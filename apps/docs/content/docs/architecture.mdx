@@ -3819,8 +3819,12 @@ report is written for one, so before it the whole conversation vanished with
 the stream. Both readers ask Redis first and the table second — when the
 stream has expired, and when the cursor is older than the capped stream
 reaches. `core.events.retention_days` (default 30) bounds the table; the
-worker sweeps it nightly. The transcript, the agent findings and the evidence
-ledger are kept by the report and the job and are not touched by the sweep.
+analysis worker sweeps it nightly (an arq cron at 03:17) and once as it starts,
+beside its job slot: a cron fires only in a process alive at its minute, and
+arq does not run a window it missed while no worker was up. The sweep reads the
+retention from the stored settings or skips. The transcript, the agent findings
+and the evidence ledger are kept by the report and the job and are not touched
+by the sweep.
 
 **The count is the last number.** Every event takes a sequence number from the
 run's counter, so the rows stored for a job equal the last number issued for
@@ -5437,7 +5441,15 @@ configured URL's password of any length, a token in its username slot and its
 registered, or a scope whose values could not be read, a row is held to the
 whole event scrub; outside the worker (the test suite, the command line, the
 `MaljanApp` facade before it registers) rows therefore keep the event scrub's
-masking, an ATT&CK name such as "Access Token Manipulation" included. A
+masking. The scrub never masks a technique or tactic name of the vendored
+ATT&CK table: after `Bearer`, `Basic` or `token` it keeps the next word of such
+a name as written ("Access Token Manipulation"), each alternative of a
+slash-joined one ("Token Impersonation" and "Token Theft" of "Token
+Impersonation/Theft") and a technique or tactic id of the table ("Make and
+Impersonate Token (T1134.003)"), and it reads a one-token name standing as a
+whole run ("SyncAppvPublishingServer") as a name, not a key, unless a
+credential label stands right before it (`password=`), as for a family name.
+Anything else after those words is masked as before. A
 configured URL's username without a password is registered only when it has a
 credential's shape by the scrub's own rules, so a user name such as
 `administrator` stays a word in events and rows; rows still lose every URL's

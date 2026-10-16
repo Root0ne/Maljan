@@ -40,6 +40,11 @@ logger = get_logger("api.job_events")
 # ask for a hundred thousand rows.
 MAX_EVENTS = 1000
 
+# How long a job's stream outlives its last write: a day. Every writer renews
+# it as it writes: the worker's publisher, and the cancel of a job that never
+# started, which is the only writer such a job's stream ever has.
+STREAM_TTL_SECONDS = 86_400
+
 
 def stream_key(job_id: Any) -> str:
     return f"analysis:{job_id}:events"

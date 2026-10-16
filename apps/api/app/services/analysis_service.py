@@ -215,6 +215,8 @@ class AnalysisService:
             redis_conn = aioredis.from_url(settings.redis_url)
             import json
 
+            from app.services.job_events import STREAM_TTL_SECONDS, stream_key
+
             message = json.dumps(
                 {"type": "cancelled", "data": {}, "ts": datetime.now(UTC).isoformat()}
             )
@@ -227,15 +229,23 @@ class AnalysisService:
             # ``_abort_queued_analysis`` for the live evidence.
             await _abort_queued_analysis(redis_conn, job_id)
             await redis_conn.publish(f"analysis:{job_id}", message)
-            await redis_conn.xadd(
-                f"analysis:{job_id}:events",
-                {"payload": message},
-                maxlen=1000,
-                approximate=True,
-            )
+            # The event and the stream's lifetime, as the worker's publisher
+            # gives it, in one transaction (MULTI/EXEC). For a job cancelled
+            # before it started this write is the stream's only one, and a key
+            # written without its expiry would never be removed.
+            async with redis_conn.pipeline(transaction=True) as pipe:
+                pipe.xadd(stream_key(job_id), {"payload": message}, maxlen=1000, approximate=True)
+                pipe.expire(stream_key(job_id), STREAM_TTL_SECONDS)
+                await pipe.execute()
             await redis_conn.aclose()
-        except Exception:
-            pass  # Non-critical: client will see status change on next poll
+        except Exception as exc:  # noqa: BLE001 — the row is cancelled; Redis is best-effort
+            # A client sees the status change on its next poll either way.
+            logger.warning(
+                "Cancel of job %s: Redis was not fully written (%s); a client sees the "
+                "status on its next poll.",
+                job_id,
+                type(exc).__name__,
+            )
 
         return job
 
