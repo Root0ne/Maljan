@@ -24,6 +24,7 @@ from maljan.core.config import (
     _builtin_definitions,
 )
 from maljan.core.delivery_limits import SAMPLE_UPLOAD_MAX_BYTES
+from maljan.core.pack_steps import step_vocabulary
 from maljan.core.settings_annotations import GROUP_ORDER
 from maljan.core.settings_catalog import CatalogEntry, FieldType, _bounds, core_catalog
 from maljan.core.settings_overrides import redact_url
@@ -681,6 +682,8 @@ def resolved_catalog(
                 builtin_agent_keys=sorted(_builtin_definitions()),
                 always_enabled_agent_keys=list(ALWAYS_ENABLED_AGENTS),
             )
+        if entry.editor == "pack_steps":
+            entry = replace(entry, pack_step_vocabulary=step_vocabulary())
         out.append(entry)
     return out
 

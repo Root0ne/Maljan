@@ -1,0 +1,20 @@
+[
+ {
+  "id": "acme_scan",
+  "tool": "scan_file",
+  "server": "acmescan",
+  "arguments": {
+   "path": "{sample_path}",
+   "options": "--hash {sha256} --as {file_type}"
+  },
+  "formats": [
+   "pe",
+   "elf"
+  ],
+  "budget_seconds": 90
+ },
+ {
+  "id": "strings",
+  "enabled": false
+ }
+]

@@ -329,6 +329,26 @@ def detect_file_type(path: Path, blob: bytes) -> str:
     return _detect_file_type(path, blob)
 
 
+# The labels ``_detect_file_type`` gives by a rule of its own rather than out of
+# one of the tables above: a Mach-O magic, the shortcut header, a ZIP no entry
+# names, an iOS application archive, the ISO volume descriptor, and nothing known.
+_RULE_FILE_TYPES: tuple[str, ...] = ("mach-o", "lnk", "zip", "ipa", "iso", "unknown")
+
+
+def routed_formats() -> tuple[str, ...]:
+    """Every label :func:`detect_file_type` can give a sample, sorted: the formats a run routes on.
+
+    Read off the detector's own tables, so a format added to one of them is
+    listed with no second copy to keep.
+    """
+    labels = {label for _magic, label in _MAGIC_PREFIXES}
+    labels.update(label for _entry, label in _ZIP_SIGNATURE_ENTRIES)
+    labels.update(label for _needle, label in _SHEBANG_TYPES)
+    labels.update(_EXTENSION_TYPES.values())
+    labels.update(_RULE_FILE_TYPES)
+    return tuple(sorted(labels))
+
+
 def infer_platform(
     file_type: str,
     mime_type: str | None = None,

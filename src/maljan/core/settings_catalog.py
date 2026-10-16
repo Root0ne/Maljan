@@ -33,7 +33,9 @@ ChoicesFrom = Literal[
     "llm_providers",
     "sandbox_report_readers",
 ]
-Editor = Literal["server_map", "rest_sandbox", "agent_definitions", "stages", "tool_facts"]
+Editor = Literal[
+    "server_map", "rest_sandbox", "agent_definitions", "stages", "tool_facts", "pack_steps"
+]
 
 # Field names that are secrets although typed as plain str.
 _SECRET_NAMES = {"auth_token", "api_key"}
@@ -129,6 +131,12 @@ class CatalogEntry:
     # For the agent definitions: the built-ins whose ``enabled`` switch the
     # settings model refuses to change (``config.ALWAYS_ENABLED_AGENTS``).
     always_enabled_agent_keys: list[str] | None = None
+    # For the triage pack's steps: what a declared step may say
+    # (``core.pack_steps.step_vocabulary``): its fields with their types and
+    # defaults, the placeholders an argument template may name and the rule a
+    # template is read by, the routed formats, the renderers and the shipped
+    # steps, served so the console's step editor keeps no copy of any of them.
+    pack_step_vocabulary: dict[str, Any] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)

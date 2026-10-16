@@ -15,6 +15,7 @@ import AgentDefinitionsEditor, {
 import StagesEditor from "./StagesEditor";
 import ServerMapEditor from "./ServerMapEditor";
 import ToolFactsLeafEditor from "./ToolFactsLeafEditor";
+import PackStepsEditor from "./PackStepsEditor";
 import PackStepsLeftOutNote from "./PackStepsLeftOutNote";
 import StoredValueRefusedNote from "./StoredValueRefusedNote";
 import { PACK_STEPS_KEY } from "./packStepsLeftOut";
@@ -211,6 +212,15 @@ export default function FieldRow({
             entry={entry}
             current={current}
             staged={staged}
+            onChange={onChange}
+          />
+        ) : entry.editor === "pack_steps" ? (
+          <PackStepsEditor
+            entry={entry}
+            current={current}
+            staged={staged}
+            errors={errors ?? {}}
+            servers={servers ?? {}}
             onChange={onChange}
           />
         ) : entry.editor === "stages" ? (

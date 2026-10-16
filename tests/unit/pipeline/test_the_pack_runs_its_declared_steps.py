@@ -12,7 +12,9 @@ operator's ``triage.steps`` laid over it adds a step, drops one or swaps one:
   ``capability_rules`` gives the function index its rules and its function
   starts, the readings of the bytes their starts, the constant scan its
   agreement and the pack's text its name;
-* a dropped matcher leaves the index naming the kind it lacks.
+* a dropped matcher leaves the index naming the kind it lacks;
+* a step named as one of the pack state's own keys runs as any other, and its
+  schedule is held apart, so no fact or count is replaced.
 """
 
 from __future__ import annotations
@@ -617,3 +619,73 @@ class TestTheServerStepCall:
         assert (last["tool"], last["server"], last["ok"]) == ("count_sections", "inventory", True)
         assert last["pack_step"] == {"v": 1, "id": "inventory", "label": "Inventory"}
         assert len(tool.asked) == 1
+
+
+@pytest.mark.usefixtures("settings")
+class TestAStepNamedAsAKeyOfThePackState:
+    """A step named as a key of the pack's state that starts beside the pack.
+
+    Its schedule used to land on that key: ``entries`` broke the run summary,
+    ``has_signature`` became a truthy text, ``hits`` and ``yara_hits`` were
+    replaced. It runs as any other step, its schedule held apart, stated in
+    the state and in the run summary.
+    """
+
+    SCHEDULE = "in turn: Inventory declares no memory peak"
+
+    @staticmethod
+    def _step(name: str, **over: Any) -> dict[str, Any]:
+        return {
+            "id": name,
+            "server": "inventory",
+            "tool": "count_sections",
+            "display_name": "Inventory",
+            **over,
+        }
+
+    def _run(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, step: dict[str, Any]) -> Any:
+        monkeypatch.setattr(triage_pack, "available_memory_bytes", lambda: 64 * 1024**3)
+        monkeypatch.setattr(triage_pack, "cgroup_headroom_bytes", lambda: None)
+        return _pack(
+            _sample(tmp_path), steps=[step], server_step=_Calls({step["id"]: INVENTORY_ANSWER})
+        )
+
+    @pytest.mark.parametrize("name", ["entries", "has_signature", "hits", "yara_hits"])
+    def test_it_runs_and_its_schedule_never_replaces_a_key(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, name: str
+    ) -> None:
+        from maljan.analysis.run_summary import RunSummaryBuilder
+        from maljan.pipeline.conditions import HELD_SCHEDULES
+        from maljan.pipeline.triage_pack import PackResult
+
+        result = self._run(tmp_path, monkeypatch, self._step(name, starts_after="signing_info"))
+        entry = result.entries[-1]
+        assert (entry.tool, entry.ok) == ("count_sections", True)
+
+        state = result.to_state()
+        unscheduled = PackResult(
+            entries=result.entries,
+            facts=result.facts,
+            failed=result.failed,
+            duration_ms=result.duration_ms,
+            degraded=result.degraded,
+        ).to_state()
+        for key, value in unscheduled.items():
+            assert state[key] == value, key
+        assert isinstance(state["entries"], int) and isinstance(state["has_signature"], bool)
+        assert isinstance(state["hits"], dict) and isinstance(state["yara_hits"], int)
+        assert state[HELD_SCHEDULES] == {name: self.SCHEDULE}
+
+        triage = RunSummaryBuilder(start_time=0.0).set_triage(state).build().to_dict()["triage"]
+        assert (triage["entries"], triage["failed"]) == (len(result.entries), len(result.failed))
+        assert triage[HELD_SCHEDULES] == {name: self.SCHEDULE}
+
+    def test_without_starts_after_it_writes_no_schedule_at_all(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from maljan.pipeline.conditions import HELD_SCHEDULES
+
+        result = self._run(tmp_path, monkeypatch, self._step("entries"))
+        state = result.to_state()
+        assert result.entries[-1].ok and state["entries"] == len(result.entries)
+        assert HELD_SCHEDULES not in state
