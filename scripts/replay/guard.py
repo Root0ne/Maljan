@@ -3,10 +3,15 @@
 Three doors are closed for the length of a replay, and put back as they were
 when it ends:
 
-* **the network.** Every socket connection and every name lookup raises
-  :class:`ReplayRefused`. No rule the replay calls needs one, and a rule that
-  reached for one (a catalogue refresh, a model index) must answer as it does
-  on a box that cannot reach anything.
+* **the network.** Every socket connection (``connect``, ``connect_ex``,
+  ``create_connection``), every datagram sent to an address (``sendto``,
+  ``sendmsg``) and every name or address lookup (``getaddrinfo``,
+  ``gethostbyname``, ``gethostbyname_ex``, ``gethostbyaddr``, ``getnameinfo``)
+  raises :class:`ReplayRefused`. A socket that cannot connect sends nothing
+  through ``send``. Not covered: a socket made from the low-level ``_socket``
+  module, and a child process. No rule the replay calls needs the network,
+  and a rule that reached for it (a catalogue refresh, a model index) must
+  answer as it does on a box that cannot reach anything.
 * **the ATT&CK cache.** The catalogue is read from the vendored tables in the
   rules' own tree (``data/attck_*.json``) and nothing else: the bundle loads
   and downloads are refused, and the cache directory points at a directory of
@@ -144,10 +149,21 @@ def replay_environment(snapshot: Mapping[str, Any] | None = None) -> Iterator[Re
         quiet = logging.getLogger("maljan")
         level = quiet.level
         try:
-            _swap(socket.socket, "connect", _refuse, "socket.socket.connect")
-            _swap(socket.socket, "connect_ex", _refuse, "socket.socket.connect_ex")
-            _swap(socket, "create_connection", _refuse, "socket.create_connection")
-            _swap(socket, "getaddrinfo", _refuse, "socket.getaddrinfo")
+            # A connection, a datagram sent to an address, and every name or
+            # address lookup. A socket that cannot connect can send nothing
+            # through ``send``; a socket pair (the event loop's own wake-up)
+            # neither connects nor looks anything up.
+            for name in ("connect", "connect_ex", "sendto", "sendmsg"):
+                _swap(socket.socket, name, _refuse, f"socket.socket.{name}")
+            for name in (
+                "create_connection",
+                "getaddrinfo",
+                "gethostbyname",
+                "gethostbyname_ex",
+                "gethostbyaddr",
+                "getnameinfo",
+            ):
+                _swap(socket, name, _refuse, f"socket.{name}")
 
             from maljan.memory import attck_loader
 

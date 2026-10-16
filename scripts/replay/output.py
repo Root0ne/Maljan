@@ -10,6 +10,8 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from typing import Any
 
+from scripts.replay.record import errors
+
 
 def _codes(codes: Mapping[str, int] | None) -> str:
     return ", ".join(f"{code} {count}" for code, count in sorted((codes or {}).items())) or "none"
@@ -20,8 +22,15 @@ def _flag_line(flag: Mapping[str, Any]) -> str:
     for key in ("path", "subject"):
         if flag.get(key):
             parts.append(str(flag[key]))
-    if flag.get("advisory"):
-        parts.append("advisory")
+    for marker, said in (
+        ("advisory", "advisory"),
+        ("settled", "settled by the parse"),
+        ("answered", "answered"),
+    ):
+        if flag.get(marker):
+            parts.append(said)
+    if flag.get("asked") is False:
+        parts.append("not shown to its producer")
     if flag.get("entries"):
         parts.append(", ".join(str(e) for e in flag["entries"]))
     if flag.get("arguments"):
@@ -37,8 +46,10 @@ def _flag_line(flag: Mapping[str, Any]) -> str:
 
 
 def render_record(record: Mapping[str, Any]) -> str:
-    """One run's replay as text."""
+    """One run's replay as text; a part that raised comes first."""
     lines: list[str] = [f"Replay of {record.get('run')}"]
+    for row in errors(record):
+        lines.append(f"  ERROR: {row.get('part')} raised: {row.get('why')}")
     rules = record.get("rules") or {}
     lines.append(f"  rules from: {rules.get('tree', 'unknown')}")
     stored = record.get("stored") or {}
@@ -77,6 +88,12 @@ def render_record(record: Mapping[str, Any]) -> str:
                 f"    claims in force: {in_force.get('claims')} claim(s); "
                 f"{_codes(in_force.get('codes'))}"
             )
+            for key, said in (
+                ("not_valid", "technique ids marked not valid"),
+                ("kept_after_absence_question", "kept after the absence question"),
+            ):
+                if in_force.get(key):
+                    lines.append(f"      {said}: {', '.join(in_force[key])}")
 
     def _part(title: str, key: str, extra: str = "") -> None:
         part = record.get(key) or {}
@@ -186,7 +203,10 @@ def render_record(record: Mapping[str, Any]) -> str:
     if not_replayed:
         lines.append("")
         lines.append("Not replayed")
-        lines.extend(f"  {row['part']}: {row['why']}" for row in not_replayed)
+        lines.extend(
+            f"  {row['part']}: {row['why']}" + (" [raised]" if row.get("error") else "")
+            for row in not_replayed
+        )
     return "\n".join(lines)
 
 
@@ -210,10 +230,34 @@ def _flags(record: Mapping[str, Any]) -> list[tuple[str, Sequence[Mapping[str, A
 
 
 def render_diff(diff: Mapping[str, Any], ref_a: str, ref_b: str) -> str:
-    """Every difference between two refs' replays of one run, as text."""
+    """Every difference between two refs' replays of one run, as text.
+
+    A part that raised in either tree comes first: the comparison is then not
+    a decision, and "no difference" is said only when every part replayed in
+    both trees.
+    """
     lines = [f"Compare {diff.get('run')}: A = {ref_a}, B = {ref_b}"]
-    if not any(key != "run" for key in diff):
-        lines.append("  no difference: both refs decide the same over this run")
+    raised = diff.get("errors") or {}
+    for side, ref in (("a", ref_a), ("b", ref_b)):
+        for row in raised.get(side) or []:
+            lines.append(
+                f"  ERROR under {side.upper()} ({ref}): {row.get('part')} raised: {row.get('why')}"
+            )
+    if raised.get("a") or raised.get("b"):
+        lines.append(
+            "  A part that raised is not a decision: this comparison is incomplete (status 2)."
+        )
+    schema = diff.get("schema") or {}
+    if schema:
+        lines.append(
+            f"  The records are of schema {schema.get('a')} (A) and {schema.get('b')} (B): only "
+            "what both define is compared."
+        )
+    if not any(key not in ("run", "errors", "schema") for key in diff):
+        if not (raised.get("a") or raised.get("b")):
+            lines.append("  no difference: both refs decide the same over this run")
+        else:
+            lines.append("  the parts that replayed in both trees decide the same")
         return "\n".join(lines)
     for key, title in (
         ("codes_gained", "Codes in B, not in A"),

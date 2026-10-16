@@ -37,6 +37,16 @@
      "confidence": 0.5,
      "technique_id": "T1105",
      "technique_line": null,
+     "technique_id_valid": false,
+     "kept_after_absence_question": false,
+     "alignment": null
+    },
+    {
+     "claim": "Process injection is not present: no write into another process is recorded.",
+     "evidence_ref": "[ev_0002] the strings show no injection API.",
+     "confidence": 0.8,
+     "technique_id": "T1055",
+     "technique_line": null,
      "technique_id_valid": true,
      "kept_after_absence_question": false,
      "alignment": null

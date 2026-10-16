@@ -11,14 +11,17 @@ answer as written, the report's deterministic build, the export and its
 publish rules, the report rounds' checks, the tool-call checks and
 corroboration (``scripts/replay/rules.py`` says what each part reads). It
 prints codes, entry ids and counts; ``--show-text`` adds each finding's words
-and the claim it is about. ``--json OUT`` writes the record.
+and the claim it is about. ``--json OUT`` writes the record. The exit status
+is 0 when every part replayed or was named as not replayable, and 2 when a
+part raised (a crash is not a decision) or on an error.
 
-``--compare REF_A REF_B`` runs the same replay under two git refs, each written
-out of the object store into a directory of its own, and names every
-difference: codes gained or lost per claim, published techniques and their
-reasons, indicator publish answers and report values. The exit status is 0
-when the two refs decide the same over every run, 1 when they differ and 2 on
-an error.
+``--compare REF_A REF_B`` replays the same runs under two git refs, each with
+its own harness over its own rules, written out of the object store into a
+directory of its own, and names every difference: codes gained or lost per
+claim, published techniques and their reasons, indicator publish answers and
+report values. The exit status is 0 when the two refs decide the same over
+every run, 1 when they differ, and 2 when a part raised in either tree, when a
+ref predates the replay tool, or on an error.
 
 ``--job ID`` reads a job from the database, read-only, into a directory in the
 same layout (``--job-dir``, a temporary one by default) and replays that.
@@ -44,6 +47,7 @@ if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 
 from scripts.replay.guard import prepare_process, restore_process  # noqa: E402
+from scripts.replay.record import errors  # noqa: E402
 from scripts.replay.stored import check_unchanged, digests  # noqa: E402
 
 
@@ -63,7 +67,7 @@ def _parser() -> argparse.ArgumentParser:
         "--compare",
         nargs=2,
         metavar=("REF_A", "REF_B"),
-        help="run the replay under two git refs and name every difference",
+        help="replay under two git refs, each with its own harness, and name every difference",
     )
     parser.add_argument(
         "--work",
@@ -136,8 +140,16 @@ def _compare(
     work: Path | None,
     show_text: bool,
     quiet: bool,
-) -> tuple[list[dict[str, Any]], bool]:
-    from scripts.replay.compare import diff_records, differs, materialise, replay_under
+) -> tuple[list[dict[str, Any]], int]:
+    """The diff of each run between the two refs, and the status the comparison ends with."""
+    from scripts.replay.compare import (
+        PredatesTheReplay,
+        diff_records,
+        differs,
+        has_errors,
+        materialise,
+        replay_under,
+    )
     from scripts.replay.output import render_diff
 
     ref_a, ref_b = refs
@@ -147,7 +159,10 @@ def _compare(
         before = {str(run): digests(run) for run in runs}
         records: dict[str, list[dict[str, Any]]] = {}
         for side, ref in (("a", ref_a), ("b", ref_b)):
-            tree = materialise(repo, ref, base / f"{side}-tree")
+            try:
+                tree = materialise(repo, ref, base / f"{side}-tree")
+            except PredatesTheReplay as exc:
+                _error(str(exc))
             records[side] = replay_under(
                 tree, runs, base / f"{side}-replay.json", show_text=show_text
             )
@@ -156,7 +171,9 @@ def _compare(
         diffs = [diff_records(a, b) for a, b in zip(records["a"], records["b"], strict=True)]
         if not quiet:
             print("\n\n".join(render_diff(diff, ref_a, ref_b) for diff in diffs))
-        return diffs, any(differs(diff) for diff in diffs)
+        if any(has_errors(diff) for diff in diffs):
+            return diffs, 2
+        return diffs, 1 if any(differs(diff) for diff in diffs) else 0
     finally:
         if owned:
             shutil.rmtree(base, ignore_errors=True)
@@ -167,22 +184,28 @@ def main(argv: list[str] | None = None) -> int:
     runs = [Path(run) for run in args.runs]
     job_dirs: list[Path] = []
     try:
+        for written in (args.json, args.work, args.job_dir):
+            if written is not None:
+                _outside(written, runs)
         if args.job:
             from scripts.replay.database import export_jobs
 
             target = args.job_dir or Path(tempfile.mkdtemp(prefix="maljan-replay-jobs-"))
             job_dirs = [] if args.job_dir else [target]
-            runs.extend(export_jobs(args.job, target, database_url=args.database_url))
+            for directory, cleared in export_jobs(args.job, target, database_url=args.database_url):
+                if cleared and not args.quiet:
+                    print(
+                        f"replay: cleared the earlier export's {', '.join(cleared)} in {directory}",
+                        file=sys.stderr,
+                    )
+                runs.append(directory)
         if not runs:
             _parser().error("name a stored run or a --job")
         for run in runs:
             if not run.is_dir():
                 _error(f"no stored run at {run}")
-        for written in (args.json, args.work):
-            if written is not None:
-                _outside(written, runs)
         if args.compare:
-            diffs, differ = _compare(
+            diffs, status = _compare(
                 runs,
                 (args.compare[0], args.compare[1]),
                 repo=args.repo,
@@ -191,14 +214,17 @@ def main(argv: list[str] | None = None) -> int:
                 quiet=args.quiet,
             )
             _write(args.json, diffs[0] if len(diffs) == 1 else diffs)
-            return 1 if differ else 0
+            return status
         records = _replay(runs, args.show_text)
         _write(args.json, records[0] if len(records) == 1 else records)
         if not args.quiet:
             from scripts.replay.output import render_record
 
             print("\n\n".join(render_record(record) for record in records))
-        return 0
+        raised = [(record.get("run"), row) for record in records for row in errors(record)]
+        for name, row in raised:
+            print(f"replay: {name}: {row['part']} raised: {row['why']}", file=sys.stderr)
+        return 2 if raised else 0
     finally:
         for directory in job_dirs:
             shutil.rmtree(directory, ignore_errors=True)

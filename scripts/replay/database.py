@@ -55,9 +55,19 @@ def _row(mapping: Any) -> dict[str, Any]:
     return {str(k): jsonable(v) for k, v in dict(mapping).items()}
 
 
-def write_run(rows: JobRows, into: Path) -> Path:
-    """Write one job's rows into ``into`` in the stored-run layout; return ``into``."""
+def write_run(rows: JobRows, into: Path) -> tuple[Path, list[str]]:
+    """Write one job's rows into ``into`` in the stored-run layout.
+
+    Returns ``into`` and the files of the layout an earlier export had left
+    there, which are removed first: a file this job has no rows for must not
+    stay from another export. No other file in ``into`` is touched.
+    """
+    from scripts.replay.stored import FILES
+
     into.mkdir(parents=True, exist_ok=True)
+    cleared = sorted(name for name in FILES if (into / name).is_file())
+    for name in cleared:
+        (into / name).unlink()
     report = rows.report or {}
     byjob = {
         "id": report.get("id"),
@@ -92,7 +102,7 @@ def write_run(rows: JobRows, into: Path) -> Path:
         files["stix-judge.json"] = report["judge_stix_bundle"]
     for name, value in files.items():
         (into / name).write_text(json.dumps(value, indent=1, sort_keys=True), encoding="utf-8")
-    return into
+    return into, cleared
 
 
 def _database_url(given: str | None) -> str:
@@ -103,6 +113,41 @@ def _database_url(given: str | None) -> str:
     from app.config import settings
 
     return str(settings.database_url)
+
+
+def with_sample(job: dict[str, Any], sample: Mapping[str, Any] | None) -> dict[str, Any]:
+    """The job row with its sample's hash and name, read from the joined sample row.
+
+    A job whose sample row is gone keeps ``None`` for both and says so
+    (``sample_row``): the replay then names the identity it reads from the
+    report alone, rather than taking it from there in silence.
+    """
+    out = dict(job)
+    if sample is None:
+        out["sample_sha256"] = None
+        out["sample_filename"] = None
+        out["sample_row"] = "absent"
+    else:
+        out["sample_sha256"] = sample.get("sha256")
+        out["sample_filename"] = sample.get("original_filename")
+    return out
+
+
+async def _sample_row(conn: Any, job: Any) -> dict[str, Any] | None:
+    """The sample row of ``job`` (a database row), or ``None`` when it names none or it is gone."""
+    from sqlalchemy import select
+
+    from app.models.sample import Sample
+
+    sample_id = job.get("sample_id")
+    if sample_id is None:
+        return None
+    found = (
+        (await conn.execute(select(Sample.__table__).where(Sample.__table__.c.id == sample_id)))
+        .mappings()
+        .first()
+    )
+    return _row(found) if found is not None else None
 
 
 async def read_jobs(job_ids: Sequence[str], database_url: str) -> list[JobRows]:
@@ -137,7 +182,7 @@ async def read_jobs(job_ids: Sequence[str], database_url: str) -> list[JobRows]:
                     )
                     if job is None:
                         raise LookupError(f"no job {job_id}")
-                    rows = JobRows(job=_row(job))
+                    rows = JobRows(job=with_sample(_row(job), await _sample_row(conn, job)))
                     report = (
                         (
                             await conn.execute(
@@ -202,8 +247,12 @@ async def read_jobs(job_ids: Sequence[str], database_url: str) -> list[JobRows]:
 
 def export_jobs(
     job_ids: Iterable[str], into: Path, *, database_url: str | None = None
-) -> list[Path]:
-    """Each job read from the database into ``into/<job id>``; the directories written."""
+) -> list[tuple[Path, list[str]]]:
+    """Each job read from the database into ``into/<job id>``.
+
+    Returns each directory written, with the files of an earlier export it
+    removed first.
+    """
     ids = [str(job_id) for job_id in job_ids]
     rows = asyncio.run(read_jobs(ids, _database_url(database_url)))
     return [write_run(job, into / str(job.job.get("id"))) for job in rows]
