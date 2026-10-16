@@ -21,6 +21,7 @@ from app.services.agent_map import (  # noqa: E402
     validate_agent_map,
 )
 from maljan.core.config import (
+    ALWAYS_ENABLED_AGENTS,
     BUILTIN_AGENTS,
     BUILTIN_PROFILES,
     DATA_SOURCES,
@@ -844,3 +845,51 @@ def test_a_lead_without_a_prompt_is_reported_on_its_prompt_field():
     with pytest.raises(AgentMapError) as exc:
         validate_agent_map(_defs(boss={"role": "lead", "prompt": ""}), stored={})
     assert exc.value.errors[f"{AGENT_DEFINITIONS_KEY}.boss.prompt"] == "a lead agent needs a prompt"
+
+
+@pytest.mark.parametrize("key", ALWAYS_ENABLED_AGENTS)
+def test_an_always_enabled_built_in_turned_off_is_refused(key):
+    from maljan.core.config import _builtin_definitions
+
+    seed = _builtin_definitions()[key].model_dump(mode="json")
+    with pytest.raises(AgentMapError) as exc:
+        validate_agent_map(_defs(**{key: {**seed, "enabled": False}}), stored={})
+    assert (
+        exc.value.errors[f"{AGENT_DEFINITIONS_KEY}.{key}"]
+        == f"{key!r} is built in; clone it to change it"
+    )
+
+
+def test_the_technique_line_turned_off_on_a_custom_agent_is_stored_off():
+    out = validate_agent_map(
+        _defs(checker={"role": "generic", "prompt": "check", "attck_techniques": False}),
+        stored={},
+    )
+    assert out[AGENT_DEFINITIONS_KEY]["checker"]["attck_techniques"] is False
+    assert all(
+        "attck_techniques" not in d
+        for key, d in out[AGENT_DEFINITIONS_KEY].items()
+        if key != "checker"
+    )
+
+
+def test_the_technique_line_turned_off_on_a_built_in_role_is_reported_on_its_field():
+    with pytest.raises(AgentMapError) as exc:
+        validate_agent_map(
+            _defs(static_r2={"role": "static", "attck_techniques": False}), stored={}
+        )
+    message = exc.value.errors[f"{AGENT_DEFINITIONS_KEY}.static_r2.attck_techniques"]
+    assert "attck_techniques can be turned off only on" in message
+
+
+def test_the_technique_line_turned_off_on_a_built_in_prompt_agent_says_to_clone_it():
+    from maljan.core.config import PROMPT_ROLES, _builtin_definitions
+
+    key = next(k for k, d in _builtin_definitions().items() if d.role in PROMPT_ROLES)
+    seed = _builtin_definitions()[key].model_dump(mode="json")
+    with pytest.raises(AgentMapError) as exc:
+        validate_agent_map(_defs(**{key: {**seed, "attck_techniques": False}}), stored={})
+    assert (
+        exc.value.errors[f"{AGENT_DEFINITIONS_KEY}.{key}"]
+        == f"{key!r} is built in; clone it to change it"
+    )

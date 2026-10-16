@@ -83,8 +83,16 @@ export function buildImportPreview(
     // A block's tool declarations are compared as they are in force, also
     // inside the server map: a file that writes them in another form but
     // changes no tool (and, for the map, no other field of any server) is no
-    // change.
-    if ((entry.editor === "tool_facts" || entry.editor === "server_map") && !line.detail) continue;
+    // change. The agent definitions likewise: a file that writes a field as
+    // the settings model already reads it (an ATT&CK technique switch written
+    // on) changes no agent.
+    if (
+      (entry.editor === "tool_facts" ||
+        entry.editor === "server_map" ||
+        entry.editor === "agent_definitions") &&
+      !line.detail
+    )
+      continue;
     lines.push(line);
   }
 

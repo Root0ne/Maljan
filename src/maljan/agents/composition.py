@@ -75,6 +75,10 @@ class ResolvedAgent:
     # its own provider and its own list, so a copy never carries either for a
     # provider or tools that are not its own.
     authored_prompt: str = ""
+    # Whether the agent is asked for an ATT&CK technique line on each claim
+    # (``AgentDefinition.attck_techniques``). Read by the configurable analyst
+    # only; a built-in role keeps its own claim format.
+    attck_techniques: bool = True
 
 
 def active_profile(settings: Settings) -> ProfileDefinition:
@@ -500,11 +504,18 @@ def _provider_parts(
 
         provider = container.get_static_provider(provider_id)
         offers = bool(getattr(getattr(provider, "capabilities", None), "provides_tools", False))
-        return static_provider_parts(
+        text, statement = static_provider_parts(
             provider,
             tools,
             provider_expected=provider_expected and definition.role == "static" and offers,
         )
+        if not definition.attck_techniques:
+            # An agent not asked for techniques is not told which ones to look
+            # for either; the provider's text is otherwise sent as it is.
+            from maljan.providers.base import without_attck_focus
+
+            text = without_attck_focus(text)
+        return text, statement
     if definition.role == "dynamic":
         from maljan.agents.dynamic_analyst import sandbox_provider_parts, sandbox_server_label
 
@@ -1055,6 +1066,7 @@ def resolve_agent(key: str, container: Any, job_key: str = "job") -> ResolvedAge
         llm=_agent_llm(container, key),
         degradation_reasons=tuple(dict.fromkeys(reasons)),
         path_by_server=staged,
+        attck_techniques=definition.attck_techniques,
     )
 
 
@@ -1130,4 +1142,5 @@ async def aresolve_agent(key: str, container: Any, job_key: str = "job") -> Reso
         llm=_agent_llm(container, key),
         degradation_reasons=tuple(dict.fromkeys(reasons)),
         path_by_server=staged,
+        attck_techniques=definition.attck_techniques,
     )

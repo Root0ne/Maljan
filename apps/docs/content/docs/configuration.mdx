@@ -2950,6 +2950,38 @@ A source with nothing behind it contributes nothing — an agent that asked for
 the network block on a sample nobody detonated has no network block, and the
 analyst node reports that once as a no-data stage rather than once per source.
 
+Whether an agent is asked for an ATT&CK technique line is its own setting too,
+`agents.definitions.<key>.attck_techniques`, on by default. On is the claim
+format every analyst has always been given: each claim ends with
+`TECHNIQUE: <T-ID, several separated by commas, or NONE>`. A `generic` or
+`lead` definition whose work is not malware behaviour (a code reviewer, a
+configuration checker, a domain checker) may turn it off. Every text that asks
+the agent for a technique then leaves the request out and asks for the CLAIM,
+EVIDENCE and CONFIDENCE lines only: its claim instruction, its negotiation round,
+a task a lead hands it, the validation questions about its answer, and the view
+and tier prompts that replace its prompt when `llm.view_decomposition_views` is 2
+or more (either `llm.view_decomposition_mode`). An agent reading a static provider is also sent the provider's text
+without the platform's sentence naming techniques to look for, and the
+priority-functions hint without its clause about picking a technique. Off is
+refused on every other role, which keeps its own claim format, and the built-in
+definitions keep it on.
+
+Texts that name a technique without asking for one stay as they are: a question
+about a technique id the agent wrote, a provider's verification discipline that
+limits when a technique may be claimed, a provider's own text worded in its own
+words, and the evidence itself.
+
+Turning the line off never hides a technique the agent states. A TECHNIQUE line
+it writes anyway is read and checked exactly as with the line on: an unreadable
+line is asked about and an unknown id is flagged. A claim with no TECHNIQUE line
+raises no question either way. Corroboration, the judge and the capability
+matrix are unchanged; an agent with the line off contributes no asserted
+technique unless it writes one. A definition that keeps the line on is stored
+and exported without the field, as every definition written before it was. The
+console's agent editor shows the switch as **Ask for an ATT&CK technique line on
+each claim**, locked on every built-in definition (the served
+`builtin_agent_keys`).
+
 ## Tool servers on another host
 
 Every path-taking tool assumes the server can open the path the worker hands

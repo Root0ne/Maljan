@@ -14,6 +14,7 @@ from typing import Any
 
 from maljan.core.config import (
     AGENT_KEY_PATTERN,
+    ALWAYS_ENABLED_AGENTS,
     PROMPT_ROLES,
     PROVIDER_REFERENCE_RULE,
     AgentDefinition,
@@ -165,7 +166,7 @@ def validate_definitions(
 
         if seed is not None:
             comparable, expected = dict(dumped), dict(seed)
-            if name != "judge":
+            if name not in ALWAYS_ENABLED_AGENTS:
                 comparable.pop("enabled", None)
                 expected.pop("enabled", None)
             if comparable != expected:

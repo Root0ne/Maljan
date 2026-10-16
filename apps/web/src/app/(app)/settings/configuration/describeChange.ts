@@ -284,7 +284,15 @@ export const DEFINITION_FIELDS: [keyof AgentDefinitionEntry, string][] = [
   ["timeout_seconds", "seconds per loop"],
   ["tab", "console tab"],
   ["data_sources", "input data"],
+  ["attck_techniques", "ATT&CK technique line"],
 ];
+
+/** A definition field as the settings model reads it: an absent ATT&CK
+ *  technique switch is on, so an explicit `true` and no field are the same. */
+function comparableField(def: AgentDefinitionEntry, field: keyof AgentDefinitionEntry): unknown {
+  if (field === "attck_techniques") return def.attck_techniques !== false;
+  return def[field];
+}
 
 function findCloneSource(
   def: AgentDefinitionEntry,
@@ -327,7 +335,7 @@ function describeDefinitionsMap(before: unknown, after: unknown): {
     const enabledChanged = bs.enabled !== as.enabled;
     const fields: string[] = [];
     for (const [field, label] of DEFINITION_FIELDS) {
-      if (!deepEqual(bs[field], as[field])) fields.push(label);
+      if (!deepEqual(comparableField(bs, field), comparableField(as, field))) fields.push(label);
     }
 
     // Same rule as the server map: an enable/disable that travels with other

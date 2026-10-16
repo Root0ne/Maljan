@@ -35,6 +35,7 @@ from pydantic import (
     Field,
     SecretStr,
     SerializerFunctionWrapHandler,
+    ValidationInfo,
     field_validator,
     model_serializer,
     model_validator,
@@ -1191,6 +1192,13 @@ PROVIDER_REFERENCE_RULE = (
     f"provider tool references are only valid on {' and '.join(PROMPT_ROLES)} "
     "definitions; built-in roles open their provider themselves"
 )
+# Why turning the ATT&CK technique line off is refused, in one sentence. A
+# built-in role runs its own class and its own claim format, which the switch
+# does not reach.
+ATTCK_OPT_OUT_RULE = (
+    f"attck_techniques can be turned off only on {' and '.join(PROMPT_ROLES)} "
+    "definitions; built-in roles keep their own claim format"
+)
 
 # Deprecated. ``MCPServerConfig.agents`` used to be a Literal of the four
 # built-in roles; an operator can now bind a server to any definition key, so
@@ -1703,6 +1711,10 @@ class MCPConfig(BaseModel):
 # maps' rules from drifting apart.
 AGENT_KEY_PATTERN = SERVER_KEY_PATTERN
 JUDGE_AGENT_KEY = "judge"
+# The built-in agents whose ``enabled`` switch a save may not change: the run's
+# skeleton always runs them. One tuple, read by the settings model's built-in
+# comparison and the API's, and served to the console, so the three agree.
+ALWAYS_ENABLED_AGENTS: tuple[str, ...] = (JUDGE_AGENT_KEY,)
 # The narrative/composer step, as a definition. It exists so the report has an
 # LLM entry and a prompt of its own instead of borrowing the judge's, and so a
 # report stage names an agent like every other stage does.
@@ -2075,6 +2087,26 @@ class AgentDefinition(BaseModel):
     # places nothing. A definition that never wrote the field reads its role's
     # (``ROLE_TABS``); a clone copies it.
     tab: str | None = None
+    # Whether the agent is asked for an ATT&CK technique line on each claim.
+    # True is what every definition written before the field reads, and what
+    # every built-in keeps. False leaves the request out of a prompt-role
+    # agent's prompt (``agents.configurable_analyst``), for an agent whose
+    # work is not malware behaviour; a TECHNIQUE line the agent writes anyway
+    # is still read and checked like any other.
+    attck_techniques: bool = True
+
+    @model_serializer(mode="wrap")
+    def _attck_techniques_only_when_off(self, handler: SerializerFunctionWrapHandler) -> Any:
+        """Dump ``attck_techniques`` only when it is off.
+
+        Every stored definition, export and pinned dump was written before the
+        field existed and reads as on; a definition that keeps it on dumps
+        exactly as it always did, so none of them reads as changed.
+        """
+        dumped = handler(self)
+        if isinstance(dumped, dict) and self.attck_techniques:
+            dumped.pop("attck_techniques", None)
+        return dumped
 
     @model_validator(mode="before")
     @classmethod
@@ -2101,6 +2133,16 @@ class AgentDefinition(BaseModel):
                 raise ValueError(f"data source {source!r} is listed twice")
             seen.add(source)
         return self
+
+    @field_validator("attck_techniques")
+    @classmethod
+    def _attck_opt_out_is_a_prompt_role_s(cls, value: bool, info: ValidationInfo) -> bool:
+        # A built-in role runs its own class and its own claim format, which
+        # this switch does not reach; accepting it there would be a setting
+        # that silently does nothing.
+        if not value and info.data.get("role") not in PROMPT_ROLES:
+            raise ValueError(ATTCK_OPT_OUT_RULE)
+        return value
 
 
 class DebateOptions(BaseModel):
@@ -3377,7 +3419,7 @@ class AgentsConfig(BaseModel):
         for key, seed in _builtin_definitions().items():
             current = self.definitions[key].model_dump()
             expected = seed.model_dump()
-            if key != "judge":
+            if key not in ALWAYS_ENABLED_AGENTS:
                 current.pop("enabled", None)
                 expected.pop("enabled", None)
             if current != expected:

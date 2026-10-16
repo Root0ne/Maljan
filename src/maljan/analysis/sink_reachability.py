@@ -265,14 +265,20 @@ def rank_suspicious_functions(graph: CallGraph, max_funcs: int = 12) -> list[Sus
     return ranked[:max_funcs]
 
 
+# The clause of a priority follow-up that points the reading at a technique.
+# Its own constant so an agent whose definition turns the technique line off
+# (``AgentDefinition.attck_techniques``) is sent the follow-up without it.
+ATTCK_PURPOSE = " to pick the right ATT&CK technique"
+
 # What to do with the priority functions, in no provider's tools' words: the
 # sentence a provider that names none of its own (``priority_follow_up``) gets.
 FOLLOW_UP = (
     "Read these functions first with the tools in your tool list. NOTE: reachable is NOT "
     "the same as data-connected — before asserting a 'capability reached' claim, confirm "
     "the data path (forward from the source, or backward from the sink argument) and "
-    "classify the terminal (caller-supplied / decoded-config / fixed constant) to pick the "
-    "right ATT&CK technique.\n"
+    "classify the terminal (caller-supplied / decoded-config / fixed constant)"
+    + ATTCK_PURPOSE
+    + ".\n"
 )
 
 

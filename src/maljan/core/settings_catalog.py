@@ -122,8 +122,13 @@ class CatalogEntry:
     agent_keys: list[str] | None = None
     # The seeded definition keys, which stay known whatever a save does to the
     # stored map, so the console can tell which agents a staged definition
-    # edit leaves bindable (``server_map._definition_keys``).
+    # edit leaves bindable (``server_map._definition_keys``). Served on the
+    # agent definitions' entry too: every one of them is built in, and the
+    # settings model refuses an edit to any but its ``enabled`` switch.
     builtin_agent_keys: list[str] | None = None
+    # For the agent definitions: the built-ins whose ``enabled`` switch the
+    # settings model refuses to change (``config.ALWAYS_ENABLED_AGENTS``).
+    always_enabled_agent_keys: list[str] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)

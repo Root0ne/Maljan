@@ -28,6 +28,9 @@ from typing import Any
 import pytest
 
 from maljan.agents.base_agent import (
+    _REVISION_ISR_FORMAT_WITHOUT_TECHNIQUES,
+    _TIER_SPECS_WITHOUT_TECHNIQUES,
+    _VIEW_SYSTEM_WITHOUT_TECHNIQUES,
     ARGUMENTS_HELD,
     EARLIER_CALLS_BY_TOOL,
     EARLIER_CALLS_NOT_LISTED,
@@ -40,6 +43,7 @@ from maljan.agents.base_agent import (
     claims_unread_sentence,
     earlier_chunks_block,
 )
+from maljan.agents.configurable_analyst import _ISR_FORMAT_INSTRUCTION_WITHOUT_TECHNIQUES
 from maljan.agents.delegation import (
     SPEND_CEILING_REFUSAL,
     WAITING_ON_EACH_OTHER_REFUSAL,
@@ -83,6 +87,7 @@ from maljan.agents.network_analyst import (
 )
 from maljan.agents.prompt_fragments import (
     CLAIM_FORMAT_FRAGMENT,
+    CLAIM_FORMAT_WITHOUT_TECHNIQUE_FRAGMENT,
     ENDPOINTS_ROW_SHAPE,
     NO_TOOLS_STATEMENT,
     TOOL_FREE_TURN_STATEMENT,
@@ -170,8 +175,11 @@ from maljan.pipeline.run_state import LOOKUP_UNREAD, NO_LIMIT, SHA256_GIVEN, bud
 from maljan.pipeline.sycophancy_detector import convergence_sentence
 from maljan.pipeline.validation import (
     _UNPARSED_ANSWER_MESSAGE,
+    _UNPARSED_ANSWER_MESSAGE_WITHOUT_TECHNIQUES,
     ANALYST_FEEDBACK_CLOSING,
     ANALYST_FEEDBACK_CLOSING_BY_NUMBER,
+    ANALYST_FEEDBACK_CLOSING_BY_NUMBER_WITHOUT_TECHNIQUES,
+    ANALYST_FEEDBACK_CLOSING_WITHOUT_TECHNIQUES,
     FUNCTION_CHECK_HEAD,
     FUNCTION_CHECK_NOT_ASKED_HEAD,
     ITEM_NOT_IN_RUN,
@@ -2381,6 +2389,30 @@ PROMPTS: dict[str, str] = {
     ).message,
     "the claim format the analysts are given and the unparsed-answer question": " ".join(
         [CLAIM_FORMAT_FRAGMENT, _UNPARSED_ANSWER_MESSAGE]
+    ),
+    "the claim format an agent with the technique line turned off is given": " ".join(
+        [
+            CLAIM_FORMAT_WITHOUT_TECHNIQUE_FRAGMENT,
+            _ISR_FORMAT_INSTRUCTION_WITHOUT_TECHNIQUES,
+            _REVISION_ISR_FORMAT_WITHOUT_TECHNIQUES,
+            _VIEW_SYSTEM_WITHOUT_TECHNIQUES,
+            _TIER_SPECS_WITHOUT_TECHNIQUES[0][1],
+            _TIER_SPECS_WITHOUT_TECHNIQUES[2][1],
+        ]
+    ),
+    "the validation questions to an agent with the technique line turned off": " ".join(
+        [
+            ANALYST_FEEDBACK_CLOSING_WITHOUT_TECHNIQUES,
+            ANALYST_FEEDBACK_CLOSING_BY_NUMBER_WITHOUT_TECHNIQUES,
+            _UNPARSED_ANSWER_MESSAGE_WITHOUT_TECHNIQUES,
+            whole_answer_after_retry_question("the retry wrote claim 2 twice", techniques=False),
+            analyst_cut_violation(4096, "", techniques=False).message,
+            analyst_repeated_violation(
+                ClaimsRepeated(begun=15, distinct=3, margin=3, chars=900, first_repeat=4),
+                cut=4096,
+                techniques=False,
+            ).message,
+        ]
     ),
     "the question and the reason for claim headings under DISPUTES": (
         f"{claims_under_disputes_violation(2).message} "

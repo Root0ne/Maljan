@@ -352,6 +352,43 @@ def _card_after(violation: Violation) -> str:
 # ---------------------------------------------------------------------------
 
 
+# The two closings for an analyst whose definition turns the technique line off
+# (``BaseAnalyst.asks_for_techniques``): the same sentences, the block named
+# without its TECHNIQUE line.
+ANALYST_FEEDBACK_CLOSING_WITHOUT_TECHNIQUES = (
+    "Fix them and write your whole answer again in the format it is read in: every claim "
+    "as its own block of CLAIM:, EVIDENCE: and CONFIDENCE: lines, the blocks "
+    "separated by a line of three dashes (---), then your fenced maljan-findings block if "
+    "your answer had one. Only CLAIM blocks are read as claims: a claim written another "
+    "way, or left out, is not in the answer."
+)
+ANALYST_FEEDBACK_CLOSING_BY_NUMBER_WITHOUT_TECHNIQUES = (
+    "Fix them by writing again only the claims you change. Your claims are numbered in the "
+    "order you wrote them, counted from 1: write each claim you change under its number "
+    "(CLAIM 7:) as its own block of CLAIM, EVIDENCE: and CONFIDENCE: lines, the "
+    "blocks separated by a line of three dashes (---), and a new claim under a number your "
+    "answer did not use. A claim you do not write again stays in your answer as you wrote "
+    "it. To take a claim out, write a line WITHDRAW CLAIM <number>: <reason>. Your fenced "
+    "maljan-findings block is kept the same way by each finding's title: write it with only "
+    'the findings you change or add, and a line WITHDRAW FINDING "<title>": <reason> takes '
+    "one out; a finding written under a new title is a new finding. Only CLAIM blocks are "
+    "read as claims."
+)
+
+
+def analyst_feedback_closing(*, whole: bool, techniques: bool = True) -> str:
+    """The closing of an analyst's retry: a whole answer or the claims it changes.
+
+    ``techniques=False`` names the claim block without its TECHNIQUE line, for
+    an analyst whose definition turns the line off.
+    """
+    if techniques:
+        return ANALYST_FEEDBACK_CLOSING if whole else ANALYST_FEEDBACK_CLOSING_BY_NUMBER
+    if whole:
+        return ANALYST_FEEDBACK_CLOSING_WITHOUT_TECHNIQUES
+    return ANALYST_FEEDBACK_CLOSING_BY_NUMBER_WITHOUT_TECHNIQUES
+
+
 UNGROUNDED_TECHNIQUE_CODE = "isr.ungrounded_technique"
 
 # What the parse of an analyst's answer could not read. Neither is corrected:
@@ -428,15 +465,29 @@ _UNPARSED_ANSWER_MESSAGE = (
     "---\n"
     "A finding you cannot put a confidence on stays in your prose."
 )
+# The same question for an analyst whose definition turns the technique line off.
+_UNPARSED_ANSWER_MESSAGE_WITHOUT_TECHNIQUES = (
+    "Your answer has no CLAIM block that can be read, so it carries no claim and "
+    "is kept as prose. Restate each finding as a block, with the confidence you "
+    "hold it at:\n"
+    "CLAIM: <claim text>\n"
+    "EVIDENCE: <artifact reference, naming the tool result you read it from, "
+    "for example [ev_0002]>\n"
+    "CONFIDENCE: <0.0-1.0>\n"
+    "---\n"
+    "A finding you cannot put a confidence on stays in your prose."
+)
 
 
-def parse_violations(isr: Any) -> list[Violation]:
+def parse_violations(isr: Any, *, techniques: bool = True) -> list[Violation]:
     """What the parse of one analyst answer could not read, as questions to it.
 
     Two, each asked once: an answer with no CLAIM block that parses, which is
     otherwise the analyst's prose and nothing more, and CLAIM blocks that state
     no confidence, which are not claims because the confidence on a claim is
     the analyst's own statement. An ISR built without a parse says nothing.
+    ``techniques=False`` restates the block without its TECHNIQUE line, for an
+    analyst whose definition turns the line off.
     """
     found: list[Violation] = []
     prose = str(getattr(isr, "unparsed_answer", "") or "")
@@ -444,9 +495,20 @@ def parse_violations(isr: Any) -> list[Violation]:
         # The answer as written rides with the question to the run record:
         # without it nobody can read later why it failed to parse.
         written = str(getattr(isr, "answer_text", "") or "") or prose
-        found.append(
-            Violation(code=UNPARSED_ANSWER_CODE, message=_UNPARSED_ANSWER_MESSAGE, answer=written)
-        )
+        if techniques:
+            found.append(
+                Violation(
+                    code=UNPARSED_ANSWER_CODE, message=_UNPARSED_ANSWER_MESSAGE, answer=written
+                )
+            )
+        else:
+            found.append(
+                Violation(
+                    code=UNPARSED_ANSWER_CODE,
+                    message=_UNPARSED_ANSWER_MESSAGE_WITHOUT_TECHNIQUES,
+                    answer=written,
+                )
+            )
     try:
         declined = int(getattr(isr, "blocks_without_confidence", 0) or 0)
     except (TypeError, ValueError):
@@ -4050,7 +4112,9 @@ SECTION_CUT_CODE = "composer.cut_at_output_cap"
 ANALYST_CUT_CODE = "isr.cut_at_output_cap"
 
 
-def analyst_cut_violation(cap: int, text: str = "", *, chunk: str = "") -> Violation:
+def analyst_cut_violation(
+    cap: int, text: str = "", *, chunk: str = "", techniques: bool = True
+) -> Violation:
     """What an analyst the cap cut is told: the cap, what was begun, and the bound.
 
     The cut answer is not sent back (``retry_with_feedback_sync``'s
@@ -4060,6 +4124,7 @@ def analyst_cut_violation(cap: int, text: str = "", *, chunk: str = "") -> Viola
     than the evidence holds, and the cap it names is the one in force: nothing
     here raises it. ``chunk`` names the chunk whose answer was cut, as
     "chunk 1 of 2", when the answer checked is a merge of chunks.
+    ``techniques=False`` names each claim's lines without the TECHNIQUE line.
     """
     begun = count_claims_begun(text)
     size = (
@@ -4085,9 +4150,18 @@ def analyst_cut_violation(cap: int, text: str = "", *, chunk: str = "") -> Viola
             f"{stopped}{size} Any reasoning you write counts "
             f"against the same limit. Write the whole answer again so that it ends well inside "
             f"{int(cap)} tokens: the claims the evidence supports best, each written once, "
-            "each one sentence with its EVIDENCE, CONFIDENCE and TECHNIQUE lines, and nothing "
+            f"each one sentence with its {_claim_lines(techniques)}, and nothing "
             "between the blocks."
         ),
+    )
+
+
+def _claim_lines(techniques: bool) -> str:
+    """The lines each claim is written with, as the whole-answer questions name them."""
+    return (
+        "EVIDENCE, CONFIDENCE and TECHNIQUE lines"
+        if techniques
+        else "EVIDENCE and CONFIDENCE lines"
     )
 
 
@@ -4160,7 +4234,12 @@ ENDED_WHILE_STREAMING_SENTENCE = (
 
 
 def analyst_repeated_violation(
-    found: ClaimsRepeated, *, chunk: str = "", cut: int | None = None, ended: bool = False
+    found: ClaimsRepeated,
+    *,
+    chunk: str = "",
+    cut: int | None = None,
+    ended: bool = False,
+    techniques: bool = True,
 ) -> Violation:
     """What an analyst whose answer repeated its claims is told, and the whole-answer question.
 
@@ -4174,7 +4253,8 @@ def analyst_repeated_violation(
     sees the answer up to its first repeat and the cut question's own words
     would say it sees none of it. ``ended`` says the answer was ended while it
     streamed (``agents.base_agent.claims_repeat_rule``), so the finding and
-    the events that carry it state it.
+    the events that carry it state it. ``techniques=False`` names each
+    claim's lines without the TECHNIQUE line.
     """
     answer = f"answer to {chunk}" if chunk else "previous answer"
     chars, begun, distinct = int(found.chars), int(found.begun), int(found.distinct)
@@ -4197,8 +4277,8 @@ def analyst_repeated_violation(
             f"block {first}, "
             "the first that repeats an earlier one; the rest is not shown to you again. Write "
             "the whole answer again: the claims shown above and any other the evidence "
-            "supports, each written once, each one sentence with its EVIDENCE, CONFIDENCE and "
-            "TECHNIQUE lines, and nothing between the blocks."
+            f"supports, each written once, each one sentence with its {_claim_lines(techniques)}"
+            ", and nothing between the blocks."
         ),
     )
 
@@ -10096,11 +10176,11 @@ def retry_unplaced_question(drops: RetryDrops) -> str:
 WHOLE_ANSWER_AFTER_RETRY_LEAD = "Your retry could not be merged into your answer by claim number"
 
 
-def whole_answer_after_retry_question(why: str) -> str:
+def whole_answer_after_retry_question(why: str, *, techniques: bool = True) -> str:
     """The one question for the whole answer, after a retry the claim numbers did not place."""
     return (
         f"{WHOLE_ANSWER_AFTER_RETRY_LEAD}: {why}. Your answer is now read whole. "
-        f"{ANALYST_FEEDBACK_CLOSING}"
+        f"{analyst_feedback_closing(whole=True, techniques=techniques)}"
     )
 
 

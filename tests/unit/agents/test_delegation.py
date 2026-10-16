@@ -152,6 +152,7 @@ class _Container:
                 tools=tools,
                 static_provider_id="none",
                 llm=None,
+                attck_techniques=definition.attck_techniques,
             )
             agent = ConfigurableAnalyst(key, resolved, self.models.get(key))
             agent.evidence_counter = self._counter
@@ -1275,3 +1276,65 @@ class TestAWaitWithNoClock:
         threading.Timer(1.5, callee.delegation_lock.release).start()
 
         assert _held_unless_waiting_on_each_other(callee.delegation_lock, None, caller, callee)
+
+
+# The closing of a callee's task turn as dev sent it, pinned whole.
+DEV_TASK_CLOSING = (
+    "Answer the task and nothing wider. Cite the ledger id of every tool call and "
+    "every fact you rely on.\n\n"
+    "Return a structured list of findings. For each finding state: the claim, "
+    "the exact artifact reference, your confidence (0.0-1.0), and the MITRE "
+    "ATT&CK technique ID.\n\n"
+    "Format each finding as:\n"
+    "CLAIM: <claim text>\n"
+    "EVIDENCE: <artifact reference, naming the tool result you read it from, "
+    "for example [ev_0002]>\n"
+    "CONFIDENCE: <float>\n"
+    "TECHNIQUE: <T-ID, several separated by commas, or NONE>\n"
+    "---"
+)
+
+
+class TestTheCalleeIsAskedInItsOwnClaimFormat:
+    """A lead-led team: the specialist's only prompt is the ask, in its own claim format."""
+
+    @staticmethod
+    def _led(*, helper_on: bool) -> _Container:
+        helper: dict[str, Any] = {
+            "role": "generic",
+            "prompt": "You help.",
+            "tools": [{"kind": "agent", "agent": "third"}],
+        }
+        if not helper_on:
+            helper["attck_techniques"] = False
+        ask = {"task": "Does it open a socket?", "context": "See the pack."}
+        return _Container(
+            _settings(definitions={"helper": helper}),
+            models={
+                "boss": _Scripted(
+                    script=[
+                        _call(tool_name("helper"), ask, "ask_1"),
+                        AIMessage(content=BOSS_REPORT),
+                    ]
+                ),
+                "helper": _Scripted(script=[AIMessage(content=HELPER_REPORT)]),
+            },
+            tools={"helper": [_peek_tool()]},
+        )
+
+    @staticmethod
+    def _helper_turn(container: _Container) -> str:
+        _run_boss(container)
+        first = container.models["helper"].seen[0]
+        return "\n".join(str(m.content) for m in first if getattr(m, "type", "") == "human")
+
+    def test_a_specialist_with_the_line_off_is_asked_for_no_technique(self) -> None:
+        turn = self._helper_turn(self._led(helper_on=False))
+        assert "Task from boss:\nDoes it open a socket?" in turn
+        assert "TECHNIQUE" not in turn
+        assert "ATT&CK" not in turn
+        assert "CONFIDENCE: <float>" in turn
+
+    def test_a_specialist_with_the_line_on_is_asked_as_on_dev(self) -> None:
+        turn = self._helper_turn(self._led(helper_on=True))
+        assert DEV_TASK_CLOSING in turn

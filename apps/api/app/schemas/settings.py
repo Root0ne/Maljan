@@ -48,6 +48,7 @@ class CatalogEntryDTO(BaseModel):
     data_source_choices: list[str] | None = None
     agent_keys: list[str] | None = None
     builtin_agent_keys: list[str] | None = None
+    always_enabled_agent_keys: list[str] | None = None
 
 
 class GroupDTO(BaseModel):

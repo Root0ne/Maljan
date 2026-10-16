@@ -30,6 +30,7 @@ from maljan.agents.base_agent import (
 from maljan.agents.composition import ResolvedAgent
 from maljan.agents.prompt_fragments import (
     CLAIM_FORMAT_FRAGMENT,
+    CLAIM_FORMAT_WITHOUT_TECHNIQUE_FRAGMENT,
     PROVIDER_FAMILY,
     tool_families,
 )
@@ -46,6 +47,14 @@ _ISR_FORMAT_INSTRUCTION = (
     "the exact artifact reference, your confidence (0.0-1.0), and the MITRE "
     "ATT&CK technique ID.\n\n"
     f"{CLAIM_FORMAT_FRAGMENT}\n"
+)
+# The same instruction for an agent whose definition turns the technique line
+# off (``AgentDefinition.attck_techniques``): an agent whose work is not
+# malware behaviour is not pushed toward technique ids.
+_ISR_FORMAT_INSTRUCTION_WITHOUT_TECHNIQUES = (
+    "Return a structured list of findings. For each finding state: the claim, "
+    "the exact artifact reference and your confidence (0.0-1.0).\n\n"
+    f"{CLAIM_FORMAT_WITHOUT_TECHNIQUE_FRAGMENT}\n"
 )
 
 # Prefix on the *report text* shown when a run degraded — cosmetic only. Never
@@ -159,6 +168,12 @@ class ConfigurableAnalyst(BaseAnalyst):
 
         path = self._analysis_file_path or _analysis_path_in(data) or ""
         hint = prepare_sample(self._own_static_provider(), path, self.logger)
+        if hint and not self.asks_for_techniques():
+            # The follow-up's clause pointing the reading at a technique is
+            # left out for an agent not asked for one.
+            from maljan.analysis.sink_reachability import ATTCK_PURPOSE
+
+            hint = hint.replace(ATTCK_PURPOSE, "")
         return f"{hint}\n" if hint else ""
 
     def _load_hint(self, data: str) -> str:
@@ -273,6 +288,16 @@ class ConfigurableAnalyst(BaseAnalyst):
             )
         return self._text_to_isr(run.text, revision_round=revision_round)
 
+    def asks_for_techniques(self) -> bool:
+        """Whether the definition asks this agent for a technique line (``attck_techniques``)."""
+        return bool(self._resolved.attck_techniques)
+
+    def _isr_format_instruction(self) -> str:
+        """The claim format this agent is asked for, with or without the technique line."""
+        if self.asks_for_techniques():
+            return _ISR_FORMAT_INSTRUCTION
+        return _ISR_FORMAT_INSTRUCTION_WITHOUT_TECHNIQUES
+
     def analyze_isr(self, data: str) -> AgentISR:
         self.logger.info("Executing '%s' ISR analysis...", self.name)
         run = self._run(
@@ -280,7 +305,7 @@ class ConfigurableAnalyst(BaseAnalyst):
                 ("system", self._resolved.prompt),
                 (
                     "human",
-                    _ISR_FORMAT_INSTRUCTION
+                    self._isr_format_instruction()
                     + self._priority_hint(data)
                     + self._with_path_header(data),
                 ),
@@ -307,6 +332,7 @@ class ConfigurableAnalyst(BaseAnalyst):
                 mediator_feedback,
                 isr=True,
                 revision_round=revision_round,
+                techniques=self.asks_for_techniques(),
             ),
             "ISR revision",
         )

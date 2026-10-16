@@ -343,6 +343,9 @@ CODE_OWNED_CALLS: frozenset[str] = (
             "_object_problem",
             "_term_ids_said",
             "count_claims_begun",
+            # ``_claim_lines`` answers with this module's own words for the lines
+            # a claim is written with, with or without its TECHNIQUE line.
+            "_claim_lines",
         }
     )
     | BUILTIN_ANSWERS
