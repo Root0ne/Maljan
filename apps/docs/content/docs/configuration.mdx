@@ -1810,7 +1810,13 @@ Turn it off on a deployment whose browsers are on a thin link; every finished
 message is unaffected.
 
 `events.retention_days` (30) is how long a finished run's feed stays in
-`job_events` before the worker's nightly sweep removes it. The feed is the
+`job_events` before the worker's nightly sweep removes it. The analysis worker
+runs the sweep at 03:17 and once each time it starts, so a worker that is not
+running at that minute (a stack started for a run and stopped after it) still
+sweeps. A sweep that cannot read the stored setting, or finds it refused,
+removes nothing rather than sweeping by the default, and a retention so long
+that it reaches past the earliest date there is keeps every row (the worker says
+so once). The feed is the
 moment-by-moment record of a run, and what a reader wants while a run is
 fresh; a stopped run also keeps a partial report (see "The job timeout").
 

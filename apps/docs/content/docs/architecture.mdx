@@ -3819,8 +3819,12 @@ report is written for one, so before it the whole conversation vanished with
 the stream. Both readers ask Redis first and the table second — when the
 stream has expired, and when the cursor is older than the capped stream
 reaches. `core.events.retention_days` (default 30) bounds the table; the
-worker sweeps it nightly. The transcript, the agent findings and the evidence
-ledger are kept by the report and the job and are not touched by the sweep.
+analysis worker sweeps it nightly (an arq cron at 03:17) and once as it starts,
+beside its job slot: a cron fires only in a process alive at its minute, and
+arq does not run a window it missed while no worker was up. The sweep reads the
+retention from the stored settings or skips. The transcript, the agent findings
+and the evidence ledger are kept by the report and the job and are not touched
+by the sweep.
 
 **The count is the last number.** Every event takes a sequence number from the
 run's counter, so the rows stored for a job equal the last number issued for
