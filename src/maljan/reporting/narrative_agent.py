@@ -920,20 +920,17 @@ class NarrativeAgent:
             try:
                 # The retry of a kept structured answer goes as that answer
                 # went, so its request only appends to the one answered; held
-                # under an output bound it goes by the plain model, which is
-                # offered no tool, so a call in the turns is said as text. One
-                # call is chosen, and made once.
+                # under an output bound it goes by the plain model. The plain
+                # model is offered no tool, so a call in its turns is said as
+                # text, once. One call is chosen, and made once.
                 as_kept = kept is not None and bound is None
+                plain = turns if as_kept else with_calls_said(turns)
                 reply = await retry_on_connection_error(
                     (lambda: structured.ainvoke(turns))
                     if as_kept
-                    else (
-                        lambda: self.llm.ainvoke(
-                            with_calls_said(turns), **output_bound_kwargs(self.llm, bound)
-                        )
-                    )
+                    else (lambda: self.llm.ainvoke(plain, **output_bound_kwargs(self.llm, bound)))
                     if bound is not None
-                    else (lambda: self.llm.ainvoke(turns)),
+                    else (lambda: self.llm.ainvoke(plain)),
                     what="NarrativeAgent structured" if as_kept else "NarrativeAgent raw",
                 )
                 raw = reply.get("raw") if isinstance(reply, dict) and "raw" in reply else reply
@@ -987,6 +984,8 @@ class NarrativeAgent:
                 ],
                 parse=_parse,
                 on_feedback=self.validation_tally.count,
+                # Only a kept structured answer's retry offers the schema's tool again.
+                reply_to_calls=kept is not None,
             )
         except SpendCeilingStop as stop:
             said = f"The narrative round was not written: {stop}."

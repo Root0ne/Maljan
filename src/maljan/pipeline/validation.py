@@ -9567,6 +9567,8 @@ def _with_feedback(
     keep_answer: bool = True,
     closing: str = FEEDBACK_CLOSING,
     cards: bool = True,
+    reply_to_calls: bool = False,
+    sent_again: bool = False,
 ) -> list[Any]:
     """The conversation plus the model's answer plus the correction turn.
 
@@ -9575,9 +9577,12 @@ def _with_feedback(
     no answer between them the correction is asked at the end of the user
     turn before it (``with_question``).
 
-    An answer that is nothing but a tool call — the call is what was read —
-    goes back as it came, and the correction is the call's reply
-    (:func:`_answered_call`).
+    ``reply_to_calls`` says the retry offers again the tool the answer was
+    asked with. An answer that is nothing but a call of it — the call is what
+    was read — then goes back as it came, and the correction is the call's
+    reply (:func:`_answered_call`); ``sent_again`` says a later request sends
+    the conversation again, so the reply may carry a cache breakpoint. A retry
+    that offers no tool is never sent a call.
     """
     from langchain_core.messages import AIMessage
 
@@ -9588,14 +9593,19 @@ def _with_feedback(
     turns = list(messages)
     # An answer with no text in it — an empty or whitespace string, or a block
     # list of thinking alone, or thinking and a tool call — holds nothing to
-    # correct, and an assistant turn of thinking alone is not a shape any
-    # request here is known to be accepted with: it is left out like a
-    # described answer, and the correction is asked at the end of the user
-    # turn before it, so the retry is never the request just answered.
+    # correct as text, and an assistant turn of thinking alone is not a shape
+    # any request here is known to be accepted with. Where the retry offers the
+    # tool again, a call is the answer and the correction is its reply.
+    # Otherwise the answer is left out like a described answer, and the
+    # correction is asked at the end of the user turn before it, so the retry
+    # is never the request just answered.
     if isinstance(content, list | str) and not answer_text(content).strip():
-        if keep_answer:
+        if keep_answer and reply_to_calls:
             answered = _answered_call(
-                turns, answer, feedback_text(violations, closing=closing, cards=cards)
+                turns,
+                answer,
+                feedback_text(violations, closing=closing, cards=cards),
+                sent_again=sent_again,
             )
             if answered is not None:
                 return answered
@@ -9615,26 +9625,38 @@ def _with_feedback(
     return with_question(turns, feedback_text(violations, closing=closing, cards=cards))
 
 
-def _answered_call(messages: list[Any], answer: Any, correction: str) -> list[Any] | None:
+def _answered_call(
+    messages: list[Any], answer: Any, correction: str, *, sent_again: bool = False
+) -> list[Any] | None:
     """The conversation, the answer as it came, and the correction as its call's reply.
 
-    An answer of a tool call and no text (on a thinking model, thinking
-    before it) is the call: its arguments are what was read, and what every
-    finding is about. Sent back whole, its thinking blocks stay valid, the
-    request only appends to the one answered, and the model reads the
-    arguments the correction names. Every provider pairs a call with its
-    reply, so the correction is that reply, marked as an error: the
-    arguments were not taken. The first call is the one read; another call
-    of the turn is answered by the provider's tool-reply completion
-    (``llm.tool_replies``). ``None`` when the answer carries no call with an
-    id to reply to.
+    For a retry that offers the called tool again. An answer of a tool call
+    and no text (on a thinking model, thinking before it) is the call: its
+    arguments are what was read, and what every finding is about. Sent back
+    whole, its thinking blocks stay valid, the request only appends to the
+    one answered, and the model reads the arguments the correction names.
+    Every provider pairs a call with its reply, so the correction is that
+    reply, marked as an error: the arguments were not taken. The first call is
+    the one read; another call of the turn is answered by the provider's
+    tool-reply completion (``llm.tool_replies``). Unless ``sent_again``, the
+    reply notes that no later request sends the conversation again
+    (``anthropic_history.LAST_REQUEST``), so no cache entry is written that
+    nothing reads. ``None`` when the answer carries no call with an id to
+    reply to.
     """
     from langchain_core.messages import AIMessage, ToolMessage
+
+    from maljan.llm.anthropic_history import LAST_REQUEST
 
     calls = list(answer.tool_calls) if isinstance(answer, AIMessage) else []
     if not calls or not calls[0].get("id"):
         return None
-    reply = ToolMessage(content=correction, tool_call_id=str(calls[0]["id"]), status="error")
+    reply = ToolMessage(
+        content=correction,
+        tool_call_id=str(calls[0]["id"]),
+        status="error",
+        response_metadata={} if sent_again else {LAST_REQUEST: True},
+    )
     return [*messages, answer, reply]
 
 
@@ -9644,15 +9666,17 @@ def with_calls_said(turns: list[Any]) -> list[Any]:
     A request that offers no tool is not known to be accepted with a call in
     its history. A retry held under an output bound goes by the plain model,
     so the call :func:`_with_feedback` answered is said as the answer's text
-    (its arguments, as the answer that was read) and its reply as the question
-    after it: the model still reads what it wrote and what is wrong with it.
-    The call's thinking blocks are left out with it, because they were written
-    beside the tool and do not hold without it. Every other turn is sent as
-    it is, and a history with no call is the same list.
+    (the arguments of each of its calls, the one read first) and its reply as
+    the question after it: the model still reads what it wrote and what is
+    wrong with it. The call's thinking blocks are left out with it, because
+    they were written beside the tool and do not hold without it. Every other
+    turn is sent as it is, and a history with no call is the same list.
     """
+    import json
+
     from langchain_core.messages import AIMessage, ToolMessage
 
-    from maljan.llm.answer_text import answer_text, structured_answer_text
+    from maljan.llm.answer_text import answer_text
     from maljan.pipeline.turns import with_question
 
     if not any(
@@ -9660,20 +9684,22 @@ def with_calls_said(turns: list[Any]) -> list[Any]:
     ):
         return turns
     out: list[Any] = []
-    said_calls = 0
+    said: list[str] = []
     for message in turns:
         if isinstance(message, ToolMessage):
             out = with_question(out, answer_text(message.content))
         elif isinstance(message, AIMessage) and message.tool_calls:
-            said_calls += len(message.tool_calls)
-            said = [answer_text(message.content).strip(), structured_answer_text(message)]
-            out.append(AIMessage(content="\n\n".join(part for part in said if part)))
+            parts = [answer_text(message.content).strip()]
+            for call in message.tool_calls:
+                parts.append(json.dumps(call.get("args"), ensure_ascii=False))
+                said.append(f"{call.get('name') or 'unnamed'} ({call.get('id') or 'no id'})")
+            out.append(AIMessage(content="\n\n".join(part for part in parts if part)))
         else:
             out.append(message)
     logger.info(
-        "validation: the retry goes to a model offered no tool; %d tool call(s) in its turns "
-        "are said as text, with their replies, and the thinking written beside them is left out.",
-        said_calls,
+        "validation: the retry goes to a model offered no tool; its tool call(s) %s are said "
+        "as text, with their replies, and the thinking written beside them is left out.",
+        ", ".join(said),
     )
     return out
 
@@ -9829,6 +9855,7 @@ async def retry_with_feedback[T](
     drop_answer_for: frozenset[str] = frozenset(),
     can_retry: Callable[[list[Any]], bool] | None = None,
     answered: Callable[[list[Violation], list[Violation]], list[Violation]] | None = None,
+    reply_to_calls: bool = False,
 ) -> tuple[T, list[Violation], int]:
     """Run, validate, and give the model one chance to fix what it got wrong.
 
@@ -9858,6 +9885,11 @@ async def retry_with_feedback[T](
     the conversation is told the outcome: a question the producer answered as
     the question allows (``Violation.answered``) is published ``resolved``,
     not ``survived``, and the mapped rows are what is returned.
+
+    ``reply_to_calls`` is for a caller whose retries offer again the tool its
+    first answer was asked with, and which sends nothing after the loop: an
+    answer that is only a call of it is corrected in the call's reply
+    (:func:`_with_feedback`). Every other caller's retry is sent no call.
     """
     feed = _feed(sink, agent, stage)
     turns = list(messages)
@@ -9868,7 +9900,15 @@ async def retry_with_feedback[T](
     shown: list[Violation] = []
     while violations and retries < max_retries:
         keep = not any(v.code in drop_answer_for for v in violations)
-        following = _with_feedback(turns, answer, violations, keep_answer=keep)
+        following = _with_feedback(
+            turns,
+            answer,
+            violations,
+            keep_answer=keep,
+            reply_to_calls=reply_to_calls,
+            # Another retry of this loop sends the conversation again.
+            sent_again=retries + 1 < max_retries,
+        )
         if can_retry is not None and not can_retry(following):
             break
         _announce_feedback(violations, on_feedback, feed, retries + 1)
