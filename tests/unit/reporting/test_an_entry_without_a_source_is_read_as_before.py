@@ -160,14 +160,30 @@ def test_the_builders_and_the_analysis_order_are_kept_as_they_were() -> None:
 
 
 def test_no_two_built_in_sources_declare_one_name_two_ways() -> None:
+    """One name, one reading; a declaration that names neither a kind nor a reader gives none.
+
+    Such a declaration states other facts only (that the tool sends the
+    sample out, its display name), and every kind-based reading treats it as
+    undeclared, so it cannot read a name a second way. What it must not do is
+    become the legacy reading of a name another source declares a kind for,
+    which takes the first source in its order (``shipped_by_name``).
+    """
     from maljan.core.config import Settings
+    from maljan.core.declared_reading import shipped_by_name
     from maljan.core.tool_declarations import ToolDeclarations
 
     seen: dict[str, tuple[str, str]] = {}
+    unread: set[str] = set()
     for source in ToolDeclarations.from_settings(Settings()).sources():
         for name, facts in source.tools.items():
+            if not facts.kind and not facts.reader:
+                unread.add(name)
+                continue
             shape = (facts.kind, facts.reader)
             assert seen.setdefault(name, shape) == shape, name
+    for name in unread & set(seen):
+        taken = shipped_by_name()[name]
+        assert (taken.kind, taken.reader) == seen[name], name
 
 
 @pytest.mark.parametrize(("before", "kinds", "reader"), PROJECTION_READERS)

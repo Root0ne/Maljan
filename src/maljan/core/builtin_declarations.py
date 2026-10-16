@@ -879,12 +879,18 @@ _PROVIDER_BLOCKS: dict[str, dict[str, Any]] = {
         "tool_facts": R2_TOOLS,
     },
     # The workflow's ``submit_file`` sends the sample to the sandbox: declared
-    # so the run's disclosure block names the upload, with the kind every
-    # built-in ``submit_file`` declares (one name, one reading).
+    # so the run's disclosure block names the upload. It names no kind on
+    # purpose. The server answers a failure in one line of prose ("Error: CAPE
+    # API unreachable"), and such an answer is filed as a failure only for a
+    # tool that declares no kind (``schemas.evidence.build_entry``); a kind
+    # would file every failed submission as an answer. A declaration with no
+    # kind gives no reading, so it reads the name no other way than the
+    # VirusTotal server's ``submit_file``, which the legacy reading by name
+    # takes first.
     "cape2_mcp": {
         "roles": ["sandbox"],
         "prompt_fragment": CAPE_WORKFLOW,
-        "tool_facts": {"submit_file": {"kind": "submission", "discloses_sample": True}},
+        "tool_facts": {"submit_file": {"discloses_sample": True}},
     },
 }
 
