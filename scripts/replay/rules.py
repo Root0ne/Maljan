@@ -28,30 +28,36 @@ the way the platform composes them:
 * **the report linter,** over the finished report.
 * **corroboration,** per technique.
 
+* **against the stored report,** what the rebuilt report does not share with
+  the one the run stored, each difference with its named cause where one is
+  known.
+
 What a model would have been asked is what is counted: no model is called.
-Output names codes, entry ids and counts; a finding's words and a claim's text
-are added only when asked for (``show_text``). Every input the stored record
-does not hold is listed in ``not_replayed`` with why, and a part that raised
-is listed there marked as an error (``"error": true``): a crash is not a
-decision, and the command ends with status 2 on one.
+The record carries codes, ids, kinds, counts and digests, and no value from
+the run; a finding's words, a claim's text, a subject's value and an
+indicator's are added only when asked for (``show_text``), in fields of their
+own (``scripts.replay.record``). Every input the stored record does not hold
+is listed in ``not_replayed`` with why, and a part that raised is listed there
+marked as an error (``"error": true``): a crash is not a decision, and the
+command ends with status 2 on one.
 """
 
 from __future__ import annotations
 
 import copy
-import hashlib
 import json
 import logging
+import re
 import traceback
 from collections import Counter
 from collections.abc import Callable, Iterable, Mapping, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime
 from pathlib import Path
 from typing import Any
 
 from scripts.replay.guard import ReplayEnvironment, replay_environment
-from scripts.replay.record import REPLAY_SCHEMA
+from scripts.replay.record import REPLAY_SCHEMA, answer_head, digest, value_free_subject
 from scripts.replay.stored import StoredRun
 
 # What each producer's checks are, as the platform composes them: the
@@ -133,6 +139,29 @@ COMPOSER_PLACES: dict[str, tuple[str, str | None]] = {
 
 _LOG = logging.getLogger("maljan.replay")
 
+# The causes a difference from the stored report is tied to: each is a row the
+# record names under ``not_replayed``, word for word.
+_NO_SANDBOX_REPORT = (
+    "the sandbox report is not in the stored record: what the build reads from it alone is not "
+    "rebuilt"
+)
+_TABLES_READ_BACK = (
+    "findings and artifacts are not stored with the claims in force; they are read back from the "
+    "stored report's Findings and Appendix A tables (a finding's detail is not in them)"
+)
+_NO_KEY_ORDER = (
+    "the ledger's structured answers are read as the database returned them, and it keeps no key "
+    "order: a table rendered from them may list its rows, columns and the parts of a cell in "
+    "another order than the run's report did, and a cell cut to its length then shows other parts"
+)
+# The export's objects the build makes from the sandbox report's process tree
+# and its network block (``ExtendedSTIXRenderer``: ``report.dynamic``,
+# ``report.network``).
+_SANDBOX_PROCESS_OBJECTS = frozenset({"process", "observed-data"})
+_SANDBOX_NETWORK_OBJECTS = frozenset(
+    {"ipv4-addr", "ipv6-addr", "domain-name", "url", "network-traffic"}
+)
+
 
 # ---------------------------------------------------------------------------
 # What every part reads
@@ -164,6 +193,11 @@ class _Run:
     judge_left: list[Any] = field(default_factory=list)
     judge_settled: list[Any] = field(default_factory=list)
     judge_codes: set[str] = field(default_factory=set)
+    # The findings each producer was never shown, as the stored summary's rows
+    # record them (``"asked": "false"``), by producer: read once.
+    unshown: dict[str, list[Any]] | None = None
+    # How the report's degradation was decided: counts only.
+    degradation: dict[str, int] = field(default_factory=dict)
     not_replayed: list[dict[str, Any]] = field(default_factory=list)
     _named: set[tuple[str, str]] = field(default_factory=set)
 
@@ -203,10 +237,6 @@ def _timestamp(value: Any) -> datetime | None:
         return None
 
 
-def _digest(value: str) -> str:
-    return hashlib.sha256(value.encode("utf-8", "replace")).hexdigest()[:12]
-
-
 def _read_ledger(run: _Run) -> None:
     from maljan.schemas.evidence import LedgerEntry
 
@@ -226,6 +256,17 @@ def _read_ledger(run: _Run) -> None:
         run.name("ledger", f"{unread} stored ledger row(s) do not read as this tree's LedgerEntry")
     if not run.stored.evidence:
         run.name("ledger", "the stored run holds no evidence ledger")
+    else:
+        blanked = sum(1 for entry in run.ledger if entry.truncated and not entry.output)
+        run.name(
+            "ledger",
+            "the entries are read as the run saved them, after the byte budget, where the "
+            "analysts' and the judge's checks read them before it: an output the budget blanked "
+            f"({blanked} here) and a structure its last pass dropped, which leaves no mark, are "
+            "read as saved",
+        )
+        if any(entry.structured for entry in run.ledger):
+            run.name("ledger", _NO_KEY_ORDER)
     try:
         from maljan.pipeline.triage_pack import pack_entries
 
@@ -263,6 +304,12 @@ def _read_identity(run: _Run) -> None:
         run.name(
             "identity",
             "the stored report states no file type or platform; the routed format is unknown",
+        )
+    if block.get("file_type") or block.get("platform"):
+        run.name(
+            "identity",
+            "the routed file type and platform are read back from the stored report's identity "
+            "block: routing reads the sample, which the record does not hold",
         )
 
 
@@ -310,17 +357,24 @@ def _flag(
     The entry ids are the ones the claim it is about cites (``ids``), or the
     ones the sentences it quotes from the checked text cite. Never ids read out
     of the finding's own message, which may list the ids the answer could have
-    cited.
+    cited. A subject that is not an id is its kind and a digest of its value,
+    in the path that writes it too; its words are added only with the text.
     """
     from maljan.schemas.evidence import entry_ids_in
 
     row: dict[str, Any] = {"code": str(getattr(violation, "code", "") or "")}
     path = str(getattr(violation, "path", "") or "")
-    if path:
-        row["path"] = path
     subject = str(getattr(violation, "subject", "") or "")
+    shown = value_free_subject(subject)
+    if path:
+        # A path that writes the subject (``objects.domain:host``) writes it value-free.
+        row["path"] = path.replace(subject, shown) if subject and shown != subject else path
     if subject:
-        row["subject"] = subject
+        row["subject"] = shown
+    if show_text and subject and shown != subject:
+        row["subject_text"] = subject
+        if path and row["path"] != path:
+            row["path_text"] = path
     if getattr(violation, "advisory", False):
         row["advisory"] = True
     if ids is None:
@@ -695,6 +749,54 @@ def _stored_artifacts(run: _Run) -> dict[str, list[Any]]:
     return out
 
 
+def _unshown_rows(run: _Run) -> dict[str, list[Any]]:
+    """The findings each producer was never shown, by producer, read once from the stored summary.
+
+    The run summary's unresolved rows record a finding its producer was not
+    shown as ``"asked": "false"``, the analysts' under their names and the
+    judge's under ``judge``.
+    """
+    if run.unshown is not None:
+        return run.unshown
+    from maljan.pipeline.validation import Violation
+
+    validation = run.stored.run_summary.get("validation")
+    rows = validation.get("unresolved") if isinstance(validation, dict) else None
+    unshown: dict[str, list[Any]] = {}
+    for row in rows or []:
+        if not isinstance(row, dict) or str(row.get("asked") or "") != "false":
+            continue
+        unshown.setdefault(str(row.get("agent") or "judge"), []).append(
+            Violation(
+                code=str(row.get("code") or ""),
+                message=str(row.get("message") or ""),
+                subject=str(row.get("subject") or ""),
+            )
+        )
+    run.unshown = unshown
+    return unshown
+
+
+def _shown_to(run: _Run, producer: str, found: Sequence[Any]) -> list[Any]:
+    """The findings ``producer`` was shown, as far as the stored summary says.
+
+    A replayed finding that matches one of the producer's ``asked: false``
+    rows, by the platform's own reading of "the same finding" (``not_asked``:
+    the code and the subject, and for a finding without a subject its words),
+    was not shown; every other one is counted as shown. One pass over each.
+    """
+    from maljan.pipeline.validation import not_asked
+
+    unshown = _unshown_rows(run).get(producer)
+    if not unshown:
+        return list(found)
+    probe = [v if v.asked else replace(v, asked=True) for v in found]
+    # ``not_asked`` keeps a finding that matches one of the given rows as it
+    # is and marks every other one unasked: here a mark kept means not shown.
+    marked = not_asked(probe, unshown)
+    return [v for v, mark in zip(found, marked, strict=True) if not mark.asked]
+
+
 def _in_force(run: _Run, agent: str, row: Mapping[str, Any]) -> dict[str, Any]:
     """The claims in force, checked by the checks that read claims, their notes decided again.
 
@@ -702,9 +804,12 @@ def _in_force(run: _Run, agent: str, row: Mapping[str, Any]) -> dict[str, Any]:
     catalogue knows each technique, whether its analyst kept an absence claim
     when asked, whether it cites only failed calls. Each is reset and decided
     again here, by the platform's own functions over the replayed findings, so
-    a change to the rules reaches what the report publishes.
+    a change to the rules reaches what the report publishes. As the analyst's
+    validation turn does, an id the catalogue does not know is marked whether
+    or not the analyst was shown the finding, and an absence claim is noted
+    only when it was (the stored ``asked: false`` rows say which it was not).
     """
-    from maljan.pipeline.validation import mark_invalid_technique_ids
+    from maljan.pipeline.validation import ABSENCE_CLAIM_CODE, mark_invalid_technique_ids
     from maljan.schemas.isr_models import AgentISR, ClaimEvidence
 
     claims: list[Any] = []
@@ -740,9 +845,15 @@ def _in_force(run: _Run, agent: str, row: Mapping[str, Any]) -> dict[str, Any]:
     techniques = bool(_snapshot_value(run, f"agents.definitions.{agent}.attck_techniques", True))
     found = _analyst_checks(run, isr, _own(run, agent, None), techniques, whole=False)
     # What the analyst's validation turn does with what survived its retry.
-    mark_invalid_technique_ids(isr, found)
-    run.in_force_found[agent] = found
+    shown = {id(v) for v in _shown_to(run, agent, found)}
+    mark_invalid_technique_ids(
+        isr, [v for v in found if v.code != ABSENCE_CLAIM_CODE or id(v) in shown]
+    )
+    run.in_force_found[agent] = [v if id(v) in shown else replace(v, asked=False) for v in found]
     flags = _claim_flags(found, isr, show_text=run.show_text)
+    for flag, violation in zip(flags, found, strict=True):
+        if id(violation) not in shown:
+            flag["asked"] = False
     out: dict[str, Any] = {
         "claims": len(claims),
         "findings": len(isr.findings),
@@ -770,28 +881,38 @@ def _analysts(run: _Run) -> dict[str, Any]:
     run.stored_findings = _stored_findings(run)
     run.stored_artifacts = _stored_artifacts(run)
     if run.stored_findings or run.stored_artifacts:
-        run.name(
-            "analysts",
-            "findings and artifacts are not stored with the claims in force; they are read "
-            "back from the stored report's Findings and Appendix A tables (a finding's detail "
-            "is not in them)",
-        )
+        run.name("analysts", _TABLES_READ_BACK)
     if rows:
         run.name(
             "analysts",
             "the claims in force are stored with the run's own validity and absence notes; "
-            "they are reset and decided again from the replayed findings, each counted as one "
-            "its analyst was shown (whether it was is not in the record)",
+            "they are reset and decided again from the replayed findings. Whether the analyst "
+            "was shown each finding is read from the stored summary's rows (asked: false), and "
+            "a finding without a subject is matched on its words",
         )
     by_speaker = _messages_by_speaker(run.stored.transcript)
-    # In the order the run's state held them: the order the analysts first
-    # answered, which is the order their first messages were said in.
+    # In the order the run's state held them, which the run summary records
+    # (``agent_stats``, written in that order); else the order the analysts
+    # first answered in, which is the order their first messages were said in.
+    stats = run.stored.run_summary.get("agent_stats")
+    held = [
+        str(row.get("agent_id") or "")
+        for row in (stats if isinstance(stats, list) else [])
+        if isinstance(row, dict)
+    ]
+    if not held:
+        run.name(
+            "analysts",
+            "the order the run's state held the analysts in is not stored "
+            "(run_summary.agent_stats): they are taken in the order they first answered",
+        )
     spoken = [
         speaker
         for speaker, messages in by_speaker.items()
         if any(str(m.get("role") or "") == "analyst" for m in messages)
     ]
-    for agent in [n for n in dict.fromkeys([*spoken, *texts, *rows]) if n in texts or n in rows]:
+    order = dict.fromkeys([*held, *spoken, *texts, *rows])
+    for agent in [n for n in order if n in texts or n in rows]:
         row = rows.get(agent) or {}
         domain = str(row.get("domain") or agent)
         in_force_round = int(row.get("revision_rounds") or 0)
@@ -888,35 +1009,15 @@ def _shown_to_the_judge(run: _Run, found: Sequence[Any]) -> list[Any]:
     """The findings of the round the judge was shown, as far as the stored summary says.
 
     A finding the answer to the judge's only retry raised first was never shown
-    to it, and the run summary records it ``"asked": "false"``. Each replayed
-    finding that matches such a row (by the platform's own reading of "the same
-    finding", ``not_asked``) was not shown; every other one is counted as shown.
+    to it, and the run summary records it ``"asked": "false"`` (:func:`_shown_to`).
     """
-    from maljan.pipeline.validation import Violation, not_asked
-
-    validation = run.stored.run_summary.get("validation")
-    rows = validation.get("unresolved") if isinstance(validation, dict) else None
-    unshown = [
-        Violation(
-            code=str(row.get("code") or ""),
-            message=str(row.get("message") or ""),
-            subject=str(row.get("subject") or ""),
-        )
-        for row in rows or []
-        if isinstance(row, dict)
-        and str(row.get("agent") or "judge") == "judge"
-        and str(row.get("asked") or "") == "false"
-    ]
     run.name(
         "judge",
         "whether the judge was shown each finding is read from the stored summary's rows "
-        "(asked: false); a finding it holds no such row for is counted as shown",
+        "(asked: false), and a finding without a subject is matched on its words; one it holds "
+        "no such row for is counted as shown",
     )
-    if not unshown:
-        return list(found)
-    # ``not_asked`` leaves a finding as it is when it matches one of the rows:
-    # matched means one of the stored unshown findings.
-    return [v for v in found if not not_asked([v], unshown)[0].asked]
+    return _shown_to(run, "judge", found)
 
 
 def _judge(run: _Run, judged: _Judged) -> dict[str, Any]:
@@ -1145,6 +1246,77 @@ def _verdict_fallback(bundle: Any, decision: str, codes: set[str]) -> dict[str, 
     }
 
 
+def _decided_by_the_verdict() -> Callable[[str], bool]:
+    """Whether a stored degradation reason is one the verdict decides, which is decided again.
+
+    The fallback's sentence and the inconclusive ones are the platform's
+    constants. The unreadable verdict's sentence quotes the judge's word, so it
+    is told by its opening, which is read off the platform's own function
+    (``unrecognised_verdict_reason``) for a word nobody writes.
+    """
+    from types import SimpleNamespace
+
+    from maljan.agents.judge_agent import VERDICT_FALLBACK_REASON
+    from maljan.pipeline.outcome import INCONCLUSIVE_REASONS, unrecognised_verdict_reason
+
+    fixed = {VERDICT_FALLBACK_REASON, *INCONCLUSIVE_REASONS}
+    word = "replay sentinel verdict"
+    opening = ""
+    try:
+        said = unrecognised_verdict_reason(
+            SimpleNamespace(x_maljan_assessment=SimpleNamespace(verdict=word))
+        )
+        at = said.find(word)
+        opening = said[:at].rstrip("'\"") if at > 0 else ""
+    except Exception:  # noqa: BLE001 — then only the constants are told apart
+        opening = ""
+    return lambda reason: reason in fixed or bool(opening) and reason.startswith(opening)
+
+
+def _degradation(
+    run: _Run, stored: Mapping[str, Any], decided: Sequence[str]
+) -> tuple[list[str], bool]:
+    """The report's degradation reasons and whether the run is degraded, as far as decidable.
+
+    The reasons the verdict carries are decided again (``decided``), and the
+    stored ones of that kind are dropped first, so one these rules no longer
+    give is gone. Every other stored reason the judge node decides from inputs
+    the record does not hold, and it is kept as stored and named: a rule change
+    that would no longer give one cannot remove it here. Whether the run is
+    degraded is decided again over the reasons, by the platform's own rule
+    (``run_is_degraded``), the verdict's reasons making it degraded as the
+    judge node's do; a stored degraded report with no reason stays degraded.
+    """
+    from maljan.pipeline.nodes import informational_reasons_in_force
+    from maljan.pipeline.outcome import corrected_reasons
+    from maljan.pipeline.triage_pack import run_is_degraded
+
+    stored_reasons = [str(r) for r in stored.get("degradation_reasons") or []]
+    by_the_verdict = _decided_by_the_verdict()
+    kept = [reason for reason in stored_reasons if not by_the_verdict(reason)]
+    reasons = corrected_reasons([*kept, *(r for r in decided if r not in kept)], run.ledger)
+    degraded = run_is_degraded(kept, informational=informational_reasons_in_force(run.isrs))
+    degraded = degraded or bool(decided)
+    if stored.get("degraded_mode") and not stored_reasons:
+        degraded = True
+        run.name("report", "the stored report is degraded and states no reason: it stays degraded")
+    run.degradation = {
+        "decided": len(decided),
+        "stored_decided_again": len(stored_reasons) - len(kept),
+        "kept_as_stored": len(kept),
+    }
+    if kept:
+        run.name(
+            "report",
+            f"{len(kept)} stored degradation reason(s) are kept as stored: the judge node decides "
+            "them from inputs the record does not hold (the sandbox report, model failures, "
+            "prompt notices, the pack), so a rule change that would no longer give one cannot "
+            "remove it here. The verdict's own reasons are decided again, and whether the run is "
+            "degraded is decided again over the reasons",
+        )
+    return reasons, degraded
+
+
 def _replayed_validation(run: _Run) -> dict[str, Any]:
     """``run_summary.validation`` rebuilt from the replayed findings, by the platform's function.
 
@@ -1189,7 +1361,6 @@ def _build(run: _Run, judged: _Judged, built: _Built) -> dict[str, Any]:
         with_verdict_fallback,
     )
     from maljan.pipeline.outcome import (
-        corrected_reasons,
         decide_from_bundle,
         unrecognised_verdict_reason,
         verdict_for_run,
@@ -1211,11 +1382,10 @@ def _build(run: _Run, judged: _Judged, built: _Built) -> dict[str, Any]:
     )
     fallback = _verdict_fallback(bundle, decision, run.judge_codes)
 
-    # The reasons this verdict carries under these rules, and the rest of the
-    # stored ones, which the judge node decided from what the record does not
-    # hold; all of them corrected against the ledger as the report node does.
+    # The reasons this verdict carries under these rules, with the rest of the
+    # stored ones, all of them corrected against the ledger as the report node
+    # does (:func:`_degradation`).
     stored = run.stored.report or {}
-    reasons = [str(r) for r in stored.get("degradation_reasons") or []]
     decided = [
         reason
         for reason in (
@@ -1225,13 +1395,7 @@ def _build(run: _Run, judged: _Judged, built: _Built) -> dict[str, Any]:
         )
         if reason
     ]
-    reasons.extend(reason for reason in decided if reason not in reasons)
-    run.name(
-        "report",
-        "degraded_mode and the degradation reasons are the stored report's: the judge node "
-        "decides them from inputs the record does not hold (the sandbox report, model "
-        "failures, prompt notices); the verdict's own reasons are decided again and joined",
-    )
+    reasons, degraded = _degradation(run, stored, decided)
 
     summary = copy.deepcopy(run.stored.run_summary)
     summary["validation"] = _replayed_validation(run)
@@ -1252,8 +1416,8 @@ def _build(run: _Run, judged: _Judged, built: _Built) -> dict[str, Any]:
         ),
         judge_assessment=assessment,
         malware_category=getattr(assessment, "malware_category", None),
-        degraded_mode=bool(stored.get("degraded_mode")) or bool(decided),
-        degradation_reasons=corrected_reasons(reasons, run.ledger),
+        degraded_mode=degraded,
+        degradation_reasons=reasons,
         sample_platform=run.identity.get("platform"),
         sample_file_type=run.identity.get("file_type"),
         evidence_ledger=run.ledger,
@@ -1271,11 +1435,7 @@ def _build(run: _Run, judged: _Judged, built: _Built) -> dict[str, Any]:
     )
     report.run_summary = rebuilt
     built.report = report
-    run.name(
-        "report",
-        "the sandbox report is not in the stored record: what the build reads from it alone "
-        "is not rebuilt",
-    )
+    run.name("report", _NO_SANDBOX_REPORT)
     return {"replayed": True}
 
 
@@ -1357,7 +1517,7 @@ def _report_values(run: _Run, built: _Built, judged: _Judged) -> dict[str, Any]:
     from maljan.schemas.isr_models import judge_dropped_reason
 
     # A technique the judge dropped carries the judge's own reason; it is the
-    # judge's text, printed only with the text.
+    # judge's text, added only with the text.
     dropped = judge_dropped_reason("")
     techniques: dict[str, Any] = {}
     for cell in report.capability_matrix or []:
@@ -1367,21 +1527,21 @@ def _report_values(run: _Run, built: _Built, judged: _Judged) -> dict[str, Any]:
         row: dict[str, Any] = {"published": not cell.not_published}
         if cell.not_published:
             why = str(cell.not_published)
-            row["why"] = dropped if why.startswith(dropped) and not run.show_text else why
+            row["why"] = dropped if why.startswith(dropped) else why
+            if run.show_text and row["why"] != why:
+                row["why_text"] = why
         techniques[tid] = row
     for mapping in report.ttp_mappings or []:
         tid = str(mapping.technique_id or "").strip().upper()
         if tid:
             techniques.setdefault(tid, {"published": True})
 
-    indicators: dict[str, Any] = {}
-    for ioc in report.consolidated_iocs or []:
-        kind = str(ioc.kind or ioc.type or "")
-        key = f"{kind}:{_digest(str(ioc.value))}"
-        row = {"kind": kind, "published": ioc.published}
-        if run.show_text:
-            row["value"] = str(ioc.value)
-        indicators[key] = row
+    indicators = {
+        key: row
+        for key, row in (
+            _indicator_row(ioc, run.show_text) for ioc in report.consolidated_iocs or []
+        )
+    }
 
     exported: list[str] = []
     types: Counter[str] = Counter()
@@ -1392,13 +1552,16 @@ def _report_values(run: _Run, built: _Built, judged: _Judged) -> dict[str, Any]:
                 if isinstance(ref, dict) and ref.get("source_name") == "mitre-attack":
                     exported.append(str(ref.get("external_id") or ""))
     severity = getattr(report, "severity", None)
+    category = str(report.malware_category or "")
     out: dict[str, Any] = {
         "replayed": True,
         "verdict": str(report.verdict),
         "severity": str(getattr(severity, "rating", "") or "") or None,
-        "category": report.malware_category,
+        # The judge's own words: a digest, the words only with the text.
+        "category": f"sha256:{digest(category)}" if category else None,
         "confidence": report.overall_confidence,
         "degraded": bool(report.degraded_mode),
+        "degradation": dict(run.degradation),
         "sections": [str(section.key) for section in report.sections],
         "persistence": len(report.persistence or []),
         "techniques": dict(sorted(techniques.items())),
@@ -1408,6 +1571,8 @@ def _report_values(run: _Run, built: _Built, judged: _Judged) -> dict[str, Any]:
             "objects": dict(sorted(types.items())),
         },
     }
+    if run.show_text and category:
+        out["category_text"] = category
     if getattr(reporting, "auto_generate_detection_rules", True):
         out.update(_drafts(run, report))
     else:
@@ -1416,6 +1581,352 @@ def _report_values(run: _Run, built: _Built, judged: _Judged) -> dict[str, Any]:
             "the run's settings draft no detection rules (reporting.auto_generate_detection_rules)",
         )
     return out
+
+
+def _indicator_row(ioc: Any, show_text: bool) -> tuple[str, dict[str, Any]]:
+    """One IOC row as the record keeps it: its kind, the head of its answer and digests.
+
+    The key is the kind and a digest of the value; the answer is its head
+    (``yes``, ``no``) and a digest of the whole of it, which may quote the value.
+    The value and the answer's words are added only with the text.
+    """
+    kind = str(getattr(ioc, "kind", None) or getattr(ioc, "type", None) or "")
+    value = str(getattr(ioc, "value", "") or "")
+    answer = str(getattr(ioc, "published", None) or "")
+    head = answer_head(answer)
+    row: dict[str, Any] = {"kind": kind, "published": head or None}
+    if answer and answer != head:
+        row["answer"] = digest(answer)
+    if show_text:
+        row["value"] = value
+        if answer and answer != head:
+            row["answer_text"] = answer
+    return f"{kind}:{digest(value)}", row
+
+
+def _cause(run: _Run, part: str, why: str) -> dict[str, str] | None:
+    """A named cause, when this replay named it under ``not_replayed``."""
+    return {"part": part, "why": why} if (part, why) in run._named else None
+
+
+def _shown(text: Any, show_text: bool) -> dict[str, Any]:
+    """A text as the record keeps it: its digest, and the words only with the text."""
+    out: dict[str, Any] = {"digest": digest(text)}
+    if show_text:
+        out["text"] = text
+    return out
+
+
+def _section_differences(
+    run: _Run, stored: Sequence[Any], replayed: Sequence[Any]
+) -> dict[str, Any]:
+    """The sections one report alone holds, the ones that moved, and every row that differs."""
+    keys_stored = [str(s.get("key") or "") for s in stored if isinstance(s, dict)]
+    by_key_stored = {str(s.get("key") or ""): s for s in stored if isinstance(s, dict)}
+    by_key_replayed = {str(s.get("key") or ""): s for s in replayed}
+    keys_replayed = [str(s.get("key") or "") for s in replayed]
+    shared_stored = [k for k in keys_stored if k in by_key_replayed]
+    shared_replayed = [k for k in keys_replayed if k in by_key_stored]
+    place = {key: index for index, key in enumerate(shared_replayed)}
+    out: dict[str, Any] = {}
+    only_stored = [k for k in keys_stored if k not in by_key_replayed]
+    only_replayed = [k for k in keys_replayed if k not in by_key_stored]
+    moved = [k for index, k in enumerate(shared_stored) if place.get(k) != index]
+    read_back = _cause(run, "analysts", _TABLES_READ_BACK)
+    for name, keys in (
+        ("only_stored", only_stored),
+        ("only_replayed", only_replayed),
+        ("moved", moved),
+    ):
+        if keys:
+            out[name] = [
+                {
+                    "section": k,
+                    **({"cause": read_back} if read_back and _read_back_section(k) else {}),
+                }
+                for k in keys
+            ]
+    contents: list[dict[str, Any]] = []
+    for key in shared_stored:
+        contents.extend(_section_content(run, key, by_key_stored[key], by_key_replayed[key]))
+    if contents:
+        out["contents"] = contents
+    return out
+
+
+def _with_cause(row: dict[str, Any], cause: dict[str, str] | None) -> dict[str, Any]:
+    return {**row, "cause": cause} if cause else row
+
+
+def _section_content(
+    run: _Run, key: str, theirs: Mapping[str, Any], mine: Mapping[str, Any]
+) -> list[dict[str, Any]]:
+    """What differs inside one section both reports hold.
+
+    A row is the same row when it writes the same keys and values, in any
+    order (:func:`_row_key`): what only one table writes is listed row by row,
+    with its digest, and the same rows (or the same values of a field)
+    standing in another order are one entry. Such a reordering is tied to the
+    read-back in a section built from the findings and artifacts read back
+    from the stored tables, and to the database's key order in any other. A
+    row or a value only one report writes has no named cause: it is what the
+    rules decide differently, or what the run's tree rendered differently.
+    """
+    read_back = _read_back_section(key)
+    order_cause = (
+        _cause(run, "analysts", _TABLES_READ_BACK)
+        if read_back
+        else _cause(run, "ledger", _NO_KEY_ORDER)
+    )
+    out: list[dict[str, Any]] = []
+    for name in ("title", "columns", "text", "items", "evidence_ids", "kind", "source"):
+        a, b = theirs.get(name), mine.get(name)
+        if (a or None) == (b or None):
+            continue
+        if _row_key(a) == _row_key(b):
+            out.append(_with_cause({"section": key, "field": name, "reordered": 1}, order_cause))
+            continue
+        row = {"section": key, "field": name, "stored": _shown(a, run.show_text)}
+        row["replayed"] = _shown(b, run.show_text)
+        out.append(row)
+    stored_rows, replayed_rows = list(theirs.get("rows") or []), list(mine.get("rows") or [])
+    if stored_rows == replayed_rows:
+        return out
+    stored_keys = [_row_key(r) for r in stored_rows]
+    replayed_keys = [_row_key(r) for r in replayed_rows]
+    missing = Counter(stored_keys) - Counter(replayed_keys)
+    extra = Counter(replayed_keys) - Counter(stored_keys)
+    for side, table, keys, left in (
+        ("stored", stored_rows, stored_keys, missing),
+        ("replayed", replayed_rows, replayed_keys, extra),
+    ):
+        for index, (value, row_key) in enumerate(zip(table, keys, strict=True)):
+            if left[row_key] > 0:
+                left[row_key] -= 1
+                entry: dict[str, Any] = {"section": key, "field": "rows", "row": index}
+                entry.update({"stored": None, "replayed": None})
+                entry[side] = _shown(value, run.show_text)
+                out.append(entry)
+    shared = sum((Counter(stored_keys) & Counter(replayed_keys)).values())
+    reordered = sum(
+        1
+        for a, b in zip(stored_rows, replayed_rows, strict=False)
+        if a != b and _row_key(a) == _row_key(b)
+    )
+    if shared and (reordered or _order_of(stored_keys, replayed_keys)):
+        entry = {"section": key, "field": "rows", "reordered": max(reordered, 1)}
+        out.append(_with_cause(entry, order_cause))
+    return out
+
+
+# The mark a table cell cut to its length ends with.
+_CUT_MARK = "…"
+
+
+# Where a rendered cell joins its keys and values (``key=value, key=value``),
+# nested ones included (``outer=key=value, key=value``).
+_CELL_JOINS = re.compile(r", |=")
+
+
+def _cell_key(cell: Any) -> str:
+    """A cell in an order-blind form: the keys and values it writes, sorted.
+
+    A cell cut to its length shows the parts that came first, which depend on
+    the order its keys came in: it is kept only as a cut cell.
+    """
+    said = "" if cell is None else str(cell)
+    if said.endswith(_CUT_MARK):
+        return _CUT_MARK
+    return json.dumps(sorted(_CELL_JOINS.split(said)), ensure_ascii=False)
+
+
+def _row_key(row: Any) -> str:
+    """A row (or a header, or a text) in an order-blind form: its cells' forms, sorted."""
+    cells = row if isinstance(row, list) else [row]
+    return json.dumps(sorted(_cell_key(cell) for cell in cells), ensure_ascii=False)
+
+
+def _order_of(stored: Sequence[str], replayed: Sequence[str]) -> bool:
+    """Whether the rows both tables write stand in another order in one of them."""
+    both = set(stored) & set(replayed)
+    return [k for k in stored if k in both] != [k for k in replayed if k in both]
+
+
+def _read_back_section(key: str) -> bool:
+    """A section built from the findings and artifacts the replay reads back from the tables."""
+    return key == "findings" or key.startswith("artifact_")
+
+
+def _against_stored(run: _Run, built: _Built, values: Mapping[str, Any]) -> dict[str, Any]:
+    """What the rebuilt report does not share with the stored one, with each named cause.
+
+    The headline values, the published techniques, the sections (the ones
+    only one report holds, their order, every row and text that differs, by a
+    digest), the IOC table's answers and the export's objects by type. A
+    difference is tied to the cause the record names for it where one is
+    known: the sandbox report the stored record does not hold, the findings
+    and artifacts read back from the stored tables, and the key order the
+    database does not keep in the ledger's structured answers. A part the
+    stored report does not hold is listed as not compared.
+    """
+    stored = run.stored.report
+    if not isinstance(stored, dict) or not stored:
+        return {"compared": False, "why": "the stored run holds no report"}
+    report = built.report
+    sandbox = _cause(run, "report", _NO_SANDBOX_REPORT)
+    out: dict[str, Any] = {"compared": True}
+    not_compared: list[str] = []
+
+    headline: dict[str, Any] = {}
+    severity = stored.get("severity")
+    category = str(stored.get("malware_category") or "")
+    # Each headline value: the record's key, the stored report's field, its value there.
+    for key, field_name, theirs in (
+        ("verdict", "verdict", stored.get("verdict")),
+        (
+            "severity",
+            "severity",
+            severity.get("rating") if isinstance(severity, dict) else severity,
+        ),
+        ("confidence", "overall_confidence", stored.get("overall_confidence")),
+        ("degraded", "degraded_mode", stored.get("degraded_mode")),
+        ("category", "malware_category", f"sha256:{digest(category)}" if category else None),
+    ):
+        if field_name not in stored:
+            not_compared.append(key)
+        elif theirs != values.get(key):
+            headline[key] = {"stored": theirs, "replayed": values.get(key)}
+    if headline:
+        out["values"] = headline
+
+    if "ttp_mappings" in stored:
+        published_stored = {
+            str(m.get("technique_id") or "").strip().upper()
+            for m in stored.get("ttp_mappings") or []
+            if isinstance(m, dict) and str(m.get("technique_id") or "").strip()
+        }
+        published_replayed = {
+            tid for tid, row in (values.get("techniques") or {}).items() if row.get("published")
+        }
+        techniques = {
+            name: sorted(ids)
+            for name, ids in (
+                ("only_stored", published_stored - published_replayed),
+                ("only_replayed", published_replayed - published_stored),
+            )
+            if ids
+        }
+        if techniques:
+            out["techniques"] = techniques
+    else:
+        not_compared.append("techniques")
+
+    if "sections" in stored:
+        sections = _section_differences(
+            run,
+            list(stored.get("sections") or []),
+            [section.model_dump(mode="json") for section in report.sections or []],
+        )
+        if sections:
+            out["sections"] = sections
+    else:
+        not_compared.append("sections")
+
+    if "consolidated_iocs" in stored:
+        theirs_iocs: dict[str, dict[str, Any]] = {}
+        sources: dict[str, str] = {}
+        for raw in stored.get("consolidated_iocs") or []:
+            if isinstance(raw, dict):
+                key, row = _indicator_row(_Row(raw), run.show_text)
+                theirs_iocs[key] = row
+                sources[key] = str(raw.get("source") or "")
+        mine_iocs = dict(values.get("indicators") or {})
+        indicators: dict[str, Any] = {}
+        only_stored = [k for k in theirs_iocs if k not in mine_iocs]
+        if only_stored:
+            indicators["only_stored"] = [
+                {
+                    "indicator": k,
+                    **({"cause": sandbox} if sandbox and sources.get(k) == "sandbox" else {}),
+                }
+                for k in only_stored
+            ]
+        only_replayed = [k for k in mine_iocs if k not in theirs_iocs]
+        if only_replayed:
+            indicators["only_replayed"] = [{"indicator": k} for k in only_replayed]
+        changed = []
+        for key in (k for k in theirs_iocs if k in mine_iocs):
+            a, b = theirs_iocs[key], mine_iocs[key]
+            if (a.get("published"), a.get("answer")) != (b.get("published"), b.get("answer")):
+                row = {"indicator": key, "stored": _free_answer(a), "replayed": _free_answer(b)}
+                if sandbox and sources.get(key) == "sandbox":
+                    row["cause"] = sandbox
+                changed.append(row)
+        if changed:
+            indicators["changed"] = changed
+        if indicators:
+            out["indicators"] = indicators
+    else:
+        not_compared.append("indicators")
+
+    export = stored.get("stix_bundle_extended")
+    if isinstance(export, dict):
+        counted: Counter[str] = Counter(
+            str(obj.get("type") or "")
+            for obj in export.get("objects") or []
+            if isinstance(obj, dict)
+        )
+        mine_counts = dict((values.get("export") or {}).get("objects") or {})
+        # What the stored report's sandbox-fed blocks hold that the rebuilt
+        # ones do not: the build adds the sandbox report's processes and
+        # network values to the ones the ledger records.
+        found = stored.get("dynamic")
+        dynamic: dict[str, Any] = found if isinstance(found, dict) else {}
+        found = stored.get("network")
+        network: dict[str, Any] = found if isinstance(found, dict) else {}
+        tree = report.dynamic.process_tree if report.dynamic is not None else []
+        lost_tree = len(dynamic.get("process_tree") or []) > len(tree or [])
+        lost_network = any(
+            len(network.get(name) or [])
+            > len(getattr(report.network, name, None) or [] if report.network is not None else [])
+            for name in ("ips", "urls", "domains")
+        )
+        objects = []
+        for kind in sorted(set(counted) | set(mine_counts)):
+            if counted.get(kind, 0) == mine_counts.get(kind, 0):
+                continue
+            row = {
+                "type": kind,
+                "stored": counted.get(kind, 0),
+                "replayed": mine_counts.get(kind, 0),
+            }
+            from_sandbox = (lost_tree and kind in _SANDBOX_PROCESS_OBJECTS) or (
+                lost_network and kind in _SANDBOX_NETWORK_OBJECTS
+            )
+            if sandbox and from_sandbox:
+                row["cause"] = sandbox
+            objects.append(row)
+        if objects:
+            out["export"] = objects
+    else:
+        not_compared.append("export")
+    if not_compared:
+        out["not_compared"] = not_compared
+    return out
+
+
+def _free_answer(row: Mapping[str, Any]) -> dict[str, Any]:
+    return {k: row[k] for k in ("published", "answer", "answer_text") if row.get(k) is not None}
+
+
+class _Row:
+    """A stored IOC row read as the row model's attributes are."""
+
+    def __init__(self, row: Mapping[str, Any]) -> None:
+        self.kind = row.get("kind")
+        self.type = row.get("type")
+        self.value = str(row.get("value") or "")
+        self.published = row.get("published")
 
 
 def _claims_not_discussed(run: _Run, built: _Built) -> dict[str, list[int]]:
@@ -1769,7 +2280,7 @@ def _settings_notes(run: _Run) -> None:
 def replay_run(stored: StoredRun, *, show_text: bool = False) -> dict[str, Any]:
     """Every part of the replay over ``stored``, as one record."""
     run = _Run(stored=stored, show_text=show_text)
-    out: dict[str, Any] = {"schema": REPLAY_SCHEMA, "run": stored.name}
+    out: dict[str, Any] = {"schema": REPLAY_SCHEMA, "run": stored.name, "show_text": show_text}
     for file_name, why in stored.unreadable.items():
         run.name("stored run", f"{file_name} does not read as JSON ({why})")
     with replay_environment(stored.settings) as env:
@@ -1820,10 +2331,18 @@ def replay_run(stored: StoredRun, *, show_text: bool = False) -> dict[str, Any]:
                 out["fp_linter"] = _fp_linter(run, built)
             except Exception as exc:  # noqa: BLE001
                 out["fp_linter"] = _failed(run, "fp_linter", exc)
+            if out["report"].get("replayed"):
+                try:
+                    out["against_stored"] = _against_stored(run, built, out["report"])
+                except Exception as exc:  # noqa: BLE001
+                    out["against_stored"] = _failed(run, "against the stored report", exc)
+            else:
+                out["against_stored"] = {"compared": False, "why": "the report was not rebuilt"}
         else:
             for part in ("narrative", "composer", "fp_linter"):
                 out[part] = {"replayed": False, "why": "the report was not rebuilt"}
                 run.name(part, "the report was not rebuilt")
+            out["against_stored"] = {"compared": False, "why": "the report was not rebuilt"}
         try:
             out["tool"] = _tools(run)
         except Exception as exc:  # noqa: BLE001

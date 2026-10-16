@@ -1,8 +1,8 @@
 """A replay record and a comparison, as text for a terminal.
 
-Codes, entry ids and counts. A finding's words and a claim's text are in the
-record only when the replay was asked for them (``--show-text``), and are
-printed only then.
+Codes, ids, kinds, counts and digests. A finding's words, a claim's text and
+any value from the run are in the record only when the replay was asked for
+them (``--show-text``), and are printed only then.
 """
 
 from __future__ import annotations
@@ -20,8 +20,9 @@ def _codes(codes: Mapping[str, int] | None) -> str:
 def _flag_line(flag: Mapping[str, Any]) -> str:
     parts = [str(flag.get("code") or "")]
     for key in ("path", "subject"):
-        if flag.get(key):
-            parts.append(str(flag[key]))
+        said = flag.get(f"{key}_text") or flag.get(key)
+        if said:
+            parts.append(str(said))
     for marker, said in (
         ("advisory", "advisory"),
         ("settled", "settled by the parse"),
@@ -139,17 +140,30 @@ def render_record(record: Mapping[str, Any]) -> str:
         ]
         lines.append(
             f"Report: {report.get('verdict')}, severity {report.get('severity')}, category "
-            f"{report.get('category')}, confidence {report.get('confidence')}; "
-            f"{len(report.get('sections') or [])} section(s); {len(published)} of "
-            f"{len(techniques)} technique(s) published; {len(yes)} of {len(indicators)} "
-            "indicator(s) published"
+            f"{report.get('category_text') or report.get('category')}, confidence "
+            f"{report.get('confidence')}; {len(report.get('sections') or [])} section(s); "
+            f"{len(published)} of {len(techniques)} technique(s) published; {len(yes)} of "
+            f"{len(indicators)} indicator(s) published"
+        )
+        degradation = report.get("degradation") or {}
+        lines.append(
+            f"  degraded: {report.get('degraded')}"
+            + (
+                f" ({degradation.get('decided', 0)} reason(s) decided again, "
+                f"{degradation.get('stored_decided_again', 0)} stored one(s) of that kind "
+                f"replaced, {degradation.get('kept_as_stored', 0)} kept as stored)"
+                if degradation
+                else ""
+            )
         )
         lines.append(
             "  exported techniques: "
             + (", ".join(report.get("export", {}).get("attack_patterns") or []) or "none")
         )
         unpublished = {
-            t: row.get("why") for t, row in techniques.items() if not row.get("published")
+            t: row.get("why_text") or row.get("why")
+            for t, row in techniques.items()
+            if not row.get("published")
         }
         for tid, why in unpublished.items():
             lines.append(f"  not published: {tid} ({why})")
@@ -177,6 +191,8 @@ def render_record(record: Mapping[str, Any]) -> str:
             f"Corroboration: {len(corroboration)} technique(s), {len(agreed)} corroborated"
             + (f" ({', '.join(agreed)})" if agreed else "")
         )
+
+    lines.extend(_against_stored_lines(record.get("against_stored") or {}))
 
     totals = record.get("totals") or {}
     codes = sorted({code for part in totals.values() for code in part})
@@ -210,6 +226,74 @@ def render_record(record: Mapping[str, Any]) -> str:
     return "\n".join(lines)
 
 
+def _said(value: Any) -> str:
+    """A text the record keeps as a digest, and its words when they are there."""
+    if not isinstance(value, Mapping):
+        return "absent" if value is None else str(value)
+    return f"{value.get('digest')}" + (f" {value['text']!r}" if "text" in value else "")
+
+
+def _against_stored_lines(block: Mapping[str, Any]) -> list[str]:
+    """What the rebuilt report does not share with the stored one, each with its named cause.
+
+    Each named cause is printed once, numbered, under the differences.
+    """
+    if not block:
+        return []
+    lines = ["", "Against the stored report"]
+    if block.get("compared") is False:
+        return [*lines, f"  not compared ({block.get('why')})"]
+    numbered: dict[tuple[str, str], int] = {}
+
+    def _cause(row: Mapping[str, Any]) -> str:
+        cause = row.get("cause") or {}
+        if not cause:
+            return " (no named cause)"
+        key = (str(cause.get("part")), str(cause.get("why")))
+        return f" (cause {numbered.setdefault(key, len(numbered) + 1)})"
+
+    for key, row in (block.get("values") or {}).items():
+        lines.append(f"  {key}: stored {row.get('stored')!r}, replayed {row.get('replayed')!r}")
+    for name, ids in (block.get("techniques") or {}).items():
+        lines.append(f"  techniques published {name.replace('_', ' ')}: {', '.join(ids)}")
+    sections = block.get("sections") or {}
+    for name in ("only_stored", "only_replayed", "moved"):
+        for row in sections.get(name) or []:
+            lines.append(f"  section {name.replace('_', ' ')}: {row['section']}{_cause(row)}")
+    for row in sections.get("contents") or []:
+        where = f"{row['section']} {row['field']}" + (f" row {row['row']}" if "row" in row else "")
+        if "reordered" in row:
+            lines.append(f"  {where}: the same parts in another order{_cause(row)}")
+            continue
+        lines.append(
+            f"  {where} differs: stored {_said(row.get('stored'))}, replayed "
+            f"{_said(row.get('replayed'))}{_cause(row)}"
+        )
+    indicators = block.get("indicators") or {}
+    for name in ("only_stored", "only_replayed"):
+        for row in indicators.get(name) or []:
+            lines.append(f"  indicator {name.replace('_', ' ')}: {row['indicator']}{_cause(row)}")
+    for row in indicators.get("changed") or []:
+        lines.append(
+            f"  indicator {row['indicator']} answers differently: stored {row.get('stored')}, "
+            f"replayed {row.get('replayed')}{_cause(row)}"
+        )
+    for row in block.get("export") or []:
+        lines.append(
+            f"  export {row['type']} objects: stored {row['stored']}, replayed "
+            f"{row['replayed']}{_cause(row)}"
+        )
+    if block.get("not_compared"):
+        lines.append(
+            "  not compared (the stored report holds none): " + ", ".join(block["not_compared"])
+        )
+    if len(lines) == 2:
+        lines.append("  the same in everything compared")
+    for (part, why), number in numbered.items():
+        lines.append(f"  cause {number}: {part}: {why}")
+    return lines
+
+
 def _flags(record: Mapping[str, Any]) -> list[tuple[str, Sequence[Mapping[str, Any]]]]:
     out: list[tuple[str, Sequence[Mapping[str, Any]]]] = []
     for agent, entry in (record.get("analysts") or {}).items():
@@ -232,9 +316,10 @@ def _flags(record: Mapping[str, Any]) -> list[tuple[str, Sequence[Mapping[str, A
 def render_diff(diff: Mapping[str, Any], ref_a: str, ref_b: str) -> str:
     """Every difference between two refs' replays of one run, as text.
 
-    A part that raised in either tree comes first: the comparison is then not
-    a decision, and "no difference" is said only when every part replayed in
-    both trees.
+    A part that raised in either tree comes first, then a part left
+    uncompared: the comparison is then not a decision, and "no difference" is
+    said only when every part replayed in both trees and was compared on both
+    sides.
     """
     lines = [f"Compare {diff.get('run')}: A = {ref_a}, B = {ref_b}"]
     raised = diff.get("errors") or {}
@@ -253,11 +338,22 @@ def render_diff(diff: Mapping[str, Any], ref_a: str, ref_b: str) -> str:
             f"  The records are of schema {schema.get('a')} (A) and {schema.get('b')} (B): only "
             "what both define is compared."
         )
-    if not any(key not in ("run", "errors", "schema") for key in diff):
-        if not (raised.get("a") or raised.get("b")):
+    left = diff.get("not_compared") or {}
+    if any(left.values()):
+        lines.append("  PARTIAL COMPARISON: these parts were not compared (status 2):")
+        for key, said in (
+            ("a", f"defined only under A ({ref_a})"),
+            ("b", f"defined only under B ({ref_b})"),
+            ("differently", "written in forms the two schemas do not share"),
+        ):
+            if left.get(key):
+                lines.append(f"    not compared, {said}: {', '.join(left[key])}")
+        lines.append("  A part that was not compared is not a decision either.")
+    if not any(key not in ("run", "errors", "schema", "not_compared") for key in diff):
+        if not (raised.get("a") or raised.get("b")) and not any(left.values()):
             lines.append("  no difference: both refs decide the same over this run")
         else:
-            lines.append("  the parts that replayed in both trees decide the same")
+            lines.append("  the parts replayed and compared on both sides decide the same")
         return "\n".join(lines)
     for key, title in (
         ("codes_gained", "Codes in B, not in A"),
@@ -274,6 +370,8 @@ def render_diff(diff: Mapping[str, Any], ref_a: str, ref_b: str) -> str:
     for key, title in (
         ("totals", "Counts by producer and code"),
         ("answers", "Claims each answer parsed into"),
+        ("judge", "The judge's bundle"),
+        ("environment", "Settings and guards"),
         ("corroboration", "Corroboration"),
         ("not_replayed", "Parts not replayed"),
         ("replayed", "Parts replayed"),

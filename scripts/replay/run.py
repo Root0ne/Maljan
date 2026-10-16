@@ -19,9 +19,12 @@ part raised (a crash is not a decision) or on an error.
 its own harness over its own rules, written out of the object store into a
 directory of its own, and names every difference: codes gained or lost per
 claim, published techniques and their reasons, indicator publish answers and
-report values. The exit status is 0 when the two refs decide the same over
-every run, 1 when they differ, and 2 when a part raised in either tree, when a
-ref predates the replay tool, or on an error.
+report values. ``--timeout SECONDS`` gives each ref's replay that long (no
+limit by default); one still running then is stopped and named. The exit
+status is 0 when the two refs decide the same over every run, 1 when they
+differ, and 2 when a part raised in either tree, when a part was defined on
+one side only and left uncompared (a partial comparison), when a ref predates
+the replay tool or was stopped at its time limit, or on an error.
 
 ``--job ID`` reads a job from the database, read-only, into a directory in the
 same layout (``--job-dir``, a temporary one by default) and replays that.
@@ -73,6 +76,12 @@ def _parser() -> argparse.ArgumentParser:
         "--work",
         type=Path,
         help="where --compare writes the two refs' trees (a temporary directory by default)",
+    )
+    parser.add_argument(
+        "--timeout",
+        type=float,
+        metavar="SECONDS",
+        help="how long --compare gives each ref's replay before stopping it (no limit by default)",
     )
     parser.add_argument(
         "--repo",
@@ -140,16 +149,10 @@ def _compare(
     work: Path | None,
     show_text: bool,
     quiet: bool,
+    timeout: float | None = None,
 ) -> tuple[list[dict[str, Any]], int]:
     """The diff of each run between the two refs, and the status the comparison ends with."""
-    from scripts.replay.compare import (
-        PredatesTheReplay,
-        diff_records,
-        differs,
-        has_errors,
-        materialise,
-        replay_under,
-    )
+    from scripts.replay import compare
     from scripts.replay.output import render_diff
 
     ref_a, ref_b = refs
@@ -160,27 +163,34 @@ def _compare(
         records: dict[str, list[dict[str, Any]]] = {}
         for side, ref in (("a", ref_a), ("b", ref_b)):
             try:
-                tree = materialise(repo, ref, base / f"{side}-tree")
-            except PredatesTheReplay as exc:
+                tree = compare.materialise(repo, ref, base / f"{side}-tree")
+                records[side] = compare.replay_under(
+                    tree, runs, base / f"{side}-replay.json", show_text=show_text, timeout=timeout
+                )
+            except compare.PredatesTheReplay as exc:
                 _error(str(exc))
-            records[side] = replay_under(
-                tree, runs, base / f"{side}-replay.json", show_text=show_text
-            )
+            except compare.RefTimedOut as exc:
+                _error(f"{ref}: {exc}")
         for run in runs:
             check_unchanged(before[str(run)], digests(run))
-        diffs = [diff_records(a, b) for a, b in zip(records["a"], records["b"], strict=True)]
+        diffs = [
+            compare.diff_records(a, b) for a, b in zip(records["a"], records["b"], strict=True)
+        ]
         if not quiet:
             print("\n\n".join(render_diff(diff, ref_a, ref_b) for diff in diffs))
-        if any(has_errors(diff) for diff in diffs):
+        if any(compare.has_errors(diff) or compare.is_partial(diff) for diff in diffs):
             return diffs, 2
-        return diffs, 1 if any(differs(diff) for diff in diffs) else 0
+        return diffs, 1 if any(compare.differs(diff) for diff in diffs) else 0
     finally:
         if owned:
             shutil.rmtree(base, ignore_errors=True)
 
 
 def main(argv: list[str] | None = None) -> int:
-    args = _parser().parse_args(argv)
+    parser = _parser()
+    args = parser.parse_args(argv)
+    if args.timeout is not None and not args.timeout > 0:
+        parser.error("--timeout takes a number of seconds above 0")
     runs = [Path(run) for run in args.runs]
     job_dirs: list[Path] = []
     try:
@@ -212,6 +222,7 @@ def main(argv: list[str] | None = None) -> int:
                 work=args.work,
                 show_text=args.show_text,
                 quiet=args.quiet,
+                timeout=args.timeout,
             )
             _write(args.json, diffs[0] if len(diffs) == 1 else diffs)
             return status

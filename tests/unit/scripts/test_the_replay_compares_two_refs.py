@@ -176,6 +176,15 @@ def test_each_ref_is_replayed_by_its_own_harness_and_a_crash_is_never_no_differe
     assert ended.value.code == 2
     assert "predates the replay tool" in capsys.readouterr().err
 
+    # A ref's replay given less time than it takes is stopped, and the ref named.
+    with pytest.raises(SystemExit) as ended:
+        replay_cli.main(
+            [str(FIXTURE), "--repo", str(repo), "--compare", "HEAD", "HEAD", "--timeout", "0.001"]
+        )
+    assert ended.value.code == 2
+    assert "HEAD: the replay under" in (said := capsys.readouterr().err)
+    assert "did not finish within 0.001 s and was stopped" in said
+
     # One code renamed: one lost, one gained, and nothing else moved.
     renamed = _commit_change(repo, lambda text: text.replace(OLD_CODE, NEW_CODE), "a code renamed")
     moved = tmp_path / "moved.json"

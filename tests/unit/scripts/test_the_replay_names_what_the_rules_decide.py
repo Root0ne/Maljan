@@ -7,33 +7,43 @@ a composer section, a tool call and the report linter. The claims in force
 carry notes the run decided (a technique id marked not valid, an absence claim
 not yet noted); the replay resets them and decides them again, so a change to
 a check reaches what the report publishes, and a test changes one check and
-sees a technique and an indicator move. The replay is the same twice, leaves
-every file of the run as it was, reaches no network, prints no claim text
-unless asked, names what it could not replay, and ends with status 2 when a
-part raised. Two records of one run are told apart by every code they gained
-or lost and every report value that moved.
+sees a technique and an indicator move. The stored degradation reasons the
+verdict decides are decided again, and a finding the stored summary says its
+producer was not shown leaves no note. The replay is the same twice, leaves
+every file of the run as it was, reaches no network, carries no value from the
+run unless asked for the text, names what it could not replay, says what the
+rebuilt report does not share with the stored one, and ends with status 2 when
+a part raised. Two records of one run are told apart by every code they gained
+or lost and every report value that moved, and two of different schemas make a
+partial comparison.
 """
 
 from __future__ import annotations
 
 import copy
 import json
+import os
+import re
+import shutil
 import socket
 import time
 import uuid
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from datetime import UTC, datetime
 from decimal import Decimal
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
+from scripts.replay import compare
+from scripts.replay import rules as replay_rules
 from scripts.replay import run as replay_cli
-from scripts.replay.compare import diff_records, differs, has_errors
+from scripts.replay.compare import diff_records, differs, has_errors, is_partial
 from scripts.replay.database import JobRows, jsonable, with_sample, write_run
 from scripts.replay.guard import ReplayRefused, replay_environment
 from scripts.replay.output import render_diff, render_record
-from scripts.replay.record import REPLAY_SCHEMA, errors
+from scripts.replay.record import REPLAY_SCHEMA, digest, errors, value_free_subject
 from scripts.replay.rules import replay_run
 from scripts.replay.stored import (
     StoredRun,
@@ -53,6 +63,8 @@ CLAIM_SENTENCES = (
     "It registers a scheduled task named Updater",
     "The file has four sections",
 )
+# A literal quoted in a STIX pattern.
+_QUOTED = re.compile(r"'((?:[^'\\]|\\.)+)'")
 
 
 @pytest.fixture(scope="module")
@@ -62,6 +74,18 @@ def record() -> dict[str, Any]:
 
 def _flags(entry: dict[str, Any]) -> list[dict[str, Any]]:
     return [{k: v for k, v in flag.items() if k != "message"} for flag in entry["flags"]]
+
+
+def _copy_run(tmp_path: Path, **edits: Callable[[dict[str, Any]], None]) -> Path:
+    """The tiny run copied, with each named file's JSON edited (``report_json=...``)."""
+    target = tmp_path / "tiny"
+    shutil.copytree(FIXTURE, target)
+    for name, edit in edits.items():
+        path = target / name.replace("_json", ".json").replace("_", "-")
+        data = json.loads(path.read_text(encoding="utf-8"))
+        edit(data)
+        path.write_text(json.dumps(data), encoding="utf-8")
+    return target
 
 
 def test_the_tiny_run_replays_to_its_expected_codes(record: dict[str, Any]) -> None:
@@ -133,11 +157,22 @@ def test_the_tiny_run_replays_to_its_expected_codes(record: dict[str, Any]) -> N
         "Medium",
         0.8,
     )
+    assert report["category"] == f"sha256:{digest('loader')}"
     published = {tid: row["published"] for tid, row in report["techniques"].items()}
     assert published == {"T1027": True, "T1055": True, "T1105": True, "T9998": False}
     assert report["export"]["attack_patterns"] == ["T1027", "T1055", "T1105"]
     assert report["claims_not_discussed"] == {"static": [3, 4]}
-    assert report["detection_rules"] == {"yara": 1}
+    assert report["detection_rules"] == {"suricata": 1, "yara": 1}
+    # The URL the decoder recovered, its host and the sample's own digest, by
+    # kind and digest, each answer by its head and a digest of its words.
+    assert {key.split(":")[0]: row["published"] for key, row in report["indicators"].items()} == {
+        "domain": "yes",
+        "hash": "yes",
+        "url": "yes",
+    }
+    assert all(set(row) == {"kind", "published", "answer"} for row in report["indicators"].values())
+    assert report["degraded"] is False
+    assert report["degradation"] == {"decided": 0, "stored_decided_again": 0, "kept_as_stored": 0}
 
 
 def test_the_stored_claim_notes_are_decided_again(record: dict[str, Any]) -> None:
@@ -180,7 +215,7 @@ def test_a_validator_change_moves_what_is_published(
         }
     ]
     assert list(indicator["report"]["indicators"]["only_b"]) == ["domain:2d5a0519f25d"]
-    assert looser["judge"]["indicators_dropped"] == 0
+    assert indicator["judge"] == {"indicators_dropped": {"a": 1, "b": 0}}
 
 
 def test_what_the_stored_run_cannot_give_is_named(record: dict[str, Any]) -> None:
@@ -191,9 +226,26 @@ def test_what_the_stored_run_cannot_give_is_named(record: dict[str, Any]) -> Non
         "stored as the platform's summary of its claims, not as the analyst wrote it",
     ) in named
     parts = {part for part, _why in named}
-    assert {"analysts", "judge", "composer", "judge evidence", "report", "run summary"} <= parts
+    assert {
+        "analysts",
+        "judge",
+        "composer",
+        "judge evidence",
+        "ledger",
+        "identity",
+        "report",
+        "run summary",
+    } <= parts
     whys = " ".join(why for _part, why in named)
-    for named_input in ("isr.retry_dropped", "nudge", "degraded_mode", "shown"):
+    for named_input in (
+        "isr.retry_dropped",
+        "nudge",
+        "byte budget",
+        "keeps no key order",
+        "routed file type",
+        "shown",
+        "agent_stats",
+    ):
         assert named_input in whys
     network = record["analysts"]["network"]["answers"]
     assert [(a["answer"], a["replayed"]) for a in network] == [
@@ -261,6 +313,11 @@ def test_the_command_writes_its_record_and_never_inside_the_run(
         assert ended.value.code == 2
         assert "inside the stored run" in capsys.readouterr().err
         assert not (FIXTURE / inside).exists()
+    for timeout in ("0", "-1"):
+        with pytest.raises(SystemExit) as ended:
+            replay_cli.main([str(FIXTURE), "--compare", "A", "B", "--timeout", timeout])
+        assert ended.value.code == 2
+        assert "--timeout takes a number of seconds above 0" in capsys.readouterr().err
     assert digests(FIXTURE) == before
 
 
@@ -275,6 +332,99 @@ def test_no_claim_text_is_printed_unless_asked(record: dict[str, Any]) -> None:
     assert "T9999" in unknown["message"]
     assert unknown["claim"].startswith("It registers a scheduled task named Updater")
     assert all("message" in flag for flag in shown["judge"]["flags"])
+    assert shown["report"]["category_text"] == "loader"
+
+
+def _strings(value: Any) -> Iterator[str]:
+    """Every key and every text of a record, nested ones included."""
+    if isinstance(value, dict):
+        for key, inner in value.items():
+            yield str(key)
+            yield from _strings(inner)
+    elif isinstance(value, list):
+        for inner in value:
+            yield from _strings(inner)
+    elif value is not None:
+        yield str(value)
+
+
+def _values_of(run: Path, shown: dict[str, Any]) -> set[str]:
+    """Every indicator value the run holds: its IOC table's, the stored report's and the judge's."""
+    values = {str(row["value"]) for row in shown["report"]["indicators"].values()}
+    stored = run / "report.json"
+    if stored.is_file():
+        report = json.loads(stored.read_text(encoding="utf-8"))
+        values.update(
+            str(row.get("value"))
+            for row in report.get("consolidated_iocs") or []
+            if isinstance(row, dict) and row.get("value")
+        )
+    judge = run / "stix-judge.json"
+    if judge.is_file():
+        for obj in json.loads(judge.read_text(encoding="utf-8"))["bundle"].get("objects") or []:
+            if obj.get("type") == "indicator":
+                values.update(_QUOTED.findall(str(obj.get("pattern") or "")))
+    for flag in _all_flags(shown):
+        if flag.get("subject_text"):
+            values.add(str(flag["subject_text"]).partition(":")[2] or str(flag["subject_text"]))
+    return {value for value in values if len(value) >= 4}
+
+
+def _all_flags(record: dict[str, Any]) -> Iterator[dict[str, Any]]:
+    for agent in record["analysts"].values():
+        for answer in agent["answers"]:
+            yield from answer.get("flags") or []
+        yield from (agent.get("in_force") or {}).get("flags") or []
+    for part in ("judge", "narrative", "tool", "fp_linter"):
+        yield from (record.get(part) or {}).get("flags") or []
+    for section in (record.get("composer") or {}).get("sections", {}).values():
+        yield from section.get("flags") or []
+
+
+def test_no_value_of_the_run_is_in_the_record_without_the_text() -> None:
+    runs = [FIXTURE]
+    extra = os.environ.get("MALJAN_REPLAY_RUN")
+    if extra:
+        runs.append(Path(extra))
+    for run in runs:
+        shown = replay_run(read_run(run), show_text=True)
+        quiet = replay_run(read_run(run))
+        values = _values_of(run, shown)
+        texts = [*_strings(quiet), render_record(quiet)]
+        assert values, run
+        assert sorted(v for v in values if any(v in text for text in texts)) == [], run
+        # The same value-free fields either way: the text only adds fields.
+        assert {k: v for k, v in shown["report"].items() if not k.endswith("_text")}.keys() == (
+            quiet["report"].keys()
+        )
+    # The tiny run's IOC answers quote a value, so the scan has one to find.
+    shown = replay_run(read_run(FIXTURE), show_text=True)
+    answers = [str(row.get("answer_text") or "") for row in shown["report"]["indicators"].values()]
+    assert any("https://cdn.stage-two-host.net/live/" in answer for answer in answers)
+
+
+def test_a_subject_and_its_path_carry_no_value() -> None:
+    from scripts.replay.rules import _flag
+
+    from maljan.pipeline.validation import Violation
+
+    finding = Violation(
+        code="stix.indicator_unattributed_flow",
+        message="the indicator names host.example.net",
+        path="objects.domain:host.example.net",
+        subject="domain:host.example.net",
+    )
+    quiet = _flag(finding, show_text=False)
+    assert quiet["subject"] == f"domain:{digest('host.example.net')}"
+    assert quiet["path"] == f"objects.domain:{digest('host.example.net')}"
+    assert "host.example.net" not in json.dumps(quiet)
+    shown = _flag(finding, show_text=True)
+    assert shown["subject"] == quiet["subject"]
+    assert shown["subject_text"] == "domain:host.example.net"
+    assert shown["path_text"] == "objects.domain:host.example.net"
+    for kept in ("T1055.001", "t1055", "ev_0003", "proc:84", quiet["subject"]):
+        assert value_free_subject(kept) == kept
+    assert value_free_subject("Some Family") == f"sha256:{digest('Some Family')}"
 
 
 def test_the_replay_reaches_no_network_and_puts_every_door_back() -> None:
@@ -314,7 +464,7 @@ def test_two_records_are_told_apart_by_what_moved(record: dict[str, Any]) -> Non
     moved["report"]["severity"] = "High"
     diff = diff_records(record, moved)
 
-    assert differs(diff) and not has_errors(diff)
+    assert differs(diff) and not has_errors(diff) and not is_partial(diff)
     assert diff["codes_lost"] == [
         {
             "part": "analyst answer",
@@ -334,7 +484,28 @@ def test_two_records_are_told_apart_by_what_moved(record: dict[str, Any]) -> Non
     assert "attck.unknown_id" in text and "stix.malformed_hash" in text
 
 
-def test_records_of_two_schemas_are_compared_on_what_both_define(record: dict[str, Any]) -> None:
+def test_the_judge_s_drops_and_each_tree_s_refusals_are_compared(record: dict[str, Any]) -> None:
+    moved = copy.deepcopy(record)
+    moved["judge"]["indicators_dropped"] = 0
+    moved["environment"]["settings_refused"] = {
+        "validation.weak_alignment": "refused by this tree's settings model"
+    }
+    moved["environment"]["doors_this_tree_lacks"] = ["attck_index.load_all_domains"]
+    diff = diff_records(record, moved)
+    assert diff["judge"] == {"indicators_dropped": {"a": 1, "b": 0}}
+    assert diff["environment"] == {
+        "settings_refused": {
+            "only_b": {"validation.weak_alignment": "refused by this tree's settings model"}
+        },
+        "doors_this_tree_lacks": {"only_a": [], "only_b": ["attck_index.load_all_domains"]},
+    }
+    assert differs(diff) and not is_partial(diff)
+    text = render_diff(diff, "A-ref", "B-ref")
+    assert "indicators_dropped" in text and "validation.weak_alignment" in text
+
+
+def _older(record: dict[str, Any]) -> dict[str, Any]:
+    """The record as a schema-1 harness wrote it: no schema, no notes, no degradation."""
     older = copy.deepcopy(record)
     del older["schema"]
     older["format"] = 1
@@ -342,10 +513,47 @@ def test_records_of_two_schemas_are_compared_on_what_both_define(record: dict[st
         for key in ("not_valid", "kept_after_absence_question"):
             agent.get("in_force", {}).pop(key, None)
     del older["report"]["degraded"]
-    diff = diff_records(older, record)
+    del older["report"]["degradation"]
+    del older["against_stored"]
+    return older
+
+
+def test_two_schemas_make_a_partial_comparison(record: dict[str, Any]) -> None:
+    diff = diff_records(_older(record), record)
     assert diff["schema"] == {"a": 1, "b": REPLAY_SCHEMA}
-    assert not differs(diff)
-    assert "only what both define is compared" in render_diff(diff, "A-ref", "B-ref")
+    assert diff["not_compared"] == {
+        "b": [
+            "claims in force: kept_after_absence_question",
+            "claims in force: not_valid",
+            "report.degradation",
+            "report.degraded",
+        ],
+        "differently": ["report.techniques: why"],
+    }
+    assert is_partial(diff) and not differs(diff)
+    text = render_diff(diff, "A-ref", "B-ref")
+    assert "PARTIAL COMPARISON" in text
+    assert "not compared, defined only under B (B-ref): claims in force" in text
+    assert "no difference" not in text
+
+
+def test_a_partial_comparison_ends_with_status_2(
+    record: dict[str, Any],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    older = _older(record)
+    monkeypatch.setattr(compare, "materialise", lambda _repo, _ref, into: into)
+    monkeypatch.setattr(
+        compare,
+        "replay_under",
+        lambda _tree, _runs, out, **_kwargs: [older if out.name.startswith("a-") else record],
+    )
+    argv = [str(FIXTURE), "--compare", "A-ref", "B-ref", "--repo", str(tmp_path)]
+    assert replay_cli.main([*argv, "--work", str(tmp_path / "work")]) == 2
+    printed = capsys.readouterr().out
+    assert "PARTIAL COMPARISON" in printed and "no difference" not in printed
 
 
 def _seconds(work: Callable[[], object]) -> float:
@@ -407,8 +615,24 @@ def _summaries_of(agents: int) -> StoredRun:
     )
 
 
+def _unshown_run(n: int) -> Any:
+    """A run whose summary records ``n`` findings the judge was never shown."""
+    from scripts.replay.rules import _Run
+
+    rows = [
+        {"agent": "judge", "code": "stix.x", "subject": f"s{i}", "message": "m", "asked": "false"}
+        for i in range(n)
+    ]
+    stored = StoredRun(
+        name="hostile", root=FIXTURE, run_summary={"validation": {"unresolved": rows}}
+    )
+    return _Run(stored=stored, show_text=False)
+
+
 def test_the_replay_s_own_bookkeeping_stays_linear() -> None:
-    from scripts.replay.rules import _analysts, _claim_flags, _Run
+    from scripts.replay.rules import _analysts, _claim_flags, _Run, _shown_to
+
+    from maljan.pipeline.validation import Violation
 
     # Ten times the input in about ten times the time; a step that walked the
     # whole of it for each of its items would be a hundred.
@@ -441,6 +665,155 @@ def test_the_replay_s_own_bookkeeping_stays_linear() -> None:
     high = _seconds(lambda: _analysts(_Run(stored=stores[2_000], show_text=False)))
     assert len(_analysts(_Run(stored=stores[2_000], show_text=False))) == 2_000
     assert high < low * 20, (low, high)
+
+    found = {
+        n: [
+            Violation(code="stix.x", message="m", subject=f"s{i}" if i % 2 else f"t{i}")
+            for i in range(n)
+        ]
+        for n in (500, 5_000)
+    }
+    _shown_to(_unshown_run(500), "judge", found[500])
+    low = _seconds(lambda: _shown_to(_unshown_run(500), "judge", found[500]))
+    high = _seconds(lambda: _shown_to(_unshown_run(5_000), "judge", found[5_000]))
+    assert len(_shown_to(_unshown_run(5_000), "judge", found[5_000])) == 2_500
+    assert high < low * 20, (low, high)
+
+
+def test_stored_degradation_reasons_are_decided_again_or_named(tmp_path: Path) -> None:
+    from maljan.agents.judge_agent import VERDICT_FALLBACK_REASON
+    from maljan.pipeline.outcome import unrecognised_verdict_reason
+
+    unreadable = unrecognised_verdict_reason(
+        SimpleNamespace(x_maljan_assessment=SimpleNamespace(verdict="Maybe"))
+    )
+
+    def _decided(report: dict[str, Any]) -> None:
+        report["degradation_reasons"] = [VERDICT_FALLBACK_REASON, unreadable]
+        report["degraded_mode"] = True
+
+    # Neither reason is one these rules give over the tiny run: both go, and
+    # the run is no longer degraded.
+    decided = replay_run(read_run(_copy_run(tmp_path / "decided", report_json=_decided)))
+    assert decided["report"]["degraded"] is False
+    assert decided["report"]["degradation"] == {
+        "decided": 0,
+        "stored_decided_again": 2,
+        "kept_as_stored": 0,
+    }
+
+    def _kept(report: dict[str, Any]) -> None:
+        report["degradation_reasons"] = ["analyst failures: network"]
+        report["degraded_mode"] = True
+
+    kept = replay_run(read_run(_copy_run(tmp_path / "kept", report_json=_kept)))
+    assert kept["report"]["degraded"] is True
+    assert kept["report"]["degradation"]["kept_as_stored"] == 1
+    assert any(
+        row["part"] == "report" and row["why"].startswith("1 stored degradation reason(s) are kept")
+        for row in kept["not_replayed"]
+    )
+
+
+def test_a_finding_the_analyst_was_not_shown_leaves_no_absence_note(tmp_path: Path) -> None:
+    def _unshown(summary: dict[str, Any]) -> None:
+        summary["validation"] = {
+            "unresolved": [
+                {
+                    "agent": "static",
+                    "code": "attck.absence_claim",
+                    "subject": "T1055",
+                    "message": "an absence claim never put to the analyst",
+                    "asked": "false",
+                }
+            ]
+        }
+
+    replayed = replay_run(read_run(_copy_run(tmp_path, run_summary_json=_unshown)))
+    in_force = replayed["analysts"]["static"]["in_force"]
+    assert in_force["kept_after_absence_question"] == []
+    absence = next(f for f in in_force["flags"] if f["code"] == "attck.absence_claim")
+    assert absence["asked"] is False
+    describe = next(f for f in in_force["flags"] if f["code"] == "attck.claim_does_not_describe")
+    assert "asked" not in describe
+
+
+def test_the_analysts_are_taken_in_the_order_the_run_held_them(tmp_path: Path) -> None:
+    def _held(summary: dict[str, Any]) -> None:
+        summary["agent_stats"] = [{"agent_id": "network"}, {"agent_id": "static"}]
+
+    replayed = replay_run(read_run(_copy_run(tmp_path, run_summary_json=_held)))
+    assert list(replayed["analysts"]) == ["network", "static"]
+    assert not [row for row in replayed["not_replayed"] if "agent_stats" in row["why"]]
+
+
+def test_the_record_says_what_differs_from_the_stored_report(
+    record: dict[str, Any], monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    block = record["against_stored"]
+    assert block["compared"] is True
+    assert block["not_compared"] == [
+        "severity",
+        "confidence",
+        "category",
+        "techniques",
+        "indicators",
+        "export",
+    ]
+    assert [row["section"] for row in block["sections"]["only_replayed"]] == [
+        "identity",
+        "tool_pe_info",
+        "tool_strings",
+        "tool_pcap_summary",
+        "tool_decode_string_blobs",
+        "tool_decode_string_blobs_results",
+    ]
+    # The stored Findings table says T1055 was not published; these rules publish it.
+    rows = block["sections"]["contents"]
+    assert [(r["section"], r["field"], r["row"]) for r in rows] == [
+        ("findings", "rows", 1),
+        ("findings", "rows", 1),
+    ]
+    assert all("cause" not in r and "text" not in (r["stored"] or r["replayed"]) for r in rows)
+
+    # The stored report as the rebuilt one, two sections swapped and one row
+    # written in another order, and an export with the sandbox's processes.
+    seen: dict[str, Any] = {}
+    against = replay_rules._against_stored
+
+    def _capture(run: Any, built: Any, values: Any) -> Any:
+        seen["sections"] = [s.model_dump(mode="json") for s in built.report.sections]
+        return against(run, built, values)
+
+    monkeypatch.setattr(replay_rules, "_against_stored", _capture)
+    replay_run(read_run(FIXTURE))
+    sections = copy.deepcopy(seen["sections"])
+    sections[1], sections[2] = sections[2], sections[1]
+    table = next(s for s in sections if len(s.get("rows") or []) > 1)
+    table["rows"] = list(reversed(table["rows"]))
+
+    def _stored(report: dict[str, Any]) -> None:
+        report["sections"] = sections
+        report["dynamic"] = {"process_tree": [{"pid": 1}, {"pid": 2}]}
+        report["stix_bundle_extended"] = {
+            "objects": [
+                {"type": "process", "id": "process--1"},
+                {"type": "process", "id": "process--2"},
+            ]
+        }
+
+    replayed = replay_run(read_run(_copy_run(tmp_path, report_json=_stored)))
+    block = replayed["against_stored"]
+    moved = [row["section"] for row in block["sections"]["moved"]]
+    assert moved == [seen["sections"][2]["key"], seen["sections"][1]["key"]]
+    reordered = [r for r in block["sections"]["contents"] if "reordered" in r]
+    assert [(r["section"], r["field"]) for r in reordered] == [(table["key"], "rows")]
+    assert reordered[0]["cause"]["part"] == "ledger"
+    process = next(row for row in block["export"] if row["type"] == "process")
+    assert (process["stored"], process["replayed"]) == (2, 0)
+    assert process["cause"]["why"].startswith("the sandbox report is not in the stored record")
+    text = render_record(replayed)
+    assert "Against the stored report" in text and "export process objects: stored 2" in text
 
 
 def test_a_job_read_from_the_database_is_written_in_the_stored_layout(tmp_path: Path) -> None:

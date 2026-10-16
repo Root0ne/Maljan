@@ -45,7 +45,9 @@
     "x_maljan_confidence": 0.5,
     "x_maljan_contributing_agents": ["network"]
    },
-   {"id": "relationship--3", "type": "relationship", "source_ref": "indicator--1", "target_ref": "malware--1", "relationship_type": "indicates"}
+   {"id": "relationship--3", "type": "relationship", "source_ref": "indicator--1", "target_ref": "malware--1", "relationship_type": "indicates"},
+   {"id": "indicator--2", "type": "indicator", "pattern": "[url:value = 'https://cdn.stage-two-host.net/live/']", "indicator_types": ["malicious-activity"], "description": "The decoded stub fetches it (ev_0004)."},
+   {"id": "relationship--4", "type": "relationship", "source_ref": "indicator--2", "target_ref": "malware--1", "relationship_type": "indicates"}
   ]
  }
 }
