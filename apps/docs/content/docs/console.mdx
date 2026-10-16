@@ -319,6 +319,14 @@ its Sigma rows say "level not recorded", draw no dots, take no part in the
 sort, and show the layer's confidence — set from the rule's maturity status —
 as the number it is. Nothing reads a confidence as a severity.
 
+A generated YARA rule's card on DETECTION says what running it against the
+sample it was drafted from found: "matches its sample", "does not match its
+sample" (in the compile error's red) or "not run on its sample", with the
+report's own §10.2 sentence under the rule — each string found at its first
+offset, the strings found nowhere, or why the rule was not run
+(`apps/web/src/components/analysis/sampleMatch.ts`). A Sigma or Suricata draft,
+and a rule stored before the check, carries no such badge.
+
 A DYNAMIC signature's number is the sandbox's own, and its scale depends on
 which sandbox produced it: a CAPEv2 signature declares 1 to 3 (low, medium,
 high), and Hatching Triage writes its 1 to 10 signature score into the same

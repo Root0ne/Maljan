@@ -72,6 +72,7 @@ from maljan.reporting.ledger_report import (
 from maljan.reporting.models import (
     CapabilityCell,
     ConsolidatedIOC,
+    DetectionRule,
     MalwareReport,
     ProcessNode,
     RegistryMod,
@@ -1612,6 +1613,11 @@ class MarkdownRenderer:
                 kind = _one_line(rule.kind).upper()
                 body.append(f"**{kind}** `{_one_line(rule.name)}` — {status}{source}")
                 body.append("")
+                # What running the draft against its own sample found. A rule
+                # stored before the check carries none and renders as it did.
+                checked = _sample_check_line(rule, ctx)
+                if checked is not None:
+                    body.extend([checked, ""])
                 fence = rule.kind if rule.kind in {"yara", "sigma"} else ""
                 # The rule's body is the rule to deploy: it prints as it
                 # compiles, set aside from the closing pass by its own token.
@@ -3287,6 +3293,37 @@ def _code_span(text: str) -> str:
         return f"`{text}`"
     fence = "`" * (longest + 1)
     return f"{fence} {text} {fence}"
+
+
+def _sample_check_line(rule: DetectionRule, ctx: _Context) -> str | None:
+    """What running a drafted rule against the sample it was drafted from found.
+
+    Whether the rule matched, each of its strings at the first offset the
+    engine matched it, the strings it matched nowhere, or why the rule was not
+    run. ``None`` for a rule with no check: a Sigma or Suricata draft, and a
+    rule stored before the check, which renders as it did.
+    """
+    if rule.sample_not_checked:
+        why = ctx.plain(_one_line(rule.sample_not_checked)).rstrip(".")
+        return f"Not run against the sample it was drafted from: {why}."
+    if rule.matches_sample is None:
+        return None
+    said = [
+        "Run against the sample it was drafted from: the rule "
+        + ("matches it." if rule.matches_sample else "does not match it.")
+    ]
+    strings = rule.sample_strings or []
+    found = [
+        f"{_code_span(_one_line(item.identifier))} at 0x{item.offset:x}"
+        for item in strings
+        if item.offset is not None
+    ]
+    nowhere = [_code_span(_one_line(item.identifier)) for item in strings if item.offset is None]
+    if found:
+        said.append(f"Found in the sample (first match of each): {', '.join(found)}.")
+    if nowhere:
+        said.append(f"Found nowhere in the sample: {', '.join(nowhere)}.")
+    return " ".join(said)
 
 
 def _finding_text(row: dict[str, Any]) -> str:

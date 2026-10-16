@@ -4764,6 +4764,28 @@ is assembled from what the run gathered rather than recomputed beside it:
   Benign verdict publishes no malicious indicator, so it gets no draft, and
   §10.2 says so. A signed benign tool once got twenty `trojan-activity` alerts
   for certificate hosts and a "C2 IP" rule for a version number.
+* **A drafted YARA rule is run against the sample it was drafted from.** Once
+  the YARA draft compiles, the engine that compiled it scans the bytes of the
+  file the run analysed, read where it lies, within
+  `core.static.yara.timeout_seconds`, the budget of one YARA scan of the
+  sample (the report node passes both, and drafts off the event loop). The
+  rule's record carries `matches_sample` (whether its condition held) and
+  `sample_strings` (each of its strings with the first offset the engine
+  matched it at, or none), or `sample_not_checked` with the reason it was not
+  run: no sample handed to the drafter, no path recorded, an unreadable file,
+  an unread budget, no engine, a rule that did not compile, a scan past its
+  budget, an engine that refused the scan. The strings are listed whether or
+  not the condition held, since the hash clause matches the sample whatever
+  the strings do and a string the sample does not hold is what a reader most
+  needs to see. §10.2 prints one line under the rule — "Run against the
+  sample it was drafted from: the rule matches it." (or "does not match
+  it."), the strings found at their first offsets, the strings found
+  nowhere — or "Not run against the sample it was drafted from: …", and
+  DETECTION's rule card shows the same. A rule that does not match is kept.
+  One offset per string is kept, so the record stays the size of the rule
+  however often a sample repeats a string. Sigma and Suricata drafts, which no
+  engine runs on a file, carry no check, and a rule stored before it renders
+  as it did.
 * **A technique only a rule match stands behind says so.** A published
   technique a deterministic rule asserted and no analyst claimed is marked in
   the ATT&CK table: "rule match only (yara `rule`, N string(s)), no analyst

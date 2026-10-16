@@ -12,6 +12,12 @@ run can have their answers even with no static provider at all.
 | The `analysis` sidecar | the `capa` and `yara_scan` tools, which an agent calls | the agent's calls |
 | The `capa_yara` static provider | two deterministic passes, no tools and no model loop | entries under the agent id `capa_yara` |
 
+YARA runs once more, after the report is built: the drafted YARA rule (§10.2)
+is run against the sample it was drafted from, and what that found is written
+on the rule's own record (`matches_sample`, `sample_strings`,
+`sample_not_checked`), not to the ledger. See
+[Reporting](/architecture/#reporting).
+
 ## The `capa_yara` provider
 
 ```
@@ -27,7 +33,7 @@ core.static.yara.rules_dir    = data/yara_rules
 | `core.static.capa.timeout_seconds` | `300` | capa's budget. |
 | `core.static.capa.backend` | `auto` | `auto`, `vivisect`, `pefile` or `binja`. |
 | `core.static.yara.rules_dir` | `data/yara_rules` | The operator's own rule directory, scanned only by this provider. |
-| `core.static.yara.timeout_seconds` | `60` | The scan's budget. |
+| `core.static.yara.timeout_seconds` | `60` | The budget of one YARA scan of the sample: this provider's scan, and the run of the drafted YARA rule against its sample. |
 
 Both libraries are optional extras of the package, `capa` (flare-capa) and
 `yara` (yara-python): `uv sync --extra capa --extra yara`. The backend image

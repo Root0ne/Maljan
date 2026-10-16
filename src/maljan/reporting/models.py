@@ -751,6 +751,21 @@ class FamilyAttribution(BaseModel):
 # ---------------------------------------------------------------------------
 
 
+class SampleString(BaseModel):
+    """One string of a drafted YARA rule, as the rule's engine found it in the sample.
+
+    ``offset`` is the first byte the engine matched the string at, counted from
+    the start of the file, and ``None`` when it matched nowhere in the sample.
+    The first place only: the record stays the size of the rule however often
+    the sample repeats a string, and the rule, run again, finds every place.
+    """
+
+    model_config = _STRICT_CONFIG
+
+    identifier: str
+    offset: int | None = None
+
+
 class DetectionRule(BaseModel):
     """Auto-generated detection content with the body kept as plain text."""
 
@@ -762,6 +777,16 @@ class DetectionRule(BaseModel):
     auto_generated: bool = True
     source_evidence: list[str] = Field(default_factory=list)
     compile_error: str | None = None  # only set when template validation fails
+    # A drafted YARA rule run against the sample it was drafted from
+    # (``reporting.detection_signatures``): whether the rule matched it, each of
+    # the rule's strings with where the engine first found it, or why the rule
+    # was not run. Absent on a Sigma or Suricata draft, which no engine runs on
+    # a file, and on a rule stored before the check, which renders as it did.
+    matches_sample: bool | None = Field(default=None, exclude_if=lambda value: value is None)
+    sample_strings: list[SampleString] | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
+    sample_not_checked: str | None = Field(default=None, exclude_if=lambda value: value is None)
 
 
 class DefensiveRecommendation(BaseModel):

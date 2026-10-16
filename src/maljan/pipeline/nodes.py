@@ -834,6 +834,14 @@ def _absolute_host_sample_path(state: AnalysisState) -> str:
         return raw
 
 
+def _yara_scan_budget(container: Any) -> int | None:
+    """The operator's wall clock for one YARA scan of the sample, or ``None`` when unread."""
+    try:
+        return int(container.config.static.yara.timeout_seconds)
+    except (AttributeError, TypeError, ValueError):
+        return None
+
+
 def _pin_sample_path(agent: Any, state: AnalysisState) -> None:
     """Pin the path this agent's tools must be given, on the agent itself.
 
@@ -6456,9 +6464,22 @@ def make_report_node(
         # influence rule metadata, and after the export, because a draft matches
         # only on what the run publishes: the IOC table's published rows, read
         # once the export has decided them. Disabled via config when desired.
+        # The YARA draft is run against the sample it was drafted from, the
+        # file the builder read the hashes from, within the operator's budget
+        # for one YARA scan of the sample. The scan is synchronous, so the
+        # drafting runs off the event loop the worker's heartbeat shares.
         if cfg is None or cfg.auto_generate_detection_rules:
             try:
-                report = MalwareReportBuilder.attach_detection_signatures(report)
+                from maljan.reporting.detection_signatures import OwnSample
+
+                report = await asyncio.to_thread(
+                    MalwareReportBuilder.attach_detection_signatures,
+                    report,
+                    OwnSample(
+                        path=state.get("sample_path"),
+                        budget_seconds=_yara_scan_budget(container),
+                    ),
+                )
                 logger.info(
                     "report_node: detection rules generated (count=%d, errors=%d).",
                     len(report.detection_signatures),
