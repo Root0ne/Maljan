@@ -71,10 +71,13 @@ class TestUnderATurkishCtype:
                 assert chosen in ctype_locale.CANDIDATES, chosen
                 assert ctype_locale.libc_folds_ascii()
                 import yara
+                # Longer than one atom, so the engine's locale-built case table
+                # decides it (``ctype_locale._SELF_TEST_TEXT``).
                 rules = yara.compile(
-                    source='rule t { strings: $a = "i" nocase condition: $a }', includes=False
+                    source='rule t { strings: $a = "wininet" nocase condition: $a }',
+                    includes=False,
                 )
-                assert rules.match(data=b"I"), "the engine loaded after the pin folds I"
+                assert rules.match(data=b"WININET"), "the engine loaded after the pin folds I"
                 print(chosen)
                 """,
                 LC_CTYPE=TURKISH,
@@ -97,9 +100,10 @@ class TestUnderATurkishCtype:
                 spec.loader.exec_module(module)
                 import yara
                 rules = yara.compile(
-                    source='rule t { strings: $a = "i" nocase condition: $a }', includes=False
+                    source='rule t { strings: $a = "wininet" nocase condition: $a }',
+                    includes=False,
                 )
-                print(json.dumps({"folds": bool(rules.match(data=b"I"))}))
+                print(json.dumps({"folds": bool(rules.match(data=b"WININET"))}))
                 """,
                 LC_CTYPE=TURKISH,
             )
@@ -178,6 +182,31 @@ class TestThePinActsOncePerProcess:
 
         assert ctype_locale.pin_character_classification() == first
         assert first is not None
+
+
+class TestTheEngineSelfTest:
+    def test_it_is_asked_once_per_process_and_passes_here(self) -> None:
+        pytest.importorskip("yara", reason="yara-python is not installed")
+        ctype_locale.yara_case_folding_problem()
+        hits = ctype_locale.yara_case_folding_problem.cache_info().hits
+
+        assert ctype_locale.yara_case_folding_problem() is None
+        assert ctype_locale.yara_case_folding_problem.cache_info().hits == hits + 1
+
+    def test_under_a_turkish_ctype_without_the_pin_it_names_the_locale(self) -> None:
+        out = _finished(
+            _run(
+                """
+                import locale, sys
+                if locale.setlocale(locale.LC_CTYPE) != "tr_TR.UTF-8":
+                    sys.exit(77)
+                from maljan.core import ctype_locale
+                print(ctype_locale.yara_case_folding_problem())
+                """,
+                LC_CTYPE=TURKISH,
+            )
+        )
+        assert _last_line(out) == ctype_locale.YARA_FOLDING_BROKEN.format(ctype=TURKISH)
 
 
 class TestEveryProcessOfOursPinsAtItsStart:

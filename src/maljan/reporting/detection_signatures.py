@@ -37,6 +37,7 @@ from typing import Any
 
 import yaml
 
+from maljan.core import ctype_locale
 from maljan.core.logger import logger
 from maljan.reporting.models import (
     DetectionRule,
@@ -621,7 +622,16 @@ def _run_on_sample(
     first match: the engine lists one match per string however often a hostile
     sample repeats it, and the scan stays linear in the sample. The draft,
     whose ``N of them`` the fast mode cannot cut short, is never scanned.
+
+    The engine is asked first whether it folds case
+    (``core.ctype_locale.yara_case_folding_problem``). Where it does not, as
+    under a locale whose ``tolower`` leaves a capital I alone, its ``nocase``
+    and import-hash answers would be wrong, and the draft is not checked
+    rather than said to miss its sample.
     """
+    folding = ctype_locale.yara_case_folding_problem()
+    if folding is not None:
+        return _SampleCheck(not_checked=folding)
     if sample is None:
         return _SampleCheck(not_checked=NOT_CHECKED_NO_SAMPLE)
     path = str(sample.path or "").strip()

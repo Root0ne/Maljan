@@ -16,9 +16,11 @@ from __future__ import annotations
 
 import errno
 import hashlib
+import json
 import os
 import random
 import re
+import textwrap
 import time
 import tracemalloc
 from pathlib import Path
@@ -28,6 +30,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from maljan.core import ctype_locale
 from maljan.reporting import detection_signatures as drafts
 from maljan.reporting.builder import build_consolidated_iocs
 from maljan.reporting.detection_signatures import (
@@ -693,6 +696,124 @@ class TestARuleNotCheckedSaysWhy:
         rule = _yara(_report(), OwnSample(path=str(path), budget_seconds=BUDGET))
 
         assert rule.sample_not_checked == NOT_CHECKED_NO_ANSWER
+
+
+class TestAnEngineThatFoldsCaseWronglyIsNotTrusted:
+    """A broken engine leaves the draft not checked, never red or amber.
+
+    The subprocess cases change the locale, which is process-wide; they read
+    the reviewer's shape: an upper-case registry key and host in the sample,
+    the same values in mixed case in the draft.
+    """
+
+    # The drafter is imported inside ``check``: it loads the YARA engine, which
+    # builds its case table by the LC_CTYPE in force when it loads.
+    SHAPE = """
+        import sys, tempfile
+        from pathlib import Path
+        from maljan.core import ctype_locale
+
+        def check():
+            from maljan.reporting import detection_signatures as drafts
+            from maljan.reporting.detection_signatures import OwnSample
+
+            folder = Path(tempfile.mkdtemp())
+            path = folder / "sample.bin"
+            path.write_bytes(
+                b"\\x00" * 8 + b"SOFTWARE\\\\MICROSOFT\\\\WINDOWS\\\\CURRENTVERSION\\\\RUN"
+                + b"\\x00" * 8 + b"MAIL.EXAMPLE.ORG" + b"\\x00" * 8
+            )
+            slots = ["$s0", "$s1"]
+            rendered = drafts._render_yara(
+                rule_name="Maljan_AutoGen_loader", sha256="c" * 64, imphash=None,
+                strings=list(zip(slots, [
+                    "Software\\\\Microsoft\\\\Windows\\\\CurrentVersion\\\\Run", "mail.example.org"
+                ])),
+                family="loader", verdict="Malware",
+                generated_at_iso="2000-01-01T00:00:00+00:00",
+            )
+            return drafts._run_on_sample(rendered, slots, OwnSample(str(path), 5))
+    """
+
+    @needs_engine
+    def test_the_test_process_s_engine_folds_case(self) -> None:
+        assert ctype_locale.yara_case_folding_problem() is None
+
+    @needs_engine
+    def test_a_broken_engine_leaves_the_draft_not_checked(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        problem = ctype_locale.YARA_FOLDING_BROKEN.format(ctype="tr_TR.UTF-8")
+        monkeypatch.setattr(ctype_locale, "yara_case_folding_problem", lambda: problem)
+        path = _sample(tmp_path, ONLY_FIRST)
+        report = _drafted(_report(), OwnSample(path=str(path), budget_seconds=BUDGET))
+        rule = _rule_of(report)
+
+        assert rule.sample_not_checked == problem
+        assert (rule.matches_sample, rule.matched_by, rule.sample_strings) == (None, None, None)
+        assert _said(report) == f"Not run against the sample it was drafted from: {problem}."
+
+    @needs_engine
+    def test_under_a_turkish_ctype_whose_pin_fails_the_draft_says_why(self) -> None:
+        from tests.unit.core.test_native_runs_pin_the_ctype_locale import (
+            TURKISH,
+            _finished,
+            _last_line,
+            _run,
+        )
+
+        out = _finished(
+            _run(
+                textwrap.dedent(self.SHAPE)
+                + textwrap.dedent("""
+                import json, locale
+                if locale.setlocale(locale.LC_CTYPE) != "tr_TR.UTF-8":
+                    sys.exit(77)
+                ctype_locale.CANDIDATES = ("xx_NO.SUCH-LOCALE",)
+                assert ctype_locale.pin_character_classification() is None
+                found = check()
+                print(json.dumps({
+                    "not_checked": found.not_checked,
+                    "matches": found.matches,
+                    "matched_by": found.matched_by,
+                }))
+                """),
+                LC_CTYPE=TURKISH,
+            )
+        )
+        assert json.loads(_last_line(out)) == {
+            "not_checked": ctype_locale.YARA_FOLDING_BROKEN.format(ctype=TURKISH),
+            "matches": None,
+            "matched_by": None,
+        }
+
+    @needs_engine
+    def test_under_a_turkish_ctype_the_pinned_check_finds_both_strings(self) -> None:
+        from tests.unit.core.test_native_runs_pin_the_ctype_locale import (
+            TURKISH,
+            _finished,
+            _last_line,
+            _run,
+        )
+
+        out = _finished(
+            _run(
+                textwrap.dedent(self.SHAPE)
+                + textwrap.dedent("""
+                import json, locale
+                if locale.setlocale(locale.LC_CTYPE) != "tr_TR.UTF-8":
+                    sys.exit(77)
+                assert ctype_locale.pin_character_classification() in ctype_locale.CANDIDATES
+                found = check()
+                print(json.dumps({
+                    "matched_by": found.matched_by,
+                    "offsets": [s.offset for s in found.strings],
+                }))
+                """),
+                LC_CTYPE=TURKISH,
+            )
+        )
+        assert json.loads(_last_line(out)) == {"matched_by": ["strings"], "offsets": [8, 61]}
 
 
 class TestOnlyTheYaraDraftCarriesACheck:

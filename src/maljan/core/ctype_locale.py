@@ -9,13 +9,16 @@ against an i, and its ``pe.imphash()`` over an import name holding one differs.
 Each of the platform's own processes therefore pins ``LC_CTYPE``, and nothing
 else, at its start (:func:`pin_character_classification`): messages, times,
 collation and numbers stay the operator's. An operator's tool server is its own
-process and keeps the environment it was started with.
+process and keeps the environment it was started with. A YARA pass asks the
+engine itself whether its case folding holds (:func:`yara_case_folding_problem`)
+before it trusts a ``nocase`` answer.
 """
 
 from __future__ import annotations
 
 import ctypes
 import ctypes.util
+import functools
 import locale
 import logging
 import sys
@@ -26,6 +29,18 @@ from maljan.core.logger import logger
 
 # The C library's UTF-8 C locale, in the two spellings C libraries give it.
 CANDIDATES: tuple[str, ...] = ("C.UTF-8", "C.utf8")
+
+# Said by a YARA pass whose engine fails the case-folding self-test.
+YARA_FOLDING_BROKEN = (
+    "the YARA engine's case folding is broken in this process's locale "
+    "(LC_CTYPE={ctype}), so nocase strings cannot be checked"
+)
+# The self-test's string, longer than the engine's longest atom (four bytes). A
+# string that fits in one atom is matched through the atom's case variants,
+# which the engine builds as ASCII whatever the locale, so a test with ``"i"``
+# passes even where every longer string fails; a longer string is verified
+# through the case table the engine built by the locale.
+_SELF_TEST_TEXT = "iiiiiiii"
 
 # The first call's answer, kept for every later call in the process.
 _pinned: list[str | None] = []
@@ -108,3 +123,35 @@ def pin_character_classification(say: Callable[[int, str], None] = _log) -> str 
             )
     _pinned.append(chosen)
     return chosen
+
+
+@functools.cache
+def yara_case_folding_problem() -> str | None:
+    """Why the YARA engine's ``nocase`` cannot be trusted in this process, or ``None``.
+
+    The engine is asked once per process: a ``nocase`` rule for a run of
+    ``i`` (``_SELF_TEST_TEXT``), compiled with includes refused, is matched
+    against the same run of ``I``, and the answer is kept, since the engine
+    builds its case table once, when it loads. The one place a YARA pass asks
+    before it trusts a ``nocase`` answer. ``None`` also when the engine is not
+    installed: nothing of its is then trusted.
+    """
+    try:
+        import yara  # type: ignore[import-untyped]
+    except ImportError:
+        return None
+    ctype = locale.setlocale(locale.LC_CTYPE)
+    try:
+        rules = yara.compile(
+            source=f'rule t {{ strings: $a = "{_SELF_TEST_TEXT}" nocase condition: $a }}',
+            includes=False,
+        )
+        folds = bool(rules.match(data=_SELF_TEST_TEXT.upper().encode("ascii")))
+    except Exception as exc:  # noqa: BLE001 - an engine that cannot run the test is not trusted
+        logger.warning("ctype_locale: the YARA case-folding self-test failed (%s).", exc)
+        folds = False
+    if folds:
+        return None
+    problem = YARA_FOLDING_BROKEN.format(ctype=ctype)
+    logger.warning("ctype_locale: %s.", problem)
+    return problem
