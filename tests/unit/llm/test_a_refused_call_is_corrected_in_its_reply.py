@@ -35,7 +35,7 @@ from maljan.pipeline.validation import (
     _with_feedback,
     with_calls_said,
 )
-from maljan.reporting.composer import ReportComposer, _message_text
+from maljan.reporting.composer import _PROSE_SECTIONS, ReportComposer, _message_text
 from tests.unit.reporting.test_the_composer_writes_its_sections_at_once import (
     _answer,
     _isr,
@@ -248,6 +248,10 @@ class TestARetryHeldUnderAnOutputBound:
             said = said if isinstance(said, str) else "".join(b["text"] for b in said)
             assert json.loads(said) == answers.calls[section][0]["input"]
             assert retry["max_tokens"] == 2048
+            # What the same answer's retry wrote before: a prose section reads
+            # the group's head and writes nothing; a section alone writes nothing.
+            assert _markers(retry) == ([(0, 0)] if section in _PROSE_SECTIONS else []), section
+        assert {"introduction", "packing_obfuscation"} <= set(retried)
         assert wire.refused == []
         assert report.technical_analysis is not None
 
@@ -403,6 +407,8 @@ class TestTheCorrectionTurn:
         assert json.loads(str(turns[2].content)) == {"body": "x", "evidence_refs": "ev_0001"}
         assert not turns[2].tool_calls
         assert str(turns[3].content).startswith(FEEDBACK_PREAMBLE)
+        assert turns[3].response_metadata == {LAST_REQUEST: True}, "the reply's note goes with it"
+        assert turns[2].response_metadata == {}
         assert [line for line in said if "tool call(s) _ProseOut (toolu_1) are said" in line]
 
     def test_every_call_is_said_and_named(self, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -417,6 +423,16 @@ class TestTheCorrectionTurn:
             call["args"] for call in answer.tool_calls
         ]
         assert [line for line in said if "_ProseOut (toolu_1), _ProseOut (toolu_11)" in line]
+
+    def test_a_question_asked_at_the_end_of_a_turn_keeps_both_turns_notes(self) -> None:
+        from maljan.pipeline.turns import with_question
+
+        asked = HumanMessage(content="Write it.", response_metadata={"maljan_shared_head": 3})
+        turns = with_question([asked], "Fix it.", notes={LAST_REQUEST: True})
+        assert turns[-1].content == "Write it.\n\nFix it."
+        assert turns[-1].response_metadata == {"maljan_shared_head": 3, LAST_REQUEST: True}
+        assert asked.response_metadata == {"maljan_shared_head": 3}, "the turn sent is not edited"
+        assert with_question([asked], "Fix it.")[-1].response_metadata == asked.response_metadata
 
     def test_a_history_with_no_call_is_sent_as_it_is(self) -> None:
         turns = [*_ASKED, AIMessage(content="{}"), HumanMessage(content="Fix it.")]

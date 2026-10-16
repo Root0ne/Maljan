@@ -9669,8 +9669,13 @@ def with_calls_said(turns: list[Any]) -> list[Any]:
     (the arguments of each of its calls, the one read first) and its reply as
     the question after it: the model still reads what it wrote and what is
     wrong with it. The call's thinking blocks are left out with it, because
-    they were written beside the tool and do not hold without it. Every other
-    turn is sent as it is, and a history with no call is the same list.
+    they were written beside the tool and do not hold without it. The question
+    keeps the reply's notes (its ``response_metadata``), so a reply noted as
+    its conversation's last (``anthropic_history.LAST_REQUEST``) is a question
+    noted so. The said answer is a new turn: the answer's own metadata is
+    what a client reads off an assistant turn it is sent, and holds no note.
+    Every other turn is sent as it is, and a history with no call is the same
+    list.
     """
     import json
 
@@ -9687,7 +9692,7 @@ def with_calls_said(turns: list[Any]) -> list[Any]:
     said: list[str] = []
     for message in turns:
         if isinstance(message, ToolMessage):
-            out = with_question(out, answer_text(message.content))
+            out = with_question(out, answer_text(message.content), notes=message.response_metadata)
         elif isinstance(message, AIMessage) and message.tool_calls:
             parts = [answer_text(message.content).strip()]
             for call in message.tool_calls:
