@@ -24,12 +24,19 @@ ledger), `report-byjob.json` (the report row: each analyst's final answer, its
 claims in force, the run summary, the report document and the transcript),
 `report.json`, `run-summary.json`, `stix-judge.json` (the judge's answer as
 written), `events.json` and `job.json`. Several runs may be named at once.
-`--json OUT` writes the record; an output inside a run's directory is refused.
+`--json OUT` writes the record; an output inside a run's directory (`--json`,
+`--work` or `--job-dir`) is refused. The exit status is 0 when every part
+replayed or was named as not replayable, and 2 when a part raised: a crash is
+not a decision, and the part that raised is printed first, marked `[raised]`.
 
 `--job ID` reads a job from the database instead (`--database-url`, else
 `DATABASE_URL`, else the API's bootstrap setting), in one transaction set
 `READ ONLY` and rolled back, writes it in the same layout (`--job-dir`, a
-temporary directory by default) and replays that.
+temporary directory by default) and replays that. The job's sample hash and
+name come from its joined sample row; a job whose sample row is gone keeps
+neither, and the replay says the report's identity block is then their only
+source. Writing into a directory an earlier export used removes only the
+layout's own files there, first, and names them; no other file is touched.
 
 ## What it replays
 
@@ -38,9 +45,9 @@ the way the platform composes them:
 
 | Part | What is re-run |
 | :-- | :-- |
-| Analysts | Each answer stored as the analyst wrote it, read by the platform's parser and checked as the analyst's validation turn checks it (`isr.*`, `attck.*`); the claims in force checked by the checks that read claims. |
+| Analysts | Each answer stored as the analyst wrote it, read by the platform's parser and checked as the analyst's validation turn checks it (`isr.*`, `attck.*`); the claims in force checked by the checks that read claims. The notes the run stored on those claims (a technique id not valid, an absence claim kept when asked, a claim citing only failed calls) are reset and decided again by the platform's own functions over the replayed findings, so a rule change reaches what the report publishes. |
 | Judge | Its answer as written, parsed as the judge parses it and checked as the verdict round checks it (`stix.*`, `verdict.*`); the indicators it would drop are dropped. |
-| Report | The deterministic build, the export over the judge's bundle and the IOC table it decides: the published techniques with the capability matrix's reasons, each indicator's publish answer, the claims in force the composed body leaves undiscussed, the detection rules drafted and the report's values. |
+| Report | The run summary's validation block rebuilt from the replayed findings (never the stored one), then the deterministic build, the export over the judge's bundle (with the run's evidence corpus rebuilt from the stored answers, and a truncation recorder of its own) and the IOC table it decides: the published techniques with the capability matrix's reasons, each indicator's publish answer, the claims in force the composed body leaves undiscussed, the detection rules drafted and the report's values. The verdict's own degradation reasons are decided again, and the run's `reporting.include_extended_stix` and `reporting.auto_generate_detection_rules` are honoured. |
 | Narrative and composer | The narrative and each composer section as the stored report holds them, checked as each round checks its answer (`narrative.*`, `composer.*`, `report.*`), then put on the rebuilt report as the rounds put them. |
 | Tool calls | Each recorded call's arguments, as the recorder checks them before it runs a call (`tool.*`). |
 | Report linter | The linter's warnings over the finished report, by rule and field. |
@@ -71,8 +78,23 @@ skipped in silence:
   a finding's detail;
 - the judge's technique review, its second answer, read back from the stored
   capability matrix's decisions;
-- a check the rules' tree does not have (an older ref), named as not replayed
-  while the rest of the part goes on.
+- which findings the judge was shown, read from the stored run summary's rows
+  marked `asked: false`; any other finding is counted as shown;
+- `degraded_mode` and the degradation reasons the judge node decides from
+  inputs the record does not hold (the sandbox report, model failures, prompt
+  notices): they are the stored report's, joined with the reasons the verdict
+  itself carries under the replayed rules;
+- the retries and what each producer was told and fixed, which are model
+  turns: `isr.retry_dropped` (a retry's answer read against the answer it
+  fixes), whether an answer followed the loop's nudge, and the claim
+  consistency gate's input when the run had the gate on;
+- a guard the rules' tree has no place for (a module attribute an older tree
+  lacks), named in the record's environment while the replay goes on.
+
+A change to one rule shows what it moves in the report. In the tests, making
+the catalogue forget one technique unpublishes it and drops it from the
+export, and letting a judge's indicator through publishes its row in the IOC
+table.
 
 ## Comparing two refs
 
@@ -80,23 +102,49 @@ skipped in silence:
 python scripts/replay/run.py runs/run7 runs/haiku4 --compare origin/dev HEAD
 ```
 
-Each ref's `src` tree and `data` tables (without `data/samples`) are written
-out of the repository's object store with `git archive` into a temporary
-directory (`--work` keeps them, `--repo` reads another repository), and the
-same replay runs once per tree in a process of its own. The checkout and its
-working tree are never read for the rules or written. The comparison names
-every difference: the codes each producer gained or lost per claim, the claims
-each answer parsed into, the published techniques and their reasons, each
-indicator's publish answer, the report's values, corroboration and the parts
-one side could replay and the other could not. The exit status is 0 when both
-refs decide the same over every run, 1 when they differ and 2 on an error.
+Each ref is replayed by its own harness over its own rules. The ref's
+`pyproject.toml`, `src` tree, `data` tables (without `data/samples`: a sample
+is never copied) and `scripts/replay` are written out of the repository's
+object store with `git archive` into a directory of the replay's own (`--work`
+keeps the trees, `--repo` reads another repository). That tree's own
+`scripts/replay/run.py` then replays the runs in a process of its own, with
+the tree first on the import path and the same guards, and its record says
+which tree it imported its rules from, which is checked. The checkout and its
+working tree are never read for the rules or written. The two records are
+then compared by the running checkout's own `scripts/replay/compare.py`, so
+run the comparison from the newer of the two checkouts: it reads every record
+schema up to its own.
+
+- **A ref from before the replay tool** has no `scripts/replay/run.py` to
+  replay with. It cannot be compared: the command says so and ends with status
+  2 before replaying anything. Compare two refs that both carry the tool.
+- **Records of two schema versions.** Every record carries the version of its
+  schema (`schema`). When the two trees write different versions, the
+  comparison says so and compares only what both define.
+- **A part that raised** in either tree is printed first, as an error. The
+  comparison is then incomplete and ends with status 2: "no difference" is said
+  only when every part replayed in both trees.
+
+The comparison names every difference: the codes each producer gained or lost
+per claim, the claims each answer parsed into and the notes on the claims in
+force, the published techniques and their reasons, each indicator's publish
+answer, the report's values, the report's sections (the ones only one side
+holds, and whether the shared ones changed order), the exported techniques and
+objects, corroboration, and the parts one side could replay and the other
+could not. The exit status is 0 when both refs decide the same over every run,
+1 when they differ, and 2 when a part raised, when a ref predates the tool, or
+on an error.
 
 ## What it holds itself to
 
 - **Read-only.** Every file of a run's directory is digested before and after;
   a replay that changed one fails.
-- **No network.** Every socket connection and name lookup is refused while it
-  runs.
+- **No network.** While it runs, every socket connection (`connect`,
+  `connect_ex`, `create_connection`), every datagram sent to an address
+  (`sendto`, `sendmsg`) and every name or address lookup (`getaddrinfo`,
+  `gethostbyname`, `gethostbyname_ex`, `gethostbyaddr`, `getnameinfo`) is
+  refused. Not covered: a socket made from the low-level `_socket` module, and
+  a child process.
 - **One catalogue.** ATT&CK is read from the vendored tables of the rules' own
   tree; the bundle loads are refused and the cache points at a directory of the
   replay's own, so the machine's cache is neither read nor written.
