@@ -49,6 +49,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from app.config import get_settings, settings
 from app.logging_config import get_logger, setup_logging
 from app.runtime_config import runtime_config
+from app.services.job_events import STREAM_TTL_SECONDS, stream_key
 from app.worker.queues import ANALYSIS_QUEUE, build_redis_settings
 
 logger = get_logger("worker")
@@ -730,7 +731,7 @@ async def seed_seq_from_the_table(
             await db.commit()
         if not highest:
             return None
-        await redis_conn.set(key, int(highest), nx=True, ex=86_400)
+        await redis_conn.set(key, int(highest), nx=True, ex=STREAM_TTL_SECONDS)
     except Exception as exc:  # noqa: BLE001 — numbering never costs an event
         logger.debug(
             "Could not continue the event numbering for job %s (%s).",
@@ -786,7 +787,7 @@ async def _next_seq(redis_conn: aioredis.Redis, job_id: str) -> int:
         # there is a stream to read alongside it, and the table keeps its own
         # copy of every number for the replay after that.
         try:
-            await redis_conn.expire(_seq_key(job_id), 86_400)
+            await redis_conn.expire(_seq_key(job_id), STREAM_TTL_SECONDS)
         except Exception as exc:  # noqa: BLE001 — a TTL never costs a number
             logger.debug(
                 "Event sequence TTL refresh failed (%s); the number stands.",
@@ -1027,13 +1028,13 @@ async def _publish_event(
     # events when it mounts after the worker already started publishing.
     try:
         await redis_conn.xadd(
-            f"analysis:{job_id}:events",
+            stream_key(job_id),
             {"payload": message},
             maxlen=1000,
             approximate=True,
         )
         # 24h TTL — every read keeps the key fresh; idle keys vanish.
-        await redis_conn.expire(f"analysis:{job_id}:events", 86_400)
+        await redis_conn.expire(stream_key(job_id), STREAM_TTL_SECONDS)
     except Exception as exc:  # noqa: BLE001
         logger.debug(
             "Event stream xadd failed (%s); pubsub-only.",
