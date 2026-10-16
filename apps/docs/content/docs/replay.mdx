@@ -45,16 +45,25 @@ the way the platform composes them:
 
 | Part | What is re-run |
 | :-- | :-- |
-| Analysts | Each answer stored as the analyst wrote it, read by the platform's parser and checked as the analyst's validation turn checks it (`isr.*`, `attck.*`); the claims in force checked by the checks that read claims. The notes the run stored on those claims (a technique id not valid, an absence claim kept when asked, a claim citing only failed calls) are reset and decided again by the platform's own functions over the replayed findings, so a rule change reaches what the report publishes. |
+| Analysts | Each answer stored as the analyst wrote it, read by the platform's parser and checked as the analyst's validation turn checks it (`isr.*`, `attck.*`); the claims in force checked by the checks that read claims. The notes the run stored on those claims (a technique id not valid, an absence claim kept when asked, a claim citing only failed calls) are reset and decided again by the platform's own functions over the replayed findings, so a rule change reaches what the report publishes. As the validation turn does, an id the catalogue does not know is marked whether or not the analyst was shown the finding, and an absence claim is noted only when it was. The analysts are taken in the order the run's state held them (`run_summary.agent_stats`). |
 | Judge | Its answer as written, parsed as the judge parses it and checked as the verdict round checks it (`stix.*`, `verdict.*`); the indicators it would drop are dropped. |
-| Report | The run summary's validation block rebuilt from the replayed findings (never the stored one), then the deterministic build, the export over the judge's bundle (with the run's evidence corpus rebuilt from the stored answers, and a truncation recorder of its own) and the IOC table it decides: the published techniques with the capability matrix's reasons, each indicator's publish answer, the claims in force the composed body leaves undiscussed, the detection rules drafted and the report's values. The verdict's own degradation reasons are decided again, and the run's `reporting.include_extended_stix` and `reporting.auto_generate_detection_rules` are honoured. |
+| Report | The run summary's validation block rebuilt from the replayed findings (never the stored one), then the deterministic build, the export over the judge's bundle (with the run's evidence corpus rebuilt from the stored answers, and a truncation recorder of its own) and the IOC table it decides: the published techniques with the capability matrix's reasons, each indicator's publish answer, the claims in force the composed body leaves undiscussed, the detection rules drafted and the report's values. The degradation reasons the verdict carries (the fallback, an unreadable verdict, an inconclusive run) are decided again, the stored ones of that kind dropped first, and whether the run is degraded is decided again over the reasons by the platform's own rule. The run's `reporting.include_extended_stix` and `reporting.auto_generate_detection_rules` are honoured. |
+| Against the stored report | What the rebuilt report does not share with the one the run stored: the headline values, the published techniques, the sections (the ones only one report holds, their order, and every row or value that differs, by a digest), the IOC table's answers and the export's objects by type. Each difference is tied to its named cause where one is known: the sandbox report the record does not hold, the findings and artifacts read back from the stored tables, and the key order the database does not keep in the ledger's structured answers. Rows that write the same keys and values in another order are one entry per section. |
 | Narrative and composer | The narrative and each composer section as the stored report holds them, checked as each round checks its answer (`narrative.*`, `composer.*`, `report.*`), then put on the rebuilt report as the rounds put them. |
 | Tool calls | Each recorded call's arguments, as the recorder checks them before it runs a call (`tool.*`). |
 | Report linter | The linter's warnings over the finished report, by rule and field. |
 | Corroboration | Per technique: who claimed it, which rules asserted it, its sources and whether it is corroborated. |
 
-The output names codes, entry ids and counts. `--show-text` adds each
-finding's words and the claim it is about, which are otherwise left out.
+The record carries no value from the run unless asked for the text: codes, ids,
+kinds, counts and digests only. A finding's subject that is not an ATT&CK id or
+a ledger or sandbox item id is written as its kind and a digest of its value
+(`domain:2d5a0519f25d`), in the path that names it too; an indicator is its
+kind and a digest of its value, its publish answer is the answer's head (`yes`
+or `no`) and a digest of its words; the judge's category and its reasons are
+digests. `--show-text` adds the words beside them, in fields of their own
+(`message`, `claim`, `subject_text`, `answer_text`, `value`, `category_text`,
+`why_text`), so a record has the same fields either way and two records are
+compared on the value-free ones.
 
 Each producer's list of checks is kept in `scripts/replay/rules.py`, and
 `tests/unit/scripts/test_the_replay_knows_every_check.py` holds it to the
@@ -78,12 +87,22 @@ skipped in silence:
   a finding's detail;
 - the judge's technique review, its second answer, read back from the stored
   capability matrix's decisions;
-- which findings the judge was shown, read from the stored run summary's rows
-  marked `asked: false`; any other finding is counted as shown;
-- `degraded_mode` and the degradation reasons the judge node decides from
-  inputs the record does not hold (the sandbox report, model failures, prompt
-  notices): they are the stored report's, joined with the reasons the verdict
-  itself carries under the replayed rules;
+- which findings the judge and each analyst were shown, read from the stored
+  run summary's rows marked `asked: false`, matched by code and subject (a
+  finding without a subject by its words); any other finding is counted as
+  shown;
+- the degradation reasons the judge node decides from inputs the record does
+  not hold (the sandbox report, model failures, prompt notices, the pack): they
+  are kept as stored and counted, and a rule change that would no longer give
+  one cannot remove it;
+- the entries as the checks read them: the run saved them after the byte
+  budget, so an output the budget blanked and a structure its last pass
+  dropped are read as saved; and the ledger's structured answers come back
+  from the database, which keeps no key order;
+- the routed file type and platform, read back from the stored report's
+  identity block, because routing reads the sample;
+- the order the run's state held the analysts in, when the run summary does
+  not record it: the order they first answered in is used;
 - the retries and what each producer was told and fixed, which are model
   turns: `isr.retry_dropped` (a retry's answer read against the answer it
   fixes), whether an answer followed the loop's nudge, and the claim
@@ -120,20 +139,31 @@ schema up to its own.
   2 before replaying anything. Compare two refs that both carry the tool.
 - **Records of two schema versions.** Every record carries the version of its
   schema (`schema`). When the two trees write different versions, the
-  comparison says so and compares only what both define.
+  comparison says so and compares only what both define. Every part only one
+  of them defines is listed as "not compared: defined only under A" (or B),
+  and a part both write in forms the two schemas do not share is listed too.
+  That comparison is **partial**: it is printed prominently and ends with
+  status 2, because a part that was not compared is not a decision.
 - **A part that raised** in either tree is printed first, as an error. The
-  comparison is then incomplete and ends with status 2: "no difference" is said
-  only when every part replayed in both trees.
+  comparison is then incomplete and ends with status 2.
+- **A time limit.** `--timeout SECONDS` gives each ref's replay that long; there
+  is no limit unless one is given. A ref still replaying then is stopped, the
+  command names it and ends with status 2.
+
+"No difference" is said only when every part replayed in both trees and was
+compared on both sides.
 
 The comparison names every difference: the codes each producer gained or lost
 per claim, the claims each answer parsed into and the notes on the claims in
 force, the published techniques and their reasons, each indicator's publish
 answer, the report's values, the report's sections (the ones only one side
 holds, and whether the shared ones changed order), the exported techniques and
-objects, corroboration, and the parts one side could replay and the other
-could not. The exit status is 0 when both refs decide the same over every run,
-1 when they differ, and 2 when a part raised, when a ref predates the tool, or
-on an error.
+objects, the indicators the judge's round drops, the settings each tree refused
+and the guards it lacks, corroboration, and the parts one side could replay
+and the other could not. The exit status is 0 when both refs decide the same
+over every run, 1 when they differ, and 2 when a part raised, when the
+comparison is partial, when a ref predates the tool or was stopped at its time
+limit, or on an error.
 
 ## What it holds itself to
 
