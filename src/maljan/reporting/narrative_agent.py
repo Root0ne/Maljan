@@ -64,6 +64,7 @@ from maljan.pipeline.validation import (
     retry_with_feedback,
     schema_violations,
     technique_name_violations,
+    with_calls_said,
     wrong_entry_citations,
 )
 from maljan.reporting import tool_kinds
@@ -868,6 +869,8 @@ class NarrativeAgent:
                     cap_tokens=int(getattr(self, "output_cap", 0) or 0),
                     holdable=False,
                 ):
+                    # Recorded and announced here, once, whatever becomes of
+                    # the answer; a parser's dict is read through the schema.
                     read = read_structured_reply(
                         await retry_on_connection_error(
                             lambda: structured.ainvoke(messages),
@@ -877,22 +880,13 @@ class NarrativeAgent:
                         agent=REPORTER_AGENT_KEY,
                         model=self.model_label,
                         call="narrative",
+                        schema=NarrativeOutput,
+                        announce=self._announce_fallback,
                     )
                 result = read.parsed
                 if isinstance(result, NarrativeOutput):
                     return self._kept_with_ungrounded_recorded(
                         result, grounding, known_ids, citable, evidence, answers, published
-                    )
-                # Some providers return a dict — coerce defensively.
-                if isinstance(result, dict):
-                    return self._kept_with_ungrounded_recorded(
-                        NarrativeOutput.model_validate(result),
-                        grounding,
-                        known_ids,
-                        citable,
-                        evidence,
-                        answers,
-                        published,
                     )
                 kept = read.kept
                 say_structured_reply("NarrativeAgent", read)
@@ -926,15 +920,17 @@ class NarrativeAgent:
             try:
                 # The retry of a kept structured answer goes as that answer
                 # went, so its request only appends to the one answered; held
-                # under an output bound it goes by the plain model. One call is
-                # chosen, and made once.
+                # under an output bound it goes by the plain model. The plain
+                # model is offered no tool, so a call in its turns is said as
+                # text, once. One call is chosen, and made once.
                 as_kept = kept is not None and bound is None
+                plain = turns if as_kept else with_calls_said(turns)
                 reply = await retry_on_connection_error(
                     (lambda: structured.ainvoke(turns))
                     if as_kept
-                    else (lambda: self.llm.ainvoke(turns, **output_bound_kwargs(self.llm, bound)))
+                    else (lambda: self.llm.ainvoke(plain, **output_bound_kwargs(self.llm, bound)))
                     if bound is not None
-                    else (lambda: self.llm.ainvoke(turns)),
+                    else (lambda: self.llm.ainvoke(plain)),
                     what="NarrativeAgent structured" if as_kept else "NarrativeAgent raw",
                 )
                 raw = reply.get("raw") if isinstance(reply, dict) and "raw" in reply else reply
@@ -950,11 +946,7 @@ class NarrativeAgent:
                             model=self.model_label,
                             call="narrative",
                         )
-                        from maljan.pipeline.events import announce_model_fallback
-
-                        announce_model_fallback(
-                            getattr(self, "event_sink", None), raw, agent="reporter", stage="report"
-                        )
+                        self._announce_fallback(raw)
                     except Exception as exc:  # noqa: BLE001
                         # nosemgrep: python.lang.security.audit.logging.logger-credential-leak.python-logger-credential-disclosure — record_response_usage() swallows its own exceptions, so exc here is only an import/attribute error  # noqa: E501
                         logger.debug("NarrativeAgent: token usage not recorded (%s).", exc)
@@ -992,6 +984,8 @@ class NarrativeAgent:
                 ],
                 parse=_parse,
                 on_feedback=self.validation_tally.count,
+                # Only a kept structured answer's retry offers the schema's tool again.
+                reply_to_calls=kept is not None,
             )
         except SpendCeilingStop as stop:
             said = f"The narrative round was not written: {stop}."
@@ -1032,6 +1026,14 @@ class NarrativeAgent:
         except Exception as exc:  # noqa: BLE001
             logger.error("NarrativeAgent: the validated payload would not build (%s).", exc)
             return None
+
+    def _announce_fallback(self, answer: Any) -> None:
+        """Publish ``model_fallback`` when ``answer`` is the one the model list moved on for."""
+        from maljan.pipeline.events import announce_model_fallback
+
+        announce_model_fallback(
+            getattr(self, "event_sink", None), answer, agent="reporter", stage="report"
+        )
 
     def _record_ungrounded(self, violations: list[Violation], *, asked: bool = True) -> None:
         """Keep the over-claims and stray citations on the record, without touching the prose."""
