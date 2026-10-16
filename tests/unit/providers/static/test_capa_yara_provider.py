@@ -3,11 +3,15 @@
 from __future__ import annotations
 
 import builtins
-import multiprocessing as mp
+import os
+import sys
 import time
+
+import pytest
 
 from maljan.core.config import Settings
 from maljan.providers.static.capa_yara import CapaYaraStaticProvider
+from maljan.tools import staging
 
 
 def _provider(tmp_path=None):
@@ -116,68 +120,54 @@ def test_the_evidence_text_carries_every_hit():
 # through the monkeypatched ``_run_capa`` seam.
 
 
-def _sleepy_worker(sample_path, rules_dir, signatures_dir, backend_name, queue):
-    """Module-level (picklable) stand-in for ``_capa_worker`` that never returns.
+def _child(code: str) -> list[str]:
+    """A stand-in for the capa child's command: the same arguments follow it, the answer path last.
 
-    Used only to drive ``_run_capa_bounded``'s timeout/kill path without a
-    real capa install or a multi-minute analysis. Must live at module scope:
-    ``multiprocessing.get_context("spawn")`` pickles a target function by
-    module + qualified name, so a closure or a monkeypatched attribute on the
-    real ``_capa_worker`` would not survive the trip to the child process.
+    Used to drive ``_run_capa_bounded``'s timeout, kill and answer paths
+    without a real capa install or a multi-minute analysis.
     """
-    import time
-
-    time.sleep(30)
-    queue.put(("ok", {"rules": {}}))  # pragma: no cover - never reached in the test
+    return [sys.executable, "-c", code]
 
 
-def test_a_capa_run_past_its_budget_is_killed_not_waited_out(tmp_path):
+def test_a_capa_run_past_its_budget_is_killed_not_waited_out(tmp_path, monkeypatch):
+    monkeypatch.setenv(staging.STAGING_DIR_ENV, str(tmp_path / "staging"))
+    pid_file = tmp_path / "child.pid"
+    sleepy = _child(
+        f"import os, time; open({str(pid_file)!r}, 'w').write(str(os.getpid())); time.sleep(30)"
+    )
     provider = _provider(tmp_path)
     provider._capa.timeout_seconds = 1
     started = time.monotonic()
-    result = provider._run_capa_bounded(str(tmp_path / "s.exe"), tmp_path, target=_sleepy_worker)
+    result = provider._run_capa_bounded(str(tmp_path / "s.exe"), tmp_path, child=sleepy)
     elapsed = time.monotonic() - started
     assert result is None
-    # Killed well before the worker's 30s sleep would have elapsed on its own,
-    # and nothing is left behind for the caller (an arq worker, in production)
-    # to join or wait on later.
+    # Killed well before the child's 30s sleep would have elapsed on its own,
+    # and reaped: nothing is left behind for the caller (an arq worker, in
+    # production) to wait on later.
     assert elapsed < 15
-    assert mp.active_children() == []
+    with pytest.raises(ProcessLookupError):
+        os.kill(int(pid_file.read_text()), 0)
 
 
-def _big_result_worker(sample_path, rules_dir, signatures_dir, backend_name, queue):
-    """Module-level (picklable) stand-in that puts a result over the pipe buffer.
-
-    I3 regression: a real capa ``ResultDocument`` is routinely well over the
-    64 KiB OS pipe buffer. A child that has put such an item blocks in its
-    feeder thread until the parent drains the queue — joining before reading
-    deadlocks the parent's wait on a child that already produced its result,
-    the join times out, the child is killed as a false "exceeded its budget",
-    and the real result is thrown away. This worker reproduces the size class
-    that triggers it.
-    """
-    big_namespace = "x" * 200
-    rules = {
-        f"rule_{i}": {
-            "meta": {"namespace": big_namespace, "attack": []},
-            "matches": [[{"type": "absolute", "value": i}, {}]],
-        }
-        for i in range(2000)
-    }
-    queue.put(("ok", {"rules": rules}))
+# A real capa ResultDocument is routinely well over the 64 KiB OS pipe buffer;
+# the answer goes through a file, so a large one arrives whole and in time.
+_BIG_ANSWER = (
+    "import json, sys\n"
+    "rules = {f'rule_{i}': {'meta': {'namespace': 'x' * 200, 'attack': []},"
+    " 'matches': [[{'type': 'absolute', 'value': i}, {}]]} for i in range(2000)}\n"
+    "open(sys.argv[-1], 'w').write(json.dumps({'ok': {'rules': rules}}))\n"
+)
 
 
-def test_a_large_capa_result_arrives_intact_within_the_budget(tmp_path):
+def test_a_large_capa_result_arrives_intact_within_the_budget(tmp_path, monkeypatch):
+    monkeypatch.setenv(staging.STAGING_DIR_ENV, str(tmp_path / "staging"))
     provider = _provider(tmp_path)
     provider._capa.timeout_seconds = 10
     started = time.monotonic()
     result = provider._run_capa_bounded(
-        str(tmp_path / "s.exe"), tmp_path, target=_big_result_worker
+        str(tmp_path / "s.exe"), tmp_path, child=_child(_BIG_ANSWER)
     )
     elapsed = time.monotonic() - started
     assert result is not None
     assert len(result["rules"]) == 2000
-    # Comfortably inside the 10s budget: draining before joining lets the
-    # child's feeder thread unblock and the child exit on its own.
     assert elapsed < 10
-    assert mp.active_children() == []

@@ -14,7 +14,6 @@ bytes the test writes; the signature files are empty names, never parsed.
 
 from __future__ import annotations
 
-import queue
 import struct
 import sys
 import types
@@ -24,9 +23,18 @@ from typing import Any
 import pytest
 
 from maljan.core.config import Settings
-from maljan.providers.static import capa_yara
+from maljan.providers.static import capa_child, capa_yara
 from maljan.providers.static.capa_yara import CapaYaraStaticProvider
 from maljan.tools import rules as tool
+from maljan.tools import staging
+
+
+@pytest.fixture(autouse=True)
+def _own_cache_and_scratch(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """capa's ruleset cache (written on every in-process pass) and the runs' scratch, in tmp."""
+    monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "cache"))
+    monkeypatch.setenv(staging.STAGING_DIR_ENV, str(tmp_path / "staging"))
+
 
 _DOTNET_RULE = """rule:
   meta:
@@ -104,14 +112,14 @@ def _assembly_and_rules(tmp_path: Path) -> tuple[Path, Path]:
 def _worker_answer(
     sample: Path, rules_dir: Path, backend_name: str, signatures: Path | None = None
 ) -> tuple[str, Any]:
-    """The capa child's answer, run in this process: the worker only puts on its queue."""
-    answers: queue.Queue[tuple[str, Any]] = queue.Queue()
+    """The capa pass run in this process: its document, or capa's error as the child says it."""
     signatures_dir = signatures if signatures is not None else rules_dir / "none"
-    capa_yara._capa_worker(str(sample), str(rules_dir), str(signatures_dir), backend_name, answers)
-    kind, payload = answers.get_nowait()
-    while kind == "peak":
-        kind, payload = answers.get_nowait()
-    return kind, payload
+    try:
+        return "ok", capa_child.capa_pass(
+            str(sample), str(rules_dir), str(signatures_dir), backend_name
+        )
+    except Exception as exc:  # noqa: BLE001 - the child writes the same words
+        return "error", f"{type(exc).__name__}: {exc}"
 
 
 def _signature_dir(tmp_path: Path) -> Path:
@@ -172,7 +180,7 @@ class TestTheChoiceIsCapas:
     ) -> None:
         asked = self._fake_capa(monkeypatch)
 
-        assert capa_yara._capa_backend(capa_yara._BACKEND_NAMES["auto"], "dotnet") == (
+        assert capa_child._capa_backend(capa_yara._BACKEND_NAMES["auto"], "dotnet") == (
             "picked by capa"
         )
         assert asked == [("auto", "dotnet")]
@@ -182,7 +190,7 @@ class TestTheChoiceIsCapas:
     ) -> None:
         asked = self._fake_capa(monkeypatch)
 
-        assert capa_yara._capa_backend(capa_yara._BACKEND_NAMES["pefile"], "dotnet") == "pefile"
+        assert capa_child._capa_backend(capa_yara._BACKEND_NAMES["pefile"], "dotnet") == "pefile"
         assert asked == []
 
     def test_the_signatures_are_asked_of_capa_with_the_format_and_the_backend(
@@ -205,15 +213,15 @@ class TestTheChoiceIsCapas:
         monkeypatch.setitem(sys.modules, "capa.main", main)
         monkeypatch.setitem(sys.modules, "capa.loader", loader)
 
-        assert capa_yara._capa_signatures(str(tmp_path), "pe", "vivisect") == (
+        assert capa_child._capa_signatures(str(tmp_path), "pe", "vivisect") == (
             [Path("chosen.sig")],
             None,
         )
         assert asked == [(tmp_path, False, "pe", "vivisect")]
         # No directory: nothing to choose from, and capa is not asked.
-        assert capa_yara._capa_signatures(str(tmp_path / "absent"), "pe", "vivisect") == (
+        assert capa_child._capa_signatures(str(tmp_path / "absent"), "pe", "vivisect") == (
             [],
-            capa_yara.LIBRARY_FUNCTIONS_NO_DIRECTORY,
+            capa_child.LIBRARY_FUNCTIONS_NO_DIRECTORY,
         )
         assert len(asked) == 1
 
@@ -223,8 +231,8 @@ class TestWithCapaInstalled:
         capa_loader = pytest.importorskip("capa.loader")
 
         for native in ("pe", "elf", "sc32", "sc64"):
-            assert capa_yara._capa_backend("auto", native) == capa_loader.BACKEND_VIV
-        assert capa_yara._capa_backend("auto", "dotnet") == capa_loader.BACKEND_DOTNET
+            assert capa_child._capa_backend("auto", native) == capa_loader.BACKEND_VIV
+        assert capa_child._capa_backend("auto", "dotnet") == capa_loader.BACKEND_DOTNET
 
     def test_a_managed_assembly_gets_capa_s_answer(self, tmp_path: Path) -> None:
         pytest.importorskip("capa.main")
@@ -243,7 +251,7 @@ class TestWithCapaInstalled:
         # A .NET match is located by a metadata token, not by a place in the image.
         assert answer["capabilities"][0]["addresses"] == []
         assert answer["function_starts"] == []
-        assert answer["library_functions"] == capa_yara.LIBRARY_FUNCTIONS_NO_DIRECTORY
+        assert answer["library_functions"] == capa_child.LIBRARY_FUNCTIONS_NO_DIRECTORY
 
     def test_a_named_vivisect_backend_still_refuses_a_managed_assembly(
         self, tmp_path: Path
@@ -275,7 +283,7 @@ class TestWithCapaInstalled:
         pytest.importorskip("capa.main")
         signatures = str(_signature_dir(tmp_path))
 
-        chosen, _ = capa_yara._capa_signatures(signatures, "pe", capa_loader.BACKEND_VIV)
+        chosen, _ = capa_child._capa_signatures(signatures, "pe", capa_loader.BACKEND_VIV)
 
         assert [path.name for path in chosen] == ["1_a.sig", "2_b.sig", "3_c.sig"]
         for input_format, backend in (
@@ -285,7 +293,7 @@ class TestWithCapaInstalled:
             ("dotnet", capa_loader.BACKEND_DOTNET),
             ("pe", capa_loader.BACKEND_PEFILE),
         ):
-            assert capa_yara._capa_signatures(signatures, input_format, backend)[0] == []
+            assert capa_child._capa_signatures(signatures, input_format, backend)[0] == []
 
     def test_a_shellcode_or_managed_run_is_handed_no_signatures(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch

@@ -362,11 +362,12 @@ def capa(
 ) -> dict[str, Any]:
     """The capabilities capa finds, each with its ATT&CK and MBC metadata.
 
-    capa runs in a spawned subprocess with the caller's budget, exactly as the
-    provider runs it (``None``, the default, is no wall clock of its own):
-    vivisect's disassembly loop has no cancellation point, so a thread-based
-    timeout can report an overrun while the work keeps running.
-    A child process can actually be killed, and on expiry this one is.
+    capa runs in a child process of its own with the caller's budget, exactly
+    as the provider runs it (``capa_yara.run_capa_document``; ``None``, the
+    default, is no wall clock of its own): vivisect's disassembly loop has no
+    cancellation point, so a thread-based timeout can report an overrun while
+    the work keeps running. A child process can actually be killed, and on
+    expiry this one is. It gets none of this process's environment.
 
     ``library_functions`` names the functions capa's signatures identified as
     library code, or says why none were looked for (``capa_library_functions``);
@@ -484,7 +485,7 @@ def capa_library_functions(document: dict[str, Any]) -> list[dict[str, str]] | s
     backend), the reason stands in place of the list, so its absence is never
     read as "none".
     """
-    from maljan.providers.static.capa_yara import LIBRARY_FUNCTIONS_UNSTATED, NOT_IDENTIFIED_KEY
+    from maljan.providers.static.capa_child import LIBRARY_FUNCTIONS_UNSTATED, NOT_IDENTIFIED_KEY
 
     if NOT_IDENTIFIED_KEY not in document:
         return LIBRARY_FUNCTIONS_UNSTATED

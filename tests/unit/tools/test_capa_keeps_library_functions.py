@@ -19,19 +19,26 @@ from typing import Any
 import pytest
 
 from maljan.core.config import Settings
-from maljan.providers.static import capa_yara
-from maljan.providers.static.capa_yara import (
+from maljan.providers.static import capa_child, capa_yara
+from maljan.providers.static.capa_child import (
     LIBRARY_FUNCTIONS_NO_DIRECTORY,
     LIBRARY_FUNCTIONS_NO_FILES,
     LIBRARY_FUNCTIONS_NOT_FOR_FORMAT,
     LIBRARY_FUNCTIONS_UNSTATED,
     NOT_IDENTIFIED_KEY,
-    CapaYaraStaticProvider,
 )
-from maljan.tools import pe_image
+from maljan.providers.static.capa_yara import CapaYaraStaticProvider
+from maljan.tools import pe_image, staging
 from maljan.tools import rules as tool
 
 BASE = 0x400000
+
+
+@pytest.fixture(autouse=True)
+def _own_cache_and_scratch(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """capa's ruleset cache and the runs' scratch, in tmp."""
+    monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "cache"))
+    monkeypatch.setenv(staging.STAGING_DIR_ENV, str(tmp_path / "staging"))
 
 
 def _at(offset: int) -> dict[str, Any]:
@@ -184,7 +191,7 @@ class TestTheAnswer:
 
     def test_no_directory_is_a_stated_reason_and_capa_is_not_asked(self, tmp_path: Path) -> None:
         for given in ("", "   ", str(tmp_path / "absent")):
-            assert capa_yara._capa_signatures(given, "pe", "vivisect") == (
+            assert capa_child._capa_signatures(given, "pe", "vivisect") == (
                 [],
                 LIBRARY_FUNCTIONS_NO_DIRECTORY,
             )
@@ -200,14 +207,14 @@ class TestWithCapaInstalled:
         empty = tmp_path / "empty"
         empty.mkdir()
 
-        chosen, reason = capa_yara._capa_signatures(str(signatures), "pe", capa_loader.BACKEND_VIV)
+        chosen, reason = capa_child._capa_signatures(str(signatures), "pe", capa_loader.BACKEND_VIV)
         assert [path.name for path in chosen] == ["1_a.sig"]
         assert reason is None
-        assert capa_yara._capa_signatures(str(signatures), "elf", capa_loader.BACKEND_VIV) == (
+        assert capa_child._capa_signatures(str(signatures), "elf", capa_loader.BACKEND_VIV) == (
             [],
             LIBRARY_FUNCTIONS_NOT_FOR_FORMAT,
         )
-        assert capa_yara._capa_signatures(str(empty), "pe", capa_loader.BACKEND_VIV) == (
+        assert capa_child._capa_signatures(str(empty), "pe", capa_loader.BACKEND_VIV) == (
             [],
             LIBRARY_FUNCTIONS_NO_FILES,
         )

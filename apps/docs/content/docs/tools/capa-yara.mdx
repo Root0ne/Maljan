@@ -41,6 +41,11 @@ Both libraries are optional extras of the package, `capa` (flare-capa) and
 installs the `capa`, `yara` and `tools` extras. A missing library costs the
 provider its evidence, with one warning, rather than failing a job.
 
+capa runs in a child process of its own, under the budget above. It does not
+inherit the worker's environment: it gets the base environment the tool
+servers get, and its own run directory in the job's scratch directory as its
+home, so no credential of the worker reaches it.
+
 capa's rules and its library-identification signatures are not in the
 flare-capa package. The backend image fetches both for the flare-capa version
 `uv.lock` pins, checks each against its recorded sha256 (the signatures come
