@@ -237,3 +237,39 @@ class TestTheHeadIsCachedOnce:
         )
         model.invoke([SystemMessage(content="S"), turn])
         assert anthropic_history.SHARED_HEAD not in json.dumps(wire.bodies[-1])
+
+
+class TestTheLastRequestOfAConversation:
+    """A request no later one sends again writes no entry nothing would read."""
+
+    @staticmethod
+    def _turns(**noted: Any) -> list[Any]:
+        from langchain_core.messages import AIMessage
+
+        head = {anthropic_history.SHARED_HEAD: 6}
+        question = [{"type": "text", "text": "the question"}]
+        return [
+            SystemMessage(content="S"),
+            HumanMessage(content="HEAD\n\nrest", response_metadata=head),
+            AIMessage(content="first answer"),
+            HumanMessage(content=question, response_metadata=noted),
+        ]
+
+    @staticmethod
+    def _marked(body: dict[str, Any]) -> list[tuple[int, int]]:
+        return [
+            (m, b)
+            for m, turn in enumerate(body["messages"])
+            if isinstance(turn["content"], list)
+            for b, block in enumerate(turn["content"])
+            if "cache_control" in block
+        ]
+
+    def test_a_conversation_sent_again_keeps_its_breakpoints(self, wire: Wire) -> None:
+        _model().invoke(self._turns())
+        assert self._marked(wire.bodies[-1]) == [(0, 0), (0, 1), (2, 0)]
+
+    def test_the_last_request_carries_only_the_head_it_reads(self, wire: Wire) -> None:
+        _model().invoke(self._turns(**{anthropic_history.LAST_REQUEST: True}))
+        assert self._marked(wire.bodies[-1]) == [(0, 0)]
+        assert anthropic_history.LAST_REQUEST not in json.dumps(wire.bodies[-1])

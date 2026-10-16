@@ -78,6 +78,7 @@ from maljan.pipeline.validation import (
     stated_value_violations,
     technique_name_violations,
     unpublished_value_violations,
+    with_calls_said,
     wrong_entry_citations,
 )
 from maljan.reporting.evidence_bundles import (
@@ -1783,16 +1784,19 @@ class ReportComposer:
                 reply = await retry_on_connection_error(
                     lambda: structured.ainvoke(messages), what="ReportComposer structured"
                 )
+                # Recorded and announced here, once, whatever becomes of the
+                # answer: a kept one is the loop's first answer and is never
+                # sent, so nothing after this reads it off the wire again.
                 read = read_structured_reply(
                     reply,
                     self.token_ledger,
                     agent=REPORTER_AGENT_KEY,
                     model=self.model_label,
                     call="report section",
+                    schema=schema,
+                    announce=self._announce_fallback,
                 )
                 result = read.parsed
-            if isinstance(result, dict):
-                result = schema.model_validate(result)
             if isinstance(result, schema):
                 # No retry on this path — ``with_structured_output`` owns the
                 # conversation and there is no turn to add one to — but the
@@ -1883,15 +1887,17 @@ class ReportComposer:
             try:
                 # The retry of a kept structured answer goes as that answer
                 # went, so its request only appends to the one answered; held
-                # under an output bound it goes by the plain model. One call is
-                # chosen, and made once.
+                # under an output bound it goes by the plain model. The plain
+                # model is offered no tool, so a call in its turns is said as
+                # text, once. One call is chosen, and made once.
                 as_kept = kept is not None and bound is None
+                plain = turns if as_kept else with_calls_said(turns)
                 reply = await retry_on_connection_error(
                     (lambda: structured.ainvoke(turns))
                     if as_kept
-                    else (lambda: self.llm.ainvoke(turns, **output_bound_kwargs(self.llm, bound)))
+                    else (lambda: self.llm.ainvoke(plain, **output_bound_kwargs(self.llm, bound)))
                     if bound is not None
-                    else (lambda: self.llm.ainvoke(turns)),
+                    else (lambda: self.llm.ainvoke(plain)),
                     what="ReportComposer structured" if as_kept else "ReportComposer raw",
                 )
                 raw = reply.get("raw") if isinstance(reply, dict) and "raw" in reply else reply
@@ -1907,11 +1913,7 @@ class ReportComposer:
                             model=self.model_label,
                             call="report section",
                         )
-                        from maljan.pipeline.events import announce_model_fallback
-
-                        announce_model_fallback(
-                            getattr(self, "event_sink", None), raw, agent="reporter", stage="report"
-                        )
+                        self._announce_fallback(raw)
                     except Exception as exc:  # noqa: BLE001
                         # nosemgrep: python.lang.security.audit.logging.logger-credential-leak.python-logger-credential-disclosure — record_response_usage() swallows its own exceptions, so exc here is only an import/attribute error  # noqa: E501
                         logger.debug("ReportComposer: token usage not recorded (%s).", exc)
@@ -2037,6 +2039,8 @@ class ReportComposer:
             on_feedback=_on_feedback,
             drop_answer_for=frozenset({SECTION_CUT_CODE}),
             can_retry=_fits,
+            # Only a kept structured answer's retry offers the schema's tool again.
+            reply_to_calls=kept is not None,
         )
         self._tally().retries += retries
         self._tally().count(violations)
@@ -2122,6 +2126,14 @@ class ReportComposer:
             asked=False,
         )
         return schema.model_validate(payload)
+
+    def _announce_fallback(self, answer: Any) -> None:
+        """Publish ``model_fallback`` when ``answer`` is the one the model list moved on for."""
+        from maljan.pipeline.events import announce_model_fallback
+
+        announce_model_fallback(
+            getattr(self, "event_sink", None), answer, agent="reporter", stage="report"
+        )
 
     def _note_degradation(self, reason: str) -> None:
         """One sentence about what this report lost, once.
@@ -2267,9 +2279,18 @@ def _section_text_envelope(payload: Any, schema: type[BaseModel], section: str) 
 
 
 def _message_text(msg: Any) -> str:
+    """What one turn puts in a request, for its size: its text and its tool calls' arguments.
+
+    A call goes back with its reply on a retry (``validation._answered_call``),
+    and its arguments then take room in the window and count against the spend.
+    """
+    import json
+
     from maljan.llm.answer_text import answer_text
 
-    return answer_text(getattr(msg, "content", msg))
+    text = answer_text(getattr(msg, "content", msg))
+    calls = [call for call in getattr(msg, "tool_calls", None) or [] if isinstance(call, dict)]
+    return text + "".join(json.dumps(call.get("args"), ensure_ascii=False) for call in calls)
 
 
 def _has_content(model: BaseModel) -> bool:
