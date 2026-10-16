@@ -319,11 +319,15 @@ its Sigma rows say "level not recorded", draw no dots, take no part in the
 sort, and show the layer's confidence — set from the rule's maturity status —
 as the number it is. Nothing reads a confidence as a severity.
 
-A generated YARA rule's card on DETECTION says what running it against the
-sample it was drafted from found: "matches its sample", "does not match its
-sample" (in the compile error's red) or "not run on its sample", with the
-report's own §10.2 sentence under the rule — each string found at its first
-offset, the strings found nowhere, or why the rule was not run
+A generated YARA rule's card on DETECTION says what checking it against the
+sample it was drafted from found, read from the clauses the engine recorded
+(`matched_by`) and never from a threshold worked out again: "its strings match
+its sample" in green, "matches its sample by hash only" in amber (the draft
+carries the sample's own sha256, so this is what a rule whose strings do not
+match says), "does not match its sample" in the compile error's red, or "not
+run on its sample", muted. The report's own §10.2 sentence is under the rule:
+which clauses held, each string found at its first offset, the strings found
+nowhere, or why the rule was not checked
 (`apps/web/src/components/analysis/sampleMatch.ts`). A Sigma or Suricata draft,
 and a rule stored before the check, carries no such badge.
 

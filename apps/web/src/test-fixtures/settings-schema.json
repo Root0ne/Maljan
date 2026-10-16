@@ -5325,11 +5325,7 @@
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
-     "applies_when": {
-      "core.static.provider": [
-       "capa_yara"
-      ]
-     },
+     "applies_when": null,
      "builtin_agent_keys": null,
      "builtin_servers": null,
      "capability_servers": null,

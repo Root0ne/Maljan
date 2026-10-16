@@ -1972,10 +1972,17 @@ ANNOTATIONS.update(
             "probe": "capa_yara",
             "subgroup": "Rules",
         },
+        # Shown under every provider: the check it bounds runs on every job that
+        # drafts detection rules, whichever static provider is selected.
         "static.yara.timeout_seconds": {
             "title": "YARA timeout (s)",
-            "description": "Wall-clock budget for one YARA scan of the sample.",
-            "applies_when": _STATIC_CAPA_YARA,
+            "description": (
+                "Wall-clock budget for checking the drafted YARA rule against the sample "
+                "it was drafted from (report §10.2); a check that runs past it is reported "
+                "as not checked. It is also one of the two values whose longer is the "
+                "per-call budget of a tool server that declares none. The capa_yara "
+                "provider's own scan does not read it."
+            ),
             "subgroup": "Rules",
         },
         "sandbox.cape2.base_url": {

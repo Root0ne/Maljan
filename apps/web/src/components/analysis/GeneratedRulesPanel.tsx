@@ -23,12 +23,20 @@ const KIND_MIME: Record<DetectionKind, string> = {
   suricata: "text/plain",
   snort: "text/plain",
 };
-/* A rule that does not match the sample it was drafted from is drawn in the
- * compile error's red; one that was not run, muted. */
+/* Green when the rule's strings match the sample it was drafted from, amber
+ * when only a hash clause does, the compile error's red when nothing does,
+ * muted when it was not checked. */
 const SAMPLE_TONE: Record<SampleMatchTone, string> = {
-  matches: "bg-status-green/10 text-status-green",
+  strings: "bg-status-green/10 text-status-green",
+  hash: "bg-status-orange/10 text-status-orange",
   misses: "bg-status-red/10 text-status-red",
-  unchecked: "bg-bg-active text-text-muted",
+  neutral: "bg-bg-active text-text-muted",
+};
+const SAMPLE_FOOTER: Record<SampleMatchTone, string> = {
+  strings: "text-text-secondary",
+  hash: "text-status-orange",
+  misses: "text-status-red bg-status-red/5",
+  neutral: "text-text-secondary",
 };
 
 export default function GeneratedRulesPanel() {
@@ -214,11 +222,7 @@ function RuleCard({ rule }: { rule: DetectionRule }) {
         </div>
       )}
       {sample && (
-        <div
-          className={`px-4 py-2 border-t border-border text-[11px] ${
-            sample.tone === "misses" ? "text-status-red bg-status-red/5" : "text-text-secondary"
-          }`}
-        >
+        <div className={`px-4 py-2 border-t border-border text-[11px] ${SAMPLE_FOOTER[sample.tone]}`}>
           {sample.detail}
         </div>
       )}

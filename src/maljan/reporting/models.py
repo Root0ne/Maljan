@@ -766,6 +766,11 @@ class SampleString(BaseModel):
     offset: int | None = None
 
 
+# The clauses of a drafted YARA rule's condition, in the order the draft writes
+# them: the sample's sha256, its import hash, and the rule's strings.
+RuleClause = Literal["sha256", "imphash", "strings"]
+
+
 class DetectionRule(BaseModel):
     """Auto-generated detection content with the body kept as plain text."""
 
@@ -777,12 +782,17 @@ class DetectionRule(BaseModel):
     auto_generated: bool = True
     source_evidence: list[str] = Field(default_factory=list)
     compile_error: str | None = None  # only set when template validation fails
-    # A drafted YARA rule run against the sample it was drafted from
-    # (``reporting.detection_signatures``): whether the rule matched it, each of
-    # the rule's strings with where the engine first found it, or why the rule
-    # was not run. Absent on a Sigma or Suricata draft, which no engine runs on
-    # a file, and on a rule stored before the check, which renders as it did.
+    # A drafted YARA rule checked against the sample it was drafted from
+    # (``reporting.detection_signatures``): whether the rule matched it, which
+    # clauses of its condition held (the engine's answer, in the draft's order;
+    # empty when none did), each of the rule's strings with where the engine
+    # first found it, or why the rule was not checked. Absent on a Sigma or
+    # Suricata draft, which no engine runs on a file, and on a rule stored
+    # before the check, which renders as it did.
     matches_sample: bool | None = Field(default=None, exclude_if=lambda value: value is None)
+    matched_by: list[RuleClause] | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
     sample_strings: list[SampleString] | None = Field(
         default=None, exclude_if=lambda value: value is None
     )
