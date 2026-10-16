@@ -18,6 +18,7 @@ from unittest.mock import AsyncMock, patch
 import pytest
 from pydantic import BaseModel, SecretStr
 
+from maljan.core import plugins
 from maljan.core.config import Settings
 from maljan.core.exceptions import MemoryStoreError
 from maljan.memory import store_factory
@@ -101,10 +102,20 @@ def _fake_qdrant(monkeypatch: pytest.MonkeyPatch) -> Iterator[type[_FakeQdrant]]
     _FakeQdrant.down = False
     _FakeQdrant.seed = {}
     monkeypatch.setattr("qdrant_client.QdrantClient", _FakeQdrant)
-    monkeypatch.setattr(store_factory, "_UNAVAILABLE", {})
+    # This process's plugin state, fresh: no plugin allowed, none tried.
+    monkeypatch.setattr(plugins, "_STATE", plugins._ProcessState())
     store_factory.forget_built_stores()
     yield _FakeQdrant
     store_factory.forget_built_stores()
+
+
+def _installed(monkeypatch: pytest.MonkeyPatch, *points: Any) -> None:
+    """``points`` are the installed memory plugins' entry points, as package metadata lists them."""
+    monkeypatch.setattr(
+        plugins,
+        "_entry_points",
+        lambda group: list(points) if group == store_factory.ENTRY_POINT_GROUP else [],
+    )
 
 
 class _ThirdSettings(BaseModel):
@@ -375,8 +386,11 @@ class TestHealthProbesTheConfiguredBackend:
         async def _ok() -> None:
             return None
 
+        # The stored plugin allow-list is the one the test put in force.
+        stored = sorted(plugins.allow_list())
         with (
             patch.object(runtime_config, "core", AsyncMock(return_value=settings)),
+            patch.object(runtime_config, "stored_value", AsyncMock(return_value=stored)),
             patch.object(main_mod, "_probe_database", _ok),
             patch.object(main_mod, "_probe_redis", _ok),
             patch.object(main_mod, "_probe_minio", _ok),
@@ -564,28 +578,31 @@ class TestABackendIsSelectedAndConfiguredThroughTheSettings:
         assert entry.type == "enum"
         assert entry.choices == list(store_factory.memory_backends())
 
-    def test_an_installed_package_registers_through_its_entry_point(self, monkeypatch: Any) -> None:
+    def test_an_installed_package_registers_through_its_entry_point_once_allowed(
+        self, monkeypatch: Any
+    ) -> None:
         def _register() -> None:
             store_factory.register_memory_backend("packaged", lambda _m: InMemoryStore())
 
-        point = SimpleNamespace(name="packaged", load=lambda: _register)
-        monkeypatch.setattr(store_factory, "entry_points", lambda group: [point])
-        monkeypatch.setattr(store_factory, "_entry_points_loaded", False)
+        _installed(monkeypatch, SimpleNamespace(name="packaged", load=lambda: _register))
         try:
+            assert "packaged" not in store_factory.memory_backends()
+            plugins.load_allowed(["memory:packaged"])
             assert "packaged" in store_factory.memory_backends()
             cfg = Settings(_env_file=None, memory={"backend": "packaged"})
             assert isinstance(store_factory.build_memory_store(cfg), InMemoryStore)
         finally:
-            store_factory._BACKENDS.pop("packaged", None)
+            plugins.load_allowed([])
+        assert "packaged" not in store_factory.memory_backends()
 
     def test_a_broken_entry_point_leaves_the_others_registered(self, monkeypatch: Any) -> None:
         def _boom() -> None:
             raise RuntimeError("broken package")
 
-        point = SimpleNamespace(name="broken", load=lambda: _boom)
-        monkeypatch.setattr(store_factory, "entry_points", lambda group: [point])
-        monkeypatch.setattr(store_factory, "_entry_points_loaded", False)
+        _installed(monkeypatch, SimpleNamespace(name="broken", load=lambda: _boom))
+        plugins.load_allowed(["memory:broken"])
         assert {"memory", "qdrant"} <= set(store_factory.memory_backends())
+        assert store_factory.unavailable_backends() == {"broken": "RuntimeError: broken package"}
 
 
 class TestTheOldFlatKeysAreStillRead:
@@ -793,10 +810,9 @@ class TestABrokenPackageBackendNeverStopsTheSettings:
         def _boom() -> None:
             raise ImportError("vectorhub_client is not installed")
 
-        point = SimpleNamespace(name="vectorhub", load=lambda: _boom)
-        monkeypatch.setattr(store_factory, "entry_points", lambda group: [point])
-        monkeypatch.setattr(store_factory, "_entry_points_loaded", False)
-        monkeypatch.setattr(store_factory, "_UNAVAILABLE", {})
+        _installed(monkeypatch, SimpleNamespace(name="vectorhub", load=lambda: _boom))
+        plugins.install_allow_list(["memory:vectorhub"])
+        plugins.load_allowed(["memory:vectorhub"])
         return Settings(_env_file=None, memory={"backend": "vectorhub", "top_k": 5})
 
     def test_the_settings_load_with_the_rest_intact(self, broken: Any) -> None:
@@ -988,18 +1004,29 @@ class TestHoldsAreNeverLost:
 
 
 class TestABrokenPackageWithAnotherEntryPointName:
-    def test_the_selected_id_is_unavailable_with_the_failure(self, monkeypatch: Any) -> None:
+    def test_its_failure_is_its_own_and_the_selected_id_names_the_installed_plugins(
+        self, monkeypatch: Any
+    ) -> None:
+        """A plugin is known by its entry point's name, the one id it may register."""
+
         def _boom() -> None:
             raise ImportError("vectorhub_client is not installed")
 
-        point = SimpleNamespace(name="vectorhub-plugin", load=lambda: _boom)
-        monkeypatch.setattr(store_factory, "entry_points", lambda group: [point])
-        monkeypatch.setattr(store_factory, "_entry_points_loaded", False)
-        monkeypatch.setattr(store_factory, "_UNAVAILABLE", {})
+        _installed(monkeypatch, SimpleNamespace(name="vectorhub-plugin", load=lambda: _boom))
+        plugins.install_allow_list(["memory:vectorhub-plugin"])
+        plugins.load_allowed(["memory:vectorhub-plugin"])
         cfg = Settings(_env_file=None, memory={"backend": "vectorhub"})
+        assert store_factory.unavailable_backends() == {
+            "vectorhub-plugin": "ImportError: vectorhub_client is not installed"
+        }
+        with pytest.raises(store_factory.MemoryBackendNotConfiguredError) as missing:
+            store_factory.build_memory_store(cfg)
+        assert missing.value.unavailable is True
+        assert "the installed memory plugins are vectorhub-plugin" in missing.value.reason
+        assert "must be the backend id it registers" in missing.value.reason
         component = TestHealthProbesTheConfiguredBackend._memory_component(cfg)
         assert component["ok"] is False and component["detail"] == "unavailable"
-        assert "vectorhub_client is not installed" in component["error"]
+        assert "vectorhub-plugin" in component["error"]
 
     def test_with_no_failed_package_an_unknown_id_is_not_configured(self) -> None:
         cfg = Settings(_env_file=None, memory={"backend": "vectorhub"})

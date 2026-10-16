@@ -41,7 +41,13 @@ class Annotation(TypedDict):
     ]
     editor: NotRequired[
         Literal[
-            "server_map", "rest_sandbox", "agent_definitions", "stages", "tool_facts", "pack_steps"
+            "server_map",
+            "rest_sandbox",
+            "agent_definitions",
+            "stages",
+            "tool_facts",
+            "pack_steps",
+            "plugin_allow_list",
         ]
     ]
     subgroup: NotRequired[str]  # heading inside the group; absent = top of the group
@@ -102,6 +108,7 @@ GROUP_ORDER: list[tuple[str, str]] = [
     ("events", "Live events"),
     ("tracing", "Tracing"),
     ("enrichment", "Enrichment / threat intelligence"),
+    ("plugins", "Provider plugins"),
     ("api", "API"),
     ("system", "Deployment (read-only)"),
 ]
@@ -137,6 +144,10 @@ GROUP_DESCRIPTIONS: dict[str, str] = {
     ),
     "tracing": "LangSmith tracing of every model call.",
     "enrichment": "Threat-intelligence lookups for the indicators a report names.",
+    "plugins": (
+        "Providers that installed packages add, and which of them this deployment loads; "
+        "none is loaded until it is allowed here."
+    ),
     "api": "Request limits and login protection of the HTTP API; changes take effect immediately.",
     "system": "Set in the process environment when the service starts; changed by redeploying.",
 }
@@ -157,6 +168,7 @@ _PREFIX_GROUPS: list[tuple[str, str]] = [
     ("triage", "analysis"),
     ("validation", "analysis"),
     ("events", "events"),
+    ("plugins", "plugins"),
     ("static", "static"),
     ("mcp", "mcp"),
     ("reporting", "reporting"),
@@ -937,6 +949,19 @@ ANNOTATIONS: dict[str, Annotation] = {
             "existing setups using the flat env var keep working."
         ),
         "advanced": True,
+    },
+    "plugins.allowed": {
+        "title": "Allowed plugins",
+        "description": (
+            "The installed provider plugins this deployment loads, each named <kind>:<name>: "
+            "the kind (llm, static, sandbox or memory) and the name of the plugin's entry "
+            "point, which is the provider id it adds. Empty, the default, loads none, whatever "
+            "is installed. Allowing a plugin runs its package's code in the API and the "
+            "workers, with their access to the settings, the samples and the network. The "
+            "list names every installed plugin with its package, its version and whether it "
+            "loaded; a plugin that fails to load is left out with the reason."
+        ),
+        "editor": "plugin_allow_list",
     },
     "preprocessing.api_attck_map_path": {
         "title": "API-to-ATT&CK map path",

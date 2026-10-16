@@ -151,6 +151,26 @@ itself (`LANGSMITH_TRACING`, `LANGCHAIN_TRACING_V2` and their kin) is warned
 about at each job with the setting off, and the Disclosure block reads the
 effective state, so it says tracing is on.
 
+## Provider plugins
+
+An installed package can add an LLM, static, sandbox or memory provider through
+an entry point, but nothing of it runs until an administrator names it in the
+plugin allow-list (`plugins.allowed`), which is empty by default. Listing the
+installed plugins, judging a saved provider id and offering the provider
+choices read package metadata only, and so do the settings pages and a save,
+import or reset that writes no plugin's own settings. Allowing one runs its
+package's code in the workers and the command line, and in the API where it
+runs that plugin's own code (a save or import that writes its own settings
+block, its connection test, the memory purge and deep health check of a
+selected plugin backend), with everything they can reach: the settings and
+their credentials, the samples, the database and the network. The list holds
+names only, never a module or a path; a change needs an administrator and is
+logged with who made it. The loader never registers a plugin under a built-in
+provider's id and refuses a registration a plugin makes while it loads under
+any name but its own; an allowed plugin's own code is not confined by that and
+could still change a registry. See the configuration guide's "Provider
+plugins".
+
 ## What the VirusTotal server sends
 
 The `virustotal` tool server is off until an operator registers an agent token,

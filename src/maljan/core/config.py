@@ -57,6 +57,13 @@ from maljan.core.pack_steps import (
     written_for,
 )
 from maljan.core.platform_secrets import platform_secrets_refusal
+from maljan.core.plugins import (
+    PluginsConfig,
+    id_refusal,
+    install_allow_list,
+    shipped_ids,
+    unloaded_plugin,
+)
 from maljan.core.report_formats import (
     READER_ID_PATTERN,
     ReportFormat,
@@ -374,7 +381,11 @@ class ModelChoice(BaseModel):
         if self.base_url:
             from maljan.llm.provider_base import facts_of, provider_names
 
-            if not facts_of(self.provider).supports_agent_base_url:
+            # An installed plugin this process has not loaded keeps its facts
+            # in its own code: checked where it is loaded (the worker).
+            if not facts_of(self.provider).supports_agent_base_url and not unloaded_plugin(
+                "llm", self.provider
+            ):
                 supported = " and ".join(
                     f"'{name}'"
                     for name in provider_names()
@@ -402,16 +413,19 @@ class ModelChoice(BaseModel):
             return self
         from maljan.llm.provider_base import effort_providers, facts_of
 
-        facts = facts_of(self.provider)
-        if not facts.effort_setting:
-            supported = " and ".join(f"'{p}'" for p in effort_providers())
-            raise ValueError(
-                f"effort is only supported for the {supported} providers, "
-                f"not '{self.provider}'; that provider sends no reasoning effort."
-            )
-        refusal = facts.effort_refusal(self.effort)
-        if refusal:
-            raise ValueError(refusal)
+        # An installed plugin this process has not loaded keeps its effort
+        # levels in its own code: checked where it is loaded (the worker).
+        if not unloaded_plugin("llm", self.provider):
+            facts = facts_of(self.provider)
+            if not facts.effort_setting:
+                supported = " and ".join(f"'{p}'" for p in effort_providers())
+                raise ValueError(
+                    f"effort is only supported for the {supported} providers, "
+                    f"not '{self.provider}'; that provider sends no reasoning effort."
+                )
+            refusal = facts.effort_refusal(self.effort)
+            if refusal:
+                raise ValueError(refusal)
         # A probe of this model is filed under the model and its effort
         # together; a spelling wider than the column that holds it could never
         # be filed, and the gate would call the model unprobed with no reason.
@@ -4327,6 +4341,8 @@ class Settings(BaseSettings):
     # Which analysts exist, in what order, and what each one gets. The
     # ``default`` profile is the architecture this project measured itself on.
     agents: AgentsConfig = Field(default_factory=AgentsConfig)
+    # The installed provider plugins this deployment loads; none by default.
+    plugins: PluginsConfig = Field(default_factory=PluginsConfig)
 
     @classmethod
     def settings_customise_sources(
@@ -4505,16 +4521,17 @@ class Settings(BaseSettings):
         PATCH that adds a server *and* an agent that uses it validate as one
         unit instead of failing on whichever half pydantic built first.
         """
-        from maljan.providers.registry import static_provider_ids
-
-        provider_ids = set(static_provider_ids())
         for key, definition in self.agents.definitions.items():
             if definition.static_provider is not None:
-                if definition.static_provider not in provider_ids:
-                    available = ", ".join(sorted(provider_ids))
+                # A shipped id, or an installed plugin these settings' own
+                # allow-list names, read from package metadata: never what
+                # this process happens to have loaded.
+                refused = id_refusal("static", definition.static_provider, self.plugins.allowed)
+                if refused:
+                    available = ", ".join(sorted(shipped_ids("static")))
                     raise ValueError(
                         f"{key!r}: unknown static provider "
-                        f"{definition.static_provider!r}. Available: {available}"
+                        f"{definition.static_provider!r}. Available: {available}; {refused}"
                     )
             for ref in definition.tools:
                 if ref.kind != "mcp":
@@ -4670,6 +4687,11 @@ def install_settings(instance: Settings) -> None:
     """
     global _settings_instance
     _settings_instance = instance
+    # Its plugin allow-list is the one this process judges a provider id by
+    # when a check is handed none; loading follows only an explicit list.
+    plugins = getattr(instance, "plugins", None)
+    if plugins is not None:
+        install_allow_list(getattr(plugins, "allowed", None))
 
 
 class _LazySettingsProxy:

@@ -13,6 +13,7 @@ import AgentDefinitionsEditor, {
   type LlmGlobalFallback,
 } from "./AgentDefinitionsEditor";
 import StagesEditor from "./StagesEditor";
+import PluginAllowListEditor from "./PluginAllowListEditor";
 import ServerMapEditor from "./ServerMapEditor";
 import ToolFactsLeafEditor from "./ToolFactsLeafEditor";
 import PackStepsEditor from "./PackStepsEditor";
@@ -221,6 +222,13 @@ export default function FieldRow({
             staged={staged}
             errors={errors ?? {}}
             servers={servers ?? {}}
+            onChange={onChange}
+          />
+        ) : entry.editor === "plugin_allow_list" ? (
+          <PluginAllowListEditor
+            entry={entry}
+            current={current}
+            staged={staged}
             onChange={onChange}
           />
         ) : entry.editor === "stages" ? (

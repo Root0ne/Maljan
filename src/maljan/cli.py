@@ -7,14 +7,15 @@ It does not mutate global settings or know about internal architecture.
 import asyncio
 import json
 from pathlib import Path
-from typing import Any, cast, get_args
+from typing import Any, cast
 
 import typer
 
 from maljan.analysis.run_summary import NOT_APPLICABLE_SENTENCE
 from maljan.app import MaljanApp
-from maljan.core.config import LLMConfig, Settings
+from maljan.core.config import Settings
 from maljan.core.logger import logger
+from maljan.core.plugins import id_refusal, install_allow_list, load_allowed, shipped_ids
 from maljan.memory.long_term_memory import MemoryStore
 
 app = typer.Typer(
@@ -22,6 +23,18 @@ app = typer.Typer(
     help="Multi-Agent Malware Analysis Pipeline powered by LangGraph.",
     no_args_is_help=True,
 )
+
+
+def _settings() -> Settings:
+    """The command line's settings, read after the plugins their allow-list names are loaded.
+
+    As the worker does: the list is read, its plugins loaded, and the settings
+    read again, so a plugin's own block is read with its model.
+    """
+    allowed = Settings().plugins.allowed
+    install_allow_list(allowed)
+    load_allowed(allowed)
+    return Settings()
 
 
 @app.command()
@@ -57,11 +70,14 @@ def analyze(
     """Run the full malware analysis pipeline on a sample."""
 
     # Build config at construction time — no post-init mutation
-    config = Settings()
+    config = _settings()
     if not mock:
-        allowed = get_args(LLMConfig.model_fields["provider"].annotation)
-        if provider not in allowed:
-            raise typer.BadParameter(f"provider must be one of {', '.join(allowed)}")
+        # The same judgement a save and a job make: a shipped id, or an
+        # installed plugin these settings' allow-list names.
+        refused = id_refusal("llm", provider, config.plugins.allowed)
+        if refused:
+            known = ", ".join(shipped_ids("llm"))
+            raise typer.BadParameter(f"provider must be one of {known}; {refused}")
         config.llm.provider = cast(Any, provider)
     config.negotiation.max_iterations = max_iterations
 
@@ -304,11 +320,10 @@ def _release(maljan_app: MaljanApp | None) -> None:
 @app.command()
 def info() -> None:
     """Show current configuration and registered components."""
-    from maljan.core.config import get_settings
     from maljan.core.container import ServiceContainer
     from maljan.parsers.registry import ParserRegistry
 
-    config = get_settings()
+    config = _settings()
     container = ServiceContainer(config, mock=True)
     parser_reg = ParserRegistry()
 
@@ -338,7 +353,7 @@ def _build_memory_store_cli() -> MemoryStore:
     """
     from maljan.memory.store_factory import build_memory_store
 
-    return build_memory_store(Settings())
+    return build_memory_store(_settings())
 
 
 @memory_app.command("stats")

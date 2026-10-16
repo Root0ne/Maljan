@@ -26,7 +26,14 @@ export type ChoicesFrom =
   | "memory_backends"
   | "sandbox_report_readers";
 
-export type Editor = "server_map" | "rest_sandbox" | "agent_definitions" | "stages" | "tool_facts" | "pack_steps";
+export type Editor =
+  | "server_map"
+  | "rest_sandbox"
+  | "agent_definitions"
+  | "stages"
+  | "tool_facts"
+  | "pack_steps"
+  | "plugin_allow_list";
 
 export interface CatalogEntry {
   key: string;
@@ -799,6 +806,44 @@ export interface AttckUpdateProgress {
   job_id: string;
   state: "queued" | "running" | "done" | "unknown";
   result: AttckUpdateResult | null;
+}
+
+/** What the metadata says of one installed plugin in every process: refused
+ *  (with `error`), allowed by the stored list, or not allowed. */
+export type PluginState = "refused" | "allowed" | "not_allowed";
+
+/** The API process's own load of a plugin, where it ran the plugin's code;
+ *  empty when it never loaded it. A worker's load is in that worker's log. */
+export type PluginApiState = "" | "loaded" | "failed" | "refused" | "absent";
+
+/** One installed provider plugin, read from its package's metadata. */
+export interface InstalledPlugin {
+  name: string;
+  /** The plugin as the allow-list writes it: `<kind>:<name>`. */
+  entry: string;
+  distribution: string;
+  version: string;
+  /** Whether the stored allow-list names it. */
+  allowed: boolean;
+  state: PluginState;
+  error: string;
+  api_state: PluginApiState;
+  api_error: string;
+}
+
+export interface PluginKind {
+  kind: "llm" | "static" | "sandbox" | "memory";
+  group: string;
+  title: string;
+  plugins: InstalledPlugin[];
+  /** Names the stored allow-list holds for this kind that no installed package declares. */
+  allowed_absent: string[];
+}
+
+/** `GET /settings/plugins`: every installed provider plugin per kind. */
+export interface PluginsListing {
+  allow_list_key: string;
+  kinds: PluginKind[];
 }
 
 export class SettingsValidationError extends Error {

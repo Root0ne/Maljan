@@ -160,14 +160,18 @@ def build_job_settings(
     """
     merged = dict(overrides)
     if job_config:
-        from app.schemas.job import _KnownJobConfig
+        from maljan.core.plugins import ALLOW_LIST_PATH
 
+        from app.schemas.job import PLUGINS_ALLOWED_CONTEXT, _KnownJobConfig
+
+        # Judged by the allow-list these settings carry, as the save was.
         _KnownJobConfig.model_validate(
             {
                 key: job_config[key]
                 for key in ("llm_provider", "static_provider", "sandbox_provider")
                 if job_config.get(key) is not None
-            }
+            },
+            context={PLUGINS_ALLOWED_CONTEXT: overrides.get(ALLOW_LIST_PATH) or []},
         )
         if job_config.get("max_iterations") is not None:
             merged["negotiation.max_iterations"] = job_config["max_iterations"]
@@ -209,6 +213,20 @@ class JobSettingsRefused(ValueError):
     def __init__(self, refused: Mapping[str, str]) -> None:
         self.refused = dict(refused)
         super().__init__("; ".join(f"{key}: {why}" for key, why in self.refused.items()))
+
+
+def take_the_job_plugin_set(overrides: Mapping[str, Any]) -> None:
+    """Load the provider plugins the job's own stored settings allow, and withdraw the rest.
+
+    Run as a job starts, before its settings are built, so a plugin's own
+    settings block is read with its model; nothing after this changes the
+    registries until the next job starts. A store read while the job runs (a
+    runtime setting, an enrichment) loads and withdraws nothing, so a list
+    saved meanwhile applies to the next job, as every other setting does.
+    """
+    from maljan.core.plugins import ALLOW_LIST_PATH, load_allowed
+
+    load_allowed(overrides.get(ALLOW_LIST_PATH))
 
 
 def retired_environment_lines(environ: Mapping[str, str]) -> list[str]:
@@ -263,6 +281,30 @@ def mirror_lines(core: Any) -> list[str]:
             f"and is handed it as {path_in_server(spec, host)}."
         )
     return lines
+
+
+async def load_the_allowed_plugins(session_factory: Any) -> None:
+    """Load the provider plugins the stored allow-list names, saying each load or failure.
+
+    At start, off the event loop, so a plugin that fails is named in this
+    worker's log before any job; each job then loads by the list its own
+    settings carry (``take_the_job_plugin_set``). A store that cannot be read
+    leaves that to the first job, and the start goes on.
+    """
+    from maljan.core.plugins import ALLOW_LIST_PATH, load_allowed
+
+    from app.services.settings_service import load_core_overrides
+
+    try:
+        async with session_factory() as db:
+            overrides = await load_core_overrides(db)
+        await asyncio.to_thread(load_allowed, overrides.get(ALLOW_LIST_PATH))
+    except Exception as exc:  # noqa: BLE001 - the start never stops on a plugin
+        logger.warning(
+            "The allowed provider plugins were not loaded at start (%s); the first job loads them.",
+            type(exc).__name__,
+            extra={"component": "worker.lifecycle"},
+        )
 
 
 async def state_the_mirrors(session_factory: Any) -> None:
@@ -2410,6 +2452,10 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
 
         from maljan.core.config import install_settings
 
+        # The plugin set this job runs with: the stored list read with its
+        # settings, loaded off the event loop before the settings are built.
+        await asyncio.to_thread(take_the_job_plugin_set, overrides)
+
         # Settings the model refuses fail the job, loudly and before any
         # pipeline starts. This used to retry on all shipped defaults, which
         # put a less safe value (no spend cap, the shipped server map, no
@@ -3836,6 +3882,7 @@ async def startup(ctx: dict) -> None:
         max_overflow=10,
     )
     ctx["db_session"] = async_sessionmaker(engine, expire_on_commit=False)
+    await load_the_allowed_plugins(ctx["db_session"])
     await state_the_mirrors(ctx["db_session"])
 
     # Store a Redis connection for PubSub

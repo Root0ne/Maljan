@@ -4,16 +4,28 @@ import uuid
 from datetime import datetime
 from typing import Annotated, Any
 
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, Field, ValidationInfo, field_validator, model_validator
 
 # ── Job Schemas ──────────────────────────────────────────────────
 
+# The validation context key a caller hands the plugin allow-list to judge
+# by: the worker, its job's own; the submit route hands none, and the stored
+# list this process last read is used.
+PLUGINS_ALLOWED_CONTEXT = "plugins_allowed"
 
-def _registered(value: str | None, known: list[str], field: str) -> str | None:
-    """``value`` when its registry holds it; refused with the registered names otherwise."""
-    if value is None or value in known:
+
+def _registered(value: str | None, field: str, kind: str, info: ValidationInfo) -> str | None:
+    """``value`` when it is a shipped id or an installed plugin of ``kind`` the allow-list
+    names, read from package metadata; refused with the shipped ids otherwise."""
+    from maljan.core.plugins import id_refusal, shipped_ids
+
+    if value is None:
         return value
-    raise ValueError(f"{field} must be one of: {', '.join(known)}")
+    context = info.context if isinstance(info.context, dict) else {}
+    refused = id_refusal(kind, value, context.get(PLUGINS_ALLOWED_CONTEXT))
+    if not refused:
+        return value
+    raise ValueError(f"{field} must be one of: {', '.join(shipped_ids(kind))}; {refused}")
 
 
 class _KnownJobConfig(BaseModel):
@@ -27,9 +39,10 @@ class _KnownJobConfig(BaseModel):
     model_config = {"extra": "allow"}
 
     max_iterations: Annotated[int, Field(ge=1)] | None = None
-    # The providers for this job, each a name its registry holds: a provider
-    # registered at runtime is accepted the day it is registered, and the
-    # registries are the one list of what a valid provider is.
+    # The providers for this job, each a name its registry holds (a provider
+    # registered at runtime is accepted the day it is registered) or an
+    # installed plugin the allow-list names, read from package metadata
+    # (``maljan.core.plugins.id_refusal``).
     llm_provider: str | None = None
     mock_mode: bool | None = None
     static_provider: str | None = None
@@ -44,10 +57,10 @@ class _KnownJobConfig(BaseModel):
 
     @field_validator("llm_provider")
     @classmethod
-    def _a_registered_llm_provider(cls, value: str | None) -> str | None:
-        from maljan.llm.provider_base import missing_block, provider_names
+    def _a_registered_llm_provider(cls, value: str | None, info: ValidationInfo) -> str | None:
+        from maljan.llm.provider_base import missing_block
 
-        value = _registered(value, provider_names(), "llm_provider")
+        value = _registered(value, "llm_provider", "llm", info)
         # A provider with no settings block of its own names no role model;
         # the job would run with none, so it is refused here.
         problem = missing_block(value) if value is not None else None
@@ -57,17 +70,13 @@ class _KnownJobConfig(BaseModel):
 
     @field_validator("static_provider")
     @classmethod
-    def _a_registered_static_provider(cls, value: str | None) -> str | None:
-        from maljan.providers.registry import static_provider_ids
-
-        return _registered(value, static_provider_ids(), "static_provider")
+    def _a_registered_static_provider(cls, value: str | None, info: ValidationInfo) -> str | None:
+        return _registered(value, "static_provider", "static", info)
 
     @field_validator("sandbox_provider")
     @classmethod
-    def _a_registered_sandbox_provider(cls, value: str | None) -> str | None:
-        from maljan.providers.registry import sandbox_provider_ids
-
-        return _registered(value, sandbox_provider_ids(), "sandbox_provider")
+    def _a_registered_sandbox_provider(cls, value: str | None, info: ValidationInfo) -> str | None:
+        return _registered(value, "sandbox_provider", "sandbox", info)
 
     @model_validator(mode="after")
     def _mock_mode_cannot_consume_an_uploaded_report(self) -> "_KnownJobConfig":

@@ -12,6 +12,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 from fastapi.responses import JSONResponse
 from maljan.core.model_assignments import endpoint_label
+from maljan.core.plugins import ALLOW_LIST_KEY
 from maljan.core.settings_annotations import (
     GROUP_DESCRIPTIONS,
     GROUP_ORDER,
@@ -47,6 +48,7 @@ from app.schemas.settings import (
     MappingPreviewResponse,
     PatchRequest,
     PatchResponse,
+    PluginsResponse,
     ProbeRequest,
     ProbeResponse,
     ResetResponse,
@@ -61,6 +63,13 @@ from app.schemas.settings import (
 from app.services import attck_cache, credential_bootstrap
 from app.services.audit import record as audit_record
 from app.services.mapping_preview import PREVIEW_MAX_BYTES, preview_mapping
+from app.services.plugins import (
+    load_written_blocks,
+    plugins_listing,
+    stored_block_entries,
+    unchanged_block_keys,
+    writes_a_plugin_block,
+)
 from app.services.report_formats_lock import (
     report_formats_serialised,
     touches_report_formats,
@@ -79,9 +88,11 @@ from app.services.settings_probes import (
 from app.services.settings_service import (
     SettingsService,
     SettingsValidationError,
+    cleared_plugin_block_keys,
     core_settings_cache,
     effective_core_settings,
     lenient_imported_declarations,
+    unknown_key_reason,
 )
 
 # The settings document an export writes and an import reads. In ``/2`` a
@@ -136,6 +147,9 @@ async def get_schema(
 
     profiles, agents = await _effective_agents(db)
     stored = await SettingsService(db).load_overrides()
+    # No plugin is loaded to serve the page: a plugin block this process has
+    # not read with its model is shown from its stored rows.
+    extra = await stored_block_entries(db)
     core = await load_core_overrides(db)
     refused: dict[str, str] = {}
     try:
@@ -158,6 +172,8 @@ async def get_schema(
         tool_facts_conflicts=refused_tool_changes(core),
         pack_steps_left_out=left_out,
         stored_values_refused={f"core.{key}": reason for key, reason in refused.items()},
+        plugins_allowed=stored.get(ALLOW_LIST_KEY),
+        extra_entries=extra,
     )
 
 
@@ -171,6 +187,8 @@ def served_schema(
     tool_facts_conflicts: dict[str, list[str]] | None = None,
     pack_steps_left_out: dict[str, str] | None = None,
     stored_values_refused: dict[str, str] | None = None,
+    plugins_allowed: Any = None,
+    extra_entries: list[Any] | None = None,
 ) -> SchemaResponse:
     """The settings schema as ``GET /settings/schema`` serves it for these choices.
 
@@ -184,12 +202,21 @@ def served_schema(
     ``pack_steps_left_out`` each stored triage pack step left out, with why
     (``pack_steps_left_out``), and ``stored_values_refused`` each stored
     value the model refuses, with why (``stored_settings``).
+    ``plugins_allowed`` is the stored plugin allow-list: each provider
+    selector offers the installed plugins it names, read from metadata.
+    ``extra_entries`` are the stored rows of plugin blocks this process has
+    not read with their models, shown as stored (``plugins.raw_block_entries``).
     """
     from app.services.credential_bootstrap import bootstrap_facts
     from app.services.enrichment_sources import source_facts
 
     by_group: dict[str, list[CatalogEntryDTO]] = {}
-    for e in resolved_catalog(servers, profiles=profiles, agents=agents):
+    for e in [
+        *resolved_catalog(
+            servers, profiles=profiles, agents=agents, plugins_allowed=plugins_allowed
+        ),
+        *(extra_entries or []),
+    ]:
         by_group.setdefault(e.group, []).append(CatalogEntryDTO(**e.to_dict()))
     groups = [
         GroupDTO(key=g, title=t, description=GROUP_DESCRIPTIONS.get(g, ""), entries=by_group[g])
@@ -233,8 +260,53 @@ def default_served_schema() -> SchemaResponse:
 async def get_values(
     _: User = Depends(require_admin), db: AsyncSession = Depends(get_db)
 ) -> ValuesResponse:
-    vals = await SettingsService(db).values()
+    vals = await SettingsService(db).values(extra=await stored_block_entries(db))
     return ValuesResponse(values={k: ValueDTO(**vars(v)) for k, v in vals.items()})
+
+
+@router.get("/plugins", response_model=PluginsResponse)
+async def list_plugins(
+    _: User = Depends(require_admin), db: AsyncSession = Depends(get_db)
+) -> PluginsResponse:
+    """Every installed provider plugin per kind, read from package metadata.
+
+    No plugin is imported to be listed, and nothing is loaded. Each names its
+    package and version, whether the stored allow-list names it, what its
+    metadata says of it, and the API process's own load result where the API
+    loaded it for itself; the worker logs its own.
+    """
+    return PluginsResponse(**await plugins_listing(db))
+
+
+async def _plugin_block_writes(
+    db: AsyncSession, changes: dict[str, Any]
+) -> tuple[dict[str, Any], dict[str, Any] | None]:
+    """Before a save or import: ``changes`` as it writes plugin blocks, and the plain rows read.
+
+    A key of an installed plugin's own block sent with the value stored for it
+    writes nothing, so it is left out, quietly, and no plugin is loaded for it
+    (``plugins.unchanged_block_keys``); a secret is never taken as sent back,
+    and no stored secret is decrypted here. A plugin whose block keys the
+    change does alter is loaded to read them with its own model: that plugin
+    alone, and never one the same change drops from the allow-list, nor for a
+    clear (``plugins.block_writes``). A change that touches no plugin block
+    reads nothing and loads nothing. Answers the stored rows that are not
+    secrets, ``None`` when it read none. Never fails the request: a store that
+    cannot be read here is read, and said, by the save.
+    """
+    if not writes_a_plugin_block(changes):
+        return changes, None
+    try:
+        rows = await SettingsService(db)._rows()
+    except Exception as exc:  # noqa: BLE001 — the save reads the store itself
+        logger.debug("The plugin allow-list was not read before the save (%s).", exc)
+        return changes, None
+    held = [(str(row.key), row.value, bool(row.is_secret)) for row in rows]
+    plain = {key: value for key, value, secret in held if not secret}
+    unchanged = unchanged_block_keys(changes, held)
+    written = {key: value for key, value in changes.items() if key not in unchanged}
+    await load_written_blocks(written, plain.get(ALLOW_LIST_KEY))
+    return written, plain
 
 
 @router.get("/context-window", response_model=ContextWindowResponse)
@@ -455,6 +527,9 @@ async def patch_values(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             content={"errors": {AGENT_MODELS_KEY: refusal_sentence(unprobed)}},
         )
+    # A plugin whose own block this save changes is loaded to read it; a block
+    # key sent back unchanged is no write, and the allow-list loads nothing.
+    changes, _stored = await _plugin_block_writes(db, changes)
     formats_written = touches_report_formats(changes)
     detects_before: dict[str, Any] | None = None
     try:
@@ -488,12 +563,23 @@ async def reset_group(
     group: str = Query(...),
     user: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
-) -> ResetResponse:
-    keys = [e.key for e in full_catalog() if e.group == group and e.editable]
+) -> ResetResponse | JSONResponse:
+    # A plugin block's stored rows go with their group, read as stored: a
+    # reset loads no plugin.
+    keys = [
+        e.key
+        for e in [*full_catalog(), *await stored_block_entries(db)]
+        if e.group == group and e.editable
+    ]
     if not keys:
         raise HTTPException(status.HTTP_404_NOT_FOUND, f"unknown group: {group}")
-    async with report_formats_serialised(db, needed=touches_report_formats(keys)):
-        removed = await SettingsService(db).reset(keys, user_id=user.id, ip=_client_ip(request))
+    try:
+        async with report_formats_serialised(db, needed=touches_report_formats(keys)):
+            removed = await SettingsService(db).reset(keys, user_id=user.id, ip=_client_ip(request))
+    except SettingsValidationError as exc:
+        return JSONResponse(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, content={"errors": exc.errors}
+        )
     runtime_config.invalidate()
     core_settings_cache.invalidate()
     return ResetResponse(reset=removed)
@@ -505,12 +591,19 @@ async def reset_key(
     request: Request,
     user: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
-) -> ResetResponse:
+) -> ResetResponse | JSONResponse:
     # A row whose key left the catalog (a later deploy renamed the field) must
     # still be removable, so the catalog check only decides between 404 and
     # an empty reset when nothing is stored either.
-    async with report_formats_serialised(db, needed=touches_report_formats([key])):
-        removed = await SettingsService(db).reset([key], user_id=user.id, ip=_client_ip(request))
+    try:
+        async with report_formats_serialised(db, needed=touches_report_formats([key])):
+            removed = await SettingsService(db).reset(
+                [key], user_id=user.id, ip=_client_ip(request)
+            )
+    except SettingsValidationError as exc:
+        return JSONResponse(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, content={"errors": exc.errors}
+        )
     if not removed and key not in catalog_index():
         raise HTTPException(status.HTTP_404_NOT_FOUND, f"unknown setting: {key}")
     runtime_config.invalidate()
@@ -621,10 +714,13 @@ async def export_values(
     _: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ) -> ExportResponse:
-    index = catalog_index()
+    # A plugin block this process has not read is exported as stored; an
+    # export loads no plugin.
+    extra = await stored_block_entries(db)
+    index = {**catalog_index(), **{entry.key: entry for entry in extra}}
     values: dict[str, Any] = {}
     secrets_omitted: list[str] = []
-    for key, info in (await SettingsService(db).values()).items():
+    for key, info in (await SettingsService(db).values(extra=extra)).items():
         if info.source != "ui":
             continue
         entry = index[key]
@@ -671,8 +767,17 @@ async def import_values(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             content={"errors": {"format": "unsupported format"}},
         )
+    # A plugin whose own block the document changes is loaded to read it,
+    # unless the document drops it from the allow-list. A block key sent back
+    # as stored, as an export writes it, is no write and loads nothing, so an
+    # unedited or list-edited export imports without loading a plugin.
+    values, stored = await _plugin_block_writes(db, _current_keys(body.values))
+    stored_allowed = stored.get(ALLOW_LIST_KEY) if stored is not None else None
+    leaves = values[ALLOW_LIST_KEY] if ALLOW_LIST_KEY in values else stored_allowed
     index = catalog_index()
-    values = _current_keys(body.values)
+    # A clear of a key in an unloaded plugin's block deletes its stored row,
+    # which the save does without the plugin's model.
+    cleared = set(cleared_plugin_block_keys(values, index))
     errors: dict[str, str] = {}
     for key in values:
         entry = index.get(key)
@@ -681,8 +786,10 @@ async def import_values(
                 f"retired setting with no effect ({RETIRED_SETTINGS[key]}); "
                 "delete this key from the file and import again"
             )
+        elif entry is None and key in cleared:
+            continue
         elif entry is None:
-            errors[key] = "unknown key"
+            errors[key] = unknown_key_reason(key, stored_allowed, "unknown key", leaves=leaves)
         elif not entry.editable:
             errors[key] = "read-only"
     if errors:
@@ -976,6 +1083,22 @@ async def test_agent(
     # The definition is resolved; the call to the model is not this
     # transaction's business and may take the whole probe budget.
     await end_read_transaction(db)
+    # The allowed model, static and sandbox plugins this agent runs on run
+    # their own code here: those alone, loaded off the event loop, waited for
+    # at most a connection test's budget.
+    from maljan.core.settings_overrides import split_key
+
+    from app.services.plugins import load_in_background, selected_plugins
+    from app.services.settings_probes import TIMEOUT
+
+    candidate = {
+        split_key(key)[1]: value
+        for key, value in {**stored, **body.values}.items()
+        if key.startswith("core.")
+    }
+    allowed = stored.get(ALLOW_LIST_KEY)
+    running = selected_plugins(candidate, allowed, ("llm", "static", "sandbox"), name)
+    await load_in_background(allowed, running, TIMEOUT)
     response = await _probe_response(run_agent_probe(name, body.values, stored))
     await _write_down_what_was_reached(db, (response.details or {}).get("completions") or [])
     await _record_the_probe(request, user, "agent", body, response, agent=name)

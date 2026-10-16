@@ -586,32 +586,55 @@ def full_catalog() -> list[CatalogEntry]:
     return sorted(core_catalog() + api_catalog(), key=lambda e: (order[e.group], e.order, e.path))
 
 
-@lru_cache(maxsize=1)
 def catalog_index() -> dict[str, CatalogEntry]:
+    """Every catalogue entry by key, read again once a plugin is loaded or withdrawn.
+
+    A loaded plugin can add settings of its own (an LLM provider's or a memory
+    backend's block), so the index is kept per state of the registries.
+    """
+    from maljan.core.plugins import registry_changes
+
+    return _catalog_index(registry_changes())
+
+
+@lru_cache(maxsize=1)
+def _catalog_index(_registries: int) -> dict[str, CatalogEntry]:
     return {e.key: e for e in full_catalog()}
 
 
 def _choice_sources(
-    servers: Iterable[str], profiles: Iterable[str], agents: Iterable[str]
+    servers: Iterable[str],
+    profiles: Iterable[str],
+    agents: Iterable[str],
+    plugins_allowed: Any = None,
 ) -> dict[str, list[str]]:
     """Every ``choices_from`` source, resolved once on the way out.
 
     The core catalog is a pure function of the models and cannot know which
     servers, profiles or agents exist right now; the web must not decide
-    either, or "what is a valid profile" has two answers.
+    either, or "what is a valid profile" has two answers. A provider source
+    offers the shipped ids, then each installed plugin of its kind that the
+    stored allow-list ``plugins_allowed`` names, read from package metadata:
+    never one because this process happens to have loaded it.
     """
+    from maljan.core.plugins import accepted_names, loaded_names
     from maljan.llm.provider_base import provider_names
     from maljan.memory.store_factory import memory_backends
     from maljan.providers.registry import sandbox_provider_ids, static_provider_ids
     from maljan.providers.sandbox.readers import choosable_reader_ids
+
+    def offered(kind: str, ids: Iterable[str]) -> list[str]:
+        plugin_ids = loaded_names(kind)
+        shipped = [i for i in ids if i not in plugin_ids]
+        return shipped + sorted(accepted_names(kind, plugins_allowed or []) - set(shipped))
 
     return {
         # Declared for completeness and for the agent definitions.
         # Neither provider selector uses them today: those two are enum leaves
         # whose choices already come from the settings Literal, in its own
         # order, and re-deriving them here would only re-sort the dropdown.
-        "static_providers": static_provider_ids(),
-        "sandbox_providers": sandbox_provider_ids(),
+        "static_providers": offered("static", static_provider_ids()),
+        "sandbox_providers": offered("sandbox", sandbox_provider_ids()),
         # The empty string is a real choice: it is how an operator says the
         # generic provider has no server yet.
         "mcp_servers": ["", *sorted(servers)],
@@ -619,8 +642,8 @@ def _choice_sources(
         # any agent an operator has defined (spec §2, role vocabulary).
         "agent_roles": list(agents),
         "profiles": list(profiles),
-        "memory_backends": list(memory_backends()),
-        "llm_providers": provider_names(),
+        "memory_backends": offered("memory", memory_backends()),
+        "llm_providers": offered("llm", provider_names()),
         "sandbox_report_readers": choosable_reader_ids(),
     }
 
@@ -630,6 +653,7 @@ def resolved_catalog(
     *,
     profiles: Iterable[str] = ("default",),
     agents: Iterable[str] = ("static", "dynamic", "network", "judge"),
+    plugins_allowed: Any = None,
 ) -> list[CatalogEntry]:
     """``full_catalog`` with every ``choices_from`` turned into real ``choices``.
 
@@ -646,7 +670,7 @@ def resolved_catalog(
     """
     from app.services.provider_facts import selector_choices, server_keys
 
-    sources = _choice_sources(servers, profiles, agents)
+    sources = _choice_sources(servers, profiles, agents, plugins_allowed)
     catalog = full_catalog()
     selectors = selector_choices([entry.key for entry in catalog])
     builtin, reserved = server_keys()

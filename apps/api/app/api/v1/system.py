@@ -292,12 +292,21 @@ async def _build_memory_store(db: AsyncSession) -> MemoryStore:
     reads and writes the UI-configured store, and purging another one would be
     destructive and silent.
     """
+    from maljan.core.plugins import ALLOW_LIST_PATH
     from maljan.core.settings_overrides import build_settings
     from maljan.memory.store_factory import build_memory_store
 
+    from app.services.plugins import load_in_background
+    from app.services.settings_probes import TIMEOUT
     from app.services.settings_service import load_core_overrides
 
-    return build_memory_store(build_settings(await load_core_overrides(db)))
+    overrides = await load_core_overrides(db)
+    # The selected backend, when it is an allowed plugin, is the code a purge
+    # runs: that plugin alone, loaded off the event loop, waited for at most a
+    # connection test's budget.
+    selected = str(overrides.get("memory.backend") or "").strip().lower()
+    await load_in_background(overrides.get(ALLOW_LIST_PATH), [f"memory:{selected}"], TIMEOUT)
+    return build_memory_store(build_settings(overrides))
 
 
 @router.post("/ltm/purge", response_model=LTMPurgeResponse)

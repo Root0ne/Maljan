@@ -313,6 +313,16 @@ would be keyed by, errors first, and each team laid out as nodes with a row
 and a column and edges between them. It stores nothing; its errors are the
 refusals `PATCH /settings` makes, in the same words. See
 [configuration.md](/configuration/).
+`GET /settings/plugins` (admin) answers every installed provider plugin per
+kind (`llm`, `static`, `sandbox`, `memory`) with its entry-point group: each
+plugin's name, its `entry` as the allow-list writes it, its distribution and
+version, whether the stored `core.plugins.allowed` names it, its `state` from
+the metadata (`refused` with the `error`, else `allowed` or `not_allowed`),
+and the API process's own load result where the API loaded it to run its code
+(`api_state`: `loaded`, `failed` or `refused`, with `api_error`; empty when it
+never did; a worker's own result is in that worker's log), and per kind the
+allowed names no installed package declares (`allowed_absent`). It reads
+package metadata only; no plugin is imported to be listed.
 
 The ATT&CK cache is asked through the worker that holds it (admin):
 `GET /settings/attck` answers, per domain (`enterprise`, `mobile`, `ics`), the
