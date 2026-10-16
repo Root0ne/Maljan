@@ -1,12 +1,15 @@
-"""capa's ``auto`` backend is the one capa itself picks for the format it detects.
+"""capa's ``auto`` backend, and the signatures a run loads, are what capa itself picks.
 
 ``auto`` used to mean vivisect for every file, and vivisect refuses capa's
 ``dotnet`` format, so every managed assembly got a capa error instead of
-capa's answer. A named backend is still used exactly as configured.
+capa's answer. A named backend is still used exactly as configured. The
+library signatures went to every run; capa passes them to vivisect for a PE
+only, and so does a run here.
 
 The managed assembly here is built from bytes by the test: a PE with a CLR
 header and the smallest metadata a reader accepts (a Module row and the
-``<Module>`` type). It holds no code and is never run.
+``<Module>`` type). It holds no code and is never run. The shellcode is five
+bytes the test writes; the signature files are empty names, never parsed.
 """
 
 from __future__ import annotations
@@ -98,16 +101,26 @@ def _assembly_and_rules(tmp_path: Path) -> tuple[Path, Path]:
     return sample, rules_dir
 
 
-def _worker_answer(sample: Path, rules_dir: Path, backend_name: str) -> tuple[str, Any]:
+def _worker_answer(
+    sample: Path, rules_dir: Path, backend_name: str, signatures: Path | None = None
+) -> tuple[str, Any]:
     """The capa child's answer, run in this process: the worker only puts on its queue."""
     answers: queue.Queue[tuple[str, Any]] = queue.Queue()
-    capa_yara._capa_worker(
-        str(sample), str(rules_dir), str(rules_dir / "none"), backend_name, answers
-    )
+    signatures_dir = signatures if signatures is not None else rules_dir / "none"
+    capa_yara._capa_worker(str(sample), str(rules_dir), str(signatures_dir), backend_name, answers)
     kind, payload = answers.get_nowait()
     while kind == "peak":
         kind, payload = answers.get_nowait()
     return kind, payload
+
+
+def _signature_dir(tmp_path: Path) -> Path:
+    """Three signature file names: capa lists them by suffix and never opens them here."""
+    signatures = tmp_path / "capa-signatures"
+    signatures.mkdir()
+    for name in ("1_a.sig", "2_b.sig", "3_c.sig"):
+        (signatures / name).write_bytes(b"")
+    return signatures
 
 
 class TestTheBackendNameReachesTheChild:
@@ -172,6 +185,28 @@ class TestTheChoiceIsCapas:
         assert capa_yara._capa_backend(capa_yara._BACKEND_NAMES["pefile"], "dotnet") == "pefile"
         assert asked == []
 
+    def test_the_signatures_are_asked_of_capa_with_the_format_and_the_backend(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        asked: list[tuple[Any, ...]] = []
+
+        def get_signatures_from_cli(args: Any, input_format: str, backend: str) -> list[Path]:
+            asked.append((args.signatures, args.is_default_signatures, input_format, backend))
+            return [Path("chosen.sig")]
+
+        main = types.ModuleType("capa.main")
+        main.get_signatures_from_cli = get_signatures_from_cli  # type: ignore[attr-defined]
+        package = types.ModuleType("capa")
+        package.main = main  # type: ignore[attr-defined]
+        monkeypatch.setitem(sys.modules, "capa", package)
+        monkeypatch.setitem(sys.modules, "capa.main", main)
+
+        assert capa_yara._capa_signatures(str(tmp_path), "pe", "vivisect") == [Path("chosen.sig")]
+        assert asked == [(tmp_path, False, "pe", "vivisect")]
+        # No directory: nothing to choose from, and capa is not asked.
+        assert capa_yara._capa_signatures(str(tmp_path / "absent"), "pe", "vivisect") == []
+        assert len(asked) == 1
+
 
 class TestWithCapaInstalled:
     def test_native_code_stays_on_vivisect_and_a_managed_assembly_goes_to_dotnet(self) -> None:
@@ -221,3 +256,50 @@ class TestWithCapaInstalled:
         assert kind == "ok", document
         assert document["meta"]["analysis"]["format"] == "dotnet"
         assert document["meta"]["analysis"]["extractor"] == "DnfileFeatureExtractor"
+
+    def test_a_pe_on_vivisect_gets_the_signatures_and_no_other_format_does(
+        self, tmp_path: Path
+    ) -> None:
+        capa_loader = pytest.importorskip("capa.loader")
+        pytest.importorskip("capa.main")
+        signatures = str(_signature_dir(tmp_path))
+
+        chosen = capa_yara._capa_signatures(signatures, "pe", capa_loader.BACKEND_VIV)
+
+        assert [path.name for path in chosen] == ["1_a.sig", "2_b.sig", "3_c.sig"]
+        for input_format, backend in (
+            ("sc32", capa_loader.BACKEND_VIV),
+            ("sc64", capa_loader.BACKEND_VIV),
+            ("elf", capa_loader.BACKEND_VIV),
+            ("dotnet", capa_loader.BACKEND_DOTNET),
+            ("pe", capa_loader.BACKEND_PEFILE),
+        ):
+            assert capa_yara._capa_signatures(signatures, input_format, backend) == []
+
+    def test_a_shellcode_or_managed_run_is_handed_no_signatures(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        capa_loader = pytest.importorskip("capa.loader")
+        pytest.importorskip("capa.main")
+        assembly, rules_dir = _assembly_and_rules(tmp_path)
+        shellcode = tmp_path / "tiny.sc32"
+        shellcode.write_bytes(b"\x90\x90\x90\x90\xc3")
+        signatures = _signature_dir(tmp_path)
+        handed: list[tuple[str, str, list[Path]]] = []
+        real = capa_loader.get_extractor
+
+        def spy(
+            path: Path, input_format: str, os_: str, backend: str, sigpaths: Any, **kw: Any
+        ) -> Any:
+            handed.append((input_format, backend, list(sigpaths)))
+            return real(path, input_format, os_, backend, sigpaths, **kw)
+
+        monkeypatch.setattr(capa_loader, "get_extractor", spy)
+        for sample in (shellcode, assembly):
+            kind, payload = _worker_answer(sample, rules_dir, "auto", signatures)
+            assert kind == "ok", payload
+
+        assert handed == [
+            ("sc32", capa_loader.BACKEND_VIV, []),
+            ("dotnet", capa_loader.BACKEND_DOTNET, []),
+        ]

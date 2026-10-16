@@ -95,6 +95,26 @@ def _capa_backend(backend_name: str, input_format: str) -> str:
     return str(capa_main.get_backend_from_cli(no_override, input_format))
 
 
+def _capa_signatures(signatures_dir: str, input_format: str, backend: str) -> list[Path]:
+    """The library signature files capa itself loads for this format and backend.
+
+    capa's command line passes signatures to vivisect for a PE only
+    (``capa.main.get_signatures_from_cli``). Asked the same way, a shellcode,
+    ELF or .NET run loads none, so it never pays for the PE signature set and
+    never marks its code as a PE library's. No directory, no signatures.
+    Called in the capa child only.
+    """
+    sig_dir = Path(signatures_dir)
+    if not sig_dir.is_dir():
+        return []
+    import argparse
+
+    import capa.main as capa_main
+
+    given = argparse.Namespace(signatures=sig_dir, is_default_signatures=False)
+    return list(capa_main.get_signatures_from_cli(given, input_format, backend))
+
+
 # A fired capa rule's technique hit carries no confidence. capa says the
 # rule's pattern is present — an instruction sequence, a string, an API call in
 # the right context — which is a presence and not a probability; the 0.70 each
@@ -146,8 +166,7 @@ def _capa_worker(
         rules = capa_rules.get_rules([rules_path], enable_cache=False)
         input_format = capa_helpers.get_auto_format(path)
         backend = _capa_backend(backend_name, input_format)
-        sig_dir = Path(signatures_dir)
-        sigpaths = capa_loader.get_signatures(sig_dir) if sig_dir.is_dir() else []
+        sigpaths = _capa_signatures(signatures_dir, input_format, backend)
         extractor = capa_loader.get_extractor(
             path,
             input_format,

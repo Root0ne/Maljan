@@ -30,7 +30,7 @@ core.static.yara.rules_dir    = data/yara_rules
 | Setting | Default | Notes |
 | :-- | :-- | :-- |
 | `core.static.capa.rules_dir` | `data/capa-rules` | capa's rules. |
-| `core.static.capa.signatures_dir` | `data/capa-signatures` | capa's library signatures. |
+| `core.static.capa.signatures_dir` | `data/capa-signatures` | capa's library signatures, loaded where capa itself loads them: for a PE on the vivisect backend. |
 | `core.static.capa.timeout_seconds` | `300` | capa's budget. |
 | `core.static.capa.backend` | `auto` | `auto` is the backend capa itself picks for the format it detects: its .NET backend for a managed assembly, vivisect for native code. `vivisect`, `pefile` or `binja` is used whatever the format. |
 | `core.static.yara.rules_dir` | `data/yara_rules` | The operator's own rule directory, scanned only by this provider. |
