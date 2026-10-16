@@ -165,14 +165,19 @@ def _ended(
 
 
 def _stop(process: subprocess.Popen[bytes]) -> Any:
-    """Stop the child's whole group, killing it after a grace, and return its resource usage."""
+    """Stop the child, killing it after a grace, and return its resource usage.
+
+    By its pid: the child shares the caller's process group, and capa starts
+    no process of its own that outlives a call (only its Binary Ninja backend
+    runs a short lookup), so there is no group of its own to stop.
+    """
     with contextlib.suppress(ProcessLookupError):
-        os.killpg(process.pid, signal.SIGTERM)
+        os.kill(process.pid, signal.SIGTERM)
     ended = _ended(process, _GRACE_SECONDS, time.monotonic())
     if ended is not None:
         return ended[1]
     with contextlib.suppress(ProcessLookupError):
-        os.killpg(process.pid, signal.SIGKILL)
+        os.kill(process.pid, signal.SIGKILL)
     _, status, usage = os.wait4(process.pid, 0)
     process.returncode = os.waitstatus_to_exitcode(status)
     return usage
@@ -196,19 +201,21 @@ def run_capa_document(
 
     capa's vivisect backend has no cooperative cancellation point inside a
     disassembly loop, so it cannot be interrupted from inside the calling
-    process; a child process can be killed. On expiry its whole group is told
-    to stop, is killed if it is still there after a short grace, and ``None``
-    is returned: the existing warn-and-degrade contract, backed by something
-    that can really stop the work.
+    process; a child process can be killed. On expiry it is told to stop, is
+    killed if it is still there after a short grace, and ``None`` is returned:
+    the existing warn-and-degrade contract, backed by something that can
+    really stop the work.
 
-    The child is ``capa_child``, run by its path as ``python -I`` in its own
-    session, with the environment ``_child_environment`` builds, in a directory
-    of its own under this job's scratch directory. It writes its answer to a
-    file there, read once it has ended, so a large document never waits on a
-    pipe; the directory goes when the run ends, however it ends. Its peak
-    resident memory is read as it is reaped. ``child`` stands in for the
-    ``python -I`` and entry part of the command in a test; the same arguments
-    follow it.
+    The child is ``capa_child``, run by its path as ``python -I`` in the
+    caller's process group, with the environment ``_child_environment``
+    builds, in a directory of its own under this job's scratch directory. It
+    dies with its parent: the kernel kills it when the calling thread ends
+    (``capa_child.die_with_parent``, handed this process's pid), and a group
+    kill of the caller reaches it. It writes its answer to a file there, read
+    once it has ended, so a large document never waits on a pipe; the
+    directory goes when the run ends. Its peak resident memory is read as it
+    is reaped. ``child`` stands in for the ``python -I`` and entry part of the
+    command in a test; the same arguments follow it.
 
     ``None`` is also returned, with a warning, when the child ended without an
     answer (it crashed, or the server killed it with its run) or with capa's
@@ -218,7 +225,15 @@ def run_capa_document(
     run = Path(tempfile.mkdtemp(prefix="run-", dir=_scratch()))
     answer = run / "answer.json"
     entry = list(child) if child else [sys.executable, "-I", str(_CHILD_ENTRY)]
-    command = [*entry, sample_path, rules_dir, signatures_dir, backend_name, str(answer)]
+    command = [
+        *entry,
+        sample_path,
+        rules_dir,
+        signatures_dir,
+        backend_name,
+        str(os.getpid()),
+        str(answer),
+    ]
     try:
         try:
             process = subprocess.Popen(  # noqa: S603 - our interpreter and entry, our paths
@@ -227,16 +242,16 @@ def run_capa_document(
                 cwd=run,
                 stdin=subprocess.DEVNULL,
                 stdout=subprocess.DEVNULL,
-                start_new_session=True,
             )
         except OSError as exc:
             logger.warning(
                 "capa on %s: the worker process could not be started (%s).", sample_path, exc
             )
             return None
-        # The server kills this child's group when every caller of its run has
-        # gone (``tools.children``); the wait below then sees it end. Only
-        # while it runs: a reaped child's pid can be another process's.
+        # The server kills this child when every caller of its run has gone
+        # (``tools.children``; it leads no group, so its pid is killed); the
+        # wait below then sees it end. Only while it runs: a reaped child's
+        # pid can be another process's.
         from maljan.tools import children
 
         children.register(

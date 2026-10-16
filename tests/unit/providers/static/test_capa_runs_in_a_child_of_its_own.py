@@ -18,6 +18,8 @@ from __future__ import annotations
 import json
 import logging
 import os
+import signal
+import subprocess
 import sys
 import time
 from pathlib import Path
@@ -110,11 +112,11 @@ class TestTheEnvironment:
     def test_the_child_is_started_isolated_by_its_entry_file(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        started: list[tuple[list[str], dict[str, str]]] = []
+        started: list[tuple[list[str], dict[str, Any]]] = []
         real = capa_yara.subprocess.Popen
 
         def spy(command: list[str], **kwargs: Any) -> Any:
-            started.append((list(command), dict(kwargs["env"])))
+            started.append((list(command), dict(kwargs)))
             return real(command, **kwargs)
 
         monkeypatch.setattr(capa_yara.subprocess, "Popen", spy)
@@ -129,10 +131,12 @@ class TestTheEnvironment:
             timeout_seconds=60,
         )
 
-        ((command, env),) = started
+        ((command, kwargs),) = started
         assert command[:3] == [sys.executable, "-I", str(capa_yara._CHILD_ENTRY)]
-        assert command[3:7] == [str(sample), str(rules), "", "auto"]
-        assert "DATABASE_URL" not in env
+        assert command[3:8] == [str(sample), str(rules), "", "auto", str(os.getpid())]
+        assert "DATABASE_URL" not in kwargs["env"]
+        # In the caller's process group, so a kill of the caller's group reaches it.
+        assert not kwargs.get("start_new_session") and not kwargs.get("process_group")
         # The entry imports nothing of the platform: the standard library and capa only.
         source = capa_yara._CHILD_ENTRY.read_text(encoding="utf-8")
         assert "import maljan" not in source and "from maljan" not in source
@@ -239,10 +243,196 @@ class TestTheScratch:
         sample, rules = _sample_and_rules(tmp_path)
         answer = tmp_path / "answer.json"
 
-        assert capa_child.main([str(sample), str(rules), "", "auto", str(answer)]) == 0
+        capa_child.answer_to_file(str(sample), str(rules), "", "auto", str(answer))
 
         written = json.loads(answer.read_text(encoding="utf-8"))
         assert list(written) == ["error"] and written["error"]
         assert sorted(p.name for p in tmp_path.iterdir() if p.name.startswith("answer")) == [
             "answer.json"
         ]
+
+
+# The child entry, loaded by its path as the real child runs it: it imports
+# only the standard library, so no package of the platform comes with it.
+_LOAD_ENTRY = (
+    "import importlib.util, os, sys, time\n"
+    "spec = importlib.util.spec_from_file_location('capa_child', {entry!r})\n"
+    "capa_child = importlib.util.module_from_spec(spec)\n"
+    "spec.loader.exec_module(capa_child)\n"
+)
+
+# A stand-in for the capa child that does what the real one does first, dies
+# with its parent, then says its pid and sleeps far past any wait here.
+_DYING_SLEEPER = _LOAD_ENTRY + (
+    "capa_child.die_with_parent(int(sys.argv[-2]))\n"
+    "open({pid_file!r}, 'w').write(str(os.getpid()))\n"
+    "time.sleep(120)\n"
+)
+
+
+def _entry_code(body: str) -> str:
+    return _LOAD_ENTRY.format(entry=str(capa_yara._CHILD_ENTRY)) + body
+
+
+# The parent: one capa run with no budget, in its main thread ("main"), or on a
+# daemon thread with the main thread exiting once the child is there ("exit").
+_PARENT = (
+    "import os, sys, threading, time\n"
+    "from pathlib import Path\n"
+    "from maljan.providers.static import capa_yara\n"
+    "child_code, pid_file, mode = sys.argv[1:4]\n"
+    "sample = Path(pid_file).with_name('s.bin')\n"
+    "sample.write_bytes(b'MZ')\n"
+    "def call():\n"
+    "    capa_yara.run_capa_document(sample_path=str(sample), rules_dir=str(sample.parent),\n"
+    "        signatures_dir='', backend_name='auto', timeout_seconds=None,\n"
+    "        child=[sys.executable, '-c', child_code])\n"
+    "if mode == 'main':\n"
+    "    call()\n"
+    "else:\n"
+    "    threading.Thread(target=call, daemon=True).start()\n"
+    "    deadline = time.monotonic() + 30\n"
+    "    while time.monotonic() < deadline:\n"
+    "        if os.path.exists(pid_file) and open(pid_file).read():\n"
+    "            break\n"
+    "        time.sleep(0.05)\n"
+    "    sys.exit(0)\n"
+)
+
+
+def _running(pid: int) -> bool:
+    """Whether ``pid`` is a live process: present, and not a zombie waiting to be reaped."""
+    try:
+        stat = Path(f"/proc/{pid}/stat").read_text(encoding="utf-8")
+    except (FileNotFoundError, ProcessLookupError):
+        return False
+    return stat.rsplit(")", 1)[1].split()[0] != "Z"
+
+
+def _gone_within(pid: int, seconds: float) -> bool:
+    deadline = time.monotonic() + seconds
+    while time.monotonic() < deadline:
+        if not _running(pid):
+            return True
+        time.sleep(0.05)
+    return False
+
+
+# A stand-in that does not ask to die with its parent: what reaches it is only
+# what reaches the parent's process group.
+_PLAIN_SLEEPER = (
+    "import os, time\nopen({pid_file!r}, 'w').write(str(os.getpid()))\ntime.sleep(120)\n"
+)
+
+
+class _Parent:
+    """A parent process running one capa run whose child is a sleeper, dying with it or not."""
+
+    def __init__(
+        self, tmp_path: Path, mode: str, *, own_session: bool = False, dies_with_it: bool = True
+    ) -> None:
+        self.pid_file = tmp_path / "child.pid"
+        env = {
+            **os.environ,
+            "PYTHONPATH": os.pathsep.join(p for p in sys.path if p),
+            staging.STAGING_DIR_ENV: str(tmp_path / "staging"),
+        }
+        sleeper = _DYING_SLEEPER if dies_with_it else _PLAIN_SLEEPER
+        child_code = sleeper.format(entry=str(capa_yara._CHILD_ENTRY), pid_file=str(self.pid_file))
+        self.process = subprocess.Popen(
+            [sys.executable, "-c", _PARENT, child_code, str(self.pid_file), mode],
+            env=env,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            start_new_session=own_session,
+        )
+        self.child = 0
+
+    def child_pid(self) -> int:
+        deadline = time.monotonic() + 30
+        while time.monotonic() < deadline:
+            text = self.pid_file.read_text(encoding="utf-8") if self.pid_file.exists() else ""
+            if text:
+                self.child = int(text)
+                return self.child
+            time.sleep(0.05)
+        pytest.fail("the stand-in child never started")
+
+    def clean_up(self) -> None:
+        """Leave nothing behind whatever the test found."""
+        if self.child and _running(self.child):
+            os.kill(self.child, signal.SIGKILL)
+        if self.process.poll() is None:
+            self.process.kill()
+        self.process.wait(timeout=30)
+
+
+@pytest.mark.skipif(not sys.platform.startswith("linux"), reason="reads /proc; prctl is Linux's")
+class TestTheChildDiesWithItsParent:
+    def test_a_parent_killed_outright_takes_its_child(self, tmp_path: Path) -> None:
+        parent = _Parent(tmp_path, "main")
+        try:
+            child = parent.child_pid()
+            os.kill(parent.process.pid, signal.SIGKILL)
+            parent.process.wait(timeout=30)
+
+            assert _gone_within(child, 10)
+        finally:
+            parent.clean_up()
+
+    def test_a_parent_that_exits_takes_its_child(self, tmp_path: Path) -> None:
+        parent = _Parent(tmp_path, "exit")
+        try:
+            child = parent.child_pid()
+            assert parent.process.wait(timeout=30) == 0
+
+            assert _gone_within(child, 10)
+        finally:
+            parent.clean_up()
+
+    def test_a_group_kill_of_the_parent_takes_its_child(self, tmp_path: Path) -> None:
+        """As mcp stops a server: SIGTERM to its group, SIGKILL two seconds later.
+
+        The stand-in does not ask to die with its parent, so this holds by the
+        process group alone: the child is in its caller's group.
+        """
+        parent = _Parent(tmp_path, "main", own_session=True, dies_with_it=False)
+        try:
+            child = parent.child_pid()
+            os.killpg(parent.process.pid, signal.SIGTERM)
+            try:
+                parent.process.wait(timeout=2)
+            except subprocess.TimeoutExpired:
+                os.killpg(parent.process.pid, signal.SIGKILL)
+                parent.process.wait(timeout=30)
+
+            assert _gone_within(child, 10)
+        finally:
+            parent.clean_up()
+
+    def test_a_child_whose_parent_has_already_gone_leaves_at_once(self) -> None:
+        from maljan.providers.static.capa_child import PARENT_GONE_EXIT
+
+        code = _entry_code("capa_child.die_with_parent(1)\nraise SystemExit(0)\n")
+
+        done = subprocess.run(
+            [sys.executable, "-I", "-c", code], capture_output=True, timeout=60, check=False
+        )
+
+        assert done.returncode == PARENT_GONE_EXIT
+
+    def test_without_prctl_it_says_so_and_watches_its_parent(self) -> None:
+        code = _entry_code(
+            "sys.platform = 'no-prctl'\nprint(capa_child.die_with_parent(os.getppid()))\n"
+        )
+
+        done = subprocess.run(
+            [sys.executable, "-I", "-c", code],
+            capture_output=True,
+            text=True,
+            timeout=60,
+            check=False,
+        )
+
+        assert done.stdout.strip() == "False"
+        assert "prctl(PR_SET_PDEATHSIG) is not available here" in done.stderr

@@ -2,16 +2,17 @@
 
 ``capa_yara.run_capa_document`` starts this file as a process of its own::
 
-    python -I capa_child.py <sample> <rules dir> <signatures dir> <backend> <answer file>
+    python -I capa_child.py <sample> <rules> <signatures> <backend> <parent pid> <answer>
 
 in isolated mode (no ``PYTHON*`` variable, no user site, no working directory
 on the path), with an environment it builds rather than its own, in a run
-directory of its own. It is run by its path and imports nothing of ``maljan``:
-only the standard library and capa, so the child runs this tree's own code and
-never loads the platform, its settings or its credentials. The answer is the
-document, or capa's error, as JSON, written beside the answer path and renamed
-onto it, so a child that dies mid-write leaves no answer rather than half of
-one.
+directory of its own, in the caller's process group. It is run by its path and
+imports nothing of ``maljan``: only the standard library and capa, so the child
+runs this tree's own code and never loads the platform, its settings or its
+credentials. Before anything else it arranges to die with its parent
+(``die_with_parent``). The answer is the document, or capa's error, as JSON,
+written beside the answer path and renamed onto it, so a child that dies
+mid-write leaves no answer rather than half of one.
 
 capa API surface pinned against flare-capa 9.4.0 (the version ``uv sync
 --extra capa`` installs); a few names moved since the 7.x line this was first
@@ -41,9 +42,20 @@ from __future__ import annotations
 
 import json
 import os
+import signal
 import sys
+import threading
+import time
 from pathlib import Path
 from typing import Any
+
+# prctl(2)'s option asking the kernel for a signal when the thread that started
+# this process ends (Linux).
+_PR_SET_PDEATHSIG = 1
+# How often a child with no prctl compares its parent with the one it was given.
+_PARENT_CHECK_SECONDS = 1.0
+# The exit status of a child whose parent had gone before it ran anything.
+PARENT_GONE_EXIT = 3
 
 # The backend name that asks capa to pick one for the detected format.
 AUTO_BACKEND = "auto"
@@ -148,9 +160,55 @@ def capa_pass(
     return result
 
 
-def main(argv: list[str]) -> int:
-    """One pass, its answer in the file named last: ``{"ok": document}`` or ``{"error": why}``."""
-    sample_path, rules_dir, signatures_dir, backend_name, answer_path = argv
+def die_with_parent(parent_pid: int) -> bool:
+    """Have this process killed when its parent goes, and leave at once if it already has.
+
+    On Linux the kernel is asked, through ``prctl(PR_SET_PDEATHSIG, SIGKILL)``,
+    to kill this process the moment the thread that started it ends, however
+    it ends: the parent killed, the parent exiting, its whole group killed.
+    The parent's thread waits for this child until it is reaped, so it never
+    ends first while the parent lives. The parent's pid is then compared with
+    the one the parent passed: a parent that went before the request was made
+    has already handed this process to another, and it leaves now. Without
+    prctl (not Linux), it says so on stderr and a thread compares the parent
+    once a second instead. Returns whether the kernel took the request.
+    """
+    armed = False
+    if sys.platform.startswith("linux"):
+        try:
+            import ctypes
+
+            libc = ctypes.CDLL(None, use_errno=True)
+            armed = libc.prctl(_PR_SET_PDEATHSIG, int(signal.SIGKILL), 0, 0, 0) == 0
+        except (OSError, AttributeError):
+            armed = False
+    if os.getppid() != parent_pid:
+        os._exit(PARENT_GONE_EXIT)
+    if not armed:
+        sys.stderr.write(
+            "capa child: prctl(PR_SET_PDEATHSIG) is not available here; the parent is "
+            "checked once a second instead.\n"
+        )
+        threading.Thread(target=_watch_parent, args=(parent_pid,), daemon=True).start()
+    return armed
+
+
+def _watch_parent(parent_pid: int) -> None:
+    """Leave the moment the parent is no longer the one that started this process."""
+    while True:
+        time.sleep(_PARENT_CHECK_SECONDS)
+        if os.getppid() != parent_pid:
+            os._exit(PARENT_GONE_EXIT)
+
+
+def answer_to_file(
+    sample_path: str, rules_dir: str, signatures_dir: str, backend_name: str, answer_path: str
+) -> None:
+    """One pass, its answer in ``answer_path``: ``{"ok": document}`` or ``{"error": why}``.
+
+    Written beside the path and renamed onto it, so it is there whole or not
+    at all.
+    """
     try:
         answer: dict[str, Any] = {
             "ok": capa_pass(sample_path, rules_dir, signatures_dir, backend_name)
@@ -160,6 +218,17 @@ def main(argv: list[str]) -> int:
     written = Path(f"{answer_path}.part")
     written.write_text(json.dumps(answer), encoding="utf-8")
     os.replace(written, answer_path)
+
+
+def main(argv: list[str]) -> int:
+    """The child's entry: die with the parent, then one pass and its answer file.
+
+    The arguments are the sample, the rules directory, the signature
+    directory, the backend name, the parent's pid and the answer path.
+    """
+    sample_path, rules_dir, signatures_dir, backend_name, parent_pid, answer_path = argv
+    die_with_parent(int(parent_pid))
+    answer_to_file(sample_path, rules_dir, signatures_dir, backend_name, answer_path)
     return 0
 
 
