@@ -45,6 +45,13 @@ An endpoint that rejects one of the extras anyway is retried once without them,
 recorded for the rest of the process, and named in a warning that says to set
 this value explicitly.
 
+`auto` is a guess at the server software, not the rule a run's disclosure
+block places a host by: a compose service's name, a `.internal` name and the
+shared range `100.64.0.0/10` get `standard` here, since a proxy in front of a
+hosted API sits there as often as llama.cpp does, while the disclosure block
+takes them as inside the deployment
+([What left this machine](/usage/reports-and-exports/#what-left-this-machine)).
+
 ## DeepSeek
 
 <Tabs items={["Settings", "Why `deepseek` is set, not guessed"]}>

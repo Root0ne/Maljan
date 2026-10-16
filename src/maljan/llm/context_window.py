@@ -1384,6 +1384,44 @@ _LOCAL_SERVER_ANSWERS = (
 )
 
 
+def runtime_answer(provider: object, endpoint: object, model: object = "") -> str:
+    """What answered one model's window probe at one endpoint as a model runtime, or ``""``.
+
+    Read from what the probe already learned (the cache :func:`learn_window`
+    fills), never by asking: llama.cpp's ``/props``, Ollama's model
+    description or the server description of Text Generation Inference, as
+    :func:`serves_locally` reads them. ``""`` for any other answer, for no
+    answer, and for a question not asked recently.
+    """
+    asked, learned = _cached((str(provider), str(endpoint or ""), str(model or "")))
+    if not asked or learned is None or learned.source != PROBED:
+        return ""
+    detail = str(learned.detail)
+    return next((what for what in _LOCAL_SERVER_ANSWERS if detail.startswith(what)), "")
+
+
+def runtime_answers(assignments: Iterable[Any]) -> dict[str, str]:
+    """``{endpoint label: what answered}`` for each model whose probe answered as a runtime.
+
+    For the run's record of where its prompts went (``analysis.disclosure``):
+    read from the cache right after the job's windows were learned, so it is
+    the answer this run used, and no request is made.
+    """
+    from maljan.core.model_assignments import endpoint_label
+
+    out: dict[str, str] = {}
+    for assignment in assignments:
+        what = runtime_answer(
+            getattr(assignment, "provider", ""),
+            getattr(assignment, "endpoint", ""),
+            getattr(assignment, "model", ""),
+        )
+        endpoint = str(getattr(assignment, "endpoint", "") or "")
+        if what and "://" in endpoint:
+            out[endpoint_label(endpoint)] = what
+    return out
+
+
 def serves_locally(assignment: Any, window: WindowFact) -> bool:
     """Whether the model is served by a runtime we run rather than a hosted API.
 

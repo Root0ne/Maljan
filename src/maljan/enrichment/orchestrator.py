@@ -24,6 +24,7 @@ import httpx
 
 from maljan.core.logger import logger
 from maljan.enrichment.declared import (
+    AskListener,
     ReadySource,
     SourceAsker,
     ToolCaller,
@@ -153,6 +154,7 @@ async def enrich_malware_report(
     tool_arguments: Callable[[str, str], Mapping[str, str]] | None = None,
     memory_store: MemoryStore | None = None,
     similar_top_k: int = 5,
+    on_ask: AskListener | None = None,
 ) -> dict[str, Any]:
     """Populate reputation/asn/geo + attribution.similar_samples in place.
 
@@ -163,8 +165,9 @@ async def enrich_malware_report(
     the argument a server's tool declares for a kind. When ``memory_store``
     is provided, the report's ``attribution.similar_samples`` is also
     populated from the LTM nearest-neighbour search (idempotent — skipped
-    when already filled). The caller is expected to persist the returned
-    dict back to ``AnalysisReport.malware_report``.
+    when already filled). ``on_ask`` is told of each question just before it
+    is sent, a source's and RDAP's alike. The caller is expected to persist
+    the returned dict back to ``AnalysisReport.malware_report``.
     """
     network = malware_report.get("network") or {}
     domains = network.get(SLOTS["domain"][0]) or []
@@ -184,8 +187,10 @@ async def enrich_malware_report(
     own_client = http_client is None
     client = http_client or httpx.AsyncClient(timeout=30.0)
     try:
-        asker = SourceAsker(client, tool_caller=tool_caller, tool_arguments=tool_arguments)
-        whois = WhoisClient(client)
+        asker = SourceAsker(
+            client, tool_caller=tool_caller, tool_arguments=tool_arguments, on_ask=on_ask
+        )
+        whois = WhoisClient(client, on_ask=on_ask)
 
         if not ready:
             logger.warning("enrich: no enrichment source configured; reputation fields left null.")

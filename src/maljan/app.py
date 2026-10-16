@@ -290,21 +290,22 @@ class MaljanApp:
             # thread changes nothing but where the blocking happens.
             #
             # The submission is recorded before it is made, as one that did
-            # not complete, and marked submitted once the provider answers: a
+            # not complete, with the host the provider resolves its submission
+            # URL to, and marked submitted once the provider answers: a
             # submission that raised may still have sent the sample, and the
             # run's disclosure block says so rather than nothing. A provider
             # whose submission never leaves the worker records none.
-            from maljan.analysis.disclosure import submission_address, upload_record
+            from maljan.analysis.disclosure import submission_host, upload_record
 
-            address = submission_address(provider)
-            if address is not None:
+            host = submission_host(provider)
+            if host is not None:
                 self.container.sample_uploads.append(
-                    upload_record(provider.id, submitted=False, address=address)
+                    upload_record(provider.id, submitted=False, host=host)
                 )
             task_id = await asyncio.to_thread(provider.submit, str(path))
-            if address is not None:
+            if host is not None:
                 self.container.sample_uploads[-1] = upload_record(
-                    provider.id, submitted=True, address=address
+                    provider.id, submitted=True, host=host
                 )
             # Thread the active provider's own completion timeout + poll
             # interval into the poll loop (see ``_poll_budget``). Without

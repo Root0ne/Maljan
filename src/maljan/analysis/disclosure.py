@@ -4,49 +4,69 @@ The **Disclosure** block of the run summary (``run_summary["disclosure"]``)
 and of the report (Appendix B, in the markdown and the HTML made from it).
 It is built when the run's last model call and last tool call have been made
 (the report node, and for a stopped run its summary and its partial report)
-from four records and nothing else:
+from the run's own records and nothing else:
 
 * the settings the run ran with, as their snapshot holds them (dotted keys,
   ``core.settings_overrides.public_snapshot``): each tool server's and each
-  provider block's transport and address, each agent's model list, the
-  sandbox provider's address, the memory store's address and the tracing
-  switch;
+  provider block's transport, address, roles and tool declarations, every
+  agent's model list and the global model, the memory store's address and the
+  tracing switch;
 * each ledger entry's recorded source (``LedgerEntry.source``), which names
   the settings block its call went through, and the facts its tool declared
-  when the entry was written (``LedgerEntry.facts``): whether it asks a
-  service about the sample or an indicator
-  (``core.reputation.asks_about_an_indicator``), the argument roles it takes
-  an indicator in, and whether it sends the sample out (``discloses_sample``);
+  when the entry was written (``LedgerEntry.facts``);
 * the token ledger's counts per agent, each call filed under the label of the
   model that answered it, which carries the endpoint the call was sent to
   (``core.model_assignments.model_label``);
-* the sample submissions the run made to its sandbox provider
-  (``MaljanApp._submit_to_sandbox``).
+* the endpoints whose window probe answered as a model runtime during the run
+  (``ServiceContainer.runtime_answers``);
+* the sample's submissions to the sandbox provider (with the host the
+  provider resolves its submission URL to) and its stagings to tool servers
+  (``MaljanApp._submit_to_sandbox``, ``agents.sample_staging``);
+* the effective tracing state (``core.tracing``).
 
 Never a tool's name. Every host is classified by the one rule in
-``core.host_locality``: local, remote, or unknown when no host is recorded.
+``core.host_locality``.
 
-**Right or absent.** ``nothing_left`` is true only when every destination the
-record names is local, nothing is left unplaced, tracing is off and the
-record is complete. Otherwise the block says what went where, and says that
-it cannot be told where the platform cannot tell. A local tool server (one
-the settings start on this machine over stdio, or reach at a local address)
-is taken to work locally, unless its tool declares that it asks a service
-about an indicator or sends the sample out: such a call does not end at the
-local server, where that server sends it is not in the settings, and the
-block says so. A model endpoint in an agent's model list that recorded no
-answered call is named too, because a request that failed is not always
-recorded.
+**Nothing needs positive knowledge for every path.** ``nothing_left`` is true
+only when every destination the record names is local and known to stop
+there, nothing is left unplaced, tracing is off and the record is complete.
+In particular:
+
+* a model endpoint at a local address counts only when it answered the window
+  probe as a model runtime in this run; any other local address may be a
+  gateway that forwards the prompts;
+* every model list in the settings is read, and the global model, because a
+  request that failed is not always recorded;
+* a local tool server (started over stdio, or at a local address) is a
+  gateway when its block declares a lookup or sandbox role, or any of its
+  tools declares a lookup or that it sends the sample out: every call through
+  it cannot be placed. A lookup or an upload through any local server cannot
+  be placed either;
+* a call to a tool that declares nothing at all cannot be shown to stay on
+  the machine;
+* a ledger row the report could not read is a call that cannot be placed.
+
+When the block does say "nothing", it says what it rests on. When enrichment
+follows the report, the worker names it here (:func:`with_enrichment`) and
+the enrichment job adds what it asked (:func:`with_enrichment_asked`).
 """
 
 from __future__ import annotations
 
 from collections.abc import Callable, Iterable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 from maljan.analysis.run_summary import count_label
-from maljan.core.host_locality import LOCAL, REMOTE, UNKNOWN, host_locality, host_of
+from maljan.core.host_locality import (
+    LOCAL,
+    REMOTE,
+    UNKNOWN,
+    host_locality,
+    host_of,
+    normal_host,
+    taken_as_service_name,
+)
 
 # The version of the stored record's shape.
 DISCLOSURE_VERSION = 1
@@ -61,15 +81,14 @@ TRACING_SETTING = "langchain_tracing_v2"
 # What a stopped run's record says it is missing (``pipeline.stopped_run``).
 STOPPED_PART_WAY = "the run was stopped part-way"
 
-NOTHING_LEFT_SENTENCE = (
-    "Nothing left this machine: every model endpoint, tool server and store this run "
-    "reached is local, and no lookup service or sandbox outside it was sent anything."
-)
 INTRO_SENTENCE = (
     "**Disclosure:** what this run sent beyond this machine, read from the settings it ran "
-    "with and the recorded source of each model call and tool call. Local is a loopback, "
-    "private, link-local or shared address, a name only a local resolver answers, or a "
-    "compose service name."
+    "with and the recorded source of each model call, tool call and sample upload."
+)
+FOOTNOTE_SENTENCE = (
+    "_This machine, here, covers its loopback addresses, the private, link-local and shared "
+    "address ranges, names only a local resolver answers, and single-label names, which are "
+    "taken as a compose service's._"
 )
 
 # The order rows are listed in: what went outside first.
@@ -79,6 +98,11 @@ _WHERE_ORDER = {REMOTE: 0, UNKNOWN: 1, LOCAL: 2}
 # key is empty, since the ledger keeps a tally only for a named one.
 NO_AGENT = ""
 
+# The upload rows' kinds.
+BY_SANDBOX = "sandbox"
+BY_STAGING = "staging"
+BY_TOOL = "tool"
+
 # Why a destination cannot be placed, each a clause the sentences go on from
 # with "so where it went cannot be told".
 _NO_HOST = "the address recorded for it names no host"
@@ -86,6 +110,11 @@ _NO_MODEL = "the token ledger filed them under no model"
 _NO_ENDPOINT = "its provider records no endpoint"
 _NO_SOURCE = "their ledger entries record no source"
 _LOCAL_SERVER = "the settings do not say where a local tool server sends what it is given"
+_GATEWAY = (
+    "it is a local tool server that declares a lookup or a sandbox, so a call through it may "
+    "go on to a service the settings do not name"
+)
+_NOT_A_RUNTIME = "a local address that did not answer as a model runtime may forward the prompts"
 
 
 @dataclass(frozen=True)
@@ -129,8 +158,15 @@ def _vendor_place(provider: str) -> _Place:
     return _Place(why=_NO_ENDPOINT)
 
 
-def _label_place(label: str) -> _Place:
-    """Where the model a call was filed under was served, from its label.
+def _endpoint_label(url: str) -> str:
+    """The endpoint as a run records it: scheme, host and port (``endpoint_label``)."""
+    from maljan.core.model_assignments import endpoint_label
+
+    return endpoint_label(url) if "://" in url else ""
+
+
+def _label_endpoint(label: str) -> tuple[_Place, str]:
+    """Where the model a call was filed under was served, and its endpoint label.
 
     A label carries `` @ <scheme>://<host>[:<port>]`` when its endpoint is an
     address (``model_assignments.model_label``); without one the call went to
@@ -138,9 +174,9 @@ def _label_place(label: str) -> _Place:
     """
     _head, sep, tail = label.rpartition(" @ ")
     if sep and "://" in tail:
-        return _url_place(tail)
+        return _url_place(tail), _endpoint_label(tail)
     provider = label.partition("/")[0] if "/" in label else ""
-    return _vendor_place(provider)
+    return _vendor_place(provider), ""
 
 
 def _configured(snapshot: Mapping[str, Any], provider: str) -> str | None:
@@ -162,7 +198,7 @@ def model_list(snapshot: Mapping[str, Any], agent: str) -> list[tuple[str, str]]
     from maljan.core.model_assignments import builds_provider, endpoint_where
 
     prefix = f"llm.agents.{agent}."
-    provider = str(snapshot.get(prefix + "provider") or "")
+    provider = str(snapshot.get(prefix + "provider") or "") if agent else ""
     choices: list[tuple[str, Any]]
     if provider and builds_provider(provider):
         choices = [(provider, snapshot.get(prefix + "base_url"))]
@@ -178,68 +214,120 @@ def model_list(snapshot: Mapping[str, Any], agent: str) -> list[tuple[str, str]]
     ]
 
 
-def _endpoint_place(provider: str, endpoint: str) -> _Place:
-    if "://" in endpoint:
-        return _url_place(endpoint)
-    return _vendor_place(provider)
-
-
-def _model_row(place: _Place) -> dict[str, Any]:
-    return {
-        "host": place.host,
-        "service": place.service,
-        "where": place.where,
-        "calls": 0,
-        "agents": {},
-        "configured_for": [],
-        "why": place.why,
+def configured_agents(snapshot: Mapping[str, Any]) -> list[str]:
+    """Every agent the snapshot gives a model entry of its own (``llm.agents.<key>``)."""
+    found = {
+        str(key)[len("llm.agents.") : -len(".provider")]
+        for key in snapshot
+        if str(key).startswith("llm.agents.") and str(key).endswith(".provider")
     }
+    return sorted(name for name in found if name and "." not in name)
+
+
+def _endpoint_place(provider: str, endpoint: str) -> tuple[_Place, str]:
+    if "://" in endpoint:
+        return _url_place(endpoint), _endpoint_label(endpoint)
+    return _vendor_place(provider), ""
+
+
+@dataclass
+class _ModelRow:
+    place: _Place
+    calls: int = 0
+    agents: dict[str, int] = field(default_factory=dict)
+    configured_for: list[str] = field(default_factory=list)
+    is_global: bool = False
+    endpoints: set[str] = field(default_factory=set)
+
+    def stored(self, runtimes: Mapping[str, str]) -> dict[str, Any]:
+        runtime = ""
+        if self.place.where == LOCAL and self.endpoints:
+            answers = [runtimes.get(endpoint, "") for endpoint in sorted(self.endpoints)]
+            if all(answers):
+                runtime = ", ".join(dict.fromkeys(answers))
+        return {
+            "host": self.place.host,
+            "service": self.place.service,
+            "where": self.place.where,
+            "calls": self.calls,
+            "agents": dict(sorted(self.agents.items())),
+            "configured_for": list(self.configured_for),
+            "global": self.is_global,
+            "runtime": runtime,
+            "why": self.place.why,
+        }
 
 
 def _model_rows(
-    snapshot: Mapping[str, Any], tokens: Mapping[str, Any] | None, agents: Iterable[str]
+    snapshot: Mapping[str, Any],
+    tokens: Mapping[str, Any] | None,
+    agents: Iterable[str],
+    runtimes: Mapping[str, str],
 ) -> list[dict[str, Any]]:
-    """One row per endpoint that answered a call or is in a model list of the run's agents."""
+    """One row per endpoint that answered a call or is in a model list the settings hold."""
     tokens = tokens if isinstance(tokens, Mapping) else {}
     per_agent = tokens.get("per_agent")
     per_agent = per_agent if isinstance(per_agent, Mapping) else {}
-    rows: dict[tuple[str, str, str, str], dict[str, Any]] = {}
+    rows: dict[tuple[str, str, str, str], _ModelRow] = {}
     unplaced: dict[str, int] = {}
     counted = 0
+
+    def _row(place: _Place) -> _ModelRow:
+        return rows.setdefault(place.key, _ModelRow(place))
+
     for agent, tally in sorted(per_agent.items()):
         if not isinstance(tally, Mapping):
             continue
         labelled = 0
         for label, count in sorted((tally.get("models") or {}).items()):
             calls = int(count or 0)
-            place = _label_place(str(label))
-            row = rows.setdefault(place.key, _model_row(place))
-            row["calls"] += calls
-            row["agents"][str(agent)] = row["agents"].get(str(agent), 0) + calls
+            place, endpoint = _label_endpoint(str(label))
+            row = _row(place)
+            row.calls += calls
+            row.agents[str(agent)] = row.agents.get(str(agent), 0) + calls
+            if endpoint:
+                row.endpoints.add(endpoint)
             labelled += calls
         made = int(tally.get("llm_calls") or 0)
         counted += made
         if made > labelled:
             unplaced[str(agent)] = made - labelled
     no_agent = int(tokens.get("llm_calls") or 0) - counted
-    for agent in sorted({str(name) for name in per_agent} | {str(name) for name in agents}):
+    named = (
+        {str(name) for name in per_agent}
+        | {str(name) for name in agents}
+        | set(configured_agents(snapshot))
+    )
+    for agent in sorted(named):
         for provider, endpoint in model_list(snapshot, agent):
-            place = _endpoint_place(provider, endpoint)
-            row = rows.setdefault(place.key, _model_row(place))
-            if agent not in row["agents"] and agent not in row["configured_for"]:
-                row["configured_for"].append(agent)
-    out = list(rows.values())
+            place, label = _endpoint_place(provider, endpoint)
+            row = _row(place)
+            if label:
+                row.endpoints.add(label)
+            if agent not in row.agents and agent not in row.configured_for:
+                row.configured_for.append(agent)
+    # The global model: every agent without a model entry of its own calls it.
+    for provider, endpoint in model_list(snapshot, ""):
+        place, label = _endpoint_place(provider, endpoint)
+        row = _row(place)
+        row.is_global = True
+        if label:
+            row.endpoints.add(label)
+    out = [row.stored(runtimes) for row in rows.values()]
     if no_agent > 0:
         # Filed under no agent: the key no agent can have.
         unplaced[NO_AGENT] = no_agent
     if unplaced:
-        row = _model_row(_Place(why=_NO_MODEL))
-        row["calls"] = sum(unplaced.values())
-        row["agents"] = dict(sorted(unplaced.items()))
-        out.append(row)
-    for row in out:
-        row["agents"] = dict(sorted(row["agents"].items()))
+        lost = _ModelRow(_Place(why=_NO_MODEL), calls=sum(unplaced.values()), agents=unplaced)
+        out.append(lost.stored(runtimes))
     return sorted(out, key=lambda r: (_WHERE_ORDER[r["where"]], r["host"], r["service"], r["why"]))
+
+
+def _model_blocks(row: Mapping[str, Any]) -> bool:
+    """Whether a model row keeps "nothing" from being said."""
+    if row.get("where") != LOCAL:
+        return True
+    return not row.get("runtime")
 
 
 def _block_path(source: str) -> str | None:
@@ -261,26 +349,62 @@ def _in_process_sources() -> frozenset[str]:
     return frozenset(str(ref) for ref in in_process_declarations())
 
 
+def gateway_blocks(snapshot: Mapping[str, Any]) -> frozenset[str]:
+    """The settings blocks that declare a lookup or a sandbox, read in one pass over the snapshot.
+
+    A block whose ``roles`` hold the reputation or the sandbox role, or any of
+    whose tools declares a lookup kind, an indicator argument role, or that it
+    sends the sample out (``tool_facts.<tool>.discloses_sample``).
+    """
+    from maljan.core.builtin_declarations import REPUTATION_KINDS
+    from maljan.core.reputation import (
+        INDICATOR_ARGUMENTS,
+        INDICATOR_LOOKUP_KINDS,
+        REPUTATION_ROLE,
+    )
+    from maljan.core.tool_declarations import SANDBOX_ROLE
+
+    lookup_kinds = {*REPUTATION_KINDS, *INDICATOR_LOOKUP_KINDS}
+    roles = {REPUTATION_ROLE, SANDBOX_ROLE}
+    out: set[str] = set()
+    for key, value in snapshot.items():
+        text = str(key)
+        head, sep, rest = text.partition(".tool_facts.")
+        if sep:
+            if rest.endswith(".discloses_sample") and value is True:
+                out.add(head)
+            elif rest.endswith(".kind") and value in lookup_kinds:
+                out.add(head)
+            elif ".arguments." in rest and rest.rsplit(".", 1)[-1] in INDICATOR_ARGUMENTS:
+                out.add(head)
+        elif text.endswith(".roles") and isinstance(value, list):
+            if any(str(role) in roles for role in value):
+                out.add(text[: -len(".roles")])
+    return frozenset(out)
+
+
 @dataclass(frozen=True)
 class _Route:
-    """How one source's calls travel: transport, place, and whether a process here runs it."""
+    """How one source's calls travel: transport, place, and whether it is a gateway."""
 
     transport: str
     place: _Place
     on_this_machine: bool = False
+    gateway: bool = False
 
 
-def _route(snapshot: Mapping[str, Any], source: str) -> _Route:
+def _route(snapshot: Mapping[str, Any], source: str, gateways: frozenset[str]) -> _Route:
     """How a source's calls travel, from its settings block's ``transport`` and ``url``."""
     path = _block_path(source)
     if path is None or f"{path}.transport" not in snapshot:
         # Every tool server block records its transport, so none is no block.
         return _Route("", _Place(why=f"the settings name no tool server block for {source}"))
     transport = str(snapshot.get(f"{path}.transport") or "")
+    gateway = path in gateways
     if transport == STDIO_TRANSPORT:
-        return _Route(transport, _Place(where=LOCAL), on_this_machine=True)
+        return _Route(transport, _Place(where=LOCAL), on_this_machine=True, gateway=gateway)
     if transport in HTTP_TRANSPORTS:
-        return _Route(transport, _url_place(snapshot.get(f"{path}.url")))
+        return _Route(transport, _url_place(snapshot.get(f"{path}.url")), gateway=gateway)
     return _Route(transport, _Place(why=f"the settings name no known transport for {source}"))
 
 
@@ -303,19 +427,33 @@ def _filled(entry: Any, argument: str) -> bool:
     return args.get(argument) not in (None, "")
 
 
-def _tool_rows(
-    snapshot: Mapping[str, Any], entries: Iterable[Any]
-) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]]]:
-    """``(lookups, uploads by a tool, tool servers)`` from the ledger's calls, each call once."""
+def _declares_anything(entry: Any) -> bool:
+    """Whether the facts the entry stored declare anything beyond their version."""
+    held = _field(entry, "facts")
+    if not isinstance(held, Mapping):
+        return False
+    return any(key != "v" and value not in (None, "", [], {}, False) for key, value in held.items())
+
+
+@dataclass
+class _ToolRows:
+    lookups: dict[tuple[Any, ...], dict[str, Any]] = field(default_factory=dict)
+    uploads: dict[tuple[Any, ...], dict[str, Any]] = field(default_factory=dict)
+    servers: dict[tuple[Any, ...], dict[str, Any]] = field(default_factory=dict)
+    undeclared: dict[tuple[Any, ...], dict[str, Any]] = field(default_factory=dict)
+    local_servers: dict[str, None] = field(default_factory=dict)
+
+
+def _tool_rows(snapshot: Mapping[str, Any], entries: Iterable[Any]) -> _ToolRows:
+    """The ledger's calls, each once: lookups, uploads by a tool, servers, undeclared tools."""
     from maljan.agents.delegation import TEAM_SERVER
     from maljan.core.declared_reading import kind_free_facts
     from maljan.core.reputation import INDICATOR_ARGUMENTS, asks_about_an_indicator
 
     in_process = _in_process_sources()
+    gateways = gateway_blocks(snapshot)
     routes: dict[str, _Route] = {}
-    lookups: dict[tuple[Any, ...], dict[str, Any]] = {}
-    uploads: dict[tuple[Any, ...], dict[str, Any]] = {}
-    servers: dict[tuple[Any, ...], dict[str, Any]] = {}
+    out = _ToolRows()
     for entry in entries:
         if _field(entry, "repeated_of"):
             # Answered from an earlier entry or by a guard: no call was made.
@@ -331,28 +469,33 @@ def _tool_rows(
                 continue
             unrouted = _Route("", _Place(why=_NO_SOURCE))
             key: tuple[Any, ...] = (name, unrouted.place.key)
-            row = servers.setdefault(key, _tool_row(name, unrouted, unrouted.place))
+            row = out.servers.setdefault(key, _tool_row(name, unrouted, unrouted.place))
             row["calls"] += 1
             continue
         if source not in routes:
-            routes[source] = _route(snapshot, source)
+            routes[source] = _route(snapshot, source, gateways)
         route = routes[source]
         facts = kind_free_facts(entry)
         lookup = asks_about_an_indicator(facts)
         place = route.place
-        if place.where == LOCAL and (facts.discloses_sample or lookup):
-            # A local server is not where a lookup or a sample sent out ends:
-            # it asks, or sends to, a service the settings do not name.
-            place = _Place(host=place.host, why=_LOCAL_SERVER)
+        local = place.where == LOCAL
+        if local and (facts.discloses_sample or lookup or route.gateway):
+            # A local server is not where a lookup, a sample sent out or a call
+            # through a declared gateway ends: it goes on to a service the
+            # settings do not name.
+            place = _Place(
+                host=place.host,
+                why=_LOCAL_SERVER if (facts.discloses_sample or lookup) else _GATEWAY,
+            )
         key = (source, route.transport, place.key)
         if facts.discloses_sample:
-            row = uploads.setdefault(
-                key, {"by": "tool", **_tool_row(source, route, place), "failed": 0}
+            row = out.uploads.setdefault(
+                key, {"by": BY_TOOL, **_tool_row(source, route, place), "failed": 0}
             )
             row["calls"] += 1
             row["failed"] += 0 if _field(entry, "ok") is not False else 1
         elif lookup:
-            row = lookups.setdefault(
+            row = out.lookups.setdefault(
                 key, {**_tool_row(source, route, place), "kinds": {}, "without_indicator": 0}
             )
             row["calls"] += 1
@@ -368,95 +511,204 @@ def _tool_rows(
                 row["kinds"][role] = row["kinds"].get(role, 0) + 1
             if not roles:
                 row["without_indicator"] += 1
-        elif not route.on_this_machine:
-            row = servers.setdefault(key, _tool_row(source, route, place))
+        elif local and route.gateway:
+            row = out.servers.setdefault(key, _tool_row(source, route, place))
             row["calls"] += 1
-    for row in lookups.values():
+        elif local and not _declares_anything(entry):
+            row = out.undeclared.setdefault(key, _tool_row(source, route, place))
+            row["calls"] += 1
+        elif local:
+            out.local_servers.setdefault(source, None)
+            if not route.on_this_machine:
+                row = out.servers.setdefault(key, _tool_row(source, route, place))
+                row["calls"] += 1
+        else:
+            row = out.servers.setdefault(key, _tool_row(source, route, place))
+            row["calls"] += 1
+    for row in out.lookups.values():
         row["kinds"] = dict(sorted(row["kinds"].items()))
-    return _ordered(lookups), _ordered(uploads), _ordered(servers)
+    return out
 
 
-def _ordered(rows: Mapping[Any, dict[str, Any]]) -> list[dict[str, Any]]:
+def _ordered(rows: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
     return sorted(
-        rows.values(),
+        rows,
         key=lambda r: (_WHERE_ORDER[r["where"]], r["host"], r["source"], r["transport"], r["why"]),
     )
 
 
-def submission_address(provider: Any) -> str | None:
-    """The settings key of the address ``provider`` submits the sample to.
+# ---------------------------------------------------------------------------
+# Sandbox submissions and sample stagings
+# ---------------------------------------------------------------------------
 
-    ``None`` for a provider whose submission never leaves the worker
-    (``SandboxProvider.submission_address`` declared empty); the provider's
-    own block's ``base_url`` where it declares no key.
+
+def submission_host(provider: Any) -> str | None:
+    """The host a sandbox provider's submission sends the sample to.
+
+    ``None`` for a provider whose submission never leaves the worker,
+    ``""`` for one that does not say (``SandboxProvider.submission_address``).
     """
-    declared = getattr(provider, "submission_address", None)
-    if declared == "":
-        return None
-    return str(declared) if declared else f"sandbox.{getattr(provider, 'id', '')}.base_url"
+    ask = getattr(provider, "submission_address", None)
+    if not callable(ask):
+        return ""
+    try:
+        where = ask()
+    except Exception:  # noqa: BLE001 — a provider that cannot say is one that does not say
+        return ""
+    return None if where is None else str(where)
 
 
-def upload_record(provider: str, *, submitted: bool, address: str = "") -> dict[str, Any]:
+def upload_record(provider: str, *, submitted: bool, host: str = "") -> dict[str, Any]:
     """One submission of the sample to the sandbox provider, as the run records it.
 
-    ``address`` is the settings key holding where the submission was sent
-    (:func:`submission_address`); empty reads the provider's own block's.
+    ``host`` is the host the provider resolved its submission URL to
+    (:func:`submission_host`); empty where it does not say.
     """
-    record: dict[str, Any] = {"provider": str(provider), "submitted": bool(submitted)}
-    if address:
-        record["address"] = str(address)
-    return record
+    return {"provider": str(provider), "submitted": bool(submitted), "host": str(host)}
 
 
-def _sandbox_uploads(
-    snapshot: Mapping[str, Any], uploads: Iterable[Mapping[str, Any]]
-) -> list[dict[str, Any]]:
-    """One row per sandbox provider the sample was submitted to, with its address."""
-    rows: dict[str, dict[str, Any]] = {}
+# A staging's states, as ``agents.sample_staging`` records them.
+STAGING_ATTEMPTED = "attempted"
+STAGING_DONE = "done"
+STAGING_FAILED = "failed"
+
+
+def staging_record(server: str, *, transport: str, url: str, state: str) -> dict[str, Any]:
+    """One staging of the sample to a tool server, as the run records it: never the URL whole."""
+    return {
+        "server": str(server),
+        "transport": str(transport),
+        "host": host_of(url),
+        "state": state,
+    }
+
+
+def _upload_row(by: str, source: str, transport: str, host: str, why: str) -> dict[str, Any]:
+    where = host_locality(host) if host else UNKNOWN
+    return {
+        "by": by,
+        "source": source,
+        "transport": transport,
+        "host": host,
+        "where": where,
+        "calls": 0,
+        "why": "" if host else why,
+        "failed": 0,
+    }
+
+
+def _sandbox_uploads(uploads: Iterable[Mapping[str, Any]]) -> list[dict[str, Any]]:
+    """One row per sandbox provider the sample was submitted to, with its host."""
+    rows: dict[tuple[str, str], dict[str, Any]] = {}
     for upload in uploads:
         provider = str(upload.get("provider") or "")
         if not provider:
             continue
-        row = rows.get(provider)
-        if row is None:
-            # The key the provider declared, else its own block's ``base_url``
-            # (``SandboxProvider.submission_address``).
-            url = snapshot.get(str(upload.get("address") or f"sandbox.{provider}.base_url"))
-            place = (
-                _url_place(url)
-                if url
-                else _Place(why=f"the settings record no address for {provider}")
+        host = normal_host(upload.get("host"))
+        key = (provider, host)
+        if key not in rows:
+            rows[key] = _upload_row(
+                BY_SANDBOX,
+                provider,
+                "",
+                host,
+                f"the {provider} provider does not say where it sends the sample",
             )
-            row = rows[provider] = {
-                "by": "sandbox",
-                "source": provider,
-                "transport": "",
-                "host": place.host,
-                "where": place.where,
-                "calls": 0,
-                "why": place.why,
-                "failed": 0,
-            }
-        row["calls"] += 1
-        row["failed"] += 0 if upload.get("submitted") else 1
+        rows[key]["calls"] += 1
+        rows[key]["failed"] += 0 if upload.get("submitted") else 1
     return list(rows.values())
 
 
-def _stores(snapshot: Mapping[str, Any]) -> list[dict[str, Any]]:
-    """The long-term memory store, where its backend reaches one at an address."""
+def _staging_uploads(stagings: Iterable[Mapping[str, Any]]) -> list[dict[str, Any]]:
+    """One row per tool server the sample was staged to, with the host of its block's address."""
+    rows: dict[tuple[str, str], dict[str, Any]] = {}
+    for staging in stagings:
+        server = str(staging.get("server") or "")
+        if not server:
+            continue
+        host = str(staging.get("host") or "")
+        key = (server, host)
+        if key not in rows:
+            rows[key] = _upload_row(
+                BY_STAGING,
+                f"mcp:{server}",
+                str(staging.get("transport") or ""),
+                host,
+                f"the address of tool server {server} names no host",
+            )
+        rows[key]["calls"] += 1
+        rows[key]["failed"] += 0 if staging.get("state") == STAGING_DONE else 1
+    return list(rows.values())
+
+
+# ---------------------------------------------------------------------------
+# The memory store
+# ---------------------------------------------------------------------------
+
+
+def memory_backends() -> dict[str, dict[str, Any]]:
+    """What each registered memory backend declares about where its store is."""
+    try:
+        from maljan.memory.store_factory import declared_backends
+    except Exception:  # noqa: BLE001 — no registry, no declarations
+        return {}
+    return declared_backends()
+
+
+def _stores(
+    snapshot: Mapping[str, Any], backends: Mapping[str, Mapping[str, Any]]
+) -> list[dict[str, Any]]:
+    """The long-term memory store, placed by what its backend declares.
+
+    In the process: no row. An address leaf: the host the snapshot holds there.
+    Neither declared: a row that cannot be placed.
+    """
     backend = str(snapshot.get("memory.backend") or "")
     if not backend:
         return []
-    prefix = f"memory.{backend}."
-    url = snapshot.get(prefix + "url")
-    if url is not None:
-        place = _url_place(url)
-    elif any(str(key).startswith(prefix) for key in snapshot):
-        place = _Place(why=f"the settings record no address for the {backend} store")
-    else:
-        # A backend with no settings of its own keeps its store in the process.
+    declared = backends.get(backend) or {}
+    if declared.get("in_process"):
         return []
+    leaf = str(declared.get("address_leaf") or "")
+    if leaf:
+        place = _url_place(snapshot.get(f"memory.{backend}.{leaf}"))
+    else:
+        place = _Place(
+            why=f"the {backend} backend declares neither an address nor that it runs in the process"
+        )
     return [{"backend": backend, "host": place.host, "where": place.where, "why": place.why}]
+
+
+# ---------------------------------------------------------------------------
+# The record
+# ---------------------------------------------------------------------------
+
+
+def addressed_hosts(snapshot: Mapping[str, Any]) -> list[str]:
+    """Every host the run's settings address: each address leaf's, and each model endpoint's.
+
+    The address leaves are the snapshot's keys whose last part is ``url`` or
+    ``base_url``; the model endpoints add the default address a provider
+    calls where no leaf holds one. The report prints these hosts as written
+    and defangs any other (``reporting.renderers.markdown``).
+    """
+    hosts = {
+        host_of(value)
+        for key, value in snapshot.items()
+        if isinstance(value, str) and str(key).rsplit(".", 1)[-1] in ("url", "base_url")
+    }
+    for agent in ["", *configured_agents(snapshot)]:
+        for _provider, endpoint in model_list(snapshot, agent):
+            if "://" in endpoint:
+                hosts.add(host_of(endpoint))
+    hosts.discard("")
+    return sorted(hosts)
+
+
+def _setting_on(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    return str(value or "").strip().lower() in ("true", "1", "yes", "on")
 
 
 def disclosure_record(
@@ -466,61 +718,261 @@ def disclosure_record(
     tokens: Mapping[str, Any] | None = None,
     agents: Iterable[str] = (),
     uploads: Iterable[Mapping[str, Any]] = (),
+    stagings: Iterable[Mapping[str, Any]] = (),
+    runtimes: Mapping[str, str] | None = None,
+    tracing: bool = False,
+    unreadable: int = 0,
+    backends: Mapping[str, Mapping[str, Any]] | None = None,
     partial_reason: str = "",
 ) -> dict[str, Any]:
     """What the run sent beyond this machine, as the run summary stores it.
 
     ``snapshot`` is the run's settings in dotted keys; ``entries`` its ledger
     entries; ``tokens`` the run summary's ``tokens`` block; ``agents`` the
-    agents the run's stages ran, whose model lists are read beside the calls
-    the ledger filed; ``uploads`` the sandbox submissions (:func:`upload_record`);
-    ``partial_reason`` says why the record may miss a call, and keeps it from
-    saying that nothing left. Linear in the entries and the snapshot.
+    agents its stages ran; ``uploads`` the sandbox submissions
+    (:func:`upload_record`) and ``stagings`` the sample's stagings to tool
+    servers (:func:`staging_record`); ``runtimes`` the endpoints (as
+    ``endpoint_label`` writes them) whose window probe answered as a model
+    runtime in this run, each with what answered; ``tracing`` the effective
+    tracing state; ``unreadable`` the ledger rows that could not be read;
+    ``backends`` what each memory backend declares (the registry's where
+    ``None``); ``partial_reason`` why the record may miss a call. Linear in
+    the entries and the snapshot.
     """
-    lookups, tool_uploads, servers = _tool_rows(snapshot, entries)
+    tools = _tool_rows(snapshot, entries)
     record: dict[str, Any] = {
         "v": DISCLOSURE_VERSION,
         "nothing_left": False,
         "partial_reason": str(partial_reason or ""),
-        "models": _model_rows(snapshot, tokens, agents),
-        "lookups": lookups,
-        "uploads": [*_sandbox_uploads(snapshot, uploads), *tool_uploads],
-        "servers": servers,
-        "stores": _stores(snapshot),
-        "tracing": snapshot.get(TRACING_SETTING) is True,
+        "models": _model_rows(snapshot, tokens, agents, runtimes or {}),
+        "lookups": _ordered(tools.lookups.values()),
+        "uploads": _ordered(
+            [*_sandbox_uploads(uploads), *_staging_uploads(stagings), *tools.uploads.values()]
+        ),
+        "servers": _ordered(tools.servers.values()),
+        "undeclared": _ordered(tools.undeclared.values()),
+        "local_servers": sorted(tools.local_servers),
+        "stores": _stores(snapshot, memory_backends() if backends is None else backends),
+        "tracing": bool(tracing) or _setting_on(snapshot.get(TRACING_SETTING)),
+        "unreadable_entries": max(0, int(unreadable or 0)),
+        "addressed": addressed_hosts(snapshot),
     }
-    rows = [
-        row
-        for part in ("models", "lookups", "uploads", "servers", "stores")
-        for row in record[part]
-    ]
-    record["nothing_left"] = (
-        not record["partial_reason"]
-        and not record["tracing"]
-        and all(row["where"] == LOCAL for row in rows)
-    )
+    record["nothing_left"] = _nothing_left(record)
     return record
 
 
-def configured_hosts(settings: Any) -> set[str]:
-    """Every host ``settings`` address: each address leaf's, and each model endpoint's.
+def _nothing_left(record: Mapping[str, Any]) -> bool:
+    if record.get("partial_reason") or record.get("tracing") or record.get("unreadable_entries"):
+        return False
+    if record.get("enrichment") or record.get("undeclared") or record.get("lookups"):
+        return False
+    if any(_model_blocks(row) for row in record.get("models") or []):
+        return False
+    return all(
+        row.get("where") == LOCAL
+        for part in ("uploads", "servers", "stores")
+        for row in record.get(part) or []
+    )
 
-    The address leaves are the snapshot's keys whose last part is ``url`` or
-    ``base_url`` (tool servers, provider blocks, sandboxes, model providers,
-    the memory store); the model endpoints add a provider's default address,
-    which no leaf holds (``model_assignments.configured_endpoint_labels``).
-    """
-    from maljan.core.model_assignments import configured_endpoint_labels
-    from maljan.core.settings_overrides import public_snapshot
 
-    hosts = {
-        host_of(value)
-        for key, value in public_snapshot(settings, ()).items()
-        if isinstance(value, str) and str(key).rsplit(".", 1)[-1] in ("url", "base_url")
+# ---------------------------------------------------------------------------
+# Enrichment
+# ---------------------------------------------------------------------------
+
+# The registry lookup the enrichment asks about a public address with no key,
+# named as its client names it (``enrichment.whois_client``).
+RDAP_SOURCE = "rdap"
+ENRICHMENT_QUEUED = "queued"
+ENRICHMENT_DONE = "done"
+
+
+def enrichment_source_row(
+    source: str,
+    *,
+    kinds: Iterable[str],
+    hosts: Iterable[str] = (),
+    server: str = "",
+    transport: str = "",
+    server_url: str = "",
+) -> dict[str, Any]:
+    """One place the enrichment may ask: a source's hosts, or the server it is asked through."""
+    named = sorted({normal_host(h) for h in hosts if normal_host(h)})
+    if server:
+        place = (
+            _url_place(server_url) if transport in HTTP_TRANSPORTS else _Place(why=_LOCAL_SERVER)
+        )
+        if place.where == LOCAL:
+            place = _Place(host=place.host, why=_LOCAL_SERVER)
+        named = [place.host] if place.host else []
+        where, why = place.where, place.why
+    elif named:
+        places = [host_locality(h) for h in named]
+        where = REMOTE if REMOTE in places else (UNKNOWN if UNKNOWN in places else LOCAL)
+        why = ""
+    else:
+        where, why = UNKNOWN, f"source {source} names no host"
+    return {
+        "source": str(source),
+        "kinds": sorted({str(k) for k in kinds}),
+        "hosts": named,
+        "server": str(server),
+        "transport": str(transport),
+        "where": where,
+        "why": why,
     }
-    hosts.update(host_of(label) for label in configured_endpoint_labels(settings))
-    hosts.discard("")
-    return hosts
+
+
+def rdap_row() -> dict[str, Any]:
+    """RDAP, which the enrichment asks about each public address with no key."""
+    from maljan.enrichment.whois_client import RDAP_HOST
+    from maljan.enrichment.whois_client import RDAP_SOURCE as SOURCE
+
+    return enrichment_source_row(SOURCE, kinds=["ip"], hosts=[RDAP_HOST])
+
+
+# Why the sources an enrichment may ask are not named.
+ENRICHMENT_SOURCES_UNREAD = "the enrichment sources in force could not be read"
+
+
+def unread_sources_row(kinds: Iterable[str]) -> dict[str, Any]:
+    """The configured sources, when they could not be read: asked about ``kinds``, no host named."""
+    row = enrichment_source_row("", kinds=kinds)
+    row["why"] = ENRICHMENT_SOURCES_UNREAD
+    return row
+
+
+def with_enrichment(
+    record: Mapping[str, Any], may_reach: Iterable[Mapping[str, Any]]
+) -> dict[str, Any]:
+    """``record`` naming the enrichment job queued after the report, and what it may reach.
+
+    Built by the worker from the job's enrichment settings: RDAP, which needs
+    no key, and every configured source (:func:`enrichment_source_row`). The
+    record never says "nothing" while it holds the enrichment.
+    """
+    rows = [dict(row) for row in may_reach]
+    out = _with_addressed(record, (h for row in rows for h in row.get("hosts") or []))
+    out["enrichment"] = {"state": ENRICHMENT_QUEUED, "may_reach": rows, "asked": []}
+    out["nothing_left"] = False
+    return out
+
+
+def with_enrichment_asked(
+    record: Mapping[str, Any], asked: Iterable[Mapping[str, Any]]
+) -> dict[str, Any]:
+    """``record`` with what the enrichment job asked: per source and host, the kinds and counts.
+
+    Added to what an earlier enrichment of the same report asked, so a report
+    enriched twice says every question either run sent.
+    """
+    out = dict(record)
+    held = dict(out.get("enrichment") or {"may_reach": []})
+    merged: dict[tuple[str, str, str], dict[str, Any]] = {}
+    before = held.get("asked")
+    earlier: list[Any] = list(before) if isinstance(before, list) else []
+    for row in [*earlier, *asked]:
+        if not isinstance(row, Mapping):
+            continue
+        host = str(row.get("host") or "")
+        source = str(row.get("source") or "")
+        why = "" if host else str(row.get("why") or _LOCAL_SERVER)
+        kept = merged.setdefault(
+            (source, host, why),
+            {
+                "source": source,
+                "host": host,
+                "where": host_locality(host) if host else UNKNOWN,
+                "kinds": {},
+                "why": why,
+            },
+        )
+        for kind, count in dict(row.get("kinds") or {}).items():
+            kept["kinds"][str(kind)] = kept["kinds"].get(str(kind), 0) + int(count or 0)
+    rows = [{**row, "kinds": dict(sorted(row["kinds"].items()))} for row in merged.values()]
+    held["state"] = ENRICHMENT_DONE
+    held["asked"] = sorted(rows, key=lambda r: (r["source"], r["host"]))
+    out = _with_addressed(out, (row["host"] for row in rows))
+    out["enrichment"] = held
+    out["nothing_left"] = False
+    return out
+
+
+def _with_addressed(record: Mapping[str, Any], hosts: Iterable[str]) -> dict[str, Any]:
+    """``record`` whose addressed hosts also hold ``hosts``: the enrichment's, from its settings.
+
+    The hosts an enrichment source's declaration fixes, RDAP's and a server
+    block's are settings, never the sample's, so the report prints them as
+    configured, as it prints the analysis settings' own addresses.
+    """
+    out = dict(record)
+    held = out.get("addressed")
+    named = {str(h) for h in held} if isinstance(held, list) else set()
+    named.update(normal_host(h) for h in hosts if normal_host(h))
+    out["addressed"] = sorted(named)
+    return out
+
+
+class EnrichmentAsks:
+    """The questions an enrichment job sends, counted per source, host and server, by kind.
+
+    Handed to the enrichment as its listener (``enrichment.declared.AskListener``),
+    then read as the rows :func:`with_enrichment_asked` takes.
+    """
+
+    def __init__(self) -> None:
+        self._counts: dict[tuple[str, str, str], dict[str, int]] = {}
+
+    def __call__(self, source: str, host: str, kind: str, server: str) -> None:
+        kinds = self._counts.setdefault((str(source), str(host), str(server)), {})
+        kinds[str(kind)] = kinds.get(str(kind), 0) + 1
+
+    def rows(self, servers: Mapping[str, Any] | None = None) -> list[dict[str, Any]]:
+        """One row per place asked; a server source's host is its block's, where it is remote.
+
+        ``servers`` are the tool servers in force (``mcp.servers``). A question
+        through a server started on this machine or reached at a local address
+        goes on to a service the settings do not name, and its row has no host.
+        """
+        out: list[dict[str, Any]] = []
+        for (source, host, server), kinds in sorted(self._counts.items()):
+            why = ""
+            if server:
+                cfg = (servers or {}).get(server)
+                transport = str(getattr(cfg, "transport", "") or "")
+                place = (
+                    _url_place(getattr(cfg, "url", ""))
+                    if transport in HTTP_TRANSPORTS
+                    else _Place(why=_LOCAL_SERVER)
+                )
+                host = place.host if place.where == REMOTE else ""
+                why = "" if host else (place.why or _LOCAL_SERVER)
+            out.append({"source": source, "host": host, "kinds": dict(kinds), "why": why})
+        return out
+
+
+def after_enrichment(
+    payload: Mapping[str, Any], rows: Iterable[Mapping[str, Any]]
+) -> dict[str, Any]:
+    """A stored report payload whose run summary's disclosure record holds what was asked.
+
+    ``payload`` is the stored ``malware_report``, which every rendering is made
+    from. A payload with no record (a run stored before the block existed) is
+    returned as it was.
+    """
+    out = dict(payload)
+    summary = out.get("run_summary")
+    if isinstance(summary, Mapping) and isinstance(summary.get("disclosure"), Mapping):
+        if "models" in summary["disclosure"]:
+            out["run_summary"] = {
+                **summary,
+                "disclosure": with_enrichment_asked(summary["disclosure"], rows),
+            }
+    return out
+
+
+# ---------------------------------------------------------------------------
+# The record of a run, from its container
+# ---------------------------------------------------------------------------
 
 
 def stage_agents(stages: Any) -> list[str]:
@@ -539,31 +991,43 @@ def run_disclosure(
     entries: Iterable[Any],
     tokens: Mapping[str, Any] | None,
     stages: Any = None,
+    unreadable: int = 0,
     partial_reason: str = "",
 ) -> dict[str, Any] | None:
     """The record of the run ``container`` holds, or ``None`` when it cannot be built.
 
     The snapshot is taken of the job's own settings (``container.config``) by
     the function the stored settings snapshot is made with
-    (``core.settings_overrides.public_snapshot``), so the record reads the
-    values the run summary's ``settings_snapshot`` records. Never raises: a
+    (``core.settings_overrides.public_snapshot``). The submissions, stagings
+    and runtime answers are the container's; tracing is read as the process
+    environment and the setting leave it (``core.tracing``). Never raises: a
     record that cannot be built is absent, with a warning, never a guess.
     """
     try:
         from maljan.core.config import Settings
         from maljan.core.settings_overrides import public_snapshot
+        from maljan.core.tracing import tracing_in_environment
 
         settings = getattr(container, "config", None)
         if not isinstance(settings, Settings):
             # No job settings to read where anything went: no record.
             return None
-        uploads = getattr(container, "sample_uploads", None)
+
+        def _held(name: str) -> list[Any]:
+            value = getattr(container, name, None)
+            return list(value) if isinstance(value, list) else []
+
+        answers = getattr(container, "runtime_answers", None)
         return disclosure_record(
             public_snapshot(settings, ()),
             entries=entries,
             tokens=tokens,
             agents=stage_agents(stages),
-            uploads=list(uploads) if isinstance(uploads, list) else [],
+            uploads=_held("sample_uploads"),
+            stagings=_held("sample_stagings"),
+            runtimes=dict(answers) if isinstance(answers, Mapping) else {},
+            tracing=tracing_in_environment(),
+            unreadable=unreadable,
             partial_reason=partial_reason,
         )
     except Exception as exc:  # noqa: BLE001 — an absent block is right; a guessed one is not
@@ -586,8 +1050,12 @@ def _code(text: str) -> str:
 
 
 def _mark(row: Mapping[str, Any]) -> str:
-    """What a placed row's host is: local, or outside this machine."""
-    return "(local)" if row.get("where") == LOCAL else "(outside this machine)"
+    """What a placed row's host is: local (a service name, where only assumed), or outside."""
+    if row.get("where") != LOCAL:
+        return "(outside this machine)"
+    if taken_as_service_name(row.get("host")):
+        return "(taken as local: a service name)"
+    return "(local)"
 
 
 def _placed(row: Mapping[str, Any]) -> bool:
@@ -634,6 +1102,14 @@ def _server(source: str, code: Callable[[str], str]) -> str:
     return f"tool server {code(source)}" if source else "a tool server"
 
 
+def _how(row: Mapping[str, Any]) -> str:
+    """The transport, as a reader is told it."""
+    transport = str(row.get("transport") or "")
+    if transport == STDIO_TRANSPORT:
+        return "stdio, run on this machine"
+    return transport or "transport not recorded"
+
+
 def _model_line(row: Mapping[str, Any], code: Callable[[str], str]) -> str:
     calls = int(row.get("calls") or 0)
     agents = dict(row.get("agents") or {})
@@ -643,19 +1119,40 @@ def _model_line(row: Mapping[str, Any], code: Callable[[str], str]) -> str:
         what = "it" if calls == 1 else "they"
         return f"Model prompts: {count_label(calls, 'call')}{by}{_untold(row, what)}."
     name = code(str(row["host"])) if row.get("host") else str(row["service"])
+    local = row.get("where") == LOCAL
+    runtime = str(row.get("runtime") or "")
     if calls:
         line = f"Model prompts: {name} {_mark(row)} received {count_label(calls, 'call')}"
-        line += f" ({_counts(agents)})." if agents else "."
+        line += f" ({_counts(agents)})" if agents else ""
+        if local and runtime:
+            line += f"; it answered as a model runtime ({runtime})"
+        elif local:
+            line += f"; {_NOT_A_RUNTIME}, so where they went cannot be told"
+        line += "."
         if listed:
             line += (
                 f" It is also in the model list of {_joined(listed)}, which recorded no "
                 "answered call there."
             )
         return line
+    whose = (
+        f"the model list of {_joined(listed)}, which recorded no answered call there"
+        if listed
+        else "no model list of an agent that called a model"
+    )
+    if row.get("global"):
+        whose = (
+            "the endpoint of the global model, which every agent without a model entry of its "
+            "own calls" + (f", and in {whose}" if listed else "")
+        )
+        line = f"Model prompts: {name} {_mark(row)} is {whose}; no answered call is recorded there"
+    else:
+        line = f"Model prompts: {name} {_mark(row)} is in {whose}"
+    if local and runtime:
+        return line + f"; it answered as a model runtime ({runtime})."
     return (
-        f"Model prompts: {name} {_mark(row)} is in the model list of {_joined(listed)}, which "
-        "recorded no answered call there; a request that failed is not always recorded, so "
-        "whether it received prompts cannot be told."
+        line + "; a request that failed is not always recorded, so whether it received prompts "
+        "cannot be told."
     )
 
 
@@ -665,14 +1162,6 @@ def _kinds(row: Mapping[str, Any]) -> str:
     if without:
         parts.append(f"{without} giving no argument declared as an indicator")
     return ", ".join(part for part in parts if part)
-
-
-def _how(row: Mapping[str, Any]) -> str:
-    """The transport, as a reader is told it."""
-    transport = str(row.get("transport") or "")
-    if transport == STDIO_TRANSPORT:
-        return "stdio, run on this machine"
-    return transport or "transport not recorded"
 
 
 def _lookup_line(row: Mapping[str, Any], code: Callable[[str], str]) -> str:
@@ -694,18 +1183,24 @@ def _upload_line(row: Mapping[str, Any], code: Callable[[str], str]) -> str:
     times = _times(calls)
     at = _at(row, code)
     failure = (
-        f"; {failed} of the attempts failed, so whether {'it' if failed == 1 else 'they'} "
-        "arrived cannot be told"
+        f"; {failed} of the attempts failed or did not finish, so whether "
+        f"{'it' if failed == 1 else 'they'} arrived cannot be told"
         if failed
         else ""
     )
     untold = "" if _placed(row) else _untold(row, "it")
-    if row.get("by") == "sandbox":
+    by = row.get("by")
+    if by == BY_SANDBOX:
         return (
             f"Sample upload: the sample was submitted {times} to the "
             f"{code(str(row.get('source') or ''))} sandbox{at}{failure}{untold}."
         )
     server = _server(str(row.get("source") or ""), code)
+    if by == BY_STAGING:
+        return (
+            f"Sample upload: the sample was staged {times} to {server} ({_how(row)}){at} through "
+            f"its put_sample tools, for its tools to read{failure}{untold}."
+        )
     return (
         f"Sample upload: {server} ({_how(row)}){at} was handed the sample {times} by a tool "
         f"declared to send it out of the deployment{failure}{untold}."
@@ -723,8 +1218,20 @@ def _server_line(row: Mapping[str, Any], code: Callable[[str], str]) -> str:
     return f"Tool calls: {server} ({_how(row)}){_at(row, code)}: {calls}{_untold(row)}."
 
 
+def _undeclared_line(rows: list[Mapping[str, Any]], code: Callable[[str], str]) -> str:
+    total = sum(int(row.get("calls") or 0) for row in rows)
+    by_server = ", ".join(
+        f"{_server(str(row.get('source') or ''), code)} ({_how(row)}) {int(row.get('calls') or 0)}"
+        for row in rows
+    )
+    return (
+        f"Tool calls: {count_label(total, 'call')} to tools that declare no effects "
+        f"({by_server}): whether they reached the network cannot be told."
+    )
+
+
 def _store_line(row: Mapping[str, Any], code: Callable[[str], str]) -> str:
-    store = f"the {code(str(row.get('backend') or ''))} store"
+    store = f"the {code(str(row.get('backend') or ''))} case-memory store"
     if _placed(row) and row.get("host"):
         return (
             f"Case memory: {store} at {code(str(row['host']))} {_mark(row)}, which this job "
@@ -734,23 +1241,108 @@ def _store_line(row: Mapping[str, Any], code: Callable[[str], str]) -> str:
 
 
 TRACING_SENTENCE = (
-    f"Tracing is on (`{TRACING_SETTING}`): every prompt and answer was also sent to the "
-    "tracing service, whose address the settings do not record, so where they went cannot "
-    "be told."
+    "Tracing is on (the setting `langchain_tracing_v2`, or the process environment): every "
+    "prompt and answer was also sent to the tracing service, whose address the settings do "
+    "not record, so where they went cannot be told."
 )
+
+
+def _unreadable_line(count: int) -> str:
+    return (
+        f"The ledger held {count_label(count, 'row')} the report could not read, so where "
+        f"{'its call' if count == 1 else 'their calls'} went cannot be told."
+    )
+
+
+def _reach(row: Mapping[str, Any], code: Callable[[str], str]) -> str:
+    kinds = ", ".join(str(k) for k in row.get("kinds") or [])
+    if not row.get("source"):
+        return f"the configured sources ({kinds}), not named here because {row.get('why')}"
+    name = (
+        "RDAP"
+        if row.get("source") == RDAP_SOURCE
+        else f"source {code(str(row.get('source') or ''))}"
+    )
+    hosts = [str(h) for h in row.get("hosts") or []]
+    if row.get("server"):
+        how = _how(row)
+        at = f" at {code(hosts[0])}" if hosts else ""
+        where = f"through {_server('mcp:' + str(row['server']), code)} ({how}){at}"
+    elif hosts:
+        where = "at " + ", ".join(code(h) for h in hosts)
+    else:
+        where = "with no host named"
+    note = " and the registry it refers an address to, with no key" if name == "RDAP" else ""
+    return f"{name} ({kinds}) {where}{note}"
+
+
+def _enrichment_lines(held: Mapping[str, Any], code: Callable[[str], str]) -> list[str]:
+    if held.get("state") == ENRICHMENT_DONE:
+        asked = [row for row in held.get("asked") or [] if isinstance(row, Mapping)]
+        if not asked:
+            return ["Enrichment: the follow-up job ran and asked no service about an indicator."]
+        parts = []
+        for row in asked:
+            kinds = _counts(dict(row.get("kinds") or {}))
+            name = (
+                "RDAP"
+                if row.get("source") == RDAP_SOURCE
+                else f"source {code(str(row.get('source') or ''))}"
+            )
+            if row.get("host"):
+                place = f"{code(str(row['host']))} {_mark(row)}"
+            else:
+                place = f"a tool server{_untold(row, 'the questions')}"
+            parts.append(f"{place} about {kinds} ({name})")
+        return ["Enrichment: the follow-up job asked " + "; ".join(parts) + "."]
+    reach = [row for row in held.get("may_reach") or [] if isinstance(row, Mapping)]
+    named = "; ".join(_reach(row, code) for row in reach) or "no source"
+    return [
+        "Enrichment: a follow-up job queued after this report may send the report's public "
+        f"domains and addresses to {named}. What it sends is added here once it has run."
+    ]
+
+
+def _nothing_sentence(record: Mapping[str, Any], code: Callable[[str], str]) -> str:
+    """ "Nothing left this machine", with what it rests on."""
+    parts: list[str] = []
+    models = [row for row in record.get("models") or [] if isinstance(row, Mapping)]
+    if models:
+        named = ", ".join(f"{code(str(row.get('host')))} ({row.get('runtime')})" for row in models)
+        parts.append(
+            "every model endpoint in this run's settings is a local address that answered as a "
+            f"model runtime: {named}"
+        )
+    local_servers = list(record.get("local_servers") or [])
+    if local_servers:
+        servers = ", ".join(_server(str(source), code) for source in local_servers)
+        parts.append(
+            f"the local tool servers called ({servers}) were taken as local by their tools' "
+            "declarations"
+        )
+    stores = [row for row in record.get("stores") or [] if isinstance(row, Mapping)]
+    if stores:
+        parts.append("the case-memory store is at a local address")
+    else:
+        parts.append("the case-memory store is kept in the process or not configured")
+    uploads = [row for row in record.get("uploads") or [] if isinstance(row, Mapping)]
+    if uploads:
+        parts.append("the sample went only to local addresses")
+    parts.append("no lookup was asked, and tracing is off")
+    return "Nothing left this machine. This rests on: " + "; ".join(parts) + "."
 
 
 def disclosure_lines(record: Any, code: Callable[[str], str] = _code) -> list[str]:
     """The block's sentences, one per line, for a list; ``[]`` for no record.
 
     ``code`` writes a host or a key as printed; the report renderer passes one
-    that keeps a configured address from its closing defang pass.
+    that keeps an address the run's settings name from its closing defang pass.
     """
-    if not isinstance(record, Mapping):
+    if not isinstance(record, Mapping) or "models" not in record:
         return []
     lines: list[str] = []
     if record.get("nothing_left"):
-        lines.append(NOTHING_LEFT_SENTENCE)
+        lines.append(_nothing_sentence(record, code))
     elif record.get("partial_reason"):
         lines.append(
             f"This record may be incomplete: {record['partial_reason']}, and a call made in the "
@@ -768,6 +1360,40 @@ def disclosure_lines(record: Any, code: Callable[[str], str] = _code) -> list[st
         for row in record.get(part) or []:
             if isinstance(row, Mapping):
                 lines.append(write(row, code))
+    undeclared = [row for row in record.get("undeclared") or [] if isinstance(row, Mapping)]
+    if undeclared:
+        lines.append(_undeclared_line(undeclared, code))
+    unreadable = int(record.get("unreadable_entries") or 0)
+    if unreadable:
+        lines.append(_unreadable_line(unreadable))
     if record.get("tracing"):
         lines.append(TRACING_SENTENCE)
+    enrichment = record.get("enrichment")
+    if isinstance(enrichment, Mapping):
+        lines.extend(_enrichment_lines(enrichment, code))
     return lines
+
+
+# Why a stored run summary carries no record (:func:`not_built`).
+NOT_BUILT_REPORTING_OFF = (
+    "reporting is off for this job (reporting.enabled), and the block is built by the report step"
+)
+NOT_BUILT_NO_SUMMARY = (
+    "the judge wrote no run summary (the mock provider's judge writes none), and the block is "
+    "built on it"
+)
+NOT_BUILT_UNREAD = "the block could not be built from the run's records"
+
+
+def not_built(reason: str) -> dict[str, Any]:
+    """The record of a run whose block was not built, and why: told apart from a stored run."""
+    return {"not_built": str(reason)}
+
+
+def not_built_reason(*, reporting: bool, summary_written: bool) -> str:
+    """Why a run's record is absent: reporting off, no run summary, or a build that failed."""
+    if not reporting:
+        return NOT_BUILT_REPORTING_OFF
+    if not summary_written:
+        return NOT_BUILT_NO_SUMMARY
+    return NOT_BUILT_UNREAD

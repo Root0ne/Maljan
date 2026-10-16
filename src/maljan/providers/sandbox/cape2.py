@@ -202,6 +202,12 @@ class CAPE2SandboxProvider(SandboxProvider):
             self._client = CAPEv2Client(base_url=self._cfg.base_url, api_token=self._cfg.api_token)
         return self._client
 
+    def submission_address(self) -> str | None:
+        """The host the submission reaches: the client posts a relative path on the base URL."""
+        from maljan.providers.base import requested_host
+
+        return requested_host(self._cfg.base_url, "/apiv2/tasks/create/file/")
+
     def submit(self, sample_path: str | Path) -> str:
         """Submit, asking for the analysis package and guest this format needs.
 

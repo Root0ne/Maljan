@@ -73,6 +73,18 @@ def is_local_endpoint(base_url: str | None) -> bool:
     a local server somebody started, and the only OpenAI-compatible servers
     people run there are llama.cpp and its forks. A public hostname is a hosted
     API, and hosted APIs validate their request bodies.
+
+    This is a guess at which server software answers, not the rule the
+    disclosure block places a host by (``core.host_locality``), and the two
+    differ on purpose. A single-label name, a ``.internal`` name and the
+    shared range (100.64.0.0/10) read as hosted here, because a compose
+    service or a gateway there is as often a proxy in front of a hosted API,
+    which refuses llama.cpp's extra fields, as it is llama.cpp; that rule takes
+    them as local, because they are inside the deployment. A documentation or
+    transition-range address reads as ``ipaddress.is_private`` answers here;
+    that rule places a transition address by the IPv4 address it carries.
+    Folding this guess into that rule would send llama.cpp's fields to every
+    such proxy, so they stay apart.
     """
     if not base_url:
         return False

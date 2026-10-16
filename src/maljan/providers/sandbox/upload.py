@@ -179,6 +179,10 @@ class UploadSandboxProvider(SandboxProvider):
             "The upload sandbox does not detonate samples; attach a report to the job instead."
         )
 
+    def submission_address(self) -> str | None:
+        """None: this provider submits nothing, and the sample goes nowhere."""
+        return None
+
     def wait_for_completion(
         self,
         task_id: str,

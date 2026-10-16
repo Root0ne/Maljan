@@ -878,7 +878,14 @@ _PROVIDER_BLOCKS: dict[str, dict[str, Any]] = {
         "auto_name_prefixes": ["fcn.", "loc.", "sub.", "func."],
         "tool_facts": R2_TOOLS,
     },
-    "cape2_mcp": {"roles": ["sandbox"], "prompt_fragment": CAPE_WORKFLOW},
+    # The workflow's ``submit_file`` sends the sample to the sandbox: declared
+    # so the run's disclosure block names the upload, with the kind every
+    # built-in ``submit_file`` declares (one name, one reading).
+    "cape2_mcp": {
+        "roles": ["sandbox"],
+        "prompt_fragment": CAPE_WORKFLOW,
+        "tool_facts": {"submit_file": {"kind": "submission", "discloses_sample": True}},
+    },
 }
 
 # The platform's own in-process sources, declared like any server.

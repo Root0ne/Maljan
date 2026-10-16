@@ -122,9 +122,13 @@ says what the run sent beyond the machine it ran on:
 
 - **Model prompts**: every model endpoint that answered a call, by host, with
   the agents that called it and how many calls each made. A local endpoint is
-  stated as local, and a provider reached through its own API with no address
-  configured is named as that API. An endpoint in an agent's model list that
-  answered nothing is named too, because a request that failed is not always
+  stated as local, and says whether it answered the context-window probe as a
+  model runtime in this run (llama.cpp's `/props`, Ollama's `/api/show`, Text
+  Generation Inference's `/info`); a local address that did not may be a
+  gateway forwarding the prompts to a hosted API. A provider reached through
+  its own API with no address configured is named as that API. Every endpoint
+  in every agent's model list, fallbacks included, and the global model's are
+  named too, called or not, because a request that failed is not always
   recorded.
 - **Lookups**: every call of a tool declared as a lookup — a reputation lookup
   (`kind: reputation`), a report or reputation of an indicator
@@ -132,39 +136,61 @@ says what the run sent beyond the machine it ran on:
   role that carries an indicator (`hash`, `domain`, `ip`, `url`) — by host,
   with the indicator kinds the calls gave.
 - **Sample uploads**: every submission of the sample to the sandbox provider,
-  with the provider and the host of `sandbox.<provider>.base_url`, and every
-  call of a tool declared with `discloses_sample`.
-- **Tool calls**: every other call of a tool server reached over `http`,
-  `streamable-http` or `sse`, by host.
-- **Case memory** and **tracing**: the long-term memory store where its backend
-  has an address (`memory.<backend>.url`), and `langchain_tracing_v2` when it
-  is on.
+  with the provider and the host its submission URL resolves to
+  (`SandboxProvider.submission_address`), every staging of the sample to a
+  tool server over its `put_sample` tools (server and host, recorded before
+  the first byte is sent), and every call of a tool declared with
+  `discloses_sample`. An attempt that failed or did not finish is still listed.
+- **Tool calls**: every call of a tool server reached over `http`,
+  `streamable-http` or `sse` at an address outside this machine, by host; every
+  call through a local tool server that is a gateway (its block declares the
+  `reputation` or `sandbox` role, or any of its tools declares a lookup or
+  `discloses_sample`); and the calls of tools that declare no effects at all.
+- **Case memory**, **tracing** and the ledger: the long-term memory store,
+  placed by what its backend declares (kept in the process, or the settings
+  leaf that holds its address); tracing when it is on in the settings
+  (`langchain_tracing_v2`) or in the process environment; and the ledger rows
+  the report could not read.
+- **Enrichment**: when enrichment is on, the follow-up job queued after the
+  report and what it may reach — RDAP, which needs no key, and every
+  configured source with the hosts its requests name or the tool server it is
+  asked through. The job then adds what it asked (service host, indicator
+  kinds, counts) to the stored record, and the served report shows it.
 
 The block is built from the run's own records and nothing else: the settings
 the run ran with, the source each ledger entry recorded with the transport and
 address that source's settings block names, the token ledger's model labels
-(which carry the endpoint each call was sent to) and the sample's submissions.
-A tool's name decides nothing.
+(which carry the endpoint each call was sent to), the runtime answers the
+window probe recorded, and the sample's submissions and stagings. A tool's
+name decides nothing.
 
-**Local** is a loopback, private, link-local or shared (`100.64.0.0/10`)
-address, a name only a local resolver answers (`localhost`,
-`host.docker.internal`, anything under `.local`, `.internal` or `.localhost`),
-or a single label such as a compose service's name. Any other host counts as
-outside this machine. Nothing is resolved, so a stored record reads the same
-wherever it is opened.
+**This machine** covers its loopback addresses, the private (RFC 1918 and
+`fc00::/7`), link-local and shared (`100.64.0.0/10`) ranges and the
+unspecified addresses; an address of a transition range (IPv4-mapped, 6to4,
+Teredo, NAT64) is read as the IPv4 address it carries. A name only a local
+resolver answers (`localhost`, `host.docker.internal`, anything under
+`.local`, `.internal` or `.localhost`) is local, and a single label is taken
+as a compose service's name, which the block says. Any other host, an
+absolute name such as `ai.` included, counts as outside this machine. Nothing
+is resolved, so a stored record reads the same wherever it is opened. The
+block's footnote says this once.
 
-When every destination is local the block says **Nothing left this machine**.
-It never says so when it cannot tell, and says why instead: a call it cannot
-place (an address with no host, a transport or a source it does not know), a
-lookup or an upload through a local tool server (started on this machine over
-`stdio`, or reached at a local address: the service it forwards the call to is
-not in the settings), tracing on, or a run stopped part-way, whose last step
-may have made calls its record does not hold. Any other call of a local tool
-server is taken to stay local.
+The block says **Nothing left this machine** only with positive knowledge of
+every path, and then says what that rests on: every model endpoint is local
+and answered as a model runtime, the local tool servers called are taken as
+local by their tools' declarations, where the case-memory store is, that the
+sample went only to local addresses, that no lookup was asked and that tracing
+is off. Wherever it cannot tell, it says what and why instead: a call it
+cannot place, a lookup or an upload through a local tool server, a call
+through a local gateway, a call to a tool that declares no effects, a local
+model endpoint that did not answer as a runtime, a configured endpoint with
+no answered call, tracing on, a queued enrichment, an unread ledger row, or a
+run stopped part-way, whose last step may have made calls its record does not
+hold.
 
-The block covers the analysis. The enrichment job queued after it is not in
-it, and the memory store is named from the settings rather than from a record
-of its calls. A report stored before the block existed shows none. The
+A run whose block was not built stores why (`{"not_built": …}`: reporting
+off, no run summary as in a mock run, or a build that failed), so it is told
+apart from a report stored before the block existed, which shows none. The
 console's summary tab does not draw the block yet; the record is in the stored
 run summary.
 

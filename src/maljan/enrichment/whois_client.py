@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import ipaddress
 from typing import Any
+from urllib.parse import urlsplit
 
 import httpx
 
@@ -17,18 +18,32 @@ from maljan.core.logger import logger
 
 _RDAP_BOOTSTRAP_URL = "https://rdap.arin.net/registry/ip/{address}"
 _RDAP_TIMEOUT_SECONDS = 15.0
+# How an RDAP question is named to a listener: the lookup, and the host it is
+# sent to first (the registry it refers the address to may answer it).
+RDAP_SOURCE = "rdap"
+RDAP_HOST = str(urlsplit(_RDAP_BOOTSTRAP_URL).hostname)
 
 
 class WhoisClient:
-    """Best-effort WHOIS / GeoIP lookups for the report's IP IOCs."""
+    """Best-effort WHOIS / GeoIP lookups for the report's IP IOCs.
 
-    def __init__(self, http: httpx.AsyncClient) -> None:
+    ``on_ask`` is told of each RDAP question just before it is sent, as the
+    declared sources' asker tells it (``enrichment.declared.AskListener``).
+    """
+
+    def __init__(self, http: httpx.AsyncClient, on_ask: Any = None) -> None:
         self._http = http
+        self._on_ask = on_ask
 
     async def asn_lookup(self, address: str) -> str | None:
         """Return ``"AS12345 ExampleCorp"`` style label or ``None``."""
         if not _is_public_ip(address):
             return None
+        if self._on_ask is not None:
+            try:
+                self._on_ask(RDAP_SOURCE, RDAP_HOST, "ip", "")
+            except Exception as exc:  # noqa: BLE001 — a listener never costs a lookup
+                logger.debug("WhoisClient: the ask listener failed (%s).", type(exc).__name__)
         # 1) Try ipwhois (RDAP, locally cached).
         result = await _try_ipwhois(address)
         if result:

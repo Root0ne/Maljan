@@ -3043,12 +3043,20 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
         await _publish_event(redis_conn, job_id, "phase_change", {"phase": "reporting"})
 
         # ── 4. Build the report ──────────────────────────────
+        # The enrichment job queued after a stored report is named in its
+        # disclosure block, with what it may reach, so that block never says
+        # nothing left the machine while a lookup is still to come.
         stix_bundle_for_persist, _run_summary = _report_inputs(
             pipeline_result,
             core_settings=core_settings,
             override_keys=overrides,
             hash_mismatch_reason=_report_hash_mismatch_reason,
             scale_record=recorded_signature_scale(getattr(app, "container", None)),
+            enrichment=(
+                await enrichment_plan(core_settings)
+                if pipeline_result.get("malware_report")
+                else None
+            ),
         )
 
         # A pipeline that produced no report is a failed run, not a
@@ -4088,11 +4096,14 @@ def _report_inputs(
     override_keys: Any,
     hash_mismatch_reason: str | None,
     scale_record: Mapping[str, Any] | None = None,
+    enrichment: list[dict[str, Any]] | None = None,
 ) -> tuple[dict | None, dict[str, Any]]:
     """The STIX bundle and the run summary a stored report carries.
 
     Read off the pipeline's state, whether the run completed or failed after
-    its report was built: both store the report the same way.
+    its report was built: both store the report the same way. ``enrichment``
+    is where the enrichment job queued after the report may send its
+    indicators (:func:`enrichment_plan`), ``None`` when none is queued.
     """
     # Prefer the rich extended bundle produced by ``report_node``
     # (54+ objects with Identity/Indicator/ObservedData/Note/Report
@@ -4146,7 +4157,84 @@ def _report_inputs(
                 *(_report_reasons if isinstance(_report_reasons, list) else []),
                 hash_mismatch_reason,
             ]
+    _disclosed(_run_summary, pipeline_result, core_settings=core_settings, enrichment=enrichment)
     return stix_bundle_for_persist, _run_summary
+
+
+def _disclosed(
+    run_summary: dict[str, Any],
+    pipeline_result: dict[str, Any],
+    *,
+    core_settings: Any,
+    enrichment: list[dict[str, Any]] | None,
+) -> None:
+    """The run's disclosure record as the stored summary and report carry it, set in place.
+
+    A record the run built names the enrichment job queued after the report
+    and what it may reach, where ``enrichment`` holds that
+    (``analysis.disclosure.with_enrichment``): in the run summary, and in the
+    report payload every rendering of the report is made from. A summary
+    without a record says why none was built (``analysis.disclosure.not_built``),
+    so it is told apart from a run stored before the block existed.
+    """
+    from maljan.analysis.disclosure import not_built, not_built_reason, with_enrichment
+
+    record = run_summary.get("disclosure")
+    if not isinstance(record, dict) or "models" not in record:
+        reporting = getattr(getattr(core_settings, "reporting", None), "enabled", True)
+        run_summary["disclosure"] = not_built(
+            not_built_reason(
+                reporting=bool(reporting),
+                summary_written=bool(pipeline_result.get("run_summary")),
+            )
+        )
+        return
+    if enrichment is None:
+        return
+    run_summary["disclosure"] = with_enrichment(record, enrichment)
+    malware_report = pipeline_result.get("malware_report")
+    if not isinstance(malware_report, dict):
+        return
+    held = malware_report.get("run_summary")
+    if isinstance(held, dict) and isinstance(held.get("disclosure"), dict):
+        if "models" in held["disclosure"]:
+            malware_report["run_summary"] = {
+                **held,
+                "disclosure": with_enrichment(held["disclosure"], enrichment),
+            }
+
+
+async def enrichment_plan(core_settings: Any) -> list[dict[str, Any]] | None:
+    """Where the enrichment job queued after a report may send its indicators; ``None`` when off.
+
+    Read as that job reads it (``enrich_worker.enrich_threat_intel``): the
+    ``enrichment_enabled`` switch, then the sources in force with their
+    credentials, and the job's tool servers
+    (``services.enrichment_sources.enrichment_reach``). Never raises: sources
+    that cannot be read are named as such, never left out.
+    """
+    if not await runtime_config.get("enrichment_enabled"):
+        return None
+    from maljan.analysis.disclosure import rdap_row, unread_sources_row
+    from maljan.enrichment.declared import ASKED_KINDS
+
+    from app.services.enrichment_sources import (
+        ENRICHMENT_SOURCES_PATH,
+        enrichment_reach,
+        read_setting_secret,
+    )
+
+    try:
+        servers = getattr(getattr(core_settings, "mcp", None), "servers", None)
+        return await enrichment_reach(
+            await runtime_config.get(ENRICHMENT_SOURCES_PATH), read_setting_secret, servers
+        )
+    except Exception as exc:  # noqa: BLE001 — a plan that cannot be read still says so
+        logger.warning(
+            "enrich: the sources the follow-up job may ask could not be read (%s).",
+            type(exc).__name__,
+        )
+        return [rdap_row(), unread_sources_row(ASKED_KINDS)]
 
 
 def evidence_budget_of(run_summary: Mapping[str, Any] | None, core_settings: Any = None) -> int:

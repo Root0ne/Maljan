@@ -283,6 +283,12 @@ class TriageSandboxProvider(SandboxProvider):
         file_type, _platform = detect_sample_format(path)
         return option_for_format(self._cfg.profile_by_format, file_type, self._cfg.profile)
 
+    def submission_address(self) -> str | None:
+        """The host the submission reaches: ``SUBMIT_PATH`` on the base URL."""
+        from maljan.providers.base import requested_host
+
+        return requested_host(self._cfg.base_url, SUBMIT_PATH)
+
     def _post_sample(self, path: Path, headers: dict[str, str]) -> httpx.Response:
         payload: dict[str, Any] = {"kind": "file", "interactive": False}
         profile = self._profile_for(path)

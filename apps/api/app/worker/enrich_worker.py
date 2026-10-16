@@ -348,6 +348,10 @@ async def enrich_threat_intel(
     before_ip_reps = _count_reputations(payload, "ips")
 
     memory_store = await _get_memory_store()
+    # Every question the enrichment sends, for the run's disclosure block.
+    from maljan.analysis.disclosure import EnrichmentAsks
+
+    asks = EnrichmentAsks()
 
     try:
         updated = await enrich_malware_report(
@@ -357,6 +361,7 @@ async def enrich_threat_intel(
             tool_caller=tools,
             tool_arguments=tools.arguments if tools is not None else None,
             memory_store=memory_store,
+            on_ask=asks,
         )
     except Exception as exc:  # noqa: BLE001
         logger.error("enrich: orchestrator failed (%s)", exc, exc_info=True)
@@ -365,6 +370,9 @@ async def enrich_threat_intel(
         if tools is not None:
             await tools.aclose()
 
+    # A question through a server is placed by that server's block, the one
+    # the caller attached it with.
+    asked = asks.rows(tools.servers() if tools is not None else None)
     async with db_session_factory() as db:
         report = await db.get(AnalysisReport, report_uuid)
         if report is None:
@@ -372,11 +380,15 @@ async def enrich_threat_intel(
             # enrichment belongs to a report that no longer exists.
             logger.warning("enrich: report %s went away during enrichment", report_id)
             return {"status": "not_found"}
+        updated, column = disclosed_enrichment(updated, report.run_summary, asked)
         report.malware_report = updated
         # SQLAlchemy needs an explicit flag for in-place JSONB mutation.
         from sqlalchemy.orm.attributes import flag_modified
 
         flag_modified(report, "malware_report")
+        if column is not None:
+            report.run_summary = column
+            flag_modified(report, "run_summary")
         await db.commit()
 
     after_domain_reps = _count_reputations(updated, "domains")
@@ -439,6 +451,27 @@ async def enrich_threat_intel(
         delta,
     )
     return {"status": "ok", **delta}
+
+
+def disclosed_enrichment(
+    payload: dict[str, Any], run_summary: Any, asked: list[dict[str, Any]]
+) -> tuple[dict[str, Any], dict[str, Any] | None]:
+    """The stored payload and run summary with the enrichment's questions in their disclosure.
+
+    Both carry the run's disclosure record (``analysis.disclosure``); each
+    gets the rows of what was asked, and neither then says that nothing left
+    the machine. A summary without a record (a run stored before the block
+    existed) is left as it is, answered as ``None``.
+    """
+    from maljan.analysis.disclosure import after_enrichment, with_enrichment_asked
+
+    updated = after_enrichment(payload, asked)
+    column = dict(run_summary) if isinstance(run_summary, dict) else None
+    record = column.get("disclosure") if column is not None else None
+    if column is None or not isinstance(record, dict) or "models" not in record:
+        return updated, None
+    column["disclosure"] = with_enrichment_asked(record, asked)
+    return updated, column
 
 
 def _count_reputations(malware_report: dict[str, Any], key: str) -> int:

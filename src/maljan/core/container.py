@@ -608,6 +608,15 @@ class ServiceContainer:
         # (``analysis.disclosure.upload_record``), set by ``app.arun`` as it
         # submits and read by the run's disclosure block. Empty outside a job.
         self.sample_uploads: list[dict[str, Any]] = []
+        # Each upload of the sample to a tool server over its ``put_sample``
+        # tools (``analysis.disclosure.staging_record``), written by
+        # ``agents.sample_staging`` as it uploads; read by the same block.
+        self.sample_stagings: list[dict[str, Any]] = []
+        # The model endpoints whose window probe answered as a model runtime in
+        # this job, by ``endpoint_label``, each with what answered
+        # (``llm.context_window.runtime_answer``): recorded where the job's
+        # windows are learned, read by the same block.
+        self.runtime_answers: dict[str, str] = {}
 
         # The job's sample, for the one step that needs the bytes rather than
         # a report: staging the sample to a tool server that does not share
@@ -1167,11 +1176,13 @@ class ServiceContainer:
         from maljan.agents.composition import window_assignments
         from maljan.llm.context_window import budget_for_settings
 
+        assignments = window_assignments(self.config)
         budget = budget_for_settings(
             self.config,
-            window_assignments(self.config),
+            assignments,
             probe=self._cap_is_derived() and not self.mock,
         )
+        self._note_runtime_answers(assignments)
         with self._lock:
             if self._context_budget is None:
                 self._context_budget = budget
@@ -1205,15 +1216,36 @@ class ServiceContainer:
         from maljan.core.model_assignments import assignment_chain_for
         from maljan.llm.context_window import budget_for_settings
 
+        assignments = assignment_chain_for(self.config, REPORTER_AGENT_KEY, role="judge")
         budget = budget_for_settings(
             self.config,
-            assignment_chain_for(self.config, REPORTER_AGENT_KEY, role="judge"),
+            assignments,
             probe=self._cap_is_derived() and not self.mock,
         )
+        self._note_runtime_answers(assignments)
         with self._lock:
             if self._reporter_context_budget is None:
                 self._reporter_context_budget = budget
             return self._reporter_context_budget
+
+    def _note_runtime_answers(self, assignments: Any) -> None:
+        """Keep which of these models' endpoints answered the window probe as a runtime.
+
+        Read from what the probe that just ran learned, with no request of its
+        own (``context_window.runtime_answers``); a mock container learns
+        nothing and keeps nothing. Never raises.
+        """
+        if self.mock:
+            return
+        try:
+            from maljan.llm.context_window import runtime_answers
+
+            found = runtime_answers(assignments)
+        except Exception as exc:  # noqa: BLE001 — a record of an answer is never worth a run
+            logger.debug("runtime answers not kept (%s).", type(exc).__name__)
+            return
+        with self._lock:
+            self.runtime_answers.update(found)
 
     def _cap_is_derived(self) -> bool:
         """Whether the tool-output cap comes from the window rather than a setting."""
@@ -2172,20 +2204,30 @@ class ServiceContainer:
         os.environ[ATTCK_REFRESH_DAYS_ENV] = str(days)
 
     def _configure_langsmith(self) -> None:
-        """Propagate LangSmith tracing config into the OS environment."""
+        """Propagate LangSmith tracing config into the OS environment, or undo it.
+
+        The environment is the process's and outlives the job, so a job with
+        the setting off puts back what the platform set for an earlier one
+        (``core.tracing.apply_tracing_setting``), and an environment that
+        traces on its own is warned about there.
+        """
+        from maljan.core.tracing import apply_tracing_setting
+
         if not self.config.langchain_tracing_v2:
+            apply_tracing_setting(False)
             logger.debug("LangSmith tracing disabled (langchain_tracing_v2=False).")
             return
 
-        os.environ["LANGCHAIN_TRACING_V2"] = "true"
-        os.environ["LANGCHAIN_PROJECT"] = self.config.langchain_project
-
         api_key = self.config.langchain_api_key
+        secret_value = ""
         if api_key:
             secret_value = (
                 api_key.get_secret_value() if hasattr(api_key, "get_secret_value") else str(api_key)
             )
-            os.environ["LANGCHAIN_API_KEY"] = secret_value
+        apply_tracing_setting(
+            True, project=str(self.config.langchain_project or ""), api_key=secret_value
+        )
+        if api_key:
             # No part of the key reaches the log: a fragment narrows a brute
             # force and is enough to confirm a key found elsewhere.
             logger.info(

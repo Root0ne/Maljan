@@ -922,8 +922,17 @@ async def _astage(
     from maljan.agents.sample_staging import stage_for_agent
 
     before = len(registry.degradation_reasons)
+    # The job's record of every upload, for the run's disclosure block.
+    stagings = getattr(container, "sample_stagings", None)
     try:
-        staged = await stage_for_agent(registry, tools, sample_path, sha256=digest, job_id=job_key)
+        staged = await stage_for_agent(
+            registry,
+            tools,
+            sample_path,
+            sha256=digest,
+            job_id=job_key,
+            stagings=stagings if isinstance(stagings, list) else None,
+        )
     except Exception as exc:  # noqa: BLE001 — staging never fails a run
         logger.warning("sample staging skipped for job %s: %s", job_key, exc)
         return {}, []

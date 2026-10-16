@@ -198,10 +198,23 @@ def _disclosure(summary: dict[str, Any]) -> dict[str, Any]:
     """The disclosure record, built by the run's builder, with a row in every part.
 
     A model endpoint outside the machine, a lookup over HTTP, a sample
-    submission to a sandbox on a private address, an entry that records no
-    source and a memory store at a compose service name.
+    submission to a sandbox on a private address and a staging to a tool
+    server, an entry that records no source, a call to a tool that declares
+    nothing and one to a declared tool on a server run on this machine, and a
+    memory store at a compose service name. Then the enrichment, as the
+    worker names it and as its job adds what it asked: the summary a run is
+    stored with once both have written it.
     """
-    from maljan.analysis.disclosure import disclosure_record, stage_agents, upload_record
+    from maljan.analysis.disclosure import (
+        STAGING_DONE,
+        disclosure_record,
+        rdap_row,
+        stage_agents,
+        staging_record,
+        upload_record,
+        with_enrichment,
+        with_enrichment_asked,
+    )
     from maljan.schemas.evidence import LedgerEntry
 
     snapshot = {
@@ -209,6 +222,7 @@ def _disclosure(summary: dict[str, Any]) -> dict[str, Any]:
         "llm.openai.base_url": "https://llm.example.org/v1",
         "mcp.servers.intel.transport": "streamable-http",
         "mcp.servers.intel.url": "https://intel.example.org/mcp",
+        "mcp.servers.analysis.transport": "stdio",
         "sandbox.provider": "cape2",
         "sandbox.cape2.base_url": "http://10.0.0.5:8000",
         "memory.backend": "qdrant",
@@ -225,12 +239,43 @@ def _disclosure(summary: dict[str, Any]) -> dict[str, Any]:
         facts={"v": 1, "kind": "reputation", "arguments": {"hash": "sha256"}},
         seq=3,
     )
-    return disclosure_record(
+    undeclared = LedgerEntry(
+        id="ev_0004",
+        agent="static",
+        server="analysis",
+        tool="anything",
+        source="mcp:analysis",
+        facts={"v": 1},
+        seq=4,
+    )
+    declared = LedgerEntry(
+        id="ev_0005",
+        agent="static",
+        server="analysis",
+        tool="strings",
+        source="mcp:analysis",
+        facts={"v": 1, "kind": "strings"},
+        seq=5,
+    )
+    record = disclosure_record(
         snapshot,
-        entries=[*_ledger(), lookup],
+        entries=[*_ledger(), lookup, undeclared, declared],
         tokens=summary.get("tokens"),
         agents=stage_agents(summary.get("stages")),
-        uploads=[upload_record("cape2", submitted=True)],
+        uploads=[upload_record("cape2", submitted=True, host="10.0.0.5")],
+        stagings=[
+            staging_record(
+                "intel",
+                transport="streamable-http",
+                url="https://intel.example.org/mcp",
+                state=STAGING_DONE,
+            )
+        ],
+        runtimes={},
+    )
+    record = with_enrichment(record, [rdap_row()])
+    return with_enrichment_asked(
+        record, [{"source": "rdap", "host": "rdap.arin.net", "kinds": {"ip": 1}, "why": ""}]
     )
 
 
@@ -296,6 +341,7 @@ DATA_KEYED = frozenset(
         # Keyed by the agent that made the calls, and by the indicator role.
         "disclosure.models[].agents",
         "disclosure.lookups[].kinds",
+        "disclosure.enrichment.asked[].kinds",
     }
 )
 

@@ -55,6 +55,9 @@ INDICATOR_ARGUMENTS: tuple[str, ...] = (HASH_ARGUMENT, *NETWORK_INDICATOR_ARGUME
 # The kinds a lookup about an indicator declares, beside a reputation lookup
 # about the sample: a service's report on an indicator, and its reputation.
 INDICATOR_LOOKUP_KINDS: tuple[str, ...] = ("indicator_report", "indicator_reputation")
+# The role a tool server declares when it answers reputation lookups
+# (``MCPServerConfig.roles``), as the built-in lookup servers do.
+REPUTATION_ROLE = "reputation"
 # The rank a lookup whose declaration names none is asked at.
 DEFAULT_RANK = 100
 

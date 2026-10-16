@@ -523,16 +523,31 @@ def safe_value(kind: str, value: str) -> bool:
 
 
 ToolCaller = Callable[[str, str, dict[str, Any]], Awaitable[Any]]
+# Told of each question about to be sent: ``(source, host, kind, server)``,
+# the host for a REST source and the server's key for a server source.
+AskListener = Callable[[str, str, str, str], None]
 
 
 @dataclass
 class SourceAsker:
-    """Asks the ready sources, one HTTP client and one pace per source for a whole enrichment."""
+    """Asks the ready sources, one HTTP client and one pace per source for a whole enrichment.
+
+    ``on_ask`` is told of each question just before it is sent, for the run's
+    disclosure block (``analysis.disclosure.with_enrichment_asked``).
+    """
 
     http: httpx.AsyncClient
     tool_caller: ToolCaller | None = None
     tool_arguments: Callable[[str, str], Mapping[str, str]] | None = None
+    on_ask: AskListener | None = None
     _paces: dict[str, asyncio.Semaphore] = field(default_factory=dict)
+
+    def _told(self, source: str, host: str, kind: str, server: str) -> None:
+        if self.on_ask is not None:
+            try:
+                self.on_ask(source, host, kind, server)
+            except Exception as exc:  # noqa: BLE001 — a listener never costs a lookup
+                logger.debug("enrich: the ask listener failed (%s).", type(exc).__name__)
 
     async def ask(self, ready: ReadySource, kind: str, value: str) -> dict[str, Any] | None:
         """``ready``'s record for ``value``, or ``None`` on any failure (never raises)."""
@@ -560,6 +575,7 @@ class SourceAsker:
         if not argument:
             logger.warning("enrich: source %s names no argument for a kind; not asked.", ready.key)
             return None
+        self._told(ready.key, "", kind, source.server)
         return await self.tool_caller(source.server, source.tool, {argument: value})
 
     async def _ask_rest(self, ready: ReadySource, kind: str, value: str) -> Any:
@@ -571,6 +587,7 @@ class SourceAsker:
             return None
         pace = self._paces.setdefault(ready.key, asyncio.Semaphore(1))
         async with pace:
+            self._told(ready.key, request.host, kind, "")
             try:
                 resp = await self.http.request(**built, timeout=source.timeout_seconds)
             except httpx.HTTPError as exc:

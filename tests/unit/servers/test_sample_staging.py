@@ -18,6 +18,7 @@ from typing import Any
 import pytest
 
 from maljan.agents import sample_staging
+from tests.credential_shapes import password
 
 
 class _FakeTool:
@@ -375,3 +376,149 @@ class TestStageForAgent:
             sample_staging.stage_for_agent(registry, [], None, sha256="", job_id="job-1")
         )
         assert staged == {}
+
+
+class TestEveryUploadIsWrittenDown:
+    """Each upload is in the job's record of what left, whatever came of it."""
+
+    @staticmethod
+    def _server(**over: Any) -> _FakeServer:
+        server = _FakeServer(**over)
+        server.config = type(
+            "_Cfg",
+            (),
+            {
+                "transport": "streamable-http",
+                "url": f"https://user:{password()}@re.example.org/mcp",
+            },
+        )()
+        return server
+
+    def test_an_upload_is_written_down_and_marked_done(self, tmp_path: Path) -> None:
+        path, digest = _sample(tmp_path, 256)
+        stagings: list[dict[str, Any]] = []
+
+        staged = asyncio.run(
+            sample_staging.stage_for_agent(
+                _FakeRegistry(self._server()),
+                [_tool_from("remote")],
+                path,
+                sha256=digest,
+                job_id="job-1",
+                stagings=stagings,
+            )
+        )
+
+        assert staged == {"remote": "/remote/staging/sample.exe"}
+        assert stagings == [
+            {
+                "server": "remote",
+                "transport": "streamable-http",
+                "host": "re.example.org",
+                "state": "done",
+            }
+        ]
+
+    def test_an_upload_the_server_refused_is_written_down_as_failed(self, tmp_path: Path) -> None:
+        path, digest = _sample(tmp_path, 256)
+        stagings: list[dict[str, Any]] = []
+
+        asyncio.run(
+            sample_staging.stage_sample(
+                _FakeRegistry(self._server(fail="disk full")),
+                "remote",
+                path,
+                sha256=digest,
+                job_id="job-1",
+                stagings=stagings,
+            )
+        )
+
+        assert [(row["host"], row["state"]) for row in stagings] == [("re.example.org", "failed")]
+
+    def test_an_upload_is_written_down_before_its_first_byte_is_sent(self, tmp_path: Path) -> None:
+        path, digest = _sample(tmp_path, 256)
+        stagings: list[dict[str, Any]] = []
+        server = self._server()
+        seen: list[list[dict[str, Any]]] = []
+        sent = server._put_sample
+
+        def _put_sample(**kwargs: Any) -> dict[str, Any]:
+            seen.append([dict(row) for row in stagings])
+            return sent(**kwargs)
+
+        server._put_sample = _put_sample  # type: ignore[method-assign]
+        asyncio.run(
+            sample_staging.stage_sample(
+                _FakeRegistry(server),
+                "remote",
+                path,
+                sha256=digest,
+                job_id="job-1",
+                stagings=stagings,
+            )
+        )
+
+        assert [row["state"] for row in seen[0]] == ["attempted"]
+        assert stagings[0]["state"] == "done"
+
+    def test_a_path_the_job_already_staged_sends_and_writes_nothing_more(
+        self, tmp_path: Path
+    ) -> None:
+        path, digest = _sample(tmp_path, 256)
+        server = self._server()
+        stagings: list[dict[str, Any]] = []
+        for _ in range(2):
+            asyncio.run(
+                sample_staging.stage_sample(
+                    _FakeRegistry(server),
+                    "remote",
+                    path,
+                    sha256=digest,
+                    job_id="job-1",
+                    stagings=stagings,
+                )
+            )
+
+        assert server.calls == ["put_sample"]
+        assert len(stagings) == 1
+
+    def test_an_agent_built_for_a_job_writes_its_uploads_on_the_jobs_container(
+        self, tmp_path: Path
+    ) -> None:
+        from types import SimpleNamespace
+
+        from maljan.agents.composition import _astage
+
+        path, digest = _sample(tmp_path, 256)
+        container = SimpleNamespace(sample_path=path, sample_sha256=digest, sample_stagings=[])
+
+        staged, _reasons = asyncio.run(
+            _astage(_FakeRegistry(self._server()), container, [_tool_from("remote")], "job-1")
+        )
+
+        assert staged == {"remote": "/remote/staging/sample.exe"}
+        assert [(row["server"], row["state"]) for row in container.sample_stagings] == [
+            ("remote", "done")
+        ]
+
+    def test_a_stdio_server_is_sent_nothing_and_nothing_is_written_down(
+        self, tmp_path: Path
+    ) -> None:
+        path, digest = _sample(tmp_path, 256)
+        server = _FakeServer()
+        server.config = type("_Cfg", (), {"transport": "stdio"})()
+        stagings: list[dict[str, Any]] = []
+
+        asyncio.run(
+            sample_staging.stage_for_agent(
+                _FakeRegistry(server),
+                [_tool_from("remote")],
+                path,
+                sha256=digest,
+                job_id="job-1",
+                stagings=stagings,
+            )
+        )
+
+        assert stagings == []

@@ -6020,10 +6020,14 @@ def make_report_node(
         # The run's evidence, in the order the ids were issued, plus the
         # entries the evidence-only static provider could not write itself.
         _ledger: list[LedgerEntry] = []
+        # Counted for the disclosure block: a row the report cannot read is a
+        # call whose destination it cannot place.
+        _unreadable_rows = 0
         for _row in state.get("evidence_ledger") or []:
             try:
                 _ledger.append(LedgerEntry.model_validate(_row))
             except Exception as exc:  # noqa: BLE001 — one bad row is not a lost report
+                _unreadable_rows += 1
                 logger.debug("report_node: unreadable ledger row skipped (%s).", exc)
         # The entries the evidence-only static provider could not write itself.
         # They go back onto the state channel below, not only into this local
@@ -6644,6 +6648,7 @@ def make_report_node(
                 entries=_ledger,
                 tokens=_closing.get("tokens"),
                 stages=_closing.get("stages"),
+                unreadable=_unreadable_rows,
             )
             if _disclosure is not None:
                 _state_summary["disclosure"] = _disclosure

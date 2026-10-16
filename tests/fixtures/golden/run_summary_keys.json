@@ -23,6 +23,39 @@
   "degradation_reasons": [],
   "degraded_mode": null,
   "disclosure": {
+    "addressed": [
+      null
+    ],
+    "enrichment": {
+      "asked": [
+        {
+          "host": null,
+          "kinds": "<data-keyed map>",
+          "source": null,
+          "where": null,
+          "why": null
+        }
+      ],
+      "may_reach": [
+        {
+          "hosts": [
+            null
+          ],
+          "kinds": [
+            null
+          ],
+          "server": null,
+          "source": null,
+          "transport": null,
+          "where": null,
+          "why": null
+        }
+      ],
+      "state": null
+    },
+    "local_servers": [
+      null
+    ],
     "lookups": [
       {
         "calls": null,
@@ -40,7 +73,9 @@
         "agents": "<data-keyed map>",
         "calls": null,
         "configured_for": [],
+        "global": null,
         "host": null,
+        "runtime": null,
         "service": null,
         "where": null,
         "why": null
@@ -67,6 +102,17 @@
       }
     ],
     "tracing": null,
+    "undeclared": [
+      {
+        "calls": null,
+        "host": null,
+        "source": null,
+        "transport": null,
+        "where": null,
+        "why": null
+      }
+    ],
+    "unreadable_entries": null,
     "uploads": [
       {
         "by": null,
