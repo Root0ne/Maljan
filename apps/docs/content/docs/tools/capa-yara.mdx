@@ -50,6 +50,26 @@ bind-mounts its own `data/` over the image's, as the shipped compose file does,
 reads that directory's copies instead: `make setup` (`make external`) fetches
 the same pinned set there and leaves a directory that is already there as it is.
 
+With the signatures capa identifies library code (the runtime's startup code,
+statically linked library functions) in a PE it reads with vivisect, and
+matches no rule in it:
+
+- A rule that matches only inside library code is no longer reported. That is
+  capa's intended false-positive reduction.
+- A small PE takes about 2 s longer, the time the signatures take to load.
+- The `capa` answer names the functions it identified under
+  `library_functions` (each start and name), and their starts stay in
+  `function_starts`. A run that looked for none says why in their place: no
+  signature directory, or capa loads no signatures for that format and
+  backend.
+- A workstation gets the signatures at its next `make setup` or
+  `make external`. capa's answers there then move against runs made before
+  it, the haiku4 baseline among them.
+
+To run without library identification, set `core.static.capa.signatures_dir`
+to an empty value or to a path with no directory there. capa runs as before,
+and its answer says that no signature directory was there.
+
 ## The rule corpora of the `analysis` sidecar
 
 The Sigma and YARA corpora the `analysis` tool server scans with are named in

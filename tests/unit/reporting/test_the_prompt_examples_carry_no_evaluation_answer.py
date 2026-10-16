@@ -235,6 +235,7 @@ from maljan.providers.base import (
 )
 from maljan.providers.sandbox.cape2 import CAPE2SandboxProvider
 from maljan.providers.sandbox.mock import MockSandboxProvider
+from maljan.providers.static import capa_yara as _capa_yara
 from maljan.providers.static import r2 as _r2
 from maljan.providers.static.ghidra import (
     GHIDRA_GUIDANCE,
@@ -2048,6 +2049,14 @@ PROMPTS: dict[str, str] = {
             binary.RELATIONSHIP_PART_EXTERNAL_ENTITY,
             binary.RELATIONSHIP_PART_NOT_XML.format(error="syntax error", line=1),
             binary.RELATIONSHIP_MEMBER_UNREAD.format(error="BadZipFile: Bad CRC-32"),
+        ]
+    ),
+    "the capa answer's reasons for library functions it did not look for": " ".join(
+        [
+            _capa_yara.LIBRARY_FUNCTIONS_NO_DIRECTORY,
+            _capa_yara.LIBRARY_FUNCTIONS_NOT_FOR_FORMAT,
+            _capa_yara.LIBRARY_FUNCTIONS_NO_FILES,
+            _capa_yara.LIBRARY_FUNCTIONS_UNSTATED,
         ]
     ),
     "the stated candidate scan and readability test": (

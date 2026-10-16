@@ -95,24 +95,53 @@ def _capa_backend(backend_name: str, input_format: str) -> str:
     return str(capa_main.get_backend_from_cli(no_override, input_format))
 
 
-def _capa_signatures(signatures_dir: str, input_format: str, backend: str) -> list[Path]:
-    """The library signature files capa itself loads for this format and backend.
+# What the capa answer says in place of its library functions when none were
+# looked for, and the key the child hands that reason to the parent under
+# (``None`` when the signatures were loaded and library functions identified).
+LIBRARY_FUNCTIONS_NO_DIRECTORY = "no: there is no signature directory"
+LIBRARY_FUNCTIONS_NOT_FOR_FORMAT = "no: capa loads no signatures for this format and backend"
+LIBRARY_FUNCTIONS_NO_FILES = "no: the signature directory holds no signatures"
+LIBRARY_FUNCTIONS_UNSTATED = "no: the capa run did not say whether it looked for them"
+NOT_IDENTIFIED_KEY = "maljan_library_functions_not_identified"
+
+
+def _capa_signatures(
+    signatures_dir: str, input_format: str, backend: str
+) -> tuple[list[Path], str | None]:
+    """The library signature files capa itself loads for this format and backend, or why none.
 
     capa's command line passes signatures to vivisect for a PE only
     (``capa.main.get_signatures_from_cli``). Asked the same way, a shellcode,
     ELF or .NET run loads none, so it never pays for the PE signature set and
-    never marks its code as a PE library's. No directory, no signatures.
+    never marks its code as a PE library's. An empty setting or a path with
+    no directory means no signatures, which is the way to run without library
+    identification. The reason is ``None`` when signatures were chosen.
     Called in the capa child only.
     """
-    sig_dir = Path(signatures_dir)
-    if not sig_dir.is_dir():
-        return []
+    if not signatures_dir.strip() or not Path(signatures_dir).is_dir():
+        return [], LIBRARY_FUNCTIONS_NO_DIRECTORY
     import argparse
 
+    import capa.loader as capa_loader
     import capa.main as capa_main
 
+    sig_dir = Path(signatures_dir)
     given = argparse.Namespace(signatures=sig_dir, is_default_signatures=False)
-    return list(capa_main.get_signatures_from_cli(given, input_format, backend))
+    chosen = list(capa_main.get_signatures_from_cli(given, input_format, backend))
+    if chosen:
+        return chosen, None
+    if capa_loader.get_signatures(sig_dir):
+        return [], LIBRARY_FUNCTIONS_NOT_FOR_FORMAT
+    return [], LIBRARY_FUNCTIONS_NO_FILES
+
+
+def signatures_argument(signatures_dir: str) -> str:
+    """The signature directory a capa run is handed: the setting resolved, or empty when it is.
+
+    An empty setting stays empty rather than resolving to the project root,
+    which every file under the project would then be searched for signatures in.
+    """
+    return str(resolve_data(signatures_dir)) if str(signatures_dir or "").strip() else ""
 
 
 # A fired capa rule's technique hit carries no confidence. capa says the
@@ -166,7 +195,7 @@ def _capa_worker(
         rules = capa_rules.get_rules([rules_path], enable_cache=False)
         input_format = capa_helpers.get_auto_format(path)
         backend = _capa_backend(backend_name, input_format)
-        sigpaths = _capa_signatures(signatures_dir, input_format, backend)
+        sigpaths, not_identified = _capa_signatures(signatures_dir, input_format, backend)
         extractor = capa_loader.get_extractor(
             path,
             input_format,
@@ -186,7 +215,11 @@ def _capa_worker(
         import resource
 
         queue.put(("peak", resource.getrusage(resource.RUSAGE_SELF).ru_maxrss * 1024))
-        queue.put(("ok", document.model_dump(mode="json")))
+        result = document.model_dump(mode="json")
+        # capa lists the library functions it identified, and an empty list
+        # when it looked for none: the reason says which.
+        result[NOT_IDENTIFIED_KEY] = not_identified
+        queue.put(("ok", result))
     except Exception as exc:  # noqa: BLE001 - reported to the parent, never raised here
         queue.put(("error", f"{type(exc).__name__}: {exc}"))
 
@@ -564,7 +597,7 @@ class CapaYaraStaticProvider(StaticProvider):
         return run_capa_document(
             sample_path=sample_path,
             rules_dir=str(rules_dir),
-            signatures_dir=str(Path(resolve_data(self._capa.signatures_dir))),
+            signatures_dir=signatures_argument(self._capa.signatures_dir),
             backend_name=_BACKEND_NAMES.get(self._capa.backend, "BACKEND_VIV"),
             timeout_seconds=self._capa.timeout_seconds,
             target=target,

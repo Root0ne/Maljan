@@ -196,15 +196,25 @@ class TestTheChoiceIsCapas:
 
         main = types.ModuleType("capa.main")
         main.get_signatures_from_cli = get_signatures_from_cli  # type: ignore[attr-defined]
+        loader = types.ModuleType("capa.loader")
+        loader.get_signatures = lambda path: []  # type: ignore[attr-defined]
         package = types.ModuleType("capa")
         package.main = main  # type: ignore[attr-defined]
+        package.loader = loader  # type: ignore[attr-defined]
         monkeypatch.setitem(sys.modules, "capa", package)
         monkeypatch.setitem(sys.modules, "capa.main", main)
+        monkeypatch.setitem(sys.modules, "capa.loader", loader)
 
-        assert capa_yara._capa_signatures(str(tmp_path), "pe", "vivisect") == [Path("chosen.sig")]
+        assert capa_yara._capa_signatures(str(tmp_path), "pe", "vivisect") == (
+            [Path("chosen.sig")],
+            None,
+        )
         assert asked == [(tmp_path, False, "pe", "vivisect")]
         # No directory: nothing to choose from, and capa is not asked.
-        assert capa_yara._capa_signatures(str(tmp_path / "absent"), "pe", "vivisect") == []
+        assert capa_yara._capa_signatures(str(tmp_path / "absent"), "pe", "vivisect") == (
+            [],
+            capa_yara.LIBRARY_FUNCTIONS_NO_DIRECTORY,
+        )
         assert len(asked) == 1
 
 
@@ -233,6 +243,7 @@ class TestWithCapaInstalled:
         # A .NET match is located by a metadata token, not by a place in the image.
         assert answer["capabilities"][0]["addresses"] == []
         assert answer["function_starts"] == []
+        assert answer["library_functions"] == capa_yara.LIBRARY_FUNCTIONS_NO_DIRECTORY
 
     def test_a_named_vivisect_backend_still_refuses_a_managed_assembly(
         self, tmp_path: Path
@@ -264,7 +275,7 @@ class TestWithCapaInstalled:
         pytest.importorskip("capa.main")
         signatures = str(_signature_dir(tmp_path))
 
-        chosen = capa_yara._capa_signatures(signatures, "pe", capa_loader.BACKEND_VIV)
+        chosen, _ = capa_yara._capa_signatures(signatures, "pe", capa_loader.BACKEND_VIV)
 
         assert [path.name for path in chosen] == ["1_a.sig", "2_b.sig", "3_c.sig"]
         for input_format, backend in (
@@ -274,7 +285,7 @@ class TestWithCapaInstalled:
             ("dotnet", capa_loader.BACKEND_DOTNET),
             ("pe", capa_loader.BACKEND_PEFILE),
         ):
-            assert capa_yara._capa_signatures(signatures, input_format, backend) == []
+            assert capa_yara._capa_signatures(signatures, input_format, backend)[0] == []
 
     def test_a_shellcode_or_managed_run_is_handed_no_signatures(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
