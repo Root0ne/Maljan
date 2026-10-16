@@ -223,12 +223,19 @@ class TestTheCorrectionTurn:
         assert len(turns) == 2 and not any(isinstance(t, ToolMessage) for t in turns)
         assert FEEDBACK_PREAMBLE in str(turns[-1].content)
 
-    def test_said_as_text_the_call_keeps_its_arguments(self) -> None:
+    def test_said_as_text_the_call_keeps_its_arguments(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from maljan.pipeline import validation
+
+        said: list[str] = []
+        monkeypatch.setattr(validation.logger, "info", lambda msg, *a: said.append(msg % a))
         turns = with_calls_said(_with_feedback(list(_ASKED), _call_answer(), _FOUND))
         assert [type(t) for t in turns] == [SystemMessage, HumanMessage, AIMessage, HumanMessage]
         assert json.loads(str(turns[2].content)) == {"body": "x", "evidence_refs": "ev_0001"}
         assert not turns[2].tool_calls
         assert str(turns[3].content).startswith(FEEDBACK_PREAMBLE)
+        assert [line for line in said if "1 tool call(s) in its turns are said as text" in line]
 
     def test_a_history_with_no_call_is_sent_as_it_is(self) -> None:
         turns = [*_ASKED, AIMessage(content="{}"), HumanMessage(content="Fix it.")]

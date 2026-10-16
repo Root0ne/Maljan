@@ -9660,14 +9660,21 @@ def with_calls_said(turns: list[Any]) -> list[Any]:
     ):
         return turns
     out: list[Any] = []
+    said_calls = 0
     for message in turns:
         if isinstance(message, ToolMessage):
             out = with_question(out, answer_text(message.content))
         elif isinstance(message, AIMessage) and message.tool_calls:
+            said_calls += len(message.tool_calls)
             said = [answer_text(message.content).strip(), structured_answer_text(message)]
             out.append(AIMessage(content="\n\n".join(part for part in said if part)))
         else:
             out.append(message)
+    logger.info(
+        "validation: the retry goes to a model offered no tool; %d tool call(s) in its turns "
+        "are said as text, with their replies, and the thinking written beside them is left out.",
+        said_calls,
+    )
     return out
 
 
