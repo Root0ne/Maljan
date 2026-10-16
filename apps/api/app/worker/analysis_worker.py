@@ -3786,6 +3786,12 @@ async def startup(ctx: dict) -> None:
     # And one look at the other queue, once the process that reads it has had
     # a health interval to come up beside this one.
     ctx["enrichment_watch_task"] = asyncio.create_task(warn_if_enrichment_is_unmanned(ctx))
+    # One sweep of ``job_events`` as the worker starts, beside its slot rather
+    # than in it. The nightly cron fires only in a process alive at 03:17, and
+    # arq does not run a window it missed while no worker was up, so a worker
+    # started for a run and stopped after it (a local stack) never swept, and
+    # neither did a deployment whose worker restarted across the night's window.
+    ctx["events_sweep_task"] = asyncio.create_task(purge_old_job_events(ctx))
     # The console's ATT&CK cache jobs, read beside this worker's one analysis
     # slot rather than in it: this is the process that holds the cache.
     from app.worker.attck_worker import start_attck_worker
@@ -3804,12 +3810,25 @@ async def shutdown(ctx: dict) -> None:
     from app.worker.attck_worker import stop_attck_worker
 
     await stop_attck_worker(ctx, EXIT_GRACE)
-    for name in ("sweep_task", "enrichment_watch_task"):
+    for name in ("sweep_task", "enrichment_watch_task", "events_sweep_task"):
         task: asyncio.Task | None = ctx.get(name)
-        if task is not None:
-            task.cancel()
-            with suppress(asyncio.CancelledError):
-                await task
+        if task is None:
+            continue
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+        except Exception as exc:  # noqa: BLE001 — a start task never stops the shutdown
+            # Logged, not raised: the Redis close, the engine dispose, the exit
+            # guard below and arq's own pool close run whatever a task did.
+            logger.error(
+                "Worker start task %s had ended with %s; the shutdown goes on.",
+                name,
+                type(exc).__name__,
+                exc_info=(type(exc), exc, exc.__traceback__),
+                extra={"component": "worker.lifecycle"},
+            )
 
     # Each close is bounded: a connection that does not close would otherwise
     # hold the shutdown open before the process ever reaches its exit.
@@ -3921,6 +3940,8 @@ class WorkerSettings:
     # The one scheduled task this worker runs: the nightly sweep that bounds
     # ``job_events`` to ``core.events.retention_days``. Off-hour and off-minute
     # so it does not land on top of whatever else a deployment runs at 03:00.
+    # ``startup`` runs the same sweep once more as the worker starts, outside
+    # the job slot, for the nights no worker was up at that minute.
     cron_jobs = [cron(purge_old_job_events, hour=3, minute=17)]
     on_startup = startup
     on_shutdown = shutdown

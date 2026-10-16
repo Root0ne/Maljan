@@ -452,6 +452,11 @@ def _count_similar_samples(malware_report: dict[str, Any]) -> int:
     return len(attribution.get("similar_samples") or [])
 
 
+# The retentions this process found reaching past the earliest date there is,
+# each said once (``purge_old_job_events``).
+_RETENTIONS_PAST_THE_EARLIEST_DATE: set[int] = set()
+
+
 async def purge_old_job_events(ctx: dict) -> dict[str, Any]:
     """Drop feed rows older than ``core.events.retention_days``. Never raises.
 
@@ -463,22 +468,47 @@ async def purge_old_job_events(ctx: dict) -> dict[str, Any]:
 
     Scheduled beside the enrichment task rather than as a worker of its own
     because it is one statement a night against the same database this process
-    already holds a session factory for.
+    already holds a session factory for. The analysis worker runs it nightly
+    and once as it starts (``analysis_worker.startup``): the nightly run fires
+    only in a process alive at that minute, and arq does not run a window it
+    missed while no worker was up.
+
+    The retention is the stored setting or nothing. A read that fails, or a
+    stored value the model refuses, skips the sweep rather than deleting by
+    the shipped default in place of the operator's value, which the shared
+    settings reader (``runtime_config.core``) would hand back on a failed read.
     """
     from datetime import UTC, datetime, timedelta
 
     from sqlalchemy import delete, or_
 
     from app.models.job_event import JobEvent
+    from app.services.settings_service import core_settings_cache
 
     db_session_factory = ctx["db_session"]
     try:
-        days = int((await runtime_config.core()).events.retention_days)
-    except Exception as exc:  # noqa: BLE001 — an unreadable setting skips the sweep
-        logger.warning("events sweep: retention not readable (%s); skipping.", exc)
+        async with db_session_factory() as db:
+            days = int((await core_settings_cache.get(db)).events.retention_days)
+    except Exception as exc:  # noqa: BLE001 — unreadable settings skip the sweep
+        logger.warning(
+            "events sweep: the stored settings were not read (%s); skipping.", type(exc).__name__
+        )
         return {"status": "skipped"}
 
-    cutoff = datetime.now(UTC) - timedelta(days=max(1, days))
+    try:
+        cutoff = datetime.now(UTC) - timedelta(days=max(1, days))
+    except OverflowError:
+        # A retention that reaches past the earliest date there is keeps every
+        # row: nothing is old enough to remove. Said once per value a process
+        # meets, not at every sweep.
+        if days not in _RETENTIONS_PAST_THE_EARLIEST_DATE:
+            _RETENTIONS_PAST_THE_EARLIEST_DATE.add(days)
+            logger.info(
+                "events sweep: a retention of %d day(s) reaches past the earliest date there "
+                "is; no row is old enough to remove.",
+                days,
+            )
+        return {"status": "ok", "removed": 0, "retention_days": days}
     try:
         async with db_session_factory() as db:
             result = await db.execute(
