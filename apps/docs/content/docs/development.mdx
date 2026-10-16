@@ -130,6 +130,13 @@ from `apps/docs` with `npm ci` and `npm run dev`; `npm run build` writes the
 static site to `apps/docs/out/` and fails if any address the site has served
 before no longer leads to a page (`scripts/old-urls.mjs`).
 
+[Validation codes](/validation-codes/) is generated, not written: run
+`uv run python scripts/validation_codes/run.py` after adding, removing or moving
+a code, its test or a page that names it, and commit the page.
+`tests/unit/test_the_validation_code_register_is_current.py` fails when the
+committed page is not what the source gives, when nothing raises a code, and
+when no test names one.
+
 ## Continuous integration
 
 [`.github/workflows/ci.yml`](https://github.com/Root0ne/Maljan/blob/dev/.github/workflows/ci.yml)
