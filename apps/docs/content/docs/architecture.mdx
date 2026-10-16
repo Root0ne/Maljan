@@ -4796,8 +4796,12 @@ is assembled from what the run gathered rather than recomputed beside it:
   and the platform's processes pin `LC_CTYPE` so that this does not arise (see
   [Native runs pin `LC_CTYPE`](/development/#native-runs-pin-lc_ctype)). A drafted
   rule carries the sample's own sha256, so it always matches by that clause
-  (but on an empty file, whose hash the engine leaves undefined); §10.2 and
-  DETECTION therefore say which clause held — "its strings match it (k of n
+  (but on an empty file, whose hash the engine leaves undefined). Its imphash
+  is pefile's, the identity table's value and the one external services
+  publish; for a sample that imports WSOCK32 by ordinal the engine names those
+  ordinals through its WS2_32 table and computes another import hash, so
+  `matched_by` then truthfully lacks `imphash`. Since the sha256 clause always
+  holds, §10.2 and DETECTION say which clause held — "its strings match it (k of n
   strings found)", "the rule matches it by its sha256 only; its strings do
   not", "the draft declares no strings", "the rule does not match it" — with
   the strings found at their first offsets and the strings found nowhere, or
