@@ -3,7 +3,8 @@
 ``external_relationships`` used to be the number of ``.rels`` parts, which
 every OOXML file has at least two of, so it said "relationships" for every
 document and never read one. It now lists each relationship a relationship
-part marks ``TargetMode="External"``, with its target defanged, and is absent
+part marks ``TargetMode="External"``, with its target exactly as written (a tool
+answer is live; the report's renderers defang where they print), and is absent
 when there are none. A relationship part that cannot be read is named with the
 reason, so its silence is never read as "none".
 
@@ -15,6 +16,7 @@ from __future__ import annotations
 
 import gc
 import io
+import json
 import time
 import zipfile
 from pathlib import Path
@@ -65,7 +67,7 @@ class TestWhatIsReported:
         # The pack line no longer says "external_relationships 2" of it.
         assert "relationship" not in triage_pack._document(answer)
 
-    def test_a_remote_template_is_listed_with_its_target_defanged(self, tmp_path: Path) -> None:
+    def test_a_remote_template_is_listed_with_its_target_as_written(self, tmp_path: Path) -> None:
         settings = _relationships(
             _row("rId7", "attachedTemplate", "https://templates.example.invalid/t.dotm", "External")
         )
@@ -78,10 +80,59 @@ class TestWhatIsReported:
                 "part": "word/_rels/settings.xml.rels",
                 "id": "rId7",
                 "type": "attachedTemplate",
-                "target": "hxxps://templates[.]example[.]invalid/t.dotm",
+                "target": "https://templates.example.invalid/t.dotm",
             }
         ]
         assert triage_pack._document(answer).endswith(", 1 external_relationships")
+
+    def test_every_target_is_kept_exactly_as_the_part_writes_it(self, tmp_path: Path) -> None:
+        targets = [
+            "https://templates.example.invalid/t.dotm",
+            "\\\\192.0.2.10\\share\\t.dotm",
+            "../x/report.dotx",
+            "file:///\\\\192.0.2.10\\share\\t.dotm",
+            "mhtml:http://192.0.2.10/page.mht!x.htm",
+        ]
+        rows = [
+            _row(f"rId{n}", "attachedTemplate", target, "External")
+            for n, target in enumerate(targets)
+        ]
+        answer = tool.document_info(
+            str(_document(tmp_path, {"word/_rels/settings.xml.rels": _relationships(*rows)}))
+        )
+
+        assert [row["target"] for row in answer["external_relationships"]] == targets
+
+    def test_the_report_prints_the_target_as_it_prints_any_tool_s_url(self, tmp_path: Path) -> None:
+        """The answer is live; the report's own evidence pass defangs it where it prints it.
+
+        ``_defanged_text`` is the pass the Markdown appendix applies to every
+        evidence cell (``plain``), whichever tool the section came from.
+        """
+        from maljan.reporting.ledger_report import build_sections
+        from maljan.reporting.renderers.markdown import _defanged_text
+        from maljan.schemas.evidence import build_entry
+
+        settings = _relationships(
+            _row("rId7", "attachedTemplate", "https://templates.example.invalid/t.dotm", "External")
+        )
+        answer = tool.document_info(
+            str(_document(tmp_path, {"word/_rels/settings.xml.rels": settings}))
+        )
+        entry = build_entry(
+            entry_id="ev_0001",
+            seq=1,
+            agent="pipeline",
+            tool="document_info",
+            args={},
+            server=None,
+            output=json.dumps(answer),
+        )
+        (table,) = [s for s in build_sections([entry]) if s.key.endswith("_external_relationships")]
+        (cell,) = [c for row in table.rows for c in row if "templates" in str(c)]
+
+        assert cell == "https://templates.example.invalid/t.dotm"
+        assert _defanged_text(cell) == "hxxps://templates[.]example[.]invalid/t.dotm"
 
     def test_every_external_relationship_of_every_part_in_order(self, tmp_path: Path) -> None:
         body = _relationships(
@@ -110,15 +161,15 @@ class TestWhatIsReported:
                 "word/_rels/document2.xml.rels",
                 "rId1",
                 "hyperlink",
-                "mailto:someone@example[.]invalid",
+                "mailto:someone@example.invalid",
             ),
             (
                 "word/_rels/document2.xml.rels",
                 "rId4",
                 "oleObject",
-                "file://share[.]example[.]invalid/x.xlsx",
+                "file://share.example.invalid/x.xlsx",
             ),
-            ("WORD/_RELS/WEBSETTINGS.XML.RELS", "rId1", "frame", "hxxp://203[.]0[.]113[.]9/f.html"),
+            ("WORD/_RELS/WEBSETTINGS.XML.RELS", "rId1", "frame", "http://203.0.113.9/f.html"),
         ]
 
     def test_only_relationship_parts_and_relationship_elements_count(self, tmp_path: Path) -> None:

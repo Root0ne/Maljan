@@ -1147,8 +1147,10 @@ def document_info(path: str) -> dict[str, Any]:
 
     All three formats answer one question — can this document run something —
     with different evidence: an OLE2 macro storage, an OOXML ``vbaProject.bin``
-    part, a PDF ``/OpenAction``. Each is reported as a count or a presence
-    flag, never as a verdict.
+    part or relationship pointing outside the package, a PDF ``/OpenAction``.
+    Each is reported as a count, a presence flag or what the document itself
+    states (an OOXML external relationship, its target as written), never as
+    a verdict.
     """
     target = Path(path)
     if not target.is_file():
@@ -1202,7 +1204,9 @@ def _ooxml_info(target: Path) -> dict[str, Any]:
     ``external_relationships`` lists each relationship a relationship part
     marks ``TargetMode="External"`` (a remote template, an external OLE link,
     a hyperlink): the part, its id, its type (the last segment of its Type)
-    and its target, defanged as a URL. It is absent when there are none.
+    and its target exactly as the part writes it. A tool answer carries values
+    live, as every other tool's does; the report's renderers defang them where
+    they print them for reading. It is absent when there are none.
     ``relationship_parts_unread`` names a relationship part that could not be
     read and why, so its silence is never taken for "none".
     """
@@ -1253,8 +1257,6 @@ def _external_relationships(part: str, stream: Any) -> list[dict[str, str]]:
     """
     from xml.parsers import expat
 
-    from maljan.reporting.defang import defang
-
     found: list[dict[str, str]] = []
 
     def refuse_document_type(*_: Any) -> None:
@@ -1271,7 +1273,7 @@ def _external_relationships(part: str, stream: Any) -> list[dict[str, str]]:
                 "part": part,
                 "id": attributes.get("Id", ""),
                 "type": attributes.get("Type", "").rstrip("/").rpartition("/")[2],
-                "target": defang(attributes.get("Target", ""), "url"),
+                "target": attributes.get("Target", ""),
             }
         )
 
