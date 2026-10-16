@@ -28,6 +28,10 @@ this environment via ``uv sync --extra capa``); a few names moved since the
 - ``capa.loader`` has no ``BACKEND_MAP``; the per-backend constants
   (``BACKEND_VIV`` / ``BACKEND_PEFILE`` / ``BACKEND_BINJA``) are looked up by
   name in this module instead.
+- ``auto`` is not a ``capa.loader`` constant. capa's command line picks the
+  backend for the format it detected (``capa.main.get_backend_from_cli``), and
+  the child asks capa the same way, so a managed assembly reaches capa's .NET
+  backend rather than vivisect, which refuses the ``dotnet`` format.
 - ``capa.render.result_document.ResultDocument.from_capa`` takes the
   ``Capabilities.matches`` mapping, not the ``Capabilities`` object itself
   (``collect_metadata`` takes the whole object).
@@ -59,13 +63,37 @@ if TYPE_CHECKING:
     from maljan.core.config import Settings, StaticCapaConfig, StaticYaraConfig
 
 # capa backend name -> capa.loader constant, resolved lazily so importing this
-# module never requires capa to be installed.
+# module never requires capa to be installed. ``auto`` names no constant: the
+# capa child resolves it from the format capa detects (``_capa_backend``).
+_AUTO_BACKEND = "auto"
 _BACKEND_NAMES: dict[str, str] = {
-    "auto": "BACKEND_VIV",
+    "auto": _AUTO_BACKEND,
     "vivisect": "BACKEND_VIV",
     "pefile": "BACKEND_PEFILE",
     "binja": "BACKEND_BINJA",
 }
+
+
+def _capa_backend(backend_name: str, input_format: str) -> str:
+    """The capa backend one run uses, for the format capa's own detection returned.
+
+    A named backend is the ``capa.loader`` constant of that name, exactly as
+    configured. ``auto`` is the backend capa itself picks for the format when
+    no backend is forced (``capa.main.get_backend_from_cli``): its .NET backend
+    for a managed assembly, and vivisect for native code, as before. Called in
+    the capa child only, where capa is imported anyway.
+    """
+    if backend_name != _AUTO_BACKEND:
+        import capa.loader as capa_loader
+
+        return str(getattr(capa_loader, backend_name))
+    import argparse
+
+    import capa.main as capa_main
+
+    no_override = argparse.Namespace(backend=capa_main.BACKEND_AUTO)
+    return str(capa_main.get_backend_from_cli(no_override, input_format))
+
 
 # A fired capa rule's technique hit carries no confidence. capa says the
 # rule's pattern is present — an instruction sequence, a string, an API call in
@@ -117,7 +145,7 @@ def _capa_worker(
         rules_path = Path(rules_dir)
         rules = capa_rules.get_rules([rules_path], enable_cache=False)
         input_format = capa_helpers.get_auto_format(path)
-        backend = getattr(capa_loader, backend_name)
+        backend = _capa_backend(backend_name, input_format)
         sig_dir = Path(signatures_dir)
         sigpaths = capa_loader.get_signatures(sig_dir) if sig_dir.is_dir() else []
         extractor = capa_loader.get_extractor(
