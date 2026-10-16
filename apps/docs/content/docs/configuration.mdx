@@ -2148,12 +2148,21 @@ its structured request sent. A structured answer that writes the object as
 text, or calls the tool with arguments the schema does not take, is not asked
 again: that text is the section's answer, read and checked as a manual-path
 answer is, and a retry its findings need is sent with the same tool, so the
-request only appends to the one answered and its thinking blocks stay valid. A
+request only appends to the one answered and its thinking blocks stay valid.
+An answer that is nothing but the call goes back as it came, and the
+correction is the call's reply, marked as an error, so the model reads the
+arguments the findings name. A parser that hands back a plain object is read
+through the section's schema the same way: one that does not fit is the
+section's first answer, not a reason to ask again from the start. A
 retry that has to be held under an output bound goes by the plain model, with
 no tool; there the kept answer's thinking blocks no longer match the request
-and are dropped, with a WARNING (the Preserved thinking recovery). Text with no
+and are dropped, with a WARNING (the Preserved thinking recovery), and a call
+is said as text: its arguments as the answer and the correction after them,
+the call's thinking left out with it. Text with no
 object in it — a preamble, a one-line refusal — is not an answer to read, and
-the section is asked again as before.
+the section is asked again as before. Each structured answer is recorded on
+the run's ledger once, where it is read, and a model list's switch carried on
+it is announced there once, a kept answer's included.
 On haiku4 every one of the 16 structured answers was of this kind and was
 asked again, 16 calls and 0.86 USD of the composer's spend. The narrative
 round, the mediator's verdict extraction and the judge's technique question
