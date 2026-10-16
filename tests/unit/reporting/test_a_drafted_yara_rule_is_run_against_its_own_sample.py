@@ -663,6 +663,10 @@ class TestARuleNotCheckedSaysWhy:
                 'internal error near "{path}"',
                 NOT_CHECKED_REFUSED.format(why="Error: internal error near the sample"),
             ),
+            (
+                "internal error near {path}, unquoted",
+                NOT_CHECKED_REFUSED.format(why="Error: internal error near the sample, unquoted"),
+            ),
             ("internal error: 30", NOT_CHECKED_REFUSED.format(why="Error: internal error: 30")),
         ],
     )

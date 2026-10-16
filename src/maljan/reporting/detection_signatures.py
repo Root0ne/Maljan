@@ -598,9 +598,9 @@ def _refused(exc: Exception, path: str, seconds: int) -> str:
     for opening, said in _ENGINE_FILE_REFUSALS.items():
         if message.startswith(opening):
             return NOT_CHECKED_UNREAD.format(why=said)
-    # The engine quotes a path it names; any other message that names it is
-    # said with "the sample" in its place.
-    message = message.replace(f'"{path}"', "the sample")
+    # Any other message that names the path, quoted as the engine writes it
+    # today or bare, is said with "the sample" in its place.
+    message = message.replace(f'"{path}"', "the sample").replace(path, "the sample")
     return NOT_CHECKED_REFUSED.format(why=f"{type(exc).__name__}: {message}")
 
 

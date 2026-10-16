@@ -1980,8 +1980,9 @@ ANNOTATIONS.update(
                 "Wall-clock budget for checking the drafted YARA rule against the sample "
                 "it was drafted from (report §10.2); a check that runs past it is reported "
                 "as not checked. It is also one of the two values whose longer is the "
-                "per-call budget of a tool server that declares none. The capa_yara "
-                "provider's own scan does not read it."
+                "per-call budget of a tool server that declares none, when "
+                "core.mcp.breaker.call_timeout_seconds is unset. The capa_yara provider's "
+                "own scan does not read it."
             ),
             "subgroup": "Rules",
         },

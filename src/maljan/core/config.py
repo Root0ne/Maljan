@@ -3653,7 +3653,8 @@ class StaticYaraConfig(BaseModel):
     only by the capa_yara static provider. ``timeout_seconds`` is in force under
     every provider: it bounds the check of the drafted YARA rule against its
     sample (``reporting.detection_signatures``), and it is one of the two values
-    whose longer is the per-call budget of a tool server that declares none
+    whose longer is the per-call budget of a tool server that declares none,
+    when ``mcp.breaker.call_timeout_seconds`` is unset
     (``core.legacy_tool_tables.legacy_call_floor``). The capa_yara provider's
     own scan does not read it.
     """
