@@ -725,8 +725,10 @@ bound), and a worker that still has it set warns at start and names the
 setting. A stored value the settings model refuses, of this or any key, is
 never replaced by a default where something runs: a job fails (it no longer
 runs on the shipped defaults, for this or any refusal of its settings, nor when
-the stored settings cannot be read from the database; then it says to run it
-again once the database answers), an API read
+the stored settings cannot be read; a database or connection error is named by
+its class with the advice to run the job again once the database answers, any
+other failure of the read by its class alone, and a refusal by the keys or
+fields it names, else by its class, never by the value refused), an API read
 answers 409 and the ATT&CK cron skips its hour, each naming the key, the reason
 and the remedy (fix or reset it in the console). The settings page alone reads
 past it so it can open: a banner above every settings page lists the refused

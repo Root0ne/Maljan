@@ -369,7 +369,9 @@ An uploaded report's format is recorded on its row when it is accepted, and the
 run reads the report as that format; it is never sniffed again. If the
 recorded format has since been removed from the declarations or from
 `sandbox.upload.allowed_formats`, or names no registered reader, the job stops
-with a message saying so.
+with a message saying so. Any other refusal a sandbox provider raises over an
+attached report (a plug-in provider's own words) stops the job naming the
+error's class, never its text, which can quote a value.
 
 ### Report readers are registered
 
