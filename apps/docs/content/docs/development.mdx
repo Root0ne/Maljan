@@ -96,6 +96,12 @@ on loopback port 8080.
   started yourself first — the browsers are memory-hungry, which is why the
   local worker count and the timeouts are raised deliberately.
 
+- **Replay** — `python scripts/replay/run.py <stored run>` re-runs the
+  platform's deterministic rules over a stored run with no model call, and
+  `--compare REF_A REF_B` names every difference a rule change makes between
+  two refs. Run it before and after a change to a check, the report builder or
+  a publish rule; see [Replaying a stored run](/replay/).
+
 The evaluation harness behind the published measurements is no longer part of
 this tree; see [paper.md](/paper/).
 

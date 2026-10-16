@@ -1,0 +1,105 @@
+---
+title: "Replaying a stored run"
+description: "Re-run the platform's deterministic rules over a stored run at zero cost, and name every difference a rule change makes between two git refs."
+---
+
+A change to a validation rule, the report builder or a publish rule changes
+what the platform decides over answers the models already wrote. The
+**replay** re-runs those decisions over a stored run with no model call, in
+seconds, so the change is measured on recorded runs before any paid run. Run
+it before and after every change to the rules: precision up, recall not down.
+
+Everything lives in `scripts/replay/` and none of it ships in the product. It
+measures decisions over what the models wrote; whether a rule changes what a
+model writes still needs a paired run.
+
+## Running it
+
+```bash
+python scripts/replay/run.py runs/haiku4
+```
+
+A stored run is a directory in the benchmark's layout: `evidence.json` (the
+ledger), `report-byjob.json` (the report row: each analyst's final answer, its
+claims in force, the run summary, the report document and the transcript),
+`report.json`, `run-summary.json`, `stix-judge.json` (the judge's answer as
+written), `events.json` and `job.json`. Several runs may be named at once.
+`--json OUT` writes the record; an output inside a run's directory is refused.
+
+`--job ID` reads a job from the database instead (`--database-url`, else
+`DATABASE_URL`, else the API's bootstrap setting), in one transaction set
+`READ ONLY` and rolled back, writes it in the same layout (`--job-dir`, a
+temporary directory by default) and replays that.
+
+## What it replays
+
+Each part calls the rules' own functions over what the run stored, composed
+the way the platform composes them:
+
+| Part | What is re-run |
+| :-- | :-- |
+| Analysts | Each answer stored as the analyst wrote it, read by the platform's parser and checked as the analyst's validation turn checks it (`isr.*`, `attck.*`); the claims in force checked by the checks that read claims. |
+| Judge | Its answer as written, parsed as the judge parses it and checked as the verdict round checks it (`stix.*`, `verdict.*`); the indicators it would drop are dropped. |
+| Report | The deterministic build, the export over the judge's bundle and the IOC table it decides: the published techniques with the capability matrix's reasons, each indicator's publish answer, the claims in force the composed body leaves undiscussed, the detection rules drafted and the report's values. |
+| Narrative and composer | The narrative and each composer section as the stored report holds them, checked as each round checks its answer (`narrative.*`, `composer.*`, `report.*`), then put on the rebuilt report as the rounds put them. |
+| Tool calls | Each recorded call's arguments, as the recorder checks them before it runs a call (`tool.*`). |
+| Report linter | The linter's warnings over the finished report, by rule and field. |
+| Corroboration | Per technique: who claimed it, which rules asserted it, its sources and whether it is corroborated. |
+
+The output names codes, entry ids and counts. `--show-text` adds each
+finding's words and the claim it is about, which are otherwise left out.
+
+Each producer's list of checks is kept in `scripts/replay/rules.py`, and
+`tests/unit/scripts/test_the_replay_knows_every_check.py` holds it to the
+producer's own code: a check a producer calls that the replay neither runs nor
+names fails it, and so does a check the replay lists that no producer calls.
+
+## What it cannot replay
+
+Every part the stored record cannot give is named under **Not replayed**, never
+skipped in silence:
+
+- an answer stored truncated (the transcript keeps 8,000 characters), and a
+  first answer with claims, which the run stores as the platform's summary of
+  them rather than as the analyst wrote it;
+- the output-cap questions, because the record keeps the answer and not whether
+  the output limit ended it;
+- what is read from the sandbox report alone, which the stored run does not
+  hold;
+- an analyst's findings and artifacts, which the report row does not keep: they
+  are read back from the stored report's Findings and Appendix A tables, without
+  a finding's detail;
+- the judge's technique review, its second answer, read back from the stored
+  capability matrix's decisions;
+- a check the rules' tree does not have (an older ref), named as not replayed
+  while the rest of the part goes on.
+
+## Comparing two refs
+
+```bash
+python scripts/replay/run.py runs/run7 runs/haiku4 --compare origin/dev HEAD
+```
+
+Each ref's `src` tree and `data` tables (without `data/samples`) are written
+out of the repository's object store with `git archive` into a temporary
+directory (`--work` keeps them, `--repo` reads another repository), and the
+same replay runs once per tree in a process of its own. The checkout and its
+working tree are never read for the rules or written. The comparison names
+every difference: the codes each producer gained or lost per claim, the claims
+each answer parsed into, the published techniques and their reasons, each
+indicator's publish answer, the report's values, corroboration and the parts
+one side could replay and the other could not. The exit status is 0 when both
+refs decide the same over every run, 1 when they differ and 2 on an error.
+
+## What it holds itself to
+
+- **Read-only.** Every file of a run's directory is digested before and after;
+  a replay that changed one fails.
+- **No network.** Every socket connection and name lookup is refused while it
+  runs.
+- **One catalogue.** ATT&CK is read from the vendored tables of the rules' own
+  tree; the bundle loads are refused and the cache points at a directory of the
+  replay's own, so the machine's cache is neither read nor written.
+- **The run's settings.** The settings the rules read (`validation.*`,
+  `preprocessing.*`, `reporting.*`) are taken from the run's snapshot, built
+  store-only, so neither the environment nor a `.env` file changes a decision.
