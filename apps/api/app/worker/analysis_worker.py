@@ -3714,6 +3714,13 @@ async def startup(ctx: dict) -> None:
     # to before ``setup_logging()`` attaches one.
     setup_logging()
 
+    # Before any job, and so before any thread or the YARA engine loads: C code
+    # in this process folds case by LC_CTYPE, and a Turkish one leaves a capital
+    # I unfolded (``core.ctype_locale``).
+    from maljan.core.ctype_locale import pin_character_classification
+
+    pin_character_classification()
+
     # Refused before any job is taken: the state an analysis keeps per
     # process is not per job yet, so a second analysis at once is never run.
     refusal = concurrent_analyses_refusal(WorkerSettings.max_jobs)

@@ -30,6 +30,7 @@ from typing import Any
 
 from mcp.server.fastmcp import FastMCP
 
+from maljan.core.ctype_locale import pin_character_classification, say_on_stderr
 from maljan.core.paths import resolve_data
 from maljan.tools import (
     api_hashes,
@@ -59,6 +60,11 @@ from maljan.tools.errors import (
 )
 from maljan.tools.roots import PathOutsideRoots, resolve_under, resolve_under_roots
 from maljan.tools.strings import DEFAULT_STRINGS_LIMIT
+
+# Pinned before the manifest below loads the YARA engine, whose ``nocase`` table
+# is built by the LC_CTYPE in force when it loads (``core.ctype_locale``). The
+# one line goes to standard error: standard output is this server's protocol.
+pin_character_classification(say=say_on_stderr)
 
 mcp = FastMCP("AnalysisMCP")
 

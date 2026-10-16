@@ -395,6 +395,11 @@ def memory_purge_low_quality(
 
 def main() -> None:
     """Application entrypoint."""
+    # Before any command runs, and so before any thread or the YARA engine
+    # loads: C code folds case by LC_CTYPE (``core.ctype_locale``).
+    from maljan.core.ctype_locale import pin_character_classification
+
+    pin_character_classification()
     app()
 
 
