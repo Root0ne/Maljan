@@ -96,9 +96,15 @@ export interface CatalogEntry {
   /** For the tool-server map: the agent keys a server may be bound to, the
    *  effective definition map's keys. */
   agent_keys?: string[] | null;
-  /** For the tool-server map: the seeded definition keys, known whatever a
-   *  save does to the stored map. */
+  /** For the tool-server map and the agent definitions: the seeded
+   *  definition keys, known whatever a save does to the stored map. Every one
+   *  is built in; the settings model refuses an edit to any of them but its
+   *  `enabled` switch. Absent from an API older than the field. */
   builtin_agent_keys?: string[] | null;
+  /** For the agent definitions: the built-ins whose `enabled` switch the
+   *  settings model refuses to change. Absent from an API older than the
+   *  field: every switch is then offered. */
+  always_enabled_agent_keys?: string[] | null;
 }
 
 /** What a provider declares about itself, served on its selector's entry.
@@ -275,6 +281,11 @@ export interface AgentDefinitionEntry {
    *  (`AgentDefinition.data_sources`); empty or absent is the role's own
    *  default. Optional because an API older than the field sends none. */
   data_sources?: string[];
+  /** Whether the agent is asked for an ATT&CK technique line on each claim
+   *  (`AgentDefinition.attck_techniques`). Absent is on: the API leaves the
+   *  field out of a definition that keeps it on. Only a generic or lead
+   *  definition may turn it off. */
+  attck_techniques?: boolean;
 }
 
 /** How hard one debate stage argues before it hands over, mirroring

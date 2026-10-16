@@ -4,7 +4,11 @@ import { describe, expect, it } from "vitest";
 
 import schema from "@/test-fixtures/settings-schema.json";
 import type { AgentDefinitionEntry, McpServerEntry } from "@/types/settings";
-import { AgentDetail, type AgentResolveApi } from "../AgentDefinitionsEditor";
+import {
+  AgentDetail,
+  type AgentResolveApi,
+  withTechniqueLine,
+} from "../AgentDefinitionsEditor";
 import { rosterAgentKeys } from "../choiceRows";
 import { EMPTY_SERVER, ServerDetail, type ServerProbeApi } from "../ServerMapEditor";
 
@@ -156,5 +160,210 @@ describe("the agent detail's input data and sandbox row", () => {
     const box = checkbox(html, "dynamic sandbox tools");
     expect(box).toContain("checked");
     expect(box).toContain("disabled");
+  });
+});
+
+describe("the agent detail's ATT&CK technique line switch", () => {
+  const seeded = served("agent_definitions").builtin_agent_keys as string[];
+
+  function agentHtml(
+    key: string,
+    definition: AgentDefinitionEntry,
+    builtinAgentKeys: readonly string[] = seeded,
+  ): string {
+    return renderToStaticMarkup(
+      createElement(AgentDetail, {
+        agentKey: key,
+        definitions: { [key]: definition },
+        onChange: () => undefined,
+        llmAgents: {},
+        onChangeLlmAgents: () => undefined,
+        llmGlobal: { providerChoices: null, providerValue: null, modelValue: null },
+        servers: {},
+        staticProviders: [],
+        resolve,
+        sections: ["identity"],
+        builtinAgentKeys,
+      }),
+    );
+  }
+
+  const base: AgentDefinitionEntry = {
+    role: "generic",
+    label: "Checker",
+    prompt: "p",
+    tools: [],
+    static_provider: null,
+    enabled: true,
+    max_steps: null,
+    timeout_seconds: null,
+  };
+
+  it("draws the switch on a custom agent, on when the field is absent", () => {
+    const html = agentHtml("checker", base);
+    const box = checkbox(html, "checker attck technique line");
+    expect(box).toBeDefined();
+    expect(box).toContain("checked");
+    expect(box).not.toContain("disabled");
+    expect(html).toContain("still read and checked");
+  });
+
+  it("draws a stored off as unticked", () => {
+    const html = agentHtml("checker", { ...base, attck_techniques: false });
+    expect(checkbox(html, "checker attck technique line")).not.toContain("checked");
+  });
+
+  it("locks the switch on every built-in the API serves, the seeded prompt agents included", () => {
+    expect(seeded).toHaveLength(9);
+    for (const key of ["lead", "reverser", "triage", "android_static", "static", "judge"]) {
+      expect(seeded, key).toContain(key);
+    }
+    for (const key of seeded) {
+      // Drawn on a prompt role, the one that would otherwise offer the switch.
+      for (const role of ["generic", "lead"] as const) {
+        const box = checkbox(agentHtml(key, { ...base, role }), `${key} attck technique line`);
+        expect(box, `${key} as ${role}`).toContain("checked");
+        expect(box, `${key} as ${role}`).toContain("disabled");
+      }
+    }
+  });
+
+  it("draws a seeded built-in fully read-only, its enabled switch aside", () => {
+    const html = renderToStaticMarkup(
+      createElement(AgentDetail, {
+        agentKey: "lead",
+        definitions: {
+          lead: { ...base, role: "lead", tools: [{ kind: "sandbox", server: null, name: null }] },
+        },
+        onChange: () => undefined,
+        llmAgents: {},
+        onChangeLlmAgents: () => undefined,
+        llmGlobal: { providerChoices: null, providerValue: null, modelValue: null },
+        servers: {},
+        staticProviders: [],
+        resolve,
+        sections: ["header", "identity", "prompt", "tools"],
+        dataSourceChoices: served("agent_definitions").data_source_choices as string[],
+        builtinAgentKeys: seeded,
+      }),
+    );
+    const controls = html.match(/<(input|textarea|select)\b[^>]*>/g) ?? [];
+    const editable = controls.filter(
+      (tag) => !/\sdisabled[\s=>]/.test(tag) && !tag.includes('aria-label="lead enabled"'),
+    );
+    expect(controls.length).toBeGreaterThan(8);
+    expect(editable).toEqual([]);
+    expect(html).toContain("Prompt (built in, read-only)");
+    expect(html).not.toContain(">Remove<");
+    expect(checkbox(html, "lead enabled")).not.toContain("disabled");
+  });
+
+  it("draws the seeded reverser's provider reference ticked and locked", () => {
+    const html = renderToStaticMarkup(
+      createElement(AgentDetail, {
+        agentKey: "reverser",
+        definitions: {
+          reverser: {
+            ...base,
+            role: "generic",
+            tools: [{ kind: "provider", server: null, name: null }],
+          },
+        },
+        onChange: () => undefined,
+        llmAgents: {},
+        onChangeLlmAgents: () => undefined,
+        llmGlobal: { providerChoices: null, providerValue: null, modelValue: null },
+        servers: {},
+        staticProviders: [],
+        resolve,
+        sections: ["tools"],
+        builtinAgentKeys: seeded,
+      }),
+    );
+    const box = checkbox(html, "reverser provider tools");
+    expect(box).toContain("checked");
+    expect(box).toContain("disabled");
+  });
+
+  it("locks the enabled switch of the agents the API serves as always enabled", () => {
+    const always = served("agent_definitions").always_enabled_agent_keys as string[];
+    expect(always.length).toBeGreaterThan(0);
+    const header = (key: string, role: AgentDefinitionEntry["role"]) =>
+      renderToStaticMarkup(
+        createElement(AgentDetail, {
+          agentKey: key,
+          definitions: { [key]: { ...base, role } },
+          onChange: () => undefined,
+          llmAgents: {},
+          onChangeLlmAgents: () => undefined,
+          llmGlobal: { providerChoices: null, providerValue: null, modelValue: null },
+          servers: {},
+          staticProviders: [],
+          resolve,
+          sections: ["header"],
+          builtinAgentKeys: seeded,
+          alwaysEnabledAgentKeys: always,
+        }),
+      );
+    for (const key of always) {
+      expect(checkbox(header(key, "judge"), `${key} enabled`), key).toContain("disabled");
+    }
+    const other = seeded.find((key) => !always.includes(key)) as string;
+    expect(checkbox(header(other, "static"), `${other} enabled`)).not.toContain("disabled");
+  });
+
+  it("leaves an operator's own lead agent editable", () => {
+    const html = renderToStaticMarkup(
+      createElement(AgentDetail, {
+        agentKey: "planner",
+        definitions: { planner: { ...base, role: "lead" } },
+        onChange: () => undefined,
+        llmAgents: {},
+        onChangeLlmAgents: () => undefined,
+        llmGlobal: { providerChoices: null, providerValue: null, modelValue: null },
+        servers: {},
+        staticProviders: [],
+        resolve,
+        sections: ["header", "identity", "prompt", "tools"],
+        builtinAgentKeys: seeded,
+      }),
+    );
+    expect(html).toMatch(/<textarea[^>]*aria-label="planner prompt"(?![^>]*disabled)[^>]*>/);
+    expect(html).toContain(">Remove<");
+  });
+
+  it("locks the five class built-ins when the API serves no list", () => {
+    const box = checkbox(
+      agentHtml("static", { ...base, role: "generic" }, []),
+      "static attck technique line",
+    );
+    expect(box).toContain("disabled");
+  });
+
+  it("fixes the switch on a clone of a role that keeps its own claim format", () => {
+    const html = agentHtml("static_r2", { ...base, role: "static" });
+    const box = checkbox(html, "static_r2 attck technique line");
+    expect(box).toContain("checked");
+    expect(box).toContain("disabled");
+    expect(html).toContain("keeps its own claim format");
+  });
+
+  it("leaves a stored off on such a role unlocked, so it can be put right", () => {
+    const html = agentHtml("static_r2", { ...base, role: "static", attck_techniques: false });
+    expect(checkbox(html, "static_r2 attck technique line")).not.toContain("disabled");
+  });
+
+  it("offers the switch on an operator's lead agent", () => {
+    const html = agentHtml("planner", { ...base, role: "lead" });
+    expect(checkbox(html, "planner attck technique line")).not.toContain("disabled");
+  });
+
+  it("stores off as false and on as no field, so off then on is the loaded definition", () => {
+    const off = withTechniqueLine(base, false);
+    expect(off.attck_techniques).toBe(false);
+    const back = withTechniqueLine(off, true);
+    expect("attck_techniques" in back).toBe(false);
+    expect(back).toEqual(base);
+    expect(JSON.parse(JSON.stringify(off))).toEqual({ ...base, attck_techniques: false });
   });
 });

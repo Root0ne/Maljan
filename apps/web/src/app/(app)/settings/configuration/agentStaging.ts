@@ -103,7 +103,13 @@ export function displayedDefinitions(
       if (BUILTIN_AGENT_KEYS.has(key)) out[key] = entry;
       continue;
     }
-    out[key] = { ...entry, ...stagedEntry };
+    // A built-in is staged narrowed to what may be edited about it, so it is
+    // drawn over its stored entry. Any other agent is staged whole and the
+    // settings model stores it as staged, replacing the stored entry: a field
+    // the edit took out (a stored off switch turned back on) is drawn out.
+    out[key] = BUILTIN_AGENT_KEYS.has(key)
+      ? { ...entry, ...stagedEntry }
+      : (stagedEntry as AgentDefinitionEntry);
   }
   for (const [key, entry] of Object.entries(staged)) {
     if (key in out) continue;

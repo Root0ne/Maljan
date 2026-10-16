@@ -15,6 +15,7 @@ from app.services.settings_service import (  # noqa: E402
     SettingsValidationError,
     ValueInfo,
 )
+from maljan.core.config import ALWAYS_ENABLED_AGENTS  # noqa: E402
 
 
 @pytest.fixture
@@ -49,6 +50,11 @@ def test_the_schema_route_serves_the_server_map_every_agent_of_the_stored_roster
     seeds = entries["core.mcp.servers"]["builtin_agent_keys"]
     assert {"lead", "reverser", "triage", "static"} <= set(seeds)
     assert "checker" not in seeds
+    # The agent editor locks what a save refuses: every seed, and the enabled
+    # switch of the agents the skeleton always runs.
+    definitions = entries["core.agents.definitions"]
+    assert definitions["builtin_agent_keys"] == seeds
+    assert definitions["always_enabled_agent_keys"] == list(ALWAYS_ENABLED_AGENTS)
 
 
 def test_schema_lists_groups_in_order_and_entries(client):

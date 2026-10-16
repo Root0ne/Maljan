@@ -59,6 +59,22 @@ const input =
    the same class as a generic agent, so the API takes a provider reference
    on it and the console has to be able to express one. */
 const PROVIDER_ROLES = new Set(["static", "generic", "lead"]);
+/** The roles that may turn the ATT&CK technique line off: the two that are a
+ *  prompt rather than a class (`config.PROMPT_ROLES`). A built-in role keeps
+ *  its own claim format and the settings model refuses the switch there. */
+const TECHNIQUE_LINE_ROLES = new Set(["generic", "lead"]);
+
+/** `definition` with the ATT&CK technique line on or off. On is stored as no
+ *  field at all, which is how the API serves a definition that keeps it on,
+ *  so turning it off and on again leaves the definition exactly as loaded. */
+export function withTechniqueLine(
+  definition: AgentDefinitionEntry,
+  on: boolean
+): AgentDefinitionEntry {
+  const next = { ...definition };
+  delete next.attck_techniques;
+  return on ? next : { ...next, attck_techniques: false };
+}
 /** The roles a custom definition may take. `judge` and `report` are missing on
  *  purpose: there is exactly one of each and both are built-ins, so offering
  *  either here would only produce a definition the settings model rejects. */
@@ -280,6 +296,8 @@ export function AgentDetail({
   keyErrorMessage,
   capabilityServers = {},
   dataSourceChoices = [],
+  builtinAgentKeys,
+  alwaysEnabledAgentKeys,
 }: {
   agentKey: string;
   /** The whole staged definition map, staged as a whole. */
@@ -310,11 +328,21 @@ export function AgentDetail({
   /** The input slices a definition may name, as the API serves them
    *  (`CatalogEntry.data_source_choices`). */
   dataSourceChoices?: readonly string[];
+  /** Every seeded definition key, as the API serves them
+   *  (`CatalogEntry.builtin_agent_keys`). Absent from an older API: the five
+   *  class built-ins are then the ones known. */
+  builtinAgentKeys?: readonly string[] | null;
+  /** The built-ins whose `enabled` switch the settings model refuses to
+   *  change, as the API serves them (`CatalogEntry.always_enabled_agent_keys`). */
+  alwaysEnabledAgentKeys?: readonly string[] | null;
 }) {
   const agent = definitions[agentKey];
   const has = (section: AgentSection) => sections.includes(section);
   const showHeader = has("header");
-  const locked = BUILTIN_AGENT_KEYS.has(agentKey);
+  // Every seeded definition is built in: the settings model refuses an edit to
+  // any of them but its `enabled` switch, so none is offered. The served list
+  // names all of them; an API older than it leaves the five class built-ins.
+  const locked = BUILTIN_AGENT_KEYS.has(agentKey) || (builtinAgentKeys ?? []).includes(agentKey);
 
   const put = (key: string, next: Partial<AgentDefinitionEntry>) => {
     resolve.noteEdit(key, next);
@@ -322,10 +350,8 @@ export function AgentDetail({
   };
 
   /** Removes an agent from the map. The header offers it only where `locked`
-   *  is false; note that `BUILTIN_AGENT_KEYS` is the set the settings model
-   *  locks, which is smaller than the set it re-seeds — the seeded generic
-   *  agents come back on the next load whether or not they are removed here,
-   *  which predates this editor. */
+   *  is false: a built-in is re-seeded on the next load whether or not it is
+   *  removed here. */
   const remove = (key: string) => onChange(removeEntry(definitions, key));
 
   const toggleRef = (key: string, ref: ToolRefEntry, on: boolean) => {
@@ -460,6 +486,7 @@ export function AgentDetail({
                 <input
                   type="checkbox"
                   aria-label={`${agentKey} enabled`}
+                  disabled={(alwaysEnabledAgentKeys ?? []).includes(agentKey)}
                   checked={agent.enabled}
                   onChange={(e) => put(agentKey, { enabled: e.target.checked })}
                 />
@@ -622,6 +649,37 @@ export function AgentDetail({
               </select>
               <FieldError message={fieldError("tab")} />
             </label>
+            {/* Whether the agent is asked for a technique id on each claim.
+                Absent is on, which is what every definition written before
+                the switch reads; off is stored as false and on as no field.
+                Locked on a built-in, and fixed on a role that keeps its own
+                claim format unless a stored off has to be put right. */}
+            <label className="block sm:col-span-2">
+              <span className="text-xs text-text-secondary flex items-center gap-1">
+                <input
+                  type="checkbox"
+                  aria-label={`${agentKey} attck technique line`}
+                  disabled={
+                    locked ||
+                    (!TECHNIQUE_LINE_ROLES.has(agent.role) && agent.attck_techniques !== false)
+                  }
+                  checked={agent.attck_techniques !== false}
+                  onChange={(e) =>
+                    onChange({
+                      ...definitions,
+                      [agentKey]: withTechniqueLine(agent, e.target.checked),
+                    })
+                  }
+                />
+                Ask for an ATT&amp;CK technique line on each claim
+              </span>
+              <span className="block text-[11px] text-text-muted mt-0.5">
+                {TECHNIQUE_LINE_ROLES.has(agent.role)
+                  ? "Turn off for an agent whose work is not malware behaviour. A technique line it writes anyway is still read and checked."
+                  : "This role keeps its own claim format; only a generic or lead agent can turn the line off."}
+              </span>
+              <FieldError message={fieldError("attck_techniques")} />
+            </label>
             {/* The slices of the job this agent is handed as its input text.
                 None ticked is the role's own input, which is what every
                 definition written before the field reads. A stored slice
@@ -716,7 +774,11 @@ export function AgentDetail({
         <fieldset className="border border-border rounded p-2">
           <legend className="text-xs text-text-muted px-1">Tools</legend>
           <ul role="tree" aria-label={`${agentKey} tools`} className="space-y-1">
-            {PROVIDER_ROLES.has(agent.role) && agent.role !== "static" && !locked && (
+            {/* A built-in holding the reference is drawn with it, ticked and
+                locked, as every other reference of a built-in is. */}
+            {PROVIDER_ROLES.has(agent.role) &&
+              agent.role !== "static" &&
+              (!locked || hasRef(agentKey, { kind: "provider", server: null, name: null })) && (
               <li
                 role="treeitem"
                 aria-selected={hasRef(agentKey, {
@@ -729,6 +791,7 @@ export function AgentDetail({
                   <input
                     type="checkbox"
                     aria-label={`${agentKey} provider tools`}
+                    disabled={locked}
                     checked={hasRef(agentKey, { kind: "provider", server: null, name: null })}
                     onChange={(e) =>
                       toggleRef(
@@ -1075,7 +1138,8 @@ export default function AgentDefinitionsEditor({
                     <span className="font-mono">{agentKeySuffix(key, value)}</span>
                   )}
                   {item.role !== key && <span>{item.role}</span>}
-                  {BUILTIN_AGENT_KEYS.has(key) && <span>built in</span>}
+                  {(BUILTIN_AGENT_KEYS.has(key) ||
+                    (entry.builtin_agent_keys ?? []).includes(key)) && <span>built in</span>}
                   {verdict && (
                     <span
                       className={verdict === "ok" ? "text-status-green" : "text-status-red"}
@@ -1186,6 +1250,8 @@ export default function AgentDefinitionsEditor({
           onClone={add}
           keyErrorMessage={keyError?.at === selected ? keyError.message : null}
           capabilityServers={entry.capability_servers ?? {}}
+          builtinAgentKeys={entry.builtin_agent_keys}
+          alwaysEnabledAgentKeys={entry.always_enabled_agent_keys}
           dataSourceChoices={entry.data_source_choices ?? []}
         />
       )}

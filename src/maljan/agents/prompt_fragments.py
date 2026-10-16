@@ -202,6 +202,19 @@ CLAIM_FORMAT_FRAGMENT = (
     "---\n"
 )
 
+# The same shape for an agent that is not asked for techniques
+# (``AgentDefinition.attck_techniques`` off): the three lines it is read from,
+# and nothing that points it at a technique id. A TECHNIQUE line it writes
+# anyway is still read by the same parser.
+CLAIM_FORMAT_WITHOUT_TECHNIQUE_FRAGMENT = (
+    "Format each finding as:\n"
+    "CLAIM: <claim text>\n"
+    "EVIDENCE: <artifact reference, naming the tool result you read it from, "
+    "for example [ev_0002]>\n"
+    "CONFIDENCE: <float>\n"
+    "---\n"
+)
+
 
 # The one sentence an analyst holding a reputation tool needs. A live run bound
 # VirusTotal to the judge, the judge only opened its tool loop on dissent, and

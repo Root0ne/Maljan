@@ -246,13 +246,30 @@ class ProviderProbe:
     tools: list[str] | None = None
 
 
-# What a static claim must cite, and which techniques to look for.
-CLAIM_CITATION = (
+# What a static claim must cite, and which techniques to look for. The two
+# sentences are kept apart so an agent whose definition turns the technique
+# line off (``AgentDefinition.attck_techniques``) is sent the first alone
+# (``without_attck_focus``); joined, they are the text every provider sends.
+CLAIM_ARTIFACT_CITATION = (
     "For EVERY claim you make, you MUST cite a concrete artifact: a function name, "
-    "string offset (.data+0xNN), API import, or hex pattern. "
+    "string offset (.data+0xNN), API import, or hex pattern."
+)
+ATTCK_FOCUS = (
     "Focus on MITRE ATT&CK: T1027 (Obfuscation), T1106 (Native API), "
     "T1055 (Process Injection), T1140 (Deobfuscation)."
 )
+CLAIM_CITATION = CLAIM_ARTIFACT_CITATION + " " + ATTCK_FOCUS
+
+
+def without_attck_focus(text: str) -> str:
+    """``text`` without the sentence that points claims at ATT&CK techniques.
+
+    For a provider's text sent to an agent whose definition turns the technique
+    line off. Only the platform's own sentence (``ATTCK_FOCUS``) is taken out,
+    wherever a provider's text carries it; the rest of the text is unchanged.
+    """
+    return text.replace(" " + ATTCK_FOCUS, "").replace(ATTCK_FOCUS, "")
+
 
 # The opening sentence of a provider that brings no tools of its own (and of a
 # provider whose tools did not attach): it says where the evidence comes from.

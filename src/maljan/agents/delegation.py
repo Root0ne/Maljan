@@ -674,7 +674,12 @@ def _task_turn(caller_name: str, task: str, context: str, callee: Any) -> str:
     The pack is not here; ``frame_messages`` puts it at the head of this turn
     inside the loop, the same way it does for a stage agent's first turn.
     """
-    from maljan.agents.configurable_analyst import _ISR_FORMAT_INSTRUCTION, _PATH_HEADER
+    from maljan.agents.base_agent import asks_for_techniques
+    from maljan.agents.configurable_analyst import (
+        _ISR_FORMAT_INSTRUCTION,
+        _ISR_FORMAT_INSTRUCTION_WITHOUT_TECHNIQUES,
+        _PATH_HEADER,
+    )
 
     parts: list[str] = []
     path = getattr(callee, "_analysis_file_path", None)
@@ -683,9 +688,16 @@ def _task_turn(caller_name: str, task: str, context: str, callee: Any) -> str:
     parts.append(f"Task from {caller_name}:\n{task}")
     if context:
         parts.append(f"Context from {caller_name}:\n{context}")
+    # The claim format the callee is asked for everywhere else: a callee whose
+    # definition turns the technique line off is not asked for one here either.
+    instruction = (
+        _ISR_FORMAT_INSTRUCTION
+        if asks_for_techniques(callee)
+        else _ISR_FORMAT_INSTRUCTION_WITHOUT_TECHNIQUES
+    )
     parts.append(
         "Answer the task and nothing wider. Cite the ledger id of every tool call and "
-        "every fact you rely on.\n\n" + _ISR_FORMAT_INSTRUCTION.rstrip()
+        "every fact you rely on.\n\n" + instruction.rstrip()
     )
     return "\n\n".join(parts)
 

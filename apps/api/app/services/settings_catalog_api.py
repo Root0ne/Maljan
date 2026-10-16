@@ -17,7 +17,12 @@ from dataclasses import replace
 from functools import lru_cache
 from typing import Any, get_args, get_origin
 
-from maljan.core.config import DATA_SOURCES, REQUIRED_ENV_ALLOW, _builtin_definitions
+from maljan.core.config import (
+    ALWAYS_ENABLED_AGENTS,
+    DATA_SOURCES,
+    REQUIRED_ENV_ALLOW,
+    _builtin_definitions,
+)
 from maljan.core.delivery_limits import SAMPLE_UPLOAD_MAX_BYTES
 from maljan.core.settings_annotations import GROUP_ORDER
 from maljan.core.settings_catalog import CatalogEntry, FieldType, _bounds, core_catalog
@@ -673,6 +678,8 @@ def resolved_catalog(
                 entry,
                 capability_servers=_capability_servers(servers),
                 data_source_choices=list(DATA_SOURCES),
+                builtin_agent_keys=sorted(_builtin_definitions()),
+                always_enabled_agent_keys=list(ALWAYS_ENABLED_AGENTS),
             )
         out.append(entry)
     return out

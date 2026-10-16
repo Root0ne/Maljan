@@ -39,7 +39,11 @@ from maljan.agents.claim_headings import (
     count_claims_after_disputes,
     count_claims_begun,
 )
-from maljan.agents.prompt_fragments import CLAIM_FORMAT_FRAGMENT, KEEP_REPLY
+from maljan.agents.prompt_fragments import (
+    CLAIM_FORMAT_FRAGMENT,
+    CLAIM_FORMAT_WITHOUT_TECHNIQUE_FRAGMENT,
+    KEEP_REPLY,
+)
 from maljan.agents.tool_answer_clearing import (
     CLEARED_FOR_REFUSAL,
     Clearing,
@@ -2168,6 +2172,15 @@ _VIEW_SYSTEM = (
     "IDs in the form Txxxx or Txxxx.yyy only when the evidence supports them.\n"
     + CLAIM_FORMAT_FRAGMENT
 )
+# The same system prompt for an agent whose definition turns the technique line
+# off (``BaseAnalyst.asks_for_techniques``): no technique id is asked for.
+_VIEW_SYSTEM_WITHOUT_TECHNIQUES = (
+    "You are an expert malware analyst examining one focused facet of a sample. "
+    "Analyse ONLY the aspect named in the instruction; ignore everything else. "
+    "For EVERY claim you MUST cite a concrete artifact (API/import, string, path, "
+    "registry key, host/domain). DO NOT invent capabilities — if "
+    "the evidence does not support a claim, omit it.\n" + CLAIM_FORMAT_WITHOUT_TECHNIQUE_FRAGMENT
+)
 
 # Per-domain ordered facets. ``_view_specs`` returns the first N (N=2 -> the first
 # two; N=4 -> all four). Each entry: (key, focused instruction).
@@ -2293,17 +2306,42 @@ _TIER_SPECS: list[tuple[str, str]] = [
 ]
 
 
-def _tier_specs(n_tiers: int) -> list[tuple[str, str]]:
+# The same ladder for an agent whose definition turns the technique line off:
+# the first tier asks for no technique id and the last states conclusions
+# rather than mapping them to techniques.
+_TIER_SPECS_WITHOUT_TECHNIQUES: list[tuple[str, str]] = [
+    (
+        "facts",
+        "Reasoning tier 1 of 3 (foundational facts). Extract ONLY concrete, "
+        "low-level artifacts present in the evidence: specific imported APIs, "
+        "strings, file paths, registry keys, hosts/domains/IPs. Do NOT interpret "
+        "intent yet — just enumerate what is verifiably present, each with its "
+        "artifact citation.",
+    ),
+    _TIER_SPECS[1],
+    (
+        "semantics",
+        "Reasoning tier 3 of 3 (conclusions). Using ONLY the behaviours "
+        "established by the previous tier, state the conclusions they support and "
+        "assess overall intent. Cite the supporting behaviour and artifact for "
+        "every conclusion; omit any conclusion the evidence does not support.",
+    ),
+]
+
+
+def _tier_specs(n_tiers: int, *, techniques: bool = True) -> list[tuple[str, str]]:
     """Return ``n_tiers`` ordered (key, instruction) reasoning tiers.
 
     Draws from the fixed LAMD-style facts->behaviour->semantics ladder (the
     canonical depth is 3); for N beyond the table it pads with generic numbered
-    tiers so the eval harness can probe any N>=2.
+    tiers so the eval harness can probe any N>=2. ``techniques=False`` is the
+    ladder for an agent not asked for technique ids.
     """
-    if n_tiers <= len(_TIER_SPECS):
-        return _TIER_SPECS[:n_tiers]
-    out = list(_TIER_SPECS)
-    for i in range(len(_TIER_SPECS), n_tiers):
+    ladder = _TIER_SPECS if techniques else _TIER_SPECS_WITHOUT_TECHNIQUES
+    if n_tiers <= len(ladder):
+        return ladder[:n_tiers]
+    out = list(ladder)
+    for i in range(len(ladder), n_tiers):
         out.append(
             (
                 f"tier{i}",
@@ -2937,6 +2975,37 @@ _REVISION_ISR_FRAMING = (
 )
 
 
+# The closing of the negotiation round's human turn: the claim shape it is read in.
+_REVISION_ISR_FORMAT = (
+    "Format your response as structured claims (CLAIM/EVIDENCE/CONFIDENCE/TECHNIQUE)\n"
+    "followed by a DISPUTES section listing peer claims you reject.\n"
+    "Example:\n"
+    "CLAIM: ...\nEVIDENCE: ...\nCONFIDENCE: 0.8\nTECHNIQUE: T1071\n---\n"
+    "DISPUTES:\n- Static analyst says no C2 strings but PCAP shows beaconing.\n"
+)
+# The same closing for an agent whose definition turns the technique line off.
+# Its example dispute names no malware behaviour: such an agent's work is not
+# malware analysis, and an example is copied as readily as a rule.
+_REVISION_ISR_FORMAT_WITHOUT_TECHNIQUES = (
+    "Format your response as structured claims (CLAIM/EVIDENCE/CONFIDENCE)\n"
+    "followed by a DISPUTES section listing peer claims you reject.\n"
+    "Example:\n"
+    "CLAIM: ...\nEVIDENCE: ...\nCONFIDENCE: 0.8\n---\n"
+    "DISPUTES:\n- A peer says a setting is absent but the file you read lists it.\n"
+)
+
+
+def asks_for_techniques(agent: Any) -> bool:
+    """Whether ``agent`` is asked for an ATT&CK technique line on each claim.
+
+    ``BaseAnalyst.asks_for_techniques`` where the agent answers it, and true
+    for one that does not: true is the claim format every built-in class
+    sends, and an agent not built on ``BaseAnalyst`` sends no other.
+    """
+    asks = getattr(agent, "asks_for_techniques", None)
+    return bool(asks()) if callable(asks) else True
+
+
 def prompt_to_messages(prompt_messages: list[tuple[str, str]]) -> list[BaseMessage]:
     """``(role, text)`` pairs as LangChain messages, with no templating step.
 
@@ -3240,6 +3309,7 @@ def revision_messages(
     *,
     isr: bool = False,
     revision_round: int = 1,
+    techniques: bool = True,
 ) -> list[tuple[str, str]]:
     """The revision prompt every analyst sends, as ``(role, text)`` pairs.
 
@@ -3255,6 +3325,10 @@ def revision_messages(
     ``revision_round`` is not interpolated into the prompt (it never was); it
     is carried so a caller's log line and the returned ISR agree about which
     round produced which text.
+
+    ``techniques=False`` is the negotiation round for an agent whose
+    definition turns the technique line off: the same text with the
+    TECHNIQUE label and example line left out.
     """
     logger.debug(
         "Building revision prompt (isr=%s, round=%d, peers=%d).",
@@ -3277,11 +3351,7 @@ def revision_messages(
                 f"PEER REPORTS:\n{peer_section}\n\n"
                 f"MEDIATOR FEEDBACK:\n{mediator_feedback}\n\n"
                 f"RAW DATA:\n{original_data}\n\n"
-                "Format your response as structured claims (CLAIM/EVIDENCE/CONFIDENCE/TECHNIQUE)\n"
-                "followed by a DISPUTES section listing peer claims you reject.\n"
-                "Example:\n"
-                "CLAIM: ...\nEVIDENCE: ...\nCONFIDENCE: 0.8\nTECHNIQUE: T1071\n---\n"
-                "DISPUTES:\n- Static analyst says no C2 strings but PCAP shows beaconing.\n",
+                + (_REVISION_ISR_FORMAT if techniques else _REVISION_ISR_FORMAT_WITHOUT_TECHNIQUES),
             ),
         ]
 
@@ -7641,8 +7711,9 @@ class BaseAnalyst(BudgetMeter, ABC):
         """
         from langchain_core.messages import HumanMessage, SystemMessage
 
+        system = _VIEW_SYSTEM if asks_for_techniques(self) else _VIEW_SYSTEM_WITHOUT_TECHNIQUES
         messages = [
-            SystemMessage(content=_VIEW_SYSTEM),
+            SystemMessage(content=system),
             HumanMessage(content=f"{instruction}\n\n{data}"),
         ]
         # ``bind`` returns a Runnable, not a BaseChatModel; widen to Any so the
@@ -7766,7 +7837,7 @@ class BaseAnalyst(BudgetMeter, ABC):
         if n_tiers < 2:
             return self.analyze_isr(data)
 
-        specs = _tier_specs(n_tiers)
+        specs = _tier_specs(n_tiers, techniques=asks_for_techniques(self))
         per_tier_budget = (total_max_tokens // n_tiers) if total_max_tokens else None
 
         tier_isrs: list[AgentISR] = []
@@ -8002,6 +8073,8 @@ class BaseAnalyst(BudgetMeter, ABC):
         # sent back; keyed by the parsed answer as the cuts are.
         repeat_margin = getattr(cfg_validation, "claim_repeat_margin", None)
         repeated_by: dict[int, ClaimsRepeated | None] = {}
+        # Every question below names the claim format this agent is asked for.
+        techniques = asks_for_techniques(self)
 
         def _repeated(candidate: AgentISR) -> ClaimsRepeated | None:
             key = id(candidate)
@@ -8026,16 +8099,20 @@ class BaseAnalyst(BudgetMeter, ABC):
                         chunk=chunk,
                         cut=widest or None,
                         ended=ended_by.get(id(candidate), False),
+                        techniques=techniques,
                     )
                 ]
-            return [analyst_cut_violation(cap, text, chunk=named) for cap, text, named in cut]
+            return [
+                analyst_cut_violation(cap, text, chunk=named, techniques=techniques)
+                for cap, text, named in cut
+            ]
 
         def _validator(candidate: AgentISR) -> list[Violation]:
             first = not asked
             asked.append(True)
             if only_cut:
                 return _whole_answer_questions(candidate)
-            unread = [] if nudged else parse_violations(candidate)
+            unread = [] if nudged else parse_violations(candidate, techniques=techniques)
             # Every answer checked that no claim could be read from, the first
             # and its retry alike, goes to the run record whole.
             self._keep_unparsed_answers(unread, candidate.revision_round)
@@ -8063,7 +8140,7 @@ class BaseAnalyst(BudgetMeter, ABC):
             ]
 
         if nudged and not only_cut:
-            unasked = parse_violations(isr)
+            unasked = parse_violations(isr, techniques=techniques)
             self.validation_findings.extend(unasked)
             self._keep_unparsed_answers(unasked, isr.revision_round)
 
@@ -8177,8 +8254,7 @@ class BaseAnalyst(BudgetMeter, ABC):
         # not the framed conversation alone: fourteen questions are not free.
         from maljan.pipeline.retry_merge import numbering_unsettled
         from maljan.pipeline.validation import (
-            ANALYST_FEEDBACK_CLOSING,
-            ANALYST_FEEDBACK_CLOSING_BY_NUMBER,
+            analyst_feedback_closing,
             feedback_text,
             gate_removed_note,
         )
@@ -8191,7 +8267,7 @@ class BaseAnalyst(BudgetMeter, ABC):
             if only_cut or loop_cuts or _repeated(isr) is not None
             else numbering_unsettled(isr)
         )
-        closing = ANALYST_FEEDBACK_CLOSING if merge_why else ANALYST_FEEDBACK_CLOSING_BY_NUMBER
+        closing = analyst_feedback_closing(whole=bool(merge_why), techniques=techniques)
         if isr.gate_removed and isr.answer_text:
             closing = f"{gate_removed_note(isr.gate_removed)}\n{closing}"
         sent = with_question(messages, feedback_text(initial, closing=closing))
@@ -8222,7 +8298,7 @@ class BaseAnalyst(BudgetMeter, ABC):
             )
             self.logger.warning("%s: the cut-at-cap question was %s.", self.name, detail)
             for cap, text, named in loop_cuts:
-                unasked_cut = analyst_cut_violation(cap, text, chunk=named)
+                unasked_cut = analyst_cut_violation(cap, text, chunk=named, techniques=techniques)
                 self.validation_findings.append(
                     replace(
                         unasked_cut,
@@ -8232,7 +8308,10 @@ class BaseAnalyst(BudgetMeter, ABC):
                 )
             if loop_repeat is not None:
                 unasked_repeat = analyst_repeated_violation(
-                    loop_repeat, chunk=chunk, ended=ended_by.get(id(isr), False)
+                    loop_repeat,
+                    chunk=chunk,
+                    ended=ended_by.get(id(isr), False),
+                    techniques=techniques,
                 )
                 self.validation_findings.append(
                     replace(
@@ -8372,7 +8451,7 @@ class BaseAnalyst(BudgetMeter, ABC):
                 cards=cards,
             )
             retried_answer = raw_answers.get(id(retried), "")
-            question = whole_answer_after_retry_question(why)
+            question = whole_answer_after_retry_question(why, techniques=techniques)
             # A retry answer with no text is not sent back (``_with_feedback``'s
             # rule): the question is asked at the end of the turn before it.
             turns = (
@@ -9568,6 +9647,17 @@ class BaseAnalyst(BudgetMeter, ABC):
         "dynamic": "dynamic",
         "network": "network",
     }
+
+    def asks_for_techniques(self) -> bool:
+        """Whether this agent is asked for an ATT&CK technique line on each claim.
+
+        True for every built-in class, whose claim format is its own. The
+        configurable analyst answers from its definition
+        (``AgentDefinition.attck_techniques``). Every text that asks an agent
+        for a technique reads this: its claim format, a delegated ask, the
+        validation questions and the view and tier prompts.
+        """
+        return True
 
     def _infer_domain(self) -> str:
         """Infer the ISR domain from the agent's registered name.
