@@ -2978,22 +2978,6 @@ def make_join_node(stage: Any, container: ServiceContainer, finishes: tuple[str,
     return node_fn
 
 
-# The format-specific parsers, and the routed formats each is for. A parser the
-# sample's format never calls on is not something this run lost: a missing
-# Mach-O library on a PE sample said nothing about the PE and still reached
-# the report's first page as a degradation. A tool not named here, or a sample
-# whose format is unknown, keeps its reason. The table names the platform's own
-# parsers: it is read only for a built-in server that ships the tool, never for
-# an operator's server whose tool shares a name with one of them.
-_FORMAT_TOOLS: dict[str, frozenset[str]] = {
-    "pe_info": frozenset({"pe"}),
-    "elf_info": frozenset({"elf"}),
-    "macho_info": frozenset({"mach-o", "macho"}),
-    "apk_info": frozenset({"apk", "dex"}),
-    "document_info": frozenset({"ole2", "ooxml", "pdf", "doc", "docx", "xls", "xlsx", "rtf"}),
-}
-
-
 _UNAVAILABLE_TOOL_RE = re.compile(r"^server\.(?P<server>[^.]+)\.(?P<tool>[^.(]+)_unavailable\(")
 
 
@@ -3011,16 +2995,19 @@ def reason_applies_to_format(reason: str, file_type: str) -> bool:
 def _needed_for(tool: str, file_type: str, server: str) -> bool:
     """Whether ``server``'s missing ``tool`` costs this sample anything, by its routed format.
 
-    Only a built-in server's own parser is read by the format table; any other
-    server's tool keeps its reason whatever it is called.
+    A parser the sample's format never calls on is not something this run lost:
+    a missing Mach-O library on a PE sample said nothing about the PE and still
+    reached the report's first page as a degradation. A tool that declares the
+    routed formats it serves (``ToolFacts.routed_formats``: the shipped
+    format-specific parsers do, and an operator's server may) costs a sample of
+    another known format nothing. Any other tool, and a sample whose format is
+    unknown, keeps its reason.
     """
-    from maljan.core.declared_reading import ships_tool
+    from maljan.core.declared_reading import routed_formats_of
 
-    if not ships_tool(f"mcp:{server}", tool):
-        return True
-    formats = _FORMAT_TOOLS.get(tool)
+    formats = routed_formats_of(f"mcp:{server}", tool)
     routed = str(file_type or "").strip().lower()
-    if formats is None or not routed or routed == "unknown":
+    if not formats or not routed or routed == "unknown":
         return True
     return routed in formats
 

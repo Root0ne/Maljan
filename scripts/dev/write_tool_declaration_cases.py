@@ -36,6 +36,7 @@ _GOOD: dict[str, Any] = {
     "discloses_sample": True,
     "read_only": True,
     "arguments": {"path": "file_path"},
+    "routed_formats": ["pe"],
     "asserts_techniques": True,
     "source": "sigma",
     "holds_strings": True,

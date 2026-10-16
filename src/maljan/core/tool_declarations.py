@@ -95,6 +95,9 @@ ENV_NAME_PATTERN = r"^[A-Za-z_][A-Za-z0-9_]*$"
 _ENV_NAME_RE = re.compile(ENV_NAME_PATTERN)
 # A tool's argument name: an identifier, as a JSON schema property is written.
 _ARGUMENT_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_.-]{0,127}$")
+# A routed sample format's name, as the routing writes it (``pe``, ``mach-o``);
+# read with ``fullmatch``, so no trailing newline passes.
+_ROUTED_FORMAT_RE = re.compile(r"[a-z0-9][a-z0-9._+-]{0,63}")
 # The separator a registry joins a server key and a tool name with when two
 # servers offer the same name; a declared tool name may not hold it.
 RENAMED_TOOL_SEPARATOR = "__"
@@ -432,7 +435,8 @@ NO_KIND = "unclassified"
 # The fields of a tool declaration, split by whether they are read without a
 # kind. A kind-free field is read from the live declaration whatever the kind
 # (the guard's budget, a call's argument roles, the tag a description is shown
-# with, the words and name a tool is given, whether it discloses the sample).
+# with, the words and name a tool is given, whether it discloses the sample,
+# the routed formats it serves).
 # A kind-dependent field is read only through the kind (an answer's rows and
 # the paths inside them, its techniques and reputation, a reader of its shape,
 # the report sections it is shown to): a declaration that names no kind may
@@ -449,6 +453,7 @@ KIND_FREE_FIELDS: tuple[str, ...] = (
     "discloses_sample",
     "read_only",
     "arguments",
+    "routed_formats",
 )
 KIND_DEPENDENT_FIELDS: tuple[str, ...] = (
     "asserts_techniques",
@@ -856,7 +861,10 @@ class ToolFacts(BaseModel):
     report sections whose writer is shown this tool's answers, ``words`` the
     words a statement may use to name this tool's entry, ``display_name`` the
     name published text gives the tool, and ``category`` the tag its
-    description is shown with.
+    description is shown with. ``routed_formats`` lists the routed sample
+    formats a format-specific tool serves (``pe_info`` serves ``pe``): when the
+    tool cannot answer on its server, a sample of another known format loses
+    nothing by it, and its unavailability is not recorded for that sample.
     """
 
     # A key this model does not know is refused in an operator's edit
@@ -886,6 +894,7 @@ class ToolFacts(BaseModel):
     words: tuple[str, ...] = ()
     display_name: str = ""
     category: str = ""
+    routed_formats: tuple[str, ...] = ()
 
     @model_validator(mode="before")
     @classmethod
@@ -950,6 +959,34 @@ class ToolFacts(BaseModel):
     @classmethod
     def _sections_are_words(cls, value: tuple[str, ...]) -> tuple[str, ...]:
         return tuple(_words(value, "report section"))
+
+    @field_validator("routed_formats")
+    @classmethod
+    def _formats_are_known_routed_formats(cls, value: tuple[str, ...]) -> tuple[str, ...]:
+        # A name the router never gives a sample would drop the tool's reason
+        # for every sample, without a word: each name is one it gives. And a
+        # tool's routed formats are the known formats it serves, so the label
+        # of a sample of no known format (``unknown``) is not one of them.
+        from maljan.extractors.sample_identity import UNKNOWN_FORMAT, routed_formats
+
+        known = tuple(name for name in routed_formats() if name != UNKNOWN_FORMAT)
+        for name in value:
+            if not _ROUTED_FORMAT_RE.fullmatch(name):
+                raise ValueError(
+                    f"routed format {name!r} is not a format name: lowercase letters, digits "
+                    "and . _ + -, starting with a letter or a digit, at most 64 characters"
+                )
+            if name == UNKNOWN_FORMAT:
+                raise ValueError(
+                    f"routed format {name!r} is the label of a sample of no known format; a "
+                    "tool's routed formats are the known formats it serves"
+                )
+            if name not in known:
+                raise ValueError(
+                    f"routed format {name!r} is not one the router gives a sample; one of: "
+                    + ", ".join(known)
+                )
+        return value
 
     @model_validator(mode="after")
     def _a_source_is_an_asserting_tool_s(self) -> ToolFacts:
