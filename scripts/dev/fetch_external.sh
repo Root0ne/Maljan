@@ -38,24 +38,6 @@ SIGMA_URL="https://github.com/SigmaHQ/sigma.git"
 SIGMA_REF="r2026-07-01"
 SIGMA_DEST="$REPO_ROOT/data/sigma_rules"
 
-# capa's rules and its library-identification signatures, for the flare-capa
-# version uv.lock pins; the flare-capa wheel carries neither. They land where
-# static.capa.rules_dir and static.capa.signatures_dir point by default, which
-# is also what the compose stack mounts over the image's own copies. The rules
-# are capa-rules' tag of that version, the signatures the sigs/ directory of
-# flare-capa's own sdist on PyPI. Each archive is checked against the sha256
-# recorded when it was pinned (the sdist's is uv.lock's own), and each
-# directory keeps its licence file. Keep the three values in step with uv.lock
-# and docker/Dockerfile.backend; a test holds them together. A directory that
-# is already there is left as it is.
-CAPA_VERSION="9.4.0"
-CAPA_RULES_SHA256="273591b11737181b3bdaac18964f23627cf10c21c2b143fc9be88e4a33217669"
-CAPA_SDIST_SHA256="c4f421abac566e23657241e4ddc66119beb0caf5f082ee42d68b7c879ebb7fc6"
-CAPA_RULES_URL="https://github.com/mandiant/capa-rules/archive/refs/tags/v${CAPA_VERSION}.tar.gz"
-CAPA_SDIST_URL="https://files.pythonhosted.org/packages/source/f/flare-capa/flare_capa-${CAPA_VERSION}.tar.gz"
-CAPA_RULES_DEST="$REPO_ROOT/data/capa-rules"
-CAPA_SIGNATURES_DEST="$REPO_ROOT/data/capa-signatures"
-
 mkdir -p "$EXTERNAL"
 
 for spec in "${targets[@]}"; do
@@ -96,43 +78,9 @@ else
     || git clone --quiet --depth 1 "$SIGMA_URL" "$SIGMA_DEST"
 fi
 
-# Unpacked beside its destination and renamed into place, so a failed fetch or
-# a digest that does not match leaves no directory a later run would skip.
-capa_work=""
-trap 'if [[ -n "$capa_work" ]]; then rm -rf "$capa_work"; fi' EXIT
-
-fetch_checked() {  # url sha256 file
-  curl --fail --location --silent --show-error --output "$3" "$1"
-  echo "$2  $3" | sha256sum -c --quiet -
-}
-
-if [[ -e "$CAPA_RULES_DEST" && -e "$CAPA_SIGNATURES_DEST" ]]; then
-  echo "  ok       capa rules and signatures are in data/, left as they are"
-else
-  mkdir -p "$REPO_ROOT/data"
-  capa_work="$(mktemp -d "$REPO_ROOT/data/.capa-fetch.XXXXXX")"
-  if [[ -e "$CAPA_RULES_DEST" ]]; then
-    echo "  ok       capa rules are in data/, left as they are"
-  else
-    echo "  fetch    capa rules v$CAPA_VERSION"
-    fetch_checked "$CAPA_RULES_URL" "$CAPA_RULES_SHA256" "$capa_work/rules.tar.gz"
-    mkdir "$capa_work/rules"
-    tar -xzf "$capa_work/rules.tar.gz" -C "$capa_work/rules" --strip-components=1
-    mv "$capa_work/rules" "$CAPA_RULES_DEST"
-  fi
-  if [[ -e "$CAPA_SIGNATURES_DEST" ]]; then
-    echo "  ok       capa signatures are in data/, left as they are"
-  else
-    echo "  fetch    capa signatures from flare-capa $CAPA_VERSION"
-    fetch_checked "$CAPA_SDIST_URL" "$CAPA_SDIST_SHA256" "$capa_work/sdist.tar.gz"
-    mkdir "$capa_work/signatures"
-    tar -xzf "$capa_work/sdist.tar.gz" -C "$capa_work/signatures" --strip-components=2 \
-      "flare_capa-${CAPA_VERSION}/sigs"
-    tar -xzf "$capa_work/sdist.tar.gz" -C "$capa_work/signatures" --strip-components=1 \
-      "flare_capa-${CAPA_VERSION}/LICENSE.txt"
-    mv "$capa_work/signatures" "$CAPA_SIGNATURES_DEST"
-  fi
-fi
+# capa's rules and its library signatures, at the capa version uv.lock pins,
+# where the settings point by default and the compose stack mounts them.
+bash "$REPO_ROOT/scripts/dev/fetch_capa_data.sh"
 
 echo
 echo "external/, data/sigma_rules, data/capa-rules and data/capa-signatures are ignored by git."

@@ -48,7 +48,10 @@ from flare-capa's own sdist, whose digest is the one `uv.lock` records), and
 puts them in `data/capa-rules` and `data/capa-signatures`. A stack that
 bind-mounts its own `data/` over the image's, as the shipped compose file does,
 reads that directory's copies instead: `make setup` (`make external`) fetches
-the same pinned set there and leaves a directory that is already there as it is.
+the same pinned set there (`scripts/dev/fetch_capa_data.sh`). A directory that
+is already there is left as it is, and the script says whether it is the
+pinned version. The rules arrive without their repository's CI folder, so
+the rule count the connection test gives is the number of rules capa loads.
 
 With the signatures capa identifies library code (the runtime's startup code,
 statically linked library functions) in a PE it reads with vivisect, and
