@@ -26,7 +26,7 @@ export type ChoicesFrom =
   | "memory_backends"
   | "sandbox_report_readers";
 
-export type Editor = "server_map" | "rest_sandbox" | "agent_definitions" | "stages" | "tool_facts";
+export type Editor = "server_map" | "rest_sandbox" | "agent_definitions" | "stages" | "tool_facts" | "pack_steps";
 
 export interface CatalogEntry {
   key: string;
@@ -105,6 +105,66 @@ export interface CatalogEntry {
    *  settings model refuses to change. Absent from an API older than the
    *  field: every switch is then offered. */
   always_enabled_agent_keys?: string[] | null;
+  /** For the triage pack's steps: what a declared step may say, read from
+   *  the settings model (`core.pack_steps.step_vocabulary`). Absent from an
+   *  API older than the field: the steps are then edited as JSON only. */
+  pack_step_vocabulary?: PackStepVocabulary | null;
+}
+
+/** One field a declared pack step may set, as the model's JSON schema states
+ *  it. `type` is `""` for a field of more than one JSON type; `bounds` holds
+ *  the JSON schema keywords that bound a number. */
+export interface PackStepField {
+  name: string;
+  type: string;
+  items: string;
+  nullable: boolean;
+  required: boolean;
+  default: unknown;
+  bounds: Partial<
+    Record<"minimum" | "maximum" | "exclusiveMinimum" | "exclusiveMaximum", number>
+  >;
+}
+
+/** A name with what it stands for: a placeholder, a renderer. */
+export interface PackStepTerm {
+  name: string;
+  meaning: string;
+}
+
+/** A field whose value, set on a declaration under a shipped id, decides
+ *  whether the declaration replaces that step: it does where the value differs
+ *  from the shipped step's `compared_with`, an empty value only where
+ *  `empty_counts`. */
+export interface PackStepReplacingField {
+  field: string;
+  compared_with: string;
+  empty_counts: boolean;
+}
+
+/** What a declared pack step may say, each list in the API's own order. */
+export interface PackStepVocabulary {
+  fields: PackStepField[];
+  /** The pattern a whole step id is read by. */
+  id_pattern: string;
+  /** The keys of the pack's own state a step id can take. A step so named runs
+   *  as any other; when it starts beside the pack, its schedule is recorded
+   *  apart from that key. */
+  state_keys: string[];
+  placeholders: PackStepTerm[];
+  /** The pattern a template string is read for placeholders by: a match's
+   *  first group is the name. */
+  placeholder_pattern: string;
+  /** Every format the router can give a sample. */
+  formats: string[];
+  renderers: PackStepTerm[];
+  /** The shipped steps, each as it dumps: only the fields it sets. */
+  shipped: Record<string, unknown>[];
+  /** What makes a declaration replace its shipped step at its place, keeping
+   *  only the id, instead of changing it field by field. */
+  replacing_fields: PackStepReplacingField[];
+  /** Per shipped id, the values `replacing_fields` are compared with. */
+  shipped_compared: Record<string, Record<string, unknown>>;
 }
 
 /** What a provider declares about itself, served on its selector's entry.

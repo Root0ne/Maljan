@@ -2288,17 +2288,18 @@ the server, or `triage.reputation = off`, keeps such a run offline.
 The pack is a list of steps (`maljan.core.pack_steps`), each declared as
 data. The shipped list is the pack described in
 [architecture.md](/architecture/), in that order; `triage.steps` holds your
-own, as JSON, laid over it:
+own, laid over it (the console edits them as a form, see *Adding a step in the
+console* below):
 
 | field | meaning |
 | :-- | :-- |
-| `id` | the step's name, unique in the list (lowercase letters, digits, `_`) |
+| `id` | the step's name, unique in the list (lowercase letters, digits, `_`, the whole id read) |
 | `tool`, `server` | what the step calls. No `server`: one of the platform's own steps, named by its shipped id. A `server`: that tool server's tool, called through the tool server registry as an agent's call is, to the path that server opens the sample at, and recorded under that server |
 | `arguments` | a server step's argument template; a string at any depth (inside objects and lists too) may hold `{sample_path}`, `{sha256}` and `{file_type}`, each filled once. None: the argument the tool declares for the `path` role takes the sample's path and the one for `hash` its sha256. The platform's own steps compute their own and refuse one |
 | `formats` | the routed formats the step runs for; empty is every format |
 | `budget_seconds` | the step's wall clock; none takes the tool's declared `timeout_seconds`, else what is left of `triage.budget_seconds`. Of the platform's own steps only those whose shipped declaration says their in-process code honours a clock take one: `capa` (else `static.capa.timeout_seconds`), `floss` and `yara_scan` |
 | `peak_mb` | the memory the step takes at its peak, where this worker does not measure it; only on a step that starts beside the pack or that another step runs beside |
-| `starts_after`, `beside` | a step that starts on a thread of its own right after `starts_after`, when the host has room for it beside the steps `beside` names (their peaks and its own against `triage.memory_floor_mb`); its entry keeps its place in the list, its thread is let go when its work is done, and `triage_facts.<id>` and the run summary's `triage.<id>` say `beside …` or `in turn: <why>`. Any server's tool can; of the platform's own steps only `floss` |
+| `starts_after`, `beside` | a step that starts on a thread of its own right after `starts_after`, when the host has room for it beside the steps `beside` names (their peaks and its own against `triage.memory_floor_mb`); its entry keeps its place in the list, its thread is let go when its work is done, and `triage_facts.<id>` and the run summary's `triage.<id>` say `beside …` or `in turn: <why>`; a step named as one of the state's own keys (`entries`, `has_signature`, `hits`, …) runs as any other and says it under `_held_schedules.<id>` in both instead, so no fact or count is replaced. Any server's tool can; of the platform's own steps only `floss` |
 | `renderer` | how its pack line shows the answer: one of the pack's renderers (`core.pack_steps.PACK_RENDERERS`). `capability_rules` reads the answer of a tool declared of kind `capability_rules` (or a step whose `kind` says so) through its declaration: each declared row that is an object and has a readable name a rule, by its `values.rule`, at its `places.addresses`, with its techniques when the tool asserts them; it is refused on a tool declared another kind or none. Every other renderer reads only the answer of the platform's own step it was written for. None: a tool of kind `capability_rules` is shown as that renderer shows it, any other by the generic line, the count of the declared rows that are objects, each by its declared `rule`, `text`, `name` or `value` (a declaration naming none of these gives the row's other declared values as `name=value`) at its first declared place |
 | `kind` | the kind of answer the step records, laid over the tool's declared kind on its entry |
 | `display_name` | what the pack's line calls the step (and, for a server's tool, what other lines name its answer by) |
@@ -2309,9 +2310,10 @@ A declaration under a shipped id changes that step in its place; one that
 names another `tool` or `server` replaces it there, keeping only the id; a new
 id adds a step. A list that cannot run as declared is refused when it is
 saved: an id twice, a placeholder no template may name, a step with no server
-that is not one of the platform's own, a server `mcp.servers` does not hold or
-a tool outside its `tools` list (in the words an agent's reference is refused
-in, and removing a server a step uses is refused too), an `after`,
+that is not one of the platform's own, on an enabled step a server
+`mcp.servers` does not hold or a tool outside its `tools` list (in the words an
+agent's reference is refused in, and removing a server a step uses is refused
+too), an `after`,
 `starts_after` or `beside` naming no step or the step itself, a `starts_after`
 or `beside` on a step that runs in turn, a `beside` with no `starts_after`, a
 `peak_mb` nothing reads, and a `renderer` that cannot read the step's answer.
@@ -2329,6 +2331,60 @@ save, and no new or changed item rides on it. A server step whose server the tea
 configured is a `not run:` entry, not a failure; a call that fails is a
 failure of its tool. Every entry an operator's step writes carries the step
 (`pack_step`), so the pack reads it back without the settings.
+
+**Adding a step in the console.** *Triage pack steps* (Analysis layers, under
+Triage pack) draws your steps as a form, one card per step. Type an id under
+**New step id** and press **Add step**: a shipped step's id (offered as you
+type) changes that step in its place, any other id adds a step of your own; an
+id that does not read whole is said there. A step named as one of the pack
+state's own keys that starts beside the pack carries a note that its schedule
+is recorded apart, and blocks nothing. Each card says how its step stands, by the rule the save
+lays a declaration over the shipped list with (served as `replacing_fields`
+with the shipped values they compare against): a step of your own, one that
+changes its shipped step field by field, or one that replaces it at its place
+because it names another `server` or `tool`, which keeps nothing of the
+shipped step but its id. What a card shows for a field you have not set is
+what the save puts in force: the shipped value on a step that changes its
+shipped step, the field's default otherwise. Pick the **Server** from the tool
+servers in force (none: one of the platform's own steps) and the **Tool**: the
+box offers only tools the save accepts, from the server's `tools` list, the
+tools it declares and what **List tools** reads from its manifest (the
+connection test the server editor runs, under the same administrator rights; a
+tool its capability manifest marks unavailable says why). A listed or declared
+tool outside the server's `tools` list is not offered, and the card names it
+with the save's reason; a step with no server is offered only the tool its own
+shipped step calls; a typed name the save refuses is marked with its words,
+and one no source names is kept and marked as not seen. On a disabled step,
+which the save does not check against its server, a tool outside the server's
+`tools` list is noted as refused once the step is enabled. A listing is dropped
+once that server's staged settings change. **Arguments** are name and value
+rows. A value may name
+`{sample_path}`, `{sha256}` and `{file_type}`, and a placeholder outside the
+list is flagged on its row before Apply, by the pattern and the list the
+settings schema serves on the entry (`pack_step_vocabulary`, built by
+`core.pack_steps.step_vocabulary` from the step model), which is the rule the
+save applies; a row with no name, or a name given twice, holds Apply until it
+is put right. **Budget (seconds)** and **Formats** (a box per format the
+router can give a sample, `extractors.sample_identity.routed_formats`; a
+stored format outside it is drawn, marked and kept) follow, and **More fields**
+draws every other field by the type the schema serves, the renderer picked
+from the pack's renderers. An empty value over a shipped one is a value of its
+own (`renderer: ""` is the generic line, `display_name: ""` the tool's own
+name, `beside: []` nothing to run beside, `formats: []` every format): such a
+field is drawn as set to empty, in place of the shipped value, and **Unset**
+puts the shipped value back. Where a shipped value stands, **Set to empty**
+(or **Every format**) writes the empty value, and emptying a box writes it
+too, so emptying never brings the shipped value back unseen; on a step of your
+own, emptying a box leaves the field unset, as you would write it by hand.
+**Up**, **Down** and **Drop** reorder and remove a card. A field the step model does not know is shown on its card and kept until
+you remove it (a save refuses it, naming it), and a field holding a value of
+another type than the schema serves is named on its card rather than drawn
+into a control. The form writes only the fields you set, key for key in the
+model's order, so a step saved through it is the step written by hand:
+`{"id": "acme_scan", "tool": "scan_file", "server": "acmescan"}`.
+**Edit as JSON (advanced)** shows the same list as JSON; both views edit one
+value, and JSON that does not read holds Apply. The save stays the judge, and
+each refusal it makes is shown beside the steps.
 
 A later step reads an earlier answer by its declared kind, never by its tool:
 the function starts the hash resolution, the string decoder, the constant

@@ -63,6 +63,7 @@ from maljan.pipeline.claim_drops import (
     unchanged_in_substance,
 )
 from maljan.pipeline.conditions import (
+    PACK_LEFT_OUT,
     ConditionError,
     StageContext,
     StageResult,
@@ -1904,7 +1905,7 @@ def make_triage_node(
         }
         left_out = _pack_left_out(result.entries, container)
         if left_out:
-            update["triage_facts"]["pack_left_out"] = left_out
+            update["triage_facts"][PACK_LEFT_OUT] = left_out
         if result.entries:
             update["evidence_ledger"] = [e.model_dump(mode="json") for e in result.entries]
         if stage.key in finishes:

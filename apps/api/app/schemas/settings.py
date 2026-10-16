@@ -49,6 +49,7 @@ class CatalogEntryDTO(BaseModel):
     agent_keys: list[str] | None = None
     builtin_agent_keys: list[str] | None = None
     always_enabled_agent_keys: list[str] | None = None
+    pack_step_vocabulary: dict[str, Any] | None = None
 
 
 class GroupDTO(BaseModel):

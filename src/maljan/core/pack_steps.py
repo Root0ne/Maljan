@@ -82,10 +82,12 @@ __all__ = [
     "lenient_steps",
     "LeftOutStep",
     "steps_left_out",
+    "held_schedules",
     "read_answer_field",
     "runs_shipped",
     "shipped_step",
     "shipped_tools_of",
+    "step_vocabulary",
     "written_for",
 ]
 
@@ -198,7 +200,9 @@ class PackStep(BaseModel):
     @field_validator("id")
     @classmethod
     def _id_is_a_word(cls, value: str) -> str:
-        if not _ID_RE.match(value or ""):
+        # The whole id is read: ``match`` would let ``$`` end it before a
+        # trailing newline.
+        if not _ID_RE.fullmatch(value or ""):
             raise ValueError(
                 f"step id {value!r} is not a step name: lowercase letters, digits and "
                 "underscores, starting with a letter, at most 64 characters"
@@ -567,18 +571,38 @@ def _as_step(value: Any) -> PackStep:
     return value if isinstance(value, PackStep) else PackStep.model_validate(value)
 
 
+# What makes a declaration under a shipped id replace that step rather than
+# change it field by field (:func:`_laid_over`): a field it sets, the shipped
+# step's attribute that field is compared with, and whether an empty value
+# counts. Served as data (:func:`step_vocabulary`), so the console reads a
+# step's standing by this rule and keeps no copy of it.
+_REPLACING_FIELDS: tuple[tuple[str, str, bool], ...] = (
+    ("server", "server", True),
+    ("tool", "called", False),
+)
+
+
+def _replaces(shipped: PackStep, declared: PackStep) -> bool:
+    """Whether ``declared`` calls something other than ``shipped`` (:data:`_REPLACING_FIELDS`)."""
+    held = declared.model_fields_set
+    for name, compared_with, empty_counts in _REPLACING_FIELDS:
+        if name not in held:
+            continue
+        value = getattr(declared, name)
+        if (value or empty_counts) and value != getattr(shipped, compared_with):
+            return True
+    return False
+
+
 def _laid_over(shipped: PackStep, declared: PackStep) -> PackStep:
     """``declared`` over ``shipped``: each field it set, the shipped value elsewhere.
 
-    A declaration that changes what the step calls is a step of its own at that
-    place: of the shipped step it keeps only the id.
+    A declaration that changes what the step calls (:func:`_replaces`) is a
+    step of its own at that place: of the shipped step it keeps only the id.
     """
-    held = declared.model_fields_set
-    calls_other = ("server" in held and declared.server != shipped.server) or (
-        "tool" in held and declared.tool and declared.tool != shipped.called
-    )
-    if calls_other:
+    if _replaces(shipped, declared):
         return declared
+    held = declared.model_fields_set
     return shipped.model_copy(update={name: getattr(declared, name) for name in held})
 
 
@@ -944,6 +968,98 @@ def placeholder_values(template: Mapping[str, Any], values: Mapping[str, str]) -
     return {name: walk(held) for name, held in template.items()}
 
 
+# The JSON schema keywords that bound a number, served with a field that has them.
+_BOUND_KEYWORDS = ("minimum", "maximum", "exclusiveMinimum", "exclusiveMaximum")
+
+
+def _declared_fields() -> list[dict[str, Any]]:
+    """Each field a declaration may set, in the model's order, as its JSON schema states it.
+
+    Per field: its JSON ``type`` (``""`` for a field of more than one), the
+    type of a list's ``items``, whether ``null`` is a value, whether it is
+    required, its default as JSON (``None`` for a required field) and its
+    numeric ``bounds``. A field the model never dumps (``exclude``) is no
+    declaration's to set and is left out.
+    """
+    from pydantic_core import to_jsonable_python
+
+    properties = PackStep.model_json_schema()["properties"]
+    fields: list[dict[str, Any]] = []
+    for name, field in PackStep.model_fields.items():
+        if field.exclude:
+            continue
+        schema = properties[name]
+        variants = schema.get("anyOf", [schema])
+        typed = [variant for variant in variants if variant.get("type") != "null"]
+        held = typed[0] if len(typed) == 1 else {}
+        kind = str(held.get("type", ""))
+        items = held.get("items") if kind == "array" else None
+        fields.append(
+            {
+                "name": name,
+                "type": kind,
+                "items": str(items.get("type", "")) if isinstance(items, dict) else "",
+                "nullable": len(typed) < len(variants),
+                "required": field.is_required(),
+                "default": None
+                if field.is_required()
+                else to_jsonable_python(field.get_default(call_default_factory=True)),
+                "bounds": {key: held[key] for key in _BOUND_KEYWORDS if key in held},
+            }
+        )
+    return fields
+
+
+def step_vocabulary() -> dict[str, Any]:
+    """What a declared step may say, as the settings schema serves it to the console's step editor.
+
+    Every part is read from this module's own model and tables, so the editor
+    keeps no copy of a rule: ``fields`` (:func:`_declared_fields`), the
+    ``id_pattern`` a whole step id is read by and the ``state_keys``, the
+    names of the pack state's own keys a step id can take (a step so named that
+    starts beside the pack has its schedule held apart,
+    ``pipeline.conditions.pack_state``), the ``placeholders`` an argument
+    template may name with what each stands for (:data:`ARGUMENT_PLACEHOLDERS`)
+    and the ``placeholder_pattern`` a template's strings are read for them by,
+    the routed ``formats`` (``extractors.sample_identity.routed_formats``), the
+    pack's ``renderers`` (:data:`PACK_RENDERERS`), the ``shipped`` steps as
+    each dumps, the ids a declaration changes in place, and what makes a
+    declaration replace its shipped step instead: the ``replacing_fields``
+    (:data:`_REPLACING_FIELDS`) and, per shipped id, the values they are
+    compared with (``shipped_compared``). Lists, not maps, wherever order
+    matters, so it survives any serialisation.
+    """
+    from maljan.extractors.sample_identity import routed_formats
+    from maljan.pipeline.conditions import pack_state_keys
+
+    steps = default_steps()
+    return {
+        "fields": _declared_fields(),
+        "id_pattern": _ID_RE.pattern,
+        "state_keys": sorted(name for name in pack_state_keys() if _ID_RE.fullmatch(name)),
+        "placeholders": [
+            {"name": name, "meaning": meaning} for name, meaning in ARGUMENT_PLACEHOLDERS.items()
+        ],
+        "placeholder_pattern": _PLACEHOLDER_RE.pattern,
+        "formats": list(routed_formats()),
+        "renderers": [
+            {"name": name, "meaning": meaning} for name, meaning in PACK_RENDERERS.items()
+        ],
+        "shipped": [step.model_dump(mode="json") for step in steps],
+        "replacing_fields": [
+            {"field": name, "compared_with": compared_with, "empty_counts": empty_counts}
+            for name, compared_with, empty_counts in _REPLACING_FIELDS
+        ],
+        "shipped_compared": {
+            step.id: {
+                compared_with: getattr(step, compared_with)
+                for _name, compared_with, _empty in _REPLACING_FIELDS
+            }
+            for step in steps
+        },
+    }
+
+
 def step_schedules(facts: Mapping[str, Any] | None) -> dict[str, str]:
     """How each step that may run beside the pack ran, out of the pack's facts.
 
@@ -954,3 +1070,17 @@ def step_schedules(facts: Mapping[str, Any] | None) -> dict[str, str]:
     return {
         str(key): value for key, value in (facts or {}).items() if isinstance(value, str) and value
     }
+
+
+def held_schedules(facts: Mapping[str, Any] | None) -> dict[str, str]:
+    """The schedules the pack's state holds apart, by step id; ``{}`` for none.
+
+    A step named as one of the state's own keys keeps its schedule there
+    (``pipeline.conditions.pack_state``), so it never replaces a fact or count.
+    """
+    from maljan.pipeline.conditions import HELD_SCHEDULES
+
+    held = (facts or {}).get(HELD_SCHEDULES)
+    if not isinstance(held, Mapping):
+        return {}
+    return {str(step): said for step, said in held.items() if isinstance(said, str) and said}

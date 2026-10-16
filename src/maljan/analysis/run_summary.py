@@ -1134,9 +1134,12 @@ class RunSummary:
     # a skipped row mean different things and a reader has to be able to tell
     # them apart.
     stages: list[dict[str, Any]] = field(default_factory=list)
-    # What the triage pack did: ``{entries, failed, duration_ms}``. ``None``
-    # on a run whose team has no triage stage or whose pack declined to run,
-    # which a reader has to be able to tell from a pack that wrote nothing.
+    # What the triage pack did: ``{entries, failed, duration_ms}``, how each
+    # step that may run beside it ran under the step's id, and under
+    # ``_held_schedules`` that of each step named as one of the pack state's
+    # own keys. ``None`` on a run whose team has no triage stage or whose pack
+    # declined to run, which a reader has to be able to tell from a pack that
+    # wrote nothing.
     triage: dict[str, Any] | None = None
     # How the final-answer nudge had to be sent, per analyst, when the plain
     # way failed: ``{"retry_mode": {"static": "invalid_tool_calls_dropped"}}``;
@@ -1931,7 +1934,8 @@ class RunSummaryBuilder:
         prompts, and the ledger holds the entries themselves.
         """
         if facts and "entries" in facts:
-            from maljan.core.pack_steps import step_schedules
+            from maljan.core.pack_steps import held_schedules, step_schedules
+            from maljan.pipeline.conditions import HELD_SCHEDULES
 
             self._triage = {
                 "entries": int(facts.get("entries") or 0),
@@ -1941,6 +1945,11 @@ class RunSummaryBuilder:
                 # beside which steps, or in turn and why.
                 **step_schedules(facts),
             }
+            # A step named as one of the state's own keys has its schedule
+            # held apart there, and here too, beside the counts it would replace.
+            held = held_schedules(facts)
+            if held:
+                self._triage[HELD_SCHEDULES] = held
         return self
 
     def set_sandbox(self, report: Any) -> RunSummaryBuilder:

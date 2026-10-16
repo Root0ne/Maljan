@@ -40,7 +40,9 @@ class Annotation(TypedDict):
         ]
     ]
     editor: NotRequired[
-        Literal["server_map", "rest_sandbox", "agent_definitions", "stages", "tool_facts"]
+        Literal[
+            "server_map", "rest_sandbox", "agent_definitions", "stages", "tool_facts", "pack_steps"
+        ]
     ]
     subgroup: NotRequired[str]  # heading inside the group; absent = top of the group
     advanced: NotRequired[bool]  # folded into the group's closed "Advanced" disclosure
@@ -1203,7 +1205,7 @@ ANNOTATIONS: dict[str, Annotation] = {
     "triage.steps": {
         "title": "Triage pack steps",
         "description": (
-            "Your own steps, as JSON, laid over the shipped list: each one's id, the "
+            "Your own steps, laid over the shipped list: each one's id, the "
             "tool and server it calls (no server: one of the platform's own steps, "
             "named by its shipped id), its argument template ({sample_path}, {sha256}, "
             "{file_type}; none: the arguments its tool declares for the path and hash "
@@ -1216,6 +1218,7 @@ ANNOTATIONS: dict[str, Annotation] = {
             "list."
         ),
         "subgroup": "Triage pack",
+        "editor": "pack_steps",
     },
     "events.stream_deltas": {
         "title": "Stream partial answers",

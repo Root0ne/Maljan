@@ -146,7 +146,7 @@ from maljan.core.pack_steps import (
 )
 from maljan.core.reputation import ReputationRecord, is_lookup_entry, reputation_of
 from maljan.core.tool_declarations import PACK, ToolFacts, first, select
-from maljan.pipeline.conditions import TriageFacts, rule_match_hits
+from maljan.pipeline.conditions import TriageFacts, pack_state, rule_match_hits
 from maljan.pipeline.sandbox_status import (
     OBSERVED,
     STATUS_TOOL,
@@ -543,15 +543,15 @@ class PackResult:
         return [failure_reason(tool) for tool in self.failed] + list(self.degraded)
 
     def to_state(self) -> dict[str, Any]:
-        """The channel value the node writes: the facts, the counts, the reasons."""
-        return {
-            **self.facts.to_dict(),
-            "entries": len(self.entries),
-            "failed": len(self.failed),
-            "duration_ms": self.duration_ms,
-            "degradation_reasons": self.degradation_reasons,
-            **self.schedules,
-        }
+        """The channel value the node writes: facts, counts and reasons (``pack_state``)."""
+        return pack_state(
+            self.facts,
+            entries=len(self.entries),
+            failed=len(self.failed),
+            duration_ms=self.duration_ms,
+            degradation_reasons=self.degradation_reasons,
+            schedules=self.schedules,
+        )
 
 
 # A step started beside the rest of the pack: its work's future and when it began.
