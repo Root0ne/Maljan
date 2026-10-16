@@ -57,6 +57,19 @@ _PDF_OBJECT_RE = re.compile(rb"\b\d+\s+\d+\s+obj\b")
 # OLE2 streams whose mere presence means the document carries VBA.
 _OLE_MACRO_STREAMS = ("vba", "macros", "_vba_project", "dir")
 
+# An OOXML relationship, as the Open Packaging Conventions name its element
+# (namespace and local name, joined by the reader's separator).
+_RELATIONSHIP_ELEMENT = "http://schemas.openxmlformats.org/package/2006/relationships Relationship"
+# How much of a relationship part one read hands the XML reader.
+_RELATIONSHIP_CHUNK = 64 * 1024
+# Why a relationship part was not read, as ``relationship_parts_unread`` says it.
+RELATIONSHIP_PART_DOCUMENT_TYPE = (
+    "it declares a document type, which a relationship part never needs"
+)
+RELATIONSHIP_PART_EXTERNAL_ENTITY = "it refers to an external entity"
+RELATIONSHIP_PART_NOT_XML = "it is not well-formed XML ({error} at line {line})"
+RELATIONSHIP_MEMBER_UNREAD = "the archive member could not be read ({error})"
+
 
 def _missing(module: str, tool: str) -> dict[str, Any]:
     return {"error": f"{module} is not installed", "tool": tool}
@@ -1184,15 +1197,99 @@ def _ole_info(target: Path) -> dict[str, Any]:
 
 
 def _ooxml_info(target: Path) -> dict[str, Any]:
+    """The parts, the VBA project's presence, and the relationships that point outside.
+
+    ``external_relationships`` lists each relationship a relationship part
+    marks ``TargetMode="External"`` (a remote template, an external OLE link,
+    a hyperlink): the part, its id, its type (the last segment of its Type)
+    and its target, defanged as a URL. It is absent when there are none.
+    ``relationship_parts_unread`` names a relationship part that could not be
+    read and why, so its silence is never taken for "none".
+    """
+    external: list[dict[str, str]] = []
+    unread: list[dict[str, str]] = []
     with zipfile.ZipFile(target) as archive:
         parts = archive.namelist()
+        for info in archive.infolist():
+            if not _is_relationship_part(info.filename):
+                continue
+            try:
+                with archive.open(info) as stream:
+                    external.extend(_external_relationships(info.filename, stream))
+            except _RelationshipPartUnread as exc:
+                unread.append({"part": info.filename, "reason": str(exc)})
+            except Exception as exc:  # noqa: BLE001 - a damaged member is stated, never raised
+                reason = RELATIONSHIP_MEMBER_UNREAD.format(error=f"{type(exc).__name__}: {exc}")
+                unread.append({"part": info.filename, "reason": reason})
     lowered = [p.lower() for p in parts]
-    return {
+    answer: dict[str, Any] = {
         "format": "ooxml",
         "parts": sorted(parts),
         "vba_project_present": any(p.endswith("vbaproject.bin") for p in lowered),
-        "external_relationships": sum(1 for p in lowered if p.endswith(".rels")),
     }
+    if external:
+        answer["external_relationships"] = external
+    if unread:
+        answer["relationship_parts_unread"] = unread
+    return answer
+
+
+class _RelationshipPartUnread(Exception):
+    """A relationship part the reader refused or could not parse; the message says why."""
+
+
+def _is_relationship_part(name: str) -> bool:
+    """A part the Open Packaging Conventions read relationships from: ``…/_rels/<source>.rels``."""
+    folder, _, leaf = name.rpartition("/")
+    return leaf.lower().endswith(".rels") and folder.rpartition("/")[2].lower() == "_rels"
+
+
+def _external_relationships(part: str, stream: Any) -> list[dict[str, str]]:
+    """Every ``TargetMode="External"`` relationship in one relationship part, in order.
+
+    Read with expat in chunks, so the time and memory follow the part's size.
+    A document type is refused before anything in it is read: a relationship
+    part never needs one, so no entity is ever declared, expanded or fetched.
+    """
+    from xml.parsers import expat
+
+    from maljan.reporting.defang import defang
+
+    found: list[dict[str, str]] = []
+
+    def refuse_document_type(*_: Any) -> None:
+        raise _RelationshipPartUnread(RELATIONSHIP_PART_DOCUMENT_TYPE)
+
+    def refuse_external_entity(*_: Any) -> int:
+        raise _RelationshipPartUnread(RELATIONSHIP_PART_EXTERNAL_ENTITY)
+
+    def element(name: str, attributes: dict[str, str]) -> None:
+        if name != _RELATIONSHIP_ELEMENT or attributes.get("TargetMode") != "External":
+            return
+        found.append(
+            {
+                "part": part,
+                "id": attributes.get("Id", ""),
+                "type": attributes.get("Type", "").rstrip("/").rpartition("/")[2],
+                "target": defang(attributes.get("Target", ""), "url"),
+            }
+        )
+
+    parser = expat.ParserCreate(namespace_separator=" ")
+    parser.SetParamEntityParsing(expat.XML_PARAM_ENTITY_PARSING_NEVER)
+    parser.StartDoctypeDeclHandler = refuse_document_type
+    parser.ExternalEntityRefHandler = refuse_external_entity
+    parser.StartElementHandler = element
+    try:
+        while chunk := stream.read(_RELATIONSHIP_CHUNK):
+            parser.Parse(chunk, False)
+        parser.Parse(b"", True)
+    except expat.ExpatError as exc:
+        reason = RELATIONSHIP_PART_NOT_XML.format(
+            error=expat.ErrorString(exc.code), line=exc.lineno
+        )
+        raise _RelationshipPartUnread(reason) from None
+    return found
 
 
 def _pdf_info(target: Path) -> dict[str, Any]:

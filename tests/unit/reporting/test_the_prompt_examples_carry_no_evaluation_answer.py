@@ -2042,6 +2042,14 @@ PROMPTS: dict[str, str] = {
             binary.apk_unread_note(["package", "permissions"], binary.MANIFEST_UNPARSED),
         ]
     ),
+    "the OOXML tool's reasons for a relationship part it did not read": " ".join(
+        [
+            binary.RELATIONSHIP_PART_DOCUMENT_TYPE,
+            binary.RELATIONSHIP_PART_EXTERNAL_ENTITY,
+            binary.RELATIONSHIP_PART_NOT_XML.format(error="syntax error", line=1),
+            binary.RELATIONSHIP_MEMBER_UNREAD.format(error="BadZipFile: Bad CRC-32"),
+        ]
+    ),
     "the stated candidate scan and readability test": (
         f"{api_hashes.SCAN_HEURISTIC} {string_blobs.READABLE_TEST}"
     ),
