@@ -604,6 +604,10 @@ class ServiceContainer:
         # none; set by ``app.arun`` beside it and recorded on the run summary
         # (``report_formats.recorded_signature_scale``).
         self.sandbox_signature_scale: dict[str, Any] | None = None
+        # Each submission of the sample to the job's sandbox provider
+        # (``analysis.disclosure.upload_record``), set by ``app.arun`` as it
+        # submits and read by the run's disclosure block. Empty outside a job.
+        self.sample_uploads: list[dict[str, Any]] = []
 
         # The job's sample, for the one step that needs the bytes rather than
         # a report: staging the sample to a tool server that does not share

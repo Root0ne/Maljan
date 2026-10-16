@@ -3680,7 +3680,8 @@ written before sources were recorded is read the way it always was.
 declares under its recorded source are stored with it (`facts` on the ledger
 entry): `{"v": 1, "kind": …}` and, where set, `reader`, `asserts_techniques`,
 `source`, `display_name`, `rows`, `places`, `values`, `techniques`,
-`reputation`, `words` and `report_sections`; `{"v": 1}` alone when the source
+`reputation`, `words`, `report_sections`, `arguments`, `holds_strings`,
+`function_starts` and `discloses_sample`; `{"v": 1}` alone when the source
 declares nothing for the tool. Everything read from a run later (a later stage,
 a re-render, the API) reads these stored facts, never the reading process's
 settings, so a run reads the same wherever it is opened, and changing a

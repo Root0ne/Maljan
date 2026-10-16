@@ -48,6 +48,13 @@ REPUTATION_KIND = "reputation"
 RECORD_VERSION = 1
 # The argument role a lookup takes the sample's hash in (``ToolFacts.arguments``).
 HASH_ARGUMENT = "hash"
+# The argument roles a network indicator is given to a tool in, and every role
+# that carries an indicator: the sample's hash and those.
+NETWORK_INDICATOR_ARGUMENTS: tuple[str, ...] = ("domain", "ip", "url")
+INDICATOR_ARGUMENTS: tuple[str, ...] = (HASH_ARGUMENT, *NETWORK_INDICATOR_ARGUMENTS)
+# The kinds a lookup about an indicator declares, beside a reputation lookup
+# about the sample: a service's report on an indicator, and its reputation.
+INDICATOR_LOOKUP_KINDS: tuple[str, ...] = ("indicator_report", "indicator_reputation")
 # The rank a lookup whose declaration names none is asked at.
 DEFAULT_RANK = 100
 
@@ -108,6 +115,22 @@ def is_lookup(facts: ToolFacts | None) -> bool:
     from maljan.core.builtin_declarations import REPUTATION_KINDS
 
     return facts is not None and facts.kind in REPUTATION_KINDS
+
+
+def asks_about_an_indicator(facts: ToolFacts | None) -> bool:
+    """Whether a tool's facts declare that it asks a service about the sample or an indicator.
+
+    A reputation lookup (:func:`is_lookup`), a tool of an indicator lookup kind
+    (:data:`INDICATOR_LOOKUP_KINDS`), or a tool that declares an argument
+    carrying an indicator (:data:`INDICATOR_ARGUMENTS`), whatever its kind.
+    """
+    if facts is None:
+        return False
+    return (
+        is_lookup(facts)
+        or facts.kind in INDICATOR_LOOKUP_KINDS
+        or any(role in facts.arguments for role in INDICATOR_ARGUMENTS)
+    )
 
 
 def kinds_of_capability(capability: str) -> frozenset[str]:

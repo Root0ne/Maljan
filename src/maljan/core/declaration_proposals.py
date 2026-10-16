@@ -65,6 +65,7 @@ from maljan.core.report_shapes import (
     note_question_value,
     row_shape,
 )
+from maljan.core.reputation import HASH_ARGUMENT, NETWORK_INDICATOR_ARGUMENTS
 from maljan.core.tool_declarations import (
     KIND_DEPENDENT_FIELDS,
     SANDBOX_ROLE,
@@ -1028,14 +1029,14 @@ def _kind_of(
     """
     roles = proposal.roles
     counts = f"a malicious count in the answer ({reading.reputation.get('malicious', '')})"
-    if reading.reputation and "hash" in roles:
+    if reading.reputation and HASH_ARGUMENT in roles:
         return "reputation", MEDIUM, [counts, "inputSchema hash argument"]
-    if reading.reputation and {"ip", "domain", "url"} & set(roles):
+    if reading.reputation and _SUBJECT_ROLES & set(roles):
         return "indicator_reputation", MEDIUM, [counts, "inputSchema indicator argument"]
     if "reputation" in words or "detections" in words:
-        if "hash" in roles:
+        if HASH_ARGUMENT in roles:
             return "reputation", LOW, [f"{word_origin} (reputation)", "inputSchema hash argument"]
-        if {"ip", "domain", "url"} & set(roles):
+        if _SUBJECT_ROLES & set(roles):
             return (
                 "indicator_reputation",
                 LOW,
@@ -1080,7 +1081,7 @@ def _answer_holds_code(answer: Any) -> bool:
 
 # The argument roles that name a subject to describe rather than a run or its
 # sample: a tool taking one is never read by the sandbox shape test.
-_SUBJECT_ROLES = frozenset({"ip", "domain", "url"})
+_SUBJECT_ROLES = frozenset(NETWORK_INDICATOR_ARGUMENTS)
 # The top-level keys a flow table lays its rows out under
 # (``analysis.evidence_roots``: reader ``flow_table``).
 _FLOW_TABLE_KEYS = frozenset({"tcp", "udp", "conversations", "dns"})

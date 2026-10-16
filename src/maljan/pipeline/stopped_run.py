@@ -224,6 +224,16 @@ def stopped_run_summary(state: dict[str, Any], container: Any, *, note: str) -> 
         if started:
             summary["elapsed_seconds"] = round(max(0.0, time.time() - started), 3)
 
+    def _disclosure() -> None:
+        # A record the report node built at the end of the run is complete and
+        # kept; otherwise the record as of the stop, which says it may miss a
+        # call of the step the run stopped in.
+        if isinstance(summary.get("disclosure"), dict):
+            return
+        record = stopped_disclosure(state, container, summary)
+        if record is not None:
+            summary["disclosure"] = record
+
     _part("spend", _spent)
     _part("generation", _generation)
     _part(
@@ -233,7 +243,28 @@ def stopped_run_summary(state: dict[str, Any], container: Any, *, note: str) -> 
         ),
     )
     _part("elapsed time", _elapsed)
+    if summary:
+        _part("disclosure", _disclosure)
     return _degraded(summary, note)
+
+
+def stopped_disclosure(
+    state: dict[str, Any], container: Any, summary: dict[str, Any]
+) -> dict[str, Any] | None:
+    """What a stopped run had sent beyond this machine by the stop, marked as possibly incomplete.
+
+    The ledger is the state's, which holds the steps that completed; the token
+    counts and the stage rollup are ``summary``'s, read again at the stop.
+    """
+    from maljan.analysis.disclosure import STOPPED_PART_WAY, run_disclosure
+
+    return run_disclosure(
+        container,
+        entries=state.get("evidence_ledger") or [],
+        tokens=summary.get("tokens"),
+        stages=summary.get("stages"),
+        partial_reason=STOPPED_PART_WAY,
+    )
 
 
 def _report_dump(report: Any) -> dict[str, Any] | None:
@@ -446,4 +477,32 @@ def partial_report(state: dict[str, Any], container: Any, *, note: str) -> dict[
     report["degraded_mode"] = True
     reasons = report.get("degradation_reasons")
     report["degradation_reasons"] = [*(reasons if isinstance(reasons, list) else []), note]
+    _with_disclosure(report, state, container)
     return report
+
+
+def _with_disclosure(report: dict[str, Any], state: dict[str, Any], container: Any) -> None:
+    """The stopped run's disclosure on ``report``'s run summary, where it carries none yet.
+
+    A report the report node returned already carries the run's complete
+    record. Any other is given the record as of the stop, read from the
+    token counts and the stage rollup taken again now. A report with no run
+    summary is left without one. Never raises.
+    """
+    summary = report.get("run_summary")
+    if not isinstance(summary, dict) or not summary or isinstance(summary.get("disclosure"), dict):
+        return
+    from maljan.analysis.run_summary import spend_blocks
+    from maljan.pipeline import nodes
+
+    closing = dict(summary)
+    try:
+        closing.update(spend_blocks(container.get_token_ledger().snapshot()))
+        closing["stages"] = nodes.stage_rollup(container, cast("AnalysisState", state))
+    except Exception as exc:  # noqa: BLE001 — the record then reads what the summary holds
+        logger.debug(
+            "stopped run: the closing counts were not read again (%s).", type(exc).__name__
+        )
+    record = stopped_disclosure(state, container, closing)
+    if record is not None:
+        report["run_summary"] = {**summary, "disclosure": record}

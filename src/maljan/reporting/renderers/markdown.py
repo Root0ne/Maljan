@@ -40,6 +40,8 @@ from types import SimpleNamespace
 from typing import Any
 from urllib.parse import urlparse
 
+from maljan.analysis.disclosure import INTRO_SENTENCE as DISCLOSURE_INTRO
+from maljan.analysis.disclosure import disclosure_lines
 from maljan.analysis.run_summary import (
     NOT_APPLICABLE,
     NOT_APPLICABLE_PHRASE,
@@ -2148,6 +2150,17 @@ class MarkdownRenderer:
                     associated = "—"
                 label = technique_label(str(tid), row if isinstance(row, dict) else None)
                 lines.append(_row(label, asserted_by, claimed_by, associated))
+        # What the run sent beyond this machine, where its summary records it
+        # (``analysis.disclosure``); a summary stored without the record shows
+        # none. A host the settings address prints as configured, set aside
+        # here and nowhere else; any other prints defanged.
+        disclosed = disclosure_lines(
+            run_summary.get("disclosure"),
+            ctx.host_kept if ctx is not None else (lambda text: f"`{text}`"),
+        )
+        if disclosed:
+            lines.extend(["", DISCLOSURE_INTRO, ""])
+            lines.extend(_item(line) for line in disclosed)
         return "\n".join(lines)
 
     def _appendix_references(self, report: MalwareReport) -> str:
@@ -2250,6 +2263,7 @@ class _Context:
         self._kept: dict[str, str] = {}
         self._nonce = secrets.token_hex(8)
         self._labels: set[str] | None = None
+        self._hosts: set[str] | None = None
         summary = report.run_summary or {}
         validation = summary.get("validation") or {}
         self.unresolved = [
@@ -2531,6 +2545,30 @@ class _Context:
         if sep and label in self._endpoint_labels():
             return f"{name} @ {self.keep(label)}"
         return model
+
+    def host_kept(self, host: str) -> str:
+        """A host the disclosure block names, as a code span kept where the settings address it.
+
+        Only a host one of the settings' own addresses names
+        (``disclosure.configured_hosts``) is set aside from the closing pass, as
+        :meth:`endpoint_kept` sets a configured model endpoint aside; any other
+        host prints defanged.
+        """
+        span = f"`{host}`"
+        return self.keep(span) if host in self._configured_hosts() else span
+
+    def _configured_hosts(self) -> set[str]:
+        """The hosts the settings address, read once per render."""
+        if self._hosts is None:
+            try:
+                from maljan.analysis.disclosure import configured_hosts
+                from maljan.core.config import get_settings
+
+                self._hosts = configured_hosts(get_settings())
+            except Exception as exc:  # noqa: BLE001 — with none read, every host is defanged
+                logger.debug("markdown: the configured hosts were not read (%s).", exc)
+                self._hosts = set()
+        return self._hosts
 
     def _endpoint_labels(self) -> set[str]:
         """The configured model endpoints' labels, read once per render."""

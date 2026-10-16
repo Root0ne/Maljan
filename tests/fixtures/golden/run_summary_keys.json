@@ -22,6 +22,65 @@
   },
   "degradation_reasons": [],
   "degraded_mode": null,
+  "disclosure": {
+    "lookups": [
+      {
+        "calls": null,
+        "host": null,
+        "kinds": "<data-keyed map>",
+        "source": null,
+        "transport": null,
+        "where": null,
+        "why": null,
+        "without_indicator": null
+      }
+    ],
+    "models": [
+      {
+        "agents": "<data-keyed map>",
+        "calls": null,
+        "configured_for": [],
+        "host": null,
+        "service": null,
+        "where": null,
+        "why": null
+      }
+    ],
+    "nothing_left": null,
+    "partial_reason": null,
+    "servers": [
+      {
+        "calls": null,
+        "host": null,
+        "source": null,
+        "transport": null,
+        "where": null,
+        "why": null
+      }
+    ],
+    "stores": [
+      {
+        "backend": null,
+        "host": null,
+        "where": null,
+        "why": null
+      }
+    ],
+    "tracing": null,
+    "uploads": [
+      {
+        "by": null,
+        "calls": null,
+        "failed": null,
+        "host": null,
+        "source": null,
+        "transport": null,
+        "where": null,
+        "why": null
+      }
+    ],
+    "v": null
+  },
   "elapsed_seconds": null,
   "evidence": {
     "by_tool": "<data-keyed map>",
