@@ -17,12 +17,19 @@ from __future__ import annotations
 import gc
 import io
 import json
+import os
+import subprocess
+import sys
 import time
 import zipfile
 from pathlib import Path
 
+import pytest
+
 from maljan.pipeline import triage_pack
 from maljan.tools import binary as tool
+
+MIB = 1024 * 1024
 
 RELS_NS = "http://schemas.openxmlformats.org/package/2006/relationships"
 OFFICE = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
@@ -327,3 +334,95 @@ class TestLinearTime:
         high = _timed(_many_parts_of(tmp_path, 5_000))
 
         assert high < low * 20
+
+
+class TestTheCap:
+    """A relationship part inflates to no more than the platform's fixed sample upload cap."""
+
+    def test_a_member_stating_more_than_the_cap_is_named_and_not_inflated(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(tool, "RELATIONSHIP_PART_CAP", 1_000)
+        big = _relationships(
+            *(
+                _row(f"rId{i}", "hyperlink", f"https://h{i}.example.invalid/x", "External")
+                for i in range(40)
+            )
+        )
+        small = _relationships(_row("rId1", "frame", "https://f.example.invalid/x", "External"))
+        path = _document(
+            tmp_path, {"word/_rels/settings.xml.rels": big, "word/_rels/footer1.xml.rels": small}
+        )
+
+        answer = tool.document_info(str(path))
+
+        assert answer["relationship_parts_unread"] == [
+            {
+                "part": "word/_rels/settings.xml.rels",
+                "reason": tool.RELATIONSHIP_PART_OVER_CAP.format(size=len(big.encode()), cap=1_000),
+            }
+        ]
+        assert [row["part"] for row in answer["external_relationships"]] == [
+            "word/_rels/footer1.xml.rels"
+        ]
+
+    def test_reading_stops_past_the_cap_whatever_the_member_states(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(tool, "RELATIONSHIP_PART_CAP", 100)
+        body = _relationships(
+            _row("rId1", "frame", "https://f.example.invalid/" + "p" * 500, "External")
+        ).encode()
+
+        with pytest.raises(tool._RelationshipPartUnread) as refused:
+            tool._external_relationships("word/_rels/x.rels", io.BytesIO(body))
+
+        assert str(refused.value) == tool.RELATIONSHIP_PART_PAST_CAP.format(cap=100)
+
+
+# Run in a child of its own, so the peak resident memory it reports is the read's alone.
+_PEAK_PROBE = """
+import resource, sys, time
+from maljan.tools import binary
+before = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+began = time.perf_counter()
+answer = binary.document_info(sys.argv[1])
+took = time.perf_counter() - began
+rise = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss - before
+print(len(answer["external_relationships"][0]["target"]), took, rise * 1024)
+"""
+
+
+def _one_token_of(tmp_path: Path, megabytes: int) -> Path:
+    token = "https://t.example.invalid/" + "a" * (megabytes * MIB)
+    body = _relationships(_row("rId1", "attachedTemplate", token, "External"))
+    return _document(tmp_path, {"word/_rels/settings.xml.rels": body}, f"token{megabytes}.docx")
+
+
+def _measured(path: Path) -> tuple[int, float, int]:
+    """The target's length, the read's seconds and its peak resident memory rise in bytes."""
+    env = {**os.environ, "PYTHONPATH": os.pathsep.join(p for p in sys.path if p)}
+    done = subprocess.run(
+        [sys.executable, "-c", _PEAK_PROBE, str(path)],
+        capture_output=True,
+        text=True,
+        check=True,
+        env=env,
+        timeout=120,
+    )
+    length, took, rise = done.stdout.split()
+    return int(length), float(took), int(rise)
+
+
+class TestOneLongToken:
+    def test_ten_times_the_token_costs_about_ten_times_the_time_and_memory(
+        self, tmp_path: Path
+    ) -> None:
+        low_length, low_seconds, low_rise = _measured(_one_token_of(tmp_path, 4))
+        high_length, high_seconds, high_rise = _measured(_one_token_of(tmp_path, 40))
+
+        assert high_length > 40 * MIB > 10 * low_length * 0.99
+        assert high_seconds < 20 * low_seconds
+        # The reader holds the whole value: about three times the token here.
+        assert high_rise < 6 * high_length
+        assert high_rise < 25 * max(low_rise, MIB)

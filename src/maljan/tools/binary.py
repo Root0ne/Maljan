@@ -25,6 +25,7 @@ import zipfile
 from pathlib import Path
 from typing import Any
 
+from maljan.core.delivery_limits import SAMPLE_UPLOAD_MAX_BYTES
 from maljan.core.logger import logger
 from maljan.core.paths import resolve_data
 
@@ -62,6 +63,11 @@ _OLE_MACRO_STREAMS = ("vba", "macros", "_vba_project", "dir")
 _RELATIONSHIP_ELEMENT = "http://schemas.openxmlformats.org/package/2006/relationships Relationship"
 # How much of a relationship part one read hands the XML reader.
 _RELATIONSHIP_CHUNK = 64 * 1024
+# The most bytes a relationship part may inflate to: the platform's fixed
+# sample upload cap, as every decompression a tool does (``transforms``,
+# ``upx``). The reader holds a whole attribute value, so its memory follows the
+# longest token, and deflate lets a small file carry a huge one.
+RELATIONSHIP_PART_CAP = SAMPLE_UPLOAD_MAX_BYTES
 # Why a relationship part was not read, as ``relationship_parts_unread`` says it.
 RELATIONSHIP_PART_DOCUMENT_TYPE = (
     "it declares a document type, which a relationship part never needs"
@@ -69,6 +75,14 @@ RELATIONSHIP_PART_DOCUMENT_TYPE = (
 RELATIONSHIP_PART_EXTERNAL_ENTITY = "it refers to an external entity"
 RELATIONSHIP_PART_NOT_XML = "it is not well-formed XML ({error} at line {line})"
 RELATIONSHIP_MEMBER_UNREAD = "the archive member could not be read ({error})"
+RELATIONSHIP_PART_OVER_CAP = (
+    "the archive member states {size} uncompressed bytes, above the platform's fixed sample "
+    "upload cap of {cap} bytes; it was not inflated"
+)
+RELATIONSHIP_PART_PAST_CAP = (
+    "it inflated past the platform's fixed sample upload cap of {cap} bytes, more than the "
+    "archive member states; reading stopped there"
+)
 
 
 def _missing(module: str, tool: str) -> dict[str, Any]:
@@ -1217,6 +1231,12 @@ def _ooxml_info(target: Path) -> dict[str, Any]:
         for info in archive.infolist():
             if not _is_relationship_part(info.filename):
                 continue
+            if info.file_size > RELATIONSHIP_PART_CAP:
+                reason = RELATIONSHIP_PART_OVER_CAP.format(
+                    size=info.file_size, cap=RELATIONSHIP_PART_CAP
+                )
+                unread.append({"part": info.filename, "reason": reason})
+                continue
             try:
                 with archive.open(info) as stream:
                     external.extend(_external_relationships(info.filename, stream))
@@ -1251,9 +1271,11 @@ def _is_relationship_part(name: str) -> bool:
 def _external_relationships(part: str, stream: Any) -> list[dict[str, str]]:
     """Every ``TargetMode="External"`` relationship in one relationship part, in order.
 
-    Read with expat in chunks, so the time and memory follow the part's size.
-    A document type is refused before anything in it is read: a relationship
-    part never needs one, so no entity is ever declared, expanded or fetched.
+    Read with expat in chunks, so the time follows the part's size and the
+    memory its longest token; past ``RELATIONSHIP_PART_CAP`` bytes the reading
+    stops, whatever the archive member stated. A document type is refused
+    before anything in it is read: a relationship part never needs one, so no
+    entity is ever declared, expanded or fetched.
     """
     from xml.parsers import expat
 
@@ -1282,8 +1304,14 @@ def _external_relationships(part: str, stream: Any) -> list[dict[str, str]]:
     parser.StartDoctypeDeclHandler = refuse_document_type
     parser.ExternalEntityRefHandler = refuse_external_entity
     parser.StartElementHandler = element
+    read = 0
     try:
         while chunk := stream.read(_RELATIONSHIP_CHUNK):
+            read += len(chunk)
+            if read > RELATIONSHIP_PART_CAP:
+                raise _RelationshipPartUnread(
+                    RELATIONSHIP_PART_PAST_CAP.format(cap=RELATIONSHIP_PART_CAP)
+                )
             parser.Parse(chunk, False)
         parser.Parse(b"", True)
     except expat.ExpatError as exc:
