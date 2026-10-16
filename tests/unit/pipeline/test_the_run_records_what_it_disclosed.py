@@ -186,13 +186,14 @@ class _Provider:
 
     id = "stub"
 
-    def __init__(self, *, raises: bool = False) -> None:
+    def __init__(self, *, raises: bool = False, address: str | None = None) -> None:
         from maljan.providers.base import SandboxCapabilities
 
         self.capabilities = SandboxCapabilities(
             can_submit=True, can_poll=True, report_format="mock"
         )
         self.raises = raises
+        self.submission_address = address
 
     def submit(self, sample_path: str) -> str:
         if self.raises:
@@ -219,7 +220,48 @@ def test_the_submission_is_recorded_before_it_is_made(
 
     asyncio.run(app._submit_to_sandbox(str(sample)))
 
-    assert app.container.sample_uploads == [{"provider": "stub", "submitted": submitted}]
+    assert app.container.sample_uploads == [
+        {"provider": "stub", "submitted": submitted, "address": "sandbox.stub.base_url"}
+    ]
+
+
+@pytest.mark.parametrize(
+    ("address", "recorded"),
+    [
+        ("", []),
+        (
+            "sandbox.rest.base_url",
+            [{"provider": "stub", "submitted": True, "address": "sandbox.rest.base_url"}],
+        ),
+    ],
+)
+def test_a_provider_says_where_its_submission_goes(
+    tmp_path: Path, address: str, recorded: list[dict[str, Any]]
+) -> None:
+    from maljan.app import MaljanApp
+
+    sample = tmp_path / "s.exe"
+    sample.write_bytes(b"payload")
+    app = MaljanApp(mock=True)
+    app.container.mock = False
+    app.container._sandbox_provider_cache = _Provider(address=address)
+
+    asyncio.run(app._submit_to_sandbox(str(sample)))
+
+    assert app.container.sample_uploads == recorded
+
+
+def test_the_built_in_providers_declare_where_their_submissions_go() -> None:
+    from maljan.providers.registry import sandbox_provider_class, sandbox_provider_ids
+
+    where = {
+        provider: disclosure.submission_address(sandbox_provider_class(provider))
+        for provider in sandbox_provider_ids()
+    }
+
+    # The recorded fixtures are read in place; every other one names its block's address.
+    assert where.pop("mock") is None
+    assert where == {provider: f"sandbox.{provider}.base_url" for provider in where}
 
 
 def test_a_run_with_no_sample_submits_nothing(tmp_path: Path) -> None:

@@ -156,11 +156,11 @@ wherever it is opened.
 When every destination is local the block says **Nothing left this machine**.
 It never says so when it cannot tell, and says why instead: a call it cannot
 place (an address with no host, a transport or a source it does not know), a
-lookup or an upload through a tool server started on this machine (`stdio`,
-whose own destination the settings do not record), tracing on, or a run
-stopped part-way, whose last step may have made calls its record does not
-hold. A tool server started on this machine is taken to work on this machine
-unless its tool declares a lookup or `discloses_sample`.
+lookup or an upload through a local tool server (started on this machine over
+`stdio`, or reached at a local address: the service it forwards the call to is
+not in the settings), tracing on, or a run stopped part-way, whose last step
+may have made calls its record does not hold. Any other call of a local tool
+server is taken to stay local.
 
 The block covers the analysis. The enrichment job queued after it is not in
 it, and the memory store is named from the settings rather than from a record

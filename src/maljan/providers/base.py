@@ -727,6 +727,12 @@ class SandboxProvider(ABC):
     variable_names: ClassVar[tuple[str, ...]] = ()
     # A server block of this provider's own (as ``StaticProvider.declaration_block``).
     declaration_block: ClassVar[str] = ""
+    # The settings key holding the address a submission sends the sample to,
+    # read by the run's disclosure block (``analysis.disclosure``). ``None``:
+    # the provider's own block's ``base_url`` (``sandbox.<id>.base_url``, the
+    # block ``MaljanApp._poll_budget`` reads too); ``""``: a submission that
+    # never leaves the worker, such as recorded fixtures read in place.
+    submission_address: ClassVar[str | None] = None
 
     @classmethod
     @abstractmethod

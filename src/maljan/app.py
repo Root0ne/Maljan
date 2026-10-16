@@ -292,12 +292,20 @@ class MaljanApp:
             # The submission is recorded before it is made, as one that did
             # not complete, and marked submitted once the provider answers: a
             # submission that raised may still have sent the sample, and the
-            # run's disclosure block says so rather than nothing.
-            from maljan.analysis.disclosure import upload_record
+            # run's disclosure block says so rather than nothing. A provider
+            # whose submission never leaves the worker records none.
+            from maljan.analysis.disclosure import submission_address, upload_record
 
-            self.container.sample_uploads.append(upload_record(provider.id, submitted=False))
+            address = submission_address(provider)
+            if address is not None:
+                self.container.sample_uploads.append(
+                    upload_record(provider.id, submitted=False, address=address)
+                )
             task_id = await asyncio.to_thread(provider.submit, str(path))
-            self.container.sample_uploads[-1] = upload_record(provider.id, submitted=True)
+            if address is not None:
+                self.container.sample_uploads[-1] = upload_record(
+                    provider.id, submitted=True, address=address
+                )
             # Thread the active provider's own completion timeout + poll
             # interval into the poll loop (see ``_poll_budget``). Without
             # this the ABC's 300s default — or another provider's config read

@@ -241,6 +241,31 @@ def test_a_lookup_through_a_server_run_on_this_machine_cannot_be_placed() -> Non
     )
 
 
+def test_a_lookup_through_a_server_at_a_local_address_cannot_be_placed_either() -> None:
+    snapshot = {
+        **LOCAL_LLM,
+        "mcp.servers.misp.transport": "http",
+        "mcp.servers.misp.url": "http://10.0.0.5:8443/mcp",
+    }
+    entry = _entry(
+        "mcp:misp",
+        "ip_lookup",
+        args={"value": "1.2.3.4"},
+        facts={"v": 1, "kind": "indicator_reputation", "arguments": {"ip": "value"}},
+    )
+
+    record = disclosure_record(snapshot, entries=[entry])
+
+    (row,) = record["lookups"]
+    assert (row["host"], row["where"]) == ("10.0.0.5", "unknown")
+    assert record["nothing_left"] is False
+    assert disclosure_lines(record)[-1] == (
+        "Lookups: tool server `misp` (http) at `10.0.0.5` was asked once: ip 1; the settings "
+        "do not say where a local tool server sends what it is given, so where they went "
+        "cannot be told."
+    )
+
+
 def test_a_tool_that_declares_nothing_outside_on_a_local_server_is_not_listed() -> None:
     record = disclosure_record(
         {**LOCAL_LLM, **STDIO},
@@ -379,6 +404,19 @@ def test_a_submission_that_failed_is_still_said_and_a_private_sandbox_is_local()
         "1 of the attempts failed, so whether it arrived cannot be told"
         in disclosure_lines(record)[-1]
     )
+
+
+def test_a_submission_is_placed_by_the_address_key_its_provider_declared() -> None:
+    snapshot = {
+        **LOCAL_LLM,
+        "sandbox.acme.base_url": "http://127.0.0.1:1",
+        "sandbox.rest.base_url": "https://detonate.example.org/api",
+    }
+    upload = upload_record("acme", submitted=True, address="sandbox.rest.base_url")
+
+    (row,) = disclosure_record(snapshot, uploads=[upload])["uploads"]
+
+    assert (row["source"], row["host"], row["where"]) == ("acme", "detonate.example.org", "remote")
 
 
 def test_a_sandbox_with_no_address_in_the_settings_cannot_be_placed() -> None:

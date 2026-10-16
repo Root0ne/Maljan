@@ -4053,7 +4053,13 @@ settings model holds no server block (a block with `tool_facts`) and a path
 that is, holds or sits inside another provider's block, shipped or registered,
 so two providers never read one block. The settings have no place for a
 third-party provider's own block yet, so such a provider declares through
-`declaration(cfg)`.
+`declaration(cfg)`. A sandbox provider says where a submission sends the
+sample in `submission_address`: the settings key holding that address (its own
+block's `base_url`, `sandbox.<id>.base_url`, when it names none), or an empty
+string for one whose submission never leaves the worker, as the mock's
+recorded fixtures do. A run's disclosure block reads it, and says it cannot
+tell where a submission went when the key holds no address
+([What left this machine](/usage/reports-and-exports/#what-left-this-machine)).
 
 **Saving.** A built-in's stored block takes the shipped value of any field it
 never set, and one the operator set, empty included, is kept. A save stores

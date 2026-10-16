@@ -29,11 +29,12 @@ Never a tool's name. Every host is classified by the one rule in
 **Right or absent.** ``nothing_left`` is true only when every destination the
 record names is local, nothing is left unplaced, tracing is off and the
 record is complete. Otherwise the block says what went where, and says that
-it cannot be told where the platform cannot tell. A tool server the settings
-start on this machine (stdio) is taken to work on this machine unless its
-tool declares that it asks a service about an indicator or sends the sample
-out: where such a server sends what it is given is not in the settings, and
-the block says so. A model endpoint in an agent's model list that recorded no
+it cannot be told where the platform cannot tell. A local tool server (one
+the settings start on this machine over stdio, or reach at a local address)
+is taken to work locally, unless its tool declares that it asks a service
+about an indicator or sends the sample out: such a call does not end at the
+local server, where that server sends it is not in the settings, and the
+block says so. A model endpoint in an agent's model list that recorded no
 answered call is named too, because a request that failed is not always
 recorded.
 """
@@ -84,9 +85,7 @@ _NO_HOST = "the address recorded for it names no host"
 _NO_MODEL = "the token ledger filed them under no model"
 _NO_ENDPOINT = "its provider records no endpoint"
 _NO_SOURCE = "their ledger entries record no source"
-_ON_THIS_MACHINE = (
-    "the settings do not say where a tool server run on this machine sends what it is given"
-)
+_LOCAL_SERVER = "the settings do not say where a local tool server sends what it is given"
 
 
 @dataclass(frozen=True)
@@ -330,16 +329,21 @@ def _tool_rows(
                 # An in-process tool (no server), or a question put to another
                 # agent of the team, whose own calls are entries of their own.
                 continue
-            route = _Route("", _Place(why=_NO_SOURCE))
-            key: tuple[Any, ...] = (name, route.place.key)
-            row = servers.setdefault(key, _tool_row(name, route, route.place))
+            unrouted = _Route("", _Place(why=_NO_SOURCE))
+            key: tuple[Any, ...] = (name, unrouted.place.key)
+            row = servers.setdefault(key, _tool_row(name, unrouted, unrouted.place))
             row["calls"] += 1
             continue
-        route = routes.get(source) or routes.setdefault(source, _route(snapshot, source))
+        if source not in routes:
+            routes[source] = _route(snapshot, source)
+        route = routes[source]
         facts = kind_free_facts(entry)
+        lookup = asks_about_an_indicator(facts)
         place = route.place
-        if route.on_this_machine and (facts.discloses_sample or asks_about_an_indicator(facts)):
-            place = _Place(why=_ON_THIS_MACHINE)
+        if place.where == LOCAL and (facts.discloses_sample or lookup):
+            # A local server is not where a lookup or a sample sent out ends:
+            # it asks, or sends to, a service the settings do not name.
+            place = _Place(host=place.host, why=_LOCAL_SERVER)
         key = (source, route.transport, place.key)
         if facts.discloses_sample:
             row = uploads.setdefault(
@@ -347,7 +351,7 @@ def _tool_rows(
             )
             row["calls"] += 1
             row["failed"] += 0 if _field(entry, "ok") is not False else 1
-        elif asks_about_an_indicator(facts):
+        elif lookup:
             row = lookups.setdefault(
                 key, {**_tool_row(source, route, place), "kinds": {}, "without_indicator": 0}
             )
@@ -379,9 +383,29 @@ def _ordered(rows: Mapping[Any, dict[str, Any]]) -> list[dict[str, Any]]:
     )
 
 
-def upload_record(provider: str, *, submitted: bool) -> dict[str, Any]:
-    """One submission of the sample to the sandbox provider, as the run records it."""
-    return {"provider": str(provider), "submitted": bool(submitted)}
+def submission_address(provider: Any) -> str | None:
+    """The settings key of the address ``provider`` submits the sample to.
+
+    ``None`` for a provider whose submission never leaves the worker
+    (``SandboxProvider.submission_address`` declared empty); the provider's
+    own block's ``base_url`` where it declares no key.
+    """
+    declared = getattr(provider, "submission_address", None)
+    if declared == "":
+        return None
+    return str(declared) if declared else f"sandbox.{getattr(provider, 'id', '')}.base_url"
+
+
+def upload_record(provider: str, *, submitted: bool, address: str = "") -> dict[str, Any]:
+    """One submission of the sample to the sandbox provider, as the run records it.
+
+    ``address`` is the settings key holding where the submission was sent
+    (:func:`submission_address`); empty reads the provider's own block's.
+    """
+    record: dict[str, Any] = {"provider": str(provider), "submitted": bool(submitted)}
+    if address:
+        record["address"] = str(address)
+    return record
 
 
 def _sandbox_uploads(
@@ -395,9 +419,9 @@ def _sandbox_uploads(
             continue
         row = rows.get(provider)
         if row is None:
-            # A sandbox provider's own block is ``sandbox.<id>`` and its address
-            # ``base_url`` there (``MaljanApp._poll_budget`` reads the block alike).
-            url = snapshot.get(f"sandbox.{provider}.base_url")
+            # The key the provider declared, else its own block's ``base_url``
+            # (``SandboxProvider.submission_address``).
+            url = snapshot.get(str(upload.get("address") or f"sandbox.{provider}.base_url"))
             place = (
                 _url_place(url)
                 if url
@@ -566,6 +590,18 @@ def _mark(row: Mapping[str, Any]) -> str:
     return "(local)" if row.get("where") == LOCAL else "(outside this machine)"
 
 
+def _placed(row: Mapping[str, Any]) -> bool:
+    return row.get("where") in (LOCAL, REMOTE)
+
+
+def _at(row: Mapping[str, Any], code: Callable[[str], str]) -> str:
+    """`` at <host> (local)``, the mark left off for a row nothing places; ``""`` with no host."""
+    if not row.get("host"):
+        return ""
+    mark = f" {_mark(row)}" if _placed(row) else ""
+    return f" at {code(str(row['host']))}{mark}"
+
+
 def _untold(row: Mapping[str, Any], what: str = "they") -> str:
     """``; <why>, so where <what> went cannot be told`` for a row nothing places."""
     why = str(row.get("why") or "the record does not say")
@@ -644,26 +680,26 @@ def _lookup_line(row: Mapping[str, Any], code: Callable[[str], str]) -> str:
     server = _server(str(row.get("source") or ""), code)
     asked = f"was asked {_times(calls)}"
     kinds = _kinds(row)
-    if row.get("host"):
+    if _placed(row) and row.get("host"):
         return (
             f"Lookups: {code(str(row['host']))} {_mark(row)} {asked} through {server} "
             f"({_how(row)}): {kinds}."
         )
-    return f"Lookups: {server} ({_how(row)}) {asked}: {kinds}{_untold(row)}."
+    return f"Lookups: {server} ({_how(row)}){_at(row, code)} {asked}: {kinds}{_untold(row)}."
 
 
 def _upload_line(row: Mapping[str, Any], code: Callable[[str], str]) -> str:
     calls = int(row.get("calls") or 0)
     failed = int(row.get("failed") or 0)
     times = _times(calls)
-    at = f" at {code(str(row['host']))} {_mark(row)}" if row.get("host") else ""
+    at = _at(row, code)
     failure = (
         f"; {failed} of the attempts failed, so whether {'it' if failed == 1 else 'they'} "
         "arrived cannot be told"
         if failed
         else ""
     )
-    untold = "" if row.get("host") else _untold(row, "it")
+    untold = "" if _placed(row) else _untold(row, "it")
     if row.get("by") == "sandbox":
         return (
             f"Sample upload: the sample was submitted {times} to the "
@@ -679,22 +715,22 @@ def _upload_line(row: Mapping[str, Any], code: Callable[[str], str]) -> str:
 def _server_line(row: Mapping[str, Any], code: Callable[[str], str]) -> str:
     calls = count_label(int(row.get("calls") or 0), "call")
     server = _server(str(row.get("source") or ""), code)
-    if row.get("host"):
+    if _placed(row) and row.get("host"):
         return (
             f"Tool calls: {server} over {row.get('transport')} at {code(str(row['host']))} "
             f"{_mark(row)}: {calls}."
         )
-    return f"Tool calls: {server} ({_how(row)}): {calls}{_untold(row)}."
+    return f"Tool calls: {server} ({_how(row)}){_at(row, code)}: {calls}{_untold(row)}."
 
 
 def _store_line(row: Mapping[str, Any], code: Callable[[str], str]) -> str:
     store = f"the {code(str(row.get('backend') or ''))} store"
-    if row.get("host"):
+    if _placed(row) and row.get("host"):
         return (
             f"Case memory: {store} at {code(str(row['host']))} {_mark(row)}, which this job "
             "reads similar cases from and stores its case in."
         )
-    return f"Case memory: {store}{_untold(row, 'its cases')}."
+    return f"Case memory: {store}{_at(row, code)}{_untold(row, 'its cases')}."
 
 
 TRACING_SENTENCE = (

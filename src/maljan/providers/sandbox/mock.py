@@ -38,6 +38,8 @@ class MockSandboxProvider(SandboxProvider):
     title = "Mock sandbox"
     description = "Built-in fixture reports stand in for a detonation; nothing is executed."
     settings_intro = "Mock sandbox: built-in fixture reports stand in for a detonation."
+    # A submission reads a fixture in place: the sample goes nowhere.
+    submission_address = ""
 
     def __init__(self, fixtures_dir: str) -> None:
         self.fixtures_dir = fixtures_dir
