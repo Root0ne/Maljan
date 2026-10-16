@@ -459,6 +459,7 @@ class ServerHandle:
                 guard=self.guard,
                 categories=categories_of(getattr(self.config, "tool_facts", None)),
                 keep_tool_definitions=self.keeps_tool_definitions,
+                label=self.label,
             )
         # An http/sse transport has no child of ours to reap.
         self._launch_argv = ()

@@ -20,6 +20,26 @@ described in [Generic MCP servers](/tools/generic-mcp/).
 The transport decides, not the manifest: a stdio sidecar is never uploaded to,
 because it can already open the file.
 
+A stdio server's stdout carries protocol messages only; its logs, banners and
+progress output belong on stderr. A UTF-8 text line on stdout that is not a
+protocol message (a log line, a JSON log record, a dependency's download
+progress bar) does not break the connection: the client leaves it out, warns at
+the first such line of each connection and states the count when the
+connection closes. During setup only, until the client has the server's tool
+list, a progress bar that ends without a newline can leave the server's answer
+after its last carriage return, and the client reads the answer out from there
+(or from after a byte-order mark): the answers to `initialize` and `tools/list`
+carry nothing from a sample, and no tool has been called yet. The client sets a
+connection up once and refuses a second setup while it is connected or still
+connecting, so this window never reopens. After setup every
+stray line is skipped, so an answer glued to other text is lost and its call
+fails, as before: a tool's answer can echo text a sample's author wrote, and an
+absent answer beats a forged one. A line that claims to be a protocol message
+(an object with a `jsonrpc` member) and is not a valid one is stated when it
+comes, with what failed its validation, since it is an answer the server got
+wrong. Bytes on stdout that are not UTF-8 still end the connection, as before:
+the SDK decodes stdout strictly before any line reaches the client.
+
 ## A server on another host
 
 Every path-taking tool assumes the server can open the path it is handed. For a
