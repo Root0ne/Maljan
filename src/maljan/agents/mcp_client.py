@@ -13,15 +13,18 @@ supported:
 from __future__ import annotations
 
 import asyncio
+import logging
+import os
 from collections.abc import Callable, Mapping, Sequence
 from contextlib import suppress
 from datetime import timedelta
-from typing import Any
+from typing import Any, cast
 
+from anyio.abc import ObjectReceiveStream
 from langchain_core.tools import BaseTool, StructuredTool
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
-from pydantic import create_model
+from pydantic import ValidationError, create_model
 
 from maljan.core.logger import logger
 
@@ -152,6 +155,159 @@ async def _cancel_at_the_server(session: Any, request_id: Any, reason: str) -> N
         logger.debug("the cancellation of request %s was not sent (%s).", request_id, exc)
 
 
+# The record the SDK's stdio reader logs, with a traceback, for each stdout line
+# that is not a protocol message. Every stdio connection is opened by the
+# toolkit below, whose read stream states those lines itself
+# (``_ProtocolLinesOnly``), so the per-line record is left out.
+_SDK_STDIO_LOGGER = "mcp.client.stdio"
+_SDK_PARSE_FAILURE = "Failed to parse JSONRPC message from server"
+
+
+class _OneLinePerServer(logging.Filter):
+    """Leaves out the SDK's per-line record of a stdout line that is not a protocol message."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        return record.getMessage() != _SDK_PARSE_FAILURE
+
+
+_PER_LINE_RECORD = _OneLinePerServer()
+
+
+def _leave_out_the_per_line_record() -> None:
+    """Attach the filter to the SDK's stdio logger, once per process."""
+    sdk_logger = logging.getLogger(_SDK_STDIO_LOGGER)
+    if _PER_LINE_RECORD not in sdk_logger.filters:
+        sdk_logger.addFilter(_PER_LINE_RECORD)
+
+
+def _message_after_a_redraw(line: str) -> Any:
+    """The protocol message a progress bar's redraw left at the end of ``line``, or ``None``.
+
+    A progress bar redraws its line with carriage returns and can end without
+    a newline, so the server's next message lands on the bar's line, after its
+    last carriage return. Only there is a message read out of a line: from the
+    first ``{`` after the last carriage return (a CRLF line's own ``\\r`` taken
+    off first), or a whole line after a byte-order mark. A message after any
+    other text is never read as one: a log line that echoes text the server
+    read (a string found in a sample) could end with a message the sample's
+    author wrote. Asked only during the toolkit's setup
+    (``_ProtocolLinesOnly.reads_redraws``), whose answers carry nothing from a
+    sample. One parse at most.
+    """
+    from mcp import types
+    from mcp.shared.message import SessionMessage
+
+    if line.endswith("\r"):
+        line = line[:-1]
+    marked = line.startswith("\ufeff")
+    if marked:
+        line = line[1:]
+    if "\r" in line:
+        tail = line.rsplit("\r", 1)[1]
+        brace = tail.find("{")
+        if brace < 0:
+            return None
+        candidate = tail[brace:]
+    elif marked:
+        candidate = line
+    else:
+        return None
+    try:
+        return SessionMessage(types.JSONRPCMessage.model_validate_json(candidate))
+    except ValidationError:
+        return None
+
+
+def _where_it_fails(error: ValidationError) -> str:
+    """What failed a line's validation, by error type and location, never by content."""
+    failed = {
+        f"{detail.get('type')} at {'.'.join(str(part) for part in detail.get('loc', ())) or 'top'}"
+        for detail in error.errors(include_url=False)
+    }
+    return "; ".join(sorted(failed))
+
+
+class _ProtocolLinesOnly(ObjectReceiveStream[Any]):
+    """A stdio transport's read stream, with each stdout line that is not a protocol message
+    stated and left out.
+
+    The SDK's stdio reader parses every line of the server's stdout as JSON-RPC
+    and puts each parse failure into the stream it hands the session, with a
+    traceback in the log: a log line or a dependency's progress bar on a
+    server's stdout cost a traceback per line. Here two kinds are told apart.
+    Log or progress output (a line that is not JSON, or JSON that does not
+    claim to be a protocol message, such as a log record) is counted and left
+    out, with a warning at the first one of the connection. A line that claims
+    to be a protocol message (an object with a ``jsonrpc`` member) and is not a
+    valid one is an answer the server got wrong, so each one is stated when it
+    comes, with what failed its validation. Every message, and every other
+    item the transport sends, reaches the session as it came, and the
+    connection stays as it is.
+
+    Only during the toolkit's setup is a message a progress bar's redraw left
+    on a stray line read out and handed on (``_message_after_a_redraw``): the
+    answers to ``initialize`` and ``tools/list`` carry nothing from a sample,
+    and no tool has been called yet. A server whose first answer followed a
+    startup bar never finished initialising before. Once the toolkit has the
+    tool list it clears ``reads_redraws``, and from then on every stray line is
+    skipped as it always was: a tool's answer can echo text a sample's author
+    wrote, and an absent answer, which fails its call, beats a forged one.
+    """
+
+    def __init__(self, inner: Any, server: str) -> None:
+        self._inner = inner
+        self._server = server
+        self.noise = 0
+        self.invalid = 0
+        self.recovered = 0
+        # Open from the start of the connection until the toolkit has the
+        # tool list (``MCPLangChainToolkit.initialize``).
+        self.reads_redraws = True
+
+    async def receive(self) -> Any:
+        while True:
+            item = await self._inner.receive()
+            if not isinstance(item, ValidationError):
+                return item
+            details = item.errors(include_url=False)
+            found = details[0].get("input") if details else None
+            if details and details[0].get("type") == "json_invalid" and isinstance(found, str):
+                self._note_noise()
+                if self.reads_redraws:
+                    message = _message_after_a_redraw(found)
+                    if message is not None:
+                        self.recovered += 1
+                        return message
+                continue
+            if not (isinstance(found, dict) and "jsonrpc" in found):
+                # JSON that does not claim to be a protocol message, such as a
+                # log record a server writes as JSON: log output like any other.
+                self._note_noise()
+                continue
+            self.invalid += 1
+            logger.warning(
+                "MCP server %r wrote a line to stdout that claims to be a protocol message and "
+                "is not a valid one (%s: %s); it was skipped, so an answer it carried is lost.",
+                self._server,
+                type(item).__name__,
+                _where_it_fails(item),
+            )
+
+    def _note_noise(self) -> None:
+        self.noise += 1
+        if self.noise == 1:
+            logger.warning(
+                "MCP server %r wrote a line to stdout that is not a protocol message; such "
+                "lines are skipped and counted, and the count is stated when the connection "
+                "closes. A server's stdout carries protocol messages only: its logs and "
+                "progress output belong on stderr.",
+                self._server,
+            )
+
+    async def aclose(self) -> None:
+        await self._inner.aclose()
+
+
 class MCPLangChainToolkit:
     """Toolkit that connects to an MCP server and exposes its tools to LangChain."""
 
@@ -169,8 +325,15 @@ class MCPLangChainToolkit:
         guard: Any | None = None,
         categories: Mapping[str, str] | None = None,
         keep_tool_definitions: bool = False,
+        label: str = "",
     ):
         self.server_params = server_params
+        # The server's name in what this toolkit logs about it; a stdio
+        # server's command name when none is given.
+        self._label = label
+        # The stdio transport's read stream as the session reads it, which
+        # counts the stdout lines that are not protocol messages.
+        self._stdout_lines: _ProtocolLinesOnly | None = None
         self.transport = (transport or "stdio").lower()
         self.http_url = http_url
         self.http_headers = http_headers or {}
@@ -211,9 +374,21 @@ class MCPLangChainToolkit:
         self.tool_definitions: list[Any] = []
 
     async def initialize(self) -> None:
-        """Initialize the connection to the MCP server and fetch available tools."""
+        """Initialize the connection to the MCP server and fetch available tools.
+
+        Once per connection: a call while the toolkit is connected, or still
+        connecting, is refused before it touches anything, so the setup window
+        of a stdio server's read stream (``_ProtocolLinesOnly.reads_redraws``)
+        can never reopen and the open connection is neither abandoned nor
+        doubled.
+        """
         from contextlib import AsyncExitStack
 
+        if self._exit_stack is not None:
+            raise RuntimeError(
+                f"MCP server {self._server_name()!r} is already connected or connecting; a "
+                "second initialize() is refused. Call cleanup() before connecting again."
+            )
         self._exit_stack = AsyncExitStack()
 
         try:
@@ -241,9 +416,15 @@ class MCPLangChainToolkit:
                     self.server_params.command,
                     self.server_params.args,
                 )
+                # A line of the server's stdout that is not a protocol message
+                # is stated and left out rather than handed to the session, and
+                # the count is stated again when the connection closes.
+                _leave_out_the_per_line_record()
                 read, write = await self._exit_stack.enter_async_context(
                     stdio_client(self.server_params)
                 )
+                self._stdout_lines = _ProtocolLinesOnly(read, self._server_name())
+                read = cast(Any, self._stdout_lines)
             self.session = await self._exit_stack.enter_async_context(ClientSession(read, write))
             initialized = await self.session.initialize()
             served = getattr(initialized, "instructions", None)
@@ -251,6 +432,11 @@ class MCPLangChainToolkit:
 
             # Fetch available tools
             response = await self.session.list_tools()
+            # The setup's answers are in. From here a stray line on the
+            # server's stdout is skipped, never read for a message: a tool's
+            # answer can echo text a sample's author wrote.
+            if self._stdout_lines is not None:
+                self._stdout_lines.reads_redraws = False
             for tool in response.tools:
                 lc_tool = self._create_langchain_tool(tool)
                 self._tools.append(lc_tool)
@@ -328,6 +514,45 @@ class MCPLangChainToolkit:
                 logger.warning("MCP cleanup failed (non-fatal): %s", exc)
         except BaseException as exc:  # noqa: BLE001 — teardown must not propagate
             logger.warning("MCP cleanup failed (%s, non-fatal): %s", type(exc).__name__, exc or "—")
+        # After the close, whichever way it went. Lines a server writes once
+        # the session has stopped reading are neither read nor counted.
+        self._state_the_stray_stdout()
+
+    def _server_name(self) -> str:
+        """The server's name in what this toolkit logs: its label, else its command's name.
+
+        A server reached over the network with no label is named by its
+        transport alone: its URL can carry a credential.
+        """
+        command = str(getattr(self.server_params, "command", "") or "")
+        return self._label or os.path.basename(command) or self.transport
+
+    def _state_the_stray_stdout(self) -> None:
+        """One line per server at close: what it wrote to stdout that was not a protocol message."""
+        counted, self._stdout_lines = self._stdout_lines, None
+        if counted is None or not (counted.noise or counted.invalid):
+            return
+        written = []
+        if counted.noise:
+            written.append(f"{counted.noise} line(s) of log or progress output, skipped")
+        if counted.invalid:
+            written.append(
+                f"{counted.invalid} line(s) that claim to be a protocol message and are not "
+                "a valid one, each stated when it came"
+            )
+        delivered = (
+            f"; {counted.recovered} protocol message(s) left after a progress bar's carriage "
+            "return during setup were read out and handed on"
+            if counted.recovered
+            else ""
+        )
+        logger.warning(
+            "MCP server %r wrote to stdout %s%s. A server's stdout carries protocol messages "
+            "only: its logs and progress output belong on stderr.",
+            self._server_name(),
+            " and ".join(written),
+            delivered,
+        )
 
     async def __aenter__(self) -> MCPLangChainToolkit:
         await self.initialize()
