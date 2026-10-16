@@ -57,6 +57,10 @@ apps/web/.env.*.local
 **/data/cape_reports/
 data/external/
 data/sigma_rules/
+# The image fetches its own capa rules and signatures at the pinned version
+# (Dockerfile.backend, capa-data); a workstation's copies would merge into them.
+data/capa-rules/
+data/capa-signatures/
 models/
 logs/
 other/

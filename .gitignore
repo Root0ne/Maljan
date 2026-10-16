@@ -63,6 +63,7 @@ data/uploads/
 external/
 data/sigma_rules/
 data/capa-rules/
+data/capa-signatures/
 data/external/
 # CAPE analysis reports: ~7 MB each and reproducible from the instance. No
 # trailing slash, so a symlink to the reports (a worktree borrowing them) is
