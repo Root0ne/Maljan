@@ -249,6 +249,39 @@ class TestWhatIsNotRead:
         ]
         assert [r["id"] for r in answer["external_relationships"]] == ["rId9"]
 
+    def test_the_reader_is_defusedxml_s_with_every_refusal_on(self) -> None:
+        from defusedxml.expatreader import DefusedExpatParser
+
+        reader = tool._relationship_reader("word/_rels/x.rels", [])
+
+        assert isinstance(reader, DefusedExpatParser)
+        assert (reader.forbid_dtd, reader.forbid_entities, reader.forbid_external) == (
+            True,
+            True,
+            True,
+        )
+        source = Path(tool.__file__).read_text(encoding="utf-8")
+        assert "from xml" not in source and "import xml" not in source
+
+    def test_a_prefixed_relationship_element_is_read_as_before(self, tmp_path: Path) -> None:
+        body = (
+            f'<?xml version="1.0"?><r:Relationships xmlns:r="{RELS_NS}">'
+            f'<r:Relationship Id="rId4" Type="{OFFICE}/frame" Target="https://p.example.invalid/x" '
+            'TargetMode="External"/></r:Relationships>'
+        )
+        path = _document(tmp_path, {"word/_rels/footer1.xml.rels": body})
+
+        answer = tool.document_info(str(path))
+
+        assert answer["external_relationships"] == [
+            {
+                "part": "word/_rels/footer1.xml.rels",
+                "id": "rId4",
+                "type": "frame",
+                "target": "https://p.example.invalid/x",
+            }
+        ]
+
     def test_a_part_that_is_not_xml_is_named_with_the_reason(self, tmp_path: Path) -> None:
         answer = tool.document_info(
             str(

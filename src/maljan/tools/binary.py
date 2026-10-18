@@ -1325,40 +1325,19 @@ def _external_relationships(
 ) -> tuple[list[dict[str, str]], int]:
     """Every ``TargetMode="External"`` relationship in one part, in order, and the bytes read.
 
-    Read with expat in chunks, so the time follows the part's size and the
-    memory its longest token. Past the ``left`` bytes the document has left of
-    ``cap`` the reading stops, whatever the archive member stated, and the
-    part is refused whole (``_RelationshipPartPastCap``). A document type is refused
-    before anything in it is read: a relationship part never needs one, so no
-    entity is ever declared, expanded or fetched.
+    Read in chunks with defusedxml's expat reader, fed as it inflates, so the
+    time follows the part's size and the memory its longest token. Past the
+    ``left`` bytes the document has left of ``cap`` the reading stops,
+    whatever the archive member stated, and the part is refused whole
+    (``_RelationshipPartPastCap``). A document type is refused before anything
+    in it is read: a relationship part never needs one, so no entity is ever
+    declared, expanded or fetched; defusedxml also refuses an entity
+    declaration and an external reference, should one be reached.
     """
-    from xml.parsers import expat
+    from defusedxml import DTDForbidden, EntitiesForbidden, ExternalReferenceForbidden
 
     found: list[dict[str, str]] = []
-
-    def refuse_document_type(*_: Any) -> None:
-        raise _RelationshipPartUnread(RELATIONSHIP_PART_DOCUMENT_TYPE)
-
-    def refuse_external_entity(*_: Any) -> int:
-        raise _RelationshipPartUnread(RELATIONSHIP_PART_EXTERNAL_ENTITY)
-
-    def element(name: str, attributes: dict[str, str]) -> None:
-        if name != _RELATIONSHIP_ELEMENT or attributes.get("TargetMode") != "External":
-            return
-        found.append(
-            {
-                "part": part,
-                "id": attributes.get("Id", ""),
-                "type": attributes.get("Type", "").rstrip("/").rpartition("/")[2],
-                "target": attributes.get("Target", ""),
-            }
-        )
-
-    parser = expat.ParserCreate(namespace_separator=" ")
-    parser.SetParamEntityParsing(expat.XML_PARAM_ENTITY_PARSING_NEVER)
-    parser.StartDoctypeDeclHandler = refuse_document_type
-    parser.ExternalEntityRefHandler = refuse_external_entity
-    parser.StartElementHandler = element
+    parser = _relationship_reader(part, found)
     read = 0
     try:
         while chunk := stream.read(_RELATIONSHIP_CHUNK):
@@ -1366,14 +1345,60 @@ def _external_relationships(
             if read > left:
                 reason = RELATIONSHIP_PART_PAST_CAP.format(left=left, cap=cap)
                 raise _RelationshipPartPastCap(reason)
-            parser.Parse(chunk, False)
-        parser.Parse(b"", True)
-    except expat.ExpatError as exc:
-        reason = RELATIONSHIP_PART_NOT_XML.format(
-            error=expat.ErrorString(exc.code), line=exc.lineno
-        )
-        raise _RelationshipPartUnread(reason) from None
+            parser.feed(chunk)
+        parser.close()
+    except (DTDForbidden, EntitiesForbidden):
+        raise _RelationshipPartUnread(RELATIONSHIP_PART_DOCUMENT_TYPE) from None
+    except ExternalReferenceForbidden:
+        raise _RelationshipPartUnread(RELATIONSHIP_PART_EXTERNAL_ENTITY) from None
     return found, read
+
+
+class _NotXml:
+    """The reader's error handler: a part that is not well-formed XML is unread, and why."""
+
+    @staticmethod
+    def fatalError(exc: Any) -> None:  # noqa: N802 - the SAX handler's own name
+        reason = RELATIONSHIP_PART_NOT_XML.format(error=exc.getMessage(), line=exc.getLineNumber())
+        raise _RelationshipPartUnread(reason) from None
+
+    error = fatalError
+
+    @staticmethod
+    def warning(exc: Any) -> None:
+        return None
+
+
+def _relationship_reader(part: str, found: list[dict[str, str]]) -> Any:
+    """defusedxml's expat reader, refusing a document type, that lists ``part``'s External ones.
+
+    Namespace-aware, as the Open Packaging Conventions name the element; each
+    element's name and plain attributes come from expat itself, as before.
+    """
+    from defusedxml.expatreader import DefusedExpatParser
+
+    class _Reader(DefusedExpatParser):  # type: ignore[misc]
+        def start_element_ns(self, name: str, attributes: dict[str, str]) -> None:
+            # expat writes a prefixed name as "namespace local prefix".
+            if " ".join(name.split(" ")[:2]) != _RELATIONSHIP_ELEMENT:
+                return
+            if attributes.get("TargetMode") != "External":
+                return
+            found.append(
+                {
+                    "part": part,
+                    "id": attributes.get("Id", ""),
+                    "type": attributes.get("Type", "").rstrip("/").rpartition("/")[2],
+                    "target": attributes.get("Target", ""),
+                }
+            )
+
+        def end_element_ns(self, name: str) -> None:
+            return None
+
+    reader = _Reader(namespaceHandling=1, forbid_dtd=True)
+    reader.setErrorHandler(_NotXml())
+    return reader
 
 
 def _pdf_info(target: Path) -> dict[str, Any]:
