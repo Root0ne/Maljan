@@ -872,6 +872,29 @@ COMPACT_BUNDLE_RULES = (
 # sentence about the tools that attached if the fast path falls back to a loop.
 _NO_TOOLS_NEEDED = "No Threat Intelligence tools are needed for this run.\n"
 
+# The mediator's sentence about its tools, by the case: no analyst consulted a
+# reputation source and the sample's sha256 is known (``{sha256}`` is replaced
+# with it), the same with no hash to name, and a dispute to resolve with them.
+# Module constants so the run fingerprint hashes them as templates
+# (``analysis.setup_prompts``).
+MEDIATOR_LOOKUP_ONCE_BY_HASH = (
+    "You have reputation tools and no analyst has consulted one. "
+    "Look the sample's hash up once — its sha256 is {sha256} "
+    "and it is in the sample identity block below — cite what comes back "
+    "as evidence, and treat a reputation label as one source rather than "
+    "as the verdict.\n"
+)
+MEDIATOR_LOOKUP_ONCE = (
+    "You have reputation tools and no analyst has consulted one. "
+    "Look the sample up once to settle its identity, cite what comes "
+    "back as evidence, and treat a reputation label as one source "
+    "rather than as the verdict.\n"
+)
+MEDIATOR_TI_TOOLS = (
+    "You have Threat Intelligence tools to verify disputed "
+    "IPs/domains/hashes — use them only to resolve contradictions.\n"
+)
+
 
 # The question asked once after the verdict about the techniques the verdict's
 # bundle does not carry (the ones an analyst claimed, and the ones named only on
@@ -1536,6 +1559,32 @@ def mediation_reports_text(
     return f"{reports_text}\n\n=== STRUCTURED CLAIMS (ISR) ===\n{isr_block}"
 
 
+def mediator_system_prompt(
+    *,
+    identity_unanswered: bool,
+    lookup_attached: bool,
+    needs_tools: bool,
+    sha256: str,
+    tools: Any,
+) -> str:
+    """The mediator's system prompt for one mediation: its head and the sentence about its tools.
+
+    The one builder ``JudgeAgent.mediate`` sends it through, and the run
+    fingerprint renders it through (``analysis.setup_prompts``) for every case.
+    """
+    return MEDIATOR_SYSTEM_HEAD + (
+        MEDIATOR_LOOKUP_ONCE_BY_HASH.replace("{sha256}", sha256)
+        if identity_unanswered and lookup_attached and sha256
+        else MEDIATOR_LOOKUP_ONCE
+        if identity_unanswered and lookup_attached
+        else MEDIATOR_TI_TOOLS
+        if needs_tools and lookup_attached
+        else tools_statement(tools) + "\n"
+        if needs_tools
+        else _NO_TOOLS_NEEDED
+    )
+
+
 def _sha256_of(sample: Any) -> str:
     """The sha256 the identity block carries, for a sentence that names it."""
     data = sample if isinstance(sample, dict) else {}
@@ -1965,6 +2014,28 @@ class JudgeAgent(BudgetMeter):
         self.tools = tools
         self.degradation_reasons = reasons
         self.logger.info("Judge tool servers: %s", [t.name for t in self.tools])
+        # The judge's setup, as an analyst's is noted where it is resolved
+        # (``ServiceContainer.note_role_setup``): what the run fingerprint reads.
+        note = getattr(getattr(self, "_container", None), "note_role_setup", None)
+        if callable(note):
+            note(str(getattr(self, "_runs_on", "judge") or "judge"), tools, self.bound_servers())
+
+    def bound_servers(self) -> set[str]:
+        """The tool servers this agent's role and definition bind, by name; never attaches."""
+        registry = self._server_registry()
+        if registry is None:
+            return set()
+        try:
+            names = {
+                handle.name
+                for handle in registry.for_agent("judge", exclude=self._profile_excluded_servers())
+            }
+        except Exception:  # noqa: BLE001 — a name never costs a mediation
+            names = set()
+        names |= {
+            str(ref.server) for ref in self._definition_tool_refs() if getattr(ref, "server", None)
+        }
+        return names
 
     async def aclose(self) -> None:
         """Release every judge-bound tool server and its stdio subprocess.
@@ -2190,6 +2261,11 @@ class JudgeAgent(BudgetMeter):
             )
             _hold_the_turn(held_binding, self.llm, held)
             self._publish_questions(conversation, asked)
+            # What the request is made of, measured as it is sent
+            # (``core.input_meter``); nothing in it changes.
+            from maljan.core.input_meter import TOOL_LOOP
+
+            self._note_request(conversation, kind=TOOL_LOOP, loop=budget, definitions=definitions)
             # Each turn after the loop's first tool round says it is a loop
             # turn, as an analyst's does, for a provider that caches a
             # conversation it will send again (``anthropic_history``): that
@@ -2385,6 +2461,9 @@ class JudgeAgent(BudgetMeter):
             # reservation with the spend meter goes with them. Once only.
             with contextlib.suppress(Exception):
                 _record_the_turns()
+            # The loop's row on the input meter, closed with the turns the
+            # ledger recorded just above, however the loop ended.
+            self._close_input_loop(budget, list(latest.get("messages") or [])[len(messages) :])
             # In a ``finally`` for the reason the analysts' loop uses one: a
             # mediation that timed out still made the calls it made.
             self._evidence_entries.extend(recorder.entries)
@@ -2600,6 +2679,11 @@ class JudgeAgent(BudgetMeter):
             the argument carries no confidence.
         """
         self.logger.info("Mediating %d expert reports for contradictions...", len(reports))
+        # The texts this mediation's requests embed, for the input meter
+        # (``BudgetMeter._note_request``) to count as the pack and as the
+        # analysts' reports.
+        self._measured_pack = str(facts_block or "")
+        self._measured_peers = tuple(str(text) for text in (reports or {}).values() if text)
         answered_by: Any = None
         # The output bound the answer's call was sent with: what a cut is
         # measured against. ``None`` reads the model's built cap.
@@ -2646,25 +2730,12 @@ class JudgeAgent(BudgetMeter):
         prompt_messages = [
             (
                 "system",
-                MEDIATOR_SYSTEM_HEAD
-                + (
-                    "You have reputation tools and no analyst has consulted one. "
-                    f"Look the sample's hash up once — its sha256 is {_sha256_of(sample)} "
-                    "and it is in the sample identity block below — cite what comes back "
-                    "as evidence, and treat a reputation label as one source rather than "
-                    "as the verdict.\n"
-                    if identity_unanswered and lookup_attached and _sha256_of(sample)
-                    else "You have reputation tools and no analyst has consulted one. "
-                    "Look the sample up once to settle its identity, cite what comes "
-                    "back as evidence, and treat a reputation label as one source "
-                    "rather than as the verdict.\n"
-                    if identity_unanswered and lookup_attached
-                    else "You have Threat Intelligence tools to verify disputed "
-                    "IPs/domains/hashes — use them only to resolve contradictions.\n"
-                    if needs_tools and lookup_attached
-                    else tools_statement(self.tools) + "\n"
-                    if needs_tools
-                    else _NO_TOOLS_NEEDED
+                mediator_system_prompt(
+                    identity_unanswered=identity_unanswered,
+                    lookup_attached=lookup_attached,
+                    needs_tools=needs_tools,
+                    sha256=_sha256_of(sample),
+                    tools=self.tools,
                 ),
             ),
             (

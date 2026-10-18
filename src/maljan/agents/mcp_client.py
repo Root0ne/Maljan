@@ -308,6 +308,16 @@ class _ProtocolLinesOnly(ObjectReceiveStream[Any]):
         await self._inner.aclose()
 
 
+def served_info(info: Any) -> dict[str, str]:
+    """``{name, version}`` as an MCP server gave them for itself, each only where it gave one."""
+    out: dict[str, str] = {}
+    for key in ("name", "version"):
+        value = getattr(info, key, None)
+        if isinstance(value, str) and value.strip():
+            out[key] = value.strip()
+    return out
+
+
 class MCPLangChainToolkit:
     """Toolkit that connects to an MCP server and exposes its tools to LangChain."""
 
@@ -364,6 +374,10 @@ class MCPLangChainToolkit:
         # nothing. Tool-supplied text: shown to a model only as the server's
         # quoted words (``agents.prompt_fragments.undeclared_server_text``).
         self.server_instructions = ""
+        # The name and version the server gave for itself when it was
+        # initialised (MCP ``serverInfo``), each only where it gave one; read
+        # into the run fingerprint (``analysis.efficiency``).
+        self.server_info: dict[str, str] = {}
         # Each tool's definition exactly as the server listed it (MCP
         # ``Tool``: its input and output schemas, annotations, title and
         # description), kept only when asked. Read by the settings probe
@@ -429,6 +443,7 @@ class MCPLangChainToolkit:
             initialized = await self.session.initialize()
             served = getattr(initialized, "instructions", None)
             self.server_instructions = served if isinstance(served, str) else ""
+            self.server_info = served_info(getattr(initialized, "serverInfo", None))
 
             # Fetch available tools
             response = await self.session.list_tools()

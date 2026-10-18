@@ -6722,6 +6722,31 @@ def make_report_node(
                 if _disclosed:
                     _disclosed["disclosure"] = _disclosure
                     report.run_summary = _disclosed
+        # What the run spent its input on, counted once the run's last model
+        # call and last tool call are made (``analysis.efficiency``). Only on a
+        # summary the judge wrote, which keeps the mock-mode contract.
+        if state.get("run_summary"):
+            from maljan.analysis.efficiency import efficiency_record
+
+            # The judge's and the mediator's servers as their settings declare
+            # them, where the run never bound them (a fast path): never attached
+            # for the fingerprint.
+            _judge_setup = getattr(type(container), "note_judge_declared_setup", None)
+            if callable(_judge_setup):
+                container.note_judge_declared_setup()
+
+            _efficiency = efficiency_record(
+                container,
+                entries=_ledger,
+                isr_reports=isr_reports,
+                tokens=({**(state.get("run_summary") or {}), **_state_summary}).get("tokens"),
+            )
+            if _efficiency is not None:
+                _state_summary["efficiency"] = _efficiency
+                _counted_input = dict(report.run_summary or {})
+                if _counted_input:
+                    _counted_input["efficiency"] = _efficiency
+                    report.run_summary = _counted_input
         # The markdown is rendered once every field it reads is final: the
         # validation block, the corroboration's published marks, the stage
         # rollup and the elapsed time are all written above this line, and so

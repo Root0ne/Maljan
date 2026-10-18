@@ -641,6 +641,29 @@ class ServiceContainer:
 
         self._token_ledger = TokenLedger(spend=SpendMeter.from_settings(config))
         self._plan_the_verdict_and_report(self._token_ledger.spend)
+        # What each agent's requests were made of, measured as they are sent
+        # (``core.input_meter``); the report node reads it into
+        # ``run_summary.efficiency``.
+        from maljan.core.input_meter import InputMeter
+
+        self.input_meter = InputMeter()
+        # The job's setup as each agent was resolved: the resolution itself,
+        # and the name and version every tool server attached by then gave for
+        # itself. What the run fingerprint is made of (``analysis.efficiency``),
+        # so nothing a run does later — a retry, a revision, a clear, the
+        # mediator's fast path — moves it.
+        self._resolved_agents: dict[str, Any] = {}
+        self._setup_servers: dict[str, dict[str, str]] = {}
+        # The tools each agent was set up with, by its key: an analyst's as it
+        # was resolved, the judge's and the mediator's as their role binds them.
+        self._setup_tools: dict[str, list[Any]] = {}
+        # The analysts whose loop has bound its tools: from then on that list,
+        # not the resolution's, is the analyst's setup.
+        self._bound_agents: set[str] = set()
+        # The judge's and the mediator's servers as their settings declare
+        # them, for an agent the run never bound: never attached for the
+        # fingerprint, so recorded with no version and no tool definitions.
+        self._declared_setup: dict[str, dict[str, dict[str, Any]]] = {}
         # Each call, as it is recorded, on the job's event feed: the durable
         # trail of what the run spent, kept call by call by the worker.
         if event_sink is not None:
@@ -1158,6 +1181,110 @@ class ServiceContainer:
         registry = self._server_registry_cache
         return [dict(row) for row in getattr(registry, "rests", None) or []]
 
+    def _note_the_setup(self, name: str, resolved: Any) -> None:
+        """Keep agent ``name``'s resolution and the servers attached by then. Never raises."""
+        try:
+            self._resolved_agents[name] = resolved
+            self._setup_tools.setdefault(name, list(getattr(resolved, "tools", None) or []))
+            self._note_setup_servers(None)
+        except Exception as exc:  # noqa: BLE001 — telemetry never costs an agent
+            logger.debug("the setup of '%s' was not noted (%s).", name, type(exc).__name__)
+
+    def _note_setup_servers(self, names: set[str] | None) -> None:
+        """The name and version each attached server gave, for ``names`` or every one."""
+        registry = self._server_registry_cache
+        versions = getattr(registry, "server_versions", None)
+        if not callable(versions):
+            return
+        for server, info in versions().items():
+            if names is None or server in names:
+                self._setup_servers.setdefault(server, dict(info))
+
+    def note_bound_tools(self, name: str, tools: Any) -> None:
+        """The tools analyst ``name``'s first loop binds, as its setup. Never raises.
+
+        A built-in role attaches its own servers after it was resolved, and its
+        prompt and requests are written for what its loop binds; the first
+        loop's list stands, and the servers attached by then are noted.
+        """
+        try:
+            if name in self._bound_agents:
+                return
+            self._bound_agents.add(name)
+            self._setup_tools[name] = list(tools or [])
+            self._note_setup_servers(None)
+        except Exception as exc:  # noqa: BLE001 — telemetry never costs an agent
+            logger.debug("the tools of '%s' were not noted (%s).", name, type(exc).__name__)
+
+    def note_role_setup(self, key: str, tools: Any, servers: set[str]) -> None:
+        """The tools agent ``key`` (the judge, the mediator) is set up with, and its servers.
+
+        Called where the agent's role binds its servers, as an analyst's are
+        noted where it is resolved; the first record of an agent stands. Never
+        raises.
+        """
+        try:
+            self._setup_tools.setdefault(str(key), list(tools or []))
+            self._note_setup_servers(set(servers))
+        except Exception as exc:  # noqa: BLE001 — telemetry never costs an agent
+            logger.debug("the setup of '%s' was not noted (%s).", key, type(exc).__name__)
+
+    def note_judge_declared_setup(self) -> None:
+        """The judge's and the mediator's servers from their settings, where the run bound none.
+
+        No server is attached for the fingerprint, and no agent is built: an
+        agent that never bound its role's servers in this run (a mediation
+        that took its fast path) is recorded by what the settings declare for
+        each server the ``judge`` role and definition bind — digests of its
+        launch identity with this host's paths replaced and of its tool filter
+        (``efficiency.declared_server``), never the values — marked not
+        attached, with no version and no tool definitions. An agent
+        the run set up is left as it is. Never raises.
+        """
+        try:
+            from maljan.agents.composition import _excluded_servers, mcp_refs_for
+            from maljan.analysis.efficiency import declared_server
+
+            servers = getattr(getattr(self.config, "mcp", None), "servers", None) or {}
+            registry = self.get_server_registry()
+            names = {
+                handle.name
+                for handle in registry.for_agent(
+                    "judge", exclude=_excluded_servers(self.config, "judge")
+                )
+            }
+            names |= {
+                str(ref.server)
+                for ref in mcp_refs_for(self.config, "judge")
+                if getattr(ref, "server", None)
+            }
+            declared = {
+                name: declared_server(servers[name]) for name in sorted(names) if name in servers
+            }
+            for key in ("judge", MEDIATOR_AGENT_KEY):
+                if key not in self._setup_tools and key not in self._declared_setup:
+                    self._declared_setup[key] = {
+                        name: dict(info) for name, info in declared.items()
+                    }
+        except Exception as exc:  # noqa: BLE001 — telemetry never costs a report
+            logger.debug("the judge's declared setup was not noted (%s).", type(exc).__name__)
+
+    def declared_setup(self) -> dict[str, dict[str, dict[str, Any]]]:
+        """Per agent the run never bound, its servers as their settings declare them."""
+        return {key: dict(held) for key, held in sorted(self._declared_setup.items())}
+
+    def resolved_agents(self) -> dict[str, Any]:
+        """Each agent this job resolved, by key, as it was resolved."""
+        return dict(self._resolved_agents)
+
+    def setup_tools(self) -> dict[str, list[Any]]:
+        """The tools each agent was set up with, by key."""
+        return {key: list(tools) for key, tools in sorted(self._setup_tools.items())}
+
+    def setup_server_versions(self) -> dict[str, dict[str, str]]:
+        """Per tool server attached by the time its agents were resolved, its name and version."""
+        return dict(sorted(self._setup_servers.items()))
+
     def get_token_ledger(self) -> TokenLedger:
         """Return the per-run LLM token/cost ledger (findings-log §4 Item 1)."""
         return self._token_ledger
@@ -1585,6 +1712,7 @@ class ServiceContainer:
             # MCP init — per chunk, so up to ten of them per run.
             agent._container = self
             agent._resolved = resolved
+            self._note_the_setup(name, resolved)
             self._agent_cache[name] = agent
             self._hold_the_evidence_of(agent)
             return agent

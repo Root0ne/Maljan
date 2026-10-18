@@ -262,6 +262,78 @@ apart from a report stored before the block existed, which shows none. The
 console's summary tab does not draw the block yet; the record is in the stored
 run summary.
 
+## What the run spent its input on
+
+After the disclosure, Appendix B carries an **Efficiency** block, and the run
+summary stores the same record under `efficiency`. Every figure in it is
+counted by code from what the run already recorded; no model is asked and
+nothing a model reads changes.
+
+- **Input by part** (`inputs`): what each agent loop's requests were made of.
+  Every request is measured as it is sent — each turn of an analyst's or the
+  judge's tool loop, and each single analyst call (a revision, a validation
+  retry, a drops question, a salvage) — and split into the system prompt, the
+  task and its data, the triage pack, the run-state block, the tool answers,
+  the peer reports a revision carries, every turn after the first answer
+  (retries, questions and the platform's notices), the agent's own earlier turns, and the tool definitions. The parts
+  are **character counts**: no provider reports the tokens of each part of a
+  prompt. Beside them stand the input tokens the provider reported for the
+  same requests, and how many reported. One row per tool loop, and one per
+  agent, stage and kind of single call; an agent whose model calls were not
+  measured by part (the report's writers, for one) is named with its calls.
+- **Evidence nothing cites** (`uncited`): of the ledger entries whose tool
+  answered, the ones no analyst's final answer names — no claim in its text or
+  its evidence field, no finding or artifact in its `evidence_ids` — by maker
+  and by tool, with their ids. A repeat and a guard's answer are not evidence
+  of their own; a cited repeat counts for the entry holding its answer. A
+  failed call is not evidence: it is counted apart (`failed`) and said.
+- **Tool calls that found nothing new** (`calls`): the calls the repeat guard
+  answered from an earlier identical call without running, the calls a guard
+  refused with no tool run, the calls that ran again with the tool, server and
+  arguments of an earlier call the same maker ran, and the calls identical to
+  one another maker ran first, each filed under who made it: the agent, the
+  triage pack or the pipeline. A re-run the guard serves because the maker's
+  earlier identical call failed is counted apart, as a retry after a failure,
+  so neither count overstates the other, and no agent is charged with a call
+  only another agent made.
+- **Rows read back** (`rows_read`): the ledger and pack rows each agent read
+  again by id through `read_evidence`, how often, each row's tool and whether
+  the triage pack wrote it.
+- **Retries' share of the output** (`output`): per agent, its reported output
+  tokens and the share its validation retries and its drops questions took,
+  with the calls that reported no usage counted beside them.
+- **Run fingerprint** (`fingerprint`): one sha256 over how the job was set
+  up, never over what its run sent. Every system prompt the platform can send
+  for the job is rendered by the code that builds it for one fixed placeholder
+  job (a placeholder sample hash, path and name, and the neutral format): each
+  analyst of the active profile for the tools its loop binds and for a
+  tools-free call, its revision prompt, every case of the mediator's prompt,
+  the mediator's extraction prompt, the judge's verdict and technique-question
+  prompts, the composer's, the narrative's, the summariser's, the view prompts
+  and every format fragment. The hash is the text each builder produces, so an
+  edit to any sentence a builder writes moves it, and no real value is masked
+  out of anything. Beside the prompts: the tool definitions each analyst's loop
+  binds and the judge and the mediator bind, the name and version each of
+  their servers gave for itself (no server is ever attached for the
+  fingerprint: where the run never bound the judge's servers, as on the
+  mediator's fast path, they are recorded as digests of their declared
+  settings, one for the whole and one per field, never the values, and marked
+  not attached in this run, with no version or tool definitions), and the settings the run ran with, masked as the stored settings
+  snapshot masks them, with this host's repository paths (the checkout, the
+  repository it is a worktree of, the virtual environment) replaced, so the
+  same setup on two hosts or worktrees hashes equal; a path such as
+  `/usr/bin/python3` stays as written. A validation retry, a revision round, a
+  cleared tool answer, the mediator's fast path and the sample do not move it.
+  A definition that is no analyst of the active profile, reached only when an
+  agent delegates to it, is not resolved for it and is named (its definition is
+  in the settings). Each component and each part keeps its own hash, and
+  `texts` keeps each rendered prompt's digest, so two fingerprints that differ
+  name what changed. A secret enters only as set or unset. A tool's own version
+  is not reported over MCP and is not in the fingerprint.
+
+A run stopped part-way stores the counts as of the stop and says so. A report
+stored before the block existed shows none.
+
 ## Comparing two runs
 
 `GET /api/v1/reports/diff?a=<id>&b=<id>` compares two stored runs (`by=job`

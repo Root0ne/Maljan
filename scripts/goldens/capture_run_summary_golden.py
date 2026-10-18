@@ -2,16 +2,16 @@
 
 ``RunSummary.to_dict()`` is where the summary begins. What the API stores,
 what the report renders and what an evaluation script reads back is that dict
-plus five keys written onto it after the dataclass exists: ``dedupe`` from the
-report builder, ``evidence``, ``sections_without_evidence`` and ``disclosure``
-from the report node, and ``fp_warnings`` from the post-pipeline linter — and
+plus six keys written onto it after the dataclass exists: ``dedupe`` from the
+report builder, ``evidence``, ``sections_without_evidence``, ``disclosure`` and
+``efficiency`` from the report node, and ``fp_warnings`` from the post-pipeline linter — and
 ``settings_snapshot``, which the worker adds. The golden used to cover only
 the dataclass, so ``dedupe`` was pinned by nothing at all and a rename of
 ``indicators_merged`` would have kept every test green.
 
-Each of the five is built here by the code that builds it in a run —
+Each of the six is built here by the code that builds it in a run —
 ``MergeTally.as_dict``, ``evidence_summary``, ``disclosure_record``,
-``FPWarning.to_dict`` — so the golden follows a rename instead of merely
+``efficiency_record``, ``FPWarning.to_dict`` — so the golden follows a rename instead of merely
 agreeing with a copy.
 ``settings_snapshot`` is the exception: it is a public view of the whole
 ``Settings`` tree, which grows with every new setting, so its presence is
@@ -289,6 +289,91 @@ def _disclosure(summary: dict[str, Any]) -> dict[str, Any]:
     )
 
 
+def _efficiency(tokens: dict[str, Any] | None = None) -> dict[str, Any]:
+    """The efficiency record, built by the run's builder over a meter and a ledger that hold a row.
+
+    One tool loop turn of the static analyst, measured as the loop's hook
+    measures it, closed with the usage its provider reported, and one single
+    call; the token ledger holds the calls. Over the ledger above, a claim
+    cites the first entry and none the second, and the first is read back.
+    """
+    from types import SimpleNamespace
+
+    from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
+
+    from maljan.analysis.efficiency import efficiency_record
+    from maljan.core.input_meter import InputMeter, request_parts
+    from maljan.core.token_ledger import TokenLedger
+
+    meter = InputMeter()
+    loop = object()
+    turn = [
+        SystemMessage(content="You are the static analyst."),
+        HumanMessage(content="PACK\n\nAnalyse the sample."),
+        AIMessage(content="", tool_calls=[{"name": "pe_info", "args": {}, "id": "c1"}]),
+        ToolMessage(content="[ev_0001] {}", tool_call_id="c1"),
+    ]
+    meter.request("static", request_parts(turn, pack="PACK", definitions=120), loop=loop)
+    meter.close("static", loop, [{"input_tokens": 40, "output_tokens": 5}])
+    single = meter.request("static", request_parts(turn[:2]), kind="validation retry")
+    meter.answered(single, {"input_tokens": 12, "output_tokens": 3})
+    ledger = TokenLedger()
+    ledger.add({"input_tokens": 40, "output_tokens": 5}, agent="static", model="openai/qwen")
+    ledger.add(
+        {"input_tokens": 12, "output_tokens": 3},
+        agent="static",
+        model="openai/qwen",
+        call="validation retry",
+    )
+    from maljan.agents.composition import ResolvedAgent
+    from maljan.core.config import Settings
+
+    container = SimpleNamespace(
+        input_meter=meter,
+        get_token_ledger=lambda: ledger,
+        resolved_agents=lambda: {
+            key: ResolvedAgent(
+                key="",
+                role=key,
+                prompt=f"You are the {key} analyst.",
+                tools=[],
+                static_provider_id="",
+                llm=None,
+            )
+            for key in ("static", "dynamic", "network")
+        },
+        setup_tools=lambda: {
+            key: [] for key in ("static", "dynamic", "network", "judge", "mediator")
+        },
+        setup_server_versions=lambda: {"analysis": {"name": "analysis-mcp", "version": "1.2.0"}},
+        config=Settings(),
+    )
+    from maljan.agents.tool_answer_clearing import READ_EVIDENCE_TOOL
+    from maljan.schemas.evidence import LedgerEntry
+    from maljan.schemas.isr_models import AgentISR, ClaimEvidence
+
+    cites = ClaimEvidence(claim="imports", evidence_ref="pe_info [ev_0001]", confidence=0.8)
+    # The static analyst read the first entry back by its id.
+    read = LedgerEntry(
+        id="ev_0003",
+        agent="static",
+        tool=READ_EVIDENCE_TOOL,
+        args={"evidence_id": "ev_0001"},
+        repeated_of="ev_0001",
+        seq=3,
+    )
+    from maljan.analysis.run_summary import spend_blocks
+
+    record = efficiency_record(
+        container,
+        tokens=tokens or spend_blocks(ledger.snapshot()).get("tokens"),
+        entries=[*_ledger(), read],
+        isr_reports={"static": AgentISR(agent_id="static", domain="static", claims=[cites])},
+    )
+    assert record is not None
+    return record
+
+
 def stored_summary() -> dict[str, Any]:
     """The dataclass, plus every key written onto the dict after it exists."""
     from maljan.pipeline.nodes import evidence_summary
@@ -308,6 +393,7 @@ def stored_summary() -> dict[str, Any]:
     summary["sections_without_evidence"] = 0
     # `report_node`, once the run's last model and tool calls are made.
     summary["disclosure"] = _disclosure(summary)
+    summary["efficiency"] = _efficiency()
 
     # The post-pipeline linter, once every other mutation has happened.
     summary["fp_warnings"] = [
@@ -352,6 +438,22 @@ DATA_KEYED = frozenset(
         "disclosure.models[].agents",
         "disclosure.lookups[].kinds",
         "disclosure.enrichment.asked[].kinds",
+        # Keyed by the agent that made the calls.
+        "efficiency.inputs.calls",
+        "efficiency.uncited.by_agent",
+        "efficiency.uncited.by_tool",
+        "efficiency.calls.by_agent",
+        "efficiency.calls.by_tool",
+        "efficiency.rows_read.by_agent",
+        "efficiency.rows_read.rows[].by",
+        # One row per agent in the token ledger.
+        "efficiency.output",
+        # Per agent, per tool server and per settings section.
+        "efficiency.fingerprint.parts.prompts",
+        "efficiency.fingerprint.parts.tools",
+        "efficiency.fingerprint.parts.servers",
+        "efficiency.fingerprint.parts.settings",
+        "efficiency.fingerprint.texts",
     }
 )
 

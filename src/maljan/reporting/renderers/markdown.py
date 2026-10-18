@@ -43,6 +43,8 @@ from urllib.parse import urlparse
 from maljan.analysis.disclosure import FOOTNOTE_SENTENCE as DISCLOSURE_FOOTNOTE
 from maljan.analysis.disclosure import INTRO_SENTENCE as DISCLOSURE_INTRO
 from maljan.analysis.disclosure import disclosure_lines
+from maljan.analysis.efficiency import INTRO_SENTENCE as EFFICIENCY_INTRO
+from maljan.analysis.efficiency import efficiency_lines
 from maljan.analysis.isolation import INTRO_SENTENCE as ISOLATION_INTRO
 from maljan.analysis.isolation import isolation_lines
 from maljan.analysis.run_summary import (
@@ -2173,6 +2175,14 @@ class MarkdownRenderer:
                 lines.extend(["", ISOLATION_INTRO, ""])
                 lines.extend(_item(line) for line in isolated)
             lines.extend(["", DISCLOSURE_FOOTNOTE])
+        # What the run spent its input on, where its summary records it
+        # (``analysis.efficiency``); a summary stored without it shows none.
+        counted = efficiency_lines(
+            run_summary.get("efficiency"), lambda text: _code_span(_one_line(text))
+        )
+        if counted:
+            lines.extend(["", EFFICIENCY_INTRO, ""])
+            lines.extend(_item(line) for line in counted)
         return "\n".join(lines)
 
     def _appendix_references(self, report: MalwareReport) -> str:
