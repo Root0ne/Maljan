@@ -99,7 +99,9 @@ test.describe("Settings → Configuration (admin)", () => {
     await page.getByRole("button", { name: "Confirm and apply" }).click();
 
     await expect(page.getByText(/Applied 1 setting/)).toContainText("on the next analysis");
-    expect(patches).toEqual([{ changes: { "core.negotiation.max_iterations": 7 } }]);
+    expect(patches).toEqual([
+      { changes: { "core.negotiation.max_iterations": 7 }, versions: expect.any(Object) },
+    ]);
   });
 
   test("a 422 from PATCH maps the message to the field and shows no success status", async ({
@@ -160,7 +162,7 @@ test.describe("Settings → Configuration (admin)", () => {
     await expect(page.getByText(/Applied 1 setting/)).toBeVisible();
 
     expect(patches).toEqual([
-      { changes: { "core.llm.openai.api_key": "sk-new-secret-value" } },
+      { changes: { "core.llm.openai.api_key": "sk-new-secret-value" }, versions: expect.any(Object) },
     ]);
   });
 
@@ -187,7 +189,9 @@ test.describe("Settings → Configuration (admin)", () => {
     await page.getByRole("button", { name: "Confirm and apply" }).click();
     await expect(page.getByText(/Applied 1 setting/)).toBeVisible();
 
-    expect(patches).toEqual([{ changes: { "core.llm.openai.api_key": null } }]);
+    expect(patches).toEqual([
+      { changes: { "core.llm.openai.api_key": null }, versions: expect.any(Object) },
+    ]);
   });
 
   test("per-row reset only appears for a UI-sourced value and calls DELETE on that key", async ({
@@ -717,7 +721,7 @@ test.describe("Settings → Configuration (admin)", () => {
     await expect(page.getByText(/Applied 1 setting/)).toBeVisible();
 
     expect(patches).toEqual([
-      { changes: { "core.negotiation.blocked_hosts": ["a", "b"] } },
+      { changes: { "core.negotiation.blocked_hosts": ["a", "b"] }, versions: expect.any(Object) },
     ]);
   });
 
@@ -909,6 +913,7 @@ test.describe("Settings → Configuration (admin)", () => {
           "core.sandbox.cape2.base_url": "http://cape.example:8000",
           "core.sandbox.provider": "triage",
         },
+        versions: expect.any(Object),
       },
     ]);
   });
