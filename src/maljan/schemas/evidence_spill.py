@@ -27,7 +27,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
-from collections.abc import Callable, MutableMapping
+from collections.abc import Callable, Mapping, MutableMapping
 from typing import Any
 
 logger = logging.getLogger(__name__)
@@ -119,6 +119,31 @@ def part_bytes(part: str, value: Any) -> bytes:
     return str(value).encode("utf-8", errors="surrogatepass")
 
 
+def surely_longer(part: str, value: Any, bound: int) -> bool:
+    """Whether ``value`` surely keeps as more than ``bound`` bytes, read without encoding it.
+
+    A UTF-8 text is at least as many bytes as it has characters, and a
+    structure's JSON at least as long as its keys and strings together; the
+    walk stops as soon as that floor passes the bound.
+    """
+    if CONTENT_TYPES.get(part) != JSON:
+        return len(str(value)) > bound
+    floor, stack = 0, [value]
+    while stack:
+        item = stack.pop()
+        if isinstance(item, str):
+            floor += len(item)
+        elif isinstance(item, Mapping):
+            floor += sum(len(str(key)) for key in item)
+            stack.extend(item.values())
+        elif isinstance(item, list | tuple):
+            floor += len(item)
+            stack.extend(item)
+        if floor > bound:
+            return True
+    return False
+
+
 def spill_part(
     sink: EvidenceSpill, part: str, value: Any, held: list[dict[str, Any]] | None = None
 ) -> dict[str, Any]:
@@ -132,6 +157,11 @@ def spill_part(
     part larger than the sink's bound is referenced with the reason
     (``exceeds <setting> (<n> bytes)``) and not uploaded.
     """
+    bound = getattr(sink, "max_bytes", 0)
+    over = f"exceeds {getattr(sink, 'bound_by', '') or 'the bound'} ({bound} bytes)"
+    # Refused before it is encoded when it is surely larger than the bound.
+    if bound and surely_longer(part, value, bound):
+        return {"part": part, "error": over}
     try:
         blob = part_bytes(part, value)
     except (TypeError, ValueError) as exc:
@@ -141,9 +171,8 @@ def spill_part(
     for earlier in held or ():
         if earlier.get("sha256") == digest and earlier.get("key"):
             return {**ref, "key": earlier["key"]}
-    bound = getattr(sink, "max_bytes", 0)
     if bound and len(blob) > bound:
-        ref["error"] = f"exceeds {getattr(sink, 'bound_by', '') or 'the bound'} ({bound} bytes)"
+        ref["error"] = over
         return ref
     try:
         ref["key"] = sink.put(digest, blob, CONTENT_TYPES.get(part, TEXT))

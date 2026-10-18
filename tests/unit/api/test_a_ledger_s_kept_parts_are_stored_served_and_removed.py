@@ -260,13 +260,32 @@ class TestTheBound:
         over = _kept("job", store, "answer", "x" * 1025, max_bytes=1024)
         at = _kept("job", store, "output", "y" * 1024, max_bytes=1024)
 
-        assert over == {
-            "part": "answer",
-            "bytes": 1025,
-            "sha256": hashlib.sha256(b"x" * 1025).hexdigest(),
+        assert over == {"part": "answer", "error": "exceeds upload_max_bytes (1024 bytes)"}
+        assert at["key"] in store.objects and len(store.objects) == 1
+
+    def test_a_part_surely_over_the_bound_is_never_encoded(self) -> None:
+        from maljan.schemas import evidence_spill
+
+        encoded: list[str] = []
+        real = evidence_spill.part_bytes
+
+        def counting(part: str, value: Any) -> bytes:
+            encoded.append(part)
+            return real(part, value)
+
+        with patch.object(evidence_spill, "part_bytes", counting):
+            text = _kept("job", _Store(), "answer", "x" * 2048, max_bytes=1024)
+            shape = _kept("job", _Store(), "structured", {"rows": ["y" * 600, "z" * 600]}, 1024)
+            wide = _kept("job", _Store(), "output", "\u00e9" * 600, max_bytes=1024)
+
+        assert text["error"] == shape["error"] == "exceeds upload_max_bytes (1024 bytes)"
+        assert encoded == ["output"], "only a part the floor cannot decide is encoded"
+        assert wide == {
+            "part": "output",
+            "bytes": 1200,
+            "sha256": hashlib.sha256(("\u00e9" * 600).encode()).hexdigest(),
             "error": "exceeds upload_max_bytes (1024 bytes)",
         }
-        assert at["key"] in store.objects and len(store.objects) == 1
 
     def test_the_job_s_store_reads_the_operator_s_upload_limit(self) -> None:
         import asyncio
