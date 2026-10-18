@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { api } from "@/lib/api";
 import { getErrorMessage } from "@/lib/errors";
-import { SettingsValidationError } from "@/types/settings";
+import { SettingsConflictError, SettingsValidationError } from "@/types/settings";
 import { deepEqual } from "./deepEqual";
 import type {
   CatalogEntry,
@@ -36,6 +36,30 @@ export function withoutErrorsFor(
   const next = { ...errors };
   for (const k of stale) delete next[k];
   return next;
+}
+
+/** Per staged key the page was served, the `updated_at` it was served with
+ *  (`null`: no stored row then), for the API to refuse a key changed since.
+ *  A key the page was never served is left out and not checked. */
+export function loadedVersions(
+  pending: Pending,
+  values: Record<string, SettingValue>
+): Record<string, string | null> {
+  const out: Record<string, string | null> = {};
+  for (const key of Object.keys(pending)) {
+    if (key in values) out[key] = values[key].updated_at ?? null;
+  }
+  return out;
+}
+
+/** What the page says when a save is refused over keys changed since it loaded them. */
+export function conflictMessage(keys: string[]): string {
+  const one = keys.length === 1;
+  return (
+    `${keys.join(", ")} ${one ? "was" : "were"} changed since this page loaded ` +
+    `${one ? "it" : "them"}, so nothing was saved. The stored ${one ? "value is" : "values are"} ` +
+    `shown again; make the change over ${one ? "it" : "them"} and apply.`
+  );
 }
 
 /**
@@ -161,12 +185,27 @@ export function useSettings() {
     setErrors({});
     setActionError(null);
     try {
-      const res = await api.patchSettings(pending);
+      const res = await api.patchSettings(pending, loadedVersions(pending, values));
       setLastResult(res);
       setPending({});
       await reload();
       return res;
     } catch (e) {
+      if (e instanceof SettingsConflictError) {
+        // Saved over, the change would drop what another writer stored since
+        // this page loaded the key: its edit is dropped, the key reloaded,
+        // and the row says why. Every other staged edit stays staged.
+        const stale = Object.keys(e.errors);
+        setErrors(e.errors);
+        setPending((p) => {
+          const n = { ...p };
+          for (const k of stale) delete n[k];
+          return n;
+        });
+        setActionError(conflictMessage(stale));
+        await reload();
+        return null;
+      }
       if (e instanceof SettingsValidationError) {
         setErrors(e.errors);
         // The server validates the whole merged set, so a stored override
@@ -193,7 +232,7 @@ export function useSettings() {
     } finally {
       setSaving(false);
     }
-  }, [pending, reload]);
+  }, [pending, reload, values]);
 
   // Callers fire-and-forget these (`void s.reset(key)`), so a rejected
   // promise here would surface only as an unhandled-rejection console entry

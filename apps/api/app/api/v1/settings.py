@@ -585,6 +585,14 @@ async def patch_values(
         # A write of the declared report formats waits for an accept that is
         # rewriting them, and an accept for it (``services.report_formats_lock``).
         async with report_formats_serialised(db, needed=formats_written):
+            # Under the lock too, so a key the page loaded before another
+            # writer changed it (an accepted report format, say) is refused
+            # rather than saved over it.
+            stale = await SettingsService(db).changed_since(
+                {key: loaded for key, loaded in body.versions.items() if key in changes}
+            )
+            if stale:
+                return JSONResponse(status_code=status.HTTP_409_CONFLICT, content={"errors": stale})
             if formats_written:
                 # Under the lock, so an accept between the read and the save
                 # is never taken for this save's change.

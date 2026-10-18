@@ -8,7 +8,7 @@ import type {
   RunSummary,
 } from "@/types/malware-report";
 import { ApiError } from "@/lib/errors";
-import { SettingsValidationError } from "@/types/settings";
+import { SettingsConflictError, SettingsValidationError } from "@/types/settings";
 import type {
   AttckCheckResult,
   AttckStatus,
@@ -463,6 +463,14 @@ class ApiClient {
       };
       throw new SettingsValidationError(body.errors ?? {});
     }
+    if (res.status === 409) {
+      const body = (await res.json().catch(() => ({}))) as {
+        errors?: Record<string, string>;
+        detail?: string;
+      };
+      if (body.errors) throw new SettingsConflictError(body.errors);
+      throw new ApiError(body.detail || `Request failed: ${res.status}`, res.status);
+    }
     if (!res.ok) {
       const body = await res.json().catch(() => ({}));
       throw new ApiError(body.detail || `Request failed: ${res.status}`, res.status);
@@ -645,10 +653,16 @@ class ApiClient {
     return this.request<SettingsValues>("/api/v1/settings");
   }
 
-  async patchSettings(changes: Record<string, unknown>): Promise<PatchResult> {
+  /** `versions` names, per changed key, the `updated_at` the page was served
+   *  it with (`null`: no stored row); a key changed since is refused with a
+   *  `SettingsConflictError` and nothing is saved. */
+  async patchSettings(
+    changes: Record<string, unknown>,
+    versions: Record<string, string | null> = {}
+  ): Promise<PatchResult> {
     const res = await this.settingsFetch("/api/v1/settings", {
       method: "PATCH",
-      body: JSON.stringify({ changes }),
+      body: JSON.stringify({ changes, versions }),
     });
     return res.json();
   }

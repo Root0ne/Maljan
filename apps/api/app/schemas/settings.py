@@ -115,6 +115,11 @@ class ValuesResponse(BaseModel):
 
 class PatchRequest(BaseModel):
     changes: dict[str, Any] = Field(min_length=1, max_length=500)
+    # Per changed key, the ``updated_at`` the page was served it with
+    # (``null``: no stored row then). A key whose stored row is not that one
+    # any more (saved, accepted or reset since) is refused with 409, nothing
+    # is saved, and the page reloads it. A key left out is not checked.
+    versions: dict[str, datetime | None] = Field(default_factory=dict, max_length=500)
 
 
 class PatchResponse(BaseModel):

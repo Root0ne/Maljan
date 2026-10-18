@@ -134,6 +134,19 @@ applying sends one `PATCH /api/v1/settings` with the whole set. Each entry
 declares when it takes effect: `live`, `next_job`, or `restart` for read-only
 deployment values.
 
+A value is saved whole, so a page loaded before another writer changed a key
+would drop that change unseen: an upload's accepted report format adds to
+`core.sandbox.report_formats` and `core.sandbox.upload.allowed_formats`, a
+credential bootstrap enables its server in `core.mcp.servers`, and another
+admin may save any key. The PATCH therefore carries `versions`: per changed
+key, the `updated_at` the page was served it with (`null` for no stored row).
+A key whose stored row is not that one any more (saved, accepted or reset
+since) is refused with 409 naming it, and nothing is saved; the console drops
+that key's staged edit, reloads it, and says so, so the change can be made
+over what is stored now. A key sent without a version is not checked, so a
+script that means to overwrite still can; an import always writes what its
+file holds.
+
 An entry that has an override can be reset: `DELETE /api/v1/settings/{key}`
 removes one override, `DELETE /api/v1/settings` removes a whole group's. The
 value then falls back to the catalog default and the console shows it as such.

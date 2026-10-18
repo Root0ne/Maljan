@@ -851,6 +851,37 @@ class SettingsService:
         if errors:
             raise SettingsValidationError(errors)
 
+    async def changed_since(self, versions: dict[str, datetime | None]) -> dict[str, str]:
+        """Each key of ``versions`` whose stored row is not the one it names, with why.
+
+        ``versions`` maps a key to the ``updated_at`` a page was served it
+        with, ``None`` for no stored row. A row saved, written by another
+        route (an accepted report format, a credential bootstrap) or reset
+        since then is named, so a page loaded before it never saves over it
+        unseen. Time linear in the stored rows and ``versions``.
+        """
+        if not versions:
+            return {}
+        rows = {r.key: r for r in await self._rows()}
+        out: dict[str, str] = {}
+        for key, loaded in versions.items():
+            row = rows.get(key)
+            stored = row.updated_at if row is not None else None
+            if stored == loaded:
+                continue
+            if row is None:
+                what = "reset"
+            elif loaded is None:
+                what = "saved"
+            else:
+                what = "saved again"
+            out[key] = (
+                f"{what} since this page loaded it, so this save would replace what is "
+                "stored now unseen; nothing was saved, the page shows the stored value "
+                "again, and the change can be made over it"
+            )
+        return out
+
     # ---- writing -------------------------------------------------------
     async def save(
         self, changes: dict[str, Any], *, user_id: uuid.UUID | None, ip: str | None

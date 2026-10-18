@@ -858,3 +858,8 @@ export class SettingsValidationError extends Error {
     super("validation failed");
   }
 }
+
+/** A 409 from `PATCH /settings`: each key was changed since the page loaded
+ *  it (saved, accepted or reset by another writer), with why; nothing was
+ *  saved. */
+export class SettingsConflictError extends SettingsValidationError {}
