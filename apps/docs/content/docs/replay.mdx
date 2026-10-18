@@ -63,7 +63,14 @@ or `no`) and a digest of its words; the judge's category and its reasons are
 digests. `--show-text` adds the words beside them, in fields of their own
 (`message`, `claim`, `subject_text`, `answer_text`, `value`, `category_text`,
 `why_text`), so a record has the same fields either way and two records are
-compared on the value-free ones.
+compared on the value-free ones. The judge's own labels for its objects are
+digested in a finding's path too (`malware--<digest>`), unless the id is a
+number or a UUID, and a subject is never passed for its shape alone.
+
+A digest identifies a value; it does not protect it. Anyone holding a list of
+candidates can confirm one: a family name, a host from a feed, and every IPv4
+address, which can simply be tried in turn. Do not share a record as if it were
+safe when the values themselves are sensitive.
 
 Each producer's list of checks is kept in `scripts/replay/rules.py`, and
 `tests/unit/scripts/test_the_replay_knows_every_check.py` holds it to the
@@ -137,13 +144,14 @@ schema up to its own.
 - **A ref from before the replay tool** has no `scripts/replay/run.py` to
   replay with. It cannot be compared: the command says so and ends with status
   2 before replaying anything. Compare two refs that both carry the tool.
-- **Records of two schema versions.** Every record carries the version of its
-  schema (`schema`). When the two trees write different versions, the
-  comparison says so and compares only what both define. Every part only one
-  of them defines is listed as "not compared: defined only under A" (or B),
-  and a part both write in forms the two schemas do not share is listed too.
-  That comparison is **partial**: it is printed prominently and ends with
-  status 2, because a part that was not compared is not a decision.
+- **Parts only one side defines.** On every comparison, every part only one
+  record defines (a report value, a note on the claims in force, a composer
+  section one tree no longer composes) is listed as "not compared: defined
+  only under A" (or B). Every record carries the version of its schema
+  (`schema`); when the two trees write different versions the comparison says
+  so, and a part both write in forms the two schemas do not share is listed
+  too. Such a comparison is **partial**: it is printed prominently and ends
+  with status 2, because a part that was not compared is not a decision.
 - **A part that raised** in either tree is printed first, as an error. The
   comparison is then incomplete and ends with status 2.
 - **A time limit.** `--timeout SECONDS` gives each ref's replay that long; there
@@ -158,12 +166,15 @@ per claim, the claims each answer parsed into and the notes on the claims in
 force, the published techniques and their reasons, each indicator's publish
 answer, the report's values, the report's sections (the ones only one side
 holds, and whether the shared ones changed order), the exported techniques and
-objects, the indicators the judge's round drops, the settings each tree refused
-and the guards it lacks, corroboration, and the parts one side could replay
-and the other could not. The exit status is 0 when both refs decide the same
-over every run, 1 when they differ, and 2 when a part raised, when the
-comparison is partial, when a ref predates the tool or was stopped at its time
-limit, or on an error.
+objects, the indicators the judge's round drops, the composer sections the
+stored report does not write, the tool calls counted, the settings each tree
+took from the run, refused or lacks a guard for, corroboration, and the parts
+one side could replay and the other could not. A tree's harness that fails
+outright is named by its failure's class and place only, since a message can
+quote a value; its whole error output is kept beside its record in the work
+directory. The exit status is 0 when both refs decide the same over every run,
+1 when they differ, and 2 when a part raised, when the comparison is partial,
+when a ref predates the tool or was stopped at its time limit, or on an error.
 
 ## What it holds itself to
 

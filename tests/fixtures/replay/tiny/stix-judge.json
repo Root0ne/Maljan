@@ -21,7 +21,7 @@
     "external_references": [{"source_name": "mitre-attack", "external_id": "T1027"}]
    },
    {
-    "id": "attack-pattern--2",
+    "id": "attack-pattern--fake",
     "type": "attack-pattern",
     "name": "An imagined technique",
     "external_references": [{"source_name": "mitre-attack", "external_id": "T9998"}]
@@ -40,7 +40,7 @@
     "id": "relationship--2",
     "type": "relationship",
     "source_ref": "malware--1",
-    "target_ref": "attack-pattern--2",
+    "target_ref": "attack-pattern--fake",
     "relationship_type": "uses",
     "x_maljan_confidence": 0.5,
     "x_maljan_contributing_agents": ["network"]

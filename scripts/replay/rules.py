@@ -47,7 +47,6 @@ from __future__ import annotations
 import copy
 import json
 import logging
-import re
 import traceback
 from collections import Counter
 from collections.abc import Callable, Iterable, Mapping, Sequence
@@ -57,7 +56,13 @@ from pathlib import Path
 from typing import Any
 
 from scripts.replay.guard import ReplayEnvironment, replay_environment
-from scripts.replay.record import REPLAY_SCHEMA, answer_head, digest, value_free_subject
+from scripts.replay.record import (
+    REPLAY_SCHEMA,
+    answer_head,
+    digest,
+    value_free_path,
+    value_free_subject,
+)
 from scripts.replay.stored import StoredRun
 
 # What each producer's checks are, as the platform composes them: the
@@ -365,16 +370,19 @@ def _flag(
     row: dict[str, Any] = {"code": str(getattr(violation, "code", "") or "")}
     path = str(getattr(violation, "path", "") or "")
     subject = str(getattr(violation, "subject", "") or "")
-    shown = value_free_subject(subject)
+    from maljan.analysis.sandbox_sections import is_item_id
+
+    shown = value_free_subject(subject, is_item_id)
     if path:
-        # A path that writes the subject (``objects.domain:host``) writes it value-free.
-        row["path"] = path.replace(subject, shown) if subject and shown != subject else path
+        # The subject a path writes (``objects.domain:host``) and the judge's own
+        # object labels it quotes (``objects[0] 'malware--name'``), value-free.
+        row["path"] = value_free_path(path, subject, is_item_id)
     if subject:
         row["subject"] = shown
     if show_text and subject and shown != subject:
         row["subject_text"] = subject
-        if path and row["path"] != path:
-            row["path_text"] = path
+    if show_text and path and row["path"] != path:
+        row["path_text"] = path
     if getattr(violation, "advisory", False):
         row["advisory"] = True
     if ids is None:
@@ -1696,25 +1704,54 @@ def _section_content(
     replayed_keys = [_row_key(r) for r in replayed_rows]
     missing = Counter(stored_keys) - Counter(replayed_keys)
     extra = Counter(replayed_keys) - Counter(stored_keys)
-    for side, table, keys, left in (
+    left: dict[str, list[tuple[int, Any, str]]] = {"stored": [], "replayed": []}
+    for side, table, keys, over in (
         ("stored", stored_rows, stored_keys, missing),
         ("replayed", replayed_rows, replayed_keys, extra),
     ):
         for index, (value, row_key) in enumerate(zip(table, keys, strict=True)):
-            if left[row_key] > 0:
-                left[row_key] -= 1
+            if over[row_key] > 0:
+                over[row_key] -= 1
+                left[side].append((index, value, row_key))
+    # What is left on one side only, and still the same rows as far as the
+    # database's key order lets them be told: a row with a cell cut to its
+    # length, where the order decided which pairs the cut kept; and a row one
+    # table holds more times than the other, rows that differed only in key
+    # order having merged in the other once the order was normalised.
+    loose_stored = Counter(_row_key(value, loose=True) for _i, value, _k in left["stored"])
+    loose_replayed = Counter(_row_key(value, loose=True) for _i, value, _k in left["replayed"])
+    loose_both = loose_stored & loose_replayed
+    reordered_cut = 0
+    merged = 0
+    loose_of = {
+        "stored": {_row_key(row, loose=True) for row in replayed_rows},
+        "replayed": {_row_key(row, loose=True) for row in stored_rows},
+    }
+    for side in ("stored", "replayed"):
+        budget = Counter(loose_both)
+        for index, value, _row in left[side]:
+            loose = _row_key(value, loose=True)
+            if budget[loose] > 0:
+                budget[loose] -= 1
+                reordered_cut += side == "stored"
+            elif loose in loose_of[side]:
+                merged += 1
+            else:
                 entry: dict[str, Any] = {"section": key, "field": "rows", "row": index}
                 entry.update({"stored": None, "replayed": None})
                 entry[side] = _shown(value, run.show_text)
                 out.append(entry)
+    if merged:
+        entry = {"section": key, "field": "rows", "merged": merged}
+        out.append(_with_cause(entry, order_cause))
     shared = sum((Counter(stored_keys) & Counter(replayed_keys)).values())
     reordered = sum(
         1
-        for a, b in zip(stored_rows, replayed_rows, strict=False)
-        if a != b and _row_key(a) == _row_key(b)
+        for stored_row, replayed_row in zip(stored_rows, replayed_rows, strict=False)
+        if stored_row != replayed_row and _row_key(stored_row) == _row_key(replayed_row)
     )
-    if shared and (reordered or _order_of(stored_keys, replayed_keys)):
-        entry = {"section": key, "field": "rows", "reordered": max(reordered, 1)}
+    if reordered_cut or (shared and (reordered or _order_of(stored_keys, replayed_keys))):
+        entry = {"section": key, "field": "rows", "reordered": max(reordered + reordered_cut, 1)}
         out.append(_with_cause(entry, order_cause))
     return out
 
@@ -1723,27 +1760,46 @@ def _section_content(
 _CUT_MARK = "…"
 
 
-# Where a rendered cell joins its keys and values (``key=value, key=value``),
-# nested ones included (``outer=key=value, key=value``).
-_CELL_JOINS = re.compile(r", |=")
+def _pairs(part: str) -> tuple[str, list[str]]:
+    """A ``key=value`` part as its innermost pair, and the outer keys written before it.
+
+    ``outer=key=value`` is the pair ``key=value`` under ``outer``: a nested
+    mapping written on one line. A pair is kept whole, so a value swapped
+    between two keys is not the same cell.
+    """
+    pieces = part.split("=")
+    if len(pieces) < 3:
+        return part, []
+    return "=".join(pieces[-2:]), pieces[:-2]
 
 
-def _cell_key(cell: Any) -> str:
-    """A cell in an order-blind form: the keys and values it writes, sorted.
+def _cell_key(cell: Any, *, loose: bool = False) -> str:
+    """A cell in an order-blind form: its ``key=value`` pairs and the outer keys, sorted.
 
-    A cell cut to its length shows the parts that came first, which depend on
-    the order its keys came in: it is kept only as a cut cell.
+    A cell cut to its length shows the pairs that came first, which depend on
+    the order its keys came in: it is compared on the whole pairs it shows
+    before the cut, and, ``loose``, only as a cut cell.
     """
     said = "" if cell is None else str(cell)
-    if said.endswith(_CUT_MARK):
+    cut = said.endswith(_CUT_MARK)
+    if cut and loose:
         return _CUT_MARK
-    return json.dumps(sorted(_CELL_JOINS.split(said)), ensure_ascii=False)
+    parts = said.split(", ")
+    if cut:
+        parts = parts[:-1]
+    pairs: list[str] = []
+    outer: list[str] = []
+    for part in parts:
+        pair, above = _pairs(part)
+        pairs.append(pair)
+        outer.extend(above)
+    return json.dumps([cut, sorted(pairs), sorted(outer)], ensure_ascii=False)
 
 
-def _row_key(row: Any) -> str:
+def _row_key(row: Any, *, loose: bool = False) -> str:
     """A row (or a header, or a text) in an order-blind form: its cells' forms, sorted."""
     cells = row if isinstance(row, list) else [row]
-    return json.dumps(sorted(_cell_key(cell) for cell in cells), ensure_ascii=False)
+    return json.dumps(sorted(_cell_key(cell, loose=loose) for cell in cells), ensure_ascii=False)
 
 
 def _order_of(stored: Sequence[str], replayed: Sequence[str]) -> bool:

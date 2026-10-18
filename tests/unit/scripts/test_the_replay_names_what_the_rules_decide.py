@@ -65,6 +65,7 @@ CLAIM_SENTENCES = (
 )
 # A literal quoted in a STIX pattern.
 _QUOTED = re.compile(r"'((?:[^'\\]|\\.)+)'")
+_UUID = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", re.I)
 
 
 @pytest.fixture(scope="module")
@@ -364,6 +365,15 @@ def _values_of(run: Path, shown: dict[str, Any]) -> set[str]:
         for obj in json.loads(judge.read_text(encoding="utf-8"))["bundle"].get("objects") or []:
             if obj.get("type") == "indicator":
                 values.update(_QUOTED.findall(str(obj.get("pattern") or "")))
+        for obj in json.loads(judge.read_text(encoding="utf-8"))["bundle"].get("objects") or []:
+            # The judge's own names for its objects, and the id parts that are not a
+            # number or a UUID: a path quotes the label.
+            if obj.get("type") == "malware" and obj.get("name"):
+                values.add(str(obj["name"]))
+            ident = str(obj.get("id") or "")
+            rest = ident.partition("--")[2]
+            if rest and not rest.isdigit() and not _UUID.match(rest):
+                values.add(ident)
     for flag in _all_flags(shown):
         if flag.get("subject_text"):
             values.add(str(flag["subject_text"]).partition(":")[2] or str(flag["subject_text"]))
@@ -390,9 +400,10 @@ def test_no_value_of_the_run_is_in_the_record_without_the_text() -> None:
         shown = replay_run(read_run(run), show_text=True)
         quiet = replay_run(read_run(run))
         values = _values_of(run, shown)
-        texts = [*_strings(quiet), render_record(quiet)]
+        texts = [text.lower() for text in [*_strings(quiet), render_record(quiet)]]
         assert values, run
-        assert sorted(v for v in values if any(v in text for text in texts)) == [], run
+        leaked = sorted(v for v in values if any(v.lower() in text for text in texts))
+        assert leaked == [], run
         # The same value-free fields either way: the text only adds fields.
         assert {k: v for k, v in shown["report"].items() if not k.endswith("_text")}.keys() == (
             quiet["report"].keys()
@@ -401,9 +412,13 @@ def test_no_value_of_the_run_is_in_the_record_without_the_text() -> None:
     shown = replay_run(read_run(FIXTURE), show_text=True)
     answers = [str(row.get("answer_text") or "") for row in shown["report"]["indicators"].values()]
     assert any("https://cdn.stage-two-host.net/live/" in answer for answer in answers)
+    # And a finding's path quotes a judge's label that names its object.
+    paths = [str(flag.get("path_text") or "") for flag in shown["judge"]["flags"]]
+    assert any("attack-pattern--fake" in path for path in paths)
 
 
 def test_a_subject_and_its_path_carry_no_value() -> None:
+    from scripts.replay.compare import _failure_named
     from scripts.replay.rules import _flag
 
     from maljan.pipeline.validation import Violation
@@ -422,9 +437,68 @@ def test_a_subject_and_its_path_carry_no_value() -> None:
     assert shown["subject"] == quiet["subject"]
     assert shown["subject_text"] == "domain:host.example.net"
     assert shown["path_text"] == "objects.domain:host.example.net"
-    for kept in ("T1055.001", "t1055", "ev_0003", "proc:84", quiet["subject"]):
+
+    # The judge's own label for an object, whatever the subject's case.
+    family = Violation(
+        code="stix.is_family_missing",
+        message="m",
+        path="objects[0] 'malware--some-family'",
+        subject="Some-Family",
+    )
+    named = _flag(family, show_text=False)
+    assert named["path"] == f"objects[0] 'malware--{digest('some-family')}'"
+    assert "some-family" not in json.dumps(named).lower()
+    plain = _flag(
+        Violation(code="c", message="m", path="objects[3] 'indicator--1'"), show_text=False
+    )
+    assert plain["path"] == "objects[3] 'indicator--1'"
+
+    # An id stays as it is; a value does not pass for its shape.
+    for kept in ("T1055.001", "t1055", "ev_0003"):
         assert value_free_subject(kept) == kept
+    from maljan.analysis.sandbox_sections import is_item_id
+
+    assert value_free_subject("proc:84", is_item_id) == "proc:84"
+    assert value_free_subject("port:4444", is_item_id) == f"port:{digest('4444')}"
+    assert value_free_subject("0123456789ab") == f"sha256:{digest('0123456789ab')}"
+    assert value_free_subject("domain:0123456789ab") == f"domain:{digest('0123456789ab')}"
     assert value_free_subject("Some Family") == f"sha256:{digest('Some Family')}"
+
+    # A harness that crashed is named by its failure's class and place, never its message.
+    said = b"Traceback\nreplay failed: KeyError at rules.py:12 (_judge)\n"
+    assert _failure_named(said, 2) == "replay failed: KeyError at rules.py:12 (_judge)"
+    older = b"replay failed: ValueError: host.example.net is not a host\n"
+    assert _failure_named(older, 2) == "replay failed: ValueError"
+    assert _failure_named(b"Segmentation fault\n", 139) == "exit status 139"
+
+
+def test_a_cell_keeps_its_key_value_pairs_and_merged_rows_carry_the_key_order() -> None:
+    from scripts.replay.rules import _row_key, _Run, _section_content
+
+    assert _row_key(["malicious=52, suspicious=0"]) != _row_key(["malicious=0, suspicious=52"])
+    assert _row_key(["outer=b=2, c=3"]) == _row_key(["outer=c=3, b=2"])
+    assert _row_key(["a=1, b=2, c=3\u2026"]) != _row_key(["c=3, a=1, b=2\u2026"])
+    assert _row_key(["a=1, b\u2026"], loose=True) == _row_key(["c=3, a\u2026"], loose=True)
+
+    run = _Run(stored=read_run(FIXTURE), show_text=False)
+    run.name("ledger", replay_rules._NO_KEY_ORDER)
+    cut_one, cut_two = ["data", "a=1, b=2, c\u2026"], ["data", "c=3, a=1, b\u2026"]
+    stored = {"key": "tool_x", "rows": [cut_one, ["k", "v"], cut_two]}
+    replayed = {"key": "tool_x", "rows": [cut_one, ["k", "v"]]}
+    rows = _section_content(run, "tool_x", stored, replayed)
+    assert rows == [
+        {
+            "section": "tool_x",
+            "field": "rows",
+            "merged": 1,
+            "cause": {"part": "ledger", "why": replay_rules._NO_KEY_ORDER},
+        }
+    ]
+    swapped = {"key": "tool_x", "rows": [["malicious=0, suspicious=52"]]}
+    differ = _section_content(
+        run, "tool_x", {"key": "tool_x", "rows": [["malicious=52, suspicious=0"]]}, swapped
+    )
+    assert [r.get("row") for r in differ] == [0, 0] and all("cause" not in r for r in differ)
 
 
 def test_the_replay_reaches_no_network_and_puts_every_door_back() -> None:
@@ -554,6 +628,43 @@ def test_a_partial_comparison_ends_with_status_2(
     assert replay_cli.main([*argv, "--work", str(tmp_path / "work")]) == 2
     printed = capsys.readouterr().out
     assert "PARTIAL COMPARISON" in printed and "no difference" not in printed
+
+
+def test_a_section_one_tree_alone_composes_is_not_compared(
+    record: dict[str, Any],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    lacking = copy.deepcopy(record)
+    sections = lacking["composer"]["sections"]
+    quiet_section = next(name for name, entry in sections.items() if not entry["flags"])
+    del sections[quiet_section]
+    diff = diff_records(record, lacking)
+    assert diff["not_compared"] == {"a": [f"composer section: {quiet_section}"]}
+    assert is_partial(diff) and not differs(diff)
+
+    moved = copy.deepcopy(record)
+    moved["tool"]["calls"] += 1
+    moved["composer"]["not_written"] = moved["composer"]["not_written"][1:]
+    moved["environment"]["settings_from_run"] = []
+    diff = diff_records(record, moved)
+    assert diff["tool"] == {
+        "calls": {"a": record["tool"]["calls"], "b": record["tool"]["calls"] + 1}
+    }
+    assert diff["composer"]["not_written"]["only_a"] == record["composer"]["not_written"][:1]
+    assert diff["environment"]["settings_from_run"]["only_b"] == []
+
+    monkeypatch.setattr(compare, "materialise", lambda _repo, _ref, into: into)
+    monkeypatch.setattr(
+        compare,
+        "replay_under",
+        lambda _tree, _runs, out, **_kwargs: [record if out.name.startswith("a-") else lacking],
+    )
+    argv = [str(FIXTURE), "--compare", "A-ref", "B-ref", "--repo", str(tmp_path)]
+    assert replay_cli.main([*argv, "--work", str(tmp_path / "work")]) == 2
+    printed = capsys.readouterr().out
+    assert "PARTIAL COMPARISON" in printed and quiet_section in printed
 
 
 def _seconds(work: Callable[[], object]) -> float:

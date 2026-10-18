@@ -265,6 +265,12 @@ def _against_stored_lines(block: Mapping[str, Any]) -> list[str]:
         if "reordered" in row:
             lines.append(f"  {where}: the same parts in another order{_cause(row)}")
             continue
+        if "merged" in row:
+            lines.append(
+                f"  {where}: {row['merged']} row(s) one table holds more often, the same once "
+                f"the key order is set aside{_cause(row)}"
+            )
+            continue
         lines.append(
             f"  {where} differs: stored {_said(row.get('stored'))}, replayed "
             f"{_said(row.get('replayed'))}{_cause(row)}"
@@ -371,6 +377,8 @@ def render_diff(diff: Mapping[str, Any], ref_a: str, ref_b: str) -> str:
         ("totals", "Counts by producer and code"),
         ("answers", "Claims each answer parsed into"),
         ("judge", "The judge's bundle"),
+        ("composer", "The composer's sections"),
+        ("tool", "The tool calls"),
         ("environment", "Settings and guards"),
         ("corroboration", "Corroboration"),
         ("not_replayed", "Parts not replayed"),

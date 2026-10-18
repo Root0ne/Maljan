@@ -247,5 +247,10 @@ if __name__ == "__main__":
     except SystemExit:
         raise
     except Exception as exc:  # noqa: BLE001 — said, and the status says it failed
-        print(f"replay failed: {type(exc).__name__}: {exc}", file=sys.stderr)
+        # The class and where it was raised: a message can quote a value from the run.
+        import traceback
+
+        frames = traceback.extract_tb(exc.__traceback__)
+        where = f" at {Path(frames[-1].filename).name}:{frames[-1].lineno} ({frames[-1].name})"
+        print(f"replay failed: {type(exc).__name__}{where if frames else ''}", file=sys.stderr)
         sys.exit(2)

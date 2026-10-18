@@ -35,6 +35,7 @@ from __future__ import annotations
 import io
 import json
 import os
+import re
 import shutil
 import subprocess  # nosec B404 — git and the replay itself, argument lists only
 import sys
@@ -51,6 +52,7 @@ from scripts.replay.record import (
     digest,
     errors,
     schema_of,
+    value_free_path,
     value_free_subject,
 )
 
@@ -66,8 +68,10 @@ ARCHIVED_PATHS: tuple[str, ...] = (
 )
 # The harness a ref replays with; a ref without it predates the replay tool.
 HARNESS = "scripts/replay/run.py"
-# The schema from which a record's values are value-free.
+# The schema from which a record's subjects and values are value-free, and the one
+# from which the object labels in its paths are too.
 VALUE_FREE_SCHEMA = 3
+LABEL_FREE_SCHEMA = 4
 
 
 class CompareError(RuntimeError):
@@ -172,9 +176,13 @@ def replay_under(
             f"the replay under {tree} did not finish within {timeout:g} s and was stopped"
         ) from exc
     if done.returncode not in (0, 2) or not out.is_file():
-        said = done.stderr.decode("utf-8", "replace").strip().splitlines()
+        # The harness's own error output can quote a value from the run: it is
+        # kept beside the record, and only the failure's name is said.
+        kept = out.with_name(f"{out.stem}-stderr.txt")
+        kept.write_bytes(done.stderr)
+        named = _failure_named(done.stderr, done.returncode)
         raise CompareError(
-            f"the replay under {tree} wrote no record: {said[-1] if said else done.returncode}"
+            f"the replay under {tree} wrote no record: {named} (its error output is kept in {kept})"
         )
     records = json.loads(out.read_text(encoding="utf-8"))
     records = records if isinstance(records, list) else [records]
@@ -188,38 +196,67 @@ def replay_under(
     return records
 
 
+# How a harness names the failure it ended on: the exception's class and where
+# it was raised, never its message.
+_FAILURE_RE = re.compile(r"^replay failed: (\w+)(?: at [\w.-]+\.py:\d+ \([\w<>.]+\))?")
+
+
+def _failure_named(stderr: bytes, status: int) -> str:
+    """The failure a harness ended on, by name and place only, or its exit status."""
+    for line in reversed(stderr.decode("utf-8", "replace").splitlines()):
+        found = _FAILURE_RE.match(line.strip())
+        if found:
+            return found.group(0)
+    return f"exit status {status}"
+
+
 # ---------------------------------------------------------------------------
 # The differences
 # ---------------------------------------------------------------------------
 
 
-def _flag_key(part: str, owner: str, flag: Mapping[str, Any]) -> tuple[str, ...]:
-    """A finding's key, its subject and the path that writes it value-free."""
+def _is_item() -> Any:
+    """The platform's reader of a sandbox item id, or ``None`` where it cannot be imported."""
+    try:
+        from maljan.analysis.sandbox_sections import is_item_id
+    except Exception:  # noqa: BLE001 — then an item id is digested like any value
+        return None
+    return is_item_id
+
+
+def _flag_key(part: str, owner: str, flag: Mapping[str, Any], schema: int) -> tuple[str, ...]:
+    """A finding's key. A record from before the value-free schemas wrote its subject
+    (before 3) or the object labels in its paths (before 4) with the values in them: they
+    are made value-free here as a later record writes them, so the two compare."""
     subject = str(flag.get("subject") or "")
-    shown = value_free_subject(subject)
     path = str(flag.get("path") or "")
-    if subject and shown != subject:
-        path = path.replace(subject, shown)
-    return (part, owner, path, shown, str(flag.get("code") or ""))
+    if schema < VALUE_FREE_SCHEMA:
+        is_item = _is_item()
+        path = value_free_path(path, subject, is_item)
+        subject = value_free_subject(subject, is_item)
+    elif schema < LABEL_FREE_SCHEMA:
+        path = value_free_path(path)
+    return (part, owner, path, subject, str(flag.get("code") or ""))
 
 
 def flag_keys(record: Mapping[str, Any]) -> Counter[tuple[str, ...]]:
     """Every finding of a record, keyed by producer, answer, claim and code, counted."""
+    schema = schema_of(record)
     out: Counter[tuple[str, ...]] = Counter()
     for agent, entry in (record.get("analysts") or {}).items():
         for answer in entry.get("answers") or []:
             owner = f"{agent} {answer.get('answer', '')}"
             for flag in answer.get("flags") or []:
-                out[_flag_key("analyst answer", owner, flag)] += 1
+                out[_flag_key("analyst answer", owner, flag, schema)] += 1
         for flag in (entry.get("in_force") or {}).get("flags") or []:
-            out[_flag_key("claims in force", agent, flag)] += 1
+            out[_flag_key("claims in force", agent, flag, schema)] += 1
     for part in ("judge", "narrative", "tool", "fp_linter"):
         for flag in (record.get(part) or {}).get("flags") or []:
             owner = ",".join(flag.get("entries") or []) if part == "tool" else ""
-            out[_flag_key(part, owner, flag)] += 1
+            out[_flag_key(part, owner, flag, schema)] += 1
     for section, entry in ((record.get("composer") or {}).get("sections") or {}).items():
         for flag in entry.get("flags") or []:
-            out[_flag_key("composer", section, flag)] += 1
+            out[_flag_key("composer", section, flag, schema)] += 1
     return out
 
 
@@ -295,6 +332,9 @@ def _defined(record: Mapping[str, Any], schema: int) -> set[str]:
             for entry in (record.get("analysts") or {}).values()
         ):
             names.add(f"claims in force: {key}")
+    composer = record.get("composer")
+    if isinstance(composer, dict):
+        names.update(f"composer section: {name}" for name in composer.get("sections") or {})
     return names
 
 
@@ -377,9 +417,12 @@ def diff_records(a: Mapping[str, Any], b: Mapping[str, Any]) -> dict[str, Any]:
     schema = min(schema_a, schema_b)
     if schema_a != schema_b:
         out["schema"] = {"a": schema_a, "b": schema_b}
-        a, b, not_compared = _common(a, b, schema_a, schema_b)
-        if any(not_compared.values()):
-            out["not_compared"] = {key: rows for key, rows in not_compared.items() if rows}
+    # On every comparison, not only across schemas: two harnesses of one schema
+    # may still define different parts (a composer section one tree no longer
+    # writes), and a part only one side defines is not compared.
+    a, b, not_compared = _common(a, b, schema_a, schema_b)
+    if any(not_compared.values()):
+        out["not_compared"] = {key: rows for key, rows in not_compared.items() if rows}
     keys_a, keys_b = flag_keys(a), flag_keys(b)
     gained = _keyed((k, c) for k, c in (keys_b - keys_a).items())
     lost = _keyed((k, c) for k, c in (keys_a - keys_b).items())
@@ -468,6 +511,18 @@ def diff_records(a: Mapping[str, Any], b: Mapping[str, Any]) -> dict[str, Any]:
             judge[key] = changed
     if judge:
         out["judge"] = judge
+    written_a = set((a.get("composer") or {}).get("not_written") or [])
+    written_b = set((b.get("composer") or {}).get("not_written") or [])
+    if written_a != written_b:
+        out["composer"] = {
+            "not_written": {
+                "only_a": sorted(written_a - written_b),
+                "only_b": sorted(written_b - written_a),
+            }
+        }
+    calls = _changed((a.get("tool") or {}).get("calls"), (b.get("tool") or {}).get("calls"))
+    if calls and ("tool" in a or "tool" in b):
+        out["tool"] = {"calls": calls}
     environment: dict[str, Any] = {}
     env_a, env_b = a.get("environment") or {}, b.get("environment") or {}
     refused = _mapping_diff(
@@ -481,6 +536,13 @@ def diff_records(a: Mapping[str, Any], b: Mapping[str, Any]) -> dict[str, Any]:
         environment["doors_this_tree_lacks"] = {
             "only_a": sorted(lacking_a - lacking_b),
             "only_b": sorted(lacking_b - lacking_a),
+        }
+    applied_a = set(env_a.get("settings_from_run") or [])
+    applied_b = set(env_b.get("settings_from_run") or [])
+    if applied_a != applied_b:
+        environment["settings_from_run"] = {
+            "only_a": sorted(applied_a - applied_b),
+            "only_b": sorted(applied_b - applied_a),
         }
     if environment:
         out["environment"] = environment
