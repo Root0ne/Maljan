@@ -462,7 +462,7 @@ def capa_function_starts(document: dict[str, Any]) -> list[str]:
     seem to run on over it. Each start is its offset from the image base, kept
     only when it is inside the image and capa names the base, so it is the
     number a disassembler agrees with; the list says where functions start,
-    not where they end.
+    not where they end, in address order.
     """
     base = _capa_base_address(document)
     if base is None:
@@ -477,7 +477,7 @@ def capa_function_starts(document: dict[str, Any]) -> list[str]:
         if where and where.startswith("0x") and where not in seen:
             seen.add(where)
             starts.append(where)
-    return starts
+    return sorted(starts, key=lambda start: int(start, 16))
 
 
 # What a library function's address says when capa's address for it is not a

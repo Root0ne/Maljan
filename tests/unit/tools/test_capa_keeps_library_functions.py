@@ -85,14 +85,16 @@ def _image() -> pe_image.Image:
 
 
 class TestTheStarts:
-    def test_the_library_functions_start_after_the_analysed_ones(self) -> None:
+    def test_the_library_functions_start_among_the_analysed_ones_in_address_order(
+        self,
+    ) -> None:
         document = _document(library=_RUNTIME, not_identified=None)
 
         assert tool.capa_function_starts(document) == [
             "0x1000",
             "0x26ae",
-            "0x28a4",
             "0x2740",
+            "0x28a4",
             "0x28b0",
         ]
 
