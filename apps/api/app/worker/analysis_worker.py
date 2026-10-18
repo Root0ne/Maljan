@@ -4642,6 +4642,23 @@ async def _store_the_report(
     report.ledger_seal = _seal
     report.malware_report = ledger_chain.with_seal(report.malware_report, _seal)
     report.run_summary = ledger_chain.with_seal(report.run_summary, _seal)
+    # The seal on the audit chain, in this transaction: a copy of the seal the
+    # report row cannot take with it when it is deleted, linked to every
+    # chained audit row before it. Best effort under a savepoint, so a failed
+    # audit write never loses the stored report; it is logged and counted.
+    from app.services import audit_chain
+
+    # The rows and the sealed report go to the database first, so a failure of
+    # theirs is never taken for the audit write's.
+    await db.flush()
+    await audit_chain.append(
+        db,
+        action=audit_chain.LEDGER_SEAL,
+        resource_type="job",
+        resource_id=str(job_uuid),
+        details={"report_id": str(report.id), "seal": _seal},
+        key=_key,
+    )
 
     logger.info(
         f"Saved {len(_ledger)} evidence entries for job={job_id}",

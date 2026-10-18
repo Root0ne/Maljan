@@ -3,7 +3,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, String
+from sqlalchemy import Boolean, DateTime, ForeignKey, Index, Integer, String
 from sqlalchemy.dialects.postgresql import INET, JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -32,6 +32,18 @@ class AuditLog(UUIDPrimaryKeyMixin, Base):
         server_default="now()",
         nullable=False,
     )
+
+    # The audit chain (``app.services.audit_chain``): a chained row (a ledger
+    # seal, an amendment to a sealed report) takes the next ``chain_seq``, the
+    # SHA-256 of its columns in canonical form, and the keyed chain value that
+    # links it to the chained row before it, with the id of the key it was
+    # chained under. NULL on every other row and every row written before.
+    chain_seq: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    digest: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    chain: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    chain_key_id: Mapped[str | None] = mapped_column(String(16), nullable=True)
+
+    __table_args__ = (Index("uq_audit_log_chain_seq", "chain_seq", unique=True),)
 
     # Relationships
     user = relationship("User", back_populates="audit_logs")
