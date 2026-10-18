@@ -69,6 +69,10 @@ def _unique_names(conn) -> set[str]:
     return {c["name"] for c in sa.inspect(conn).get_unique_constraints("evidence_entries")}
 
 
+def _index_names(conn) -> set[str]:
+    return {i["name"] for i in sa.inspect(conn).get_indexes("evidence_entries")}
+
+
 def test_the_revision_follows_the_every_field_one():
     mod = _load(_REV)
     assert mod.revision == "20261018000000"
@@ -85,8 +89,11 @@ def test_a_clean_table_gains_both_constraints_and_refuses_a_second_row():
         # Another job issues the same ids from its own counter.
         _insert(conn, other, "ev_0001", 1)
 
+        assert "ix_evidence_entries_job_seq" in _index_names(conn)
         _run(conn, _REV, "upgrade")
         assert _NAMES <= _unique_names(conn)
+        # The constraint on (job_id, seq) makes the plain index redundant.
+        assert "ix_evidence_entries_job_seq" not in _index_names(conn)
         assert conn.execute(sa.text("SELECT COUNT(*) FROM evidence_entries")).scalar() == 3
 
         with pytest.raises(sa.exc.IntegrityError):
@@ -115,6 +122,7 @@ def test_a_stored_duplicate_stops_the_upgrade_naming_the_job_and_changing_nothin
         assert f"one seq: {twice_seq}" in reason
         assert clean not in reason
         assert not _NAMES & _unique_names(conn)
+        assert "ix_evidence_entries_job_seq" in _index_names(conn)
         assert conn.execute(sa.text("SELECT COUNT(*) FROM evidence_entries")).scalar() == 5
 
 
@@ -128,5 +136,50 @@ def test_the_downgrade_takes_both_constraints_away():
         _run(conn, _REV, "downgrade")
 
         assert not _NAMES & _unique_names(conn)
+        assert "ix_evidence_entries_job_seq" in _index_names(conn)
         _insert(conn, job, "ev_0001", 1)
         assert conn.execute(sa.text("SELECT COUNT(*) FROM evidence_entries")).scalar() == 2
+
+
+def _postgres_sql(step: str) -> str:
+    """What the revision does on PostgreSQL, as the offline SQL script it writes."""
+    import io
+
+    buffer = io.StringIO()
+    mod = _load(_REV)
+    context = MigrationContext.configure(
+        dialect_name="postgresql", opts={"as_sql": True, "output_buffer": buffer}
+    )
+    with Operations.context(context):
+        mod.op = Operations(context)
+        getattr(mod, step)()
+    return buffer.getvalue()
+
+
+def test_on_postgres_the_indexes_are_built_concurrently_and_then_attached():
+    sql = _postgres_sql("upgrade")
+    for name, column in (
+        ("uq_evidence_entries_job_entry_id", "entry_id"),
+        ("uq_evidence_entries_job_seq", "seq"),
+    ):
+        built = f"CREATE UNIQUE INDEX CONCURRENTLY {name} ON evidence_entries (job_id, {column})"
+        attached = f"ALTER TABLE evidence_entries ADD CONSTRAINT {name} UNIQUE USING INDEX {name}"
+        assert built in sql
+        assert attached in sql
+        assert sql.index(built) < sql.index(attached)
+    assert "DROP INDEX CONCURRENTLY IF EXISTS ix_evidence_entries_job_seq" in sql
+    # Built outside the migration's transaction: a concurrent build refuses one.
+    assert sql.index("COMMIT") < sql.index("CREATE UNIQUE INDEX CONCURRENTLY")
+
+
+def test_on_postgres_the_downgrade_puts_the_plain_index_back_before_dropping_the_constraints():
+    sql = _postgres_sql("downgrade")
+    restored = (
+        "CREATE INDEX CONCURRENTLY IF NOT EXISTS ix_evidence_entries_job_seq "
+        "ON evidence_entries (job_id, seq)"
+    )
+    assert restored in sql
+    for name in ("uq_evidence_entries_job_entry_id", "uq_evidence_entries_job_seq"):
+        dropped = f"ALTER TABLE evidence_entries DROP CONSTRAINT IF EXISTS {name}"
+        assert dropped in sql
+        assert sql.index(restored) < sql.index(dropped)
