@@ -130,12 +130,25 @@ from `apps/docs` with `npm ci` and `npm run dev`; `npm run build` writes the
 static site to `apps/docs/out/` and fails if any address the site has served
 before no longer leads to a page (`scripts/old-urls.mjs`).
 
-[Validation codes](/validation-codes/) is generated, not written: run
-`uv run python scripts/validation_codes/run.py` after adding, removing or moving
-a code, its test or a page that names it, and commit the page.
-`tests/unit/test_the_validation_code_register_is_current.py` fails when the
-committed page is not what the source gives, when nothing raises a code, and
-when no test names one.
+[Validation codes](/validation-codes/) is generated, not written. Run
+`uv run python scripts/validation_codes/run.py` and commit the page after any of
+these edits:
+
+- adding, removing or renaming a code, or the constant that names it;
+- adding, moving or removing a place that raises a code or passes one on,
+  renaming the function it is in included;
+- changing a code constant's comment, the comment over a group of code
+  constants, or the message a raise site passes;
+- adding or removing a mention of a code on a docs page, or renaming or moving
+  such a page;
+- adding or changing a code position the register cannot follow.
+
+Adding, changing or removing a test does not change the page: the tests are not
+listed on it, and `run.py --tests` prints which tests name each code. The
+register reads only the files git tracks, so add a new file before
+regenerating. `tests/unit/test_the_validation_code_register_is_current.py` fails
+when the committed page is not what the source gives, naming the command, when
+nothing raises a code, and when no test names one.
 
 ## Continuous integration
 

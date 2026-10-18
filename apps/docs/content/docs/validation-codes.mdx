@@ -1,6 +1,6 @@
 ---
 title: "Validation codes"
-description: "Every code the platform's validators file a finding under: where it is raised, what it means, and the tests and pages that name it."
+description: "Every code the platform's validators file a finding under: where it is raised, what it means, and the pages that name it."
 ---
 
 This page is generated from the source by
@@ -13,27 +13,34 @@ a retry turn shows the producer, the key of `run_summary.validation.by_code`, an
 the `code` of every unresolved row. The register reads the source with Python's
 `ast` module and never imports it. A string counts as a code only in a code
 position (the value of a `code=` keyword, the value assigned to a name ending in
-`_CODE`, a member of a set or tuple bound to a name ending in `_CODES`) and only
-in the form `family.name`. The families are the ones the source uses.
+`_CODE`, a member of a set or tuple bound to a name ending in `_CODES`, or the
+code slot of a finding the platform builds) and only in the form `family.name`.
+The families are the ones the source uses.
 
-A code is raised where its value is used: given as a `code=` keyword, passed,
-returned or stored. A name it is assigned to is followed, and so are a loop over
-a constant collection, a conditional between constants, a lookup in a constant
-mapping and a parameter fed by constants at every call site. Comparing a code,
-listing it in a set or tuple of codes, or naming it in formatted text reads it,
-and is not a raise site. Places are named `module:function`, without line
-numbers, so an edit elsewhere in a file leaves this page as it is.
+A code is raised only where the platform puts it into a finding it emits: a call
+building an object of a class whose instances carry a `code` (with `code=` or in
+its positional place), a dict with a `"code"` key, a tuple shaped like such a
+class, a call to a factory whose parameter reaches one of those, or a callback
+the function was handed; and only in code something calls. Sites that store or
+forward an existing code are listed as passing it on. Comparing a code, looking
+up or counting by it, testing a string against it, logging it, filtering by it,
+a default that reaches no finding and formatted text read it, and are not
+listed. A name, a loop over constants, a conditional, a constant mapping and a
+parameter fed by constants at every call site are followed. Places are named
+`module:function`, without line numbers, so an edit elsewhere in a file leaves
+this page as it is.
 
-A code's meaning is the comment or docstring on its constant; where there is
-none, the message its first raise site passes, with each value it fills in
-written `<name>`. Its tests are the Python tests that name it, in a string other
-than a docstring or by its constant; a code the platform raises needs one. The
-console's unit tests that name it in a string are listed apart. A code bound
-under a `LEGACY_` name is one nothing raises any more and stored runs
-still carry; the comment on that name says what reads it, and a test where it
-is read names it.
+A code's meaning is the comment or docstring on its own constant; where there is
+none, the message a raise site passes, with each value it fills in written
+`<name>`; where there is neither, the comment written over the group of
+constants it belongs to, marked as such. A code counts as tested when a Python
+test names it, in a string other than a docstring or by its constant; that does
+not prove the test makes the platform raise it. The tests are not listed here:
+`uv run python scripts/validation_codes/run.py --tests` prints them. A code bound under a `LEGACY_` name is
+one nothing raises any more and stored runs still carry; the comment on that
+name says what reads it.
 
-**85 codes in 9 families:** [attck](#attck) 6 · [attribution](#attribution) 1 · [composer](#composer) 3 · [isr](#isr) 13 · [narrative](#narrative) 5 · [report](#report) 12 · [stix](#stix) 32 · [tool](#tool) 1 · [verdict](#verdict) 12. 4 code positions the register could not resolve are [listed at the end](#unresolved-code-positions).
+**85 codes in 9 families:** [attck](#attck) 6 · [attribution](#attribution) 1 · [composer](#composer) 3 · [isr](#isr) 13 · [narrative](#narrative) 5 · [report](#report) 12 · [stix](#stix) 32 · [tool](#tool) 1 · [verdict](#verdict) 12. 13 code positions the register could not resolve are [listed at the end](#unresolved-code-positions).
 
 ## attck
 
@@ -43,7 +50,6 @@ No comment names its meaning; the message at `maljan.pipeline.validation:absence
 
 - **Raised at** `maljan.pipeline.validation:absence_claim_violation`
 - **Constant** `maljan.pipeline.validation:ABSENCE_CLAIM_CODE`
-- **Tests** `tests/unit/agents/test_a_corrected_technique_list_is_the_answer_kept.py`, `tests/unit/pipeline/test_a_claim_naming_its_technique_s_procedure_describes_it.py`, `tests/unit/pipeline/test_a_claim_that_does_not_describe_its_technique_is_asked.py`, `tests/unit/pipeline/test_a_claim_that_reads_as_absence_is_asked_about_its_technique.py`, `tests/unit/reporting/test_every_network_value_the_report_prints_is_defanged.py`
 - **Docs** [Architecture](/architecture/)
 
 ### `attck.claim_does_not_describe`
@@ -52,7 +58,6 @@ No comment names its meaning; the message at `maljan.pipeline.validation:claim_d
 
 - **Raised at** `maljan.pipeline.validation:claim_does_not_describe_violation`
 - **Constant** `maljan.pipeline.validation:CLAIM_DOES_NOT_DESCRIBE_CODE`
-- **Tests** `tests/unit/agents/test_a_corrected_technique_list_is_the_answer_kept.py`, `tests/unit/agents/test_a_technique_line_may_list_several_ids.py`, `tests/unit/agents/test_an_analyst_cut_at_its_cap_is_asked_for_a_whole_answer.py`, `tests/unit/pipeline/test_a_claim_naming_its_technique_s_procedure_describes_it.py`, `tests/unit/pipeline/test_a_claim_that_does_not_describe_its_technique_is_asked.py`, `tests/unit/pipeline/test_a_claim_written_in_its_technique_s_description_words_describes_it.py`, `tests/unit/pipeline/test_a_sub_technique_is_not_described_by_its_parent_s_words_alone.py`, `tests/unit/pipeline/test_a_validation_retry_changes_only_what_was_asked.py`, `tests/unit/pipeline/test_an_identical_unresolved_finding_is_listed_once.py`, `tests/unit/pipeline/test_an_inflection_of_the_catalogue_name_describes_the_technique.py`, `tests/unit/pipeline/test_report_text_is_never_masked.py`, `tests/unit/pipeline/test_validation.py`, `tests/unit/reporting/test_the_report_says_what_the_run_did_not_do.py`
 - **Docs** [Architecture](/architecture/), [Latrodectus score: iteration 5, default model](/benchmark/scores/latrodectus-iteration5-default/), [Latrodectus score: iteration 6, default model](/benchmark/scores/latrodectus-iteration6-default/)
 
 ### `attck.missing_id`
@@ -61,7 +66,6 @@ A technique named with no id. Its own code because the answer is different from 
 
 - **Raised at** `maljan.pipeline.validation:validate_verdict_bundle`
 - **Constant** `maljan.pipeline.validation:MISSING_ID_CODE`
-- **Tests** `tests/unit/agents/test_judge_verdict_validation.py`, `tests/unit/analysis/test_a_name_that_begins_with_t_names_no_technique.py`, `tests/unit/pipeline/test_a_finding_row_never_carries_a_secret.py`, `tests/unit/pipeline/test_validation.py`, `tests/unit/reporting/test_one_source_for_published_techniques.py`
 - **Docs** [Architecture](/architecture/)
 
 ### `attck.platform_mismatch`
@@ -70,26 +74,23 @@ No comment names its meaning; the message at `maljan.pipeline.validation:validat
 
 - **Raised at** `maljan.pipeline.validation:validate_isr`, `maljan.pipeline.validation:validate_verdict_bundle`
 - **Constant** `maljan.pipeline.validation:PLATFORM_MISMATCH_CODE`
-- **Tests** `tests/unit/pipeline/test_a_claim_that_does_not_describe_its_technique_is_asked.py`, `tests/unit/pipeline/test_technique_check.py`, `tests/unit/pipeline/test_validation.py`
 - **Docs** [Architecture](/architecture/), [Latrodectus score: iteration 2, default model](/benchmark/scores/latrodectus-iteration2-default/)
 
 ### `attck.unknown_id`
 
-No comment names its meaning; the message at `maljan.pipeline.validation:validate_isr` reads: "TECHNIQUE \<tid> is not in the MITRE ATT&CK catalogue\<tid>.\<hint> Use one of them, or omit the technique id."
+No comment names its meaning; the message at `maljan.pipeline.validation:validate_isr` reads: "TECHNIQUE \<tid> is not in the MITRE ATT&CK catalogue\<retired_note>.\<hint> Use one of them, or omit the technique id."
 
-- **Raised at** `maljan.agents.base_agent:BaseAnalyst._validate_isr`, `maljan.pipeline.nodes:make_judge_node.node_fn`, `maljan.pipeline.validation:validate_isr`
+- **Raised at** `maljan.pipeline.validation:validate_isr`
+- **Passes on** `maljan.agents.base_agent:BaseAnalyst._validate_isr`, `maljan.pipeline.nodes:make_judge_node.node_fn`
 - **Constant** `maljan.pipeline.validation:VALIDITY_CODE`
-- **Tests** `tests/unit/agents/test_a_corrected_technique_list_is_the_answer_kept.py`, `tests/unit/agents/test_analyst_validation_loop.py`, `tests/unit/pipeline/test_a_fallback_verdict_assesses_nothing.py`, `tests/unit/pipeline/test_degraded_mode_at_the_judge_node.py`, `tests/unit/pipeline/test_live_event_producers.py`, `tests/unit/pipeline/test_technique_check.py`, `tests/unit/pipeline/test_validation.py`, `tests/unit/pipeline/test_validation_by_code.py`, `tests/unit/reporting/test_the_report_says_what_the_run_did_not_do.py`, `tests/unit/test_run_summary.py`
-- **Console tests** `apps/web/src/lib/__tests__/validationRows.test.ts`
 - **Docs** [Architecture](/architecture/), [Latrodectus score: iteration 5, default model](/benchmark/scores/latrodectus-iteration5-default/), [Latrodectus score: iteration 6, default model](/benchmark/scores/latrodectus-iteration6-default/)
 
 ### `attck.weak_alignment`
 
-No comment names its meaning; the message at `maljan.pipeline.validation:validate_isr` reads: "TECHNIQUE \<tid> aligns weakly with the claim's own text (gate score \<gate_score>, threshold \<threshold>), and the ATT&CK index ranks \<best> (\<best>) and other techniques from this sample's own domain above it: \<ranked>. Keep \<tid> if the evidence says so and say why in the claim, choose one of the ranked techniques, or drop the technique id."
+No comment names its meaning; the message at `maljan.pipeline.validation:validate_isr` reads: "TECHNIQUE \<tid> aligns weakly with the claim's own text (gate score \<gate_score>, threshold \<threshold>), and the ATT&CK index ranks \<technique_id> (\<score_gate>) and other techniques from this sample's own domain above it: \<ranked>. Keep \<tid> if the evidence says so and say why in the claim, choose one of the ranked techniques, or drop the technique id."
 
 - **Raised at** `maljan.pipeline.validation:validate_isr`
 - **Constant** `maljan.pipeline.validation:WEAK_ALIGNMENT_CODE`
-- **Tests** `tests/unit/pipeline/test_technique_check.py`, `tests/unit/pipeline/test_the_alignment_gate_stays_in_scope.py`
 - **Docs** [Architecture](/architecture/)
 
 ## attribution
@@ -100,7 +101,6 @@ No comment names its meaning; the message at `maljan.pipeline.validation:validat
 
 - **Raised at** `maljan.pipeline.validation:validate_verdict_bundle`
 - **Constant** none: the code is written as a literal
-- **Tests** `tests/unit/agents/test_judge_verdict_validation.py`, `tests/unit/pipeline/test_a_finding_row_never_carries_a_secret.py`, `tests/unit/pipeline/test_validation.py`
 - **Docs** none
 
 ## composer
@@ -111,7 +111,6 @@ A report section answer the output cap ended. Its JSON is cut before it closes, 
 
 - **Raised at** `maljan.pipeline.validation:section_cut_violation`
 - **Constant** `maljan.pipeline.validation:SECTION_CUT_CODE`
-- **Tests** `tests/unit/reporting/test_a_repeated_item_is_asked_about_once.py`, `tests/unit/reporting/test_a_section_the_cap_cut_is_asked_again.py`
 - **Docs** [Architecture](/architecture/)
 
 ### `composer.repeated_items`
@@ -120,7 +119,6 @@ A report section answer that writes one item again. Every list section's contrac
 
 - **Raised at** `maljan.pipeline.validation:repeated_item_violations`
 - **Constant** `maljan.pipeline.validation:REPEATED_ITEMS_CODE`
-- **Tests** `tests/unit/reporting/test_a_repeated_item_is_asked_about_once.py`, `tests/unit/reporting/test_a_section_s_findings_are_asked_together.py`
 - **Docs** [Architecture](/architecture/), [Latrodectus score: iteration 4, default model](/benchmark/scores/latrodectus-iteration4-default/), [Latrodectus score: iteration 5, default model](/benchmark/scores/latrodectus-iteration5-default/), [Latrodectus score: iteration 6, default model](/benchmark/scores/latrodectus-iteration6-default/)
 
 ### `composer.schema`
@@ -129,7 +127,6 @@ No comment names its meaning; the message at `maljan.pipeline.validation:schema_
 
 - **Raised at** `maljan.pipeline.validation:schema_violations`, `maljan.reporting.composer:ReportComposer._invoke._validate`
 - **Constant** none: the code is written as a literal
-- **Tests** `tests/unit/agents/test_the_prompt_prefix_is_stable.py`, `tests/unit/pipeline/test_a_finding_row_never_carries_a_secret.py`, `tests/unit/pipeline/test_schema_feedback_names_keys.py`, `tests/unit/pipeline/test_validation_by_code.py`, `tests/unit/reporting/test_a_section_answer_that_is_not_json_is_told_why.py`, `tests/unit/reporting/test_a_section_s_findings_are_asked_together.py`, `tests/unit/reporting/test_the_report_states_the_host_identifiers_it_read.py`
 - **Docs** [Latrodectus score: iteration 4, default model](/benchmark/scores/latrodectus-iteration4-default/), [Latrodectus score: iteration 5, default model](/benchmark/scores/latrodectus-iteration5-default/)
 
 ## isr
@@ -140,7 +137,6 @@ No comment names its meaning; the message at `maljan.pipeline.validation:confide
 
 - **Raised at** `maljan.pipeline.validation:confidence_violation`
 - **Constant** `maljan.pipeline.validation:CLAIM_WITHOUT_CONFIDENCE_CODE`
-- **Tests** `tests/unit/agents/test_a_confidence_is_read_through_its_punctuation.py`, `tests/unit/agents/test_a_revision_is_checked_like_a_first_answer.py`, `tests/unit/agents/test_an_unparsed_answer_is_prose.py`
 - **Docs** [Architecture](/architecture/), [Latrodectus score: iteration 2, default model with the r2 disassembler](/benchmark/scores/latrodectus-iteration2-r2/)
 
 ### `isr.claims_repeated`
@@ -149,7 +145,6 @@ An analyst's answer that writes the same claims again and again: the same whole-
 
 - **Raised at** `maljan.pipeline.validation:analyst_repeated_violation`
 - **Constant** `maljan.pipeline.validation:ANALYST_REPEATED_CODE`
-- **Tests** `tests/unit/agents/test_a_repeating_answer_is_asked_once.py`, `tests/unit/agents/test_an_analyst_answer_is_watched_while_it_streams.py`
 - **Docs** [Architecture](/architecture/), [Configuration](/configuration/)
 
 ### `isr.claims_under_disputes`
@@ -158,8 +153,6 @@ Claim headings under the DISPUTES section, beside the analyst's own claims. Not 
 
 - **Raised at** `maljan.pipeline.validation:claims_kept_under_disputes_finding`, `maljan.pipeline.validation:claims_under_disputes_violation`
 - **Constant** `maljan.pipeline.validation:CLAIMS_UNDER_DISPUTES_CODE`
-- **Tests** `tests/unit/agents/test_every_claim_begun_is_read_or_recorded.py`, `tests/unit/reporting/test_an_answered_question_is_not_left_unresolved.py`
-- **Console tests** `apps/web/src/lib/__tests__/validationRows.test.ts`
 - **Docs** [Architecture](/architecture/)
 
 ### `isr.confidence_range`
@@ -168,8 +161,6 @@ No comment names its meaning; the message at `maljan.pipeline.validation:validat
 
 - **Raised at** `maljan.pipeline.validation:validate_isr`
 - **Constant** none: the code is written as a literal
-- **Tests** `tests/unit/pipeline/test_a_finding_row_never_carries_a_secret.py`, `tests/unit/pipeline/test_the_grounding_searches_what_the_run_saw.py`, `tests/unit/pipeline/test_validation.py`
-- **Console tests** `apps/web/src/lib/__tests__/validationRows.test.ts`
 - **Docs** none
 
 ### `isr.cut_at_output_cap`
@@ -178,7 +169,6 @@ An analyst's answer the output cap ended. The judge and the composer were asked 
 
 - **Raised at** `maljan.pipeline.validation:analyst_cut_violation`
 - **Constant** `maljan.pipeline.validation:ANALYST_CUT_CODE`
-- **Tests** `tests/unit/agents/test_a_repeating_answer_is_asked_once.py`, `tests/unit/agents/test_an_analyst_cut_at_its_cap_is_asked_for_a_whole_answer.py`
 - **Docs** [Architecture](/architecture/)
 
 ### `isr.decompiled_not_described`
@@ -187,7 +177,6 @@ A reverser decompiled two routines that held half of what the analysis needed, k
 
 - **Raised at** `maljan.pipeline.validation:decompiled_not_described_violation`
 - **Constant** `maljan.pipeline.validation:DECOMPILED_NOT_DESCRIBED_CODE`
-- **Tests** `tests/unit/agents/test_a_decompiled_function_no_claim_describes_is_asked_once.py`
 - **Docs** [Architecture](/architecture/)
 
 ### `isr.empty_evidence`
@@ -196,7 +185,6 @@ No comment names its meaning; the message at `maljan.pipeline.validation:validat
 
 - **Raised at** `maljan.pipeline.validation:validate_isr`
 - **Constant** none: the code is written as a literal
-- **Tests** `tests/unit/agents/test_a_corrected_technique_list_is_the_answer_kept.py`, `tests/unit/pipeline/test_live_event_producers.py`, `tests/unit/pipeline/test_ungrounded_techniques.py`, `tests/unit/pipeline/test_validation.py`
 - **Docs** none
 
 ### `isr.function_claim_unheld`
@@ -205,7 +193,6 @@ A claim naming a call or a string for a function whose own facts hold none.
 
 - **Raised at** `maljan.pipeline.function_claims:_question`
 - **Constant** `maljan.pipeline.function_claims:FUNCTION_CLAIM_UNHELD_CODE`, `maljan.pipeline.validation:FUNCTION_CLAIM_UNHELD`
-- **Tests** `tests/unit/agents/test_a_function_claim_its_facts_do_not_hold_is_asked_once.py`, `tests/unit/pipeline/test_a_function_claim_is_checked_against_its_function_s_facts.py`
 - **Docs** [Architecture](/architecture/)
 
 ### `isr.library_only_claims`
@@ -214,16 +201,14 @@ A reverser's answer was mostly one-line claims of the form "uses `x.dll` APIs fo
 
 - **Raised at** `maljan.pipeline.validation:library_only_claims_violation`
 - **Constant** `maljan.pipeline.validation:LIBRARY_ONLY_CLAIMS_CODE`
-- **Tests** `tests/unit/agents/test_a_function_claim_its_facts_do_not_hold_is_asked_once.py`, `tests/unit/agents/test_a_library_only_claim_is_asked_once.py`
 - **Docs** [Architecture](/architecture/)
 
 ### `isr.retry_dropped`
 
 A retry kept as the analyst's answer that no longer states claims or findings its first answer had. The platform states which, per analyst, and asks the analyst once to keep or withdraw each with a reason; its answer stands. Unanswered, the first answer's items stay, their state said.
 
-- **Raised at** `maljan.agents.base_agent:BaseAnalyst._ask_retry_drops`
+- **Raised at** `maljan.agents.base_agent:BaseAnalyst._ask_retry_drops`, `maljan.pipeline.events:emit_validation_feedback`
 - **Constant** `maljan.pipeline.validation:RETRY_DROPPED_CODE`
-- **Tests** `tests/unit/agents/test_a_validation_retry_is_merged_by_claim_number.py`, `tests/unit/agents/test_what_a_kept_retry_left_out_is_settled_by_the_analyst.py`
 - **Docs** [Architecture](/architecture/)
 
 ### `isr.technique_line_unread`
@@ -232,7 +217,6 @@ A claim whose TECHNIQUE line is more than ids or NONE. No id is read from it, an
 
 - **Raised at** `maljan.pipeline.validation:technique_line_violation`
 - **Constant** `maljan.pipeline.validation:TECHNIQUE_LINE_UNREAD_CODE`
-- **Tests** `tests/unit/agents/test_a_technique_line_may_list_several_ids.py`, `tests/unit/agents/test_every_claim_begun_is_read_or_recorded.py`, `tests/unit/agents/test_the_technique_line_is_optional_per_definition.py`
 - **Docs** [Architecture](/architecture/)
 
 ### `isr.ungrounded_technique`
@@ -241,16 +225,14 @@ No comment names its meaning; the message at `maljan.pipeline.validation:validat
 
 - **Raised at** `maljan.pipeline.validation:validate_isr`
 - **Constant** `maljan.pipeline.validation:UNGROUNDED_TECHNIQUE_CODE`
-- **Tests** `tests/integration/test_a_rehearsal_run_passes_its_checklist.py`, `tests/unit/agents/test_a_prompt_states_the_tools_it_is_sent.py`, `tests/unit/agents/test_a_revision_cites_its_own_earlier_entries.py`, `tests/unit/agents/test_a_validation_retry_is_merged_by_claim_number.py`, `tests/unit/agents/test_an_analyst_reads_a_thinking_answer_by_its_text.py`, `tests/unit/agents/test_every_turn_reads_the_ledger_as_it_stands.py`, `tests/unit/agents/test_standing_blocks_reach_the_prompts.py`, `tests/unit/agents/test_the_prompt_prefix_is_stable.py`, `tests/unit/analysis/test_a_sandbox_report_reads_as_sections_of_items.py`, `tests/unit/pipeline/test_a_run_is_degraded_only_by_what_limited_it.py`, `tests/unit/pipeline/test_a_validation_retry_changes_only_what_was_asked.py`, `tests/unit/pipeline/test_technique_check.py`, `tests/unit/pipeline/test_ungrounded_techniques.py`, `tests/unit/pipeline/test_validation.py`, `tests/unit/scripts/test_the_rehearsal_roles_are_read_from_the_request.py`
 - **Docs** [Architecture](/architecture/)
 
 ### `isr.unparsed_answer`
 
-What the parse of an analyst's answer could not read. Neither is corrected: prose is not cut into claims and a block with no confidence is not given one. Each is asked about once in the analyst's own validation turn, and what is still unread after it is recorded.
+No comment names its meaning; the message at `maljan.pipeline.validation:parse_violations` reads: "Your answer has no CLAIM block that can be read, so it carries no claim and is kept as prose. Restate each finding as a block, with the confidence you hold it at: CLAIM: \<claim text> EVIDENCE: \<artifact reference, naming the tool result you read it from, for example \[ev_0002\]> CONFIDENCE: \<0.0-1.0> TECHNIQUE: \<T-ID, several separated by commas, or NONE> --- A finding you cannot put a confidence on stays in your prose."
 
 - **Raised at** `maljan.pipeline.validation:parse_violations`
 - **Constant** `maljan.pipeline.validation:UNPARSED_ANSWER_CODE`
-- **Tests** `tests/unit/agents/test_an_unparsed_answer_is_prose.py`, `tests/unit/agents/test_the_validation_turn_keeps_to_the_loop_s_time.py`, `tests/unit/pipeline/test_an_unparsed_answer_is_kept_in_the_run_record.py`
 - **Docs** [Architecture](/architecture/), [Latrodectus score: iteration 2, default model with the r2 disassembler](/benchmark/scores/latrodectus-iteration2-r2/)
 
 ## narrative
@@ -261,7 +243,6 @@ No comment names its meaning; the message at `maljan.pipeline.validation:schema_
 
 - **Raised at** `maljan.pipeline.validation:schema_violations`, `maljan.reporting.narrative_agent:NarrativeAgent.generate`
 - **Constant** none: the code is written as a literal
-- **Tests** `tests/unit/pipeline/test_schema_feedback_names_keys.py`, `tests/unit/pipeline/test_validation_by_code.py`
 - **Docs** none
 
 ### `narrative.ungrounded_capability`
@@ -270,16 +251,14 @@ No comment names its meaning; the message at `maljan.pipeline.validation:ungroun
 
 - **Raised at** `maljan.pipeline.validation:section_capability_violations`, `maljan.pipeline.validation:ungrounded_capabilities`
 - **Constant** `maljan.pipeline.validation:UNGROUNDED_CAPABILITY_CODE`
-- **Tests** `tests/unit/pipeline/test_ungrounded_capabilities.py`, `tests/unit/pipeline/test_what_grounds_a_capability_word.py`, `tests/unit/reporting/test_a_rule_match_is_not_written_as_an_action.py`, `tests/unit/reporting/test_the_report_says_what_the_run_did_not_do.py`
 - **Docs** [Architecture](/architecture/), [Latrodectus score: iteration 1, small model](/benchmark/scores/latrodectus-iteration1-small/), [Latrodectus score: iteration 2, default model with the r2 disassembler](/benchmark/scores/latrodectus-iteration2-r2/), [Latrodectus score: iteration 4, default model](/benchmark/scores/latrodectus-iteration4-default/), [Latrodectus score: iteration 5, default model](/benchmark/scores/latrodectus-iteration5-default/)
 
 ### `narrative.ungrounded_finding`
 
-The report's own citations. Each of these is shown to the model once and, if it survives, recorded beside the value it is about; none of them removes or rewrites what the model wrote.
+No comment names its meaning; the message at `maljan.pipeline.validation:key_finding_citation_violations` reads: "key finding \<index> cites \<unknown>, which no entry in this run's evidence carries. Cite the ev_ ids of the entries the finding stands on, or leave evidence_ids empty."
 
 - **Raised at** `maljan.pipeline.validation:key_finding_citation_violations`
 - **Constant** `maljan.pipeline.validation:UNGROUNDED_FINDING_CODE`
-- **Tests** `tests/unit/reporting/test_narrative_agent.py`
 - **Docs** [Architecture](/architecture/)
 
 ### `narrative.unpublished_indicator`
@@ -288,16 +267,14 @@ A recommendation or hunting note that acts on a value this run does not publish.
 
 - **Raised at** `maljan.pipeline.validation:recommendation_indicator_violations`
 - **Constant** `maljan.pipeline.validation:UNPUBLISHED_RECOMMENDATION_CODE`
-- **Tests** `tests/unit/reporting/test_a_recommendation_acts_on_published_indicators.py`
 - **Docs** [Architecture](/architecture/)
 
 ### `narrative.unpublished_technique`
 
-A recommendation or hunting note that names a technique id this run does not publish. Asked once with the fact; an id kept after it is recorded.
+No comment names its meaning; the message at `maljan.pipeline.validation:recommendation_technique_violations` reads: "recommendation \<index> names a technique this run does not publish: \<ids>. The report's ATT&CK table does not carry it. A recommendation acts on the techniques this run publishes. Write it with a published technique, or without the id."
 
 - **Raised at** `maljan.pipeline.validation:recommendation_technique_violations`
 - **Constant** `maljan.pipeline.validation:UNPUBLISHED_RECOMMENDATION_TECHNIQUE_CODE`
-- **Tests** `tests/unit/reporting/test_a_recommendation_names_only_published_techniques.py`
 - **Docs** [Architecture](/architecture/)
 
 ## report
@@ -308,16 +285,14 @@ A report sentence that says a routine was not read, or that something is not in 
 
 - **Raised at** `maljan.pipeline.validation:ledger_absence_contradictions`
 - **Constant** `maljan.pipeline.validation:ABSENCE_CONTRADICTS_LEDGER_CODE`
-- **Tests** `tests/unit/pipeline/test_a_report_never_says_the_ledger_lacks_what_it_holds.py`
 - **Docs** [Architecture](/architecture/)
 
 ### `report.citation_not_evidence`
 
-No comment names its meaning; the message at `maljan.pipeline.validation:citation_violations` reads: "\<why> \<remedy>"
+No comment names its meaning, and the message at `maljan.pipeline.validation:citation_violations` is made only of values it fills in: see the message there.
 
 - **Raised at** `maljan.pipeline.validation:citation_violations`
 - **Constant** `maljan.pipeline.validation:CITATION_NOT_EVIDENCE_CODE`
-- **Tests** `tests/unit/analysis/test_a_sandbox_report_reads_as_sections_of_items.py`, `tests/unit/pipeline/test_a_citation_is_an_evidence_id.py`
 - **Docs** [Architecture](/architecture/)
 
 ### `report.citation_wrong_entry`
@@ -326,26 +301,22 @@ No comment names its meaning; the message at `maljan.pipeline.validation:wrong_e
 
 - **Raised at** `maljan.pipeline.validation:wrong_entry_citations`
 - **Constant** `maljan.pipeline.validation:CITATION_WRONG_ENTRY_CODE`
-- **Tests** `tests/unit/reporting/test_a_citation_names_the_entry_that_holds_it.py`, `tests/unit/reporting/test_a_row_naming_its_field_is_held_by_the_entry_s_pair.py`, `tests/unit/reporting/test_the_value_findings_are_written_defanged_and_escaped.py`
 - **Docs** [Architecture](/architecture/)
 
 ### `report.configuration_uncited`
 
-No comment names its meaning; the message at `maljan.pipeline.validation:configuration_citation_violations` reads: "configuration item \<safe_finding_value> (\<get>) is marked \<how> but cites no entry in this run's evidence. Cite the entry the value was read from, or mark how it was obtained as inferred."
+No comment names its meaning; the message at `maljan.pipeline.validation:configuration_citation_violations` reads: "configuration item \<index> (\<key>) is marked \<how> but cites no entry in this run's evidence. Cite the entry the value was read from, or mark how it was obtained as inferred."
 
 - **Raised at** `maljan.pipeline.validation:configuration_citation_violations`
 - **Constant** `maljan.pipeline.validation:UNCITED_CONFIGURATION_CODE`
-- **Tests** `tests/unit/reporting/test_composer.py`
-- **Console tests** `apps/web/src/components/analysis/__tests__/reportProse.test.ts`
 - **Docs** [Architecture](/architecture/), [The console](/console/)
 
 ### `report.entry_contents_misstated`
 
-No comment names its meaning; the message at `maljan.pipeline.validation:misstated_entry_contents` reads: "The text says \<named> \<said> (\<sentence>); \<named> holds \<held> values in this run. State what the entry holds, or cite the entry the statement is about."
+No comment names its meaning; the message at `maljan.pipeline.validation:misstated_entry_contents` reads: "The text says \<named> \<said> (\<marked_cut>); \<named> holds \<held> values in this run. State what the entry holds, or cite the entry the statement is about."
 
 - **Raised at** `maljan.pipeline.validation:misstated_entry_contents`
 - **Constant** `maljan.pipeline.validation:ENTRY_CONTENTS_MISSTATED_CODE`
-- **Tests** `tests/unit/pipeline/test_the_pack_shows_what_the_capture_holds.py`
 - **Docs** [Architecture](/architecture/)
 
 ### `report.flow_voice`
@@ -354,27 +325,22 @@ No comment names its meaning; the message at `maljan.pipeline.validation:flow_vo
 
 - **Raised at** `maljan.pipeline.validation:flow_voice_violations`, `maljan.pipeline.validation:persistence_not_observed_violations`
 - **Constant** `maljan.pipeline.validation:FLOW_VOICE_CODE`
-- **Tests** `tests/unit/llm/test_an_anthropic_request_carries_no_empty_text_block.py`, `tests/unit/reporting/test_an_observed_step_is_observed_whole.py`, `tests/unit/reporting/test_composer.py`, `tests/unit/reporting/test_persistence_the_sandbox_did_not_record_is_asked_about.py`, `tests/unit/reporting/test_the_report_reads_like_a_malware_analysis.py`, `tests/unit/reporting/test_the_report_says_what_the_run_did_not_do.py`
-- **Console tests** `apps/web/src/components/analysis/__tests__/reportProse.test.ts`
 - **Docs** [Architecture](/architecture/), [The console](/console/)
 
 ### `report.identifier_uncited`
 
-No comment names its meaning; the message at `maljan.pipeline.validation:identifier_citation_violations` reads: "identifier \<safe_finding_value> (\<get>) cites no entry in this run's evidence. Cite the ev_ id of the entry the value was read in, or leave the identifier out."
+No comment names its meaning; the message at `maljan.pipeline.validation:identifier_citation_violations` reads: "identifier \<index> (\<value>) cites no entry in this run's evidence. Cite the ev_ id of the entry the value was read in, or leave the identifier out."
 
 - **Raised at** `maljan.pipeline.validation:identifier_citation_violations`
 - **Constant** `maljan.pipeline.validation:UNCITED_IDENTIFIER_CODE`
-- **Tests** `tests/unit/reporting/test_the_report_states_the_host_identifiers_it_read.py`
-- **Console tests** `apps/web/src/components/analysis/__tests__/reportProse.test.ts`
 - **Docs** [Architecture](/architecture/), [The console](/console/)
 
 ### `report.persistence_not_observed`
 
-A section's prose states persistence where the sandbox, watching the registry and the files, recorded none: the report prints "no persistence observed" under that same section. Asked once; the prose kept is recorded.
+No comment names its meaning; the message at `maljan.pipeline.validation:persistence_not_observed_violations` reads: "the section states persistence (\<first>), and \<fact>. Say in the section that persistence was not observed in this run and what the reading rests on, or write what in this run's evidence shows it."
 
 - **Raised at** `maljan.pipeline.validation:persistence_not_observed_violations`
 - **Constant** `maljan.pipeline.validation:PERSISTENCE_NOT_OBSERVED_CODE`
-- **Tests** `tests/unit/reporting/test_persistence_the_sandbox_did_not_record_is_asked_about.py`
 - **Docs** [Architecture](/architecture/)
 
 ### `report.rule_match_as_action`
@@ -383,7 +349,6 @@ No comment names its meaning; the message at `maljan.pipeline.validation:rule_ma
 
 - **Raised at** `maljan.pipeline.validation:rule_match_statement_violations`
 - **Constant** `maljan.pipeline.validation:RULE_MATCH_AS_ACTION_CODE`
-- **Tests** `tests/unit/reporting/test_a_rule_match_is_not_written_as_an_action.py`
 - **Docs** [Architecture](/architecture/), [Latrodectus score: iteration 4, default model](/benchmark/scores/latrodectus-iteration4-default/)
 
 ### `report.technique_name`
@@ -392,16 +357,14 @@ No comment names its meaning; the message at `maljan.pipeline.validation:techniq
 
 - **Raised at** `maljan.pipeline.validation:technique_name_violations`
 - **Constant** `maljan.pipeline.validation:TECHNIQUE_NAME_CODE`
-- **Tests** `tests/unit/reporting/test_a_technique_is_written_with_its_own_name.py`
 - **Docs** [Architecture](/architecture/)
 
 ### `report.unpublished_value`
 
-Technical prose naming a network value this run does not publish without that value's publish state (`unpublished_value_violations`). Asked once; a sentence kept after it is marked where it stands with the state.
+No comment names its meaning; the message at `maljan.pipeline.validation:unpublished_value_violations` reads: "the text names values this run does not publish, without their state: \<said>. A value this run does not publish is written only with its publish state beside it. Write the state beside each value, or write the text without the value."
 
 - **Raised at** `maljan.pipeline.validation:unpublished_value_violations`
 - **Constant** `maljan.pipeline.validation:UNPUBLISHED_VALUE_CODE`
-- **Tests** `tests/unit/reporting/test_an_unpublished_value_in_prose_carries_its_state.py`, `tests/unit/reporting/test_the_value_findings_are_written_defanged_and_escaped.py`
 - **Docs** [Architecture](/architecture/)
 
 ### `report.value_not_in_cited_entry`
@@ -410,7 +373,6 @@ A table row whose whole value is in none of the entries it cites (`stated_value_
 
 - **Raised at** `maljan.pipeline.validation:stated_value_violations`
 - **Constant** `maljan.pipeline.validation:STATED_VALUE_UNHELD_CODE`
-- **Tests** `tests/unit/reporting/test_a_row_naming_its_field_is_held_by_the_entry_s_pair.py`, `tests/unit/reporting/test_a_row_s_whole_value_is_in_an_entry_it_cites.py`, `tests/unit/reporting/test_the_value_findings_are_written_defanged_and_escaped.py`
 - **Docs** [Architecture](/architecture/)
 
 ## stix
@@ -421,16 +383,14 @@ No comment names its meaning; the message at `maljan.pipeline.validation:annotat
 
 - **Raised at** `maljan.pipeline.validation:annotation_out_of_schema_violations`
 - **Constant** `maljan.pipeline.validation:ANNOTATION_OUT_OF_SCHEMA_CODE`
-- **Tests** `tests/unit/agents/test_an_annotation_outside_the_schema_is_asked_about.py`, `tests/unit/reporting/test_the_judge_endpoints_answer_the_host_question.py`
 - **Docs** [Architecture](/architecture/)
 
 ### `stix.credit_without_claim`
 
-The unresolved codes that are about one technique and print beside its row.
+No comment names its meaning; the message at `maljan.pipeline.validation:credit_without_claim_violations` reads: "the relationship at \<where> credits \<n> with \<tid>, and \<who> — the evidence summary lists who named each technique. Credit only sources that named it, by the names the summary gives them, or leave x_maljan_contributing_agents empty. A credit you keep that names no source is not published."
 
 - **Raised at** `maljan.pipeline.validation:credit_without_claim_violations`
 - **Constant** `maljan.pipeline.validation:CREDIT_WITHOUT_CLAIM_CODE`
-- **Tests** `tests/unit/agents/test_a_credit_names_a_source.py`, `tests/unit/agents/test_an_annotation_outside_the_schema_is_asked_about.py`, `tests/unit/agents/test_what_the_judge_was_asked_is_what_the_row_says.py`, `tests/unit/analysis/test_a_name_that_begins_with_t_names_no_technique.py`, `tests/unit/reporting/test_the_judge_endpoints_answer_the_host_question.py`, `tests/unit/reporting/test_the_report_says_what_the_run_did_not_do.py`, `tests/unit/test_no_silent_overrides.py`
 - **Docs** [Architecture](/architecture/), [Latrodectus score: iteration 5, default model](/benchmark/scores/latrodectus-iteration5-default/)
 
 ### `stix.duplicate_label`
@@ -439,7 +399,6 @@ No comment names its meaning; the message at `maljan.agents.judge_postprocess:du
 
 - **Raised at** `maljan.agents.judge_postprocess:duplicate_label_violations`
 - **Constant** `maljan.agents.judge_postprocess:DUPLICATE_LABEL_CODE`
-- **Tests** `tests/unit/agents/test_a_repeated_label_is_asked_about.py`, `tests/unit/reporting/test_the_judge_endpoints_answer_the_host_question.py`
 - **Docs** [Architecture](/architecture/)
 
 ### `stix.evidence_ref_not_in_ledger`
@@ -448,8 +407,6 @@ A ledger id the run's record cites for an exported object that the run's ledger 
 
 - **Raised at** `maljan.reporting.renderers.stix_renderer:ExtendedSTIXRenderer._family_refs`
 - **Constant** `maljan.reporting.renderers.stix_renderer:EVIDENCE_REF_NOT_IN_LEDGER_CODE`
-- **Tests** `tests/unit/reporting/test_the_export_cites_the_ledger.py`
-- **Console tests** `apps/web/src/lib/__tests__/validationRows.test.ts`
 - **Docs** [Architecture](/architecture/)
 
 ### `stix.file_unidentified`
@@ -458,8 +415,6 @@ No comment names its meaning; the message at `maljan.pipeline.validation:validat
 
 - **Raised at** `maljan.pipeline.validation:validate_verdict_bundle`
 - **Constant** `maljan.pipeline.validation:FILE_UNIDENTIFIED_CODE`
-- **Tests** `tests/unit/agents/test_a_judge_observable_never_costs_the_bundle.py`, `tests/unit/reporting/test_the_judge_endpoints_answer_the_host_question.py`
-- **Console tests** `apps/web/src/lib/__tests__/validationRows.test.ts`
 - **Docs** none
 
 ### `stix.indicator_not_published`
@@ -468,7 +423,6 @@ A judge indicator naming a value the one publish rule refuses — a host only th
 
 - **Raised at** `maljan.reporting.renderers.stix_renderer:_judge_indicator_unpublished`
 - **Constant** `maljan.reporting.renderers.stix_renderer:UNPUBLISHED_VALUE_CODE`
-- **Tests** `tests/unit/agents/test_every_operator_the_grammar_has_is_kept.py`, `tests/unit/reporting/test_every_surface_publishes_what_the_export_publishes.py`, `tests/unit/reporting/test_the_judge_endpoints_answer_the_host_question.py`
 - **Docs** [Architecture](/architecture/)
 
 ### `stix.indicator_type_contradicts_verdict`
@@ -477,16 +431,14 @@ No comment names its meaning; the message at `maljan.pipeline.validation:indicat
 
 - **Raised at** `maljan.pipeline.validation:indicator_type_contradicts_verdict`
 - **Constant** `maljan.pipeline.validation:INDICATOR_TYPE_CONTRADICTS_VERDICT_CODE`
-- **Tests** `tests/unit/reporting/test_a_benign_verdict_is_asked_about_a_malicious_indicator.py`, `tests/unit/reporting/test_nothing_is_stamped_on_a_judge_object.py`, `tests/unit/reporting/test_the_judge_endpoints_answer_the_host_question.py`
 - **Docs** [Architecture](/architecture/)
 
 ### `stix.indicator_type_vocabulary`
 
-No comment names its meaning; the message at `maljan.pipeline.validation:indicator_type_vocabulary_violations` reads: "the indicator \<named> is typed \<join>; indicator_types says what the value indicates, not what kind of value it is, and STIX's vocabulary for it is \<INDICATOR_TYPES>. Use one of those, or keep the type — whichever you answer is what this run publishes."
+No comment names its meaning; the message at `maljan.pipeline.validation:indicator_type_vocabulary_violations` reads: "the indicator \<named> is typed \<t>; indicator_types says what the value indicates, not what kind of value it is, and STIX's vocabulary for it is \<INDICATOR_TYPES>. Use one of those, or keep the type — whichever you answer is what this run publishes."
 
 - **Raised at** `maljan.pipeline.validation:indicator_type_vocabulary_violations`
 - **Constant** `maljan.pipeline.validation:INDICATOR_TYPE_VOCABULARY_CODE`
-- **Tests** `tests/unit/reporting/test_a_pattern_names_a_stix_type.py`, `tests/unit/reporting/test_nothing_is_stamped_on_a_judge_object.py`, `tests/unit/reporting/test_the_judge_endpoints_answer_the_host_question.py`
 - **Docs** [Architecture](/architecture/)
 
 ### `stix.indicator_unattributed_flow`
@@ -495,7 +447,6 @@ A judge indicator naming a value the sandbox recorded and attributes no flow of 
 
 - **Raised at** `maljan.pipeline.validation:unattributed_indicator_violations`
 - **Constant** `maljan.pipeline.validation:UNATTRIBUTED_INDICATOR_CODE`
-- **Tests** `tests/unit/reporting/test_the_judge_endpoints_answer_the_host_question.py`, `tests/unit/reporting/test_the_judge_is_asked_with_the_sandbox_fact.py`, `tests/unit/reporting/test_the_prompt_examples_carry_no_evaluation_answer.py`
 - **Docs** [HTTP API](/api/), [Architecture](/architecture/)
 
 ### `stix.is_family_contradicts_family`
@@ -504,7 +455,6 @@ No comment names its meaning; the message at `maljan.pipeline.validation:malware
 
 - **Raised at** `maljan.pipeline.validation:malware_object_violations`
 - **Constant** `maljan.pipeline.validation:IS_FAMILY_CONTRADICTS_FAMILY_CODE`
-- **Tests** `tests/unit/reporting/test_nothing_is_stamped_on_a_judge_object.py`, `tests/unit/reporting/test_the_judge_endpoints_answer_the_host_question.py`
 - **Docs** [Architecture](/architecture/)
 
 ### `stix.is_family_missing`
@@ -513,8 +463,6 @@ No comment names its meaning; the message at `maljan.pipeline.validation:validat
 
 - **Raised at** `maljan.pipeline.validation:validate_verdict_bundle`
 - **Constant** `maljan.pipeline.validation:IS_FAMILY_MISSING_CODE`
-- **Tests** `tests/unit/agents/test_a_repeated_label_is_asked_about.py`, `tests/unit/reporting/test_nothing_is_stamped_on_a_judge_object.py`, `tests/unit/reporting/test_the_judge_endpoints_answer_the_host_question.py`
-- **Console tests** `apps/web/src/lib/__tests__/validationRows.test.ts`
 - **Docs** [Architecture](/architecture/)
 
 ### `stix.malformed_hash`
@@ -523,27 +471,22 @@ A digest literal that is not a digest of the algorithm it is written under.
 
 - **Raised at** `maljan.reporting.renderers.stix_renderer:_judge_indicator_problem`
 - **Constant** `maljan.reporting.renderers.stix_renderer:MALFORMED_HASH_CODE`
-- **Tests** `tests/unit/reporting/test_a_hash_is_a_hash_and_a_file_is_a_file.py`
-- **Console tests** `apps/web/src/lib/__tests__/validationRows.test.ts`
 - **Docs** [Architecture](/architecture/)
 
 ### `stix.malware_object_under_benign`
 
-What the run summary calls a judge object this export declined to carry. Each says what is not in the bundle and why; nothing is rewritten, and the judge's own bundle keeps the object.
+No comment names its meaning; the message at `maljan.reporting.renderers.stix_renderer:ExtendedSTIXRenderer._render` reads: "the malware object \<named> is not in the exported bundle: this run's verdict is Benign. The object is unchanged in the judge's own bundle and the disagreement is in this run's validation findings."
 
 - **Raised at** `maljan.reporting.renderers.stix_renderer:ExtendedSTIXRenderer._render`
 - **Constant** `maljan.reporting.renderers.stix_renderer:MALWARE_UNDER_BENIGN_CODE`
-- **Tests** `tests/unit/pipeline/test_the_verdict_is_what_the_judge_states.py`, `tests/unit/test_no_silent_overrides.py`
-- **Console tests** `apps/web/src/lib/__tests__/validationRows.test.ts`
 - **Docs** [Architecture](/architecture/)
 
 ### `stix.malware_type_vocabulary`
 
-No comment names its meaning; the message at `maljan.pipeline.validation:malware_object_violations` reads: "the malware object \<subject> gives its kind as labels \<join>, which the export does not carry, and has no malware_types, so the export says nothing of what kind of malware it is. malware_types takes values from STIX 2.1's malware-type vocabulary: \<vocabulary>. Write the ones that fit under malware_types, or leave it out — nothing is filled in for you."
+No comment names its meaning; the message at `maljan.pipeline.validation:malware_object_violations` reads: "the malware object \<subject> gives its kind as labels \<label>, which the export does not carry, and has no malware_types, so the export says nothing of what kind of malware it is. malware_types takes values from STIX 2.1's malware-type vocabulary: \<vocabulary>. Write the ones that fit under malware_types, or leave it out — nothing is filled in for you."
 
 - **Raised at** `maljan.pipeline.validation:malware_object_violations`
 - **Constant** `maljan.pipeline.validation:MALWARE_TYPE_VOCABULARY_CODE`
-- **Tests** `tests/unit/reporting/test_nothing_is_stamped_on_a_judge_object.py`, `tests/unit/reporting/test_the_judge_endpoints_answer_the_host_question.py`
 - **Docs** [Architecture](/architecture/)
 
 ### `stix.pattern_refused`
@@ -552,7 +495,6 @@ No comment names its meaning; the message at `maljan.pipeline.validation:unknown
 
 - **Raised at** `maljan.pipeline.validation:unknown_observable_type_violations`
 - **Constant** `maljan.pipeline.validation:PATTERN_REFUSED_CODE`
-- **Tests** `tests/unit/agents/test_every_operator_the_grammar_has_is_kept.py`, `tests/unit/reporting/test_the_judge_endpoints_answer_the_host_question.py`, `tests/unit/reporting/test_the_prompt_examples_carry_no_evaluation_answer.py`
 - **Docs** [Architecture](/architecture/)
 
 ### `stix.property_not_carried`
@@ -561,8 +503,6 @@ A property of a judge object that the platform's model for its type does not dec
 
 - **Raised at** `maljan.agents.judge_postprocess:lift_misplaced_extensions`
 - **Constant** `maljan.agents.judge_postprocess:PROPERTY_NOT_CARRIED_CODE`
-- **Tests** `tests/unit/agents/test_what_the_export_does_not_carry_is_recorded.py`, `tests/unit/reporting/test_the_export_cites_the_ledger.py`
-- **Console tests** `apps/web/src/lib/__tests__/validationRows.test.ts`
 - **Docs** [Architecture](/architecture/)
 
 ### `stix.shape_names_a_value`
@@ -571,7 +511,6 @@ No comment names its meaning; the message at `maljan.pipeline.validation:shape_n
 
 - **Raised at** `maljan.pipeline.validation:shape_names_a_value_violations`
 - **Constant** `maljan.pipeline.validation:SHAPE_NAMES_A_VALUE_CODE`
-- **Tests** `tests/unit/agents/test_every_operator_the_grammar_has_is_kept.py`, `tests/unit/reporting/test_the_judge_endpoints_answer_the_host_question.py`, `tests/unit/reporting/test_the_prompt_examples_carry_no_evaluation_answer.py`
 - **Docs** [Architecture](/architecture/)
 
 ### `stix.unescaped_backslash`
@@ -580,7 +519,6 @@ No comment names its meaning; the message at `maljan.pipeline.validation:unknown
 
 - **Raised at** `maljan.pipeline.validation:unknown_observable_type_violations`
 - **Constant** `maljan.pipeline.validation:STRAY_BACKSLASH_CODE`
-- **Tests** `tests/unit/agents/test_every_operator_the_grammar_has_is_kept.py`, `tests/unit/reporting/test_the_judge_endpoints_answer_the_host_question.py`, `tests/unit/reporting/test_the_prompt_examples_carry_no_evaluation_answer.py`
 - **Docs** [Architecture](/architecture/)
 
 ### `stix.ungrounded_indicator`
@@ -589,8 +527,6 @@ No comment names its meaning; the message at `maljan.pipeline.validation:validat
 
 - **Raised at** `maljan.pipeline.validation:validate_verdict_bundle`
 - **Constant** none: the code is written as a literal
-- **Tests** `tests/unit/agents/test_a_fallback_verdict_keeps_the_indicators_it_wrote.py`, `tests/unit/agents/test_a_repeated_label_is_asked_about.py`, `tests/unit/agents/test_every_operator_the_grammar_has_is_kept.py`, `tests/unit/agents/test_judge_sees_the_sample.py`, `tests/unit/agents/test_judge_verdict_validation.py`, `tests/unit/pipeline/test_a_finding_row_never_carries_a_secret.py`, `tests/unit/pipeline/test_grounding_reads_every_spelling.py`, `tests/unit/pipeline/test_the_grounding_searches_what_the_run_saw.py`, `tests/unit/pipeline/test_validation.py`, `tests/unit/reporting/test_a_hash_is_a_hash_and_a_file_is_a_file.py`, `tests/unit/reporting/test_the_judge_endpoints_answer_the_host_question.py`, `tests/unit/reporting/test_the_prompt_examples_carry_no_evaluation_answer.py`
-- **Console tests** `apps/web/src/lib/__tests__/validationRows.test.ts`
 - **Docs** [Architecture](/architecture/)
 
 ### `stix.unknown_object`
@@ -599,7 +535,6 @@ An object inside `objects` that no STIX type in the bundle's union matches. Set 
 
 - **Raised at** `maljan.agents.judge_postprocess:lift_misplaced_extensions`
 - **Constant** `maljan.agents.judge_postprocess:UNKNOWN_OBJECT_CODE`
-- **Tests** `tests/unit/agents/test_a_judge_observable_never_costs_the_bundle.py`, `tests/unit/agents/test_a_misplaced_assessment_keeps_the_bundle.py`, `tests/unit/reporting/test_the_judge_endpoints_answer_the_host_question.py`
 - **Docs** [Architecture](/architecture/)
 
 ### `stix.unknown_object_path`
@@ -608,7 +543,6 @@ No comment names its meaning; the message at `maljan.pipeline.validation:unknown
 
 - **Raised at** `maljan.pipeline.validation:unknown_observable_type_violations`
 - **Constant** `maljan.pipeline.validation:UNKNOWN_OBJECT_PATH_CODE`
-- **Tests** `tests/unit/reporting/test_a_pattern_names_a_stix_type.py`, `tests/unit/reporting/test_a_pattern_the_grammar_refuses_is_asked_and_declined.py`, `tests/unit/reporting/test_the_judge_endpoints_answer_the_host_question.py`
 - **Docs** [Architecture](/architecture/)
 
 ### `stix.unknown_observable_type`
@@ -617,8 +551,6 @@ No comment names its meaning; the message at `maljan.pipeline.validation:unknown
 
 - **Raised at** `maljan.pipeline.validation:unknown_observable_type_violations`
 - **Constant** `maljan.pipeline.validation:UNKNOWN_OBSERVABLE_TYPE_CODE`
-- **Tests** `tests/unit/reporting/test_a_pattern_names_a_stix_type.py`, `tests/unit/reporting/test_the_judge_endpoints_answer_the_host_question.py`
-- **Console tests** `apps/web/src/lib/__tests__/validationRows.test.ts`
 - **Docs** [Architecture](/architecture/)
 
 ### `stix.unknown_technique`
@@ -627,7 +559,6 @@ No comment names its meaning; the message at `maljan.pipeline.validation:validat
 
 - **Raised at** `maljan.pipeline.validation:validate_verdict_bundle`
 - **Constant** none: the code is written as a literal
-- **Tests** `tests/unit/agents/test_judge_verdict_validation.py`, `tests/unit/analysis/test_a_name_that_begins_with_t_names_no_technique.py`, `tests/unit/pipeline/test_technique_check.py`, `tests/unit/pipeline/test_validation.py`, `tests/unit/pipeline/test_validation_by_code.py`
 - **Docs** none
 
 ### `stix.unlinked_technique`
@@ -636,8 +567,6 @@ What the run summary calls a judge annotation whose technique did not survive va
 
 - **Raised at** `maljan.pipeline.nodes:_note_unlinked_techniques`
 - **Constant** `maljan.pipeline.nodes:UNLINKED_TECHNIQUE_CODE`
-- **Tests** `tests/unit/reporting/test_the_judge_endpoints_answer_the_host_question.py`, `tests/unit/reporting/test_the_judge_relationships_survive_the_rebuild.py`
-- **Console tests** `apps/web/src/lib/__tests__/validationRows.test.ts`
 - **Docs** [Architecture](/architecture/)
 
 ### `stix.unpublishable_artefact`
@@ -646,8 +575,6 @@ An indicator over something that is not an endpoint: a mailbox that is not one, 
 
 - **Raised at** `maljan.reporting.renderers.stix_renderer:_judge_indicator_problem`
 - **Constant** `maljan.reporting.renderers.stix_renderer:UNPUBLISHABLE_ARTEFACT_CODE`
-- **Tests** `tests/unit/reporting/test_a_hash_is_a_hash_and_a_file_is_a_file.py`
-- **Console tests** `apps/web/src/lib/__tests__/validationRows.test.ts`
 - **Docs** [Architecture](/architecture/)
 
 ### `stix.unpublishable_credit`
@@ -656,18 +583,14 @@ A judge credit naming an agent that did not name the technique, which the judge 
 
 - **Raised at** `maljan.reporting.renderers.stix_renderer:_without_unconfirmed_credit`
 - **Constant** `maljan.reporting.renderers.stix_renderer:UNPUBLISHABLE_CREDIT_CODE`
-- **Tests** `tests/unit/agents/test_what_the_judge_was_asked_is_what_the_row_says.py`, `tests/unit/reporting/test_the_export_says_who_did_what.py`, `tests/unit/test_no_silent_overrides.py`
-- **Console tests** `apps/web/src/lib/__tests__/validationRows.test.ts`
 - **Docs** [Architecture](/architecture/)
 
 ### `stix.unpublishable_domain`
 
-What a run stored before `stix.unpublishable_endpoint` replaced them carries for the same decision. Nothing is migrated: a stored row is what that run recorded. The console reads these as the same decision, and `apps/web/src/lib/validationRows.ts` holds the list it reads them from.
+No comment of its own names its meaning; the comment over the group of constants it belongs to, on `maljan.reporting.renderers.stix_renderer:LEGACY_UNPUBLISHABLE_CODES`, reads: "What a run stored before `stix.unpublishable_endpoint` replaced them carries for the same decision. Nothing is migrated: a stored row is what that run recorded. The console reads these as the same decision, and `apps/web/src/lib/validationRows.ts` holds the list it reads them from."
 
 - **Raised at** nothing: kept for stored runs, as `maljan.reporting.renderers.stix_renderer:LEGACY_UNPUBLISHABLE_CODES` says
 - **Listed in** `maljan.reporting.renderers.stix_renderer:LEGACY_UNPUBLISHABLE_CODES`
-- **Tests** none
-- **Console tests** `apps/web/src/lib/__tests__/validationRows.test.ts`
 - **Docs** [Architecture](/architecture/)
 
 ### `stix.unpublishable_endpoint`
@@ -676,8 +599,6 @@ One endpoint question, one code. A URL, a name and an address that fail the same
 
 - **Raised at** `maljan.reporting.renderers.stix_renderer:ExtendedSTIXRenderer._render`, `maljan.reporting.renderers.stix_renderer:_judge_indicator_problem`
 - **Constant** `maljan.reporting.renderers.stix_renderer:UNPUBLISHABLE_ENDPOINT_CODE`
-- **Tests** `tests/unit/reporting/test_an_observation_survives_the_projection.py`, `tests/unit/reporting/test_every_network_value_the_report_prints_is_defanged.py`, `tests/unit/reporting/test_string_derived_urls.py`, `tests/unit/reporting/test_the_judge_endpoints_answer_the_host_question.py`
-- **Console tests** `apps/web/src/lib/__tests__/validationRows.test.ts`
 - **Docs** [Architecture](/architecture/), [Latrodectus score: iteration 6, default model](/benchmark/scores/latrodectus-iteration6-default/)
 
 ### `stix.unpublishable_object`
@@ -686,8 +607,6 @@ A judge object without a property the standard requires of it — a malware obje
 
 - **Raised at** `maljan.reporting.renderers.stix_renderer:ExtendedSTIXRenderer._render`, `maljan.reporting.renderers.stix_renderer:ExtendedSTIXRenderer._without_empty_references`
 - **Constant** `maljan.reporting.renderers.stix_renderer:UNPUBLISHABLE_OBJECT_CODE`
-- **Tests** `tests/unit/reporting/test_the_export_passes_the_official_validator.py`
-- **Console tests** `apps/web/src/lib/__tests__/validationRows.test.ts`
 - **Docs** none
 
 ### `stix.unpublishable_pattern`
@@ -696,8 +615,6 @@ A pattern over an object type STIX does not have, which the judge was asked abou
 
 - **Raised at** `maljan.reporting.renderers.stix_renderer:_judge_indicator_problem`
 - **Constant** `maljan.reporting.renderers.stix_renderer:UNPUBLISHABLE_PATTERN_CODE`
-- **Tests** `tests/unit/agents/test_every_operator_the_grammar_has_is_kept.py`, `tests/unit/reporting/test_a_pattern_names_a_stix_type.py`, `tests/unit/reporting/test_a_pattern_the_grammar_refuses_is_asked_and_declined.py`, `tests/unit/reporting/test_the_judge_endpoints_answer_the_host_question.py`
-- **Console tests** `apps/web/src/lib/__tests__/validationRows.test.ts`
 - **Docs** [Architecture](/architecture/)
 
 ### `stix.unpublishable_producer`
@@ -706,18 +623,14 @@ A `created_by_ref` naming an identity the bundle does not hold, which the export
 
 - **Raised at** `maljan.reporting.renderers.stix_renderer:_produced_by`
 - **Constant** `maljan.reporting.renderers.stix_renderer:UNPUBLISHABLE_PRODUCER_CODE`
-- **Tests** `tests/unit/reporting/test_the_export_says_who_did_what.py`, `tests/unit/test_no_silent_overrides.py`
-- **Console tests** `apps/web/src/lib/__tests__/validationRows.test.ts`
 - **Docs** none
 
 ### `stix.unpublishable_url`
 
-What a run stored before `stix.unpublishable_endpoint` replaced them carries for the same decision. Nothing is migrated: a stored row is what that run recorded. The console reads these as the same decision, and `apps/web/src/lib/validationRows.ts` holds the list it reads them from.
+No comment of its own names its meaning; the comment over the group of constants it belongs to, on `maljan.reporting.renderers.stix_renderer:LEGACY_UNPUBLISHABLE_CODES`, reads: "What a run stored before `stix.unpublishable_endpoint` replaced them carries for the same decision. Nothing is migrated: a stored row is what that run recorded. The console reads these as the same decision, and `apps/web/src/lib/validationRows.ts` holds the list it reads them from."
 
 - **Raised at** nothing: kept for stored runs, as `maljan.reporting.renderers.stix_renderer:LEGACY_UNPUBLISHABLE_CODES` says
 - **Listed in** `maljan.reporting.renderers.stix_renderer:LEGACY_UNPUBLISHABLE_CODES`
-- **Tests** none
-- **Console tests** `apps/web/src/lib/__tests__/validationRows.test.ts`
 - **Docs** [Architecture](/architecture/)
 
 ## tool
@@ -728,7 +641,6 @@ The question a call is answered with when an argument's value is the name of its
 
 - **Raised at** `maljan.agents.evidence_recorder:_record_tool._names_its_own_parameter`
 - **Constant** `maljan.agents.evidence_recorder:SELF_NAMED_ARGUMENT_CODE`
-- **Tests** `tests/unit/agents/test_an_argument_that_names_its_parameter.py`
 - **Docs** [Architecture](/architecture/)
 
 ## verdict
@@ -739,8 +651,6 @@ No comment names its meaning; the message at `maljan.pipeline.validation:assessm
 
 - **Raised at** `maljan.pipeline.validation:assessment_conflict_violations`
 - **Constant** `maljan.pipeline.validation:ASSESSMENT_CONFLICT_CODE`
-- **Tests** `tests/unit/agents/test_verdict_assessment_conflict.py`, `tests/unit/pipeline/test_the_verdict_is_what_the_judge_states.py`
-- **Console tests** `apps/web/src/lib/__tests__/validationRows.test.ts`
 - **Docs** [Architecture](/architecture/)
 
 ### `verdict.assessment_missing`
@@ -749,16 +659,14 @@ No comment names its meaning; the message at `maljan.pipeline.validation:assessm
 
 - **Raised at** `maljan.pipeline.validation:assessment_violations`
 - **Constant** `maljan.pipeline.validation:ASSESSMENT_MISSING_CODE`
-- **Tests** `tests/unit/agents/test_verdict_assessment_required.py`
 - **Docs** none
 
 ### `verdict.assessment_relocated`
 
-Rows the judge's parse settles itself, so the retry is never spent on them: an assessment moved to its property, and a property the export does not carry.
+No comment names its meaning; the message at `maljan.agents.judge_postprocess:lift_misplaced_extensions` reads: "\<ASSESSMENT_PROPERTY> was written inside objects\[\<index>\] and belongs beside the list; it was moved there unchanged and read from there. Write it as a sibling of "objects" next time."
 
 - **Raised at** `maljan.agents.judge_postprocess:lift_misplaced_extensions`
 - **Constant** `maljan.agents.judge_postprocess:ASSESSMENT_RELOCATED_CODE`
-- **Tests** `tests/unit/agents/test_a_misplaced_assessment_keeps_the_bundle.py`, `tests/unit/test_no_silent_overrides.py`
 - **Docs** [Architecture](/architecture/)
 
 ### `verdict.cut_at_output_cap`
@@ -767,16 +675,15 @@ The correction for an answer the output cap cut off. The benchmark's large model
 
 - **Raised at** `maljan.agents.judge_agent:verdict_cut_violation`
 - **Constant** `maljan.agents.judge_agent:VERDICT_CUT_CODE`
-- **Tests** `tests/unit/agents/test_a_verdict_cut_at_its_output_cap.py`, `tests/unit/agents/test_the_judge_writes_a_compact_bundle.py`, `tests/unit/agents/test_what_the_judge_was_asked_is_what_the_row_says.py`
 - **Docs** [Architecture](/architecture/)
 
 ### `verdict.fallback`
 
 What is recorded when even the retry was not a bundle. The code lands in `run_summary.validation.unresolved`; the reason joins the report's degradation reasons, where a reader looking at a verdict with no severity will find out why it has none.
 
-- **Raised at** `maljan.agents.judge_agent:JudgeAgent.give_verdict`, `maljan.pipeline.nodes:make_judge_node.node_fn`, `maljan.pipeline.nodes:with_verdict_fallback`
+- **Raised at** `maljan.agents.judge_agent:JudgeAgent.give_verdict`, `maljan.pipeline.nodes:with_verdict_fallback`
+- **Passes on** `maljan.pipeline.nodes:make_judge_node.node_fn`
 - **Constant** `maljan.agents.judge_agent:VERDICT_FALLBACK_CODE`
-- **Tests** `tests/unit/agents/test_a_fallback_verdict_keeps_the_indicators_it_wrote.py`, `tests/unit/agents/test_a_judge_that_never_answered_names_no_malware.py`, `tests/unit/agents/test_a_misplaced_assessment_keeps_the_bundle.py`, `tests/unit/agents/test_a_verdict_cut_at_its_output_cap.py`, `tests/unit/agents/test_every_verdict_ending_is_checked.py`, `tests/unit/agents/test_judge_verdict_validation.py`, `tests/unit/pipeline/test_a_fallback_verdict_assesses_nothing.py`, `tests/unit/pipeline/test_the_verdict_is_what_the_judge_states.py`, `tests/unit/pipeline/test_validation_by_code.py`
 - **Docs** [Architecture](/architecture/)
 
 ### `verdict.not_json`
@@ -785,7 +692,6 @@ No comment names its meaning; the message at `maljan.agents.judge_agent:JudgeAge
 
 - **Raised at** `maljan.agents.judge_agent:JudgeAgent.give_verdict._validate`
 - **Constant** none: the code is written as a literal
-- **Tests** `tests/unit/agents/test_a_verdict_cut_at_its_output_cap.py`, `tests/unit/agents/test_every_verdict_ending_is_checked.py`, `tests/unit/agents/test_judge_verdict_validation.py`, `tests/unit/pipeline/test_validation_by_code.py`
 - **Docs** none
 
 ### `verdict.severity_enum`
@@ -794,16 +700,15 @@ No comment names its meaning; the message at `maljan.pipeline.validation:validat
 
 - **Raised at** `maljan.pipeline.validation:validate_verdict_bundle`
 - **Constant** none: the code is written as a literal
-- **Tests** `tests/unit/agents/test_judge_verdict_validation.py`, `tests/unit/pipeline/test_a_finding_row_never_carries_a_secret.py`, `tests/unit/pipeline/test_validation.py`
 - **Docs** none
 
 ### `verdict.timeout`
 
 What is recorded when the judge never answered at all. A retry would cost a second full judge timeout and could only produce the same fallback bundle, so nothing is asked again — but a verdict extracted from the analysts' text because the judge timed out is not a verdict the judge gave, and the run summary says so rather than showing a clean validation block.
 
-- **Raised at** `maljan.agents.judge_agent:JudgeAgent.give_verdict`, `maljan.pipeline.nodes:make_judge_node.node_fn`
+- **Raised at** `maljan.agents.judge_agent:JudgeAgent.give_verdict`
+- **Passes on** `maljan.pipeline.nodes:make_judge_node.node_fn`
 - **Constant** `maljan.agents.judge_agent:VERDICT_TIMEOUT_CODE`
-- **Tests** `tests/unit/agents/test_a_judge_that_never_answered_names_no_malware.py`, `tests/unit/agents/test_every_verdict_ending_is_checked.py`, `tests/unit/agents/test_judge_verdict_validation.py`, `tests/unit/pipeline/test_a_fallback_verdict_assesses_nothing.py`
 - **Docs** [Architecture](/architecture/)
 
 ### `verdict.unrecognised`
@@ -812,7 +717,6 @@ No comment names its meaning; the message at `maljan.pipeline.validation:stated_
 
 - **Raised at** `maljan.pipeline.validation:stated_verdict_violations`
 - **Constant** `maljan.pipeline.validation:UNRECOGNISED_VERDICT_CODE`
-- **Tests** `tests/unit/pipeline/test_the_verdict_is_what_the_judge_states.py`
 - **Docs** [Architecture](/architecture/)
 
 ### `verdict.unstated`
@@ -821,7 +725,6 @@ No comment names its meaning; the message at `maljan.pipeline.validation:stated_
 
 - **Raised at** `maljan.pipeline.validation:stated_verdict_violations`
 - **Constant** `maljan.pipeline.validation:UNSTATED_VERDICT_CODE`
-- **Tests** `tests/unit/agents/test_verdict_assessment_required.py`, `tests/unit/pipeline/test_the_verdict_is_what_the_judge_states.py`
 - **Docs** [Architecture](/architecture/)
 
 ### `verdict.unsupported_benign`
@@ -830,7 +733,6 @@ No comment names its meaning; the message at `maljan.pipeline.validation:unsuppo
 
 - **Raised at** `maljan.pipeline.validation:unsupported_benign_violations`
 - **Constant** `maljan.pipeline.validation:UNSUPPORTED_BENIGN_CODE`
-- **Tests** `tests/unit/agents/test_every_verdict_ending_is_checked.py`, `tests/unit/agents/test_judge_sees_the_sample.py`, `tests/unit/agents/test_unsupported_malware_verdict.py`
 - **Docs** [Architecture](/architecture/)
 
 ### `verdict.unsupported_malware`
@@ -839,14 +741,22 @@ No comment names its meaning; the message at `maljan.pipeline.validation:unsuppo
 
 - **Raised at** `maljan.pipeline.validation:unsupported_malware_violations`
 - **Constant** `maljan.pipeline.validation:UNSUPPORTED_MALWARE_CODE`
-- **Tests** `tests/unit/agents/test_a_judge_that_never_answered_names_no_malware.py`, `tests/unit/agents/test_every_verdict_ending_is_checked.py`, `tests/unit/agents/test_unsupported_malware_verdict.py`
 - **Docs** [Architecture](/architecture/)
 
 ## Unresolved code positions
 
-Each of these is a code position whose value the register could not follow to a literal or a constant. It may raise a code this page does not list.
+Each of these is a code position whose value the register could not follow to a literal or a constant: mostly a finding built from a code it was handed, out of a row or another finding. It may carry a code this page does not list.
 
 - `maljan.agents.delegation:_hand_over_the_record`: `code=str(row.get('code', ''))`, the result of a call.
+- `maljan.core.team_lint:TeamFinding.to_dict`: `"code": self.code`, an attribute of a value.
+- `maljan.pipeline.nodes:_note_export_findings`: `"code": code`, `code`, bound by unpacking, `+=`, `with` or `except`.
 - `maljan.pipeline.nodes:_violations_from_rows`: `code=str(row.get('code'))`, the result of a call.
+- `maljan.pipeline.validation:ValidationTally.record_unresolved`: `"code": v.code`, an attribute of a value.
+- `maljan.pipeline.validation:Violation.to_dict`: `"code": self.code`, an attribute of a value.
 - `maljan.pipeline.validation:_FeedbackFeed._emit`: `code=str(violation.code)`, an attribute of a value.
 - `maljan.pipeline.validation:record_flagged_statements`: `code=violation.code`, an attribute of a value.
+- `maljan.pipeline.validation:validation_metrics`: `"code": violation.code`, an attribute of a value.
+- `maljan.providers.sandbox.upload:UploadSandboxProvider.__init__`: `'report.json'`, a code-shaped string where no code position is, nor a read.
+- `maljan.providers.sandbox.upload:UploadSandboxProvider.set_pending_blob`: `'report.json'`, a code-shaped string where no code position is, nor a read.
+- `maljan.reporting.renderers.markdown:_Context.__init__`: `"code": str(row.get('code', ''))`, the result of a call.
+- `maljan.tools.errors:normalise_error`: `"code": code`, the result of a call.
