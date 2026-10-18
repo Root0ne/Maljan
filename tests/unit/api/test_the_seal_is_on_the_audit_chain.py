@@ -4,8 +4,9 @@ A chained audit row takes the next ``chain_seq``, a digest of its columns and a
 keyed chain value linking it to the chained row before it. Recomputing the
 chain finds a changed row, a missing row, a tail cut off the end (the keyed
 head record points past it) and a row chained by someone without the key. A
-row is checked under the key its id names, looked up among the keys the
-platform can derive: a relabelled or unknown key id is a break, never a skip.
+key rotation leaves the rows under a key the platform cannot derive
+unverifiable, never verified and never broken; from the current key's first
+row on, any other key id is a break.
 A failed append is counted and logged and never raises into the store.
 """
 
@@ -184,11 +185,11 @@ async def test_a_relabelled_key_id_is_a_break_not_a_skip():
     forged.digest = audit_chain.audit_digest(forged)
     check = _verify(db)
     assert check.broken_at == 2
-    assert "cannot derive" in (check.reason or "")
+    assert "after rows under the current key" in (check.reason or "")
 
 
 @pytest.mark.asyncio
-async def test_a_row_relabelled_as_unkeyed_is_a_break_on_a_keyed_platform():
+async def test_a_row_relabelled_as_unkeyed_breaks_the_link_after_it():
     db = await _chain(2)
     forged = db.rows[0]
     forged.chain_key_id = None
@@ -196,35 +197,99 @@ async def test_a_row_relabelled_as_unkeyed_is_a_break_on_a_keyed_platform():
     forged.chain = audit_chain.audit_link(
         audit_chain.audit_genesis(ledger_chain.UNKEYED), forged.digest, ledger_chain.UNKEYED
     )
-    assert _verify(db).broken_at == 1
+    check = _verify(db)
+    assert check.broken_at == 2
+    assert "does not link" in (check.reason or "")
+
+
+async def _rotated(old: int, new: int) -> _ChainSession:
+    """``old`` rows under a key no longer held, then ``new`` rows under the current key."""
+    db = await _chain(old, key=OTHER)
+    for index in range(new):
+        await audit_chain.append(
+            db,
+            action=audit_chain.LEDGER_SEAL,
+            resource_type="job",
+            resource_id=f"new-{index}",
+            details={"seal": {"head": f"{index:064d}"}},
+            key=KEY,
+        )
+    return db
 
 
 @pytest.mark.asyncio
-async def test_rows_chained_under_a_key_the_platform_cannot_derive_are_a_break():
-    db = await _chain(2, key=OTHER)
+async def test_a_rotation_mid_chain_leaves_old_rows_unverifiable_and_new_rows_verified():
+    db = await _rotated(old=3, new=2)
     check = _verify(db)
-    assert check.broken_at == 1
+    assert check.broken_at is None, check.reason
+    assert check.unverifiable == [1, 2, 3]
+    assert check.unverifiable_span == (1, 3)
+    assert check.head_seq == 5
+
+
+@pytest.mark.asyncio
+async def test_a_relabel_after_the_rotation_boundary_is_a_break_at_its_seq():
+    db = await _rotated(old=2, new=3)
+    forged = db.rows[3]
+    forged.details = {"seal": {"head": "d" * 64}}
+    forged.chain_key_id = OTHER.key_id
+    forged.digest = audit_chain.audit_digest(forged)
+    check = _verify(db)
+    assert check.broken_at == 4
+    assert "after rows under the current key" in (check.reason or "")
+
+
+@pytest.mark.asyncio
+async def test_a_relabel_to_an_unknown_key_after_the_boundary_is_a_break():
+    db = await _chain(3)
+    forged = db.rows[1]
+    forged.chain_key_id = "0000000000000000"
+    forged.digest = audit_chain.audit_digest(forged)
+    assert _verify(db).broken_at == 2
+
+
+@pytest.mark.asyncio
+async def test_an_old_key_row_after_a_current_key_row_is_a_break():
+    db = await _chain(1, key=KEY)
+    await audit_chain.append(
+        db,
+        action=audit_chain.LEDGER_SEAL,
+        resource_type="job",
+        resource_id="late-old",
+        details={},
+        key=OTHER,
+    )
+    await audit_chain.append(
+        db,
+        action=audit_chain.LEDGER_SEAL,
+        resource_type="job",
+        resource_id="x",
+        details={},
+        key=KEY,
+    )
+    check = _verify(db)
+    assert check.broken_at == 2
     assert OTHER.key_id in (check.reason or "")
 
 
 @pytest.mark.asyncio
-async def test_rows_chained_under_an_older_known_key_verify_under_it():
-    db = await _chain(1, key=OTHER)
-    for index in range(2):
-        await audit_chain.append(
-            db,
-            action=audit_chain.REPORT_AMEND,
-            resource_type="job",
-            resource_id=str(index),
-            details={},
-            key=KEY,
-        )
-    keys = {KEY.key_id: KEY, OTHER.key_id: OTHER}
-    check = audit_chain.verify_audit_chain(db.rows, keys, db.head)
+async def test_a_chain_wholly_under_an_old_key_is_unverifiable_not_broken():
+    db = await _chain(2, key=OTHER)
+    check = _verify(db)
     assert check.broken_at is None
+    assert check.unverifiable == [1, 2]
+    assert check.head_unverifiable
+
+
+@pytest.mark.asyncio
+async def test_rows_chained_under_an_older_known_key_verify_under_it():
+    db = await _rotated(old=1, new=2)
+    keys = {KEY.key_id: KEY, OTHER.key_id: OTHER}
+    check = audit_chain.verify_audit_chain(db.rows, keys, db.head, KEY.key_id)
+    assert (check.broken_at, check.unverifiable) == (None, [])
     db.rows[0].details = {"changed": True}
     db.rows[0].digest = audit_chain.audit_digest(db.rows[0])
-    assert audit_chain.verify_audit_chain(db.rows, keys, db.head).broken_at == 1
+    assert audit_chain.verify_audit_chain(db.rows, keys, db.head, KEY.key_id).broken_at == 1
 
 
 @pytest.mark.asyncio

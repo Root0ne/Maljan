@@ -30,7 +30,7 @@ import hashlib
 import ipaddress
 import uuid
 from collections.abc import Iterable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
 
@@ -189,26 +189,55 @@ async def append(
 
 @dataclass
 class AuditChainCheck:
-    """What recomputing the audit chain found: ``broken_at`` is ``None`` only when it holds."""
+    """What recomputing the audit chain found: ``broken_at`` is ``None`` only when it holds.
+
+    ``unverifiable`` lists the chained rows before the current key's first row
+    that were chained under a key the platform cannot derive: never verified
+    and never broken. ``unverifiable_span`` is their first and last seq.
+    """
 
     rows: int
     broken_at: int | None = None
     reason: str | None = None
     head_seq: int | None = None
+    unverifiable: list[int] = field(default_factory=list)
+    head_unverifiable: bool = False
+
+    @property
+    def unverifiable_span(self) -> tuple[int, int] | None:
+        return (self.unverifiable[0], self.unverifiable[-1]) if self.unverifiable else None
 
 
 def verify_audit_chain(
-    rows: Iterable[Any], keys: Mapping[str, ledger_chain.ChainKey], head: Any
+    rows: Iterable[Any],
+    keys: Mapping[str, ledger_chain.ChainKey],
+    head: Any,
+    current: str | None = None,
 ) -> AuditChainCheck:
     """Recompute the chained audit rows in ``chain_seq`` order against the head; the first break.
 
-    Each row is checked under the key its ``chain_key_id`` names, looked up
-    among ``keys`` (``ledger_chain.known_keys``): a row naming a key the
-    platform cannot derive is a break, never skipped, because a row must not
-    choose how it is checked. The walk must end exactly at the head record,
-    whose MAC is checked the same way: a row cut off the end, a missing head or
-    a head that does not match is a break.
+    ``current`` is the id of the key the platform chains under now (by
+    default the one key in ``keys`` when there is one). The walk is split at
+    the rotation boundary, the first row under the current key:
+
+    - from the boundary on, every row must carry the current key id and
+      verify under it; an older or unknown key id there is a break, so recent
+      rows cannot be relabelled, and an older row placed after a current-key
+      row is a break;
+    - before the boundary, a row under a key the platform can derive is
+      verified with it; a row under a key it cannot derive is unverifiable,
+      listed in ``unverifiable``, never verified and never broken;
+    - every row links to the stored chain value of the row before it, so the
+      first current-key row joins the older history and it cannot be swapped
+      out underneath.
+
+    The walk must end at the head record, whose MAC is checked under the key
+    it names: a row cut off the end, a missing head or a head that does not
+    match is a break. A head under a key the platform cannot derive (nothing
+    appended since a rotation) is reported as unverifiable, not as a break.
     """
+    if current is None and len(keys) == 1:
+        current = next(iter(keys))
     ordered = sorted(rows, key=lambda r: int(_read(r, "chain_seq") or 0))
     check = AuditChainCheck(rows=len(ordered))
 
@@ -217,6 +246,7 @@ def verify_audit_chain(
         check.reason = reason
         return check
 
+    boundary_seen = False
     previous: str | None = None
     expected_seq = 1
     for row in ordered:
@@ -226,16 +256,21 @@ def verify_audit_chain(
         if audit_digest(row) != _read(row, "digest"):
             return _broken(seq, f"chained audit row {seq} differs from its digest")
         key_id = _read(row, "chain_key_id") or ""
-        key = keys.get(key_id)
-        if key is None:
+        if current is not None and key_id == current:
+            boundary_seen = True
+        elif boundary_seen:
             return _broken(
                 seq,
-                f"chained audit row {seq} names key {key_id or '(none)'}, "
-                "which the platform's settings cannot derive",
+                f"chained audit row {seq} names key {key_id or '(none)'} after rows under "
+                "the current key",
             )
-        start = previous if previous is not None else audit_genesis(key)
-        if audit_link(start, str(_read(row, "digest")), key) != _read(row, "chain"):
-            return _broken(seq, f"chained audit row {seq} does not link to the row before it")
+        key = keys.get(key_id)
+        if key is None:
+            check.unverifiable.append(seq)
+        else:
+            start = previous if previous is not None else audit_genesis(key)
+            if audit_link(start, str(_read(row, "digest")), key) != _read(row, "chain"):
+                return _broken(seq, f"chained audit row {seq} does not link to the row before it")
         previous = str(_read(row, "chain"))
         expected_seq += 1
     last_seq = expected_seq - 1
@@ -245,10 +280,22 @@ def verify_audit_chain(
         return check
     head_seq = int(_read(head, "chain_seq") or 0)
     check.head_seq = head_seq
-    head_key = keys.get(_read(head, "key_id") or "")
+    head_key_id = _read(head, "key_id") or ""
+    head_key = keys.get(head_key_id)
     head_chain = str(_read(head, "chain"))
-    if head_key is None or head_mac(head_seq, head_chain, head_key) != _read(head, "mac"):
+    if head_key is None:
+        if boundary_seen:
+            return _broken(
+                last_seq + 1, "the audit chain's head names a key other than the current one"
+            )
+        check.head_unverifiable = True
+        return check
+    if head_mac(head_seq, head_chain, head_key) != _read(head, "mac"):
         return _broken(last_seq + 1, "the audit chain's head record does not verify")
+    if current is not None and head_key_id == current and ordered and not boundary_seen:
+        return _broken(
+            last_seq + 1, "the audit chain's head is under the current key but no row is"
+        )
     if head_seq > last_seq:
         return _broken(
             last_seq + 1,

@@ -252,7 +252,20 @@ def verify_ledger(
                     f"Amendment {record.get('number')} is not on the audit chain.",
                 )
     if audit_check is not None:
-        result.check(f"the audit chain verifies over {audit_check.rows} rows to its head")
+        span = audit_check.unverifiable_span
+        verified_rows = audit_check.rows - len(audit_check.unverifiable)
+        result.check(f"the audit chain verifies over {verified_rows} of {audit_check.rows} rows")
+        if span is not None:
+            result.note(
+                f"{len(audit_check.unverifiable)} chained audit row(s), seq {span[0]} to "
+                f"{span[1]}, were chained under a key the platform's settings cannot derive "
+                "(before a key rotation): unverifiable, neither verified nor broken."
+            )
+        if audit_check.head_unverifiable:
+            result.note(
+                "The audit chain's head is under a key the platform cannot derive: nothing "
+                "was appended since a rotation, so a cut tail cannot be ruled out."
+            )
     return result.end(VERIFIED, "The ledger, its seal and the stored report verify.")
 
 
@@ -321,7 +334,9 @@ async def verify_job(db: Any, job_id: Any) -> dict[str, Any]:
             for r in mine
             if r["action"] == audit_chain.REPORT_AMEND
         ],
-        audit_check=audit_chain.verify_audit_chain(chained, keys, head),
+        audit_check=audit_chain.verify_audit_chain(
+            chained, keys, head, ledger_chain.platform_key().key_id
+        ),
         keys=keys,
     )
 

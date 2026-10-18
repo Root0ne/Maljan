@@ -150,16 +150,27 @@ Verify a job with `GET /api/v1/jobs/{job_id}/evidence/verify` (owner only) or
 when the seal names a key the platform's settings cannot derive (after a
 settings-key rotation, or a relabelled seal: never verified), or `not_sealed`
 for a run stored before sealing. On a sealed job a NULL digest, a missing,
-extra or reordered row and a changed row count are each a break. Each chained
-audit row is checked under the key its id names among the keys the settings
-can derive; an unknown key id is a break.
+extra or reordered row and a changed row count are each a break.
+
+The audit chain is read in `chain_seq` order and split at the rotation
+boundary, the first row under the current key. From there on every row must
+carry the current key id and verify; an older or unknown key id, or an
+older-key row after a current-key row, is a break named by its seq. Before the
+boundary a row under a key the settings can derive is verified with it, and a
+row under one they cannot derive is reported as unverifiable with its seq
+span, never verified and never broken. Every row links to the stored chain
+value of the row before it, so the first current-key row joins the older
+history. A job's verdict comes from its own seal, rows and audit rows: an
+unverifiable older segment elsewhere leaves it `verified` with a note.
 
 **What it proves, and what it does not.** The chain proves integrity against
 anyone who can write the database but does not hold `SETTINGS_ENCRYPTION_KEY`.
 Someone who holds that secret can rewrite the rows, the chain, the seal and
 the audit chain consistently, and a writer who kept an earlier audit head
 record can put it back after cutting the rows that followed it. Rotating the
-settings key leaves older seals reading as `other_key`.
+settings key leaves older seals reading as `other_key` and older audit rows
+unverifiable; until the first append after a rotation, the head is
+unverifiable too, so a cut tail cannot be ruled out then.
 
 **Anchoring (not built).** The seal's `digest` is the value an external anchor
 would take. An anchor would publish it, once per stored run or batched under a

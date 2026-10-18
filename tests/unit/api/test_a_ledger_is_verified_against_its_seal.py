@@ -232,6 +232,15 @@ def test_a_broken_audit_chain_is_tampering():
     assert "chained row 2" in verdict["reason"]
 
 
+def test_a_job_sealed_after_a_rotation_verifies_beside_an_unverifiable_older_segment():
+    job = _sealed()
+    check = AuditChainCheck(rows=5, head_seq=5, unverifiable=[1, 2, 3])
+    verdict = _verify(job, audit_check=check)
+    assert verdict["status"] == "verified", verdict
+    assert any("seq 1 to 3" in note and "unverifiable" in note for note in verdict["notes"])
+    assert "the audit chain verifies over 2 of 5 rows" in verdict["checks"]
+
+
 def test_an_old_job_predates_sealing_and_an_empty_one_stored_nothing():
     job = _sealed()
     old_rows = [{k: v for k, v in r.items() if k not in ("digest", "chain")} for r in job["rows"]]
