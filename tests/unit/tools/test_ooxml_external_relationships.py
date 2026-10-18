@@ -337,47 +337,93 @@ class TestLinearTime:
 
 
 class TestTheCap:
-    """A relationship part inflates to no more than the platform's fixed sample upload cap."""
+    """The relationship parts of one document inflate to no more than the upload cap together."""
 
-    def test_a_member_stating_more_than_the_cap_is_named_and_not_inflated(
+    @staticmethod
+    def _links(part: int, rows: int) -> str:
+        return _relationships(
+            *(
+                _row(f"rId{i}", "hyperlink", f"https://p{part}h{i}.example.invalid/x", "External")
+                for i in range(rows)
+            )
+        )
+
+    def test_parts_under_the_cap_one_by_one_are_counted_against_it_together(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        extra = {f"word/_rels/footer{n}.xml.rels": self._links(n, 6) for n in range(1, 6)}
+        path = _document(tmp_path, extra)
+        with zipfile.ZipFile(path) as archive:
+            rels = [i for i in archive.infolist() if "_rels/" in i.filename]
+            sizes = [(i.filename, i.file_size) for i in rels]
+        # Every part fits the cap alone; the first three extra parts fit it
+        # together with the two usual ones, and the fourth would cross it.
+        cap = sum(size for _, size in sizes[:5]) + sizes[5][1] // 2
+        assert all(size < cap for _, size in sizes)
+        monkeypatch.setattr(tool, "RELATIONSHIP_PART_CAP", cap)
+
+        answer = tool.document_info(str(path))
+
+        assert {row["part"] for row in answer["external_relationships"]} == {
+            name for name, _ in sizes[2:5]
+        }
+        left = cap - sum(size for _, size in sizes[:5])
+        assert answer["relationship_parts_unread"] == [
+            {
+                "part": sizes[5][0],
+                "reason": tool.RELATIONSHIP_PART_OVER_CAP.format(
+                    size=sizes[5][1], left=left, cap=cap
+                ),
+            },
+            {"part": sizes[6][0], "reason": tool.RELATIONSHIP_PART_AFTER_CAP.format(cap=cap)},
+        ]
+
+    def test_a_part_stating_more_than_the_whole_cap_stops_the_reading_there(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         monkeypatch.setattr(tool, "RELATIONSHIP_PART_CAP", 1_000)
-        big = _relationships(
-            *(
-                _row(f"rId{i}", "hyperlink", f"https://h{i}.example.invalid/x", "External")
-                for i in range(40)
-            )
-        )
+        big = self._links(1, 40)
         small = _relationships(_row("rId1", "frame", "https://f.example.invalid/x", "External"))
         path = _document(
             tmp_path, {"word/_rels/settings.xml.rels": big, "word/_rels/footer1.xml.rels": small}
         )
+        with zipfile.ZipFile(path) as archive:
+            usual = sum(i.file_size for i in archive.infolist()[:4] if "_rels/" in i.filename)
 
         answer = tool.document_info(str(path))
 
+        assert "external_relationships" not in answer
         assert answer["relationship_parts_unread"] == [
             {
                 "part": "word/_rels/settings.xml.rels",
-                "reason": tool.RELATIONSHIP_PART_OVER_CAP.format(size=len(big.encode()), cap=1_000),
-            }
-        ]
-        assert [row["part"] for row in answer["external_relationships"]] == [
-            "word/_rels/footer1.xml.rels"
+                "reason": tool.RELATIONSHIP_PART_OVER_CAP.format(
+                    size=len(big.encode()), left=1_000 - usual, cap=1_000
+                ),
+            },
+            {
+                "part": "word/_rels/footer1.xml.rels",
+                "reason": tool.RELATIONSHIP_PART_AFTER_CAP.format(cap=1_000),
+            },
         ]
 
-    def test_reading_stops_past_the_cap_whatever_the_member_states(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        monkeypatch.setattr(tool, "RELATIONSHIP_PART_CAP", 100)
+    def test_reading_stops_past_what_is_left_whatever_the_member_states(self) -> None:
         body = _relationships(
             _row("rId1", "frame", "https://f.example.invalid/" + "p" * 500, "External")
         ).encode()
 
-        with pytest.raises(tool._RelationshipPartUnread) as refused:
-            tool._external_relationships("word/_rels/x.rels", io.BytesIO(body))
+        with pytest.raises(tool._RelationshipPartPastCap) as refused:
+            tool._external_relationships("word/_rels/x.rels", io.BytesIO(body), 100, 1_000)
 
-        assert str(refused.value) == tool.RELATIONSHIP_PART_PAST_CAP.format(cap=100)
+        assert str(refused.value) == tool.RELATIONSHIP_PART_PAST_CAP.format(left=100, cap=1_000)
+
+    def test_a_part_read_whole_says_how_much_of_the_cap_it_took(self) -> None:
+        body = self._links(1, 3).encode()
+
+        found, read = tool._external_relationships(
+            "word/_rels/x.rels", io.BytesIO(body), len(body), len(body)
+        )
+
+        assert len(found) == 3 and read == len(body)
 
 
 # Run in a child of its own, so the peak resident memory it reports is the read's alone.

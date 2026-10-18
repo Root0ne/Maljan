@@ -63,10 +63,11 @@ _OLE_MACRO_STREAMS = ("vba", "macros", "_vba_project", "dir")
 _RELATIONSHIP_ELEMENT = "http://schemas.openxmlformats.org/package/2006/relationships Relationship"
 # How much of a relationship part one read hands the XML reader.
 _RELATIONSHIP_CHUNK = 64 * 1024
-# The most bytes a relationship part may inflate to: the platform's fixed
-# sample upload cap, as every decompression a tool does (``transforms``,
-# ``upx``). The reader holds a whole attribute value, so its memory follows the
-# longest token, and deflate lets a small file carry a huge one.
+# The most bytes the relationship parts of one document may inflate to, all of
+# them together: the platform's fixed sample upload cap, as every
+# decompression a tool does (``transforms`` caps what its whole chain writes,
+# ``upx``). Every target read stays in the answer, and deflate lets a small
+# file carry many huge ones, so the cap is the document's and not each part's.
 RELATIONSHIP_PART_CAP = SAMPLE_UPLOAD_MAX_BYTES
 # Why a relationship part was not read, as ``relationship_parts_unread`` says it.
 RELATIONSHIP_PART_DOCUMENT_TYPE = (
@@ -76,12 +77,18 @@ RELATIONSHIP_PART_EXTERNAL_ENTITY = "it refers to an external entity"
 RELATIONSHIP_PART_NOT_XML = "it is not well-formed XML ({error} at line {line})"
 RELATIONSHIP_MEMBER_UNREAD = "the archive member could not be read ({error})"
 RELATIONSHIP_PART_OVER_CAP = (
-    "the archive member states {size} uncompressed bytes, above the platform's fixed sample "
-    "upload cap of {cap} bytes; it was not inflated"
+    "the archive member states {size} uncompressed bytes, more than the {left} bytes left of "
+    "the platform's fixed sample upload cap of {cap} bytes, which the document's relationship "
+    "parts share; it was not inflated, and no later relationship part was read"
 )
 RELATIONSHIP_PART_PAST_CAP = (
-    "it inflated past the platform's fixed sample upload cap of {cap} bytes, more than the "
-    "archive member states; reading stopped there"
+    "it inflated past the {left} bytes left of the platform's fixed sample upload cap of {cap} "
+    "bytes, which the document's relationship parts share, more than the archive member "
+    "states; reading stopped there, and no later relationship part was read"
+)
+RELATIONSHIP_PART_AFTER_CAP = (
+    "an earlier relationship part reached the platform's fixed sample upload cap of {cap} "
+    "bytes, which the document's relationship parts share; it was not read"
 )
 
 
@@ -1223,23 +1230,39 @@ def _ooxml_info(target: Path) -> dict[str, Any]:
     they print them for reading. It is absent when there are none.
     ``relationship_parts_unread`` names a relationship part that could not be
     read and why, so its silence is never taken for "none".
+
+    Every relationship part of the document is counted against one
+    ``RELATIONSHIP_PART_CAP``: the part that would cross it, by what its
+    member states or by what it inflates to, is not read, and neither is any
+    relationship part after it; each is named with the reason.
     """
     external: list[dict[str, str]] = []
     unread: list[dict[str, str]] = []
+    cap = RELATIONSHIP_PART_CAP
+    left = cap
+    reached = False
     with zipfile.ZipFile(target) as archive:
         parts = archive.namelist()
         for info in archive.infolist():
             if not _is_relationship_part(info.filename):
                 continue
-            if info.file_size > RELATIONSHIP_PART_CAP:
-                reason = RELATIONSHIP_PART_OVER_CAP.format(
-                    size=info.file_size, cap=RELATIONSHIP_PART_CAP
-                )
+            if reached:
+                reason = RELATIONSHIP_PART_AFTER_CAP.format(cap=cap)
                 unread.append({"part": info.filename, "reason": reason})
+                continue
+            if info.file_size > left:
+                reason = RELATIONSHIP_PART_OVER_CAP.format(size=info.file_size, left=left, cap=cap)
+                unread.append({"part": info.filename, "reason": reason})
+                reached = True
                 continue
             try:
                 with archive.open(info) as stream:
-                    external.extend(_external_relationships(info.filename, stream))
+                    found, read = _external_relationships(info.filename, stream, left, cap)
+                external.extend(found)
+                left -= read
+            except _RelationshipPartPastCap as exc:
+                unread.append({"part": info.filename, "reason": str(exc)})
+                reached = True
             except _RelationshipPartUnread as exc:
                 unread.append({"part": info.filename, "reason": str(exc)})
             except Exception as exc:  # noqa: BLE001 - a damaged member is stated, never raised
@@ -1262,18 +1285,25 @@ class _RelationshipPartUnread(Exception):
     """A relationship part the reader refused or could not parse; the message says why."""
 
 
+class _RelationshipPartPastCap(_RelationshipPartUnread):
+    """A relationship part that inflated past what the document had left of the cap."""
+
+
 def _is_relationship_part(name: str) -> bool:
     """A part the Open Packaging Conventions read relationships from: ``…/_rels/<source>.rels``."""
     folder, _, leaf = name.rpartition("/")
     return leaf.lower().endswith(".rels") and folder.rpartition("/")[2].lower() == "_rels"
 
 
-def _external_relationships(part: str, stream: Any) -> list[dict[str, str]]:
-    """Every ``TargetMode="External"`` relationship in one relationship part, in order.
+def _external_relationships(
+    part: str, stream: Any, left: int, cap: int
+) -> tuple[list[dict[str, str]], int]:
+    """Every ``TargetMode="External"`` relationship in one part, in order, and the bytes read.
 
     Read with expat in chunks, so the time follows the part's size and the
-    memory its longest token; past ``RELATIONSHIP_PART_CAP`` bytes the reading
-    stops, whatever the archive member stated. A document type is refused
+    memory its longest token. Past the ``left`` bytes the document has left of
+    ``cap`` the reading stops, whatever the archive member stated, and the
+    part is refused whole (``_RelationshipPartPastCap``). A document type is refused
     before anything in it is read: a relationship part never needs one, so no
     entity is ever declared, expanded or fetched.
     """
@@ -1308,10 +1338,9 @@ def _external_relationships(part: str, stream: Any) -> list[dict[str, str]]:
     try:
         while chunk := stream.read(_RELATIONSHIP_CHUNK):
             read += len(chunk)
-            if read > RELATIONSHIP_PART_CAP:
-                raise _RelationshipPartUnread(
-                    RELATIONSHIP_PART_PAST_CAP.format(cap=RELATIONSHIP_PART_CAP)
-                )
+            if read > left:
+                reason = RELATIONSHIP_PART_PAST_CAP.format(left=left, cap=cap)
+                raise _RelationshipPartPastCap(reason)
             parser.Parse(chunk, False)
         parser.Parse(b"", True)
     except expat.ExpatError as exc:
@@ -1319,7 +1348,7 @@ def _external_relationships(part: str, stream: Any) -> list[dict[str, str]]:
             error=expat.ErrorString(exc.code), line=exc.lineno
         )
         raise _RelationshipPartUnread(reason) from None
-    return found
+    return found, read
 
 
 def _pdf_info(target: Path) -> dict[str, Any]:

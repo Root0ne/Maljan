@@ -2049,8 +2049,9 @@ PROMPTS: dict[str, str] = {
             binary.RELATIONSHIP_PART_EXTERNAL_ENTITY,
             binary.RELATIONSHIP_PART_NOT_XML.format(error="syntax error", line=1),
             binary.RELATIONSHIP_MEMBER_UNREAD.format(error="BadZipFile: Bad CRC-32"),
-            binary.RELATIONSHIP_PART_OVER_CAP.format(size=2, cap=1),
-            binary.RELATIONSHIP_PART_PAST_CAP.format(cap=1),
+            binary.RELATIONSHIP_PART_OVER_CAP.format(size=2, left=1, cap=1),
+            binary.RELATIONSHIP_PART_PAST_CAP.format(left=1, cap=1),
+            binary.RELATIONSHIP_PART_AFTER_CAP.format(cap=1),
         ]
     ),
     "the capa answer's reasons for library functions it did not look for": " ".join(
