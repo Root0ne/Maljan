@@ -231,6 +231,9 @@ class JobEvidenceSpill(EvidenceSpill):
         self._failed: dict[str, str] = {}
         # Keys already written or being written: the same bytes go up once per job.
         self._written: set[str] = set()
+        # How many times each key was handed to a writer: a write given up on
+        # at the drain removes its object only if no later put wrote it again.
+        self._generation: dict[str, int] = {}
         self._bucket_ready = False
         self.down = False
         # Bytes handed to the writers and not yet written, and their bound.
@@ -256,6 +259,7 @@ class JobEvidenceSpill(EvidenceSpill):
                 raise SpillRefused("store busy")
             self._queued += len(blob)
             self._written.add(key)
+            self._generation[key] = self._generation.get(key, 0) + 1
             self._failed.pop(sha256, None)
             if self._pool is None:
                 self._pool = ThreadPoolExecutor(
@@ -312,26 +316,41 @@ class JobEvidenceSpill(EvidenceSpill):
         with self._lock:
             pending = dict(self._pending)
         wait(list(pending.values()), timeout=max(0.0, float(timeout)))
-        outcomes: dict[str, str | None] = {}
-        late = [(sha256, future) for sha256, future in pending.items() if not future.done()]
+        # One snapshot decides: a write still open here is stated not finished
+        # and its object removed when it ends, even if it ends a moment later.
+        late = {sha256: future for sha256, future in pending.items() if not future.done()}
         if late:
             with self._lock:
                 pool, self._pool = self._pool, None
             if pool is not None:
                 pool.shutdown(wait=False, cancel_futures=True)
-        for sha256, future in pending.items():
-            finished = future.done() and not future.cancelled()
-            outcomes[sha256] = self._failed.get(sha256) if finished else "not finished"
-        for sha256, future in late:
+        outcomes: dict[str, str | None] = {
+            sha256: "not finished" if sha256 in late else self._failed.get(sha256)
+            for sha256 in pending
+        }
+        for sha256, future in late.items():
             key = evidence_key(self.job_id, sha256)
             with self._lock:
                 self._written.discard(key)
-            future.add_done_callback(lambda done, key=key: self._remove_late(done, key))
+                generation = self._generation.get(key, 0)
+            future.add_done_callback(
+                lambda done, key=key, generation=generation: self._remove_late(
+                    done, key, generation
+                )
+            )
         return outcomes
 
-    def _remove_late(self, future: Any, key: str) -> None:
-        """Remove the object a write left after its reference was stated not finished."""
-        if future.cancelled() or self._failed.get(key.rsplit("/", 1)[-1]) is not None:
+    def _remove_late(self, future: Any, key: str, generation: int) -> None:
+        """Remove the object a write left after its reference was stated not finished.
+
+        Not when a later put handed the same key to a writer again: that
+        object is the later write's.
+        """
+        with self._lock:
+            rewritten = self._generation.get(key, 0) != generation
+        if future.cancelled() or rewritten:
+            return
+        if self._failed.get(key.rsplit("/", 1)[-1]) is not None:
             return
         logger.info("Evidence object %s was written after its drain; removing it", log_safe(key))
         try:

@@ -306,6 +306,66 @@ class TestTheWritesRunOffTheLoop:
         assert queued["spilled"][0]["error"] == "upload_failed (not finished)"
         assert store.objects == {}, "no object outlives a reference that says not kept"
 
+    def _gated(self) -> tuple[Any, Any]:
+        import threading
+
+        gate = threading.Event()
+
+        class _Gated(_Store):
+            def put_object(self, *args: Any, **kwargs: Any) -> None:
+                gate.wait(5)
+                super().put_object(*args, **kwargs)
+
+        return gate, _Gated()
+
+    def _wait_for(self, done: Any) -> None:
+        import threading
+
+        for _ in range(150):
+            if done():
+                return
+            threading.Event().wait(0.02)
+
+    def test_a_write_ending_during_the_drain_is_stated_and_removed_as_one(self) -> None:
+        import threading
+
+        gate, store = self._gated()
+        sink = object_store.evidence_spill("job", 1000, store=store)
+        entry = {"spilled": [spill_part(sink, "answer", "hello")]}
+        threading.Event().wait(0.1)
+        pool = sink._pool
+        shutdown = pool.shutdown
+
+        def ending_now(*args: Any, **kwargs: Any) -> None:
+            gate.set()  # the write ends after the drain's snapshot, before its shutdown
+            threading.Event().wait(0.2)
+            shutdown(*args, **kwargs)
+
+        pool.shutdown = ending_now
+        settle_refs([entry], sink.drain(0.05))
+        self._wait_for(lambda: store.removed)
+
+        assert entry["spilled"][0]["error"] == "upload_failed (not finished)"
+        assert store.objects == {}, "the object goes with the reference that says not kept"
+
+    def test_a_late_write_never_removes_what_a_later_put_wrote_again(self) -> None:
+        import threading
+
+        gate, store = self._gated()
+        sink = object_store.evidence_spill("job", 1000, store=store)
+        first = {"spilled": [spill_part(sink, "answer", "again")]}
+        threading.Event().wait(0.05)
+        settle_refs([first], sink.drain(0.05))
+
+        second = spill_part(sink, "output", "again")
+        gate.set()
+        assert sink.drain(5) == {second["sha256"]: None}
+        threading.Event().wait(0.1)
+
+        assert first["spilled"][0]["error"] == "upload_failed (not finished)"
+        assert second["key"] in store.objects and store.removed == []
+        sink.close()
+
     def test_the_writers_client_has_short_timeouts_and_one_retry(self) -> None:
         built = object_store._evidence_client()
         pool = built._http
