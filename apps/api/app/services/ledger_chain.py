@@ -223,6 +223,19 @@ def platform_key() -> ChainKey:
     return derive_key(secret) if secret else UNKEYED
 
 
+def known_keys() -> dict[str, ChainKey]:
+    """Every chain key the platform's settings can derive today, by key id.
+
+    One settings encryption key is held at a time, so this is the current key
+    alone; the unkeyed key (id ``""``) is known only to a platform that holds
+    no settings key. A record naming any other id was not made with a key the
+    platform holds and cannot be checked: a verifier says so and never takes
+    the record's own word for which key to trust.
+    """
+    current = platform_key()
+    return {current.key_id: current}
+
+
 def keyed(key: ChainKey, tag: bytes, message: bytes) -> str:
     """HMAC-SHA256 of ``message`` under ``key``, domain-separated by ``tag``, as hex."""
     return hmac.new(key.key, tag + message, hashlib.sha256).hexdigest()

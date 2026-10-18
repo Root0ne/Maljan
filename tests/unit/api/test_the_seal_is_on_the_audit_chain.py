@@ -2,8 +2,10 @@
 
 A chained audit row takes the next ``chain_seq``, a digest of its columns and a
 keyed chain value linking it to the chained row before it. Recomputing the
-chain finds a changed row, a missing row and a row chained by someone without
-the key; a row chained under another key is said to be so, not called changed.
+chain finds a changed row, a missing row, a tail cut off the end (the keyed
+head record points past it) and a row chained by someone without the key. A
+row is checked under the key its id names, looked up among the keys the
+platform can derive: a relabelled or unknown key id is a break, never a skip.
 A failed append is counted and logged and never raises into the store.
 """
 
@@ -21,7 +23,7 @@ from alembic.runtime.migration import MigrationContext
 from tests.integration._session_probe import SessionFactory, fake_job, fake_sample, rows_for
 
 from app import observability
-from app.models.audit import AuditLog
+from app.models.audit import AuditChainHead, AuditLog
 from app.services import audit_chain, ledger_chain
 from app.worker.analysis_worker import _store_the_report
 from maljan.core.config import Settings
@@ -52,10 +54,11 @@ class _Result:
 
 
 class _ChainSession:
-    """Holds the chained audit rows it is handed and answers the last one."""
+    """Holds the chained audit rows and the head it is handed and answers the last row."""
 
     def __init__(self, fail: bool = False) -> None:
         self.rows: list[AuditLog] = []
+        self.head: AuditChainHead | None = None
         self.fail = fail
 
     def begin_nested(self) -> _Nested:
@@ -72,8 +75,14 @@ class _ChainSession:
         last = max(self.rows, key=lambda r: r.chain_seq)
         return _Result((last.chain_seq, last.chain))
 
-    def add(self, row: AuditLog) -> None:
-        self.rows.append(row)
+    async def get(self, model: Any, name: str) -> Any:
+        return self.head
+
+    def add(self, row: Any) -> None:
+        if isinstance(row, AuditChainHead):
+            self.head = row
+        else:
+            self.rows.append(row)
 
     async def flush(self) -> None:
         return None
@@ -93,20 +102,25 @@ async def _chain(count: int, key: ledger_chain.ChainKey = KEY) -> _ChainSession:
     return db
 
 
+def _verify(db: _ChainSession) -> audit_chain.AuditChainCheck:
+    return audit_chain.verify_audit_chain(db.rows, {KEY.key_id: KEY}, db.head)
+
+
 @pytest.mark.asyncio
-async def test_chained_rows_follow_one_another_and_verify():
+async def test_chained_rows_follow_one_another_and_verify_to_the_head():
     db = await _chain(3)
     assert [r.chain_seq for r in db.rows] == [1, 2, 3]
     assert all(r.chain_key_id == KEY.key_id for r in db.rows)
-    check = audit_chain.verify_audit_chain(db.rows, KEY)
-    assert (check.rows, check.broken_at, check.other_key_rows) == (3, None, [])
+    assert db.head is not None and db.head.chain_seq == 3 and db.head.chain == db.rows[-1].chain
+    check = _verify(db)
+    assert (check.rows, check.broken_at, check.head_seq) == (3, None, 3)
 
 
 @pytest.mark.asyncio
 async def test_a_changed_row_is_found():
     db = await _chain(3)
     db.rows[1].details = {"seal": {"head": "f" * 64}}
-    check = audit_chain.verify_audit_chain(db.rows, KEY)
+    check = _verify(db)
     assert check.broken_at == 2
     assert "differs from its digest" in (check.reason or "")
 
@@ -115,9 +129,38 @@ async def test_a_changed_row_is_found():
 async def test_a_deleted_row_is_found():
     db = await _chain(3)
     del db.rows[1]
-    check = audit_chain.verify_audit_chain(db.rows, KEY)
+    check = _verify(db)
     assert check.broken_at == 2
     assert "missing" in (check.reason or "")
+
+
+@pytest.mark.asyncio
+async def test_a_tail_cut_off_the_end_is_found():
+    db = await _chain(3)
+    del db.rows[2]
+    check = _verify(db)
+    assert check.broken_at == 3
+    assert "cut off the end" in (check.reason or "")
+
+
+@pytest.mark.asyncio
+async def test_a_tail_cut_with_a_head_moved_back_without_the_key_is_found():
+    db = await _chain(3)
+    del db.rows[2]
+    assert db.head is not None
+    db.head.chain_seq = 2
+    db.head.chain = db.rows[1].chain
+    db.head.mac = audit_chain.head_mac(2, db.rows[1].chain, ledger_chain.UNKEYED)
+    check = _verify(db)
+    assert check.broken_at == 3
+    assert "head record does not verify" in (check.reason or "")
+
+
+@pytest.mark.asyncio
+async def test_rows_with_no_head_record_are_a_break():
+    db = await _chain(2)
+    db.head = None
+    assert _verify(db).broken_at == 2
 
 
 @pytest.mark.asyncio
@@ -127,17 +170,61 @@ async def test_a_row_rechained_without_the_key_is_found():
     forged.details = {"seal": {"head": "e" * 64}}
     forged.digest = audit_chain.audit_digest(forged)
     forged.chain = audit_chain.audit_link(db.rows[0].chain, forged.digest, ledger_chain.UNKEYED)
-    check = audit_chain.verify_audit_chain(db.rows, KEY)
+    check = _verify(db)
     assert check.broken_at == 2
     assert "does not link" in (check.reason or "")
 
 
 @pytest.mark.asyncio
-async def test_rows_chained_under_another_key_are_said_to_be_so():
+async def test_a_relabelled_key_id_is_a_break_not_a_skip():
+    db = await _chain(3)
+    forged = db.rows[1]
+    forged.details = {"seal": {"head": "d" * 64}}
+    forged.chain_key_id = "0000000000000000"
+    forged.digest = audit_chain.audit_digest(forged)
+    check = _verify(db)
+    assert check.broken_at == 2
+    assert "cannot derive" in (check.reason or "")
+
+
+@pytest.mark.asyncio
+async def test_a_row_relabelled_as_unkeyed_is_a_break_on_a_keyed_platform():
+    db = await _chain(2)
+    forged = db.rows[0]
+    forged.chain_key_id = None
+    forged.digest = audit_chain.audit_digest(forged)
+    forged.chain = audit_chain.audit_link(
+        audit_chain.audit_genesis(ledger_chain.UNKEYED), forged.digest, ledger_chain.UNKEYED
+    )
+    assert _verify(db).broken_at == 1
+
+
+@pytest.mark.asyncio
+async def test_rows_chained_under_a_key_the_platform_cannot_derive_are_a_break():
     db = await _chain(2, key=OTHER)
-    check = audit_chain.verify_audit_chain(db.rows, KEY)
+    check = _verify(db)
+    assert check.broken_at == 1
+    assert OTHER.key_id in (check.reason or "")
+
+
+@pytest.mark.asyncio
+async def test_rows_chained_under_an_older_known_key_verify_under_it():
+    db = await _chain(1, key=OTHER)
+    for index in range(2):
+        await audit_chain.append(
+            db,
+            action=audit_chain.REPORT_AMEND,
+            resource_type="job",
+            resource_id=str(index),
+            details={},
+            key=KEY,
+        )
+    keys = {KEY.key_id: KEY, OTHER.key_id: OTHER}
+    check = audit_chain.verify_audit_chain(db.rows, keys, db.head)
     assert check.broken_at is None
-    assert check.other_key_rows == [1, 2]
+    db.rows[0].details = {"changed": True}
+    db.rows[0].digest = audit_chain.audit_digest(db.rows[0])
+    assert audit_chain.verify_audit_chain(db.rows, keys, db.head).broken_at == 1
 
 
 @pytest.mark.asyncio
@@ -192,6 +279,23 @@ def _load():
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
+
+
+def test_the_head_table_is_created_and_dropped():
+    path = _REV.with_name("20261023000000_audit_chain_head.py")
+    spec = importlib.util.spec_from_file_location("audit_chain_head", path)
+    assert spec and spec.loader
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    assert (mod.revision, mod.down_revision) == ("20261023000000", "20261022000000")
+    engine = sa.create_engine("sqlite://")
+    with engine.connect() as conn:
+        with Operations.context(MigrationContext.configure(conn)):
+            mod.upgrade()
+            columns = {c["name"] for c in sa.inspect(conn).get_columns("audit_chain_head")}
+            assert columns == {"name", "chain_seq", "chain", "key_id", "mac"}
+            mod.downgrade()
+        assert "audit_chain_head" not in sa.inspect(conn).get_table_names()
 
 
 def test_the_revision_follows_the_report_seal_one():

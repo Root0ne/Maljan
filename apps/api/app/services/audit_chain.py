@@ -6,6 +6,9 @@ it changes) or not at all. It takes the next ``chain_seq``, a SHA-256 digest
 of its columns in canonical form (``ledger_chain.canonical``) and a chain value:
 the HMAC of the previous chained row's chain value and its own digest, under
 the ledger's key (``ledger_chain.ChainKey``), with that key's id beside it.
+The chain's head record (``AuditChainHead``: last ``chain_seq``, chain value,
+key id and a MAC over them) is rewritten in the same savepoint, so rows cut off
+the end of the log are found.
 
 Appends are serialised by a PostgreSQL transaction-scoped advisory lock taken
 inside a savepoint, and ``chain_seq`` is unique, so two writers can never fork
@@ -13,6 +16,12 @@ the chain. The append is best effort like every audit write
 (``services.audit``): a failure rolls back the savepoint only, never the
 transaction it sits in, and is logged at ERROR and counted in
 ``audit_write_failures``. Ordinary audit rows are not chained.
+
+The limit, stated: the chain proves integrity against a database writer who
+does not hold the settings encryption key. Someone who holds it can rewrite the
+chain and its head, and a writer who kept an earlier head record can put it
+back after cutting the rows that followed it; an anchor outside the database
+is what rules those out.
 """
 
 from __future__ import annotations
@@ -21,7 +30,7 @@ import hashlib
 import ipaddress
 import uuid
 from collections.abc import Iterable, Mapping
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
 
@@ -36,6 +45,8 @@ AUDIT_CHAIN_LOCK = 0x6D616C6A616E4143  # "maljanAC"
 _ENTRY_TAG = b"maljan-audit-entry/1\n"
 _GENESIS_TAG = b"maljan-audit-chain/1\n"
 _LINK_TAG = b"maljan-audit-link/1\n"
+_HEAD_TAG = b"maljan-audit-head/1\n"
+HEAD_NAME = "audit"
 
 # The actions written onto the chain.
 LEDGER_SEAL = "ledger.seal"
@@ -98,6 +109,13 @@ def audit_link(previous: str, digest: str, key: ledger_chain.ChainKey) -> str:
     return ledger_chain.keyed(key, _LINK_TAG, f"{previous}:{digest}".encode("ascii"))
 
 
+def head_mac(chain_seq: int, chain: str, key: ledger_chain.ChainKey) -> str:
+    """The keyed MAC of the audit chain's head record."""
+    return ledger_chain.keyed(
+        key, _HEAD_TAG, ledger_chain.canonical({"chain": chain, "chain_seq": int(chain_seq)})
+    )
+
+
 def _is_postgres(db: Any) -> bool:
     try:
         return bool(db.get_bind().dialect.name == "postgresql")
@@ -115,10 +133,13 @@ async def append(
     key: ledger_chain.ChainKey,
     user_id: uuid.UUID | None = None,
 ) -> Any:
-    """Add one chained audit row to ``db``'s transaction; the row, or ``None`` when it failed."""
+    """Add one chained audit row to ``db``'s transaction; the row, or ``None`` when it failed.
+
+    The chain's head record is rewritten in the same savepoint, under ``key``.
+    """
     from sqlalchemy import select, text
 
-    from app.models.audit import AuditLog
+    from app.models.audit import AuditChainHead, AuditLog
 
     try:
         async with db.begin_nested():
@@ -150,6 +171,14 @@ async def append(
             row.digest = audit_digest(row)
             row.chain = audit_link(previous, row.digest, key)
             db.add(row)
+            head = await db.get(AuditChainHead, HEAD_NAME)
+            if head is None:
+                head = AuditChainHead(name=HEAD_NAME)
+                db.add(head)
+            head.chain_seq = previous_seq + 1
+            head.chain = row.chain
+            head.key_id = key.key_id or None
+            head.mac = head_mac(previous_seq + 1, row.chain, key)
             await db.flush()
         return row
     except Exception as exc:  # noqa: BLE001 — audit is best effort, but never silent
@@ -160,41 +189,73 @@ async def append(
 
 @dataclass
 class AuditChainCheck:
-    """What recomputing the audit chain found."""
+    """What recomputing the audit chain found: ``broken_at`` is ``None`` only when it holds."""
 
     rows: int
     broken_at: int | None = None
     reason: str | None = None
-    other_key_rows: list[int] = field(default_factory=list)
+    head_seq: int | None = None
 
 
-def verify_audit_chain(rows: Iterable[Any], key: ledger_chain.ChainKey) -> AuditChainCheck:
-    """Recompute the chained audit rows in ``chain_seq`` order; the first that breaks.
+def verify_audit_chain(
+    rows: Iterable[Any], keys: Mapping[str, ledger_chain.ChainKey], head: Any
+) -> AuditChainCheck:
+    """Recompute the chained audit rows in ``chain_seq`` order against the head; the first break.
 
-    A row chained under another key than ``key`` cannot have its link checked:
-    it is listed under ``other_key_rows``, its digest is still checked, and its
-    stored chain value carries the walk on.
+    Each row is checked under the key its ``chain_key_id`` names, looked up
+    among ``keys`` (``ledger_chain.known_keys``): a row naming a key the
+    platform cannot derive is a break, never skipped, because a row must not
+    choose how it is checked. The walk must end exactly at the head record,
+    whose MAC is checked the same way: a row cut off the end, a missing head or
+    a head that does not match is a break.
     """
     ordered = sorted(rows, key=lambda r: int(_read(r, "chain_seq") or 0))
     check = AuditChainCheck(rows=len(ordered))
-    previous = audit_genesis(key)
+
+    def _broken(seq: int, reason: str) -> AuditChainCheck:
+        check.broken_at = seq
+        check.reason = reason
+        return check
+
+    previous: str | None = None
     expected_seq = 1
     for row in ordered:
         seq = int(_read(row, "chain_seq") or 0)
         if seq != expected_seq:
-            check.broken_at = expected_seq
-            check.reason = f"chained audit row {expected_seq} is missing"
-            return check
+            return _broken(expected_seq, f"chained audit row {expected_seq} is missing")
         if audit_digest(row) != _read(row, "digest"):
-            check.broken_at = seq
-            check.reason = f"chained audit row {seq} differs from its digest"
-            return check
-        if (_read(row, "chain_key_id") or "") != key.key_id:
-            check.other_key_rows.append(seq)
-        elif audit_link(previous, str(_read(row, "digest")), key) != _read(row, "chain"):
-            check.broken_at = seq
-            check.reason = f"chained audit row {seq} does not link to the row before it"
-            return check
+            return _broken(seq, f"chained audit row {seq} differs from its digest")
+        key_id = _read(row, "chain_key_id") or ""
+        key = keys.get(key_id)
+        if key is None:
+            return _broken(
+                seq,
+                f"chained audit row {seq} names key {key_id or '(none)'}, "
+                "which the platform's settings cannot derive",
+            )
+        start = previous if previous is not None else audit_genesis(key)
+        if audit_link(start, str(_read(row, "digest")), key) != _read(row, "chain"):
+            return _broken(seq, f"chained audit row {seq} does not link to the row before it")
         previous = str(_read(row, "chain"))
         expected_seq += 1
+    last_seq = expected_seq - 1
+    if head is None:
+        if ordered:
+            return _broken(last_seq, "the audit chain has rows but no head record")
+        return check
+    head_seq = int(_read(head, "chain_seq") or 0)
+    check.head_seq = head_seq
+    head_key = keys.get(_read(head, "key_id") or "")
+    head_chain = str(_read(head, "chain"))
+    if head_key is None or head_mac(head_seq, head_chain, head_key) != _read(head, "mac"):
+        return _broken(last_seq + 1, "the audit chain's head record does not verify")
+    if head_seq > last_seq:
+        return _broken(
+            last_seq + 1,
+            f"chained audit rows {last_seq + 1} to {head_seq} are missing: cut off the end",
+        )
+    if head_seq < last_seq:
+        return _broken(head_seq + 1, f"chained audit rows after {head_seq} are past the head")
+    if head_chain != previous:
+        return _broken(last_seq, f"the head's chain value differs from row {last_seq}")
     return check

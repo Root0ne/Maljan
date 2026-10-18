@@ -52,6 +52,26 @@ class AuditLog(UUIDPrimaryKeyMixin, Base):
         return f"<AuditLog {self.action} by user={self.user_id}>"
 
 
+class AuditChainHead(Base):
+    """The audit chain's head: its last ``chain_seq`` and chain value, under a keyed MAC.
+
+    One row (``name`` ``"audit"``), rewritten by every chained append in the
+    same transaction (``app.services.audit_chain``). Cutting chained rows off
+    the end of the log leaves the head pointing past them, and moving the head
+    back needs the key the MAC is computed under; a writer holding an earlier
+    head record can still put it back, which only an anchor outside the
+    database rules out.
+    """
+
+    __tablename__ = "audit_chain_head"
+
+    name: Mapped[str] = mapped_column(String(32), primary_key=True)
+    chain_seq: Mapped[int] = mapped_column(Integer, nullable=False)
+    chain: Mapped[str] = mapped_column(String(64), nullable=False)
+    key_id: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    mac: Mapped[str] = mapped_column(String(64), nullable=False)
+
+
 class APIKey(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     """API key for programmatic access."""
 

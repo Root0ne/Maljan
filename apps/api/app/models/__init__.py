@@ -1,5 +1,5 @@
 # Models package
-from app.models.audit import APIKey, AuditLog
+from app.models.audit import APIKey, AuditChainHead, AuditLog
 from app.models.evidence import EvidenceEntry
 from app.models.job import AnalysisJob
 from app.models.job_event import JobEvent
@@ -11,6 +11,7 @@ from app.models.settings import RuntimeSetting
 from app.models.user import User
 
 __all__ = [
+    "AuditChainHead",
     "User",
     "Sample",
     "SandboxReportRow",
