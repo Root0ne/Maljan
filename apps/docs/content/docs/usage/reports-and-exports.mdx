@@ -316,8 +316,9 @@ nothing a model reads changes.
   binds and the judge and the mediator bind, the name and version each of
   their servers gave for itself (no server is ever attached for the
   fingerprint: where the run never bound the judge's servers, as on the
-  mediator's fast path, they are recorded from their declared settings and
-  marked not attached in this run, with no version or tool definitions), and the settings the run ran with, masked as the stored settings
+  mediator's fast path, they are recorded as digests of their declared
+  settings, one for the whole and one per field, never the values, and marked
+  not attached in this run, with no version or tool definitions), and the settings the run ran with, masked as the stored settings
   snapshot masks them, with this host's repository paths (the checkout, the
   repository it is a worktree of, the virtual environment) replaced, so the
   same setup on two hosts or worktrees hashes equal; a path such as

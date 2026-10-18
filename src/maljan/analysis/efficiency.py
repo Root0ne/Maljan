@@ -52,9 +52,10 @@ what the run sent: every system prompt the platform can send for the job,
 rendered by the builder that sends it for one fixed placeholder job
 (``analysis.setup_prompts``); the tools each analyst was resolved with and the
 judge and the mediator bind, as their definitions are bound — or, where the run
-never bound the judge's servers, those servers as their settings declare them,
-marked not attached, since no server is ever attached for the fingerprint; the name and
-version each tool server attached by then gave for itself; and the settings
+never bound the judge's servers, digests of those servers' declared settings
+(never the values), marked not attached, since no server is ever attached for
+the fingerprint; the name and version each tool server attached by then gave
+for itself; and the settings
 the run ran with, masked as the stored snapshot masks them. A retry, a
 revision round, a cleared tool answer or the mediator's fast path does not
 move it, nor does the sample, whose values are never in a rendered prompt;
@@ -486,18 +487,26 @@ def host_paths() -> list[tuple[str, str]]:
 
 
 def declared_server(config: Any) -> dict[str, Any]:
-    """A tool server as its settings declare it, with this host's paths replaced.
+    """A tool server as its settings declare it, as digests only.
 
     Its transport, launch command and arguments or address, working directory
-    and tool filter: what identifies the server without attaching it.
+    and tool filter — what identifies the server without attaching it — are
+    hashed with this host's paths replaced: one digest of the whole identity
+    and one per field, so a diff still names the field. Nothing of the values
+    is kept, so a token an argument or an address carries is never stored,
+    masked or not, whatever its shape.
     """
     held = host_paths()
-    out: dict[str, Any] = {"not_attached": True}
+    fields: dict[str, Any] = {}
     for field in ("transport", "command", "args", "url", "cwd", "tools"):
         value = getattr(config, field, None)
         if value not in (None, "", []):
-            out[field] = _without_host(list(value) if isinstance(value, tuple) else value, held)
-    return out
+            fields[field] = _without_host(list(value) if isinstance(value, tuple) else value, held)
+    return {
+        "not_attached": True,
+        "identity": _hash(fields),
+        "fields": {name: _hash(value) for name, value in sorted(fields.items())},
+    }
 
 
 def _without_host(value: Any, host: Sequence[tuple[str, str]]) -> Any:

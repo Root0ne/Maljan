@@ -430,3 +430,46 @@ def test_a_judge_the_run_never_bound_is_recorded_from_its_settings_and_never_att
     lines = efficiency_lines({"v": 2, "fingerprint": record})
     assert any(line.startswith("Not attached in this run") for line in lines)
     assert any("not attached in this run (its declared settings only)" in line for line in lines)
+
+
+def test_a_token_in_a_declared_server_s_arguments_or_address_is_never_stored() -> None:
+    import json
+    from datetime import UTC, datetime
+
+    from maljan.reporting.models import FileHashes, MalwareReport, SampleIdentity
+    from maljan.reporting.renderers.markdown import MarkdownRenderer
+
+    token = prefixed_key("tok-")
+    settings = Settings()
+    container = _container(settings=settings)
+    for key in ("judge", "mediator"):
+        del container._setup_tools[key]
+    container._setup_servers = {}
+    judge_servers = [handle.name for handle in container.get_server_registry().for_agent("judge")]
+    assert judge_servers, "the shipped settings bind a server to the judge"
+    server = settings.mcp.servers[judge_servers[0]]
+    server.args = [*server.args, "--api-token", token]
+    server.url = f"https://intel.example.org/mcp?key={token}"
+
+    container.note_judge_declared_setup()
+    record = efficiency_record_for(container)
+    declared = record["fingerprint"]["parts"]["servers"][judge_servers[0]]
+    report = MalwareReport(
+        identity=SampleIdentity(hashes=FileHashes(sha256="a" * 64)),
+        verdict="Malware",
+        run_summary={"final_decision": "Malware", "efficiency": record},
+        generated_at=datetime(2026, 9, 1, tzinfo=UTC),
+    )
+
+    assert set(declared) == {"not_attached", "identity", "fields"}
+    assert {"args", "url"} <= set(declared["fields"])
+    assert token not in json.dumps(record)
+    assert token not in MarkdownRenderer().render(report)
+
+
+def efficiency_record_for(container: Any) -> dict[str, Any]:
+    from maljan.analysis.efficiency import efficiency_record
+
+    record = efficiency_record(container)
+    assert record is not None
+    return record

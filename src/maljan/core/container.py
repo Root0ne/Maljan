@@ -1235,9 +1235,10 @@ class ServiceContainer:
         No server is attached for the fingerprint, and no agent is built: an
         agent that never bound its role's servers in this run (a mediation
         that took its fast path) is recorded by what the settings declare for
-        each server the ``judge`` role and definition bind — its name, its
-        launch identity with this host's paths replaced and its tool filter —
-        marked not attached, with no version and no tool definitions. An agent
+        each server the ``judge`` role and definition bind — digests of its
+        launch identity with this host's paths replaced and of its tool filter
+        (``efficiency.declared_server``), never the values — marked not
+        attached, with no version and no tool definitions. An agent
         the run set up is left as it is. Never raises.
         """
         try:
