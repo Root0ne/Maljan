@@ -126,8 +126,15 @@ same state.
 ## Sample storage
 
 Sample bytes live in MinIO, in the bucket named by `MINIO_BUCKET`
-(`maljan-samples` by default); metadata, jobs and reports live in Postgres.
-Uploads are streamed through `UPLOAD_TEMP_DIR` rather than the system temp
+(`maljan-samples` by default), beside the uploaded sandbox reports; metadata,
+jobs, reports and the evidence ledger live in Postgres. One module builds every
+client and creates the bucket (`app/services/object_store.py`): the API's
+upload, read and delete paths, the health probe and the worker's download all
+use it. Nothing creates the bucket in advance: the first write that finds it
+missing creates it and gives it an explicit policy that denies an anonymous
+principal every read, write and listing, whichever write came first. A policy
+the server refuses is logged as a warning; verify then that the bucket is not
+anonymously readable. Uploads are streamed through `UPLOAD_TEMP_DIR` rather than the system temp
 directory, and the worker mirrors each downloaded sample into `SAMPLES_DIR`
 so the Ghidra container can read it through its read-only bind mount. Both
 directories hold live malware: exclude them from any on-access scanner and

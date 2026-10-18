@@ -2730,19 +2730,9 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
         static_sample_paths: dict[str, str] = {}
         server_sample_paths: dict[str, str] = {}
         try:
-            from minio import Minio
-            from pydantic import SecretStr as _SecretStr
+            from app.services import object_store
 
-            secret = settings.minio_secret_key
-            secret_value = (
-                secret.get_secret_value() if isinstance(secret, _SecretStr) else str(secret)
-            )
-            minio_client = Minio(
-                settings.minio_endpoint,
-                access_key=settings.minio_access_key,
-                secret_key=secret_value,
-                secure=settings.minio_secure,
-            )
+            minio_client = object_store.client()
             # Re-derive the storage path from the sha256 instead of trusting
             # the value in the DB row (defence in depth against tampering).
             derived_path = f"samples/{sample_sha256[:2]}/{sample_sha256}"
@@ -2779,16 +2769,11 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
             # carrying the job's heartbeat, its cancellation poller and every
             # event the pipeline publishes. A slow store would stop all three
             # for the length of the download.
-            await asyncio.to_thread(
-                minio_client.fget_object,
-                settings.minio_bucket,
-                derived_path,
-                temp_path,
-            )
-            # 0o600 on the file; the parent dir is already 0o700 (owner-
-            # only) via ``sample_files.temp_dir()``, so this file is
-            # unreachable to anyone but the worker's own user either way.
-            os.chmod(temp_path, 0o600)
+            # 0o600 on the file (``object_store.download``); the parent dir
+            # is already 0o700 (owner-only) via ``sample_files.temp_dir()``,
+            # so this file is unreachable to anyone but the worker's own user
+            # either way.
+            await asyncio.to_thread(object_store.download, minio_client, derived_path, temp_path)
             logger.info(
                 "Downloaded sample from MinIO: %s -> %s",
                 sample_storage_path,

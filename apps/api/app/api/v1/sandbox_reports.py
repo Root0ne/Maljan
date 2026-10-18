@@ -48,11 +48,10 @@ from maljan.core.report_formats import (
 )
 from maljan.core.safe_json import loads
 from maljan.providers.sandbox.readers import mapping_refusal, report_reader, sandbox_formats
-from pydantic import SecretStr, ValidationError
+from pydantic import ValidationError
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.config import settings
 from app.database import get_db
 from app.deps import get_current_user, require_active_user, require_admin
 from app.logging_config import get_logger
@@ -67,7 +66,7 @@ from app.schemas.job import (
     SandboxReportResponse,
     SignatureScaleResponse,
 )
-from app.services import audit
+from app.services import audit, object_store
 from app.services.report_formats_lock import (
     ALLOWED_FORMATS_KEY,
     REPORT_FORMATS_KEY,
@@ -117,26 +116,14 @@ async def _maybe_await(value: Any) -> Any:
 
 
 def _minio_client() -> Any:
-    from minio import Minio
-
-    raw = settings.minio_secret_key
-    return Minio(
-        settings.minio_endpoint,
-        access_key=settings.minio_access_key,
-        secret_key=raw.get_secret_value() if isinstance(raw, SecretStr) else str(raw),
-        secure=settings.minio_secure,
-    )
+    """The object store's client (``app.services.object_store``)."""
+    return object_store.client()
 
 
 def _put_object_blocking(path: str, blob: bytes, *, content_type: str = "application/json") -> None:
-    import io as _io
-
-    client = _minio_client()
-    if not client.bucket_exists(settings.minio_bucket):
-        client.make_bucket(settings.minio_bucket)
-    client.put_object(
-        settings.minio_bucket, path, _io.BytesIO(blob), length=len(blob), content_type=content_type
-    )
+    # The bucket is created the one way every path creates it, with the
+    # anonymous-deny policy (``object_store.ensure_bucket``).
+    object_store.put_bytes(_minio_client(), path, blob, content_type=content_type)
 
 
 async def put_object(path: str, blob: bytes, *, content_type: str = "application/json") -> None:
@@ -157,12 +144,7 @@ def get_object(path: str) -> bytes:
     and needs the bytes before the sandbox provider is built — hence the public
     name and the synchronous shape. Inside the API, call ``get_object_async``.
     """
-    response = _minio_client().get_object(settings.minio_bucket, path)
-    try:
-        return bytes(response.read())
-    finally:
-        response.close()
-        response.release_conn()
+    return object_store.read_bytes(_minio_client(), path)
 
 
 async def get_object_async(path: str) -> bytes:
@@ -472,9 +454,7 @@ async def delete_sandbox_report(
     if row is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Sandbox report not found")
     try:
-        await asyncio.to_thread(
-            _minio_client().remove_object, settings.minio_bucket, row.storage_path
-        )
+        await asyncio.to_thread(object_store.remove, _minio_client(), row.storage_path)
     except Exception as exc:  # noqa: BLE001 — an orphaned object is not a failed delete
         logger.warning("Could not remove %s from storage: %s", row.storage_path, exc)
     await db.execute(delete(SandboxReportRow).where(SandboxReportRow.id == row.id))
