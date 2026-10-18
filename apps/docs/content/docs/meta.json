@@ -38,6 +38,7 @@
     "operations",
     "development",
     "replay",
+    "blind-scoring",
     "---Benchmark---",
     "./benchmark/index",
     "./benchmark/scores/latrodectus-all-tools-local6",
