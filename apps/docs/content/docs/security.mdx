@@ -93,6 +93,12 @@ Stored secrets are never echoed back. Values are returned to the console as a
 mask plus a short hint, run summaries mask them, and DSNs are redacted before
 they are shown in the read-only Deployment group.
 
+No tool server's environment carries the platform's own secrets: a server block
+naming a bootstrap variable that opens a store (the database or Redis URL, an
+object-store key, the settings key, a JWT signing key) in `env_allow` or `env`
+is refused, and the spawn drops one whatever a block says
+([configuration](/configuration/#which-directories-a-sidecar-may-read)).
+
 ## What an export leaves out
 
 A JSON export is a file on an operator's disk, so it carries no credential at
