@@ -133,14 +133,24 @@ Uploaded samples are live malware. They are stored in MinIO and mirrored into
 `SAMPLES_DIR`, which the Ghidra container mounts read-only. Keep both
 directories excluded from on-access scanners, off shared storage and off
 developer machines that are not meant to hold samples. Detonation happens in
-whichever sandbox is configured, never on the Maljan host.
+whichever sandbox is configured, never on the Maljan host. The production
+compose file mounts the source trees read-only in every container built from
+the backend image, and runs the API without `--reload`. A parser bug in a
+process that opens a sample therefore cannot plant code the platform would
+run next; see [The compose stack](/deployment/#the-compose-stack).
 
 Every report says what its run sent beyond this machine — the model endpoints
 its prompts went to, the lookup services it asked, where the sample was
 uploaded or staged, and the enrichment that follows the report — in its
 Disclosure block, which says "nothing left" only when it knows every path;
 see [What left this
-machine](/usage/reports-and-exports/#what-left-this-machine).
+machine](/usage/reports-and-exports/#what-left-this-machine). The same block
+says where the sample's bytes were read: in the worker process, in a tool
+server's process the worker started and measured, or in a server reached at an
+address that this run does not measure. A reader counts as isolated only when
+it was measured and passed every check, and today's shipped stack has no such
+reader; see [Where the sample was
+read](/usage/reports-and-exports/#where-the-sample-was-read).
 
 Tracing sends every prompt and answer to the tracing service. The tracing
 library reads the process environment, which outlives a job: a job with

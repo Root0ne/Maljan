@@ -98,6 +98,10 @@ class GenericMCPStaticProvider(StaticProvider):
         # A declared error's remediation may name the path the server can open
         # for the job's sample: the job's mirror.
         self._handle.error_sample_path = self._mirror_path
+        # A job's server: its process is measured, under the block its calls
+        # are recorded under, for the run's isolation part.
+        self._handle.declared_source = self.declaration_source
+        self._handle.measures_isolation = True
 
     def _mirror_path(self) -> str | None:
         """The path the server can open for the job's sample, ``None`` before a job."""

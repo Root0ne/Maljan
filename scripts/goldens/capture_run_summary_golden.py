@@ -201,7 +201,8 @@ def _disclosure(summary: dict[str, Any]) -> dict[str, Any]:
     submission to a sandbox on a private address and a staging to a tool
     server, an entry that records no source, a call to a tool that declares
     nothing and one to a declared tool on a server run on this machine, and a
-    memory store at a compose service name. Then the enrichment, as the
+    memory store at a compose service name; in the isolation part, the
+    worker's own read of the sample. Then the enrichment, as the
     worker names it and as its job adds what it asked: the summary a run is
     stored with once both have written it.
     """
@@ -272,6 +273,15 @@ def _disclosure(summary: dict[str, Any]) -> dict[str, Any]:
             )
         ],
         runtimes={},
+        opened={"worker": [{"where": "in_process", "label": "the platform's own readers"}]},
+        worker={
+            "uid": 10001,
+            "cap_eff_zero": True,
+            "cap_prm_zero": True,
+            "cap_amb_zero": True,
+            "no_new_privs": True,
+            "platform_names_in_env": ["DATABASE_URL"],
+        },
     )
     record = with_enrichment(record, [rdap_row()])
     return with_enrichment_asked(

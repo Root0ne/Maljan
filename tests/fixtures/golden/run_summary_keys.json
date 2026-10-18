@@ -54,6 +54,52 @@
       ],
       "state": null
     },
+    "isolation": {
+      "isolated": null,
+      "rows": [
+        {
+          "attaches": null,
+          "calls": null,
+          "cap_amb_zero": null,
+          "cap_eff_zero": null,
+          "cap_prm_zero": null,
+          "descendants": null,
+          "descendants_failing": null,
+          "descendants_judged": null,
+          "descendants_why": null,
+          "host": null,
+          "isolated": null,
+          "label": null,
+          "measured_by": null,
+          "needs_network": null,
+          "no_new_privs": null,
+          "own_mount_namespace": null,
+          "own_net_namespace": null,
+          "own_pid_namespace": null,
+          "platform_names_in_env": [
+            null
+          ],
+          "same_uid_as_worker": null,
+          "shares_group_with_worker": null,
+          "source": null,
+          "transport": null,
+          "uid": null,
+          "where": null,
+          "why_not_measured": null
+        }
+      ],
+      "unsourced_reads": null,
+      "worker": {
+        "cap_amb_zero": null,
+        "cap_eff_zero": null,
+        "cap_prm_zero": null,
+        "no_new_privs": null,
+        "platform_names_in_env": [
+          null
+        ],
+        "uid": null
+      }
+    },
     "local_servers": [
       null
     ],

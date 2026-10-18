@@ -842,6 +842,19 @@ def _yara_scan_budget(container: Any) -> int | None:
         return None
 
 
+def _noting_the_report_read(container: Any) -> Any:
+    """What the report step's check of its drafted rule calls as it reads the sample.
+
+    The check reads the sample in the worker process, so the run's isolation
+    part names it (``analysis.isolation.note_read_in_worker``).
+    """
+    from functools import partial
+
+    from maljan.analysis.isolation import REPORT_LABEL, REPORT_SOURCE, note_read_in_worker
+
+    return partial(note_read_in_worker, container, REPORT_SOURCE, REPORT_LABEL)
+
+
 def _pin_sample_path(agent: Any, state: AnalysisState) -> None:
     """Pin the path this agent's tools must be given, on the agent itself.
 
@@ -6521,6 +6534,7 @@ def make_report_node(
                     OwnSample(
                         path=state.get("sample_path"),
                         budget_seconds=_yara_scan_budget(container),
+                        on_open=_noting_the_report_read(container),
                     ),
                 )
                 logger.info(

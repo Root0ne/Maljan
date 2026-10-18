@@ -204,6 +204,58 @@ no answered call, tracing on, a queued enrichment, an unread ledger row, or a
 run stopped part-way, whose last step may have made calls its record does not
 hold.
 
+### Where the sample was read
+
+Inside the same block, under its own **Isolation** lead, the report says where
+the run read the sample's bytes and what kept each reader from the worker. The
+run summary stores this as `disclosure.isolation`, in records of version 2.
+
+**Which sources read the sample.** These are read from the run's records,
+never from a tool's name:
+
+- every call of a tool that declares an argument as the sample or a payload
+  carved from it (argument role `path` or `carved`);
+- every call through a block that declares where its server sees the sample
+  (`sample_mount`, `work_dir` or `sample_open.open_tool`);
+- every call handed one of the job's paths to the sample as an argument (the
+  worker's copy, the path a server that declares a mount sees it at, a static
+  provider's mirror), so a tool that declares nothing is counted too;
+- the worker's own reads that write no ledger entry. These are the sample's
+  routing, which every run with a readable sample does before any tool is
+  called, and the report step's check of its drafted YARA rule.
+
+**How each reader is told**:
+
+- **A read in the worker process.** This covers the triage pack, the capa and
+  YARA provider, the routing and the report step. It is not isolated, by
+  construction. The block names the worker's user and, by name only, the
+  platform's own variables in its environment.
+- **A tool server started over stdio.** The worker measures the process it
+  started, once the server has initialised and before its first tool call:
+  - its user, and whether that is the worker's own;
+  - whether it has its own process table, network and mount namespace;
+  - whether it holds any effective capability;
+  - whether it can gain privileges;
+  - which of the platform's own variables its environment held, read off the
+    environment the platform handed it.
+
+  Such a reader is isolated only when every check holds. The network check is
+  lifted for a block that declares it needs the network: a lookup or sandbox
+  role, a kind that reaches outside, an indicator argument, or
+  `discloses_sample`. A field that could not be read never counts as passing.
+  A launcher (a sandbox's monitor, `uv run`, a container client) starts the
+  real server as its own child, so every process under the started one is
+  measured too, up to 64 processes. Which of them reads the sample cannot be
+  told, so every one is held to the checks. A tree that could not be read
+  whole, or is wider than that, is said not to be judged, and is not isolated.
+- **A server reached at an address.** One at a local address is "not verified
+  by this run". A remote one is a host whose isolation this run cannot tell.
+
+**The verdict.** The block says every reader was kept from the worker only
+when at least one reader exists and every one was measured and passed. A run
+that recorded no read of the sample says so, and claims nothing. A version-1
+record has no isolation part and renders as before.
+
 A run whose block was not built stores why (`{"not_built": …}`: reporting
 off, no run summary as in a mock run, or a build that failed), so it is told
 apart from a report stored before the block existed, which shows none. The

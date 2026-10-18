@@ -86,6 +86,14 @@ Every published port binds to `BIND_ADDRESS`, which the example file sets to
 `127.0.0.1`. The stack is unreachable from the network until that is changed
 deliberately, behind a firewall or a reverse proxy you control.
 
+The API, the workers and the migration mount `src/`, `apps/`, `tests/` and
+`services/` read-only, and the API runs without `--reload`. A process in those
+containers opens hostile bytes, so it must not be able to plant code that the
+API or a later worker would run, or rewrite the host's working tree. `data/`
+stays writable, for the uploads and the sample mirrors. A source edit reaches a
+production container only when it restarts. The development overlay (`make
+dev-up`) mounts the sources writable and reloads the API on an edit.
+
 ## Where a tool server sees the sample
 
 The worker copies each sample into a directory under `data/samples/` on the

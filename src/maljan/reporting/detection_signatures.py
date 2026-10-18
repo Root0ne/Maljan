@@ -31,7 +31,8 @@ import os
 import re
 import stat
 import uuid
-from dataclasses import dataclass
+from collections.abc import Callable
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
 
@@ -85,11 +86,14 @@ class OwnSample:
     it lies, and it is never copied. ``budget_seconds`` is the operator's wall
     clock for the check (``core.static.yara.timeout_seconds``), ``None`` when it
     could not be read, and then the rule is not checked rather than run
-    unbounded.
+    unbounded. ``on_open`` is called once, just before the engine is handed
+    the file, so the run can say where the sample's bytes were read
+    (``analysis.isolation``).
     """
 
     path: str | None
     budget_seconds: int | None
+    on_open: Callable[[], None] | None = field(default=None, compare=False)
 
 
 # Why a drafted YARA rule was not checked against its sample, said on the rule.
@@ -669,6 +673,8 @@ def _run_on_sample(
         return int(yara.CALLBACK_CONTINUE)
 
     seconds = max(1, int(budget))
+    if sample.on_open is not None:
+        sample.on_open()
     try:
         probe.match(
             filepath=path,

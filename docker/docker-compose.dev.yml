@@ -39,6 +39,19 @@ services:
       - /app/node_modules
       - /app/.next
 
+  # The production file mounts the source trees read-only and runs the API
+  # without --reload. Here both are as they were before that: writable source
+  # mounts (Compose merges volumes by target, so these replace the read-only
+  # ones) and the API reloading on a source edit.
+  backend-api:
+    command: >
+      uv run uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+    volumes:
+      - ../src:/app/src
+      - ../apps:/app/apps
+      - ../tests:/app/tests
+      - ../services:/app/services
+
   # Restart the worker process when Python under src/ or apps/ changes. arq has
   # no reload facility of its own, so watchfiles supervises it.
   backend-worker:
@@ -46,6 +59,11 @@ services:
       uv run watchfiles
       "arq app.worker.analysis_worker.WorkerSettings"
       /app/src /app/apps/api
+    volumes:
+      - ../src:/app/src
+      - ../apps:/app/apps
+      - ../tests:/app/tests
+      - ../services:/app/services
     environment:
       # A reload mid-analysis kills the run, so keep the probe verbose here —
       # it is the only trace of what the process was doing when it went.

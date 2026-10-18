@@ -628,6 +628,10 @@ class ServiceContainer:
         # The path each tool server that declares a ``sample_mount`` opens the
         # worker's copy of the sample at, by server key; empty outside a job.
         self.server_sample_paths: dict[str, str] = {}
+        # The path each static provider's mirror of the sample is handed to
+        # its server under, by provider; empty outside a job. Read by the run's
+        # isolation part, which counts a call handed one as a read of the sample.
+        self.static_sample_paths: dict[str, str] = {}
 
         # Per-run LLM token/cost ledger (findings-log §4 Item 1). Agents and the
         # judge add each call's usage; the judge node snapshots it into RunSummary.
@@ -1767,6 +1771,11 @@ class ServiceContainer:
             staging.remove_job_staging(self.job_key())
         except Exception as exc:  # noqa: BLE001 — teardown never propagates
             logger.warning("Removing this run's staging failed (non-fatal): %s", exc)
+        # What this run noted of the processes that read its sample, read by
+        # its disclosure record inside the run.
+        from maljan.analysis.isolation import forget as forget_isolation_notes
+
+        forget_isolation_notes(self.job_key())
 
         # And what this run saw, which is the other thing it held that outlives
         # nothing. Dropping the container already frees it; this drops it here
