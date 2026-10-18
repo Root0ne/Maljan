@@ -381,6 +381,7 @@ async def enrich_threat_intel(
                     db_session_factory,
                     report_uuid,
                     lambda stored, column: disclosed(stored, column, with_enrichment_started),
+                    kind="enrichment_started",
                 )
             except Exception as exc:  # noqa: BLE001 — the final write records it again
                 logger.warning("enrich: the disclosure could not be marked (%s).", exc)
@@ -420,6 +421,7 @@ async def enrich_threat_intel(
                     lambda stored, column: disclosed_enrichment(
                         stored, column, stopped, state=ENRICHMENT_STOPPED
                     ),
+                    kind="enrichment_stopped",
                 )
             except Exception as exc:  # noqa: BLE001
                 logger.warning("enrich: what the stopped job asked was not recorded (%s).", exc)
@@ -504,6 +506,8 @@ async def write_under_lock(
     db_session_factory: Any,
     report_uuid: uuid.UUID,
     change: Any,
+    *,
+    kind: str = "enrichment",
 ) -> bool:
     """Re-read the report row under a row lock, apply ``change``, write it. ``False`` if gone.
 
@@ -511,8 +515,19 @@ async def write_under_lock(
     summary to write (``None`` leaves the summary as it is). Read and written
     in one transaction holding the row, so two enrichments of one report merge
     instead of the later one writing over the earlier one's record.
+
+    A report whose ledger is sealed is never rewritten in silence: a change to
+    its documents is recorded as an amendment (``ledger_chain.amend``) chained
+    onto the seal or the last amendment, in the payload and the run summary,
+    and as a chained ``report.amend`` audit row in this transaction. ``kind``
+    names what changed it. The ledger rows are not touched. A report stored
+    before sealing existed is written as before.
     """
+    from datetime import UTC, datetime
+
     from sqlalchemy.orm.attributes import flag_modified
+
+    from app.services import audit_chain, ledger_chain
 
     async with db_session_factory() as db:
         report = await db.get(
@@ -522,12 +537,37 @@ async def write_under_lock(
             return False
         stored = dict(report.malware_report) if isinstance(report.malware_report, dict) else {}
         payload, column = change(stored, report.run_summary)
+        seal_record = getattr(report, "ledger_seal", None)
+        key = ledger_chain.platform_key() if isinstance(seal_record, dict) else None
+        record = None
+        if key is not None:
+            payload, column, record = ledger_chain.amend(
+                stored,
+                report.run_summary,
+                payload,
+                column,
+                report.stix_bundle,
+                seal_record=seal_record,
+                kind=kind,
+                key=key,
+                at=datetime.now(UTC),
+            )
         report.malware_report = payload
         # SQLAlchemy needs an explicit flag for in-place JSONB mutation.
         flag_modified(report, "malware_report")
         if column is not None:
             report.run_summary = column
             flag_modified(report, "run_summary")
+        if record is not None and key is not None:
+            await db.flush()
+            await audit_chain.append(
+                db,
+                action=audit_chain.REPORT_AMEND,
+                resource_type="job",
+                resource_id=str(report.job_id),
+                details={"report_id": str(report_uuid), "amendment": record},
+                key=key,
+            )
         await db.commit()
     return True
 

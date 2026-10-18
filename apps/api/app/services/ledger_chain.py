@@ -323,6 +323,80 @@ def seal(
     return record
 
 
+def amendment(
+    previous: Mapping[str, Any],
+    *,
+    number: int,
+    kind: str,
+    before: str,
+    after: str,
+    at: datetime,
+    key: ChainKey,
+) -> dict[str, Any]:
+    """An amendment to a sealed report, chained onto ``previous`` (the seal or the last amendment).
+
+    It records what changed the stored report (``kind``), the report digest
+    before and after, and the key it was computed under; it never touches a
+    ledger row.
+    """
+    record: dict[str, Any] = {
+        "number": number,
+        "kind": kind,
+        "prev": previous.get("digest"),
+        "report_sha256_before": before,
+        "report_sha256_after": after,
+        "at": timestamp(at),
+        "key_id": key.key_id or None,
+    }
+    record["digest"] = record_digest(record, key)
+    return record
+
+
+def amend(
+    stored_payload: Mapping[str, Any],
+    stored_summary: Any,
+    payload: dict[str, Any],
+    summary: Any,
+    stix_bundle: Any,
+    *,
+    seal_record: Any,
+    kind: str,
+    key: ChainKey,
+    at: datetime,
+) -> tuple[dict[str, Any], Any, dict[str, Any] | None]:
+    """The payload and run summary to write over a sealed report, with the amendment it needs.
+
+    ``stored_*`` are the documents as stored, ``payload`` and ``summary`` what
+    is about to replace them (``summary`` ``None`` leaves the stored one). A
+    report without a seal, or a change that leaves the report digest as it
+    was, is written as it is and needs no amendment (``None``). Otherwise an
+    amendment chained onto the last record is appended to both documents.
+    """
+    if not isinstance(seal_record, Mapping) or not seal_record.get("digest"):
+        return payload, summary, None
+    next_summary = summary if summary is not None else stored_summary
+    before = report_digest(stored_payload, stored_summary, stix_bundle)
+    after = report_digest(payload, next_summary, stix_bundle)
+    if before == after:
+        return payload, summary, None
+    held = stored_payload.get(AMENDMENTS_KEY)
+    amendments = [dict(a) for a in held if isinstance(a, Mapping)] if isinstance(held, list) else []
+    record = amendment(
+        amendments[-1] if amendments else seal_record,
+        number=len(amendments) + 1,
+        kind=kind,
+        before=before,
+        after=after,
+        at=at,
+        key=key,
+    )
+    amendments.append(record)
+    payload = {**payload, AMENDMENTS_KEY: amendments}
+    if isinstance(next_summary, Mapping):
+        next_summary = {**next_summary, AMENDMENTS_KEY: amendments}
+    return payload, next_summary, record
+
+
 def with_seal(document: Any, record: Mapping[str, Any]) -> Any:
     """A copy of a stored document with the seal written in; ``None`` stays ``None``."""
     if not isinstance(document, Mapping):
