@@ -175,6 +175,13 @@
     "v": null
   },
   "efficiency": {
+    "calls": {
+      "by_agent": "<data-keyed map>",
+      "by_tool": "<data-keyed map>",
+      "refused": null,
+      "repeated": null,
+      "run_again": null
+    },
     "inputs": {
       "calls": "<data-keyed map>",
       "loops": [

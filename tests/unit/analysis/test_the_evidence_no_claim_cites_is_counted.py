@@ -70,10 +70,10 @@ def test_the_record_and_the_report_carry_it() -> None:
     )
     assert record is not None
     assert "inputs" not in record
-    assert efficiency_lines(record) == [
+    assert efficiency_lines(record)[0] == (
         "Evidence no claim cites: 2 of the 2 ledger entries whose tool ran are cited by no "
         "analyst's final claim (by agent: `static` 2; by tool: `pe_info` 1, `strings` 1)."
-    ]
+    )
 
 
 def test_the_count_is_linear_in_the_ledger() -> None:

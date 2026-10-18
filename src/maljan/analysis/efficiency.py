@@ -19,10 +19,18 @@ agent whose calls the meter did not measure is named rather than left out.
 ran (a repeat and a guard's answer are not evidence of their own), those whose
 id no analyst's final claim names, in its text or its evidence field. A cited
 repeat counts for the entry that holds its answer.
+
+``calls`` is the tool calls that cost a step and found nothing new: the ones
+the repeat guard answered from an earlier identical call without running
+(``repeated``), the ones a guard answered with no tool run at all
+(``refused``), and the ones that ran again with the tool, server and arguments
+of an earlier call that ran (``run_again``). A read of a cleared answer
+(``read_evidence``) is a read, counted under ``rows_read``, not a repeat.
 """
 
 from __future__ import annotations
 
+import json
 from collections.abc import Mapping, Sequence
 from types import SimpleNamespace
 from typing import Any
@@ -155,6 +163,62 @@ def uncited_record(
     }
 
 
+def _reads_again(entry: Any) -> bool:
+    """Whether the entry is a read of a cleared answer by its id (``read_evidence``)."""
+    from maljan.agents.tool_answer_clearing import READ_EVIDENCE_TOOL
+
+    return str(_field(entry, "tool") or "") == READ_EVIDENCE_TOOL
+
+
+def _call_key(entry: Any) -> str:
+    """A call's tool, server and arguments as one key; arguments in a canonical order."""
+    try:
+        args = json.dumps(_field(entry, "args") or {}, sort_keys=True, default=str)
+    except (TypeError, ValueError):
+        args = str(_field(entry, "args"))
+    return json.dumps([str(_field(entry, "server") or ""), str(_field(entry, "tool") or ""), args])
+
+
+_CALL_COUNTS = ("repeated", "refused", "run_again")
+
+
+def calls_record(entries: Sequence[Any]) -> dict[str, Any] | None:
+    """``efficiency.calls``: repeated, refused and run-again calls, or ``None`` for no ledger."""
+    from maljan.schemas.evidence import is_guard_answer
+
+    held = [e for e in entries if _entry_id(e)]
+    if not held:
+        return None
+    totals = dict.fromkeys(_CALL_COUNTS, 0)
+    by_agent: dict[str, dict[str, int]] = {}
+    by_tool: dict[str, dict[str, int]] = {}
+    seen: set[str] = set()
+    for entry in held:
+        if is_guard_answer({"id": _entry_id(entry), "repeated_of": _field(entry, "repeated_of")}):
+            kind = "refused"
+        elif not _ran(entry):
+            if _reads_again(entry):
+                continue
+            kind = "repeated"
+        else:
+            key = _call_key(entry)
+            if key not in seen:
+                seen.add(key)
+                continue
+            kind = "run_again"
+        totals[kind] += 1
+        agent = str(_field(entry, "agent") or "") or "pipeline"
+        tool = str(_field(entry, "tool") or "")
+        for table, name in ((by_agent, agent), (by_tool, tool)):
+            row = table.setdefault(name, dict.fromkeys(_CALL_COUNTS, 0))
+            row[kind] += 1
+    return {
+        **totals,
+        "by_agent": dict(sorted(by_agent.items())),
+        "by_tool": dict(sorted(by_tool.items())),
+    }
+
+
 def efficiency_record(
     container: Any,
     *,
@@ -177,6 +241,9 @@ def efficiency_record(
         uncited = uncited_record(held, isr_reports)
         if uncited is not None:
             record["uncited"] = uncited
+        calls = calls_record(held)
+        if calls is not None:
+            record["calls"] = calls
         if len(record) == 1:
             return None
         if partial_reason:
@@ -279,7 +346,35 @@ def efficiency_lines(record: Any) -> list[str]:
     uncited = record.get("uncited")
     if isinstance(uncited, Mapping):
         lines.append(_uncited_line(uncited))
+    calls = record.get("calls")
+    if isinstance(calls, Mapping):
+        lines.append(_calls_line(calls))
     return lines
+
+
+def _summed(table: Any) -> dict[str, int]:
+    """``{name: {count: n}}`` as ``{name: total}``."""
+    if not isinstance(table, Mapping):
+        return {}
+    return {
+        str(name): sum(_int(row.get(kind)) for kind in _CALL_COUNTS)
+        for name, row in table.items()
+        if isinstance(row, Mapping)
+    }
+
+
+def _calls_line(calls: Mapping[str, Any]) -> str:
+    repeated, refused, again = (_int(calls.get(kind)) for kind in _CALL_COUNTS)
+    line = (
+        f"Tool calls that found nothing new: {repeated:,} answered from an earlier identical "
+        f"call without running, {refused:,} refused by a guard with no tool run, and "
+        f"{again:,} run again with the tool, server and arguments of an earlier call"
+    )
+    by_agent = _named_counts(_summed(calls.get("by_agent")))
+    if repeated + refused + again and by_agent:
+        by_tool = _named_counts(_summed(calls.get("by_tool")))
+        line += f" (by agent: {by_agent}; by tool: {by_tool})"
+    return line + "."
 
 
 def _named_counts(counts: Any) -> str:

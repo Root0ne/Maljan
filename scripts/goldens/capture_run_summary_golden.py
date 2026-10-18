@@ -401,6 +401,8 @@ DATA_KEYED = frozenset(
         "efficiency.inputs.calls",
         "efficiency.uncited.by_agent",
         "efficiency.uncited.by_tool",
+        "efficiency.calls.by_agent",
+        "efficiency.calls.by_tool",
     }
 )
 
