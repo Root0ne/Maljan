@@ -90,7 +90,7 @@ class TestTheBudget:
         assert second.output == "" and second.truncated is True
         (ref,) = second.spilled or []
         assert "key" not in ref
-        assert ref["error"] == "ConnectionError: the store refused the connection"
+        assert ref["error"] == "upload_failed (ConnectionError)"
         assert ref["bytes"] == 60 and len(ref["sha256"]) == 64
 
     def test_without_a_store_nothing_is_kept_and_the_dump_is_unchanged(self) -> None:

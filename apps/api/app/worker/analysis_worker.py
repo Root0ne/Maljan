@@ -2661,7 +2661,7 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
         # entry references it (``maljan.schemas.evidence_spill``).
         from app.services import object_store
 
-        app.container.set_evidence_spill(object_store.evidence_spill(job_id))
+        app.container.set_evidence_spill(await object_store.job_evidence_spill(job_id))
 
         # A job that names an attached report hands its bytes to the
         # sandbox provider before anything else runs: build_job_settings
@@ -4560,11 +4560,12 @@ async def _store_the_report(
     # (``object_store.evidence_spill``), on a thread: it is an upload.
     from app.services import object_store
 
+    _spill = await object_store.job_evidence_spill(job_id)
     await asyncio.to_thread(
         fit_structures_to_budget,
         [_entry for _entry in _ledger if isinstance(_entry, dict)],
         evidence_budget_of(run_summary, core_settings),
-        spill=object_store.evidence_spill(job_id),
+        spill=_spill,
     )
     for _entry in rows_to_store(_ledger, job_id=job_id):
         db.add(_evidence_row(_entry, job_id=job_uuid))

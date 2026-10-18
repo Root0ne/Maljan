@@ -14,7 +14,9 @@ The store is the caller's: the analysis worker hands the job's container a
 sink that writes into object storage, and a run without one (the CLI, the
 rehearsal, a test) spills nothing and its entries carry no reference. An
 upload that fails is stated on the reference with its reason and the run goes
-on. Nothing here limits the size of what is kept.
+on. The size of one kept part is bounded only by the operator setting the
+caller names (the API bounds it by ``upload_max_bytes``, the sample upload
+limit); a part above it is referenced with that reason and not kept.
 
 Nothing a model reads changes: the reference lives on the entry beside what
 it already kept, and no prompt or tool result renders it.
@@ -60,8 +62,19 @@ class EvidenceSpill:
     never copies a storage client.
     """
 
-    def __init__(self, put: Callable[[str, bytes, str], str]) -> None:
+    def __init__(
+        self,
+        put: Callable[[str, bytes, str], str],
+        *,
+        max_bytes: int = 0,
+        bound_by: str = "",
+    ) -> None:
         self._put = put
+        # The largest object one part may be kept as, read by the caller from
+        # an operator setting it names (``bound_by``); 0 when the caller bounds
+        # nothing. A part above it is referenced with the reason and not kept.
+        self.max_bytes = max(0, int(max_bytes or 0))
+        self.bound_by = bound_by
 
     def put(self, sha256: str, blob: bytes, content_type: str) -> str:
         return str(self._put(sha256, blob, content_type))
@@ -87,21 +100,29 @@ def spill_part(
 
     ``held`` is the entry's references so far: bytes already kept under one of
     them are referenced again rather than uploaded twice. A failed upload is
-    returned as a reference with no key and the failure's reason.
+    returned as a reference with no key and a fixed reason naming only the
+    failure's class (``upload_failed (<class>)``): the failure's own text can
+    name the store's host or its credentials, and a reference is served. A
+    part larger than the sink's bound is referenced with the reason
+    (``exceeds <setting> (<n> bytes)``) and not uploaded.
     """
     try:
         blob = part_bytes(part, value)
     except (TypeError, ValueError) as exc:
-        return {"part": part, "error": f"not serialisable: {type(exc).__name__}: {exc}"}
+        return {"part": part, "error": f"not_serialisable ({type(exc).__name__})"}
     digest = hashlib.sha256(blob).hexdigest()
     ref: dict[str, Any] = {"part": part, "bytes": len(blob), "sha256": digest}
     for earlier in held or ():
         if earlier.get("sha256") == digest and earlier.get("key"):
             return {**ref, "key": earlier["key"]}
+    bound = getattr(sink, "max_bytes", 0)
+    if bound and len(blob) > bound:
+        ref["error"] = f"exceeds {getattr(sink, 'bound_by', '') or 'the bound'} ({bound} bytes)"
+        return ref
     try:
         ref["key"] = sink.put(digest, blob, CONTENT_TYPES.get(part, TEXT))
     except Exception as exc:  # noqa: BLE001 — a failed upload is stated, never fatal
-        ref["error"] = f"{type(exc).__name__}: {exc}"
+        ref["error"] = f"upload_failed ({type(exc).__name__})"
         logger.warning("evidence: the %s part was not kept (%s)", part, type(exc).__name__)
     return ref
 

@@ -154,7 +154,7 @@ class TestTheAnswer:
         )
 
         (ref,) = entry.spilled or []
-        assert ref["error"] == "TimeoutError: the store did not answer"
+        assert ref["error"] == "upload_failed (TimeoutError)"
         assert "key" not in ref
         assert entry.output in handed
 

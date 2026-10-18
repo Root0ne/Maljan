@@ -94,7 +94,7 @@ class TestTheStore:
             ref = spill_part(object_store.evidence_spill("j"), "structured", {"a": 1})
 
         assert "key" not in ref
-        assert ref["error"] == "OSError: connection refused"
+        assert ref["error"] == "upload_failed (OSError)"
         assert ref["bytes"] == len(b'{"a": 1}')
 
     def test_the_last_structure_pass_keeps_what_it_drops(self) -> None:
@@ -121,8 +121,67 @@ class TestTheStore:
     def test_the_worker_gives_the_job_s_container_the_store_and_the_last_pass_too(self) -> None:
         run = inspect.getsource(analysis_worker.run_analysis)
         stored = inspect.getsource(analysis_worker._store_the_report)
-        assert "app.container.set_evidence_spill(object_store.evidence_spill(job_id))" in run
-        assert "spill=object_store.evidence_spill(job_id)" in stored
+        assert (
+            "app.container.set_evidence_spill(await object_store.job_evidence_spill(job_id))" in run
+        )
+        assert "_spill = await object_store.job_evidence_spill(job_id)" in stored
+
+
+class _Talkative(_Store):
+    """A store whose failure text names its endpoint, its bucket and its key."""
+
+    def put_object(self, bucket: str, path: str, data: Any, length: int, content_type: str) -> None:
+        raise OSError(
+            "S3 operation failed; host: minio.internal:9000, bucket: maljan-samples, "
+            "access key: operator-key"
+        )
+
+
+class TestWhatIsServed:
+    def test_a_failed_upload_serves_its_class_and_logs_the_whole_failure(self, caplog: Any) -> None:
+        with patch.object(object_store, "client", lambda: _Talkative()):
+            ref = spill_part(object_store.evidence_spill("job"), "answer", "text")
+
+        row = _evidence_row({"id": "ev_0001", "tool": "t", "spilled": [ref]}, job_id=uuid.uuid4())
+        row.id = uuid.uuid4()
+        served = EvidenceEntryResponse.model_validate(row).model_dump_json()
+        assert ref["error"] == "upload_failed (OSError)"
+        for leaked in ("minio.internal", "9000", "maljan-samples", "operator-key", "host"):
+            assert leaked not in served, leaked
+        assert "minio.internal:9000" in caplog.text, "the whole failure is logged server-side"
+
+
+class TestTheBound:
+    def test_a_part_above_the_upload_limit_is_referenced_with_the_reason_and_not_written(
+        self,
+    ) -> None:
+        store = _Store()
+        with patch.object(object_store, "client", lambda: store):
+            sink = object_store.evidence_spill("job", 1024)
+            over = spill_part(sink, "answer", "x" * 1025)
+            at = spill_part(sink, "output", "y" * 1024)
+
+        assert over == {
+            "part": "answer",
+            "bytes": 1025,
+            "sha256": hashlib.sha256(b"x" * 1025).hexdigest(),
+            "error": "exceeds upload_max_bytes (1024 bytes)",
+        }
+        assert at["key"] in store.objects and len(store.objects) == 1
+
+    def test_the_job_s_store_reads_the_operator_s_upload_limit(self) -> None:
+        import asyncio
+
+        from app.runtime_config import runtime_config
+
+        async def setting(name: str) -> Any:
+            assert name == "upload_max_bytes"
+            return 4096
+
+        with patch.object(runtime_config, "get", setting):
+            sink = asyncio.run(object_store.job_evidence_spill("job"))
+
+        assert (sink.max_bytes, sink.bound_by) == (4096, "upload_max_bytes")
 
 
 class TestTheRemoval:

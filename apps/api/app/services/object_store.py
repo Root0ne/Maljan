@@ -138,25 +138,62 @@ def evidence_key(job_id: object, sha256: str) -> str:
     return f"{evidence_prefix(job_id)}{sha256}"
 
 
-def evidence_spill(job_id: object) -> Any:
+# The operator setting that bounds one kept part: the sample upload limit,
+# the largest object the operator already lets one request put in this bucket.
+EVIDENCE_BOUND_SETTING = "upload_max_bytes"
+
+
+def evidence_spill(job_id: object, max_bytes: int = 0) -> Any:
     """The job's store for whole answers, writing into this bucket under the job's prefix.
 
-    The client is built at the first write, on the thread that writes, and
-    reused for the job's later writes. A write that fails raises; the caller
-    (``spill_part``) states the failure on the entry's reference.
+    ``max_bytes`` is the bound on one part, the operator's
+    ``upload_max_bytes`` (:func:`job_evidence_spill` reads it): a part above it
+    is referenced with that reason and not written. The client is built at the
+    first write, on the thread that writes, and reused for the job's later
+    writes. A write that fails is logged here, whole and through ``log_safe``,
+    and raises; the caller (``spill_part``) states only its class on the
+    entry's reference, which is served.
     """
     from maljan.schemas.evidence_spill import EvidenceSpill
+
+    from app.logsafe import log_safe
 
     held: list[Any] = []
 
     def put(sha256: str, blob: bytes, content_type: str) -> str:
-        if not held:
-            held.append(client())
         key = evidence_key(job_id, sha256)
-        put_bytes(held[0], key, blob, content_type=content_type)
+        try:
+            if not held:
+                held.append(client())
+            put_bytes(held[0], key, blob, content_type=content_type)
+        except Exception as exc:
+            logger.warning(
+                "Evidence object %s was not written: %s",
+                log_safe(key),
+                log_safe(f"{type(exc).__name__}: {exc}"),
+            )
+            raise
         return key
 
-    return EvidenceSpill(put)
+    return EvidenceSpill(put, max_bytes=max_bytes, bound_by=EVIDENCE_BOUND_SETTING)
+
+
+async def job_evidence_spill(job_id: object) -> Any:
+    """:func:`evidence_spill` bounded by the operator's ``upload_max_bytes``, read now."""
+    from maljan.core.delivery_limits import SAMPLE_UPLOAD_MAX_BYTES
+
+    from app.runtime_config import runtime_config
+
+    try:
+        bound = int(await runtime_config.get(EVIDENCE_BOUND_SETTING))
+    except Exception as exc:  # noqa: BLE001 — the setting's own default stands
+        logger.warning(
+            "%s was not read (%s); its default stands.",
+            EVIDENCE_BOUND_SETTING,
+            type(exc).__name__,
+        )
+        bound = SAMPLE_UPLOAD_MAX_BYTES
+    return evidence_spill(job_id, bound)
 
 
 def remove_prefix(store: Any, prefix: str) -> int:
