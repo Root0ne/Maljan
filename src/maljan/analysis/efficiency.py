@@ -15,10 +15,12 @@ tokens the provider reported for the same requests beside them where it
 reported any. ``calls`` is each agent's model calls in the token ledger, so an
 agent whose calls the meter did not measure is named rather than left out.
 
-``uncited`` is the evidence no claim cites: of the ledger entries whose tool
-ran (a repeat and a guard's answer are not evidence of their own), those whose
-id no analyst's final claim names, in its text or its evidence field. A cited
-repeat counts for the entry that holds its answer.
+``uncited`` is the evidence nothing cites: of the ledger entries whose tool
+ran and answered (a repeat and a guard's answer are not evidence of their own,
+and a failed call is not evidence: those are counted apart as ``failed``),
+those no analyst's final answer names — a claim in its text or its evidence
+field, a finding or an artifact (a finding's own artifacts included) in its
+``evidence_ids``. A cited repeat counts for the entry that holds its answer.
 
 ``calls`` is the tool calls that cost a step and found nothing new: the ones
 the repeat guard answered from an earlier identical call without running
@@ -158,8 +160,23 @@ def _claims_of(report: Any) -> list[Any]:
     return list(claims) if isinstance(claims, list | tuple) else []
 
 
+def _items_of(holder: Any, name: str) -> list[Any]:
+    items = _field(holder, name)
+    return list(items) if isinstance(items, list | tuple) else []
+
+
+def _evidence_ids_of(item: Any) -> set[str]:
+    from maljan.schemas.evidence import entry_ids_in
+
+    return entry_ids_in(" ".join(str(i) for i in _items_of(item, "evidence_ids")))
+
+
 def cited_ids(isr_reports: Mapping[str, Any] | None) -> set[str]:
-    """Every entry id an analyst's final claim names, in its text or its evidence field."""
+    """Every entry id an analyst's final answer names.
+
+    A claim in its text or its evidence field; a finding, an artifact, and a
+    finding's own artifacts in their ``evidence_ids``.
+    """
     from maljan.schemas.evidence import entry_ids_in
 
     cited: set[str] = set()
@@ -167,16 +184,27 @@ def cited_ids(isr_reports: Mapping[str, Any] | None) -> set[str]:
         for claim in _claims_of(report):
             text = f"{_field(claim, 'claim') or ''} {_field(claim, 'evidence_ref') or ''}"
             cited |= entry_ids_in(text)
+        for finding in _items_of(report, "findings"):
+            cited |= _evidence_ids_of(finding)
+            for artifact in _items_of(finding, "artifacts"):
+                cited |= _evidence_ids_of(artifact)
+        for artifact in _items_of(report, "artifacts"):
+            cited |= _evidence_ids_of(artifact)
     return cited
 
 
 def uncited_record(
     entries: Sequence[Any], isr_reports: Mapping[str, Any] | None
 ) -> dict[str, Any] | None:
-    """``efficiency.uncited``: the entries that ran and no claim cites, or ``None`` for none ran."""
-    ran = [e for e in entries if _ran(e) and not _reads_again(e)]
-    if not ran:
+    """``efficiency.uncited``: the entries that answered and nothing cites, or ``None``.
+
+    ``None`` when no call ran. A failed call is not evidence: it is counted as
+    ``failed`` and left out of the rest.
+    """
+    called = [e for e in entries if _ran(e) and not _reads_again(e)]
+    if not called:
         return None
+    ran = [e for e in called if _field(e, "ok") is not False]
     holders = _holders(entries)
     cited = {holders.get(found) or found for found in cited_ids(isr_reports)}
     uncited = [e for e in ran if _entry_id(e) not in cited]
@@ -191,6 +219,7 @@ def uncited_record(
         "entries": len(ran),
         "cited": len(ran) - len(uncited),
         "uncited": len(uncited),
+        "failed": len(called) - len(ran),
         "by_agent": dict(sorted(by_agent.items())),
         "by_tool": dict(sorted(by_tool.items())),
         "ids": [_entry_id(e) for e in uncited],
@@ -781,8 +810,8 @@ def _uncited_line(uncited: Mapping[str, Any]) -> str:
     entries, none = _int(uncited.get("entries")), _int(uncited.get("uncited"))
     held = _count(entries, "ledger entry", "ledger entries")
     line = (
-        f"Evidence no claim cites: {none:,} of the {held} whose tool ran are cited by no "
-        "analyst's final claim"
+        f"Evidence nothing cites: {none:,} of the {held} whose tool answered are named by no "
+        "claim, finding or artifact of an analyst's final answer"
     )
     by_agent, by_tool = (
         _named_counts(uncited.get("by_agent")),
@@ -790,4 +819,11 @@ def _uncited_line(uncited: Mapping[str, Any]) -> str:
     )
     if none and by_agent:
         line += f" (by agent: {by_agent}; by tool: {by_tool})"
+    failed = _int(uncited.get("failed"))
+    if "failed" in uncited:
+        line += (
+            f"; {_count(failed, 'failed call')} not counted as evidence"
+            if failed
+            else "; no call failed"
+        )
     return line + "."

@@ -241,9 +241,8 @@
       "by_tool": "<data-keyed map>",
       "cited": null,
       "entries": null,
-      "ids": [
-        null
-      ],
+      "failed": null,
+      "ids": [],
       "uncited": null
     },
     "v": null

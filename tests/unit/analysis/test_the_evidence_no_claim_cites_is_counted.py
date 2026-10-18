@@ -1,9 +1,10 @@
-"""The evidence no claim cites is counted from the ledger and the analysts' final claims.
+"""The evidence nothing cites is counted from the ledger and the analysts' final answers.
 
-Of the entries whose tool ran, the ones no analyst's final claim names in its
-text or its evidence field. A repeat and a guard's answer are not evidence of
-their own; a cited repeat counts for the entry holding its answer. The ledger
-may be models or the dicts a state channel holds.
+Of the entries whose tool answered, the ones no claim names in its text or its
+evidence field and no finding or artifact names in its ``evidence_ids``. A
+repeat and a guard's answer are not evidence of their own, and a failed call
+is counted apart, not as evidence; a cited repeat counts for the entry holding
+its answer. The ledger may be models or the dicts a state channel holds.
 """
 
 from __future__ import annotations
@@ -13,7 +14,7 @@ from types import SimpleNamespace
 
 from maljan.analysis.efficiency import efficiency_lines, efficiency_record, uncited_record
 from maljan.schemas.evidence import LedgerEntry
-from maljan.schemas.isr_models import AgentISR, ClaimEvidence
+from maljan.schemas.isr_models import AgentISR, Artifact, ClaimEvidence, Finding
 
 
 def _entry(seq: int, tool: str = "pe_info", agent: str = "static", **extra: object) -> LedgerEntry:
@@ -33,6 +34,7 @@ def test_an_entry_no_claim_names_is_uncited() -> None:
         "entries": 3,
         "cited": 1,
         "uncited": 2,
+        "failed": 0,
         "by_agent": {"pipeline": 1, "static": 1},
         "by_tool": {"strings": 2},
         "ids": ["ev_0002", "ev_0003"],
@@ -60,6 +62,36 @@ def test_a_guard_answer_is_not_evidence_and_dict_rows_are_read() -> None:
     assert (record["entries"], record["uncited"], record["ids"]) == (1, 1, ["ev_0001"])
 
 
+def test_a_finding_or_an_artifact_cites_by_its_evidence_ids_and_a_failed_call_is_apart() -> None:
+    ledger = [
+        _entry(1),
+        _entry(2),
+        _entry(3),
+        _entry(4, ok=False, error="the server did not answer"),
+        _entry(5),
+    ]
+    report = AgentISR(
+        agent_id="static",
+        domain="static",
+        findings=[
+            Finding(
+                title="imports",
+                evidence_ids=["ev_0001"],
+                artifacts=[Artifact(kind="imports", rows=[["a"]], evidence_ids=["EV_0002"])],
+            )
+        ],
+        artifacts=[Artifact(kind="strings", rows=[["b"]], evidence_ids=["ev_0003"])],
+    )
+    record = uncited_record(ledger, {"static": report.model_dump(mode="json")})
+
+    assert record is not None
+    assert (record["entries"], record["cited"], record["failed"]) == (4, 3, 1)
+    assert record["ids"] == ["ev_0005"]
+    assert efficiency_lines({"v": 2, "uncited": record})[0].endswith(
+        "; 1 failed call not counted as evidence."
+    )
+
+
 def test_no_entry_that_ran_is_no_part() -> None:
     assert uncited_record([], {}) is None
 
@@ -71,8 +103,9 @@ def test_the_record_and_the_report_carry_it() -> None:
     assert record is not None
     assert "inputs" not in record
     assert efficiency_lines(record)[0] == (
-        "Evidence no claim cites: 2 of the 2 ledger entries whose tool ran are cited by no "
-        "analyst's final claim (by agent: `static` 2; by tool: `pe_info` 1, `strings` 1)."
+        "Evidence nothing cites: 2 of the 2 ledger entries whose tool answered are named by no "
+        "claim, finding or artifact of an analyst's final answer (by agent: `static` 2; by "
+        "tool: `pe_info` 1, `strings` 1); no call failed."
     )
 
 

@@ -281,11 +281,12 @@ nothing a model reads changes.
   same requests, and how many reported. One row per tool loop, and one per
   agent, stage and kind of single call; an agent whose model calls were not
   measured by part (the report's writers, for one) is named with its calls.
-- **Evidence no claim cites** (`uncited`): of the ledger entries whose tool
-  ran, the ones no analyst's final claim names in its text or its evidence
-  field, by agent and by tool, with their ids. A repeat and a guard's answer
-  are not evidence of their own; a cited repeat counts for the entry holding
-  its answer.
+- **Evidence nothing cites** (`uncited`): of the ledger entries whose tool
+  answered, the ones no analyst's final answer names — no claim in its text or
+  its evidence field, no finding or artifact in its `evidence_ids` — by maker
+  and by tool, with their ids. A repeat and a guard's answer are not evidence
+  of their own; a cited repeat counts for the entry holding its answer. A
+  failed call is not evidence: it is counted apart (`failed`) and said.
 - **Tool calls that found nothing new** (`calls`): the calls the repeat guard
   answered from an earlier identical call without running, the calls a guard
   refused with no tool run, and the calls that ran again with the tool, server
