@@ -59,6 +59,10 @@ class RuntimeConfig:
         self._loaded_at = now
         return self._cache
 
+    async def stored_value(self, key: str) -> Any:
+        """The stored override for a whole key (``core.plugins.allowed``), or ``None``."""
+        return (await self._overrides()).get(key)
+
     async def get(self, name: str) -> Any:
         overrides = await self._overrides()
         if f"api.{name}" in overrides:

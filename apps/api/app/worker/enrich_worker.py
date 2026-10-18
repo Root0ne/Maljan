@@ -250,8 +250,18 @@ async def _get_memory_store() -> MemoryStore | None:
         return _memory_store
 
     try:
+        from maljan.core.plugins import ALLOW_LIST_KEY, load_allowed, registry_changes
         from maljan.memory.store_factory import build_memory_store, configured_backend
 
+        from app.services.settings_service import core_settings_cache
+
+        # An allowed memory plugin is loaded before the settings are read,
+        # off the event loop, so its own block is read with its model.
+        before = registry_changes()
+        allowed = await runtime_config.stored_value(ALLOW_LIST_KEY)
+        await asyncio.to_thread(load_allowed, allowed, ("memory",))
+        if registry_changes() != before:
+            core_settings_cache.invalidate()
         core = await runtime_config.core()
         _memory_store = build_memory_store(core)
         logger.info(

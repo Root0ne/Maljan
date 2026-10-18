@@ -22,6 +22,7 @@ import httpx
 from maljan.core.config import BUILTIN_SERVER_KEYS, MCPServerConfig, builtin_env_allow
 from maljan.core.logger import logger
 from maljan.core.model_assignments import endpoint_for, endpoint_label
+from maljan.core.plugins import ALLOW_LIST_KEY, PLUGIN_GROUPS
 from maljan.core.settings_overrides import build_settings, redact_url, split_key
 from maljan.core.tool_declarations import SANDBOX_ROLE
 from maljan.llm.provider_base import COMPLETION_MAX_TOKENS as _COMPLETION_MAX_TOKENS
@@ -1249,18 +1250,25 @@ def _provider_probe_kinds(stored: dict[str, Any] | None = None) -> dict[str, str
     An enrichment source is tested under its key; ``stored`` adds the ones an
     operator declared to the ones the platform ships.
     """
+    from maljan.core.plugins import accepted_names, loaded_names
     from maljan.memory.store_factory import memory_backends
     from maljan.providers.registry import sandbox_provider_ids, static_provider_ids
 
     kinds: dict[str, str] = {}
     for source in _probed_sources(stored):
         kinds.setdefault(source, "reputation")
-    for backend in memory_backends():
-        kinds.setdefault(backend, "memory")
-    for provider_id in sandbox_provider_ids():
-        kinds.setdefault(provider_id, "sandbox")
-    for provider_id in static_provider_ids():
-        kinds.setdefault(provider_id, "static")
+    allowed = (stored or {}).get(ALLOW_LIST_KEY) or []
+    for kind, ids in (
+        ("memory", memory_backends()),
+        ("sandbox", sandbox_provider_ids()),
+        ("static", static_provider_ids()),
+    ):
+        # A plugin is tested under its id when the stored list allows it,
+        # whether or not this process has loaded it yet.
+        plugin_ids = loaded_names(kind)
+        shipped = [i for i in ids if i not in plugin_ids]
+        for provider_id in [*shipped, *sorted(accepted_names(kind, allowed))]:
+            kinds.setdefault(provider_id, kind)
     return kinds
 
 
@@ -1303,6 +1311,13 @@ async def _probe_registered_provider(kind: str, name: str, core: Any) -> ProbeRe
     t0 = time.perf_counter()
     discover_providers()
     registry = _STATIC_REGISTRY if kind == "static" else _SANDBOX_REGISTRY
+    if name not in registry:
+        # An allowed plugin this process has not loaded: why, or that it is
+        # still loading, never a bare failure.
+        from maljan.core.plugins import unavailable_reason
+
+        why = unavailable_reason(kind, name) or "it is an allowed plugin still loading in the API"
+        return ProbeResult(False, _ms(t0), f"{kind} provider {name!r} is not loaded: {why}")
     try:
         cls: Any = registry[name]
         provider = cls.from_settings(core)
@@ -1418,6 +1433,19 @@ async def run_probe(name: str, values: dict[str, Any], stored: dict[str, Any]) -
         return await in_probe_loop(lambda: _probe_reputation_source(name, values, stored))
     if name == "redis":
         return await in_probe_loop(probe_redis)
+    plugin_kind = "llm" if name == "llm" else kinds.get(name)
+    if plugin_kind in PLUGIN_GROUPS:
+        # A plugin's own test runs its own code: that plugin alone (the LLM
+        # test's is the provider it would ask), when the stored list allows
+        # it, loaded off the event loop and waited for at most this budget.
+        from app.services.plugins import load_in_background
+
+        tested = (
+            str(values.get("core.llm.provider", stored.get("core.llm.provider")) or "")
+            if name == "llm"
+            else name
+        )
+        await load_in_background(stored.get(ALLOW_LIST_KEY), [f"{plugin_kind}:{tested}"], TIMEOUT)
     try:
         core = candidate_settings(values, stored)
     except (ValueError, ValidationError) as exc:

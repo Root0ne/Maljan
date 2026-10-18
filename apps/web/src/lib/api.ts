@@ -19,6 +19,7 @@ import type {
   ImportRequest,
   MappingPreview,
   PatchResult,
+  PluginsListing,
   ProbeResult,
   SettingsSchema,
   SettingsValues,
@@ -697,6 +698,11 @@ class ApiClient {
     return this.request<AttckUpdateProgress>(
       `/api/v1/settings/attck/update/${encodeURIComponent(jobId)}`
     );
+  }
+
+  /** Every installed provider plugin per kind, read from package metadata (admin). */
+  getSettingsPlugins() {
+    return this.request<PluginsListing>("/api/v1/settings/plugins");
   }
 
   testSettingsProbe(probe: string, values: Record<string, unknown>) {

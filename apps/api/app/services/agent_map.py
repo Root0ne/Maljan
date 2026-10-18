@@ -102,10 +102,19 @@ def _server_allow_lists(overrides: dict[str, Any]) -> dict[str, list[str] | None
 
 
 def validate_definitions(
-    value: Any, *, servers: dict[str, list[str] | None] | None = None
+    value: Any,
+    *,
+    servers: dict[str, list[str] | None] | None = None,
+    plugins_allowed: list[Any] | None = None,
 ) -> dict[str, Any]:
-    """Return the definition map to store, or raise with one message per offender."""
-    from maljan.providers.registry import static_provider_ids
+    """Return the definition map to store, or raise with one message per offender.
+
+    ``plugins_allowed`` is the plugin allow-list the save leaves in force: a
+    static provider id is a shipped one or an installed plugin it names, read
+    from package metadata (``maljan.core.plugins.id_refusal``), never what
+    the API process has loaded.
+    """
+    from maljan.core.plugins import id_refusal, shipped_ids
 
     if not isinstance(value, dict):
         raise AgentMapError(
@@ -116,7 +125,6 @@ def validate_definitions(
         )
 
     allow_lists = servers if servers is not None else {}
-    provider_ids = set(static_provider_ids())
     errors: dict[str, str] = {}
     out: dict[str, Any] = {}
     seeds = {name: d.model_dump(mode="json") for name, d in _builtin_definitions().items()}
@@ -180,10 +188,15 @@ def validate_definitions(
             continue
         if model.role in PROMPT_ROLES and not (model.prompt or "").strip():
             errors[f"{name}.prompt"] = f"a {model.role} agent needs a prompt"
-        if model.static_provider and model.static_provider not in provider_ids:
+        refused = (
+            id_refusal("static", model.static_provider, plugins_allowed or [])
+            if model.static_provider
+            else ""
+        )
+        if refused:
             errors[f"{name}.static_provider"] = (
                 f"unknown static provider {model.static_provider!r}. "
-                f"Available: {', '.join(sorted(provider_ids))}"
+                f"Available: {', '.join(sorted(shipped_ids('static')))}; {refused}"
             )
         has_provider_ref = any(ref.kind == "provider" for ref in model.tools)
         if has_provider_ref and model.role not in PROMPT_ROLES:
@@ -514,7 +527,13 @@ def validate_agent_map(changes: dict[str, Any], stored: dict[str, Any]) -> dict[
         definitions_raw = stored.get(AGENT_DEFINITIONS_KEY) or {}
     elif definitions_raw is None:
         definitions_raw = {}
-    definitions = validate_definitions(definitions_raw, servers=_server_allow_lists(stored))
+    from app.services.settings_service import merged_allow_list
+
+    definitions = validate_definitions(
+        definitions_raw,
+        servers=_server_allow_lists(stored),
+        plugins_allowed=merged_allow_list(changes, stored),
+    )
     if AGENT_DEFINITIONS_KEY in changes and changes[AGENT_DEFINITIONS_KEY] is not None:
         out[AGENT_DEFINITIONS_KEY] = definitions
 

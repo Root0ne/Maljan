@@ -96,7 +96,7 @@ API fields (`apps/api/app/services/settings_catalog_api.py`), and each entry
 carries its own title, description, type, bounds, choices and the group it
 belongs to (`src/maljan/core/settings_annotations.py`).
 
-The backend exposes seventeen groups, in this order:
+The backend exposes eighteen groups, in this order:
 
 | Group | Covers |
 | :-- | :-- |
@@ -115,6 +115,7 @@ The backend exposes seventeen groups, in this order:
 | Live events | The conversation feed the console draws a running analysis from, and how long the record of one is kept. |
 | Tracing | LangSmith tracing of model calls. |
 | Enrichment / threat intelligence | Lookups for the indicators a report names, and whether they run on the enrichment worker or beside the analyses. |
+| Provider plugins | The providers installed packages add, and the allow-list that decides which of them load; none loads by default. |
 | API | Request limits and login protection; applied immediately. |
 | Deployment (read-only) | Bootstrap values, shown for reference. |
 
@@ -4289,6 +4290,201 @@ and `stage_ended_at_cap` when a cap ended the work — `steps`, `time`,
 the spend per agent with the caps it hit and keeps the largest
 `tool_definition_chars` of its loops, and the console's pipeline panel
 says beside the step which cap ended it.
+
+## Provider plugins
+
+A provider that is not an MCP tool server, such as a model API that is not
+OpenAI-compatible, a sandbox with its own client or a decompiler with a library
+of its own, can come from an installed Python package. The package declares it
+through an entry point in the group of its kind:
+
+| Kind | Entry-point group | The entry point names |
+| :-- | :-- | :-- |
+| `llm` | `maljan.llm_providers` | a subclass of `maljan.llm.provider_base.LLMProvider` with a `build_model` method |
+| `static` | `maljan.static_providers` | a subclass of `maljan.providers.base.StaticProvider`, its abstract methods written |
+| `sandbox` | `maljan.sandbox_providers` | a subclass of `maljan.providers.base.SandboxProvider`, its abstract methods written |
+| `memory` | `maljan.memory_backends` | a callable that calls `register_memory_backend(<name>, builder, ...)` |
+
+The entry point's name is the provider id the plugin adds: it is what
+`llm.provider`, `static.provider`, `sandbox.provider`, `memory.backend`, an
+agent's `static_provider` or a job's provider override names. It is
+lowercase letters, digits, `_` and `-`, and starts with a letter. A package's
+`pyproject.toml` declares one like this:
+
+```toml
+[project.entry-points."maljan.static_providers"]
+acme = "acme_maljan.provider:AcmeProvider"
+```
+
+The classes are the ones the built-in providers derive from, so a plugin
+answers the same interface and declares the same facts about itself (its
+console title, its settings model, its probe). An LLM provider class may leave
+its `name` empty or set it to the entry point's name; a memory plugin's
+callable registers exactly the entry point's name.
+
+### Allowing a plugin
+
+No installed plugin is loaded until it is allowed. `plugins.allowed` (Settings
+→ Configuration → Platform → Provider plugins, admin only) holds one entry per
+plugin, written `<kind>:<name>` (`static:acme`); it is empty by default. It
+holds names only, never a module or a path. The page lists every installed
+plugin per kind, read from the package metadata, with its package, its version
+and its status: Allowed, Not allowed, or Refused with the reason the metadata
+gives (a built-in id, a name two packages declare, a name that is no provider
+id). Ticking **Allowed** stages the entry, and Apply saves it. The API column
+is the API process's own load, where the API ran that plugin's code; whether a
+plugin loads in the analysis worker is written to the worker's log, each load
+with its package and version and each failure with its reason, and the page
+never shows the API's load as the worker's. An entry no installed package
+declares is listed as such, to be removed. `GET /api/v1/settings/plugins`
+answers the same list.
+
+### When a plugin is loaded
+
+Reading a registry loads no plugin. The analysis worker loads the allowed
+plugins at start, so a failure is in its log before any job, and again as each
+job starts, by the list the job's own stored settings carry, before those
+settings are built: a list saved while a job runs applies to the next job, and
+a running job keeps the plugins it started with. The enrichment worker loads
+the allowed memory plugins before it builds the memory store. The command line
+loads the plugins its settings allow, then reads its settings again, so a
+plugin's own block is read with its model, as the worker does.
+
+The API imports no plugin to list plugins, to judge a saved provider id, to
+offer the provider choices or to serve the settings pages, and none at start
+or for a save, import or reset that writes no plugin's own settings. It loads
+an allowed plugin only where a request runs that plugin's own code, and that
+plugin alone: a save or import that changes a key of an LLM or memory
+plugin's own settings block (`llm.<name>.*`, `memory.<name>.*`) and does not
+drop that plugin from the list, a connection test of the plugin (for the LLM
+test, of the provider it would ask; for an agent's
+test, of the model, static and sandbox providers that agent runs on), and the
+memory purge and the deep health check (`/health?deep=true`) when the selected
+backend is a plugin.
+
+An installed plugin's block the API has not loaded is shown on the settings
+page from its stored rows, typed from their values, under the heading
+`<kind>:<name> (as stored)`; a credential among them is shown as set, never
+its value. Changing one loads that plugin to read it while the list allows it;
+clearing one (a `null`) or resetting it deletes the stored row without loading
+anything. A plugin's own fields join
+the page once the API has loaded it: after its connection test
+(`POST /api/v1/settings/test/<name>`; for an LLM plugin, the LLM test with it
+selected), after the deep health check or a purge while it is the selected
+memory backend, or after a save or import that writes a key of its block once
+the saved list allows it.
+
+Those loads run on one thread of their own, never on the API's event loop. A
+request waits for one at most a connection test's budget (10 s) or, for the
+health check, that check's own (3 s), then goes on without the plugin, and once
+a load has run longer than a request's budget no request waits on it. Loading
+a plugin is logged with its package and version. A plugin that fails to
+import, or whose entry point names something that is not a provider of its
+kind, is logged with the error and the process goes on without it; a job that
+names it fails with that reason. A plugin the list no longer names is withdrawn
+from its registry at that process's next load; its code stays imported in that
+process until the process restarts.
+
+Every shipped provider registers before any plugin is imported. The loader
+never registers a plugin under a shipped id: a plugin named like one (`ghidra`,
+`cape2`, `openai`, `qdrant`) is refused and never imported, and a registration
+a plugin makes while it loads, under a shipped id or under any name but its
+own, is refused with the reason. Two installed packages that declare the same
+name are both refused. These are the loader's guarantees, not a sandbox: once
+allowed, a plugin's own code runs with the process's full access and could
+change a registry outside its load.
+
+### When a plugin hangs or ends the process
+
+- **It hangs as the API imports it.** The request goes on without it after its
+  budget, but the API's one loading thread stays with the hung import: every
+  later plugin load in the API (another block, a test, the memory purge and
+  deep health check of a plugin backend) waits until the import ends or the API
+  restarts, and stopping the API waits for that thread until it is killed.
+  Remove the plugin from the list (Provider plugins, Apply, with a new value
+  for any setting that selects it), then restart the API: removing it alone
+  does not free the thread.
+- **It hangs as the worker imports it.** At start the worker then takes no
+  job; as a job starts, that job never goes on (the job timeout,
+  `core.job_timeout`, none by default, watches only the run that follows the
+  load), and the next job's load waits behind it. The console stays reachable:
+  remove the plugin from the list there (with a new value for any setting
+  that selects it), then restart the worker.
+- **It ends the whole process as it is imported**, rather than raising. The
+  process that imports it goes down: the worker at start or as a job starts,
+  the API on the requests above. The settings pages, the listing, and a save,
+  import or reset that writes no plugin's own block never import it, and
+  neither does a save or import that drops it or sends its block back as
+  stored, so it can be removed: save the list without it, together with a new
+  value for every setting that selects it (a save that drops a plugin a
+  setting still selects is refused, naming those settings); or export the
+  settings, edit the list and those settings in the file, and import it; or
+  reset the Provider plugins group or call
+  `DELETE /api/v1/settings/core.plugins.allowed`, either of which removes the
+  whole list once no setting selects a plugin on it.
+
+### Saving a provider id
+
+A provider id is saved when it is a shipped one, or when it is an installed
+plugin of its kind that the list the save leaves names, read from the package
+metadata without importing the plugin and never from what the API process has
+loaded; the worker judges the stored settings the same way. So one save may
+allow a plugin and select it, but may not drop it and select it. A save, or a
+reset of the list, that drops a plugin a provider id still selects
+(`llm.provider`, `static.provider`, `sandbox.provider`, `memory.backend`, an
+agent's `static_provider`, a per-agent model or one of its fallbacks) is
+refused, naming each key that selects it. Any other refusal gives the cause:
+the plugin's own refusal, a list that does not name it, an entry no package
+declares, or how a plugin is accepted. Changing the list needs an
+administrator, and each change is logged with who made it and kept in the
+audit trail.
+
+The checks that read an LLM or memory plugin's own code run only in a process
+that has loaded it, and the worker's, as a job starts, is final. Where the API
+has not loaded the plugin, they wait for the worker: a missing `llm.<name>`
+block that names the role models (accepted when a job is submitted, refused
+when it starts), the selected LLM provider's block at a save, a per-agent
+`base_url` or reasoning effort for an LLM plugin, and the validation of an LLM
+or memory plugin's own block against its settings model. A plugin's block is
+also known only once the API has loaded the plugin, so a save or import that
+allows a plugin and writes its block at once is refused for those keys, with
+the reason: save the list first, then the block. A save or import that drops a
+plugin never loads it, so a change to its block in the same save is refused
+for those keys, with the reason. A block key a save or import sends with the
+value stored for it, compared exactly as JSON (`1`, `1.0` and `true` differ;
+key order does not), writes nothing: it is left out without a word and loads
+no plugin, whether the plugin is allowed or not, so an export imported back
+unedited, or with only its list and selections edited, loads no plugin. A
+secret is never compared: one sent is always a write, judged as any secret is,
+and no answer depends on what a stored secret holds (an export omits secrets,
+and the console never sends a stored one back). A changed value in a block
+whose plugin the change does not load (dropped, not allowed, or failed to load)
+is refused with the reason, and a `null` that clears a key deletes its stored
+row without loading the plugin.
+
+### Memory plugins written to the older advice
+
+Memory backends were loaded from installed packages on their own before the
+list existed. Revision `20261016000000` adds the one memory plugin the stored
+`memory.backend` names, when it is installed in the image that runs the
+migration, to the list once, as `memory:<name>`, so a deployment that used one
+keeps it; nothing else is added. A memory plugin's entry point must now be named
+after the backend id it registers, in lowercase; the older advice only
+recommended it. When the stored backend is not shipped and no installed memory
+entry point carries its name, the revision says so in its output and its log,
+naming the installed memory entry points, and the backend does not load; the
+health check and every job then name those entry points and the rule. To keep
+it: install a release of the plugin whose entry point in the
+`maljan.memory_backends` group is named after the backend id, then allow
+`memory:<id>`; or select a shipped backend.
+
+### What allowing a plugin trusts
+
+Allowing a plugin runs its package's code in the workers and the command line,
+and in the API where it runs that plugin's own code, with their access: the
+settings and the credentials they hold, the samples, the database and the
+network. Allow only a package you would install into the image yourself, from a
+source you trust; the list decides what is loaded, not what is safe.
 
 ## Export and import
 

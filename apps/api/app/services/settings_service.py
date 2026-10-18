@@ -4,15 +4,23 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 import time
 import uuid
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
 
 from maljan.core import settings_secrets as box
 from maljan.core.config import BUILTIN_SERVER_KEYS, Settings, builtin_env_allow
+from maljan.core.plugins import (
+    ALLOW_LIST_KEY,
+    dropped_selections,
+    id_refusal,
+    install_allow_list,
+)
+from maljan.core.settings_catalog import PLUGIN_CHOICE_KINDS, _registry_choices
 from maljan.core.settings_overrides import (
     SERVER_MAP_PATH,
     build_settings,
@@ -48,6 +56,102 @@ from app.services.settings_catalog_api import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def merged_allow_list(changes: dict[str, Any], stored: dict[str, Any]) -> list[Any]:
+    """The plugin allow-list a save of ``changes`` over ``stored`` would leave in force."""
+    value = changes[ALLOW_LIST_KEY] if ALLOW_LIST_KEY in changes else stored.get(ALLOW_LIST_KEY)
+    return list(value) if isinstance(value, list) else []
+
+
+def choice_refusal(entry: Any, value: Any, allowed: list[Any]) -> str:
+    """Why ``value`` is not one of ``entry``'s choices; ``""`` when it is.
+
+    A provider id is a shipped one, or an installed plugin of that kind that
+    ``allowed`` (the list the save leaves) names, read from package metadata:
+    never what the API process has loaded, which is how the worker judges it
+    too. A refusal gives the plugin's own cause where one applies, else names
+    the allow-list.
+    """
+    kind = PLUGIN_CHOICE_KINDS.get(entry.choices_from)
+    if kind is None:
+        choices = entry.choices or []
+        return "" if value in choices else f"not one of: {', '.join(choices)}"
+    refused = id_refusal(kind, value, allowed)
+    if not refused:
+        return ""
+    return f"not one of: {', '.join(_registry_choices(entry.choices_from) or [])}; {refused}"
+
+
+def _core(flat: dict[str, Any]) -> dict[str, Any]:
+    return {split_key(k)[1]: v for k, v in flat.items() if k.startswith("core.")}
+
+
+# A key of an LLM or memory plugin's own settings block.
+_PLUGIN_BLOCK_KEY = re.compile(r"core\.(llm|memory)\.([^.]+)\..+")
+
+
+def unknown_key_reason(
+    key: str, stored_allowed: Any, said: str = "unknown setting", leaves: Any = None
+) -> str:
+    """Why ``key`` is refused as unknown: ``said``, with the cause when it is a plugin's block.
+
+    A plugin's own settings are read with its model, so a key of its block is
+    known once the API has loaded it, which it does for a save that writes
+    such a key while the stored allow-list ``stored_allowed`` names it and the
+    list the save leaves, ``leaves`` (the stored one when ``None``), still does.
+    """
+    from maljan.core import plugins
+
+    match = _PLUGIN_BLOCK_KEY.fullmatch(str(key))
+    if match is None:
+        return said
+    kind, name = match.groups()
+    listed = plugins.allowed_names(kind, plugins.usable_list(stored_allowed))
+    if name in plugins.loaded_names(kind):
+        return said
+    if name not in listed:
+        if not any(plugin.name == name for plugin in plugins.installed(kind)):
+            return said
+        return (
+            f"{said}: it belongs to plugin {kind}:{name}, whose own settings are read with its "
+            "model once the stored plugin allow-list names it; save the list naming "
+            f"{kind}:{name} first, then its settings"
+        )
+    if leaves is not None and name not in plugins.allowed_names(kind, plugins.usable_list(leaves)):
+        return (
+            f"{said}: it belongs to plugin {kind}:{name}, which this change drops from the "
+            "plugin allow-list, so the API does not load it to read its settings; leave its "
+            "changed settings out, or keep it on the list"
+        )
+    why = plugins.unavailable_reason(kind, name) or "its load has not finished"
+    return f"{said}: the API has not loaded plugin {kind}:{name} to read it ({why})"
+
+
+def cleared_plugin_block_keys(changes: dict[str, Any], known: Iterable[str]) -> list[str]:
+    """The keys ``changes`` clears (``None``) in an installed plugin's own block outside ``known``.
+
+    ``known`` is the catalogue's keys. Such a key is one of a plugin this
+    process has not loaded; clearing it deletes its stored row, which needs no
+    model, so no plugin is loaded for it and no value of the row is read.
+    """
+    from maljan.core import plugins
+
+    held = set(known)
+    names: dict[str, set[str]] = {}
+    out: list[str] = []
+    for key, value in changes.items():
+        if value is not None or key in held:
+            continue
+        match = _PLUGIN_BLOCK_KEY.fullmatch(str(key))
+        if match is None:
+            continue
+        kind, name = match.groups()
+        if kind not in names:
+            names[kind] = {plugin.name for plugin in plugins.installed(kind)}
+        if name in names[kind]:
+            out.append(key)
+    return out
 
 
 # The catalog leaves that hold a provider block's tool declarations
@@ -434,9 +538,16 @@ class SettingsService:
                     continue
             else:
                 out[row.key] = row.value
-        return _merge_nested(merge_server_secrets(out))
+        merged = _merge_nested(merge_server_secrets(out))
+        # The stored plugin allow-list is the one this process judges a
+        # provider id by when a check is handed none; it loads and withdraws
+        # nothing (``maljan.core.plugins.load_allowed`` does, when told to).
+        install_allow_list(merged.get(ALLOW_LIST_KEY))
+        return merged
 
-    async def values(self) -> dict[str, ValueInfo]:
+    async def values(self, extra: Iterable[Any] = ()) -> dict[str, ValueInfo]:
+        """Every catalogue key's value, with its source; ``extra`` are catalogue entries
+        served beside the catalogue (a plugin block's stored rows, shown as stored)."""
         index = catalog_index()
         rows = {r.key: r for r in await self._rows()}
         core_defaults = build_settings({})
@@ -555,6 +666,27 @@ class SettingsService:
                 shown = default_value if entry.editable else _masked(entry.path, default_value)
                 src = effective_source(overridden=False)
                 out[key] = ValueInfo(shown, None, None, src)
+        for entry in extra:
+            row = rows.get(entry.key)
+            if entry.key in out or row is None:
+                continue
+            if entry.secret:
+                try:
+                    plain = box.decrypt(str(row.value))
+                except box.SecretsUnavailable:
+                    plain = ""
+                out[entry.key] = ValueInfo(
+                    None,
+                    True,
+                    box.hint(plain) if plain else None,
+                    "ui",
+                    row.updated_at,
+                    row.updated_by,
+                )
+            else:
+                out[entry.key] = ValueInfo(
+                    row.value, None, None, "ui", row.updated_at, row.updated_by
+                )
         return out
 
     def _masked_server_map(
@@ -620,11 +752,12 @@ class SettingsService:
         """
         index = catalog_index()
         stored = stored or {}
+        allowed = merged_allow_list(changes, stored)
         errors = {}
         for key in changes:
             entry = index.get(key)
             if entry is None:
-                errors[key] = "unknown setting"
+                errors[key] = unknown_key_reason(key, stored.get(ALLOW_LIST_KEY), leaves=allowed)
             elif not entry.editable:
                 errors[key] = entry.reason or "read-only"
             elif (
@@ -632,7 +765,6 @@ class SettingsService:
                 and entry.choices is not None
                 and changes[key] is not None
                 and changes[key] != stored.get(key)
-                and changes[key] not in entry.choices
             ):
                 # Exactly as the registry spells it: a value that differs in
                 # case or spacing names no provider when a job is built, so it
@@ -640,7 +772,11 @@ class SettingsService:
                 # A choice a registry holds (a memory backend, say) is checked
                 # here, where it is saved, rather than wherever the settings
                 # are read: a stored id whose package later breaks still loads.
-                errors[key] = f"not one of: {', '.join(entry.choices)}"
+                # An installed plugin the allow-list this save leaves names is
+                # accepted by its name.
+                refusal = choice_refusal(entry, changes[key], allowed)
+                if refusal:
+                    errors[key] = refusal
         if errors:
             raise SettingsValidationError(errors)
 
@@ -718,6 +854,10 @@ class SettingsService:
         self, changes: dict[str, Any], *, user_id: uuid.UUID | None, ip: str | None
     ) -> SaveResult:
         current = await self.load_overrides()
+        # A clear of a key in the block of a plugin this process has not
+        # loaded deletes its stored row; no model is needed to delete it.
+        cleared = cleared_plugin_block_keys(changes, catalog_index())
+        changes = {key: value for key, value in changes.items() if key not in cleared}
         try:
             self.check_keys(changes, current)
         except SettingsValidationError as refused:
@@ -820,7 +960,7 @@ class SettingsService:
                 changes.update(await asyncio.to_thread(validate_agent_map, changes, current))
             except AgentMapError as exc:
                 raise SettingsValidationError(dict(exc.errors)) from exc
-        merged = {**current}
+        merged = {key: value for key, value in current.items() if key not in cleared}
         for key, value in changes.items():
             # ``null`` means "drop the override" for every key, secrets
             # included; an admin cannot pin a nullable field to None against
@@ -845,6 +985,11 @@ class SettingsService:
         for more in (
             pack_step_refusals(core, stored_core),
             changed_declaration_refusals(changes, current),
+            # A plugin this save drops from the allow-list may not stay the
+            # provider a setting selects, as a removed agent may not stay bound.
+            dropped_selections(current.get(ALLOW_LIST_KEY), merged.get(ALLOW_LIST_KEY), core)
+            if ALLOW_LIST_KEY in changes
+            else {},
         ):
             for key, message in more.items():
                 refusals.setdefault(key, message)
@@ -882,6 +1027,18 @@ class SettingsService:
                 after[key] = "set" if entry.secret else value
             result.applied.append(key)
             result.applies[entry.applies] = result.applies.get(entry.applies, 0) + 1
+        removed: list[str] = []
+        for key in cleared:
+            existing = rows.get(key)
+            if existing is None:
+                continue
+            # Said from the row's own flag: a secret's value is never read.
+            before[key] = "set" if existing.is_secret else existing.value
+            after[key] = "unset" if existing.is_secret else None
+            await self.db.delete(existing)
+            removed.append(key)
+            result.applied.append(key)
+            result.applies["next_job"] = result.applies.get("next_job", 0) + 1
         if server_map_kept is not None:
             await self._save_server_tokens(tokens, server_map_kept)
         for spec, secrets, kept in nested_writes:
@@ -889,8 +1046,10 @@ class SettingsService:
                 secrets, kept, prefix=f"{spec.key}.", suffix=spec.suffix, key_of=spec.row_key
             )
         await self.db.commit()
-        details = {"changed": list(changes), "before": before, "after": after}
+        details = {"changed": [*changes, *removed], "before": before, "after": after}
         await _audit(user_id, "settings.update", details, ip)
+        if ALLOW_LIST_KEY in changes:
+            _say_the_allow_list_changed(user_id, before.get(ALLOW_LIST_KEY), after[ALLOW_LIST_KEY])
         return result
 
     async def _save_server_tokens(self, tokens: dict[str, str | None], kept: set[str]) -> None:
@@ -967,6 +1126,15 @@ class SettingsService:
             targets.update(
                 dict.fromkeys(k for k in rows if k.startswith(prefix) and k.endswith(suffix))
             )
+        held = rows.get(ALLOW_LIST_KEY)
+        allowed_before = held.value if held is not None else None
+        if held is not None and ALLOW_LIST_KEY in targets:
+            # A reset of the allow-list drops every plugin it named: refused,
+            # as a save is, while a stored provider id still selects one.
+            left = {key: row.value for key, row in rows.items() if key not in targets}
+            dangling = dropped_selections(allowed_before, None, _core(left))
+            if dangling:
+                raise SettingsValidationError(dangling)
         removed = []
         for key in targets:
             if key in rows:
@@ -975,7 +1143,25 @@ class SettingsService:
         await self.db.commit()
         if removed:
             await _audit(user_id, "settings.reset", {"keys": removed}, ip)
+        if ALLOW_LIST_KEY in removed:
+            _say_the_allow_list_changed(user_id, allowed_before, None)
         return removed
+
+
+def _say_the_allow_list_changed(user_id: uuid.UUID | None, before: Any, after: Any) -> None:
+    """Log a change of the plugin allow-list with who made it; the audit trail keeps it too."""
+
+    def named(value: Any) -> str:
+        if isinstance(value, list) and value:
+            return ", ".join(str(item) for item in value)
+        return "no plugin"
+
+    logger.info(
+        "The plugin allow-list was changed by user %s: it named %s and names %s.",
+        user_id or "(unknown)",
+        named(before),
+        named(after),
+    )
 
 
 async def _audit(

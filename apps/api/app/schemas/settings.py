@@ -368,3 +368,41 @@ class ChannelPreview(BaseModel):
 class MappingPreviewResponse(BaseModel):
     target_sha256: str
     channels: dict[str, ChannelPreview]
+
+
+class PluginDTO(BaseModel):
+    """One installed plugin: its name, package and version, read from package metadata.
+
+    ``allowed`` is what the stored allow-list says. ``state`` is what the
+    metadata says of it in every process: ``refused`` (``error`` says why),
+    else ``allowed`` or ``not_allowed``. ``api_state`` and ``api_error`` are
+    the API process's own load result, where the API loaded the plugin to run
+    its code (a settings block, a test, the memory purge or health check);
+    empty when it never did. A worker's load result is in that worker's log.
+    """
+
+    name: str
+    entry: str
+    distribution: str
+    version: str
+    allowed: bool
+    state: str
+    error: str = ""
+    api_state: str = ""
+    api_error: str = ""
+
+
+class PluginKindDTO(BaseModel):
+    kind: str
+    group: str
+    title: str
+    plugins: list[PluginDTO]
+    # Names the allow-list holds for this kind that no installed package declares.
+    allowed_absent: list[str] = Field(default_factory=list)
+
+
+class PluginsResponse(BaseModel):
+    """Every installed provider plugin per kind, and the setting that allows them."""
+
+    allow_list_key: str
+    kinds: list[PluginKindDTO]

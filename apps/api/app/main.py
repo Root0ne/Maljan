@@ -72,6 +72,7 @@ async def _probe_memory() -> dict[str, Any]:
     answered. A backend id the factory does not know is reported as not
     configured rather than as a failure; every answer names the backend.
     """
+    from maljan.core.plugins import ALLOW_LIST_KEY
     from maljan.core.settings_overrides import StoredValueRefused, redact_url
     from maljan.memory.store_factory import (
         MemoryBackendNotConfiguredError,
@@ -80,8 +81,17 @@ async def _probe_memory() -> dict[str, Any]:
     )
 
     from app.runtime_config import runtime_config
+    from app.services.plugins import load_in_background
 
     try:
+        # The selected backend, when it is an allowed plugin, is the code this
+        # check runs: that plugin alone, loaded off the event loop within the
+        # check's own budget.
+        allowed = await runtime_config.stored_value(ALLOW_LIST_KEY)
+        selected = str(await runtime_config.stored_value("core.memory.backend") or "")
+        await load_in_background(
+            allowed, [f"memory:{selected.strip().lower()}"], _PROBE_TIMEOUT_SECONDS
+        )
         core = await runtime_config.core()
     except StoredValueRefused:
         # Unauthenticated: the fact, never the key or the reason.
@@ -331,6 +341,21 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         # next start tries again -- it must never take an otherwise-healthy
         # API down.
         logger.exception("Composite-secret repair failed")
+
+    # The stored plugin allow-list, read so a job naming an allowed plugin is
+    # judged by it from the first request. No plugin is imported at start:
+    # the API loads one only where it runs that plugin's own code.
+    try:
+        from app.services.settings_service import SettingsService
+
+        async with async_session_factory() as _plugins_session:
+            await SettingsService(_plugins_session).load_overrides()
+    except Exception as exc:  # noqa: BLE001 — a start never stops on a plugin
+        logger.warning(
+            "The stored plugin allow-list was not read at start (%s); the first settings "
+            "read reads it.",
+            type(exc).__name__,
+        )
 
     if settings.auth_disabled:
         try:

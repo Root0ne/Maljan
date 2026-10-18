@@ -34,7 +34,13 @@ ChoicesFrom = Literal[
     "sandbox_report_readers",
 ]
 Editor = Literal[
-    "server_map", "rest_sandbox", "agent_definitions", "stages", "tool_facts", "pack_steps"
+    "server_map",
+    "rest_sandbox",
+    "agent_definitions",
+    "stages",
+    "tool_facts",
+    "pack_steps",
+    "plugin_allow_list",
 ]
 
 # Field names that are secrets although typed as plain str.
@@ -233,16 +239,34 @@ def _annotation(path: str, undeclared: Mapping[str, Any] | None = None) -> Any:
     return backend.annotations.get(leaf) if backend is not None and leaf else None
 
 
+# The registry sources an installed plugin adds to, by the kind of plugin.
+PLUGIN_CHOICE_KINDS: dict[str, str] = {
+    "llm_providers": "llm",
+    "static_providers": "static",
+    "sandbox_providers": "sandbox",
+    "memory_backends": "memory",
+}
+
+
 def _registry_choices(source: str | None) -> list[str] | None:
-    """The choices a core registry holds for ``source``, or ``None`` when it is not one."""
+    """The choices a core registry holds for ``source``, or ``None`` when it is not one.
+
+    Shipped and in-process ids only: a plugin's id is offered from its
+    package metadata and the stored allow-list (``maljan.core.plugins``),
+    never because this process happens to have loaded it.
+    """
+    from maljan.core.plugins import loaded_names
+
+    kind = PLUGIN_CHOICE_KINDS.get(str(source))
+    plugin_ids = loaded_names(kind) if kind else set()
     if source == "memory_backends":
         from maljan.memory.store_factory import memory_backends
 
-        return list(memory_backends())
+        return [i for i in memory_backends() if i not in plugin_ids]
     if source == "llm_providers":
         from maljan.llm.provider_base import provider_names
 
-        return provider_names()
+        return [i for i in provider_names() if i not in plugin_ids]
     if source == "sandbox_report_readers":
         from maljan.providers.sandbox.readers import choosable_reader_ids
 
@@ -259,7 +283,10 @@ def _registry_choices(source: str | None) -> list[str] | None:
         ids = static_provider_ids() if static else sandbox_provider_ids()
         cls_of = static_provider_class if static else sandbox_provider_class
         # In the order each provider declares, then by id.
-        return sorted(ids, key=lambda i: (getattr(cls_of(i), "choice_order", 100), i))
+        return sorted(
+            (i for i in ids if i not in plugin_ids),
+            key=lambda i: (getattr(cls_of(i), "choice_order", 100), i),
+        )
     return None
 
 

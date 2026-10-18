@@ -263,6 +263,11 @@ def remember_facts(name: str, cls: Any) -> None:
         _FACTS[str(name)] = cls
 
 
+def forget_facts(name: str) -> None:
+    """Drop the facts kept under ``name`` (a withdrawn plugin's)."""
+    _FACTS.pop(str(name), None)
+
+
 def _discover() -> None:
     try:
         from maljan.llm.registry import discover_providers
@@ -363,7 +368,7 @@ def undeclared_settings_models() -> dict[str, Any]:
 
     # Only what is registered already: every built-in adapter is a declared
     # field of ``LLMConfig``, so nothing is discovered (and no client library
-    # loaded) to answer this.
+    # loaded) to answer this. A plugin is here once its process loaded it.
     out: dict[str, Any] = {}
     for name in list(_PROVIDER_REGISTRY):
         if name in LLMConfig.model_fields:
