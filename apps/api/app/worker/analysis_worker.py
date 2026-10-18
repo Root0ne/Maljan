@@ -1871,6 +1871,7 @@ async def keep_the_built_report(
     override_keys: Any,
     hash_mismatch_reason: str | None,
     scale_record: Mapping[str, Any] | None = None,
+    container: Any = None,
 ) -> bool:
     """Store a report a failed run built, marked incomplete. Never raises.
 
@@ -1880,10 +1881,13 @@ async def keep_the_built_report(
     with ``incomplete_reason`` set to ``note``, and the note is added to the
     degradation reasons the report and the run summary already carry, so every
     surface that shows a degraded run shows this one. The job row is not
-    touched: it stays ``failed``.
+    touched: it stays ``failed``. The ledger stored is the state's with every
+    entry ``container``'s agents still held added (``with_undrained_evidence``).
     """
     try:
-        state = dict(built)
+        from maljan.pipeline.state import with_undrained_evidence
+
+        state = with_undrained_evidence(dict(built), container)
         malware_report = state.get("malware_report")
         if isinstance(malware_report, dict):
             malware_report = dict(malware_report)
@@ -3100,6 +3104,12 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
         await _publish_event(redis_conn, job_id, "phase_change", {"phase": "reporting"})
 
         # ── 4. Build the report ──────────────────────────────
+        # Every entry the job's counter issued is on the ledger that is
+        # stored, including what no node drained (``with_undrained_evidence``);
+        # gathered before the run summary below counts the ledger.
+        from maljan.pipeline.state import with_undrained_evidence
+
+        pipeline_result = with_undrained_evidence(pipeline_result, getattr(app, "container", None))
         # The enrichment job queued after a stored report is named in its
         # disclosure block, with what it may reach, so that block never says
         # nothing left the machine while a lookup is still to come.
@@ -3301,6 +3311,7 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
                     job_uuid=job_uuid,
                     job_id=job_id,
                     built=built,
+                    container=getattr(app, "container", None),
                     note=kept_report_note(failed_step, exc, error_id),
                     transcript=transcript,
                     core_settings=core_settings,
@@ -4517,9 +4528,12 @@ async def _store_the_report(
         [_entry for _entry in _ledger if isinstance(_entry, dict)],
         evidence_budget_of(run_summary, core_settings),
     )
-    for _entry in _ledger:
-        if not isinstance(_entry, dict):
-            continue
+    # Written in ``seq`` order, so the table's row order is the order the ids
+    # were issued in; the state holds them in node-completion order.
+    for _entry in sorted(
+        (_entry for _entry in _ledger if isinstance(_entry, dict)),
+        key=lambda _entry: int(_entry.get("seq", 0) or 0),
+    ):
         db.add(_evidence_row(_entry, job_id=job_uuid))
 
     logger.info(

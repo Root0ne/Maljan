@@ -426,3 +426,25 @@ class AnalysisState(TypedDict):
     # per analyst, round and claim (``pipeline.claim_drops``), with the run
     # summary's sentence. Recorded, never asked. Append-only.
     dropped_claims: Annotated[list[dict[str, Any]], operator.add]
+
+
+def with_undrained_evidence(state: dict[str, Any], container: Any) -> dict[str, Any]:
+    """``state`` with every ledger entry no node wrote added to ``evidence_ledger``.
+
+    Each path that persists a ledger — a completed run, a stopped one and a
+    report kept from a failed run — calls this before it stores the state, so
+    the ledger it stores holds every id the job's counter issued
+    (``ServiceContainer.collect_undrained_evidence``). A container that cannot
+    say, or a state with nothing left out, comes back as it was.
+    """
+    collect = getattr(container, "collect_undrained_evidence", None)
+    if not callable(collect):
+        return state
+    ledger = list(state.get("evidence_ledger") or [])
+    known = [str(row.get("id")) for row in ledger if isinstance(row, dict) and row.get("id")]
+    late = collect(known)
+    if not late:
+        return state
+    out = dict(state)
+    out["evidence_ledger"] = [*ledger, *(entry.model_dump(mode="json") for entry in late)]
+    return out

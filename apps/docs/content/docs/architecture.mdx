@@ -3578,7 +3578,14 @@ What each salvage sent, how it was sized and how it ended is on the loop's
 budget record and in `run_summary.budget.<agent>.salvages`.
 That stamp is what makes a report checkable: the model can cite the call it read
 a fact from, a report section lists the entries it was built from, and `GET
-/api/v1/jobs/{id}/evidence` serves those entries back.
+/api/v1/jobs/{id}/evidence` serves those entries back. Every id the job's
+counter issued reaches that ledger: whatever no stage node drained — an
+analyst asked at the verdict stage, a revision that raised, a mediation loop's
+late calls, a delegation answered after its caller's loop ended, a triage pack
+stopped on its thread — is collected from the container's holders
+(`ServiceContainer.collect_undrained_evidence`) by the report node, and again
+by the worker before a completed, stopped or failed-after-report run stores
+its ledger. The rows are written in `seq` order.
 
 **How wide the prompt allows.** What "too wide" means is not a constant.
 `preprocessing.max_tool_output_chars` is 0 by default, and 0 means the limit is

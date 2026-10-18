@@ -55,13 +55,24 @@ def stopped_state(app: Any) -> dict[str, Any]:
     """The pipeline state a stopped run had produced, or an empty dict.
 
     The report node's state when it had returned (a superset of every step
-    before it), otherwise the state after the last complete step.
+    before it), otherwise the state after the last complete step, with every
+    ledger entry no node wrote added (``pipeline.state.with_undrained_evidence``).
     """
+    from maljan.pipeline.state import with_undrained_evidence
+
     built = getattr(app, "built_report", None)
     if isinstance(built, dict) and built:
-        return dict(built)
-    latest = getattr(app, "latest_state", None)
-    return dict(latest) if isinstance(latest, dict) else {}
+        state = dict(built)
+    else:
+        latest = getattr(app, "latest_state", None)
+        state = dict(latest) if isinstance(latest, dict) else {}
+    # What the run's agents held when it stopped is on its ledger too: a stage
+    # node that was cancelled never ran its drain.
+    try:
+        return with_undrained_evidence(state, getattr(app, "container", None))
+    except Exception as exc:  # noqa: BLE001 — every function here is total
+        logger.warning("stopped run: undrained evidence not collected (%s).", exc)
+        return state
 
 
 def judge_ran(state: dict[str, Any]) -> bool:
