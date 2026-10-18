@@ -274,8 +274,8 @@ nothing a model reads changes.
   judge's tool loop, and each single analyst call (a revision, a validation
   retry, a drops question, a salvage) — and split into the system prompt, the
   task and its data, the triage pack, the run-state block, the tool answers,
-  the peer reports a revision carries, the retries and questions asked after
-  an answer, the agent's own earlier turns, and the tool definitions. The parts
+  the peer reports a revision carries, every turn after the first answer
+  (retries, questions and the platform's notices), the agent's own earlier turns, and the tool definitions. The parts
   are **character counts**: no provider reports the tokens of each part of a
   prompt. Beside them stand the input tokens the provider reported for the
   same requests, and how many reported. One row per tool loop, and one per

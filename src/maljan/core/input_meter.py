@@ -41,7 +41,8 @@ from typing import Any
 # ``tool_answers``     the tool answers the conversation holds.
 # ``peer_reports``     the other analysts' reports a revision carries.
 # ``retries``          every human turn after the first model answer: a
-#                      validation retry, a drops question, a nudge.
+#                      validation retry, a drops question, a nudge, and any
+#                      notice the platform sends as a human turn.
 # ``own_turns``        the agent's own earlier turns and answers, sent again.
 # ``tool_definitions`` the definitions of the tools a loop's request is bound to.
 PARTS: tuple[str, ...] = (

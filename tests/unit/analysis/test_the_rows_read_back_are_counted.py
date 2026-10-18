@@ -8,8 +8,10 @@ read is never evidence of its own nor a repeated call.
 
 from __future__ import annotations
 
-import time
+from collections.abc import Callable
 from types import SimpleNamespace
+
+import pytest
 
 from maljan.agents.tool_answer_clearing import READ_EVIDENCE_TOOL
 from maljan.analysis.efficiency import (
@@ -88,13 +90,30 @@ def test_a_ledger_with_no_read_says_none() -> None:
     assert rows_read_record([]) is None
 
 
-def test_the_count_is_linear_in_the_ledger() -> None:
-    def timed(scale: int) -> float:
-        rows = [_entry(i) for i in range(1, 300 * scale)]
-        reads = [_read(300 * scale + i, f"ev_{i:04d}") for i in range(1, 300 * scale)]
-        start = time.perf_counter()
-        rows_read_record([*rows, *reads])
-        return time.perf_counter() - start
+def _field_reads(monkeypatch: pytest.MonkeyPatch, build: Callable[[], object]) -> int:
+    """How many entry fields ``build`` reads: the record's unit of work, not a clock."""
+    import maljan.analysis.efficiency as efficiency
 
-    small = max(timed(1), 1e-4)
-    assert timed(10) < small * 40
+    counted = [0]
+    real = efficiency._field
+
+    def field(entry: object, name: str) -> object:
+        counted[0] += 1
+        return real(entry, name)
+
+    monkeypatch.setattr(efficiency, "_field", field)
+    try:
+        build()
+    finally:
+        monkeypatch.setattr(efficiency, "_field", real)
+    return counted[0]
+
+
+def test_the_count_is_linear_in_the_ledger(monkeypatch: pytest.MonkeyPatch) -> None:
+    def work(scale: int) -> int:
+        rows = [_entry(i) for i in range(1, 300 * scale + 1)]
+        reads = [_read(300 * scale + i, f"ev_{i:04d}") for i in range(1, 300 * scale + 1)]
+        return _field_reads(monkeypatch, lambda: rows_read_record([*rows, *reads]))
+
+    # Linear: one more unit of ledger costs as much at ten units as at one.
+    assert work(11) - work(10) <= (work(2) - work(1)) * 1.1

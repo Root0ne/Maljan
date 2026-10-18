@@ -9,8 +9,10 @@ its answer. The ledger may be models or the dicts a state channel holds.
 
 from __future__ import annotations
 
-import time
+from collections.abc import Callable
 from types import SimpleNamespace
+
+import pytest
 
 from maljan.analysis.efficiency import efficiency_lines, efficiency_record, uncited_record
 from maljan.schemas.evidence import LedgerEntry
@@ -109,14 +111,31 @@ def test_the_record_and_the_report_carry_it() -> None:
     )
 
 
-def test_the_count_is_linear_in_the_ledger() -> None:
-    def timed(scale: int) -> float:
-        ledger = [_entry(i) for i in range(1, 500 * scale)]
-        refs = " ".join(f"ev_{i:04d}" for i in range(1, 500 * scale, 2))
-        reports = {"static": _isr(refs)}
-        start = time.perf_counter()
-        uncited_record(ledger, reports)
-        return time.perf_counter() - start
+def _field_reads(monkeypatch: pytest.MonkeyPatch, build: Callable[[], object]) -> int:
+    """How many entry fields ``build`` reads: the record's unit of work, not a clock."""
+    import maljan.analysis.efficiency as efficiency
 
-    small = max(timed(1), 1e-4)
-    assert timed(10) < small * 40
+    counted = [0]
+    real = efficiency._field
+
+    def field(entry: object, name: str) -> object:
+        counted[0] += 1
+        return real(entry, name)
+
+    monkeypatch.setattr(efficiency, "_field", field)
+    try:
+        build()
+    finally:
+        monkeypatch.setattr(efficiency, "_field", real)
+    return counted[0]
+
+
+def test_the_count_is_linear_in_the_ledger(monkeypatch: pytest.MonkeyPatch) -> None:
+    def work(scale: int) -> int:
+        ledger = [_entry(i) for i in range(1, 500 * scale + 1)]
+        refs = " ".join(f"ev_{i:04d}" for i in range(1, 500 * scale + 1, 2))
+        reports = {"static": _isr(refs)}
+        return _field_reads(monkeypatch, lambda: uncited_record(ledger, reports))
+
+    # Linear: one more unit of ledger costs as much at ten units as at one.
+    assert work(11) - work(10) <= (work(2) - work(1)) * 1.1

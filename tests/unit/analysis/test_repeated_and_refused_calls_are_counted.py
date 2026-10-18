@@ -11,7 +11,10 @@ call it never saw. A read of a cleared answer is a read, not a repeat.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from types import SimpleNamespace
+
+import pytest
 
 from maljan.agents.tool_answer_clearing import READ_EVIDENCE_TOOL
 from maljan.analysis.efficiency import calls_record, efficiency_lines, efficiency_record
@@ -111,22 +114,29 @@ def test_the_line_names_who_made_each_call() -> None:
     )
 
 
-def test_the_count_is_linear_in_the_ledger(monkeypatch: object) -> None:
+def _field_reads(monkeypatch: pytest.MonkeyPatch, build: Callable[[], object]) -> int:
+    """How many entry fields ``build`` reads: the record's unit of work, not a clock."""
     import maljan.analysis.efficiency as efficiency
 
-    def operations(scale: int) -> int:
-        counted = [0]
-        real = efficiency._field
+    counted = [0]
+    real = efficiency._field
 
-        def field(entry: object, name: str) -> object:
-            counted[0] += 1
-            return real(entry, name)
+    def field(entry: object, name: str) -> object:
+        counted[0] += 1
+        return real(entry, name)
 
-        efficiency._field = field  # type: ignore[assignment]
-        try:
-            calls_record([_entry(i, args={"n": i % 50}) for i in range(1, 500 * scale)])
-        finally:
-            efficiency._field = real  # type: ignore[assignment]
-        return counted[0]
+    monkeypatch.setattr(efficiency, "_field", field)
+    try:
+        build()
+    finally:
+        monkeypatch.setattr(efficiency, "_field", real)
+    return counted[0]
 
-    assert operations(10) <= operations(1) * 11
+
+def test_the_count_is_linear_in_the_ledger(monkeypatch: pytest.MonkeyPatch) -> None:
+    def work(scale: int) -> int:
+        ledger = [_entry(i, args={"n": i % 50}) for i in range(1, 500 * scale + 1)]
+        return _field_reads(monkeypatch, lambda: calls_record(ledger))
+
+    # Linear: one more unit of ledger costs as much at ten units as at one.
+    assert work(11) - work(10) <= (work(2) - work(1)) * 1.1

@@ -10,7 +10,6 @@ report prints one sentence per agent.
 
 from __future__ import annotations
 
-import time
 from types import SimpleNamespace
 from typing import Any
 
@@ -76,19 +75,40 @@ def test_run_state_markers_a_tool_answer_carries_are_not_taken_for_the_block() -
 
 
 def test_the_split_is_linear_in_the_request() -> None:
-    def timed(scale: int) -> float:
-        body = "x" * (50_000 * scale)
-        turns = [
-            HumanMessage(content=body),
-            AIMessage(content=body),
-            ToolMessage(content=body, tool_call_id="c"),
-        ]
-        start = time.perf_counter()
-        request_parts(turns, pack="y" * 1000, peers=["z" * 1000] * 5)
-        return time.perf_counter() - start
+    """The messages measured and the texts searched grow with the request, and nothing else."""
+    import maljan.core.input_meter as input_meter
 
-    small = max(timed(1), 1e-4)
-    assert timed(10) < small * 40
+    def work(scale: int) -> int:
+        counted = [0]
+
+        def measure(message: object) -> int:
+            counted[0] += 1
+            return len(str(getattr(message, "content", "")))
+
+        real = input_meter._found
+
+        def found(texts: object, within: str) -> int:
+            counted[0] += 1
+            return real(texts, within)  # type: ignore[arg-type]
+
+        input_meter._found = found  # type: ignore[assignment]
+        try:
+            turns = [
+                message
+                for _ in range(100 * scale)
+                for message in (
+                    HumanMessage(content="x" * 500),
+                    AIMessage(content="y" * 500),
+                    ToolMessage(content="z" * 500, tool_call_id="c"),
+                )
+            ]
+            request_parts(turns, measure=measure, pack="p" * 50, peers=["q" * 50] * 5)
+        finally:
+            input_meter._found = real  # type: ignore[assignment]
+        return counted[0]
+
+    # Linear: one more unit of request costs as much at ten units as at one.
+    assert work(11) - work(10) == work(2) - work(1)
 
 
 def test_a_loop_sums_its_turns_and_single_calls_sum_by_kind() -> None:

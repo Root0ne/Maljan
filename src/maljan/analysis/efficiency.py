@@ -80,7 +80,10 @@ from typing import Any
 from maljan.core.input_meter import PARTS, TOOL_LOOP
 
 # The record's shape version: a reader that meets a newer one reads what it knows.
-EFFICIENCY_VERSION = 1
+# 2: the fingerprint is the setup's, the repeat counts are per maker
+# (``same_call_elsewhere``, ``retried_after_failure``), ``uncited`` counts
+# ``failed`` apart, and the token figures are the summary's own.
+EFFICIENCY_VERSION = 2
 
 INTRO_SENTENCE = (
     "**Efficiency:** counted by code from what this run recorded — the requests its "
@@ -95,7 +98,7 @@ PART_LABELS: dict[str, str] = {
     "run_state": "run state",
     "tool_answers": "tool answers",
     "peer_reports": "peer reports",
-    "retries": "retries and questions after an answer",
+    "retries": "turns after the first answer (retries, questions, notices)",
     "own_turns": "own earlier turns",
     "tool_definitions": "tool definitions",
 }
