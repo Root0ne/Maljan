@@ -4065,7 +4065,6 @@ class BudgetMeter:
         if cap and detail:
             record["detail"] = detail
         self._note_budget(record)
-        self._close_input_loop(ledger, messages)
         if cap:
             emit_stage_ended_at_cap(
                 self._event_sink(), stage=stage, agent=str(self.name), cap=cap, detail=detail
@@ -4136,7 +4135,13 @@ class BudgetMeter:
             self.logger.debug("%s: the answer was not measured (%s).", self.name, exc)
 
     def _close_input_loop(self, loop: Any, messages: Sequence[Any]) -> None:
-        """Close this loop's row on the meter, with each model turn's reported input. Never raises."""
+        """Close this loop's row on the meter, with each model turn's reported input. Never raises.
+
+        ``messages`` are the turns the loop's model answered, the very ones the
+        token ledger records the loop's usage from on the same exit path, so
+        the two agree however the loop ended. Every loop's own ``finally``
+        closes it; a second close of the same loop changes nothing.
+        """
         meter = self._input_meter()
         if meter is None:
             return
@@ -6111,6 +6116,12 @@ class BaseAnalyst(BudgetMeter, ABC):
             # after they are on the ledger: never a moment counted nowhere.
             if spend_meter is not None and sys.exc_info()[1] is not None:
                 spend_meter.forget_loop(spend_key)
+            # And its row on the input meter closes with the turns the ledger
+            # just recorded from ``latest`` (``_record_turns_taken``); a loop
+            # that returned closes below, with the turns recorded from its
+            # result.
+            if sys.exc_info()[1] is not None:
+                self._close_input_loop(budget, list(latest.get("messages") or [])[len(messages) :])
             # Read before the conversation is forgotten: forgetting it clears
             # the mark, so a question asked afterwards is always answered no
             # and a loop that ran out of room recorded the step cap instead.
@@ -6125,6 +6136,7 @@ class BaseAnalyst(BudgetMeter, ABC):
         if thread_result is None:
             if spend_meter is not None:
                 spend_meter.forget_loop(spend_key)
+            self._close_input_loop(budget, list(latest.get("messages") or [])[len(messages) :])
             raise AnalystError(f"{self.name} ReAct agent returned no result")
 
         msgs = thread_result.get("messages", []) or []
@@ -6171,6 +6183,9 @@ class BaseAnalyst(BudgetMeter, ABC):
                 call=TOOL_LOOP_TURN_CALL,
                 held=last_held if index == len(turns) - 1 else None,
             )
+        # The loop's row on the input meter, closed with exactly the turns the
+        # ledger recorded above.
+        self._close_input_loop(budget, [*dropped, *turns])
         if spend_meter is not None:
             spend_meter.forget_loop(spend_key)
         elapsed = _time.monotonic() - _t0

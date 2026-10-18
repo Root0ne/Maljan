@@ -2391,6 +2391,9 @@ class JudgeAgent(BudgetMeter):
             # reservation with the spend meter goes with them. Once only.
             with contextlib.suppress(Exception):
                 _record_the_turns()
+            # The loop's row on the input meter, closed with the turns the
+            # ledger recorded just above, however the loop ended.
+            self._close_input_loop(budget, list(latest.get("messages") or [])[len(messages) :])
             # In a ``finally`` for the reason the analysts' loop uses one: a
             # mediation that timed out still made the calls it made.
             self._evidence_entries.extend(recorder.entries)
