@@ -571,6 +571,19 @@ _PACK_TOOLS: dict[str, dict[str, Any]] = {
 # records stored then still carry (``core.legacy_reputation``).
 REPUTATION_KINDS: tuple[str, ...] = (REPUTATION_KIND, *STORED_REPUTATION_KINDS)
 
+# The kinds that reach a service outside the deployment by what they mean,
+# each with what it reaches it for. A tool of one of these kinds asks that
+# service whatever server it is called through, so the run's disclosure block
+# (``analysis.disclosure``) never takes a call of it, or any call through a
+# local server that declares one, as staying on the machine.
+OUTWARD_KINDS: dict[str, str] = {
+    **{kind: "asks a reputation service about the sample" for kind in REPUTATION_KINDS},
+    "indicator_report": "asks a service for its report on an indicator",
+    "indicator_reputation": "asks a service for an indicator's reputation",
+    "submission": "hands a service something to analyse",
+    "submission_status": "asks a service how a submission is going",
+}
+
 # Each name table the core reads tools by, as the set of kinds that is exactly
 # that table over every built-in tool (``tests/unit/core/
 # test_every_built_in_declares_what_its_name_tables_say.py`` holds each one
@@ -878,7 +891,20 @@ _PROVIDER_BLOCKS: dict[str, dict[str, Any]] = {
         "auto_name_prefixes": ["fcn.", "loc.", "sub.", "func."],
         "tool_facts": R2_TOOLS,
     },
-    "cape2_mcp": {"roles": ["sandbox"], "prompt_fragment": CAPE_WORKFLOW},
+    # The workflow's ``submit_file`` sends the sample to the sandbox: declared
+    # so the run's disclosure block names the upload. It names no kind on
+    # purpose. The server answers a failure in one line of prose ("Error: CAPE
+    # API unreachable"), and such an answer is filed as a failure only for a
+    # tool that declares no kind (``schemas.evidence.build_entry``); a kind
+    # would file every failed submission as an answer. A declaration with no
+    # kind gives no reading, so it reads the name no other way than the
+    # VirusTotal server's ``submit_file``, which the legacy reading by name
+    # takes first.
+    "cape2_mcp": {
+        "roles": ["sandbox"],
+        "prompt_fragment": CAPE_WORKFLOW,
+        "tool_facts": {"submit_file": {"discloses_sample": True}},
+    },
 }
 
 # The platform's own in-process sources, declared like any server.

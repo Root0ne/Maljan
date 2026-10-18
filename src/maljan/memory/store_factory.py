@@ -65,7 +65,11 @@ class MemoryBackend:
     each a ``settings_annotations.Annotation``. ``label`` is the short phrase
     the console shows beside the id (``"in-process"``); empty shows the id alone.
     ``probe_label`` names its connection test in the console; empty shows a
-    generic one.
+    generic one. Where its store is, for a run's disclosure block
+    (``analysis.disclosure``): ``in_process`` for a store kept in the
+    process, ``address_leaf`` for the leaf of ``memory.<id>`` that holds the
+    store's address; a backend that declares neither is one whose store
+    cannot be placed.
     """
 
     id: str
@@ -74,6 +78,8 @@ class MemoryBackend:
     annotations: Mapping[str, Mapping[str, Any]] = field(default_factory=dict)
     label: str = ""
     probe_label: str = ""
+    in_process: bool = False
+    address_leaf: str = ""
 
 
 _BACKENDS: dict[str, MemoryBackend] = {}
@@ -96,6 +102,8 @@ def register_memory_backend(
     annotations: Mapping[str, Mapping[str, Any]] | None = None,
     label: str = "",
     probe_label: str = "",
+    in_process: bool = False,
+    address_leaf: str = "",
 ) -> None:
     """Make ``backend_id`` a value ``memory.backend`` can select.
 
@@ -104,7 +112,8 @@ def register_memory_backend(
     Registering an id again replaces it. A package's entry point is best named
     after the id it registers: a failure to load is then reported against that
     id alone, where otherwise any selected id nothing registered is reported
-    unavailable with every failure's reason.
+    unavailable with every failure's reason. ``in_process`` and
+    ``address_leaf`` say where the store is (:class:`MemoryBackend`).
     """
     key = _key(backend_id)
     if not key:
@@ -116,8 +125,18 @@ def register_memory_backend(
         dict(annotations or {}),
         str(label or "").strip(),
         str(probe_label or "").strip(),
+        bool(in_process),
+        str(address_leaf or "").strip(),
     )
     forget_built_stores()
+
+
+def declared_backends() -> dict[str, dict[str, Any]]:
+    """Where each registered backend says its store is: ``{id: {in_process, address_leaf}}``."""
+    return {
+        key: {"in_process": backend.in_process, "address_leaf": backend.address_leaf}
+        for key, backend in registered_backends().items()
+    }
 
 
 def _load_entry_points() -> None:
@@ -386,7 +405,11 @@ def _build_qdrant(memory: Any) -> MemoryStore:
     )
 
 
-register_memory_backend("memory", _build_in_process, label="in-process")
+register_memory_backend("memory", _build_in_process, label="in-process", in_process=True)
 register_memory_backend(
-    "qdrant", _build_qdrant, settings_model=QdrantMemoryConfig, probe_label="Test Qdrant"
+    "qdrant",
+    _build_qdrant,
+    settings_model=QdrantMemoryConfig,
+    probe_label="Test Qdrant",
+    address_leaf="url",
 )

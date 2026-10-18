@@ -838,6 +838,7 @@ KIND_FREE_SAMPLES: dict[str, Any] = {
     "display_name": "Section scanner",
     "words": ["sectioner"],
     "arguments": {"report": "task_report", "address": "offset_va"},
+    "discloses_sample": True,
 }
 
 

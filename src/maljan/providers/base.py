@@ -88,6 +88,26 @@ class MirrorSpec:
 DEFAULT_WORK_DIR = ".work"
 
 
+def requested_host(base_url: object, path: object) -> str:
+    """The host a request for ``path`` reaches on an HTTP client built with ``base_url``.
+
+    Merged as httpx merges them: an absolute URL (a scheme and a host) is sent
+    as it is, so it names its own host; anything else is appended to the base
+    URL and reaches the base's host. ``""`` where neither names a host.
+    """
+    import httpx
+
+    from maljan.core.host_locality import host_of
+
+    try:
+        url = httpx.URL(str(path or ""))
+    except Exception:  # noqa: BLE001 — a path httpx refuses reaches no host
+        return ""
+    if url.is_absolute_url:
+        return host_of(str(url))
+    return host_of(base_url)
+
+
 def path_in_server(spec: MirrorSpec, host_path: str | Path) -> str:
     """The path a server opens the worker's copy at ``host_path`` under.
 
@@ -731,6 +751,17 @@ class SandboxProvider(ABC):
     @classmethod
     @abstractmethod
     def from_settings(cls, cfg: Settings) -> SandboxProvider: ...
+
+    def submission_address(self) -> str | None:
+        """The host a submission sends the sample to, as this provider resolves its URL.
+
+        Read by the run's disclosure block (``analysis.disclosure``) when the
+        sample is submitted. ``None`` for a submission that never leaves the
+        worker, such as recorded fixtures read in place; ``""`` where the
+        provider does not say, which the block states as a host it cannot
+        name.
+        """
+        return ""
 
     @classmethod
     def declaration(cls, cfg: Settings) -> Any:

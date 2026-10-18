@@ -6048,10 +6048,14 @@ def make_report_node(
         # The run's evidence, in the order the ids were issued, plus the
         # entries the evidence-only static provider could not write itself.
         _ledger: list[LedgerEntry] = []
+        # Counted for the disclosure block: a row the report cannot read is a
+        # call whose destination it cannot place.
+        _unreadable_rows = 0
         for _row in state.get("evidence_ledger") or []:
             try:
                 _ledger.append(LedgerEntry.model_validate(_row))
             except Exception as exc:  # noqa: BLE001 — one bad row is not a lost report
+                _unreadable_rows += 1
                 logger.debug("report_node: unreadable ledger row skipped (%s).", exc)
         # The entries the evidence-only static provider could not write itself.
         # They go back onto the state channel below, not only into this local
@@ -6658,6 +6662,28 @@ def make_report_node(
             if _rated_summary:
                 _rated_summary["generation"] = _generation
                 report.run_summary = _rated_summary
+        # What left the machine, read once the run's last model call and last
+        # tool call are made: the summary's closing token counts and stage
+        # rollup, the whole ledger, the job's settings and the sample's
+        # submissions (``analysis.disclosure``). Only on a summary the judge
+        # wrote, which keeps the mock-mode contract.
+        if state.get("run_summary"):
+            from maljan.analysis.disclosure import run_disclosure
+
+            _closing = {**(state.get("run_summary") or {}), **_state_summary}
+            _disclosure = run_disclosure(
+                container,
+                entries=_ledger,
+                tokens=_closing.get("tokens"),
+                stages=_closing.get("stages"),
+                unreadable=_unreadable_rows,
+            )
+            if _disclosure is not None:
+                _state_summary["disclosure"] = _disclosure
+                _disclosed = dict(report.run_summary or {})
+                if _disclosed:
+                    _disclosed["disclosure"] = _disclosure
+                    report.run_summary = _disclosed
         # The markdown is rendered once every field it reads is final: the
         # validation block, the corroboration's published marks, the stage
         # rollup and the elapsed time are all written above this line, and so

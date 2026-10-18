@@ -113,6 +113,103 @@ image path only when the table publishes it or a sandbox recorded it. A Benign
 verdict publishes no malicious indicator, so it gets no draft, and the report
 says so. They are drafts: review them before deploying them.
 
+## What left this machine
+
+Every report a run finishes carries a **Disclosure** block at the end of its
+run summary appendix (Appendix B, in the Markdown and in the HTML and PDF made
+from it), and the run summary stores the same record under `disclosure`. It
+says what the run sent beyond the machine it ran on:
+
+- **Model prompts**: every model endpoint that answered a call, by host, with
+  the agents that called it and how many calls each made. A local endpoint is
+  stated as local, and says whether it answered the context-window probe as a
+  model runtime in this run (llama.cpp's `/props`, Ollama's `/api/show`, Text
+  Generation Inference's `/info`); a local address that did not may be a
+  gateway forwarding the prompts to a hosted API. A provider reached through
+  its own API with no address configured is named as that API. Every endpoint
+  in every agent's model list, fallbacks included, and the global model's are
+  named too, called or not, because a request that failed is not always
+  recorded.
+- **Lookups**: every call of a tool declared as a lookup — a reputation lookup
+  (`kind: reputation`), a report or reputation of an indicator
+  (`indicator_report`, `indicator_reputation`), or a tool declaring an argument
+  role that carries an indicator (`hash`, `domain`, `ip`, `url`) — by host,
+  with the indicator kinds the calls gave.
+- **Sample uploads**: every submission of the sample to the sandbox provider,
+  with the provider and the host its submission URL resolves to
+  (`SandboxProvider.submission_address`), every staging of the sample to a
+  tool server over its `put_sample` tools (server and host, recorded before
+  the first byte is sent), and every call of a tool declared with
+  `discloses_sample`. An attempt that failed or did not finish is still listed.
+- **Tool calls**: every call of a tool server reached over `http`,
+  `streamable-http` or `sse` at an address outside this machine, by host; every
+  call through a local tool server that is a gateway (its block declares the
+  `reputation` or `sandbox` role, or any of its tools declares
+  `discloses_sample` or a kind that reaches outside by its meaning: the lookup
+  kinds, `submission` and `submission_status`); every call of a tool of such a
+  kind through a local server; and the calls of tools that name no kind, which
+  the platform reads as undeclared however many other facts they state.
+- **Case memory**, **tracing** and the ledger: the long-term memory store,
+  placed by what its backend declares (kept in the process, or the settings
+  leaf that holds its address); tracing when it is on in the settings
+  (`langchain_tracing_v2`) or in the process environment; and the ledger rows
+  the report could not read.
+- **Enrichment**: when enrichment is on, the follow-up job queued after the
+  report and what it may reach — RDAP, which needs no key (from the ARIN
+  bootstrap `rdap.arin.net`, whose referral to a regional registry the job's
+  client does not follow; where the optional `ipwhois` package is installed,
+  its own RDAP path, which may follow that referral, and its ASN lookup by DNS
+  to `origin.asn.cymru.com` with the fallbacks it may take, each its own row),
+  and every
+  configured source with the hosts its requests name or the tool server it is
+  asked through. The job then adds what it asked (service host, indicator
+  kinds, counts) to the stored record, and the served report shows it. Each
+  question is counted as attempted before it is sent, and before the first
+  one the stored record is marked, so an enrichment run on demand
+  (`POST /reports/{id}/enrich`) clears "nothing" the moment it begins asking,
+  whatever happens to it after. A job that fails or is stopped part-way leaves
+  what it asked until then, each question that failed in transport or never
+  finished counted as one that may have arrived.
+
+The block is built from the run's own records and nothing else: the settings
+the run ran with, the source each ledger entry recorded with the transport and
+address that source's settings block names, the token ledger's model labels
+(which carry the endpoint each call was sent to), the runtime answers the
+window probe recorded, and the sample's submissions and stagings. A tool's
+name decides nothing.
+
+**This machine** covers its loopback addresses, the private (RFC 1918 and
+`fc00::/7`), link-local and shared (`100.64.0.0/10`) ranges and the
+unspecified addresses; an address of a transition range (IPv4-mapped, 6to4,
+Teredo, NAT64) is read as the IPv4 address it carries. A name only a local
+resolver answers (`localhost`, `host.docker.internal`, anything under
+`.local`, `.internal` or `.localhost`) is local, and a single label is taken
+as a compose service's name, which the block says. Any other host, an
+absolute name such as `ai.` included, counts as outside this machine. Nothing
+is resolved, so a stored record reads the same wherever it is opened. The
+block's footnote says this once.
+
+The block says **Nothing left this machine** only with positive knowledge of
+every path, and then says what that rests on: every model endpoint is local
+and answered as a model runtime (taken as running here: a tunnel, port forward
+or proxy to a remote runtime answers the probe the same way and cannot be told
+apart, and the block says so), the local tool servers called are taken as
+local by their tools' declarations, where the case-memory store is, that the
+sample went only to local addresses, that no lookup was asked and that tracing
+is off. Wherever it cannot tell, it says what and why instead: a call it
+cannot place, a lookup or an upload through a local tool server, a call
+through a local gateway, a call to a tool that declares no effects, a local
+model endpoint that did not answer as a runtime, a configured endpoint with
+no answered call, tracing on, a queued enrichment, an unread ledger row, or a
+run stopped part-way, whose last step may have made calls its record does not
+hold.
+
+A run whose block was not built stores why (`{"not_built": …}`: reporting
+off, no run summary as in a mock run, or a build that failed), so it is told
+apart from a report stored before the block existed, which shows none. The
+console's summary tab does not draw the block yet; the record is in the stored
+run summary.
+
 ## Comparing two runs
 
 `GET /api/v1/reports/diff?a=<id>&b=<id>` compares two stored runs (`by=job`

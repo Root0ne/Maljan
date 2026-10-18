@@ -2,16 +2,17 @@
 
 ``RunSummary.to_dict()`` is where the summary begins. What the API stores,
 what the report renders and what an evaluation script reads back is that dict
-plus four keys written onto it after the dataclass exists: ``dedupe`` from the
-report builder, ``evidence`` and ``sections_without_evidence`` from the report
-node, and ``fp_warnings`` from the post-pipeline linter — and
+plus five keys written onto it after the dataclass exists: ``dedupe`` from the
+report builder, ``evidence``, ``sections_without_evidence`` and ``disclosure``
+from the report node, and ``fp_warnings`` from the post-pipeline linter — and
 ``settings_snapshot``, which the worker adds. The golden used to cover only
 the dataclass, so ``dedupe`` was pinned by nothing at all and a rename of
 ``indicators_merged`` would have kept every test green.
 
-Each of the four is built here by the code that builds it in a run —
-``MergeTally.as_dict``, ``evidence_summary``, ``FPWarning.to_dict`` — so the
-golden follows a rename instead of merely agreeing with a copy.
+Each of the five is built here by the code that builds it in a run —
+``MergeTally.as_dict``, ``evidence_summary``, ``disclosure_record``,
+``FPWarning.to_dict`` — so the golden follows a rename instead of merely
+agreeing with a copy.
 ``settings_snapshot`` is the exception: it is a public view of the whole
 ``Settings`` tree, which grows with every new setting, so its presence is
 pinned and its contents are left opaque.
@@ -193,6 +194,91 @@ def _ledger() -> list[Any]:
     ]
 
 
+def _disclosure(summary: dict[str, Any]) -> dict[str, Any]:
+    """The disclosure record, built by the run's builder, with a row in every part.
+
+    A model endpoint outside the machine, a lookup over HTTP, a sample
+    submission to a sandbox on a private address and a staging to a tool
+    server, an entry that records no source, a call to a tool that declares
+    nothing and one to a declared tool on a server run on this machine, and a
+    memory store at a compose service name. Then the enrichment, as the
+    worker names it and as its job adds what it asked: the summary a run is
+    stored with once both have written it.
+    """
+    from maljan.analysis.disclosure import (
+        STAGING_DONE,
+        disclosure_record,
+        rdap_row,
+        stage_agents,
+        staging_record,
+        upload_record,
+        with_enrichment,
+        with_enrichment_asked,
+    )
+    from maljan.schemas.evidence import LedgerEntry
+
+    snapshot = {
+        "llm.provider": "openai",
+        "llm.openai.base_url": "https://llm.example.org/v1",
+        "mcp.servers.intel.transport": "streamable-http",
+        "mcp.servers.intel.url": "https://intel.example.org/mcp",
+        "mcp.servers.analysis.transport": "stdio",
+        "sandbox.provider": "cape2",
+        "sandbox.cape2.base_url": "http://10.0.0.5:8000",
+        "memory.backend": "qdrant",
+        "memory.qdrant.url": "http://qdrant:6333",
+        "langchain_tracing_v2": False,
+    }
+    lookup = LedgerEntry(
+        id="ev_0003",
+        agent="static",
+        server="intel",
+        tool="file_lookup",
+        args={"sha256": "abc123"},
+        source="mcp:intel",
+        facts={"v": 1, "kind": "reputation", "arguments": {"hash": "sha256"}},
+        seq=3,
+    )
+    undeclared = LedgerEntry(
+        id="ev_0004",
+        agent="static",
+        server="analysis",
+        tool="anything",
+        source="mcp:analysis",
+        facts={"v": 1},
+        seq=4,
+    )
+    declared = LedgerEntry(
+        id="ev_0005",
+        agent="static",
+        server="analysis",
+        tool="strings",
+        source="mcp:analysis",
+        facts={"v": 1, "kind": "strings"},
+        seq=5,
+    )
+    record = disclosure_record(
+        snapshot,
+        entries=[*_ledger(), lookup, undeclared, declared],
+        tokens=summary.get("tokens"),
+        agents=stage_agents(summary.get("stages")),
+        uploads=[upload_record("cape2", submitted=True, host="10.0.0.5")],
+        stagings=[
+            staging_record(
+                "intel",
+                transport="streamable-http",
+                url="https://intel.example.org/mcp",
+                state=STAGING_DONE,
+            )
+        ],
+        runtimes={},
+    )
+    record = with_enrichment(record, [rdap_row()])
+    return with_enrichment_asked(
+        record, [{"source": "rdap", "host": "rdap.arin.net", "kinds": {"ip": 1}, "why": ""}]
+    )
+
+
 def stored_summary() -> dict[str, Any]:
     """The dataclass, plus every key written onto the dict after it exists."""
     from maljan.pipeline.nodes import evidence_summary
@@ -210,6 +296,8 @@ def stored_summary() -> dict[str, Any]:
     # `report_node`, once the report is standing.
     summary["evidence"] = evidence_summary(_ledger())
     summary["sections_without_evidence"] = 0
+    # `report_node`, once the run's last model and tool calls are made.
+    summary["disclosure"] = _disclosure(summary)
 
     # The post-pipeline linter, once every other mutation has happened.
     summary["fp_warnings"] = [
@@ -250,6 +338,10 @@ DATA_KEYED = frozenset(
         # Keyed by the model measured, and by the calls a run sized.
         "generation.models",
         "generation.timeouts",
+        # Keyed by the agent that made the calls, and by the indicator role.
+        "disclosure.models[].agents",
+        "disclosure.lookups[].kinds",
+        "disclosure.enrichment.asked[].kinds",
     }
 )
 

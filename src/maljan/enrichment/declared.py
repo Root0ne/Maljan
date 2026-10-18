@@ -523,16 +523,62 @@ def safe_value(kind: str, value: str) -> bool:
 
 
 ToolCaller = Callable[[str, str, dict[str, Any]], Awaitable[Any]]
+# Told of each question about to be sent: ``(source, host, kind, server)``,
+# the host for a REST source and the server's key for a server source. It may
+# answer an awaitable, awaited before the question goes out, and may answer
+# (or resolve to) a settle function, called with whether the question was
+# answered once it was or failed (``settle_asked``).
+AskListener = Callable[[str, str, str, str], Any]
+Settle = Callable[[bool], None]
+
+
+async def tell_listener(
+    listener: AskListener | None, source: str, host: str, kind: str, server: str
+) -> Settle | None:
+    """Tell ``listener`` of a question about to go out; its settle function, or ``None``.
+
+    Never raises: a listener that fails never costs a lookup.
+    """
+    if listener is None:
+        return None
+    try:
+        said = listener(source, host, kind, server)
+        if asyncio.iscoroutine(said) or isinstance(said, asyncio.Future):
+            said = await said
+        return said if callable(said) else None
+    except asyncio.CancelledError:
+        raise
+    except Exception as exc:  # noqa: BLE001 — a listener never costs a lookup
+        logger.debug("enrich: the ask listener failed (%s).", type(exc).__name__)
+        return None
+
+
+def settle_asked(settle: Settle | None, answered: bool) -> None:
+    """Tell a question's settle function how it ended. Never raises."""
+    if settle is None:
+        return
+    try:
+        settle(answered)
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("enrich: the ask listener failed to settle (%s).", type(exc).__name__)
 
 
 @dataclass
 class SourceAsker:
-    """Asks the ready sources, one HTTP client and one pace per source for a whole enrichment."""
+    """Asks the ready sources, one HTTP client and one pace per source for a whole enrichment.
+
+    ``on_ask`` is told of each question just before it is sent, for the run's
+    disclosure block (``analysis.disclosure.with_enrichment_asked``).
+    """
 
     http: httpx.AsyncClient
     tool_caller: ToolCaller | None = None
     tool_arguments: Callable[[str, str], Mapping[str, str]] | None = None
+    on_ask: AskListener | None = None
     _paces: dict[str, asyncio.Semaphore] = field(default_factory=dict)
+
+    async def _told(self, source: str, host: str, kind: str, server: str) -> Settle | None:
+        return await tell_listener(self.on_ask, source, host, kind, server)
 
     async def ask(self, ready: ReadySource, kind: str, value: str) -> dict[str, Any] | None:
         """``ready``'s record for ``value``, or ``None`` on any failure (never raises)."""
@@ -560,7 +606,10 @@ class SourceAsker:
         if not argument:
             logger.warning("enrich: source %s names no argument for a kind; not asked.", ready.key)
             return None
-        return await self.tool_caller(source.server, source.tool, {argument: value})
+        settle = await self._told(ready.key, "", kind, source.server)
+        answer = await self.tool_caller(source.server, source.tool, {argument: value})
+        settle_asked(settle, True)
+        return answer
 
     async def _ask_rest(self, ready: ReadySource, kind: str, value: str) -> Any:
         source = ready.source
@@ -571,9 +620,12 @@ class SourceAsker:
             return None
         pace = self._paces.setdefault(ready.key, asyncio.Semaphore(1))
         async with pace:
+            settle = await self._told(ready.key, request.host, kind, "")
             try:
                 resp = await self.http.request(**built, timeout=source.timeout_seconds)
+                settle_asked(settle, True)
             except httpx.HTTPError as exc:
+                settle_asked(settle, False)
                 logger.warning(
                     "enrich: source %s request failed (%s).", ready.key, type(exc).__name__
                 )

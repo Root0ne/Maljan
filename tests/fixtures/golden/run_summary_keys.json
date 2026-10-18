@@ -22,6 +22,112 @@
   },
   "degradation_reasons": [],
   "degraded_mode": null,
+  "disclosure": {
+    "addressed": [
+      null
+    ],
+    "enrichment": {
+      "asked": [
+        {
+          "failed": null,
+          "host": null,
+          "kinds": "<data-keyed map>",
+          "source": null,
+          "where": null,
+          "why": null
+        }
+      ],
+      "may_reach": [
+        {
+          "hosts": [
+            null
+          ],
+          "kinds": [
+            null
+          ],
+          "server": null,
+          "source": null,
+          "transport": null,
+          "where": null,
+          "why": null
+        }
+      ],
+      "state": null
+    },
+    "local_servers": [
+      null
+    ],
+    "lookups": [
+      {
+        "calls": null,
+        "host": null,
+        "kinds": "<data-keyed map>",
+        "source": null,
+        "transport": null,
+        "where": null,
+        "why": null,
+        "without_indicator": null
+      }
+    ],
+    "models": [
+      {
+        "agents": "<data-keyed map>",
+        "calls": null,
+        "configured_for": [],
+        "global": null,
+        "host": null,
+        "runtime": null,
+        "service": null,
+        "where": null,
+        "why": null
+      }
+    ],
+    "nothing_left": null,
+    "partial_reason": null,
+    "servers": [
+      {
+        "calls": null,
+        "host": null,
+        "source": null,
+        "transport": null,
+        "where": null,
+        "why": null
+      }
+    ],
+    "stores": [
+      {
+        "backend": null,
+        "host": null,
+        "where": null,
+        "why": null
+      }
+    ],
+    "tracing": null,
+    "undeclared": [
+      {
+        "calls": null,
+        "host": null,
+        "source": null,
+        "transport": null,
+        "where": null,
+        "why": null
+      }
+    ],
+    "unreadable_entries": null,
+    "uploads": [
+      {
+        "by": null,
+        "calls": null,
+        "failed": null,
+        "host": null,
+        "source": null,
+        "transport": null,
+        "where": null,
+        "why": null
+      }
+    ],
+    "v": null
+  },
   "elapsed_seconds": null,
   "evidence": {
     "by_tool": "<data-keyed map>",

@@ -1,11 +1,11 @@
 """The key set of the summary a run is *stored* with is a contract, so it is pinned.
 
 What the API stores, what the report renders and what every evaluation script
-reads back out of a stored run is not ``RunSummary.to_dict()`` alone. Four more
+reads back out of a stored run is not ``RunSummary.to_dict()`` alone. Five more
 keys are written onto that dict after the dataclass exists — ``dedupe`` by the
-report builder, ``evidence`` and ``sections_without_evidence`` by the report
-node, ``fp_warnings`` by the post-pipeline linter — and the worker adds
-``settings_snapshot``. The golden used to cover the dataclass only, so
+report builder, ``evidence``, ``sections_without_evidence`` and ``disclosure``
+by the report node, ``fp_warnings`` by the post-pipeline linter — and the
+worker adds ``settings_snapshot``. The golden used to cover the dataclass only, so
 ``dedupe`` was pinned by nothing at all: a rename of ``indicators_merged`` or
 ``findings_merged`` would have left every test in this repository green and
 broken a consumer that is not in it.
@@ -24,10 +24,10 @@ from pathlib import Path
 
 from scripts.goldens.capture_run_summary_golden import GOLDEN, key_shape, stored_summary
 
-# The four keys the post-pass adds. Named here so a reader of a failure knows
+# The five keys the post-pass adds. Named here so a reader of a failure knows
 # which half of the summary moved, and so removing one from the capture fails
 # rather than quietly shrinking what is pinned.
-POST_PASS_KEYS = ("dedupe", "evidence", "sections_without_evidence", "fp_warnings")
+POST_PASS_KEYS = ("dedupe", "evidence", "sections_without_evidence", "disclosure", "fp_warnings")
 
 
 def test_the_stored_summary_key_set_matches_the_golden():

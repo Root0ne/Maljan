@@ -219,6 +219,16 @@ class RestSandboxProvider(SandboxProvider):
 
     # ---- the four calls ----------------------------------------------
 
+    def submission_address(self) -> str | None:
+        """The host ``submit.path`` reaches on the base URL, merged as httpx merges them.
+
+        An absolute ``submit.path`` names its own host, which is where the
+        sample goes; it is stated, not refused.
+        """
+        from maljan.providers.base import requested_host
+
+        return requested_host(self._cfg.base_url, self._cfg.submit.path)
+
     def submit(self, sample_path: str | Path) -> str:
         path = Path(sample_path)
         files: dict[str, Any] = {

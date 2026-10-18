@@ -11,8 +11,8 @@ source, as the run's settings hold it, is resolved once and stored on the
 entry (``LedgerEntry.facts``), versioned and small: ``{"v": 1, "kind": ...}``
 and, where set, ``reader``, ``asserts_techniques``, ``source``,
 ``display_name``, ``rows``, ``places``, ``values``, ``techniques``,
-``reputation``, ``words``, ``report_sections``, ``arguments``, ``holds_strings`` and
-``function_starts``. ``{"v": 1}`` alone records
+``reputation``, ``words``, ``report_sections``, ``arguments``, ``holds_strings``,
+``function_starts`` and ``discloses_sample``. ``{"v": 1}`` alone records
 that the source declares nothing for the tool.
 
 **The reader** (:func:`facts_of`, :func:`kind_of`, :func:`reads_as`). It reads
@@ -90,6 +90,9 @@ STORED_FACT_FIELDS: tuple[str, ...] = (
     "arguments",
     "holds_strings",
     "function_starts",
+    # Whether the tool sends the sample out of the deployment, read by the
+    # run's disclosure block (``analysis.disclosure``) whatever the kind.
+    "discloses_sample",
 )
 
 # The stored fields read without a kind (``tool_declarations.KIND_FREE_FIELDS``),

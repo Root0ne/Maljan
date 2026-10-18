@@ -348,7 +348,40 @@ async def enrich_threat_intel(
     before_ip_reps = _count_reputations(payload, "ips")
 
     memory_store = await _get_memory_store()
+    # Every question the enrichment sends, for the run's disclosure block:
+    # counted as attempted before it goes out, and before the first one the
+    # stored record is marked, so a job that dies after it never leaves
+    # "nothing" standing.
+    from maljan.analysis.disclosure import (
+        ENRICHMENT_DONE,
+        ENRICHMENT_STOPPED,
+        EnrichmentAsks,
+        with_enrichment_started,
+    )
 
+    asks = EnrichmentAsks()
+    marked: list[bool] = []
+
+    async def _asking(source: str, host: str, kind: str, server: str) -> Any:
+        settle = asks(source, host, kind, server)
+        if not marked:
+            marked.append(True)
+            try:
+                await write_under_lock(
+                    db_session_factory,
+                    report_uuid,
+                    lambda stored, column: disclosed(stored, column, with_enrichment_started),
+                )
+            except Exception as exc:  # noqa: BLE001 — the final write records it again
+                logger.warning("enrich: the disclosure could not be marked (%s).", exc)
+        return settle
+
+    def _servers() -> Any:
+        # A question through a server is placed by that server's block, the
+        # one the caller attached it with.
+        return tools.servers() if tools is not None else None
+
+    state = ENRICHMENT_STOPPED
     try:
         updated = await enrich_malware_report(
             payload,
@@ -357,27 +390,43 @@ async def enrich_threat_intel(
             tool_caller=tools,
             tool_arguments=tools.arguments if tools is not None else None,
             memory_store=memory_store,
+            on_ask=_asking,
         )
+        state = ENRICHMENT_DONE
     except Exception as exc:  # noqa: BLE001
         logger.error("enrich: orchestrator failed (%s)", exc, exc_info=True)
         return {"status": "error", "error": str(exc)[:200]}
     finally:
         if tools is not None:
             await tools.aclose()
+        if state == ENRICHMENT_STOPPED and asks.asked_any:
+            # Failed, timed out or cancelled after it began asking: what it
+            # asked until then is recorded, each question not finished marked.
+            stopped = asks.rows(_servers())
+            try:
+                await write_under_lock(
+                    db_session_factory,
+                    report_uuid,
+                    lambda stored, column: disclosed_enrichment(
+                        stored, column, stopped, state=ENRICHMENT_STOPPED
+                    ),
+                )
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("enrich: what the stopped job asked was not recorded (%s).", exc)
 
-    async with db_session_factory() as db:
-        report = await db.get(AnalysisReport, report_uuid)
-        if report is None:
-            # Superseded by a re-run while the lookups were in flight. The
-            # enrichment belongs to a report that no longer exists.
-            logger.warning("enrich: report %s went away during enrichment", report_id)
-            return {"status": "not_found"}
-        report.malware_report = updated
-        # SQLAlchemy needs an explicit flag for in-place JSONB mutation.
-        from sqlalchemy.orm.attributes import flag_modified
-
-        flag_modified(report, "malware_report")
-        await db.commit()
+    asked = asks.rows(_servers())
+    written = await write_under_lock(
+        db_session_factory,
+        report_uuid,
+        lambda stored, column: disclosed_enrichment(
+            enrichment_laid_over(stored, updated), column, asked
+        ),
+    )
+    if not written:
+        # Superseded by a re-run while the lookups were in flight. The
+        # enrichment belongs to a report that no longer exists.
+        logger.warning("enrich: report %s went away during enrichment", report_id)
+        return {"status": "not_found"}
 
     after_domain_reps = _count_reputations(updated, "domains")
     after_ip_reps = _count_reputations(updated, "ips")
@@ -439,6 +488,137 @@ async def enrich_threat_intel(
         delta,
     )
     return {"status": "ok", **delta}
+
+
+async def write_under_lock(
+    db_session_factory: Any,
+    report_uuid: uuid.UUID,
+    change: Any,
+) -> bool:
+    """Re-read the report row under a row lock, apply ``change``, write it. ``False`` if gone.
+
+    ``change(stored_payload, run_summary)`` answers the payload and the run
+    summary to write (``None`` leaves the summary as it is). Read and written
+    in one transaction holding the row, so two enrichments of one report merge
+    instead of the later one writing over the earlier one's record.
+    """
+    from sqlalchemy.orm.attributes import flag_modified
+
+    async with db_session_factory() as db:
+        report = await db.get(
+            AnalysisReport, report_uuid, with_for_update=True, populate_existing=True
+        )
+        if report is None:
+            return False
+        stored = dict(report.malware_report) if isinstance(report.malware_report, dict) else {}
+        payload, column = change(stored, report.run_summary)
+        report.malware_report = payload
+        # SQLAlchemy needs an explicit flag for in-place JSONB mutation.
+        flag_modified(report, "malware_report")
+        if column is not None:
+            report.run_summary = column
+            flag_modified(report, "run_summary")
+        await db.commit()
+    return True
+
+
+# What an enrichment writes into an indicator row of the report's network section.
+_ENRICHED_FIELDS = ("reputation", "asn", "geo")
+_NETWORK_KEYS = {"domains": "fqdn", "ips": "address"}
+
+
+def enrichment_laid_over(stored: dict[str, Any], enriched: dict[str, Any]) -> dict[str, Any]:
+    """The stored payload, as re-read under the row lock, with this enrichment's results on it.
+
+    ``enriched`` is the copy this job read before its lookups, with what they
+    found. Only what an enrichment writes is taken from it, row by row
+    (reputation, ASN, geography, the suspicion flag it raises, and the similar
+    samples), and only where the stored row has none by the orchestrator's own
+    test (a reputation without a successful record, as an older report's
+    sandbox-context shell, takes the live one, as dev stores it), so anything
+    written to the report during the lookups, another enrichment's results
+    included, is kept.
+    """
+    from maljan.enrichment.orchestrator import _has_successful_rep
+
+    out = dict(stored)
+    network = dict(out.get("network") or {})
+    found = enriched.get("network") or {}
+    for section, field_name in _NETWORK_KEYS.items():
+        theirs = {
+            str(row.get(field_name)): row
+            for row in found.get(section) or []
+            if isinstance(row, dict) and row.get(field_name)
+        }
+        rows = []
+        for row in network.get(section) or []:
+            if not isinstance(row, dict):
+                rows.append(row)
+                continue
+            mine = dict(row)
+            other = theirs.get(str(row.get(field_name)))
+            if other is not None:
+                # The orchestrator's own tests of what is already done: a
+                # reputation counts only as a successful record (an earlier
+                # shell holding sandbox context does not), and the ASN and
+                # the geography count when they hold a value.
+                if not _has_successful_rep(mine) and _has_successful_rep(other):
+                    mine["reputation"] = other["reputation"]
+                for name in _ENRICHED_FIELDS:
+                    if name != "reputation" and not mine.get(name) and other.get(name):
+                        mine[name] = other[name]
+                if other.get("is_suspicious"):
+                    mine["is_suspicious"] = True
+            rows.append(mine)
+        if section in network:
+            network[section] = rows
+    if network:
+        out["network"] = network
+    attribution = dict(out.get("attribution") or {})
+    similar = (enriched.get("attribution") or {}).get("similar_samples")
+    if similar and not attribution.get("similar_samples"):
+        attribution["similar_samples"] = similar
+        out["attribution"] = attribution
+    return out
+
+
+def disclosed(
+    payload: dict[str, Any], run_summary: Any, change: Any
+) -> tuple[dict[str, Any], dict[str, Any] | None]:
+    """The stored payload and run summary with ``change`` applied to their disclosure records.
+
+    Both carry the run's disclosure record (``analysis.disclosure``). A summary
+    without a record (a run stored before the block existed) is left as it is,
+    answered as ``None``; so is a payload without one.
+    """
+    from maljan.analysis.disclosure import in_payload
+
+    updated = in_payload(payload, change)
+    column = dict(run_summary) if isinstance(run_summary, dict) else None
+    record = column.get("disclosure") if column is not None else None
+    if column is None or not isinstance(record, dict) or "models" not in record:
+        return updated, None
+    column["disclosure"] = change(record)
+    return updated, column
+
+
+def disclosed_enrichment(
+    payload: dict[str, Any],
+    run_summary: Any,
+    asked: list[dict[str, Any]],
+    *,
+    state: str = "done",
+) -> tuple[dict[str, Any], dict[str, Any] | None]:
+    """The stored payload and run summary with the enrichment's questions in their disclosure.
+
+    Each gets the rows of what was asked, and neither then says that nothing
+    left the machine (:func:`disclosed`).
+    """
+    from maljan.analysis.disclosure import with_enrichment_asked
+
+    return disclosed(
+        payload, run_summary, lambda record: with_enrichment_asked(record, asked, state=state)
+    )
 
 
 def _count_reputations(malware_report: dict[str, Any], key: str) -> int:

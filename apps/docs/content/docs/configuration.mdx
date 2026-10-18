@@ -243,6 +243,14 @@ recorded for the rest of the process, and named in a warning that says to set
 this value explicitly. `base_url` unset means api.openai.com, which never
 receives them in any mode.
 
+`auto` guesses which server software answers; it is not the rule a run's
+disclosure block places a host by, and the two differ on purpose. A single
+label (a compose service's name), a `.internal` name and the shared range
+`100.64.0.0/10` get `standard` here, because a proxy in front of a hosted API
+sits there as often as llama.cpp does and refuses the extras, while the
+disclosure block takes those hosts as inside the deployment
+([What left this machine](/usage/reports-and-exports/#what-left-this-machine)).
+
 `deepseek` is a value of its own because no one body serves both APIs. OpenAI's
 clients send the output cap as `max_completion_tokens`, which DeepSeek's chat
 completions ignore (measured: a cap of 5 came back as 88 tokens with thinking
@@ -2098,7 +2106,14 @@ revises run: in parallel only when every one of them does.
     what the name resolves to (a compose service name, a Tailscale name) — and
     a name only a local resolver answers (`localhost`, `*.local`,
     `*.internal`, `host.docker.internal`, `host.containers.internal`) is a
-    local server. Its `/props` is asked for `total_slots` (the request the
+    local server. The address rule is the one the disclosure block uses
+    (`core.host_locality`): an IPv4-mapped, 6to4, Teredo or NAT64 address is
+    read as the IPv4 address it carries, so one carrying a public address is
+    hosted and one carrying a private address is local (the well-known NAT64
+    prefix included, the one case decided less strictly than
+    `ipaddress.is_private` decided it), and a documentation, benchmarking or
+    other reserved address is hosted, since none of them is this machine. Its
+    `/props` is asked for `total_slots` (the request the
     context-window probe makes anyway): more than one slot runs the analysts
     in parallel; one slot, or no answer, one after another;
   - a host that resolves only to public addresses is a hosted API and runs
@@ -3680,7 +3695,8 @@ written before sources were recorded is read the way it always was.
 declares under its recorded source are stored with it (`facts` on the ledger
 entry): `{"v": 1, "kind": …}` and, where set, `reader`, `asserts_techniques`,
 `source`, `display_name`, `rows`, `places`, `values`, `techniques`,
-`reputation`, `words` and `report_sections`; `{"v": 1}` alone when the source
+`reputation`, `words`, `report_sections`, `arguments`, `holds_strings`,
+`function_starts` and `discloses_sample`; `{"v": 1}` alone when the source
 declares nothing for the tool. Everything read from a run later (a later stage,
 a re-render, the API) reads these stored facts, never the reading process's
 settings, so a run reads the same wherever it is opened, and changing a
@@ -4052,7 +4068,17 @@ settings model holds no server block (a block with `tool_facts`) and a path
 that is, holds or sits inside another provider's block, shipped or registered,
 so two providers never read one block. The settings have no place for a
 third-party provider's own block yet, so such a provider declares through
-`declaration(cfg)`.
+`declaration(cfg)`. A sandbox provider says where a submission sends the
+sample in its `submission_address()` method: the host its submission URL
+reaches, resolved as its HTTP client resolves it (the REST provider merges
+`sandbox.rest.submit.path` with `base_url` as httpx does, so an absolute
+`submit.path` names its own host, which is stated rather than refused);
+`None` for one whose submission never leaves the worker, as the mock's
+recorded fixtures and an attached report do; and `""`, the default, for one
+that does not say. A run's disclosure block records that host when the
+sample is submitted, and says it cannot tell where a submission went when
+the provider does not say
+([What left this machine](/usage/reports-and-exports/#what-left-this-machine)).
 
 **Saving.** A built-in's stored block takes the shipped value of any field it
 never set, and one the operator set, empty included, is kept. A save stores

@@ -259,6 +259,7 @@ class MaljanApp:
         # cleared first so a job with no report never reads the last one's.
         self.container.sandbox_normalised = None
         self.container.sandbox_signature_scale = None
+        self.container.sample_uploads = []
         if not sample_path or self.container.is_mock:
             return None
 
@@ -287,7 +288,25 @@ class MaljanApp:
             # heartbeat — for the whole detonation. The provider
             # objects are plain HTTP clients with no loop affinity, so a
             # thread changes nothing but where the blocking happens.
+            #
+            # The submission is recorded before it is made, as one that did
+            # not complete, with the host the provider resolves its submission
+            # URL to, and marked submitted once the provider answers: a
+            # submission that raised may still have sent the sample, and the
+            # run's disclosure block says so rather than nothing. A provider
+            # whose submission never leaves the worker records none.
+            from maljan.analysis.disclosure import submission_host, upload_record
+
+            host = submission_host(provider)
+            if host is not None:
+                self.container.sample_uploads.append(
+                    upload_record(provider.id, submitted=False, host=host)
+                )
             task_id = await asyncio.to_thread(provider.submit, str(path))
+            if host is not None:
+                self.container.sample_uploads[-1] = upload_record(
+                    provider.id, submitted=True, host=host
+                )
             # Thread the active provider's own completion timeout + poll
             # interval into the poll loop (see ``_poll_budget``). Without
             # this the ABC's 300s default — or another provider's config read

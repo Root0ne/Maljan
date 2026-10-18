@@ -149,12 +149,16 @@ async def stage_sample(
     *,
     sha256: str,
     job_id: str,
+    stagings: list[dict[str, Any]] | None = None,
 ) -> str | None:
     """Upload the sample to ``server_key`` and return the path it lives at there.
 
     ``None`` means "call this server with the local path": either it does not
     speak the convention, or the upload failed and the reason has been recorded
-    on the registry.
+    on the registry. ``stagings`` is the job's record of what was sent
+    (``ServiceContainer.sample_stagings``): an upload is written there before
+    its first byte is sent, as attempted, and marked done or failed once it
+    ended, so a run's disclosure block names it whatever came of it.
     """
     try:
         handle = registry.get(server_key)
@@ -172,6 +176,7 @@ async def stage_sample(
         _record(registry, server_key, f"no sample at {sample_path}")
         return None
 
+    sent: dict[str, Any] | None = None
     try:
         blob = source.read_bytes()
         # The digest is computed before the cache is consulted, not after. The
@@ -182,15 +187,18 @@ async def stage_sample(
         cached = _cached(job_id, server_key, digest)
         if cached is not None:
             return cached
+        sent = _note_staging(stagings, server_key, handle)
         chunked = len(blob) > CHUNK_THRESHOLD_BYTES and all(t in manifest for t in CHUNKED_TOOLS)
         if chunked:
             path = await _stage_chunked(handle, source.name, blob, digest)
         else:
             path = await _stage_single(handle, source.name, blob, digest)
     except Exception as exc:  # noqa: BLE001 — staging never fails a run
+        _mark_staging(sent, done=False)
         _record(registry, server_key, f"{type(exc).__name__}: {exc}")
         return None
 
+    _mark_staging(sent, done=bool(path))
     if not path:
         _record(registry, server_key, "the server returned no path")
         return None
@@ -255,6 +263,34 @@ async def _stage_chunked(handle: Any, filename: str, blob: bytes, digest: str) -
     return _path_from(finished)
 
 
+def _note_staging(
+    stagings: list[dict[str, Any]] | None, server_key: str, handle: Any
+) -> dict[str, Any] | None:
+    """Write an upload down as attempted, before its first byte is sent; the record, or ``None``."""
+    if stagings is None:
+        return None
+    from maljan.analysis.disclosure import STAGING_ATTEMPTED, staging_record
+
+    config = getattr(handle, "config", None)
+    record = staging_record(
+        server_key,
+        transport=str(getattr(config, "transport", "") or ""),
+        url=str(getattr(config, "url", "") or ""),
+        state=STAGING_ATTEMPTED,
+    )
+    stagings.append(record)
+    return record
+
+
+def _mark_staging(record: dict[str, Any] | None, *, done: bool) -> None:
+    """Mark a written-down upload done or failed."""
+    if record is None:
+        return
+    from maljan.analysis.disclosure import STAGING_DONE, STAGING_FAILED
+
+    record["state"] = STAGING_DONE if done else STAGING_FAILED
+
+
 def _record(registry: Any, server_key: str, reason: str) -> None:
     """Put a staging failure on the registry's degradation list, once."""
     message = STAGING_FAILED_REASON.format(server=server_key, reason=reason)
@@ -271,6 +307,7 @@ async def stage_for_agent(
     *,
     sha256: str,
     job_id: str,
+    stagings: list[dict[str, Any]] | None = None,
 ) -> dict[str, str]:
     """Stage the sample to every server among ``tools`` that cannot read it.
 
@@ -278,6 +315,7 @@ async def stage_for_agent(
     stdio server is a child process of this worker and opens the same
     filesystem, so it is handed the path and nothing is copied. Only an HTTP
     transport gets the bytes, and only when it advertises the convention.
+    Each upload is written to ``stagings`` (:func:`stage_sample`).
     """
     if not sample_path:
         return {}
@@ -294,7 +332,9 @@ async def stage_for_agent(
         transport = str(getattr(handle.config, "transport", "stdio") or "stdio").lower()
         if transport not in REMOTE_TRANSPORTS:
             continue
-        path = await stage_sample(registry, key, sample_path, sha256=sha256, job_id=job_id)
+        path = await stage_sample(
+            registry, key, sample_path, sha256=sha256, job_id=job_id, stagings=stagings
+        )
         if path:
             staged[key] = path
     return staged
