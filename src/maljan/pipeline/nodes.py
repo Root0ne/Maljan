@@ -6728,12 +6728,12 @@ def make_report_node(
         if state.get("run_summary"):
             from maljan.analysis.efficiency import efficiency_record
 
-            # The judge's and the mediator's setup, bound where the run did not
-            # bind it (a fast path), so the fingerprint is the setup's whichever
-            # path the run took.
-            _judge_setup = getattr(container, "anote_judge_setup", None)
-            if inspect.iscoroutinefunction(_judge_setup):
-                await _judge_setup()
+            # The judge's and the mediator's servers as their settings declare
+            # them, where the run never bound them (a fast path): never attached
+            # for the fingerprint.
+            _judge_setup = getattr(type(container), "note_judge_declared_setup", None)
+            if callable(_judge_setup):
+                container.note_judge_declared_setup()
 
             _efficiency = efficiency_record(
                 container,

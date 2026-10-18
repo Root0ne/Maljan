@@ -313,9 +313,11 @@ nothing a model reads changes.
   and every format fragment. The hash is the text each builder produces, so an
   edit to any sentence a builder writes moves it, and no real value is masked
   out of anything. Beside the prompts: the tool definitions each analyst's loop
-  binds and the judge and the mediator bind (bound for the fingerprint where
-  the run did not bind them), the name and version each of their servers gave
-  for itself, and the settings the run ran with, masked as the stored settings
+  binds and the judge and the mediator bind, the name and version each of
+  their servers gave for itself (no server is ever attached for the
+  fingerprint: where the run never bound the judge's servers, as on the
+  mediator's fast path, they are recorded from their declared settings and
+  marked not attached in this run, with no version or tool definitions), and the settings the run ran with, masked as the stored settings
   snapshot masks them, with this host's repository paths (the checkout, the
   repository it is a worktree of, the virtual environment) replaced, so the
   same setup on two hosts or worktrees hashes equal; a path such as

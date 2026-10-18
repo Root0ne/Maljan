@@ -51,7 +51,9 @@ tokens only, with the calls that reported none counted beside them.
 what the run sent: every system prompt the platform can send for the job,
 rendered by the builder that sends it for one fixed placeholder job
 (``analysis.setup_prompts``); the tools each analyst was resolved with and the
-judge and the mediator bind, as their definitions are bound; the name and
+judge and the mediator bind, as their definitions are bound — or, where the run
+never bound the judge's servers, those servers as their settings declare them,
+marked not attached, since no server is ever attached for the fingerprint; the name and
 version each tool server attached by then gave for itself; and the settings
 the run ran with, masked as the stored snapshot masks them. A retry, a
 revision round, a cleared tool answer or the mediator's fast path does not
@@ -483,6 +485,21 @@ def host_paths() -> list[tuple[str, str]]:
     return sorted(held.items(), key=lambda pair: -len(pair[0]))
 
 
+def declared_server(config: Any) -> dict[str, Any]:
+    """A tool server as its settings declare it, with this host's paths replaced.
+
+    Its transport, launch command and arguments or address, working directory
+    and tool filter: what identifies the server without attaching it.
+    """
+    held = host_paths()
+    out: dict[str, Any] = {"not_attached": True}
+    for field in ("transport", "command", "args", "url", "cwd", "tools"):
+        value = getattr(config, field, None)
+        if value not in (None, "", []):
+            out[field] = _without_host(list(value) if isinstance(value, tuple) else value, held)
+    return out
+
+
 def _without_host(value: Any, host: Sequence[tuple[str, str]]) -> Any:
     """``value`` with every path of ``host`` in its strings replaced by its placeholder."""
     if isinstance(value, str):
@@ -558,13 +575,18 @@ def fingerprint_record(container: Any) -> dict[str, Any] | None:
     config = getattr(container, "config", None)
     tools_of = getattr(container, "setup_tools", None)
     servers_of = getattr(container, "setup_server_versions", None)
+    declared_of = getattr(container, "declared_setup", None)
     if config is None and not callable(tools_of) and not callable(servers_of):
         return None
+    declared = declared_of() if callable(declared_of) else {}
+    declared = declared if isinstance(declared, dict) else {}
     unread: list[str] = []
     analysts, not_resolved = _setup_agents(config) if config is not None else ([], [])
     set_up = tools_of() if callable(tools_of) else {}
     covered = [*analysts, *JUDGE_KEYS]
-    unread.extend(f"{key} (not set up)" for key in covered if key not in set_up)
+    unread.extend(
+        f"{key} (not set up)" for key in covered if key not in set_up and key not in declared
+    )
     parts: dict[str, dict[str, Any]] = {"prompts": {}, "tools": {}, "servers": {}, "settings": {}}
     texts: dict[str, list[str]] = {}
     try:
@@ -577,10 +599,20 @@ def fingerprint_record(container: Any) -> dict[str, Any] | None:
         unread.append("prompts")
     try:
         parts["tools"] = {key: _hash(tool_digests(set_up[key])) for key in covered if key in set_up}
+        parts["tools"].update(
+            {
+                key: _hash({"not_attached": sorted(declared[key])})
+                for key in covered
+                if key not in set_up and key in declared
+            }
+        )
     except Exception:  # noqa: BLE001 — an unread part is named, never guessed
         unread.append("tools")
     try:
         parts["servers"] = dict(servers_of()) if callable(servers_of) else {}
+        for held in declared.values():
+            for name, identity in held.items():
+                parts["servers"].setdefault(name, dict(identity))
     except Exception:  # noqa: BLE001 — an unread part is named, never guessed
         unread.append("servers")
     try:
@@ -600,6 +632,9 @@ def fingerprint_record(container: Any) -> dict[str, Any] | None:
         record["unread"] = sorted(set(unread))
     if not_resolved:
         record["not_resolved"] = not_resolved
+    not_attached = {key: sorted(held) for key, held in declared.items() if key not in set_up}
+    if not_attached:
+        record["not_attached"] = not_attached
     return record
 
 
@@ -811,6 +846,17 @@ def _fingerprint_lines(fingerprint: Mapping[str, Any]) -> list[str]:
     if unread:
         line += f"; not in it, as the job could not give them: {', '.join(unread)}"
     lines = [line + "."]
+    not_attached = fingerprint.get("not_attached")
+    if isinstance(not_attached, Mapping) and not_attached:
+        said_agents = "; ".join(
+            f"{_c(agent)}: " + (", ".join(_c(s) for s in held) if held else "no server")
+            for agent, held in not_attached.items()
+            if isinstance(held, list)
+        )
+        lines.append(
+            "Not attached in this run, so recorded from their declared settings with no version "
+            f"and no tool definitions: {said_agents}."
+        )
     not_resolved = [str(name) for name in fingerprint.get("not_resolved") or []]
     if not_resolved:
         lines.append(
@@ -825,6 +871,9 @@ def _fingerprint_lines(fingerprint: Mapping[str, Any]) -> list[str]:
         said = []
         for key, info in servers.items():
             info = info if isinstance(info, Mapping) else {}
+            if info.get("not_attached"):
+                said.append(f"{_c(key)} not attached in this run (its declared settings only)")
+                continue
             name, version = info.get("name"), info.get("version")
             text = _c(key)
             if name:

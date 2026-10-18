@@ -409,3 +409,24 @@ def test_the_interpreter_s_own_installation_stays_as_written() -> None:
 
     assert _without_host("/usr/bin/python3", host_paths()) == "/usr/bin/python3"
     assert all(mark != "<interpreter>" for _path, mark in host_paths())
+
+
+def test_a_judge_the_run_never_bound_is_recorded_from_its_settings_and_never_attached() -> None:
+    container = _container()
+    for key in ("judge", "mediator"):
+        del container._setup_tools[key]
+    container._setup_servers = {}
+
+    container.note_judge_declared_setup()
+    registry = container.get_server_registry()
+    record = _record(container)
+
+    assert not registry.still_open(), "no server is attached for the fingerprint"
+    assert set(record["not_attached"]) == {"judge", "mediator"}
+    declared = [info for info in record["parts"]["servers"].values() if info.get("not_attached")]
+    assert declared
+    assert all("version" not in info and "name" not in info for info in declared)
+    assert not any("(not set up)" in name for name in record.get("unread", []))
+    lines = efficiency_lines({"v": 2, "fingerprint": record})
+    assert any(line.startswith("Not attached in this run") for line in lines)
+    assert any("not attached in this run (its declared settings only)" in line for line in lines)

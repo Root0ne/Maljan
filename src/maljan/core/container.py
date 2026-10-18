@@ -660,6 +660,10 @@ class ServiceContainer:
         # The analysts whose loop has bound its tools: from then on that list,
         # not the resolution's, is the analyst's setup.
         self._bound_agents: set[str] = set()
+        # The judge's and the mediator's servers as their settings declare
+        # them, for an agent the run never bound: never attached for the
+        # fingerprint, so recorded with no version and no tool definitions.
+        self._declared_setup: dict[str, dict[str, dict[str, Any]]] = {}
         # Each call, as it is recorded, on the job's event feed: the durable
         # trail of what the run spent, kept call by call by the worker.
         if event_sink is not None:
@@ -1225,26 +1229,48 @@ class ServiceContainer:
         except Exception as exc:  # noqa: BLE001 — telemetry never costs an agent
             logger.debug("the setup of '%s' was not noted (%s).", key, type(exc).__name__)
 
-    async def anote_judge_setup(self) -> None:
-        """Set up the judge and the mediator for the fingerprint where the run did not.
+    def note_judge_declared_setup(self) -> None:
+        """The judge's and the mediator's servers from their settings, where the run bound none.
 
-        Each binds its role's servers the way it does when a mediation needs
-        tools (``JudgeAgent._initialize_mcp_client``), so its tools and servers
-        are recorded whichever path the run took — a fast path that attached
-        nothing included. An agent already set up is left as it is. Never
-        raises.
+        No server is attached for the fingerprint, and no agent is built: an
+        agent that never bound its role's servers in this run (a mediation
+        that took its fast path) is recorded by what the settings declare for
+        each server the ``judge`` role and definition bind — its name, its
+        launch identity with this host's paths replaced and its tool filter —
+        marked not attached, with no version and no tool definitions. An agent
+        the run set up is left as it is. Never raises.
         """
-        for role in ("judge", "expert"):
-            try:
-                judge = self.get_judge_agent(role)
-                key = str(getattr(judge, "_runs_on", role) or role)
-                if key in self._setup_tools:
-                    continue
-                await judge._initialize_mcp_client()
-                if key not in self._setup_tools:
-                    self.note_role_setup(key, getattr(judge, "tools", None), judge.bound_servers())
-            except Exception as exc:  # noqa: BLE001 — telemetry never costs a report
-                logger.debug("the %s's setup was not noted (%s).", role, type(exc).__name__)
+        try:
+            from maljan.agents.composition import _excluded_servers, mcp_refs_for
+            from maljan.analysis.efficiency import declared_server
+
+            servers = getattr(getattr(self.config, "mcp", None), "servers", None) or {}
+            registry = self.get_server_registry()
+            names = {
+                handle.name
+                for handle in registry.for_agent(
+                    "judge", exclude=_excluded_servers(self.config, "judge")
+                )
+            }
+            names |= {
+                str(ref.server)
+                for ref in mcp_refs_for(self.config, "judge")
+                if getattr(ref, "server", None)
+            }
+            declared = {
+                name: declared_server(servers[name]) for name in sorted(names) if name in servers
+            }
+            for key in ("judge", MEDIATOR_AGENT_KEY):
+                if key not in self._setup_tools and key not in self._declared_setup:
+                    self._declared_setup[key] = {
+                        name: dict(info) for name, info in declared.items()
+                    }
+        except Exception as exc:  # noqa: BLE001 — telemetry never costs a report
+            logger.debug("the judge's declared setup was not noted (%s).", type(exc).__name__)
+
+    def declared_setup(self) -> dict[str, dict[str, dict[str, Any]]]:
+        """Per agent the run never bound, its servers as their settings declare them."""
+        return {key: dict(held) for key, held in sorted(self._declared_setup.items())}
 
     def resolved_agents(self) -> dict[str, Any]:
         """Each agent this job resolved, by key, as it was resolved."""
