@@ -262,6 +262,54 @@ apart from a report stored before the block existed, which shows none. The
 console's summary tab does not draw the block yet; the record is in the stored
 run summary.
 
+## What the run spent its input on
+
+After the disclosure, Appendix B carries an **Efficiency** block, and the run
+summary stores the same record under `efficiency`. Every figure in it is
+counted by code from what the run already recorded; no model is asked and
+nothing a model reads changes.
+
+- **Input by part** (`inputs`): what each agent loop's requests were made of.
+  Every request is measured as it is sent — each turn of an analyst's or the
+  judge's tool loop, and each single analyst call (a revision, a validation
+  retry, a drops question, a salvage) — and split into the system prompt, the
+  task and its data, the triage pack, the run-state block, the tool answers,
+  the peer reports a revision carries, the retries and questions asked after
+  an answer, the agent's own earlier turns, and the tool definitions. The parts
+  are **character counts**: no provider reports the tokens of each part of a
+  prompt. Beside them stand the input tokens the provider reported for the
+  same requests, and how many reported. One row per tool loop, and one per
+  agent, stage and kind of single call; an agent whose model calls were not
+  measured by part (the report's writers, for one) is named with its calls.
+- **Evidence no claim cites** (`uncited`): of the ledger entries whose tool
+  ran, the ones no analyst's final claim names in its text or its evidence
+  field, by agent and by tool, with their ids. A repeat and a guard's answer
+  are not evidence of their own; a cited repeat counts for the entry holding
+  its answer.
+- **Tool calls that found nothing new** (`calls`): the calls the repeat guard
+  answered from an earlier identical call without running, the calls a guard
+  refused with no tool run, and the calls that ran again with the tool, server
+  and arguments of an earlier call, by agent and by tool.
+- **Rows read back** (`rows_read`): the ledger and pack rows each agent read
+  again by id through `read_evidence`, how often, each row's tool and whether
+  the triage pack wrote it.
+- **Retries' share of the output** (`output`): per agent, its reported output
+  tokens and the share its validation retries and its drops questions took,
+  with the calls that reported no usage counted beside them.
+- **Run fingerprint** (`fingerprint`): one sha256 over the system prompts as
+  sent, the tool declarations, the name and version each tool server gave for
+  itself at attach, and the settings the run ran with, masked as the stored
+  settings snapshot masks them. Each component and each part (per agent, per
+  server, per settings section) keeps its own hash, so two fingerprints that
+  differ name what changed. A secret enters only as set or unset. A prompt
+  carries the run's own words where the platform writes them in (the
+  mediator's names the sample's hash), so the prompts component tells two
+  samples apart. A tool's own version is not reported over MCP and is not in
+  the fingerprint.
+
+A run stopped part-way stores the counts as of the stop and says so. A report
+stored before the block existed shows none.
+
 ## Comparing two runs
 
 `GET /api/v1/reports/diff?a=<id>&b=<id>` compares two stored runs (`by=job`
