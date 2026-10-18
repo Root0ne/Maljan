@@ -286,6 +286,11 @@ class ServerHandle:
         # from its ``capabilities`` tool when it offers one; ``None`` for a
         # server that does not, or whose answer could not be read.
         self.capabilities: ServerCapabilities | None = None
+        # The name and version the server gave for itself at its last attach
+        # (MCP ``serverInfo``), kept after the handle closes: the run
+        # fingerprint is read once the run's last tool call is made.
+        self.server_info: dict[str, str] = {}
+        self.attached_once = False
         # Whether the next attach keeps each tool's definition as the server
         # listed it (``tool_definitions``). Only the settings probe asks, to
         # propose declarations; a run's handle keeps none.
@@ -538,6 +543,8 @@ class ServerHandle:
             self._teardown(toolkit)
             raise
         self._toolkit = toolkit
+        self.server_info = dict(getattr(toolkit, "server_info", None) or {})
+        self.attached_once = True
         _ATTACHED_HANDLES.add(self)
         self._opened_async = False
         # ``_run_async`` hands the coroutine to the shared agent loop, so that
@@ -612,6 +619,8 @@ class ServerHandle:
             self._child_pids = ()
             raise
         self._toolkit = toolkit
+        self.server_info = dict(getattr(toolkit, "server_info", None) or {})
+        self.attached_once = True
         _ATTACHED_HANDLES.add(self)
         self._opened_async = True
         self._note_child_pids(before)
@@ -1868,6 +1877,22 @@ class ServerRegistry:
         tools.extend(added)
         reasons.extend(added_reasons)
         return tools, reasons
+
+    def server_versions(self) -> dict[str, dict[str, str]]:
+        """Per configured server this job attached, the name and version it gave for itself.
+
+        A server attached on more than one loop gave the same answer each
+        time; the first handle's is kept. A server that gave neither is
+        listed with nothing, so it is told apart from one never attached.
+        """
+        out: dict[str, dict[str, str]] = {}
+        for handle in self._all_handles():
+            info = getattr(handle, "server_info", None) or {}
+            if handle.name in out:
+                continue
+            if info or handle.is_open or getattr(handle, "attached_once", False):
+                out[handle.name] = dict(info)
+        return dict(sorted(out.items()))
 
     def still_open(self) -> list[ServerHandle]:
         """Every handle still attached, per-loop ones included.

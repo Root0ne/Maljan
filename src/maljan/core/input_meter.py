@@ -12,6 +12,11 @@ prompt took, only the prompt's total. That total, where the provider reported
 it, is kept beside the parts as the provider's own figure, with the number of
 requests that reported one, and is never apportioned among them.
 
+The meter also keeps, as sha256 digests and never as text, each agent's
+system prompts as sent and the definitions of the tools its loops were bound
+to: what the run fingerprint (``analysis.efficiency``) is made of besides the
+servers and the settings.
+
 Nothing here changes what is sent: the meter reads the messages a request
 carries and keeps counts. Recording never raises — telemetry must not break
 analysis.
@@ -19,6 +24,8 @@ analysis.
 
 from __future__ import annotations
 
+import hashlib
+import json
 import threading
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from typing import Any
@@ -158,6 +165,41 @@ def request_parts(
     return parts
 
 
+def digest(text: str) -> str:
+    """The sha256 of ``text``, hex."""
+    return hashlib.sha256(text.encode("utf-8", "surrogatepass")).hexdigest()
+
+
+def system_prompt_digests(messages: Iterable[Any]) -> list[str]:
+    """The digest of each system message of a request, as sent."""
+    return [
+        digest(_text_of(getattr(m, "content", "")))
+        for m in messages
+        if str(getattr(m, "type", "") or "") == "system"
+    ]
+
+
+def tool_digests(tools: Iterable[Any]) -> dict[str, str]:
+    """Each tool's definition as a request carries it, by the tool's name, as a digest.
+
+    The OpenAI-compatible definition, the one ``context_window.tool_definition_chars``
+    measures, serialised with its keys in order. A tool that cannot be
+    described is left out.
+    """
+    from langchain_core.utils.function_calling import convert_to_openai_tool
+
+    out: dict[str, str] = {}
+    for tool in tools:
+        try:
+            definition = convert_to_openai_tool(tool)
+            text = json.dumps(definition, sort_keys=True, ensure_ascii=False, default=str)
+        except Exception:  # noqa: BLE001 — a definition is never worth a lost loop
+            continue
+        name = str(getattr(tool, "name", "") or definition.get("function", {}).get("name", ""))
+        out[name] = digest(text)
+    return out
+
+
 def _new_row(agent: str, stage: str, kind: str) -> dict[str, Any]:
     return {
         "agent": agent,
@@ -182,6 +224,10 @@ class InputMeter:
         # budget, held until the loop is closed so its identity is not reused.
         self._loops: dict[tuple[str, int], tuple[Any, dict[str, Any]]] = {}
         self._calls: dict[tuple[str, str, str], dict[str, Any]] = {}
+        # Per agent, the digests of the system prompts it sent and of the tool
+        # definitions its loops were bound to, by tool name.
+        self._prompts: dict[str, set[str]] = {}
+        self._tools: dict[str, dict[str, str]] = {}
 
     def request(
         self,
@@ -191,15 +237,18 @@ class InputMeter:
         stage: str = "",
         kind: str = TOOL_LOOP,
         loop: Any = None,
+        prompts: Iterable[str] = (),
     ) -> dict[str, Any] | None:
         """One request about to be sent; the row it was counted on (for :meth:`answered`).
 
         ``loop`` is the tool loop the request is a turn of — its turns are
         summed on one row until :meth:`close` — or ``None`` for a single call,
         summed with the agent's other calls of the same ``kind`` and stage.
+        ``prompts`` are the digests of the request's system prompts.
         """
         try:
             with self._lock:
+                self._prompts.setdefault(agent, set()).update(str(p) for p in prompts)
                 if loop is not None:
                     held = self._loops.get((agent, id(loop)))
                     if held is None or held[0] is not loop:
@@ -253,6 +302,28 @@ class InputMeter:
                         row["input_tokens"] += max(0, int(usage.get("input_tokens") or 0))
         except Exception:  # noqa: BLE001 — recording never raises
             return
+
+    def note_tools(self, agent: str, digests: Mapping[str, str]) -> None:
+        """The tool definitions a loop of ``agent`` was bound to, by name, as digests."""
+        try:
+            with self._lock:
+                self._tools.setdefault(agent, {}).update(
+                    {str(k): str(v) for k, v in digests.items()}
+                )
+        except Exception:  # noqa: BLE001 — recording never raises
+            return
+
+    def prompt_digests(self) -> dict[str, list[str]]:
+        """Per agent, the distinct digests of the system prompts it sent, sorted."""
+        with self._lock:
+            return {agent: sorted(held) for agent, held in sorted(self._prompts.items()) if held}
+
+    def tool_digests(self) -> dict[str, dict[str, str]]:
+        """Per agent, the digest of each tool definition its loops were bound to."""
+        with self._lock:
+            return {
+                agent: dict(sorted(held.items())) for agent, held in sorted(self._tools.items())
+            }
 
     def rows(self) -> list[dict[str, Any]]:
         """A plain copy of every row, in order; ``input_tokens`` only where a request reported."""

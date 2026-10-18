@@ -1164,6 +1164,16 @@ class ServiceContainer:
         registry = self._server_registry_cache
         return [dict(row) for row in getattr(registry, "rests", None) or []]
 
+    def server_versions(self) -> dict[str, dict[str, str]]:
+        """Per tool server this job attached, the name and version it gave, or ``{}``.
+
+        Reads the cached registry only, for the same reason
+        ``server_degradation_reasons`` does.
+        """
+        registry = self._server_registry_cache
+        versions = getattr(registry, "server_versions", None)
+        return versions() if callable(versions) else {}
+
     def get_token_ledger(self) -> TokenLedger:
         """Return the per-run LLM token/cost ledger (findings-log §4 Item 1)."""
         return self._token_ledger

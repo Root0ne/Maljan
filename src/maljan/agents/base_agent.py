@@ -54,7 +54,12 @@ from maljan.analysis.sandbox_sections import item_index_of
 from maljan.analysis.technique_ids import ID_BODY
 from maljan.core.config import get_settings
 from maljan.core.exceptions import AgentLoopCancelled, AnalystError, SampleNotOpened
-from maljan.core.input_meter import TOOL_LOOP, request_parts
+from maljan.core.input_meter import (
+    TOOL_LOOP,
+    request_parts,
+    system_prompt_digests,
+    tool_digests,
+)
 from maljan.core.logger import logger
 from maljan.core.spend import LOOP_TURN_CALL, SPEND_CAP, SpendCeilingStop, call_deadline_of
 from maljan.core.token_ledger import (
@@ -4101,10 +4106,21 @@ class BudgetMeter:
                 stage=str(getattr(self, "pipeline_stage", "") or "analysis"),
                 kind=kind,
                 loop=loop,
+                prompts=system_prompt_digests(messages),
             )
         except Exception as exc:  # noqa: BLE001 — a measure never costs a turn
             self.logger.debug("%s: the request was not measured (%s).", self.name, exc)
             return None
+
+    def _note_tools(self, tools: Sequence[Any]) -> None:
+        """The definitions this loop's requests are bound to, onto the meter as digests."""
+        meter = self._input_meter()
+        if meter is None:
+            return
+        try:
+            meter.note_tools(str(getattr(self, "name", "") or ""), tool_digests(tools))
+        except Exception as exc:  # noqa: BLE001 — a measure never costs a turn
+            self.logger.debug("%s: the tool definitions were not noted (%s).", self.name, exc)
 
     def _note_answered(self, row: Any, response: Any) -> None:
         """A single call's provider-reported input tokens onto its row. Never raises."""
@@ -5489,6 +5505,7 @@ class BaseAnalyst(BudgetMeter, ABC):
         )
         # Sent with every request of this loop, so counted with its conversation.
         self._tool_definition_chars = tool_definition_chars(recorded)
+        self._note_tools(recorded)
         self.ended_out_of_room = False
         # The key this loop's turns are counted and reserved under with the
         # job's spend meter, until the ledger records them.
@@ -5564,6 +5581,7 @@ class BaseAnalyst(BudgetMeter, ABC):
                 )
                 return False
             self._tool_definition_chars = tool_definition_chars(recorded)
+            self._note_tools(recorded)
             self._offered_after_clear = [read_tool]
             return True
 

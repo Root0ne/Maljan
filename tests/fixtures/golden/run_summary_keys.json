@@ -182,6 +182,21 @@
       "repeated": null,
       "run_again": null
     },
+    "fingerprint": {
+      "components": {
+        "prompts": null,
+        "servers": null,
+        "settings": null,
+        "tools": null
+      },
+      "parts": {
+        "prompts": "<data-keyed map>",
+        "servers": "<data-keyed map>",
+        "settings": "<data-keyed map>",
+        "tools": "<data-keyed map>"
+      },
+      "sha256": null
+    },
     "inputs": {
       "calls": "<data-keyed map>",
       "loops": [

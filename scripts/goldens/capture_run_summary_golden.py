@@ -325,7 +325,15 @@ def _efficiency() -> dict[str, Any]:
         model="openai/qwen",
         call="validation retry",
     )
-    container = SimpleNamespace(input_meter=meter, get_token_ledger=lambda: ledger)
+    from maljan.core.config import Settings
+
+    meter.note_tools("static", {"pe_info": "0" * 64})
+    container = SimpleNamespace(
+        input_meter=meter,
+        get_token_ledger=lambda: ledger,
+        server_versions=lambda: {"analysis": {"name": "analysis-mcp", "version": "1.2.0"}},
+        config=Settings(),
+    )
     from maljan.agents.tool_answer_clearing import READ_EVIDENCE_TOOL
     from maljan.schemas.evidence import LedgerEntry
     from maljan.schemas.isr_models import AgentISR, ClaimEvidence
@@ -423,6 +431,11 @@ DATA_KEYED = frozenset(
         "efficiency.rows_read.rows[].by",
         # One row per agent in the token ledger.
         "efficiency.output",
+        # Per agent, per tool server and per settings section.
+        "efficiency.fingerprint.parts.prompts",
+        "efficiency.fingerprint.parts.tools",
+        "efficiency.fingerprint.parts.servers",
+        "efficiency.fingerprint.parts.settings",
     }
 )
 

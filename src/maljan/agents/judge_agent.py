@@ -2132,6 +2132,7 @@ class JudgeAgent(BudgetMeter):
         definitions = tool_definition_chars(recorded)
         # On the budget record and the ticks, as the analysts' loop puts it.
         self._tool_definition_chars = definitions
+        self._note_tools(recorded)
 
         def _note_the_conversation(conversation: list[Any]) -> None:
             if not isinstance(room, ContextBudget):

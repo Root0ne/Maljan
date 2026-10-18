@@ -39,6 +39,19 @@ A read is not evidence of its own and is not counted under ``uncited`` or
 validation retries (a retry, and the whole answer asked for after a retry that
 could not be merged) and its drops questions took: provider-reported output
 tokens only, with the calls that reported none counted beside them.
+
+``fingerprint`` is one sha256 over what the run was set up with (H5): the
+system prompts as each agent sent them, the definitions of the tools its loops
+were bound to, the name and version each tool server gave for itself at
+attach, and the settings the run ran with, masked as the stored snapshot masks
+them. Each of the four is hashed on its own (``components``), and each
+component per agent, per server or per settings section (``parts``), so two
+fingerprints that differ name what changed. Secrets never enter it: only the
+masked view of the settings is hashed, where a secret reads as set or unset.
+A prompt carries the run's own words where the platform writes them in (the
+mediator's names the sample's hash), so the prompts component tells two
+samples apart; the others do not. A tool's own version is not reported over
+MCP and is not in it.
 """
 
 from __future__ import annotations
@@ -334,6 +347,72 @@ def output_record(container: Any) -> dict[str, Any] | None:
     return out
 
 
+def _hash(value: Any) -> str:
+    """The sha256 of ``value`` serialised with its keys in order."""
+    from maljan.core.input_meter import digest
+
+    return digest(json.dumps(value, sort_keys=True, ensure_ascii=False, default=str))
+
+
+def masked_settings(config: Any) -> dict[str, Any]:
+    """The settings the run ran with, masked as the stored snapshot masks them, flattened.
+
+    ``settings_overrides.public_snapshot`` with every catalogue path typed as a
+    secret: a secret's value is replaced by whether it is set.
+    """
+    from maljan.core.settings_catalog import core_catalog
+    from maljan.core.settings_overrides import public_snapshot
+
+    secrets = [entry.path for entry in core_catalog() if entry.secret]
+    return public_snapshot(config, secrets)
+
+
+def _settings_sections(config: Any) -> dict[str, str]:
+    """Each top-level settings section's hash, over its masked leaves."""
+    sections: dict[str, dict[str, Any]] = {}
+    for key, value in masked_settings(config).items():
+        sections.setdefault(str(key).split(".", 1)[0], {})[str(key)] = value
+    return {name: _hash(leaves) for name, leaves in sorted(sections.items())}
+
+
+def fingerprint_record(container: Any) -> dict[str, Any] | None:
+    """``efficiency.fingerprint``, or ``None`` outside a run (no meter, registry or settings).
+
+    A part the run could not read (no meter, no registry, settings that would
+    not dump) is named in ``unread`` and hashed as empty, so the fingerprint
+    still says what it is made of.
+    """
+    meter: Any = getattr(container, "input_meter", None)
+    versions = getattr(container, "server_versions", None)
+    config = getattr(container, "config", None)
+    if meter is None and not callable(versions) and config is None:
+        return None
+    unread: list[str] = []
+    parts: dict[str, dict[str, Any]] = {"prompts": {}, "tools": {}, "servers": {}, "settings": {}}
+    try:
+        parts["prompts"] = {
+            agent: _hash(digests) for agent, digests in meter.prompt_digests().items()
+        }
+        parts["tools"] = {agent: _hash(held) for agent, held in meter.tool_digests().items()}
+    except Exception:  # noqa: BLE001 — an unread part is named, never guessed
+        unread.extend(["prompts", "tools"])
+    try:
+        parts["servers"] = dict(versions()) if callable(versions) else {}
+    except Exception:  # noqa: BLE001 — an unread part is named, never guessed
+        unread.append("servers")
+    try:
+        parts["settings"] = _settings_sections(config) if config is not None else {}
+    except Exception:  # noqa: BLE001 — an unread part is named, never guessed
+        parts["settings"] = {}
+    if config is None or not parts["settings"]:
+        unread.append("settings")
+    components = {name: _hash(held) for name, held in parts.items()}
+    record: dict[str, Any] = {"sha256": _hash(components), "components": components, "parts": parts}
+    if unread:
+        record["unread"] = sorted(set(unread))
+    return record
+
+
 def efficiency_record(
     container: Any,
     *,
@@ -365,6 +444,9 @@ def efficiency_record(
         output = output_record(container)
         if output is not None:
             record["output"] = output
+        fingerprint = fingerprint_record(container)
+        if fingerprint is not None:
+            record["fingerprint"] = fingerprint
         if len(record) == 1:
             return None
         if partial_reason:
@@ -476,6 +558,53 @@ def efficiency_lines(record: Any) -> list[str]:
     output = record.get("output")
     if isinstance(output, Mapping):
         lines.extend(_output_lines(output))
+    fingerprint = record.get("fingerprint")
+    if isinstance(fingerprint, Mapping):
+        lines.extend(_fingerprint_lines(fingerprint))
+    return lines
+
+
+# How each component of the fingerprint is named in the report.
+_COMPONENT_LABELS = {
+    "prompts": "system prompts as sent",
+    "tools": "tool declarations",
+    "servers": "server names and versions",
+    "settings": "masked settings",
+}
+
+
+def _fingerprint_lines(fingerprint: Mapping[str, Any]) -> list[str]:
+    components = fingerprint.get("components")
+    components = components if isinstance(components, Mapping) else {}
+    shown = "; ".join(
+        f"{label} `{str(components.get(name) or '')[:12]}`"
+        for name, label in _COMPONENT_LABELS.items()
+        if name in components
+    )
+    line = f"Run fingerprint: `{fingerprint.get('sha256') or ''}`"
+    if shown:
+        line += f" (sha256 of its components: {shown})"
+    unread = [str(name) for name in fingerprint.get("unread") or []]
+    if unread:
+        line += f"; not read, and hashed as empty: {', '.join(unread)}"
+    lines = [line + "."]
+    parts = fingerprint.get("parts")
+    servers = parts.get("servers") if isinstance(parts, Mapping) else None
+    if isinstance(servers, Mapping) and servers:
+        said = []
+        for key, info in servers.items():
+            info = info if isinstance(info, Mapping) else {}
+            name, version = info.get("name"), info.get("version")
+            text = f"`{key}`"
+            if name:
+                text += f" as `{name}`"
+            text += f" version `{version}`" if version else ", no version given"
+            said.append(text)
+        lines.append(
+            "Tool servers as they gave themselves at attach: "
+            + "; ".join(said)
+            + ". A tool's own version is not reported over MCP."
+        )
     return lines
 
 
