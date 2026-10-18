@@ -277,6 +277,8 @@ def _disclosure(summary: dict[str, Any]) -> dict[str, Any]:
         worker={
             "uid": 10001,
             "cap_eff_zero": True,
+            "cap_prm_zero": True,
+            "cap_amb_zero": True,
             "no_new_privs": True,
             "platform_names_in_env": ["DATABASE_URL"],
         },

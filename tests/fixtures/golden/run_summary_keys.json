@@ -60,7 +60,9 @@
         {
           "attaches": null,
           "calls": null,
+          "cap_amb_zero": null,
           "cap_eff_zero": null,
+          "cap_prm_zero": null,
           "host": null,
           "isolated": null,
           "label": null,
@@ -84,7 +86,9 @@
       ],
       "unsourced_reads": null,
       "worker": {
+        "cap_amb_zero": null,
         "cap_eff_zero": null,
+        "cap_prm_zero": null,
         "no_new_privs": null,
         "platform_names_in_env": [
           null

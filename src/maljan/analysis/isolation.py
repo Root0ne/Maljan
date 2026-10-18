@@ -81,6 +81,8 @@ MEASURED_FIELDS = (
     "own_net_namespace",
     "own_mount_namespace",
     "cap_eff_zero",
+    "cap_prm_zero",
+    "cap_amb_zero",
     "no_new_privs",
     "platform_names_in_env",
 )
@@ -147,12 +149,17 @@ def _worker_groups() -> frozenset[int]:
     return frozenset({os.getegid(), *os.getgroups()})
 
 
-def _cap_eff_zero(status: Mapping[str, str] | None) -> bool | None:
-    text = str((status or {}).get("CapEff") or "")
+def _cap_zero(status: Mapping[str, str] | None, key: str) -> bool | None:
+    """Whether a capability set (``CapEff``, ``CapPrm``, ``CapAmb``) is empty; ``None`` unread."""
+    text = str((status or {}).get(key) or "")
     try:
         return int(text, 16) == 0 if text else None
     except ValueError:
         return None
+
+
+def _cap_eff_zero(status: Mapping[str, str] | None) -> bool | None:
+    return _cap_zero(status, "CapEff")
 
 
 def _no_new_privs(status: Mapping[str, str] | None) -> bool | None:
@@ -195,6 +202,10 @@ def measure_process(pid: int, env_names: Iterable[str]) -> dict[str, Any]:
         theirs, ours = _namespace(pid, name), _namespace("self", name)
         out[key] = None if theirs is None or ours is None else theirs != ours
     out["cap_eff_zero"] = _cap_eff_zero(status)
+    # The permitted set can be raised into the effective one, and the ambient
+    # set is handed to what the process executes: both must be empty too.
+    out["cap_prm_zero"] = _cap_zero(status, "CapPrm")
+    out["cap_amb_zero"] = _cap_zero(status, "CapAmb")
     out["no_new_privs"] = _no_new_privs(status)
     out["platform_names_in_env"] = platform_names(env_names)
     return out
@@ -207,6 +218,8 @@ def worker_facts() -> dict[str, Any]:
     return {
         "uid": os.geteuid() if uid is None else uid,
         "cap_eff_zero": _cap_eff_zero(status),
+        "cap_prm_zero": _cap_zero(status, "CapPrm"),
+        "cap_amb_zero": _cap_zero(status, "CapAmb"),
         "no_new_privs": _no_new_privs(status),
         "platform_names_in_env": platform_names(os.environ),
     }
@@ -338,6 +351,8 @@ def _passes(row: Mapping[str, Any]) -> bool:
         row.get("own_pid_namespace") is True,
         row.get("own_mount_namespace") is True,
         row.get("cap_eff_zero") is True,
+        row.get("cap_prm_zero") is True,
+        row.get("cap_amb_zero") is True,
         row.get("no_new_privs") is True,
         row.get("platform_names_in_env") == [],
         row.get("needs_network") is True or row.get("own_net_namespace") is True,
@@ -417,6 +432,8 @@ def isolation_part(
                     own_net_namespace=False,
                     own_mount_namespace=False,
                     cap_eff_zero=worker.get("cap_eff_zero"),
+                    cap_prm_zero=worker.get("cap_prm_zero"),
+                    cap_amb_zero=worker.get("cap_amb_zero"),
                     no_new_privs=worker.get("no_new_privs"),
                     platform_names_in_env=list(worker.get("platform_names_in_env") or []),
                 )
@@ -560,6 +577,28 @@ def _user(uid: Any, same: Any) -> str:
     return f"{who}{whose}"
 
 
+_CAPABILITY_SETS = (
+    ("cap_eff_zero", "effective"),
+    ("cap_prm_zero", "permitted"),
+    ("cap_amb_zero", "ambient"),
+)
+
+
+def _capabilities(row: Mapping[str, Any]) -> str:
+    """The three capability sets, said together."""
+    held = [name for key, name in _CAPABILITY_SETS if row.get(key) is False]
+    unread = [name for key, name in _CAPABILITY_SETS if row.get(key) is None]
+    if held:
+        return f"{_joined_names(held)} capabilities"
+    if unread:
+        return f"{_joined_names(unread)} capabilities that could not be read"
+    return "no effective, permitted or ambient capabilities"
+
+
+def _joined_names(names: list[str]) -> str:
+    return names[0] if len(names) == 1 else ", ".join(names[:-1]) + " and " + names[-1]
+
+
 def _worker_line(worker: Mapping[str, Any], code: Callable[[str], str]) -> str:
     uid = worker.get("uid")
     who = f"user {uid}" if uid is not None else "a user that could not be read"
@@ -614,12 +653,7 @@ def _child_line(row: Mapping[str, Any], code: Callable[[str], str]) -> str:
             "the worker's network",
             "its network could not be compared",
         ),
-        _yes_no(
-            row.get("cap_eff_zero"),
-            "no capabilities",
-            "capabilities in effect",
-            "capabilities that could not be read",
-        ),
+        _capabilities(row),
         _yes_no(
             row.get("no_new_privs"),
             "no way to gain privileges",

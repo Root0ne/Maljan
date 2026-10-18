@@ -60,6 +60,8 @@ KEPT = {
     "own_net_namespace": True,
     "own_mount_namespace": True,
     "cap_eff_zero": True,
+    "cap_prm_zero": True,
+    "cap_amb_zero": True,
     "no_new_privs": True,
     "platform_names_in_env": [],
 }
@@ -72,6 +74,8 @@ SHARED = {
     "own_net_namespace": False,
     "own_mount_namespace": False,
     "cap_eff_zero": True,
+    "cap_prm_zero": True,
+    "cap_amb_zero": True,
     "no_new_privs": False,
     "platform_names_in_env": [],
 }
@@ -182,6 +186,8 @@ def test_a_process_that_cannot_be_read_is_absent_never_a_pass() -> None:
         "own_net_namespace": None,
         "own_mount_namespace": None,
         "cap_eff_zero": None,
+        "cap_prm_zero": None,
+        "cap_amb_zero": None,
         "no_new_privs": None,
         "platform_names_in_env": [],
     }
@@ -197,10 +203,36 @@ def _status_of(**lines: str) -> dict[str, str]:
         "Gid": " ".join([group] * 4),
         "Groups": group,
         "CapEff": "0" * 16,
+        "CapPrm": "0" * 16,
+        "CapAmb": "0" * 16,
         "NoNewPrivs": "1",
     }
     status.update(lines)
     return status
+
+
+@pytest.mark.parametrize(
+    "key, field",
+    [("CapEff", "cap_eff_zero"), ("CapPrm", "cap_prm_zero"), ("CapAmb", "cap_amb_zero")],
+)
+def test_each_capability_set_is_read_and_one_that_cannot_be_read_is_absent(
+    monkeypatch: pytest.MonkeyPatch, key: str, field: str
+) -> None:
+    for value, expected in (("0000000000000000", True), ("0000000000002000", False), ("zz", None)):
+        monkeypatch.setattr(isolation, "_status", lambda pid, v=value: _status_of(**{key: v}))
+        assert measure_process(4242, [])[field] is expected, (key, value)
+    missing = _status_of()
+    del missing[key]
+    monkeypatch.setattr(isolation, "_status", lambda pid: missing)
+    assert measure_process(4242, [])[field] is None
+
+
+def test_a_permitted_or_ambient_capability_is_said_and_keeps_the_reader_from_isolated() -> None:
+    part = _part(
+        STDIO, [_reads()], {"mcp:analysis": [{"where": CHILD, **KEPT, "cap_prm_zero": False}]}
+    )
+    assert part["isolated"] is False
+    assert "; permitted capabilities;" in isolation_lines(part)[2]
 
 
 @pytest.mark.parametrize("field", range(4))
@@ -293,6 +325,10 @@ def test_a_child_kept_from_the_worker_on_every_count_is_isolated() -> None:
         ("own_mount_namespace", False),
         ("own_net_namespace", False),
         ("cap_eff_zero", False),
+        ("cap_prm_zero", False),
+        ("cap_amb_zero", False),
+        ("cap_prm_zero", None),
+        ("cap_amb_zero", None),
         ("no_new_privs", False),
         ("platform_names_in_env", ["SETTINGS_ENCRYPTION_KEY"]),
         ("same_uid_as_worker", None),
@@ -432,9 +468,8 @@ def test_the_report_prints_the_part_inside_the_disclosure_block() -> None:
         "worker started, measured at its start: it ran as user 1000 (one of its real, "
         "effective, saved or filesystem user ids is the worker's); in a group of the worker's; "
         "sharing the worker's process table; the worker's view of the filesystem; the worker's "
-        "network; "
-        "no capabilities; no bar on gaining privileges; its environment held none of the "
-        "platform's own variables. So: not isolated."
+        "network; no effective, permitted or ambient capabilities; no bar on gaining "
+        "privileges; its environment held none of the platform's own variables. So: not isolated."
     ) in markdown
 
 
