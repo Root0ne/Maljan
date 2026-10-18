@@ -454,6 +454,59 @@ def test_calls_to_tools_that_declare_no_effects_cannot_be_shown_to_stay() -> Non
     ) in disclosure_lines(record)
 
 
+@pytest.mark.parametrize(
+    "facts",
+    [
+        {"v": 1, "kind": "", "display_name": "Lookup"},
+        {"v": 1, "kind": "", "words": ["fetch", "url"]},
+        {"v": 1, "kind": "", "holds_strings": True},
+    ],
+    ids=["display-name-only", "words-only", "other-fact-only"],
+)
+def test_a_tool_that_names_no_kind_counts_as_undeclared(facts: dict) -> None:
+    """The platform's own rule: a declaration without a kind leaves the tool undeclared."""
+    record = _local(snapshot=STDIO, entries=[_entry("mcp:analysis", "fetch_url", facts=facts)])
+
+    (row,) = record["undeclared"]
+    assert row["calls"] == 1
+    assert record["local_servers"] == []
+    assert record["nothing_left"] is False
+
+
+@pytest.mark.parametrize("kind", ["submission", "submission_status"])
+def test_a_tool_of_a_kind_that_reaches_outside_is_never_taken_as_local(kind: str) -> None:
+    """An operator's submission tool, with no ``discloses_sample``, stops "nothing"."""
+    record = _local(
+        snapshot=STDIO, entries=[_entry("mcp:analysis", "send_it", facts={"v": 1, "kind": kind})]
+    )
+
+    (row,) = record["servers"]
+    assert (row["source"], row["where"], row["calls"]) == ("mcp:analysis", "unknown", 1)
+    assert f"declares the kind {kind}" in row["why"]
+    assert record["nothing_left"] is False
+
+
+def test_a_server_that_declares_a_submission_tool_is_a_gateway() -> None:
+    from maljan.analysis.disclosure import gateway_blocks
+
+    snapshot = {**STDIO, "mcp.servers.analysis.tool_facts.send_it.kind": "submission"}
+
+    assert gateway_blocks(snapshot) == frozenset({"mcp.servers.analysis"})
+    record = _local(snapshot=snapshot, entries=[_entry("mcp:analysis", "strings", facts=STRINGS)])
+    (row,) = record["servers"]
+    assert row["where"] == "unknown" and record["nothing_left"] is False
+
+
+def test_the_kinds_that_reach_outside_are_defined_once_with_their_meaning() -> None:
+    from maljan.core.builtin_declarations import OUTWARD_KINDS, REPUTATION_KINDS
+    from maljan.core.reputation import INDICATOR_LOOKUP_KINDS
+
+    assert {"submission", "submission_status", *REPUTATION_KINDS, *INDICATOR_LOOKUP_KINDS} == set(
+        OUTWARD_KINDS
+    )
+    assert all(meaning.strip() for meaning in OUTWARD_KINDS.values())
+
+
 def test_a_tool_server_reached_over_http_is_listed_with_where_it_is() -> None:
     snapshot = {
         **LOCAL_LLM,

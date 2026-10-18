@@ -353,18 +353,16 @@ def gateway_blocks(snapshot: Mapping[str, Any]) -> frozenset[str]:
     """The settings blocks that declare a lookup or a sandbox, read in one pass over the snapshot.
 
     A block whose ``roles`` hold the reputation or the sandbox role, or any of
-    whose tools declares a lookup kind, an indicator argument role, or that it
-    sends the sample out (``tool_facts.<tool>.discloses_sample``).
+    whose tools declares a kind that reaches outside the deployment by its
+    meaning (``builtin_declarations.OUTWARD_KINDS``: the lookups and the
+    submissions), an indicator argument role, or that it sends the sample out
+    (``tool_facts.<tool>.discloses_sample``).
     """
-    from maljan.core.builtin_declarations import REPUTATION_KINDS
-    from maljan.core.reputation import (
-        INDICATOR_ARGUMENTS,
-        INDICATOR_LOOKUP_KINDS,
-        REPUTATION_ROLE,
-    )
+    from maljan.core.builtin_declarations import OUTWARD_KINDS
+    from maljan.core.reputation import INDICATOR_ARGUMENTS, REPUTATION_ROLE
     from maljan.core.tool_declarations import SANDBOX_ROLE
 
-    lookup_kinds = {*REPUTATION_KINDS, *INDICATOR_LOOKUP_KINDS}
+    lookup_kinds = set(OUTWARD_KINDS)
     roles = {REPUTATION_ROLE, SANDBOX_ROLE}
     out: set[str] = set()
     for key, value in snapshot.items():
@@ -427,12 +425,24 @@ def _filled(entry: Any, argument: str) -> bool:
     return args.get(argument) not in (None, "")
 
 
-def _declares_anything(entry: Any) -> bool:
-    """Whether the facts the entry stored declare anything beyond their version."""
+def _stored_kind(entry: Any) -> str:
+    """The kind the facts the entry stored name, ``""`` for none."""
     held = _field(entry, "facts")
-    if not isinstance(held, Mapping):
-        return False
-    return any(key != "v" and value not in (None, "", [], {}, False) for key, value in held.items())
+    return str(held.get("kind") or "").strip() if isinstance(held, Mapping) else ""
+
+
+def _declares_a_kind(entry: Any) -> bool:
+    """Whether the entry's tool counts as declared: by the platform's rule, a named kind.
+
+    A declaration that states other facts only (a display name, words) is an
+    undeclared tool to every reading (``undeclared_tools.declares_a_kind``),
+    and what such a tool did cannot be told from it.
+    """
+    from types import SimpleNamespace
+
+    from maljan.core.undeclared_tools import declares_a_kind
+
+    return declares_a_kind(SimpleNamespace(kind=_stored_kind(entry) or None))
 
 
 @dataclass
@@ -447,6 +457,7 @@ class _ToolRows:
 def _tool_rows(snapshot: Mapping[str, Any], entries: Iterable[Any]) -> _ToolRows:
     """The ledger's calls, each once: lookups, uploads by a tool, servers, undeclared tools."""
     from maljan.agents.delegation import TEAM_SERVER
+    from maljan.core.builtin_declarations import OUTWARD_KINDS
     from maljan.core.declared_reading import kind_free_facts
     from maljan.core.reputation import INDICATOR_ARGUMENTS, asks_about_an_indicator
 
@@ -477,16 +488,24 @@ def _tool_rows(snapshot: Mapping[str, Any], entries: Iterable[Any]) -> _ToolRows
         route = routes[source]
         facts = kind_free_facts(entry)
         lookup = asks_about_an_indicator(facts)
+        kind = _stored_kind(entry)
+        outward = kind in OUTWARD_KINDS
         place = route.place
         local = place.where == LOCAL
-        if local and (facts.discloses_sample or lookup or route.gateway):
-            # A local server is not where a lookup, a sample sent out or a call
-            # through a declared gateway ends: it goes on to a service the
-            # settings do not name.
-            place = _Place(
-                host=place.host,
-                why=_LOCAL_SERVER if (facts.discloses_sample or lookup) else _GATEWAY,
-            )
+        if local and (facts.discloses_sample or lookup or outward or route.gateway):
+            # A local server is not where a lookup, a sample sent out, a call of
+            # a kind that reaches outside or a call through a declared gateway
+            # ends: it goes on to a service the settings do not name.
+            if facts.discloses_sample or lookup:
+                why = _LOCAL_SERVER
+            elif route.gateway:
+                why = _GATEWAY
+            else:
+                why = (
+                    f"its tool declares the kind {kind}, which {OUTWARD_KINDS[kind]} outside "
+                    "the deployment, and " + _LOCAL_SERVER
+                )
+            place = _Place(host=place.host, why=why)
         key = (source, route.transport, place.key)
         if facts.discloses_sample:
             row = out.uploads.setdefault(
@@ -511,10 +530,10 @@ def _tool_rows(snapshot: Mapping[str, Any], entries: Iterable[Any]) -> _ToolRows
                 row["kinds"][role] = row["kinds"].get(role, 0) + 1
             if not roles:
                 row["without_indicator"] += 1
-        elif local and route.gateway:
+        elif local and (route.gateway or outward):
             row = out.servers.setdefault(key, _tool_row(source, route, place))
             row["calls"] += 1
-        elif local and not _declares_anything(entry):
+        elif local and not _declares_a_kind(entry):
             row = out.undeclared.setdefault(key, _tool_row(source, route, place))
             row["calls"] += 1
         elif local:

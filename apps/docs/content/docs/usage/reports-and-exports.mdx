@@ -144,8 +144,11 @@ says what the run sent beyond the machine it ran on:
 - **Tool calls**: every call of a tool server reached over `http`,
   `streamable-http` or `sse` at an address outside this machine, by host; every
   call through a local tool server that is a gateway (its block declares the
-  `reputation` or `sandbox` role, or any of its tools declares a lookup or
-  `discloses_sample`); and the calls of tools that declare no effects at all.
+  `reputation` or `sandbox` role, or any of its tools declares
+  `discloses_sample` or a kind that reaches outside by its meaning: the lookup
+  kinds, `submission` and `submission_status`); every call of a tool of such a
+  kind through a local server; and the calls of tools that name no kind, which
+  the platform reads as undeclared however many other facts they state.
 - **Case memory**, **tracing** and the ledger: the long-term memory store,
   placed by what its backend declares (kept in the process, or the settings
   leaf that holds its address); tracing when it is on in the settings

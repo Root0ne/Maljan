@@ -571,6 +571,19 @@ _PACK_TOOLS: dict[str, dict[str, Any]] = {
 # records stored then still carry (``core.legacy_reputation``).
 REPUTATION_KINDS: tuple[str, ...] = (REPUTATION_KIND, *STORED_REPUTATION_KINDS)
 
+# The kinds that reach a service outside the deployment by what they mean,
+# each with what it reaches it for. A tool of one of these kinds asks that
+# service whatever server it is called through, so the run's disclosure block
+# (``analysis.disclosure``) never takes a call of it, or any call through a
+# local server that declares one, as staying on the machine.
+OUTWARD_KINDS: dict[str, str] = {
+    **{kind: "asks a reputation service about the sample" for kind in REPUTATION_KINDS},
+    "indicator_report": "asks a service for its report on an indicator",
+    "indicator_reputation": "asks a service for an indicator's reputation",
+    "submission": "hands a service something to analyse",
+    "submission_status": "asks a service how a submission is going",
+}
+
 # Each name table the core reads tools by, as the set of kinds that is exactly
 # that table over every built-in tool (``tests/unit/core/
 # test_every_built_in_declares_what_its_name_tables_say.py`` holds each one
