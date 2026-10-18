@@ -12,8 +12,9 @@ nothing.
 loop, and one per agent, stage and kind of single call, each split into the
 parts of :data:`core.input_meter.PARTS` in **characters**, with the input
 tokens the provider reported for the same requests beside them where it
-reported any. ``calls`` is each agent's model calls in the token ledger, so an
-agent whose calls the meter did not measure is named rather than left out.
+reported any. ``calls`` is each agent's model calls as the summary's ``tokens``
+block states them, so an agent whose calls the meter did not measure is named
+rather than left out.
 
 ``uncited`` is the evidence nothing cites: of the ledger entries whose tool
 ran and answered (a repeat and a guard's answer are not evidence of their own,
@@ -107,24 +108,33 @@ def _int(value: Any) -> int:
         return 0
 
 
-def _ledger_calls(container: Any) -> dict[str, int]:
-    """Each agent's model calls in the run's token ledger, or ``{}`` where none is held."""
-    ledger_of = getattr(container, "get_token_ledger", None)
-    if not callable(ledger_of):
-        return {}
-    try:
-        agents = (ledger_of().snapshot() or {}).get("agents") or {}
-    except Exception:  # noqa: BLE001 — a figure the ledger cannot give is left out
+def _per_agent(tokens: Mapping[str, Any] | None) -> dict[str, Mapping[str, Any]]:
+    """Each named agent's row of the summary's ``tokens`` block, the figures the summary states.
+
+    Read from the block rather than from the ledger again, so the record and
+    the summary state one set of numbers; an agent with no name has no row.
+    """
+    rows = (tokens or {}).get("per_agent") if isinstance(tokens, Mapping) else None
+    if not isinstance(rows, Mapping):
         return {}
     return {
-        str(name): _int(row.get("llm_calls"))
-        for name, row in sorted(agents.items())
-        if isinstance(row, Mapping) and _int(row.get("llm_calls"))
+        str(name): row
+        for name, row in sorted(rows.items())
+        if str(name).strip() and isinstance(row, Mapping)
     }
 
 
-def inputs_record(container: Any) -> dict[str, Any] | None:
-    """``efficiency.inputs``: the meter's rows and the ledger's calls, or ``None`` with no meter."""
+def _ledger_calls(tokens: Mapping[str, Any] | None) -> dict[str, int]:
+    """Each named agent's model calls as the summary's ``tokens`` block states them."""
+    return {
+        name: _int(row.get("llm_calls"))
+        for name, row in _per_agent(tokens).items()
+        if _int(row.get("llm_calls"))
+    }
+
+
+def inputs_record(container: Any, tokens: Mapping[str, Any] | None = None) -> dict[str, Any] | None:
+    """``efficiency.inputs``: the meter's rows and the summary's calls; ``None`` with no meter."""
     meter = getattr(container, "input_meter", None)
     rows_of = getattr(meter, "rows", None)
     if not callable(rows_of):
@@ -133,7 +143,8 @@ def inputs_record(container: Any) -> dict[str, Any] | None:
         rows = list(rows_of())
     except Exception:  # noqa: BLE001 — a meter that cannot be read leaves the part out
         return None
-    return {"unit": "characters", "loops": rows, "calls": _ledger_calls(container)}
+    named = [row for row in rows if str(row.get("agent") or "").strip()]
+    return {"unit": "characters", "loops": named, "calls": _ledger_calls(tokens)}
 
 
 def _field(entry: Any, name: str) -> Any:
@@ -389,26 +400,31 @@ def _tally(rows: Sequence[Mapping[str, Any]]) -> dict[str, int]:
     }
 
 
-def output_record(container: Any) -> dict[str, Any] | None:
+def output_record(container: Any, tokens: Mapping[str, Any] | None = None) -> dict[str, Any] | None:
     """``efficiency.output``: per agent, its output and the retries' and drops questions' share.
 
-    ``None`` where the run holds no token ledger that names its calls.
+    An agent's calls, calls with no usage and output are the summary's
+    ``tokens`` block's own figures; only the split by call name, which the
+    block does not hold, is read from the ledger (``TokenLedger.by_call``).
+    ``None`` where the summary states no agent's tokens.
     """
+    per_agent = _per_agent(tokens)
+    if not per_agent:
+        return None
     ledger_of = getattr(container, "get_token_ledger", None)
     by_call_of = getattr(ledger_of(), "by_call", None) if callable(ledger_of) else None
-    if not callable(by_call_of):
-        return None
-    by_agent = by_call_of()
-    if not isinstance(by_agent, Mapping):
-        return None
+    by_agent = by_call_of() if callable(by_call_of) else {}
+    by_agent = by_agent if isinstance(by_agent, Mapping) else {}
     kinds = _kinds()
     out: dict[str, Any] = {}
-    for agent, calls in sorted(by_agent.items()):
-        if not isinstance(calls, Mapping):
-            continue
+    for agent, stated in per_agent.items():
+        calls = by_agent.get(agent)
+        calls = calls if isinstance(calls, Mapping) else {}
         rows = {str(name): row for name, row in calls.items() if isinstance(row, Mapping)}
-        out[str(agent)] = {
-            **_tally(list(rows.values())),
+        out[agent] = {
+            "calls": _int(stated.get("llm_calls")),
+            "unreported_calls": _int(stated.get("unreported_calls")),
+            "output_tokens": _int(stated.get("output_tokens")),
             **{
                 kind: _tally([row for name, row in rows.items() if name in names])
                 for kind, names in kinds.items()
@@ -553,17 +569,19 @@ def efficiency_record(
     *,
     entries: Sequence[Any] = (),
     isr_reports: Mapping[str, Any] | None = None,
+    tokens: Mapping[str, Any] | None = None,
     partial_reason: str = "",
 ) -> dict[str, Any] | None:
     """``run_summary.efficiency`` as of now, or ``None`` when the run holds nothing to count.
 
     ``entries`` is the run's evidence ledger, in order; ``isr_reports`` the
-    analysts' final answers. ``partial_reason`` says why the record may miss
+    analysts' final answers; ``tokens`` the summary's own ``tokens`` block, whose
+    figures the record states. ``partial_reason`` says why the record may miss
     what the step the run stopped in did. Never raises.
     """
     try:
         record: dict[str, Any] = {"v": EFFICIENCY_VERSION}
-        inputs = inputs_record(container)
+        inputs = inputs_record(container, tokens)
         if inputs is not None:
             record["inputs"] = inputs
         held = list(entries or ())
@@ -576,7 +594,7 @@ def efficiency_record(
         rows_read = rows_read_record(held)
         if rows_read is not None:
             record["rows_read"] = rows_read
-        output = output_record(container)
+        output = output_record(container, tokens)
         if output is not None:
             record["output"] = output
         fingerprint = fingerprint_record(container)

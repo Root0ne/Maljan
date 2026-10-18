@@ -163,7 +163,10 @@ def test_the_record_and_the_report_name_an_agent_whose_calls_were_not_measured()
     ledger.add({"input_tokens": 60, "output_tokens": 2}, agent="static")
     ledger.add({"input_tokens": 9, "output_tokens": 2}, agent="reporter")
 
-    record = efficiency_record(_container(meter, ledger))
+    from maljan.analysis.run_summary import spend_blocks
+
+    tokens = spend_blocks(ledger.snapshot())["tokens"]
+    record = efficiency_record(_container(meter, ledger), tokens=tokens)
     assert record is not None
     assert record["inputs"]["unit"] == "characters"
     assert record["inputs"]["calls"] == {"reporter": 1, "static": 1}

@@ -259,7 +259,7 @@ def stopped_run_summary(state: dict[str, Any], container: Any, *, note: str) -> 
         # kept; otherwise the counts as of the stop.
         if isinstance(summary.get("efficiency"), dict):
             return
-        record = stopped_efficiency(state, container)
+        record = stopped_efficiency(state, container, summary.get("tokens"))
         if record is not None:
             summary["efficiency"] = record
 
@@ -270,7 +270,9 @@ def stopped_run_summary(state: dict[str, Any], container: Any, *, note: str) -> 
     return _degraded(summary, note)
 
 
-def stopped_efficiency(state: dict[str, Any], container: Any) -> dict[str, Any] | None:
+def stopped_efficiency(
+    state: dict[str, Any], container: Any, tokens: Any = None
+) -> dict[str, Any] | None:
     """What a stopped run had counted by the stop (``analysis.efficiency``), marked as such."""
     from maljan.analysis.disclosure import STOPPED_PART_WAY
     from maljan.analysis.efficiency import efficiency_record
@@ -279,6 +281,7 @@ def stopped_efficiency(state: dict[str, Any], container: Any) -> dict[str, Any] 
         container,
         entries=state.get("evidence_ledger") or [],
         isr_reports=state.get("isr_reports") or {},
+        tokens=tokens if isinstance(tokens, dict) else None,
         partial_reason=STOPPED_PART_WAY,
     )
 
@@ -527,7 +530,7 @@ def _with_efficiency(report: dict[str, Any], state: dict[str, Any], container: A
     if not isinstance(summary, dict) or not summary or isinstance(summary.get("efficiency"), dict):
         return
     try:
-        record = stopped_efficiency(state, container)
+        record = stopped_efficiency(state, container, summary.get("tokens"))
     except Exception as exc:  # noqa: BLE001 — every function here is total
         logger.debug("stopped run: the efficiency counts were not read (%s).", type(exc).__name__)
         return

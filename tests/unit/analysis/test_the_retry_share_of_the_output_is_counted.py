@@ -1,9 +1,10 @@
 """The validation retries' and drops questions' share of each agent's output is counted.
 
 The token ledger keeps each agent's calls by the name each call was made
-under, outside its snapshot so the summary's token block is unchanged; the
-efficiency record reads the share from provider-reported output tokens only,
-and counts the calls that reported none beside them.
+under, outside its snapshot so the summary's token block is unchanged. The
+efficiency record takes each agent's totals from the summary's own ``tokens``
+block, and from the ledger only the split by call name, so the two state one
+set of numbers; an agent with no name has no row.
 """
 
 from __future__ import annotations
@@ -11,6 +12,7 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 from maljan.analysis.efficiency import efficiency_lines, efficiency_record, output_record
+from maljan.analysis.run_summary import spend_blocks
 from maljan.core.token_ledger import (
     RETRY_DROPS_QUESTION_CALL,
     VALIDATION_RETRY_CALL,
@@ -30,7 +32,16 @@ def _ledger() -> TokenLedger:
         {"input_tokens": 9, "output_tokens": 100}, agent="static", call=RETRY_DROPS_QUESTION_CALL
     )
     ledger.add({"input_tokens": 9, "output_tokens": 40}, agent="judge", call="verdict")
+    ledger.add({"input_tokens": 1, "output_tokens": 1}, agent="", call=VALIDATION_RETRY_CALL)
     return ledger
+
+
+def _tokens(ledger: TokenLedger) -> dict:
+    return spend_blocks(ledger.snapshot())["tokens"]
+
+
+def _container(ledger: TokenLedger) -> SimpleNamespace:
+    return SimpleNamespace(get_token_ledger=lambda: ledger)
 
 
 def test_the_ledger_keeps_calls_by_name_outside_its_snapshot() -> None:
@@ -48,7 +59,8 @@ def test_the_ledger_keeps_calls_by_name_outside_its_snapshot() -> None:
 
 
 def test_each_agent_s_output_and_the_two_shares() -> None:
-    record = output_record(SimpleNamespace(get_token_ledger=_ledger))
+    ledger = _ledger()
+    record = output_record(_container(ledger), _tokens(ledger))
 
     assert record == {
         "judge": {
@@ -69,7 +81,8 @@ def test_each_agent_s_output_and_the_two_shares() -> None:
 
 
 def test_the_report_line_names_an_agent_that_was_asked_again() -> None:
-    record = efficiency_record(SimpleNamespace(get_token_ledger=_ledger))
+    ledger = _ledger()
+    record = efficiency_record(_container(ledger), tokens=_tokens(ledger))
     assert record is not None
 
     assert efficiency_lines(record) == [
@@ -82,7 +95,7 @@ def test_the_report_line_names_an_agent_that_was_asked_again() -> None:
 def test_a_run_never_asked_again_says_so() -> None:
     ledger = TokenLedger()
     ledger.add({"input_tokens": 1, "output_tokens": 2}, agent="static", call="tool loop turn")
-    record = efficiency_record(SimpleNamespace(get_token_ledger=lambda: ledger))
+    record = efficiency_record(_container(ledger), tokens=_tokens(ledger))
     assert record is not None
 
     assert efficiency_lines(record) == [
@@ -90,5 +103,21 @@ def test_a_run_never_asked_again_says_so() -> None:
     ]
 
 
-def test_no_ledger_is_no_part() -> None:
+def test_the_totals_are_the_summary_s_own_figures() -> None:
+    ledger = _ledger()
+    tokens = _tokens(ledger)
+    record = output_record(_container(ledger), tokens)
+    assert record is not None
+
+    for agent, row in record.items():
+        stated = tokens["per_agent"][agent]
+        assert (row["calls"], row["output_tokens"]) == (
+            stated["llm_calls"],
+            stated["output_tokens"],
+        )
+    assert "" not in record
+
+
+def test_no_tokens_block_is_no_part() -> None:
     assert output_record(SimpleNamespace()) is None
+    assert output_record(_container(_ledger()), None) is None

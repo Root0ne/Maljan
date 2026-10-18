@@ -289,7 +289,7 @@ def _disclosure(summary: dict[str, Any]) -> dict[str, Any]:
     )
 
 
-def _efficiency() -> dict[str, Any]:
+def _efficiency(tokens: dict[str, Any] | None = None) -> dict[str, Any]:
     """The efficiency record, built by the run's builder over a meter and a ledger that hold a row.
 
     One tool loop turn of the static analyst, measured as the loop's hook
@@ -358,8 +358,11 @@ def _efficiency() -> dict[str, Any]:
         repeated_of="ev_0001",
         seq=3,
     )
+    from maljan.analysis.run_summary import spend_blocks
+
     record = efficiency_record(
         container,
+        tokens=tokens or spend_blocks(ledger.snapshot()).get("tokens"),
         entries=[*_ledger(), read],
         isr_reports={"static": AgentISR(agent_id="static", domain="static", claims=[cites])},
     )

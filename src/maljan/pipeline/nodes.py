@@ -6728,7 +6728,12 @@ def make_report_node(
         if state.get("run_summary"):
             from maljan.analysis.efficiency import efficiency_record
 
-            _efficiency = efficiency_record(container, entries=_ledger, isr_reports=isr_reports)
+            _efficiency = efficiency_record(
+                container,
+                entries=_ledger,
+                isr_reports=isr_reports,
+                tokens=({**(state.get("run_summary") or {}), **_state_summary}).get("tokens"),
+            )
             if _efficiency is not None:
                 _state_summary["efficiency"] = _efficiency
                 _counted_input = dict(report.run_summary or {})
