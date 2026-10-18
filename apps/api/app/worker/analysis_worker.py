@@ -1150,13 +1150,18 @@ def _job_spill(container: Any) -> Any:
     return getter() if callable(getter) else None
 
 
-def _evidence_row(entry: dict[str, Any], *, job_id: uuid.UUID) -> Any:
+def _evidence_row(
+    entry: dict[str, Any], *, job_id: uuid.UUID, written_at: datetime | None = None
+) -> Any:
     """One ledger entry as the row that keeps it.
 
     Every one of the 30 fields ``maljan.schemas.evidence.LedgerEntry`` carries
     has a column here, which is what lets a reader of the stored ledger say why an output
     is empty instead of guessing. An absent value stays absent rather than
-    becoming a default, for the same reason.
+    becoming a default, for the same reason. ``written_at`` is the moment the
+    ledger is stored, the ``created_at`` of a call the recorder never stamped;
+    the stored ledger passes it so every column the row's digest covers is
+    known before the insert.
     """
     from app.models.evidence import EvidenceEntry
 
@@ -1167,9 +1172,9 @@ def _evidence_row(entry: dict[str, Any], *, job_id: uuid.UUID) -> Any:
         # measured run's thirty entries had one distinct ``created_at`` between
         # them. The entry knows: ``started_at`` is the call's own clock and
         # ``duration_ms`` is how long it took. A row whose entry was never
-        # stamped leaves the column to its server default rather than inventing
-        # a moment.
-        created_at=_returned_at(entry),
+        # stamped takes the moment the ledger is stored, which is what the
+        # server default gave, rather than inventing a moment.
+        created_at=_returned_at(entry) or written_at,
         job_id=job_id,
         entry_id=str(entry.get("id", ""))[:32],
         stage=str(entry.get("stage", "analysis"))[:32],
@@ -4595,8 +4600,19 @@ async def _store_the_report(
             f"{_unkept} evidence part(s) of job={job_id} were not kept; their references say why",
             extra={"job_id": job_id},
         )
-    for _entry in rows_to_store(_ledger, job_id=job_id):
-        db.add(_evidence_row(_entry, job_id=job_uuid))
+    # Each row's digest over every column it persists, and its place in the
+    # job's hash chain in ``seq`` order (``ledger_chain``), taken from the rows
+    # exactly as they are inserted: what a verifier reads back.
+    from app.services import ledger_chain
+
+    _written_at = datetime.now(UTC)
+    _rows = [
+        _evidence_row(_entry, job_id=job_uuid, written_at=_written_at)
+        for _entry in rows_to_store(_ledger, job_id=job_id)
+    ]
+    _head = ledger_chain.chain_rows(job_uuid, _rows)
+    for _row in _rows:
+        db.add(_row)
 
     logger.info(
         f"Saved {len(_ledger)} evidence entries for job={job_id}",

@@ -6,7 +6,9 @@ a run that failed before the report assembled still made the calls, and the
 calls are the part worth keeping.
 
 The application only ever inserts rows and deletes a job's whole ledger on a
-re-run; nothing in the database enforces that yet. What it does enforce is
+re-run; nothing in the database enforces that, but each row carries a digest
+and a chain value, so a changed, removed or reordered row is found by
+recomputing the chain (``app.services.ledger_chain``). What it does enforce is
 that a job holds each ``entry_id`` and each ``seq`` once, so a citation
 resolves to one call. ``seq`` is the order the ids were issued in across the
 whole job, and it is the ordering key: agent
@@ -117,6 +119,12 @@ class EvidenceEntry(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     # or the reason the upload failed. NULL where nothing was taken and on
     # every row older than the column.
     spilled: Mapped[Any | None] = mapped_column(JSONB, nullable=True)
+    # The row's place in the job's hash chain (``app.services.ledger_chain``):
+    # the SHA-256 of every column above in canonical form, and the chain value
+    # after it, the SHA-256 of the previous row's chain value and this digest
+    # in ``seq`` order. NULL on every row written before sealing existed.
+    digest: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    chain: Mapped[str | None] = mapped_column(String(64), nullable=True)
 
     __table_args__ = (
         UniqueConstraint("job_id", "entry_id", name="uq_evidence_entries_job_entry_id"),

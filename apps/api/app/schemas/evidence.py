@@ -72,6 +72,12 @@ class EvidenceEntryResponse(BaseModel):
     # the upload failed. Absent where nothing was taken and on an older row.
     # The bytes are served by ``GET /jobs/{id}/evidence/{entry_id}/objects/{part}``.
     spilled: list[dict[str, Any]] | None = Field(default=None, exclude_if=_absent)
+    # The row's digest over every column it persists, and the job's chain value
+    # after it in ``seq`` order (``app.services.ledger_chain``); with them a
+    # reader recomputes the chain from this page alone. Absent on a row written
+    # before sealing existed.
+    digest: str | None = Field(default=None, exclude_if=_absent)
+    chain: str | None = Field(default=None, exclude_if=_absent)
 
     @field_validator("structured_from_server", mode="before")
     @classmethod

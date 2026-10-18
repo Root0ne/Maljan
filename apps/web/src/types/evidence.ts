@@ -70,6 +70,11 @@ export interface EvidenceEntry {
    *  whole, one reference per part the run shortened, blanked or dropped.
    *  Absent where nothing was taken and on rows older than the column. */
   spilled?: EvidenceObjectRef[];
+  /** SHA-256 hex of every column the row persists, in canonical form, and the
+   *  job's hash-chain value after this row in `seq` order. Absent on rows
+   *  written before sealing existed. */
+  digest?: string;
+  chain?: string;
 }
 
 /** One part of an answer kept whole in object storage. `key` is absent and
