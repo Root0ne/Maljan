@@ -247,6 +247,7 @@ class EvidenceRecorder:
         model: str = "",
         agent_role: str | None = None,
         agent_tab: str | None = None,
+        spill: Any = None,
     ) -> None:
         self.agent = agent
         self.agent_tab = agent_tab or None
@@ -278,6 +279,11 @@ class EvidenceRecorder:
         # budget blanks the entry later, after the model has read it, and a
         # grounding check over what survived is a check over the wrong thing.
         self.corpus = corpus
+        # The job's store for the parts of an answer an entry does not keep
+        # whole (``schemas.evidence_spill``): given to every entry written
+        # here, so a byte budget or a structure eviction that later takes a
+        # part keeps it there first. ``None`` outside a job: nothing is kept.
+        self.spill = spill
 
     def note_turn(self, message: Any) -> None:
         """The model that gave ``message`` asked for the calls that follow it. Never raises."""
@@ -400,6 +406,7 @@ class EvidenceRecorder:
             agent_role=self.agent_role,
             agent_tab=self.agent_tab,
         )
+        entry._spill = self.spill
         self.entries.append(entry)
         self._by_id[entry.id] = entry
         # The function names a hash resolution read are names, and the event

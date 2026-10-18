@@ -43,7 +43,7 @@ import threading
 from collections.abc import Mapping, Sequence
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, PrivateAttr
 
 from maljan.schemas.tool_evidence import (
     CapturedToolOutput,
@@ -388,6 +388,21 @@ class LedgerEntry(BaseModel):
             "is placed by when its kind places none. None where the definition declares none."
         ),
     )
+    spilled: list[dict[str, Any]] | None = Field(
+        default=None,
+        # Like ``source``: an entry nothing was taken from dumps as it did.
+        exclude_if=lambda value: value is None,
+        description=(
+            "Where the parts of the answer this entry does not keep whole are kept whole "
+            "(schemas.evidence_spill): one reference per part the run shortened, blanked or "
+            "dropped (answer, structured_content, output, structured), each with the object "
+            "key, the byte length and the SHA-256 of the bytes, or with no key and the reason "
+            "the upload failed. None where nothing was taken, or the run had no store."
+        ),
+    )
+    # The job's store for those parts, set by the recorder that wrote the
+    # entry; never dumped and never copied into a dump. ``None`` outside a job.
+    _spill: Any = PrivateAttr(default=None)
 
     def to_captured(self) -> CapturedToolOutput:
         """This entry in the shape readers of the previous capture expect."""
@@ -649,7 +664,16 @@ def beside_bytes(entry: LedgerEntry) -> int:
         return 0
 
 
+def _spill_before_loss(entry: Any, part: str, value: Any, spill: Any = None) -> None:
+    """Keep ``value`` whole before the entry loses it, where the entry's job has a store."""
+    from maljan.schemas.evidence_spill import spill_into
+
+    sink = spill if spill is not None else getattr(entry, "_spill", None)
+    spill_into(entry, sink, part, value)
+
+
 def _drop_beside(entry: LedgerEntry) -> None:
+    _spill_before_loss(entry, "structured", entry.structured)
     entry.structured = None
     entry.structured_from_server = False
 
@@ -683,7 +707,9 @@ def _beside_cost(entry: Any) -> int:
         return 0
 
 
-def fit_structures_to_budget(entries: Sequence[Any], budget_bytes: int) -> int:
+def fit_structures_to_budget(
+    entries: Sequence[Any], budget_bytes: int, *, spill: Any = None
+) -> int:
     """Drop kept structures, largest first, until each agent's kept bytes fit its budget.
 
     The last pass over a run's ledger (ledger entries or their dumps) before
@@ -694,6 +720,11 @@ def fit_structures_to_budget(entries: Sequence[Any], budget_bytes: int) -> int:
     ``budget_bytes``. A text is never touched. Nothing happens when no entry
     carries such a structure (every built-in's ledger) or with no budget.
     Returns how many structures were dropped.
+
+    ``spill`` is the job's store (``schemas.evidence_spill.EvidenceSpill``)
+    for a pass over dumps, which carry none of their own: a dropped structure
+    is kept there whole and the dump references it. A ledger entry uses the
+    store its recorder gave it.
     """
     if budget_bytes <= 0:
         return 0
@@ -719,8 +750,11 @@ def fit_structures_to_budget(entries: Sequence[Any], budget_bytes: int) -> int:
                 break
             total -= _beside_cost(entry)
             if isinstance(entry, LedgerEntry):
+                if spill is not None and entry._spill is None:
+                    _spill_before_loss(entry, "structured", entry.structured, spill)
                 _drop_beside(entry)
             else:
+                _spill_before_loss(entry, "structured", entry["structured"], spill)
                 entry["structured"] = None
                 entry.pop("structured_from_server", None)
             dropped += 1
@@ -772,6 +806,12 @@ def apply_budget(
         if spent + size <= budget_bytes:
             spent += size
             continue
+        # What the budget takes is kept whole first, where the job has a store.
+        # A structure parsed from the output is that output read again; only
+        # one the server returned beside it is a part of its own.
+        _spill_before_loss(entry, "output", entry.output)
+        if entry.structured_from_server:
+            _spill_before_loss(entry, "structured", entry.structured)
         entry.output = ""
         entry.structured = None
         entry.structured_from_server = False

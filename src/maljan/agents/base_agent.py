@@ -4174,6 +4174,9 @@ class BaseAnalyst(BudgetMeter, ABC):
         # The run's record of what its tools answered, handed down by the
         # container. ``None`` for an agent built outside a job.
         self.evidence_corpus: Any = None
+        # The job's store for the parts of an answer an entry does not keep
+        # whole (``schemas.evidence_spill``). ``None`` outside a job.
+        self.evidence_spill: Any = None
         # What the optional ``maljan-findings`` block carried, accumulated as
         # the loop answers and drained onto the ISR the analyst returns. A
         # buffer rather than a return value because the block arrives with the
@@ -5328,6 +5331,8 @@ class BaseAnalyst(BudgetMeter, ABC):
             sink=self._event_sink(),
             # What the run saw, before the byte budget trims what it keeps.
             corpus=getattr(self, "evidence_corpus", None),
+            # Where the parts of an answer an entry does not keep are kept whole.
+            spill=getattr(self, "evidence_spill", None),
             # The model a call is filed under until a turn names another.
             model=self._model_label(),
             # The role and tab this agent's definition declares, stored on each entry.
