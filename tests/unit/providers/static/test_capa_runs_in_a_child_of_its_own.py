@@ -628,3 +628,52 @@ class TestTheRunDirectoryGoesWithTheJob:
         assert all(job_dir in p.parents for p in base.rglob("*") if p != job_dir)
         # And nothing went to the temporary directory.
         assert list((tmp_path / "tmp").iterdir()) == []
+
+    def test_a_run_with_no_job_first_sweeps_what_killed_runs_left_past_the_ttl(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv(staging.STAGING_TTL_ENV, "1")
+        loose = Path(tempfile.gettempdir())
+        stale = loose / "maljan-capa-left"
+        (stale / ".cache").mkdir(parents=True)
+        (stale / ".cache" / "capa.cache").write_bytes(b"x")
+        fresh = loose / "maljan-capa-running"
+        fresh.mkdir()
+        other = loose / "someone-else"
+        other.mkdir()
+        hours_ago = time.time() - 2 * 3600
+        for path in (other, stale / ".cache" / "capa.cache", stale / ".cache", stale):
+            os.utime(path, (hours_ago, hours_ago))
+        sample, rules = _sample_and_rules(tmp_path)
+
+        assert _run(sample, rules, _REPORT) is not None
+
+        # The stale one went; one touched within the TTL, and anything not a
+        # capa run's, stays; the run's own directory went when it ended.
+        assert sorted(p.name for p in loose.iterdir()) == ["maljan-capa-running", "someone-else"]
+
+    def test_a_ttl_of_zero_sweeps_nothing(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv(staging.STAGING_TTL_ENV, "0")
+        stale = Path(tempfile.gettempdir()) / "maljan-capa-left"
+        stale.mkdir()
+        os.utime(stale, (0, 0))
+        sample, rules = _sample_and_rules(tmp_path)
+
+        assert _run(sample, rules, _REPORT) is not None
+
+        assert stale.is_dir()
+
+    def test_a_run_in_a_job_does_not_sweep_the_temporary_directory(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, _job_capa: Path
+    ) -> None:
+        monkeypatch.setenv(staging.STAGING_TTL_ENV, "1")
+        stale = Path(tempfile.gettempdir()) / "maljan-capa-left"
+        stale.mkdir()
+        os.utime(stale, (0, 0))
+        sample, rules = _sample_and_rules(tmp_path)
+
+        assert _run(sample, rules, _REPORT, scratch=_job_capa) is not None
+
+        assert stale.is_dir()

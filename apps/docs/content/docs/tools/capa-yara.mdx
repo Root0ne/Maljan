@@ -52,7 +52,10 @@ the worker, is the isolation work that closes that, and it is not done yet.
 Its run directory is `<staging base>/job-…/capa/run-*`, in the job's own staging directory, so the
 job's teardown removes it however the run ended; a run with no job (a script,
 an analysis server started by hand) gets a private temporary directory of its
-own (`maljan-capa-*`), removed when the run ends. It dies with the process that
+own (`maljan-capa-*`), removed when the run ends. A run with no job whose
+process was killed outright leaves its directory; the next run with no job
+removes such directories of the same user once nothing in them has changed for
+the staging TTL (`MALJAN_STAGING_TTL_HOURS`, a day by default; zero keeps them). It dies with the process that
 started it, whether that process is killed, exits or has its process group
 stopped.
 

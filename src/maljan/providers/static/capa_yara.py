@@ -26,6 +26,7 @@ import json
 import os
 import shutil
 import signal
+import stat
 import subprocess
 import sys
 import tempfile
@@ -120,6 +121,37 @@ _GRACE_SECONDS = 5.0
 _POLL_SECONDS = 0.05
 
 
+def _sweep_loose_runs() -> None:
+    """Remove the ``maljan-capa-*`` directories runs with no job left, once past the TTL.
+
+    A run removes its own directory when it ends; one whose process was
+    killed outright leaves it, and no job's teardown or server's sweep looks
+    in the system's temporary directory. So the next run with no job sweeps
+    there before it makes its own: a directory of this user's whose newest
+    mtime is older than the staging TTL (``MALJAN_STAGING_TTL_HOURS``, the
+    one the analysis server sweeps its staging by) goes. A live run touches
+    its directory as capa writes its cache and its answer, and no capa run
+    lasts a TTL. Never raises: a sweep that fails costs only the sweep.
+    """
+    ttl = staging.staging_ttl_seconds()
+    if ttl <= 0:
+        return
+    cutoff = time.time() - ttl
+    try:
+        entries = list(Path(tempfile.gettempdir()).glob(f"{_LOOSE_RUN_PREFIX}*"))
+    except OSError:
+        return
+    for entry in entries:
+        try:
+            info = entry.lstat()
+        except OSError:
+            continue
+        if not stat.S_ISDIR(info.st_mode) or info.st_uid != os.getuid():
+            continue
+        if staging.newest_mtime(entry) < cutoff:
+            staging.remove_tree(entry)
+
+
 def _run_directory(scratch: str | Path | None) -> Path:
     """A new directory, only this user's, for one run: in the job's own directory when one exists.
 
@@ -134,8 +166,9 @@ def _run_directory(scratch: str | Path | None) -> Path:
     With neither — a script calling the tool, a tool server started by hand —
     no job directory exists, and the run gets a temporary directory of its
     own (``tempfile.mkdtemp``, 0o700, ``maljan-capa-*`` in the system's
-    temporary directory) rather than one under the staging base that no
-    teardown and no sweep would reach. Every one is removed when the run ends.
+    temporary directory), and first sweeps the ones a killed run left there
+    past the staging TTL (``_sweep_loose_runs``). Every one is removed when
+    the run ends.
     """
     if scratch is not None:
         parent = staging.private_dir(Path(scratch))
@@ -143,6 +176,7 @@ def _run_directory(scratch: str | Path | None) -> Path:
         base = staging.staging_base()
         root = staging.staging_root()
         if root == base:
+            _sweep_loose_runs()
             return Path(tempfile.mkdtemp(prefix=_LOOSE_RUN_PREFIX))
         staging.private_dir(base)
         staging.private_dir(root)
