@@ -357,6 +357,8 @@ class EvidenceRecorder:
         guard_answer: bool = False,
         source: str | None = None,
         structured_content: dict[str, Any] | None = None,
+        whole: str | None = None,
+        whole_structure: dict[str, Any] | None = None,
     ) -> LedgerEntry:
         """Append one entry and return it, so the caller can quote its id.
 
@@ -375,6 +377,15 @@ class EvidenceRecorder:
         later from the tool's name. ``structured_content`` is the structured
         answer the tool's server returned beside its text (MCP
         ``structuredContent``), filed on the entry as returned.
+
+        ``whole`` is the answer as the tool gave it before the guardrail, and
+        ``whole_structure`` the structured answer its server returned beside
+        it, whether or not it reached this call. Where the job has a store, an
+        entry that does not hold them keeps a reference to them whole
+        (``schemas.evidence_spill``): the answer when the guardrail cut it or
+        the conversation had no room for it, the structure when the entry
+        keeps none although it adds something to the text. A repeat keeps
+        neither; the entry it names holds the answer.
         """
         if repeated_of:
             repeated_of = self.holder_of(repeated_of)
@@ -407,6 +418,10 @@ class EvidenceRecorder:
             agent_tab=self.agent_tab,
         )
         entry._spill = self.spill
+        if self.spill is not None and not repeated_of:
+            self._keep_whole(
+                entry, output, whole, whole_structure, lost=not_shown is not None or bool(cut)
+            )
         self.entries.append(entry)
         self._by_id[entry.id] = entry
         # The function names a hash resolution read are names, and the event
@@ -453,6 +468,26 @@ class EvidenceRecorder:
             repeated_of=entry.repeated_of or "",
         )
         return entry
+
+    def _keep_whole(
+        self,
+        entry: LedgerEntry,
+        output: str,
+        whole: str | None,
+        structure: dict[str, Any] | None,
+        *,
+        lost: bool,
+    ) -> None:
+        """Keep the parts of the answer ``entry`` does not hold whole in the job's store."""
+        from maljan.schemas.evidence import _structured_beside, parse_structured
+        from maljan.schemas.evidence_spill import ANSWER, STRUCTURED_CONTENT, spill_into
+
+        if whole is not None and lost:
+            spill_into(entry, self.spill, ANSWER, whole)
+        if structure and not entry.structured_from_server:
+            text = whole if whole is not None else output
+            if _structured_beside(structure, text, parse_structured(text)) is not None:
+                spill_into(entry, self.spill, STRUCTURED_CONTENT, structure)
 
     def record_repeat(
         self,
@@ -1442,6 +1477,8 @@ def _record_tool(
         repeated: str | None,
         not_shown: int | None = None,
         cut: int | None = None,
+        whole: str | None = None,
+        whole_structure: dict[str, Any] | None = None,
     ) -> str:
         text = result_text(value)
         raw = _was_repaired(kwargs)
@@ -1487,6 +1524,8 @@ def _record_tool(
             not_shown=not_shown,
             cut=cut,
             structured_content=None if same else structured_content_of(value),
+            whole=whole,
+            whole_structure=whole_structure,
         )
         # A repeat is noted under the entry that holds its answer, so a later
         # served or refused identical call names that entry, never the repeat.
@@ -1609,6 +1648,8 @@ def _record_tool(
                     repeated,
                     call_answer.not_shown,
                     call_answer.cut,
+                    call_answer.whole,
+                    call_answer.structure,
                 )
             except SampleNotOpened as exc:
                 return _stopped(kwargs, started, wall_clock, exc, repeated)
@@ -1646,6 +1687,8 @@ def _record_tool(
                     repeated,
                     call_answer.not_shown,
                     call_answer.cut,
+                    call_answer.whole,
+                    call_answer.structure,
                 )
             except SampleNotOpened as exc:
                 return _stopped(kwargs, started, wall_clock, exc, repeated)
