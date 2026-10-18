@@ -275,8 +275,8 @@ def unwritable_reason(answer: BaseModel) -> str | None:
 def unwritable_reason_of(exc: BaseException) -> str:
     """What :func:`unwritable_reason` says for the writer's refusal ``exc``."""
     return (
-        "the stored value is not served: it is nested deeper than an answer can be "
-        f"written ({type(exc).__name__}: {exc}); reset this key or save it again"
+        "the stored value is not served: the answer's writer refused it "
+        f"({type(exc).__name__}: {exc}); reset this key or save it again"
     )
 
 

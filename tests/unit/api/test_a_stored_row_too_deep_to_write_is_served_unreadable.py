@@ -86,14 +86,14 @@ def test_a_row_too_deep_is_served_unreadable_and_the_rest_as_before(
     assert values[key]["value"] is None
     assert values[key]["source"] == "ui"
     reason = values[key]["unreadable"]
-    assert "nested deeper than an answer can be written" in reason
+    assert "the answer's writer refused it" in reason
     assert values["core.llm.expert_max_tokens"]["value"] == 4096
     assert values["core.llm.expert_max_tokens"]["unreadable"] is None
 
     export = _get(rows, "/api/v1/settings/export")
     assert key not in export["values"]
     assert list(export["unreadable"]) == [key]
-    assert "nested deeper than an answer can be written" in export["unreadable"][key]
+    assert "the answer's writer refused it" in export["unreadable"][key]
     assert export["values"]["core.llm.expert_max_tokens"] == 4096
 
 

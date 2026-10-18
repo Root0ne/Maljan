@@ -10,7 +10,7 @@ import type { SettingValue } from "@/types/settings";
 import StoredValueRefusedNote, { unreadableNote } from "../StoredValueRefusedNote";
 
 const REASON =
-  "the stored value is not served: it is nested deeper than an answer can be written " +
+  "the stored value is not served: the answer's writer refused it " +
   "(ValueError: Circular reference detected (depth exceeded)); reset this key or save it again";
 
 const unserved: SettingValue = {
@@ -39,7 +39,7 @@ describe("a stored value the API did not serve", () => {
       createElement(StoredValueRefusedNote, { settingKey: "core.llm.provider", current: unserved })
     );
     expect(html).toContain("data-stored-value-unreadable");
-    expect(html).toContain("nested deeper than an answer can be written");
+    expect(html).toContain("the answer&#x27;s writer refused it");
     expect(renderToStaticMarkup(createElement(StoredValueRefusedNote, { settingKey: "k" }))).toBe("");
   });
 });
