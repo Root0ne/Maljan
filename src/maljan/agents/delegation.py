@@ -763,9 +763,12 @@ def _hand_over_the_record(caller: Any, callee: Any, *, still_running: bool = Tru
 
     ``still_running`` is false when the caller's loop ended while this ask was
     in flight. Its node has already failed it and drained it, so anything
-    appended now would either be lost or re-emitted in a later round. The
-    callee is drained all the same — its buffers must not carry into its next
-    run — and what could not be handed over is logged and counted.
+    appended to the caller now would either be lost or re-emitted in a later
+    round. The callee is drained all the same — its buffers must not carry
+    into its next run — and its ledger entries go to the job's ledger through
+    the container (``ServiceContainer.hand_over_evidence``): their ids were
+    issued and may already have been shown. The budget rows and the validation
+    state, which belong to the caller's finished round, are logged and dropped.
     """
     try:
         entries = callee.drain_evidence_entries()
@@ -774,12 +777,19 @@ def _hand_over_the_record(caller: Any, callee: Any, *, still_running: bool = Tru
         entries = []
     rows = _drain_budget_rows(callee)
     if not still_running:
+        container = getattr(caller, "_container", None) or getattr(callee, "_container", None)
+        hand_over = getattr(container, "hand_over_evidence", None)
+        handed = False
+        if entries and callable(hand_over):
+            hand_over(entries)
+            handed = True
         logger.warning(
-            "delegation %s -> %s: the caller's loop ended first; %d ledger entr(y/ies), "
+            "delegation %s -> %s: the caller's loop ended first; %d ledger entr(y/ies) %s, "
             "%d budget row(s) and the callee's validation state are dropped.",
             caller.name,
             callee.name,
             len(entries),
+            "go to the job's ledger" if handed or not entries else "are dropped (no container)",
             len(rows),
         )
         _drop_the_callee_s_validation_state(callee)

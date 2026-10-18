@@ -45,23 +45,10 @@ async def _probe_redis() -> None:
 
 
 async def _probe_minio() -> None:
-    from minio import Minio
-    from pydantic import SecretStr
+    from app.services import object_store
 
-    secret = settings.minio_secret_key
-    secret_value = secret.get_secret_value() if isinstance(secret, SecretStr) else str(secret)
-
-    def _check() -> None:
-        # The MinIO SDK is synchronous — keep it off the event loop.
-        client = Minio(
-            settings.minio_endpoint,
-            access_key=settings.minio_access_key,
-            secret_key=secret_value,
-            secure=settings.minio_secure,
-        )
-        client.bucket_exists(settings.minio_bucket)
-
-    await asyncio.to_thread(_check)
+    # The MinIO SDK is synchronous — keep it off the event loop.
+    await asyncio.to_thread(object_store.probe)
 
 
 async def _probe_memory() -> dict[str, Any]:

@@ -402,12 +402,13 @@ def test_deleting_a_report_removes_it_and_the_stored_object(monkeypatch):
     db.execute = AsyncMock(return_value=result)
     minio = MagicMock()
     monkeypatch.setattr(module, "_minio_client", lambda: minio)
+    from app.config import settings
 
     r = _build_client(db, sample, user).delete(
         f"/api/v1/samples/{sample.id}/sandbox-reports/{report_id}"
     )
     assert r.status_code == 204
-    minio.remove_object.assert_called_once_with(module.settings.minio_bucket, row.storage_path)
+    minio.remove_object.assert_called_once_with(settings.minio_bucket, row.storage_path)
 
 
 def test_deleting_an_unknown_report_is_a_404(monkeypatch):

@@ -32,6 +32,7 @@ import os
 import threading
 import uuid
 import weakref
+from collections.abc import Callable, Iterable
 from contextlib import suppress
 from contextvars import ContextVar
 from dataclasses import replace
@@ -684,6 +685,17 @@ class ServiceContainer:
         # Per-job source of evidence-ledger ids. One counter for the whole job
         # so ``ev_0007`` names one tool call rather than one per agent.
         self._evidence_counter = EvidenceCounter()
+        # Everything that holds entries this counter issued before they reach
+        # the run's ledger, asked by ``collect_undrained_evidence``: every agent
+        # this container builds registers itself, and any other writer that
+        # holds entries registers a way to hand them over. Entries whose holder
+        # can no longer hand them to a node (a delegation answered after its
+        # caller's loop ended) are parked on ``_handed_over_evidence``.
+        self._evidence_holders: list[Callable[[], Iterable[Any]]] = []
+        self._handed_over_evidence: list[Any] = []
+        # Every entry ``collect_undrained_evidence`` has collected, by id, kept
+        # for the job's length so no later caller can miss one.
+        self._collected_evidence: dict[str, Any] = {}
 
         # The window this job's models were served with, and the cap it gives
         # one tool answer. Built on first use rather than here: learning the
@@ -1282,6 +1294,76 @@ class ServiceContainer:
         """Return the per-job counter that issues evidence-ledger ids."""
         return self._evidence_counter
 
+    def register_evidence_holder(self, holder: Callable[[], Iterable[Any]]) -> None:
+        """Name something that may hold ledger entries no node has written yet.
+
+        ``holder`` returns the entries it still holds; it may hand over ones
+        already on the run's ledger, which ``collect_undrained_evidence``
+        leaves out by id. Every agent ``get_agent`` and ``get_judge_agent``
+        build is registered with its own drain.
+        """
+        with self._lock:
+            self._evidence_holders.append(holder)
+
+    def _hold_the_evidence_of(self, agent: Any) -> None:
+        drain = getattr(agent, "drain_evidence_entries", None)
+        if callable(drain):
+            self._evidence_holders.append(drain)
+
+    def hand_over_evidence(self, entries: Iterable[Any]) -> None:
+        """Keep entries for the run's ledger whose holder has no node left to drain it."""
+        entries = list(entries)
+        if not entries:
+            return
+        with self._lock:
+            self._handed_over_evidence.extend(entries)
+
+    def collect_undrained_evidence(self, known_ids: Iterable[str] = ()) -> list[Any]:
+        """Every entry this job's counter issued that the caller's ledger lacks.
+
+        The one place a path that persists or reports a ledger asks for what no
+        node drained: entries handed over through ``hand_over_evidence``, and
+        whatever every registered holder still holds — an analyst whose stage
+        node never ran its drain (a revision that raised, an analyst asked at
+        the verdict stage, a run stopped mid-stage), a judge loop. The ids were
+        issued, and the report and the console may already have shown them, so
+        the entries belong on the ledger.
+
+        Collecting loses nothing. Every entry ever collected is kept here, and
+        each call answers with all of them less ``known_ids``, the ids the
+        caller's ledger already holds. A caller that collected and then never
+        wrote what it got (a report node cancelled after its collection) leaves
+        the entries for the next caller (the stopped run's keep), which finds
+        them although the holders are already drained. An id collected twice
+        keeps its first entry. In ``seq`` order. Never raises.
+        """
+        with self._lock:
+            parked = self._handed_over_evidence
+            self._handed_over_evidence = []
+            holders = list(self._evidence_holders)
+        found: list[Any] = list(parked)
+        for holder in holders:
+            try:
+                found.extend(holder() or ())
+            except Exception as exc:  # noqa: BLE001 — a ledger read never fails a run
+                logger.warning("evidence: a holder's entries could not be read (%s).", exc)
+        with self._lock:
+            for entry in found:
+                entry_id = str(getattr(entry, "id", "") or "")
+                if entry_id and entry_id not in self._collected_evidence:
+                    self._collected_evidence[entry_id] = entry
+            kept = list(self._collected_evidence.items())
+        known = {str(entry_id) for entry_id in known_ids}
+        collected = [entry for entry_id, entry in kept if entry_id not in known]
+        if collected:
+            logger.warning(
+                "evidence: %d entr(y/ies) no node had written reach the ledger now (%s).",
+                len(collected),
+                ", ".join(str(entry.id) for entry in collected[:20]),
+            )
+        collected.sort(key=lambda entry: int(getattr(entry, "seq", 0) or 0))
+        return collected
+
     def drain_all_judge_evidence(self) -> list[Any]:
         """Every entry the judge agents gathered, drained from each cached role.
 
@@ -1483,6 +1565,7 @@ class ServiceContainer:
             agent._container = self
             agent._resolved = resolved
             self._agent_cache[name] = agent
+            self._hold_the_evidence_of(agent)
             return agent
 
     def get_judge_agent(self, role: str = "judge") -> Any:
@@ -1517,6 +1600,7 @@ class ServiceContainer:
                 # like a healthy one that had already attached.
                 cached._container = self
                 self._judge_agent_cache[role] = cached
+                self._hold_the_evidence_of(cached)
             return cached
 
     async def aclose(self) -> None:

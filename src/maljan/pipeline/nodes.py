@@ -1879,6 +1879,19 @@ def make_triage_node(
         def _elapsed_ms() -> int:
             return int((time.monotonic() - started) * 1000)
 
+        def _held_by_the_pack() -> list[Any]:
+            # What the pack wrote, under the budget a finished pack applies; the
+            # entries this node puts on the ledger itself are left out by id.
+            held = list(recorder.entries)
+            apply_budget(budgeted_entries(held), inputs.evidence_budget_bytes)
+            return held
+
+        # A run stopped while the pack runs on its thread never reaches the
+        # writes below, and the ids the pack issued are the run's all the same.
+        register_holder = getattr(container, "register_evidence_holder", None)
+        if callable(register_holder):
+            register_holder(_held_by_the_pack)
+
         try:
             result = await asyncio.to_thread(
                 run_pack,
@@ -6057,6 +6070,16 @@ def make_report_node(
             except Exception as exc:  # noqa: BLE001 — one bad row is not a lost report
                 _unreadable_rows += 1
                 logger.debug("report_node: unreadable ledger row skipped (%s).", exc)
+        # The entries no node drained — an analyst asked at the verdict stage,
+        # a revision that raised, a delegation answered after its caller's
+        # loop ended — are the run's too: their ids were issued and may have
+        # been shown. They go onto the state channel below with the provider's.
+        _undrained: list[LedgerEntry] = []
+        try:
+            _undrained = list(container.collect_undrained_evidence(entry.id for entry in _ledger))
+        except Exception as exc:  # noqa: BLE001 — the ledger never fails a report
+            logger.warning("report_node: undrained evidence not collected (%s).", exc)
+        _ledger.extend(_undrained)
         # The entries the evidence-only static provider could not write itself.
         # They go back onto the state channel below, not only into this local
         # list: the report cites their ids, and a citation the evidence
@@ -6709,10 +6732,12 @@ def make_report_node(
             "malware_report_markdown": markdown,
             "stix_bundle_extended": extended_dump,
         }
-        if _capa_entries:
-            # ``evidence_ledger`` is append-only, so this adds the provider's
-            # entries to the run's rather than replacing it.
-            result["evidence_ledger"] = [e.model_dump(mode="json") for e in _capa_entries]
+        if _undrained or _capa_entries:
+            # ``evidence_ledger`` is append-only, so this adds the undrained
+            # and the provider's entries to the run's rather than replacing it.
+            result["evidence_ledger"] = [
+                e.model_dump(mode="json") for e in (*_undrained, *_capa_entries)
+            ]
         # ``run_summary`` on the state is what the API's own column carries, so
         # anything a reader is meant to see outside the full report has to be
         # added here too. Only written when there is something to add — an

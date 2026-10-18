@@ -52,6 +52,20 @@ export interface EvidenceEntry {
   symbol?: string | null;
   started_at?: number | null;
   created_at: string | null;
+  /** Where the tool's declaration lives (`mcp:<server key>`, `provider:<id>`,
+   *  `sandbox`, `pack`), what it declared about the answer, the reputation
+   *  record, and the operator's pack step, as the entry recorded them. Absent
+   *  where the entry carried none and on rows older than the columns. */
+  source?: string;
+  facts?: Record<string, unknown>;
+  reputation?: Record<string, unknown>;
+  pack_step?: Record<string, unknown>;
+  /** True when `structured` is the server's own structured answer beside a
+   *  prose text; absent otherwise. */
+  structured_from_server?: true;
+  /** The role and console tab the calling agent's definition declared. */
+  agent_role?: string;
+  agent_tab?: string;
 }
 
 export interface EvidenceListResponse {

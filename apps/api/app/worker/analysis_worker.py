@@ -1147,8 +1147,8 @@ def _returned_at(entry: dict[str, Any]) -> datetime | None:
 def _evidence_row(entry: dict[str, Any], *, job_id: uuid.UUID) -> Any:
     """One ledger entry as the row that keeps it.
 
-    Every field ``maljan.schemas.evidence.LedgerEntry`` carries has a column
-    here, which is what lets a reader of the stored ledger say why an output
+    Every one of the 29 fields ``maljan.schemas.evidence.LedgerEntry`` carries
+    has a column here, which is what lets a reader of the stored ledger say why an output
     is empty instead of guessing. An absent value stays absent rather than
     becoming a default, for the same reason.
     """
@@ -1193,7 +1193,56 @@ def _evidence_row(entry: dict[str, Any], *, job_id: uuid.UUID) -> Any:
         repeated_of=(str(entry["repeated_of"])[:32] if entry.get("repeated_of") else None),
         symbol=(str(entry["symbol"])[:200] if entry.get("symbol") else None),
         started_at=(float(entry["started_at"]) if entry.get("started_at") else None),
+        # The seven fields the entry carries beside the call itself, whole and
+        # uncut. Each is absent where the entry has none, and
+        # ``structured_from_server`` is kept only when it is true, the rule
+        # ``LedgerEntry``'s dump keeps.
+        source=(str(entry["source"]) if entry.get("source") is not None else None),
+        facts=entry.get("facts"),
+        reputation=entry.get("reputation"),
+        pack_step=entry.get("pack_step"),
+        structured_from_server=(True if entry.get("structured_from_server") is True else None),
+        agent_role=(str(entry["agent_role"]) if entry.get("agent_role") is not None else None),
+        agent_tab=(str(entry["agent_tab"]) if entry.get("agent_tab") is not None else None),
     )
+
+
+def rows_to_store(ledger: list[Any], *, job_id: str) -> list[dict[str, Any]]:
+    """The ledger's entries as they are written: one per id and per ``seq``, in ``seq`` order.
+
+    The table holds each ``entry_id`` and each ``seq`` once per job, and a
+    second row under either would refuse the whole stored report. The first
+    entry under an id or a position is kept, as the container's collection
+    keeps it, and every one left out is named in a warning. The state holds
+    the entries in node-completion order; written in ``seq`` order, the table's
+    row order is the order the ids were issued in.
+    """
+    ids: set[str] = set()
+    seqs: set[int] = set()
+    kept: list[dict[str, Any]] = []
+    repeated: list[str] = []
+    for entry in ledger:
+        if not isinstance(entry, dict):
+            continue
+        entry_id = str(entry.get("id", ""))[:32]
+        seq = int(entry.get("seq", 0) or 0)
+        if entry_id in ids or seq in seqs:
+            repeated.append(f"{entry_id or '?'}/seq {seq}")
+            continue
+        ids.add(entry_id)
+        seqs.add(seq)
+        kept.append(entry)
+    if repeated:
+        logger.warning(
+            "Evidence ledger of job=%s holds %d entr(y/ies) under an id or seq already "
+            "stored; the first is kept, these are not: %s",
+            job_id,
+            len(repeated),
+            ", ".join(repeated),
+            extra={"job_id": job_id},
+        )
+    kept.sort(key=lambda entry: int(entry.get("seq", 0) or 0))
+    return kept
 
 
 def _transcript_row(message: dict[str, Any], *, report_id: uuid.UUID, seq: int) -> Any:
@@ -1860,6 +1909,7 @@ async def keep_the_built_report(
     override_keys: Any,
     hash_mismatch_reason: str | None,
     scale_record: Mapping[str, Any] | None = None,
+    container: Any = None,
 ) -> bool:
     """Store a report a failed run built, marked incomplete. Never raises.
 
@@ -1869,10 +1919,13 @@ async def keep_the_built_report(
     with ``incomplete_reason`` set to ``note``, and the note is added to the
     degradation reasons the report and the run summary already carry, so every
     surface that shows a degraded run shows this one. The job row is not
-    touched: it stays ``failed``.
+    touched: it stays ``failed``. The ledger stored is the state's with every
+    entry ``container``'s agents still held added (``with_undrained_evidence``).
     """
     try:
-        state = dict(built)
+        from maljan.pipeline.state import with_undrained_evidence
+
+        state = with_undrained_evidence(dict(built), container)
         malware_report = state.get("malware_report")
         if isinstance(malware_report, dict):
             malware_report = dict(malware_report)
@@ -2715,19 +2768,9 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
         static_sample_paths: dict[str, str] = {}
         server_sample_paths: dict[str, str] = {}
         try:
-            from minio import Minio
-            from pydantic import SecretStr as _SecretStr
+            from app.services import object_store
 
-            secret = settings.minio_secret_key
-            secret_value = (
-                secret.get_secret_value() if isinstance(secret, _SecretStr) else str(secret)
-            )
-            minio_client = Minio(
-                settings.minio_endpoint,
-                access_key=settings.minio_access_key,
-                secret_key=secret_value,
-                secure=settings.minio_secure,
-            )
+            minio_client = object_store.client()
             # Re-derive the storage path from the sha256 instead of trusting
             # the value in the DB row (defence in depth against tampering).
             derived_path = f"samples/{sample_sha256[:2]}/{sample_sha256}"
@@ -2764,16 +2807,11 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
             # carrying the job's heartbeat, its cancellation poller and every
             # event the pipeline publishes. A slow store would stop all three
             # for the length of the download.
-            await asyncio.to_thread(
-                minio_client.fget_object,
-                settings.minio_bucket,
-                derived_path,
-                temp_path,
-            )
-            # 0o600 on the file; the parent dir is already 0o700 (owner-
-            # only) via ``sample_files.temp_dir()``, so this file is
-            # unreachable to anyone but the worker's own user either way.
-            os.chmod(temp_path, 0o600)
+            # 0o600 on the file (``object_store.download``); the parent dir
+            # is already 0o700 (owner-only) via ``sample_files.temp_dir()``,
+            # so this file is unreachable to anyone but the worker's own user
+            # either way.
+            await asyncio.to_thread(object_store.download, minio_client, derived_path, temp_path)
             logger.info(
                 "Downloaded sample from MinIO: %s -> %s",
                 sample_storage_path,
@@ -3089,6 +3127,12 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
         await _publish_event(redis_conn, job_id, "phase_change", {"phase": "reporting"})
 
         # ── 4. Build the report ──────────────────────────────
+        # Every entry the job's counter issued is on the ledger that is
+        # stored, including what no node drained (``with_undrained_evidence``);
+        # gathered before the run summary below counts the ledger.
+        from maljan.pipeline.state import with_undrained_evidence
+
+        pipeline_result = with_undrained_evidence(pipeline_result, getattr(app, "container", None))
         # The enrichment job queued after a stored report is named in its
         # disclosure block, with what it may reach, so that block never says
         # nothing left the machine while a lookup is still to come.
@@ -3290,6 +3334,7 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
                     job_uuid=job_uuid,
                     job_id=job_id,
                     built=built,
+                    container=getattr(app, "container", None),
                     note=kept_report_note(failed_step, exc, error_id),
                     transcript=transcript,
                     core_settings=core_settings,
@@ -4506,9 +4551,7 @@ async def _store_the_report(
         [_entry for _entry in _ledger if isinstance(_entry, dict)],
         evidence_budget_of(run_summary, core_settings),
     )
-    for _entry in _ledger:
-        if not isinstance(_entry, dict):
-            continue
+    for _entry in rows_to_store(_ledger, job_id=job_id):
         db.add(_evidence_row(_entry, job_id=job_uuid))
 
     logger.info(

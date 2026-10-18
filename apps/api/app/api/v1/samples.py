@@ -20,7 +20,6 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, UploadFile, status
-from pydantic import SecretStr
 from sqlalchemy import delete, func, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -36,7 +35,7 @@ from app.models.sandbox_report import SandboxReportRow
 from app.models.user import User
 from app.runtime_config import runtime_config
 from app.schemas.job import SampleListResponse, SampleResponse
-from app.services import audit
+from app.services import audit, object_store
 from app.services.settings_service import effective_core_settings
 
 logger = get_logger("api.samples")
@@ -44,71 +43,13 @@ logger = get_logger("api.samples")
 router = APIRouter(prefix="/samples", tags=["Samples"])
 
 
-def _minio_secret() -> str:
-    raw = settings.minio_secret_key
-    return raw.get_secret_value() if isinstance(raw, SecretStr) else str(raw)
-
-
 def _minio_client() -> Any:
-    """Build a MinIO client from settings.
-
-    Single construction point so the upload and delete paths cannot drift apart
-    (the client used to be hand-built inline at every site).
-    """
-    from minio import Minio
-
-    return Minio(
-        settings.minio_endpoint,
-        access_key=settings.minio_access_key,
-        secret_key=_minio_secret(),
-        secure=settings.minio_secure,
-    )
+    """The object store's client (``app.services.object_store``)."""
+    return object_store.client()
 
 
 def _store_sample_bytes_blocking(storage_path: str, source: str, content_type: str) -> None:
-    client = _minio_client()
-
-    if not client.bucket_exists(settings.minio_bucket):
-        client.make_bucket(settings.minio_bucket)
-        logger.info("MinIO bucket created: %s", settings.minio_bucket)
-        # MinIO defaults
-        # to private buckets, but an operator can mis-configure
-        # ``MINIO_BROWSER_ALLOW_PUBLIC_BUCKETS`` or a prior process
-        # could have left the bucket public. Set an explicit deny
-        # policy on every new bucket so a malware corpus is never
-        # served unauthenticated. We deny anonymous reads at the
-        # ``s3:GetObject`` level — the API path still works because
-        # it presigns via the configured access key.
-        _deny_anonymous_policy = (
-            '{"Version":"2012-10-17","Statement":[{'
-            '"Effect":"Deny","Principal":{"AWS":["*"]},'
-            '"Action":["s3:GetObject","s3:PutObject","s3:ListBucket"],'
-            f'"Resource":["arn:aws:s3:::{settings.minio_bucket}",'
-            f'"arn:aws:s3:::{settings.minio_bucket}/*"],'
-            '"Condition":{"StringEquals":{"aws:PrincipalType":"Anonymous"}}}]}'
-        )
-        try:
-            client.set_bucket_policy(settings.minio_bucket, _deny_anonymous_policy)
-            logger.info(
-                "MinIO bucket policy set (anonymous-deny): %s",
-                settings.minio_bucket,
-            )
-        except Exception as policy_exc:
-            # Failure to set the policy is non-fatal but loud —
-            # operators must verify bucket privacy out-of-band.
-            logger.warning(
-                "MinIO set_bucket_policy failed for '%s' (%s). "
-                "Verify the bucket is not anonymously readable.",
-                settings.minio_bucket,
-                policy_exc,
-            )
-
-    client.fput_object(
-        settings.minio_bucket,
-        storage_path,
-        source,
-        content_type=content_type,
-    )
+    object_store.put_file(_minio_client(), storage_path, source, content_type=content_type)
 
 
 async def store_sample_bytes(*, storage_path: str, source: Any, content_type: str) -> None:
@@ -566,7 +507,7 @@ async def delete_sample(
         client = _minio_client()
         for report_path in sandbox_report_paths:
             try:
-                await asyncio.to_thread(client.remove_object, settings.minio_bucket, report_path)
+                await asyncio.to_thread(object_store.remove, client, report_path)
             except Exception as exc:  # noqa: BLE001 — object cleanup must not fail the delete
                 logger.warning(
                     "Sample %s row deleted but sandbox-report object %s could not be removed: %s",
@@ -582,7 +523,7 @@ async def delete_sample(
     if (others.scalar() or 0) == 0:
         try:
             client = _minio_client()
-            await asyncio.to_thread(client.remove_object, settings.minio_bucket, storage_path)
+            await asyncio.to_thread(object_store.remove, client, storage_path)
         except Exception as exc:  # noqa: BLE001 — object cleanup must not fail the delete
             logger.warning(
                 "Sample %s row deleted but MinIO object %s could not be removed: %s",
