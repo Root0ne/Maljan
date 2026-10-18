@@ -1,0 +1,76 @@
+---
+title: "Blind A/B scoring"
+description: "Score two or more stored runs against the answer list without knowing which arm is which, then reveal the arms."
+---
+
+A comparison scored by someone who knows which arm is which is scored with that
+knowledge. **Blind scoring** hides it: each arm's reports are copied under a
+shuffled anonymous id with every string that names the arm removed, the scorer
+fills a score sheet, and only then is the map opened. It sits beside the
+[replay](/replay/): the replay measures the rules over what the models wrote,
+this scores what the platform published.
+
+Everything lives in `scripts/blind/` and none of it ships in the product.
+
+## Preparing
+
+```bash
+python scripts/blind/run.py prepare runs/run7 runs/haiku4 --out blind-1 --items items.txt
+```
+
+`items.txt` is the answer list's item ids, one per line (blank lines and lines
+starting with `#` are skipped). Two or more stored runs are the arms. Each arm
+must hold the same scorer-facing files: the rendered report (`report.md`,
+`report.html`), the STIX bundle (`stix-bundle.json`) and the IOC table
+(`iocs.json`), which is the surface the scoring brief has a scorer read. An arm
+that lacks a file the others hold is refused, since the gap would give it away.
+
+The output directory must be new or empty. It gets:
+
+| Path | What it is |
+| :-- | :-- |
+| `scorer/A/`, `scorer/B/`, ... | the copies, under ids drawn in a shuffled order |
+| `scorer/scores.csv` | the score template: `item` and one column per id, a row per item and a `beyond_human` row |
+| `sealed-map.json` | the id-to-arm map, outside `scorer/`; give the scorer `scorer/` and nothing else |
+
+`--seed N` makes the shuffle, and so the whole output, repeatable (for tests);
+without it the order is drawn with `secrets`. `prepare` never prints the map.
+
+## What is removed
+
+From every copy, for every arm's strings (so a name an arm quotes of another goes
+too), in any case and as written in JSON or HTML: the run's directory name and
+path, the model, provider and endpoint settings of the run's settings snapshot
+and the first word of each model id, the team profile, the job and report ids,
+the free-text model line of `meta.json`, any `--identify TEXT` you add, every
+date and timestamp (`[date]`), and the day in a report number. Words that are
+only settings of tools and roles are kept: they are the report's own text.
+
+**The self-check.** Before anything is kept, the copies and their file names are
+scanned for every one of those strings and for any date. A survivor fails the
+preparation (status 2), names the file and the string, and removes the output.
+
+What the redaction cannot hide is what the reports say: a degraded-run banner, a
+tool-call count or a style of writing can still tell an arm. Add a string with
+`--identify` when a report quotes something of the arm that the stored run does
+not hold.
+
+## The stored runs are read-only
+
+Every file of each run is digested before and after, and the preparation fails
+when any digest moved. The output may not be inside a run, or hold one.
+
+## Revealing
+
+```bash
+python scripts/blind/run.py reveal blind-1/scorer/scores.csv --map blind-1/sealed-map.json
+```
+
+The scorer writes one of `found`, `partly (body)`, `partly (dump)`, `missed` or
+`wrong` in each item's cell, and a count of facts beyond the human reports in the
+`beyond_human` row. A JSON object of one object per id (`{"A": {"K1.1a": "found",
+"beyond_human": 3}}`, bare or under `scores`) is read too. `reveal` prints each
+arm's totals and every item the arms scored differently, by the arm's name. It
+refuses, with status 2, when any item or the count is left unscored, naming the
+item and the id, when a cell is not a verdict, or when the sheet names an id the
+map does not hold.
