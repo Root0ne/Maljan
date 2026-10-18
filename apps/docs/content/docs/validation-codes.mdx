@@ -28,7 +28,9 @@ a default that reaches no finding and formatted text read it, and are not
 listed. A name, a loop over constants, a conditional, a constant mapping and a
 parameter fed by constants at every call site are followed. Places are named
 `module:function`, without line numbers, so an edit elsewhere in a file leaves
-this page as it is.
+this page as it is. A class or factory whose code slots only ever receive
+strings of another shape files another kind of code (a team rule, a tool error);
+its slots the register cannot follow are left out of the unresolved list.
 
 A code's meaning is the comment or docstring on its own constant; where there is
 none, the message a raise site passes, with each value it fills in written
