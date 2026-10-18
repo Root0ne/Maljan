@@ -2385,7 +2385,12 @@ in force again, a step placed after or beside it goes with it, and every other
 setting and step stands. Whatever left a step out (also a reset of the server
 it calls, or a shipped declaration that changed its tool's kind), the settings
 schema names it with why (`pack_steps_left_out`, also where other stored
-settings do not build) and the console marks it on the steps. A save that changes the steps is held to the rules above, and a
+settings do not build) and the console marks it on the steps. Where the stored
+entry of the server a step names in its `server` field is refused, the step is
+listed as not checked or run until that entry is fixed or reset, never as
+calling an unknown server, and a save leaves it to that entry's own refusal;
+only the step's `server` is matched to a refused entry, never another value it
+holds. A save that changes the steps is held to the rules above, and a
 refused save names its step problems beside every other refusal; a stale
 stored step sent back exactly as stored, wherever it stands, blocks no other
 save, and no new or changed item rides on it. A server step whose server the team withholds or that is not

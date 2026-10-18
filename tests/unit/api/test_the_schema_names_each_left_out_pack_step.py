@@ -97,6 +97,22 @@ def test_stored_settings_that_do_not_build_still_serve_the_schema() -> None:
     assert said == {"lost": "triage step 'lost' references unknown mcp server 'nowhere'"}
 
 
+def test_a_stored_step_on_a_server_whose_stored_entry_is_refused_is_listed_saying_so() -> None:
+    servers = {"rules": SERVER, "refused": {"command": "x", "enabled": "maybe"}}
+    rows = [
+        RuntimeSetting(key="core.mcp.servers", value=servers, is_secret=False),
+        RuntimeSetting(
+            key="core.triage.steps",
+            value=[STEP, {"id": "on_refused", "server": "refused", "tool": "t"}],
+            is_secret=False,
+        ),
+    ]
+    with patch("app.api.v1.settings.audit_record", AsyncMock()):
+        said = _left_out(_client(_db(rows)))
+    assert list(said) == ["on_refused"]
+    assert "stored entry of its server 'refused' is refused" in said["on_refused"]
+
+
 def test_a_stored_value_alone_that_does_not_build_serves_an_empty_listing() -> None:
     rows = [RuntimeSetting(key="core.triage.budget_seconds", value=0, is_secret=False)]
     with patch("app.api.v1.settings.audit_record", AsyncMock()):

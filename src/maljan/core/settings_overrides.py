@@ -211,7 +211,7 @@ PACK_STEPS_PATH = "triage.steps"
 
 
 def _built(
-    core_overrides: Mapping[str, Any], excused: Callable[[PackStep], bool] | None = None
+    core_overrides: Mapping[str, Any], set_aside: Callable[[PackStep], str | None] | None = None
 ) -> tuple[Settings, list[LeftOutStep]]:
     """The settings :func:`build_settings` builds, and the stored pack steps it left out.
 
@@ -220,8 +220,9 @@ def _built(
     step it changed in force again, so one stale step never costs a job every
     setting. A save holds the steps it changes to the strict rules
     (:func:`pack_step_refusals`); the console names each step left out and
-    why (:func:`pack_steps_left_out`). A step ``excused`` names is not held
-    to the settings' own check (:func:`_left_out_checked`).
+    why (:func:`pack_steps_left_out`). A step ``set_aside`` answers for
+    (anything but ``None``) is not held to the settings' own check: its
+    answer is its problem, ``""`` for none (:func:`_left_out_checked`).
     """
     token = STORE_ONLY.set(True)
     try:
@@ -233,11 +234,12 @@ def _built(
     finally:
         STORE_ONLY.reset(token)
     problem = built.pack_step_problem
-    if excused is not None:
-        held = excused
+    if set_aside is not None:
+        held = set_aside
 
         def problem(step: PackStep) -> str:
-            return "" if held(step) else built.pack_step_problem(step)
+            said = held(step)
+            return built.pack_step_problem(step) if said is None else said
 
     kept, left = steps_left_out(stored, problem)
     if left:
@@ -273,7 +275,7 @@ def _warn_left_out_steps(left: list[str]) -> None:
 
 def left_out_pack_steps(core_overrides: Mapping[str, Any]) -> list[str]:
     """The stored pack steps :func:`build_settings` leaves out, by id (else position), once each."""
-    return _names_once(_left_out_checked(core_overrides))
+    return _names_once(_left_out_checked(core_overrides, list_set_aside=True))
 
 
 def pack_steps_left_out(core_overrides: Mapping[str, Any]) -> dict[str, str]:
@@ -289,7 +291,7 @@ def pack_steps_left_out(core_overrides: Mapping[str, Any]) -> dict[str, str]:
     from maljan.core.tool_declarations import loggable_text
 
     out: dict[str, list[str]] = {}
-    for entry in _left_out_checked(core_overrides):
+    for entry in _left_out_checked(core_overrides, list_set_aside=True):
         reasons = out.setdefault(loggable_text(entry.name), [])
         reason = loggable_text(entry.reason)
         if reason not in reasons:
@@ -329,16 +331,21 @@ def pack_step_refusals(merged: Mapping[str, Any], current: Mapping[str, Any]) ->
     }
 
 
-def _left_out_checked(core_overrides: Mapping[str, Any]) -> list[LeftOutStep]:
+def _left_out_checked(
+    core_overrides: Mapping[str, Any], *, list_set_aside: bool = False
+) -> list[LeftOutStep]:
     """The stored steps left out of ``core_overrides``, also where other settings do not build.
 
     What the model refuses is set aside, a refused entry of a map setting
     alone where the refusal names one, the rest kept, and the steps are
-    checked against what is left; a step naming a set-aside entry (any of its
-    values is that entry's name) is not held to the settings' own check, so
+    checked against what is left. A step whose ``server`` is a set-aside
+    entry of the tool-server map is not held to the settings' own check, so
     a server present in a refused map is never called unknown, its own
-    refusal standing for it. Where even that does not build, the steps are
-    checked on their own, without the checks that need the built settings.
+    refusal standing for it: a save's refusal leaves it to that refusal,
+    and with ``list_set_aside`` (the console's listing) it is listed, saying
+    its server's stored entry is refused. Only the step's server is matched,
+    never another value it holds. Where even that does not build, the steps
+    are checked on their own, without the checks that need the built settings.
     """
     try:
         return _built(core_overrides)[1]
@@ -366,33 +373,35 @@ def _left_out_checked(core_overrides: Mapping[str, Any]) -> list[LeftOutStep]:
             whole.update(key for parts, key in keys.items() if parts[: len(loc)] == loc and loc)
     if not whole and not entries:
         return steps_left_out(core_overrides.get(PACK_STEPS_PATH))[1]
-    excused: set[str] = set()
+    servers: set[str] = set()
     rest: dict[str, Any] = {}
     for key, value in core_overrides.items():
         if key in whole:
-            if isinstance(value, Mapping):
-                excused.update(str(name) for name in value)
+            if key == SERVER_MAP_PATH and isinstance(value, Mapping):
+                servers.update(str(name) for name in value)
         elif key in entries:
             dropped = entries[key]
-            excused.update(dropped)
+            if key == SERVER_MAP_PATH:
+                servers.update(dropped)
             rest[key] = {name: item for name, item in value.items() if name not in dropped}
         else:
             rest[key] = value
+
+    def on_a_refused_server(step: PackStep) -> str | None:
+        if not step.server or step.server not in servers:
+            return None
+        if not list_set_aside:
+            return ""
+        return (
+            f"triage step {step.id!r}: the stored entry of its server {step.server!r} is "
+            "refused (see the refused stored values), so the step is not checked or run "
+            "until that entry is fixed or reset"
+        )
+
     try:
-        return _built(rest, lambda step: _names_any(step, excused))[1]
+        return _built(rest, on_a_refused_server)[1]
     except ValueError:
         return steps_left_out(core_overrides.get(PACK_STEPS_PATH))[1]
-
-
-def _names_any(step: PackStep, names: set[str]) -> bool:
-    """Whether any value ``step`` holds, or holds in a list, is one of ``names``."""
-    if not names:
-        return False
-    for value in step.model_dump(mode="json").values():
-        for item in value if isinstance(value, list) else [value]:
-            if isinstance(item, str) and item in names:
-                return True
-    return False
 
 
 def _left_out_items(core_overrides: Mapping[str, Any], left: Iterable[LeftOutStep]) -> list[str]:

@@ -232,6 +232,36 @@ class TestASaveIsStillStrict:
             "core.triage.steps": "lost: triage step 'lost' references unknown mcp server 'nowhere'"
         }
 
+    def test_a_step_on_a_server_of_a_refused_map_is_listed_saying_why(self) -> None:
+        on_refused = {"id": "on_refused", "server": "refused", "tool": "t"}
+        servers = {"rules": RULES, "refused": {"command": "x", "enabled": "maybe"}}
+        stored = {"mcp.servers": servers, "triage.steps": [GOOD, on_refused]}
+        said = pack_steps_left_out(stored)
+        assert list(said) == ["on_refused"]
+        assert "stored entry of its server 'refused' is refused" in said["on_refused"]
+        assert "unknown" not in said["on_refused"]
+        assert left_out_pack_steps(stored) == ["on_refused"]
+
+    @pytest.mark.parametrize(
+        "step",
+        [
+            pytest.param({"id": "refused", "server": "nowhere", "tool": "t"}, id="its-id"),
+            pytest.param({"id": "s", "server": "nowhere", "tool": "refused"}, id="its-tool"),
+            pytest.param(
+                {"id": "s", "server": "nowhere", "tool": "t", "after": "refused"}, id="another"
+            ),
+        ],
+    )
+    def test_only_the_step_s_server_is_matched_to_a_refused_entry(
+        self, step: dict[str, Any]
+    ) -> None:
+        servers = {"rules": RULES, "refused": {"command": "x", "enabled": "maybe"}}
+        merged = {"mcp.servers": servers, "triage.steps": [GOOD, step]}
+        said = pack_step_refusals(merged, {})
+        assert "references unknown mcp server 'nowhere'" in said["core.triage.steps"]
+        listed = pack_steps_left_out(merged)
+        assert "references unknown mcp server 'nowhere'" in listed[step["id"]]
+
     def test_steps_are_listed_where_another_stored_setting_does_not_build(self) -> None:
         stored = _stored(GONE, GOOD, **{"triage.budget_seconds": 0})
         assert list(pack_steps_left_out(stored)) == ["lost"]
