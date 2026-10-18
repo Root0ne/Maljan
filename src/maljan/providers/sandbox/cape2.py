@@ -155,7 +155,7 @@ class CAPE2SandboxProvider(SandboxProvider):
 
             from maljan.agents.subprocess_env import child_env
 
-            env = child_env(self._cfg.mcp.env)
+            env = child_env(self._cfg.mcp.env, server=self.id)
 
             from maljan.core.paths import get_project_root, resolve_mcp_args
 

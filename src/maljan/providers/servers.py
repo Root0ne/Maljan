@@ -429,7 +429,7 @@ class ServerHandle:
             from maljan.core.config import BUILTIN_SERVER_KEYS
             from maljan.core.paths import resolve_mcp_args
 
-            env = child_env(self.config.env, allow=tuple(self.config.env_allow))
+            env = child_env(self.config.env, allow=tuple(self.config.env_allow), server=self.name)
             self._name_the_job_staging(env)
             if self.name not in BUILTIN_SERVER_KEYS:
                 # Byte-for-byte with the pre-branch built-ins (spec S3.2): the

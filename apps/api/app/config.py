@@ -15,6 +15,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from maljan.core.platform_secrets import PlatformSecrets
 from pydantic import Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -52,8 +53,16 @@ def _is_test_env() -> bool:
     return "pytest" in _sys.modules
 
 
-class APISettings(BaseSettings):
-    """API-level configuration (separate from maljan-core Settings)."""
+class APISettings(BaseSettings, PlatformSecrets):
+    """API-level configuration (separate from maljan-core Settings).
+
+    The variables whose values open the platform's own stores -- the database
+    and Redis URLs, the object store's keys, the settings key and the JWT
+    signing keys -- are marked on ``PlatformSecrets``, which this model
+    inherits; each is declared here again with its development default. The
+    names no tool server's environment may carry are read from those marks
+    (``maljan.core.platform_secrets``).
+    """
 
     model_config = SettingsConfigDict(
         env_file=None,
