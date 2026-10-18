@@ -265,17 +265,18 @@ class JobEvidenceSpill(EvidenceSpill):
                 self._pool = ThreadPoolExecutor(
                     max_workers=EVIDENCE_WRITERS, thread_name_prefix="evidence-writer"
                 )
-            self._pending[sha256] = self._pool.submit(self._write, key, sha256, blob, content_type)
+            future = self._pool.submit(self._write, key, sha256, blob, content_type)
+            self._pending[sha256] = future
+        # Released when the write ends, and when it is cancelled before it began.
+        size = len(blob)
+        future.add_done_callback(lambda _done: self._release(size))
         return key
 
-    def _write(self, key: str, sha256: str, blob: bytes, content_type: str) -> None:
-        try:
-            self._write_once(key, sha256, blob, content_type)
-        finally:
-            with self._lock:
-                self._queued -= len(blob)
+    def _release(self, size: int) -> None:
+        with self._lock:
+            self._queued -= size
 
-    def _write_once(self, key: str, sha256: str, blob: bytes, content_type: str) -> None:
+    def _write(self, key: str, sha256: str, blob: bytes, content_type: str) -> None:
         if self.down:
             self._failed[sha256] = "store unreachable"
             return

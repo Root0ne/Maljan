@@ -366,6 +366,21 @@ class TestTheWritesRunOffTheLoop:
         assert second["key"] in store.objects and store.removed == []
         sink.close()
 
+    def test_a_write_cancelled_at_the_drain_gives_its_bytes_back(self) -> None:
+        import threading
+
+        gate, store = self._gated()
+        sink = object_store.evidence_spill("job", 100, store=store)
+        for index in range(3):
+            spill_part(sink, "answer", f"{index}" * 40)
+        threading.Event().wait(0.05)
+
+        sink.drain(0.05)
+        gate.set()
+        self._wait_for(lambda: sink._queued == 0 and len(store.removed) == 2)
+
+        assert sink._queued == 0, "the cancelled write's bytes are no longer counted"
+
     def test_the_writers_client_has_short_timeouts_and_one_retry(self) -> None:
         built = object_store._evidence_client()
         pool = built._http
