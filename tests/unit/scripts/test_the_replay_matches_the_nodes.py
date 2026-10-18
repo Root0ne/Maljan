@@ -22,7 +22,10 @@ judge's review dropped.
 What the oracle does not hold: the analyst node (its checks are the
 platform's own functions, held by ``test_the_replay_knows_every_check``), the
 reading of the transcript, the stand-in that hosts the analyst's parser, the
-stored-run and database readers, and the state both sides are fed (the claims
+stored-run and database readers, the replay's own ``COMPOSER_PLACES`` (the stub
+composer answers through it) and its read-back of the stored technique review
+(``rules._stored_review``, the stub review's answer), and the state both sides
+are fed (the claims
 in force read as ISRs, the findings that survived, the corpus rebuilt from the
 stored answers, the settings snapshot). An error there is on both sides and
 passes. Retries and what was fed back are model turns the replay does not make,
@@ -364,6 +367,10 @@ def test_the_replay_builds_the_report_the_nodes_build(
     assert _unresolved(replayed.run_summary) == _unresolved(verdict.get("run_summary"))
 
     # And the branch the scenario is for was taken.
+    if name == "tiny":
+        # Not two empty reports that compare equal.
+        assert "T1027" in _view(nodes)["published"]
+        assert verdict.get("final_decision") == "Malware"
     if name == "fallback verdict":
         assert verdict.get("verdict_fallback")
     if name == "sandbox facts":
