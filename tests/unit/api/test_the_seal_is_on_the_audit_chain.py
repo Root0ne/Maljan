@@ -369,7 +369,8 @@ async def test_the_store_puts_the_seal_on_the_chain_in_its_own_transaction(monke
     assert call["db"] is db
     assert call["action"] == audit_chain.LEDGER_SEAL
     assert call["resource_id"] == str(job.id)
-    assert call["details"]["seal"] == report.ledger_seal
+    assert call["details"]["seal"] == ledger_chain.core_of(report.ledger_seal)
+    assert report.ledger_seal["audit_anchored"] is False, "the stub append wrote no row"
     assert call["key"] is KEY
 
 
@@ -559,11 +560,15 @@ class _Report:
 async def test_a_report_s_deletion_is_chained_with_the_seal_it_carried(monkeypatch: Any):
     monkeypatch.setattr(ledger_chain, "platform_key_status", lambda: (KEY, None))
     db = _ChainSession()
-    report = _Report({"digest": "d" * 64})
+    report = _Report({"digest": "d" * 64, "core_digest": "c" * 64})
     row = await audit_chain.record_report_deletion(db, report, user_id=None)
     assert row is not None
     assert (row.action, row.resource_id) == (audit_chain.REPORT_DELETE, str(report.job_id))
-    assert row.details == {"report_id": str(report.id), "seal_digest": "d" * 64}
+    assert row.details == {
+        "report_id": str(report.id),
+        "seal_digest": "d" * 64,
+        "core_digest": "c" * 64,
+    }
     assert _verify(db).broken_at is None
 
 

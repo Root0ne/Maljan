@@ -262,12 +262,15 @@ def _seal_of_the_report(
         if isinstance(document, Mapping) and name not in present:
             return result.end(BROKEN, f"The {name} carries no seal although the report row does.")
     result.check("every stored copy of the seal agrees: " + ", ".join(sorted(present)))
+    if str(seal.get("report_id")) != report_id:
+        return result.end(BROKEN, "The seal was made for another report row.")
     if audit is not None:
+        core = ledger_chain.core_of(seal)
         matching = [
-            d.get("seal") for d in for_report if _digest_of(d.get("seal")) == seal["digest"]
+            d.get("seal") for d in for_report if _digest_of(d.get("seal")) == core["digest"]
         ]
         if matching:
-            if matching[-1] != seal:
+            if matching[-1] != core:
                 return result.end(BROKEN, "The audit chain's seal for this report differs.")
             result.check("the seal is on the audit chain")
         elif for_report:
@@ -276,6 +279,12 @@ def _seal_of_the_report(
             )
         elif audit.unverifiable_own:
             result.pending = OWN_ROWS_UNVERIFIABLE
+        elif seal.get("audit_anchored") is True:
+            return result.end(
+                BROKEN,
+                "The seal says its audit row was written, and the job's audit rows do not hold "
+                "it: the row was removed.",
+            )
         else:
             result.pending = SEAL_NOT_ANCHORED
     return seal
@@ -369,7 +378,7 @@ def _check_the_deletion(
 ) -> dict[str, Any]:
     """A sealed job whose report row is gone: deleted by its owner, or broken."""
     records = [
-        d for d in (audit.deletes if audit else []) if d.get("seal_digest") == seal.get("digest")
+        d for d in (audit.deletes if audit else []) if d.get("core_digest") == seal.get("digest")
     ]
     if not records:
         return result.end(
@@ -526,13 +535,21 @@ async def verify_job(db: Any, job_id: Any) -> dict[str, Any]:
         .mappings()
         .all()
     )
-    wanted = sorted({int(r["chain_seq"]) - 1 for r in own if int(r["chain_seq"]) > 1})
+    # The chain value of the row before each of the job's rows, and the row
+    # after each: O(the job's rows), whatever the length of the chain.
+    seqs = {int(r["chain_seq"]) for r in own}
+    neighbours = sorted({s - 1 for s in seqs if s > 1} | {s + 1 for s in seqs})
     predecessors: dict[int, str] = {}
-    if wanted:
+    successors: dict[int, dict[str, Any]] = {}
+    if neighbours:
         found = await db.execute(
-            select(log.c.chain_seq, log.c.chain).where(log.c.chain_seq.in_(wanted))
+            select(log.c.chain_seq, log.c.chain, log.c.digest, log.c.chain_key_id).where(
+                log.c.chain_seq.in_(neighbours)
+            )
         )
-        predecessors = {int(seq): str(chain) for seq, chain in found.all()}
+        for seq, chain, digest, key_id in found.all():
+            predecessors[int(seq)] = str(chain)
+            successors[int(seq)] = {"chain": chain, "digest": digest, "chain_key_id": key_id}
     heads = AuditChainHead.__table__
     head = (
         (await db.execute(select(heads).where(heads.c.name == audit_chain.HEAD_NAME)))
@@ -542,7 +559,12 @@ async def verify_job(db: Any, job_id: Any) -> dict[str, Any]:
     keys = ledger_chain.known_keys()
     current = ledger_chain.platform_key()
     check = audit_chain.verify_job_rows(
-        own, predecessors, keys, head, current.key_id if current is not None else None
+        own,
+        predecessors,
+        keys,
+        head,
+        current.key_id if current is not None else None,
+        successors=successors,
     )
     verified = set(check.verified)
 

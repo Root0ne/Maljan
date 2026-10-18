@@ -119,11 +119,14 @@ When a run is stored, the worker seals its evidence ledger
   each kept part, included), and `chain`, the HMAC-SHA256 of the previous row's
   chain value and its digest in `seq` order, from a genesis value bound to the
   job;
-- the seal (chain head, entries and `seq` span, key id, the digest of the
-  stored report row, and its own keyed digest) is written in the same
-  transaction into `analysis_reports.ledger_seal`, the report payload and the
-  run summary as `ledger_seal`, and onto the audit chain as a `ledger.seal`
-  row. The report digest covers every column of the report row except its
+- the core seal (chain head, entries and `seq` span, key id, the id of the
+  report row it describes, the digest of that row, and its own keyed digest)
+  is written onto the audit chain as a `ledger.seal` row. The append's own
+  result, known before the transaction commits, goes into the seal the report
+  carries as `audit_anchored`, beside `core_digest`, both under the seal's
+  keyed digest; that seal is written in the same transaction into
+  `analysis_reports.ledger_seal`, the report payload and the run summary as
+  `ledger_seal`. The report digest covers every column of the report row except its
   random key, its two timestamps and the seal itself: verdict, confidence,
   category, both STIX bundles, techniques, the analysts' reports, the
   negotiation log, the run summary, the report payload and the incomplete
@@ -173,7 +176,7 @@ its answer names no position in the platform's chain. The answer is:
 | `broken` | the first thing that failed, with the first broken `seq` where a ledger row is to blame: a NULL digest, a missing, extra or reordered row, a changed row count, a changed report column with no amendment, an amendment the audit chain records but the report lacks, a seal copy that disagrees, a report row gone with no `report.delete` row |
 | `deleted` | the report row is gone and a verified `report.delete` row for its seal records the deletion; the ledger still verifies |
 | `other_key` | the seal names a key the platform's settings cannot derive (after a key rotation, or a relabelled seal); the rows' digests are still checked |
-| `unverifiable` | nothing failed, but something could not be checked: the audit append for the seal or an amendment did not land, the job's own audit rows lie before a rotation under a key the platform cannot derive, or the audit head is still under the old key |
+| `unverifiable` | nothing failed, but something could not be checked: the audit append for the seal (its seal says `audit_anchored: false`) or an amendment did not land, the job's own audit rows lie before a rotation under a key the platform cannot derive, or the audit head is still under the old key |
 | `not_sealed` | a run stored before sealing, or a job that stored nothing |
 
 The command exits 0, 1, 6, 4, 5 and 3 for these, and 2 on a usage or read
@@ -200,7 +203,13 @@ never to `verified`. Rotating the settings key leaves older seals reading as
 `other_key` and older audit rows unverifiable; until the first append after a
 rotation every sealed job reads `unverifiable`. Rotating back to an earlier key
 makes the rows already under it, now before the new boundary, read as broken.
-A failed audit append leaves its seal or amendment `unverifiable` for good.
+A failed audit append leaves its seal or amendment `unverifiable` for good. A seal
+whose row landed (`audit_anchored: true`) and is gone reads `broken`, and so
+does a seal moved onto another report row. Each of the job's own audit rows is
+checked against the row before it and the row after it (or the head), so a
+deleted row next to one of the job's rows leaves a gap that reads `broken`; a
+deleted amendment row with no row of the job beside it is found only by the
+full `--audit-chain` walk.
 
 **Anchoring (not built).** The seal's `digest` is the value an external anchor
 would take. An anchor would publish it, once per stored run or batched under a

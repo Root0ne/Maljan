@@ -4398,31 +4398,34 @@ async def _seal_the_ledger(
     from app.services import audit_chain, ledger_chain
 
     head = ledger_chain.chain_rows(job_uuid, rows, key)
-    # The report row goes to the database first, so every column the seal's
-    # report digest covers holds what is stored.
+    # The rows and the report row go to the database first, so every column
+    # the seal's report digest covers holds what is stored, and a failure of
+    # theirs is never taken for the audit write's.
     await db.flush()
-    seal = ledger_chain.seal(
+    core = ledger_chain.seal(
         job_uuid,
         rows,
         head,
         report_sha256=ledger_chain.report_digest(report),
         sealed_at=sealed_at,
         key=key,
+        report_id=report.id,
     )
-    report.ledger_seal = seal
-    report.malware_report = ledger_chain.with_seal(report.malware_report, seal)
-    report.run_summary = ledger_chain.with_seal(report.run_summary, seal)
-    # The rows and the sealed report go to the database before the audit
-    # append, so a failure of theirs is never taken for the audit write's.
-    await db.flush()
-    await audit_chain.append(
+    landed = await audit_chain.append(
         db,
         action=audit_chain.LEDGER_SEAL,
         resource_type="job",
         resource_id=str(job_uuid),
-        details={"report_id": str(report.id), "seal": seal},
+        details={"report_id": str(report.id), "seal": core},
         key=key,
     )
+    # The append's own result, known before this transaction commits, goes
+    # into the keyed seal: a verifier then tells a deleted audit row from an
+    # append that never landed.
+    seal = ledger_chain.anchored(core, landed=landed is not None, key=key)
+    report.ledger_seal = seal
+    report.malware_report = ledger_chain.with_seal(report.malware_report, seal)
+    report.run_summary = ledger_chain.with_seal(report.run_summary, seal)
     return seal
 
 

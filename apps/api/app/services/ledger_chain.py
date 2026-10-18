@@ -385,14 +385,21 @@ def seal(
     report_sha256: str,
     sealed_at: datetime,
     key: ChainKey,
+    report_id: Any,
 ) -> dict[str, Any]:
-    """The seal of a stored ledger: the chain head, what it covers, the key id, and its digest."""
+    """The core seal of a stored ledger: the chain head, what it covers, the key id, its digest.
+
+    The report row it describes is bound in by its id, so a seal copied onto
+    another report row does not verify there. This is the record written onto
+    the audit chain; :func:`anchored` makes the seal the report carries from it.
+    """
     seqs = [int(_read(row, "seq") or 0) for row in rows]
     record: dict[str, Any] = {
         "version": CHAIN_VERSION,
         "algorithm": "hmac-sha256",
         "key_id": key.key_id or None,
         "job_id": str(job_id),
+        "report_id": str(report_id),
         "entries": len(rows),
         "first_seq": min(seqs) if seqs else None,
         "last_seq": max(seqs) if seqs else None,
@@ -402,6 +409,33 @@ def seal(
     }
     record["digest"] = record_digest(record, key)
     return record
+
+
+# The two keys :func:`anchored` adds to a core seal.
+_ANCHOR_KEYS = ("core_digest", "audit_anchored")
+
+
+def anchored(core: Mapping[str, Any], *, landed: bool, key: ChainKey) -> dict[str, Any]:
+    """The seal a report carries: the core seal, whether its audit row landed, keyed again.
+
+    ``landed`` is the audit append's own result, known inside the store's
+    transaction before it commits. ``core_digest`` names the core record the
+    audit chain holds. Both are covered by this record's digest, so a verifier
+    can tell a deleted audit row (``audit_anchored`` true, row gone) from an
+    append that never landed (false).
+    """
+    record = {k: v for k, v in core.items() if k != "digest"}
+    record["core_digest"] = core.get("digest")
+    record["audit_anchored"] = bool(landed)
+    record["digest"] = record_digest(record, key)
+    return record
+
+
+def core_of(seal: Mapping[str, Any]) -> dict[str, Any]:
+    """The core seal a report's seal was made from, as the audit chain holds it."""
+    core = {k: v for k, v in seal.items() if k not in (*_ANCHOR_KEYS, "digest")}
+    core["digest"] = seal.get("core_digest")
+    return core
 
 
 def amendment(

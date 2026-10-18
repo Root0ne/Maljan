@@ -56,6 +56,7 @@ def _sealed_report() -> AnalysisReport:
         job_id=job_id, verdict="Malicious", stix_bundle=stix, malware_report=payload
     )
     report.run_summary = summary
+    report.id = uuid.uuid4()
     seal = ledger_chain.seal(
         job_id,
         [],
@@ -63,6 +64,7 @@ def _sealed_report() -> AnalysisReport:
         report_sha256=ledger_chain.report_digest(report),
         sealed_at=NOW,
         key=KEY,
+        report_id=report.id,
     )
     report.ledger_seal = seal
     report.malware_report = ledger_chain.with_seal(payload, seal)

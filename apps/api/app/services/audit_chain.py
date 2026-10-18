@@ -423,12 +423,15 @@ def verify_job_rows(
     keys: Mapping[str, ledger_chain.ChainKey],
     head: Any,
     current: str | None,
+    successors: Mapping[int, Any] | None = None,
 ) -> AuditChainCheck:
     """Check one job's own chained audit rows locally; the first that breaks.
 
     ``own`` are the job's chained rows; ``predecessors`` maps each row's
-    ``chain_seq - 1`` to the chain value stored there, so every link is
-    checked against the row before it without reading the rest of the chain.
+    ``chain_seq - 1`` to the chain value stored there, and ``successors`` each
+    row's ``chain_seq + 1`` to that row (its digest, chain and key id), so
+    every link into and out of the job's rows is checked without reading the
+    rest of the chain; a row of the job's that is the head must end the head.
     The head record gives the rotation boundary under the same rules as
     :func:`verify_audit_chain`. The cost follows the job; a break elsewhere in
     the chain does not touch it. Reasons name the job's rows by what they
@@ -436,6 +439,7 @@ def verify_job_rows(
     end of the whole chain is found only by the full walk
     (``python -m scripts.ledger.verify --audit-chain``).
     """
+    successors = successors or {}
     ordered = sorted(own, key=lambda r: int(_read(r, "chain_seq") or 0))
     check = AuditChainCheck(rows=len(ordered))
 
@@ -493,6 +497,22 @@ def verify_job_rows(
             return _broken(seq, f"the audit row before this job's {action} row is missing")
         if audit_link(previous, str(_read(row, "digest")), key) != _read(row, "chain"):
             return _broken(seq, f"this job's {action} audit row does not link to the row before it")
+        # The row after must link onto this one, or this one is the head: a
+        # deleted row of this job leaves a gap or a dangling successor here.
+        if seq == head_seq:
+            if not check.head_unverifiable and _read(head, "chain") != _read(row, "chain"):
+                return _broken(seq, f"the audit head does not end on this job's {action} row")
+        else:
+            following = successors.get(seq + 1)
+            if following is None:
+                return _broken(seq, f"the audit row after this job's {action} row is missing")
+            next_key = keys.get(_read(following, "chain_key_id") or "")
+            if next_key is not None and audit_link(
+                str(_read(row, "chain")), str(_read(following, "digest")), next_key
+            ) != _read(following, "chain"):
+                return _broken(
+                    seq, f"the audit row after this job's {action} row does not link onto it"
+                )
         check.verified.append(seq)
     return check
 
@@ -520,6 +540,9 @@ async def record_report_deletion(db: Any, report: Any, *, user_id: uuid.UUID | N
         details={
             "report_id": str(report.id),
             "seal_digest": seal.get("digest") if isinstance(seal, Mapping) else None,
+            # The core seal the audit chain holds, which a verifier of a job
+            # whose report is gone reads the seal from.
+            "core_digest": seal.get("core_digest") if isinstance(seal, Mapping) else None,
         },
         key=key,
         user_id=user_id,
