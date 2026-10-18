@@ -65,6 +65,13 @@ class EvidenceEntryResponse(BaseModel):
     structured_from_server: bool | None = Field(default=None, exclude_if=_absent)
     agent_role: str | None = Field(default=None, exclude_if=_absent)
     agent_tab: str | None = Field(default=None, exclude_if=_absent)
+    # Where the parts of the answer this entry does not keep whole are kept
+    # whole: one reference per part the run shortened, blanked or dropped
+    # (``answer``, ``structured_content``, ``output``, ``structured``), each
+    # with ``key``, ``bytes`` and ``sha256``, or with ``error`` and no key when
+    # the upload failed. Absent where nothing was taken and on an older row.
+    # The bytes are served by ``GET /jobs/{id}/evidence/{entry_id}/objects/{part}``.
+    spilled: list[dict[str, Any]] | None = Field(default=None, exclude_if=_absent)
 
     @field_validator("structured_from_server", mode="before")
     @classmethod

@@ -111,6 +111,12 @@ class EvidenceEntry(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     # The role and console tab the calling agent's definition declared.
     agent_role: Mapped[str | None] = mapped_column(String, nullable=True)
     agent_tab: Mapped[str | None] = mapped_column(String, nullable=True)
+    # Where the parts of the answer this row does not keep whole are kept
+    # whole in object storage (``maljan.schemas.evidence_spill``): one
+    # reference per part with the object key, the byte length and the SHA-256,
+    # or the reason the upload failed. NULL where nothing was taken and on
+    # every row older than the column.
+    spilled: Mapped[Any | None] = mapped_column(JSONB, nullable=True)
 
     __table_args__ = (
         UniqueConstraint("job_id", "entry_id", name="uq_evidence_entries_job_entry_id"),

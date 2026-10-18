@@ -66,6 +66,21 @@ export interface EvidenceEntry {
   /** The role and console tab the calling agent's definition declared. */
   agent_role?: string;
   agent_tab?: string;
+  /** Where the parts of the answer this entry does not keep whole are kept
+   *  whole, one reference per part the run shortened, blanked or dropped.
+   *  Absent where nothing was taken and on rows older than the column. */
+  spilled?: EvidenceObjectRef[];
+}
+
+/** One part of an answer kept whole in object storage. `key` is absent and
+ *  `error` says why when the upload failed. The bytes are served by
+ *  `GET /jobs/{id}/evidence/{entry_id}/objects/{part}`. */
+export interface EvidenceObjectRef {
+  part: "answer" | "structured_content" | "output" | "structured";
+  key?: string;
+  bytes?: number;
+  sha256?: string;
+  error?: string;
 }
 
 export interface EvidenceListResponse {

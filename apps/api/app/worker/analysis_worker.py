@@ -1147,7 +1147,7 @@ def _returned_at(entry: dict[str, Any]) -> datetime | None:
 def _evidence_row(entry: dict[str, Any], *, job_id: uuid.UUID) -> Any:
     """One ledger entry as the row that keeps it.
 
-    Every one of the 29 fields ``maljan.schemas.evidence.LedgerEntry`` carries
+    Every one of the 30 fields ``maljan.schemas.evidence.LedgerEntry`` carries
     has a column here, which is what lets a reader of the stored ledger say why an output
     is empty instead of guessing. An absent value stays absent rather than
     becoming a default, for the same reason.
@@ -1204,6 +1204,9 @@ def _evidence_row(entry: dict[str, Any], *, job_id: uuid.UUID) -> Any:
         structured_from_server=(True if entry.get("structured_from_server") is True else None),
         agent_role=(str(entry["agent_role"]) if entry.get("agent_role") is not None else None),
         agent_tab=(str(entry["agent_tab"]) if entry.get("agent_tab") is not None else None),
+        # The references to the parts of the answer kept whole, as the entry
+        # carries them; absent where nothing was taken.
+        spilled=(list(entry["spilled"]) if entry.get("spilled") else None),
     )
 
 
@@ -2653,6 +2656,12 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
                 recorder=transcript,
             ),
         )
+        # What the run shortens, blanks or drops from a ledger entry's answer
+        # is kept whole in object storage under this job's prefix, and the
+        # entry references it (``maljan.schemas.evidence_spill``).
+        from app.services import object_store
+
+        app.container.set_evidence_spill(object_store.evidence_spill(job_id))
 
         # A job that names an attached report hands its bytes to the
         # sandbox provider before anything else runs: build_job_settings
@@ -4547,9 +4556,15 @@ async def _store_the_report(
     # The last pass before it is saved: each agent's kept bytes within its
     # budget, structures dropped first, texts untouched (a no-op for a ledger
     # with no structure kept beside a prose text, every built-in's).
-    fit_structures_to_budget(
+    # A structure this pass drops is kept whole under the job's prefix first
+    # (``object_store.evidence_spill``), on a thread: it is an upload.
+    from app.services import object_store
+
+    await asyncio.to_thread(
+        fit_structures_to_budget,
         [_entry for _entry in _ledger if isinstance(_entry, dict)],
         evidence_budget_of(run_summary, core_settings),
+        spill=object_store.evidence_spill(job_id),
     )
     for _entry in rows_to_store(_ledger, job_id=job_id):
         db.add(_evidence_row(_entry, job_id=job_uuid))
