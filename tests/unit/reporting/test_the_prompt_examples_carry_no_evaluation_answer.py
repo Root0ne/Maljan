@@ -323,6 +323,7 @@ from maljan.schemas.isr_models import (
 from maljan.schemas.sandbox_report import SECTION_IDS
 from maljan.schemas.stix_models import Bundle
 from maljan.tools import api_hashes, artefact_index, binary, knowledge, string_blobs
+from maljan.tools import rules as _capa_rules
 from maljan.tools.errors import CAPTURES_REMEDIATION, NO_CAPTURE_REMEDIATION
 
 # Every no: sentence a root reading writes, and the names of the roots.
@@ -2060,6 +2061,7 @@ PROMPTS: dict[str, str] = {
             _capa_child.LIBRARY_FUNCTIONS_NOT_FOR_FORMAT,
             _capa_child.LIBRARY_FUNCTIONS_NO_FILES,
             _capa_child.LIBRARY_FUNCTIONS_UNSTATED,
+            _capa_rules.LIBRARY_FUNCTION_NOT_IN_IMAGE,
         ]
     ),
     "the stated candidate scan and readability test": (

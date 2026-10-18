@@ -480,6 +480,11 @@ def capa_function_starts(document: dict[str, Any]) -> list[str]:
     return starts
 
 
+# What a library function's address says when capa's address for it is not a
+# place in the image (a .NET token, no address at all), as the model reads it.
+LIBRARY_FUNCTION_NOT_IN_IMAGE = "no: not a place in the image"
+
+
 def capa_library_functions(document: dict[str, Any]) -> list[dict[str, str]] | str:
     """The functions capa's signatures identified as library code, or why none were looked for.
 
@@ -506,7 +511,7 @@ def capa_library_functions(document: dict[str, Any]) -> list[dict[str, str]] | s
         where = _capa_address(row.get("address"), base)
         found.append(
             {
-                "address": where or "no: not a place in the image",
+                "address": where or LIBRARY_FUNCTION_NOT_IN_IMAGE,
                 "name": str(row.get("name") or ""),
             }
         )

@@ -126,6 +126,19 @@ class TestTheNames:
             {"address": "0x28b0", "name": "__setdefaultprecision"},
         ]
 
+    def test_a_library_function_capa_places_nowhere_in_the_image_says_so(self) -> None:
+        document = _document(library=[(0x2740, "_WinMainCRTStartup")], not_identified=None)
+        analysis = document["meta"]["analysis"]
+        analysis["library_functions"].append(
+            {"address": {"type": "token", "value": 7}, "name": "f"}
+        )
+
+        assert tool.capa_library_functions(document) == [
+            {"address": "0x2740", "name": "_WinMainCRTStartup"},
+            {"address": tool.LIBRARY_FUNCTION_NOT_IN_IMAGE, "name": "f"},
+        ]
+        assert tool.LIBRARY_FUNCTION_NOT_IN_IMAGE == "no: not a place in the image"
+
     def test_looked_and_found_none_is_an_empty_list(self) -> None:
         assert tool.capa_library_functions(_document(library=[], not_identified=None)) == []
 
