@@ -22,7 +22,10 @@ from mcp.server.fastmcp import FastMCP
 
 from maljan.core.stdio_safe import route_logging_to_stderr
 
-route_logging_to_stderr()
+# Only when run as the stdio server: a test or tool that imports this module
+# in-process keeps its own logging.
+if __name__ == "__main__":
+    route_logging_to_stderr()
 
 from maljan.tools import knowledge as knowledge_tools
 from maljan.tools.arguments import read_unquoted, says_unquoted, with_read_as
