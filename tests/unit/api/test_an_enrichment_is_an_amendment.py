@@ -52,15 +52,19 @@ def _sealed_report() -> AnalysisReport:
     summary = {"evidence": {"entries": 1}}
     stix = {"type": "bundle", "objects": []}
     job_id = uuid.uuid4()
+    report = AnalysisReport(
+        job_id=job_id, verdict="Malicious", stix_bundle=stix, malware_report=payload
+    )
+    report.run_summary = summary
     seal = ledger_chain.seal(
         job_id,
         [],
         ledger_chain.genesis(job_id, KEY),
-        report_sha256=ledger_chain.report_digest(payload, summary, stix),
+        report_sha256=ledger_chain.report_digest(report),
         sealed_at=NOW,
         key=KEY,
     )
-    report = AnalysisReport(job_id=job_id, stix_bundle=stix, ledger_seal=seal)
+    report.ledger_seal = seal
     report.malware_report = ledger_chain.with_seal(payload, seal)
     report.run_summary = ledger_chain.with_seal(summary, seal)
     return report
@@ -80,7 +84,7 @@ def appended(monkeypatch: Any) -> list[dict[str, Any]]:
         calls.append(kwargs)
 
     monkeypatch.setattr(audit_chain, "append", _append)
-    monkeypatch.setattr(ledger_chain, "platform_key", lambda: KEY)
+    monkeypatch.setattr(ledger_chain, "platform_key_status", lambda: (KEY, None))
     return calls
 
 
@@ -98,9 +102,7 @@ async def test_a_change_to_a_sealed_report_is_an_amendment_chained_onto_the_seal
     assert record["kind"] == "enrichment"
     assert record["prev"] == seal["digest"]
     assert record["report_sha256_before"] == seal["report_sha256"]
-    assert record["report_sha256_after"] == ledger_chain.report_digest(
-        report.malware_report, report.run_summary, report.stix_bundle
-    )
+    assert record["report_sha256_after"] == ledger_chain.report_digest(report)
     assert record["key_id"] == KEY.key_id
     assert record["digest"] == ledger_chain.record_digest(record, KEY)
     [call] = appended

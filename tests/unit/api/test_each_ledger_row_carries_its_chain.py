@@ -178,7 +178,7 @@ def test_an_older_row_serves_no_digest_and_no_chain():
 
 @pytest.mark.asyncio
 async def test_the_stored_ledger_is_chained_as_it_is_inserted(monkeypatch: Any):
-    monkeypatch.setattr(ledger_chain, "platform_key", lambda: KEY)
+    monkeypatch.setattr(ledger_chain, "platform_key_status", lambda: (KEY, None))
     job = fake_job()
     factory = SessionFactory(rows_for(job, fake_sample(job.sample_id)))
     state = {

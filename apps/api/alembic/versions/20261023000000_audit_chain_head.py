@@ -1,9 +1,11 @@
 """The audit chain keeps a keyed head record.
 
 ``audit_chain_head`` holds one row per chain (``name`` ``"audit"``): the last
-``chain_seq``, its chain value, the id of the key and a MAC over both under
-that key (``app.services.audit_chain``). Every chained append rewrites it in
-the same transaction, so rows cut off the end of the log are found.
+``chain_seq``, its chain value, ``rotated_at_seq`` (the seq of the first row
+under the head's key: 1 for a chain that never rotated), the id of the key and
+a MAC over all three under that key (``app.services.audit_chain``). Every
+chained append rewrites it in the same transaction, so rows cut off the end of
+the log are found and the rotation boundary cannot be moved without the key.
 
 A new, empty table: nothing is read or rewritten.
 
@@ -28,8 +30,10 @@ def upgrade() -> None:
         sa.Column("name", sa.String(32), primary_key=True),
         sa.Column("chain_seq", sa.Integer(), nullable=False),
         sa.Column("chain", sa.String(64), nullable=False),
+        # ``ledger_chain.KEY_ID_LENGTH``: a key id is 16 hex characters.
         sa.Column("key_id", sa.String(16), nullable=True),
         sa.Column("mac", sa.String(64), nullable=False),
+        sa.Column("rotated_at_seq", sa.Integer(), nullable=False),
     )
 
 

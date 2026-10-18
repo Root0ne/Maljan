@@ -538,19 +538,27 @@ async def write_under_lock(
         stored = dict(report.malware_report) if isinstance(report.malware_report, dict) else {}
         payload, column = change(stored, report.run_summary)
         seal_record = getattr(report, "ledger_seal", None)
-        key = ledger_chain.platform_key() if isinstance(seal_record, dict) else None
+        key, no_key = (
+            ledger_chain.platform_key_status() if isinstance(seal_record, dict) else (None, None)
+        )
         record = None
         if key is not None:
             payload, column, record = ledger_chain.amend(
-                stored,
-                report.run_summary,
+                report,
                 payload,
                 column,
-                report.stix_bundle,
                 seal_record=seal_record,
                 kind=kind,
                 key=key,
                 at=datetime.now(UTC),
+            )
+        elif no_key is not None:
+            # Nothing can be chained without the key: the change is written,
+            # and a verification of this report says it changed after the seal.
+            logger.warning(
+                "enrich: report %s is sealed but changed without an amendment: %s.",
+                report_uuid,
+                no_key,
             )
         report.malware_report = payload
         # SQLAlchemy needs an explicit flag for in-place JSONB mutation.

@@ -40,7 +40,9 @@ from app.services import ledger_chain
 
 logger = get_logger("api.audit_chain")
 
-# The advisory lock every chained append takes, one 64-bit id for the chain.
+# The id of the PostgreSQL advisory lock every chained append takes
+# (``pg_advisory_xact_lock``): one 64-bit number for the one chain, the ASCII of
+# "maljanAC", chosen so no other lock in the application can share it.
 AUDIT_CHAIN_LOCK = 0x6D616C6A616E4143  # "maljanAC"
 _ENTRY_TAG = b"maljan-audit-entry/1\n"
 _GENESIS_TAG = b"maljan-audit-chain/1\n"
@@ -48,9 +50,15 @@ _LINK_TAG = b"maljan-audit-link/1\n"
 _HEAD_TAG = b"maljan-audit-head/1\n"
 HEAD_NAME = "audit"
 
+
+class HeadRefused(RuntimeError):
+    """The stored head cannot be carried forward without re-signing what was never checked."""
+
+
 # The actions written onto the chain.
 LEDGER_SEAL = "ledger.seal"
 REPORT_AMEND = "report.amend"
+REPORT_DELETE = "report.delete"
 
 DIGESTED: tuple[str, ...] = (
     "chain_seq",
@@ -129,6 +137,57 @@ def _is_postgres(db: Any) -> bool:
         return False
 
 
+async def _boundary_for_append(
+    db: Any, head: Any, last: Any, key: ledger_chain.ChainKey, seq: int
+) -> int:
+    """The ``rotated_at_seq`` the head takes with the row at ``seq``; :class:`HeadRefused` if none.
+
+    ``last`` is the last chained row as ``(chain_seq, chain, chain_key_id)``.
+    A head under ``key`` is carried forward only when its MAC verifies and it
+    points at the last row. A head under another key is accepted as a real
+    rotation only when no row already carries ``key`` (the key is new), the
+    head points at the last row by seq and chain, the last row was chained
+    under the head's key, and the head's MAC verifies under that key when the
+    platform can derive it. Anything else is refused and nothing is re-signed.
+    """
+    from sqlalchemy import select
+
+    from app.models.audit import AuditLog
+
+    if head is None:
+        if last is not None:
+            raise HeadRefused("chained rows exist but the head record is missing")
+        return seq
+    points_at_last = last is not None and (
+        int(head.chain_seq) == int(last[0]) and head.chain == last[1]
+    )
+    if (head.key_id or "") == key.key_id:
+        if (
+            not points_at_last
+            or head_mac(head.chain_seq, head.chain, head.rotated_at_seq, key) != head.mac
+        ):
+            raise HeadRefused("the stored head record does not verify under the key")
+        return int(head.rotated_at_seq)
+    already = (
+        await db.execute(
+            select(AuditLog.chain_seq).where(AuditLog.chain_key_id == key.key_id).limit(1)
+        )
+    ).first()
+    if already is not None:
+        raise HeadRefused("the head names another key although rows carry the current one")
+    if not points_at_last:
+        raise HeadRefused("the head under another key does not point at the last row")
+    if (last[2] or "") != (head.key_id or ""):
+        raise HeadRefused("the last row was not chained under the head's key")
+    older = ledger_chain.known_keys().get(head.key_id or "")
+    if (
+        older is not None
+        and head_mac(head.chain_seq, head.chain, head.rotated_at_seq, older) != head.mac
+    ):
+        raise HeadRefused("the head does not verify under the key it names")
+    return seq
+
+
 async def append(
     db: Any,
     *,
@@ -142,9 +201,12 @@ async def append(
     """Add one chained audit row to ``db``'s transaction; the row, or ``None`` when it failed.
 
     The chain's head record is rewritten in the same savepoint, under ``key``.
-    Its ``rotated_at_seq`` stays where it is while the key stays the same; the
-    first append under a new key (or onto a missing head) sets it to the new
-    row's seq, and it is 1 for a chain that starts here.
+    Its ``rotated_at_seq`` is carried forward only from a head whose MAC
+    verifies under ``key`` and that points at the last row; a head that does
+    not, or a missing head over existing rows, refuses the append (logged and
+    counted, never re-signed). A head written under another key is a real
+    rotation: the boundary becomes the new row's seq. A chain that starts here
+    starts at 1.
     """
     from sqlalchemy import select, text
 
@@ -158,7 +220,7 @@ async def append(
                 )
             last = (
                 await db.execute(
-                    select(AuditLog.chain_seq, AuditLog.chain)
+                    select(AuditLog.chain_seq, AuditLog.chain, AuditLog.chain_key_id)
                     .where(AuditLog.chain_seq.is_not(None))
                     .order_by(AuditLog.chain_seq.desc())
                     .limit(1)
@@ -167,6 +229,8 @@ async def append(
             previous_seq = int(last[0]) if last is not None else 0
             previous = str(last[1]) if last is not None else audit_genesis(key)
             seq = previous_seq + 1
+            head = await db.get(AuditChainHead, HEAD_NAME)
+            rotated_at = await _boundary_for_append(db, head, last, key, seq)
             row = AuditLog(
                 user_id=user_id,
                 action=action,
@@ -181,16 +245,9 @@ async def append(
             row.digest = audit_digest(row)
             row.chain = audit_link(previous, row.digest, key)
             db.add(row)
-            head = await db.get(AuditChainHead, HEAD_NAME)
-            same_key = (
-                head is not None
-                and (head.key_id or "") == key.key_id
-                and head.rotated_at_seq is not None
-            )
             if head is None:
                 head = AuditChainHead(name=HEAD_NAME)
                 db.add(head)
-            rotated_at = int(head.rotated_at_seq) if same_key else seq
             head.chain_seq = seq
             head.chain = row.chain
             head.key_id = key.key_id or None
@@ -198,6 +255,10 @@ async def append(
             head.mac = head_mac(seq, row.chain, rotated_at, key)
             await db.flush()
         return row
+    except HeadRefused as exc:
+        observability.counters.audit_write_failures += 1
+        logger.error("Chained audit write refused (action=%s): %s", action, exc)
+        return None
     except Exception as exc:  # noqa: BLE001 — audit is best effort, but never silent
         observability.counters.audit_write_failures += 1
         logger.error("Chained audit write failed (action=%s): %s", action, type(exc).__name__)
@@ -253,14 +314,16 @@ def verify_audit_chain(
       first current-key row joins the older history.
 
     A head that fails its MAC is a break. A head under a key other than the
-    current one leaves the boundary and the tail unknown: the rows the
+    current one is a break when any row is under the current key, and otherwise
+    leaves the boundary and the tail unknown: the rows the
     platform can check are checked, the rest are unverifiable, and
     ``head_unverifiable`` is set. The walk must end at the head: rows cut off
     the end, or a missing head, are a break.
     """
     if current is None and len(keys) == 1:
         current = next(iter(keys))
-    ordered = sorted(rows, key=lambda r: int(_read(r, "chain_seq") or 0))
+    rows_list = list(rows)
+    ordered = sorted(rows_list, key=lambda r: int(_read(r, "chain_seq") or 0))
     check = AuditChainCheck(rows=len(ordered))
 
     def _broken(seq: int, reason: str) -> AuditChainCheck:
@@ -296,6 +359,16 @@ def verify_audit_chain(
             head, "mac"
         ):
             return _broken(head_seq + 1, "the audit chain's head record does not verify")
+        current_rows = [
+            int(_read(r, "chain_seq") or 0)
+            for r in rows_list
+            if current is not None and (_read(r, "chain_key_id") or "") == current
+        ]
+        if current_rows:
+            return _broken(
+                min(current_rows),
+                "the audit chain's head is not under the current key although rows are",
+            )
         check.head_unverifiable = True
 
     previous: str | None = None
@@ -342,3 +415,112 @@ def verify_audit_chain(
     if last_seq and head_chain != previous:
         return _broken(last_seq, f"the head's chain value differs from row {last_seq}")
     return check
+
+
+def verify_job_rows(
+    own: Iterable[Any],
+    predecessors: Mapping[int, str],
+    keys: Mapping[str, ledger_chain.ChainKey],
+    head: Any,
+    current: str | None,
+) -> AuditChainCheck:
+    """Check one job's own chained audit rows locally; the first that breaks.
+
+    ``own`` are the job's chained rows; ``predecessors`` maps each row's
+    ``chain_seq - 1`` to the chain value stored there, so every link is
+    checked against the row before it without reading the rest of the chain.
+    The head record gives the rotation boundary under the same rules as
+    :func:`verify_audit_chain`. The cost follows the job; a break elsewhere in
+    the chain does not touch it. Reasons name the job's rows by what they
+    record, never by their place in the platform's chain. A row cut off the
+    end of the whole chain is found only by the full walk
+    (``python -m scripts.ledger.verify --audit-chain``).
+    """
+    ordered = sorted(own, key=lambda r: int(_read(r, "chain_seq") or 0))
+    check = AuditChainCheck(rows=len(ordered))
+
+    def _broken(seq: int, reason: str) -> AuditChainCheck:
+        check.broken_at = seq
+        check.reason = reason
+        return check
+
+    if not ordered:
+        return check
+    if head is None:
+        return _broken(int(_read(ordered[0], "chain_seq")), "the audit chain has no head record")
+    head_seq = int(_read(head, "chain_seq") or 0)
+    head_key_id = _read(head, "key_id") or ""
+    rotated = _read(head, "rotated_at_seq")
+    boundary: int | None = None
+    if current is not None and head_key_id == current:
+        if rotated is None or head_mac(
+            head_seq, str(_read(head, "chain")), rotated, keys[current]
+        ) != _read(head, "mac"):
+            return _broken(int(_read(ordered[0], "chain_seq")), "the audit head does not verify")
+        boundary = int(rotated)
+    elif any((_read(r, "chain_key_id") or "") == current for r in ordered if current):
+        return _broken(
+            int(_read(ordered[0], "chain_seq")),
+            "the audit head is not under the current key although this job's rows are",
+        )
+    else:
+        check.head_unverifiable = True
+    for row in ordered:
+        seq = int(_read(row, "chain_seq") or 0)
+        action = _read(row, "action")
+        if seq > head_seq:
+            return _broken(seq, f"this job's {action} audit row lies past the audit head")
+        if audit_digest(row) != _read(row, "digest"):
+            return _broken(seq, f"this job's {action} audit row differs from its digest")
+        key_id = _read(row, "chain_key_id") or ""
+        if boundary is not None and seq >= boundary and key_id != current:
+            return _broken(
+                seq, f"this job's {action} audit row names a key the chain no longer allows there"
+            )
+        if boundary is not None and seq < boundary and key_id == current:
+            return _broken(
+                seq, f"this job's {action} audit row claims the current key before the rotation"
+            )
+        key = keys.get(key_id)
+        if key is None:
+            check.unverifiable.append(seq)
+            continue
+        if seq == 1:
+            previous = audit_genesis(key)
+        elif seq - 1 in predecessors:
+            previous = predecessors[seq - 1]
+        else:
+            return _broken(seq, f"the audit row before this job's {action} row is missing")
+        if audit_link(previous, str(_read(row, "digest")), key) != _read(row, "chain"):
+            return _broken(seq, f"this job's {action} audit row does not link to the row before it")
+        check.verified.append(seq)
+    return check
+
+
+async def record_report_deletion(db: Any, report: Any, *, user_id: uuid.UUID | None = None) -> Any:
+    """Write a chained ``report.delete`` row for ``report`` into ``db``'s transaction.
+
+    Every path that deletes a stored report calls this before the delete: the
+    owner's ``DELETE /reports/{id}`` and a re-run superseding its report. It
+    names the report, its job and the digest of the seal it carried (``None``
+    for a report stored before sealing), so a verification of a sealed job
+    whose report row is gone can tell a deletion by its owner from tampering.
+    Without a settings key nothing can be chained; that is logged.
+    """
+    key, no_key = ledger_chain.platform_key_status()
+    seal = getattr(report, "ledger_seal", None)
+    if key is None:
+        logger.warning("The deletion of report %s is not chained: %s.", report.id, no_key)
+        return None
+    return await append(
+        db,
+        action=REPORT_DELETE,
+        resource_type="job",
+        resource_id=str(report.job_id),
+        details={
+            "report_id": str(report.id),
+            "seal_digest": seal.get("digest") if isinstance(seal, Mapping) else None,
+        },
+        key=key,
+        user_id=user_id,
+    )

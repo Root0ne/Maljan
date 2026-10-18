@@ -30,6 +30,7 @@ from app.logsafe import log_safe
 from app.models.job import AnalysisJob
 from app.models.report import AnalysisReport
 from app.models.user import User
+from app.services.audit_chain import record_report_deletion
 
 if TYPE_CHECKING:  # pragma: no cover — import cycle-free typing only
     from maljan.reporting.models import MalwareReport
@@ -481,6 +482,7 @@ class ReportService:
         report = await self.get_report(report_id, user)
         if report is None:
             return False
+        await record_report_deletion(self.db, report, user_id=user.id)
         await self.db.delete(report)
         await self.db.flush()
         logger.info(

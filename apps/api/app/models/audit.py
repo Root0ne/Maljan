@@ -3,7 +3,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Index, Integer, String
+from sqlalchemy import Boolean, DateTime, ForeignKey, Index, Integer, String, text
 from sqlalchemy.dialects.postgresql import INET, JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -41,9 +41,20 @@ class AuditLog(UUIDPrimaryKeyMixin, Base):
     chain_seq: Mapped[int | None] = mapped_column(Integer, nullable=True)
     digest: Mapped[str | None] = mapped_column(String(64), nullable=True)
     chain: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    # ``ledger_chain.KEY_ID_LENGTH`` wide.
     chain_key_id: Mapped[str | None] = mapped_column(String(16), nullable=True)
 
-    __table_args__ = (Index("uq_audit_log_chain_seq", "chain_seq", unique=True),)
+    __table_args__ = (
+        Index("uq_audit_log_chain_seq", "chain_seq", unique=True),
+        # One job's chained rows, read by its verification alone.
+        Index(
+            "ix_audit_log_chain_resource",
+            "resource_id",
+            "chain_seq",
+            postgresql_where=text("chain_seq IS NOT NULL"),
+            sqlite_where=text("chain_seq IS NOT NULL"),
+        ),
+    )
 
     # Relationships
     user = relationship("User", back_populates="audit_logs")
@@ -68,12 +79,13 @@ class AuditChainHead(Base):
     name: Mapped[str] = mapped_column(String(32), primary_key=True)
     chain_seq: Mapped[int] = mapped_column(Integer, nullable=False)
     chain: Mapped[str] = mapped_column(String(64), nullable=False)
+    # ``ledger_chain.KEY_ID_LENGTH`` wide.
     key_id: Mapped[str | None] = mapped_column(String(16), nullable=True)
     mac: Mapped[str] = mapped_column(String(64), nullable=False)
     # The ``chain_seq`` of the first row under ``key_id``: 1 for a chain that
     # never rotated, set by the first append under a new key, covered by the
     # MAC. Verification reads the rotation boundary from here only.
-    rotated_at_seq: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    rotated_at_seq: Mapped[int] = mapped_column(Integer, nullable=False)
 
 
 class APIKey(UUIDPrimaryKeyMixin, TimestampMixin, Base):

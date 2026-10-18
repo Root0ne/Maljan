@@ -186,10 +186,15 @@ class ChainKey:
     key_id: str
 
 
-# What a stored ledger is chained under when the platform holds no settings
-# key: the empty key, said on the seal (``key_id`` ``None``) and by every
-# verification, because a chain anyone can recompute proves only that nothing
-# changed by accident.
+# The length of a key id in hex characters: 64 bits of the SHA-256 of the
+# derived key, enough to tell keys apart and nothing to derive one from. The
+# ``chain_key_id`` and ``key_id`` columns (migrations ``20261022000000`` and
+# ``20261023000000``) are ``String`` of this width.
+KEY_ID_LENGTH = 16
+
+# A key nobody holds a secret for: the empty HMAC key. Nothing is sealed under
+# it (a platform without a settings key seals nothing); tests use it to stand
+# for a writer who recomputes a chain without the platform's key.
 UNKEYED = ChainKey(key=b"", key_id="")
 
 
@@ -201,39 +206,58 @@ def derive_key(secret: str) -> ChainKey:
     key = HKDF(algorithm=hashes.SHA256(), length=32, salt=None, info=KEY_LABEL).derive(
         secret.encode("utf-8")
     )
-    key_id = hashlib.sha256(b"maljan-ledger-chain-key-id/1\n" + key).hexdigest()[:16]
-    return ChainKey(key=key, key_id=key_id)
+    digest = hashlib.sha256(b"maljan-ledger-chain-key-id/1\n" + key).hexdigest()
+    return ChainKey(key=key, key_id=digest[:KEY_ID_LENGTH])
 
 
-def platform_key() -> ChainKey:
-    """The key derived from the platform's settings encryption key; :data:`UNKEYED` without one."""
+def platform_key_status() -> tuple[ChainKey | None, str | None]:
+    """The key derived from the settings encryption key, or ``None`` with the reason there is none.
+
+    The bootstrap settings are read first; only a failure to import or to
+    validate them is caught, and it is named in the reason. The process
+    environment is read next, as ``maljan.core.settings_secrets`` reads it.
+    """
     import os
 
+    from maljan.core.settings_secrets import ENV_VAR
+    from pydantic import ValidationError
+
     secret = ""
+    unread: str | None = None
     try:
         from app.config import settings
 
         secret = settings.settings_encryption_key.get_secret_value().strip()
-    except Exception:  # noqa: BLE001 — the environment is read below
-        secret = ""
+    except (ImportError, ValidationError) as exc:
+        unread = type(exc).__name__
     if not secret:
-        from maljan.core.settings_secrets import ENV_VAR
-
         secret = os.environ.get(ENV_VAR, "").strip()
-    return derive_key(secret) if secret else UNKEYED
+    if secret:
+        return derive_key(secret), None
+    if unread is not None:
+        return None, (
+            f"the bootstrap settings could not be read ({unread}) and {ENV_VAR} is not set "
+            "in the environment"
+        )
+    return None, f"{ENV_VAR} is not set"
+
+
+def platform_key() -> ChainKey | None:
+    """The key derived from the platform's settings encryption key; ``None`` without one."""
+    return platform_key_status()[0]
 
 
 def known_keys() -> dict[str, ChainKey]:
     """Every chain key the platform's settings can derive today, by key id.
 
     One settings encryption key is held at a time, so this is the current key
-    alone; the unkeyed key (id ``""``) is known only to a platform that holds
-    no settings key. A record naming any other id was not made with a key the
-    platform holds and cannot be checked: a verifier says so and never takes
-    the record's own word for which key to trust.
+    alone, and none on a platform without a settings key. A record naming any
+    other id was not made with a key the platform holds and cannot be checked:
+    a verifier says so and never takes the record's own word for which key to
+    trust.
     """
     current = platform_key()
-    return {current.key_id: current}
+    return {current.key_id: current} if current is not None else {}
 
 
 def keyed(key: ChainKey, tag: bytes, message: bytes) -> str:
@@ -283,20 +307,68 @@ def _without_seal(document: Any) -> Any:
     return json_value(document)
 
 
-def report_digest(malware_report: Any, run_summary: Any, stix_bundle: Any) -> str:
-    """The SHA-256 of the stored report's three documents, each without its seal.
-
-    The report payload, the run summary column and the STIX bundle column, as
-    they are stored; the seal and amendment keys are left out of the first
-    two, so the digest a seal records is the one recomputed after it is
-    written.
-    """
-    document = {
-        "malware_report": _without_seal(malware_report),
-        "run_summary": _without_seal(run_summary),
-        "stix_bundle": json_value(stix_bundle),
+# Every column of ``analysis_reports`` the seal's report digest covers, by
+# column name, in the same canonical form as the ledger rows.
+REPORT_DIGESTED: tuple[str, ...] = (
+    "job_id",
+    "verdict",
+    "overall_confidence",
+    "malware_category",
+    "stix_bundle",
+    "judge_stix_bundle",
+    "mitre_techniques",
+    "agent_reports",
+    "negotiation_log",
+    "run_summary",
+    "malware_report",
+    "incomplete_reason",
+)
+# Left out of the report digest, named so a new column is a decision: the
+# random key, the timestamps the database writes (``created_at`` is not known
+# before the insert returns, ``updated_at`` moves with every amendment) and the
+# seal itself. The per-agent findings and the transcript are rows of their own
+# tables, not columns of this one, and are not covered.
+REPORT_BOOKKEEPING: tuple[str, ...] = ("id", "created_at", "updated_at", "ledger_seal")
+_REPORT_JSON = frozenset(
+    {
+        "stix_bundle",
+        "judge_stix_bundle",
+        "mitre_techniques",
+        "agent_reports",
+        "negotiation_log",
+        "run_summary",
+        "malware_report",
     }
-    return hashlib.sha256(_REPORT_TAG + canonical(document)).hexdigest()
+)
+
+
+def report_fields(report: Any, overrides: Mapping[str, Any] | None = None) -> dict[str, Any]:
+    """The digested columns of a report row (an object or a mapping), canonical.
+
+    ``overrides`` replaces columns before they are read, for the digest of a
+    write about to happen. The seal and amendment keys are left out of the
+    payload and the run summary, so the digest a seal records is the one
+    recomputed after it is written.
+    """
+    out: dict[str, Any] = {}
+    for name in REPORT_DIGESTED:
+        value = overrides[name] if overrides and name in overrides else _read(report, name)
+        if name in ("malware_report", "run_summary"):
+            out[name] = _without_seal(value)
+        elif name in _REPORT_JSON:
+            out[name] = json_value(value)
+        elif name == "job_id":
+            out[name] = str(value) if value is not None else None
+        elif isinstance(value, float):
+            out[name] = _number(value)
+        else:
+            out[name] = value
+    return out
+
+
+def report_digest(report: Any, overrides: Mapping[str, Any] | None = None) -> str:
+    """The SHA-256 of the stored report row's digested columns (:data:`REPORT_DIGESTED`)."""
+    return hashlib.sha256(_REPORT_TAG + canonical(report_fields(report, overrides))).hexdigest()
 
 
 def record_digest(record: Mapping[str, Any], key: ChainKey) -> str:
@@ -314,11 +386,7 @@ def seal(
     sealed_at: datetime,
     key: ChainKey,
 ) -> dict[str, Any]:
-    """The seal of a stored ledger: the chain head, what it covers, the key id, and its digest.
-
-    ``key_id`` is ``None`` when the platform held no settings key and the
-    chain was computed under :data:`UNKEYED`.
-    """
+    """The seal of a stored ledger: the chain head, what it covers, the key id, and its digest."""
     seqs = [int(_read(row, "seq") or 0) for row in rows]
     record: dict[str, Any] = {
         "version": CHAIN_VERSION,
@@ -366,11 +434,9 @@ def amendment(
 
 
 def amend(
-    stored_payload: Mapping[str, Any],
-    stored_summary: Any,
+    report: Any,
     payload: dict[str, Any],
     summary: Any,
-    stix_bundle: Any,
     *,
     seal_record: Any,
     kind: str,
@@ -379,17 +445,20 @@ def amend(
 ) -> tuple[dict[str, Any], Any, dict[str, Any] | None]:
     """The payload and run summary to write over a sealed report, with the amendment it needs.
 
-    ``stored_*`` are the documents as stored, ``payload`` and ``summary`` what
-    is about to replace them (``summary`` ``None`` leaves the stored one). A
-    report without a seal, or a change that leaves the report digest as it
-    was, is written as it is and needs no amendment (``None``). Otherwise an
-    amendment chained onto the last record is appended to both documents.
+    ``report`` is the stored row as read; ``payload`` and ``summary`` are what
+    is about to replace its report payload and run summary (``summary``
+    ``None`` leaves the stored one). A report without a seal, or a change that
+    leaves the report digest as it was, is written as it is and needs no
+    amendment (``None``). Otherwise an amendment chained onto the last record
+    is appended to both documents.
     """
     if not isinstance(seal_record, Mapping) or not seal_record.get("digest"):
         return payload, summary, None
-    next_summary = summary if summary is not None else stored_summary
-    before = report_digest(stored_payload, stored_summary, stix_bundle)
-    after = report_digest(payload, next_summary, stix_bundle)
+    stored_payload = _read(report, "malware_report")
+    stored_payload = stored_payload if isinstance(stored_payload, Mapping) else {}
+    next_summary = summary if summary is not None else _read(report, "run_summary")
+    before = report_digest(report)
+    after = report_digest(report, {"malware_report": payload, "run_summary": next_summary})
     if before == after:
         return payload, summary, None
     held = stored_payload.get(AMENDMENTS_KEY)

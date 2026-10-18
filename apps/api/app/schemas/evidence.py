@@ -101,7 +101,7 @@ class EvidenceEntryResponse(BaseModel):
 class LedgerVerificationResponse(BaseModel):
     """What recomputing a job's ledger chain against its seal found (``services.ledger_verify``).
 
-    ``status`` is ``verified``, ``broken``, ``other_key``, ``unverifiable`` or
+    ``status`` is ``verified``, ``broken``, ``deleted``, ``other_key``, ``unverifiable`` or
     ``not_sealed``;
     ``reason`` says why in a sentence, ``first_broken_seq`` names the first row
     to blame when one is, ``checks`` lists what held and ``notes`` what was not

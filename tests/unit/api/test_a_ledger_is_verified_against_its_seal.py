@@ -3,10 +3,13 @@
 The chain is recomputed from the rows. A sealed job reads as tampered when a
 row changed, a row was deleted or added, a digest is NULL, the count changed,
 the chain was recomputed without the key, a copy of the seal is missing or
-disagrees, or the report changed after the seal with no amendment; the first
-broken ``seq`` is named where a row is to blame. A seal made under a key the
-platform cannot derive is reported as such, not as tampering. A run stored
-before sealing reads as not sealed, and so does a job that stored nothing.
+disagrees, any column of the report row the seal covers changed with no
+amendment, or the payload lacks an amendment the audit chain records; the first
+broken ``seq`` is named where a row is to blame. A report its owner deleted
+reads ``deleted``; one gone without a record is broken. A missing audit row
+reads ``unverifiable``, never verified and never broken. A seal made under a
+key the platform cannot derive is reported as such. A run stored before
+sealing reads as not sealed, and so does a job that stored nothing.
 """
 
 from __future__ import annotations
@@ -21,8 +24,10 @@ import pytest
 from fastapi import HTTPException
 from scripts.ledger import verify as cli
 
+from app.models.report import AnalysisReport
 from app.services import ledger_chain, ledger_verify
 from app.services.audit_chain import AuditChainCheck
+from app.services.ledger_verify import JobAudit
 from app.worker.analysis_worker import _evidence_row
 from maljan.schemas.evidence import LedgerEntry
 
@@ -30,6 +35,33 @@ KEY = ledger_chain.derive_key("verify-test-material")
 OTHER = ledger_chain.derive_key("verify-test-rotated-material")
 KEYS = {KEY.key_id: KEY}
 NOW = datetime(2026, 10, 18, 9, 0, tzinfo=UTC)
+
+
+def _report_row(job_id: uuid.UUID) -> dict[str, Any]:
+    return {
+        "id": str(uuid.uuid4()),
+        "job_id": str(job_id),
+        "verdict": "Malicious",
+        "overall_confidence": 0.85,
+        "malware_category": "loader",
+        "stix_bundle": {"type": "bundle", "objects": []},
+        "judge_stix_bundle": None,
+        "mitre_techniques": ["T1055"],
+        "agent_reports": {"static": "a packed loader"},
+        "negotiation_log": {"discussion_history": []},
+        "run_summary": {"evidence": {"entries": 4}},
+        "malware_report": {"verdict": "Malicious", "network": {"domains": []}},
+        "incomplete_reason": None,
+        "ledger_seal": None,
+    }
+
+
+def _audit(*seals: dict[str, Any], **extra: Any) -> JobAudit:
+    count = len(seals) + len(extra.get("amendments", [])) + len(extra.get("deletes", []))
+    check = extra.pop("check", None) or AuditChainCheck(
+        rows=count, head_seq=count, rotated_at_seq=1, verified=list(range(1, count + 1))
+    )
+    return JobAudit(check=check, seals=list(seals), **extra)
 
 
 def _sealed(count: int = 4, key: ledger_chain.ChainKey = KEY) -> dict[str, Any]:
@@ -45,56 +77,46 @@ def _sealed(count: int = 4, key: ledger_chain.ChainKey = KEY) -> dict[str, Any]:
         for seq in range(1, count + 1)
     ]
     head = ledger_chain.chain_rows(job_id, rows, key)
-    payload: dict[str, Any] = {"verdict": "Malicious", "network": {"domains": []}}
-    summary: dict[str, Any] = {"evidence": {"entries": count}}
-    stix = {"type": "bundle", "objects": []}
+    report = _report_row(job_id)
     seal = ledger_chain.seal(
         job_id,
         rows,
         head,
-        report_sha256=ledger_chain.report_digest(payload, summary, stix),
+        report_sha256=ledger_chain.report_digest(report),
         sealed_at=NOW,
         key=key,
     )
+    report["ledger_seal"] = seal
+    report["malware_report"] = ledger_chain.with_seal(report["malware_report"], seal)
+    report["run_summary"] = ledger_chain.with_seal(report["run_summary"], seal)
     return {
         "job_id": job_id,
         "rows": [
             ledger_chain.entry_fields(r) | {"digest": r.digest, "chain": r.chain} for r in rows
         ],
-        "report_seal": seal,
-        "malware_report": ledger_chain.with_seal(payload, seal),
-        "run_summary": ledger_chain.with_seal(summary, seal),
-        "stix_bundle": stix,
-        "audit_seals": [seal],
-        "audit_amendments": [],
+        "report": report,
+        "audit": _audit({"report_id": report["id"], "seal": seal}),
     }
 
 
 def _verify(job: dict[str, Any], keys: dict[str, Any] = KEYS, **changes: Any) -> dict[str, Any]:
     given = {**job, **changes}
     return ledger_verify.verify_ledger(
-        given["job_id"],
-        given["rows"],
-        report_seal=given["report_seal"],
-        malware_report=given["malware_report"],
-        run_summary=given["run_summary"],
-        stix_bundle=given["stix_bundle"],
-        report_stored=True,
-        audit_seals=given["audit_seals"],
-        audit_amendments=given["audit_amendments"],
-        audit_check=given.get("audit_check"),
-        audit_own_unverifiable=given.get("audit_own_unverifiable", False),
-        keys=keys,
+        given["job_id"], given["rows"], report=given["report"], audit=given["audit"], keys=keys
     )
+
+
+def _seal(job: dict[str, Any]) -> dict[str, Any]:
+    return dict(job["report"]["ledger_seal"])
 
 
 def test_an_untouched_sealed_ledger_verifies():
     job = _sealed()
     verdict = _verify(job)
     assert verdict["status"] == "verified", verdict
-    assert verdict["head"] == job["report_seal"]["head"]
+    assert verdict["head"] == _seal(job)["head"]
     assert verdict["first_broken_seq"] is None
-    assert verdict["checks"]
+    assert "findings and the transcript are not covered" in verdict["reason"]
 
 
 def test_a_changed_row_is_tampering_at_its_seq():
@@ -119,13 +141,11 @@ def test_a_row_rechained_without_the_key_is_tampering():
 def test_a_whole_chain_and_seal_recomputed_without_the_key_is_tampering():
     job = _sealed()
     forged = _sealed(key=ledger_chain.UNKEYED)
-    seal = dict(forged["report_seal"], job_id=str(job["job_id"]), key_id=KEY.key_id)
-    for copy in ("report_seal",):
-        job[copy] = seal
-    job["malware_report"] = ledger_chain.with_seal(job["malware_report"], seal)
-    job["run_summary"] = ledger_chain.with_seal(job["run_summary"], seal)
-    job["audit_seals"] = [seal]
-    verdict = _verify(job)
+    seal = dict(forged["report"]["ledger_seal"], job_id=str(job["job_id"]), key_id=KEY.key_id)
+    report = dict(job["report"], ledger_seal=seal)
+    report["malware_report"] = ledger_chain.with_seal(report["malware_report"], seal)
+    report["run_summary"] = ledger_chain.with_seal(report["run_summary"], seal)
+    verdict = _verify(job, report=report, audit=_audit({"report_id": report["id"], "seal": seal}))
     assert verdict["status"] == "broken"
     assert "does not verify under its key" in verdict["reason"]
 
@@ -133,8 +153,7 @@ def test_a_whole_chain_and_seal_recomputed_without_the_key_is_tampering():
 def test_a_deleted_row_is_tampering_at_the_next_seq():
     job = _sealed()
     del job["rows"][1]
-    verdict = _verify(job)
-    assert (verdict["status"], verdict["first_broken_seq"]) == ("broken", 3)
+    assert (_verify(job)["status"], _verify(job)["first_broken_seq"]) == ("broken", 3)
 
 
 def test_a_deleted_last_row_is_tampering_named_by_its_seq():
@@ -165,21 +184,15 @@ def test_a_null_digest_on_a_sealed_job_is_tampering():
 
 def test_a_missing_or_disagreeing_seal_copy_is_tampering():
     job = _sealed()
-    assert _verify(job, report_seal=None)["status"] == "broken"
-    other = dict(job["report_seal"], entries=3)
-    assert "disagree" in _verify(job, report_seal=other)["reason"]
-    assert _verify(job, audit_seals=[])["reason"].startswith("No ledger.seal row")
+    assert _verify(job, report=dict(job["report"], ledger_seal=None))["status"] == "broken"
+    other = dict(_seal(job), entries=3)
+    assert "disagree" in _verify(job, report=dict(job["report"], ledger_seal=other))["reason"]
 
 
 def test_rows_with_digests_and_no_seal_anywhere_are_tampering():
     job = _sealed()
-    verdict = _verify(
-        job,
-        report_seal=None,
-        malware_report={"verdict": "x"},
-        run_summary={},
-        audit_seals=[],
-    )
+    report = dict(_report_row(job["job_id"]))
+    verdict = _verify(job, report=report, audit=_audit())
     assert (verdict["status"], verdict["first_broken_seq"]) == ("broken", 1)
 
 
@@ -192,66 +205,166 @@ def test_a_rotated_key_is_reported_as_such():
     assert _verify(job, keys={OTHER.key_id: OTHER})["status"] == "broken"
 
 
-def test_an_unkeyed_seal_on_a_keyed_platform_is_not_verified():
+def test_an_unkeyed_seal_is_never_verified():
     job = _sealed(key=ledger_chain.UNKEYED)
     assert _verify(job)["status"] == "other_key"
-    unkeyed = _verify(job, keys={"": ledger_chain.UNKEYED})
-    assert unkeyed["status"] == "verified"
-    assert any("without a key" in note for note in unkeyed["notes"])
+    assert _verify(job, keys={})["status"] == "other_key"
 
 
-def test_a_report_changed_without_an_amendment_is_tampering_and_with_one_verifies():
-    job = _sealed()
-    changed = dict(job["malware_report"], verdict="Benign")
-    verdict = _verify(job, malware_report=changed)
-    assert verdict["status"] == "broken"
-    assert "no amendment" in verdict["reason"]
+def test_a_change_to_any_report_column_without_an_amendment_is_tampering():
+    for name, value in (
+        ("verdict", "Benign"),
+        ("overall_confidence", 0.1),
+        ("malware_category", "adware"),
+        ("mitre_techniques", []),
+        ("agent_reports", {"static": "benign"}),
+        ("negotiation_log", {}),
+        ("judge_stix_bundle", {"bundle": {}}),
+        ("incomplete_reason", "stopped"),
+    ):
+        job = _sealed()
+        verdict = _verify(job, report=dict(job["report"], **{name: value}))
+        assert verdict["status"] == "broken", name
+        assert "no amendment" in verdict["reason"], name
 
+
+def test_every_report_column_is_digested_or_named_as_bookkeeping():
+    columns = {c.name for c in AnalysisReport.__table__.columns}
+    digested = set(ledger_chain.REPORT_DIGESTED)
+    bookkeeping = set(ledger_chain.REPORT_BOOKKEEPING)
+    assert not digested & bookkeeping
+    assert digested | bookkeeping == columns
+
+
+def _amended(job: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
+    report = job["report"]
+    changed = dict(report["malware_report"], verdict="Benign")
     payload, summary, record = ledger_chain.amend(
-        job["malware_report"],
-        job["run_summary"],
-        dict(changed),
-        None,
-        job["stix_bundle"],
-        seal_record=job["report_seal"],
-        kind="enrichment",
-        key=KEY,
-        at=NOW,
+        report, changed, None, seal_record=report["ledger_seal"], kind="enrichment", key=KEY, at=NOW
     )
     assert record is not None
-    amended = _verify(job, malware_report=payload, run_summary=summary, audit_amendments=[record])
-    assert amended["status"] == "verified", amended
-    assert amended["amendments"] == 1
-    assert _verify(job, malware_report=payload, run_summary=summary)["status"] == "broken"
+    return dict(report, malware_report=payload, run_summary=summary), record
 
 
-def test_a_broken_audit_chain_is_tampering():
+def test_a_report_changed_with_an_amendment_on_both_sides_verifies():
     job = _sealed()
-    check = AuditChainCheck(rows=3, broken_at=2, reason="chained audit row 2 is missing")
-    verdict = _verify(job, audit_check=check)
+    report, record = _amended(job)
+    audit = _audit(
+        {"report_id": report["id"], "seal": _seal(job)},
+        amendments=[{"report_id": report["id"], "amendment": record}],
+    )
+    verdict = _verify(job, report=report, audit=audit)
+    assert verdict["status"] == "verified", verdict
+    assert verdict["amendments"] == 1
+
+
+def test_a_dropped_trailing_amendment_and_a_rolled_back_report_is_tampering():
+    job = _sealed()
+    report, record = _amended(job)
+    audit = _audit(
+        {"report_id": report["id"], "seal": _seal(job)},
+        amendments=[{"report_id": report["id"], "amendment": record}],
+    )
+    rolled_back = job["report"]
+    verdict = _verify(job, report=rolled_back, audit=audit)
     assert verdict["status"] == "broken"
-    assert "chained row 2" in verdict["reason"]
+    assert "Amendment 1, recorded on the audit chain for this seal, is missing" in verdict["reason"]
+
+
+def test_an_amendment_whose_audit_append_did_not_land_reads_unverifiable():
+    job = _sealed()
+    report, _record = _amended(job)
+    verdict = _verify(job, report=report)
+    assert verdict["status"] == "unverifiable"
+    assert "amendment 1 did not land" in verdict["reason"]
+
+
+def test_a_missing_audit_seal_row_reads_unverifiable_never_broken_or_verified():
+    job = _sealed()
+    verdict = _verify(job, audit=_audit())
+    assert verdict["status"] == "unverifiable"
+    assert verdict["reason"] == ledger_verify.SEAL_NOT_ANCHORED
+
+
+def test_the_audit_seal_is_picked_by_this_report_s_seal_digest():
+    job = _sealed()
+    earlier = _sealed()
+    audit = _audit(
+        {"report_id": job["report"]["id"], "seal": _seal(job)},
+        {"report_id": earlier["report"]["id"], "seal": _seal(earlier)},
+    )
+    assert _verify(job, audit=audit)["status"] == "verified"
+
+
+def test_a_relabelled_key_id_with_recomputed_digests_does_not_escape():
+    job = _sealed()
+    seal = dict(_seal(job), key_id="0000000000000000")
+    report = dict(job["report"], ledger_seal=seal)
+    report["malware_report"] = ledger_chain.with_seal(report["malware_report"], seal)
+    report["run_summary"] = ledger_chain.with_seal(report["run_summary"], seal)
+    job["rows"][0]["output"] = "edited"
+    job["rows"][0]["digest"] = ledger_chain.entry_digest(job["rows"][0])
+    verdict = _verify(job, report=report)
+    assert verdict["status"] == "broken"
+    assert "differs" in verdict["reason"]
+
+
+def test_a_report_deleted_by_its_owner_reads_deleted_and_one_gone_silently_is_broken():
+    job = _sealed()
+    seal = _seal(job)
+    audit = _audit(
+        {"report_id": job["report"]["id"], "seal": seal},
+        deletes=[{"report_id": job["report"]["id"], "seal_digest": seal["digest"]}],
+    )
+    deleted = _verify(job, report=None, audit=audit)
+    assert deleted["status"] == "deleted", deleted
+    gone = _verify(job, report=None, audit=_audit({"report_id": job["report"]["id"], "seal": seal}))
+    assert gone["status"] == "broken"
+    assert "no report.delete audit row" in gone["reason"]
+    job["rows"][0]["output"] = "edited after the deletion"
+    assert _verify(job, report=None, audit=audit)["status"] == "broken"
+
+
+def test_a_broken_job_audit_row_is_tampering_without_a_global_position():
+    job = _sealed()
+    check = AuditChainCheck(
+        rows=1, broken_at=812, reason="this job's ledger.seal audit row differs from its digest"
+    )
+    verdict = _verify(job, audit=JobAudit(check=check))
+    assert verdict["status"] == "broken"
+    assert "812" not in verdict["reason"]
 
 
 def test_a_job_sealed_after_a_rotation_verifies_beside_an_unverifiable_older_segment():
     job = _sealed()
-    check = AuditChainCheck(rows=5, head_seq=5, unverifiable=[1, 2, 3])
-    verdict = _verify(job, audit_check=check)
-    assert verdict["status"] == "verified", verdict
-    assert any("seq 1 to 3" in note and "unverifiable" in note for note in verdict["notes"])
-    assert "the audit chain verifies over 2 of 5 rows" in verdict["checks"]
+    audit = job["audit"]
+    audit.check.unverifiable = []
+    assert _verify(job)["status"] == "verified"
+
+
+def test_a_head_under_an_unknown_key_reads_unverifiable_never_verified():
+    job = _sealed()
+    job["audit"].check.head_unverifiable = True
+    verdict = _verify(job)
+    assert verdict["status"] == "unverifiable"
+    assert verdict["reason"] == ledger_verify.HEAD_UNVERIFIABLE
+
+
+def test_a_job_whose_own_seal_row_is_unverifiable_reads_unverifiable():
+    job = _sealed()
+    check = AuditChainCheck(rows=1, head_seq=3, rotated_at_seq=3, unverifiable=[1])
+    verdict = _verify(job, audit=JobAudit(check=check))
+    assert verdict["status"] == "unverifiable"
+    assert verdict["reason"] == ledger_verify.OWN_ROWS_UNVERIFIABLE
+    gone = _verify(job, report=None, audit=JobAudit(check=check))
+    assert gone["status"] == "unverifiable"
 
 
 def test_an_old_job_predates_sealing_and_an_empty_one_stored_nothing():
     job = _sealed()
     old_rows = [{k: v for k, v in r.items() if k not in ("digest", "chain")} for r in job["rows"]]
     verdict = ledger_verify.verify_ledger(
-        job["job_id"],
-        old_rows,
-        malware_report={"verdict": "x"},
-        run_summary={},
-        report_stored=True,
-        keys=KEYS,
+        job["job_id"], old_rows, report=_report_row(job["job_id"]), keys=KEYS
     )
     assert (verdict["status"], verdict["reason"]) == ("not_sealed", ledger_verify.PREDATES)
     empty = ledger_verify.verify_ledger(uuid.uuid4(), [], keys=KEYS)
@@ -260,16 +373,17 @@ def test_an_old_job_predates_sealing_and_an_empty_one_stored_nothing():
 
 def _write_run(job: dict[str, Any], into: Path) -> None:
     into.mkdir()
+    report = job["report"]
     (into / "evidence.json").write_text(
         json.dumps({"total": len(job["rows"]), "items": job["rows"]}), encoding="utf-8"
     )
-    (into / "report.json").write_text(json.dumps(job["malware_report"]), encoding="utf-8")
-    (into / "run-summary.json").write_text(json.dumps(job["run_summary"]), encoding="utf-8")
-    (into / "stix-bundle.json").write_text(json.dumps(job["stix_bundle"]), encoding="utf-8")
-    (into / "report-byjob.json").write_text(
-        json.dumps({"job_id": str(job["job_id"]), "ledger_seal": job["report_seal"]}),
-        encoding="utf-8",
-    )
+    byjob = {name: report.get(name) for name in (*ledger_chain.REPORT_DIGESTED, "id")}
+    byjob["ledger_seal"] = report["ledger_seal"]
+    (into / "report-byjob.json").write_text(json.dumps(byjob), encoding="utf-8")
+    if report["malware_report"] is not None:
+        (into / "report.json").write_text(json.dumps(report["malware_report"]), encoding="utf-8")
+    if report["run_summary"] is not None:
+        (into / "run-summary.json").write_text(json.dumps(report["run_summary"]), encoding="utf-8")
 
 
 def test_the_command_verifies_a_stored_run_directory(tmp_path: Path, monkeypatch: Any, capsys):
@@ -287,15 +401,36 @@ def test_the_command_verifies_a_stored_run_directory(tmp_path: Path, monkeypatch
     assert json.loads(capsys.readouterr().out)["first_broken_seq"] == 2
 
 
+def test_a_null_run_summary_reads_the_same_from_an_export_as_from_the_database(
+    tmp_path: Path, monkeypatch: Any
+):
+    monkeypatch.setattr(ledger_chain, "known_keys", lambda: KEYS)
+    job_id = uuid.uuid4()
+    report = _report_row(job_id) | {"run_summary": None}
+    seal = ledger_chain.seal(
+        job_id,
+        [],
+        ledger_chain.genesis(job_id, KEY),
+        report_sha256=ledger_chain.report_digest(report),
+        sealed_at=NOW,
+        key=KEY,
+    )
+    report["ledger_seal"] = seal
+    report["malware_report"] = ledger_chain.with_seal(report["malware_report"], seal)
+    job = {"job_id": job_id, "rows": [], "report": report, "audit": None}
+    database = _verify(job)
+    _write_run(job, tmp_path / "run")
+    exported = cli.verify_run(tmp_path / "run")
+    assert database["status"] == exported["status"] == "verified", (database, exported)
+
+
 def _benchmark() -> Path | None:
-    here = Path(__file__).resolve()
-    for parent in here.parents:
+    main = Path("/home/user/Belgeler/kingston/Projects/Maljan/.superpowers/sdd/mandate-2026-09-17")
+    for parent in (*Path(__file__).resolve().parents, main.parents[2]):
         candidate = parent / ".superpowers/sdd/mandate-2026-09-17/benchmark/deepseek"
         if candidate.is_dir():
             return candidate
-    main = Path("/home/user/Belgeler/kingston/Projects/Maljan/.superpowers/sdd/mandate-2026-09-17")
-    candidate = main / "benchmark/deepseek"
-    return candidate if candidate.is_dir() else None
+    return None
 
 
 @pytest.mark.parametrize("run", ["run7", "run5", "run4", "local8", "haiku4"])
@@ -338,12 +473,12 @@ async def test_the_route_is_owner_only_and_serves_the_verdict(monkeypatch: Any):
         job["job_id"], user=_User(), svc=_Service(object()), db=object()
     )
     assert served.status == "verified"
-    assert served.seal == job["report_seal"]
+    assert served.seal == _seal(job)
     assert KEY.key.hex() not in json.dumps(served.model_dump())
 
 
 class _AsyncConnection:
-    """The one call ``verify_job`` makes, answered by a synchronous SQLite connection."""
+    """The calls ``verify_job`` makes, answered by a synchronous SQLite connection."""
 
     def __init__(self, conn: Any) -> None:
         self._conn = conn
@@ -352,15 +487,35 @@ class _AsyncConnection:
         return self._conn.execute(statement)
 
 
+def _audit_row(seq: int, previous: str | None, job_id: Any, action: str, details: Any) -> dict:
+    from app.services import audit_chain
+
+    row: dict[str, Any] = {
+        "id": uuid.uuid4(),
+        "user_id": None,
+        "action": action,
+        "resource_type": "job",
+        "resource_id": str(job_id),
+        "details": details,
+        "ip_address": None,
+        "created_at": NOW,
+        "chain_seq": seq,
+        "chain_key_id": KEY.key_id,
+    }
+    row["digest"] = audit_chain.audit_digest(row)
+    start = previous if previous is not None else audit_chain.audit_genesis(KEY)
+    row["chain"] = audit_chain.audit_link(start, row["digest"], KEY)
+    return row
+
+
 @pytest.mark.asyncio
-async def test_the_job_is_read_from_the_database_and_verified(monkeypatch: Any):
+async def test_the_job_is_read_from_the_database_with_only_its_own_audit_rows(monkeypatch: Any):
     import sqlalchemy as sa
     from sqlalchemy.dialects import postgresql
     from sqlalchemy.ext.compiler import compiles
 
     from app.models.audit import AuditChainHead, AuditLog
     from app.models.evidence import EvidenceEntry
-    from app.models.report import AnalysisReport
     from app.services import audit_chain
 
     @compiles(postgresql.JSONB, "sqlite")
@@ -371,8 +526,7 @@ async def test_the_job_is_read_from_the_database_and_verified(monkeypatch: Any):
     def _inet(element, compiler, **kw):  # noqa: ANN001, ANN202
         return "TEXT"
 
-    monkeypatch.setattr(ledger_chain, "known_keys", lambda: KEYS)
-    monkeypatch.setattr(ledger_chain, "platform_key", lambda: KEY)
+    monkeypatch.setattr(ledger_chain, "platform_key_status", lambda: (KEY, None))
     job_id = uuid.uuid4()
     rows = [
         _evidence_row(
@@ -385,30 +539,28 @@ async def test_the_job_is_read_from_the_database_and_verified(monkeypatch: Any):
         for s in (1, 2, 3)
     ]
     head = ledger_chain.chain_rows(job_id, rows, KEY)
-    payload: dict[str, Any] = {"verdict": "Malicious"}
-    summary: dict[str, Any] = {"evidence": {}}
+    report = _report_row(job_id)
     seal = ledger_chain.seal(
         job_id,
         rows,
         head,
-        report_sha256=ledger_chain.report_digest(payload, summary, None),
+        report_sha256=ledger_chain.report_digest(report),
         sealed_at=NOW,
         key=KEY,
     )
-    audit: dict[str, Any] = {
-        "id": uuid.uuid4(),
-        "user_id": None,
-        "action": audit_chain.LEDGER_SEAL,
-        "resource_type": "job",
-        "resource_id": str(job_id),
-        "details": {"seal": seal},
-        "ip_address": None,
-        "created_at": NOW,
-        "chain_seq": 1,
-        "chain_key_id": KEY.key_id,
-    }
-    audit["digest"] = audit_chain.audit_digest(audit)
-    audit["chain"] = audit_chain.audit_link(audit_chain.audit_genesis(KEY), audit["digest"], KEY)
+    report["ledger_seal"] = seal
+    report["malware_report"] = ledger_chain.with_seal(report["malware_report"], seal)
+    report["run_summary"] = ledger_chain.with_seal(report["run_summary"], seal)
+    other_job = uuid.uuid4()
+    first = _audit_row(1, None, other_job, audit_chain.LEDGER_SEAL, {"seal": {}})
+    mine = _audit_row(
+        2,
+        first["chain"],
+        job_id,
+        audit_chain.LEDGER_SEAL,
+        {"report_id": report["id"], "seal": seal},
+    )
+    last = _audit_row(3, mine["chain"], other_job, audit_chain.REPORT_AMEND, {})
 
     engine = sa.create_engine("sqlite://")
     with engine.begin() as conn:
@@ -420,101 +572,45 @@ async def test_the_job_is_read_from_the_database_and_verified(monkeypatch: Any):
             conn.execute(EvidenceEntry.__table__.insert().values(**values))
         conn.execute(
             AnalysisReport.__table__.insert().values(
-                id=uuid.uuid4(),
-                job_id=job_id,
-                verdict="Malicious",
-                malware_report=ledger_chain.with_seal(payload, seal),
-                run_summary=ledger_chain.with_seal(summary, seal),
-                stix_bundle=None,
-                ledger_seal=seal,
+                **report | {"id": uuid.UUID(report["id"]), "job_id": job_id},
                 created_at=NOW,
                 updated_at=NOW,
             )
         )
-        conn.execute(AuditLog.__table__.insert().values(**audit))
+        for audit_row in (first, mine, last):
+            conn.execute(AuditLog.__table__.insert().values(**audit_row))
         conn.execute(
             AuditChainHead.__table__.insert().values(
                 name=audit_chain.HEAD_NAME,
-                chain_seq=1,
-                chain=audit["chain"],
+                chain_seq=3,
+                chain=last["chain"],
                 key_id=KEY.key_id,
-                mac=audit_chain.head_mac(1, audit["chain"], 1, KEY),
                 rotated_at_seq=1,
+                mac=audit_chain.head_mac(3, last["chain"], 1, KEY),
             )
         )
         db = _AsyncConnection(conn)
         verdict = await ledger_verify.verify_job(db, job_id)
         assert verdict["status"] == "verified", verdict
 
+        log = AuditLog.__table__
+        conn.execute(log.update().where(log.c.chain_seq == 3).values(details={"x": 1}))
+        verdict = await ledger_verify.verify_job(db, job_id)
+        assert verdict["status"] == "verified", "a break in another job's row does not touch it"
+
         table = EvidenceEntry.__table__
         conn.execute(table.update().where(table.c.seq == 2).values(output="edited in place"))
         verdict = await ledger_verify.verify_job(db, job_id)
         assert (verdict["status"], verdict["first_broken_seq"]) == ("broken", 2)
 
-        conn.execute(table.delete().where(table.c.seq == 2))
-        verdict = await ledger_verify.verify_job(db, job_id)
-        assert (verdict["status"], verdict["first_broken_seq"]) == ("broken", 3)
-
-        conn.execute(AuditLog.__table__.delete())
+        conn.execute(table.update().where(table.c.seq == 2).values(output="x"))
+        conn.execute(log.update().where(log.c.chain_seq == 2).values(details={"seal": {}}))
         verdict = await ledger_verify.verify_job(db, job_id)
         assert verdict["status"] == "broken"
-        assert "audit chain" in verdict["reason"]
+        assert "this job's ledger.seal audit row" in verdict["reason"]
+        assert " 2 " not in verdict["reason"]
 
-
-def test_a_head_under_an_unknown_key_reads_unverifiable_never_verified():
-    job = _sealed()
-    check = AuditChainCheck(rows=2, head_seq=2, unverifiable=[1, 2], head_unverifiable=True)
-    verdict = _verify(job, audit_check=check)
-    assert verdict["status"] == "unverifiable"
-    assert verdict["reason"] == ledger_verify.HEAD_UNVERIFIABLE
-
-
-def test_a_job_whose_own_seal_row_is_unverifiable_reads_unverifiable():
-    job = _sealed()
-    check = AuditChainCheck(rows=3, head_seq=3, rotated_at_seq=3, verified=[3], unverifiable=[1, 2])
-    verdict = _verify(job, audit_seals=[], audit_check=check, audit_own_unverifiable=True)
-    assert verdict["status"] == "unverifiable"
-    assert verdict["reason"] == ledger_verify.OWN_ROWS_UNVERIFIABLE
-    only_audit = _verify(
-        job,
-        report_seal=None,
-        malware_report=None,
-        run_summary=None,
-        audit_seals=[],
-        audit_check=check,
-        audit_own_unverifiable=True,
-    )
-    assert only_audit["status"] == "unverifiable"
-
-
-@pytest.mark.asyncio
-async def test_a_rotation_then_an_append_lets_the_new_job_verify(monkeypatch: Any):
-    from tests.unit.api.test_the_seal_is_on_the_audit_chain import _ChainSession
-
-    from app.services import audit_chain
-
-    monkeypatch.setattr(ledger_chain, "known_keys", lambda: KEYS)
-    monkeypatch.setattr(ledger_chain, "platform_key", lambda: KEY)
-    job = _sealed()
-    db = _ChainSession()
-    await audit_chain.append(
-        db,
-        action=audit_chain.LEDGER_SEAL,
-        resource_type="job",
-        resource_id="old",
-        details={"seal": {}},
-        key=OTHER,
-    )
-    await audit_chain.append(
-        db,
-        action=audit_chain.LEDGER_SEAL,
-        resource_type="job",
-        resource_id=str(job["job_id"]),
-        details={"seal": job["report_seal"]},
-        key=KEY,
-    )
-    check = audit_chain.verify_audit_chain(db.rows, KEYS, db.head, KEY.key_id)
-    assert (check.broken_at, check.unverifiable, check.verified) == (None, [1], [2])
-    verdict = _verify(job, audit_check=check)
-    assert verdict["status"] == "verified", verdict
-    assert any("seq 1 to 1" in note for note in verdict["notes"])
+        conn.execute(log.delete().where(log.c.chain_seq == 2))
+        verdict = await ledger_verify.verify_job(db, job_id)
+        assert verdict["status"] == "unverifiable"
+        assert verdict["reason"] == ledger_verify.SEAL_NOT_ANCHORED
