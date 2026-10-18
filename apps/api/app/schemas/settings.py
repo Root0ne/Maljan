@@ -104,6 +104,9 @@ class ValueDTO(BaseModel):
     source: str
     updated_at: datetime | None = None
     updated_by: uuid.UUID | None = None
+    # Why a stored row is not served (``value`` is then ``None``): the answer
+    # could not be written with it in (``api.v1.settings.unwritable_reason``).
+    unreadable: str | None = None
 
 
 class ValuesResponse(BaseModel):
@@ -112,6 +115,11 @@ class ValuesResponse(BaseModel):
 
 class PatchRequest(BaseModel):
     changes: dict[str, Any] = Field(min_length=1, max_length=500)
+    # Per changed key, the ``updated_at`` the page was served it with
+    # (``null``: no stored row then). A key whose stored row is not that one
+    # any more (saved, accepted or reset since) is refused with 409, nothing
+    # is saved, and the page reloads it. A key left out is not checked.
+    versions: dict[str, datetime | None] = Field(default_factory=dict, max_length=500)
 
 
 class PatchResponse(BaseModel):
@@ -141,6 +149,14 @@ class ExportResponse(BaseModel):
             "importing one back as a top-level key is rejected as an unknown key; the "
             "token is restored as the nested auth_token field inside the map instead."
         )
+    )
+    unreadable: dict[str, str] = Field(
+        default_factory=dict,
+        description=(
+            "Catalog keys whose stored value the export could not write, each with why "
+            "(a row nested deeper than the answer's writer goes). Left out of 'values'; "
+            "an import ignores this field."
+        ),
     )
 
 

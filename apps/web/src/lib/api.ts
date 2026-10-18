@@ -8,7 +8,8 @@ import type {
   RunSummary,
 } from "@/types/malware-report";
 import { ApiError } from "@/lib/errors";
-import { SettingsValidationError } from "@/types/settings";
+import { SettingsConflictError, SettingsValidationError } from "@/types/settings";
+import { exportUnreadable } from "@/lib/settingsExport";
 import type {
   AttckCheckResult,
   AttckStatus,
@@ -463,6 +464,14 @@ class ApiClient {
       };
       throw new SettingsValidationError(body.errors ?? {});
     }
+    if (res.status === 409) {
+      const body = (await res.json().catch(() => ({}))) as {
+        errors?: Record<string, string>;
+        detail?: string;
+      };
+      if (body.errors) throw new SettingsConflictError(body.errors);
+      throw new ApiError(body.detail || `Request failed: ${res.status}`, res.status);
+    }
     if (!res.ok) {
       const body = await res.json().catch(() => ({}));
       throw new ApiError(body.detail || `Request failed: ${res.status}`, res.status);
@@ -645,10 +654,16 @@ class ApiClient {
     return this.request<SettingsValues>("/api/v1/settings");
   }
 
-  async patchSettings(changes: Record<string, unknown>): Promise<PatchResult> {
+  /** `versions` names, per changed key, the `updated_at` the page was served
+   *  it with (`null`: no stored row); a key changed since is refused with a
+   *  `SettingsConflictError` and nothing is saved. */
+  async patchSettings(
+    changes: Record<string, unknown>,
+    versions: Record<string, string | null> = {}
+  ): Promise<PatchResult> {
     const res = await this.settingsFetch("/api/v1/settings", {
       method: "PATCH",
-      body: JSON.stringify({ changes }),
+      body: JSON.stringify({ changes, versions }),
     });
     return res.json();
   }
@@ -792,11 +807,12 @@ class ApiClient {
    * as `maljan-settings.json` — no server round trip beyond the fetch
    * already made, and the viewer never sees a bare `data:` link. The
    * document is downloaded byte-for-byte as the API sent it (`format`,
-   * `exported_at`, `values`, `secrets_omitted` in that order) rather than
+   * `exported_at`, `values`, `secrets_omitted`, `unreadable` in that order) rather than
    * re-serialised, so the file on disk is exactly what `GET
-   * /settings/export` returned.
+   * /settings/export` returned. Returns the document's `unreadable` map:
+   * the keys it left out, with why.
    */
-  async exportSettings(): Promise<void> {
+  async exportSettings(): Promise<Record<string, string>> {
     const res = await this.settingsFetch("/api/v1/settings/export");
     const text = await res.text();
     const blob = new Blob([text], { type: "application/json" });
@@ -808,6 +824,7 @@ class ApiClient {
     a.click();
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
+    return exportUnreadable(text);
   }
 
   /** Imports a previously exported (or hand-written) configuration document.

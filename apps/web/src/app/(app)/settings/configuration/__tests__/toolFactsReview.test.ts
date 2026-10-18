@@ -220,7 +220,25 @@ describe("the import preview of a server's tool declarations", () => {
       FIELDS
     );
     expect(preview.lines).toHaveLength(1);
-    expect(preview.lines[0].detail).toEqual(["srv: changed: tool_facts"]);
+    expect(preview.lines[0].detail).toEqual([
+      "srv: changed: tool_facts",
+      `srv: tool ${SECOND}: removed`,
+    ]);
+  });
+
+  it("names each tool that changes in force, and how", () => {
+    const sent = server({ ...MARK, [FIRST]: { timeout_seconds: 7 }, zz_new: { kind: "strings" } });
+    const preview = buildImportPreview(
+      { format: "maljan-settings/2", values: { [SERVER_MAP.key]: sent } },
+      entries,
+      { [SERVER_MAP.key]: server({ ...MARK }) },
+      FIELDS
+    );
+    const detail = preview.lines[0].detail ?? [];
+    expect(detail[0]).toBe("srv: changed: tool_facts");
+    expect(detail).toContain("srv: tool zz_new: added");
+    expect(detail.some((line) => line.startsWith(`srv: tool ${FIRST}: changed: timeout_seconds`))).toBe(true);
+    expect(detail).toHaveLength(3);
   });
 
   it("still names a server whose other field changes beside equal declarations", () => {

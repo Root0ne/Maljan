@@ -220,13 +220,15 @@ function describeServerMap(
     const as = asRecord(a[key]);
     const enabledChanged = bs.enabled !== as.enabled;
     const changed: string[] = [];
+    let toolLines: string[] = [];
     for (const field of SERVER_FIELDS) {
       if (deepEqual(bs[field], as[field])) continue;
-      if (
-        field === "tool_facts" &&
-        toolFactsDiff(shippedToolFactsOf(entry, key), bs[field], as[field], fields).length === 0
-      ) {
-        continue;
+      if (field === "tool_facts") {
+        const diff = toolFactsDiff(shippedToolFactsOf(entry, key), bs[field], as[field], fields);
+        if (diff.length === 0) continue;
+        // Each tool that changes in force is named, as on a block's own
+        // declarations, under the server's line.
+        toolLines = diff.map((d) => `${key}: tool ${describeToolLine(d)}`);
       }
       changed.push(field);
     }
@@ -252,6 +254,7 @@ function describeServerMap(
       detail.push(`${key}: changed: ${changed.join(", ")}`);
       changedCount++;
     }
+    detail.push(...toolLines);
   }
 
   return {

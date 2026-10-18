@@ -213,6 +213,7 @@ test.describe("Settings → Setup guides (admin)", () => {
           "core.static.provider": "r2",
           "core.static.r2.binary_path": "/usr/bin/r2",
         },
+        versions: expect.any(Object),
       },
     ]);
   });
@@ -409,7 +410,7 @@ test.describe("Settings → Setup guides (admin)", () => {
     await page.getByRole("button", { name: "Apply", exact: true }).click();
     await expect(page.getByText(/Applied 2 settings/)).toBeVisible();
     expect(patches).toEqual([
-      { changes: { "core.llm.provider": "ollama", "core.memory.top_k": 9 } },
+      { changes: { "core.llm.provider": "ollama", "core.memory.top_k": 9 }, versions: expect.any(Object) },
     ]);
   });
 

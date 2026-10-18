@@ -21,7 +21,7 @@ from maljan.core.settings_annotations import (
 )
 from maljan.core.settings_overrides import redact_url
 from maljan.pipeline.conditions import validate_condition
-from pydantic import ValidationError
+from pydantic import BaseModel, ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import end_read_transaction, get_db
@@ -98,7 +98,8 @@ from app.services.settings_service import (
 # The settings document an export writes and an import reads. In ``/2`` a
 # block's tool declarations are its changes over what the block ships, one
 # tool at a time, as they are stored; an import also reads ``/1``, written
-# before that, where a block's tool declarations are its whole map.
+# before that, where a block's tool declarations are its whole map (a map
+# marked as changes, which only ``/2`` writes, reads as it does there).
 EXPORT_FORMAT = "maljan-settings/2"
 WHOLE_MAP_FORMAT = "maljan-settings/1"
 IMPORT_FORMATS = (EXPORT_FORMAT, WHOLE_MAP_FORMAT)
@@ -256,12 +257,60 @@ def default_served_schema() -> SchemaResponse:
     )
 
 
+def unwritable_reason(answer: BaseModel) -> str | None:
+    """Why ``answer`` cannot be written as a response body, or ``None`` when it can.
+
+    It is written the way the response is (the model's dump, then
+    ``json.dumps``), so the bound is the writers' own (pydantic-core's nesting
+    guard, the interpreter's recursion limit), not a depth of ours. One more
+    write of the answer: time linear in its size.
+    """
+    try:
+        json.dumps(answer.model_dump(mode="json"))
+    except (ValueError, RecursionError) as exc:
+        return unwritable_reason_of(exc)
+    return None
+
+
+def unwritable_reason_of(exc: BaseException) -> str:
+    """What :func:`unwritable_reason` says for the writer's refusal ``exc``."""
+    return (
+        "the stored value is not served: the answer's writer refused it "
+        f"({type(exc).__name__}: {exc}); reset this key or save it again"
+    )
+
+
+def _say_unwritable(where: str, key: str, reason: str) -> None:
+    logger.warning("Stored setting %s left out of %s: %s", log_safe(key), where, reason)
+
+
+def served_values(vals: dict[str, Any]) -> tuple[dict[str, ValueDTO], dict[str, str]]:
+    """Each value as ``GET /settings`` serves it, and the keys left unserved with why.
+
+    A stored row an answer cannot be written with (:func:`unwritable_reason`)
+    is served with no value and its reason, so one row never fails the page.
+    """
+    served: dict[str, ValueDTO] = {}
+    unreadable: dict[str, str] = {}
+    for key, info in vals.items():
+        dto = ValueDTO(**vars(info))
+        reason = unwritable_reason(ValuesResponse(values={key: dto}))
+        if reason is not None:
+            dto = ValueDTO(**{**vars(info), "value": None, "unreadable": reason})
+            unreadable[key] = reason
+        served[key] = dto
+    return served, unreadable
+
+
 @router.get("", response_model=ValuesResponse)
 async def get_values(
     _: User = Depends(require_admin), db: AsyncSession = Depends(get_db)
 ) -> ValuesResponse:
     vals = await SettingsService(db).values(extra=await stored_block_entries(db))
-    return ValuesResponse(values={k: ValueDTO(**vars(v)) for k, v in vals.items()})
+    served, unreadable = served_values(vals)
+    for key, reason in unreadable.items():
+        _say_unwritable("the settings answer", key, reason)
+    return ValuesResponse(values=served)
 
 
 @router.get("/plugins", response_model=PluginsResponse)
@@ -536,6 +585,14 @@ async def patch_values(
         # A write of the declared report formats waits for an accept that is
         # rewriting them, and an accept for it (``services.report_formats_lock``).
         async with report_formats_serialised(db, needed=formats_written):
+            # Under the lock too, so a key the page loaded before another
+            # writer changed it (an accepted report format, say) is refused
+            # rather than saved over it.
+            stale = await SettingsService(db).changed_since(
+                {key: loaded for key, loaded in body.versions.items() if key in changes}
+            )
+            if stale:
+                return JSONResponse(status_code=status.HTTP_409_CONFLICT, content={"errors": stale})
             if formats_written:
                 # Under the lock, so an accept between the read and the save
                 # is never taken for this save's change.
@@ -720,6 +777,7 @@ async def export_values(
     index = {**catalog_index(), **{entry.key: entry for entry in extra}}
     values: dict[str, Any] = {}
     secrets_omitted: list[str] = []
+    unreadable: dict[str, str] = {}
     for key, info in (await SettingsService(db).values(extra=extra)).items():
         if info.source != "ui":
             continue
@@ -729,7 +787,25 @@ async def export_values(
         if entry.secret:
             secrets_omitted.append(key)
             continue
-        sanitized, omitted_paths = _export_value(key, info.value)
+        try:
+            sanitized, omitted_paths = _export_value(key, info.value)
+        except RecursionError as exc:
+            # Too deep for the walk that strips its masks: the same bound the
+            # answer's writer has (:func:`unwritable_reason`).
+            reason: str | None = unwritable_reason_of(exc)
+        else:
+            reason = unwritable_reason(
+                ExportResponse(
+                    format=EXPORT_FORMAT,
+                    exported_at=datetime.now(UTC),
+                    values={key: sanitized},
+                    secrets_omitted=omitted_paths,
+                )
+            )
+        if reason is not None:
+            _say_unwritable("the export", key, reason)
+            unreadable[key] = reason
+            continue
         values[key] = sanitized
         secrets_omitted.extend(omitted_paths)
     response.headers["Content-Disposition"] = "attachment; filename=maljan-settings.json"
@@ -738,6 +814,7 @@ async def export_values(
         exported_at=datetime.now(UTC),
         values=values,
         secrets_omitted=sorted(secrets_omitted),
+        unreadable=unreadable,
     )
 
 
@@ -797,10 +874,10 @@ async def import_values(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, content={"errors": errors}
         )
     # A declaration another version wrote may hold what this one does not
-    # read: it is left out with a warning, never a refusal of the file.
-    values, left_out = lenient_imported_declarations(
-        values, whole_maps=body.format == WHOLE_MAP_FORMAT
-    )
+    # read: it is left out with a warning, never a refusal of the file. Both
+    # formats are read alike: a map marked as changes is its changes, one
+    # without the mark its whole map.
+    values, left_out = lenient_imported_declarations(values)
     try:
         async with report_formats_serialised(db, needed=touches_report_formats(values)):
             res = await SettingsService(db).save(values, user_id=user.id, ip=_client_ip(request))

@@ -1,6 +1,6 @@
 "use client";
 
-import type { SettingsSchema } from "@/types/settings";
+import type { SettingValue, SettingsSchema } from "@/types/settings";
 import { useOptionalSettingsContext } from "./SettingsContext";
 
 /** What the console says beside a refused stored value, or `""`.
@@ -19,13 +19,39 @@ export function refusedNote(schema: SettingsSchema | null | undefined, key: stri
   );
 }
 
-export default function StoredValueRefusedNote({ settingKey }: { settingKey: string }) {
+/** What the console says beside a stored value the API did not serve, or `""`.
+ *
+ *  `GET /settings` serves a stored row it cannot write in an answer with no
+ *  value and its reason (`SettingValue.unreadable`). */
+export function unreadableNote(current: SettingValue | null | undefined): string {
+  const reason = current?.unreadable;
+  if (typeof reason !== "string" || !reason) return "";
+  return `The stored value is not shown: ${reason}.`;
+}
+
+export default function StoredValueRefusedNote({
+  settingKey,
+  current,
+}: {
+  settingKey: string;
+  current?: SettingValue;
+}) {
   const schema = useOptionalSettingsContext()?.schema;
   const text = refusedNote(schema, settingKey);
-  if (!text) return null;
+  const unreadable = unreadableNote(current);
+  if (!text && !unreadable) return null;
   return (
-    <p role="alert" className="mt-1 text-[11px] text-status-orange" data-stored-value-refused>
-      {text}
-    </p>
+    <>
+      {text && (
+        <p role="alert" className="mt-1 text-[11px] text-status-orange" data-stored-value-refused>
+          {text}
+        </p>
+      )}
+      {unreadable && (
+        <p role="alert" className="mt-1 text-[11px] text-status-orange" data-stored-value-unreadable>
+          {unreadable}
+        </p>
+      )}
+    </>
   );
 }

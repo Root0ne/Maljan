@@ -134,6 +134,19 @@ applying sends one `PATCH /api/v1/settings` with the whole set. Each entry
 declares when it takes effect: `live`, `next_job`, or `restart` for read-only
 deployment values.
 
+A value is saved whole, so a page loaded before another writer changed a key
+would drop that change unseen: an upload's accepted report format adds to
+`core.sandbox.report_formats` and `core.sandbox.upload.allowed_formats`, a
+credential bootstrap enables its server in `core.mcp.servers`, and another
+admin may save any key. The PATCH therefore carries `versions`: per changed
+key, the `updated_at` the page was served it with (`null` for no stored row).
+A key whose stored row is not that one any more (saved, accepted or reset
+since) is refused with 409 naming it, and nothing is saved; the console drops
+that key's staged edit, reloads it, and says so, so the change can be made
+over what is stored now. A key sent without a version is not checked, so a
+script that means to overwrite still can; an import always writes what its
+file holds.
+
 An entry that has an override can be reset: `DELETE /api/v1/settings/{key}`
 removes one override, `DELETE /api/v1/settings` removes a whole group's. The
 value then falls back to the catalog default and the console shows it as such.
@@ -2372,7 +2385,12 @@ in force again, a step placed after or beside it goes with it, and every other
 setting and step stands. Whatever left a step out (also a reset of the server
 it calls, or a shipped declaration that changed its tool's kind), the settings
 schema names it with why (`pack_steps_left_out`, also where other stored
-settings do not build) and the console marks it on the steps. A save that changes the steps is held to the rules above, and a
+settings do not build) and the console marks it on the steps. Where the stored
+entry of the server a step names in its `server` field is refused, the step is
+listed as not checked or run until that entry is fixed or reset, never as
+calling an unknown server, and a save leaves it to that entry's own refusal;
+only the step's `server` is matched to a refused entry, never another value it
+holds. A save that changes the steps is held to the rules above, and a
 refused save names its step problems beside every other refusal; a stale
 stored step sent back exactly as stored, wherever it stands, blocks no other
 save, and no new or changed item rides on it. A server step whose server the team withholds or that is not
@@ -4127,7 +4145,10 @@ probe's candidate settings, and an import in either format), a marked map is
 the block's changes, so a tool it leaves out is not removed and `null` removes
 one; a map without the mark is the whole map, as earlier releases read every
 map, so a shipped tool it leaves out is removed. A `maljan-settings/1` import
-is read whole throughout. A map sent back exactly as it is stored keeps the
+reads the same way: its maps carry no mark, so they are whole, and a map marked
+as changes (only `/2` writes the mark, so such a file was relabelled from one)
+is its changes there too, never a whole map that would remove every shipped
+tool. A map sent back exactly as it is stored keeps the
 reading it is stored with, since it says what the stored one says; the console
 always sends the marked form it was served.
 
@@ -4509,6 +4530,12 @@ sets `Content-Disposition: attachment; filename=maljan-settings.json`:
 - `secrets_omitted` names each credential the document does not carry, so an
   operator can see what has to be re-entered on the other side. Those paths are
   informational, not catalog keys.
+- A stored row nested deeper than an answer can be written (the bound is the
+  JSON writers' own, never a depth Maljan sets) is left out and named under
+  `unreadable` with why, which the console names beside the download; an import ignores that field. `GET /api/v1/settings`
+  serves the same row with no value and its reason in `unreadable`, which the
+  console shows on the row, and a warning is logged, so one such row never
+  fails the settings page or the export.
 
 `POST /api/v1/settings/import` (admin) accepts the same document. In
 `maljan-settings/2` a built-in block's tool declarations are stored as their
@@ -4518,7 +4545,7 @@ those changes. A map in a `/2` document without the mark is read whole, as
 a stored one is. A document in `maljan-settings/1`, written before, is still
 accepted: a built-in block's tool declarations there are its whole map, so a
 shipped tool it does not name stays removed and a tool it names reads as
-written. A `format` other than these two is rejected with 422; unknown or read-only keys
+written; a map marked as changes reads as it does in `/2`. A `format` other than these two is rejected with 422; unknown or read-only keys
 are rejected with 422 and a per-key error, and nothing is applied when any key
 fails. A key of a setting retired with no effect — `core.preprocessing.summarizer_provider`,
 `core.preprocessing.summarizer_model`, `core.reporting.narrative_max_tokens` —

@@ -324,7 +324,7 @@ def served_tool_facts(stored: dict[str, Any], shipped: dict[str, Any]) -> dict[s
 
 
 def lenient_imported_declarations(
-    values: dict[str, Any], *, whole_maps: bool = False
+    values: dict[str, Any],
 ) -> tuple[dict[str, Any], dict[str, str]]:
     """An import document's tool declarations, without what this version cannot read.
 
@@ -337,10 +337,11 @@ def lenient_imported_declarations(
     A block's tool declarations marked as changes
     (``tool_declarations.holds_changes``) are its changes over what the block
     ships, one tool at a time; each tool the document names is read as it is
-    in force, and kept as its changes again, marked. A map without the mark,
-    and every map when ``whole_maps`` says the document was written before
-    declarations were stored that way, is its whole map: a shipped tool it
-    does not name was removed, and stays removed.
+    in force, and kept as its changes again, marked, whichever format the
+    document is in: only a format that stores changes writes the mark, so a
+    ``maljan-settings/1`` document relabelled from one is read as it was
+    written. A map without the mark is its whole map: a shipped tool it does
+    not name was removed, and stays removed.
     """
     from maljan.core.tool_declarations import (
         holds_changes,
@@ -381,14 +382,15 @@ def lenient_imported_declarations(
             if tool in declared
         }
         declared = {tool: held for tool, held in declared.items() if tool not in carried}
-        # A map marked as changes is read as changes; one without the mark
-        # (every map of a ``/1`` document, or of a ``/2`` one exported from a
-        # store a release before the mark wrote) is read whole, as it was
-        # written: a shipped tool it does not name was removed, and a field a
-        # shipped tool's declaration leaves out is at its default.
+        # A map marked as changes is read as changes, in any document format;
+        # one without the mark (every map a ``/1`` document was written with,
+        # or one of a ``/2`` document exported from a store a release before
+        # the mark wrote) is read whole, as it was written: a shipped tool it
+        # does not name was removed, and a field a shipped tool's declaration
+        # leaves out is at its default.
         declared = (
             without_mark(declared)
-            if holds_changes(declared) and not whole_maps
+            if holds_changes(declared)
             else whole_as_changes(declared, shipped)
         )
         in_force = merge_tool_facts(shipped, declared)
@@ -848,6 +850,45 @@ class SettingsService:
                 errors[f"api.{name}"] = msg
         if errors:
             raise SettingsValidationError(errors)
+
+    async def changed_since(self, versions: dict[str, datetime | None]) -> dict[str, str]:
+        """Each key of ``versions`` whose stored row is not the one it names, with why.
+
+        ``versions`` maps a key to the ``updated_at`` a page was served it
+        with, ``None`` for no stored row. A row saved, written by another
+        route (an accepted report format, a credential bootstrap) or reset
+        since then is named, so a page loaded before it never saves over it
+        unseen. Time linear in ``versions`` and the rows it names.
+        """
+        if not versions:
+            return {}
+        # The checked rows are locked until the save that follows commits in
+        # this same transaction, so two saves of one key cannot both pass the
+        # check. PostgreSQL takes ``FOR UPDATE``; SQLite has no row locks and
+        # SQLAlchemy leaves the clause out there, so on SQLite the check alone
+        # stands (its writes are serialised by the database file's own lock).
+        res = await self.db.execute(
+            select(RuntimeSetting).where(RuntimeSetting.key.in_(list(versions))).with_for_update()
+        )
+        rows = {r.key: r for r in res.scalars().all()}
+        out: dict[str, str] = {}
+        for key, loaded in versions.items():
+            row = rows.get(key)
+            stored = row.updated_at if row is not None else None
+            if stored == loaded:
+                continue
+            if row is None:
+                what = "reset"
+            elif loaded is None:
+                what = "saved"
+            else:
+                what = "saved again"
+            out[key] = (
+                f"{what} since this page loaded it, so this save would replace what is "
+                "stored now unseen; nothing was saved, the page shows the stored value "
+                "again, and the change can be made over it"
+            )
+        return out
 
     # ---- writing -------------------------------------------------------
     async def save(
