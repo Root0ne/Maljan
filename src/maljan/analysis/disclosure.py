@@ -808,7 +808,13 @@ def _nothing_left(record: Mapping[str, Any]) -> bool:
 # named as its client names it (``enrichment.whois_client``).
 RDAP_SOURCE = "rdap"
 ENRICHMENT_QUEUED = "queued"
+# Written before the job's first question goes out, so a job that dies after
+# it leaves a record that never says "nothing".
+ENRICHMENT_RUNNING = "running"
 ENRICHMENT_DONE = "done"
+# The job failed or was stopped after it began asking; what it asked until
+# then is recorded.
+ENRICHMENT_STOPPED = "stopped"
 
 
 def enrichment_source_row(
@@ -882,13 +888,35 @@ def with_enrichment(
     return out
 
 
+def with_enrichment_started(record: Mapping[str, Any]) -> dict[str, Any]:
+    """``record`` saying an enrichment job is about to send its first question.
+
+    Written before that question goes out, so whatever happens to the job
+    after it, the record never says that nothing left the machine. What an
+    earlier enrichment asked is kept.
+    """
+    out = dict(record)
+    held = dict(out.get("enrichment") or {"may_reach": [], "asked": []})
+    held["state"] = ENRICHMENT_RUNNING
+    held.setdefault("asked", [])
+    out["enrichment"] = held
+    out["nothing_left"] = False
+    return out
+
+
 def with_enrichment_asked(
-    record: Mapping[str, Any], asked: Iterable[Mapping[str, Any]]
+    record: Mapping[str, Any],
+    asked: Iterable[Mapping[str, Any]],
+    *,
+    state: str = ENRICHMENT_DONE,
 ) -> dict[str, Any]:
     """``record`` with what the enrichment job asked: per source and host, the kinds and counts.
 
     Added to what an earlier enrichment of the same report asked, so a report
-    enriched twice says every question either run sent.
+    enriched twice says every question either run sent. A row's ``failed``
+    counts the questions that failed in transport or never finished, which
+    may have arrived. ``state`` is ``done``, or ``stopped`` for a job that
+    failed or was stopped part-way.
     """
     out = dict(record)
     held = dict(out.get("enrichment") or {"may_reach": []})
@@ -908,13 +936,15 @@ def with_enrichment_asked(
                 "host": host,
                 "where": host_locality(host) if host else UNKNOWN,
                 "kinds": {},
+                "failed": 0,
                 "why": why,
             },
         )
         for kind, count in dict(row.get("kinds") or {}).items():
             kept["kinds"][str(kind)] = kept["kinds"].get(str(kind), 0) + int(count or 0)
+        kept["failed"] += int(row.get("failed") or 0)
     rows = [{**row, "kinds": dict(sorted(row["kinds"].items()))} for row in merged.values()]
-    held["state"] = ENRICHMENT_DONE
+    held["state"] = state
     held["asked"] = sorted(rows, key=lambda r: (r["source"], r["host"]))
     out = _with_addressed(out, (row["host"] for row in rows))
     out["enrichment"] = held
@@ -941,15 +971,34 @@ class EnrichmentAsks:
     """The questions an enrichment job sends, counted per source, host and server, by kind.
 
     Handed to the enrichment as its listener (``enrichment.declared.AskListener``),
-    then read as the rows :func:`with_enrichment_asked` takes.
+    then read as the rows :func:`with_enrichment_asked` takes. Each question is
+    counted as attempted when it is about to be sent; the call answers with a
+    settle function the asker calls once the question was answered or failed,
+    so one that never settles (the job stopped under it) counts as failed.
     """
 
     def __init__(self) -> None:
         self._counts: dict[tuple[str, str, str], dict[str, int]] = {}
+        self._answered: dict[tuple[str, str, str], int] = {}
 
-    def __call__(self, source: str, host: str, kind: str, server: str) -> None:
-        kinds = self._counts.setdefault((str(source), str(host), str(server)), {})
+    def __call__(self, source: str, host: str, kind: str, server: str) -> Callable[[bool], None]:
+        key = (str(source), str(host), str(server))
+        kinds = self._counts.setdefault(key, {})
         kinds[str(kind)] = kinds.get(str(kind), 0) + 1
+        settled: list[bool] = []
+
+        def settle(answered: bool) -> None:
+            if settled:
+                return
+            settled.append(True)
+            if answered:
+                self._answered[key] = self._answered.get(key, 0) + 1
+
+        return settle
+
+    @property
+    def asked_any(self) -> bool:
+        return bool(self._counts)
 
     def rows(self, servers: Mapping[str, Any] | None = None) -> list[dict[str, Any]]:
         """One row per place asked; a server source's host is its block's, where it is remote.
@@ -960,6 +1009,7 @@ class EnrichmentAsks:
         """
         out: list[dict[str, Any]] = []
         for (source, host, server), kinds in sorted(self._counts.items()):
+            key_host = host
             why = ""
             if server:
                 cfg = (servers or {}).get(server)
@@ -971,12 +1021,24 @@ class EnrichmentAsks:
                 )
                 host = place.host if place.where == REMOTE else ""
                 why = "" if host else (place.why or _LOCAL_SERVER)
-            out.append({"source": source, "host": host, "kinds": dict(kinds), "why": why})
+            failed = sum(kinds.values()) - self._answered.get((source, key_host, server), 0)
+            out.append(
+                {
+                    "source": source,
+                    "host": host,
+                    "kinds": dict(kinds),
+                    "failed": max(0, failed),
+                    "why": why,
+                }
+            )
         return out
 
 
 def after_enrichment(
-    payload: Mapping[str, Any], rows: Iterable[Mapping[str, Any]]
+    payload: Mapping[str, Any],
+    rows: Iterable[Mapping[str, Any]],
+    *,
+    state: str = ENRICHMENT_DONE,
 ) -> dict[str, Any]:
     """A stored report payload whose run summary's disclosure record holds what was asked.
 
@@ -984,14 +1046,19 @@ def after_enrichment(
     from. A payload with no record (a run stored before the block existed) is
     returned as it was.
     """
+    held = list(rows)
+    return in_payload(payload, lambda record: with_enrichment_asked(record, held, state=state))
+
+
+def in_payload(
+    payload: Mapping[str, Any], change: Callable[[Mapping[str, Any]], dict[str, Any]]
+) -> dict[str, Any]:
+    """``payload`` with ``change`` applied to its run summary's disclosure record, if it has one."""
     out = dict(payload)
     summary = out.get("run_summary")
     if isinstance(summary, Mapping) and isinstance(summary.get("disclosure"), Mapping):
         if "models" in summary["disclosure"]:
-            out["run_summary"] = {
-                **summary,
-                "disclosure": with_enrichment_asked(summary["disclosure"], rows),
-            }
+            out["run_summary"] = {**summary, "disclosure": change(summary["disclosure"])}
     return out
 
 
@@ -1301,25 +1368,48 @@ def _reach(row: Mapping[str, Any], code: Callable[[str], str]) -> str:
     return f"{name} ({kinds}) {where}{note}"
 
 
+def _asked_parts(asked: list[Mapping[str, Any]], code: Callable[[str], str]) -> str:
+    parts = []
+    for row in asked:
+        kinds = _counts(dict(row.get("kinds") or {}))
+        name = (
+            "RDAP"
+            if row.get("source") == RDAP_SOURCE
+            else f"source {code(str(row.get('source') or ''))}"
+        )
+        if row.get("host"):
+            place = f"{code(str(row['host']))} {_mark(row)}"
+        else:
+            place = f"a tool server{_untold(row, 'the questions')}"
+        failed = int(row.get("failed") or 0)
+        tail = (
+            f", {failed} of them failed in transport or did not finish and may have arrived"
+            if failed
+            else ""
+        )
+        parts.append(f"{place} about {kinds} ({name}{tail})")
+    return "; ".join(parts)
+
+
 def _enrichment_lines(held: Mapping[str, Any], code: Callable[[str], str]) -> list[str]:
-    if held.get("state") == ENRICHMENT_DONE:
-        asked = [row for row in held.get("asked") or [] if isinstance(row, Mapping)]
+    state = held.get("state")
+    asked = [row for row in held.get("asked") or [] if isinstance(row, Mapping)]
+    if state == ENRICHMENT_DONE:
         if not asked:
             return ["Enrichment: the follow-up job ran and asked no service about an indicator."]
-        parts = []
-        for row in asked:
-            kinds = _counts(dict(row.get("kinds") or {}))
-            name = (
-                "RDAP"
-                if row.get("source") == RDAP_SOURCE
-                else f"source {code(str(row.get('source') or ''))}"
-            )
-            if row.get("host"):
-                place = f"{code(str(row['host']))} {_mark(row)}"
-            else:
-                place = f"a tool server{_untold(row, 'the questions')}"
-            parts.append(f"{place} about {kinds} ({name})")
-        return ["Enrichment: the follow-up job asked " + "; ".join(parts) + "."]
+        return ["Enrichment: the follow-up job asked " + _asked_parts(asked, code) + "."]
+    if state == ENRICHMENT_STOPPED:
+        what = f" after asking {_asked_parts(asked, code)}" if asked else ""
+        return [
+            f"Enrichment: the follow-up job stopped part-way{what}; a question in flight when it "
+            "stopped is counted as not finished."
+        ]
+    if state == ENRICHMENT_RUNNING:
+        earlier = f" An earlier enrichment asked {_asked_parts(asked, code)}." if asked else ""
+        return [
+            "Enrichment: a follow-up job began sending questions about the report's indicators "
+            "and recorded nothing after that, so where its questions went cannot be told." + earlier
+        ]
     reach = [row for row in held.get("may_reach") or [] if isinstance(row, Mapping)]
     named = "; ".join(_reach(row, code) for row in reach) or "no source"
     return [

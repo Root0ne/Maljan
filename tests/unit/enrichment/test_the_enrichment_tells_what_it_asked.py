@@ -67,8 +67,14 @@ async def test_each_question_is_told_with_its_source_host_and_kind() -> None:
             )
 
     assert asks.rows() == [
-        {"source": RDAP_SOURCE, "host": RDAP_HOST, "kinds": {"ip": 1}, "why": ""},
-        {"source": "virustotal", "host": VT_HOST, "kinds": {"domain": 1, "ip": 1}, "why": ""},
+        {"source": RDAP_SOURCE, "host": RDAP_HOST, "kinds": {"ip": 1}, "failed": 0, "why": ""},
+        {
+            "source": "virustotal",
+            "host": VT_HOST,
+            "kinds": {"domain": 1, "ip": 1},
+            "failed": 0,
+            "why": "",
+        },
     ]
 
 
@@ -91,10 +97,13 @@ async def test_a_listener_that_fails_never_costs_a_lookup() -> None:
 
 def test_a_question_through_a_server_is_placed_by_the_servers_block() -> None:
     asks = EnrichmentAsks()
-    asks("intel", "", "domain", "far")
-    asks("intel", "", "domain", "far")
-    asks("misp", "", "ip", "near")
-    asks("local", "", "ip", "child")
+    for source, kind, server in [
+        ("intel", "domain", "far"),
+        ("intel", "domain", "far"),
+        ("misp", "ip", "near"),
+        ("local", "ip", "child"),
+    ]:
+        asks(source, "", kind, server)(True)
     servers = {
         "far": SimpleNamespace(
             transport="streamable-http", url=f"https://u:{password()}@intel.example.org/mcp"
@@ -109,6 +118,7 @@ def test_a_question_through_a_server_is_placed_by_the_servers_block() -> None:
         "source": "intel",
         "host": "intel.example.org",
         "kinds": {"domain": 2},
+        "failed": 0,
         "why": "",
     }
     for local in ("misp", "local"):

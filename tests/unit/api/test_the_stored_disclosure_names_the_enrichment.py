@@ -242,7 +242,8 @@ async def test_the_enrichment_job_adds_what_it_asked_to_the_stored_record() -> N
     report.run_summary = queued
 
     async def _lookups(payload: dict[str, Any], **kwargs: Any) -> dict[str, Any]:
-        kwargs["on_ask"]("rdap", "rdap.arin.net", "ip", "")
+        settle = await kwargs["on_ask"]("rdap", "rdap.arin.net", "ip", "")
+        settle(True)
         return payload
 
     db = MagicMock()
@@ -277,6 +278,7 @@ async def test_the_enrichment_job_adds_what_it_asked_to_the_stored_record() -> N
                 "host": "rdap.arin.net",
                 "where": "remote",
                 "kinds": {"ip": 1},
+                "failed": 0,
                 "why": "",
             }
         ]
@@ -297,3 +299,124 @@ def test_a_report_stored_before_the_block_is_left_as_it_was() -> None:
 
     assert updated == payload
     assert column is None
+
+
+# ---------------------------------------------------------------------------
+# An enrichment on demand that fails or is stopped part-way
+# ---------------------------------------------------------------------------
+
+
+def _row_built_with_enrichment_off() -> Any:
+    """A stored report whose record says nothing left: built while enrichment was off."""
+    record = _local_record()
+    row = MagicMock()
+    row.id = uuid.uuid4()
+    row.job_id = uuid.uuid4()
+    row.malware_report = {
+        **_payload(record),
+        "network": {"domains": [{"fqdn": "evil.example.com"}], "ips": [{"address": "1.2.3.4"}]},
+    }
+    row.run_summary = {"final_decision": "Malware", "disclosure": record}
+    return row
+
+
+async def _enrich_on_demand(row: Any, lookups: Any) -> dict[str, Any]:
+    from app.worker.enrich_worker import enrich_threat_intel
+
+    db = MagicMock()
+    db.get = AsyncMock(return_value=row)
+    db.commit = AsyncMock()
+    session = AsyncMock()
+    session.__aenter__.return_value = db
+    session.__aexit__.return_value = None
+    values = {"enrichment_enabled": True, "enrichment_max_lookups": 25, "enrichment_sources": {}}
+    with (
+        patch("maljan.enrichment.enrich_malware_report", new=AsyncMock(side_effect=lookups)),
+        patch(
+            "app.worker.enrich_worker.runtime_config.get",
+            AsyncMock(side_effect=lambda name: values[name]),
+        ),
+        patch("app.worker.enrich_worker.runtime_config.get_secret", AsyncMock(return_value="")),
+        patch("app.worker.enrich_worker._get_memory_store", AsyncMock(return_value=None)),
+    ):
+        return await enrich_threat_intel(
+            {"redis": AsyncMock(), "db_session": MagicMock(return_value=session)}, str(row.id)
+        )
+
+
+def _records(row: Any) -> list[dict[str, Any]]:
+    return [row.run_summary["disclosure"], row.malware_report["run_summary"]["disclosure"]]
+
+
+@pytest.mark.asyncio
+async def test_nothing_is_cleared_before_the_first_question_goes_out() -> None:
+    row = _row_built_with_enrichment_off()
+    assert all(record["nothing_left"] for record in _records(row))
+    seen: list[list[Any]] = []
+
+    async def _lookups(payload: dict[str, Any], **kwargs: Any) -> dict[str, Any]:
+        settle = await kwargs["on_ask"]("rdap", "rdap.arin.net", "ip", "")
+        # The question is about to be sent: what the stored report says now.
+        seen.append([(r["nothing_left"], r["enrichment"]["state"]) for r in _records(row)])
+        settle(True)
+        return payload
+
+    await _enrich_on_demand(row, _lookups)
+
+    assert seen == [[(False, "running"), (False, "running")]]
+
+
+@pytest.mark.asyncio
+async def test_a_job_that_fails_part_way_leaves_what_it_asked() -> None:
+    row = _row_built_with_enrichment_off()
+
+    async def _lookups(payload: dict[str, Any], **kwargs: Any) -> dict[str, Any]:
+        (await kwargs["on_ask"]("rdap", "rdap.arin.net", "ip", ""))(True)
+        await kwargs["on_ask"]("intel", "api.intel.example", "domain", "")
+        raise RuntimeError("the source closed the connection")
+
+    result = await _enrich_on_demand(row, _lookups)
+
+    assert result["status"] == "error"
+    for record in _records(row):
+        assert record["nothing_left"] is False
+        assert record["enrichment"]["state"] == "stopped"
+        assert [(r["source"], r["kinds"], r["failed"]) for r in record["enrichment"]["asked"]] == [
+            ("intel", {"domain": 1}, 1),
+            ("rdap", {"ip": 1}, 0),
+        ]
+    served = _served(row.malware_report)
+    assert "Nothing left this machine" not in served
+    assert "Enrichment: the follow-up job stopped part-way after asking" in served
+
+
+@pytest.mark.asyncio
+async def test_a_job_stopped_by_its_timeout_leaves_what_it_asked() -> None:
+    import asyncio
+
+    row = _row_built_with_enrichment_off()
+
+    async def _lookups(payload: dict[str, Any], **kwargs: Any) -> dict[str, Any]:
+        await kwargs["on_ask"]("rdap", "rdap.arin.net", "ip", "")
+        raise asyncio.CancelledError
+
+    with pytest.raises(asyncio.CancelledError):
+        await _enrich_on_demand(row, _lookups)
+
+    for record in _records(row):
+        assert record["nothing_left"] is False
+        assert record["enrichment"]["state"] == "stopped"
+        assert [(r["source"], r["failed"]) for r in record["enrichment"]["asked"]] == [("rdap", 1)]
+
+
+@pytest.mark.asyncio
+async def test_a_job_that_asked_nothing_before_failing_leaves_the_record_as_it_was() -> None:
+    row = _row_built_with_enrichment_off()
+    before = [dict(record) for record in _records(row)]
+
+    async def _lookups(payload: dict[str, Any], **kwargs: Any) -> dict[str, Any]:
+        raise RuntimeError("no source configured")
+
+    await _enrich_on_demand(row, _lookups)
+
+    assert _records(row) == before

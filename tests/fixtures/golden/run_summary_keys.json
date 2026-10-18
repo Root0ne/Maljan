@@ -29,6 +29,7 @@
     "enrichment": {
       "asked": [
         {
+          "failed": null,
           "host": null,
           "kinds": "<data-keyed map>",
           "source": null,

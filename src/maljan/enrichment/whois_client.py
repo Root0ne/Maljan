@@ -39,14 +39,13 @@ class WhoisClient:
         """Return ``"AS12345 ExampleCorp"`` style label or ``None``."""
         if not _is_public_ip(address):
             return None
-        if self._on_ask is not None:
-            try:
-                self._on_ask(RDAP_SOURCE, RDAP_HOST, "ip", "")
-            except Exception as exc:  # noqa: BLE001 — a listener never costs a lookup
-                logger.debug("WhoisClient: the ask listener failed (%s).", type(exc).__name__)
+        from maljan.enrichment.declared import settle_asked, tell_listener
+
+        settle = await tell_listener(self._on_ask, RDAP_SOURCE, RDAP_HOST, "ip", "")
         # 1) Try ipwhois (RDAP, locally cached).
         result = await _try_ipwhois(address)
         if result:
+            settle_asked(settle, True)
             return result
         # 2) Fallback to ARIN bootstrap (network call).
         try:
@@ -56,8 +55,10 @@ class WhoisClient:
                 headers={"Accept": "application/rdap+json"},
             )
         except httpx.HTTPError as exc:
+            settle_asked(settle, False)
             logger.warning("WhoisClient: RDAP fallback failed: %s", exc)
             return None
+        settle_asked(settle, True)
         if resp.status_code >= 400:
             return None
         try:

@@ -158,7 +158,13 @@ says what the run sent beyond the machine it ran on:
   report and what it may reach — RDAP, which needs no key, and every
   configured source with the hosts its requests name or the tool server it is
   asked through. The job then adds what it asked (service host, indicator
-  kinds, counts) to the stored record, and the served report shows it.
+  kinds, counts) to the stored record, and the served report shows it. Each
+  question is counted as attempted before it is sent, and before the first
+  one the stored record is marked, so an enrichment run on demand
+  (`POST /reports/{id}/enrich`) clears "nothing" the moment it begins asking,
+  whatever happens to it after. A job that fails or is stopped part-way leaves
+  what it asked until then, each question that failed in transport or never
+  finished counted as one that may have arrived.
 
 The block is built from the run's own records and nothing else: the settings
 the run ran with, the source each ledger entry recorded with the transport and
