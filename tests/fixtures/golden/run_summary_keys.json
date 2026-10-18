@@ -191,13 +191,17 @@
         "settings": null,
         "tools": null
       },
+      "not_resolved": [
+        null
+      ],
       "parts": {
         "prompts": "<data-keyed map>",
         "servers": "<data-keyed map>",
         "settings": "<data-keyed map>",
         "tools": "<data-keyed map>"
       },
-      "sha256": null
+      "sha256": null,
+      "texts": "<data-keyed map>"
     },
     "inputs": {
       "calls": "<data-keyed map>",

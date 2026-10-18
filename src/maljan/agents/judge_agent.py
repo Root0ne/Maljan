@@ -1559,6 +1559,32 @@ def mediation_reports_text(
     return f"{reports_text}\n\n=== STRUCTURED CLAIMS (ISR) ===\n{isr_block}"
 
 
+def mediator_system_prompt(
+    *,
+    identity_unanswered: bool,
+    lookup_attached: bool,
+    needs_tools: bool,
+    sha256: str,
+    tools: Any,
+) -> str:
+    """The mediator's system prompt for one mediation: its head and the sentence about its tools.
+
+    The one builder ``JudgeAgent.mediate`` sends it through, and the run
+    fingerprint renders it through (``analysis.setup_prompts``) for every case.
+    """
+    return MEDIATOR_SYSTEM_HEAD + (
+        MEDIATOR_LOOKUP_ONCE_BY_HASH.replace("{sha256}", sha256)
+        if identity_unanswered and lookup_attached and sha256
+        else MEDIATOR_LOOKUP_ONCE
+        if identity_unanswered and lookup_attached
+        else MEDIATOR_TI_TOOLS
+        if needs_tools and lookup_attached
+        else tools_statement(tools) + "\n"
+        if needs_tools
+        else _NO_TOOLS_NEEDED
+    )
+
+
 def _sha256_of(sample: Any) -> str:
     """The sha256 the identity block carries, for a sentence that names it."""
     data = sample if isinstance(sample, dict) else {}
@@ -1988,6 +2014,28 @@ class JudgeAgent(BudgetMeter):
         self.tools = tools
         self.degradation_reasons = reasons
         self.logger.info("Judge tool servers: %s", [t.name for t in self.tools])
+        # The judge's setup, as an analyst's is noted where it is resolved
+        # (``ServiceContainer.note_role_setup``): what the run fingerprint reads.
+        note = getattr(getattr(self, "_container", None), "note_role_setup", None)
+        if callable(note):
+            note(str(getattr(self, "_runs_on", "judge") or "judge"), tools, self.bound_servers())
+
+    def bound_servers(self) -> set[str]:
+        """The tool servers this agent's role and definition bind, by name; never attaches."""
+        registry = self._server_registry()
+        if registry is None:
+            return set()
+        try:
+            names = {
+                handle.name
+                for handle in registry.for_agent("judge", exclude=self._profile_excluded_servers())
+            }
+        except Exception:  # noqa: BLE001 — a name never costs a mediation
+            names = set()
+        names |= {
+            str(ref.server) for ref in self._definition_tool_refs() if getattr(ref, "server", None)
+        }
+        return names
 
     async def aclose(self) -> None:
         """Release every judge-bound tool server and its stdio subprocess.
@@ -2682,17 +2730,12 @@ class JudgeAgent(BudgetMeter):
         prompt_messages = [
             (
                 "system",
-                MEDIATOR_SYSTEM_HEAD
-                + (
-                    MEDIATOR_LOOKUP_ONCE_BY_HASH.replace("{sha256}", _sha256_of(sample))
-                    if identity_unanswered and lookup_attached and _sha256_of(sample)
-                    else MEDIATOR_LOOKUP_ONCE
-                    if identity_unanswered and lookup_attached
-                    else MEDIATOR_TI_TOOLS
-                    if needs_tools and lookup_attached
-                    else tools_statement(self.tools) + "\n"
-                    if needs_tools
-                    else _NO_TOOLS_NEEDED
+                mediator_system_prompt(
+                    identity_unanswered=identity_unanswered,
+                    lookup_attached=lookup_attached,
+                    needs_tools=needs_tools,
+                    sha256=_sha256_of(sample),
+                    tools=self.tools,
                 ),
             ),
             (

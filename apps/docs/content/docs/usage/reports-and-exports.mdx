@@ -303,27 +303,30 @@ nothing a model reads changes.
   tokens and the share its validation retries and its drops questions took,
   with the calls that reported no usage counted beside them.
 - **Run fingerprint** (`fingerprint`): one sha256 over how the job was set
-  up, never over what its run sent: every system prompt the platform can send
-  for the job, read from where each is built (each resolved agent's own prompt,
-  for its tools and for a tools-free call, and the revision framing, the view
-  prompts, every format fragment, the mediator's, the judge's verdict and
-  technique-question prompts, the composer's, the narrative's and the
-  summariser's, each as its fixed template); the tool definitions each agent
-  was resolved with, as bound; the name and version each tool server attached
-  by then gave for itself; and the settings the run ran with, masked as the
-  stored settings snapshot masks them. A validation retry, a revision round, a
-  cleared tool answer or the mediator's fast path does not move it; editing any
-  built-in prompt does. Neither does the sample: an agent's prompt is composed
-  with the neutral format fragment, and the job's own identifiers (the sample's
-  sha256, its paths and file name, the job id), taken from the job's known
-  values, are masked as whole tokens. Nor does the host: the paths that belong
-  to it (the checkout, the interpreter's environment, the home and working
-  directories) are replaced before the settings are hashed, so the same setup
-  on two hosts or worktrees hashes equal. Each component and each part (per
-  prompt, agent, server and settings section) keeps its own hash, so two
-  fingerprints that differ name what changed. A secret enters only as set or
-  unset. A tool's own version is not reported over MCP and is not in the
-  fingerprint.
+  up, never over what its run sent. Every system prompt the platform can send
+  for the job is rendered by the code that builds it for one fixed placeholder
+  job (a placeholder sample hash, path and name, and the neutral format): each
+  analyst of the active profile for the tools its loop binds and for a
+  tools-free call, its revision prompt, every case of the mediator's prompt,
+  the mediator's extraction prompt, the judge's verdict and technique-question
+  prompts, the composer's, the narrative's, the summariser's, the view prompts
+  and every format fragment. The hash is the text each builder produces, so an
+  edit to any sentence a builder writes moves it, and no real value is masked
+  out of anything. Beside the prompts: the tool definitions each analyst's loop
+  binds and the judge and the mediator bind (bound for the fingerprint where
+  the run did not bind them), the name and version each of their servers gave
+  for itself, and the settings the run ran with, masked as the stored settings
+  snapshot masks them, with this host's repository paths (the checkout, the
+  repository it is a worktree of, the virtual environment) replaced, so the
+  same setup on two hosts or worktrees hashes equal; a path such as
+  `/usr/bin/python3` stays as written. A validation retry, a revision round, a
+  cleared tool answer, the mediator's fast path and the sample do not move it.
+  A definition that is no analyst of the active profile, reached only when an
+  agent delegates to it, is not resolved for it and is named (its definition is
+  in the settings). Each component and each part keeps its own hash, and
+  `texts` keeps each rendered prompt's digest, so two fingerprints that differ
+  name what changed. A secret enters only as set or unset. A tool's own version
+  is not reported over MCP and is not in the fingerprint.
 
 A run stopped part-way stores the counts as of the stop and says so. A report
 stored before the block existed shows none.

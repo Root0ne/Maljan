@@ -5484,8 +5484,15 @@ class BaseAnalyst(BudgetMeter, ABC):
                 return answer
             return repaired if repaired is not None else answer
 
+        bound = self.pinned_tools()
+        # The tools this analyst's loop binds, its setup for the run fingerprint
+        # (``ServiceContainer.note_bound_tools``): a built-in role attaches its
+        # own servers after it was resolved, and its prompt is written for them.
+        note_bound = getattr(getattr(self, "_container", None), "note_bound_tools", None)
+        if callable(note_bound):
+            note_bound(str(self.name), bound)
         recorded = record_tools(
-            self.pinned_tools(),
+            bound,
             recorder,
             repeats,
             repairs,

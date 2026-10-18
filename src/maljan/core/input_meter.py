@@ -13,8 +13,8 @@ it, is kept beside the parts as the provider's own figure, with the number of
 requests that reported one, and is never apportioned among them.
 
 The run fingerprint is not read from here: it hashes the job's setup, never
-what a run sent (``analysis.setup_prompts``). This module gives it the digest,
-the tool-definition digests and the masking of the job's own identifiers.
+what a run sent (``analysis.setup_prompts``). This module gives it the digest
+and the tool-definition digests.
 
 Nothing here changes what is sent: the meter reads the messages a request
 carries and keeps counts. Recording never raises — telemetry must not break
@@ -25,7 +25,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import re
 import threading
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from typing import Any
@@ -169,53 +168,6 @@ def request_parts(
 def digest(text: str) -> str:
     """The sha256 of ``text``, hex."""
     return hashlib.sha256(text.encode("utf-8", "surrogatepass")).hexdigest()
-
-
-def job_identifiers(container: Any) -> list[tuple[str, str]]:
-    """``(value, placeholder)`` for each identifier of this job the platform writes into prompts.
-
-    Taken from the job's known values on the container — the sample's sha256
-    (as written and upper-cased), the sample's path and every path a tool
-    server opens it at, its file name, and the job id — never found by a
-    pattern. Longest first, so a path is replaced before the name inside it;
-    each is replaced only as a whole token (:func:`without_identifiers`), so a
-    short name is masked at any length and never inside a longer word.
-    """
-    import os
-
-    pairs: list[tuple[str, str]] = []
-    sha = str(getattr(container, "sample_sha256", "") or "").strip()
-    if sha:
-        pairs += [(form, "<sample-sha256>") for form in (sha, sha.lower(), sha.upper())]
-    paths = [str(getattr(container, "sample_path", "") or "")]
-    served = getattr(container, "server_sample_paths", None)
-    if isinstance(served, Mapping):
-        paths += [str(p or "") for p in served.values()]
-    for path in paths:
-        if path.strip():
-            pairs.append((path, "<sample-path>"))
-            name = os.path.basename(path)
-            if name:
-                pairs.append((name, "<sample-name>"))
-    job = str(getattr(container, "job_id", "") or "").strip()
-    if job:
-        pairs.append((job, "<job-id>"))
-    unique = {value: mark for value, mark in pairs if value}
-    return sorted(unique.items(), key=lambda pair: -len(pair[0]))
-
-
-def without_identifiers(text: str, identifiers: Sequence[tuple[str, str]]) -> str:
-    """``text`` with each identifier replaced by its placeholder, as a whole token only.
-
-    A token is bounded by characters that cannot be part of an identifier
-    (anything but a letter, a digit or ``_``), or by the text's ends: the
-    sample named ``a.exe`` is masked in ``open a.exe`` and left alone in
-    ``data.exe``.
-    """
-    for value, mark in identifiers:
-        # The placeholder escaped for ``re.sub``, which reads backslashes in it.
-        text = re.sub(rf"(?<!\w){re.escape(value)}(?!\w)", mark.replace("\\", "\\\\"), text)
-    return text
 
 
 def tool_digests(tools: Iterable[Any]) -> dict[str, str]:

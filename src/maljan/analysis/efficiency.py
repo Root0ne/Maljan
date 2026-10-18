@@ -48,22 +48,22 @@ could not be merged) and its drops questions took: provider-reported output
 tokens only, with the calls that reported none counted beside them.
 
 ``fingerprint`` is one sha256 over how the job was set up (H5), never over
-what the run sent: every system prompt the platform can send for the job, read
-from where each is built (``analysis.setup_prompts``); the definitions of the
-tools each agent was resolved with, as bound; the name and version each tool
-server attached by then gave for itself; and the settings the run ran with,
-masked as the stored snapshot masks them. A retry, a revision round, a cleared
-tool answer or the mediator's fast path does not move it; editing any built-in
-prompt does. Each of the four is hashed on its own (``components``), and each
-per prompt, agent, server or settings section (``parts``), so two fingerprints
-that differ name what changed. The sample does not move it either: an agent's
-prompt is composed with the neutral format fragment (every fragment is hashed
-as its template), and the job's own identifiers the platform writes in — the
-sample's sha256, its paths and file name, the job id, taken from the job's
-known values (``core.input_meter.job_identifiers``) — are masked as whole
-tokens. Nor does the host: the paths that belong to it (the checkout, the
-interpreter's environment, the home and working directories) are replaced in
-the settings before they are hashed. Secrets never enter it: only the masked view of the settings is
+what the run sent: every system prompt the platform can send for the job,
+rendered by the builder that sends it for one fixed placeholder job
+(``analysis.setup_prompts``); the tools each analyst was resolved with and the
+judge and the mediator bind, as their definitions are bound; the name and
+version each tool server attached by then gave for itself; and the settings
+the run ran with, masked as the stored snapshot masks them. A retry, a
+revision round, a cleared tool answer or the mediator's fast path does not
+move it, nor does the sample, whose values are never in a rendered prompt;
+editing any built-in prompt, or any sentence a builder writes, does. Each of
+the four is hashed on its own (``components``), and each per prompt, agent,
+server or settings section (``parts``), so two fingerprints that differ name
+what changed; ``texts`` keeps each rendered prompt's own digest. An agent
+reached only by delegation is not resolved for it, and is named. Nor does the
+host move it: its repository paths (the checkout, the repository it is a
+worktree of, the virtual environment) are replaced in the settings before they
+are hashed. Secrets never enter it: only the masked view of the settings is
 hashed, where a secret reads as set or unset. A tool's own version is not
 reported over MCP and is not in it.
 """
@@ -460,26 +460,25 @@ def masked_settings(config: Any) -> dict[str, Any]:
 
 
 def host_paths() -> list[tuple[str, str]]:
-    """``(path, placeholder)`` for each path that belongs to this host, longest first.
+    """``(path, placeholder)`` for each of this host's repository paths, longest first.
 
-    The checkout the code runs from, the interpreter's environment and the one
-    it was built from, the home directory and the working directory: a tool
+    The checkout the code runs from, the repository it is a worktree of (where
+    it is one), and the virtual environment the interpreter runs in: a tool
     server's launch command and working directory name them, and the same
-    setup on another host or in another worktree names others.
+    setup on another host or in another worktree names others. Nothing else is
+    replaced — the interpreter's own installation (``/usr``) is a path a
+    setting may name for itself, and it stays as written.
     """
-    import os
     import sys
     from pathlib import Path
 
-    # In rising order of what a path says, so where two are the same path the
-    # later name is the one kept on every host.
-    candidates = [
-        (os.getcwd(), "<cwd>"),
-        (str(Path.home()), "<home>"),
-        (sys.base_prefix, "<interpreter>"),
-        (sys.prefix, "<environment>"),
-        (str(Path(__file__).resolve().parents[3]), "<checkout>"),
-    ]
+    checkout = Path(__file__).resolve().parents[3]
+    parts = checkout.parts
+    candidates = [(str(checkout), "<checkout>")]
+    if ".claude" in parts and "worktrees" in parts:
+        candidates.append((str(Path(*parts[: parts.index(".claude")])), "<repository>"))
+    if sys.prefix != sys.base_prefix:
+        candidates.append((sys.prefix, "<environment>"))
     held = {path.rstrip("/"): mark for path, mark in candidates if path.strip("/")}
     return sorted(held.items(), key=lambda pair: -len(pair[0]))
 
@@ -513,44 +512,71 @@ def _settings_sections(
     return {name: _hash(leaves) for name, leaves in sorted(sections.items())}
 
 
+# The agents set up by their role rather than resolved as analysts, by the key
+# their setup is recorded under (``ServiceContainer.note_role_setup``).
+JUDGE_KEYS = ("judge", "mediator")
+
+
+def _setup_agents(config: Any) -> tuple[list[str], list[str]]:
+    """``(the analysts the fingerprint covers, the definitions it does not resolve)``.
+
+    The analysts of the active profile are resolved in every run that reaches
+    its analysis stage; the judge and the mediator are set up by their role.
+    The report writers' prompts are rendered as their own parts. Any other
+    definition is no analyst of the active profile and is reached in a job only
+    when an agent delegates to it, so it is never resolved for the fingerprint:
+    it is named instead, and its definition is in the settings component.
+    """
+    from maljan.agents.composition import analyst_keys
+
+    analysts = list(analyst_keys(config))
+    definitions = getattr(getattr(config, "agents", None), "definitions", None) or {}
+    others = sorted(
+        str(key)
+        for key, definition in definitions.items()
+        if key not in analysts
+        and key not in JUDGE_KEYS
+        and str(getattr(definition, "role", "")) not in ("judge", "report")
+    )
+    return analysts, others
+
+
 def fingerprint_record(container: Any) -> dict[str, Any] | None:
     """``efficiency.fingerprint`` from the job's setup, or ``None`` outside a job.
 
-    Read from the container's setup alone — its settings, the agents it
-    resolved and the servers attached by then — never from the requests a run
-    sent. A part the job could not give (no agent resolved yet, settings that
-    would not dump) is named in ``unread`` and hashed as what it holds, so the
-    fingerprint still says what it is made of.
+    Read from the container's setup alone — its settings, the analysts it
+    resolved, the judge's and the mediator's setup and the servers attached by
+    then — never from the requests a run sent. Every prompt is rendered by its
+    builder for the placeholder job (``analysis.setup_prompts``); ``texts``
+    keeps each rendered prompt's digest, by its part. A part the job could not
+    give is named in ``unread``, and an agent reached only by delegation in
+    ``not_resolved``.
     """
     from maljan.analysis.setup_prompts import setup_prompts
-    from maljan.core.input_meter import job_identifiers, tool_digests, without_identifiers
+    from maljan.core.input_meter import digest, tool_digests
 
     config = getattr(container, "config", None)
-    resolved_of = getattr(container, "resolved_agents", None)
+    tools_of = getattr(container, "setup_tools", None)
     servers_of = getattr(container, "setup_server_versions", None)
-    if config is None and not callable(resolved_of) and not callable(servers_of):
+    if config is None and not callable(tools_of) and not callable(servers_of):
         return None
     unread: list[str] = []
+    analysts, not_resolved = _setup_agents(config) if config is not None else ([], [])
+    set_up = tools_of() if callable(tools_of) else {}
+    covered = [*analysts, *JUDGE_KEYS]
+    unread.extend(f"{key} (not set up)" for key in covered if key not in set_up)
     parts: dict[str, dict[str, Any]] = {"prompts": {}, "tools": {}, "servers": {}, "settings": {}}
-    identifiers = job_identifiers(container)
-
-    def mask(text: str) -> str:
-        return without_identifiers(text, identifiers)
-
+    texts: dict[str, list[str]] = {}
     try:
-        parts["prompts"] = {
-            name: _hash(texts) for name, texts in sorted(setup_prompts(container, mask).items())
-        }
+        rendered = setup_prompts(
+            container, analysts, [set_up[key] for key in JUDGE_KEYS if key in set_up]
+        )
+        parts["prompts"] = {name: _hash(held) for name, held in sorted(rendered.items())}
+        texts = {name: sorted({digest(t) for t in held}) for name, held in sorted(rendered.items())}
     except Exception:  # noqa: BLE001 — an unread part is named, never guessed
         unread.append("prompts")
-    resolved = resolved_of() if callable(resolved_of) else {}
-    if not resolved:
-        unread.append("agents")
     try:
-        parts["tools"] = {
-            str(key): _hash(tool_digests(getattr(agent, "tools", None) or []))
-            for key, agent in sorted(resolved.items())
-        }
+        parts["tools"] = {key: _hash(tool_digests(set_up[key])) for key in covered if key in set_up}
     except Exception:  # noqa: BLE001 — an unread part is named, never guessed
         unread.append("tools")
     try:
@@ -564,9 +590,16 @@ def fingerprint_record(container: Any) -> dict[str, Any] | None:
     if config is None or not parts["settings"]:
         unread.append("settings")
     components = {name: _hash(held) for name, held in parts.items()}
-    record: dict[str, Any] = {"sha256": _hash(components), "components": components, "parts": parts}
+    record: dict[str, Any] = {
+        "sha256": _hash(components),
+        "components": components,
+        "parts": parts,
+        "texts": texts,
+    }
     if unread:
         record["unread"] = sorted(set(unread))
+    if not_resolved:
+        record["not_resolved"] = not_resolved
     return record
 
 
@@ -776,8 +809,16 @@ def _fingerprint_lines(fingerprint: Mapping[str, Any]) -> list[str]:
         line += f" (sha256 of its components: {shown})"
     unread = [str(name) for name in fingerprint.get("unread") or []]
     if unread:
-        line += f"; not read, and hashed as empty: {', '.join(unread)}"
+        line += f"; not in it, as the job could not give them: {', '.join(unread)}"
     lines = [line + "."]
+    not_resolved = [str(name) for name in fingerprint.get("not_resolved") or []]
+    if not_resolved:
+        lines.append(
+            "Not resolved for the fingerprint, being no analyst of the active profile and "
+            "reached only when an agent delegates to it (its definition is in the settings): "
+            + ", ".join(_c(name) for name in not_resolved)
+            + "."
+        )
     parts = fingerprint.get("parts")
     servers = parts.get("servers") if isinstance(parts, Mapping) else None
     if isinstance(servers, Mapping) and servers:

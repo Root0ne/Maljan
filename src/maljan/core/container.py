@@ -654,6 +654,12 @@ class ServiceContainer:
         # mediator's fast path — moves it.
         self._resolved_agents: dict[str, Any] = {}
         self._setup_servers: dict[str, dict[str, str]] = {}
+        # The tools each agent was set up with, by its key: an analyst's as it
+        # was resolved, the judge's and the mediator's as their role binds them.
+        self._setup_tools: dict[str, list[Any]] = {}
+        # The analysts whose loop has bound its tools: from then on that list,
+        # not the resolution's, is the analyst's setup.
+        self._bound_agents: set[str] = set()
         # Each call, as it is recorded, on the job's event feed: the durable
         # trail of what the run spent, kept call by call by the worker.
         if event_sink is not None:
@@ -1175,17 +1181,78 @@ class ServiceContainer:
         """Keep agent ``name``'s resolution and the servers attached by then. Never raises."""
         try:
             self._resolved_agents[name] = resolved
-            registry = self._server_registry_cache
-            versions = getattr(registry, "server_versions", None)
-            if callable(versions):
-                for server, info in versions().items():
-                    self._setup_servers.setdefault(server, dict(info))
+            self._setup_tools.setdefault(name, list(getattr(resolved, "tools", None) or []))
+            self._note_setup_servers(None)
         except Exception as exc:  # noqa: BLE001 — telemetry never costs an agent
             logger.debug("the setup of '%s' was not noted (%s).", name, type(exc).__name__)
+
+    def _note_setup_servers(self, names: set[str] | None) -> None:
+        """The name and version each attached server gave, for ``names`` or every one."""
+        registry = self._server_registry_cache
+        versions = getattr(registry, "server_versions", None)
+        if not callable(versions):
+            return
+        for server, info in versions().items():
+            if names is None or server in names:
+                self._setup_servers.setdefault(server, dict(info))
+
+    def note_bound_tools(self, name: str, tools: Any) -> None:
+        """The tools analyst ``name``'s first loop binds, as its setup. Never raises.
+
+        A built-in role attaches its own servers after it was resolved, and its
+        prompt and requests are written for what its loop binds; the first
+        loop's list stands, and the servers attached by then are noted.
+        """
+        try:
+            if name in self._bound_agents:
+                return
+            self._bound_agents.add(name)
+            self._setup_tools[name] = list(tools or [])
+            self._note_setup_servers(None)
+        except Exception as exc:  # noqa: BLE001 — telemetry never costs an agent
+            logger.debug("the tools of '%s' were not noted (%s).", name, type(exc).__name__)
+
+    def note_role_setup(self, key: str, tools: Any, servers: set[str]) -> None:
+        """The tools agent ``key`` (the judge, the mediator) is set up with, and its servers.
+
+        Called where the agent's role binds its servers, as an analyst's are
+        noted where it is resolved; the first record of an agent stands. Never
+        raises.
+        """
+        try:
+            self._setup_tools.setdefault(str(key), list(tools or []))
+            self._note_setup_servers(set(servers))
+        except Exception as exc:  # noqa: BLE001 — telemetry never costs an agent
+            logger.debug("the setup of '%s' was not noted (%s).", key, type(exc).__name__)
+
+    async def anote_judge_setup(self) -> None:
+        """Set up the judge and the mediator for the fingerprint where the run did not.
+
+        Each binds its role's servers the way it does when a mediation needs
+        tools (``JudgeAgent._initialize_mcp_client``), so its tools and servers
+        are recorded whichever path the run took — a fast path that attached
+        nothing included. An agent already set up is left as it is. Never
+        raises.
+        """
+        for role in ("judge", "expert"):
+            try:
+                judge = self.get_judge_agent(role)
+                key = str(getattr(judge, "_runs_on", role) or role)
+                if key in self._setup_tools:
+                    continue
+                await judge._initialize_mcp_client()
+                if key not in self._setup_tools:
+                    self.note_role_setup(key, getattr(judge, "tools", None), judge.bound_servers())
+            except Exception as exc:  # noqa: BLE001 — telemetry never costs a report
+                logger.debug("the %s's setup was not noted (%s).", role, type(exc).__name__)
 
     def resolved_agents(self) -> dict[str, Any]:
         """Each agent this job resolved, by key, as it was resolved."""
         return dict(self._resolved_agents)
+
+    def setup_tools(self) -> dict[str, list[Any]]:
+        """The tools each agent was set up with, by key."""
+        return {key: list(tools) for key, tools in sorted(self._setup_tools.items())}
 
     def setup_server_versions(self) -> dict[str, dict[str, str]]:
         """Per tool server attached by the time its agents were resolved, its name and version."""

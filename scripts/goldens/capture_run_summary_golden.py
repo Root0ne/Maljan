@@ -332,14 +332,18 @@ def _efficiency(tokens: dict[str, Any] | None = None) -> dict[str, Any]:
         input_meter=meter,
         get_token_ledger=lambda: ledger,
         resolved_agents=lambda: {
-            "static": ResolvedAgent(
+            key: ResolvedAgent(
                 key="",
-                role="static",
-                prompt="You are the static analyst.",
+                role=key,
+                prompt=f"You are the {key} analyst.",
                 tools=[],
                 static_provider_id="",
                 llm=None,
             )
+            for key in ("static", "dynamic", "network")
+        },
+        setup_tools=lambda: {
+            key: [] for key in ("static", "dynamic", "network", "judge", "mediator")
         },
         setup_server_versions=lambda: {"analysis": {"name": "analysis-mcp", "version": "1.2.0"}},
         config=Settings(),
@@ -449,6 +453,7 @@ DATA_KEYED = frozenset(
         "efficiency.fingerprint.parts.tools",
         "efficiency.fingerprint.parts.servers",
         "efficiency.fingerprint.parts.settings",
+        "efficiency.fingerprint.texts",
     }
 )
 

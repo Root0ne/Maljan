@@ -28,7 +28,7 @@ from maljan.analysis.efficiency import efficiency_lines, fingerprint_record
 from maljan.analysis.setup_prompts import PROMPT_CONSTANTS, PROMPT_SITES, covered_names
 from maljan.core.config import Settings
 from maljan.core.container import ServiceContainer
-from maljan.core.input_meter import job_identifiers, request_parts, without_identifiers
+from maljan.core.input_meter import request_parts
 
 SRC = Path(__file__).resolve().parents[3] / "src" / "maljan"
 SECRET = prefixed_key("sk-")
@@ -50,6 +50,7 @@ def _container(
     path: str = "/samples/job-1/invoice.exe",
     job: str = "job-0001",
     file_format: tuple[str, str] = ("pe", "windows"),
+    judge_description: str = "Looks a hash up.",
 ) -> ServiceContainer:
     config = settings or Settings()
     container = ServiceContainer(config=config, mock=True, job_id=job)
@@ -57,14 +58,19 @@ def _container(
     container.sample_path = path
     container.sample_format = file_format  # type: ignore[attr-defined]
     for key in ("static", "dynamic", "network"):
-        container._resolved_agents[key] = ResolvedAgent(
-            key=key,
-            role=key,
-            prompt="",
-            tools=[_tool(description)] if key == "static" else [],
-            static_provider_id=static_provider_id_for(config, key),
-            llm=None,
+        container._note_the_setup(
+            key,
+            ResolvedAgent(
+                key=key,
+                role=key,
+                prompt="",
+                tools=[_tool(description)] if key == "static" else [],
+                static_provider_id=static_provider_id_for(config, key),
+                llm=None,
+            ),
         )
+    for key in ("judge", "mediator"):
+        container.note_role_setup(key, [_tool(judge_description)], set())
     container._setup_servers = {"analysis": {"name": "analysis-mcp", "version": version}}
     return container
 
@@ -167,7 +173,7 @@ def test_editing_an_analyst_s_built_in_prompt_moves_its_part(
     monkeypatch.setattr(static_analyst, "_ISR_HEAD", static_analyst._ISR_HEAD + " Edited.")
     after = _record(_container())
 
-    assert _changed(before, after, "prompts") == {"analyst:static"}
+    assert _changed(before, after, "prompts") == {"analyst:static", "revision:static"}
 
 
 def _system_prompt_sites() -> set[str]:
@@ -257,20 +263,6 @@ def test_a_changed_setting_is_named_by_its_section() -> None:
     }
 
 
-def test_the_job_s_identifiers_are_masked_as_whole_tokens_at_any_length() -> None:
-    container = SimpleNamespace(
-        sample_sha256="ab" * 32, sample_path="/s/a.exe", server_sample_paths={}, job_id="j1"
-    )
-    identifiers = job_identifiers(container)
-
-    assert without_identifiers("open a.exe; not data.exe; job j1, not j10", identifiers) == (
-        "open <sample-name>; not data.exe; job <job-id>, not j10"
-    )
-    assert without_identifiers(f"at /s/a.exe sha {'AB' * 32}", identifiers) == (
-        "at <sample-path> sha <sample-sha256>"
-    )
-
-
 def test_outside_a_job_there_is_none() -> None:
     assert fingerprint_record(SimpleNamespace()) is None
 
@@ -302,7 +294,7 @@ def test_the_report_lines_give_the_hash_and_the_servers() -> None:
 
     assert lines[0].startswith(f"Run fingerprint: `{record['sha256']}` (sha256 of its components:")
     assert "tool definitions as bound" in lines[0]
-    assert lines[1] == (
+    assert lines[-1] == (
         "Tool servers as they gave themselves at attach: `analysis` as `analysis-mcp` version "
         "`1.0`. A tool's own version is not reported over MCP."
     )
@@ -342,3 +334,78 @@ def test_a_host_path_is_replaced_only_as_a_whole_path() -> None:
         "/home/one/repo2/bin",
         "x=<checkout>",
     ]
+
+
+def test_a_sample_whose_name_is_an_ordinary_word_changes_nothing() -> None:
+    assert _record(_container(path="/samples/sample")) == _record(
+        _container(path="/samples/main.exe")
+    )
+
+
+def test_editing_a_sentence_a_builder_writes_moves_its_part(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from maljan.agents import base_agent, judge_agent, prompt_fragments
+    from maljan.reporting import narrative_agent
+
+    before = _record(_container())
+    edits = [
+        (narrative_agent, "rule_pointer", lambda report=None: "a reworded pointer", "narrative"),
+        (judge_agent, "MEDIATOR_TI_TOOLS", "Reworded.\n", "mediator"),
+        (base_agent, "_REVISION_ISR_FRAMING", "Reworded.", "revision:static"),
+        (prompt_fragments, "_ARCHIVE_FRAGMENT", "Reworded.", "format fragments"),
+    ]
+    for owner, attr, value, part in edits:
+        with monkeypatch.context() as patch:
+            patch.setattr(owner, attr, value)
+            assert part in _changed(before, _record(_container()), "prompts"), attr
+
+
+def test_the_judge_s_tools_are_in_it() -> None:
+    before = _record(_container())
+    after = _record(_container(judge_description="Looks a hash up, reworded."))
+
+    assert {"judge", "mediator"} <= set(before["parts"]["tools"])
+    assert _changed(before, after, "tools") == {"judge", "mediator"}
+
+
+def test_an_agent_reached_only_by_delegation_is_named_and_never_hashed() -> None:
+    from maljan.core.config import AgentDefinition
+
+    settings = Settings()
+    settings.agents.definitions["helper"] = AgentDefinition(role="generic", prompt="Help.")
+    container = _container(settings=settings)
+    before = _record(container)
+    container._note_the_setup(
+        "helper",
+        ResolvedAgent(
+            key="helper",
+            role="generic",
+            prompt="Help.",
+            tools=[_tool()],
+            static_provider_id="",
+            llm=None,
+        ),
+    )
+
+    assert "helper" in before["not_resolved"]
+    assert "reporter" not in before["not_resolved"]
+    assert _record(container) == before
+    lines = efficiency_lines({"v": 2, "fingerprint": before})
+    assert any(
+        "reached only when an agent delegates" in line and "`helper`" in line for line in lines
+    )
+
+
+def test_an_agent_not_set_up_is_named() -> None:
+    container = _container()
+    del container._setup_tools["judge"]
+
+    assert "judge (not set up)" in _record(container)["unread"]
+
+
+def test_the_interpreter_s_own_installation_stays_as_written() -> None:
+    from maljan.analysis.efficiency import _without_host, host_paths
+
+    assert _without_host("/usr/bin/python3", host_paths()) == "/usr/bin/python3"
+    assert all(mark != "<interpreter>" for _path, mark in host_paths())

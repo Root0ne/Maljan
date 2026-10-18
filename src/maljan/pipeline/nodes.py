@@ -6728,6 +6728,13 @@ def make_report_node(
         if state.get("run_summary"):
             from maljan.analysis.efficiency import efficiency_record
 
+            # The judge's and the mediator's setup, bound where the run did not
+            # bind it (a fast path), so the fingerprint is the setup's whichever
+            # path the run took.
+            _judge_setup = getattr(container, "anote_judge_setup", None)
+            if inspect.iscoroutinefunction(_judge_setup):
+                await _judge_setup()
+
             _efficiency = efficiency_record(
                 container,
                 entries=_ledger,
