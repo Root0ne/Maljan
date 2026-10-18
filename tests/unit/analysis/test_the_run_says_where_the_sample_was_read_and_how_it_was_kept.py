@@ -1,0 +1,513 @@
+"""The disclosure record says where the sample's bytes were read, and what kept each reader.
+
+The isolation part is read from the run's own records: the ledger entries
+whose tools declare an argument as the sample (role ``path`` or ``carved``),
+the settings blocks that declare where their server sees it, and the reads in
+the worker the platform notes as they happen. A tool server started over stdio
+is measured by the worker when it starts. A row is isolated only when it was
+measured and every check held. A field that could not be read is absent and
+never counts as passing. A server reached at an address is "not verified", and
+a run that read nothing claims nothing.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import os
+import shutil
+import subprocess
+import sys
+import time
+from collections.abc import Iterator
+from pathlib import Path
+from types import SimpleNamespace
+from typing import Any
+
+import pytest
+
+from maljan.analysis import isolation
+from maljan.analysis.disclosure import DISCLOSURE_VERSION, disclosure_lines, disclosure_record
+from maljan.analysis.isolation import (
+    CHILD,
+    IN_PROCESS,
+    LOCAL_SERVICE,
+    NOT_MEASURED_CHILD,
+    NOT_MEASURED_DISAGREE,
+    NOT_MEASURED_REMOTE,
+    NOT_MEASURED_SERVICE,
+    REMOTE_SERVICE,
+    REPORT_LABEL,
+    REPORT_SOURCE,
+    WORKER_LABEL,
+    WORKER_SOURCE,
+    isolation_lines,
+    measure_process,
+    note_in_process,
+    note_process,
+    note_read_in_worker,
+    noted,
+    sample_readers,
+)
+
+STDIO = {"mcp.servers.analysis.transport": "stdio", "mcp.servers.analysis.url": ""}
+WORKER = {"uid": 1000, "cap_eff_zero": True, "no_new_privs": False, "platform_names_in_env": []}
+# A child measured as kept from the worker on every count.
+KEPT = {
+    "uid": 10002,
+    "same_uid_as_worker": False,
+    "own_pid_namespace": True,
+    "own_net_namespace": True,
+    "own_mount_namespace": True,
+    "cap_eff_zero": True,
+    "no_new_privs": True,
+    "platform_names_in_env": [],
+}
+# A child of the worker as the shipped stack starts one today.
+SHARED = {
+    "uid": 1000,
+    "same_uid_as_worker": True,
+    "own_pid_namespace": False,
+    "own_net_namespace": False,
+    "own_mount_namespace": False,
+    "cap_eff_zero": True,
+    "no_new_privs": False,
+    "platform_names_in_env": [],
+}
+
+
+def _entry(source: str, tool: str = "t", *, arguments: dict | None = None, **over: Any) -> dict:
+    facts: dict[str, Any] = {"v": 1, "kind": "format_info"}
+    if arguments is not None:
+        facts["arguments"] = arguments
+    row: dict[str, Any] = {"id": "ev_1", "tool": tool, "args": {}, "ok": True, "facts": facts}
+    if source:
+        row["source"] = source
+    row.update(over)
+    return row
+
+
+def _reads(source: str = "mcp:analysis") -> dict:
+    return _entry(source, "pe_info", arguments={"path": "path"})
+
+
+def _part(snapshot: dict, entries: list, opened: dict | None = None) -> dict:
+    record = disclosure_record(snapshot, entries=entries, opened=opened or {}, worker=WORKER)
+    return dict(record["isolation"])
+
+
+@pytest.fixture(autouse=True)
+def _clean_notes() -> Iterator[None]:
+    yield
+    isolation._NOTES.clear()
+
+
+# ---------------------------------------------------------------------------
+# Which sources read the sample
+# ---------------------------------------------------------------------------
+
+
+def test_a_tool_that_declares_the_sample_as_an_argument_read_it() -> None:
+    readers, unsourced = sample_readers(
+        STDIO,
+        [
+            _reads(),
+            _entry("mcp:analysis", "carve", arguments={"carved": "carved_path"}),
+            _entry("mcp:analysis", "iocs_from_text", arguments={"text": "text"}),
+            _entry("mcp:knowledge", "attck_lookup"),
+            _entry("mcp:analysis", "pe_info", arguments={"path": "path"}, repeated_of="ev_0"),
+            _entry("", "pe_info", arguments={"path": "path"}),
+        ],
+        lambda source: None,
+    )
+    assert readers == {"mcp:analysis": 2}
+    assert unsourced == 1
+
+
+def test_every_call_through_a_block_that_declares_where_it_sees_the_sample_read_it() -> None:
+    for leaf in ("sample_mount", "work_dir", "sample_open.open_tool"):
+        snapshot = {f"static.decomp.{leaf}": "x"}
+        readers, _ = sample_readers(
+            snapshot,
+            [_entry("provider:decomp", "decompile")],
+            lambda source: "static.decomp",
+        )
+        assert readers == {"provider:decomp": 1}, leaf
+
+
+def test_finding_the_readers_is_linear_in_the_entries() -> None:
+    def timed(count: int) -> float:
+        entries = [_reads(f"mcp:s{i % 50}") for i in range(count)]
+        started = time.perf_counter()
+        sample_readers(STDIO, entries, lambda source: None)
+        return time.perf_counter() - started
+
+    small, large = timed(2_000), timed(20_000)
+    assert large < max(small, 1e-3) * 40
+
+
+# ---------------------------------------------------------------------------
+# Measuring a process
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.skipif(not Path("/proc/self/status").exists(), reason="no procfs")
+def test_a_child_of_the_worker_is_measured_as_sharing_the_worker() -> None:
+    child = subprocess.Popen(
+        [sys.executable, "-I", "-c", "import time; time.sleep(30)"],
+        env={"PATH": os.environ.get("PATH", "")},
+    )
+    try:
+        measured = measure_process(child.pid, ["PATH", "DATABASE_URL", "MALJAN_STAGING_DIR"])
+    finally:
+        child.kill()
+        child.wait()
+    assert measured["uid"] == os.geteuid()
+    assert measured["same_uid_as_worker"] is True
+    assert measured["own_pid_namespace"] is False
+    assert measured["own_net_namespace"] is False
+    assert measured["own_mount_namespace"] is False
+    assert measured["platform_names_in_env"] == ["DATABASE_URL"]
+    assert measured["cap_eff_zero"] in (True, False)
+    assert measured["no_new_privs"] in (True, False)
+
+
+def test_a_process_that_cannot_be_read_is_absent_never_a_pass() -> None:
+    measured = measure_process(2**22 + 12345, ["PATH"])
+    assert {key: measured[key] for key in isolation.MEASURED_FIELDS if key != "uid"} == {
+        "same_uid_as_worker": None,
+        "own_pid_namespace": None,
+        "own_net_namespace": None,
+        "own_mount_namespace": None,
+        "cap_eff_zero": None,
+        "no_new_privs": None,
+        "platform_names_in_env": [],
+    }
+    assert measured["uid"] is None
+
+
+# ---------------------------------------------------------------------------
+# The part
+# ---------------------------------------------------------------------------
+
+
+def test_the_record_carries_the_part_and_says_its_version() -> None:
+    record = disclosure_record(STDIO, entries=[_reads()], worker=WORKER)
+    assert record["v"] == DISCLOSURE_VERSION == 2
+    assert record["isolation"]["rows"][0]["source"] == "mcp:analysis"
+
+
+def test_a_read_in_the_worker_is_never_isolated() -> None:
+    part = _part(
+        STDIO,
+        [_reads("pack")],
+        {REPORT_SOURCE: [{"where": IN_PROCESS, "label": REPORT_LABEL}]},
+    )
+    rows = {row["source"]: row for row in part["rows"]}
+    assert rows["pack"]["where"] == IN_PROCESS
+    assert rows["pack"]["label"] == "Triage pack"
+    assert rows[REPORT_SOURCE]["label"] == REPORT_LABEL
+    assert not any(row["isolated"] for row in rows.values())
+    assert part["isolated"] is False
+
+
+def test_a_child_kept_from_the_worker_on_every_count_is_isolated() -> None:
+    part = _part(STDIO, [_reads()], {"mcp:analysis": [{"where": CHILD, **KEPT}]})
+    assert part["rows"][0]["isolated"] is True
+    assert part["isolated"] is True
+    lines = isolation_lines(part)
+    assert lines[0] == (
+        "Every source that read the sample's bytes was measured as kept from the worker."
+    )
+    assert "So: isolated." in lines[2]
+
+
+@pytest.mark.parametrize(
+    "field, value",
+    [
+        ("same_uid_as_worker", True),
+        ("own_pid_namespace", False),
+        ("own_mount_namespace", False),
+        ("own_net_namespace", False),
+        ("cap_eff_zero", False),
+        ("no_new_privs", False),
+        ("platform_names_in_env", ["SETTINGS_ENCRYPTION_KEY"]),
+        ("same_uid_as_worker", None),
+        ("own_pid_namespace", None),
+        ("cap_eff_zero", None),
+        ("no_new_privs", None),
+        ("platform_names_in_env", None),
+    ],
+)
+def test_any_check_that_failed_or_could_not_be_read_keeps_a_child_from_isolated(
+    field: str, value: Any
+) -> None:
+    part = _part(STDIO, [_reads()], {"mcp:analysis": [{"where": CHILD, **KEPT, field: value}]})
+    assert part["rows"][0]["isolated"] is False
+    assert part["isolated"] is False
+
+
+def test_a_block_that_declares_it_needs_the_network_is_not_held_to_one_of_its_own() -> None:
+    snapshot = {**STDIO, "mcp.servers.analysis.roles": ["sandbox"]}
+    open_net = {"where": CHILD, **KEPT, "own_net_namespace": False}
+    part = _part(snapshot, [_reads()], {"mcp:analysis": [open_net]})
+    assert part["rows"][0]["needs_network"] is True
+    assert part["rows"][0]["isolated"] is True
+    # Only the network is lifted.
+    shared_user = {**open_net, "same_uid_as_worker": True}
+    part = _part(snapshot, [_reads()], {"mcp:analysis": [shared_user]})
+    assert part["rows"][0]["isolated"] is False
+
+
+def test_a_child_the_worker_could_not_measure_is_said_and_not_isolated() -> None:
+    part = _part(STDIO, [_reads()])
+    row = part["rows"][0]
+    assert (row["where"], row["isolated"], row["why_not_measured"]) == (
+        CHILD,
+        False,
+        NOT_MEASURED_CHILD,
+    )
+    assert isolation_lines(part)[2].endswith("so its isolation cannot be told.")
+
+
+def test_starts_measured_differently_leave_the_differing_field_absent() -> None:
+    part = _part(
+        STDIO,
+        [_reads()],
+        {"mcp:analysis": [{"where": CHILD, **KEPT}, {"where": CHILD, **KEPT, "uid": 10003}]},
+    )
+    row = part["rows"][0]
+    assert row["uid"] is None
+    assert row["attaches"] == 2
+    assert row["why_not_measured"] == NOT_MEASURED_DISAGREE
+    assert row["isolated"] is True
+
+
+def test_a_server_reached_at_an_address_is_not_verified() -> None:
+    snapshot = {
+        "mcp.servers.near.transport": "streamable-http",
+        "mcp.servers.near.url": "http://tools:8089/mcp",
+        "mcp.servers.far.transport": "streamable-http",
+        "mcp.servers.far.url": "https://tools.example.org/mcp",
+    }
+    part = _part(snapshot, [_reads("mcp:near"), _reads("mcp:far")])
+    rows = {row["source"]: row for row in part["rows"]}
+    assert (rows["mcp:near"]["where"], rows["mcp:near"]["why_not_measured"]) == (
+        LOCAL_SERVICE,
+        NOT_MEASURED_SERVICE,
+    )
+    assert (rows["mcp:far"]["where"], rows["mcp:far"]["why_not_measured"]) == (
+        REMOTE_SERVICE,
+        NOT_MEASURED_REMOTE,
+    )
+    lines = isolation_lines(part)
+    assert any(line.endswith("so not verified by this run.") for line in lines)
+    assert any(line.endswith("so this run cannot tell what isolation it had.") for line in lines)
+
+
+def test_a_run_that_read_nothing_claims_nothing() -> None:
+    part = _part(STDIO, [_entry("mcp:knowledge", "attck_lookup")])
+    assert part["rows"] == []
+    assert part["isolated"] is False
+    assert isolation_lines(part) == [
+        "This run recorded no read of the sample's bytes, so nothing is said of it."
+    ]
+
+
+def test_a_read_with_no_source_keeps_the_run_from_isolated() -> None:
+    part = _part(
+        STDIO,
+        [_reads(), _entry("", "pe_info", arguments={"path": "path"})],
+        {"mcp:analysis": [{"where": CHILD, **KEPT}]},
+    )
+    assert part["unsourced_reads"] == 1
+    assert part["isolated"] is False
+    assert isolation_lines(part)[-1] == (
+        "1 call that read the sample recorded no source, so where it ran cannot be told."
+    )
+
+
+def test_a_version_one_record_renders_as_it_did() -> None:
+    record = disclosure_record(STDIO, entries=[_reads()], worker=WORKER)
+    old = {key: value for key, value in record.items() if key != "isolation"}
+    old["v"] = 1
+    assert isolation_lines(old.get("isolation")) == []
+    assert disclosure_lines(old) == disclosure_lines(record)
+
+
+def test_the_report_prints_the_part_inside_the_disclosure_block() -> None:
+    from maljan.analysis.disclosure import FOOTNOTE_SENTENCE
+    from maljan.analysis.disclosure import INTRO_SENTENCE as DISCLOSURE_INTRO
+    from maljan.analysis.isolation import INTRO_SENTENCE
+    from maljan.reporting.models import FileHashes, MalwareReport, SampleIdentity
+    from maljan.reporting.renderers.markdown import MarkdownRenderer
+
+    record = disclosure_record(
+        STDIO,
+        entries=[_reads(), _reads("pack")],
+        opened={"mcp:analysis": [{"where": CHILD, **SHARED}]},
+        worker={**WORKER, "platform_names_in_env": ["DATABASE_URL", "JWT_SECRET_KEY"]},
+    )
+    report = MalwareReport(
+        identity=SampleIdentity(hashes=FileHashes(sha256="a" * 64)),
+        verdict="Malware",
+        run_summary={"final_decision": "Malware", "disclosure": record},
+    )
+    markdown = MarkdownRenderer().render(report)
+    assert markdown.index(DISCLOSURE_INTRO) < markdown.index(INTRO_SENTENCE)
+    assert markdown.index(INTRO_SENTENCE) < markdown.index(FOOTNOTE_SENTENCE)
+    assert (
+        "- The worker process runs as user 1000; its environment holds the platform's own "
+        "variables `DATABASE_URL`, `JWT_SECRET_KEY`."
+    ) in markdown
+    assert (
+        "- Triage pack (`pack`) read the sample in the worker process itself: not isolated, "
+        "since it shares the worker's memory, environment, files and network."
+    ) in markdown
+    assert (
+        "- Tool server `analysis` (stdio, run on this machine) read the sample in a process the "
+        "worker started, measured at its start: it ran as user 1000, the worker's own; sharing "
+        "the worker's process table; the worker's view of the filesystem; the worker's network; "
+        "no capabilities; no bar on gaining privileges; its environment held none of the "
+        "platform's own variables. So: not isolated."
+    ) in markdown
+
+
+# ---------------------------------------------------------------------------
+# The reads in the worker that write no entry
+# ---------------------------------------------------------------------------
+
+
+def _drafting(path: str | None, calls: list[str]) -> None:
+    from maljan.reporting.builder import build_consolidated_iocs
+    from maljan.reporting.detection_signatures import OwnSample, build_detection_rules
+    from maljan.reporting.models import (
+        FileHashes,
+        MalwareReport,
+        NetworkDomain,
+        NetworkIOCs,
+        SampleIdentity,
+    )
+
+    report = MalwareReport(
+        identity=SampleIdentity(hashes=FileHashes(sha256="c" * 64)),
+        verdict="Malware",
+        malware_category="loader",
+        network=NetworkIOCs(
+            domains=[
+                NetworkDomain(fqdn=name, source="sandbox")
+                for name in ("gate9.example.org", "relay4.example.net")
+            ]
+        ),
+    )
+    report.consolidated_iocs = build_consolidated_iocs(report)
+    build_detection_rules(
+        report, OwnSample(path=path, budget_seconds=60, on_open=lambda: calls.append("open"))
+    )
+
+
+def test_the_report_steps_check_notes_its_read_only_when_it_hands_the_engine_the_file(
+    tmp_path: Path,
+) -> None:
+    from maljan.reporting import detection_signatures as drafts
+
+    if not drafts._YARA_AVAILABLE:
+        pytest.skip("yara-python is not installed")
+    calls: list[str] = []
+    _drafting(None, calls)
+    assert calls == []
+    sample = tmp_path / "sample.bin"
+    sample.write_bytes(b"\x00" * 16 + b"gate9.example.org" + b"\x00" * 8)
+    _drafting(str(sample), calls)
+    assert calls == ["open"]
+
+
+def test_the_report_node_notes_its_read_under_the_job() -> None:
+    from maljan.pipeline.nodes import _noting_the_report_read
+
+    note = _noting_the_report_read(SimpleNamespace(job_key=lambda: "job-d"))
+    note()
+    assert noted("job-d") == {REPORT_SOURCE: [{"where": IN_PROCESS, "label": REPORT_LABEL}]}
+
+
+def test_the_routing_notes_the_workers_own_read(tmp_path: Path) -> None:
+    from maljan.app import MaljanApp
+
+    sample = tmp_path / "sample.bin"
+    sample.write_bytes(b"MZ" + b"\x00" * 62)
+    app = SimpleNamespace(container=SimpleNamespace(job_key=lambda: "job-e"))
+    MaljanApp._infer_sample_platform(app, str(sample), None)  # type: ignore[arg-type]
+    assert noted("job-e") == {WORKER_SOURCE: [{"where": IN_PROCESS, "label": WORKER_LABEL}]}
+
+
+# ---------------------------------------------------------------------------
+# The job's notes
+# ---------------------------------------------------------------------------
+
+
+def test_notes_are_kept_per_job_and_dropped_when_asked() -> None:
+    note_process("job-a", "mcp:analysis", KEPT)
+    note_in_process("job-a", WORKER_SOURCE, WORKER_LABEL)
+    note_in_process("job-a", WORKER_SOURCE, WORKER_LABEL)
+    note_process("job-b", "mcp:analysis", SHARED)
+    held = noted("job-a")
+    assert [note["where"] for note in held["mcp:analysis"]] == [CHILD]
+    assert held[WORKER_SOURCE] == [{"where": IN_PROCESS, "label": WORKER_LABEL}]
+    isolation.forget("job-a")
+    assert noted("job-a") == {}
+    assert noted("job-b")["mcp:analysis"][0]["uid"] == SHARED["uid"]
+
+
+def test_a_container_without_a_job_key_notes_nothing() -> None:
+    note_read_in_worker(SimpleNamespace(), WORKER_SOURCE, WORKER_LABEL)
+    assert isolation._NOTES == {}
+    note_read_in_worker(SimpleNamespace(job_key=lambda: "job-c"), REPORT_SOURCE, REPORT_LABEL)
+    assert noted("job-c")[REPORT_SOURCE][0]["label"] == REPORT_LABEL
+
+
+def test_a_connection_test_measures_nothing(tmp_path: Path) -> None:
+    from maljan.core.config import MCPServerConfig
+    from maljan.providers.servers import ServerHandle
+
+    handle = ServerHandle("probe", MCPServerConfig(transport="stdio", command="/bin/true"))
+    handle._child_pids = (os.getpid(),)
+    handle._job_id = "probe-x"
+    handle._note_isolation()
+    assert noted("probe-x") == {}
+    handle.measures_isolation = True
+    handle.declared_source = "provider:decomp"
+    handle._launch_env_names = ("PATH",)
+    handle._note_isolation()
+    assert noted("probe-x")["provider:decomp"][0]["same_uid_as_worker"] is True
+
+
+@pytest.mark.skipif(
+    not sys.executable or not shutil.which(sys.executable),
+    reason="no python interpreter available to launch the sidecar",
+)
+def test_a_jobs_stdio_server_is_measured_at_its_start_and_forgotten_at_teardown(
+    tmp_path: Path,
+) -> None:
+    from maljan.core.container import ServiceContainer
+    from maljan.core.settings_overrides import build_settings
+
+    job_id = "job-isolation-measure"
+    container = ServiceContainer(
+        build_settings({}), mock=True, samples_dir=str(tmp_path), job_id=job_id
+    )
+
+    async def attach() -> dict:
+        try:
+            handle = container.get_server_registry().get("analysis")
+            await handle.aopen(job_id)
+            assert handle._child_pids, "the sidecar really is a child of this process"
+            return dict(noted(job_id))
+        finally:
+            await container.aclose()
+
+    held = asyncio.run(asyncio.wait_for(attach(), timeout=120))
+    (measured,) = held["mcp:analysis"]
+    assert measured["where"] == CHILD
+    assert measured["same_uid_as_worker"] is True
+    assert measured["own_pid_namespace"] is False
+    assert measured["platform_names_in_env"] == []
+    assert noted(job_id) == {}

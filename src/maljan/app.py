@@ -196,6 +196,15 @@ class MaljanApp:
                 path = Path(sample_path)
                 if path.exists() and path.is_file():
                     blob = path.read_bytes()
+                    # The routing reads the sample in this process: the run's
+                    # isolation part names the worker's own readers.
+                    from maljan.analysis.isolation import (
+                        WORKER_LABEL,
+                        WORKER_SOURCE,
+                        note_read_in_worker,
+                    )
+
+                    note_read_in_worker(self.container, WORKER_SOURCE, WORKER_LABEL)
                     file_type = detect_file_type(path, blob)
             except OSError as exc:
                 logger.warning("_infer_sample_platform: could not read %s (%s)", sample_path, exc)

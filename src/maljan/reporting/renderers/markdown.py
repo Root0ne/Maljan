@@ -43,6 +43,8 @@ from urllib.parse import urlparse
 from maljan.analysis.disclosure import FOOTNOTE_SENTENCE as DISCLOSURE_FOOTNOTE
 from maljan.analysis.disclosure import INTRO_SENTENCE as DISCLOSURE_INTRO
 from maljan.analysis.disclosure import disclosure_lines
+from maljan.analysis.isolation import INTRO_SENTENCE as ISOLATION_INTRO
+from maljan.analysis.isolation import isolation_lines
 from maljan.analysis.run_summary import (
     NOT_APPLICABLE,
     NOT_APPLICABLE_PHRASE,
@@ -2155,13 +2157,20 @@ class MarkdownRenderer:
         # (``analysis.disclosure``); a summary stored without the record shows
         # none. A host the settings address prints as configured, set aside
         # here and nowhere else; any other prints defanged.
-        disclosed = disclosure_lines(
-            run_summary.get("disclosure"),
-            ctx.host_kept if ctx is not None else (lambda text: f"`{text}`"),
-        )
+        code = ctx.host_kept if ctx is not None else (lambda text: f"`{text}`")
+        held = run_summary.get("disclosure")
+        disclosed = disclosure_lines(held, code)
         if disclosed:
             lines.extend(["", DISCLOSURE_INTRO, ""])
             lines.extend(_item(line) for line in disclosed)
+            # Where the sample's bytes were read and what kept each reader
+            # from the worker (``analysis.isolation``); a record stored before
+            # the part existed shows none.
+            part = held.get("isolation") if isinstance(held, dict) else None
+            isolated = isolation_lines(part, code)
+            if isolated:
+                lines.extend(["", ISOLATION_INTRO, ""])
+                lines.extend(_item(line) for line in isolated)
             lines.extend(["", DISCLOSURE_FOOTNOTE])
         return "\n".join(lines)
 

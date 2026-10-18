@@ -1767,6 +1767,11 @@ class ServiceContainer:
             staging.remove_job_staging(self.job_key())
         except Exception as exc:  # noqa: BLE001 — teardown never propagates
             logger.warning("Removing this run's staging failed (non-fatal): %s", exc)
+        # What this run noted of the processes that read its sample, read by
+        # its disclosure record inside the run.
+        from maljan.analysis.isolation import forget as forget_isolation_notes
+
+        forget_isolation_notes(self.job_key())
 
         # And what this run saw, which is the other thing it held that outlives
         # nothing. Dropping the container already frees it; this drops it here

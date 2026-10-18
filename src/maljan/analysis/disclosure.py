@@ -22,7 +22,10 @@ from the run's own records and nothing else:
 * the sample's submissions to the sandbox provider (with the host the
   provider resolves its submission URL to) and its stagings to tool servers
   (``MaljanApp._submit_to_sandbox``, ``agents.sample_staging``);
-* the effective tracing state (``core.tracing``).
+* the effective tracing state (``core.tracing``);
+* what the job noted of the processes that read the sample, for the isolation
+  part (``analysis.isolation``), which says where the sample's bytes were read
+  and what kept each reader from the worker.
 
 Never a tool's name. Every host is classified by the one rule in
 ``core.host_locality``.
@@ -53,7 +56,7 @@ the enrichment job adds what it asked (:func:`with_enrichment_asked`).
 
 from __future__ import annotations
 
-from collections.abc import Callable, Iterable, Mapping
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -68,8 +71,9 @@ from maljan.core.host_locality import (
     taken_as_service_name,
 )
 
-# The version of the stored record's shape.
-DISCLOSURE_VERSION = 1
+# The version of the stored record's shape. Version 2 adds the isolation part
+# (``analysis.isolation``); a version-1 record has none and renders as before.
+DISCLOSURE_VERSION = 2
 
 # The transports a tool server is reached over at an address.
 HTTP_TRANSPORTS = frozenset({"http", "streamable-http", "sse"})
@@ -749,6 +753,8 @@ def disclosure_record(
     unreadable: int = 0,
     backends: Mapping[str, Mapping[str, Any]] | None = None,
     partial_reason: str = "",
+    opened: Mapping[str, Sequence[Mapping[str, Any]]] | None = None,
+    worker: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """What the run sent beyond this machine, as the run summary stores it.
 
@@ -761,9 +767,13 @@ def disclosure_record(
     runtime in this run, each with what answered; ``tracing`` the effective
     tracing state; ``unreadable`` the ledger rows that could not be read;
     ``backends`` what each memory backend declares (the registry's where
-    ``None``); ``partial_reason`` why the record may miss a call. Linear in
-    the entries and the snapshot.
+    ``None``); ``partial_reason`` why the record may miss a call; ``opened``
+    what the job noted of the processes that read the sample and of the reads
+    in the worker that write no entry (``analysis.isolation.noted``), and
+    ``worker`` the worker's own facts (``analysis.isolation.worker_facts``,
+    read here where ``None``). Linear in the entries and the snapshot.
     """
+    entries = list(entries)
     tools = _tool_rows(snapshot, entries)
     record: dict[str, Any] = {
         "v": DISCLOSURE_VERSION,
@@ -781,9 +791,44 @@ def disclosure_record(
         "tracing": bool(tracing) or _setting_on(snapshot.get(TRACING_SETTING)),
         "unreadable_entries": max(0, int(unreadable or 0)),
         "addressed": addressed_hosts(snapshot),
+        "isolation": _isolation(snapshot, entries, opened or {}, worker),
     }
     record["nothing_left"] = _nothing_left(record)
     return record
+
+
+def _isolation(
+    snapshot: Mapping[str, Any],
+    entries: list[Any],
+    opened: Mapping[str, Sequence[Mapping[str, Any]]],
+    worker: Mapping[str, Any] | None,
+) -> dict[str, Any]:
+    """The isolation part: each source that read the sample, placed by its settings block."""
+    from maljan.analysis.isolation import isolation_part, sample_readers, worker_facts
+    from maljan.core.builtin_declarations import in_process_declarations
+
+    gateways = gateway_blocks(snapshot)
+    routes: dict[str, _Route] = {}
+
+    def _held(source: str) -> _Route:
+        if source not in routes:
+            routes[source] = _route(snapshot, source, gateways)
+        return routes[source]
+
+    def _placed(source: str) -> tuple[str, str, str, str]:
+        route = _held(source)
+        return (route.transport, route.place.host, route.place.where, route.place.why)
+
+    readers, unsourced = sample_readers(snapshot, entries, _block_path)
+    return isolation_part(
+        readers,
+        unsourced,
+        opened,
+        worker=worker_facts() if worker is None else worker,
+        in_process={str(ref): cfg.label for ref, cfg in in_process_declarations().items()},
+        route=_placed,
+        needs_network=lambda source: _held(source).gateway,
+    )
 
 
 def _nothing_left(record: Mapping[str, Any]) -> bool:
@@ -1123,7 +1168,10 @@ def run_disclosure(
             value = getattr(container, name, None)
             return list(value) if isinstance(value, list) else []
 
+        from maljan.analysis.isolation import noted
+
         answers = getattr(container, "runtime_answers", None)
+        job_key = getattr(container, "job_key", None)
         return disclosure_record(
             public_snapshot(settings, ()),
             entries=entries,
@@ -1135,6 +1183,7 @@ def run_disclosure(
             tracing=tracing_in_environment(),
             unreadable=unreadable,
             partial_reason=partial_reason,
+            opened=noted(str(job_key())) if callable(job_key) else {},
         )
     except Exception as exc:  # noqa: BLE001 — an absent block is right; a guessed one is not
         from maljan.core.logger import logger

@@ -270,6 +270,18 @@ class ServerHandle:
         # The argv that child was launched with, which is what makes the pid
         # above this handle's rather than merely contemporaneous.
         self._launch_argv: tuple[str, ...] = ()
+        # The names of the environment that child was handed, which the run's
+        # isolation part reads the platform's own variables from, by name.
+        self._launch_env_names: tuple[str, ...] = ()
+        # The source this server's calls are recorded under
+        # (``LedgerEntry.source``); a provider that drives the handle under a
+        # block of its own names that block instead.
+        self.declared_source = f"mcp:{name}"
+        # Whether an attach measures the process it started for the job's
+        # isolation part: set by the job's registry and by a provider that
+        # drives a handle for a job. A connection test is no job, and notes
+        # nothing.
+        self.measures_isolation = False
         # What the server said it can do on its host, read once per attach
         # from its ``capabilities`` tool when it offers one; ``None`` for a
         # server that does not, or whose answer could not be read.
@@ -444,6 +456,7 @@ class ServerHandle:
             # other subprocess that happened to start in the same window; see
             # ``_child_matches``.
             self._launch_argv = (self.config.command, *args)
+            self._launch_env_names = tuple(env)
             params = StdioServerParameters(
                 command=self.config.command,
                 args=args,
@@ -463,6 +476,7 @@ class ServerHandle:
             )
         # An http/sse transport has no child of ours to reap.
         self._launch_argv = ()
+        self._launch_env_names = ()
         token = self.config.auth_token.get_secret_value()
         headers = {"Authorization": f"Bearer {token}"} if token else {}
         return MCPLangChainToolkit(
@@ -532,6 +546,7 @@ class ServerHandle:
 
         self._owner_loop = _get_agent_loop()
         self._note_child_pids(before)
+        self._note_isolation()
         self._all_tools = list(toolkit.get_tools())
         self._read_capabilities()
         allowed = self.config.tools
@@ -600,6 +615,7 @@ class ServerHandle:
         _ATTACHED_HANDLES.add(self)
         self._opened_async = True
         self._note_child_pids(before)
+        self._note_isolation()
         self._all_tools = list(toolkit.get_tools())
         await self._aread_capabilities()
 
@@ -783,6 +799,31 @@ class ServerHandle:
         """Record the children that appeared while ``initialize`` ran."""
         appeared = _own_child_pids() - before
         self._child_pids = tuple(sorted(pid for pid in appeared if self._child_matches(pid)))
+
+    def _note_isolation(self) -> None:
+        """Measure each process this attach started, for the run's isolation part.
+
+        Read once the server has initialised and before its first tool call
+        (``analysis.isolation.measure_process``), and noted under this job's
+        key and this server's source. A child that could not be identified is
+        not measured, and the run then says its isolation cannot be told.
+        """
+        if not self.measures_isolation or not self._child_pids or not self._job_id:
+            return
+        from maljan.analysis.isolation import measure_process, note_process
+
+        for pid in self._child_pids:
+            try:
+                measured = measure_process(pid, self._launch_env_names)
+            except Exception as exc:  # noqa: BLE001 — an unmeasured child is said, never guessed
+                logger.warning(
+                    "mcp server '%s': its process was not measured (%s); the run says its "
+                    "isolation cannot be told.",
+                    self.name,
+                    type(exc).__name__,
+                )
+                continue
+            note_process(self._job_id, self.declared_source, measured)
 
     def _live_children(self) -> list[int]:
         """The pids this handle spawned that are still our children."""
@@ -1250,6 +1291,8 @@ class ServerRegistry:
         self.sample_notes = sample_notes if sample_notes is not None else SampleNotes()
         for handle in self._handles.values():
             handle.sample_notes = self.sample_notes
+            # A job's server: its process is measured for the run's isolation part.
+            handle.measures_isolation = True
         # Every rest this job gave a server, in the order the breakers opened;
         # the judge node reads it into the run summary. Written from whichever
         # loop's call tripped the breaker, so appended under the lock.
@@ -1394,6 +1437,8 @@ class ServerRegistry:
                 # The job's note: a remote server's opens are noted under its
                 # address, a local process's under its own handle.
                 replica.sample_notes = handle.sample_notes
+                replica.declared_source = handle.declared_source
+                replica.measures_isolation = handle.measures_isolation
                 self._loop_handles[key] = replica
                 logger.info(
                     "mcp server '%s' is attached on another loop; the caller gets "
