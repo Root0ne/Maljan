@@ -1,0 +1,145 @@
+{
+ "id": "00000000-0000-4000-8000-000000000002",
+ "job_id": "00000000-0000-4000-8000-000000000001",
+ "verdict": "Malware",
+ "agent_reports": {
+  "static": "CLAIM 1: The sample is a 32-bit PE executable with four sections.\nEVIDENCE: [ev_0001] pe_info lists four sections.\nCONFIDENCE: 0.9\nTECHNIQUE: NONE\n---\nCLAIM 2: Its configuration strings are XOR-encoded and decoded at run time, which obfuscates them from a static scan.\nEVIDENCE: the strings were unreadable.\nCONFIDENCE: 0.7\nTECHNIQUE: T1027\n---\nCLAIM 3: It registers a scheduled task named Updater.\nEVIDENCE: [ev_0002]\nCONFIDENCE: 0.6\nTECHNIQUE: T9999\n---\nCLAIM 4: Process injection is not present: no write into another process is recorded.\nEVIDENCE: [ev_0002] the strings show no injection API.\nCONFIDENCE: 0.8\nTECHNIQUE: T1055\n---\nCLAIM 5: The sample may inject code into another process.\nEVIDENCE: [ev_0002]\nCONFIDENCE: 0.4\nTECHNIQUE: T1055 not supported\n---\nCLAIM 6: The sample carries a resource section.\nEVIDENCE: [ev_0001]\nTECHNIQUE: NONE\n---\nCLAIM 7: It decodes a second stage at run time.\nEVIDENCE: [ev_0004]\nCONFIDENCE: 0.5\nTECHNIQUE: T1140\n",
+  "network": "CLAIM 1: No packets were captured, so no network contact is shown.\nEVIDENCE: [ev_0003]\nCONFIDENCE: 0.9\nTECHNIQUE: NONE\n"
+ },
+ "agent_findings": [
+  {
+   "agent_name": "static",
+   "domain": "static",
+   "claims": [
+    {
+     "claim": "The sample is a 32-bit PE executable with four sections.",
+     "evidence_ref": "[ev_0001] pe_info lists four sections.",
+     "confidence": 0.9,
+     "technique_id": null,
+     "technique_line": null,
+     "technique_id_valid": true,
+     "kept_after_absence_question": false,
+     "alignment": null
+    },
+    {
+     "claim": "Its configuration strings are XOR-encoded and decoded at run time, which obfuscates them from a static scan.",
+     "evidence_ref": "[ev_0002] two XOR-encoded blobs.",
+     "confidence": 0.7,
+     "technique_id": "T1027",
+     "technique_line": null,
+     "technique_id_valid": true,
+     "kept_after_absence_question": false,
+     "alignment": null
+    },
+    {
+     "claim": "The file has four sections.",
+     "evidence_ref": "[ev_0001]",
+     "confidence": 0.5,
+     "technique_id": "T1105",
+     "technique_line": null,
+     "technique_id_valid": false,
+     "kept_after_absence_question": false,
+     "alignment": null
+    },
+    {
+     "claim": "Process injection is not present: no write into another process is recorded.",
+     "evidence_ref": "[ev_0002] the strings show no injection API.",
+     "confidence": 0.8,
+     "technique_id": "T1055",
+     "technique_line": null,
+     "technique_id_valid": true,
+     "kept_after_absence_question": false,
+     "alignment": null
+    }
+   ],
+   "dissent_items": [],
+   "revision_rounds": 1,
+   "final_confidence": 0.7,
+   "status": "complete",
+   "status_reason": null
+  },
+  {
+   "agent_name": "network",
+   "domain": "network",
+   "claims": [
+    {
+     "claim": "No packets were captured, so no network contact is shown.",
+     "evidence_ref": "[ev_0003]",
+     "confidence": 0.9,
+     "technique_id": null,
+     "technique_line": null,
+     "technique_id_valid": true,
+     "kept_after_absence_question": false,
+     "alignment": null
+    }
+   ],
+   "dissent_items": [],
+   "revision_rounds": 2,
+   "final_confidence": 0.9,
+   "status": "complete",
+   "status_reason": null
+  }
+ ],
+ "transcript": [
+  {
+   "seq": 10,
+   "speaker": "static",
+   "role": "analyst",
+   "round": 0,
+   "status": "complete",
+   "text": "2 evidence-backed claims.",
+   "report": "[STATIC ANALYST — round 0]\nDomain: static | Mean confidence: 0.80\n  Claim 1: The sample is a 32-bit PE executable with four sections. | Evidence: [ev_0001] | Confidence: 0.90",
+   "report_truncated": false,
+   "claims": [{"claim": "The sample is a 32-bit PE executable with four sections.", "evidence_ref": "[ev_0001]", "confidence": 0.9, "technique_id": null}],
+   "ts": "2026-01-01T00:00:10Z"
+  },
+  {
+   "seq": 11,
+   "speaker": "network",
+   "role": "analyst",
+   "round": 0,
+   "status": "complete",
+   "text": "1 evidence-backed claim.",
+   "report": "[NETWORK ANALYST — round 0]\nDomain: network | Mean confidence: 0.90\n  Claim 1: No packets were captured. | Evidence: [ev_0003] | Confidence: 0.90",
+   "report_truncated": false,
+   "claims": [{"claim": "No packets were captured.", "evidence_ref": "[ev_0003]", "confidence": 0.9, "technique_id": null}],
+   "ts": "2026-01-01T00:00:11Z"
+  },
+  {
+   "seq": 20,
+   "speaker": "static",
+   "role": "reviser",
+   "round": 1,
+   "status": "complete",
+   "text": "3 claims.",
+   "report": "CLAIM 1: The sample is a 32-bit PE executable with four sections.",
+   "report_truncated": false,
+   "claims": [],
+   "ts": "2026-01-01T00:00:20Z"
+  },
+  {
+   "seq": 21,
+   "speaker": "network",
+   "role": "reviser",
+   "round": 1,
+   "status": "complete",
+   "text": "1 claim.",
+   "report": "CLAIM 1: No packets were captured, so no network contact is shown, and the stored copy of this answer ends here",
+   "report_truncated": true,
+   "claims": [],
+   "ts": "2026-01-01T00:00:21Z"
+  },
+  {
+   "seq": 30,
+   "speaker": "network",
+   "role": "reviser",
+   "round": 2,
+   "status": "complete",
+   "text": "1 claim.",
+   "report": "CLAIM 1: No packets were captured, so no network contact is shown.",
+   "report_truncated": false,
+   "claims": [],
+   "ts": "2026-01-01T00:00:30Z"
+  }
+ ]
+}

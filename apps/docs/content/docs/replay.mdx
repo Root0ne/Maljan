@@ -1,0 +1,237 @@
+---
+title: "Replaying a stored run"
+description: "Re-run the platform's deterministic rules over a stored run at zero cost, and name every difference a rule change makes between two git refs."
+---
+
+A change to a validation rule, the report builder or a publish rule changes
+what the platform decides over answers the models already wrote. The
+**replay** re-runs those decisions over a stored run with no model call, in
+seconds, so the change is measured on recorded runs before any paid run. Run
+it before and after every change to the rules: precision up, recall not down.
+
+Everything lives in `scripts/replay/` and none of it ships in the product. It
+measures decisions over what the models wrote; whether a rule changes what a
+model writes still needs a paired run.
+
+## Running it
+
+```bash
+python scripts/replay/run.py runs/haiku4
+```
+
+A stored run is a directory in the benchmark's layout: `evidence.json` (the
+ledger), `report-byjob.json` (the report row: each analyst's final answer, its
+claims in force, the run summary, the report document and the transcript),
+`report.json`, `run-summary.json`, `stix-judge.json` (the judge's answer as
+written), `events.json` and `job.json`. Several runs may be named at once.
+`--json OUT` writes the record; an output inside a run's directory (`--json`,
+`--work` or `--job-dir`) is refused. The exit status is 0 when every part
+replayed or was named as not replayable, and 2 when a part raised: a crash is
+not a decision, and the part that raised is printed first, marked `[raised]`.
+
+`--job ID` reads a job from the database instead (`--database-url`, else
+`DATABASE_URL`, else the API's bootstrap setting), in one transaction set
+`READ ONLY` and rolled back, writes it in the same layout (`--job-dir`, a
+temporary directory by default) and replays that. The job's sample hash and
+name come from its joined sample row; a job whose sample row is gone keeps
+neither, and the replay says the report's identity block is then their only
+source. Writing into a directory an earlier export used removes only the
+layout's own files there, first, and names them; no other file is touched.
+
+## What it replays
+
+Each part calls the rules' own functions over what the run stored, composed
+the way the platform composes them:
+
+| Part | What is re-run |
+| :-- | :-- |
+| Analysts | Each answer stored as the analyst wrote it, read by the platform's parser and checked as the analyst's validation turn checks it (`isr.*`, `attck.*`); the claims in force checked by the checks that read claims. The notes the run stored on those claims (a technique id not valid, an absence claim kept when asked, a claim citing only failed calls) are reset and decided again by the platform's own functions over the replayed findings, so a rule change reaches what the report publishes. As the validation turn does, an id the catalogue does not know is marked whether or not the analyst was shown the finding, and an absence claim is noted only when it was. The analysts are taken in the order the run's state held them (`run_summary.agent_stats`). |
+| Judge | Its answer as written, parsed as the judge parses it and checked as the verdict round checks it (`stix.*`, `verdict.*`); the indicators it would drop are dropped. |
+| Report | The run summary's validation block rebuilt from the replayed findings (never the stored one), then the deterministic build, the export over the judge's bundle (with the run's evidence corpus rebuilt from the stored answers, and a truncation recorder of its own) and the IOC table it decides: the published techniques with the capability matrix's reasons, each indicator's publish answer, the claims in force the composed body leaves undiscussed, the detection rules drafted and the report's values. The degradation reasons the verdict carries (the fallback, an unreadable verdict, an inconclusive run) and the partial-grounding one, over the corpus the judge's checks searched, are decided again, the stored ones of that kind dropped first, and whether the run is degraded is decided again over the reasons by the platform's own rule. The run's `reporting.include_extended_stix` and `reporting.auto_generate_detection_rules` are honoured. |
+| Against the stored report | What the rebuilt report does not share with the one the run stored: the headline values, the published techniques, the sections (the ones only one report holds, their order, and every row or value that differs, by a digest), the IOC table's answers and the export's objects by type. Each difference is tied to its named cause where one is known: the sandbox report the record does not hold, the findings and artifacts read back from the stored tables, and the key order the database does not keep in the ledger's structured answers. Rows that write the same keys and values in another order are one entry per section. |
+| Narrative and composer | The narrative and each composer section as the stored report holds them, checked as each round checks its answer (`narrative.*`, `composer.*`, `report.*`), then put on the rebuilt report as the rounds put them: a narrative that still breaks its schema is none, and the report carries the deterministic summary and says why, as the round does. |
+| Tool calls | Each recorded call's arguments, as the recorder checks them before it runs a call (`tool.*`). |
+| Report linter | The linter's warnings over the finished report, by rule and field. |
+| Corroboration | Per technique: who claimed it, which rules asserted it, its sources and whether it is corroborated. |
+
+The record carries no value from the run unless asked for the text: codes, ids,
+kinds, counts and digests only. A finding's subject that is not an ATT&CK id or
+a ledger or sandbox item id is written as its kind and a digest of its value
+(`domain:2d5a0519f25d`), in the path that names it too; an indicator is its
+kind and a digest of its value, its publish answer is the answer's head (`yes`
+or `no`) and a digest of its words; the judge's category and its reasons are
+digests. `--show-text` adds the words beside them, in fields of their own
+(`message`, `claim`, `subject_text`, `answer_text`, `value`, `category_text`,
+`why_text`), so a record has the same fields either way and two records are
+compared on the value-free ones. The judge's own labels for its objects are
+digested in a finding's path too (`malware--<digest>`), unless the id is a
+number or a UUID, and a subject is never passed for its shape alone.
+
+A digest identifies a value; it does not protect it. Anyone holding a list of
+candidates can confirm one: a family name, a host from a feed, and every IPv4
+address, which can simply be tried in turn. Do not share a record as if it were
+safe when the values themselves are sensitive.
+
+## How it stays the platform's
+
+The analysts' and the judge's checks are not copied: the analyst's validation
+turn and the replay call the same functions
+(`validation.analyst_answer_checks`, `whole_answer_questions`,
+`settle_validation_marks`, the ledger-id and image-base derivations, and the
+inputs dataclass `AnswerCheckInputs`), and so do the verdict round and the
+replay (`judge_agent.verdict_bundle_checks` over `VerdictCheckInputs`). The
+inputs dataclasses have no defaults, so an input added to a producer is one the
+replay must state. `tests/unit/scripts/test_the_replay_knows_every_check.py`
+holds that the producers call these functions and that a recorder in their
+place is reached from both sides; it also holds the narrative's, the
+composer's and the tool recorder's check lists, which the replay still keeps,
+to those producers' own code.
+
+**The oracle.** `tests/unit/scripts/test_the_replay_matches_the_nodes.py` runs
+the platform's own judge node and report node over a stored run's state, every
+model in them a stub answering what the run stored: the judge's bundle as
+written (and the same again when the round retries), its technique review as
+the stored matrix records it, the narrative and each composer section as the
+stored report holds them. What the nodes build must be what the replay builds:
+the verdict and its degradation, the published techniques and the matrix's
+reasons, the IOC answers, the export, the detection drafts, the claims left
+undiscussed, the narrative and the sections, and the analysts' and the judge's
+unresolved findings. Retries and what each producer was fed back are model
+turns the replay does not make, and are not compared. It runs in the default
+suite, over the tiny run and over scenarios that take the branches the tiny run
+does not: a judge answer that is not a bundle (the fallback verdict), a capture
+the sandbox attributes no flow of the sample to, a blanked answer (absences
+advisory), the export and the detection drafts switched off, and a technique
+the judge's review dropped. `MALJAN_REPLAY_RUN` adds a stored run, compared on
+everything but its degradation.
+
+The oracle does not cover:
+
+- **the analyst node.** Its checks are the shared functions above, but the
+  node itself (its loop, its retries, its nudge) is not run;
+- **the reading of the transcript:** which stored answer is told apart as cut,
+  as a summary of claims, or as the one in force;
+- **the stand-in that hosts the analyst's parser** (`_ReplayAnalyst`): a parse
+  method that came to read an attribute of a real analyst would get the class
+  default here;
+- **the stored-run and database readers** (`stored.py`, `database.py`);
+- **the shared projection:** the state both sides are fed (the claims in force
+  read as ISRs, the findings that survived, the corpus rebuilt from the stored
+  answers, the settings snapshot) and the replay's own reading of a report into
+  record fields. An error there is on both sides and passes.
+
+## What it cannot replay
+
+Every part the stored record cannot give is named under **Not replayed**, never
+skipped in silence:
+
+- an answer stored truncated (the transcript keeps 8,000 characters), and a
+  first answer with claims, which the run stores as the platform's summary of
+  them rather than as the analyst wrote it;
+- the output-cap questions, because the record keeps the answer and not whether
+  the output limit ended it;
+- what is read from the sandbox report alone, which the stored run does not
+  hold;
+- an analyst's findings and artifacts, which the report row does not keep: they
+  are read back from the stored report's Findings and Appendix A tables, without
+  a finding's detail;
+- the judge's technique review, its second answer, read back from the stored
+  capability matrix's decisions;
+- which findings the judge and each analyst were shown, read from the stored
+  run summary's rows marked `asked: false`, matched by code and subject (a
+  finding without a subject by its words); any other finding is counted as
+  shown;
+- the degradation reasons the judge node decides from inputs the record does
+  not hold (the sandbox report, model failures, prompt notices, the pack): they
+  are kept as stored and counted, and a rule change that would no longer give
+  one cannot remove it;
+- the entries as the checks read them: the run saved them after the byte
+  budget, so an output the budget blanked and a structure its last pass
+  dropped are read as saved; and the ledger's structured answers come back
+  from the database, which keeps no key order;
+- the routed file type and platform, read back from the stored report's
+  identity block, because routing reads the sample;
+- the order the run's state held the analysts in, when the run summary does
+  not record it: the order they first answered in is used;
+- the retries and what each producer was told and fixed, which are model
+  turns: `isr.retry_dropped` (a retry's answer read against the answer it
+  fixes), whether an answer followed the loop's nudge, and the claim
+  consistency gate's input when the run had the gate on;
+- a guard the rules' tree has no place for (a module attribute an older tree
+  lacks), named in the record's environment while the replay goes on.
+
+A change to one rule shows what it moves in the report. In the tests, making
+the catalogue forget one technique unpublishes it and drops it from the
+export, and letting a judge's indicator through publishes its row in the IOC
+table.
+
+## Comparing two refs
+
+```bash
+python scripts/replay/run.py runs/run7 runs/haiku4 --compare origin/dev HEAD
+```
+
+Each ref is replayed by its own harness over its own rules. The ref's
+`pyproject.toml`, `src` tree, `data` tables (without `data/samples`: a sample
+is never copied) and `scripts/replay` are written out of the repository's
+object store with `git archive` into a directory of the replay's own (`--work`
+keeps the trees, `--repo` reads another repository). That tree's own
+`scripts/replay/run.py` then replays the runs in a process of its own, with
+the tree first on the import path and the same guards, and its record says
+which tree it imported its rules from, which is checked. The checkout and its
+working tree are never read for the rules or written. The two records are
+then compared by the running checkout's own `scripts/replay/compare.py`, so
+run the comparison from the newer of the two checkouts: it reads every record
+schema up to its own.
+
+- **A ref from before the replay tool** has no `scripts/replay/run.py` to
+  replay with. It cannot be compared: the command says so and ends with status
+  2 before replaying anything. Compare two refs that both carry the tool.
+- **Parts only one side defines.** On every comparison, every part only one
+  record defines (a report value, a note on the claims in force, a composer
+  section one tree no longer composes) is listed as "not compared: defined
+  only under A" (or B). Every record carries the version of its schema
+  (`schema`); when the two trees write different versions the comparison says
+  so, and a part both write in forms the two schemas do not share is listed
+  too. Such a comparison is **partial**: it is printed prominently and ends
+  with status 2, because a part that was not compared is not a decision.
+- **A part that raised** in either tree is printed first, as an error. The
+  comparison is then incomplete and ends with status 2.
+- **A time limit.** `--timeout SECONDS` gives each ref's replay that long; there
+  is no limit unless one is given. A ref still replaying then is stopped, the
+  command names it and ends with status 2.
+
+"No difference" is said only when every part replayed in both trees and was
+compared on both sides.
+
+The comparison names every difference: the codes each producer gained or lost
+per claim, the claims each answer parsed into and the notes on the claims in
+force, the published techniques and their reasons, each indicator's publish
+answer, the report's values, the report's sections (the ones only one side
+holds, and whether the shared ones changed order), the exported techniques and
+objects, the indicators the judge's round drops, the composer sections the
+stored report does not write, the tool calls counted, the settings each tree
+took from the run, refused or lacks a guard for, corroboration, and the parts
+one side could replay and the other could not. A tree's harness that fails
+outright is named by its failure's class and place only, since a message can
+quote a value; its whole error output is kept beside its record in the work
+directory. The exit status is 0 when both refs decide the same over every run,
+1 when they differ, and 2 when a part raised, when the comparison is partial,
+when a ref predates the tool or was stopped at its time limit, or on an error.
+
+## What it holds itself to
+
+- **Read-only.** Every file of a run's directory is digested before and after;
+  a replay that changed one fails.
+- **No network.** While it runs, every socket connection (`connect`,
+  `connect_ex`, `create_connection`), every datagram sent to an address
+  (`sendto`, `sendmsg`) and every name or address lookup (`getaddrinfo`,
+  `gethostbyname`, `gethostbyname_ex`, `gethostbyaddr`, `getnameinfo`) is
+  refused. Not covered: a socket made from the low-level `_socket` module, and
+  a child process.
+- **One catalogue.** ATT&CK is read from the vendored tables of the rules' own
+  tree; the bundle loads are refused and the cache points at a directory of the
+  replay's own, so the machine's cache is neither read nor written.
+- **The run's settings.** The settings the rules read (`validation.*`,
+  `preprocessing.*`, `reporting.*`) are taken from the run's snapshot, built
+  store-only, so neither the environment nor a `.env` file changes a decision.

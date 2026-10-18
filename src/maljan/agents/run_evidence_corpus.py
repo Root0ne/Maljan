@@ -156,6 +156,20 @@ class RunEvidenceCorpus:
             self._tools[key] = name
             self._spent += size
 
+    def count_missing(self, tool: str) -> None:
+        """Count an answer this corpus does not hold though the run read it. Never raises.
+
+        For a corpus rebuilt after the run from what was stored (the replay of
+        a stored run): an answer the byte budget blanked after the model read
+        it, or one the run's own corpus recorded as not kept, is a gap the
+        rebuilt corpus says it has, so an absence it is asked about is a note.
+        """
+        name = str(tool or "").strip() or "a tool"
+        with self._lock:
+            self._missing_answers += 1
+            if name not in self._missing_tools:
+                self._missing_tools.append(name)
+
     def text_for(self, entry_id: str) -> str:
         """One answer's text, lower-cased, or ``""`` when the corpus never held it."""
         with self._lock:

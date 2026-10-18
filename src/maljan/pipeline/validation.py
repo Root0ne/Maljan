@@ -11133,3 +11133,127 @@ def kept_after_the_sandbox_fact(violations: Sequence[Violation]) -> list[Violati
             )
         out.append(violation)
     return out
+
+
+# ---------------------------------------------------------------------------
+# One analyst answer's checks, composed once
+# ---------------------------------------------------------------------------
+#
+# The analyst's validation turn and the replay of a stored run
+# (``scripts/replay``) both call these, so the two compose an answer's checks
+# one way. The state a turn keeps (what it recorded, its caches, whether a
+# weak-alignment batch was already asked) stays with the turn.
+
+
+@dataclass(frozen=True)
+class AnswerCheckInputs:
+    """What an analyst's answer is checked against, on the run's side.
+
+    No field has a default: an input added here is one every caller states,
+    the replay included.
+    """
+
+    attck: Any
+    ledger_ids: Sequence[str]
+    sample: Mapping[str, str]
+    items: Any
+    decompiled: Sequence[Any]
+    image_bases: tuple[int, ...]
+    techniques: bool
+    alignment: Any
+    alignment_threshold: float
+    alignment_margin: float
+
+
+def analyst_ledger_ids(
+    own: Iterable[Any], drained: Iterable[str], pack: Iterable[Any]
+) -> list[str]:
+    """The ids an analyst may cite: its own entries', its earlier rounds' and the pack's."""
+    ids = [str(getattr(entry, "id", "")) for entry in own if getattr(entry, "id", "")]
+    current = set(ids)
+    ids.extend(dict.fromkeys(str(i) for i in drained if str(i) not in current))
+    ids.extend(str(i) for i in pack if str(i).strip())
+    return ids
+
+
+def run_image_bases(own: Iterable[Any], pack_bases: Iterable[int]) -> tuple[int, ...]:
+    """The image bases the run read: the analyst's own calls' and the pack's, once each."""
+    return tuple(dict.fromkeys([*image_bases_in(own), *pack_bases]))
+
+
+def whole_answer_questions(
+    repeated: ClaimsRepeated | None,
+    cuts: Sequence[tuple[int, str, str]],
+    *,
+    chunk: str,
+    ended: bool,
+    techniques: bool,
+) -> list[Violation]:
+    """The questions about an answer as a whole: one that repeated its claims, or one the cap cut.
+
+    An answer that repeated is asked once, the cut folded in (the model sees
+    its answer up to the first repeat, and the cut question's words say it sees
+    none of it); otherwise each cut ``(cap, text, chunk)`` is one question.
+    """
+    if repeated is not None:
+        widest = max((cap for cap, _text, _named in cuts), default=0)
+        return [
+            analyst_repeated_violation(
+                repeated, chunk=chunk, cut=widest or None, ended=ended, techniques=techniques
+            )
+        ]
+    return [
+        analyst_cut_violation(cap, text, chunk=named, techniques=techniques)
+        for cap, text, named in cuts
+    ]
+
+
+def analyst_answer_checks(
+    candidate: Any,
+    inputs: AnswerCheckInputs,
+    *,
+    whole_answer: Sequence[Violation],
+    unread: Sequence[Violation],
+    functions: Sequence[Violation],
+    weak_alignment_challenges: bool,
+) -> list[Violation]:
+    """Every finding of the validation turn about one answer, in the turn's order.
+
+    ``whole_answer`` (:func:`whole_answer_questions`), ``unread`` (the parse's
+    findings, which the caller records) and ``functions`` (the function-claim
+    check's) are computed by the caller, which keeps what they record.
+    """
+    undescribed = decompiled_not_described_violation(
+        undescribed_decompiles(candidate, inputs.decompiled, inputs.image_bases)
+    )
+    library_only = library_only_claims_violation(candidate)
+    return [
+        *whole_answer,
+        *unread,
+        *([undescribed] if undescribed is not None else []),
+        *([library_only] if library_only is not None else []),
+        *functions,
+        *validate_isr(
+            candidate,
+            attck=inputs.attck,
+            ledger_ids=inputs.ledger_ids,
+            sample=inputs.sample,
+            alignment=inputs.alignment,
+            alignment_threshold=inputs.alignment_threshold,
+            alignment_margin=inputs.alignment_margin,
+            weak_alignment_challenges=weak_alignment_challenges,
+            items=inputs.items,
+        ),
+    ]
+
+
+def settle_validation_marks(isr: Any, recorded: Iterable[Violation]) -> None:
+    """Mark the claims as the validation turn leaves them, from the findings it records.
+
+    A technique id the catalogue does not know is marked whether or not the
+    analyst was asked (a catalogue fact); an absence claim is noted only when
+    the analyst was shown the finding and kept its id (``asked``).
+    """
+    mark_invalid_technique_ids(
+        isr, [v for v in recorded if v.code != ABSENCE_CLAIM_CODE or v.asked]
+    )

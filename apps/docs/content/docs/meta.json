@@ -37,6 +37,7 @@
     "deployment",
     "operations",
     "development",
+    "replay",
     "---Benchmark---",
     "./benchmark/index",
     "./benchmark/scores/latrodectus-all-tools-local6",

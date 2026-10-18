@@ -136,13 +136,14 @@ class TestATurnAfterTheLoop:
     def test_the_validation_retry_reads_the_entries_the_answer_cites(
         self, monkeypatch: Any
     ) -> None:
-        from maljan.agents import base_agent
         from maljan.pipeline.validation import Violation
         from maljan.schemas.isr_models import AgentISR, ClaimEvidence
 
         told = [Violation(code="isr.ungrounded_technique", message="cite ev_0004")]
         answers = iter([told, told, []])
-        monkeypatch.setattr(base_agent, "validate_isr", lambda *_a, **_k: next(answers, []))
+        monkeypatch.setattr(
+            "maljan.pipeline.validation.validate_isr", lambda *_a, **_k: next(answers, [])
+        )
         agent = _briefed(_state())
         # The loop filed two reads after the briefing; the answer cites them.
         agent._evidence_entries = [_entry(4, "reverser"), _entry(5, "reverser")]
