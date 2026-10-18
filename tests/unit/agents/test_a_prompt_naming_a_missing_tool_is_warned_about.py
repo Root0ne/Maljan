@@ -34,12 +34,12 @@ def test_a_declared_name_absent_from_the_agents_set_is_a_warning(caplog):
     with caplog.at_level(logging.WARNING):
         resolved = resolve_agent("mine", _Container(cfg))
     assert sum(DECLARED in r.getMessage() and "mine" in r.getMessage() for r in caplog.records) == 1
-    assert any(DECLARED in reason for reason in resolved.degradation_reasons)
+    assert not resolved.degradation_reasons  # an advisory is not a degradation
     assert "mine" in warnings_for_settings(cfg)
 
 
 def test_an_ordinary_word_matching_no_tool_gives_none(caplog):
-    cfg = _settings("Read the sample carefully and report what you find.")
+    cfg = _settings("Read the strings carefully and analyze what you find.")
     with caplog.at_level(logging.WARNING):
         resolved = resolve_agent("mine", _Container(cfg))
     assert not [r for r in caplog.records if "does not have" in r.getMessage()]
@@ -60,6 +60,22 @@ def test_a_built_in_agent_gives_none(caplog):
             resolve_agent(key, _Container(cfg))
     assert not [r for r in caplog.records if "does not have" in r.getMessage()]
     assert warnings_for_settings(cfg) == {}
+
+
+def test_a_plain_word_is_prose_but_the_same_word_in_backticks_is_a_name(caplog):
+    plain = _settings("Read the strings and analyze them.")
+    assert "strings" in known_tool_names(plain)
+    assert warnings_for_settings(plain) == {}
+    quoted = _settings("Run `strings` on the sample.")
+    with caplog.at_level(logging.WARNING):
+        resolve_agent("mine", _Container(quoted))
+    assert any("strings" in r.getMessage() and "mine" in r.getMessage() for r in caplog.records)
+    assert "strings" in warnings_for_settings(quoted)["mine"]
+
+
+def test_a_run_with_this_warning_is_not_marked_degraded():
+    resolved = resolve_agent("mine", _Container(_settings(f"Use {DECLARED}.")))
+    assert resolved.degradation_reasons == ()
 
 
 def test_the_warning_never_blocks_a_run():

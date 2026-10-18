@@ -29,6 +29,8 @@ from maljan.core.logger import logger
 _WORDS = re.compile(r"[A-Za-z0-9_]+")
 _CHUNKS = re.compile(r"[^\s\"'`()\[\]{},;:<>]+")
 _RENAMED = "__"
+# A name set off in backticks or quotes, with no blank inside it.
+_QUOTED = re.compile(r"`([^`\s]+)`|\"([^\"\s]+)\"|'([^'\s]+)'")
 
 
 def _facts_names(block: Any) -> Iterable[str]:
@@ -62,7 +64,11 @@ def names_in(prompt: str, known: frozenset[str]) -> list[str]:
     """The known tool names ``prompt`` spells exactly, sorted, once each."""
     if not prompt or not known:
         return []
-    found = set(_WORDS.findall(prompt)) | {c.rstrip(".!?") for c in _CHUNKS.findall(prompt)}
+    plain = set(_WORDS.findall(prompt)) | {c.rstrip(".!?") for c in _CHUNKS.findall(prompt)}
+    # A bare plain word is prose; only a code-shaped name (it holds a character
+    # that is not a letter) or one set off in backticks or quotes is a candidate.
+    found = {word for word in plain if not word.isalpha()}
+    found |= {name for groups in _QUOTED.findall(prompt) for name in groups if name}
     return sorted(found & known)
 
 
