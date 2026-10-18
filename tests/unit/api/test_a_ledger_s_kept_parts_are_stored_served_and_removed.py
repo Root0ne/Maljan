@@ -381,6 +381,20 @@ class TestTheWritesRunOffTheLoop:
 
         assert sink._queued == 0, "the cancelled write's bytes are no longer counted"
 
+    def test_a_closed_store_takes_no_part_and_keeps_no_writer(self) -> None:
+        store = _Store()
+        sink = object_store.evidence_spill("job", store=store)
+        spill_part(sink, "answer", "before")
+        sink.drain(5)
+
+        sink.close()
+        after = spill_part(sink, "output", "after")
+
+        assert after["error"] == "upload_failed (store closed)" and "key" not in after
+        assert sink._pool is None
+        stored = inspect.getsource(analysis_worker._store_the_report)
+        assert stored.index("_spill.drain") < stored.index("_spill.close()")
+
     def test_the_writers_client_has_short_timeouts_and_one_retry(self) -> None:
         built = object_store._evidence_client()
         pool = built._http

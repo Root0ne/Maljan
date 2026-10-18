@@ -4586,6 +4586,9 @@ async def _store_the_report(
     # reference to how its write ended: a write that failed, or had not
     # finished by then, loses its key and states why.
     _outcomes = await asyncio.to_thread(_spill.drain, object_store.EVIDENCE_DRAIN_SECONDS)
+    # The ledger is final from here: the store takes no more parts and lets
+    # its writers go, the fallback store made above included.
+    _spill.close()
     _unkept = settle_refs(_dumps, _outcomes)
     if _unkept:
         logger.warning(

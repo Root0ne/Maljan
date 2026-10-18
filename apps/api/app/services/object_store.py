@@ -236,6 +236,7 @@ class JobEvidenceSpill(EvidenceSpill):
         self._generation: dict[str, int] = {}
         self._bucket_ready = False
         self.down = False
+        self.closed = False
         # Bytes handed to the writers and not yet written, and their bound.
         self._queued = 0
         self.backlog_bytes = EVIDENCE_WRITERS * self.max_bytes
@@ -251,6 +252,8 @@ class JobEvidenceSpill(EvidenceSpill):
 
         key = evidence_key(self.job_id, sha256)
         with self._lock:
+            if self.closed:
+                raise SpillRefused("store closed")
             if self.down:
                 raise SpillRefused("store unreachable")
             if key in self._written and sha256 not in self._failed:
@@ -364,7 +367,9 @@ class JobEvidenceSpill(EvidenceSpill):
             )
 
     def close(self) -> None:
+        """No part is taken after this; writes already handed over still finish."""
         with self._lock:
+            self.closed = True
             pool, self._pool = self._pool, None
         if pool is not None:
             pool.shutdown(wait=False)
