@@ -559,7 +559,10 @@ def verify_job_rows(
 
 
 def repaired_head(
-    rows: Iterable[Any], keys: Mapping[str, ledger_chain.ChainKey], current: str | None
+    rows: Iterable[Any],
+    keys: Mapping[str, ledger_chain.ChainKey],
+    current: str | None,
+    boundary: int | None = None,
 ) -> tuple[dict[str, Any], list[int]]:
     """The head the whole chain supports, and the rows it could not check; or :class:`HeadRefused`.
 
@@ -573,7 +576,9 @@ def repaired_head(
     cannot derive is counted unverifiable (returned) and allowed. The head is
     rebuilt from the walk: the last row's seq and chain value and the boundary
     as ``rotated_at_seq``, keyed under the current key. Anything else is
-    refused with the first break; nothing is signed.
+    refused with the first break; nothing is signed. ``boundary``, when given,
+    is the boundary an old head vouches for: every row at or after it must be
+    under the current key and verify, and none before it may claim that key.
     """
     if current is None or current not in keys:
         raise HeadRefused("no current key to sign a head with")
@@ -591,6 +596,17 @@ def repaired_head(
         if audit_digest(row) != _read(row, "digest"):
             raise HeadRefused(f"chained audit row {seq} differs from its digest")
         key_id = _read(row, "chain_key_id") or ""
+        if boundary is not None:
+            if seq >= boundary and key_id != current:
+                raise HeadRefused(
+                    f"chained audit row {seq} is under another key at or after the rotation "
+                    f"boundary (seq {boundary}) the old head vouches for"
+                )
+            if seq < boundary and key_id == current:
+                raise HeadRefused(
+                    f"chained audit row {seq} claims the current key before the rotation "
+                    f"boundary (seq {boundary}) the old head vouches for"
+                )
         if rotated_at is not None and key_id != current:
             raise HeadRefused(
                 f"chained audit row {seq} is under another key after the rotation boundary "
@@ -634,11 +650,19 @@ def plan_repair(
     old_head: Any,
     *,
     accept_truncation_at: int | None = None,
+    accept_boundary_at: int | None = None,
     at: datetime | None = None,
 ) -> dict[str, Any]:
     """The chained repair row and the head that points at it; :class:`HeadRefused` if none.
 
-    The walk is :func:`repaired_head`. The old head is then compared with it: a
+    The rotation boundary never comes from the rows' own labels alone. An old
+    head under the current key whose MAC verifies vouches for its
+    ``rotated_at_seq``, and the walk (:func:`repaired_head`) holds every row to
+    it. An old head that cannot vouch (missing, failing its MAC, or under
+    another key) leaves only the boundary the rows suggest, and the repair is
+    refused unless ``accept_boundary_at`` equals that seq, the operator's
+    acknowledgement, recorded on the repair row. The old head is then compared
+    with the walk: a
     head whose seq lies beyond the last row, or whose chain differs from the
     chain at its seq, says rows were cut off the end, and re-signing would hide
     that. Such a repair is refused unless ``accept_truncation_at`` equals the
@@ -650,7 +674,41 @@ def plan_repair(
     from app.models.audit import AuditLog
 
     rows = list(rows)
-    walked, unverifiable = repaired_head(rows, keys, current)
+    if current is None or current not in keys:
+        raise HeadRefused("no current key to sign a head with")
+    vouched: int | None = None
+    if old_head is not None and (_read(old_head, "key_id") or "") == current:
+        rotated = _read(old_head, "rotated_at_seq")
+        if rotated is not None and head_mac(
+            int(_read(old_head, "chain_seq") or 0),
+            str(_read(old_head, "chain")),
+            rotated,
+            keys[current],
+        ) == _read(old_head, "mac"):
+            vouched = int(rotated)
+    acknowledged: int | None = None
+    if vouched is not None:
+        if accept_boundary_at is not None and accept_boundary_at != vouched:
+            raise HeadRefused(
+                f"--accept-boundary-at {accept_boundary_at} differs from the boundary the old "
+                f"head vouches for ({vouched})"
+            )
+        walked, unverifiable = repaired_head(rows, keys, current, boundary=vouched)
+    else:
+        walked, unverifiable = repaired_head(rows, keys, current)
+        derived = int(walked["rotated_at_seq"])
+        if accept_boundary_at is None:
+            raise HeadRefused(
+                "the old head cannot vouch for the rotation boundary (missing, failing its "
+                f"check, or under another key); the rows put it at seq {derived}: re-run with "
+                f"--accept-boundary-at {derived} only after checking it"
+            )
+        if accept_boundary_at != derived:
+            raise HeadRefused(
+                f"--accept-boundary-at {accept_boundary_at} does not name the boundary the rows "
+                f"put at seq {derived}"
+            )
+        acknowledged = derived
     key = keys[str(current)]
     by_seq = {int(_read(r, "chain_seq") or 0): r for r in rows}
     old_seq = int(_read(old_head, "chain_seq") or 0) if old_head is not None else None
@@ -684,6 +742,8 @@ def plan_repair(
             "walked_head_chain": walked["chain"],
             "rotated_at_seq": walked["rotated_at_seq"],
             "truncation_acknowledged_at": accept_truncation_at if truncated else None,
+            "boundary_vouched_by_old_head": vouched is not None,
+            "boundary_acknowledged_at": acknowledged,
             "unverifiable": [unverifiable[0], unverifiable[-1]] if unverifiable else None,
         },
         ip_address=None,

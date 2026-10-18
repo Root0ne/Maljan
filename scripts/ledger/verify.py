@@ -23,6 +23,9 @@ unverifiable span; every row from the boundary on must verify) and refuses
 with the first break otherwise. An old head that names rows past the last one,
 or another chain at its seq, means rows were cut off the end: the repair is
 refused unless ``--accept-truncation-at N`` names the old head's seq. The
+rotation boundary is the one an old head under the current key vouches for
+when its MAC verifies; an old head that cannot vouch leaves the boundary the
+rows suggest, refused unless ``--accept-boundary-at N`` names it. The
 repair is written as a chained ``audit.head_repair`` row naming the old head,
 the walked head and any acknowledged truncation, and the new head, keyed under
 the current key, points at it. It is the one command here that writes.
@@ -173,7 +176,9 @@ async def walk_audit_chain(conn: Any) -> dict[str, Any]:
     }
 
 
-async def repair_head(conn: Any, accept_truncation_at: int | None = None) -> dict[str, Any]:
+async def repair_head(
+    conn: Any, accept_truncation_at: int | None = None, accept_boundary_at: int | None = None
+) -> dict[str, Any]:
     """Rebuild the audit head from the whole chain, or refuse with the first break.
 
     Runs in one write transaction under the chain's advisory lock (PostgreSQL),
@@ -219,6 +224,7 @@ async def repair_head(conn: Any, accept_truncation_at: int | None = None) -> dic
             current.key_id if current is not None else None,
             old_head,
             accept_truncation_at=accept_truncation_at,
+            accept_boundary_at=accept_boundary_at,
         )
     except audit_chain.HeadRefused as refused:
         return {"status": "refused", "reason": str(refused)}
@@ -270,6 +276,15 @@ def _parser() -> argparse.ArgumentParser:
         help="with --repair-head: acknowledge that rows after the old head's seq N were cut",
     )
     parser.add_argument(
+        "--accept-boundary-at",
+        type=int,
+        metavar="N",
+        help=(
+            "with --repair-head, when the old head cannot vouch for the rotation boundary: "
+            "acknowledge the boundary the rows put at seq N"
+        ),
+    )
+    parser.add_argument(
         "--database-url", help="the database to read; DATABASE_URL or the bootstrap settings"
     )
     return parser
@@ -290,7 +305,14 @@ def main(argv: list[str] | None = None) -> int:
             if args.repair_head:
                 accepted = args.accept_truncation_at
                 verdict = asyncio.run(
-                    _write(url, lambda conn: repair_head(conn, accept_truncation_at=accepted))
+                    _write(
+                        url,
+                        lambda conn: repair_head(
+                            conn,
+                            accept_truncation_at=accepted,
+                            accept_boundary_at=args.accept_boundary_at,
+                        ),
+                    )
                 )
             elif args.audit_chain:
                 verdict = asyncio.run(_read_only(url, walk_audit_chain))

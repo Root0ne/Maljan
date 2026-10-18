@@ -772,7 +772,7 @@ async def test_a_repair_with_an_old_key_row_after_the_boundary_is_refused():
 @pytest.mark.asyncio
 async def test_a_repair_over_a_cut_tail_needs_the_operator_to_name_the_old_head():
     db = await _chain(4)
-    old_head = {"chain_seq": 4, "chain": db.rows[-1].chain}
+    old_head = db.head
     cut = db.rows[:3]
     keys = {KEY.key_id: KEY}
     with pytest.raises(audit_chain.HeadRefused, match="cut off the end"):
@@ -788,11 +788,54 @@ async def test_a_repair_over_a_cut_tail_needs_the_operator_to_name_the_old_head(
 
 
 @pytest.mark.asyncio
+async def test_a_repair_holds_relabelled_rows_to_the_boundary_the_old_head_vouches_for():
+    db = await _rotated(old=2, new=3)
+    assert db.head is not None and db.head.rotated_at_seq == 3
+    for forged in db.rows[2:4]:
+        forged.chain_key_id = "0000000000000000"
+        forged.digest = audit_chain.audit_digest(forged)
+    with pytest.raises(audit_chain.HeadRefused, match="boundary \\(seq 3\\) the old head vouches"):
+        audit_chain.plan_repair(db.rows, {KEY.key_id: KEY}, KEY.key_id, db.head)
+
+
+@pytest.mark.asyncio
+async def test_a_repair_under_an_old_head_that_cannot_vouch_needs_the_boundary_named():
+    db = await _chain(3)
+    assert db.head is not None
+    db.head.mac = "0" * 64
+    keys = {KEY.key_id: KEY}
+    with pytest.raises(audit_chain.HeadRefused, match="cannot vouch"):
+        audit_chain.plan_repair(db.rows, keys, KEY.key_id, db.head)
+    with pytest.raises(audit_chain.HeadRefused, match="does not name the boundary"):
+        audit_chain.plan_repair(db.rows, keys, KEY.key_id, db.head, accept_boundary_at=2)
+    plan = audit_chain.plan_repair(db.rows, keys, KEY.key_id, db.head, accept_boundary_at=1)
+    details = plan["row"]["details"]
+    assert (details["boundary_acknowledged_at"], details["boundary_vouched_by_old_head"]) == (
+        1,
+        False,
+    )
+    rows = [*db.rows, plan["row"]]
+    assert audit_chain.verify_audit_chain(rows, keys, plan["head"]).broken_at is None
+
+
+@pytest.mark.asyncio
+async def test_a_repair_under_a_vouching_head_needs_no_flag_and_refuses_a_wrong_one():
+    db = await _chain(3)
+    keys = {KEY.key_id: KEY}
+    plan = audit_chain.plan_repair(db.rows, keys, KEY.key_id, db.head)
+    assert plan["row"]["details"]["boundary_vouched_by_old_head"] is True
+    with pytest.raises(audit_chain.HeadRefused, match="differs from the boundary"):
+        audit_chain.plan_repair(db.rows, keys, KEY.key_id, db.head, accept_boundary_at=2)
+
+
+@pytest.mark.asyncio
 async def test_a_repair_over_another_chain_at_the_old_head_s_seq_is_refused():
     db = await _chain(3)
     old_head = {"chain_seq": 3, "chain": "0" * 64}
     with pytest.raises(audit_chain.HeadRefused, match="cut off the end"):
-        audit_chain.plan_repair(db.rows, {KEY.key_id: KEY}, KEY.key_id, old_head)
+        audit_chain.plan_repair(
+            db.rows, {KEY.key_id: KEY}, KEY.key_id, old_head, accept_boundary_at=1
+        )
 
 
 @pytest.mark.asyncio
@@ -850,7 +893,7 @@ async def test_the_repair_command_rewrites_a_refused_head(monkeypatch: Any):
                 mac="0" * 64,
             )
         )
-        answer = await cli.repair_head(_AsyncWrite(conn))
+        answer = await cli.repair_head(_AsyncWrite(conn), accept_boundary_at=1)
         assert answer == {
             "status": "repaired",
             "head_seq": 4,

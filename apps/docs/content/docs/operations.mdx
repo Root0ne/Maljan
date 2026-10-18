@@ -199,10 +199,15 @@ every row from the boundary on must carry the current key and verify) and
 otherwise refuses with the first break. A repair can hide rows cut off the end
 of the chain, so check the chain first: when the old head names a seq past the
 last row, or another chain at its seq, the repair is refused unless
-`--accept-truncation-at N` names exactly the old head's seq. The repair is
-written as a chained `audit.head_repair` row (the old head, the walked head and
-any acknowledged truncation), and the new head, keyed under the current key
-with the walk's `rotated_at_seq`, points at that row.
+`--accept-truncation-at N` names exactly the old head's seq. The boundary never
+comes from the rows' labels alone: an old head under the current key whose MAC
+verifies vouches for its `rotated_at_seq`, and every row from it on must carry
+the current key and verify; an old head that cannot vouch (missing, failing
+its MAC, or under another key) leaves the boundary the rows suggest, and the
+repair is refused unless `--accept-boundary-at N` names exactly that seq. The
+repair is written as a chained `audit.head_repair` row (the old head, the
+walked head, any acknowledged truncation and boundary), and the new head, keyed
+under the current key with that `rotated_at_seq`, points at that row.
 
 The rotation boundary is anchored in the head: `rotated_at_seq`, covered by its
 MAC, read only from a head that verifies under the current key, never from a
