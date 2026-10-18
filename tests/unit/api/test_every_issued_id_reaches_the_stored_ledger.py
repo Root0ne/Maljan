@@ -327,3 +327,37 @@ class TestEachHolderAlone:
         collected = container.collect_undrained_evidence(f"ev_{n:04d}" for n in range(1, 501))
         assert len(collected) == 500
         assert time.perf_counter() - started < 2.0
+
+
+class TestOneRowPerIdAndSeq:
+    def test_a_repeated_id_or_seq_keeps_the_first_and_is_named(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        from app.worker.analysis_worker import rows_to_store
+
+        ledger = [
+            {"id": "ev_0002", "seq": 2, "output": "first"},
+            {"id": "ev_0001", "seq": 1},
+            {"id": "ev_0002", "seq": 2, "output": "second"},
+            {"id": "ev_0009", "seq": 1},
+            "not an entry",
+        ]
+        with caplog.at_level("WARNING"):
+            rows = rows_to_store(ledger, job_id="job-1")
+
+        assert [(row["id"], row["seq"]) for row in rows] == [("ev_0001", 1), ("ev_0002", 2)]
+        assert rows[1]["output"] == "first"
+        assert "ev_0002/seq 2" in caplog.text
+        assert "ev_0009/seq 1" in caplog.text
+
+    def test_a_clean_ledger_is_written_whole_without_a_warning(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        from app.worker.analysis_worker import rows_to_store
+
+        with caplog.at_level("WARNING"):
+            rows = rows_to_store(
+                [{"id": "ev_0002", "seq": 2}, {"id": "ev_0001", "seq": 1}], job_id="j"
+            )
+        assert [row["seq"] for row in rows] == [1, 2]
+        assert "already stored" not in caplog.text

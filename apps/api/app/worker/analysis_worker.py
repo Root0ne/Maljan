@@ -1207,6 +1207,44 @@ def _evidence_row(entry: dict[str, Any], *, job_id: uuid.UUID) -> Any:
     )
 
 
+def rows_to_store(ledger: list[Any], *, job_id: str) -> list[dict[str, Any]]:
+    """The ledger's entries as they are written: one per id and per ``seq``, in ``seq`` order.
+
+    The table holds each ``entry_id`` and each ``seq`` once per job, and a
+    second row under either would refuse the whole stored report. The first
+    entry under an id or a position is kept, as the container's collection
+    keeps it, and every one left out is named in a warning. The state holds
+    the entries in node-completion order; written in ``seq`` order, the table's
+    row order is the order the ids were issued in.
+    """
+    ids: set[str] = set()
+    seqs: set[int] = set()
+    kept: list[dict[str, Any]] = []
+    repeated: list[str] = []
+    for entry in ledger:
+        if not isinstance(entry, dict):
+            continue
+        entry_id = str(entry.get("id", ""))[:32]
+        seq = int(entry.get("seq", 0) or 0)
+        if entry_id in ids or seq in seqs:
+            repeated.append(f"{entry_id or '?'}/seq {seq}")
+            continue
+        ids.add(entry_id)
+        seqs.add(seq)
+        kept.append(entry)
+    if repeated:
+        logger.warning(
+            "Evidence ledger of job=%s holds %d entr(y/ies) under an id or seq already "
+            "stored; the first is kept, these are not: %s",
+            job_id,
+            len(repeated),
+            ", ".join(repeated),
+            extra={"job_id": job_id},
+        )
+    kept.sort(key=lambda entry: int(entry.get("seq", 0) or 0))
+    return kept
+
+
 def _transcript_row(message: dict[str, Any], *, report_id: uuid.UUID, seq: int) -> Any:
     """One broadcast line as the row that keeps it.
 
@@ -4513,12 +4551,7 @@ async def _store_the_report(
         [_entry for _entry in _ledger if isinstance(_entry, dict)],
         evidence_budget_of(run_summary, core_settings),
     )
-    # Written in ``seq`` order, so the table's row order is the order the ids
-    # were issued in; the state holds them in node-completion order.
-    for _entry in sorted(
-        (_entry for _entry in _ledger if isinstance(_entry, dict)),
-        key=lambda _entry: int(_entry.get("seq", 0) or 0),
-    ):
+    for _entry in rows_to_store(_ledger, job_id=job_id):
         db.add(_evidence_row(_entry, job_id=job_uuid))
 
     logger.info(
