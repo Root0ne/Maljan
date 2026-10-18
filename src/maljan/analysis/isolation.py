@@ -237,6 +237,24 @@ def _children(pid: int) -> list[int] | None:
     return found
 
 
+def environ_names(pid: int) -> list[str] | None:
+    """The variable names in ``/proc/<pid>/environ``, ``None`` where it cannot be read.
+
+    Only the part of each entry before ``=`` is kept; the bytes read are
+    dropped here and no value leaves this function.
+    """
+    try:
+        with open(f"/proc/{pid}/environ", "rb") as fh:
+            blob = fh.read()
+    except OSError:
+        return None
+    names = [
+        entry.split(b"=", 1)[0].decode("ascii", "replace") for entry in blob.split(b"\0") if entry
+    ]
+    del blob
+    return names
+
+
 def _gone(pid: int) -> bool:
     return not os.path.exists(f"/proc/{pid}")
 
@@ -253,12 +271,12 @@ def measure_tree(pid: int, env_names: Iterable[str]) -> dict[str, Any]:
     whole, or is wider than the bound, is ``descendants_judged: False``, with
     why.
 
-    A descendant's platform variables are the started process's: an
-    environment passes only from a parent to its child, and the started
-    process's is the one the platform built.
+    A descendant's platform variables are read from its own
+    ``/proc/<pid>/environ``, names only (:func:`environ_names`): a launcher
+    can add variables to what it hands the server. Where that file cannot be
+    read they are ``None``, unknown, which fails like any unread fact.
     """
     started = measure_process(pid, env_names)
-    inherited = started["platform_names_in_env"]
     descendants: list[dict[str, Any]] = []
     judged, why = True, ""
     seen, queue = {pid}, [pid]
@@ -281,7 +299,8 @@ def measure_tree(pid: int, env_names: Iterable[str]) -> dict[str, Any]:
             measured = measure_process(child, ())
             if measured["uid"] is None and _gone(child):
                 continue
-            measured["platform_names_in_env"] = list(inherited)
+            names = environ_names(child)
+            measured["platform_names_in_env"] = None if names is None else platform_names(names)
             descendants.append(measured)
             queue.append(child)
     return {

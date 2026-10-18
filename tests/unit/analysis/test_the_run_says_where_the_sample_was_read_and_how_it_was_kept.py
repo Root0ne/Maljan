@@ -299,8 +299,58 @@ def test_a_launcher_is_measured_with_the_server_it_started_under_it() -> None:
     assert tree["same_uid_as_worker"] is True
     (server,) = tree["descendants"]
     assert server["same_uid_as_worker"] is True
-    # Its environment came from the started process's, the one the platform built.
-    assert server["platform_names_in_env"] == ["JWT_SECRET_KEY"]
+    # Read from its own environment, not taken from the names the started one was handed.
+    assert tree["platform_names_in_env"] == ["JWT_SECRET_KEY"]
+    assert server["platform_names_in_env"] == []
+
+
+def _one_child_tree(monkeypatch: pytest.MonkeyPatch, names: list[str] | None) -> dict:
+    monkeypatch.setattr(isolation, "_children", lambda pid: [4243] if pid == 4242 else [])
+    monkeypatch.setattr(isolation, "_status", lambda pid: _status_of())
+    monkeypatch.setattr(isolation, "environ_names", lambda pid: names)
+    return isolation.measure_tree(4242, ["PATH"])
+
+
+def test_a_descendant_whose_launcher_added_a_platform_variable_is_read_as_holding_it(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    tree = _one_child_tree(monkeypatch, ["PATH", "HOME", "DATABASE_URL"])
+    assert tree["platform_names_in_env"] == []
+    (server,) = tree["descendants"]
+    assert server["platform_names_in_env"] == ["DATABASE_URL"]
+    note = {"where": CHILD, **KEPT, "descendants": [{**KEPT, **server}]}
+    part = _part(STDIO, [_reads()], {"mcp:analysis": [note]})
+    assert part["rows"][0]["descendants_failing"] == 1
+    assert part["isolated"] is False
+
+
+def test_a_descendant_whose_environment_cannot_be_read_is_unknown_and_fails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    (server,) = _one_child_tree(monkeypatch, None)["descendants"]
+    assert server["platform_names_in_env"] is None
+    note = {"where": CHILD, **KEPT, "descendants": [{**KEPT, **server}]}
+    assert _part(STDIO, [_reads()], {"mcp:analysis": [note]})["isolated"] is False
+
+
+def test_environ_names_keeps_names_only(tmp_path: Path) -> None:
+    child = subprocess.Popen(
+        [sys.executable, "-I", "-c", "import time; time.sleep(30)"],
+        env={"PATH": os.environ.get("PATH", ""), "X2_NAME_ONLY": "value-not-kept"},
+    )
+    try:
+        # Read once the child has exec'd: before that its environment reads empty.
+        deadline = time.monotonic() + 10
+        names = isolation.environ_names(child.pid)
+        while not names and time.monotonic() < deadline:
+            time.sleep(0.05)
+            names = isolation.environ_names(child.pid)
+    finally:
+        child.kill()
+        child.wait()
+    assert names is not None and "X2_NAME_ONLY" in names
+    assert not any("value-not-kept" in name for name in names)
+    assert isolation.environ_names(2**22 + 12345) is None
 
 
 def test_a_tree_wider_than_the_bound_is_not_judged(monkeypatch: pytest.MonkeyPatch) -> None:
