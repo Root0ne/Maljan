@@ -116,10 +116,12 @@ def test_a_run_that_stayed_local_says_nothing_and_what_that_rests_on() -> None:
     )
     assert disclosure_lines(record) == [
         "Nothing left this machine. This rests on: every model endpoint in this run's settings "
-        "is a local address that answered as a model runtime: `127.0.0.1` (llama.cpp /props); "
-        "the local tool servers called (tool server `analysis`) were taken as local by their "
-        "tools' declarations; the case-memory store is kept in the process or not configured; "
-        "no lookup was asked, and tracing is off.",
+        "is a local address that answered as a model runtime: `127.0.0.1` (llama.cpp /props) "
+        "(a local address that answered as a model runtime is taken as running here, and a "
+        "tunnel or proxy to a remote runtime cannot be told apart); the local tool servers "
+        "called (tool server `analysis`) were taken as local by their tools' declarations; "
+        "the case-memory store is kept in the process or not configured; no lookup "
+        "was asked, and tracing is off.",
         "Model prompts: `127.0.0.1` (local) received 3 calls (static 3); it answered as a model "
         "runtime (llama.cpp /props).",
     ]

@@ -115,6 +115,12 @@ _GATEWAY = (
     "go on to a service the settings do not name"
 )
 _NOT_A_RUNTIME = "a local address that did not answer as a model runtime may forward the prompts"
+# What "nothing" assumes of a runtime answer: the probe proves a runtime
+# answered, not where it runs, and a tunnel or proxy looks the same.
+RUNTIME_ASSUMPTION = (
+    "a local address that answered as a model runtime is taken as running here, and a tunnel "
+    "or proxy to a remote runtime cannot be told apart"
+)
 
 
 @dataclass(frozen=True)
@@ -1330,7 +1336,7 @@ def _nothing_sentence(record: Mapping[str, Any], code: Callable[[str], str]) -> 
         named = ", ".join(f"{code(str(row.get('host')))} ({row.get('runtime')})" for row in models)
         parts.append(
             "every model endpoint in this run's settings is a local address that answered as a "
-            f"model runtime: {named}"
+            f"model runtime: {named} ({RUNTIME_ASSUMPTION})"
         )
     local_servers = list(record.get("local_servers") or [])
     if local_servers:

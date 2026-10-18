@@ -166,7 +166,9 @@ def test_a_run_that_stayed_local_says_so_and_what_that_rests_on() -> None:
     assert (
         "- Nothing left this machine. This rests on: every model endpoint in this run's "
         "settings is a local address that answered as a model runtime: `127.0.0.1` "
-        "(llama.cpp /props); the case-memory store is kept in the process or not configured; "
+        "(llama.cpp /props) (a local address that answered as a model runtime is taken as "
+        "running here, and a tunnel or proxy to a remote runtime cannot be told apart); the "
+        "case-memory store is kept in the process or not configured; "
         "no lookup was asked, and tracing is off."
     ) in appendix
 
