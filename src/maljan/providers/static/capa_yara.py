@@ -112,21 +112,42 @@ def measured_capa_peak_bytes() -> int | None:
 # (a worktree, a PYTHONPATH) points at another tree, and it would import the
 # provider packages into the child.
 _CHILD_ENTRY = Path(capa_child.__file__)
-# Each run's directory, under this job's scratch directory.
-_SCRATCH_DIRECTORY = "capa"
+# What a run's directory is called where no job directory exists to hold it.
+_LOOSE_RUN_PREFIX = "maljan-capa-"
 # How long a child told to stop is given before it is killed.
 _GRACE_SECONDS = 5.0
 # The longest a wait sleeps between two looks at whether its child has ended.
 _POLL_SECONDS = 0.05
 
 
-def _scratch() -> Path:
-    """This job's directory for capa runs, created private, as FLOSS's is."""
-    base = staging.private_dir(staging.staging_base())
-    root = staging.staging_root()
-    if root != base:
+def _run_directory(scratch: str | Path | None) -> Path:
+    """A new directory, only this user's, for one run: in the job's own directory when one exists.
+
+    ``scratch`` is the directory a caller in the worker opened in its job's
+    staging directory (``staging.open_job_directory(job, "capa")``: the
+    triage pack's step and this provider). A tool server started for a job
+    joins its own job directory and ``capa``. Either way the run's directory
+    is ``<staging base>/job-…/capa/run-*``, which goes with the job: its
+    teardown removes the job directory, and a server's sweep removes a job
+    directory a dead worker left once it is past its TTL.
+
+    With neither — a script calling the tool, a tool server started by hand —
+    no job directory exists, and the run gets a temporary directory of its
+    own (``tempfile.mkdtemp``, 0o700, ``maljan-capa-*`` in the system's
+    temporary directory) rather than one under the staging base that no
+    teardown and no sweep would reach. Every one is removed when the run ends.
+    """
+    if scratch is not None:
+        parent = staging.private_dir(Path(scratch))
+    else:
+        base = staging.staging_base()
+        root = staging.staging_root()
+        if root == base:
+            return Path(tempfile.mkdtemp(prefix=_LOOSE_RUN_PREFIX))
+        staging.private_dir(base)
         staging.private_dir(root)
-    return staging.private_dir(root / _SCRATCH_DIRECTORY)
+        parent = staging.private_dir(root / staging.CAPA_DIRECTORY)
+    return Path(tempfile.mkdtemp(prefix="run-", dir=parent))
 
 
 def _child_environment(run: Path) -> dict[str, str]:
@@ -196,6 +217,7 @@ def run_capa_document(
     backend_name: str,
     timeout_seconds: float | None,
     child: Sequence[str] | None = None,
+    scratch: str | Path | None = None,
 ) -> dict[str, Any] | None:
     """Run one capa pass in a child process, killed if it overruns its budget.
 
@@ -208,8 +230,9 @@ def run_capa_document(
 
     The child is ``capa_child``, run by its path as ``python -I`` in the
     caller's process group, with the environment ``_child_environment``
-    builds, in a directory of its own under this job's scratch directory. It
-    dies with its parent: the kernel kills it when the calling thread ends
+    builds, in a directory of its own (``_run_directory``: in the job's
+    staging directory, ``scratch`` when the caller opened one there). It dies
+    with its parent: the kernel kills it when the calling thread ends
     (``capa_child.die_with_parent``, handed this process's pid), and a group
     kill of the caller reaches it. It writes its answer to a file there, read
     once it has ended, so a large document never waits on a pipe; the
@@ -222,7 +245,7 @@ def run_capa_document(
     own error. A free function rather than a provider method because the
     ``capa`` tool runs the same pass with no provider and no ``Settings``.
     """
-    run = Path(tempfile.mkdtemp(prefix="run-", dir=_scratch()))
+    run = _run_directory(scratch)
     answer = run / "answer.json"
     entry = list(child) if child else [sys.executable, "-I", str(_CHILD_ENTRY)]
     command = [
@@ -306,6 +329,12 @@ class CapaYaraStaticProvider(StaticProvider):
         self._capa = capa
         self._yara = yara
         self._capa_available: bool | None = None
+        # The job this provider serves, set by the container that built it
+        # (``ServiceContainer.get_static_provider``): each capa run goes in
+        # that job's staging directory, which the job's teardown removes.
+        # Empty for a provider built outside a job, whose runs then get a
+        # temporary directory of their own (``_run_directory``).
+        self.job_key = ""
 
     @classmethod
     def from_settings(cls, cfg: Settings) -> CapaYaraStaticProvider:
@@ -493,11 +522,17 @@ class CapaYaraStaticProvider(StaticProvider):
     ) -> dict[str, Any] | None:
         """This provider's budget and backend, applied to ``run_capa_document``.
 
-        ``child`` stands in for the capa child's command so a test can run one
-        that only sleeps, crashes or writes a given answer, to exercise the
-        timeout, kill and failure paths without capa installed or a real
-        multi-minute analysis.
+        The run goes in the job's staging directory (``job_key``), opened as
+        the triage pack opens it for its own capa step. ``child`` stands in
+        for the capa child's command so a test can run one that only sleeps,
+        crashes or writes a given answer, to exercise the timeout, kill and
+        failure paths without capa installed or a real multi-minute analysis.
         """
+        scratch = (
+            staging.open_job_directory(self.job_key, staging.CAPA_DIRECTORY)
+            if self.job_key
+            else None
+        )
         return run_capa_document(
             sample_path=sample_path,
             rules_dir=str(rules_dir),
@@ -505,6 +540,7 @@ class CapaYaraStaticProvider(StaticProvider):
             backend_name=_BACKEND_NAMES.get(self._capa.backend, "BACKEND_VIV"),
             timeout_seconds=self._capa.timeout_seconds,
             child=child,
+            scratch=scratch,
         )
 
     # ------------------------------------------------------------------

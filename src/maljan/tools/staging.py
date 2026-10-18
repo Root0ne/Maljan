@@ -77,6 +77,12 @@ CAPTURES_DIRECTORY = "captures"
 # server's ``carved_path`` reads only there.
 CARVED_DIRECTORY = "carved"
 
+# The child of a job directory each capa run has a directory of its own in,
+# its home, temporary and working directory, removed when the run ends: the
+# triage pack's step and the capa_yara provider open it in the worker, and an
+# analysis server started for the job joins it to its own job directory.
+CAPA_DIRECTORY = "capa"
+
 # Where the release before this fetched captures. Written by nothing now; the
 # sweep still reaches it, because it is this project's directory and what is
 # in it is somebody's traffic.

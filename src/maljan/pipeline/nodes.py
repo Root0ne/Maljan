@@ -1616,11 +1616,13 @@ def _pack_left_out(entries: list[Any], container: ServiceContainer) -> dict[str,
     }
 
 
-# The renderers of the pack's decoded-strings step and of its UPX carve. The
-# in-process decoder reads the environment of the server declaring the
-# decoder's tool (``FlossSettings.environ``); the carve writes where the
-# server declaring the unpack tool's kind reads (``PackInputs.carve_environ``).
+# The renderers of the pack's decoded-strings step, its capa step and its UPX
+# carve. The in-process decoder and capa read the environment of the server
+# declaring their tool (``FlossSettings.environ``, ``CapaSettings.environ``);
+# the carve writes where the server declaring the unpack tool's kind reads
+# (``PackInputs.carve_environ``).
 _DECODER_RENDERER = "emulated_strings"
+_CAPA_RENDERER = "capability_rules"
 _CARVE_RENDERER = "unpacked_image"
 
 
@@ -1689,14 +1691,24 @@ def _decoder_server_key(servers: Mapping[str, Any], steps: Sequence[Any]) -> str
     server whose tool the in-process step stands in for. With the step left
     out of ``steps`` (switched off), its shipped declaration is read.
     """
-    step = _pack_step_of(_DECODER_RENDERER, steps)
+    return _step_server_key(servers, steps, _DECODER_RENDERER, purpose="the decoder")
+
+
+def _step_server_key(
+    servers: Mapping[str, Any], steps: Sequence[Any], renderer: str, *, purpose: str
+) -> str:
+    """The key of the server the pack's ``renderer`` step declares, ``""`` for none.
+
+    Read as :func:`_decoder_server_key` says, for any in-process step.
+    """
+    step = _pack_step_of(renderer, steps)
     if step is None:
         return ""
     if step.server:
         named = servers.get(step.server)
         if named is not None and getattr(named, "enabled", True):
             return str(step.server)
-    return _declaring_server_key(servers, step.called, purpose="the decoder")
+    return _declaring_server_key(servers, step.called, purpose=purpose)
 
 
 def _carve_server_key(servers: Mapping[str, Any]) -> str:
@@ -1746,6 +1758,20 @@ def _decoder_server_environ(container: ServiceContainer, steps: Sequence[Any]) -
     """
     return _server_environ(
         container, lambda servers: _decoder_server_key(servers, steps), "decoder"
+    )
+
+
+def _capa_server_environ(container: ServiceContainer, steps: Sequence[Any]) -> dict[str, str]:
+    """The environment the pack's capa step reads its staging base from.
+
+    The capa step's server's own ``env`` over this process's, found as the
+    decoder's is (:func:`_step_server_key`), so the job directory each capa
+    run goes in is under the base that server's sweep reaches.
+    """
+    return _server_environ(
+        container,
+        lambda servers: _step_server_key(servers, steps, _CAPA_RENDERER, purpose="capa"),
+        "capa",
     )
 
 
@@ -1835,6 +1861,8 @@ def make_triage_node(
                 signatures_dir=str(capa_cfg.signatures_dir),
                 timeout_s=int(capa_cfg.timeout_seconds),
                 backend=str(capa_cfg.backend),
+                environ=_capa_server_environ(container, steps),
+                job_id=container.job_key(),
             ),
             sandbox_report=state.get("sandbox_report"),
             sandbox_normalised_by=sandbox_tools.normalised_by_of(container),

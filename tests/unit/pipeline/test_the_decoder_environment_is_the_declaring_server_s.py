@@ -17,6 +17,8 @@
 * The UPX carve's environment is the unpack-declaring server's, apart from
   the decoder's: an operator who moves the decoded-strings step to its own
   server leaves the carve staging where that server's file tools read.
+* The capa step reads the server declaring ``capa`` the same way, so the job
+  directory its runs go in is under the base that server's sweep reaches.
 """
 
 from __future__ import annotations
@@ -148,3 +150,17 @@ def test_moving_the_decoded_strings_step_leaves_the_carve_where_it_was() -> None
     container = _container(servers)
     assert nodes._decoder_server_environ(container, steps)["MALJAN_STAGING_DIR"] == "/emu-only"
     assert nodes._carve_server_environ(container)["MALJAN_STAGING_DIR"] == "/shared"
+
+
+def test_the_capa_step_reads_the_server_declaring_capa() -> None:
+    from maljan.core.config import Settings
+
+    shipped = Settings(_env_file=None).mcp.servers
+    key = nodes._step_server_key(shipped, default_steps(), nodes._CAPA_RENDERER, purpose="capa")
+    assert key == "analysis"
+    servers = {
+        "decoder": _server(("floss",), {"MALJAN_STAGING_DIR": "/decoder"}),
+        "rules": _server(("capa",), {"MALJAN_STAGING_DIR": "/rules"}),
+    }
+    environ = nodes._capa_server_environ(_container(servers), default_steps())
+    assert environ["MALJAN_STAGING_DIR"] == "/rules"

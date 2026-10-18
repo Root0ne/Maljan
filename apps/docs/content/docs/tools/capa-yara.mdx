@@ -43,8 +43,11 @@ provider its evidence, with one warning, rather than failing a job.
 
 capa runs in a child process of its own, under the budget above. It does not
 inherit the worker's environment: it gets the base environment the tool
-servers get, and its own run directory in the job's scratch directory as its
-home, so no credential of the worker reaches it. It dies with the process that
+servers get, and its own run directory as its home. Its run directory is
+`<staging base>/job-…/capa/run-*`, in the job's own staging directory, so the
+job's teardown removes it however the run ended; a run with no job (a script,
+an analysis server started by hand) gets a private temporary directory of its
+own (`maljan-capa-*`), removed when the run ends. It dies with the process that
 started it, whether that process is killed, exits or has its process group
 stopped.
 

@@ -452,12 +452,22 @@ def reason_sentence(reason: str) -> str:
 
 @dataclass(frozen=True)
 class CapaSettings:
-    """What ``capa`` is run with: the operator's rule sources and budget."""
+    """What ``capa`` is run with: the operator's rule sources and budget.
+
+    ``job_id`` names the staging directory each run's own directory goes in,
+    as ``FlossSettings.job_id`` does for FLOSS, so the job's teardown removes
+    what a run left; ``environ`` is the capa step's server's environment,
+    whose ``MALJAN_STAGING_DIR`` names that directory's base (``None`` reads
+    this process's). An empty ``job_id`` gives each run a temporary directory
+    of its own (``capa_yara.run_capa_document``).
+    """
 
     rules_dir: str
     signatures_dir: str
     timeout_s: int
     backend: str = "auto"
+    environ: Mapping[str, str] | None = None
+    job_id: str = ""
 
 
 @dataclass(frozen=True)
@@ -1043,17 +1053,23 @@ class _Pack:
             "rules_dir": capa.rules_dir,
             "signatures_dir": capa.signatures_dir,
         }
-        self.record(
-            "capa",
-            capa_args,
-            lambda: rules.capa(
+
+        def call() -> dict[str, Any]:
+            scratch = (
+                staging.open_job_directory(capa.job_id, staging.CAPA_DIRECTORY, capa.environ)
+                if capa.job_id
+                else None
+            )
+            return rules.capa(
                 path,
                 timeout_s=timeout,
                 backend=capa.backend,
                 rules_dir=capa.rules_dir,
                 signatures_dir=capa.signatures_dir,
-            ),
-        )
+                scratch=scratch,
+            )
+
+        self.record("capa", capa_args, call)
 
     def _sigma_match_sandbox(self, step: PackStep) -> None:
         report = observed_report(self.inputs.sandbox_report)

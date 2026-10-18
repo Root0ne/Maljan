@@ -1064,6 +1064,10 @@ class ServiceContainer:
                 logger.info("Static provider: %s.", cached.id)
                 if hasattr(cached, "sample_notes"):
                     cached.sample_notes = self.sample_notes
+                # A provider that does work of its own in the job's staging
+                # directory (capa_yara's capa runs) is told whose it is.
+                if hasattr(cached, "job_key"):
+                    cached.job_key = self.job_key()
                 self._static_provider_cache[wanted] = cached
             return cached
 

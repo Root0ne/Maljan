@@ -359,6 +359,7 @@ def capa(
     backend: str = "auto",
     rules_dir: str = DEFAULT_CAPA_RULES,
     signatures_dir: str = DEFAULT_CAPA_SIGNATURES,
+    scratch: str | Path | None = None,
 ) -> dict[str, Any]:
     """The capabilities capa finds, each with its ATT&CK and MBC metadata.
 
@@ -368,6 +369,9 @@ def capa(
     cancellation point, so a thread-based timeout can report an overrun while
     the work keeps running. A child process can actually be killed, and on
     expiry this one is. It gets none of this process's environment.
+    ``scratch`` is the directory the run's own directory goes in, which the
+    triage pack opens in its job's staging directory; the sidecar passes none
+    and joins its own job directory.
 
     ``library_functions`` names the functions capa's signatures identified as
     library code, or says why none were looked for (``capa_library_functions``);
@@ -393,6 +397,7 @@ def capa(
         signatures_dir=signatures_argument(signatures_dir),
         backend_name=backend_name,
         timeout_seconds=None if timeout_s is None else max(1, int(timeout_s)),
+        scratch=scratch,
     )
     if document is None:
         return {
