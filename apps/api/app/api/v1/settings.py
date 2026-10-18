@@ -98,7 +98,8 @@ from app.services.settings_service import (
 # The settings document an export writes and an import reads. In ``/2`` a
 # block's tool declarations are its changes over what the block ships, one
 # tool at a time, as they are stored; an import also reads ``/1``, written
-# before that, where a block's tool declarations are its whole map.
+# before that, where a block's tool declarations are its whole map (a map
+# marked as changes, which only ``/2`` writes, reads as it does there).
 EXPORT_FORMAT = "maljan-settings/2"
 WHOLE_MAP_FORMAT = "maljan-settings/1"
 IMPORT_FORMATS = (EXPORT_FORMAT, WHOLE_MAP_FORMAT)
@@ -865,10 +866,10 @@ async def import_values(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, content={"errors": errors}
         )
     # A declaration another version wrote may hold what this one does not
-    # read: it is left out with a warning, never a refusal of the file.
-    values, left_out = lenient_imported_declarations(
-        values, whole_maps=body.format == WHOLE_MAP_FORMAT
-    )
+    # read: it is left out with a warning, never a refusal of the file. Both
+    # formats are read alike: a map marked as changes is its changes, one
+    # without the mark its whole map.
+    values, left_out = lenient_imported_declarations(values)
     try:
         async with report_formats_serialised(db, needed=touches_report_formats(values)):
             res = await SettingsService(db).save(values, user_id=user.id, ip=_client_ip(request))

@@ -4127,7 +4127,10 @@ probe's candidate settings, and an import in either format), a marked map is
 the block's changes, so a tool it leaves out is not removed and `null` removes
 one; a map without the mark is the whole map, as earlier releases read every
 map, so a shipped tool it leaves out is removed. A `maljan-settings/1` import
-is read whole throughout. A map sent back exactly as it is stored keeps the
+reads the same way: its maps carry no mark, so they are whole, and a map marked
+as changes (only `/2` writes the mark, so such a file was relabelled from one)
+is its changes there too, never a whole map that would remove every shipped
+tool. A map sent back exactly as it is stored keeps the
 reading it is stored with, since it says what the stored one says; the console
 always sends the marked form it was served.
 
@@ -4524,7 +4527,7 @@ those changes. A map in a `/2` document without the mark is read whole, as
 a stored one is. A document in `maljan-settings/1`, written before, is still
 accepted: a built-in block's tool declarations there are its whole map, so a
 shipped tool it does not name stays removed and a tool it names reads as
-written. A `format` other than these two is rejected with 422; unknown or read-only keys
+written; a map marked as changes reads as it does in `/2`. A `format` other than these two is rejected with 422; unknown or read-only keys
 are rejected with 422 and a per-key error, and nothing is applied when any key
 fails. A key of a setting retired with no effect — `core.preprocessing.summarizer_provider`,
 `core.preprocessing.summarizer_model`, `core.reporting.narrative_max_tokens` —
