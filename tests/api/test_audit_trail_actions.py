@@ -173,7 +173,8 @@ def test_deleting_a_sample_is_audited(rows, monkeypatch):
 
     db = MagicMock()
     db.execute = AsyncMock(
-        side_effect=[sample_result, no_active_jobs, no_reports, None, still_shared]
+        # The sample, its active jobs, its sandbox reports, its job ids (none).
+        side_effect=[sample_result, no_active_jobs, no_reports, no_reports, None, still_shared]
     )
     db.delete = AsyncMock()
     db.flush = AsyncMock()
