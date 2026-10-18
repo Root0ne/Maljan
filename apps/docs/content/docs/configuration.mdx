@@ -2109,7 +2109,10 @@ revises run: in parallel only when every one of them does.
     local server. The address rule is the one the disclosure block uses
     (`core.host_locality`): an IPv4-mapped, 6to4, Teredo or NAT64 address is
     read as the IPv4 address it carries, so one carrying a public address is
-    hosted, and a documentation or other reserved address is not local. Its
+    hosted and one carrying a private address is local (the well-known NAT64
+    prefix included, the one case decided less strictly than
+    `ipaddress.is_private` decided it), and a documentation, benchmarking or
+    other reserved address is hosted, since none of them is this machine. Its
     `/props` is asked for `total_slots` (the request the
     context-window probe makes anyway): more than one slot runs the analysts
     in parallel; one slot, or no answer, one after another;

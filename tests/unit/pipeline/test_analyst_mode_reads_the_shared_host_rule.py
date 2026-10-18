@@ -88,3 +88,73 @@ def test_an_endpoint_is_decided_as_before(host: str, kind: str, form: str) -> No
 def test_an_odd_endpoint_is_decided_without_raising(odd: str) -> None:
     kind, _fact = analyst_mode.locality(odd)
     assert kind in ("local", "hosted", "unknown")
+
+
+# Every class of address whose decision changed when the rule was shared, each
+# with what dev decided and what it is decided as now.
+CHANGED_CLASSES: dict[str, tuple[str, str, list[str]]] = {
+    # Conservative: an address that is not on this machine is never taken as local.
+    "documentation": (
+        "local",
+        "hosted",
+        ["192.0.2.1", "198.51.100.1", "203.0.113.1", "[2001:db8::1]", "[3fff::1]"],
+    ),
+    "benchmarking": ("local", "hosted", ["198.18.0.1", "198.19.255.1"]),
+    "reserved": (
+        "local",
+        "hosted",
+        [
+            "240.0.0.1",
+            "255.255.255.255",
+            "0.1.2.3",
+            "192.0.0.8",
+            "[100::1]",
+            "[2001:2::1]",
+            "[2001:10::1]",
+        ],
+    ),
+    # A transition address routes to the IPv4 address it carries.
+    "transition carrying a public IPv4": (
+        "local",
+        "hosted",
+        [
+            "[2002:808:808::1]",
+            "[2001:0:4136:e378:8000:63bf:3fff:fdd2]",
+            "[64:ff9b:1::808:808]",
+        ],
+    ),
+    # Less strict: the well-known NAT64 prefix carrying a private IPv4 address.
+    "well-known NAT64 carrying a private IPv4": ("hosted", "local", ["[64:ff9b::a00:1]"]),
+}
+
+
+@pytest.mark.parametrize(
+    ("name", "address"),
+    [(name, address) for name, (_dev, _now, held) in CHANGED_CLASSES.items() for address in held],
+)
+def test_each_class_that_changed_is_decided_as_the_shared_rule_says(
+    name: str, address: str
+) -> None:
+    dev, now, _held = CHANGED_CLASSES[name]
+    assert dev != now
+    assert analyst_mode.locality(f"http://{address}/v1")[0] == now
+
+
+@pytest.mark.parametrize(
+    ("address", "kind"),
+    [
+        # Transition addresses carrying a local IPv4 address stay local, as on dev.
+        ("[2002:a00:5::1]", "local"),
+        ("[2001:0:4136:e378:8000:63bf:f5ff:fffa]", "local"),
+        ("[64:ff9b:1::a00:1]", "local"),
+        # Unchanged: IPv4-mapped, the unspecified addresses, a zone id.
+        ("[::ffff:10.0.0.1]", "local"),
+        ("[::ffff:8.8.8.8]", "hosted"),
+        ("[64:ff9b::808:808]", "hosted"),
+        ("0.0.0.0", "local"),
+        ("[::]", "local"),
+        ("[fe80::1%25eth0]", "local"),
+    ],
+)
+def test_each_class_that_did_not_change_is_decided_as_on_dev(address: str, kind: str) -> None:
+    assert analyst_mode.locality(f"http://{address}/v1")[0] == kind
