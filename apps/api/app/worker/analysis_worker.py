@@ -1144,10 +1144,16 @@ def _returned_at(entry: dict[str, Any]) -> datetime | None:
         return None
 
 
+def _job_spill(container: Any) -> Any:
+    """The job's store for whole answers, as its container holds it; ``None`` without one."""
+    getter = getattr(container, "get_evidence_spill", None)
+    return getter() if callable(getter) else None
+
+
 def _evidence_row(entry: dict[str, Any], *, job_id: uuid.UUID) -> Any:
     """One ledger entry as the row that keeps it.
 
-    Every one of the 29 fields ``maljan.schemas.evidence.LedgerEntry`` carries
+    Every one of the 30 fields ``maljan.schemas.evidence.LedgerEntry`` carries
     has a column here, which is what lets a reader of the stored ledger say why an output
     is empty instead of guessing. An absent value stays absent rather than
     becoming a default, for the same reason.
@@ -1204,6 +1210,9 @@ def _evidence_row(entry: dict[str, Any], *, job_id: uuid.UUID) -> Any:
         structured_from_server=(True if entry.get("structured_from_server") is True else None),
         agent_role=(str(entry["agent_role"]) if entry.get("agent_role") is not None else None),
         agent_tab=(str(entry["agent_tab"]) if entry.get("agent_tab") is not None else None),
+        # The references to the parts of the answer kept whole, as the entry
+        # carries them; absent where nothing was taken.
+        spilled=(list(entry["spilled"]) if entry.get("spilled") else None),
     )
 
 
@@ -1958,6 +1967,7 @@ async def keep_the_built_report(
                 transcript=transcript,
                 incomplete_reason=note,
                 core_settings=core_settings,
+                spill=_job_spill(container),
             )
             await db.commit()
             report_id = report.id
@@ -2089,6 +2099,7 @@ async def keep_the_stopped_run(
                 transcript=transcript,
                 incomplete_reason=note,
                 core_settings=core_settings,
+                spill=_job_spill(container),
             )
             await db.commit()
             report_id = report.id
@@ -2653,6 +2664,12 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
                 recorder=transcript,
             ),
         )
+        # What the run shortens, blanks or drops from a ledger entry's answer
+        # is kept whole in object storage under this job's prefix, and the
+        # entry references it (``maljan.schemas.evidence_spill``).
+        from app.services import object_store
+
+        app.container.set_evidence_spill(await object_store.job_evidence_spill(job_id))
 
         # A job that names an attached report hands its bytes to the
         # sandbox provider before anything else runs: build_job_settings
@@ -3195,6 +3212,7 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
                 run_summary=_run_summary,
                 transcript=transcript,
                 core_settings=core_settings,
+                spill=_job_spill(app.container),
             )
 
             # ── 5. Mark job complete ─────────────────────────────
@@ -4359,6 +4377,7 @@ async def _store_the_report(
     transcript: list[dict[str, Any]],
     incomplete_reason: str | None = None,
     core_settings: Any = None,
+    spill: Any = None,
 ) -> Any:
     """Add the report and everything that cites it to ``db``, uncommitted.
 
@@ -4547,10 +4566,35 @@ async def _store_the_report(
     # The last pass before it is saved: each agent's kept bytes within its
     # budget, structures dropped first, texts untouched (a no-op for a ledger
     # with no structure kept beside a prose text, every built-in's).
-    fit_structures_to_budget(
-        [_entry for _entry in _ledger if isinstance(_entry, dict)],
+    # A structure this pass drops is kept whole under the job's prefix first,
+    # by the job's own store (``spill``, the container's) or, for a caller
+    # without one, a store made now (``object_store.job_evidence_spill``).
+    from maljan.schemas.evidence_spill import settle_refs
+
+    from app.services import object_store
+
+    _spill = spill if spill is not None else await object_store.job_evidence_spill(job_id)
+    _dumps = [_entry for _entry in _ledger if isinstance(_entry, dict)]
+    await asyncio.to_thread(
+        fit_structures_to_budget,
+        _dumps,
         evidence_budget_of(run_summary, core_settings),
+        spill=_spill,
     )
+    # The store writes in the background. Wait for it, off the loop and for a
+    # stated time (``object_store.EVIDENCE_DRAIN_SECONDS``), then set every
+    # reference to how its write ended: a write that failed, or had not
+    # finished by then, loses its key and states why.
+    _outcomes = await asyncio.to_thread(_spill.drain, object_store.EVIDENCE_DRAIN_SECONDS)
+    # The ledger is final from here: the store takes no more parts and lets
+    # its writers go, the fallback store made above included.
+    _spill.close()
+    _unkept = settle_refs(_dumps, _outcomes)
+    if _unkept:
+        logger.warning(
+            f"{_unkept} evidence part(s) of job={job_id} were not kept; their references say why",
+            extra={"job_id": job_id},
+        )
     for _entry in rows_to_store(_ledger, job_id=job_id):
         db.add(_evidence_row(_entry, job_id=job_uuid))
 

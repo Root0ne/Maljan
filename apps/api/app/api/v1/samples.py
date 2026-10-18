@@ -449,6 +449,9 @@ async def delete_sample(
 ) -> None:
     """Delete a sample, its stored object and every analysis derived from it.
 
+    Every job's evidence objects (the parts of its ledger's answers kept
+    whole, ``object_store.evidence_prefix``) are removed with the job.
+
     There was no way to remove an uploaded sample through
     the API or the UI, so malware binaries accumulated forever with no retention
     or cleanup path.
@@ -498,10 +501,38 @@ async def delete_sample(
         .all()
     )
 
+    # Each job's ledger keeps the parts of its answers it does not hold whole
+    # under the job's own prefix (``object_store.evidence_prefix``); gather
+    # the job ids before the cascade removes the rows that name them.
+    job_ids = (
+        (await db.execute(select(AnalysisJob.id).where(AnalysisJob.sample_id == sample.id)))
+        .scalars()
+        .all()
+    )
+
     # Jobs (and their reports, via the report->job cascade) go with the sample.
     await db.execute(delete(AnalysisJob).where(AnalysisJob.sample_id == sample.id))
     await db.delete(sample)
     await db.flush()
+
+    if job_ids:
+        # Committed first: objects are removed only once no row can name them,
+        # so a delete that rolls back never leaves a ledger pointing at nothing.
+        await db.commit()
+        client = _minio_client()
+        for job_id in job_ids:
+            prefix = object_store.evidence_prefix(job_id)
+            try:
+                await asyncio.to_thread(object_store.remove_prefix, client, prefix)
+            except Exception as exc:  # noqa: BLE001 — object cleanup must not fail the delete
+                logger.warning(
+                    "Sample %s row deleted but the evidence objects under %s could not be "
+                    "removed: %s",
+                    log_safe(sample_id),
+                    log_safe(prefix),
+                    log_safe(f"{type(exc).__name__}: {exc}"),
+                    extra={"user_id": str(user.id), "component": "minio"},
+                )
 
     if sandbox_report_paths:
         client = _minio_client()

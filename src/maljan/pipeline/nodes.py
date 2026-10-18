@@ -1844,6 +1844,7 @@ def make_triage_node(
             # The pack's answers are what the run saw too, and a judge
             # grounding an indicator in one must find it.
             corpus=container.get_evidence_corpus(),
+            spill=container.get_evidence_spill(),
         )
         cfg = container.config
         capa_cfg = cfg.static.capa

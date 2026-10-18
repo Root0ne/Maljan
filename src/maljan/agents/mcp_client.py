@@ -746,8 +746,13 @@ class MCPLangChainToolkit:
             shown = await asyncio.to_thread(self._apply_output_guardrail, output, narrowing, limit)
             # The server's own structured answer, when it gave one and it is no
             # larger than what the model could be shown, rides on the text to
-            # the ledger; the text the model reads is unchanged.
+            # the ledger; the text the model reads is unchanged. It is noted
+            # for the call either way, so an entry that cannot keep it keeps a
+            # reference to it whole (``schemas.evidence_spill``).
             content = getattr(result, "structuredContent", None)
+            from maljan.llm.context_window import note_answer_structure
+
+            note_answer_structure(content)
             if not isinstance(content, dict) or not content or limit <= 0:
                 return shown
             # Parsing the text and sizing the structure are CPU-bound too.
@@ -844,13 +849,18 @@ class MCPLangChainToolkit:
         """
         from maljan.agents.output_shortening import shorten_json_document, shorten_target
         from maljan.agents.tool_fence import cut_length, view_room
-        from maljan.llm.context_window import note_answer_not_shown, output_limit
+        from maljan.llm.context_window import (
+            note_answer_not_shown,
+            note_answer_whole,
+            output_limit,
+        )
 
         chars_in = len(output)
         if limit is None:
             limit = output_limit(self._max_output_chars, self._context_budget)
 
         if limit <= 0:
+            note_answer_whole(output)
             note_answer_not_shown(chars_in)
             said = self._no_room(chars_in)
             self._record_guardrail(chars_in, len(said), over_limit=True, no_room=True, limit=limit)
@@ -864,6 +874,9 @@ class MCPLangChainToolkit:
             self._record_guardrail(chars_in, chars_in, over_limit=False, limit=limit)
             return output
 
+        # The answer as the tool gave it, for the call's entry to keep whole
+        # when what follows cuts it (``schemas.evidence_spill``).
+        note_answer_whole(output)
         logger.warning(
             "Tool output exceeds limit (%d > %d chars). Applying guardrail.",
             chars_in,

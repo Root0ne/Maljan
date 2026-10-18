@@ -682,6 +682,11 @@ class ServiceContainer:
             int(getattr(config.reporting, "evidence_corpus_bytes", 0) or 0)
         )
 
+        # Where the parts of an answer a ledger entry does not keep whole are
+        # kept whole (``schemas.evidence_spill``). Set by the caller that owns
+        # a store, the analysis worker; ``None`` keeps nothing.
+        self._evidence_spill: Any = None
+
         # Per-job source of evidence-ledger ids. One counter for the whole job
         # so ``ev_0007`` names one tool call rather than one per agent.
         self._evidence_counter = EvidenceCounter()
@@ -1290,6 +1295,17 @@ class ServiceContainer:
         """
         return self._evidence_corpus
 
+    def get_evidence_spill(self) -> Any:
+        """Return the job's store for whole answers, or ``None`` when the run has none."""
+        return getattr(self, "_evidence_spill", None)
+
+    def set_evidence_spill(self, spill: Any) -> None:
+        """Give the job a store for whole answers; agents already built get it too."""
+        with self._lock:
+            self._evidence_spill = spill
+            for agent in (*self._agent_cache.values(), *self._judge_agent_cache.values()):
+                agent.evidence_spill = spill
+
     def get_evidence_counter(self) -> EvidenceCounter:
         """Return the per-job counter that issues evidence-ledger ids."""
         return self._evidence_counter
@@ -1559,6 +1575,7 @@ class ServiceContainer:
             agent.truncation_ledger = getattr(self, "_truncation_ledger", None)
             agent.evidence_counter = getattr(self, "_evidence_counter", None)
             agent.evidence_corpus = getattr(self, "_evidence_corpus", None)
+            agent.evidence_spill = getattr(self, "_evidence_spill", None)
             # Hand the agent a way back to this container. The static analyst
             # used to construct a *whole new* ServiceContainer on every failed
             # MCP init — per chunk, so up to ten of them per run.
@@ -1592,6 +1609,7 @@ class ServiceContainer:
                 cached.truncation_ledger = getattr(self, "_truncation_ledger", None)
                 cached.evidence_counter = getattr(self, "_evidence_counter", None)
                 cached.evidence_corpus = getattr(self, "_evidence_corpus", None)
+                cached.evidence_spill = getattr(self, "_evidence_spill", None)
                 # Hand the judge a way back to this container, the same way
                 # ``get_agent`` does above. Without this, ``_server_registry()``
                 # always read ``None`` and the judge ran with zero threat-intel
@@ -1763,6 +1781,16 @@ class ServiceContainer:
         # evidence was whole — a sentinel that fails open on the one rule this
         # whole thread exists to protect. No corpus reads as no corpus.
         self._evidence_corpus = None
+
+        # The store for whole answers lets go of its writers; writes already
+        # handed to it still finish, and the worker drains it before it
+        # stores the ledger (``schemas.evidence_spill``).
+        spill = getattr(self, "_evidence_spill", None)
+        if spill is not None:
+            try:
+                spill.close()
+            except Exception as exc:  # noqa: BLE001 — teardown never propagates
+                logger.warning("Closing the evidence store failed (non-fatal): %s", exc)
 
     def get_narrative_agent(self) -> Any | None:
         """Return the singleton NarrativeAgent or ``None`` in mock mode.

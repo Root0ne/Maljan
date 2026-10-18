@@ -126,6 +126,8 @@ __all__ = [
     "no_room_sentence",
     "note_answer_cut",
     "note_answer_not_shown",
+    "note_answer_structure",
+    "note_answer_whole",
     "CallAnswer",
     "output_limit",
     "probe_plan",
@@ -1889,10 +1891,18 @@ class CallAnswer:
     ``cut`` is how many characters the guardrail dropped from an answer it
     cut, shortened or summarised to fit (:func:`note_answer_cut`); ``None``
     for an answer handed over whole.
+    ``whole`` is the answer as the tool gave it, noted by the guardrail when
+    the answer was longer than the call's limit (:func:`note_answer_whole`),
+    and ``structure`` the structured answer the tool's server returned beside
+    its text (:func:`note_answer_structure`): what the recorder keeps whole
+    for an entry that does not hold them (``schemas.evidence_spill``). Neither
+    reaches the conversation.
     """
 
     not_shown: int | None = None
     cut: int | None = None
+    whole: str | None = None
+    structure: dict[str, Any] | None = None
 
 
 _CALL_ANSWER: ContextVar[CallAnswer | None] = ContextVar("maljan_call_answer", default=None)
@@ -1921,6 +1931,20 @@ def note_answer_not_shown(chars: int) -> None:
     answer = _CALL_ANSWER.get()
     if answer is not None:
         answer.not_shown = max(0, int(chars))
+
+
+def note_answer_whole(text: str) -> None:
+    """Note, for the call being answered, the answer as the tool gave it, before any cut."""
+    answer = _CALL_ANSWER.get()
+    if answer is not None:
+        answer.whole = str(text)
+
+
+def note_answer_structure(content: Any) -> None:
+    """Note, for the call being answered, the structured answer the server returned beside it."""
+    answer = _CALL_ANSWER.get()
+    if answer is not None and isinstance(content, dict) and content:
+        answer.structure = content
 
 
 def note_answer_cut(chars: int) -> None:

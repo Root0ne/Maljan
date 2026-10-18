@@ -1,6 +1,6 @@
 """Every field a ledger entry carries is stored on its row and served back.
 
-``LedgerEntry`` has 29 fields. Each one goes into the row ``_evidence_row``
+``LedgerEntry`` has 30 fields. Each one goes into the row ``_evidence_row``
 builds and comes out of ``GET /jobs/{id}/evidence`` unchanged; the entry's
 ``id`` is the row's ``entry_id``. A row written before the seven newest
 columns existed reads with those seven absent, never as false or empty, and
@@ -42,7 +42,7 @@ _SEVEN = (
 
 
 def _full_entry() -> LedgerEntry:
-    """An entry where every one of the 29 fields holds a value other than its default."""
+    """An entry where every one of the 30 fields holds a value other than its default."""
     return LedgerEntry(
         id="ev_0042",
         stage="verdict",
@@ -73,11 +73,15 @@ def _full_entry() -> LedgerEntry:
         structured_from_server=True,
         agent_role="static",
         agent_tab="static",
+        spilled=[
+            {"part": "answer", "key": "evidence/j/" + "a" * 64, "bytes": 9, "sha256": "a" * 64},
+            {"part": "output", "bytes": 3, "sha256": "b" * 64, "error": "OSError: refused"},
+        ],
     )
 
 
-def test_the_entry_has_the_twenty_nine_fields_the_round_trip_walks():
-    assert len(LedgerEntry.model_fields) == 29
+def test_the_entry_has_the_thirty_fields_the_round_trip_walks():
+    assert len(LedgerEntry.model_fields) == 30
     for name in _SEVEN:
         assert name in LedgerEntry.model_fields
 
@@ -190,7 +194,8 @@ def test_an_older_row_holds_none_of_the_seven_and_the_downgrade_takes_them_away(
         conn.execute(sa.text("INSERT INTO evidence_entries (tool) VALUES ('pe_info')"))
 
         _run(conn, lambda mod: mod.upgrade())
-        row = conn.execute(sa.text(f"SELECT {', '.join(_SEVEN)} FROM evidence_entries")).one()
+        table = sa.table("evidence_entries", *(sa.column(name) for name in _SEVEN))
+        row = conn.execute(sa.select(*table.columns)).one()
         assert tuple(row) == (None,) * len(_SEVEN)
 
         _run(conn, lambda mod: mod.downgrade())

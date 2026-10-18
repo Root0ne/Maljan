@@ -1715,6 +1715,9 @@ class JudgeAgent(BudgetMeter):
         # What the run saw, handed down by the container. ``None`` for a judge
         # built outside a job.
         self.evidence_corpus: Any = None
+        # The job's store for the parts of an answer an entry does not keep
+        # whole (``schemas.evidence_spill``). ``None`` outside a job.
+        self.evidence_spill: Any = None
         # The name the meter and the console draw this agent under. Fixed:
         # there is one judge, and the ledger already stamps its entries with
         # this word.
@@ -2086,6 +2089,7 @@ class JudgeAgent(BudgetMeter):
             stage=str(getattr(self, "pipeline_stage", "") or "analysis"),
             sink=self._event_sink(),
             corpus=getattr(self, "evidence_corpus", None),
+            spill=getattr(self, "evidence_spill", None),
             agent_role=self._definition_role(),
             agent_tab=self._definition_tab(),
         )

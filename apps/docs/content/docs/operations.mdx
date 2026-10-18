@@ -142,6 +142,37 @@ keep them off shared storage.
 
 `upload_max_bytes` and `upload_allowed_mime_types` bound what the API accepts.
 
+The same bucket keeps, per job, the parts of the evidence ledger's answers the
+run did not keep whole: an answer the tool-output guardrail shortened,
+summarised or cut, or had no room for; a structured answer a tool server
+returned that the entry could not keep; an output or structure the per-agent
+byte budget blanked or the structure eviction dropped. Each is written by the
+analysis worker under `evidence/<job_id>/<sha256>` (the same bytes once per
+job), and the ledger entry references it with the part, the object key, the
+byte length and the SHA-256. One object is bounded by `upload_max_bytes`, read
+as each job starts; a larger part is referenced with
+`exceeds upload_max_bytes (<n> bytes)` and not written, so one job stores at
+most its number of entries times that bound (four parts at most per entry).
+Parts are written in the background by two writers per job with their own
+client (3 s to connect, 60 s of silence mid-write, one retry), so no analyst
+waits on the store; at most one part per writer waits to be written (twice
+`upload_max_bytes`), and a part past that is referenced as
+`upload_failed (store busy)`. The first failure to reach the store marks it
+down for the job: every later part is referenced at once as
+`upload_failed (store unreachable)`. Before it stores the ledger the worker
+waits up to 5 s for the writes still running and sets every reference to how
+its write ended: a write that failed is referenced as `upload_failed (<class>)`
+(the failure is logged whole on the worker), one not finished by then as
+`upload_failed (not finished)`, and an object such a write leaves afterwards is
+removed again. A slow store given large parts can therefore leave parts
+`not finished` at that 5 s wait, and those parts are then deleted rather than
+kept. A store that answers with server errors fails only that write; only a
+failed connection or a timeout marks it down. The run goes on in every case. The same bytes are written once
+per job. Deleting a sample removes the objects of every job it removes, after
+the delete is committed, best effort and logged, as it does the sandbox-report
+objects; deleting a report keeps them with the ledger. Back them up with the
+MinIO volume.
+
 ## Backups
 
 Two things carry state that cannot be rebuilt: the Postgres volume (`pgdata`)

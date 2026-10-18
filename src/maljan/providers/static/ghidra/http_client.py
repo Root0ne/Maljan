@@ -432,12 +432,17 @@ class GhidraHTTPClient:
         from maljan.agents.output_shortening import shorten_json_document, shorten_target
         from maljan.agents.tool_fence import cut_length, view_room
         from maljan.core.truncation_ledger import record_guardrail_outcome
-        from maljan.llm.context_window import note_answer_not_shown, output_limit
+        from maljan.llm.context_window import (
+            note_answer_not_shown,
+            note_answer_whole,
+            output_limit,
+        )
 
         chars_in = len(output)
         limit = output_limit(self._max_output_chars, self._context_budget)
 
         if limit <= 0:
+            note_answer_whole(output)
             note_answer_not_shown(chars_in)
             said = self._no_room(chars_in)
             record_guardrail_outcome(
@@ -464,6 +469,9 @@ class GhidraHTTPClient:
             )
             return output
 
+        # The answer as the tool gave it, for the call's entry to keep whole
+        # when what follows cuts it (``schemas.evidence_spill``).
+        note_answer_whole(output)
         logger.warning(
             "Ghidra tool output exceeds limit (%d > %d chars). Applying guardrail.",
             chars_in,
