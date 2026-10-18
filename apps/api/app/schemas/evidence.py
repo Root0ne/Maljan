@@ -98,6 +98,27 @@ class EvidenceEntryResponse(BaseModel):
         return int(value or 0)
 
 
+class LedgerVerificationResponse(BaseModel):
+    """What recomputing a job's ledger chain against its seal found (``services.ledger_verify``).
+
+    ``status`` is ``verified``, ``broken``, ``other_key`` or ``not_sealed``;
+    ``reason`` says why in a sentence, ``first_broken_seq`` names the first row
+    to blame when one is, ``checks`` lists what held and ``notes`` what was not
+    checked or holds only weakly.
+    """
+
+    job_id: str
+    status: str
+    reason: str | None = None
+    first_broken_seq: int | None = None
+    entries: int = 0
+    head: str | None = None
+    seal: dict[str, Any] | None = None
+    amendments: int = 0
+    checks: list[str] = Field(default_factory=list)
+    notes: list[str] = Field(default_factory=list)
+
+
 class EvidenceListResponse(BaseModel):
     """One page of a job's ledger, in the order the calls were made."""
 

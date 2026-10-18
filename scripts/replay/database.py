@@ -82,6 +82,9 @@ def write_run(rows: JobRows, into: Path) -> tuple[Path, list[str]]:
         "run_summary": report.get("run_summary") or {},
         "malware_report": report.get("malware_report"),
         "incomplete_reason": report.get("incomplete_reason"),
+        # The seal of the job's ledger, the mark that it is sealed
+        # (``python -m scripts.ledger.verify --run`` reads it).
+        "ledger_seal": report.get("ledger_seal"),
         "agent_findings": rows.findings,
         "transcript": sorted(rows.transcript, key=lambda m: int(m.get("seq") or 0)),
     }
