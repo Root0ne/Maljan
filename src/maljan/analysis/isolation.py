@@ -76,6 +76,7 @@ _NAMESPACES = {"pid": "own_pid_namespace", "net": "own_net_namespace", "mnt": "o
 MEASURED_FIELDS = (
     "uid",
     "same_uid_as_worker",
+    "shares_group_with_worker",
     "own_pid_namespace",
     "own_net_namespace",
     "own_mount_namespace",
@@ -105,13 +106,45 @@ def _status(pid: int | str) -> dict[str, str] | None:
     return out
 
 
-def _effective_uid(status: Mapping[str, str] | None) -> int | None:
-    """The effective user id: the second of the four ``Uid`` fields."""
-    parts = str((status or {}).get("Uid") or "").split()
+def _ids(status: Mapping[str, str] | None, key: str) -> tuple[int, ...] | None:
+    """The four ids of a ``Uid`` or ``Gid`` line (real, effective, saved, filesystem), or ``None``.
+
+    ``None`` unless all four are there and read as numbers.
+    """
+    parts = str((status or {}).get(key) or "").split()
     try:
-        return int(parts[1]) if len(parts) > 1 else None
+        ids = tuple(int(part) for part in parts)
     except ValueError:
         return None
+    return ids if len(ids) == 4 else None
+
+
+def _effective_uid(status: Mapping[str, str] | None) -> int | None:
+    """The effective user id: the second of the four ``Uid`` fields."""
+    ids = _ids(status, "Uid")
+    return ids[1] if ids else None
+
+
+def _groups(status: Mapping[str, str] | None) -> frozenset[int] | None:
+    """The supplementary groups of a ``Groups`` line, or ``None`` where the line is absent."""
+    if status is None or "Groups" not in status:
+        return None
+    try:
+        return frozenset(int(part) for part in str(status["Groups"]).split())
+    except ValueError:
+        return None
+
+
+def _shares(theirs: Iterable[int] | None, ours: Iterable[int]) -> bool | None:
+    """Whether any of ``theirs`` is one of ``ours``; ``None`` where ``theirs`` was not read."""
+    if theirs is None:
+        return None
+    return bool(set(theirs) & set(ours))
+
+
+def _worker_groups() -> frozenset[int]:
+    """The worker's effective group and supplementary groups."""
+    return frozenset({os.getegid(), *os.getgroups()})
 
 
 def _cap_eff_zero(status: Mapping[str, str] | None) -> bool | None:
@@ -146,10 +179,17 @@ def measure_process(pid: int, env_names: Iterable[str]) -> dict[str, Any]:
     handed to the process.
     """
     status = _status(pid)
-    uid = _effective_uid(status)
+    uids, gids, groups = _ids(status, "Uid"), _ids(status, "Gid"), _groups(status)
     out: dict[str, Any] = {
-        "uid": uid,
-        "same_uid_as_worker": None if uid is None else uid == os.geteuid(),
+        "uid": uids[1] if uids else None,
+        # Any of the four user ids (real, effective, saved, filesystem) that is
+        # the worker's effective one: a saved or real id can be taken back.
+        "same_uid_as_worker": _shares(uids, {os.geteuid()}),
+        # Any of the four group ids, or a supplementary group, that is one of
+        # the worker's groups: a group opens what is group-readable.
+        "shares_group_with_worker": (
+            None if gids is None or groups is None else _shares({*gids, *groups}, _worker_groups())
+        ),
     }
     for name, key in _NAMESPACES.items():
         theirs, ours = _namespace(pid, name), _namespace("self", name)
@@ -294,6 +334,7 @@ def _passes(row: Mapping[str, Any]) -> bool:
     """Whether a measured row passes: every check read, and every one held."""
     checks = [
         row.get("same_uid_as_worker") is False,
+        row.get("shares_group_with_worker") is False,
         row.get("own_pid_namespace") is True,
         row.get("own_mount_namespace") is True,
         row.get("cap_eff_zero") is True,
@@ -371,6 +412,7 @@ def isolation_part(
                     measured_by="worker",
                     uid=worker.get("uid"),
                     same_uid_as_worker=True,
+                    shares_group_with_worker=True,
                     own_pid_namespace=False,
                     own_net_namespace=False,
                     own_mount_namespace=False,
@@ -508,10 +550,14 @@ def _cap(text: str) -> str:
 
 
 def _user(uid: Any, same: Any) -> str:
-    if uid is None:
-        return "a user that could not be read"
-    whose = _yes_no(same, ", the worker's own", ", not the worker's", "")
-    return f"user {uid}{whose}"
+    who = "a user that could not be read" if uid is None else f"user {uid}"
+    whose = _yes_no(
+        same,
+        " (one of its real, effective, saved or filesystem user ids is the worker's)",
+        " (none of its real, effective, saved or filesystem user ids is the worker's)",
+        " (its user ids could not all be read)",
+    )
+    return f"{who}{whose}"
 
 
 def _worker_line(worker: Mapping[str, Any], code: Callable[[str], str]) -> str:
@@ -544,6 +590,12 @@ def _child_line(row: Mapping[str, Any], code: Callable[[str], str]) -> str:
         )
     parts = [
         f"it ran as {_user(row.get('uid'), row.get('same_uid_as_worker'))}",
+        _yes_no(
+            row.get("shares_group_with_worker"),
+            "in a group of the worker's",
+            "in none of the worker's groups",
+            "in groups that could not all be read",
+        ),
         _yes_no(
             row.get("own_pid_namespace"),
             "with a process table of its own",

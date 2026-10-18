@@ -74,6 +74,7 @@
             null
           ],
           "same_uid_as_worker": null,
+          "shares_group_with_worker": null,
           "source": null,
           "transport": null,
           "uid": null,

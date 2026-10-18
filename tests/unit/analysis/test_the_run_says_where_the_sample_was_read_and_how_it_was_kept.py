@@ -55,6 +55,7 @@ WORKER = {"uid": 1000, "cap_eff_zero": True, "no_new_privs": False, "platform_na
 KEPT = {
     "uid": 10002,
     "same_uid_as_worker": False,
+    "shares_group_with_worker": False,
     "own_pid_namespace": True,
     "own_net_namespace": True,
     "own_mount_namespace": True,
@@ -66,6 +67,7 @@ KEPT = {
 SHARED = {
     "uid": 1000,
     "same_uid_as_worker": True,
+    "shares_group_with_worker": True,
     "own_pid_namespace": False,
     "own_net_namespace": False,
     "own_mount_namespace": False,
@@ -175,6 +177,7 @@ def test_a_process_that_cannot_be_read_is_absent_never_a_pass() -> None:
     measured = measure_process(2**22 + 12345, ["PATH"])
     assert {key: measured[key] for key in isolation.MEASURED_FIELDS if key != "uid"} == {
         "same_uid_as_worker": None,
+        "shares_group_with_worker": None,
         "own_pid_namespace": None,
         "own_net_namespace": None,
         "own_mount_namespace": None,
@@ -183,6 +186,65 @@ def test_a_process_that_cannot_be_read_is_absent_never_a_pass() -> None:
         "platform_names_in_env": [],
     }
     assert measured["uid"] is None
+
+
+def _status_of(**lines: str) -> dict[str, str]:
+    """A process status whose ids differ from the worker's, with ``lines`` laid over it."""
+    other = str(os.geteuid() + 7)
+    group = str(max(os.getegid(), *os.getgroups(), 0) + 7)
+    status = {
+        "Uid": " ".join([other] * 4),
+        "Gid": " ".join([group] * 4),
+        "Groups": group,
+        "CapEff": "0" * 16,
+        "NoNewPrivs": "1",
+    }
+    status.update(lines)
+    return status
+
+
+@pytest.mark.parametrize("field", range(4))
+def test_any_of_the_four_user_ids_being_the_workers_shares_the_worker(
+    monkeypatch: pytest.MonkeyPatch, field: int
+) -> None:
+    ids = [str(os.geteuid() + 7)] * 4
+    ids[field] = str(os.geteuid())
+    monkeypatch.setattr(isolation, "_status", lambda pid: _status_of(Uid=" ".join(ids)))
+    assert measure_process(4242, [])["same_uid_as_worker"] is True
+
+
+def test_four_user_ids_none_of_them_the_workers_do_not_share_it(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(isolation, "_status", lambda pid: _status_of())
+    measured = measure_process(4242, [])
+    assert measured["same_uid_as_worker"] is False
+    assert measured["shares_group_with_worker"] is False
+
+
+@pytest.mark.parametrize("uid_line", ["", "1 2 3", "1 2 x 4"])
+def test_a_user_id_line_that_cannot_be_read_whole_is_absent(
+    monkeypatch: pytest.MonkeyPatch, uid_line: str
+) -> None:
+    monkeypatch.setattr(isolation, "_status", lambda pid: _status_of(Uid=uid_line))
+    assert measure_process(4242, [])["same_uid_as_worker"] is None
+
+
+def test_a_group_id_or_a_supplementary_group_of_the_workers_shares_a_group(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    mine = str(os.getegid())
+    other = _status_of()["Gid"].split()[0]
+    for lines in (
+        {"Gid": f"{other} {other} {mine} {other}"},
+        {"Groups": f"{other} {mine}"},
+    ):
+        monkeypatch.setattr(isolation, "_status", lambda pid, lines=lines: _status_of(**lines))
+        assert measure_process(4242, [])["shares_group_with_worker"] is True, lines
+    without_groups = _status_of()
+    del without_groups["Groups"]
+    monkeypatch.setattr(isolation, "_status", lambda pid: without_groups)
+    assert measure_process(4242, [])["shares_group_with_worker"] is None
 
 
 # ---------------------------------------------------------------------------
@@ -225,6 +287,8 @@ def test_a_child_kept_from_the_worker_on_every_count_is_isolated() -> None:
     "field, value",
     [
         ("same_uid_as_worker", True),
+        ("shares_group_with_worker", True),
+        ("shares_group_with_worker", None),
         ("own_pid_namespace", False),
         ("own_mount_namespace", False),
         ("own_net_namespace", False),
@@ -365,8 +429,10 @@ def test_the_report_prints_the_part_inside_the_disclosure_block() -> None:
     ) in markdown
     assert (
         "- Tool server `analysis` (stdio, run on this machine) read the sample in a process the "
-        "worker started, measured at its start: it ran as user 1000, the worker's own; sharing "
-        "the worker's process table; the worker's view of the filesystem; the worker's network; "
+        "worker started, measured at its start: it ran as user 1000 (one of its real, "
+        "effective, saved or filesystem user ids is the worker's); in a group of the worker's; "
+        "sharing the worker's process table; the worker's view of the filesystem; the worker's "
+        "network; "
         "no capabilities; no bar on gaining privileges; its environment held none of the "
         "platform's own variables. So: not isolated."
     ) in markdown
