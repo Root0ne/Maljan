@@ -2177,7 +2177,9 @@ class MarkdownRenderer:
             lines.extend(["", DISCLOSURE_FOOTNOTE])
         # What the run spent its input on, where its summary records it
         # (``analysis.efficiency``); a summary stored without it shows none.
-        counted = efficiency_lines(run_summary.get("efficiency"))
+        counted = efficiency_lines(
+            run_summary.get("efficiency"), lambda text: _code_span(_one_line(text))
+        )
         if counted:
             lines.extend(["", EFFICIENCY_INTRO, ""])
             lines.extend(_item(line) for line in counted)

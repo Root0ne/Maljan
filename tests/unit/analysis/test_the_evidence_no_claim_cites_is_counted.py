@@ -104,7 +104,7 @@ def test_the_record_and_the_report_carry_it() -> None:
     assert "inputs" not in record
     assert efficiency_lines(record)[0] == (
         "Evidence nothing cites: 2 of the 2 ledger entries whose tool answered are named by no "
-        "claim, finding or artifact of an analyst's final answer (by agent: `static` 2; by "
+        "claim, finding or artifact of an analyst's final answer (by maker: `static` 2; by "
         "tool: `pe_info` 1, `strings` 1); no call failed."
     )
 

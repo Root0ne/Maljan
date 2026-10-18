@@ -71,7 +71,8 @@ from __future__ import annotations
 
 import json
 import re
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
+from contextvars import ContextVar
 from types import SimpleNamespace
 from typing import Any
 
@@ -590,6 +591,24 @@ def efficiency_record(
         return None
 
 
+# How the block being written prints a value that came from a run — an agent's,
+# a tool's or a server's name, a version, a hash — set by :func:`efficiency_lines`.
+_CODE: ContextVar[Callable[[str], str] | None] = ContextVar("efficiency_code", default=None)
+
+
+def _guarded(text: str) -> str:
+    """``text`` as the report prints any value it did not write: one line, one code span."""
+    from maljan.reporting.renderers.markdown import _code_span, _one_line
+
+    return _code_span(_one_line(text))
+
+
+def _c(value: Any) -> str:
+    """A run-supplied value as the block prints it (:data:`_CODE`, else the report's guard)."""
+    code = _CODE.get()
+    return code(str(value)) if code is not None else _guarded(str(value))
+
+
 def _share(part: int, total: int) -> str:
     if not total:
         return "0%"
@@ -624,7 +643,7 @@ def _agent_input_line(agent: str, rows: Sequence[Mapping[str, Any]], calls: int 
     if singles:
         what.append(_count(singles, "kind of single call", "kinds of single call"))
     line = (
-        f"Input of `{agent}`: {' and '.join(what) or 'no loop'}, {_count(requests, 'request')}, "
+        f"Input of {_c(agent)}: {' and '.join(what) or 'no loop'}, {_count(requests, 'request')}, "
         f"{total:,} characters in all"
     )
     if shown:
@@ -654,7 +673,7 @@ def _input_lines(inputs: Mapping[str, Any]) -> list[str]:
         _agent_input_line(agent, held, _int(calls.get(agent)) if agent in calls else None)
         for agent, held in by_agent.items()
     ]
-    unmeasured = [f"`{name}` ({n:,})" for name, n in calls.items() if name not in by_agent]
+    unmeasured = [f"{_c(name)} ({n:,})" for name, n in calls.items() if name not in by_agent]
     if unmeasured:
         lines.append(
             "Not measured by part (model calls in the token ledger): " + ", ".join(unmeasured) + "."
@@ -667,10 +686,23 @@ def _input_lines(inputs: Mapping[str, Any]) -> list[str]:
     return lines
 
 
-def efficiency_lines(record: Any) -> list[str]:
-    """The block's sentences, one per line, for a list; ``[]`` for no record."""
+def efficiency_lines(record: Any, code: Callable[[str], str] | None = None) -> list[str]:
+    """The block's sentences, one per line, for a list; ``[]`` for no record.
+
+    ``code`` prints a value the run supplied (a name, a version, a hash) as the
+    report prints every value it did not write; the report's own guard
+    (``_code_span`` over one line) when none is given.
+    """
     if not isinstance(record, Mapping) or "v" not in record:
         return []
+    token = _CODE.set(code)
+    try:
+        return _lines(record)
+    finally:
+        _CODE.reset(token)
+
+
+def _lines(record: Mapping[str, Any]) -> list[str]:
     lines: list[str] = []
     if record.get("partial_reason"):
         lines.append(
@@ -711,11 +743,11 @@ def _fingerprint_lines(fingerprint: Mapping[str, Any]) -> list[str]:
     components = fingerprint.get("components")
     components = components if isinstance(components, Mapping) else {}
     shown = "; ".join(
-        f"{label} `{str(components.get(name) or '')[:12]}`"
+        f"{label} {_c(str(components.get(name) or '')[:12])}"
         for name, label in _COMPONENT_LABELS.items()
         if name in components
     )
-    line = f"Run fingerprint: `{fingerprint.get('sha256') or ''}`"
+    line = f"Run fingerprint: {_c(fingerprint.get('sha256') or '')}"
     if shown:
         line += f" (sha256 of its components: {shown})"
     unread = [str(name) for name in fingerprint.get("unread") or []]
@@ -729,10 +761,10 @@ def _fingerprint_lines(fingerprint: Mapping[str, Any]) -> list[str]:
         for key, info in servers.items():
             info = info if isinstance(info, Mapping) else {}
             name, version = info.get("name"), info.get("version")
-            text = f"`{key}`"
+            text = _c(key)
             if name:
-                text += f" as `{name}`"
-            text += f" version `{version}`" if version else ", no version given"
+                text += f" as {_c(name)}"
+            text += f" version {_c(version)}" if version else ", no version given"
             said.append(text)
         lines.append(
             "Tool servers as they gave themselves at attach: "
@@ -763,7 +795,7 @@ def _output_lines(output: Mapping[str, Any]) -> list[str]:
             continue
         total = _int(row.get("output_tokens"))
         line = (
-            f"Output of `{agent}`: of its {total:,} reported output tokens, "
+            f"Output of {_c(agent)}: of its {total:,} reported output tokens, "
             f"{_kind_clause('validation retries', retry, total)} and "
             f"{_kind_clause('drops questions', drop, total)}"
         )
@@ -786,7 +818,7 @@ def _rows_read_line(rows_read: Mapping[str, Any]) -> str:
             continue
         rows, pack = _int(tally.get("rows")), _int(tally.get("pack_rows"))
         parts.append(
-            f"`{agent}` {_count(_int(tally.get('reads')), 'read')} of "
+            f"{_c(agent)} {_count(_int(tally.get('reads')), 'read')} of "
             f"{_count(rows, 'row')} ({pack:,} of them pack rows)"
         )
     line = f"Rows read back by id (read_evidence): {_count(reads, 'read')}"
@@ -820,7 +852,7 @@ _CALL_WORDS = {
 
 
 def _maker_label(name: str) -> str:
-    return {"pack": "the triage pack", "pipeline": "the pipeline"}.get(name, f"`{name}`")
+    return {"pack": "the triage pack", "pipeline": "the pipeline"}.get(name) or _c(name)
 
 
 def _calls_line(calls: Mapping[str, Any]) -> str:
@@ -851,12 +883,12 @@ def _calls_line(calls: Mapping[str, Any]) -> str:
     return line + "."
 
 
-def _named_counts(counts: Any) -> str:
+def _named_counts(counts: Any, label: Callable[[str], str] = _c) -> str:
     """``{name: n}`` as "`a` 3, `b` 1", largest first; "" for none."""
     if not isinstance(counts, Mapping):
         return ""
     rows = sorted(((str(k), _int(v)) for k, v in counts.items()), key=lambda kv: (-kv[1], kv[0]))
-    return ", ".join(f"`{name}` {n:,}" for name, n in rows if n)
+    return ", ".join(f"{label(name)} {n:,}" for name, n in rows if n)
 
 
 def _uncited_line(uncited: Mapping[str, Any]) -> str:
@@ -867,11 +899,11 @@ def _uncited_line(uncited: Mapping[str, Any]) -> str:
         "claim, finding or artifact of an analyst's final answer"
     )
     by_agent, by_tool = (
-        _named_counts(uncited.get("by_agent")),
+        _named_counts(uncited.get("by_agent"), _maker_label),
         _named_counts(uncited.get("by_tool")),
     )
     if none and by_agent:
-        line += f" (by agent: {by_agent}; by tool: {by_tool})"
+        line += f" (by maker: {by_agent}; by tool: {by_tool})"
     failed = _int(uncited.get("failed"))
     if "failed" in uncited:
         line += (

@@ -100,3 +100,30 @@ def test_a_stored_run_renders_as_it_did_before_the_block(run: str) -> None:
     digests = tuple(hashlib.sha256(text.encode()).hexdigest()[:16] for text in (markdown, html))
     assert digests == STORED_RENDERS[run]
     assert INTRO_SENTENCE not in markdown
+
+
+HOSTILE = "1.0` [click](https://example.org/x) `x"
+
+
+def test_a_value_a_server_supplied_cannot_break_out_of_its_code_span() -> None:
+    record = {
+        "v": 2,
+        "fingerprint": {
+            "sha256": "a" * 64,
+            "components": {},
+            "parts": {"servers": {"analysis": {"name": "n\nline two", "version": HOSTILE}}},
+        },
+    }
+    markdown = MarkdownRenderer().render(
+        _report({"final_decision": "Malware", "efficiency": record})
+    )
+    (line,) = [line for line in markdown.splitlines() if "Tool servers as they gave" in line]
+
+    # One span, fenced longer than the backtick inside it; the closing pass
+    # defangs the address within it as it does every address.
+    assert "version `` 1.0` [click](" in line
+    assert " `x ``. A tool's own version" in line
+    assert "`n line two`" in line
+    assert "https://" not in line
+    # The same guard when the block is written outside the renderer.
+    assert f"`` {HOSTILE} ``" in efficiency_lines(record)[1]
