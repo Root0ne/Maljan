@@ -133,6 +133,24 @@ def test_a_key_with_no_version_is_not_checked() -> None:
     assert status == 200, body
 
 
+def test_the_checked_rows_are_locked_for_the_save() -> None:
+    """Read ``FOR UPDATE`` on PostgreSQL, only the checked keys; SQLite drops the clause."""
+    import asyncio
+
+    from sqlalchemy.dialects import postgresql, sqlite
+
+    db = MagicMock()
+    db.execute = AsyncMock(
+        return_value=SimpleNamespace(scalars=lambda: SimpleNamespace(all=lambda: []))
+    )
+    asyncio.run(svc.SettingsService(db).changed_since({PLAIN: None}))
+    (statement,), _ = db.execute.await_args
+    on_postgres = str(statement.compile(dialect=postgresql.dialect()))
+    assert on_postgres.rstrip().endswith("FOR UPDATE")
+    assert "runtime_settings.key IN" in on_postgres
+    assert "FOR UPDATE" not in str(statement.compile(dialect=sqlite.dialect()))
+
+
 def test_the_check_is_linear_in_the_stored_rows() -> None:
     import asyncio
 

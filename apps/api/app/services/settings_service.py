@@ -858,11 +858,19 @@ class SettingsService:
         with, ``None`` for no stored row. A row saved, written by another
         route (an accepted report format, a credential bootstrap) or reset
         since then is named, so a page loaded before it never saves over it
-        unseen. Time linear in the stored rows and ``versions``.
+        unseen. Time linear in ``versions`` and the rows it names.
         """
         if not versions:
             return {}
-        rows = {r.key: r for r in await self._rows()}
+        # The checked rows are locked until the save that follows commits in
+        # this same transaction, so two saves of one key cannot both pass the
+        # check. PostgreSQL takes ``FOR UPDATE``; SQLite has no row locks and
+        # SQLAlchemy leaves the clause out there, so on SQLite the check alone
+        # stands (its writes are serialised by the database file's own lock).
+        res = await self.db.execute(
+            select(RuntimeSetting).where(RuntimeSetting.key.in_(list(versions))).with_for_update()
+        )
+        rows = {r.key: r for r in res.scalars().all()}
         out: dict[str, str] = {}
         for key, loaded in versions.items():
             row = rows.get(key)
