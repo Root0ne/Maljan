@@ -43,14 +43,15 @@ _CONSTRAINTS = (
 
 
 def _jobs_with_duplicates(column: str) -> list[str]:
-    rows = op.get_bind().execute(
-        sa.text(
-            f"SELECT DISTINCT job_id FROM ("  # noqa: S608 - the column is one of two constants
-            f"SELECT job_id FROM {_TABLE} GROUP BY job_id, {column} "
-            f"HAVING COUNT(*) > 1) AS duplicated ORDER BY job_id"
-        )
+    table = sa.table(_TABLE, sa.column("job_id"), sa.column(column))
+    duplicated = (
+        sa.select(table.c.job_id)
+        .group_by(table.c.job_id, table.c[column])
+        .having(sa.func.count() > 1)
+        .subquery("duplicated")
     )
-    return [str(row[0]) for row in rows]
+    query = sa.select(duplicated.c.job_id).distinct().order_by(duplicated.c.job_id)
+    return [str(row[0]) for row in op.get_bind().execute(query)]
 
 
 def _refuse_on_duplicates() -> None:
