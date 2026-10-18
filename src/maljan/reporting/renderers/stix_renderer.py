@@ -113,10 +113,10 @@ MALWARE_UNDER_BENIGN_CODE = "stix.malware_object_under_benign"
 # covering addresses too, which is not what it is called. The kind is in the
 # sentence, where it says something.
 UNPUBLISHABLE_ENDPOINT_CODE = "stix.unpublishable_endpoint"
-# What a run stored before that carries for the same decision. Nothing is
-# migrated: a stored row is what that run recorded. The console reads these as
-# the same decision, and ``apps/web/src/lib/validationRows.ts`` holds the list
-# it reads them from.
+# What a run stored before ``stix.unpublishable_endpoint`` replaced them carries
+# for the same decision. Nothing is migrated: a stored row is what that run
+# recorded. The console reads these as the same decision, and
+# ``apps/web/src/lib/validationRows.ts`` holds the list it reads them from.
 LEGACY_UNPUBLISHABLE_CODES = ("stix.unpublishable_url", "stix.unpublishable_domain")
 # A ``created_by_ref`` naming an identity the bundle does not hold, which the
 # export replaced with this platform's identity.
