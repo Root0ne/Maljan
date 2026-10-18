@@ -7,7 +7,8 @@ import time
 import uuid
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request, status
+from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
@@ -586,7 +587,7 @@ async def get_job_evidence_object(
     user: User = Depends(get_current_user),
     svc: AnalysisService = Depends(_get_service),
     db: AsyncSession = Depends(get_db),
-) -> Response:
+) -> StreamingResponse:
     """One part of a ledger entry's answer the entry does not keep whole, as it was kept.
 
     The entry's ``spilled`` reference names the part, its object key, byte
@@ -594,7 +595,9 @@ async def get_job_evidence_object(
     job's, checked exactly the way the evidence page checks it. 404 when the
     job, the entry or the reference is not there, or the part was never kept
     (its reference states why); 502 when the store cannot hand the object
-    back or the bytes it hands back do not match the recorded digest.
+    back. The bytes are streamed with the recorded digest and length in the
+    headers and hashed as they go; bytes that end on another digest drop the
+    connection before the answer completes.
     """
     import asyncio
     import hashlib
@@ -637,7 +640,7 @@ async def get_job_evidence_object(
             status_code=status.HTTP_404_NOT_FOUND, detail="The part was not kept for this job"
         )
     try:
-        blob = await asyncio.to_thread(object_store.read_bytes, object_store.client(), key)
+        response = await asyncio.to_thread(object_store.open_object, object_store.client(), key)
     except Exception as exc:  # noqa: BLE001 — the store's failure is logged, not served
         logger.warning(
             f"Evidence object {log_safe(key)} could not be read: {log_safe(type(exc).__name__)}",
@@ -646,22 +649,40 @@ async def get_job_evidence_object(
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY, detail="The object store did not hand it back"
         ) from None
-    digest = hashlib.sha256(blob).hexdigest()
-    if digest != ref.get("sha256"):
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
-            detail="The kept object does not match the digest its entry recorded",
-        )
+    expected = str(ref.get("sha256") or "")
+
+    def chunks() -> Any:
+        # Streamed as it is read and hashed as it goes, so no part is held
+        # whole in memory; bytes that end on another digest drop the
+        # connection, and the client never receives a complete answer.
+        digest = hashlib.sha256()
+        try:
+            for chunk in response.stream(object_store.EVIDENCE_CHUNK_BYTES):
+                digest.update(chunk)
+                yield chunk
+        finally:
+            response.close()
+            response.release_conn()
+        if digest.hexdigest() != expected:
+            logger.warning(
+                f"Evidence object {log_safe(key)} does not match its recorded digest",
+                extra={"job_id": log_safe(job_id), "user_id": log_safe(user.id)},
+            )
+            raise EvidenceDigestMismatch(key)
+
     media = CONTENT_TYPES.get(part, "application/octet-stream")
     suffix = "json" if media == JSON else "txt"
-    return Response(
-        content=blob,
-        media_type=media,
-        headers={
-            "Content-Disposition": f'attachment; filename="{row.entry_id}-{part}.{suffix}"',
-            "X-Content-SHA256": digest,
-        },
-    )
+    headers = {
+        "Content-Disposition": f'attachment; filename="{row.entry_id}-{part}.{suffix}"',
+        "X-Content-SHA256": expected,
+    }
+    if isinstance(ref.get("bytes"), int):
+        headers["Content-Length"] = str(ref["bytes"])
+    return StreamingResponse(chunks(), media_type=media, headers=headers)
+
+
+class EvidenceDigestMismatch(RuntimeError):
+    """A kept part whose bytes end on another digest than its entry recorded."""
 
 
 @router.delete("/{job_id}", status_code=status.HTTP_204_NO_CONTENT)

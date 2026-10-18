@@ -14,9 +14,11 @@ import inspect
 import json
 import uuid
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 from unittest.mock import patch
 
+import pytest
 import sqlalchemy as sa
 from alembic.operations import Operations
 from alembic.runtime.migration import MigrationContext
@@ -410,8 +412,10 @@ class _Readable(_Store):
     def get_object(self, bucket: str, path: str) -> Any:
         from unittest.mock import MagicMock
 
+        blob = self.objects[path][0]
         response = MagicMock()
-        response.read.return_value = self.objects[path][0]
+        response.stream.side_effect = lambda amt: (blob[i : i + 4] for i in range(0, len(blob), 4))
+        self.response = response
         return response
 
 
@@ -427,7 +431,7 @@ class TestTheDownload:
         app = FastAPI()
         app.include_router(jobs.router, prefix="/api/v1")
         self.svc = _Svc(owned)
-        self.user = object()
+        self.user = SimpleNamespace(id=uuid.uuid4())
         app.dependency_overrides[get_db] = lambda: _Db(row)
         app.dependency_overrides[get_current_user] = lambda: self.user
         app.dependency_overrides[jobs._get_service] = lambda: self.svc
@@ -451,6 +455,9 @@ class TestTheDownload:
         assert r.content == b"the whole answer"
         assert r.headers["content-type"].startswith("text/plain")
         assert r.headers["x-content-sha256"] == hashlib.sha256(b"the whole answer").hexdigest()
+        assert r.headers["content-length"] == "16"
+        store.response.stream.assert_called_once_with(object_store.EVIDENCE_CHUNK_BYTES)
+        store.response.release_conn.assert_called_once()
         assert 'filename="ev_0007-answer.txt"' in r.headers["content-disposition"]
         assert self.svc.asked == [(job, self.user)], "ownership checked as the evidence page does"
 
@@ -492,6 +499,21 @@ class TestTheDownload:
         job, store = uuid.uuid4(), _Readable()
         row = self._kept(job, store)
         store.objects[row.spilled[0]["key"]] = (b"altered", "text/plain")
+        client = self._client(owned=True, row=row)
+
+        from app.api.v1.jobs import EvidenceDigestMismatch
+
+        with (
+            patch.object(object_store, "client", lambda: store),
+            pytest.raises(EvidenceDigestMismatch),
+        ):
+            client.get(f"/api/v1/jobs/{job}/evidence/ev_0007/objects/answer")
+        store.response.release_conn.assert_called_once()
+
+    def test_a_store_that_cannot_hand_it_back_is_a_bad_gateway(self) -> None:
+        job, store = uuid.uuid4(), _Readable()
+        row = self._kept(job, store)
+        store.objects.clear()
         client = self._client(owned=True, row=row)
 
         with patch.object(object_store, "client", lambda: store):

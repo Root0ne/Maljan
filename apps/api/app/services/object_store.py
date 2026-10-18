@@ -113,6 +113,15 @@ def read_bytes(store: Any, path: str) -> bytes:
         response.release_conn()
 
 
+# What one evidence download holds in memory at a time.
+EVIDENCE_CHUNK_BYTES = 1024 * 1024
+
+
+def open_object(store: Any, path: str) -> Any:
+    """The object at ``path`` as a response to stream; the caller closes and releases it."""
+    return store.get_object(settings.minio_bucket, path)
+
+
 def download(store: Any, path: str, destination: str) -> None:
     """Copy the object at ``path`` to ``destination``, readable by this user only (0600)."""
     store.fget_object(settings.minio_bucket, path, destination)
