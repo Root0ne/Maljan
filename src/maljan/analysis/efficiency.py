@@ -694,7 +694,7 @@ def efficiency_record(
 
 # How the block being written prints a value that came from a run — an agent's,
 # a tool's or a server's name, a version, a hash — set by :func:`efficiency_lines`.
-_CODE: ContextVar[Callable[[str], str] | None] = ContextVar("efficiency_code", default=None)
+_CODE_SPAN: ContextVar[Callable[[str], str] | None] = ContextVar("efficiency_code", default=None)
 
 
 def _guarded(text: str) -> str:
@@ -705,8 +705,8 @@ def _guarded(text: str) -> str:
 
 
 def _c(value: Any) -> str:
-    """A run-supplied value as the block prints it (:data:`_CODE`, else the report's guard)."""
-    code = _CODE.get()
+    """A run-supplied value as the block prints it (:data:`_CODE_SPAN`, else the report's guard)."""
+    code = _CODE_SPAN.get()
     return code(str(value)) if code is not None else _guarded(str(value))
 
 
@@ -796,11 +796,11 @@ def efficiency_lines(record: Any, code: Callable[[str], str] | None = None) -> l
     """
     if not isinstance(record, Mapping) or "v" not in record:
         return []
-    token = _CODE.set(code)
+    token = _CODE_SPAN.set(code)
     try:
         return _lines(record)
     finally:
-        _CODE.reset(token)
+        _CODE_SPAN.reset(token)
 
 
 def _lines(record: Mapping[str, Any]) -> list[str]:
