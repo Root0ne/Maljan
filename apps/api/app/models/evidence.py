@@ -5,12 +5,13 @@ what those ids point at. Rows hang off the job rather than the report because
 a run that failed before the report assembled still made the calls, and the
 calls are the part worth keeping.
 
-Append-only and immutable. ``seq`` is the order the ids were issued in across
-the whole job, and it is the ordering key: agent names cannot separate calls
-that two analysts made in parallel. ``created_at`` is the moment the call
-returned, derived from ``started_at`` and ``duration_ms`` when the row is
-built; a call the recorder never stamped falls back to the write time, which is
-the whole batch's and says only that.
+The application only ever inserts rows and deletes a job's whole ledger on a
+re-run; nothing in the database enforces that yet. ``seq`` is the order the
+ids were issued in across the whole job, and it is the ordering key: agent
+names cannot separate calls that two analysts made in parallel.
+``created_at`` is the moment the call returned, derived from ``started_at``
+and ``duration_ms`` when the row is built; a call the recorder never stamped
+falls back to the write time, which is the whole batch's and says only that.
 """
 
 import uuid
@@ -60,8 +61,10 @@ class EvidenceEntry(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     # The model whose turn asked for the call, as ``provider/model``; NULL
     # where nothing named it, including every row written before the column.
     model: Mapped[str | None] = mapped_column(String(300), nullable=True)
-    # Text, not String(n): a decompilation runs to thousands of characters and
-    # the producer already caps it (schemas.evidence).
+    # Text, not String(n): a decompilation runs to thousands of characters, and
+    # no per-answer cap stands in front of it. What is stored is the text the
+    # model was handed, or empty with ``truncated`` once the agent's byte
+    # budget was spent (schemas.evidence).
     output: Mapped[str] = mapped_column(Text, nullable=False, default="")
     structured: Mapped[Any | None] = mapped_column(JSONB, nullable=True)
     # The function index's exception-directory ranges, by function start,
@@ -90,6 +93,22 @@ class EvidenceEntry(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     # call on the run's clock, which ``created_at`` cannot: that is written
     # when the row is persisted, long after the call happened.
     started_at: Mapped[float | None] = mapped_column(Float, nullable=True)
+
+    # Where the tool's declaration lives, what it declared about the answer,
+    # the reputation record, and the operator's pack step, each as the entry
+    # recorded it when it was written (``maljan.schemas.evidence.LedgerEntry``).
+    # NULL where the entry carried none and on every row older than the
+    # columns: absent, never false or empty.
+    source: Mapped[str | None] = mapped_column(String, nullable=True)
+    facts: Mapped[Any | None] = mapped_column(JSONB, nullable=True)
+    reputation: Mapped[Any | None] = mapped_column(JSONB, nullable=True)
+    pack_step: Mapped[Any | None] = mapped_column(JSONB, nullable=True)
+    # True when ``structured`` is the server's own structured answer beside a
+    # prose text; NULL otherwise, the rule the entry's dump keeps.
+    structured_from_server: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    # The role and console tab the calling agent's definition declared.
+    agent_role: Mapped[str | None] = mapped_column(String, nullable=True)
+    agent_tab: Mapped[str | None] = mapped_column(String, nullable=True)
 
     def __repr__(self) -> str:
         return f"<EvidenceEntry {self.entry_id} {self.agent}/{self.tool} ok={self.ok}>"

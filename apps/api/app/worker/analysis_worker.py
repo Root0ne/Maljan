@@ -1147,8 +1147,8 @@ def _returned_at(entry: dict[str, Any]) -> datetime | None:
 def _evidence_row(entry: dict[str, Any], *, job_id: uuid.UUID) -> Any:
     """One ledger entry as the row that keeps it.
 
-    Every field ``maljan.schemas.evidence.LedgerEntry`` carries has a column
-    here, which is what lets a reader of the stored ledger say why an output
+    Every one of the 29 fields ``maljan.schemas.evidence.LedgerEntry`` carries
+    has a column here, which is what lets a reader of the stored ledger say why an output
     is empty instead of guessing. An absent value stays absent rather than
     becoming a default, for the same reason.
     """
@@ -1193,6 +1193,17 @@ def _evidence_row(entry: dict[str, Any], *, job_id: uuid.UUID) -> Any:
         repeated_of=(str(entry["repeated_of"])[:32] if entry.get("repeated_of") else None),
         symbol=(str(entry["symbol"])[:200] if entry.get("symbol") else None),
         started_at=(float(entry["started_at"]) if entry.get("started_at") else None),
+        # The seven fields the entry carries beside the call itself, whole and
+        # uncut. Each is absent where the entry has none, and
+        # ``structured_from_server`` is kept only when it is true, the rule
+        # ``LedgerEntry``'s dump keeps.
+        source=(str(entry["source"]) if entry.get("source") is not None else None),
+        facts=entry.get("facts"),
+        reputation=entry.get("reputation"),
+        pack_step=entry.get("pack_step"),
+        structured_from_server=(True if entry.get("structured_from_server") is True else None),
+        agent_role=(str(entry["agent_role"]) if entry.get("agent_role") is not None else None),
+        agent_tab=(str(entry["agent_tab"]) if entry.get("agent_tab") is not None else None),
     )
 
 

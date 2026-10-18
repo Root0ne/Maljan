@@ -4,7 +4,11 @@ import uuid
 from datetime import datetime
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+
+def _absent(value: Any) -> bool:
+    return value is None
 
 
 class EvidenceEntryResponse(BaseModel):
@@ -47,6 +51,26 @@ class EvidenceEntryResponse(BaseModel):
     symbol: str | None = None
     started_at: float | None = None
     created_at: datetime | None = None
+    # The seven fields the entry carries beside the call: where the tool's
+    # declaration lives, what it declared about the answer, the reputation
+    # record, the operator's pack step, whether ``structured`` is the server's
+    # own answer, and the calling agent's role and tab. Each is left out of the
+    # response where the row holds none, as the entry's own dump leaves it out,
+    # so a row older than the columns reads exactly as it did: absent, never
+    # false or empty.
+    source: str | None = Field(default=None, exclude_if=_absent)
+    facts: dict[str, Any] | None = Field(default=None, exclude_if=_absent)
+    reputation: dict[str, Any] | None = Field(default=None, exclude_if=_absent)
+    pack_step: dict[str, Any] | None = Field(default=None, exclude_if=_absent)
+    structured_from_server: bool | None = Field(default=None, exclude_if=_absent)
+    agent_role: str | None = Field(default=None, exclude_if=_absent)
+    agent_tab: str | None = Field(default=None, exclude_if=_absent)
+
+    @field_validator("structured_from_server", mode="before")
+    @classmethod
+    def _only_true_is_kept(cls, value: Any) -> bool | None:
+        """Absent unless it was true, the rule the entry's dump keeps."""
+        return True if value is True else None
 
     @field_validator("args_repaired", "truncated", mode="before")
     @classmethod

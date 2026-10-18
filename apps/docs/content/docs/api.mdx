@@ -55,7 +55,15 @@ tool call, in the order the calls were made. An entry carries the citation id
 the report quotes (`entry_id`, e.g. `ev_0007`), the stage, the agent, the tool
 server (null for an in-process tool), the tool, the arguments, whether the call
 succeeded, its duration, the result text and the parsed result when the tool
-answered JSON. `stage`, `agent` and `tool` narrow it — the three grains the
+answered JSON. Beside those it carries every other field the run recorded on
+the entry: where the tool's declaration lives (`source`), what that
+declaration said about the answer (`facts`), the reputation record
+(`reputation`), the operator's triage pack step (`pack_step`), whether
+`structured` is the server's own structured answer (`structured_from_server`,
+present only when true), and the calling agent's declared role and console
+tab (`agent_role`, `agent_tab`). Each of these seven is left out where the
+entry carried none, and on every entry stored before they were kept: absent,
+never false or empty. `stage`, `agent` and `tool` narrow it — the three grains the
 console groups by — and `page` and `page_size` (up to 200) page it. Ordering is
 by the sequence the ids were issued in across the whole run, so paging walks
 the analysis rather than one agent at a time, and the page an id is on is
