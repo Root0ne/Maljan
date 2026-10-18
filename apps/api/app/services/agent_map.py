@@ -566,3 +566,21 @@ def validate_agent_map(changes: dict[str, Any], stored: dict[str, Any]) -> dict[
             }
         )
     return out
+
+
+def prompt_tool_warnings(settings: Any) -> dict[str, str]:
+    """Agents whose own prompt names a tool they do not hold, keyed by definition path.
+
+    Advisory only (`maljan.agents.prompt_tools`): a prompt written against
+    last week's tool servers is still a legal thing to save. Read from the
+    declarations, so no server is opened. Never raises.
+    """
+    from maljan.agents.prompt_tools import warnings_for_settings
+
+    try:
+        return {
+            f"{AGENT_DEFINITIONS_KEY}.{key}": message
+            for key, message in warnings_for_settings(settings).items()
+        }
+    except Exception:  # noqa: BLE001 - advisory, the write is done
+        return {}
