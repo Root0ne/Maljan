@@ -289,10 +289,13 @@ nothing a model reads changes.
   failed call is not evidence: it is counted apart (`failed`) and said.
 - **Tool calls that found nothing new** (`calls`): the calls the repeat guard
   answered from an earlier identical call without running, the calls a guard
-  refused with no tool run, and the calls that ran again with the tool, server
-  and arguments of an earlier call, by agent and by tool. A re-run the guard
-  serves because the earlier identical call failed is counted apart, as a
-  retry after a failure, so neither count overstates the other.
+  refused with no tool run, the calls that ran again with the tool, server and
+  arguments of an earlier call the same maker ran, and the calls identical to
+  one another maker ran first, each filed under who made it: the agent, the
+  triage pack or the pipeline. A re-run the guard serves because the maker's
+  earlier identical call failed is counted apart, as a retry after a failure,
+  so neither count overstates the other, and no agent is charged with a call
+  only another agent made.
 - **Rows read back** (`rows_read`): the ledger and pack rows each agent read
   again by id through `read_evidence`, how often, each row's tool and whether
   the triage pack wrote it.

@@ -1,15 +1,16 @@
-"""Tool calls that found nothing new are counted from the ledger.
+"""Tool calls that found nothing new are counted from the ledger, under who made each.
 
 A call the repeat guard answered from an earlier identical call without running
-is a repeat; one a guard answered with no tool run is refused; one that ran
-again with the tool, server and arguments of an earlier call that ran is run
-again, whatever order its arguments were written in. A read of a cleared answer
-is a read, not a repeat.
+is a repeat; one a guard answered with no tool run is refused. A call that ran
+again with the tool, server and arguments of an earlier call the same maker ran
+is run again — or retried after a failure, where that earlier call failed —
+whatever order its arguments were written in; one identical to a call another
+agent or the pack ran first is counted apart, so no maker is charged with a
+call it never saw. A read of a cleared answer is a read, not a repeat.
 """
 
 from __future__ import annotations
 
-import time
 from types import SimpleNamespace
 
 from maljan.agents.tool_answer_clearing import READ_EVIDENCE_TOOL
@@ -21,13 +22,22 @@ def _entry(seq: int, tool: str = "strings", agent: str = "static", **extra: obje
     return LedgerEntry(id=f"ev_{seq:04d}", agent=agent, tool=tool, seq=seq, **extra)
 
 
+def _zero(**counts: int) -> dict[str, int]:
+    row = dict.fromkeys(
+        ("repeated", "refused", "run_again", "retried_after_failure", "same_call_elsewhere"), 0
+    )
+    return {**row, **counts}
+
+
+ARGS = {"min": 4, "path": "a"}
 LEDGER = [
-    _entry(1, args={"min": 4, "path": "a"}, server="analysis"),
+    _entry(1, args={"min": 4, "path": "a"}, server="analysis", agent="", pack_step={"s": 1}),
     _entry(2, args={"path": "a", "min": 4}, server="analysis", agent="dynamic"),
-    _entry(3, args={"path": "a", "min": 4}, server="other"),
-    _entry(4, repeated_of="ev_0001"),
-    _entry(5, repeated_of="ev_0005", tool="decompile"),
-    _entry(6, tool=READ_EVIDENCE_TOOL, args={"evidence_id": "ev_0001"}, repeated_of="ev_0001"),
+    _entry(3, args={"path": "a", "min": 4}, server="analysis", agent="dynamic"),
+    _entry(4, args=ARGS, server="other"),
+    _entry(5, repeated_of="ev_0004"),
+    _entry(6, repeated_of="ev_0006", tool="decompile"),
+    _entry(7, tool=READ_EVIDENCE_TOOL, args={"evidence_id": "ev_0001"}, repeated_of="ev_0001"),
 ]
 
 
@@ -36,23 +46,42 @@ def _calls_line(record: dict) -> str:
     return line
 
 
-def test_each_kind_is_counted_by_agent_and_tool() -> None:
+def test_each_kind_is_filed_under_its_maker() -> None:
     record = calls_record(LEDGER)
 
     assert record == {
-        "repeated": 1,
-        "refused": 1,
-        "run_again": 1,
-        "retried_after_failure": 0,
+        **_zero(repeated=1, refused=1, run_again=1, same_call_elsewhere=1),
         "by_agent": {
-            "dynamic": {"repeated": 0, "refused": 0, "run_again": 1, "retried_after_failure": 0},
-            "static": {"repeated": 1, "refused": 1, "run_again": 0, "retried_after_failure": 0},
+            "dynamic": _zero(run_again=1, same_call_elsewhere=1),
+            "static": _zero(repeated=1, refused=1),
         },
         "by_tool": {
-            "decompile": {"repeated": 0, "refused": 1, "run_again": 0, "retried_after_failure": 0},
-            "strings": {"repeated": 1, "refused": 0, "run_again": 1, "retried_after_failure": 0},
+            "decompile": _zero(refused=1),
+            "strings": _zero(repeated=1, run_again=1, same_call_elsewhere=1),
         },
     }
+
+
+def test_another_maker_s_identical_call_is_never_a_run_again() -> None:
+    """Two agents calling the same tool in parallel: whichever lands second is not charged."""
+    first = calls_record([_entry(1, args=ARGS), _entry(2, args=ARGS, agent="network")])
+    second = calls_record([_entry(1, args=ARGS, agent="network"), _entry(2, args=ARGS)])
+
+    assert first is not None and second is not None
+    assert (first["run_again"], first["same_call_elsewhere"]) == (0, 1)
+    assert (second["run_again"], second["same_call_elsewhere"]) == (0, 1)
+
+
+def test_a_retry_after_a_failure_is_the_platform_s_and_counted_apart() -> None:
+    ledger = [
+        _entry(1, args=ARGS, ok=False, error="the server did not answer"),
+        _entry(2, args=ARGS),
+        _entry(3, args=ARGS),
+    ]
+    record = calls_record(ledger)
+
+    assert record is not None
+    assert record["by_agent"]["static"] == _zero(run_again=1, retried_after_failure=1)
 
 
 def test_dict_rows_read_the_same() -> None:
@@ -65,45 +94,39 @@ def test_no_ledger_is_no_part_and_a_clean_one_counts_zeros() -> None:
     assert record is not None
     assert _calls_line(record) == (
         "Tool calls that found nothing new: 0 answered from an earlier identical call without "
-        "running, 0 refused by a guard with no tool run, and 0 run again by the agent with the "
-        "tool, server and arguments of an earlier call; besides them, 0 identical call(s) "
-        "retried after the earlier one failed."
+        "running, 0 refused by a guard with no tool run, 0 run again by the maker of an earlier "
+        "identical call and 0 identical to a call another maker ran first; besides them, 0 "
+        "retried after the maker's own earlier identical call failed."
     )
 
 
-def test_the_line_names_the_agents_and_tools() -> None:
+def test_the_line_names_who_made_each_call() -> None:
     record = efficiency_record(SimpleNamespace(), entries=LEDGER)
     assert record is not None
     assert _calls_line(record).endswith(
-        "(by agent: `static` 2, `dynamic` 1; by tool: `strings` 2, `decompile` 1)."
+        "By who made them — `dynamic`: 1 run again after its own earlier identical call, 1 "
+        "identical to a call another maker ran first; `static`: 1 answered from its earlier "
+        "identical call without running, 1 refused by a guard with no tool run (by tool: "
+        "`strings` 3, `decompile` 1)."
     )
 
 
-def test_the_count_is_linear_in_the_ledger() -> None:
-    def timed(scale: int) -> float:
-        ledger = [_entry(i, args={"n": i % 50}) for i in range(1, 500 * scale)]
-        start = time.perf_counter()
-        calls_record(ledger)
-        return time.perf_counter() - start
+def test_the_count_is_linear_in_the_ledger(monkeypatch: object) -> None:
+    import maljan.analysis.efficiency as efficiency
 
-    small = max(timed(1), 1e-4)
-    assert timed(10) < small * 40
+    def operations(scale: int) -> int:
+        counted = [0]
+        real = efficiency._field
 
+        def field(entry: object, name: str) -> object:
+            counted[0] += 1
+            return real(entry, name)
 
-def test_a_retry_after_a_failure_is_the_platform_s_and_counted_apart() -> None:
-    args = {"path": "a"}
-    ledger = [
-        _entry(1, args=args, ok=False, error="the server did not answer"),
-        _entry(2, args=args),
-        _entry(3, args=args),
-    ]
-    record = calls_record(ledger)
+        efficiency._field = field  # type: ignore[assignment]
+        try:
+            calls_record([_entry(i, args={"n": i % 50}) for i in range(1, 500 * scale)])
+        finally:
+            efficiency._field = real  # type: ignore[assignment]
+        return counted[0]
 
-    assert record is not None
-    assert (record["retried_after_failure"], record["run_again"]) == (1, 1)
-    assert record["by_tool"]["strings"] == {
-        "repeated": 0,
-        "refused": 0,
-        "run_again": 1,
-        "retried_after_failure": 1,
-    }
+    assert operations(10) <= operations(1) * 11

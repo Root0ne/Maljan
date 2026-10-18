@@ -25,8 +25,12 @@ field, a finding or an artifact (a finding's own artifacts included) in its
 ``calls`` is the tool calls that cost a step and found nothing new: the ones
 the repeat guard answered from an earlier identical call without running
 (``repeated``), the ones a guard answered with no tool run at all
-(``refused``), and the ones that ran again with the tool, server and arguments
-of an earlier call that ran (``run_again``). A read of a cleared answer
+(``refused``), the ones that ran again with the tool, server and arguments of
+an earlier call the same maker ran (``run_again``, or ``retried_after_failure``
+where that earlier call failed, the guard's own reason to serve it again), and
+the ones identical to a call another maker ran first
+(``same_call_elsewhere``). Each is filed under the maker of the call: the
+agent that made it, the triage pack (``pack``) or the pipeline otherwise. A read of a cleared answer
 (``read_evidence``) is a read, counted under ``rows_read``, not a repeat.
 
 ``rows_read`` is the ledger and pack rows each agent read back by id through
@@ -138,6 +142,14 @@ def _field(entry: Any, name: str) -> Any:
     return getattr(entry, name, None)
 
 
+def _maker(entry: Any) -> str:
+    """Who made the call: its agent, ``pack`` for the triage pack, ``pipeline`` otherwise."""
+    agent = str(_field(entry, "agent") or "").strip()
+    if agent:
+        return agent
+    return "pack" if _field(entry, "pack_step") is not None else "pipeline"
+
+
 def _entry_id(entry: Any) -> str:
     return str(_field(entry, "id") or "").strip().lower()
 
@@ -211,7 +223,7 @@ def uncited_record(
     by_agent: dict[str, int] = {}
     by_tool: dict[str, int] = {}
     for entry in uncited:
-        agent = str(_field(entry, "agent") or "") or "pipeline"
+        agent = _maker(entry)
         tool = str(_field(entry, "tool") or "")
         by_agent[agent] = by_agent.get(agent, 0) + 1
         by_tool[tool] = by_tool.get(tool, 0) + 1
@@ -246,7 +258,13 @@ def _call_key(entry: Any) -> str:
 # serves an identical call again when the earlier one failed (a retry after a
 # transient failure, its own stated reason, read from the ``ok`` of the entry it
 # repeats). ``run_again`` is every other identical call that ran: the agent's.
-_CALL_COUNTS = ("repeated", "refused", "run_again", "retried_after_failure")
+_CALL_COUNTS = (
+    "repeated",
+    "refused",
+    "run_again",
+    "retried_after_failure",
+    "same_call_elsewhere",
+)
 
 
 def calls_record(entries: Sequence[Any]) -> dict[str, Any] | None:
@@ -259,8 +277,10 @@ def calls_record(entries: Sequence[Any]) -> dict[str, Any] | None:
     totals = dict.fromkeys(_CALL_COUNTS, 0)
     by_agent: dict[str, dict[str, int]] = {}
     by_tool: dict[str, dict[str, int]] = {}
-    # Each call key's last run, and whether it failed.
-    last_failed: dict[str, bool] = {}
+    # Each maker's last run of each call, and whether it failed; and every
+    # call any maker ran.
+    last_failed: dict[tuple[str, str], bool] = {}
+    ran_by_anyone: set[str] = set()
     for entry in held:
         if _reads_again(entry):
             continue
@@ -270,13 +290,19 @@ def calls_record(entries: Sequence[Any]) -> dict[str, Any] | None:
             kind = "repeated"
         else:
             key = _call_key(entry)
-            earlier = last_failed.get(key)
-            last_failed[key] = _field(entry, "ok") is False
-            if earlier is None:
+            own = (_maker(entry), key)
+            earlier = last_failed.get(own)
+            last_failed[own] = _field(entry, "ok") is False
+            if earlier is not None:
+                kind = "retried_after_failure" if earlier else "run_again"
+            elif key in ran_by_anyone:
+                kind = "same_call_elsewhere"
+            else:
+                ran_by_anyone.add(key)
                 continue
-            kind = "retried_after_failure" if earlier else "run_again"
+            ran_by_anyone.add(key)
         totals[kind] += 1
-        agent = str(_field(entry, "agent") or "") or "pipeline"
+        agent = _maker(entry)
         tool = str(_field(entry, "tool") or "")
         for table, name in ((by_agent, agent), (by_tool, tool)):
             row = table.setdefault(name, dict.fromkeys(_CALL_COUNTS, 0))
@@ -306,7 +332,7 @@ def rows_read_record(entries: Sequence[Any]) -> dict[str, Any] | None:
         if not _reads_again(entry):
             continue
         reads += 1
-        agent = str(_field(entry, "agent") or "") or "pipeline"
+        agent = _maker(entry)
         tally = by_agent.setdefault(agent, {"reads": 0, "rows": set(), "pack_rows": set()})
         tally["reads"] += 1
         first = str(_field(entry, "repeated_of") or "").strip().lower()
@@ -783,18 +809,45 @@ def _summed(table: Any) -> dict[str, int]:
     }
 
 
+# How each count is said for one maker.
+_CALL_WORDS = {
+    "repeated": "answered from its earlier identical call without running",
+    "refused": "refused by a guard with no tool run",
+    "run_again": "run again after its own earlier identical call",
+    "retried_after_failure": "retried after its own earlier identical call failed",
+    "same_call_elsewhere": "identical to a call another maker ran first",
+}
+
+
+def _maker_label(name: str) -> str:
+    return {"pack": "the triage pack", "pipeline": "the pipeline"}.get(name, f"`{name}`")
+
+
 def _calls_line(calls: Mapping[str, Any]) -> str:
-    repeated, refused, again, retried = (_int(calls.get(kind)) for kind in _CALL_COUNTS)
+    counts = {kind: _int(calls.get(kind)) for kind in _CALL_COUNTS}
     line = (
-        f"Tool calls that found nothing new: {repeated:,} answered from an earlier identical "
-        f"call without running, {refused:,} refused by a guard with no tool run, and "
-        f"{again:,} run again by the agent with the tool, server and arguments of an earlier "
-        f"call; besides them, {retried:,} identical call(s) retried after the earlier one failed"
+        f"Tool calls that found nothing new: {counts['repeated']:,} answered from an earlier "
+        f"identical call without running, {counts['refused']:,} refused by a guard with no "
+        f"tool run, {counts['run_again']:,} run again by the maker of an earlier identical call "
+        f"and {counts['same_call_elsewhere']:,} identical to a call another maker ran first; "
+        f"besides them, {counts['retried_after_failure']:,} retried after the maker's own "
+        "earlier identical call failed"
     )
-    by_agent = _named_counts(_summed(calls.get("by_agent")))
-    if repeated + refused + again + retried and by_agent:
+    makers = calls.get("by_agent")
+    said = []
+    for name, row in makers.items() if isinstance(makers, Mapping) else ():
+        if not isinstance(row, Mapping):
+            continue
+        parts = [
+            f"{_int(row.get(kind)):,} {_CALL_WORDS[kind]}"
+            for kind in _CALL_COUNTS
+            if _int(row.get(kind))
+        ]
+        if parts:
+            said.append(f"{_maker_label(str(name))}: {', '.join(parts)}")
+    if said:
         by_tool = _named_counts(_summed(calls.get("by_tool")))
-        line += f" (by agent: {by_agent}; by tool: {by_tool})"
+        line += f". By who made them — {'; '.join(said)} (by tool: {by_tool})"
     return line + "."
 
 
