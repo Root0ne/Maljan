@@ -23,6 +23,7 @@ import sys
 import time
 import zipfile
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -415,6 +416,76 @@ class TestTheCap:
             tool._external_relationships("word/_rels/x.rels", io.BytesIO(body), 100, 1_000)
 
         assert str(refused.value) == tool.RELATIONSHIP_PART_PAST_CAP.format(left=100, cap=1_000)
+
+    @staticmethod
+    def _sizes(path: Path) -> list[tuple[str, int]]:
+        with zipfile.ZipFile(path) as archive:
+            rels = [i for i in archive.infolist() if "_rels/" in i.filename]
+            return [(i.filename, i.file_size) for i in rels]
+
+    @staticmethod
+    def _cap_after(sizes: list[tuple[str, int]], whole: int) -> int:
+        """A cap the first ``whole`` relationship parts fit and the next one crosses."""
+        return sum(size for _, size in sizes[:whole]) + sizes[whole][1] // 2
+
+    def test_parts_that_fail_at_their_end_are_counted_against_the_cap_too(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # Each part is a document that never closes: inflated whole, then refused.
+        extra = {
+            f"word/_rels/footer{n}.xml.rels": self._links(n, 6).removesuffix("</Relationships>")
+            for n in range(1, 5)
+        }
+        path = _document(tmp_path, extra)
+        sizes = self._sizes(path)
+        cap = self._cap_after(sizes, 4)
+        monkeypatch.setattr(tool, "RELATIONSHIP_PART_CAP", cap)
+        inflated: list[int] = []
+        real = tool._CountedStream.read
+
+        def counting(self: Any, size: int = -1) -> bytes:
+            chunk = real(self, size)
+            inflated.append(len(chunk))
+            return chunk
+
+        monkeypatch.setattr(tool._CountedStream, "read", counting)
+
+        answer = tool.document_info(str(path))
+
+        unread = answer["relationship_parts_unread"]
+        assert [row["part"] for row in unread] == [name for name, _ in sizes[2:]]
+        assert all(row["reason"].startswith("it is not well-formed XML") for row in unread[:2])
+        left = cap - sum(size for _, size in sizes[:4])
+        assert unread[2]["reason"] == tool.RELATIONSHIP_PART_OVER_CAP.format(
+            size=sizes[4][1], left=left, cap=cap
+        )
+        assert unread[3]["reason"] == tool.RELATIONSHIP_PART_AFTER_CAP.format(cap=cap)
+        # Inflation stopped at the cap: nothing of the last two parts was read.
+        assert sum(inflated) == sum(size for _, size in sizes[:4])
+
+    def test_members_failing_their_crc_are_counted_against_the_cap_too(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        extra = {f"word/_rels/footer{n}.xml.rels": self._links(n, 6) for n in range(1, 5)}
+        path = _document(tmp_path, extra)
+        with zipfile.ZipFile(path) as archive:
+            crcs = [i.CRC for i in archive.infolist() if i.filename.startswith("word/_rels/foot")]
+        blob = path.read_bytes()
+        for crc in crcs:
+            right = crc.to_bytes(4, "little")
+            blob = blob.replace(right, (crc ^ 1).to_bytes(4, "little"))
+        path.write_bytes(blob)
+        sizes = self._sizes(path)
+        cap = self._cap_after(sizes, 4)
+        monkeypatch.setattr(tool, "RELATIONSHIP_PART_CAP", cap)
+
+        answer = tool.document_info(str(path))
+
+        unread = answer["relationship_parts_unread"]
+        assert [row["part"] for row in unread] == [name for name, _ in sizes[2:]]
+        assert all("BadZipFile" in row["reason"] for row in unread[:2])
+        assert unread[3]["reason"] == tool.RELATIONSHIP_PART_AFTER_CAP.format(cap=cap)
+        assert "external_relationships" not in answer
 
     def test_a_part_read_whole_says_how_much_of_the_cap_it_took(self) -> None:
         body = self._links(1, 3).encode()

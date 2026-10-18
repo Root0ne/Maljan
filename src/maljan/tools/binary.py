@@ -1255,11 +1255,13 @@ def _ooxml_info(target: Path) -> dict[str, Any]:
                 unread.append({"part": info.filename, "reason": reason})
                 reached = True
                 continue
+            counted = _CountedStream(None)
+            damaged = 0
             try:
                 with archive.open(info) as stream:
-                    found, read = _external_relationships(info.filename, stream, left, cap)
+                    counted = _CountedStream(stream)
+                    found, _ = _external_relationships(info.filename, counted, left, cap)
                 external.extend(found)
-                left -= read
             except _RelationshipPartPastCap as exc:
                 unread.append({"part": info.filename, "reason": str(exc)})
                 reached = True
@@ -1268,6 +1270,16 @@ def _ooxml_info(target: Path) -> dict[str, Any]:
             except Exception as exc:  # noqa: BLE001 - a damaged member is stated, never raised
                 reason = RELATIONSHIP_MEMBER_UNREAD.format(error=f"{type(exc).__name__}: {exc}")
                 unread.append({"part": info.filename, "reason": reason})
+                # A damaged member may have inflated more than it handed
+                # out: zipfile checks the CRC once the last block is
+                # inflated and raises with it unreturned. It inflates no
+                # more than the member states, so that is what it costs.
+                damaged = info.file_size
+            finally:
+                # What the part inflated counts however it ended: a part
+                # refused at its end, or for an external entity, was
+                # inflated as far as it got all the same.
+                left = max(0, left - max(counted.inflated, damaged))
     lowered = [p.lower() for p in parts]
     answer: dict[str, Any] = {
         "format": "ooxml",
@@ -1287,6 +1299,19 @@ class _RelationshipPartUnread(Exception):
 
 class _RelationshipPartPastCap(_RelationshipPartUnread):
     """A relationship part that inflated past what the document had left of the cap."""
+
+
+class _CountedStream:
+    """An archive member's stream that counts the inflated bytes it hands out."""
+
+    def __init__(self, stream: Any) -> None:
+        self._stream = stream
+        self.inflated = 0
+
+    def read(self, size: int = -1) -> bytes:
+        chunk: bytes = self._stream.read(size)
+        self.inflated += len(chunk)
+        return chunk
 
 
 def _is_relationship_part(name: str) -> bool:
