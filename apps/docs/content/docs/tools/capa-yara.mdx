@@ -41,10 +41,15 @@ Both libraries are optional extras of the package, `capa` (flare-capa) and
 installs the `capa`, `yara` and `tools` extras. A missing library costs the
 provider its evidence, with one warning, rather than failing a job.
 
-capa runs in a child process of its own, under the budget above. It does not
-inherit the worker's environment: it gets the base environment the tool
-servers get, and its own run directory as its home. Its run directory is
-`<staging base>/job-…/capa/run-*`, in the job's own staging directory, so the
+capa runs in a child process of its own, under the budget above. The worker's
+environment is not passed to it: it gets the base environment the tool servers
+get, and its own run directory as its home. That keeps the worker's
+credentials out of its environment block only. The child runs as the worker's
+own user, so it can still read the worker's environment from
+`/proc/<worker pid>/environ`; running tools as a user of their own, apart from
+the worker, is the isolation work that closes that, and it is not done yet.
+
+Its run directory is `<staging base>/job-…/capa/run-*`, in the job's own staging directory, so the
 job's teardown removes it however the run ended; a run with no job (a script,
 an analysis server started by hand) gets a private temporary directory of its
 own (`maljan-capa-*`), removed when the run ends. It dies with the process that
@@ -77,7 +82,7 @@ matches no rule in it:
   backend.
 - A workstation gets the signatures at its next `make setup` or
   `make external`. capa's answers there then move against runs made before
-  it, the haiku4 baseline among them.
+  it.
 
 To run without library identification, set `core.static.capa.signatures_dir`
 to an empty value or to a path with no directory there. capa runs as before,
