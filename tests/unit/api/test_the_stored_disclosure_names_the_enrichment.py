@@ -10,10 +10,12 @@ built stores why, so it is told apart from a run stored before the block.
 
 from __future__ import annotations
 
+import json
 import uuid
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import httpx
 import pytest
 
 from app.worker.analysis_worker import _report_inputs, enrichment_plan
@@ -555,3 +557,58 @@ async def test_a_disclosure_entry_written_during_the_lookups_survives_the_write(
     assert result["status"] == "ok"
     for record in _records(row):
         assert sorted(r["source"] for r in record["enrichment"]["asked"]) == ["misp", "rdap"]
+
+
+@pytest.mark.asyncio
+async def test_a_sandbox_context_shell_takes_the_live_record_as_dev_stores_it() -> None:
+    """An older report's reputation holds sandbox context and no source; the live record wins."""
+    from app.worker.enrich_worker import enrichment_laid_over
+    from maljan.enrichment.declared import ReadySource, effective_sources
+    from maljan.enrichment.orchestrator import enrich_malware_report
+
+    shell = {"hostname": "c2.example.com", "contacted_ports": [443]}
+    before = {"network": {"domains": [], "ips": [{"address": "1.2.3.4", "reputation": shell}]}}
+    source = effective_sources({"virustotal": {"rate_limit_seconds": 0.0}})["virustotal"]
+    ready = ReadySource(key="virustotal", source=source, credential="-".join(("vt", "k")))
+
+    def _answer(request: httpx.Request) -> httpx.Response:
+        stats = {"malicious": 9, "suspicious": 0}
+        return httpx.Response(200, json={"data": {"attributes": {"last_analysis_stats": stats}}})
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(_answer)) as http:
+        with patch("maljan.enrichment.orchestrator.WhoisClient") as whois:
+            whois.return_value.asn_lookup = AsyncMock(return_value=None)
+            whois.return_value.geoip = MagicMock(return_value=None)
+            enriched = await enrich_malware_report(
+                json.loads(json.dumps(before)), sources=[ready], http_client=http
+            )
+    # Dev wrote the enriched copy whole: its row is the outcome to match.
+    (dev_row,) = enriched["network"]["ips"]
+    assert dev_row["reputation"]["source"] == "virustotal"
+
+    # Meanwhile another writer added an entry to the stored row's record.
+    stored = json.loads(json.dumps(before))
+    stored["run_summary"] = {"disclosure": {"models": [], "kept": "concurrent"}}
+    merged = enrichment_laid_over(stored, enriched)
+
+    (row,) = merged["network"]["ips"]
+    assert row == dev_row
+    assert row["reputation"]["hostname"] == "c2.example.com"
+    assert merged["run_summary"]["disclosure"]["kept"] == "concurrent"
+
+
+def test_a_successful_stored_record_is_kept_over_the_live_one() -> None:
+    from app.worker.enrich_worker import enrichment_laid_over
+
+    kept = {"source": "abuseipdb", "abuse_confidence": 80}
+    stored = {"network": {"ips": [{"address": "1.2.3.4", "reputation": kept, "asn": "AS1 X"}]}}
+    live = {"source": "virustotal", "malicious": 9}
+    enriched = {
+        "network": {
+            "ips": [{"address": "1.2.3.4", "reputation": live, "asn": "AS2 Y", "geo": "US"}]
+        }
+    }
+
+    (row,) = enrichment_laid_over(stored, enriched)["network"]["ips"]
+
+    assert (row["reputation"], row["asn"], row["geo"]) == (kept, "AS1 X", "US")

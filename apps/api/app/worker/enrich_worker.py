@@ -533,10 +533,14 @@ def enrichment_laid_over(stored: dict[str, Any], enriched: dict[str, Any]) -> di
     ``enriched`` is the copy this job read before its lookups, with what they
     found. Only what an enrichment writes is taken from it, row by row
     (reputation, ASN, geography, the suspicion flag it raises, and the similar
-    samples), and only where the stored row has none, so anything written to
-    the report during the lookups, another enrichment's results included, is
-    kept.
+    samples), and only where the stored row has none by the orchestrator's own
+    test (a reputation without a successful record, as an older report's
+    sandbox-context shell, takes the live one, as dev stores it), so anything
+    written to the report during the lookups, another enrichment's results
+    included, is kept.
     """
+    from maljan.enrichment.orchestrator import _has_successful_rep
+
     out = dict(stored)
     network = dict(out.get("network") or {})
     found = enriched.get("network") or {}
@@ -554,8 +558,14 @@ def enrichment_laid_over(stored: dict[str, Any], enriched: dict[str, Any]) -> di
             mine = dict(row)
             other = theirs.get(str(row.get(field_name)))
             if other is not None:
+                # The orchestrator's own tests of what is already done: a
+                # reputation counts only as a successful record (an earlier
+                # shell holding sandbox context does not), and the ASN and
+                # the geography count when they hold a value.
+                if not _has_successful_rep(mine) and _has_successful_rep(other):
+                    mine["reputation"] = other["reputation"]
                 for name in _ENRICHED_FIELDS:
-                    if not mine.get(name) and other.get(name):
+                    if name != "reputation" and not mine.get(name) and other.get(name):
                         mine[name] = other[name]
                 if other.get("is_suspicious"):
                     mine["is_suspicious"] = True
