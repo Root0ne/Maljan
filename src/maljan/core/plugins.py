@@ -259,7 +259,9 @@ def install_allow_list(value: Any) -> None:
         if entries == _STATE.allowed:
             return
         _STATE.allowed = entries
-    logger.info("The stored plugin allow-list names %s.", ", ".join(sorted(entries)) or "no plugin")
+    # The count only: each plugin is named where it is loaded, and the list
+    # itself is read from the settings store, which CodeQL treats as secret.
+    logger.info("The stored plugin allow-list names %d plugin(s).", len(entries))
 
 
 def allow_list() -> frozenset[str]:
