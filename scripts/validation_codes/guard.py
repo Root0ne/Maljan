@@ -3,7 +3,8 @@
 Three findings, each named so a test can show it failing on its own:
 
 * ``stale``: the committed page is not what the source gives;
-* ``dead``: a code nothing raises. A code kept because stored runs carry it is
+* ``dead``: a code nothing raises: no finding the platform builds, in code
+  something calls, carries it. A code kept because stored runs carry it is
   bound under a ``LEGACY_`` name whose comment says so; that is the only way
   out, and it is in the code, not in a list here. A kept code that is still
   raised, or kept with no comment saying why, is dead too;
@@ -54,11 +55,17 @@ def check(register: Register, rendered: str, committed: str | None) -> Findings:
                     "saying which stored runs carry it and what reads it"
                 )
         elif not code.raised_at:
-            named = ", ".join(code.constants or code.collections)
+            named = ", ".join(code.constants or code.collections) or "a literal"
+            also = ""
+            if code.passes_on:
+                also += f"; it is only passed on, at {', '.join(code.passes_on)}"
+            if code.uncalled:
+                where = ", ".join(code.uncalled)
+                also += f"; it is built into a finding only where nothing calls it, at {where}"
             dead.append(
-                f"`{code.code}` ({named}): nothing raises it. Remove it, or bind it under a "
-                f"{KEPT_PREFIX} name whose comment says which stored runs carry it and what "
-                "reads it"
+                f"`{code.code}` ({named}): nothing raises it{also}. Remove it, or bind it "
+                f"under a {KEPT_PREFIX} name whose comment says which stored runs carry it and "
+                "what reads it"
             )
         if code.tests or (code.kept_by and code.console_tests):
             continue

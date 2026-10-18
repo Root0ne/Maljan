@@ -3,6 +3,7 @@
     uv run python scripts/validation_codes/run.py            # write the page
     uv run python scripts/validation_codes/run.py --check    # write nothing; exit 1 on a finding
     uv run python scripts/validation_codes/run.py --stdout   # print the page
+    uv run python scripts/validation_codes/run.py --tests [CODE ...]   # the tests naming each code
 
 The page is ``apps/docs/content/docs/validation-codes.mdx``. The register is read
 from the source alone (``scripts/validation_codes/register.py``: ``ast`` and
@@ -37,10 +38,32 @@ def main(argv: list[str] | None = None) -> int:
         "--check", action="store_true", help="write nothing; exit 1 when the tree has a finding"
     )
     action.add_argument("--stdout", action="store_true", help="print the page instead")
+    action.add_argument(
+        "--tests",
+        nargs="*",
+        metavar="CODE",
+        help="print the tests naming each code (or the codes named), and write nothing",
+    )
     args = parser.parse_args(argv)
 
     root = args.root.resolve()
     register = build(root)
+    if args.tests is not None:
+        wanted = set(args.tests)
+        for code in register.codes:
+            if wanted and code.code not in wanted:
+                continue
+            print(code.code)
+            for test in code.tests:
+                print(f"  {test}")
+            for test in code.console_tests:
+                print(f"  {test} (console)")
+            if not code.tests and not code.console_tests:
+                print("  no test names it")
+        unknown = sorted(wanted - {code.code for code in register.codes})
+        for code in unknown:
+            print(f"{code}: not a code the register knows")
+        return 1 if unknown else 0
     text = render(register)
     if args.stdout:
         sys.stdout.write(text)

@@ -9,7 +9,7 @@ COMMAND = "uv run python scripts/validation_codes/run.py"
 TITLE = "Validation codes"
 DESCRIPTION = (
     "Every code the platform's validators file a finding under: where it is raised, what it "
-    "means, and the tests and pages that name it."
+    "means, and the pages that name it."
 )
 
 HEADER = f"""This page is generated from the source by
@@ -22,25 +22,32 @@ a retry turn shows the producer, the key of `run_summary.validation.by_code`, an
 the `code` of every unresolved row. The register reads the source with Python's
 `ast` module and never imports it. A string counts as a code only in a code
 position (the value of a `code=` keyword, the value assigned to a name ending in
-`_CODE`, a member of a set or tuple bound to a name ending in `_CODES`) and only
-in the form `family.name`. The families are the ones the source uses.
+`_CODE`, a member of a set or tuple bound to a name ending in `_CODES`, or the
+code slot of a finding the platform builds) and only in the form `family.name`.
+The families are the ones the source uses.
 
-A code is raised where its value is used: given as a `code=` keyword, passed,
-returned or stored. A name it is assigned to is followed, and so are a loop over
-a constant collection, a conditional between constants, a lookup in a constant
-mapping and a parameter fed by constants at every call site. Comparing a code,
-listing it in a set or tuple of codes, or naming it in formatted text reads it,
-and is not a raise site. Places are named `module:function`, without line
-numbers, so an edit elsewhere in a file leaves this page as it is.
+A code is raised only where the platform puts it into a finding it emits: a call
+building an object of a class whose instances carry a `code` (with `code=` or in
+its positional place), a dict with a `"code"` key, a tuple shaped like such a
+class, a call to a factory whose parameter reaches one of those, or a callback
+the function was handed; and only in code something calls. Sites that store or
+forward an existing code are listed as passing it on. Comparing a code, looking
+up or counting by it, testing a string against it, logging it, filtering by it,
+a default that reaches no finding and formatted text read it, and are not
+listed. A name, a loop over constants, a conditional, a constant mapping and a
+parameter fed by constants at every call site are followed. Places are named
+`module:function`, without line numbers, so an edit elsewhere in a file leaves
+this page as it is.
 
-A code's meaning is the comment or docstring on its constant; where there is
-none, the message its first raise site passes, with each value it fills in
-written `<name>`. Its tests are the Python tests that name it, in a string other
-than a docstring or by its constant; a code the platform raises needs one. The
-console's unit tests that name it in a string are listed apart. A code bound
-under a `{KEPT_PREFIX}` name is one nothing raises any more and stored runs
-still carry; the comment on that name says what reads it, and a test where it
-is read names it."""
+A code's meaning is the comment or docstring on its own constant; where there is
+none, the message a raise site passes, with each value it fills in written
+`<name>`; where there is neither, the comment written over the group of
+constants it belongs to, marked as such. A code counts as tested when a Python
+test names it, in a string other than a docstring or by its constant; that does
+not prove the test makes the platform raise it. The tests are not listed here:
+`{COMMAND} --tests` prints them. A code bound under a `{KEPT_PREFIX}` name is
+one nothing raises any more and stored runs still carry; the comment on that
+name says what reads it."""
 
 
 def render(register: Register) -> str:
@@ -90,18 +97,29 @@ def _counted(count: int, one: str, many: str) -> str:
 def _entry(code: Code) -> list[str]:
     lines = [f"### `{code.code}`", ""]
     paragraphs = [" ".join(part.split()) for part in code.meaning.split("\n\n") if part.strip()]
-    if not paragraphs:
-        lines += ["No comment or message in the source says what it means.", ""]
-    elif code.meaning_from:
-        quoted = " ".join(paragraphs)
+    quoted = _inline(" ".join(paragraphs))
+    if code.meaning_kind == "message":
         lines += [
-            f"No comment names its meaning; the message at `{code.meaning_from}` reads: "
-            f'"{_inline(quoted)}"',
+            f'No comment names its meaning; the message at `{code.meaning_from}` reads: "{quoted}"',
             "",
         ]
-    else:
+    elif code.meaning_kind == "group":
+        lines += [
+            "No comment of its own names its meaning; the comment over the group of constants "
+            f'it belongs to, on `{code.meaning_from}`, reads: "{quoted}"',
+            "",
+        ]
+    elif code.meaning_kind == "pointer":
+        lines += [
+            "No comment names its meaning, and the message at "
+            f"`{code.meaning_from}` is made only of values it fills in: see the message there.",
+            "",
+        ]
+    elif paragraphs:
         for paragraph in paragraphs:
             lines += [_block(_inline(paragraph)), ""]
+    else:
+        lines += ["No comment or message in the source says what it means.", ""]
     if code.raised_at:
         lines.append(f"- **Raised at** {_spans(code.raised_at)}")
     elif code.kept_by:
@@ -110,15 +128,16 @@ def _entry(code: Code) -> list[str]:
         )
     else:
         lines.append("- **Raised at** nothing")
+    if code.passes_on:
+        lines.append(f"- **Passes on** {_spans(code.passes_on)}")
+    if code.uncalled:
+        lines.append(f"- **Raised where nothing calls it** {_spans(code.uncalled)}")
     if code.constants:
         lines.append(f"- **Constant** {_spans(code.constants)}")
     elif code.collections:
         lines.append(f"- **Listed in** {_spans(code.collections)}")
     else:
         lines.append("- **Constant** none: the code is written as a literal")
-    lines.append(f"- **Tests** {_spans(code.tests)}" if code.tests else "- **Tests** none")
-    if code.console_tests:
-        lines.append(f"- **Console tests** {_spans(code.console_tests)}")
     if code.docs:
         pages = ", ".join(f"[{_inline(title)}]({route})" for route, title in code.docs)
         lines.append(f"- **Docs** {pages}")
@@ -139,7 +158,8 @@ def _unresolved(items: tuple[Unresolved, ...]) -> list[str]:
         ]
     lines += [
         "Each of these is a code position whose value the register could not follow to a "
-        "literal or a constant. It may raise a code this page does not list.",
+        "literal or a constant: mostly a finding built from a code it was handed, out of a "
+        "row or another finding. It may carry a code this page does not list.",
         "",
     ]
     for item in items:

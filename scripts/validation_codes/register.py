@@ -4,24 +4,38 @@ A validation code is the ``family.name`` string a validator files a finding
 under (``isr.empty_evidence``, ``verdict.fallback``). A string is one only in a
 code position — the value of a ``code=`` keyword, the value assigned to a name
 ending in ``_CODE``, a member of a set or tuple bound to a name ending in
-``_CODES`` — and only in that shape. The family is the part before the dot, so
-the families are whatever the source uses: ``os.path`` in an import, a host
-name in a list or ``"report.json"`` in a call is never a code.
+``_CODES``, or the code slot of a finding the platform builds (below) — and only
+in that shape. The family is the part before the dot, so the families are
+whatever the source uses: ``os.path`` in an import, a host name in a list or
+``"report.json"`` in a call is never a code.
 
-A code is raised where its value is used: given as a ``code=`` keyword, passed,
-returned, stored, or assigned to anything but a plain name. A plain name it is
-assigned to is followed, and so are a loop over a constant collection, a
-conditional or ``or`` between constants, ``str()`` of one, a lookup in a
-constant mapping, an import, and a parameter fed by constants at every call
-site (or by its default where a call leaves it out). A comparison, a set or
-tuple of codes (something codes are looked up in) and formatted text read a
-code and are not raise sites. A ``code=`` value that cannot be followed is kept
-as an unresolved site with the expression seen; it is never dropped.
+A code is *raised* only where the platform puts it into a finding it emits:
+
+* a call that builds a finding: a class whose instances carry ``code`` (a
+  ``code`` field or a ``code`` parameter of ``__init__``/``__new__``), with the
+  code given as ``code=`` or in that parameter's positional place;
+* a dict display with a ``"code"`` key, and a tuple display shaped like a
+  finding class that is itself a tuple (the code in the same place);
+* a call to a factory: a platform function one of whose parameters reaches such
+  a slot (found by following every parameter through the code, not by name);
+* a call to a callback the function was handed: the code leaves for a listener
+  the register cannot see;
+
+and only inside code something calls. A code stored, forwarded or returned
+anywhere else *passes on*, and is listed apart; a comparison, a lookup or count
+keyed by it, a string test, a log line, a filter, a default that reaches no
+slot and formatted text *read* it and are not listed. A value is followed
+through plain names, a loop over a constant collection, a conditional or ``or``,
+``str()``, a lookup in a constant mapping, imports, and a parameter fed by
+constants at every call site (or by its default). A code slot whose value cannot
+be followed is kept as an unresolved site with the expression seen, and so is a
+code-shaped string of a known family in a position that is neither a code
+position nor a read; neither is dropped.
 
 Nothing is imported: the source is parsed with ``ast`` and its comments read
-with ``tokenize``, so the register is the same on a machine where half the
-platform's dependencies are missing. One parse per file and memoised
-resolution keep the work linear in the size of the tree.
+with ``tokenize``. In a git checkout only tracked files are read, so the page is
+the same here and in CI. One parse per file, memoised resolution and a
+worklist over parameters keep the work linear in the size of the tree.
 """
 
 from __future__ import annotations
@@ -31,6 +45,8 @@ import inspect
 import io
 import os
 import string
+import subprocess
+import sys
 import tokenize
 from collections.abc import Callable, Iterable, Iterator
 from dataclasses import dataclass, field
@@ -50,9 +66,16 @@ PAGE = f"{DOCS_DIR}/validation-codes.mdx"
 # a stored run still carries; the comment on that binding says what reads it.
 KEPT_PREFIX = "LEGACY_"
 
-# The keywords a raise site's text is read from when a code's constant carries
-# no comment.
+# The keywords and dict keys a finding's text is read from.
 TEXT_KEYWORDS = ("message", "feedback")
+
+# How many names a value is followed through before it is called too deep to
+# follow. Counted by the register itself, so the answer does not depend on how
+# deep the caller's own stack already is.
+MAX_CHAIN = 1000
+
+# The methods that store a value in a container: a code handed to one passes on.
+STORING_METHODS = ("append", "appendleft", "add", "insert", "extend", "update", "setdefault")
 
 _PRAGMAS = ("noqa", "type:", "pragma", "pylint:", "fmt:", "mypy:", "pyright:", "ruff:", "isort:")
 _COLLECTION_CALLS = ("frozenset", "set", "tuple", "list", "sorted")
@@ -81,13 +104,19 @@ class Code:
 
     code: str
     raised_at: tuple[str, ...]
+    # Sites that store or forward the code without filing it, and sites that
+    # would raise it but sit in code nothing calls.
+    passes_on: tuple[str, ...]
+    uncalled: tuple[str, ...]
     constants: tuple[str, ...]
     collections: tuple[str, ...]
     meaning: str
-    # The raise site whose message the meaning is, or "" for a constant's comment.
+    # comment, message, group, pointer, or "" when nothing says.
+    meaning_kind: str
+    # The constant or site the meaning was read from.
     meaning_from: str
     # The Python tests naming the code or its constant, and the console's unit
-    # tests naming it as a string.
+    # tests naming it in a string. Kept in memory for the guard and --tests.
     tests: tuple[str, ...]
     console_tests: tuple[str, ...]
     # ``(route, title)`` of every docs page naming the code.
@@ -139,7 +168,7 @@ class Value:
 NOTHING = Value()
 NOT_A_STRING = Value(other=True)
 _BUSY = Value(why="a name defined through itself")
-_TOO_DEEP = Value(why="a chain of names too long to follow")
+_TOO_DEEP = Value(why=f"a chain of more than {MAX_CHAIN} names")
 
 
 # ---------------------------------------------------------------------------
@@ -176,6 +205,8 @@ class Module:
     trailing: dict[int, str]
     # The string statement right after an assignment, by the assignment's id.
     docstrings: dict[int, str]
+    # Every statement's body and place in it, by the statement's id.
+    places: dict[int, tuple[list[ast.stmt], int]]
     scope: Scope | None = None
 
 
@@ -189,16 +220,26 @@ class Scope:
     bindings: dict[str, list[Binding]] = field(default_factory=dict)
     declared: dict[str, str] = field(default_factory=dict)
     params: dict[str, Param] = field(default_factory=dict)
+    # The positional parameters in order, and the star parameters by kind.
+    order: list[str] = field(default_factory=list)
+    stars: dict[str, str] = field(default_factory=dict)
     star_imports: list[str] = field(default_factory=list)
+    decorators: list[str] = field(default_factory=list)
     # The calls that name this function directly, with the scope each is in.
     calls: list[tuple[ast.Call, Scope]] = field(default_factory=list)
     # Named other than as a callee: passed, stored or returned, so its callers
     # are not all known.
     escaped: bool = False
+    # Named anywhere outside its own body.
+    referenced: bool = False
 
     @property
     def site(self) -> str:
         return f"{self.module.name}:{self.qualname}"
+
+    @property
+    def name(self) -> str:
+        return self.qualname.rpartition(".")[2]
 
 
 @dataclass(frozen=True, eq=False)
@@ -208,6 +249,20 @@ class Ref:
     kind: str
     scope: Scope | None = None
     name: str = ""
+
+
+@dataclass(frozen=True)
+class FindingType:
+    """A platform class whose instances carry a code, and where the code goes."""
+
+    scope: Scope
+    # The positional places of the code and of its text; None where keyword only.
+    code_index: int | None
+    text_index: int | None
+    text_name: str
+    # The number of items, for a finding class that is a tuple.
+    arity: int | None
+    skip_first: bool
 
 
 def module_name(path: str) -> tuple[str, bool]:
@@ -224,7 +279,25 @@ def module_name(path: str) -> tuple[str, bool]:
     return ".".join(parts), package
 
 
-def _files(root: Path, base: str, suffixes: tuple[str, ...]) -> Iterator[Path]:
+def tracked_files(root: Path) -> set[str] | None:
+    """The files git tracks under ``root``, or None where ``root`` is not a git checkout."""
+    if not (root / ".git").exists():
+        return None
+    try:
+        listed = subprocess.run(
+            ["git", "-C", str(root), "ls-files", "-z"],
+            capture_output=True,
+            check=True,
+            timeout=120,
+        ).stdout
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return {part.decode("utf-8") for part in listed.split(b"\0") if part}
+
+
+def _files(
+    root: Path, base: str, suffixes: tuple[str, ...], tracked: set[str] | None
+) -> Iterator[Path]:
     """The files under ``base`` with one of ``suffixes``, in a fixed order."""
     folder = root / base
     if not folder.is_dir():
@@ -236,8 +309,11 @@ def _files(root: Path, base: str, suffixes: tuple[str, ...]) -> Iterator[Path]:
             if not name.startswith(".") and name not in ("node_modules", "__pycache__")
         )
         for name in sorted(names):
-            if name.endswith(suffixes):
-                yield Path(directory) / name
+            path = Path(directory) / name
+            if name.endswith(suffixes) and (
+                tracked is None or path.relative_to(root).as_posix() in tracked
+            ):
+                yield path
 
 
 def _comments(source: str) -> tuple[dict[int, str], dict[int, str]]:
@@ -254,21 +330,30 @@ def _comments(source: str) -> tuple[dict[int, str], dict[int, str]]:
     return whole, trailing
 
 
-def _docstrings(tree: ast.Module) -> dict[int, str]:
-    found: dict[int, str] = {}
+def _bodies(
+    tree: ast.Module,
+) -> tuple[dict[int, str], dict[int, tuple[list[ast.stmt], int]]]:
+    """Each assignment's docstring, and every statement's body and place in it."""
+    docstrings: dict[int, str] = {}
+    places: dict[int, tuple[list[ast.stmt], int]] = {}
     for node in ast.walk(tree):
-        body = getattr(node, "body", None)
-        if not isinstance(body, list):
-            continue
-        for statement, following in zip(body, body[1:], strict=False):
-            if (
-                isinstance(statement, (ast.Assign, ast.AnnAssign))
-                and isinstance(following, ast.Expr)
-                and isinstance(following.value, ast.Constant)
-                and isinstance(following.value.value, str)
-            ):
-                found[id(statement)] = inspect.cleandoc(following.value.value)
-    return found
+        for name in ("body", "orelse", "finalbody"):
+            body = getattr(node, name, None)
+            if not isinstance(body, list):
+                continue
+            for index, statement in enumerate(body):
+                if not isinstance(statement, ast.stmt):
+                    continue
+                places[id(statement)] = (body, index)
+                following = body[index + 1] if index + 1 < len(body) else None
+                if (
+                    isinstance(statement, (ast.Assign, ast.AnnAssign))
+                    and isinstance(following, ast.Expr)
+                    and isinstance(following.value, ast.Constant)
+                    and isinstance(following.value.value, str)
+                ):
+                    docstrings[id(statement)] = inspect.cleandoc(following.value.value)
+    return docstrings, places
 
 
 def _prose(lines: Iterable[str]) -> str:
@@ -306,6 +391,23 @@ def _never_a_string(annotation: ast.expr | None) -> bool:
     return bool(names & _NON_STRING_TYPES) and names <= allowed
 
 
+def _is_str(annotation: ast.expr | None) -> bool:
+    return isinstance(annotation, ast.Name) and annotation.id == "str"
+
+
+def _position_name(statement: ast.stmt) -> str | None:
+    """The ``_CODE`` or ``_CODES`` name a statement assigns, if it assigns one."""
+    if isinstance(statement, ast.Assign) and len(statement.targets) == 1:
+        target: ast.expr = statement.targets[0]
+    elif isinstance(statement, ast.AnnAssign) and statement.value is not None:
+        target = statement.target
+    else:
+        return None
+    if isinstance(target, ast.Name) and target.id.endswith(("_CODE", "_CODES")):
+        return target.id
+    return None
+
+
 _SPLAT = object()
 _DEFAULT = object()
 
@@ -324,6 +426,16 @@ def _argument(call: ast.Call, param: Param) -> object:
     if any(keyword.arg is None for keyword in call.keywords):
         return _SPLAT
     return _DEFAULT
+
+
+def _decorator_name(node: ast.expr) -> str:
+    if isinstance(node, ast.Call):
+        node = node.func
+    if isinstance(node, ast.Name):
+        return node.id
+    if isinstance(node, ast.Attribute):
+        return node.attr
+    return ""
 
 
 class _ScopeBuilder(ast.NodeVisitor):
@@ -379,11 +491,13 @@ class _ScopeBuilder(ast.NodeVisitor):
         for index, arg in enumerate(positional):
             default = args.defaults[index - first_default] if index >= first_default else None
             scope.params[arg.arg] = Param(arg.arg, index, default, arg.annotation)
+            scope.order.append(arg.arg)
         for arg, keyword_default in zip(args.kwonlyargs, args.kw_defaults, strict=True):
             scope.params[arg.arg] = Param(arg.arg, None, keyword_default, arg.annotation)
-        for star in (args.vararg, args.kwarg):
+        for star, kind in ((args.vararg, "args"), (args.kwarg, "kwargs")):
             if star is not None:
                 scope.params[star.arg] = Param(star.arg, None, None, star.annotation, star=True)
+                scope.stars[kind] = star.arg
 
     def _outer_parts(self, args: ast.arguments) -> None:
         """Defaults and annotations: they run in the scope the definition is in."""
@@ -407,6 +521,7 @@ class _ScopeBuilder(ast.NodeVisitor):
         if node.returns is not None:
             self.visit(node.returns)
         child = self._enter(node, "function", node.name)
+        child.decorators = [_decorator_name(d) for d in node.decorator_list]
         self._bind(node.name, "def", child, node)
         self._params(node.args, child)
         self._body(child, node.body)
@@ -423,6 +538,7 @@ class _ScopeBuilder(ast.NodeVisitor):
         for part in [*node.decorator_list, *node.bases, *node.keywords]:
             self.visit(part)
         child = self._enter(node, "class", node.name)
+        child.decorators = [_decorator_name(d) for d in node.decorator_list]
         self._bind(node.name, "def", child, node)
         self._body(child, node.body)
 
@@ -547,14 +663,22 @@ class _ScopeBuilder(ast.NodeVisitor):
 @dataclass
 class _Record:
     raised: set[str] = field(default_factory=set)
+    passes_on: set[str] = field(default_factory=set)
+    uncalled: set[str] = field(default_factory=set)
     constants: set[str] = field(default_factory=set)
     collections: set[str] = field(default_factory=set)
-    # ``(sort key, text, the site a message came from)``; the lowest key wins.
-    meanings: list[tuple[tuple[Any, ...], str, str]] = field(default_factory=list)
+    # ``(sort key, text, kind, source)``; the lowest key wins.
+    meanings: list[tuple[tuple[Any, ...], str, str, str]] = field(default_factory=list)
     kept_by: dict[str, str] = field(default_factory=dict)
     tests: set[str] = field(default_factory=set)
     console_tests: set[str] = field(default_factory=set)
     docs: set[tuple[str, str]] = field(default_factory=set)
+
+
+# How strongly a parameter is used: read only, passed on, or put in a code slot.
+_READ_LEVEL, _PASS_LEVEL, _SLOT_LEVEL = 0, 1, 2
+
+_Key = tuple[int, str]
 
 
 class Reader:
@@ -562,22 +686,49 @@ class Reader:
 
     def __init__(self, root: Path) -> None:
         self.root = root
+        self.tracked = tracked_files(root)
         self.modules: dict[str, Module] = {}
         self.scopes: dict[int, Scope] = {}
         self.positions: list[tuple[ast.stmt, str, ast.expr, Scope]] = []
         self.keywords: list[tuple[ast.Call, ast.keyword, Scope]] = []
         self.codes: dict[str, _Record] = {}
         self.unresolved: set[Unresolved] = set()
+        self.attribute_names: set[str] = set()
+        self.types: dict[int, FindingType | None] = {}
+        self.shapes: dict[int, FindingType] = {}
         self._memo: dict[tuple[str, int, str], Value] = {}
-        self._carried: dict[tuple[int, str], tuple[str, frozenset[str]]] = {}
+        self._carried: dict[_Key, tuple[str, frozenset[str]]] = {}
+        self._followed: dict[_Key, Ref] = {}
+        self._chains: dict[_Key, list[tuple[str, str, str, str]]] = {}
+        self._position_scopes: dict[int, Scope] | None = None
+        self._attached: dict[int, str] = {}
+        self._groups: dict[int, tuple[str, str]] = {}
+        self._grouped: set[int] = set()
         self._returned: dict[int, str] = {}
+        self._called: dict[int, bool] = {}
+        self._fed: dict[_Key, Value] = {}
         self._code_set: frozenset[str] | None = None
+        self._depth = 0
+        # The parameter flow graph: each name's own strongest use, the names whose
+        # use flows back into it, and the settled levels.
+        self._base: dict[_Key, int] = {}
+        self._backward: dict[_Key, list[_Key]] = {}
+        self._levels: dict[_Key, int] = {}
+        self._deferred_loads: list[tuple[Ref, Scope, str]] = []
+        self._deferred_literals: list[tuple[str, Scope, str]] = []
+        self._deferred_known: list[tuple[ast.expr, Scope, str, ast.expr | None]] = []
+        # What each slot target is seen to receive, and the unresolved sites
+        # waiting on it: a target that receives only strings not shaped as
+        # codes files another kind of code (a team rule, a tool error).
+        self._shaped: set[tuple[Any, ...]] = set()
+        self._unshaped: set[tuple[Any, ...]] = set()
+        self._pending: list[tuple[tuple[Any, ...], Unresolved]] = []
 
     # -- reading -------------------------------------------------------------
 
     def read_platform(self) -> None:
         for base in PLATFORM_DIRS:
-            for path in _files(self.root, base, (".py",)):
+            for path in _files(self.root, base, (".py",), self.tracked):
                 rel = path.relative_to(self.root).as_posix()
                 name, package = module_name(rel)
                 if name in self.modules:
@@ -585,8 +736,9 @@ class Reader:
                 source = path.read_text(encoding="utf-8")
                 tree = ast.parse(source, filename=rel)
                 whole, trailing = _comments(source)
+                docstrings, places = _bodies(tree)
                 self.modules[name] = Module(
-                    name, rel, package, tree, whole, trailing, _docstrings(tree)
+                    name, rel, package, tree, whole, trailing, docstrings, places
                 )
         for module in self.modules.values():
             builder = _ScopeBuilder(self, module)
@@ -642,17 +794,26 @@ class Reader:
         return Ref("unknown", None, f"{module}.{name}")
 
     def follow(self, ref: Ref) -> Ref:
-        """Through names that are only an import of another name."""
-        seen: set[tuple[int, str]] = set()
+        """Through names that are only an import of another name, memoised along the way."""
+        passed: list[_Key] = []
         while ref.kind == "binding" and ref.scope is not None:
-            bindings = ref.scope.bindings.get(ref.name, [])
+            holder = ref.scope
+            key = (id(holder), ref.name)
+            known = self._followed.get(key)
+            if known is not None:
+                ref = known
+                break
+            bindings = holder.bindings.get(ref.name, [])
             if len(bindings) != 1 or bindings[0].kind != "import":
-                return ref
-            key = (id(ref.scope), ref.name)
-            if key in seen:
-                return Ref("unknown", None, ref.name)
-            seen.add(key)
+                self._followed[key] = ref
+                break
+            if key in passed:
+                ref = Ref("unknown", None, ref.name)
+                break
+            passed.append(key)
             ref = self.import_target(*bindings[0].node)
+        for key in passed:
+            self._followed[key] = ref
         return ref
 
     def module_of(self, node: ast.expr, scope: Scope) -> str | None:
@@ -712,12 +873,18 @@ class Reader:
         found = self._memo.get(key)
         if found is not None:
             return found
+        if self._depth >= MAX_CHAIN:
+            self._memo[key] = _TOO_DEEP
+            return _TOO_DEEP
         self._memo[key] = _BUSY
+        self._depth += 1
         try:
             value = compute()
         except RecursionError:
             self._memo[key] = _TOO_DEEP
             raise
+        finally:
+            self._depth -= 1
         self._memo[key] = value
         return value
 
@@ -854,7 +1021,7 @@ class Reader:
 
         return self._memoised(("members", id(scope), ref.name), compute)
 
-    def _dict_displays(self, node: ast.expr, scope: Scope) -> list[tuple[ast.Dict, Scope]] | None:
+    def dict_displays(self, node: ast.expr, scope: Scope) -> list[tuple[ast.Dict, Scope]] | None:
         """The dict displays a name is bound to, when every binding is one."""
         if isinstance(node, ast.Dict):
             return [(node, scope)]
@@ -888,7 +1055,7 @@ class Reader:
             getter = True
         else:
             return None
-        displays = self._dict_displays(container, scope)
+        displays = self.dict_displays(container, scope)
         if displays is None:
             return None
         result = NOTHING
@@ -910,10 +1077,9 @@ class Reader:
             )
         return result
 
-    def _param_value(self, function: Scope, name: str) -> Value:
+    def _unknown_callers(self, function: Scope, name: str) -> Value | None:
+        """Why a parameter's callers cannot all be known, or None when they can."""
         param = function.params[name]
-        if _never_a_string(param.annotation):
-            return NOT_A_STRING
         if param.star:
             return Value(why=f"`{name}`, which collects a call's extra arguments")
         if function.kind == "lambda":
@@ -927,6 +1093,15 @@ class Reader:
             )
         if not function.calls:
             return Value(why=f"`{name}`, a parameter of a function nothing in the platform calls")
+        return None
+
+    def _param_value(self, function: Scope, name: str) -> Value:
+        param = function.params[name]
+        if _never_a_string(param.annotation):
+            return NOT_A_STRING
+        unknown = self._unknown_callers(function, name)
+        if unknown is not None:
+            return unknown
         result = NOTHING
         for call, caller in function.calls:
             argument = _argument(call, param)
@@ -940,6 +1115,72 @@ class Reader:
             elif isinstance(argument, ast.expr):
                 result = result | self.value_of(argument, caller)
         return result
+
+    def fed_codes(self, function: Scope, name: str) -> Value:
+        """What a factory's code parameter is fed: each caller reports its own unfollowed value."""
+        key = (id(function), name)
+        found = self._fed.get(key)
+        if found is not None:
+            return found
+        param = function.params[name]
+        unknown = self._unknown_callers(function, name)
+        if _never_a_string(param.annotation):
+            result = NOT_A_STRING
+        elif unknown is not None:
+            result = unknown
+        else:
+            result = NOTHING
+            for call, caller in function.calls:
+                argument = _argument(call, param)
+                if argument is _DEFAULT and param.default is not None and function.parent:
+                    value = self.entry(partial(self.value_of, param.default, function.parent))
+                elif isinstance(argument, ast.expr):
+                    value = self.entry(partial(self.value_of, argument, caller))
+                else:
+                    continue
+                result = result | Value(value.strings, value.other)
+        self._fed[key] = result
+        return result
+
+    def slot_value(self, node: ast.expr, scope: Scope, seen: frozenset[int] = frozenset()) -> Value:
+        """The value in a code slot; a factory's own parameter is fed by its callers."""
+        if isinstance(node, ast.IfExp):
+            return self.slot_value(node.body, scope, seen) | self.slot_value(
+                node.orelse, scope, seen
+            )
+        if isinstance(node, ast.BoolOp):
+            result = NOTHING
+            for value in node.values:
+                result = result | self.slot_value(value, scope, seen)
+            return result
+        if isinstance(node, ast.NamedExpr):
+            return self.slot_value(node.value, scope, seen)
+        if (
+            isinstance(node, ast.Call)
+            and self.builtin(node.func, scope, "str")
+            and len(node.args) == 1
+            and not node.keywords
+        ):
+            return self.slot_value(node.args[0], scope, seen)
+        if isinstance(node, ast.Name):
+            ref = self.lookup(scope, node.id)
+            if ref.kind == "param" and ref.scope is not None:
+                if self.level(ref.scope, ref.name) == _SLOT_LEVEL:
+                    return self.fed_codes(ref.scope, ref.name)
+            elif (
+                ref.kind == "binding"
+                and ref.scope is not None
+                and ref.scope.kind in ("function", "lambda")
+            ):
+                bindings = ref.scope.bindings[ref.name]
+                if (
+                    len(bindings) == 1
+                    and bindings[0].kind == "value"
+                    and id(bindings[0].node) not in seen
+                ):
+                    bound = bindings[0]
+                    return self.slot_value(bound.node, bound.scope, seen | {id(bound.node)})
+        return self.entry(partial(self.value_of, node, scope))
 
     # -- what a name carries, for its uses -----------------------------------
 
@@ -993,19 +1234,22 @@ class Reader:
         return result
 
     def all_codes(self, elements: list[ast.expr], scope: Scope) -> bool:
-        """Every element is a code or a name holding one: a collection of codes, not a row."""
+        """Every element holds only code-shaped strings: a collection of codes, not a row."""
         if not elements:
             return False
         for element in elements:
+            if isinstance(element, ast.Starred):
+                return False
             if isinstance(element, ast.Constant):
-                if element.value not in self.code_set:
+                if not is_code(element.value):
                     return False
                 continue
-            ref = self.ref_of(element, scope)
-            if ref is None:
+            if not isinstance(element, (ast.Name, ast.Attribute)):
                 return False
-            kind, codes = self.carried(ref)
-            if kind != "scalar" or not codes:
+            value = self.entry(partial(self.value_of, element, scope))
+            if value.why or value.other or not value.strings:
+                return False
+            if not all(is_code(text) for text in value.strings):
                 return False
         return True
 
@@ -1014,6 +1258,249 @@ class Reader:
         if self._code_set is None:
             self._code_set = frozenset(self.codes)
         return self._code_set
+
+    # -- finding types, callees and who calls what ----------------------------
+
+    def finding_type(self, scope: Scope) -> FindingType | None:
+        """The class as a finding type, when its instances carry a code."""
+        if id(scope) in self.types:
+            return self.types[id(scope)]
+        self.types[id(scope)] = None
+        node = scope.node
+        found: FindingType | None = None
+        if isinstance(node, ast.ClassDef):
+            found = self._own_finding_type(scope, node)
+            if found is None:
+                for base in node.bases:
+                    inherited = self.def_of(self.ref_of(base, scope.parent or scope))
+                    if inherited is not None and inherited.kind == "class":
+                        parent = self.finding_type(inherited)
+                        if parent is not None:
+                            found = FindingType(
+                                scope,
+                                parent.code_index,
+                                parent.text_index,
+                                parent.text_name,
+                                parent.arity,
+                                parent.skip_first,
+                            )
+                            break
+        self.types[id(scope)] = found
+        return found
+
+    def _own_finding_type(self, scope: Scope, node: ast.ClassDef) -> FindingType | None:
+        arity: int | None = None
+        for base in node.bases:
+            if (
+                isinstance(base, ast.Subscript)
+                and _decorator_name(base.value) in ("tuple", "Tuple")
+                and isinstance(base.slice, ast.Tuple)
+            ):
+                arity = len(base.slice.elts)
+        named_tuple = any(_decorator_name(base) == "NamedTuple" for base in node.bases)
+        for item in node.body:
+            if isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef)) and item.name in (
+                "__init__",
+                "__new__",
+            ):
+                init = self.scopes.get(id(item))
+                if init is not None and "code" in init.params:
+                    order = init.order[1:]
+                    code_index = order.index("code") if "code" in order else None
+                    text_name, text_index = "", None
+                    for name in TEXT_KEYWORDS:
+                        if name in init.params:
+                            text_name = name
+                    if code_index is not None and code_index + 1 < len(order):
+                        following = order[code_index + 1]
+                        if not text_name and _is_str(init.params[following].annotation):
+                            text_name = following
+                    if text_name in order:
+                        text_index = order.index(text_name)
+                    return FindingType(scope, code_index, text_index, text_name, arity, True)
+        fields: list[tuple[str, ast.expr]] = []
+        for item in node.body:
+            if isinstance(item, ast.AnnAssign) and isinstance(item.target, ast.Name):
+                if "ClassVar" not in ast.unparse(item.annotation):
+                    fields.append((item.target.id, item.annotation))
+        names = [name for name, _annotation in fields]
+        if "code" not in names:
+            return None
+        positional = named_tuple or "dataclass" in scope.decorators
+        code_at = names.index("code")
+        text_name = next((name for name in TEXT_KEYWORDS if name in names), "")
+        if not text_name and code_at + 1 < len(fields) and _is_str(fields[code_at + 1][1]):
+            text_name = names[code_at + 1]
+        return FindingType(
+            scope,
+            code_at if positional else None,
+            names.index(text_name) if positional and text_name else None,
+            text_name,
+            len(names) if named_tuple else arity,
+            False,
+        )
+
+    def discover_types(self) -> None:
+        for scope in list(self.scopes.values()):
+            if scope.kind == "class":
+                found = self.finding_type(scope)
+                if found is not None and found.arity is not None and found.code_index is not None:
+                    self.shapes.setdefault(found.arity, found)
+
+    def method_of(self, cls: Scope, name: str, seen: frozenset[int] = frozenset()) -> Scope | None:
+        if id(cls) in seen:
+            return None
+        bindings = cls.bindings.get(name, [])
+        if len(bindings) == 1 and bindings[0].kind == "def":
+            found: Scope = bindings[0].node
+            return found if found.kind == "function" else None
+        node = cls.node
+        if isinstance(node, ast.ClassDef):
+            for base in node.bases:
+                parent = self.def_of(self.ref_of(base, cls.parent or cls))
+                if parent is not None and parent.kind == "class":
+                    method = self.method_of(parent, name, seen | {id(cls)})
+                    if method is not None:
+                        return method
+        return None
+
+    def callee(self, func: ast.expr, scope: Scope) -> tuple[str, Any, bool]:
+        """What a call calls: a finding type, a platform function, a callback, or other."""
+        if isinstance(func, ast.Name):
+            ref = self.lookup(scope, func.id)
+            if ref.kind == "param":
+                return ("callback", None, False)
+            target = self.def_of(ref)
+        elif isinstance(func, ast.Attribute):
+            ref_or_none = self.attribute_ref(func, scope)
+            if ref_or_none is not None:
+                target = self.def_of(ref_or_none)
+            else:
+                method = self._receiver_method(func, scope)
+                if method is not None:
+                    return method
+                kind = "store" if func.attr in STORING_METHODS else "method"
+                return (kind, None, False)
+        else:
+            return ("other", None, False)
+        if target is None:
+            return ("other", None, False)
+        if target.kind == "class":
+            found = self.finding_type(target)
+            return ("type", found, False) if found is not None else ("other", None, False)
+        return ("function", target, False)
+
+    def _receiver_method(self, func: ast.Attribute, scope: Scope) -> tuple[str, Any, bool] | None:
+        """``self.name(…)`` or ``Class.name(…)`` resolved to the method it calls."""
+        receiver = func.value
+        if not isinstance(receiver, ast.Name):
+            return None
+        ref = self.lookup(scope, receiver.id)
+        if ref.kind == "param" and ref.scope is not None:
+            method_scope = ref.scope
+            cls = method_scope.parent
+            if (
+                cls is None
+                or cls.kind != "class"
+                or not method_scope.order
+                or method_scope.order[0] != receiver.id
+                or "staticmethod" in method_scope.decorators
+            ):
+                return None
+            method = self.method_of(cls, func.attr)
+            if method is None:
+                return None
+            return ("function", method, "staticmethod" not in method.decorators)
+        cls = self.def_of(ref)
+        if cls is not None and cls.kind == "class":
+            method = self.method_of(cls, func.attr)
+            if method is not None:
+                return ("function", method, "classmethod" in method.decorators)
+        return None
+
+    def bind_args(
+        self, call: ast.Call, function: Scope, skip_first: bool
+    ) -> list[tuple[ast.expr, str | None]]:
+        """Each argument of a call with the parameter of ``function`` it fills, if known."""
+        order = function.order[1:] if skip_first else function.order
+        bound: list[tuple[ast.expr, str | None]] = []
+        splat = False
+        for index, argument in enumerate(call.args):
+            if isinstance(argument, ast.Starred):
+                splat = True
+                bound.append((argument.value, None))
+            elif splat:
+                bound.append((argument, None))
+            elif index < len(order):
+                bound.append((argument, order[index]))
+            else:
+                bound.append((argument, function.stars.get("args")))
+        for keyword in call.keywords:
+            if keyword.arg is None:
+                bound.append((keyword.value, None))
+            elif keyword.arg in function.params:
+                bound.append((keyword.value, keyword.arg))
+            else:
+                bound.append((keyword.value, function.stars.get("kwargs")))
+        return bound
+
+    def called(self, scope: Scope) -> bool:
+        """Whether anything in the platform calls the code this scope holds."""
+        found = self._called.get(id(scope))
+        if found is not None:
+            return found
+        if scope.kind in ("module", "class"):
+            result = True
+        elif scope.parent is None or not self.called(scope.parent):
+            result = False
+        elif scope.kind == "lambda":
+            result = True
+        else:
+            name = scope.name
+            result = (
+                bool(scope.decorators)
+                or (name.startswith("__") and name.endswith("__"))
+                or scope.referenced
+                or (scope.parent.kind == "class" and name in self.attribute_names)
+            )
+        self._called[id(scope)] = result
+        return result
+
+    # -- the parameter flow graph ---------------------------------------------
+
+    def flow_key(self, ref: Ref) -> _Key | None:
+        """A name the flow graph tracks: a parameter or a local of a function."""
+        if ref.scope is None:
+            return None
+        if ref.kind == "param" or (
+            ref.kind == "binding" and ref.scope.kind in ("function", "lambda")
+        ):
+            return (id(ref.scope), ref.name)
+        return None
+
+    def flow_use(self, key: _Key, level: int) -> None:
+        if level > self._base.get(key, _READ_LEVEL):
+            self._base[key] = level
+
+    def flow_edge(self, source: _Key, target: _Key) -> None:
+        """``source``'s value goes into ``target``: target's use is source's use too."""
+        self._backward.setdefault(target, []).append(source)
+
+    def settle(self) -> None:
+        """Propagate every use back along the edges, each name rising at most twice."""
+        levels = dict(self._base)
+        work = [key for key, level in levels.items() if level > _READ_LEVEL]
+        while work:
+            key = work.pop()
+            level = levels[key]
+            for source in self._backward.get(key, ()):
+                if levels.get(source, _READ_LEVEL) < level:
+                    levels[source] = level
+                    work.append(source)
+        self._levels = levels
+
+    def level(self, function: Scope, name: str) -> int:
+        return self._levels.get((id(function), name), _READ_LEVEL)
 
     # -- the codes -----------------------------------------------------------
 
@@ -1028,98 +1515,226 @@ class Reader:
             return f"{scope.module.name}:{name}"
         return f"{scope.site}.{name}"
 
-    def attached(self, module: Module, statement: ast.stmt | None) -> str:
-        """The comment block right above a statement, or its trailing comment or docstring."""
-        if statement is None:
-            return ""
+    def _block(self, module: Module, statement: ast.stmt) -> list[str]:
         lines: list[str] = []
         row = statement.lineno - 1
         while row in module.comments:
             lines.append(module.comments[row])
             row -= 1
         lines.reverse()
-        if not lines and statement.lineno in module.trailing:
-            lines = [module.trailing[statement.lineno]]
-        return _prose(lines) or _prose(module.docstrings.get(id(statement), "").splitlines())
+        return lines
+
+    def attached(self, module: Module, statement: ast.stmt | None) -> str:
+        """A statement's own comment: the block right above it, its trailing comment or docstring.
+
+        A block that heads a group of constants is not one constant's own
+        comment; ``group_comment`` reads it.
+        """
+        if statement is None:
+            return ""
+        found = self._attached.get(id(statement))
+        if found is not None:
+            return found
+        text = ""
+        if not self.group_comment(module, statement)[0]:
+            lines = self._block(module, statement)
+            if not lines and statement.lineno in module.trailing:
+                lines = [module.trailing[statement.lineno]]
+            text = _prose(lines)
+        text = text or _prose(module.docstrings.get(id(statement), "").splitlines())
+        self._attached[id(statement)] = text
+        return text
+
+    def group_comment(self, module: Module, statement: ast.stmt) -> tuple[str, str]:
+        """The comment heading a group of constants this one is in, and the constant it sits on.
+
+        A comment sits on a group when the constant it is written above is
+        followed, with no blank line, by constants with no comment of their
+        own; or when it opens a run of constants written one after another.
+        """
+        place = module.places.get(id(statement))
+        if place is None or _position_name(statement) is None:
+            return ("", "")
+        body, _index = place
+        if id(body) not in self._grouped:
+            self._group_body(module, body)
+        return self._groups.get(id(statement), ("", ""))
+
+    def _group_body(self, module: Module, body: list[ast.stmt]) -> None:
+        """Every group of constants in one body, in one pass over it."""
+        self._grouped.add(id(body))
+        size = len(body)
+        position = [_position_name(statement) is not None for statement in body]
+        blocks = [
+            self._block(module, statement) if position[i] else []
+            for i, statement in enumerate(body)
+        ]
+
+        def adjacent(index: int) -> bool:
+            """Whether ``body[index]`` follows the statement before it with no blank line."""
+            if index == 0:
+                return False
+            previous, current = body[index - 1], body[index]
+            top = current.lineno - len(blocks[index])
+            return top == (previous.end_lineno or previous.lineno) + 1
+
+        index = 0
+        while index < size:
+            if not position[index] or not blocks[index]:
+                index += 1
+                continue
+            head = index
+            run = head + 1
+            while run < size and position[run] and adjacent(run) and not blocks[run]:
+                run += 1
+            opens = (
+                not (head > 0 and position[head - 1] and adjacent(head))
+                and head + 1 < size
+                and position[head + 1]
+                and adjacent(head + 1)
+            )
+            members = (
+                range(head, run)
+                if run - head > 1
+                else (range(head, head + 1) if opens else range(0))
+            )
+            if members:
+                scope = self._scope_of(module, body[head])
+                name = _position_name(body[head]) or ""
+                label = self.label(scope, name) if scope is not None else name
+                text = _prose(blocks[head])
+                for member in members:
+                    self._groups[id(body[member])] = (text, label)
+            index = run
+
+    def _scope_of(self, module: Module, statement: ast.stmt) -> Scope | None:
+        if self._position_scopes is None:
+            self._position_scopes = {id(item[0]): item[3] for item in self.positions}
+        return self._position_scopes.get(id(statement), module.scope)
 
     def read_positions(self) -> None:
         """Codes assigned to ``_CODE`` names and listed in ``_CODES`` collections."""
         for statement, name, value, scope in self.positions:
             label = self.label(scope, name)
-            comment = self.attached(scope.module, statement)
+            module = scope.module
+            comment = self.attached(module, statement)
+            group, head = self.group_comment(module, statement)
             if name.endswith("_CODE"):
                 found = self.entry(partial(self.value_of, value, scope))
-                chain = list(self._alias_chain(value, scope))
+                chain = self._alias_chain(value, scope)
                 for code in sorted(text for text in found.strings if is_code(text)):
                     record = self.record(code)
                     record.constants.add(label)
-                    record.meanings.append(((0, label), comment, ""))
-                    for alias, alias_comment in chain:
+                    record.meanings.append(((0, label), comment, "comment", label))
+                    record.meanings.append(((3, head), group, "group", head))
+                    for alias, alias_comment, alias_group, alias_head in chain:
                         record.constants.add(alias)
-                        record.meanings.append(((1, alias), alias_comment, ""))
+                        record.meanings.append(((1, alias), alias_comment, "comment", alias))
+                        record.meanings.append(((3, alias_head), alias_group, "group", alias_head))
                     if name.startswith(KEPT_PREFIX):
-                        record.kept_by[label] = comment
+                        record.kept_by[label] = comment or group
             else:
                 found = self.entry(partial(self.members_of, value, scope))
+                collection_comment = comment or group
                 for code in sorted(text for text in found.strings if is_code(text)):
                     record = self.record(code)
                     record.collections.add(label)
-                    record.meanings.append(((2, label), comment, ""))
+                    record.meanings.append(((3, label), collection_comment, "group", label))
                     if name.startswith(KEPT_PREFIX):
-                        record.kept_by[label] = comment
+                        record.kept_by[label] = collection_comment
             if found.why:
                 self.unresolved.add(Unresolved(label, f"{name} = {ast.unparse(value)}", found.why))
 
-    def _alias_chain(self, value: ast.expr, scope: Scope) -> Iterator[tuple[str, str]]:
+    def _alias_chain(self, value: ast.expr, scope: Scope) -> list[tuple[str, str, str, str]]:
         """The constants a ``_CODE`` name is an alias of, nearest first, with their comments."""
-        seen: set[tuple[int, str]] = set()
-        while isinstance(value, (ast.Name, ast.Attribute)):
-            ref = self.ref_of(value, scope)
-            if ref is None:
-                return
-            ref = self.follow(ref)
-            if ref.kind != "binding" or ref.scope is None:
-                return
-            bindings = ref.scope.bindings[ref.name]
-            key = (id(ref.scope), ref.name)
+        ref = self.ref_of(value, scope) if isinstance(value, (ast.Name, ast.Attribute)) else None
+        if ref is None:
+            return []
+        ref = self.follow(ref)
+        if ref.kind != "binding" or ref.scope is None:
+            return []
+        start = (id(ref.scope), ref.name)
+        if start in self._chains:
+            return self._chains[start]
+        walked: list[tuple[_Key, tuple[str, str, str, str]]] = []
+        seen: set[_Key] = set()
+        tail: list[tuple[str, str, str, str]] = []
+        current: Ref | None = ref
+        while current is not None and current.kind == "binding" and current.scope is not None:
+            key = (id(current.scope), current.name)
+            if key in self._chains:
+                tail = self._chains[key]
+                break
+            bindings = current.scope.bindings[current.name]
             if len(bindings) != 1 or bindings[0].kind != "value" or key in seen:
-                return
+                break
             seen.add(key)
-            yield (
-                self.label(ref.scope, ref.name),
-                self.attached(ref.scope.module, bindings[0].statement),
+            module = current.scope.module
+            statement = bindings[0].statement
+            if statement is not None and (_position_name(statement) or "").endswith("_CODE"):
+                # A constant that is itself a code position files itself and the
+                # rest of its chain, so each name is filed once.
+                break
+            group, head = (
+                self.group_comment(module, statement) if statement is not None else ("", "")
             )
-            value, scope = bindings[0].node, bindings[0].scope
+            walked.append(
+                (
+                    key,
+                    (
+                        self.label(current.scope, current.name),
+                        self.attached(module, statement),
+                        group,
+                        head,
+                    ),
+                )
+            )
+            node, node_scope = bindings[0].node, bindings[0].scope
+            nxt = (
+                self.ref_of(node, node_scope)
+                if isinstance(node, (ast.Name, ast.Attribute))
+                else None
+            )
+            current = self.follow(nxt) if nxt is not None else None
+        chain = list(tail)
+        for key, entry in reversed(walked):
+            chain = [entry, *chain]
+            self._chains[key] = chain
+        return chain
 
     def read_keywords(self) -> None:
-        """Every ``code=`` keyword: what it resolves to, or the expression it could not."""
+        """``code=`` keywords that build no finding: their codes exist, unread values are named."""
         for call, keyword, scope in self.keywords:
+            if self._keyword_is_slot(call, keyword, scope):
+                continue
             found = self.entry(partial(self.value_of, keyword.value, scope))
-            codes = sorted(text for text in found.strings if is_code(text))
-            text = self._text_of_call(call, scope) if codes else ""
-            for code in codes:
-                record = self.record(code)
-                record.raised.add(scope.site)
-                record.meanings.append(
-                    ((3, scope.site, call.lineno, call.col_offset), text, scope.site)
-                )
+            for code in sorted(text for text in found.strings if is_code(text)):
+                self.record(code)
             if found.why:
                 self.unresolved.add(
                     Unresolved(scope.site, f"code={ast.unparse(keyword.value)}", found.why)
                 )
 
-    def _text_of_call(self, call: ast.Call, scope: Scope) -> str:
-        for keyword in call.keywords:
-            if keyword.arg in TEXT_KEYWORDS:
-                return self._text(keyword.value, scope)
-        return ""
+    def _keyword_is_slot(self, call: ast.Call, keyword: ast.keyword, scope: Scope) -> bool:
+        kind, target, skip = self.callee(call.func, scope)
+        if kind in ("type", "callback"):
+            return True
+        if kind == "function":
+            for argument, param in self.bind_args(call, target, skip):
+                if argument is keyword.value and param is not None:
+                    return self.level(target, param) == _SLOT_LEVEL
+        return False
+
+    def text(self, node: ast.expr | None, scope: Scope) -> str:
+        return "" if node is None else self._text(node, scope)
 
     def _text(self, node: ast.expr, scope: Scope, seen: frozenset[int] = frozenset()) -> str:
         """The words an expression spells, each interpolated value as ``<name>``.
 
-        Followed through a name bound once, the first branch of a conditional,
-        ``.format()`` of a constant, and the first ``return`` of the helper a
-        message is built by; anything else spells nothing.
+        Followed through a name bound once, a parameter fed one string, the
+        first branch of a conditional, ``.format()`` of a constant, and the first
+        ``return`` of the helper a message is built by; anything else spells
+        nothing.
         """
         if isinstance(node, ast.Constant):
             return node.value if isinstance(node.value, str) else ""
@@ -1170,12 +1785,117 @@ class Reader:
         self._returned[id(function)] = text
         return text
 
-    def read_uses(self) -> None:
-        uses = _Uses(self)
+    def raised(
+        self,
+        value: ast.expr,
+        scope: Scope,
+        form: str,
+        text: ast.expr | None,
+        site: str,
+        target: tuple[Any, ...],
+    ) -> None:
+        """One code slot of a finding the platform builds: its codes, or what could not be read."""
+        inner = self._own_parameter(value, scope)
+        if inner is not None:
+            target = inner
+        found = self.slot_value(value, scope)
+        if any(is_code(item) for item in found.strings):
+            self._shaped.add(target)
+        if any(not is_code(item) for item in found.strings):
+            self._unshaped.add(target)
+        codes = sorted(item for item in found.strings if is_code(item))
+        called = self.called(scope)
+        message = self.text(text, scope) if codes and called else ""
+        for code in codes:
+            record = self.record(code)
+            if not called:
+                record.uncalled.add(site)
+                continue
+            record.raised.add(site)
+            self._message(code, message, site, value)
+        if found.why:
+            unresolved = Unresolved(site, form.replace("{}", ast.unparse(value), 1), found.why)
+            self._pending.append((target, unresolved))
+
+    def _own_parameter(self, value: ast.expr, scope: Scope) -> tuple[Any, ...] | None:
+        """The factory parameter a slot is fed by, when its value is that parameter."""
+        while (
+            isinstance(value, ast.Call)
+            and self.builtin(value.func, scope, "str")
+            and len(value.args) == 1
+        ):
+            value = value.args[0]
+        if isinstance(value, ast.Name):
+            ref = self.lookup(scope, value.id)
+            if ref.kind == "param" and ref.scope is not None:
+                if self.level(ref.scope, ref.name) == _SLOT_LEVEL:
+                    return ("param", id(ref.scope), ref.name)
+        return None
+
+    def _message(self, code: str, message: str, site: str, value: ast.expr) -> None:
+        if not message.strip():
+            return
+        pointer = _placeholders_only(message)
+        self.codes[code].meanings.append(
+            (
+                (4 if pointer else 2, site, value.lineno, value.col_offset),
+                "" if pointer else message,
+                "pointer" if pointer else "message",
+                site,
+            )
+        )
+
+    def read_flow(self) -> None:
+        walk = _Walk(self, flow=True)
         for module in self.modules.values():
             if module.scope is not None:
-                for statement in module.tree.body:
-                    uses.statement(statement, module.scope)
+                walk.body(module.tree.body, module.scope)
+        self.settle()
+
+    def read_uses(self) -> None:
+        walk = _Walk(self, flow=False)
+        for module in self.modules.values():
+            if module.scope is not None:
+                walk.body(module.tree.body, module.scope)
+        for target, unresolved in self._pending:
+            if target in self._unshaped and target not in self._shaped:
+                continue
+            self.unresolved.add(unresolved)
+        families = {code.partition(".")[0] for code in self.code_set}
+        for value, scope, site, text in self._deferred_known:
+            found = self.entry(partial(self.value_of, value, scope))
+            known = sorted(found.strings & self.code_set)
+            if not known:
+                continue
+            if not self.called(scope):
+                for code in known:
+                    self.codes[code].uncalled.add(site)
+                continue
+            message = self.text(text, scope)
+            for code in known:
+                self.codes[code].raised.add(site)
+                self._message(code, message, site, value)
+        for ref, scope, site in self._deferred_loads:
+            if not self.called(scope):
+                continue
+            kind, codes = self.carried(ref)
+            if kind == "collection":
+                continue
+            for code in codes:
+                self.codes[code].passes_on.add(site)
+        for literal, scope, site in self._deferred_literals:
+            if not self.called(scope):
+                continue
+            if literal in self.codes:
+                self.codes[literal].passes_on.add(site)
+            elif is_code(literal) and literal.partition(".")[0] in families:
+                self.unresolved.add(
+                    Unresolved(
+                        site,
+                        repr(literal),
+                        "a code-shaped string where no code position is, nor a read",
+                    )
+                )
 
     def index_calls(self) -> None:
         index = _Index(self)
@@ -1187,7 +1907,7 @@ class Reader:
     # -- tests and pages -----------------------------------------------------
 
     def read_tests(self) -> None:
-        for path in _files(self.root, TEST_DIR, (".py",)):
+        for path in _files(self.root, TEST_DIR, (".py",), self.tracked):
             if not (path.name.startswith("test_") or path.name.endswith("_test.py")):
                 continue
             rel = path.relative_to(self.root).as_posix()
@@ -1241,7 +1961,7 @@ class Reader:
 
     def read_console_tests(self) -> None:
         known = self.code_set
-        for path in _files(self.root, CONSOLE_DIR, (".test.ts", ".test.tsx")):
+        for path in _files(self.root, CONSOLE_DIR, (".test.ts", ".test.tsx"), self.tracked):
             rel = path.relative_to(self.root).as_posix()
             words: set[str] = set()
             for literal in _quoted(path.read_text(encoding="utf-8")):
@@ -1251,7 +1971,7 @@ class Reader:
 
     def read_docs(self) -> None:
         known = self.code_set
-        for path in _files(self.root, DOCS_DIR, (".mdx",)):
+        for path in _files(self.root, DOCS_DIR, (".mdx",), self.tracked):
             rel = path.relative_to(self.root).as_posix()
             if rel == PAGE:
                 continue
@@ -1266,19 +1986,24 @@ class Reader:
         codes: list[Code] = []
         for code in sorted(self.codes):
             record = self.codes[code]
-            meaning, meaning_from = "", ""
-            for _key, text, site in sorted(record.meanings, key=lambda item: item[0]):
-                if text.strip():
-                    meaning, meaning_from = text.strip(), site
+            meaning, kind, source = "", "", ""
+            for _key, text, candidate_kind, candidate_source in sorted(
+                record.meanings, key=lambda item: item[0]
+            ):
+                if text.strip() or candidate_kind == "pointer":
+                    meaning, kind, source = text.strip(), candidate_kind, candidate_source
                     break
             codes.append(
                 Code(
                     code=code,
                     raised_at=tuple(sorted(record.raised)),
+                    passes_on=tuple(sorted(record.passes_on - record.raised)),
+                    uncalled=tuple(sorted(record.uncalled)),
                     constants=tuple(sorted(record.constants)),
                     collections=tuple(sorted(record.collections)),
                     meaning=meaning,
-                    meaning_from=meaning_from,
+                    meaning_kind=kind,
+                    meaning_from=source,
                     tests=tuple(sorted(record.tests)),
                     console_tests=tuple(sorted(record.console_tests)),
                     docs=tuple(sorted(record.docs)),
@@ -1292,13 +2017,9 @@ class Reader:
         return Register(tuple(codes), tuple(unresolved))
 
 
-# Contexts a value is used in. Only ``RAISE`` makes a raise site; ``ATTR`` is the
-# base of an attribute or an item, which reads a mapping's values out.
-RAISE, READ, BIND, ITER, ATTR = "raise", "read", "bind", "iter", "attr"
-
-
 class _Index:
-    """Who calls each function by name, and which functions are passed as values."""
+    """Who calls each function by name, what is named outside its own body, and which
+    attribute names are used at all (a method is called through one)."""
 
     def __init__(self, reader: Reader) -> None:
         self.reader = reader
@@ -1310,6 +2031,17 @@ class _Index:
         for arg in [*args.posonlyargs, *args.args, *args.kwonlyargs, args.vararg, args.kwarg]:
             if arg is not None and arg.annotation is not None:
                 self.walk(arg.annotation, scope)
+
+    def named(self, target: Scope | None, scope: Scope) -> None:
+        """``target`` is named from ``scope``: it counts unless that is its own body."""
+        if target is None:
+            return
+        current: Scope | None = scope
+        while current is not None:
+            if current is target:
+                return
+            current = current.parent
+        target.referenced = True
 
     def walk(self, node: ast.AST, scope: Scope) -> None:
         reader = self.reader
@@ -1335,6 +2067,9 @@ class _Index:
             target = reader.def_of(reader.ref_of(node.func, scope))
             if target is not None and target.kind == "function":
                 target.calls.append((node, scope))
+                self.named(target, scope)
+                if isinstance(node.func, ast.Attribute):
+                    reader.attribute_names.add(node.func.attr)
             else:
                 self.walk(node.func, scope)
             for argument in node.args:
@@ -1346,76 +2081,159 @@ class _Index:
                 target = reader.def_of(reader.lookup(scope, node.id))
                 if target is not None:
                     target.escaped = True
-        elif isinstance(node, ast.Attribute) and (ref := reader.attribute_ref(node, scope)):
-            target = reader.def_of(ref)
-            if target is not None and isinstance(node.ctx, ast.Load):
-                target.escaped = True
+                    self.named(target, scope)
+        elif isinstance(node, ast.Attribute):
+            reader.attribute_names.add(node.attr)
+            ref = reader.attribute_ref(node, scope)
+            if ref is not None:
+                target = reader.def_of(ref)
+                if target is not None and isinstance(node.ctx, ast.Load):
+                    target.escaped = True
+                    self.named(target, scope)
+                return
+            self.walk(node.value, scope)
         else:
             for child in ast.iter_child_nodes(node):
                 self.walk(child, scope)
 
 
-class _Uses:
-    """Every use of a name that holds codes, sorted into raises and reads."""
+# Contexts a value is used in. ``SLOT`` is a finding's code slot and ``PASS`` any
+# other use as a value; ``BIND`` and ``ITER`` bind a name that is followed on.
+READ, BIND, ITER, PASS, SLOT = "read", "bind", "iter", "pass", "slot"
+_LEVELS = {READ: _READ_LEVEL, PASS: _PASS_LEVEL, SLOT: _SLOT_LEVEL}
 
-    def __init__(self, reader: Reader) -> None:
+
+@dataclass(frozen=True)
+class _Flow:
+    """A value handed to a platform function's parameter, decided once parameters are settled."""
+
+    callee: Scope
+    param: str
+
+
+class _Walk:
+    """One walk of the platform, deciding the context every value is used in.
+
+    The flow walk records how each parameter and local of a function is used,
+    so factories are known; the use walk then files every finding's code slot
+    and every code passed on.
+    """
+
+    def __init__(self, reader: Reader, *, flow: bool) -> None:
         self.reader = reader
-        # A parameter's default is evaluated outside its function and used inside it.
+        self.flow = flow
+        # A parameter's default is evaluated outside its function and used in it.
         self.site: str | None = None
+        # The locals a value is being bound to.
+        self.targets: list[_Key] = []
 
-    def raise_at(self, codes: Iterable[str], scope: Scope) -> None:
-        for code in codes:
-            self.reader.codes[code].raised.add(self.site or scope.site)
+    # -- what each use means --------------------------------------------------
 
-    def load(self, ref: Ref, scope: Scope, context: str) -> None:
-        kind, codes = self.reader.carried(ref)
-        if not codes or kind == "collection":
-            # A collection of codes is looked up in wherever it goes; a loop
-            # over one binds a name that is followed in its own right.
-            return
-        if context == RAISE or (kind == "mapping" and context == ATTR):
-            self.raise_at(codes, scope)
+    def load(self, ref: Ref, scope: Scope, context: str | _Flow) -> None:
+        reader = self.reader
+        if self.flow:
+            key = reader.flow_key(ref)
+            if key is None:
+                return
+            if isinstance(context, _Flow):
+                reader.flow_edge(key, (id(context.callee), context.param))
+            elif context in (BIND, ITER):
+                for target in self.targets:
+                    if target != key:
+                        reader.flow_edge(key, target)
+            elif context in (PASS, SLOT):
+                reader.flow_use(key, _LEVELS[context])
+        elif context == PASS:
+            reader._deferred_loads.append((ref, scope, self.site or scope.site))
+
+    def literal(self, value: str, scope: Scope, context: str | _Flow) -> None:
+        if not self.flow and context == PASS:
+            self.reader._deferred_literals.append((value, scope, self.site or scope.site))
+
+    def slot(
+        self,
+        value: ast.expr,
+        scope: Scope,
+        form: str,
+        text: ast.expr | None,
+        target: tuple[Any, ...],
+    ) -> None:
+        if not self.flow:
+            self.reader.raised(value, scope, form, text, self.site or scope.site, target)
+        self.expr(value, scope, SLOT)
+
+    def known(self, value: ast.expr, scope: Scope, text: ast.expr | None) -> None:
+        """A value handed to a callback, or put where a tuple finding keeps its code.
+
+        Either raises a code the register already knows; neither makes a code,
+        a factory or an unresolved site of its own, since a callback or a pair
+        may as well carry anything else.
+        """
+        if not self.flow:
+            self.reader._deferred_known.append((value, scope, self.site or scope.site, text))
+        self.expr(value, scope, PASS)
+
+    # -- statements -----------------------------------------------------------
+
+    def body(self, statements: Iterable[ast.stmt], scope: Scope) -> None:
+        for statement in statements:
+            self.statement(statement, scope)
 
     def arguments(self, args: ast.arguments, scope: Scope, inner: Scope) -> None:
         outer_site, self.site = self.site, inner.site
-        for default in [*args.defaults, *args.kw_defaults]:
-            if default is not None:
-                self.expr(default, scope, RAISE)
+        positional = [*args.posonlyargs, *args.args]
+        defaults = list(
+            zip(positional[len(positional) - len(args.defaults) :], args.defaults, strict=True)
+        )
+        defaults += [
+            (arg, default)
+            for arg, default in zip(args.kwonlyargs, args.kw_defaults, strict=True)
+            if default is not None
+        ]
+        for arg, default in defaults:
+            level = self.reader.level(inner, arg.arg) if not self.flow else _READ_LEVEL
+            # A default that reaches a slot is read through the parameter; one
+            # that is passed on passes on in the function it belongs to.
+            self.expr(default, scope, PASS if level == _PASS_LEVEL else READ)
         self.site = outer_site
-        for arg in [*args.posonlyargs, *args.args, *args.kwonlyargs, args.vararg, args.kwarg]:
-            if arg is not None and arg.annotation is not None:
-                self.expr(arg.annotation, scope, READ)
+        for parameter in [*args.posonlyargs, *args.args, *args.kwonlyargs, args.vararg, args.kwarg]:
+            if parameter is not None and parameter.annotation is not None:
+                self.expr(parameter.annotation, scope, READ)
 
-    def statement(self, node: ast.stmt, scope: Scope) -> None:  # noqa: C901 — one case per statement kind
+    def statement(self, node: ast.stmt, scope: Scope) -> None:  # noqa: C901 — one case per kind
         reader = self.reader
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
             inner = reader.scopes[id(node)]
             for decorator in node.decorator_list:
-                self.expr(decorator, scope, RAISE)
+                self.expr(decorator, scope, READ)
             self.arguments(node.args, scope, inner)
             if node.returns is not None:
                 self.expr(node.returns, scope, READ)
             self.body(node.body, inner)
         elif isinstance(node, ast.ClassDef):
             for part in [*node.decorator_list, *node.bases, *(k.value for k in node.keywords)]:
-                self.expr(part, scope, RAISE)
+                self.expr(part, scope, READ)
             self.body(node.body, reader.scopes[id(node)])
-        elif isinstance(node, ast.Assign):
-            followed = scope.kind != "class" and all(isinstance(t, ast.Name) for t in node.targets)
-            self.expr(node.value, scope, BIND if followed else RAISE)
-            for target in node.targets:
-                self.target(target, scope)
-        elif isinstance(node, ast.AnnAssign):
-            self.expr(node.annotation, scope, READ)
+        elif isinstance(node, (ast.Assign, ast.AnnAssign)):
+            targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+            if isinstance(node, ast.AnnAssign):
+                self.expr(node.annotation, scope, READ)
             if node.value is not None:
-                followed = scope.kind != "class" and isinstance(node.target, ast.Name)
-                self.expr(node.value, scope, BIND if followed else RAISE)
-            self.target(node.target, scope)
+                followed = scope.kind != "class" and all(isinstance(t, ast.Name) for t in targets)
+                if any(isinstance(t, ast.Name) and t.id.endswith("_CODES") for t in targets):
+                    # A collection of codes is something codes are looked up in.
+                    self.expr(node.value, scope, READ)
+                elif followed:
+                    self.bind(node.value, scope, [t.id for t in targets if isinstance(t, ast.Name)])
+                else:
+                    self.expr(node.value, scope, PASS)
+            for target in targets:
+                self.target(target, scope)
         elif isinstance(node, ast.AugAssign):
             self.target(node.target, scope)
-            self.expr(node.value, scope, RAISE)
+            self.expr(node.value, scope, PASS)
         elif isinstance(node, (ast.For, ast.AsyncFor)):
-            self.expr(node.iter, scope, ITER if isinstance(node.target, ast.Name) else RAISE)
+            self.loop(node.iter, node.target, scope)
             self.target(node.target, scope)
             self.body([*node.body, *node.orelse], scope)
         elif isinstance(node, (ast.While, ast.If)):
@@ -1423,19 +2241,19 @@ class _Uses:
             self.body([*node.body, *node.orelse], scope)
         elif isinstance(node, (ast.With, ast.AsyncWith)):
             for item in node.items:
-                self.expr(item.context_expr, scope, RAISE)
+                self.expr(item.context_expr, scope, READ)
                 if item.optional_vars is not None:
                     self.target(item.optional_vars, scope)
             self.body(node.body, scope)
         elif isinstance(node, ast.Return):
             if node.value is not None:
-                self.expr(node.value, scope, RAISE)
+                self.expr(node.value, scope, PASS)
         elif isinstance(node, ast.Expr):
             self.expr(node.value, scope, READ)
         elif isinstance(node, ast.Raise):
             for raised in (node.exc, node.cause):
                 if raised is not None:
-                    self.expr(raised, scope, RAISE)
+                    self.expr(raised, scope, READ)
         elif isinstance(node, ast.Assert):
             self.expr(node.test, scope, READ)
             if node.msg is not None:
@@ -1462,17 +2280,34 @@ class _Uses:
         # Imports, global and nonlocal declarations, pass, break and continue
         # use no value.
 
-    def body(self, statements: Iterable[ast.stmt], scope: Scope) -> None:
-        for statement in statements:
-            self.statement(statement, scope)
+    def loop(self, iterable: ast.expr, target: ast.expr, scope: Scope) -> None:
+        """A loop: its variable is bound to what it iterates, and followed."""
+        if not isinstance(target, ast.Name):
+            self.expr(iterable, scope, READ)
+            return
+        outer, self.targets = self.targets, []
+        key = self.reader.flow_key(self.reader.lookup(scope, target.id))
+        if key is not None:
+            self.targets.append(key)
+        self.expr(iterable, scope, ITER)
+        self.targets = outer
+
+    def bind(self, value: ast.expr, scope: Scope, names: list[str]) -> None:
+        outer, self.targets = self.targets, []
+        for name in names:
+            key = self.reader.flow_key(self.reader.lookup(scope, name))
+            if key is not None:
+                self.targets.append(key)
+        self.expr(value, scope, BIND)
+        self.targets = outer
 
     def target(self, node: ast.expr, scope: Scope) -> None:
-        # What is written into is read, not raised; a key written under is used.
+        # What is written into is read, and so is a key written under.
         if isinstance(node, ast.Attribute):
             self.expr(node.value, scope, READ)
         elif isinstance(node, ast.Subscript):
             self.expr(node.value, scope, READ)
-            self.expr(node.slice, scope, RAISE)
+            self.expr(node.slice, scope, READ)
         elif isinstance(node, (ast.Tuple, ast.List)):
             for element in node.elts:
                 self.target(element, scope)
@@ -1491,8 +2326,13 @@ class _Uses:
             if isinstance(child, ast.pattern):
                 self.pattern(child, scope)
 
-    def expr(self, node: ast.expr, scope: Scope, context: str) -> None:  # noqa: C901
+    # -- expressions ----------------------------------------------------------
+
+    def expr(self, node: ast.expr, scope: Scope, context: str | _Flow) -> None:  # noqa: C901
         reader = self.reader
+        value_context = (
+            context if context in (PASS, SLOT, BIND) or isinstance(context, _Flow) else None
+        )
         if isinstance(node, ast.Name):
             if isinstance(node.ctx, ast.Load):
                 self.load(reader.lookup(scope, node.id), scope, context)
@@ -1501,9 +2341,10 @@ class _Uses:
             if ref is not None:
                 self.load(ref, scope, context)
             else:
-                self.expr(node.value, scope, ATTR)
+                self.expr(node.value, scope, READ)
         elif isinstance(node, ast.Constant):
-            return
+            if isinstance(node.value, str):
+                self.literal(node.value, scope, context)
         elif isinstance(node, ast.Compare):
             self.expr(node.left, scope, READ)
             for comparator in node.comparators:
@@ -1521,7 +2362,7 @@ class _Uses:
                 if isinstance(operand, ast.expr):
                     self.expr(operand, scope, READ)
         elif isinstance(node, ast.NamedExpr):
-            self.expr(node.value, scope, BIND)
+            self.bind(node.value, scope, [node.target.id])
         elif isinstance(node, ast.Starred):
             self.expr(node.value, scope, context)
         elif isinstance(node, ast.Call):
@@ -1530,26 +2371,16 @@ class _Uses:
             for element in node.elts:
                 self.expr(element, scope, READ)
         elif isinstance(node, (ast.Tuple, ast.List)):
-            if reader.all_codes(node.elts, scope) or context in (READ, ITER):
-                element_context = READ
-            else:
-                element_context = RAISE
-            for element in node.elts:
-                self.expr(element, scope, element_context)
+            self.sequence(node, scope, value_context)
         elif isinstance(node, ast.Dict):
-            value_context = {READ: READ, ITER: READ, BIND: BIND}.get(context, RAISE)
-            for key, value in zip(node.keys, node.values, strict=True):
-                if key is not None:
-                    self.expr(key, scope, READ)
-                self.expr(value, scope, value_context if key is not None else RAISE)
+            self.mapping(node, scope, context, value_context)
         elif isinstance(node, (ast.ListComp, ast.SetComp, ast.GeneratorExp, ast.DictComp)):
             for generator in node.generators:
-                looped = isinstance(generator.target, ast.Name)
-                self.expr(generator.iter, scope, ITER if looped else RAISE)
+                self.loop(generator.iter, generator.target, scope)
                 self.target(generator.target, scope)
                 for condition in generator.ifs:
                     self.expr(condition, scope, READ)
-            produced = READ if context == READ else RAISE
+            produced = PASS if value_context is not None else READ
             if isinstance(node, ast.DictComp):
                 self.expr(node.key, scope, READ)
                 self.expr(node.value, scope, produced)
@@ -1558,45 +2389,166 @@ class _Uses:
         elif isinstance(node, ast.Lambda):
             inner = reader.scopes[id(node)]
             self.arguments(node.args, scope, inner)
-            self.expr(node.body, inner, RAISE)
+            self.expr(node.body, inner, PASS)
         elif isinstance(node, (ast.JoinedStr, ast.FormattedValue)):
             for part in ast.iter_child_nodes(node):
                 if isinstance(part, ast.expr):
                     self.expr(part, scope, READ)
         elif isinstance(node, ast.Subscript):
-            self.expr(node.value, scope, ATTR)
-            self.expr(node.slice, scope, RAISE)
+            if reader.dict_displays(node.value, scope) is not None and isinstance(
+                node.value, (ast.Name, ast.Attribute)
+            ):
+                # A constant mapping's values are read out where the item goes.
+                self.expr(node.value, scope, context)
+            else:
+                self.expr(node.value, scope, READ)
+            self.expr(node.slice, scope, READ)
         elif isinstance(node, ast.Slice):
             for bound in (node.lower, node.upper, node.step):
                 if bound is not None:
                     self.expr(bound, scope, READ)
+        elif isinstance(node, (ast.Await, ast.Yield, ast.YieldFrom)):
+            if node.value is not None:
+                self.expr(node.value, scope, PASS)
         else:
             for child in ast.iter_child_nodes(node):
                 if isinstance(child, ast.expr):
-                    self.expr(child, scope, RAISE)
+                    self.expr(child, scope, READ)
 
-    def call(self, node: ast.Call, scope: Scope, context: str) -> None:
+    def sequence(
+        self, node: ast.Tuple | ast.List, scope: Scope, context: str | _Flow | None
+    ) -> None:
         reader = self.reader
-        if reader.builtin(node.func, scope, "frozenset", "set"):
+        if context is None or reader.all_codes(node.elts, scope):
+            for element in node.elts:
+                self.expr(element, scope, READ)
+            return
+        shape = reader.shapes.get(len(node.elts)) if isinstance(node, ast.Tuple) else None
+        if shape is not None and any(isinstance(e, ast.Starred) for e in node.elts):
+            shape = None
+        for index, element in enumerate(node.elts):
+            if shape is not None and index == shape.code_index:
+                text = node.elts[shape.text_index] if shape.text_index is not None else None
+                self.known(element, scope, text)
+            else:
+                self.expr(element, scope, PASS)
+
+    def mapping(
+        self, node: ast.Dict, scope: Scope, context: str | _Flow, value_context: str | _Flow | None
+    ) -> None:
+        text = None
+        for key, value in zip(node.keys, node.values, strict=True):
+            if isinstance(key, ast.Constant) and key.value in TEXT_KEYWORDS:
+                text = value
+        for key, value in zip(node.keys, node.values, strict=True):
+            if key is None:
+                self.expr(value, scope, PASS)
+                continue
+            self.expr(key, scope, READ)
+            if value_context is not None and isinstance(key, ast.Constant) and key.value == "code":
+                self.slot(value, scope, '"code": {}', text, ("dict",))
+            elif value_context is None:
+                self.expr(value, scope, READ)
+            elif context == BIND:
+                self.expr(value, scope, BIND)
+            else:
+                self.expr(value, scope, PASS)
+
+    def call(self, node: ast.Call, scope: Scope, context: str | _Flow) -> None:  # noqa: C901
+        reader = self.reader
+        func = node.func
+        if reader.builtin(func, scope, "frozenset", "set"):
             for argument in node.args:
                 self.expr(argument, scope, READ)
             return
         if (
-            reader.builtin(node.func, scope, "str", "tuple", "list", "sorted")
+            reader.builtin(func, scope, "str", "tuple", "list", "sorted")
             and len(node.args) == 1
             and not node.keywords
         ):
             self.expr(node.args[0], scope, context)
             return
-        self.expr(node.func, scope, ATTR)
-        for argument in node.args:
-            self.expr(argument, scope, RAISE)
-        for keyword in node.keywords:
-            self.expr(keyword.value, scope, RAISE)
+        if (
+            isinstance(func, ast.Attribute)
+            and func.attr == "get"
+            and isinstance(func.value, (ast.Name, ast.Attribute))
+            and reader.dict_displays(func.value, scope) is not None
+            and 1 <= len(node.args) <= 2
+        ):
+            # A lookup in a constant mapping: the values and the default go where
+            # the result goes; the key is read.
+            self.expr(func.value, scope, context)
+            self.expr(node.args[0], scope, READ)
+            if len(node.args) == 2:
+                self.expr(node.args[1], scope, context)
+            return
+        kind, target, skip = reader.callee(func, scope)
+        if not (isinstance(func, ast.Name) or kind == "function"):
+            self.expr(func, scope, READ)
+        text = next((k.value for k in node.keywords if k.arg in TEXT_KEYWORDS), None)
+        if kind == "type":
+            finding: FindingType = target
+            for index, argument in enumerate(node.args):
+                if index == finding.code_index and not isinstance(argument, ast.Starred):
+                    positional_text = None
+                    if finding.text_index is not None and finding.text_index < len(node.args):
+                        positional_text = node.args[finding.text_index]
+                    self.slot(
+                        argument,
+                        scope,
+                        f"{ast.unparse(func)}({{}}, …)",
+                        text or positional_text,
+                        ("type", id(finding.scope)),
+                    )
+                else:
+                    self.expr(argument, scope, PASS)
+            for keyword in node.keywords:
+                if keyword.arg == "code":
+                    text_value = next(
+                        (k.value for k in node.keywords if k.arg == finding.text_name), text
+                    )
+                    self.slot(
+                        keyword.value, scope, "code={}", text_value, ("type", id(finding.scope))
+                    )
+                else:
+                    self.expr(keyword.value, scope, PASS)
+        elif kind == "callback":
+            for argument in [*node.args, *(k.value for k in node.keywords)]:
+                self.known(argument, scope, None)
+        elif kind == "function":
+            function: Scope = target
+            keywords = {id(k.value): k.arg for k in node.keywords}
+            for argument, param in reader.bind_args(node, function, skip):
+                if param is None:
+                    self.expr(argument, scope, PASS)
+                elif self.flow:
+                    self.expr(argument, scope, _Flow(function, param))
+                else:
+                    level = reader.level(function, param)
+                    if level == _SLOT_LEVEL:
+                        form = (
+                            f"{keywords[id(argument)]}={{}}"
+                            if id(argument) in keywords
+                            else f"{ast.unparse(func)}({{}}, …)"
+                        )
+                        self.slot(argument, scope, form, text, ("param", id(function), param))
+                    else:
+                        self.expr(argument, scope, PASS if level == _PASS_LEVEL else READ)
+        else:
+            argument_context = PASS if kind == "store" else READ
+            for argument in node.args:
+                self.expr(argument, scope, argument_context)
+            for keyword in node.keywords:
+                self.expr(keyword.value, scope, argument_context)
 
 
 def _placeholder(node: ast.expr) -> str:
-    """What an interpolated value is called: ``{safe_finding_value(tid)!r}`` is tid."""
+    """What an interpolated value is called.
+
+    A call with one argument is named by that argument (``safe_finding_value(tid)``
+    is tid), any other call by its callee (``_retired_note(tid, attck)`` is
+    retired_note), and an item by its key (``best['score_gate']`` is score_gate).
+    """
     if isinstance(node, ast.FormattedValue):
         return _placeholder(node.value)
     if isinstance(node, ast.Name):
@@ -1604,14 +2556,37 @@ def _placeholder(node: ast.expr) -> str:
     if isinstance(node, ast.Attribute):
         return node.attr
     if isinstance(node, ast.Subscript):
+        key = node.slice
+        if isinstance(key, ast.Constant) and isinstance(key.value, str):
+            return key.value
         return _placeholder(node.value)
     if isinstance(node, ast.Call):
-        for argument in node.args:
-            name = _placeholder(argument)
-            if name != "…":
-                return name
-        return _placeholder(node.func)
+        if len(node.args) == 1 and not node.keywords:
+            only = node.args[0]
+            if isinstance(only, ast.Constant) and isinstance(only.value, str):
+                return only.value
+            return _placeholder(only)
+        name = _placeholder(node.func)
+        return name.lstrip("_") or name
+    if isinstance(node, ast.BinOp):
+        return _placeholder(node.left)
+    if isinstance(node, (ast.GeneratorExp, ast.ListComp, ast.SetComp)):
+        return _placeholder(node.elt)
     return "…"
+
+
+def _placeholders_only(text: str) -> bool:
+    """A message whose every word is a value filled in, such as ``<why> <remedy>``."""
+    outside: list[str] = []
+    depth = 0
+    for char in text:
+        if char == "<":
+            depth += 1
+        elif char == ">" and depth:
+            depth -= 1
+        elif not depth:
+            outside.append(char)
+    return not any(char.isalpha() for char in outside)
 
 
 def _fields_named(template: str) -> str:
@@ -1732,13 +2707,23 @@ def _title(text: str) -> str:
 
 def build(root: Path) -> Register:
     """The register of the tree at ``root``."""
-    reader = Reader(root)
-    reader.read_platform()
-    reader.index_calls()
-    reader.read_positions()
-    reader.read_keywords()
-    reader.read_uses()
-    reader.read_tests()
-    reader.read_console_tests()
-    reader.read_docs()
-    return reader.register()
+    # The register keeps its own count of how deep it follows a name
+    # (MAX_CHAIN); Python's limit is raised so that count, not the caller's
+    # stack, is what stops it.
+    limit = sys.getrecursionlimit()
+    sys.setrecursionlimit(max(limit, 20 * MAX_CHAIN))
+    try:
+        reader = Reader(root)
+        reader.read_platform()
+        reader.index_calls()
+        reader.discover_types()
+        reader.read_positions()
+        reader.read_flow()
+        reader.read_keywords()
+        reader.read_uses()
+        reader.read_tests()
+        reader.read_console_tests()
+        reader.read_docs()
+        return reader.register()
+    finally:
+        sys.setrecursionlimit(limit)
