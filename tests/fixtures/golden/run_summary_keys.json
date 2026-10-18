@@ -207,6 +207,18 @@
       ],
       "unit": null
     },
+    "rows_read": {
+      "by_agent": "<data-keyed map>",
+      "reads": null,
+      "rows": [
+        {
+          "by": "<data-keyed map>",
+          "id": null,
+          "pack": null,
+          "tool": null
+        }
+      ]
+    },
     "uncited": {
       "by_agent": "<data-keyed map>",
       "by_tool": "<data-keyed map>",

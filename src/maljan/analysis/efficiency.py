@@ -26,6 +26,14 @@ the repeat guard answered from an earlier identical call without running
 (``refused``), and the ones that ran again with the tool, server and arguments
 of an earlier call that ran (``run_again``). A read of a cleared answer
 (``read_evidence``) is a read, counted under ``rows_read``, not a repeat.
+
+``rows_read`` is the ledger and pack rows each agent read back by id through
+``read_evidence``: every read is filed as a repeat of the row it reads, so the
+row is the entry holding the read's answer. Per row, who read it and how
+often, its tool, and whether it is a pack row (an entry the triage pack wrote,
+``pack_step``); a read whose id named no row the ledger holds is counted apart.
+A read is not evidence of its own and is not counted under ``uncited`` or
+``calls``.
 """
 
 from __future__ import annotations
@@ -140,7 +148,7 @@ def uncited_record(
     entries: Sequence[Any], isr_reports: Mapping[str, Any] | None
 ) -> dict[str, Any] | None:
     """``efficiency.uncited``: the entries that ran and no claim cites, or ``None`` for none ran."""
-    ran = [e for e in entries if _ran(e)]
+    ran = [e for e in entries if _ran(e) and not _reads_again(e)]
     if not ran:
         return None
     holders = _holders(entries)
@@ -194,11 +202,11 @@ def calls_record(entries: Sequence[Any]) -> dict[str, Any] | None:
     by_tool: dict[str, dict[str, int]] = {}
     seen: set[str] = set()
     for entry in held:
+        if _reads_again(entry):
+            continue
         if is_guard_answer({"id": _entry_id(entry), "repeated_of": _field(entry, "repeated_of")}):
             kind = "refused"
         elif not _ran(entry):
-            if _reads_again(entry):
-                continue
             kind = "repeated"
         else:
             key = _call_key(entry)
@@ -217,6 +225,59 @@ def calls_record(entries: Sequence[Any]) -> dict[str, Any] | None:
         "by_agent": dict(sorted(by_agent.items())),
         "by_tool": dict(sorted(by_tool.items())),
     }
+
+
+def rows_read_record(entries: Sequence[Any]) -> dict[str, Any] | None:
+    """``efficiency.rows_read``: the rows read back through ``read_evidence``, or ``None``.
+
+    ``None`` for a ledger with no entry; a ledger no read was made from reads
+    as zero reads.
+    """
+    held = [e for e in entries if _entry_id(e)]
+    if not held:
+        return None
+    by_id = {_entry_id(e): e for e in held}
+    holders = _holders(held)
+    rows: dict[str, dict[str, Any]] = {}
+    by_agent: dict[str, dict[str, Any]] = {}
+    reads = unfound = 0
+    for entry in held:
+        if not _reads_again(entry):
+            continue
+        reads += 1
+        agent = str(_field(entry, "agent") or "") or "pipeline"
+        tally = by_agent.setdefault(agent, {"reads": 0, "rows": set(), "pack_rows": set()})
+        tally["reads"] += 1
+        first = str(_field(entry, "repeated_of") or "").strip().lower()
+        wanted = holders.get(_entry_id(entry)) if first else ""
+        row = by_id.get(wanted or "")
+        if row is None or not first:
+            unfound += 1
+            continue
+        pack = _field(row, "pack_step") is not None
+        found = rows.setdefault(
+            wanted or "",
+            {"id": wanted, "tool": str(_field(row, "tool") or ""), "pack": pack, "by": {}},
+        )
+        found["by"][agent] = found["by"].get(agent, 0) + 1
+        tally["rows"].add(wanted)
+        if pack:
+            tally["pack_rows"].add(wanted)
+    record: dict[str, Any] = {
+        "reads": reads,
+        "rows": list(rows.values()),
+        "by_agent": {
+            name: {
+                "reads": tally["reads"],
+                "rows": len(tally["rows"]),
+                "pack_rows": len(tally["pack_rows"]),
+            }
+            for name, tally in sorted(by_agent.items())
+        },
+    }
+    if unfound:
+        record["unfound"] = unfound
+    return record
 
 
 def efficiency_record(
@@ -244,6 +305,9 @@ def efficiency_record(
         calls = calls_record(held)
         if calls is not None:
             record["calls"] = calls
+        rows_read = rows_read_record(held)
+        if rows_read is not None:
+            record["rows_read"] = rows_read
         if len(record) == 1:
             return None
         if partial_reason:
@@ -349,7 +413,32 @@ def efficiency_lines(record: Any) -> list[str]:
     calls = record.get("calls")
     if isinstance(calls, Mapping):
         lines.append(_calls_line(calls))
+    rows_read = record.get("rows_read")
+    if isinstance(rows_read, Mapping):
+        lines.append(_rows_read_line(rows_read))
     return lines
+
+
+def _rows_read_line(rows_read: Mapping[str, Any]) -> str:
+    reads = _int(rows_read.get("reads"))
+    if not reads:
+        return "Rows read back by id (read_evidence): none."
+    parts = []
+    for agent, tally in (rows_read.get("by_agent") or {}).items():
+        if not isinstance(tally, Mapping):
+            continue
+        rows, pack = _int(tally.get("rows")), _int(tally.get("pack_rows"))
+        parts.append(
+            f"`{agent}` {_count(_int(tally.get('reads')), 'read')} of "
+            f"{_count(rows, 'row')} ({pack:,} of them pack rows)"
+        )
+    line = f"Rows read back by id (read_evidence): {_count(reads, 'read')}"
+    if parts:
+        line += " — " + ", ".join(parts)
+    unfound = _int(rows_read.get("unfound"))
+    if unfound:
+        line += f"; {_count(unfound, 'read')} named no row the ledger holds"
+    return line + "."
 
 
 def _summed(table: Any) -> dict[str, int]:

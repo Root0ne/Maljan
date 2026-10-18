@@ -31,6 +31,11 @@ LEDGER = [
 ]
 
 
+def _calls_line(record: dict) -> str:
+    (line,) = [line for line in efficiency_lines(record) if line.startswith("Tool calls")]
+    return line
+
+
 def test_each_kind_is_counted_by_agent_and_tool() -> None:
     record = calls_record(LEDGER)
 
@@ -57,7 +62,7 @@ def test_no_ledger_is_no_part_and_a_clean_one_counts_zeros() -> None:
     assert calls_record([]) is None
     record = efficiency_record(SimpleNamespace(), entries=[_entry(1)])
     assert record is not None
-    assert efficiency_lines(record)[-1] == (
+    assert _calls_line(record) == (
         "Tool calls that found nothing new: 0 answered from an earlier identical call without "
         "running, 0 refused by a guard with no tool run, and 0 run again with the tool, server "
         "and arguments of an earlier call."
@@ -67,7 +72,7 @@ def test_no_ledger_is_no_part_and_a_clean_one_counts_zeros() -> None:
 def test_the_line_names_the_agents_and_tools() -> None:
     record = efficiency_record(SimpleNamespace(), entries=LEDGER)
     assert record is not None
-    assert efficiency_lines(record)[-1].endswith(
+    assert _calls_line(record).endswith(
         "(by agent: `static` 2, `dynamic` 1; by tool: `strings` 2, `decompile` 1)."
     )
 
