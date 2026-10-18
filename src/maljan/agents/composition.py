@@ -39,6 +39,7 @@ from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
+from maljan.agents.prompt_tools import note_for_resolved
 from maljan.core.config import PROMPT_ROLES, AgentDefinition, ProfileDefinition, Settings, ToolRef
 from maljan.core.logger import logger
 
@@ -1058,6 +1059,9 @@ def resolve_agent(key: str, container: Any, job_key: str = "job") -> ResolvedAge
     staged, staging_reasons = _stage(container, deduped, job_key)
     staged = _mounted(container, deduped, staged)
     reasons.extend(staging_reasons)
+    note = note_for_resolved(settings, definition, key, deduped)
+    if note:
+        reasons.append(note)
     return ResolvedAgent(
         key=key,
         role=definition.role,
@@ -1134,6 +1138,9 @@ async def aresolve_agent(key: str, container: Any, job_key: str = "job") -> Reso
     )
     staged = _mounted(container, deduped, staged)
     reasons.extend(staging_reasons)
+    note = note_for_resolved(settings, definition, key, deduped)
+    if note:
+        reasons.append(note)
     return ResolvedAgent(
         key=key,
         role=definition.role,

@@ -416,15 +416,27 @@ async def _agent_warnings(db: AsyncSession) -> dict[str, str]:
     this runs, so a failure here must cost the operator an advisory note, not
     turn a saved change into a 500 that says it was not saved.
     """
-    from app.services.agent_map import effective_definitions, effective_profiles, profile_warnings
+    from maljan.core.settings_overrides import build_settings
+
+    from app.services.agent_map import (
+        effective_definitions,
+        effective_profiles,
+        profile_warnings,
+        prompt_tool_warnings,
+    )
+    from app.services.settings_service import load_core_overrides
 
     try:
         stored = await SettingsService(db).load_overrides()
-        return profile_warnings(
+        found = profile_warnings(
             effective_profiles(stored),
             definitions=effective_definitions(stored),
             overrides=stored,
         )
+        # An agent's own prompt that names a tool it no longer holds: the
+        # same advisory shape, never a refusal.
+        found.update(prompt_tool_warnings(build_settings(await load_core_overrides(db))))
+        return found
     except Exception as exc:  # noqa: BLE001 — advisory, and the write is done
         logger.debug("Could not compute settings warnings (%s); continuing.", log_safe(str(exc)))
         return {}

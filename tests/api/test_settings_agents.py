@@ -69,6 +69,19 @@ def test_a_generic_agent_without_a_prompt_is_reported_on_its_prompt_field():
     )
 
 
+def test_a_prompt_naming_a_tool_the_agent_lacks_is_a_warning_and_the_save_stands():
+    from app.services.agent_map import prompt_tool_warnings
+
+    out = validate_agent_map(
+        _defs(mine={"role": "generic", "prompt": "Run yara_scan first."}), stored={}
+    )
+    assert "mine" in out[AGENT_DEFINITIONS_KEY]
+    cfg = Settings(_env_file=None, agents={"definitions": out[AGENT_DEFINITIONS_KEY]})
+    warnings = prompt_tool_warnings(cfg)
+    assert "yara_scan" in warnings[f"{AGENT_DEFINITIONS_KEY}.mine"]
+    assert not any(key.endswith((".static", ".dynamic", ".network")) for key in warnings)
+
+
 def test_an_edited_built_in_says_to_clone_it():
     with pytest.raises(AgentMapError) as exc:
         validate_agent_map(_defs(static={**BUILTIN_STATIC, "prompt": "mine"}), stored={})
