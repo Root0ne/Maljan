@@ -1374,8 +1374,15 @@ class MCPServerConfig(BaseModel):
 
     @field_validator("required_env_allow", "variable_names")
     @classmethod
-    def _names_are_env_names(cls, value: list[str]) -> list[str]:
-        return check_env_names(value)
+    def _names_are_env_names(cls, value: list[str], info: ValidationInfo) -> list[str]:
+        names = check_env_names(value)
+        # A server that cannot run without one of the platform's own bootstrap
+        # variables cannot run here at all: its ``env_allow`` would be refused.
+        if info.field_name == "required_env_allow":
+            refusal = platform_secrets_refusal(names, "required_env_allow")
+            if refusal:
+                raise ValueError(refusal)
+        return names
 
     @field_validator("env", "env_allow")
     @classmethod

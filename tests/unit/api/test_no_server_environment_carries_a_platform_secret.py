@@ -104,6 +104,23 @@ def test_a_bootstrap_variable_that_opens_a_store_is_declared_with_them() -> None
             )
 
 
+# The variables ``app.bootstrap`` reads straight from the environment that open
+# no store. Anything else it reads that way must be a platform secret.
+_BOOTSTRAP_READS_NOT_A_STORE: frozenset[str] = frozenset()
+_ENV_READ = re.compile(r"os\.(?:environ\.get|getenv|environ\[)\(?\s*[\"']([A-Za-z_][A-Za-z0-9_]*)")
+
+
+def test_every_variable_bootstrap_reads_from_the_environment_is_covered() -> None:
+    """A credential the startup check reads directly, not through the model, is covered too."""
+    text = (ROOT / "apps" / "api" / "app" / "bootstrap.py").read_text(encoding="utf-8")
+    read = set(_ENV_READ.findall(text))
+    assert "JWT_SECRET_KEY" in read, "the guard no longer sees bootstrap's own read"
+    uncovered = {n for n in read if n not in _BOOTSTRAP_READS_NOT_A_STORE}
+    assert all(is_platform_secret(n) for n in uncovered), sorted(
+        n for n in uncovered if not is_platform_secret(n)
+    )
+
+
 def test_every_secret_the_compose_file_requires_is_refused() -> None:
     """Each ``:?`` variable, and the one a bootstrap variable is composed around."""
     text = COMPOSE.read_text(encoding="utf-8")
@@ -148,6 +165,26 @@ def test_every_name_is_refused_in_env_allow_and_in_env() -> None:
                 assert spelled == name or f"read as {name}" in message, message
                 assert f"remove it from {field}." in message, message
                 assert _value(name) not in str(refused.value)
+
+
+def test_a_declaration_that_needs_one_is_refused_the_same_way() -> None:
+    with pytest.raises(ValidationError) as refused:
+        MCPServerConfig(
+            transport="stdio",
+            command="/bin/true",
+            required_env_allow=["MALJAN_SAMPLE_ROOTS", "DATABASE_URL"],
+        )
+    (error,) = refused.value.errors()
+    assert error["loc"] == ("required_env_allow",)
+    assert "DATABASE_URL opens the platform's database" in error["msg"]
+    assert "remove it from required_env_allow." in error["msg"]
+    # A non-secret name it may list still passes, and so does one in ``variable_names``.
+    MCPServerConfig(
+        transport="stdio",
+        command="/bin/true",
+        required_env_allow=["MALJAN_SAMPLE_ROOTS"],
+        variable_names=["MALJAN_SAMPLE_ROOTS"],
+    )
 
 
 def test_a_provider_block_is_refused_the_same_way() -> None:
