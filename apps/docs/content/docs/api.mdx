@@ -98,7 +98,8 @@ its row persists in canonical form, and `chain`, the job's keyed chain value
 after it in `seq` order; both are absent on entries stored before sealing.
 `GET /jobs/{job_id}/evidence/verify` recomputes the chain from the rows and
 checks it against the seal, under the same ownership rule, and writes nothing.
-It answers `status` (`verified`, `broken`, `other_key` when the seal names a
+It answers `status` (`verified`, `broken`, `unverifiable` after a key rotation
+the audit chain cannot yet vouch for, `other_key` when the seal names a
 key the platform cannot derive, `not_sealed` for a run stored before sealing),
 `reason`, `first_broken_seq`, `entries`, the recomputed `head`, the `seal`,
 the number of `amendments`, and the `checks` that held and `notes` on what was

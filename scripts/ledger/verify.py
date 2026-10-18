@@ -14,7 +14,8 @@ in such a directory, and the answer says it was not checked.
 The keys are the ones the platform's settings derive
 (``SETTINGS_ENCRYPTION_KEY`` in the environment). The answer is printed as
 JSON. Exit status: 0 verified, 1 broken, 3 not sealed, 4 sealed under a key
-this environment cannot derive, 2 a usage or read error.
+this environment cannot derive, 5 unverifiable (audit rows or head under a key
+this environment cannot derive), 2 a usage or read error.
 """
 
 from __future__ import annotations
@@ -27,7 +28,7 @@ import uuid
 from pathlib import Path
 from typing import Any
 
-EXIT = {"verified": 0, "broken": 1, "not_sealed": 3, "other_key": 4}
+EXIT = {"verified": 0, "broken": 1, "not_sealed": 3, "other_key": 4, "unverifiable": 5}
 
 
 def _load(path: Path) -> Any:

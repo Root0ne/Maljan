@@ -146,22 +146,29 @@ logged and counted like any audit write and never loses the stored report.
 Verify a job with `GET /api/v1/jobs/{job_id}/evidence/verify` (owner only) or
 `python -m scripts.ledger.verify --job <id>` (read-only transaction; `--run
 <dir>` checks an exported stored-run directory with no database). The answer is
-`verified`, `broken` with the reason and the first broken `seq`, `other_key`
+`verified`; `broken` with the reason and the first broken `seq`; `other_key`
 when the seal names a key the platform's settings cannot derive (after a
-settings-key rotation, or a relabelled seal: never verified), or `not_sealed`
-for a run stored before sealing. On a sealed job a NULL digest, a missing,
-extra or reordered row and a changed row count are each a break.
+settings-key rotation, or a relabelled seal: never verified); `unverifiable`
+when the audit chain's head is under a key other than the current one, or one
+of the job's own audit rows lies in the segment before a rotation under a key
+the settings cannot derive (never verified, never broken); or `not_sealed` for
+a run stored before sealing. On a sealed job a NULL digest, a missing, extra or
+reordered row and a changed row count are each a break. The command exits 0,
+1, 4, 5 and 3 for these, and 2 on a usage or read error.
 
-The audit chain is read in `chain_seq` order and split at the rotation
-boundary, the first row under the current key. From there on every row must
-carry the current key id and verify; an older or unknown key id, or an
-older-key row after a current-key row, is a break named by its seq. Before the
-boundary a row under a key the settings can derive is verified with it, and a
-row under one they cannot derive is reported as unverifiable with its seq
-span, never verified and never broken. Every row links to the stored chain
-value of the row before it, so the first current-key row joins the older
-history. A job's verdict comes from its own seal, rows and audit rows: an
-unverifiable older segment elsewhere leaves it `verified` with a note.
+The rotation boundary is anchored in the audit chain's head record:
+`rotated_at_seq`, the seq of the first row under the head's key (1 for a chain
+that never rotated, set by the first append under a new key), covered by the
+head's MAC. It is read only from a head that verifies under the current key,
+never from a row's own key id. Every row at or after it must carry the current
+key id and verify, or it is broken at that seq; a row before it that claims the
+current key is broken; a row before it under a key the settings can derive is
+verified with it, and one under a key they cannot derive is unverifiable, with
+its seq span reported. Every row links to the stored chain value of the row
+before it, so the first current-key row joins the older history. A head that
+fails its MAC is a break. Only audit rows that verified are read for a job's
+seal and amendments. A job sealed after a rotation verifies beside an
+unverifiable older segment, with a note.
 
 **What it proves, and what it does not.** The chain proves integrity against
 anyone who can write the database but does not hold `SETTINGS_ENCRYPTION_KEY`.
@@ -169,8 +176,11 @@ Someone who holds that secret can rewrite the rows, the chain, the seal and
 the audit chain consistently, and a writer who kept an earlier audit head
 record can put it back after cutting the rows that followed it. Rotating the
 settings key leaves older seals reading as `other_key` and older audit rows
-unverifiable; until the first append after a rotation, the head is
-unverifiable too, so a cut tail cannot be ruled out then.
+unverifiable. Until the first append after a rotation the head is still under
+the old key, so every sealed job reads `unverifiable` in that window: the
+boundary and a cut tail cannot be checked. Rotating back to an earlier key
+makes the rows already under it, now before the new boundary, read as broken.
+
 
 **Anchoring (not built).** The seal's `digest` is the value an external anchor
 would take. An anchor would publish it, once per stored run or batched under a

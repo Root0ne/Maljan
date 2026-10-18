@@ -595,7 +595,9 @@ async def verify_job_evidence(
     Ownership is the job's, checked exactly the way the evidence page checks
     it. The answer always says what it found (``services.ledger_verify``):
     ``verified``; ``broken`` with the reason and the first broken ``seq``;
-    ``other_key`` when the seal names a key the platform cannot derive; or
+    ``other_key`` when the seal names a key the platform cannot derive;
+    ``unverifiable`` when the audit head or the job's own audit rows are under a key
+    the platform cannot derive (after a key rotation); or
     ``not_sealed`` when the run predates sealing. Nothing is written.
     """
     from app.services.ledger_verify import verify_job

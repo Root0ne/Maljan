@@ -2,7 +2,7 @@
 
 One function, :func:`verify_ledger`, read by the API route
 (``GET /jobs/{id}/evidence/verify``) and the developer command
-(``python -m scripts.ledger.verify``). It answers one of four statuses and
+(``python -m scripts.ledger.verify``). It answers one of five statuses and
 always says why:
 
 - ``verified``: every row recomputes to its digest and links to the one before
@@ -16,6 +16,10 @@ always says why:
   cannot derive (a rotated settings key, or a relabelled record). The chain
   cannot be checked with the keys held; the rows' own digests are still
   checked, and a row that fails them is ``broken``.
+- ``unverifiable``: the audit chain's head is under a key other than the
+  current one (nothing appended since a rotation), or one of the job's own
+  chained audit rows sits in the segment before the rotation under a key the
+  platform cannot derive. Never ``verified``, never ``broken``.
 - ``not_sealed``: no seal exists anywhere and no row carries a digest: the run
   predates sealing, or nothing was stored for it.
 
@@ -37,6 +41,16 @@ VERIFIED = "verified"
 BROKEN = "broken"
 OTHER_KEY = "other_key"
 NOT_SEALED = "not_sealed"
+UNVERIFIABLE = "unverifiable"
+
+OWN_ROWS_UNVERIFIABLE = (
+    "This job's own chained audit rows were chained under a key the platform's settings "
+    "cannot derive (before a key rotation): they can be neither verified nor called broken."
+)
+HEAD_UNVERIFIABLE = (
+    "The audit chain's head is under a key other than the current one: nothing was appended "
+    "since a key rotation, so the rotation boundary and a cut tail cannot be checked."
+)
 
 PREDATES = (
     "This run predates ledger sealing: its rows carry no digest and no seal was stored for it."
@@ -94,6 +108,7 @@ def verify_ledger(
     audit_seals: Sequence[Mapping[str, Any]] | None = None,
     audit_amendments: Sequence[Mapping[str, Any]] | None = None,
     audit_check: AuditChainCheck | None = None,
+    audit_own_unverifiable: bool = False,
     keys: Mapping[str, ledger_chain.ChainKey] | None = None,
 ) -> dict[str, Any]:
     """The verification of one job's stored ledger, as a JSON-ready dict.
@@ -105,8 +120,11 @@ def verify_ledger(
     report row exists. ``audit_seals`` and ``audit_amendments`` are the seal
     and amendment records the job's chained audit rows carry, and
     ``audit_check`` the audit chain's own verification; ``None`` for each
-    means the audit log was not read, which the answer says. ``keys`` defaults
-    to the keys the platform's settings can derive.
+    means the audit log was not read, which the answer says. Only rows that
+    verified may be handed in as ``audit_seals`` and ``audit_amendments``;
+    ``audit_own_unverifiable`` says one of the job's own chained rows could not
+    be verified, and the job then reads ``unverifiable``. ``keys`` defaults to
+    the keys the platform's settings can derive.
     """
     keys = dict(keys) if keys is not None else ledger_chain.known_keys()
     result = _Result(job_id)
@@ -125,6 +143,8 @@ def verify_ledger(
     present = {name: dict(seal) for name, seal in copies.items() if isinstance(seal, Mapping)}
     chained_rows = [r for r in ordered if _read(r, "digest") or _read(r, "chain")]
 
+    if not present and audit_own_unverifiable:
+        return result.end(UNVERIFIABLE, OWN_ROWS_UNVERIFIABLE)
     if not present and not chained_rows:
         if audit_seals is None:
             result.note("The audit log was not read, so no ledger.seal row was looked for.")
@@ -238,6 +258,10 @@ def verify_ledger(
     else:
         result.note("No report is stored for this job; the seal was read from the audit chain.")
 
+    if audit_own_unverifiable:
+        return result.end(UNVERIFIABLE, OWN_ROWS_UNVERIFIABLE)
+    if audit_check is not None and audit_check.head_unverifiable:
+        return result.end(UNVERIFIABLE, HEAD_UNVERIFIABLE)
     if audit_seals is None:
         result.note("The audit log was not read: the seal and amendments were not checked there.")
     else:
@@ -260,11 +284,6 @@ def verify_ledger(
                 f"{len(audit_check.unverifiable)} chained audit row(s), seq {span[0]} to "
                 f"{span[1]}, were chained under a key the platform's settings cannot derive "
                 "(before a key rotation): unverifiable, neither verified nor broken."
-            )
-        if audit_check.head_unverifiable:
-            result.note(
-                "The audit chain's head is under a key the platform cannot derive: nothing "
-                "was appended since a rotation, so a cut tail cannot be ruled out."
             )
     return result.end(VERIFIED, "The ledger, its seal and the stored report verify.")
 
@@ -315,7 +334,17 @@ async def verify_job(db: Any, job_id: Any) -> dict[str, Any]:
         .first()
     )
     keys = ledger_chain.known_keys()
-    mine = [r for r in chained if str(r["resource_id"]) == str(job_id)]
+    check = audit_chain.verify_audit_chain(chained, keys, head, ledger_chain.platform_key().key_id)
+    # Only rows that verified are read for the job's seal and amendments; one
+    # of its own that could not be verified makes the job unverifiable.
+    verified = set(check.verified)
+    own = [
+        r
+        for r in chained
+        if str(r["resource_id"]) == str(job_id)
+        and r["action"] in (audit_chain.LEDGER_SEAL, audit_chain.REPORT_AMEND)
+    ]
+    mine = [r for r in own if int(r["chain_seq"]) in verified]
     return verify_ledger(
         job_id,
         [dict(r) for r in rows],
@@ -334,9 +363,9 @@ async def verify_job(db: Any, job_id: Any) -> dict[str, Any]:
             for r in mine
             if r["action"] == audit_chain.REPORT_AMEND
         ],
-        audit_check=audit_chain.verify_audit_chain(
-            chained, keys, head, ledger_chain.platform_key().key_id
-        ),
+        audit_check=check,
+        audit_own_unverifiable=check.broken_at is None
+        and any(int(r["chain_seq"]) not in verified for r in own),
         keys=keys,
     )
 

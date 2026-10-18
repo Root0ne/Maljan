@@ -70,6 +70,10 @@ class AuditChainHead(Base):
     chain: Mapped[str] = mapped_column(String(64), nullable=False)
     key_id: Mapped[str | None] = mapped_column(String(16), nullable=True)
     mac: Mapped[str] = mapped_column(String(64), nullable=False)
+    # The ``chain_seq`` of the first row under ``key_id``: 1 for a chain that
+    # never rotated, set by the first append under a new key, covered by the
+    # MAC. Verification reads the rotation boundary from here only.
+    rotated_at_seq: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
 
 class APIKey(UUIDPrimaryKeyMixin, TimestampMixin, Base):

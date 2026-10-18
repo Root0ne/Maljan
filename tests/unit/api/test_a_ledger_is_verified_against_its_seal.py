@@ -83,6 +83,7 @@ def _verify(job: dict[str, Any], keys: dict[str, Any] = KEYS, **changes: Any) ->
         audit_seals=given["audit_seals"],
         audit_amendments=given["audit_amendments"],
         audit_check=given.get("audit_check"),
+        audit_own_unverifiable=given.get("audit_own_unverifiable", False),
         keys=keys,
     )
 
@@ -371,6 +372,7 @@ async def test_the_job_is_read_from_the_database_and_verified(monkeypatch: Any):
         return "TEXT"
 
     monkeypatch.setattr(ledger_chain, "known_keys", lambda: KEYS)
+    monkeypatch.setattr(ledger_chain, "platform_key", lambda: KEY)
     job_id = uuid.uuid4()
     rows = [
         _evidence_row(
@@ -436,7 +438,8 @@ async def test_the_job_is_read_from_the_database_and_verified(monkeypatch: Any):
                 chain_seq=1,
                 chain=audit["chain"],
                 key_id=KEY.key_id,
-                mac=audit_chain.head_mac(1, audit["chain"], KEY),
+                mac=audit_chain.head_mac(1, audit["chain"], 1, KEY),
+                rotated_at_seq=1,
             )
         )
         db = _AsyncConnection(conn)
@@ -456,3 +459,62 @@ async def test_the_job_is_read_from_the_database_and_verified(monkeypatch: Any):
         verdict = await ledger_verify.verify_job(db, job_id)
         assert verdict["status"] == "broken"
         assert "audit chain" in verdict["reason"]
+
+
+def test_a_head_under_an_unknown_key_reads_unverifiable_never_verified():
+    job = _sealed()
+    check = AuditChainCheck(rows=2, head_seq=2, unverifiable=[1, 2], head_unverifiable=True)
+    verdict = _verify(job, audit_check=check)
+    assert verdict["status"] == "unverifiable"
+    assert verdict["reason"] == ledger_verify.HEAD_UNVERIFIABLE
+
+
+def test_a_job_whose_own_seal_row_is_unverifiable_reads_unverifiable():
+    job = _sealed()
+    check = AuditChainCheck(rows=3, head_seq=3, rotated_at_seq=3, verified=[3], unverifiable=[1, 2])
+    verdict = _verify(job, audit_seals=[], audit_check=check, audit_own_unverifiable=True)
+    assert verdict["status"] == "unverifiable"
+    assert verdict["reason"] == ledger_verify.OWN_ROWS_UNVERIFIABLE
+    only_audit = _verify(
+        job,
+        report_seal=None,
+        malware_report=None,
+        run_summary=None,
+        audit_seals=[],
+        audit_check=check,
+        audit_own_unverifiable=True,
+    )
+    assert only_audit["status"] == "unverifiable"
+
+
+@pytest.mark.asyncio
+async def test_a_rotation_then_an_append_lets_the_new_job_verify(monkeypatch: Any):
+    from tests.unit.api.test_the_seal_is_on_the_audit_chain import _ChainSession
+
+    from app.services import audit_chain
+
+    monkeypatch.setattr(ledger_chain, "known_keys", lambda: KEYS)
+    monkeypatch.setattr(ledger_chain, "platform_key", lambda: KEY)
+    job = _sealed()
+    db = _ChainSession()
+    await audit_chain.append(
+        db,
+        action=audit_chain.LEDGER_SEAL,
+        resource_type="job",
+        resource_id="old",
+        details={"seal": {}},
+        key=OTHER,
+    )
+    await audit_chain.append(
+        db,
+        action=audit_chain.LEDGER_SEAL,
+        resource_type="job",
+        resource_id=str(job["job_id"]),
+        details={"seal": job["report_seal"]},
+        key=KEY,
+    )
+    check = audit_chain.verify_audit_chain(db.rows, KEYS, db.head, KEY.key_id)
+    assert (check.broken_at, check.unverifiable, check.verified) == (None, [1], [2])
+    verdict = _verify(job, audit_check=check)
+    assert verdict["status"] == "verified", verdict
+    assert any("seq 1 to 1" in note for note in verdict["notes"])

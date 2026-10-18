@@ -109,10 +109,16 @@ def audit_link(previous: str, digest: str, key: ledger_chain.ChainKey) -> str:
     return ledger_chain.keyed(key, _LINK_TAG, f"{previous}:{digest}".encode("ascii"))
 
 
-def head_mac(chain_seq: int, chain: str, key: ledger_chain.ChainKey) -> str:
-    """The keyed MAC of the audit chain's head record."""
+def head_mac(
+    chain_seq: int, chain: str, rotated_at_seq: int | None, key: ledger_chain.ChainKey
+) -> str:
+    """The keyed MAC of the audit chain's head record, its rotation boundary included."""
     return ledger_chain.keyed(
-        key, _HEAD_TAG, ledger_chain.canonical({"chain": chain, "chain_seq": int(chain_seq)})
+        key,
+        _HEAD_TAG,
+        ledger_chain.canonical(
+            {"chain": chain, "chain_seq": int(chain_seq), "rotated_at_seq": rotated_at_seq}
+        ),
     )
 
 
@@ -136,6 +142,9 @@ async def append(
     """Add one chained audit row to ``db``'s transaction; the row, or ``None`` when it failed.
 
     The chain's head record is rewritten in the same savepoint, under ``key``.
+    Its ``rotated_at_seq`` stays where it is while the key stays the same; the
+    first append under a new key (or onto a missing head) sets it to the new
+    row's seq, and it is 1 for a chain that starts here.
     """
     from sqlalchemy import select, text
 
@@ -157,6 +166,7 @@ async def append(
             ).first()
             previous_seq = int(last[0]) if last is not None else 0
             previous = str(last[1]) if last is not None else audit_genesis(key)
+            seq = previous_seq + 1
             row = AuditLog(
                 user_id=user_id,
                 action=action,
@@ -165,20 +175,27 @@ async def append(
                 details=details,
                 ip_address=None,
                 created_at=datetime.now(UTC),
-                chain_seq=previous_seq + 1,
+                chain_seq=seq,
                 chain_key_id=key.key_id or None,
             )
             row.digest = audit_digest(row)
             row.chain = audit_link(previous, row.digest, key)
             db.add(row)
             head = await db.get(AuditChainHead, HEAD_NAME)
+            same_key = (
+                head is not None
+                and (head.key_id or "") == key.key_id
+                and head.rotated_at_seq is not None
+            )
             if head is None:
                 head = AuditChainHead(name=HEAD_NAME)
                 db.add(head)
-            head.chain_seq = previous_seq + 1
+            rotated_at = int(head.rotated_at_seq) if same_key else seq
+            head.chain_seq = seq
             head.chain = row.chain
             head.key_id = key.key_id or None
-            head.mac = head_mac(previous_seq + 1, row.chain, key)
+            head.rotated_at_seq = rotated_at
+            head.mac = head_mac(seq, row.chain, rotated_at, key)
             await db.flush()
         return row
     except Exception as exc:  # noqa: BLE001 — audit is best effort, but never silent
@@ -191,15 +208,20 @@ async def append(
 class AuditChainCheck:
     """What recomputing the audit chain found: ``broken_at`` is ``None`` only when it holds.
 
-    ``unverifiable`` lists the chained rows before the current key's first row
-    that were chained under a key the platform cannot derive: never verified
-    and never broken. ``unverifiable_span`` is their first and last seq.
+    ``verified`` lists the chained rows whose link was checked under a key the
+    platform holds; ``unverifiable`` the rows before the rotation boundary
+    chained under a key it cannot derive (never verified, never broken).
+    ``head_unverifiable`` says the head is under a key other than the current
+    one (nothing appended since a rotation), so no boundary and no tail could
+    be checked: nothing read through this check is then verified.
     """
 
     rows: int
     broken_at: int | None = None
     reason: str | None = None
     head_seq: int | None = None
+    rotated_at_seq: int | None = None
+    verified: list[int] = field(default_factory=list)
     unverifiable: list[int] = field(default_factory=list)
     head_unverifiable: bool = False
 
@@ -217,24 +239,24 @@ def verify_audit_chain(
     """Recompute the chained audit rows in ``chain_seq`` order against the head; the first break.
 
     ``current`` is the id of the key the platform chains under now (by
-    default the one key in ``keys`` when there is one). The walk is split at
-    the rotation boundary, the first row under the current key:
+    default the one key in ``keys`` when there is one). The rotation boundary
+    is read only from the head, and only from a head that verifies under the
+    current key (``rotated_at_seq``, covered by its MAC); never from a row's
+    own key id:
 
-    - from the boundary on, every row must carry the current key id and
-      verify under it; an older or unknown key id there is a break, so recent
-      rows cannot be relabelled, and an older row placed after a current-key
-      row is a break;
-    - before the boundary, a row under a key the platform can derive is
-      verified with it; a row under a key it cannot derive is unverifiable,
-      listed in ``unverifiable``, never verified and never broken;
+    - every row at or after the boundary must carry the current key id and
+      verify under it, or it is broken at its seq;
+    - a row before the boundary that claims the current key is broken; one
+      under another key the platform can derive is verified with it; one under
+      a key it cannot derive is unverifiable, never verified and never broken;
     - every row links to the stored chain value of the row before it, so the
-      first current-key row joins the older history and it cannot be swapped
-      out underneath.
+      first current-key row joins the older history.
 
-    The walk must end at the head record, whose MAC is checked under the key
-    it names: a row cut off the end, a missing head or a head that does not
-    match is a break. A head under a key the platform cannot derive (nothing
-    appended since a rotation) is reported as unverifiable, not as a break.
+    A head that fails its MAC is a break. A head under a key other than the
+    current one leaves the boundary and the tail unknown: the rows the
+    platform can check are checked, the rest are unverifiable, and
+    ``head_unverifiable`` is set. The walk must end at the head: rows cut off
+    the end, or a missing head, are a break.
     """
     if current is None and len(keys) == 1:
         current = next(iter(keys))
@@ -246,7 +268,36 @@ def verify_audit_chain(
         check.reason = reason
         return check
 
-    boundary_seen = False
+    if head is None:
+        if ordered:
+            return _broken(
+                int(_read(ordered[-1], "chain_seq") or 0),
+                "the audit chain has rows but no head record",
+            )
+        return check
+    head_seq = int(_read(head, "chain_seq") or 0)
+    head_chain = str(_read(head, "chain"))
+    head_key_id = _read(head, "key_id") or ""
+    rotated = _read(head, "rotated_at_seq")
+    check.head_seq = head_seq
+    boundary: int | None = None
+    if current is not None and head_key_id == current:
+        if rotated is None or head_mac(head_seq, head_chain, rotated, keys[current]) != _read(
+            head, "mac"
+        ):
+            return _broken(head_seq + 1, "the audit chain's head record does not verify")
+        boundary = int(rotated)
+        if not 1 <= boundary <= max(head_seq, 1):
+            return _broken(head_seq + 1, "the audit chain's head names an impossible boundary")
+        check.rotated_at_seq = boundary
+    else:
+        older = keys.get(head_key_id)
+        if older is not None and head_mac(head_seq, head_chain, rotated, older) != _read(
+            head, "mac"
+        ):
+            return _broken(head_seq + 1, "the audit chain's head record does not verify")
+        check.head_unverifiable = True
+
     previous: str | None = None
     expected_seq = 1
     for row in ordered:
@@ -256,13 +307,17 @@ def verify_audit_chain(
         if audit_digest(row) != _read(row, "digest"):
             return _broken(seq, f"chained audit row {seq} differs from its digest")
         key_id = _read(row, "chain_key_id") or ""
-        if current is not None and key_id == current:
-            boundary_seen = True
-        elif boundary_seen:
+        if boundary is not None and seq >= boundary and key_id != current:
             return _broken(
                 seq,
-                f"chained audit row {seq} names key {key_id or '(none)'} after rows under "
-                "the current key",
+                f"chained audit row {seq} names key {key_id or '(none)'} at or after the "
+                f"rotation boundary (seq {boundary}), where only the current key may chain",
+            )
+        if boundary is not None and seq < boundary and key_id == current:
+            return _broken(
+                seq,
+                f"chained audit row {seq} claims the current key before the rotation "
+                f"boundary (seq {boundary})",
             )
         key = keys.get(key_id)
         if key is None:
@@ -271,31 +326,12 @@ def verify_audit_chain(
             start = previous if previous is not None else audit_genesis(key)
             if audit_link(start, str(_read(row, "digest")), key) != _read(row, "chain"):
                 return _broken(seq, f"chained audit row {seq} does not link to the row before it")
+            check.verified.append(seq)
         previous = str(_read(row, "chain"))
         expected_seq += 1
+    if check.head_unverifiable:
+        return check
     last_seq = expected_seq - 1
-    if head is None:
-        if ordered:
-            return _broken(last_seq, "the audit chain has rows but no head record")
-        return check
-    head_seq = int(_read(head, "chain_seq") or 0)
-    check.head_seq = head_seq
-    head_key_id = _read(head, "key_id") or ""
-    head_key = keys.get(head_key_id)
-    head_chain = str(_read(head, "chain"))
-    if head_key is None:
-        if boundary_seen:
-            return _broken(
-                last_seq + 1, "the audit chain's head names a key other than the current one"
-            )
-        check.head_unverifiable = True
-        return check
-    if head_mac(head_seq, head_chain, head_key) != _read(head, "mac"):
-        return _broken(last_seq + 1, "the audit chain's head record does not verify")
-    if current is not None and head_key_id == current and ordered and not boundary_seen:
-        return _broken(
-            last_seq + 1, "the audit chain's head is under the current key but no row is"
-        )
     if head_seq > last_seq:
         return _broken(
             last_seq + 1,
@@ -303,6 +339,6 @@ def verify_audit_chain(
         )
     if head_seq < last_seq:
         return _broken(head_seq + 1, f"chained audit rows after {head_seq} are past the head")
-    if head_chain != previous:
+    if last_seq and head_chain != previous:
         return _broken(last_seq, f"the head's chain value differs from row {last_seq}")
     return check

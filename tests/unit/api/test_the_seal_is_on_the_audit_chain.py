@@ -151,7 +151,7 @@ async def test_a_tail_cut_with_a_head_moved_back_without_the_key_is_found():
     assert db.head is not None
     db.head.chain_seq = 2
     db.head.chain = db.rows[1].chain
-    db.head.mac = audit_chain.head_mac(2, db.rows[1].chain, ledger_chain.UNKEYED)
+    db.head.mac = audit_chain.head_mac(2, db.rows[1].chain, 1, ledger_chain.UNKEYED)
     check = _verify(db)
     assert check.broken_at == 3
     assert "head record does not verify" in (check.reason or "")
@@ -185,11 +185,11 @@ async def test_a_relabelled_key_id_is_a_break_not_a_skip():
     forged.digest = audit_chain.audit_digest(forged)
     check = _verify(db)
     assert check.broken_at == 2
-    assert "after rows under the current key" in (check.reason or "")
+    assert "at or after the rotation boundary" in (check.reason or "")
 
 
 @pytest.mark.asyncio
-async def test_a_row_relabelled_as_unkeyed_breaks_the_link_after_it():
+async def test_a_row_relabelled_as_unkeyed_after_the_boundary_is_a_break():
     db = await _chain(2)
     forged = db.rows[0]
     forged.chain_key_id = None
@@ -198,8 +198,8 @@ async def test_a_row_relabelled_as_unkeyed_breaks_the_link_after_it():
         audit_chain.audit_genesis(ledger_chain.UNKEYED), forged.digest, ledger_chain.UNKEYED
     )
     check = _verify(db)
-    assert check.broken_at == 2
-    assert "does not link" in (check.reason or "")
+    assert check.broken_at == 1
+    assert "at or after the rotation boundary" in (check.reason or "")
 
 
 async def _rotated(old: int, new: int) -> _ChainSession:
@@ -236,7 +236,7 @@ async def test_a_relabel_after_the_rotation_boundary_is_a_break_at_its_seq():
     forged.digest = audit_chain.audit_digest(forged)
     check = _verify(db)
     assert check.broken_at == 4
-    assert "after rows under the current key" in (check.reason or "")
+    assert "at or after the rotation boundary" in (check.reason or "")
 
 
 @pytest.mark.asyncio
@@ -249,27 +249,58 @@ async def test_a_relabel_to_an_unknown_key_after_the_boundary_is_a_break():
 
 
 @pytest.mark.asyncio
+@pytest.mark.asyncio
 async def test_an_old_key_row_after_a_current_key_row_is_a_break():
-    db = await _chain(1, key=KEY)
-    await audit_chain.append(
-        db,
-        action=audit_chain.LEDGER_SEAL,
-        resource_type="job",
-        resource_id="late-old",
-        details={},
-        key=OTHER,
-    )
-    await audit_chain.append(
-        db,
-        action=audit_chain.LEDGER_SEAL,
-        resource_type="job",
-        resource_id="x",
-        details={},
-        key=KEY,
-    )
+    db = await _chain(3)
+    forged = db.rows[1]
+    forged.chain_key_id = OTHER.key_id
+    forged.digest = audit_chain.audit_digest(forged)
     check = _verify(db)
     assert check.broken_at == 2
     assert OTHER.key_id in (check.reason or "")
+
+
+@pytest.mark.asyncio
+async def test_relabelling_the_first_current_key_rows_does_not_move_the_boundary():
+    db = await _rotated(old=2, new=3)
+    assert db.head is not None and db.head.rotated_at_seq == 3
+    for forged in db.rows[2:4]:
+        forged.chain_key_id = "0000000000000000"
+        forged.digest = audit_chain.audit_digest(forged)
+    check = _verify(db)
+    assert check.broken_at == 3
+    assert "rotation boundary (seq 3)" in (check.reason or "")
+
+
+@pytest.mark.asyncio
+async def test_a_tampered_head_boundary_is_a_break():
+    db = await _rotated(old=2, new=2)
+    assert db.head is not None
+    db.head.rotated_at_seq = 4
+    check = _verify(db)
+    assert check.broken_at == 5
+    assert "head record does not verify" in (check.reason or "")
+
+
+@pytest.mark.asyncio
+async def test_a_row_claiming_the_current_key_before_the_boundary_is_a_break():
+    db = await _rotated(old=2, new=1)
+    forged = db.rows[0]
+    forged.chain_key_id = KEY.key_id
+    forged.digest = audit_chain.audit_digest(forged)
+    forged.chain = audit_chain.audit_link(audit_chain.audit_genesis(KEY), forged.digest, KEY)
+    check = _verify(db)
+    assert check.broken_at == 1
+    assert "claims the current key" in (check.reason or "")
+
+
+@pytest.mark.asyncio
+async def test_a_legitimate_rotation_then_an_append_verifies_the_new_rows():
+    db = await _rotated(old=2, new=1)
+    check = _verify(db)
+    assert check.broken_at is None
+    assert (check.rotated_at_seq, check.verified, check.unverifiable) == (3, [3], [1, 2])
+    assert not check.head_unverifiable
 
 
 @pytest.mark.asyncio
@@ -361,6 +392,28 @@ def test_the_head_table_is_created_and_dropped():
             assert columns == {"name", "chain_seq", "chain", "key_id", "mac"}
             mod.downgrade()
         assert "audit_chain_head" not in sa.inspect(conn).get_table_names()
+
+
+def test_the_head_gains_its_rotation_boundary_and_loses_it_again():
+    path = _REV.with_name("20261024000000_audit_chain_head_anchors_its_rotation.py")
+    spec = importlib.util.spec_from_file_location("audit_chain_head_rotation", path)
+    assert spec and spec.loader
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    assert (mod.revision, mod.down_revision) == ("20261024000000", "20261023000000")
+    engine = sa.create_engine("sqlite://")
+    with engine.connect() as conn:
+        conn.execute(sa.text("CREATE TABLE audit_chain_head (name TEXT PRIMARY KEY)"))
+        conn.execute(sa.text("INSERT INTO audit_chain_head (name) VALUES ('audit')"))
+        with Operations.context(MigrationContext.configure(conn)):
+            mod.upgrade()
+            assert (
+                conn.execute(sa.text("SELECT rotated_at_seq FROM audit_chain_head")).scalar()
+                is None
+            )
+            mod.downgrade()
+        columns = {c["name"] for c in sa.inspect(conn).get_columns("audit_chain_head")}
+        assert "rotated_at_seq" not in columns
 
 
 def test_the_revision_follows_the_report_seal_one():
