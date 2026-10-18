@@ -125,6 +125,20 @@ class TestTheStore:
         assert "spill=object_store.evidence_spill(job_id)" in stored
 
 
+class TestTheRemoval:
+    def test_a_job_s_prefix_is_removed_whole_and_no_other(self) -> None:
+        store = _Store()
+        job, other = uuid.uuid4(), uuid.uuid4()
+        with patch.object(object_store, "client", lambda: store):
+            for owner, text in ((job, "one"), (job, "two"), (other, "three")):
+                spill_part(object_store.evidence_spill(owner), "answer", text)
+
+        removed = object_store.remove_prefix(store, object_store.evidence_prefix(job))
+
+        assert removed == 2
+        assert [key.split("/")[1] for key in store.objects] == [str(other)]
+
+
 class TestTheRow:
     def test_an_entry_with_no_references_writes_none(self) -> None:
         row = _evidence_row({"id": "ev_0001", "tool": "t"}, job_id=uuid.uuid4())

@@ -1,4 +1,4 @@
-"""Deleting a sample also removes the sandbox reports it owned.
+"""Deleting a sample also removes the sandbox reports and the evidence objects it owned.
 
 Fix round 1, Important 3: ``delete_sample`` had no test coverage at all before
 this — every sandbox report's bytes routinely run to tens of megabytes and
@@ -21,6 +21,12 @@ from fastapi.testclient import TestClient
 from app.api.v1 import samples as module  # noqa: E402
 from app.database import get_db  # noqa: E402
 from app.deps import require_active_user  # noqa: E402
+
+
+def _jobs(*ids: uuid.UUID) -> MagicMock:
+    result = MagicMock()
+    result.scalars.return_value.all.return_value = list(ids)
+    return result
 
 
 def _client(db: MagicMock, user: MagicMock) -> TestClient:
@@ -59,7 +65,14 @@ def test_deleting_a_sample_also_removes_its_sandbox_report_objects(monkeypatch):
 
     db = MagicMock()
     db.execute = AsyncMock(
-        side_effect=[sample_result, no_active_jobs, report_paths_result, None, still_shared]
+        side_effect=[
+            sample_result,
+            no_active_jobs,
+            report_paths_result,
+            _jobs(),
+            None,
+            still_shared,
+        ]
     )
     db.delete = AsyncMock()
     db.flush = AsyncMock()
@@ -107,6 +120,7 @@ def test_deleting_a_sample_with_no_sandbox_reports_touches_storage_once(monkeypa
             sample_result,
             no_active_jobs,
             no_reports,
+            _jobs(),
             None,
             not_shared,
             # The delete handler resolves the configured mirror directories
@@ -162,6 +176,7 @@ def test_a_local_cleanup_that_fails_does_not_fail_the_delete(monkeypatch):
             sample_result,
             no_active_jobs,
             no_reports,
+            _jobs(),
             None,
             not_shared,
             # The delete handler resolves the configured mirror directories
@@ -191,3 +206,56 @@ def test_a_local_cleanup_that_fails_does_not_fail_the_delete(monkeypatch):
 
     assert r.status_code == 204
     minio.remove_object.assert_called_once_with(module.settings.minio_bucket, sample.storage_path)
+
+
+def test_deleting_a_sample_removes_every_job_s_evidence_objects(monkeypatch):
+    """Each job's ledger objects live under ``evidence/<job_id>/`` and go with the job."""
+    from app.services import object_store
+
+    user = MagicMock(id=uuid.uuid4())
+    sha256 = "c" * 64
+    sample = MagicMock(
+        id=uuid.uuid4(),
+        sha256=sha256,
+        storage_path=f"samples/{sha256[:2]}/{sha256}",
+        uploaded_by=user.id,
+    )
+    first, second = uuid.uuid4(), uuid.uuid4()
+    sample_result = MagicMock()
+    sample_result.scalar_one_or_none.return_value = sample
+    no_active_jobs = MagicMock()
+    no_active_jobs.scalar.return_value = 0
+    no_reports = MagicMock()
+    no_reports.scalars.return_value.all.return_value = []
+    still_shared = MagicMock()
+    still_shared.scalar.return_value = 1
+
+    db = MagicMock()
+    db.execute = AsyncMock(
+        side_effect=[
+            sample_result,
+            no_active_jobs,
+            no_reports,
+            _jobs(first, second),
+            None,
+            still_shared,
+        ]
+    )
+    db.delete = AsyncMock()
+    db.flush = AsyncMock()
+    minio = MagicMock()
+    monkeypatch.setattr(module, "_minio_client", lambda: minio)
+    asked: list[str] = []
+
+    def removing(store, prefix):
+        asked.append(prefix)
+        if prefix.endswith(f"{first}/"):
+            raise OSError("the store is down")
+        return 2
+
+    monkeypatch.setattr(object_store, "remove_prefix", removing)
+
+    r = _client(db, user).delete(f"/api/v1/samples/{sample.id}")
+
+    assert r.status_code == 204, "a store that fails does not fail the delete"
+    assert asked == [f"evidence/{first}/", f"evidence/{second}/"]
