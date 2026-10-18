@@ -58,6 +58,9 @@ from maljan.core.input_meter import TOOL_LOOP, request_parts
 from maljan.core.logger import logger
 from maljan.core.spend import LOOP_TURN_CALL, SPEND_CAP, SpendCeilingStop, call_deadline_of
 from maljan.core.token_ledger import (
+    RETRY_DROPS_QUESTION_CALL,
+    VALIDATION_RETRY_CALL,
+    WHOLE_ANSWER_RETRY_CALL,
     TokenLedger,
     record_lost_retries,
     record_response_usage,
@@ -8396,7 +8399,7 @@ class BaseAnalyst(BudgetMeter, ABC):
             return self._invoke_llm_with_timeout(
                 frame_messages(turns, run_state=current_run_state(self)),
                 left,
-                what="validation retry",
+                what=VALIDATION_RETRY_CALL,
             )
 
         def _parse(answer: Any) -> AgentISR:
@@ -8521,7 +8524,7 @@ class BaseAnalyst(BudgetMeter, ABC):
                 answer = self._invoke_llm_with_timeout(
                     frame_messages(turns, run_state=current_run_state(self)),
                     left,
-                    what="whole answer after an unmerged retry",
+                    what=WHOLE_ANSWER_RETRY_CALL,
                 )
             except Exception as exc:  # noqa: BLE001 — unanswered, the first answer stays
                 self.logger.warning(
@@ -9187,7 +9190,7 @@ class BaseAnalyst(BudgetMeter, ABC):
             reply = self._invoke_llm_with_timeout(
                 frame_messages(turns, run_state=current_run_state(self)),
                 left,
-                what="kept-retry drops question",
+                what=RETRY_DROPS_QUESTION_CALL,
             )
             decided = read_retry_drop_answers(
                 answer_text(getattr(reply, "content", reply)), [row[0] for row in labelled]

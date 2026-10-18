@@ -207,6 +207,7 @@
       ],
       "unit": null
     },
+    "output": "<data-keyed map>",
     "rows_read": {
       "by_agent": "<data-keyed map>",
       "reads": null,

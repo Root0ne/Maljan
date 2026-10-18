@@ -301,6 +301,14 @@ def call_record(
 # The ``call`` of a record that is a retry of a model request, not a call.
 RETRY_RECORD = "retry"
 
+# The calls an analyst's validation turn makes after its answer: asking again
+# for an answer that failed a check, asking for the whole answer when a retry's
+# could not be merged, and asking which of the items a kept retry left out were
+# meant to go. ``analysis.efficiency`` reads their share of the output.
+VALIDATION_RETRY_CALL = "validation retry"
+WHOLE_ANSWER_RETRY_CALL = "whole answer after an unmerged retry"
+RETRY_DROPS_QUESTION_CALL = "kept-retry drops question"
+
 # What a record says the job's spend meter charged for it, as the meter
 # settled it: what it cost, where the price came from, and for a charge by
 # stated estimate what the estimate cost.
@@ -361,6 +369,10 @@ class TokenLedger:
         # (``maljan.llm.transient``), filed under the call that then answered.
         self._retries: list[dict[str, str]] = []
         self._unreported: list[dict[str, str]] = []
+        # Per agent and per call name, the calls and their reported figures:
+        # what ``analysis.efficiency`` reads a kind of call's share from. Not
+        # in the snapshot, so the summary's token block reads as it always did.
+        self._by_call: dict[tuple[str, str], dict[str, int]] = {}
         # Told of every recorded call as it is recorded, with the call's own
         # figures (``call_record``): the worker commits each one to the job's
         # event record once its loop runs the publish, so what a run spent is
@@ -416,6 +428,16 @@ class TokenLedger:
                 if "cost" in usage:
                     tally.cost += float(usage["cost"])
                     tally.cost_calls += 1
+            named = self._by_call.setdefault(
+                (agent, call),
+                {"calls": 0, "unreported_calls": 0, "input_tokens": 0, "output_tokens": 0},
+            )
+            named["calls"] += 1
+            if usage is None:
+                named["unreported_calls"] += 1
+            else:
+                named["input_tokens"] += int(usage.get("input_tokens") or 0)
+                named["output_tokens"] += int(usage.get("output_tokens") or 0)
             if fallback:
                 self._fallbacks.append({"agent": agent, "model": model, "reason": fallback})
             for reason in retries:
@@ -505,6 +527,18 @@ class TokenLedger:
     @property
     def total_tokens(self) -> int:
         return self._total.input_tokens + self._total.output_tokens
+
+    def by_call(self) -> dict[str, dict[str, dict[str, int]]]:
+        """Per agent, per call name, the calls and their reported figures, as a plain copy.
+
+        ``{agent: {call: {calls, unreported_calls, input_tokens, output_tokens}}}``;
+        the tokens are the reported calls' only.
+        """
+        with self._lock:
+            out: dict[str, dict[str, dict[str, int]]] = {}
+            for (agent, call), row in sorted(self._by_call.items()):
+                out.setdefault(agent, {})[call] = dict(row)
+            return out
 
     def snapshot(self) -> dict[str, Any]:
         """A plain-dict copy for handing to the RunSummary builder."""

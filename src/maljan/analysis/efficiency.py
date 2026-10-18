@@ -34,6 +34,11 @@ often, its tool, and whether it is a pack row (an entry the triage pack wrote,
 ``pack_step``); a read whose id named no row the ledger holds is counted apart.
 A read is not evidence of its own and is not counted under ``uncited`` or
 ``calls``.
+
+``output`` is each agent's output in the token ledger, and of it the share its
+validation retries (a retry, and the whole answer asked for after a retry that
+could not be merged) and its drops questions took: provider-reported output
+tokens only, with the calls that reported none counted beside them.
 """
 
 from __future__ import annotations
@@ -280,6 +285,55 @@ def rows_read_record(entries: Sequence[Any]) -> dict[str, Any] | None:
     return record
 
 
+def _kinds() -> dict[str, frozenset[str]]:
+    from maljan.core.token_ledger import (
+        RETRY_DROPS_QUESTION_CALL,
+        VALIDATION_RETRY_CALL,
+        WHOLE_ANSWER_RETRY_CALL,
+    )
+
+    return {
+        "retry": frozenset({VALIDATION_RETRY_CALL, WHOLE_ANSWER_RETRY_CALL}),
+        "drop_question": frozenset({RETRY_DROPS_QUESTION_CALL}),
+    }
+
+
+def _tally(rows: Sequence[Mapping[str, Any]]) -> dict[str, int]:
+    return {
+        "calls": sum(_int(r.get("calls")) for r in rows),
+        "unreported_calls": sum(_int(r.get("unreported_calls")) for r in rows),
+        "output_tokens": sum(_int(r.get("output_tokens")) for r in rows),
+    }
+
+
+def output_record(container: Any) -> dict[str, Any] | None:
+    """``efficiency.output``: per agent, its output and the retries' and drops questions' share.
+
+    ``None`` where the run holds no token ledger that names its calls.
+    """
+    ledger_of = getattr(container, "get_token_ledger", None)
+    by_call_of = getattr(ledger_of(), "by_call", None) if callable(ledger_of) else None
+    if not callable(by_call_of):
+        return None
+    by_agent = by_call_of()
+    if not isinstance(by_agent, Mapping):
+        return None
+    kinds = _kinds()
+    out: dict[str, Any] = {}
+    for agent, calls in sorted(by_agent.items()):
+        if not isinstance(calls, Mapping):
+            continue
+        rows = {str(name): row for name, row in calls.items() if isinstance(row, Mapping)}
+        out[str(agent)] = {
+            **_tally(list(rows.values())),
+            **{
+                kind: _tally([row for name, row in rows.items() if name in names])
+                for kind, names in kinds.items()
+            },
+        }
+    return out
+
+
 def efficiency_record(
     container: Any,
     *,
@@ -308,6 +362,9 @@ def efficiency_record(
         rows_read = rows_read_record(held)
         if rows_read is not None:
             record["rows_read"] = rows_read
+        output = output_record(container)
+        if output is not None:
+            record["output"] = output
         if len(record) == 1:
             return None
         if partial_reason:
@@ -416,6 +473,43 @@ def efficiency_lines(record: Any) -> list[str]:
     rows_read = record.get("rows_read")
     if isinstance(rows_read, Mapping):
         lines.append(_rows_read_line(rows_read))
+    output = record.get("output")
+    if isinstance(output, Mapping):
+        lines.extend(_output_lines(output))
+    return lines
+
+
+def _kind_clause(what: str, part: Mapping[str, Any], total: int) -> str:
+    calls, tokens = _int(part.get("calls")), _int(part.get("output_tokens"))
+    clause = f"{what} {tokens:,} ({_share(tokens, total)}, {_count(calls, 'call')}"
+    unreported = _int(part.get("unreported_calls"))
+    if unreported:
+        clause += f", {unreported:,} of them reporting no usage"
+    return clause + ")"
+
+
+def _output_lines(output: Mapping[str, Any]) -> list[str]:
+    lines: list[str] = []
+    for agent, row in output.items():
+        if not isinstance(row, Mapping):
+            continue
+        retry, drop = row.get("retry"), row.get("drop_question")
+        retry = retry if isinstance(retry, Mapping) else {}
+        drop = drop if isinstance(drop, Mapping) else {}
+        if not (_int(retry.get("calls")) or _int(drop.get("calls"))):
+            continue
+        total = _int(row.get("output_tokens"))
+        line = (
+            f"Output of `{agent}`: of its {total:,} reported output tokens, "
+            f"{_kind_clause('validation retries', retry, total)} and "
+            f"{_kind_clause('drops questions', drop, total)}"
+        )
+        unreported = _int(row.get("unreported_calls"))
+        if unreported:
+            line += f"; {_count(unreported, 'call')} of the agent's reported no usage"
+        lines.append(line + ".")
+    if not lines and output:
+        lines.append("Output: no validation retry and no drops question was asked.")
     return lines
 
 

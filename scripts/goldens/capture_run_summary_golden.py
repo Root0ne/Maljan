@@ -319,7 +319,12 @@ def _efficiency() -> dict[str, Any]:
     meter.answered(single, {"input_tokens": 12, "output_tokens": 3})
     ledger = TokenLedger()
     ledger.add({"input_tokens": 40, "output_tokens": 5}, agent="static", model="openai/qwen")
-    ledger.add({"input_tokens": 12, "output_tokens": 3}, agent="static", model="openai/qwen")
+    ledger.add(
+        {"input_tokens": 12, "output_tokens": 3},
+        agent="static",
+        model="openai/qwen",
+        call="validation retry",
+    )
     container = SimpleNamespace(input_meter=meter, get_token_ledger=lambda: ledger)
     from maljan.agents.tool_answer_clearing import READ_EVIDENCE_TOOL
     from maljan.schemas.evidence import LedgerEntry
@@ -416,6 +421,8 @@ DATA_KEYED = frozenset(
         "efficiency.calls.by_tool",
         "efficiency.rows_read.by_agent",
         "efficiency.rows_read.rows[].by",
+        # One row per agent in the token ledger.
+        "efficiency.output",
     }
 )
 
