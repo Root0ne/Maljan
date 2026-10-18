@@ -164,7 +164,10 @@ waits up to 5 s for the writes still running and sets every reference to how
 its write ended: a write that failed is referenced as `upload_failed (<class>)`
 (the failure is logged whole on the worker), one not finished by then as
 `upload_failed (not finished)`, and an object such a write leaves afterwards is
-removed again. The run goes on in every case. The same bytes are written once
+removed again. A slow store given large parts can therefore leave parts
+`not finished` at that 5 s wait, and those parts are then deleted rather than
+kept. A store that answers with server errors fails only that write; only a
+failed connection or a timeout marks it down. The run goes on in every case. The same bytes are written once
 per job. Deleting a sample removes the objects of every job it removes, after
 the delete is committed, best effort and logged, as it does the sandbox-report
 objects; deleting a report keeps them with the ledger. Back them up with the
