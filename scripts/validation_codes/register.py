@@ -14,8 +14,10 @@ A code is *raised* only where the platform puts it into a finding it emits:
 * a call that builds a finding: a class whose instances carry ``code`` (a
   ``code`` field or a ``code`` parameter of ``__init__``/``__new__``), with the
   code given as ``code=`` or in that parameter's positional place;
-* a dict display with a ``"code"`` key, and a tuple display shaped like a
-  finding class that is itself a tuple (the code in the same place);
+* a dict display with a ``"code"`` key or ``dict(code=…)``, a copy made with
+  ``code`` changed (``dataclasses.replace``, ``copy.replace``, ``_replace``),
+  and a tuple display shaped like a finding class that is itself a tuple (the
+  code in the same place);
 * a call to a factory: a platform function one of whose parameters reaches such
   a slot (found by following every parameter through the code, not by name);
 * a call to a callback the function was handed: the code leaves for a listener
@@ -1424,6 +1426,17 @@ class Reader:
                 return ("function", method, "classmethod" in method.decorators)
         return None
 
+    def copies_with_changes(self, func: ast.expr, scope: Scope) -> bool:
+        """A call that copies a value with fields changed: ``dataclasses.replace``,
+        ``copy.replace`` or a named tuple's ``_replace``."""
+        if isinstance(func, ast.Attribute) and func.attr == "_replace":
+            return True
+        ref = self.ref_of(func, scope)
+        if ref is None:
+            return False
+        ref = self.follow(ref)
+        return ref.kind == "unknown" and ref.name in ("dataclasses.replace", "copy.replace")
+
     def bind_args(
         self, call: ast.Call, function: Scope, skip_first: bool
     ) -> list[tuple[ast.expr, str | None]]:
@@ -2519,6 +2532,24 @@ class _Walk:
             else:
                 self.expr(value, scope, PASS)
 
+    def row_call(self, node: ast.Call, scope: Scope, context: str | _Flow) -> None:
+        """``dict(code=…)`` or a copy with changes (``replace(v, code=…)``): a code slot."""
+        builds = context in (PASS, SLOT, BIND) or isinstance(context, _Flow)
+        builds = builds or not self.reader.builtin(node.func, scope, "dict")
+        text = next((k.value for k in node.keywords if k.arg in TEXT_KEYWORDS), None)
+        if not isinstance(node.func, ast.Name):
+            self.expr(node.func, scope, READ)
+        for argument in node.args:
+            self.expr(argument, scope, READ)
+        for keyword in node.keywords:
+            if keyword.arg == "code" and builds:
+                self.slot(keyword.value, scope, "code={}", text, ("dict",))
+            elif keyword.arg == "code":
+                self.read_row_code(keyword.value, scope)
+                self.expr(keyword.value, scope, READ)
+            else:
+                self.expr(keyword.value, scope, PASS if builds else READ)
+
     def call(self, node: ast.Call, scope: Scope, context: str | _Flow) -> None:  # noqa: C901
         reader = self.reader
         func = node.func
@@ -2546,6 +2577,9 @@ class _Walk:
             self.expr(node.args[0], scope, READ)
             if len(node.args) == 2:
                 self.expr(node.args[1], scope, context)
+            return
+        if reader.builtin(func, scope, "dict") or reader.copies_with_changes(func, scope):
+            self.row_call(node, scope, context)
             return
         kind, target, skip = reader.callee(func, scope)
         if not (isinstance(func, ast.Name) or kind == "function"):

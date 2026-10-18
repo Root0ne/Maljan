@@ -19,18 +19,19 @@ The families are the ones the source uses.
 
 A code is raised only where the platform puts it into a finding it emits: a call
 building an object of a class whose instances carry a `code` (with `code=` or in
-its positional place), a dict with a `"code"` key, a tuple shaped like such a
-class, a call to a factory whose parameter reaches one of those, or a callback
-the function was handed; and only in code something calls. Sites that store or
-forward an existing code are listed as passing it on. Comparing a code, looking
-up or counting by it, testing a string against it, logging it, filtering by it,
-a default that reaches no finding and formatted text read it, and are not
-listed. A name, a loop over constants, a conditional, a constant mapping and a
-parameter fed by constants at every call site are followed. Places are named
-`module:function`, without line numbers, so an edit elsewhere in a file leaves
-this page as it is. A class or factory whose code slots only ever receive
-strings of another shape files another kind of code (a team rule, a tool error);
-its slots the register cannot follow are left out of the unresolved list.
+its positional place), a dict with a `"code"` key, a copy made with its `code`
+changed, a tuple shaped like such a class, a call to a factory whose parameter
+reaches one of those, or a callback the function was handed; and only in code
+something calls. Sites that store or forward an existing code are listed as
+passing it on. Comparing a code, looking up or counting by it, testing a string
+against it, logging it, filtering by it, a default that reaches no finding and
+formatted text read it, and are not listed. A name, a loop over constants, a
+conditional, a constant mapping and a parameter fed by constants at every call
+site are followed. Places are named `module:function`, without line numbers, so
+an edit elsewhere in a file leaves this page as it is. A class or factory whose
+code slots only ever receive strings of another shape files another kind of code
+(a team rule, a tool error); its slots the register cannot follow are left out
+of the unresolved list.
 
 A code's meaning is the comment or docstring on its own constant; where there is
 none, the message a raise site passes, with each value it fills in written

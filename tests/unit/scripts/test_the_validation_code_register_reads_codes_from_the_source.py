@@ -508,6 +508,40 @@ class TestWhatRaises:
             Unresolved("demo.checks:rows", "'demo.paired'", LOOSE),
         )
 
+    def test_a_dict_call_and_a_copy_with_a_changed_code_raise_it(self, tmp_path: Path) -> None:
+        register = _tree(
+            tmp_path,
+            """\
+            import copy
+            import dataclasses
+            from dataclasses import replace
+
+            from demo.base import Violation
+
+            def rows(v: Violation, pair: object) -> list[object]:
+                return [
+                    dict(code="demo.called", message="a dict built by a call"),
+                    dataclasses.replace(v, code="demo.replaced"),
+                    replace(v, code="demo.imported"),
+                    copy.replace(v, code="demo.copied"),
+                    pair._replace(code="demo.renamed"),
+                ]
+
+            ENTRY = rows
+            """,
+        )
+
+        assert _raised(register) == {
+            code: ("demo.checks:rows",)
+            for code in (
+                "demo.called",
+                "demo.copied",
+                "demo.imported",
+                "demo.renamed",
+                "demo.replaced",
+            )
+        }
+
     def test_a_factory_raises_where_it_is_called_and_inside_it(self, tmp_path: Path) -> None:
         register = _tree(
             tmp_path,
