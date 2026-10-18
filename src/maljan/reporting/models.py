@@ -1515,6 +1515,15 @@ class MalwareReport(BaseModel):
     reputation: Annotated[list[ReputationAnswer] | None, BeforeValidator(_readable_reputation)] = (
         Field(default=None, exclude_if=lambda value: value is None)
     )
+    # The stored ledger's seal and the amendments chained onto it since,
+    # written by the worker when the run is stored and by an enrichment that
+    # changes the stored report afterwards (``app.services.ledger_chain``).
+    # Never built in the run, so no model sees them; ``None`` on a report
+    # stored before sealing existed, and then left out of the dump.
+    ledger_seal: dict[str, Any] | None = Field(default=None, exclude_if=lambda value: value is None)
+    ledger_amendments: list[dict[str, Any]] | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
 
     # --- Professional-report front-matter & spine ---
     # All additive/optional. Deterministic extractors fill front_matter /

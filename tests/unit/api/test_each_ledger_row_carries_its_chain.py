@@ -3,7 +3,8 @@
 The digest is taken over the row as the worker builds it, and the same digest
 comes back from the row read out of a database and from the evidence page a
 client downloads: the canonical form is what makes the three agree. The chain
-runs in ``seq`` order from a genesis value bound to the job, so a changed,
+runs in ``seq`` order from a genesis value bound to the job, under a key derived
+from the settings encryption key (keyed HMAC), so a changed,
 removed or reordered row changes every chain value after it.
 """
 
@@ -43,6 +44,7 @@ _REV = (
     / "apps/api/alembic/versions/20261020000000_evidence_entries_carry_their_chain.py"
 )
 _WRITTEN = datetime(2026, 10, 18, 12, 0, 0, 123456, tzinfo=UTC)
+KEY = ledger_chain.derive_key("chain-test-material")
 
 
 def _entry(seq: int, **extra: Any) -> dict[str, Any]:
@@ -90,15 +92,15 @@ def test_a_stored_ledger_row_has_every_column_known_before_the_insert():
 def test_the_chain_runs_in_seq_order_from_the_job_s_genesis():
     job_id = uuid.uuid4()
     rows = _rows(job_id, 3)
-    head = ledger_chain.chain_rows(job_id, list(reversed(rows)))
-    previous = ledger_chain.genesis(job_id)
+    head = ledger_chain.chain_rows(job_id, list(reversed(rows)), KEY)
+    previous = ledger_chain.genesis(job_id, KEY)
     for row in rows:
         assert row.digest == ledger_chain.entry_digest(row)
-        assert row.chain == ledger_chain.link(previous, row.digest)
+        assert row.chain == ledger_chain.link(previous, row.digest, KEY)
         previous = row.chain
     assert head == rows[-1].chain
-    assert ledger_chain.genesis(job_id) != ledger_chain.genesis(uuid.uuid4())
-    assert ledger_chain.chain_rows(job_id, []) == ledger_chain.genesis(job_id)
+    assert ledger_chain.genesis(job_id, KEY) != ledger_chain.genesis(uuid.uuid4(), KEY)
+    assert ledger_chain.chain_rows(job_id, [], KEY) == ledger_chain.genesis(job_id, KEY)
 
 
 @pytest.mark.parametrize("name", ledger_chain.DIGESTED)
@@ -139,7 +141,7 @@ def test_the_digest_survives_the_database_round_trip():
     job_id = uuid.uuid4()
     rows = _rows(job_id, 2)
     rows.append(_evidence_row(_entry(3, started_at=0.0), job_id=job_id, written_at=_WRITTEN))
-    ledger_chain.chain_rows(job_id, rows)
+    ledger_chain.chain_rows(job_id, rows, KEY)
     table = EvidenceEntry.__table__
     engine = sa.create_engine("sqlite://")
     with engine.begin() as conn:
@@ -157,7 +159,7 @@ def test_the_digest_survives_the_database_round_trip():
 def test_the_digest_survives_the_evidence_page():
     job_id = uuid.uuid4()
     rows = _rows(job_id, 2)
-    ledger_chain.chain_rows(job_id, rows)
+    ledger_chain.chain_rows(job_id, rows, KEY)
     for row in rows:
         row.id = uuid.uuid4()
         body = json.loads(EvidenceEntryResponse.model_validate(row).model_dump_json())
@@ -175,7 +177,8 @@ def test_an_older_row_serves_no_digest_and_no_chain():
 
 
 @pytest.mark.asyncio
-async def test_the_stored_ledger_is_chained_as_it_is_inserted():
+async def test_the_stored_ledger_is_chained_as_it_is_inserted(monkeypatch: Any):
+    monkeypatch.setattr(ledger_chain, "platform_key", lambda: KEY)
     job = fake_job()
     factory = SessionFactory(rows_for(job, fake_sample(job.sample_id)))
     state = {
@@ -196,10 +199,10 @@ async def test_the_stored_ledger_is_chained_as_it_is_inserted():
     stored = [o for s in factory.sessions for o in s.added if isinstance(o, EvidenceEntry)]
     assert [r.seq for r in stored] == [1, 2, 3]
     assert all(r.created_at is not None for r in stored)
-    previous = ledger_chain.genesis(job.id)
+    previous = ledger_chain.genesis(job.id, KEY)
     for row in stored:
         assert row.digest == ledger_chain.entry_digest(row)
-        assert row.chain == ledger_chain.link(previous, row.digest)
+        assert row.chain == ledger_chain.link(previous, row.digest, KEY)
         previous = row.chain
 
 
@@ -208,10 +211,10 @@ def test_chaining_is_linear_in_the_ledger_s_size():
     small = _rows(job_id, 300)
     large = _rows(job_id, 3000)
     started = time.perf_counter()
-    ledger_chain.chain_rows(job_id, small)
+    ledger_chain.chain_rows(job_id, small, KEY)
     small_time = time.perf_counter() - started
     started = time.perf_counter()
-    ledger_chain.chain_rows(job_id, large)
+    ledger_chain.chain_rows(job_id, large, KEY)
     large_time = time.perf_counter() - started
     assert large_time < max(small_time, 1e-3) * 30
 

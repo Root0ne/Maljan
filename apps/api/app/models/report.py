@@ -54,6 +54,13 @@ class AnalysisReport(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     # job is ``failed``; ``NULL`` is a report of a completed run.
     incomplete_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
 
+    # The seal of the job's stored ledger (``app.services.ledger_chain``),
+    # written in the transaction that stores the ledger: its presence is the
+    # mark that the job's ledger is sealed, so a missing, extra or unchained
+    # row reads as tampering rather than as a run from before sealing. NULL on
+    # every report stored before sealing existed.
+    ledger_seal: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+
     # Relationships
     job = relationship("AnalysisJob", back_populates="report")
     agent_findings = relationship(

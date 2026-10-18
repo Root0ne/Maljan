@@ -1991,6 +1991,7 @@ class MarkdownRenderer:
         # Each section carries its own voice: a tool's answer is measured, and
         # an analyst's table or finding is the analyst's, never under Measured.
         lines = [_appendix_heading("A", "Evidence index", PER_SUBSECTION), ""]
+        lines.extend(_ledger_seal_lines(report))
         if not report.evidence_index and not report.sections:
             lines.append("No tool call is recorded in this report.")
             return "\n".join(lines)
@@ -3539,6 +3540,36 @@ def _heading(number: int, title: str, voice: str) -> str:
 def _appendix_heading(letter: str, title: str, voice: str) -> str:
     """An appendix's H2, lettered, with its voice tag."""
     return f"## Appendix {letter}. {_one_line(title)} · _{voice}_"
+
+
+def _ledger_seal_lines(report: Any) -> list[str]:
+    """The stored ledger's seal as one line, with the amendments after it; none without a seal.
+
+    A report stored before sealing existed has no seal and prints nothing here,
+    so it renders as it always did.
+    """
+    seal = getattr(report, "ledger_seal", None)
+    if not isinstance(seal, dict) or not seal.get("head"):
+        return []
+    span = (
+        f" (seq {seal.get('first_seq')} to {seal.get('last_seq')})"
+        if seal.get("first_seq") is not None
+        else ""
+    )
+    key = f"key `{seal['key_id']}`" if seal.get("key_id") else "no key"
+    line = (
+        f"_Ledger seal: chain head `{seal['head']}` over {seal.get('entries', 0)} "
+        f"entr{'y' if seal.get('entries') == 1 else 'ies'}{span}, {key}; "
+        f"seal digest `{seal.get('digest', '')}`."
+    )
+    amendments = getattr(report, "ledger_amendments", None) or []
+    if amendments:
+        last = amendments[-1] if isinstance(amendments[-1], dict) else {}
+        line += (
+            f" Amended {len(amendments)} time{'' if len(amendments) == 1 else 's'} "
+            f"since; last amendment digest `{last.get('digest', '')}`."
+        )
+    return [line + "_", ""]
 
 
 def _subheading(number: str, title: str, voice: str) -> str:

@@ -4605,14 +4605,43 @@ async def _store_the_report(
     # exactly as they are inserted: what a verifier reads back.
     from app.services import ledger_chain
 
+    # The chain is keyed by a key derived from the settings encryption key
+    # (``ledger_chain.platform_key``); without one it is computed unkeyed and
+    # the seal and this warning say so.
+    _key = ledger_chain.platform_key()
+    if not _key.key_id:
+        logger.warning(
+            "The ledger of job=%s is sealed without a key: no settings encryption key is set, "
+            "so its chain proves only that nothing changed by accident.",
+            job_id,
+            extra={"job_id": job_id},
+        )
     _written_at = datetime.now(UTC)
     _rows = [
         _evidence_row(_entry, job_id=job_uuid, written_at=_written_at)
         for _entry in rows_to_store(_ledger, job_id=job_id)
     ]
-    _head = ledger_chain.chain_rows(job_uuid, _rows)
+    _head = ledger_chain.chain_rows(job_uuid, _rows, _key)
     for _row in _rows:
         db.add(_row)
+    # The seal: the chain head, what it covers, the key id and the digest of
+    # the stored report's documents, written into the report row (the mark
+    # that this job's ledger is sealed), the report payload and the run
+    # summary column, in this transaction. Nothing the models saw is touched;
+    # the run is over.
+    _seal = ledger_chain.seal(
+        job_uuid,
+        _rows,
+        _head,
+        report_sha256=ledger_chain.report_digest(
+            report.malware_report, report.run_summary, report.stix_bundle
+        ),
+        sealed_at=_written_at,
+        key=_key,
+    )
+    report.ledger_seal = _seal
+    report.malware_report = ledger_chain.with_seal(report.malware_report, _seal)
+    report.run_summary = ledger_chain.with_seal(report.run_summary, _seal)
 
     logger.info(
         f"Saved {len(_ledger)} evidence entries for job={job_id}",

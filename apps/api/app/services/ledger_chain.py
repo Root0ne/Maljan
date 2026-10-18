@@ -1,12 +1,18 @@
 """The evidence ledger's digests and hash chain, over the rows as they are stored.
 
 Every stored ledger row gets a digest over a canonical serialisation of every
-column it persists, and a chain value: the SHA-256 of the previous row's chain
-value and its own digest, in ``seq`` order, starting from a genesis value bound
-to the job. Both are computed from the row as the worker builds it, after the
-last structure pass and after each ``spilled`` reference states how its upload
-ended, which is exactly what a reader later reads back: a verifier recomputes
-the chain from the rows alone.
+column it persists (SHA-256), and a chain value: the HMAC-SHA256 of the
+previous row's chain value and its own digest, in ``seq`` order, starting from
+a genesis value bound to the job. Both are computed from the row as the worker
+builds it, after the last structure pass and after each ``spilled`` reference
+states how its upload ended, which is exactly what a reader later reads back: a
+verifier recomputes the chain from the rows alone.
+
+The chain, the seal and its amendments are keyed (:class:`ChainKey`): the key
+is derived from the settings encryption key the platform already holds. They
+prove integrity against anyone who can write the database but does not hold
+that secret; someone who holds it can recompute everything. Anchoring the seal
+outside the platform is the step that closes that (``operations.mdx``).
 
 The canonical form (version 1):
 
@@ -26,9 +32,11 @@ once, in the genesis value), ``updated_at`` and the two chain columns.
 from __future__ import annotations
 
 import hashlib
+import hmac
 import json
 import math
 from collections.abc import Iterable, Mapping
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any
@@ -36,6 +44,9 @@ from typing import Any
 CHAIN_VERSION = 1
 _ENTRY_TAG = b"maljan-evidence-entry/1\n"
 _GENESIS_TAG = b"maljan-evidence-ledger/1\n"
+_LINK_TAG = b"maljan-evidence-link/1\n"
+# The HKDF purpose label the chain key is derived under.
+KEY_LABEL = b"maljan-ledger-chain-v1"
 
 # Every column of ``evidence_entries`` the digest covers, by column name.
 DIGESTED: tuple[str, ...] = (
@@ -159,28 +170,161 @@ def entry_digest(row: Any) -> str:
     return hashlib.sha256(_ENTRY_TAG + canonical(entry_fields(row))).hexdigest()
 
 
-def genesis(job_id: Any) -> str:
+@dataclass(frozen=True)
+class ChainKey:
+    """The key the chain and its records are computed under, and its public id.
+
+    Derived with HKDF-SHA256 from the settings encryption key the platform
+    already holds (``SETTINGS_ENCRYPTION_KEY``), under a fixed purpose label,
+    so no new secret exists and no other use of that key can produce these
+    values. ``key_id`` is a short hash of the derived key, stored beside the
+    seal so a verifier holding another key says so rather than calling the
+    rows changed. The key itself is never logged or served.
+    """
+
+    key: bytes = field(repr=False)
+    key_id: str
+
+
+# What a stored ledger is chained under when the platform holds no settings
+# key: the empty key, said on the seal (``key_id`` ``None``) and by every
+# verification, because a chain anyone can recompute proves only that nothing
+# changed by accident.
+UNKEYED = ChainKey(key=b"", key_id="")
+
+
+def derive_key(secret: str) -> ChainKey:
+    """The chain key derived from ``secret`` (the settings encryption key's text)."""
+    from cryptography.hazmat.primitives import hashes
+    from cryptography.hazmat.primitives.kdf.hkdf import HKDF
+
+    key = HKDF(algorithm=hashes.SHA256(), length=32, salt=None, info=KEY_LABEL).derive(
+        secret.encode("utf-8")
+    )
+    key_id = hashlib.sha256(b"maljan-ledger-chain-key-id/1\n" + key).hexdigest()[:16]
+    return ChainKey(key=key, key_id=key_id)
+
+
+def platform_key() -> ChainKey:
+    """The key derived from the platform's settings encryption key; :data:`UNKEYED` without one."""
+    import os
+
+    secret = ""
+    try:
+        from app.config import settings
+
+        secret = settings.settings_encryption_key.get_secret_value().strip()
+    except Exception:  # noqa: BLE001 — the environment is read below
+        secret = ""
+    if not secret:
+        from maljan.core.settings_secrets import ENV_VAR
+
+        secret = os.environ.get(ENV_VAR, "").strip()
+    return derive_key(secret) if secret else UNKEYED
+
+
+def keyed(key: ChainKey, tag: bytes, message: bytes) -> str:
+    """HMAC-SHA256 of ``message`` under ``key``, domain-separated by ``tag``, as hex."""
+    return hmac.new(key.key, tag + message, hashlib.sha256).hexdigest()
+
+
+def genesis(job_id: Any, key: ChainKey) -> str:
     """The chain value before the job's first row."""
-    return hashlib.sha256(
-        _GENESIS_TAG + canonical({"job_id": str(job_id), "version": CHAIN_VERSION})
-    ).hexdigest()
+    return keyed(key, _GENESIS_TAG, canonical({"job_id": str(job_id), "version": CHAIN_VERSION}))
 
 
-def link(previous: str, digest: str) -> str:
+def link(previous: str, digest: str, key: ChainKey) -> str:
     """The chain value after a row with ``digest`` that follows ``previous``."""
-    return hashlib.sha256(f"{previous}:{digest}".encode("ascii")).hexdigest()
+    return keyed(key, _LINK_TAG, f"{previous}:{digest}".encode("ascii"))
 
 
-def chain_rows(job_id: Any, rows: Iterable[Any]) -> str:
+def chain_rows(job_id: Any, rows: Iterable[Any], key: ChainKey) -> str:
     """Set ``digest`` and ``chain`` on each row object, in ``seq`` order; the head.
 
     ``rows`` are the row objects about to be inserted. The head is the last
     row's chain value, or the genesis value for a job with no row.
     """
-    head = genesis(job_id)
+    head = genesis(job_id, key)
     for row in sorted(rows, key=lambda r: int(_read(r, "seq") or 0)):
         digest = entry_digest(row)
-        head = link(head, digest)
+        head = link(head, digest, key)
         row.digest = digest
         row.chain = head
     return head
+
+
+# ── The seal ─────────────────────────────────────────────────────
+
+# Where the seal and the amendments after it are kept, in the stored report
+# payload and in the run summary column alike.
+SEAL_KEY = "ledger_seal"
+AMENDMENTS_KEY = "ledger_amendments"
+_SEAL_KEYS = frozenset({SEAL_KEY, AMENDMENTS_KEY})
+_REPORT_TAG = b"maljan-stored-report/1\n"
+_RECORD_TAG = b"maljan-ledger-record/1\n"
+
+
+def _without_seal(document: Any) -> Any:
+    if isinstance(document, Mapping):
+        document = {k: v for k, v in document.items() if k not in _SEAL_KEYS}
+    return json_value(document)
+
+
+def report_digest(malware_report: Any, run_summary: Any, stix_bundle: Any) -> str:
+    """The SHA-256 of the stored report's three documents, each without its seal.
+
+    The report payload, the run summary column and the STIX bundle column, as
+    they are stored; the seal and amendment keys are left out of the first
+    two, so the digest a seal records is the one recomputed after it is
+    written.
+    """
+    document = {
+        "malware_report": _without_seal(malware_report),
+        "run_summary": _without_seal(run_summary),
+        "stix_bundle": json_value(stix_bundle),
+    }
+    return hashlib.sha256(_REPORT_TAG + canonical(document)).hexdigest()
+
+
+def record_digest(record: Mapping[str, Any], key: ChainKey) -> str:
+    """The HMAC of a seal or an amendment under ``key``, over every key but its own ``digest``."""
+    body = {k: json_value(v) for k, v in record.items() if k != "digest"}
+    return keyed(key, _RECORD_TAG, canonical(body))
+
+
+def seal(
+    job_id: Any,
+    rows: list[Any],
+    head: str,
+    *,
+    report_sha256: str,
+    sealed_at: datetime,
+    key: ChainKey,
+) -> dict[str, Any]:
+    """The seal of a stored ledger: the chain head, what it covers, the key id, and its digest.
+
+    ``key_id`` is ``None`` when the platform held no settings key and the
+    chain was computed under :data:`UNKEYED`.
+    """
+    seqs = [int(_read(row, "seq") or 0) for row in rows]
+    record: dict[str, Any] = {
+        "version": CHAIN_VERSION,
+        "algorithm": "hmac-sha256",
+        "key_id": key.key_id or None,
+        "job_id": str(job_id),
+        "entries": len(rows),
+        "first_seq": min(seqs) if seqs else None,
+        "last_seq": max(seqs) if seqs else None,
+        "head": head,
+        "report_sha256": report_sha256,
+        "sealed_at": timestamp(sealed_at),
+    }
+    record["digest"] = record_digest(record, key)
+    return record
+
+
+def with_seal(document: Any, record: Mapping[str, Any]) -> Any:
+    """A copy of a stored document with the seal written in; ``None`` stays ``None``."""
+    if not isinstance(document, Mapping):
+        return document
+    return {**document, SEAL_KEY: dict(record)}
