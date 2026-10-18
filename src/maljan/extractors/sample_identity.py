@@ -156,6 +156,11 @@ _EXTENSION_TYPES: dict[str, str] = {
     ".iso": "iso",
 }
 
+# The label the detector gives a sample none of its rules recognises. A run
+# routes on it like any other label (to the neutral analysis path); it names no
+# format a tool could serve.
+UNKNOWN_FORMAT = "unknown"
+
 # Entries that identify what a ZIP container really is, in the order they are
 # looked for: an APK also carries META-INF/MANIFEST.MF, so ``jar`` must lose to
 # ``apk`` rather than win by arriving first.
@@ -319,7 +324,7 @@ def _detect_file_type(path: Path, blob: bytes) -> str:
     shebang = _shebang_type(blob)
     if shebang:
         return shebang
-    return _EXTENSION_TYPES.get(path.suffix.lower(), "unknown")
+    return _EXTENSION_TYPES.get(path.suffix.lower(), UNKNOWN_FORMAT)
 
 
 # The public name. ``_detect_file_type`` stays for the callers that grew up
@@ -331,15 +336,21 @@ def detect_file_type(path: Path, blob: bytes) -> str:
 
 # The labels ``_detect_file_type`` gives by a rule of its own rather than out of
 # one of the tables above: a Mach-O magic, the shortcut header, a ZIP no entry
-# names, an iOS application archive, the ISO volume descriptor, and nothing known.
-_RULE_FILE_TYPES: tuple[str, ...] = ("mach-o", "lnk", "zip", "ipa", "iso", "unknown")
+# names, an iOS application archive, the ISO volume descriptor, and nothing
+# known (:data:`UNKNOWN_FORMAT`).
+_RULE_FILE_TYPES: tuple[str, ...] = ("mach-o", "lnk", "zip", "ipa", "iso", UNKNOWN_FORMAT)
 
 
 def routed_formats() -> tuple[str, ...]:
     """Every label :func:`detect_file_type` can give a sample, sorted: the formats a run routes on.
 
-    Read off the detector's own tables, so a format added to one of them is
-    listed with no second copy to keep.
+    The one list of them, ``unknown`` included, read off the detector's own
+    tables and the labels its rules give beside them, so a format added to one
+    is listed with no second copy to keep. The triage pack's step vocabulary
+    serves it to the console (``core.pack_steps.step_vocabulary``), and a
+    declaration that names the formats a tool serves
+    (``ToolFacts.routed_formats``) is held to it, less :data:`UNKNOWN_FORMAT`,
+    which names no format a tool could serve.
     """
     labels = {label for _magic, label in _MAGIC_PREFIXES}
     labels.update(label for _entry, label in _ZIP_SIGNATURE_ENTRIES)

@@ -283,8 +283,8 @@ def _shipped_tools_by_source() -> Mapping[str, frozenset[str]]:
 def shipped_under_its_source(entry: Any) -> bool:
     """Whether ``entry``'s tool is one a built-in source ships, under the source it recorded.
 
-    The platform's own name tables (which format a parser reads, which tool
-    opens which container) describe the platform's own tools only: an entry
+    The platform's own name tables (``sample_identity._FORMAT_TOOL_FOR``: which
+    of its tools reads a routed format) describe the platform's own tools only: an entry
     is read by one when the source it recorded is a built-in source that
     ships a declaration for its tool (its bare name, the collision prefix
     taken off). An operator's tool of the same name, recorded under the
@@ -306,6 +306,38 @@ def ships_tool(source: str, tool: Any) -> bool:
     """
     held = _shipped_tools_by_source().get(str(source))
     return held is not None and bare_name(tool) in held
+
+
+@cache
+def _shipped_routed_formats() -> Mapping[tuple[str, str], frozenset[str]]:
+    """``(mcp:<key>, tool)`` → the routed formats the platform ships for a built-in's tool."""
+    from maljan.core import builtin_declarations as shipped
+
+    out: dict[tuple[str, str], frozenset[str]] = {}
+    for key in shipped.builtin_server_names():
+        for tool, facts in (shipped.server_declaration(key).get("tool_facts") or {}).items():
+            formats = facts.get("routed_formats") if isinstance(facts, Mapping) else None
+            if formats:
+                out[(f"mcp:{key}", str(tool))] = frozenset(str(f) for f in formats)
+    return out
+
+
+def routed_formats_of(source: str, tool: str) -> frozenset[str]:
+    """The routed formats ``source``'s ``tool`` declares it serves; empty when it declares none.
+
+    Read from the live declaration (``ToolFacts.routed_formats``), so an
+    operator's server declares them as a built-in does, and an operator's edit
+    of a built-in tool's formats, even to none, is in force. A built-in
+    server's tool whose live declaration does not set the field (a map an
+    earlier release stored whole, before the field existed, or one that leaves
+    the tool out) is read with the formats the platform ships for it. The tool
+    is the name its server gives it.
+    """
+    held = declarations().source(str(source))
+    facts = held.tools.get(tool) if held is not None else None
+    if facts is not None and "routed_formats" in facts.model_fields_set:
+        return frozenset(facts.routed_formats)
+    return _shipped_routed_formats().get((str(source), tool), frozenset())
 
 
 @lru_cache(maxsize=4096)

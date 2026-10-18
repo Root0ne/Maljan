@@ -735,8 +735,10 @@ bound), and a worker that still has it set warns at start and names the
 setting. A stored value the settings model refuses, of this or any key, is
 never replaced by a default where something runs: a job fails (it no longer
 runs on the shipped defaults, for this or any refusal of its settings, nor when
-the stored settings cannot be read from the database; then it says to run it
-again once the database answers), an API read
+the stored settings cannot be read; a database or connection error is named by
+its class with the advice to run the job again once the database answers, any
+other failure of the read by its class alone, and a refusal by the keys or
+fields it names, else by its class, never by the value refused), an API read
 answers 409 and the ATT&CK cron skips its hour, each naming the key, the reason
 and the remedy (fix or reset it in the console). The settings page alone reads
 past it so it can open: a banner above every settings page lists the refused
@@ -1810,7 +1812,13 @@ Turn it off on a deployment whose browsers are on a thin link; every finished
 message is unaffected.
 
 `events.retention_days` (30) is how long a finished run's feed stays in
-`job_events` before the worker's nightly sweep removes it. The feed is the
+`job_events` before the worker's nightly sweep removes it. The analysis worker
+runs the sweep at 03:17 and once each time it starts, so a worker that is not
+running at that minute (a stack started for a run and stopped after it) still
+sweeps. A sweep that cannot read the stored setting, or finds it refused,
+removes nothing rather than sweeping by the default, and a retention so long
+that it reaches past the earliest date there is keeps every row (the worker says
+so once). The feed is the
 moment-by-moment record of a run, and what a reader wants while a run is
 fresh; a stopped run also keeps a partial report (see "The job timeout").
 
@@ -3515,6 +3523,7 @@ it:
 | `discloses_sample` | the tool sends the sample, or its bytes, out of the deployment |
 | `read_only` | the tool changes nothing and answers an identical call the same (read-only or idempotent): a revision that repeats an identical call of an earlier round is answered from that round's entry, as a tool its server marks `readOnlyHint` is, while no call that is not read-only has run on the same server since that entry was recorded; any other tool runs again. The shipped Ghidra, radare2, analysis, knowledge and network declarations mark their reading tools (`builtin_reverser_tools.GHIDRA_READ_ONLY`, `R2_READ_ONLY`, `builtin_declarations.ANALYSIS_READ_ONLY`, `KNOWLEDGE_READ_ONLY`, `NETWORK_READ_ONLY`) |
 | `holds_strings` | the answer holds the sample's strings as data though its kind is not a strings kind (Ghidra's `batch_string_anchor_report` and `find_undocumented_by_string`); a function claim's quoted value is looked for in it |
+| `routed_formats` | the routed sample formats a format-specific tool serves, each a known format the router gives a sample (`extractors.sample_identity.routed_formats()`: `pe`, `elf`, `mach-o`, `apk`, `dex`, `ole2`, `ooxml`, `pdf` …); a name it never gives, such as `macos` or `exe`, is refused on save, since it would drop the tool's reason for every sample, and so is `unknown`, the label of a sample of no known format, which no tool serves. When the tool cannot answer on its server, a sample of another known format loses nothing by it, so its unavailability is not recorded as a degradation of that run; a sample of an unknown format, and a tool that declares none, keep the reason. The shipped analysis server declares its parsers (`builtin_declarations.ANALYSIS_ROUTED_FORMATS`: `pe_info` `pe`, `elf_info` `elf`, `macho_info` `mach-o`, `apk_info` `apk` and `dex`, `document_info` `ole2`, `ooxml` and `pdf`); a map of the analysis server stored whole before the field existed reads those as shipped |
 | `function_starts` | the path of the answer's list of function start addresses (offsets from the image base), read for a `function_list` or `capability_rules` answer by the triage pack's function index and the readings of an image with no function table of its own |
 | `rows` | the path of the answer's rows |
 | `places` | per kind of place (`offset`, `rva`, `address`, `addresses`, `call_site`, `function`, `pid`, `command_line` …), the path inside a row that holds one |
@@ -3841,7 +3850,8 @@ the kind and is offered only with one, accepting it stages both or neither,
 and a row field also needs `rows`. A tool declaration names a kind or states
 only the fields read without one (`display_name`, `category`, `words`,
 `timeout_seconds`, `long_running`, `memory_peak_mb`, `discloses_sample`,
-`read_only`, `arguments`; `core.tool_declarations.KIND_FREE_FIELDS`): a declaration with an
+`read_only`, `arguments`, `routed_formats`;
+`core.tool_declarations.KIND_FREE_FIELDS`): a declaration with an
 unknown key (`{"knd": …}`), an empty one, or one of no kind that sets a field
 read only through a kind is refused on save, by the API and the console's box
 alike: the box reads the field split, each field's default and the no-kind word
@@ -4215,7 +4225,9 @@ stage's agent starts, each tool it binds that its server's manifest marks
 unavailable is recorded once as
 `server.<key>.<tool>_unavailable(<reason>); still answers <without>; <remediation>`
 in the run's degradation reasons, instead of being discovered by a failed call
-mid-run. `timeout_s` is the tool's real timeout, taken from the constant the
+mid-run. A tool whose declaration names the routed formats it serves
+(`routed_formats`) is not recorded for a sample of another known format: a
+missing Mach-O library costs a PE sample nothing. `timeout_s` is the tool's real timeout, taken from the constant the
 tool itself uses, so a manifest cannot say a call has none when it gives up
 after fifteen seconds. An unavailable tool does not make the run degraded on its own; a
 server that could not be attached still does.

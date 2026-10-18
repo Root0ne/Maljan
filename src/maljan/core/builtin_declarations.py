@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from collections.abc import Mapping
 from functools import cache
 from typing import TYPE_CHECKING, Any
 
@@ -764,6 +765,23 @@ KNOWLEDGE_READ_ONLY: frozenset[str] = frozenset(
 )
 NETWORK_READ_ONLY: frozenset[str] = frozenset({"capabilities"})
 
+# The routed formats each of the analysis server's format-specific parsers
+# serves (``ToolFacts.routed_formats``), as the router names them
+# (``extractors.sample_identity.routed_formats``). A parser the sample's format
+# never calls on is not something a run loses: a missing Mach-O library on a PE
+# sample is no degradation of that run. The table the pipeline read before also
+# named ``macho``, ``doc``, ``docx``, ``xls``, ``xlsx`` and ``rtf``, which the
+# router never gives a sample (it says ``mach-o``, ``ole2``, ``ooxml``), so no
+# sample read them. The triage pack's own steps keep their facts as they were:
+# they run only for their own format.
+ANALYSIS_ROUTED_FORMATS: dict[str, tuple[str, ...]] = {
+    "pe_info": ("pe",),
+    "elf_info": ("elf",),
+    "macho_info": ("mach-o",),
+    "apk_info": ("apk", "dex"),
+    "document_info": ("ole2", "ooxml", "pdf"),
+}
+
 
 def _marked_read_only(
     tools: dict[str, dict[str, Any]], names: frozenset[str]
@@ -773,6 +791,18 @@ def _marked_read_only(
         raise KeyError(f"read-only marks for undeclared tools: {missing}")
     return {
         name: {**facts, "read_only": True} if name in names else facts
+        for name, facts in tools.items()
+    }
+
+
+def _serving_formats(
+    tools: dict[str, dict[str, Any]], formats: Mapping[str, tuple[str, ...]]
+) -> dict[str, dict[str, Any]]:
+    missing = sorted(set(formats) - set(tools))
+    if missing:
+        raise KeyError(f"routed formats for undeclared tools: {missing}")
+    return {
+        name: {**facts, "routed_formats": list(formats[name])} if name in formats else facts
         for name, facts in tools.items()
     }
 
@@ -795,7 +825,9 @@ _SERVER_BLOCKS: dict[str, dict[str, Any]] = {
         ],
         "reads_staged_sample": True,
         "platform_owned": True,
-        "tool_facts": _marked_read_only(_ANALYSIS_TOOLS, ANALYSIS_READ_ONLY),
+        "tool_facts": _serving_formats(
+            _marked_read_only(_ANALYSIS_TOOLS, ANALYSIS_READ_ONLY), ANALYSIS_ROUTED_FORMATS
+        ),
     },
     "knowledge": {
         "roles": ["reference"],

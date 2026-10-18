@@ -41,14 +41,16 @@ from maljan.core.settings_overrides import (
 )
 from maljan.pipeline.events import MODEL_USAGE as MODEL_USAGE_EVENT
 from maljan.pipeline.outcome import absent_analysis_message
-from maljan.providers.errors import ProviderError
+from maljan.providers.errors import AttachedReportRefused, ProviderError
 from pydantic import ValidationError
 from sqlalchemy import Select, delete, func, select, update
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from app.config import get_settings, settings
 from app.logging_config import get_logger, setup_logging
 from app.runtime_config import runtime_config
+from app.services.job_events import STREAM_TTL_SECONDS, stream_key
 from app.worker.queues import ANALYSIS_QUEUE, build_redis_settings
 
 logger = get_logger("worker")
@@ -190,8 +192,23 @@ def build_job_settings(
 
     problem = role_block_problem(settings)
     if problem:
-        raise ValueError(f"llm.provider: {problem}")
+        raise JobSettingsRefused({"llm.provider": problem})
     return settings
+
+
+class JobSettingsRefused(ValueError):
+    """Settings a job would run with, refused here: each by its setting, with why.
+
+    Every reason is a sentence the platform composes from setting names and
+    the ids its provider registry issued (``provider_base.role_block_problem``),
+    never a value an operator typed or another component's words, so a job's
+    message states it whole. A plain ``ValueError`` from anywhere else is
+    stated by its class alone (``run_analysis``).
+    """
+
+    def __init__(self, refused: Mapping[str, str]) -> None:
+        self.refused = dict(refused)
+        super().__init__("; ".join(f"{key}: {why}" for key, why in self.refused.items()))
 
 
 def retired_environment_lines(environ: Mapping[str, str]) -> list[str]:
@@ -730,7 +747,7 @@ async def seed_seq_from_the_table(
             await db.commit()
         if not highest:
             return None
-        await redis_conn.set(key, int(highest), nx=True, ex=86_400)
+        await redis_conn.set(key, int(highest), nx=True, ex=STREAM_TTL_SECONDS)
     except Exception as exc:  # noqa: BLE001 — numbering never costs an event
         logger.debug(
             "Could not continue the event numbering for job %s (%s).",
@@ -786,7 +803,7 @@ async def _next_seq(redis_conn: aioredis.Redis, job_id: str) -> int:
         # there is a stream to read alongside it, and the table keeps its own
         # copy of every number for the replay after that.
         try:
-            await redis_conn.expire(_seq_key(job_id), 86_400)
+            await redis_conn.expire(_seq_key(job_id), STREAM_TTL_SECONDS)
         except Exception as exc:  # noqa: BLE001 — a TTL never costs a number
             logger.debug(
                 "Event sequence TTL refresh failed (%s); the number stands.",
@@ -1027,13 +1044,13 @@ async def _publish_event(
     # events when it mounts after the worker already started publishing.
     try:
         await redis_conn.xadd(
-            f"analysis:{job_id}:events",
+            stream_key(job_id),
             {"payload": message},
             maxlen=1000,
             approximate=True,
         )
         # 24h TTL — every read keeps the key fresh; idle keys vanish.
-        await redis_conn.expire(f"analysis:{job_id}:events", 86_400)
+        await redis_conn.expire(stream_key(job_id), STREAM_TTL_SECONDS)
     except Exception as exc:  # noqa: BLE001
         logger.debug(
             "Event stream xadd failed (%s); pubsub-only.",
@@ -2321,11 +2338,17 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
             # defaults would drop the operator's spend cap, server map and
             # timeout without the run saying so. The class of the error is
             # logged, never its text (it can quote a connection string).
+            #
+            # Only an error of the database or of the connection to it is said
+            # to be the database's. Any other failure of the read (the merge of
+            # the stored rows, say) is no outage to wait out: it reaches the
+            # failure path below as itself, named by its class with its
+            # traceback in the log, and no pipeline starts either way.
             from app.services.settings_service import load_core_overrides
 
             try:
                 overrides = await load_core_overrides(db)
-            except Exception as exc:  # noqa: BLE001 — any failure to read fails the job
+            except (SQLAlchemyError, OSError) as exc:
                 logger.error(
                     "Failed to load the stored settings (%s); job %s fails rather than "
                     "running on defaults.",
@@ -2334,9 +2357,9 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
                     extra={"job_id": job_id},
                 )
                 raise StatedFailure(
-                    "The stored settings could not be read from the database, so the job "
-                    "did not run on defaults in their place. Run it again once the "
-                    "database answers."
+                    "The stored settings could not be read from the database "
+                    f"({type(exc).__name__}), so the job did not run on defaults in their "
+                    "place. Run it again once the database answers."
                 ) from None
 
             # A job that names an attached report is read here too, for the
@@ -2412,13 +2435,29 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
                 + "). Fix them in the console or in the job's options; the job did "
                 "not run on defaults in their place."
             ) from None
-        except ValueError as exc:
-            # ``role_block_problem`` and the provider checks: sentences this
-            # package composes from setting names. ``StatedFailure`` publishes
-            # one only when it carries nothing the event scrubber would change.
+        except JobSettingsRefused as exc:
+            # The refusals ``build_job_settings`` writes from setting names and
+            # registered ids: stated by setting, with why, as the arms above
+            # state the keys and fields they name.
+            stated = "; ".join(f"{key}: {why}" for key, why in sorted(exc.refused.items()))
             raise StatedFailure(
-                f"The settings this job would run with are refused: {exc}. Fix them in "
+                f"The settings this job would run with are refused: {stated}. Fix them in "
                 "the console; the job did not run on defaults in their place."
+            ) from None
+        except ValueError as exc:
+            # Any other refusal: its class, never its text, which can quote the
+            # value refused (a stored secret among them). The rule the job's
+            # failure reason and the field-named arm above follow.
+            logger.error(
+                "The settings job %s would run with are refused (%s); it fails rather "
+                "than running on defaults.",
+                job_id,
+                type(exc).__name__,
+                extra={"job_id": job_id},
+            )
+            raise StatedFailure(
+                f"The settings this job would run with are refused ({type(exc).__name__}). "
+                "Fix them in the console; the job did not run on defaults in their place."
             ) from None
         # Agents, pipeline nodes and extractors read the process singleton
         # (``get_settings()``), not the config handed to MaljanApp. With
@@ -2570,11 +2609,26 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
                     filename=f"{_attached_row_id}.json",
                     report_format=_attached_format,
                 )
-            except ProviderError as exc:
+            except AttachedReportRefused as exc:
                 # A recorded format no longer declared, or declared without a
                 # reader: the attached evidence cannot be read, and the run
-                # says so rather than going on without it.
-                raise StatedFailure(str(exc)) from exc
+                # says so rather than going on without it, in the sentence the
+                # platform composed from the format's name and its settings.
+                raise StatedFailure(str(exc)) from None
+            except ProviderError as exc:
+                # Any other provider's own words (a plug-in sandbox's): its
+                # class, never its text, which can carry a value; the rule the
+                # job's other messages follow.
+                logger.error(
+                    "The sandbox provider refused the attached report of job %s (%s).",
+                    job_id,
+                    type(exc).__name__,
+                    extra={"job_id": job_id},
+                )
+                raise StatedFailure(
+                    "The configured sandbox provider could not read the attached sandbox "
+                    f"report ({type(exc).__name__}); the job did not run without it."
+                ) from None
 
         # Announce which analysts are about to run so the frontend can show
         # them. The active profile, not the class registry: a job that runs
@@ -3792,6 +3846,12 @@ async def startup(ctx: dict) -> None:
     # And one look at the other queue, once the process that reads it has had
     # a health interval to come up beside this one.
     ctx["enrichment_watch_task"] = asyncio.create_task(warn_if_enrichment_is_unmanned(ctx))
+    # One sweep of ``job_events`` as the worker starts, beside its slot rather
+    # than in it. The nightly cron fires only in a process alive at 03:17, and
+    # arq does not run a window it missed while no worker was up, so a worker
+    # started for a run and stopped after it (a local stack) never swept, and
+    # neither did a deployment whose worker restarted across the night's window.
+    ctx["events_sweep_task"] = asyncio.create_task(purge_old_job_events(ctx))
     # The console's ATT&CK cache jobs, read beside this worker's one analysis
     # slot rather than in it: this is the process that holds the cache.
     from app.worker.attck_worker import start_attck_worker
@@ -3810,12 +3870,25 @@ async def shutdown(ctx: dict) -> None:
     from app.worker.attck_worker import stop_attck_worker
 
     await stop_attck_worker(ctx, EXIT_GRACE)
-    for name in ("sweep_task", "enrichment_watch_task"):
+    for name in ("sweep_task", "enrichment_watch_task", "events_sweep_task"):
         task: asyncio.Task | None = ctx.get(name)
-        if task is not None:
-            task.cancel()
-            with suppress(asyncio.CancelledError):
-                await task
+        if task is None:
+            continue
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+        except Exception as exc:  # noqa: BLE001 — a start task never stops the shutdown
+            # Logged, not raised: the Redis close, the engine dispose, the exit
+            # guard below and arq's own pool close run whatever a task did.
+            logger.error(
+                "Worker start task %s had ended with %s; the shutdown goes on.",
+                name,
+                type(exc).__name__,
+                exc_info=(type(exc), exc, exc.__traceback__),
+                extra={"component": "worker.lifecycle"},
+            )
 
     # Each close is bounded: a connection that does not close would otherwise
     # hold the shutdown open before the process ever reaches its exit.
@@ -3927,6 +4000,8 @@ class WorkerSettings:
     # The one scheduled task this worker runs: the nightly sweep that bounds
     # ``job_events`` to ``core.events.retention_days``. Off-hour and off-minute
     # so it does not land on top of whatever else a deployment runs at 03:00.
+    # ``startup`` runs the same sweep once more as the worker starts, outside
+    # the job slot, for the nights no worker was up at that minute.
     cron_jobs = [cron(purge_old_job_events, hour=3, minute=17)]
     on_startup = startup
     on_shutdown = shutdown

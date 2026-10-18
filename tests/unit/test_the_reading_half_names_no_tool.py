@@ -40,11 +40,6 @@ _PACK_STEP = (
 # ((module, what, code), count) -> why it is still by name.
 STILL_BY_NAME: dict[tuple[str, str, str], tuple[int, str]] = {
     ("pipeline/triage_pack.py", "looks", "_ESTABLISHED.get(tool)"): (1, _PACK_STEP),
-    ("pipeline/nodes.py", "looks", "_FORMAT_TOOLS.get(tool)"): (
-        1,
-        "the format a built-in server's own parser reads, looked up only for a built-in "
-        "server that ships the tool (``declared_reading.ships_tool``)",
-    ),
     ("agents/evidence_recorder.py", "compares", "name != tool"): (
         1,
         "a repaired call matched to the note the same call left, by the tool name it gave",

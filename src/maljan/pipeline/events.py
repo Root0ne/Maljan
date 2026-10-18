@@ -1214,6 +1214,15 @@ def _hide_credentials(found: re.Match[str]) -> str:
       the stretch: ``host.example/<key>/x.php`` reads ``host.***.php``.
     """
     value = found.group(0)
+    if value in _attck_one_token_names() and not _LABEL_BEFORE_RE.search(
+        found.string[max(0, found.start() - 40) : found.start()]
+    ):
+        # A technique or tactic name of the vendored ATT&CK table as the whole
+        # run (``SyncAppvPublishingServer``) is a name, away from a credential
+        # label as a family name is: after ``password=`` the run is the
+        # credential, whatever it spells. A run that joins one to anything
+        # else is read as it always was.
+        return value
     if _names_only(value):
         return value
     if _is_a_family_name(value) and not _LABEL_BEFORE_RE.search(
@@ -1645,46 +1654,94 @@ def _scrub_line(line: str) -> str:
     return line
 
 
-# The ATT&CK names a label word stands in, read once from the vendored table:
-# for each, the text in front of the word and the word after it
-# (``Access Token Manipulation`` → ``("access ", "token", "Manipulation")``).
+# The vendored ATT&CK table's technique and tactic names and ids, read once.
+# The names a label word stands in are kept from the label rule, for each the
+# text in front of the word and the word after it (``Access Token
+# Manipulation`` → ``("access ", "token", "Manipulation")``); an id is never a
+# credential; and a name that is one token is a name the shape rules keep
+# (``SyncAppvPublishingServer``).
 _ATTCK_FILE = "data/attck_techniques.json"
+_ATTCK_NAMES: tuple[str, ...] | None = None
+_ATTCK_IDS: frozenset[str] | None = None
 _LABELLED_NAMES: frozenset[tuple[str, str, str]] | None = None
+_ATTCK_ONE_TOKEN_NAMES: frozenset[str] | None = None
 
 
-def _labelled_attck_names() -> frozenset[tuple[str, str, str]]:
-    """``(text before, label word, word after)`` for each vendored ATT&CK name with a label word."""
-    global _LABELLED_NAMES
-    if _LABELLED_NAMES is None:
-        found: set[tuple[str, str, str]] = set()
+def _attck_table() -> tuple[tuple[str, ...], frozenset[str]]:
+    """Every technique and tactic name of the vendored ATT&CK table, and every id; empty unread."""
+    global _ATTCK_NAMES, _ATTCK_IDS
+    if _ATTCK_NAMES is None or _ATTCK_IDS is None:
+        names: set[str] = set()
+        ids: set[str] = set()
         try:
-            import json
-
-            from maljan.core.paths import resolve_data
-
-            table = json.loads(resolve_data(_ATTCK_FILE).read_text(encoding="utf-8"))
+            table = _read_data(_ATTCK_FILE)
             for key, row in table.items():
                 if key.startswith("_") or not isinstance(row, dict):
                     continue
-                name = str(row.get("name") or "")
-                for match in re.finditer(r"(?i)\b(bearer|basic|token)\s+(\S+)", name):
-                    in_front = name[: match.start()].lower()
-                    found.add((in_front, match.group(1).lower(), match.group(2)))
-        except Exception as exc:  # noqa: BLE001 — every label then masks what follows it
+                ids.add(str(key))
+                names.add(str(row.get("name") or ""))
+            for tactics in (table.get("_tactics") or {}).values():
+                for tactic in (tactics or {}).values():
+                    if isinstance(tactic, dict):
+                        ids.add(str(tactic.get("id") or ""))
+                        names.add(str(tactic.get("name") or ""))
+        except Exception as exc:  # noqa: BLE001 — every rule then reads the names as any text
             logger.warning("The ATT&CK names were not read for the scrub (%s).", exc)
+        names.discard("")
+        ids.discard("")
+        _ATTCK_NAMES = tuple(sorted(names))
+        _ATTCK_IDS = frozenset(ids)
+    return _ATTCK_NAMES, _ATTCK_IDS
+
+
+def _labelled_attck_names() -> frozenset[tuple[str, str, str]]:
+    """``(text before, label word, word after)`` for each vendored ATT&CK name with a label word.
+
+    Technique and tactic names, as written. A word after the label that joins
+    alternatives with ``/`` is the name of each alternative too: ``Token
+    Impersonation`` and ``Token Theft`` are how a report shortens ``Token
+    Impersonation/Theft``, and are kept as the whole name is.
+    """
+    global _LABELLED_NAMES
+    if _LABELLED_NAMES is None:
+        found: set[tuple[str, str, str]] = set()
+        names, _ = _attck_table()
+        for name in names:
+            for match in re.finditer(r"(?i)\b(bearer|basic|token)\s+(\S+)", name):
+                in_front = name[: match.start()].lower()
+                label = match.group(1).lower()
+                word = match.group(2)
+                for spelling in (word, *word.split("/")):
+                    if spelling:
+                        found.add((in_front, label, spelling))
         _LABELLED_NAMES = frozenset(found)
     return _LABELLED_NAMES
 
 
-def _scheme_and_secret(found: re.Match[str]) -> str:
-    """An authorization scheme with what follows it masked, unless the two are an ATT&CK name.
+def _attck_one_token_names() -> frozenset[str]:
+    """The vendored ATT&CK technique and tactic names that are a single token."""
+    global _ATTCK_ONE_TOKEN_NAMES
+    if _ATTCK_ONE_TOKEN_NAMES is None:
+        names, _ = _attck_table()
+        _ATTCK_ONE_TOKEN_NAMES = frozenset(name for name in names if len(name.split()) == 1)
+    return _ATTCK_ONE_TOKEN_NAMES
 
-    Kept only on an exact match with a name in the vendored ATT&CK table, the
-    words in front of the label included: ``Access Token Manipulation``.
+
+def _scheme_and_secret(found: re.Match[str]) -> str:
+    """An authorization scheme with what follows it masked, unless the two are ATT&CK's.
+
+    Kept on an exact match with a name in the vendored ATT&CK table, the words
+    in front of the label included (``Access Token Manipulation``), or with an
+    alternative of a slash-joined name (``Token Impersonation``); and kept when
+    what follows is a technique or tactic id of the table, bracketed or not
+    (``Make and Impersonate Token (T1134.003)``), which no credential is.
     Anything else after ``Bearer``, ``Basic`` or ``token`` is masked.
     """
     scheme = found.group(1)
     after = found.group(0)[len(scheme) :].strip().rstrip(".,;:!?")
+    _, ids = _attck_table()
+    if after.lstrip("([{") in ids:
+        return found.group(0)
     before = found.string[max(0, found.start() - 80) : found.start()].lower()
     for in_front, label, word in _labelled_attck_names():
         if label == scheme.lower() and after == word and before.endswith(in_front):
