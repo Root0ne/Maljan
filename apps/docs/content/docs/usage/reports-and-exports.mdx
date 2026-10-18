@@ -217,6 +217,9 @@ never from a tool's name:
   carved from it (argument role `path` or `carved`);
 - every call through a block that declares where its server sees the sample
   (`sample_mount`, `work_dir` or `sample_open.open_tool`);
+- every call handed one of the job's paths to the sample as an argument (the
+  worker's copy, the path a server that declares a mount sees it at, a static
+  provider's mirror), so a tool that declares nothing is counted too;
 - the worker's own reads that write no ledger entry. These are the sample's
   routing, which every run with a readable sample does before any tool is
   called, and the report step's check of its drafted YARA rule.

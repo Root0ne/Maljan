@@ -755,6 +755,7 @@ def disclosure_record(
     partial_reason: str = "",
     opened: Mapping[str, Sequence[Mapping[str, Any]]] | None = None,
     worker: Mapping[str, Any] | None = None,
+    sample_paths: Iterable[str] = (),
 ) -> dict[str, Any]:
     """What the run sent beyond this machine, as the run summary stores it.
 
@@ -771,7 +772,8 @@ def disclosure_record(
     what the job noted of the processes that read the sample and of the reads
     in the worker that write no entry (``analysis.isolation.noted``), and
     ``worker`` the worker's own facts (``analysis.isolation.worker_facts``,
-    read here where ``None``). Linear in the entries and the snapshot.
+    read here where ``None``); ``sample_paths`` the job's paths to the sample,
+    a call handed one of which read it. Linear in the entries and the snapshot.
     """
     entries = list(entries)
     tools = _tool_rows(snapshot, entries)
@@ -791,7 +793,7 @@ def disclosure_record(
         "tracing": bool(tracing) or _setting_on(snapshot.get(TRACING_SETTING)),
         "unreadable_entries": max(0, int(unreadable or 0)),
         "addressed": addressed_hosts(snapshot),
-        "isolation": _isolation(snapshot, entries, opened or {}, worker),
+        "isolation": _isolation(snapshot, entries, opened or {}, worker, sample_paths),
     }
     record["nothing_left"] = _nothing_left(record)
     return record
@@ -802,6 +804,7 @@ def _isolation(
     entries: list[Any],
     opened: Mapping[str, Sequence[Mapping[str, Any]]],
     worker: Mapping[str, Any] | None,
+    sample_paths: Iterable[str] = (),
 ) -> dict[str, Any]:
     """The isolation part: each source that read the sample, placed by its settings block."""
     from maljan.analysis.isolation import isolation_part, sample_readers, worker_facts
@@ -819,7 +822,7 @@ def _isolation(
         route = _held(source)
         return (route.transport, route.place.host, route.place.where, route.place.why)
 
-    readers, unsourced = sample_readers(snapshot, entries, _block_path)
+    readers, unsourced = sample_readers(snapshot, entries, _block_path, sample_paths)
     return isolation_part(
         readers,
         unsourced,
@@ -1136,6 +1139,20 @@ def stage_agents(stages: Any) -> list[str]:
     return list(names)
 
 
+def job_sample_paths(container: Any) -> list[str]:
+    """Every path the job's sample was given under: the worker's copy, the path each
+    server that declares a mount sees it at, and each static provider's mirror."""
+    paths: list[str] = []
+    held = getattr(container, "sample_path", None)
+    if isinstance(held, str):
+        paths.append(held)
+    for name in ("server_sample_paths", "static_sample_paths"):
+        mapping = getattr(container, name, None)
+        if isinstance(mapping, Mapping):
+            paths.extend(str(value) for value in mapping.values() if isinstance(value, str))
+    return paths
+
+
 def run_disclosure(
     container: Any,
     *,
@@ -1184,6 +1201,7 @@ def run_disclosure(
             unreadable=unreadable,
             partial_reason=partial_reason,
             opened=noted(str(job_key())) if callable(job_key) else {},
+            sample_paths=job_sample_paths(container),
         )
     except Exception as exc:  # noqa: BLE001 — an absent block is right; a guessed one is not
         from maljan.core.logger import logger

@@ -525,6 +525,10 @@ class MaljanApp:
         self.container.sample_path = sample_path
         self.container.sample_sha256 = file_hash
         self.container.server_sample_paths = dict(server_sample_paths or {})
+        self.container.static_sample_paths = {
+            **({"": static_sample_path} if static_sample_path else {}),
+            **dict(static_sample_paths or {}),
+        }
 
         initial_state: AnalysisState = {
             "file_hash": file_hash,

@@ -144,6 +144,40 @@ def test_every_call_through_a_block_that_declares_where_it_sees_the_sample_read_
         assert readers == {"provider:decomp": 1}, leaf
 
 
+def test_an_undeclared_tool_handed_one_of_the_jobs_sample_paths_read_it() -> None:
+    from maljan.analysis.disclosure import job_sample_paths
+
+    container = SimpleNamespace(
+        sample_path="/app/data/uploads/.tmp/abc.exe",
+        server_sample_paths={"remote": "/data/samples/.work/abc.exe"},
+        static_sample_paths={"r2": "/app/data/samples/r2-work/abc.exe"},
+    )
+    paths = job_sample_paths(container)
+    undeclared = {"id": "ev_9", "tool": "anything", "facts": {"v": 1}, "ok": True}
+    readers, _ = sample_readers(
+        {},
+        [
+            {**undeclared, "source": "mcp:plugged", "args": {"file": paths[0]}},
+            {**undeclared, "source": "mcp:remote", "args": {"f": "/data/samples//.work/abc.exe"}},
+            {**undeclared, "source": "mcp:r2ish", "args": {"target": paths[2], "n": 3}},
+            {**undeclared, "source": "mcp:other", "args": {"file": "/etc/hosts"}},
+            {**undeclared, "source": "mcp:empty", "args": {"file": ""}},
+        ],
+        lambda source: None,
+        paths,
+    )
+    assert readers == {"mcp:plugged": 1, "mcp:remote": 1, "mcp:r2ish": 1}
+
+
+def test_a_run_record_counts_a_call_handed_the_sample_path() -> None:
+    entry = {"id": "ev_9", "tool": "scan", "source": "mcp:analysis", "facts": {"v": 1}}
+    entry["args"] = {"target": "/tmp/s.bin"}
+    record = disclosure_record(STDIO, entries=[entry], worker=WORKER, sample_paths=["/tmp/s.bin"])
+    assert [row["source"] for row in record["isolation"]["rows"]] == ["mcp:analysis"]
+    record = disclosure_record(STDIO, entries=[entry], worker=WORKER)
+    assert record["isolation"]["rows"] == []
+
+
 def test_finding_the_readers_is_linear_in_the_entries() -> None:
     def timed(count: int) -> float:
         entries = [_reads(f"mcp:s{i % 50}") for i in range(count)]

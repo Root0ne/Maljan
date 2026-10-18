@@ -373,17 +373,40 @@ def _block_opens(snapshot: Mapping[str, Any], path: str | None) -> bool:
     return bool(path) and any(snapshot.get(f"{path}.{leaf}") for leaf in SAMPLE_BLOCK_FIELDS)
 
 
+def _normal_paths(paths: Iterable[Any]) -> frozenset[str]:
+    return frozenset(os.path.normpath(str(p)) for p in paths if isinstance(p, str) and p.strip())
+
+
+def _names_a_sample_path(entry: Any, paths: frozenset[str]) -> bool:
+    """Whether a top-level argument of the call is one of the job's sample paths, as given."""
+    args = _field(entry, "args")
+    if not paths or not isinstance(args, Mapping):
+        return False
+    return any(
+        isinstance(value, str) and value.strip() and os.path.normpath(value) in paths
+        for value in args.values()
+    )
+
+
 def sample_readers(
     snapshot: Mapping[str, Any],
     entries: Iterable[Any],
     block_path: Callable[[str], str | None],
+    sample_paths: Iterable[str] = (),
 ) -> tuple[dict[str, int], int]:
     """``({source: calls that read the sample}, calls that read it but record no source)``.
 
-    Linear in the entries: each source's block is looked up once.
+    A call reads the sample when its block declares where it sees it, when its
+    tool declares an argument as the sample, or, read from the data, when it
+    was handed one of the job's paths to the sample (``sample_paths``: the
+    worker's copy, the paths servers that declare a mount see it at, the static
+    providers' mirrors), so a tool that declares nothing is counted too.
+    Linear in the entries and their arguments: each source's block is looked up
+    once.
     """
     from maljan.core.declared_reading import kind_free_facts
 
+    paths = _normal_paths(sample_paths)
     blocks: dict[str, bool] = {}
     readers: dict[str, int] = {}
     unsourced = 0
@@ -397,6 +420,8 @@ def sample_readers(
         if not reads:
             arguments = kind_free_facts(entry).arguments
             reads = any(role in arguments for role in SAMPLE_ARGUMENT_ROLES)
+        if not reads:
+            reads = _names_a_sample_path(entry, paths)
         if not reads:
             continue
         if source:
