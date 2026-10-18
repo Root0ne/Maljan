@@ -56,6 +56,7 @@ from maljan.core.config import get_settings
 from maljan.core.exceptions import AgentLoopCancelled, AnalystError, SampleNotOpened
 from maljan.core.input_meter import (
     TOOL_LOOP,
+    job_identifiers,
     request_parts,
     system_prompt_digests,
     tool_digests,
@@ -4106,7 +4107,9 @@ class BudgetMeter:
                 stage=str(getattr(self, "pipeline_stage", "") or "analysis"),
                 kind=kind,
                 loop=loop,
-                prompts=system_prompt_digests(messages),
+                prompts=system_prompt_digests(
+                    messages, job_identifiers(getattr(self, "_container", None))
+                ),
             )
         except Exception as exc:  # noqa: BLE001 — a measure never costs a turn
             self.logger.debug("%s: the request was not measured (%s).", self.name, exc)

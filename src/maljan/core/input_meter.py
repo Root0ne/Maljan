@@ -170,10 +170,55 @@ def digest(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8", "surrogatepass")).hexdigest()
 
 
-def system_prompt_digests(messages: Iterable[Any]) -> list[str]:
-    """The digest of each system message of a request, as sent."""
+# The shortest file name taken for a job identifier: a shorter one is too
+# likely to be an ordinary word of the prompt.
+_MIN_NAME = 8
+
+
+def job_identifiers(container: Any) -> list[tuple[str, str]]:
+    """``(value, placeholder)`` for each identifier of this job the platform writes into prompts.
+
+    Taken from the job's known values on the container — the sample's sha256
+    (as written and upper-cased), the sample's path and every path a tool
+    server opens it at, its file name, and the job id — never found by a
+    pattern. Longest first, so a path is replaced before the name inside it.
+    """
+    import os
+
+    pairs: list[tuple[str, str]] = []
+    sha = str(getattr(container, "sample_sha256", "") or "").strip()
+    if sha:
+        pairs += [(form, "<sample-sha256>") for form in (sha, sha.lower(), sha.upper())]
+    paths = [str(getattr(container, "sample_path", "") or "")]
+    served = getattr(container, "server_sample_paths", None)
+    if isinstance(served, Mapping):
+        paths += [str(p or "") for p in served.values()]
+    for path in paths:
+        if path.strip():
+            pairs.append((path, "<sample-path>"))
+            name = os.path.basename(path)
+            if len(name) >= _MIN_NAME:
+                pairs.append((name, "<sample-name>"))
+    job = str(getattr(container, "job_id", "") or "").strip()
+    if job:
+        pairs.append((job, "<job-id>"))
+    unique = {value: mark for value, mark in pairs if value}
+    return sorted(unique.items(), key=lambda pair: -len(pair[0]))
+
+
+def without_identifiers(text: str, identifiers: Sequence[tuple[str, str]]) -> str:
+    """``text`` with each identifier replaced by its placeholder."""
+    for value, mark in identifiers:
+        text = text.replace(value, mark)
+    return text
+
+
+def system_prompt_digests(
+    messages: Iterable[Any], identifiers: Sequence[tuple[str, str]] = ()
+) -> list[str]:
+    """The digest of each system message of a request, its job identifiers replaced first."""
     return [
-        digest(_text_of(getattr(m, "content", "")))
+        digest(without_identifiers(_text_of(getattr(m, "content", "")), identifiers))
         for m in messages
         if str(getattr(m, "type", "") or "") == "system"
     ]

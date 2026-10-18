@@ -50,8 +50,14 @@ fingerprints that differ name what changed. Secrets never enter it: only the
 masked view of the settings is hashed, where a secret reads as set or unset.
 A prompt carries the run's own words where the platform writes them in (the
 mediator's names the sample's hash), so the prompts component tells two
-samples apart; the others do not. A tool's own version is not reported over
-MCP and is not in it.
+samples apart unless its identifiers are taken out: before a system prompt is
+hashed, the job's own identifiers the platform writes into prompts — the
+sample's sha256 (as written and upper-cased), its path and the paths the tool
+servers open it at, its file name and the job id, each taken from the job's
+known values (``core.input_meter.job_identifiers``), never by a pattern — are
+replaced with fixed placeholders, so the same configuration on two samples
+gives the same prompts hash. A tool's own version is not reported over MCP and
+is not in it.
 """
 
 from __future__ import annotations
@@ -205,7 +211,11 @@ def _call_key(entry: Any) -> str:
     return json.dumps([str(_field(entry, "server") or ""), str(_field(entry, "tool") or ""), args])
 
 
-_CALL_COUNTS = ("repeated", "refused", "run_again")
+# ``retried_after_failure`` is the platform's intended re-run: the repeat guard
+# serves an identical call again when the earlier one failed (a retry after a
+# transient failure, its own stated reason, read from the ``ok`` of the entry it
+# repeats). ``run_again`` is every other identical call that ran: the agent's.
+_CALL_COUNTS = ("repeated", "refused", "run_again", "retried_after_failure")
 
 
 def calls_record(entries: Sequence[Any]) -> dict[str, Any] | None:
@@ -218,7 +228,8 @@ def calls_record(entries: Sequence[Any]) -> dict[str, Any] | None:
     totals = dict.fromkeys(_CALL_COUNTS, 0)
     by_agent: dict[str, dict[str, int]] = {}
     by_tool: dict[str, dict[str, int]] = {}
-    seen: set[str] = set()
+    # Each call key's last run, and whether it failed.
+    last_failed: dict[str, bool] = {}
     for entry in held:
         if _reads_again(entry):
             continue
@@ -228,10 +239,11 @@ def calls_record(entries: Sequence[Any]) -> dict[str, Any] | None:
             kind = "repeated"
         else:
             key = _call_key(entry)
-            if key not in seen:
-                seen.add(key)
+            earlier = last_failed.get(key)
+            last_failed[key] = _field(entry, "ok") is False
+            if earlier is None:
                 continue
-            kind = "run_again"
+            kind = "retried_after_failure" if earlier else "run_again"
         totals[kind] += 1
         agent = str(_field(entry, "agent") or "") or "pipeline"
         tool = str(_field(entry, "tool") or "")
@@ -676,14 +688,15 @@ def _summed(table: Any) -> dict[str, int]:
 
 
 def _calls_line(calls: Mapping[str, Any]) -> str:
-    repeated, refused, again = (_int(calls.get(kind)) for kind in _CALL_COUNTS)
+    repeated, refused, again, retried = (_int(calls.get(kind)) for kind in _CALL_COUNTS)
     line = (
         f"Tool calls that found nothing new: {repeated:,} answered from an earlier identical "
         f"call without running, {refused:,} refused by a guard with no tool run, and "
-        f"{again:,} run again with the tool, server and arguments of an earlier call"
+        f"{again:,} run again by the agent with the tool, server and arguments of an earlier "
+        f"call; besides them, {retried:,} identical call(s) retried after the earlier one failed"
     )
     by_agent = _named_counts(_summed(calls.get("by_agent")))
-    if repeated + refused + again and by_agent:
+    if repeated + refused + again + retried and by_agent:
         by_tool = _named_counts(_summed(calls.get("by_tool")))
         line += f" (by agent: {by_agent}; by tool: {by_tool})"
     return line + "."

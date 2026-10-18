@@ -47,12 +47,19 @@ def _container(
     description: str = "Reads a PE header.",
     version: str = "1.0",
     settings: Settings | None = None,
+    sha: str = "a" * 64,
+    path: str = "/samples/job-1/invoice_2024.exe",
+    job: str = "job-0001",
 ) -> Any:
     meter = InputMeter()
     container = SimpleNamespace(
         input_meter=meter,
         server_versions=lambda: {"analysis": {"name": "analysis-mcp", "version": version}},
         config=settings or Settings(),
+        sample_sha256=sha,
+        sample_path=path,
+        server_sample_paths={"analysis": path.replace("/samples", "/srv")},
+        job_id=job,
     )
     agent = _Agent("static", container)
     agent._note_request([SystemMessage(content=prompt), HumanMessage(content="go")], kind="x")
@@ -184,3 +191,25 @@ def test_the_report_lines_give_the_hash_and_the_servers() -> None:
         "Tool servers as they gave themselves at attach: `analysis` as `analysis-mcp` version "
         "`1.0`. A tool's own version is not reported over MCP."
     )
+
+
+def _with_identity(sha: str, path: str, job: str, *, verb: str = "Look") -> Any:
+    prompt = (
+        f"{verb} the sample up once: its sha256 is {sha} (upper case {sha.upper()}), "
+        f"it is at {path}, the server reads {path.replace('/samples', '/srv')}, its name is "
+        f"{path.rsplit('/', 1)[-1]}, and the job is {job}."
+    )
+    return _container(prompt=prompt, sha=sha, path=path, job=job)
+
+
+def test_two_samples_of_one_configuration_give_one_prompts_hash() -> None:
+    first = fingerprint_record(_with_identity("ab" * 32, "/samples/j1/invoice.exe", "job-1"))
+    second = fingerprint_record(_with_identity("cd" * 32, "/samples/j2/dropper_x.dll", "job-2"))
+    reworded = fingerprint_record(
+        _with_identity("cd" * 32, "/samples/j2/dropper_x.dll", "job-2", verb="Check")
+    )
+    assert first is not None and second is not None and reworded is not None
+
+    assert first["components"]["prompts"] == second["components"]["prompts"]
+    assert first["sha256"] == second["sha256"]
+    assert reworded["components"]["prompts"] != second["components"]["prompts"]

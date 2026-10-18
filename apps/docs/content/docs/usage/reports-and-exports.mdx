@@ -289,7 +289,9 @@ nothing a model reads changes.
 - **Tool calls that found nothing new** (`calls`): the calls the repeat guard
   answered from an earlier identical call without running, the calls a guard
   refused with no tool run, and the calls that ran again with the tool, server
-  and arguments of an earlier call, by agent and by tool.
+  and arguments of an earlier call, by agent and by tool. A re-run the guard
+  serves because the earlier identical call failed is counted apart, as a
+  retry after a failure, so neither count overstates the other.
 - **Rows read back** (`rows_read`): the ledger and pack rows each agent read
   again by id through `read_evidence`, how often, each row's tool and whether
   the triage pack wrote it.
@@ -301,11 +303,12 @@ nothing a model reads changes.
   itself at attach, and the settings the run ran with, masked as the stored
   settings snapshot masks them. Each component and each part (per agent, per
   server, per settings section) keeps its own hash, so two fingerprints that
-  differ name what changed. A secret enters only as set or unset. A prompt
-  carries the run's own words where the platform writes them in (the
-  mediator's names the sample's hash), so the prompts component tells two
-  samples apart. A tool's own version is not reported over MCP and is not in
-  the fingerprint.
+  differ name what changed. A secret enters only as set or unset. Before a
+  system prompt is hashed, the job's own identifiers the platform writes into
+  it (the sample's sha256, its paths and file name, the job id), taken from
+  the job's known values, are replaced with fixed placeholders, so the same
+  configuration on two samples gives the same fingerprint. A tool's own
+  version is not reported over MCP and is not in the fingerprint.
 
 A run stopped part-way stores the counts as of the stop and says so. A report
 stored before the block existed shows none.

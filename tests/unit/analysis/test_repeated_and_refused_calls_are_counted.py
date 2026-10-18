@@ -43,13 +43,14 @@ def test_each_kind_is_counted_by_agent_and_tool() -> None:
         "repeated": 1,
         "refused": 1,
         "run_again": 1,
+        "retried_after_failure": 0,
         "by_agent": {
-            "dynamic": {"repeated": 0, "refused": 0, "run_again": 1},
-            "static": {"repeated": 1, "refused": 1, "run_again": 0},
+            "dynamic": {"repeated": 0, "refused": 0, "run_again": 1, "retried_after_failure": 0},
+            "static": {"repeated": 1, "refused": 1, "run_again": 0, "retried_after_failure": 0},
         },
         "by_tool": {
-            "decompile": {"repeated": 0, "refused": 1, "run_again": 0},
-            "strings": {"repeated": 1, "refused": 0, "run_again": 1},
+            "decompile": {"repeated": 0, "refused": 1, "run_again": 0, "retried_after_failure": 0},
+            "strings": {"repeated": 1, "refused": 0, "run_again": 1, "retried_after_failure": 0},
         },
     }
 
@@ -64,8 +65,9 @@ def test_no_ledger_is_no_part_and_a_clean_one_counts_zeros() -> None:
     assert record is not None
     assert _calls_line(record) == (
         "Tool calls that found nothing new: 0 answered from an earlier identical call without "
-        "running, 0 refused by a guard with no tool run, and 0 run again with the tool, server "
-        "and arguments of an earlier call."
+        "running, 0 refused by a guard with no tool run, and 0 run again by the agent with the "
+        "tool, server and arguments of an earlier call; besides them, 0 identical call(s) "
+        "retried after the earlier one failed."
     )
 
 
@@ -86,3 +88,22 @@ def test_the_count_is_linear_in_the_ledger() -> None:
 
     small = max(timed(1), 1e-4)
     assert timed(10) < small * 40
+
+
+def test_a_retry_after_a_failure_is_the_platform_s_and_counted_apart() -> None:
+    args = {"path": "a"}
+    ledger = [
+        _entry(1, args=args, ok=False, error="the server did not answer"),
+        _entry(2, args=args),
+        _entry(3, args=args),
+    ]
+    record = calls_record(ledger)
+
+    assert record is not None
+    assert (record["retried_after_failure"], record["run_again"]) == (1, 1)
+    assert record["by_tool"]["strings"] == {
+        "repeated": 0,
+        "refused": 0,
+        "run_again": 1,
+        "retried_after_failure": 1,
+    }

@@ -180,6 +180,7 @@
       "by_tool": "<data-keyed map>",
       "refused": null,
       "repeated": null,
+      "retried_after_failure": null,
       "run_again": null
     },
     "fingerprint": {
