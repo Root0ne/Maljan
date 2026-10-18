@@ -395,6 +395,20 @@ class TestTheWritesRunOffTheLoop:
         stored = inspect.getsource(analysis_worker._store_the_report)
         assert stored.index("_spill.drain") < stored.index("_spill.close()")
 
+    def test_only_a_connection_or_timeout_cause_marks_the_store_down(self) -> None:
+        import urllib3
+
+        def exhausted(reason: Any) -> Any:
+            return urllib3.exceptions.MaxRetryError(None, "/evidence", reason=reason)
+
+        refused = urllib3.exceptions.NewConnectionError(None, "refused")
+        five_hundreds = urllib3.exceptions.ResponseError("too many 503 error responses")
+        assert object_store._unreachable(exhausted(refused))
+        assert object_store._unreachable(exhausted(urllib3.exceptions.ConnectTimeoutError()))
+        assert object_store._unreachable(ConnectionRefusedError())
+        assert not object_store._unreachable(exhausted(five_hundreds))
+        assert not object_store._unreachable(OSError("disk full on the store"))
+
     def test_the_writers_client_has_short_timeouts_and_one_retry(self) -> None:
         built = object_store._evidence_client()
         pool = built._http

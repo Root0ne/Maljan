@@ -190,18 +190,24 @@ def _evidence_client() -> Any:
 
 
 def _unreachable(exc: BaseException) -> bool:
-    """Whether ``exc`` says the store could not be reached at all (not that it refused a write)."""
+    """Whether ``exc`` says the store could not be reached at all (not that it refused a write).
+
+    Retries that ran out are read by their cause: a connection or a timeout
+    that failed is a store out of reach; server errors answered every time
+    are a store that answered, and only that write failed.
+    """
     import urllib3
 
-    return isinstance(
-        exc,
-        urllib3.exceptions.MaxRetryError
-        | urllib3.exceptions.NewConnectionError
-        | urllib3.exceptions.ConnectTimeoutError
-        | urllib3.exceptions.ProtocolError
-        | ConnectionError
-        | TimeoutError,
+    causes = (
+        urllib3.exceptions.NewConnectionError,
+        urllib3.exceptions.TimeoutError,
+        urllib3.exceptions.ProtocolError,
+        ConnectionError,
+        TimeoutError,
     )
+    if isinstance(exc, urllib3.exceptions.MaxRetryError):
+        return isinstance(exc.reason, causes)
+    return isinstance(exc, causes)
 
 
 class JobEvidenceSpill(EvidenceSpill):
