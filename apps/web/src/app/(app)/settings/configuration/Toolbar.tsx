@@ -6,6 +6,7 @@ import { Download, Upload } from "lucide-react";
 import { api } from "@/lib/api";
 import { getErrorMessage } from "@/lib/errors";
 import ImportDialog from "./ImportDialog";
+import { exportLeftOutNotice } from "@/lib/settingsExport";
 import { useSettingsContext } from "./SettingsContext";
 
 const SEARCH_PATH = "/settings/configuration/search";
@@ -25,6 +26,8 @@ export default function Toolbar() {
   const [query, setQuery] = useState(urlQuery);
   const [toast, setToast] = useState<string | null>(null);
   const [exportError, setExportError] = useState<string | null>(null);
+  // Kept on screen, unlike the toast: what the downloaded file does not hold.
+  const [exportLeftOut, setExportLeftOut] = useState("");
   const [importOpen, setImportOpen] = useState(false);
 
   // The box mirrors `?q` on the search page and is empty everywhere else, so
@@ -107,9 +110,11 @@ export default function Toolbar() {
           className="flex items-center gap-1.5 text-xs text-accent-strong shrink-0"
           onClick={async () => {
             setExportError(null);
+            setExportLeftOut("");
             try {
-              await api.exportSettings();
+              const unreadable = await api.exportSettings();
               setToast("Configuration downloaded as maljan-settings.json");
+              setExportLeftOut(exportLeftOutNotice(unreadable));
             } catch (e) {
               setExportError(getErrorMessage(e));
             }
@@ -130,6 +135,11 @@ export default function Toolbar() {
 
       {importOpen && <ImportDialog onClose={() => setImportOpen(false)} />}
 
+      {exportLeftOut && (
+        <div className="text-xs text-status-orange mt-3" role="alert" data-export-left-out>
+          {exportLeftOut}
+        </div>
+      )}
       {exportError && (
         <div className="text-xs text-status-red mt-3" role="alert">
           {exportError}

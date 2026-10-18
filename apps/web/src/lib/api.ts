@@ -9,6 +9,7 @@ import type {
 } from "@/types/malware-report";
 import { ApiError } from "@/lib/errors";
 import { SettingsConflictError, SettingsValidationError } from "@/types/settings";
+import { exportUnreadable } from "@/lib/settingsExport";
 import type {
   AttckCheckResult,
   AttckStatus,
@@ -808,9 +809,10 @@ class ApiClient {
    * document is downloaded byte-for-byte as the API sent it (`format`,
    * `exported_at`, `values`, `secrets_omitted`, `unreadable` in that order) rather than
    * re-serialised, so the file on disk is exactly what `GET
-   * /settings/export` returned.
+   * /settings/export` returned. Returns the document's `unreadable` map:
+   * the keys it left out, with why.
    */
-  async exportSettings(): Promise<void> {
+  async exportSettings(): Promise<Record<string, string>> {
     const res = await this.settingsFetch("/api/v1/settings/export");
     const text = await res.text();
     const blob = new Blob([text], { type: "application/json" });
@@ -822,6 +824,7 @@ class ApiClient {
     a.click();
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
+    return exportUnreadable(text);
   }
 
   /** Imports a previously exported (or hand-written) configuration document.

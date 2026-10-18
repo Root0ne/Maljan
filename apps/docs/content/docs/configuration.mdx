@@ -4532,7 +4532,7 @@ sets `Content-Disposition: attachment; filename=maljan-settings.json`:
   informational, not catalog keys.
 - A stored row nested deeper than an answer can be written (the bound is the
   JSON writers' own, never a depth Maljan sets) is left out and named under
-  `unreadable` with why; an import ignores that field. `GET /api/v1/settings`
+  `unreadable` with why, which the console names beside the download; an import ignores that field. `GET /api/v1/settings`
   serves the same row with no value and its reason in `unreadable`, which the
   console shows on the row, and a warning is logged, so one such row never
   fails the settings page or the export.
