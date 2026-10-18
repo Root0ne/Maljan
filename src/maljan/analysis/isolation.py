@@ -26,8 +26,10 @@ said to be "not verified". The whole part is isolated only when at least one
 row exists and every row is isolated. A run that recorded no read of the
 sample says so and claims nothing.
 
-What is measured is the process the worker started. A launcher that starts the
-real server as its own child is measured as the launcher.
+What is measured is the process the worker started and every process under it
+(:func:`measure_tree`): a launcher starts the real server as its own child, and
+which process of the tree reads the sample cannot be told, so every one is held
+to the checks.
 """
 
 from __future__ import annotations
@@ -211,6 +213,85 @@ def measure_process(pid: int, env_names: Iterable[str]) -> dict[str, Any]:
     return out
 
 
+# The most processes one started server's tree is measured over: a server is its
+# launcher and a few helpers, and a wider tree is said to be cut, never judged.
+MAX_TREE_PROCESSES = 64
+
+
+def _children(pid: int) -> list[int] | None:
+    """The children of ``pid`` across its threads, or ``None`` where they cannot be read."""
+    try:
+        tasks = os.listdir(f"/proc/{pid}/task")
+    except OSError:
+        return None
+    found: list[int] = []
+    for task in tasks:
+        try:
+            with open(f"/proc/{pid}/task/{task}/children", encoding="ascii") as fh:
+                found.extend(int(child) for child in fh.read().split())
+        except FileNotFoundError:
+            # The thread ended between the listing and the read.
+            continue
+        except (OSError, ValueError):
+            return None
+    return found
+
+
+def _gone(pid: int) -> bool:
+    return not os.path.exists(f"/proc/{pid}")
+
+
+def measure_tree(pid: int, env_names: Iterable[str]) -> dict[str, Any]:
+    """The process the worker started (:func:`measure_process`), and each of its descendants.
+
+    A launcher (a sandbox's monitor, ``uv run``, a container client) starts the
+    real server as its own child, so the whole tree under the started process
+    is walked, breadth first, through ``/proc/<pid>/task/*/children``, up to
+    :data:`MAX_TREE_PROCESSES`. Which process of the tree reads the sample
+    cannot be told from outside, so every one is held to the checks. A process
+    that ended during the walk is left out. A tree that could not be read
+    whole, or is wider than the bound, is ``descendants_judged: False``, with
+    why.
+
+    A descendant's platform variables are the started process's: an
+    environment passes only from a parent to its child, and the started
+    process's is the one the platform built.
+    """
+    started = measure_process(pid, env_names)
+    inherited = started["platform_names_in_env"]
+    descendants: list[dict[str, Any]] = []
+    judged, why = True, ""
+    seen, queue = {pid}, [pid]
+    while queue and judged:
+        current = queue.pop(0)
+        children = _children(current)
+        if children is None:
+            if not _gone(current):
+                judged, why = False, "the children of a process in its tree could not be read"
+            continue
+        for child in children:
+            if child in seen:
+                continue
+            if len(seen) >= MAX_TREE_PROCESSES:
+                judged = False
+                why = f"its tree holds more than {MAX_TREE_PROCESSES} processes, which is "
+                why += "as many as one start is measured over"
+                break
+            seen.add(child)
+            measured = measure_process(child, ())
+            if measured["uid"] is None and _gone(child):
+                continue
+            measured["platform_names_in_env"] = list(inherited)
+            descendants.append(measured)
+            queue.append(child)
+    return {
+        **started,
+        "descendants": descendants,
+        "descendants_judged": judged,
+        "descendants_why": why,
+    }
+
+
 def worker_facts() -> dict[str, Any]:
     """The worker process itself: its user, capabilities, flag and platform variables by name."""
     status = _status("self")
@@ -360,6 +441,35 @@ def _passes(row: Mapping[str, Any]) -> bool:
     return all(checks)
 
 
+# Why a start's descendants were not judged when its note says nothing of them.
+DESCENDANTS_UNRECORDED = "the run recorded no walk of the processes under it"
+
+
+def _descendant_fields(notes: Sequence[Mapping[str, Any]], needs_network: bool) -> dict[str, Any]:
+    """Every start's descendants together: how many, how many failed, and whether all were judged.
+
+    A note that records no walk judged nothing: never isolated by default.
+    """
+    count = failing = 0
+    judged, why = True, ""
+    for note in notes:
+        if "descendants_judged" not in note:
+            judged, why = False, why or DESCENDANTS_UNRECORDED
+            continue
+        if not note.get("descendants_judged"):
+            judged = False
+            why = why or str(note.get("descendants_why") or DESCENDANTS_UNRECORDED)
+        for process in note.get("descendants") or []:
+            count += 1
+            failing += 0 if _passes({**process, "needs_network": needs_network}) else 1
+    return {
+        "descendants": count,
+        "descendants_failing": failing,
+        "descendants_judged": judged,
+        "descendants_why": why,
+    }
+
+
 def _row(source: str, where: str, calls: int, **over: Any) -> dict[str, Any]:
     row: dict[str, Any] = {
         "source": source,
@@ -371,6 +481,10 @@ def _row(source: str, where: str, calls: int, **over: Any) -> dict[str, Any]:
         "measured_by": "",
         "attaches": 0,
         **dict.fromkeys(MEASURED_FIELDS),
+        "descendants": 0,
+        "descendants_failing": 0,
+        "descendants_judged": False,
+        "descendants_why": "",
         "needs_network": False,
         "isolated": False,
         "why_not_measured": "",
@@ -466,8 +580,11 @@ def isolation_part(
                 needs_network=network,
                 why_not_measured=NOT_MEASURED_DISAGREE if disagreed else "",
                 **fields,
+                **_descendant_fields(measured, network),
             )
-            row["isolated"] = _passes(row)
+            row["isolated"] = (
+                _passes(row) and row["descendants_judged"] and not row["descendants_failing"]
+            )
             rows.append(row)
             continue
         if transport and locality == LOCAL:
@@ -670,8 +787,30 @@ def _child_line(row: Mapping[str, Any], code: Callable[[str], str]) -> str:
     need = " Its block declares that it needs the network." if row.get("needs_network") else ""
     tail = f" {_cap(why)}." if why else ""
     return (
-        f"{who} (stdio, run on this machine) read the sample in a process the worker started, "
-        f"{measured}: " + "; ".join(parts) + f". So: {verdict}.{need}{tail}"
+        f"{who} (stdio, run on this machine) read the sample. The process the worker started "
+        f"for it was {measured}: " + "; ".join(parts) + f". {_tree_sentence(row)} "
+        f"So: {verdict}.{need}{tail}"
+    )
+
+
+def _tree_sentence(row: Mapping[str, Any]) -> str:
+    """What was judged of the processes under the one the worker started."""
+    if not row.get("descendants_judged"):
+        return (
+            f"Its descendant processes were not judged ({row.get('descendants_why')}), so they "
+            "cannot be shown to be kept from the worker."
+        )
+    count, failing = int(row.get("descendants") or 0), int(row.get("descendants_failing") or 0)
+    if not count:
+        return "It had no descendant process when it was measured."
+    which = "Which process of its tree reads the sample cannot be told, so every one is held to "
+    which += "the checks."
+    noun = "process was" if count == 1 else "processes were"
+    if not failing:
+        return f"Its {count} descendant {noun} measured too, and every one passed. {which}"
+    return (
+        f"Its {count} descendant {noun} measured too, and {failing} did not pass every "
+        f"check. {which}"
     )
 
 

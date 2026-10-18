@@ -79,6 +79,10 @@ SHARED = {
     "no_new_privs": False,
     "platform_names_in_env": [],
 }
+# The walk of a started process that had no descendant.
+NO_TREE = {"descendants": [], "descendants_judged": True, "descendants_why": ""}
+KEPT = {**KEPT, **NO_TREE}
+SHARED = {**SHARED, **NO_TREE}
 
 
 def _entry(source: str, tool: str = "t", *, arguments: dict | None = None, **over: Any) -> dict:
@@ -225,6 +229,81 @@ def test_each_capability_set_is_read_and_one_that_cannot_be_read_is_absent(
     del missing[key]
     monkeypatch.setattr(isolation, "_status", lambda pid: missing)
     assert measure_process(4242, [])[field] is None
+
+
+@pytest.mark.skipif(not Path("/proc/self/status").exists(), reason="no procfs")
+def test_a_launcher_is_measured_with_the_server_it_started_under_it() -> None:
+    launcher = subprocess.Popen(
+        ["/bin/sh", "-c", f"'{sys.executable}' -I -c 'import time; time.sleep(30)' & wait"],
+        env={"PATH": os.environ.get("PATH", "")},
+    )
+    try:
+        deadline = time.monotonic() + 10
+        tree = isolation.measure_tree(launcher.pid, ["PATH", "JWT_SECRET_KEY"])
+        while not tree["descendants"] and time.monotonic() < deadline:
+            time.sleep(0.05)
+            tree = isolation.measure_tree(launcher.pid, ["PATH", "JWT_SECRET_KEY"])
+    finally:
+        launcher.kill()
+        launcher.wait()
+    assert tree["descendants_judged"] is True
+    assert tree["same_uid_as_worker"] is True
+    (server,) = tree["descendants"]
+    assert server["same_uid_as_worker"] is True
+    # Its environment came from the started process's, the one the platform built.
+    assert server["platform_names_in_env"] == ["JWT_SECRET_KEY"]
+
+
+def test_a_tree_wider_than_the_bound_is_not_judged(monkeypatch: pytest.MonkeyPatch) -> None:
+    wide = list(range(10_000, 10_000 + isolation.MAX_TREE_PROCESSES + 5))
+    monkeypatch.setattr(isolation, "_children", lambda pid: wide if pid == 1 else [])
+    monkeypatch.setattr(isolation, "_status", lambda pid: _status_of())
+    tree = isolation.measure_tree(1, [])
+    assert tree["descendants_judged"] is False
+    assert str(isolation.MAX_TREE_PROCESSES) in tree["descendants_why"]
+    assert len(tree["descendants"]) == isolation.MAX_TREE_PROCESSES - 1
+
+
+def test_a_tree_whose_children_cannot_be_read_is_not_judged(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(isolation, "_children", lambda pid: None)
+    monkeypatch.setattr(isolation, "_gone", lambda pid: False)
+    monkeypatch.setattr(isolation, "_status", lambda pid: _status_of())
+    tree = isolation.measure_tree(4242, [])
+    assert tree["descendants_judged"] is False
+    assert tree["descendants_why"] == "the children of a process in its tree could not be read"
+
+
+def test_every_process_of_the_tree_is_held_to_the_checks() -> None:
+    passing_server = {**KEPT, "uid": 10003}
+    launcher_then_kept = {**SHARED, "descendants": [passing_server]}
+    part = _part(STDIO, [_reads()], {"mcp:analysis": [{"where": CHILD, **launcher_then_kept}]})
+    row = part["rows"][0]
+    assert (row["descendants"], row["descendants_failing"], row["isolated"]) == (1, 0, False)
+    line = isolation_lines(part)[2]
+    assert "Its 1 descendant process was measured too, and every one passed." in line
+    assert "every one is held to the checks. So: not isolated." in line
+
+    kept_then_failing = {**KEPT, "descendants": [SHARED]}
+    part = _part(STDIO, [_reads()], {"mcp:analysis": [{"where": CHILD, **kept_then_failing}]})
+    assert part["rows"][0]["descendants_failing"] == 1
+    assert part["isolated"] is False
+
+    kept_tree = {**KEPT, "descendants": [passing_server]}
+    part = _part(STDIO, [_reads()], {"mcp:analysis": [{"where": CHILD, **kept_tree}]})
+    assert part["isolated"] is True
+
+
+def test_a_start_whose_tree_was_not_walked_or_not_judged_is_never_isolated() -> None:
+    unwalked = {key: value for key, value in KEPT.items() if key not in NO_TREE}
+    part = _part(STDIO, [_reads()], {"mcp:analysis": [{"where": CHILD, **unwalked}]})
+    assert part["isolated"] is False
+    assert isolation.DESCENDANTS_UNRECORDED in isolation_lines(part)[2]
+    cut = {**KEPT, "descendants_judged": False, "descendants_why": "its tree was cut"}
+    part = _part(STDIO, [_reads()], {"mcp:analysis": [{"where": CHILD, **cut}]})
+    assert part["isolated"] is False
+    assert "Its descendant processes were not judged (its tree was cut)" in isolation_lines(part)[2]
 
 
 def test_a_permitted_or_ambient_capability_is_said_and_keeps_the_reader_from_isolated() -> None:
@@ -464,12 +543,13 @@ def test_the_report_prints_the_part_inside_the_disclosure_block() -> None:
         "since it shares the worker's memory, environment, files and network."
     ) in markdown
     assert (
-        "- Tool server `analysis` (stdio, run on this machine) read the sample in a process the "
-        "worker started, measured at its start: it ran as user 1000 (one of its real, "
+        "- Tool server `analysis` (stdio, run on this machine) read the sample. The process the "
+        "worker started for it was measured at its start: it ran as user 1000 (one of its real, "
         "effective, saved or filesystem user ids is the worker's); in a group of the worker's; "
         "sharing the worker's process table; the worker's view of the filesystem; the worker's "
         "network; no effective, permitted or ambient capabilities; no bar on gaining "
-        "privileges; its environment held none of the platform's own variables. So: not isolated."
+        "privileges; its environment held none of the platform's own variables. It had no "
+        "descendant process when it was measured. So: not isolated."
     ) in markdown
 
 

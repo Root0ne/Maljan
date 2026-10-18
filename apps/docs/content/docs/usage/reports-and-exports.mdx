@@ -240,8 +240,11 @@ never from a tool's name:
   lifted for a block that declares it needs the network: a lookup or sandbox
   role, a kind that reaches outside, an indicator argument, or
   `discloses_sample`. A field that could not be read never counts as passing.
-  Where the real server is a child of a launcher, the launcher is what is
-  measured.
+  A launcher (a sandbox's monitor, `uv run`, a container client) starts the
+  real server as its own child, so every process under the started one is
+  measured too, up to 64 processes. Which of them reads the sample cannot be
+  told, so every one is held to the checks. A tree that could not be read
+  whole, or is wider than that, is said not to be judged, and is not isolated.
 - **A server reached at an address.** One at a local address is "not verified
   by this run". A remote one is a host whose isolation this run cannot tell.
 

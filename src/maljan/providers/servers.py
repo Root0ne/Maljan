@@ -803,18 +803,20 @@ class ServerHandle:
     def _note_isolation(self) -> None:
         """Measure each process this attach started, for the run's isolation part.
 
-        Read once the server has initialised and before its first tool call
-        (``analysis.isolation.measure_process``), and noted under this job's
-        key and this server's source. A child that could not be identified is
-        not measured, and the run then says its isolation cannot be told.
+        Read once the server has initialised and before its first tool call,
+        with every process under it (``analysis.isolation.measure_tree``): a
+        launcher starts the real server as its own child. Noted under this
+        job's key and this server's source. A child that could not be
+        identified is not measured, and the run then says its isolation cannot
+        be told.
         """
         if not self.measures_isolation or not self._child_pids or not self._job_id:
             return
-        from maljan.analysis.isolation import measure_process, note_process
+        from maljan.analysis.isolation import measure_tree, note_process
 
         for pid in self._child_pids:
             try:
-                measured = measure_process(pid, self._launch_env_names)
+                measured = measure_tree(pid, self._launch_env_names)
             except Exception as exc:  # noqa: BLE001 — an unmeasured child is said, never guessed
                 logger.warning(
                     "mcp server '%s': its process was not measured (%s); the run says its "
