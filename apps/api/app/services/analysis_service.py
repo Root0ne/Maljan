@@ -243,7 +243,7 @@ class AnalysisService:
             logger.warning(
                 "Cancel of job %s: Redis was not fully written (%s); a client sees the "
                 "status on its next poll.",
-                job_id,
+                log_safe(job_id),
                 type(exc).__name__,
             )
 
