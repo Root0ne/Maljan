@@ -407,6 +407,19 @@ def _job_rows(job: Any, sample: Any) -> list[MagicMock]:
             },
             "core.mcp.servers",
         ),
+        (
+            {
+                "mcp.servers": {
+                    "custom": {
+                        "enabled": True,
+                        "transport": "stdio",
+                        "command": "x",
+                        "env_allow": ["DATABASE_URL"],
+                    }
+                }
+            },
+            "core.mcp.servers",
+        ),
         ({"job_timeout": 0}, "core.job_timeout"),
     ],
 )

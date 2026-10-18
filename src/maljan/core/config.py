@@ -56,6 +56,7 @@ from maljan.core.pack_steps import (
     effective_steps,
     written_for,
 )
+from maljan.core.platform_secrets import platform_secrets_refusal
 from maljan.core.report_formats import (
     READER_ID_PATTERN,
     ReportFormat,
@@ -1301,7 +1302,9 @@ class MCPServerConfig(BaseModel):
     cwd: str = ""
     # Names copied out of the API process's own environment into the child.
     # The only way a credential reaches a sidecar: ``env`` below is a visible
-    # setting, so a token written there would be readable in the UI.
+    # setting, so a token written there would be readable in the UI. The
+    # platform's own bootstrap variables are never among them, here or in
+    # ``env`` (``_carries_no_platform_secret``).
     env_allow: list[str] = Field(default_factory=list)
     # Allow-list. ``None`` exposes every tool the server advertises (what the
     # built-ins do today); ``[]`` exposes nothing, which is what a freshly
@@ -1371,8 +1374,33 @@ class MCPServerConfig(BaseModel):
 
     @field_validator("required_env_allow", "variable_names")
     @classmethod
-    def _names_are_env_names(cls, value: list[str]) -> list[str]:
-        return check_env_names(value)
+    def _names_are_env_names(cls, value: list[str], info: ValidationInfo) -> list[str]:
+        names = check_env_names(value)
+        # A server that cannot run without one of the platform's own bootstrap
+        # variables cannot run here at all: its ``env_allow`` would be refused.
+        if info.field_name == "required_env_allow":
+            refusal = platform_secrets_refusal(names, "required_env_allow")
+            if refusal:
+                raise ValueError(refusal)
+        return names
+
+    @field_validator("env", "env_allow")
+    @classmethod
+    def _carries_no_platform_secret(cls, value: Any, info: ValidationInfo) -> Any:
+        """A variable that opens one of the platform's own stores is no server's to read.
+
+        ``env_allow`` copies a name's value out of the worker's (or the API's)
+        own environment into the child, and ``env`` writes one in by value. A
+        name the bootstrap contract reads the database, the queue, the object
+        store, the settings key or a signing key from is refused in either
+        (``core.platform_secrets``), here, where a save, a stored row loaded
+        for a job and a connection test all validate the block. The refusal
+        names the variables and what each opens, never a value.
+        """
+        refusal = platform_secrets_refusal(value, str(info.field_name))
+        if refusal:
+            raise ValueError(refusal)
+        return value
 
     @field_validator("sample_mount")
     @classmethod

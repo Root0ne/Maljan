@@ -16,6 +16,8 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from maljan.agents.subprocess_env import BASE_KEYS, child_env
+from maljan.core.platform_secrets import PLATFORM_SECRET_NAMES
+from tests.credential_shapes import lowercase_body, password
 
 
 def _dsn(scheme: str, userinfo: str, rest: str) -> str:
@@ -56,6 +58,53 @@ def test_allow_list_and_extra_are_the_only_additions() -> None:
 
 def test_missing_base_keys_are_skipped_not_empty() -> None:
     assert "TZ" not in child_env(source={"PATH": "/bin"})
+
+
+def test_no_base_key_is_one_of_the_platforms_own_variables() -> None:
+    assert not {key.upper() for key in BASE_KEYS} & PLATFORM_SECRET_NAMES
+
+
+def test_a_platform_variable_asked_for_by_name_is_dropped_and_said(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Whatever the block says: by ``allow``, by ``extra``, in another case."""
+    values = {name: f"{name.lower()}-{password(16)}" for name in PLATFORM_SECRET_NAMES}
+    source = {"PATH": "/usr/bin", **values}
+    asked = sorted(PLATFORM_SECRET_NAMES)
+
+    with caplog.at_level("WARNING", logger="maljan"):
+        env = child_env(
+            {name.lower(): values[name] for name in asked},
+            allow=(*asked, *(name.lower() for name in asked)),
+            source=source,
+            server="mine",
+        )
+
+    assert env == {"PATH": "/usr/bin"}
+    said = [r.getMessage() for r in caplog.records if r.levelname == "WARNING"]
+    for name in asked:
+        assert any(f" {name}:" in line and "mine" in line for line in said), name
+    for value in values.values():
+        assert value not in caplog.text
+
+
+def test_an_ordinary_name_still_passes_and_is_not_said(caplog: pytest.LogCaptureFixture) -> None:
+    """A provider key an operator allows, a base key and a plain variable reach the child."""
+    provider_key = lowercase_body(24)
+    with caplog.at_level("WARNING", logger="maljan"):
+        env = child_env(
+            {"JAVA_HOME": "/opt/jdk", "MY_SETTING": "1"},
+            allow=("OPENAI_API_KEY",),
+            source={"PATH": "/usr/bin", "OPENAI_API_KEY": provider_key},
+            server="mine",
+        )
+    assert env == {
+        "PATH": "/usr/bin",
+        "OPENAI_API_KEY": provider_key,
+        "JAVA_HOME": "/opt/jdk",
+        "MY_SETTING": "1",
+    }
+    assert not [r for r in caplog.records if r.levelname == "WARNING"]
 
 
 # ---------------------------------------------------------------------------
@@ -115,6 +164,39 @@ class TestStaticAnalystEnv:
         assert _no_api_keys(env), f"an API key reached the Ghidra sidecar: {env}"
         assert env.get("PYTHONIOENCODING") == "utf-8"
 
+    def test_the_stdio_branch_drops_a_platform_variable_its_block_sets(
+        self, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """A block built in code skips settings validation; the spawn still drops the name."""
+        dsn = _dsn("postgresql", "u:" + password(), "db/x")
+
+        class _Ghidra:
+            enabled = True
+            transport = "stdio"
+            command = "ghidra-mcp"
+            args: list[str] = []
+            env: dict[str, str] = {"DATABASE_URL": dsn, "GHIDRA_INSTALL_DIR": "/opt/ghidra"}
+
+        recorder = MagicMock()
+        monkeypatch.setattr("mcp.StdioServerParameters", recorder)
+        monkeypatch.setattr("maljan.agents.mcp_client.MCPLangChainToolkit", _toolkit_factory())
+
+        from maljan.core.config import MemoryConfig, PreprocessingConfig
+        from maljan.providers.base import StaticJobContext
+        from maljan.providers.static.ghidra import GhidraStaticProvider
+
+        provider = GhidraStaticProvider(_Ghidra(), PreprocessingConfig(), MemoryConfig())
+        with caplog.at_level("WARNING", logger="maljan"):
+            provider.open(StaticJobContext())
+
+        env = recorder.call_args.kwargs["env"]
+        assert "DATABASE_URL" not in env
+        assert env["GHIDRA_INSTALL_DIR"] == "/opt/ghidra"
+        assert f"Tool server {GhidraStaticProvider.id} is started without DATABASE_URL" in (
+            caplog.text
+        )
+        assert dsn not in caplog.text
+
 
 class TestDynamicAnalystEnv:
     def test_cape_sidecar_env_carries_no_api_key(self, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -144,6 +226,35 @@ class TestDynamicAnalystEnv:
         env = recorder.call_args.kwargs["env"]
         assert _no_api_keys(env), f"an API key reached the CAPE sidecar: {env}"
 
+    def test_the_cape_sidecar_drops_a_platform_variable_its_block_sets(
+        self, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Assigned after validation, as code may: the spawn still drops the name."""
+        recorder = MagicMock()
+        monkeypatch.setattr("mcp.StdioServerParameters", recorder)
+        monkeypatch.setattr("maljan.agents.mcp_client.MCPLangChainToolkit", _toolkit_factory())
+
+        from maljan.core.config import Settings
+        from maljan.providers.sandbox.cape2 import CAPE2SandboxProvider
+
+        signing_key = lowercase_body(40)
+        cfg = Settings(_env_file=None)
+        cfg.sandbox.cape2.mcp.enabled = True
+        cfg.sandbox.cape2.mcp.transport = "stdio"
+        cfg.sandbox.cape2.mcp.command = "python"
+        cfg.sandbox.cape2.mcp.env = {"JWT_SECRET_KEY": signing_key, "CAPE_TIMEOUT": "60"}
+        provider = CAPE2SandboxProvider.from_settings(cfg)
+        with caplog.at_level("WARNING", logger="maljan"):
+            provider.dynamic_tools()
+
+        env = recorder.call_args.kwargs["env"]
+        assert "JWT_SECRET_KEY" not in env
+        assert env["CAPE_TIMEOUT"] == "60"
+        assert f"Tool server {CAPE2SandboxProvider.id} is started without JWT_SECRET_KEY" in (
+            caplog.text
+        )
+        assert signing_key not in caplog.text
+
 
 class TestNetworkAnalystEnv:
     def test_network_sidecar_env_carries_no_api_key(self, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -168,6 +279,43 @@ class TestNetworkAnalystEnv:
         assert recorder.called, "StdioServerParameters was never constructed"
         env = recorder.call_args.kwargs["env"]
         assert _no_api_keys(env), f"an API key reached the network sidecar: {env}"
+
+    def test_a_block_built_in_code_never_hands_a_platform_variable_over(
+        self, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """``model_construct`` skips the validator that refuses the names; the spawn does not."""
+        settings_key = lowercase_body(44)
+        monkeypatch.setenv("SETTINGS_ENCRYPTION_KEY", settings_key)
+
+        recorder = MagicMock()
+        monkeypatch.setattr("mcp.StdioServerParameters", recorder)
+        monkeypatch.setattr("maljan.agents.mcp_client.MCPLangChainToolkit", _toolkit_factory())
+
+        from maljan.core.config import MCPServerConfig
+        from maljan.providers.servers import ServerHandle
+
+        config = MCPServerConfig.model_construct(
+            enabled=True,
+            transport="stdio",
+            command="theirs-mcp",
+            args=[],
+            env={"REDIS_URL": "redis://cache:6379/0"},
+            env_allow=["SETTINGS_ENCRYPTION_KEY", "PATH"],
+            tools=None,
+            agents=[],
+            label="",
+            cwd="",
+            url="",
+        )
+        with caplog.at_level("WARNING", logger="maljan"):
+            ServerHandle("theirs", config).open("test-job")
+
+        env = recorder.call_args.kwargs["env"]
+        assert "SETTINGS_ENCRYPTION_KEY" not in env and "REDIS_URL" not in env
+        assert "PATH" in env
+        for name in ("SETTINGS_ENCRYPTION_KEY", "REDIS_URL"):
+            assert f"Tool server theirs is started without {name}" in caplog.text
+        assert settings_key not in caplog.text
 
 
 class TestJudgeAgentEnv:

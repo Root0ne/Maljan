@@ -1720,7 +1720,9 @@ def mcp_server_annotations(
         f"{prefix}.env": ann(
             f"{label} environment",
             "Extra environment variables for the stdio subprocess. The child gets "
-            "these plus a fixed base set, and no credentials of its own.",
+            "these plus a fixed base set, and no credentials of its own. A name of the "
+            "platform's own bootstrap variables (its database and Redis URLs, object-store "
+            "keys, settings key and JWT signing keys) is refused.",
             advanced=True,
         ),
         f"{prefix}.url": ann(
@@ -1757,7 +1759,8 @@ def mcp_server_annotations(
             f"{label} inherited environment names",
             "Names copied out of the API process's own environment into the "
             "stdio subprocess — the only way a credential reaches this sidecar, "
-            "since the environment field above is visible in the UI.",
+            "since the environment field above is visible in the UI. The platform's "
+            "own bootstrap variables are refused here too.",
             advanced=True,
         ),
     }

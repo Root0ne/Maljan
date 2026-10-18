@@ -70,6 +70,16 @@ the settings select, where its copy goes and the path its server is handed, in
 one line at start (`Static provider 'ghidra' mirrors a sample to ... and is
 handed it as /data/samples/.work/<sha256>.`).
 
+Seven of these variables open the platform's own stores: `DATABASE_URL`,
+`REDIS_URL`, `MINIO_ACCESS_KEY`, `MINIO_SECRET_KEY`, `SETTINGS_ENCRYPTION_KEY`,
+`JWT_SECRET_KEY` and `JWT_PREVIOUS_SECRET_KEY`. Each is marked once, on
+`PlatformSecrets` in `src/maljan/core/platform_secrets.py`, which `APISettings`
+inherits and gives each its default, with what it opens and the names the
+shipped Compose file writes the same value under (`POSTGRES_PASSWORD`, `REDIS_PASSWORD`,
+`MINIO_ROOT_USER`, `MINIO_ROOT_PASSWORD`). Those names are what no tool server's
+environment may carry ([Which directories a sidecar may read](#which-directories-a-sidecar-may-read)
+says how that is held).
+
 One warning does not block startup: `COOKIE_SECURE` false outside debug, which
 means the refresh cookie crosses the wire unencrypted unless a trusted proxy
 terminates TLS.
@@ -3201,7 +3211,10 @@ directory, a FIFO, a device or a socket is refused.
 
 Those two, plus `MALJAN_STAGING_TTL_HOURS` above, are the whole of what the
 `analysis` sidecar's `env_allow` carries; the `network` sidecar's carries the
-two in this table and nothing else. Neither sees a credential of any kind.
+two in this table and nothing else. Neither is started with a credential in its
+environment. That holds for the environment alone: each runs as the worker's
+own user, in the worker's container, on its filesystem and its network, so what
+that user can read there, a sidecar can read too.
 
 **How the variable reaches a sidecar.** A stdio child is started with a built
 environment rather than the worker's own: the general-purpose names (`PATH`,
@@ -3221,6 +3234,21 @@ inputs, and a run that was handed a sample path names that file's directory
 before the pipeline builds. A job's servers are attached after all of it, and a
 sidecar held over from an earlier job is closed and started again for the new
 job, so nothing has to be restarted mid-run for a root to take effect.
+
+**The platform's own variables never reach a server.** The bootstrap variables
+that open the platform's stores — the database and Redis URLs, the object
+store's keys, the settings key and the JWT signing keys, and the names the
+shipped Compose file writes those values under (the list is in
+[The bootstrap contract](#the-bootstrap-contract)) — are never among a child's
+names. A server block that names one in `env_allow` or as a key of `env`, in
+any case, is refused when it is saved, with the variable and what it opens and
+never its value; a stored one fails every job that loads it, naming the
+setting, before any server starts; the connection test reports it and starts
+nothing. The spawn drops such a name whatever a block says, for a block that
+reached it some other way, and logs a warning naming the variable and the
+server. A model provider's key is not one of these: it is an application
+setting, and an operator may list it in the `env_allow` of a server that needs
+it.
 
 **The names a built-in always gets.** Three names are not an operator's to
 take away: `MALJAN_SAMPLE_ROOTS` and `MALJAN_STAGING_DIR` on `analysis` and

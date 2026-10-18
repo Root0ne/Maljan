@@ -443,7 +443,7 @@ class GhidraStaticProvider(StaticProvider):
         command = self._cfg.command
         args = self._cfg.args
 
-        env = child_env(self._cfg.env)
+        env = child_env(self._cfg.env, server=self.id)
         env.setdefault("PYTHONIOENCODING", "utf-8")
 
         args = resolve_mcp_args(args)
