@@ -60,6 +60,7 @@ from maljan.reporting.models import (
 from maljan.schemas.judgement import SEVERITY_RATINGS
 
 if TYPE_CHECKING:
+    from maljan.reporting.detection_signatures import OwnSample
     from maljan.schemas.evidence import LedgerEntry
 
 # How the reason for an absent summary begins, so the key-findings section can
@@ -78,7 +79,7 @@ class MalwareReportBuilder:
             report = builder.apply_narrative(narrative_output)
         builder.render_extended_stix(report)  # mutates report.stix_bundle_extended
         report.consolidated_iocs = build_consolidated_iocs(report)  # reads the export
-        report = builder.attach_detection_signatures(report)  # published rows only
+        report = builder.attach_detection_signatures(report, sample)  # published rows only
     """
 
     def __init__(
@@ -383,18 +384,21 @@ class MalwareReportBuilder:
         return report
 
     @staticmethod
-    def attach_detection_signatures(report: MalwareReport) -> MalwareReport:
+    def attach_detection_signatures(
+        report: MalwareReport, sample: OwnSample | None = None
+    ) -> MalwareReport:
         """Populate ``report.detection_signatures`` with template-generated rules.
 
         Calls into :mod:`maljan.reporting.detection_signatures` which produces
         up to three rules (YARA / Sigma / Suricata) keyed by the report's
         IOCs. Missing evidence in any of the three input domains results in
         that format being skipped (never an empty rule). Generation is
-        deterministic — no LLM involvement.
+        deterministic — no LLM involvement. ``sample`` is the file the YARA
+        draft is run against once it compiles.
         """
         from maljan.reporting.detection_signatures import build_detection_rules
 
-        report.detection_signatures = build_detection_rules(report)
+        report.detection_signatures = build_detection_rules(report, sample)
         return report
 
     @staticmethod

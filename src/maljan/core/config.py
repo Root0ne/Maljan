@@ -3646,11 +3646,17 @@ class StaticCapaConfig(BaseModel):
 
 
 class StaticYaraConfig(BaseModel):
-    """Rule directory for the evidence-only YARA pass of the capa_yara provider.
+    """The capa_yara provider's YARA rule directory, and the drafted rule's check budget.
 
     The deterministic YARA *layer* (``analysis/yara_layer.py``) keeps its own
-    vendored corpus; this is the operator's own rule directory, scanned only by
-    the capa_yara static provider.
+    vendored corpus; ``rules_dir`` is the operator's own rule directory, scanned
+    only by the capa_yara static provider. ``timeout_seconds`` is in force under
+    every provider: it bounds the check of the drafted YARA rule against its
+    sample (``reporting.detection_signatures``), and it is one of the two values
+    whose longer is the per-call budget of a tool server that declares none,
+    when ``mcp.breaker.call_timeout_seconds`` is unset
+    (``core.legacy_tool_tables.legacy_call_floor``). The capa_yara provider's
+    own scan does not read it.
     """
 
     rules_dir: str = "data/yara_rules"
@@ -3710,8 +3716,9 @@ class StaticConfig(BaseModel):
     """Which static-analysis tool the static analyst attaches, and its settings.
 
     ``provider`` is the single switch; every block below is the configuration of
-    one provider and is inert unless that provider is selected. ``ghidra`` is
-    the default.
+    one provider, read when that provider is selected. Some fields are read
+    under every provider as well, ``yara.timeout_seconds`` among them
+    (``StaticYaraConfig``). ``ghidra`` is the default.
     """
 
     # A registered static provider's id (``maljan.providers.registry``): the

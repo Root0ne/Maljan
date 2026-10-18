@@ -4764,6 +4764,51 @@ is assembled from what the run gathered rather than recomputed beside it:
   Benign verdict publishes no malicious indicator, so it gets no draft, and
   §10.2 says so. A signed benign tool once got twenty `trojan-activity` alerts
   for certificate hosts and a "C2 IP" rule for a version number.
+* **A drafted YARA rule is checked against the sample it was drafted from.**
+  The draft's strings and clauses are declared once, and one function writes
+  both the rule the report publishes and a probe ruleset from them: one rule
+  per string (`condition: $a`, the draft's own text and modifiers), a reporter
+  rule per clause of the draft's condition (the sha256, the imphash when the
+  draft has one, and the strings clause as the draft's quantifier over the
+  probe string rules), and one reporter for the whole condition over those
+  parts. Once the draft compiles (includes refused by the engine, so no file
+  is opened at compile time), the same engine scans the probe ruleset over the
+  file the run analysed, mapped read-only where it lies, in its fast mode and
+  within `core.static.yara.timeout_seconds` (the report node passes both, and
+  drafts off the event loop). The draft itself is never scanned: its
+  `N of them` lists every match up to the engine's limit of a million per
+  string, which a sample repeating a published name could turn into
+  gigabytes; a probe string stops at its first match. The rule's record
+  carries `matches_sample` (the whole-condition reporter's answer),
+  `matched_by` (the clauses whose reporters held, in the draft's order, empty
+  when none did) and `sample_strings` (each string with the offset of its
+  first match, or none), or `sample_not_checked` with the reason, which never
+  names a path: no sample handed to the drafter, no path recorded, an
+  unreadable file, an unread budget, no engine, an engine whose case folding
+  is broken in this process's locale or whose self-test raised (quoting its
+  message), a rule or probe that did not compile, a scan past its budget, an
+  engine that refused the scan. Before anything else the engine is asked, once
+  per process, whether it folds case
+  (`core.ctype_locale.yara_case_folding_problem`: a `nocase` run of 32 `i`, far
+  longer than an atom, matched against 32 `I`, since a string that fits in one
+  atom is matched without the engine's locale-built case table); under a
+  locale whose `tolower` leaves a capital I alone its `nocase` strings and its
+  import-hash clause would be wrong, so the draft is not checked rather than said to miss,
+  and the platform's processes pin `LC_CTYPE` so that this does not arise (see
+  [Native runs pin `LC_CTYPE`](/development/#native-runs-pin-lc_ctype)). A drafted
+  rule carries the sample's own sha256, so it always matches by that clause
+  (but on an empty file, whose hash the engine leaves undefined). Its imphash
+  is pefile's, the identity table's value and the one external services
+  publish; for a sample that imports WSOCK32 by ordinal the engine names those
+  ordinals through its WS2_32 table and computes another import hash, so
+  `matched_by` then truthfully lacks `imphash`. Since the sha256 clause always
+  holds, §10.2 and DETECTION say which clause held — "its strings match it (k of n
+  strings found)", "the rule matches it by its sha256 only; its strings do
+  not", "the draft declares no strings", "the rule does not match it" — with
+  the strings found at their first offsets and the strings found nowhere, or
+  "Not run against the sample it was drafted from: …". A rule that does not
+  match is kept. Sigma and Suricata drafts, which no engine runs on a file,
+  carry no check, and a rule stored before it renders as it did.
 * **A technique only a rule match stands behind says so.** A published
   technique a deterministic rule asserted and no analyst claimed is marked in
   the ATT&CK table: "rule match only (yara `rule`, N string(s)), no analyst

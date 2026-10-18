@@ -33,7 +33,7 @@ from __future__ import annotations
 import ipaddress
 import re
 import secrets
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Sequence
 from contextvars import ContextVar
 from dataclasses import dataclass
 from types import SimpleNamespace
@@ -72,6 +72,7 @@ from maljan.reporting.ledger_report import (
 from maljan.reporting.models import (
     CapabilityCell,
     ConsolidatedIOC,
+    DetectionRule,
     MalwareReport,
     ProcessNode,
     RegistryMod,
@@ -1612,6 +1613,11 @@ class MarkdownRenderer:
                 kind = _one_line(rule.kind).upper()
                 body.append(f"**{kind}** `{_one_line(rule.name)}` — {status}{source}")
                 body.append("")
+                # What running the draft against its own sample found. A rule
+                # stored before the check carries none and renders as it did.
+                checked = _sample_check_line(rule, ctx)
+                if checked is not None:
+                    body.extend([checked, ""])
                 fence = rule.kind if rule.kind in {"yara", "sigma"} else ""
                 # The rule's body is the rule to deploy: it prints as it
                 # compiles, set aside from the closing pass by its own token.
@@ -3287,6 +3293,62 @@ def _code_span(text: str) -> str:
         return f"`{text}`"
     fence = "`" * (longest + 1)
     return f"{fence} {text} {fence}"
+
+
+def _sample_check_line(rule: DetectionRule, ctx: _Context) -> str | None:
+    """What checking a drafted rule against the sample it was drafted from found.
+
+    Whether the rule matched and by which clause, each of its strings at the
+    first offset the engine matched it, the strings it matched nowhere, or why
+    the rule was not checked. ``None`` for a rule with no check: a Sigma or
+    Suricata draft, and a rule stored before the check, which renders as it did.
+    """
+    if rule.sample_not_checked:
+        why = ctx.plain(_one_line(rule.sample_not_checked)).rstrip(".")
+        return f"Not run against the sample it was drafted from: {why}."
+    if rule.matches_sample is None:
+        return None
+    strings = rule.sample_strings or []
+    found = [
+        f"{_code_span(_one_line(item.identifier))} at 0x{item.offset:x}"
+        for item in strings
+        if item.offset is not None
+    ]
+    nowhere = [_code_span(_one_line(item.identifier)) for item in strings if item.offset is None]
+    said = [
+        "Run against the sample it was drafted from: "
+        + _held_by_clauses(rule.matches_sample, rule.matched_by, len(found), len(strings))
+    ]
+    if found:
+        said.append(f"Found in the sample (first match of each): {', '.join(found)}.")
+    if nowhere:
+        said.append(f"Found nowhere in the sample: {', '.join(nowhere)}.")
+    return " ".join(said)
+
+
+def _held_by_clauses(
+    matches: bool, matched_by: Sequence[str] | None, found: int, declared: int
+) -> str:
+    """Which clauses of a drafted rule's condition held on its sample, as one sentence.
+
+    Read from ``matched_by``, the engine's answer: the strings clause, the
+    sha256 or imphash clause without it, or none. A rule whose strings clause
+    did not hold matches by its hash only, which is all a rule carrying the
+    sample's own sha256 then says. A record without ``matched_by`` says only
+    whether the rule matched.
+    """
+    counted = f"{found} of {declared} strings found"
+    if matched_by is None:
+        return "the rule matches it." if matches else "the rule does not match it."
+    hashes = [part for part in matched_by if part != "strings"]
+    named = " and ".join(hashes)
+    if "strings" in matched_by:
+        also = f", and so {'do' if len(hashes) > 1 else 'does'} its {named}" if hashes else ""
+        return f"its strings match it ({counted}){also}."
+    if hashes:
+        rest = f"its strings do not ({counted})." if declared else "the draft declares no strings."
+        return f"the rule matches it by its {named} only; {rest}"
+    return "the rule does not match it" + (f" ({counted})." if declared else ".")
 
 
 def _finding_text(row: dict[str, Any]) -> str:

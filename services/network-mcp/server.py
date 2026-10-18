@@ -313,4 +313,10 @@ def pcap_summary(pcap_path: str, packet_limit: int | None = None) -> dict[str, A
 
 
 if __name__ == "__main__":
+    # Before the server starts its threads: C code in this process folds case
+    # as ASCII does (``core.ctype_locale``). The one line goes to standard
+    # error: standard output is this server's protocol.
+    from maljan.core.ctype_locale import pin_character_classification, say_on_stderr
+
+    pin_character_classification(say=say_on_stderr)
     mcp.run(transport="stdio")

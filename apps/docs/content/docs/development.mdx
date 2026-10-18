@@ -99,6 +99,27 @@ on loopback port 8080.
 The evaluation harness behind the published measurements is no longer part of
 this tree; see [paper.md](/paper/).
 
+### Native runs pin `LC_CTYPE`
+
+C code folds case with the C library's `tolower`, by the process's `LC_CTYPE`.
+Under a Turkish or Azerbaijani locale a capital I does not fold, so the YARA
+engine's `nocase` misses every I it should match and its `pe.imphash()`
+differs. Each of the platform's own processes therefore sets `LC_CTYPE`, and
+nothing else, to `C.UTF-8` (or `C.utf8`) when it starts, before any thread or
+the YARA engine loads, and keeps it only when the C library then folds `I` to
+`i` (`core.ctype_locale.pin_character_classification`). This covers the analysis
+worker, the `maljan` CLI, `scripts/validation/run.py`, `scripts/rehearsal/run.py`
+and the analysis and network sidecars, whose line goes to standard error
+because standard output is their protocol. The test session pins the same way
+in `tests/conftest.py`, and a test that changes the locale itself runs in a
+subprocess. Messages, times and collation stay the operator's. On a host whose
+locale is not UTF-8 (a legacy 8-bit one such as `tr_TR.ISO-8859-9`), the pin
+also makes UTF-8 Python's preferred encoding, which matches the image; the
+INFO line says so when the encoding changes. An operator's own tool server
+keeps the environment it was started with, and so the operator's locale: a
+YARA engine inside one can still mishandle I and i on such a host. The
+backend image already runs under `LANG=C.UTF-8`.
+
 ## Documentation site
 
 The pages are MDX files under `apps/docs/content/docs/`, built into a static

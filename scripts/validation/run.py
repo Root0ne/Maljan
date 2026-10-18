@@ -1699,4 +1699,9 @@ def main(argv: list[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
+    # The run's pipeline is in this process: before any thread or the YARA
+    # engine loads, C code is pinned to fold case as ASCII does.
+    from maljan.core.ctype_locale import pin_character_classification
+
+    pin_character_classification()
     raise SystemExit(main())
