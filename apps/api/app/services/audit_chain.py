@@ -51,6 +51,14 @@ _HEAD_TAG = b"maljan-audit-head/1\n"
 HEAD_NAME = "audit"
 
 
+# Said wherever a head fails its MAC: appends are refused from then on, and an
+# operator repairs it after the full walk.
+HEAD_REFUSED = (
+    "the audit head does not verify, so every chained append is refused until an operator "
+    "repairs it (python -m scripts.ledger.verify --repair-head)"
+)
+
+
 class HeadRefused(RuntimeError):
     """The stored head cannot be carried forward without re-signing what was never checked."""
 
@@ -348,7 +356,7 @@ def verify_audit_chain(
         if rotated is None or head_mac(head_seq, head_chain, rotated, keys[current]) != _read(
             head, "mac"
         ):
-            return _broken(head_seq + 1, "the audit chain's head record does not verify")
+            return _broken(head_seq + 1, HEAD_REFUSED)
         boundary = int(rotated)
         if not 1 <= boundary <= max(head_seq, 1):
             return _broken(head_seq + 1, "the audit chain's head names an impossible boundary")
@@ -358,7 +366,7 @@ def verify_audit_chain(
         if older is not None and head_mac(head_seq, head_chain, rotated, older) != _read(
             head, "mac"
         ):
-            return _broken(head_seq + 1, "the audit chain's head record does not verify")
+            return _broken(head_seq + 1, HEAD_REFUSED)
         current_rows = [
             int(_read(r, "chain_seq") or 0)
             for r in rows_list
@@ -462,7 +470,7 @@ def verify_job_rows(
         if rotated is None or head_mac(
             head_seq, str(_read(head, "chain")), rotated, keys[current]
         ) != _read(head, "mac"):
-            return _broken(int(_read(ordered[0], "chain_seq")), "the audit head does not verify")
+            return _broken(int(_read(ordered[0], "chain_seq")), HEAD_REFUSED)
         boundary = int(rotated)
     elif any((_read(r, "chain_key_id") or "") == current for r in ordered if current):
         return _broken(
@@ -548,6 +556,58 @@ def verify_job_rows(
     return check
 
 
+def head_for_repair(
+    rows: Iterable[Any], keys: Mapping[str, ledger_chain.ChainKey], current: str | None
+) -> dict[str, Any]:
+    """The head the whole chain supports, keyed under the current key; :class:`HeadRefused` if none.
+
+    The operator's repair after a head was refused: every chained row, from
+    the first to the last, must recompute to its digest and link to the one
+    before it under a key the platform can derive, and from the first row under
+    the current key on, every row must be under it, ending on the last row.
+    The head is then rebuilt from the walk: the last row's seq and chain value,
+    and that first current-key row as ``rotated_at_seq``. Anything else is
+    refused with the first break; nothing is signed.
+    """
+    if current is None or current not in keys:
+        raise HeadRefused("no current key to sign a head with")
+    key = keys[current]
+    ordered = sorted(rows, key=lambda r: int(_read(r, "chain_seq") or 0))
+    if not ordered:
+        raise HeadRefused("there is no chained row to rebuild a head from")
+    previous: str | None = None
+    rotated_at: int | None = None
+    for expected, row in enumerate(ordered, start=1):
+        seq = int(_read(row, "chain_seq") or 0)
+        if seq != expected:
+            raise HeadRefused(f"chained audit row {expected} is missing")
+        if audit_digest(row) != _read(row, "digest"):
+            raise HeadRefused(f"chained audit row {seq} differs from its digest")
+        key_id = _read(row, "chain_key_id") or ""
+        row_key = keys.get(key_id)
+        if row_key is None:
+            raise HeadRefused(f"chained audit row {seq} is under a key the platform cannot derive")
+        if rotated_at is not None and key_id != current:
+            raise HeadRefused(f"chained audit row {seq} leaves the current key after it began")
+        if key_id == current and rotated_at is None:
+            rotated_at = seq
+        start = previous if previous is not None else audit_genesis(row_key)
+        if audit_link(start, str(_read(row, "digest")), row_key) != _read(row, "chain"):
+            raise HeadRefused(f"chained audit row {seq} does not link to the row before it")
+        previous = str(_read(row, "chain"))
+    if rotated_at is None:
+        raise HeadRefused("no chained row is under the current key")
+    last_seq = int(_read(ordered[-1], "chain_seq"))
+    return {
+        "name": HEAD_NAME,
+        "chain_seq": last_seq,
+        "chain": previous,
+        "key_id": current,
+        "rotated_at_seq": rotated_at,
+        "mac": head_mac(last_seq, str(previous), rotated_at, key),
+    }
+
+
 async def record_report_deletion(db: Any, report: Any, *, user_id: uuid.UUID | None = None) -> Any:
     """Write a chained ``report.delete`` row for ``report`` into ``db``'s transaction.
 
@@ -556,14 +616,17 @@ async def record_report_deletion(db: Any, report: Any, *, user_id: uuid.UUID | N
     names the report, its job and the digest of the seal it carried (``None``
     for a report stored before sealing), so a verification of a sealed job
     whose report row is gone can tell a deletion by its owner from tampering.
-    Without a settings key nothing can be chained; that is logged.
+    Without a settings key nothing can be chained; that is logged and ``None``
+    answered. With a key, an append that does not land raises
+    :class:`DeletionNotChained`: the caller decides, and the owner's delete is
+    refused rather than done without its record.
     """
     key, no_key = ledger_chain.platform_key_status()
     seal = getattr(report, "ledger_seal", None)
     if key is None:
         logger.warning("The deletion of report %s is not chained: %s.", report.id, no_key)
         return None
-    return await append(
+    row = await append(
         db,
         action=REPORT_DELETE,
         resource_type="job",
@@ -578,3 +641,10 @@ async def record_report_deletion(db: Any, report: Any, *, user_id: uuid.UUID | N
         key=key,
         user_id=user_id,
     )
+    if row is None:
+        raise DeletionNotChained(report.id)
+    return row
+
+
+class DeletionNotChained(RuntimeError):
+    """A report's deletion could not be written onto the audit chain."""

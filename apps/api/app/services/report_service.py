@@ -477,7 +477,9 @@ class ReportService:
         ``get_report`` so one user can never delete another's report.
         ``AnalysisReport.agent_findings`` and ``.transcript`` are both
         declared with ``cascade="all, delete-orphan"``, so the findings and
-        the stored conversation go with it.
+        the stored conversation go with it. The deletion is first written onto
+        the audit chain in this transaction; when that append does not land,
+        ``audit_chain.DeletionNotChained`` propagates and nothing is deleted.
         """
         report = await self.get_report(report_id, user)
         if report is None:

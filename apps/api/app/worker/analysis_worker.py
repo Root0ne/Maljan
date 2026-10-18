@@ -4200,9 +4200,18 @@ async def _supersede_previous_report(db: Any, job_id: Any) -> None:
         )
         # The superseded report's deletion on the audit chain, in this
         # transaction, as every path that deletes a stored report writes it.
-        from app.services.audit_chain import record_report_deletion
+        from app.services.audit_chain import DeletionNotChained, record_report_deletion
 
-        await record_report_deletion(db, existing)
+        try:
+            await record_report_deletion(db, existing)
+        except DeletionNotChained:
+            # The re-run's own result must still be stored; the superseded
+            # report's verification will say its deletion was not recorded.
+            logger.warning(
+                "The superseded report of job %s is deleted without its audit record.",
+                job_id,
+                extra={"job_id": str(job_id), "component": "report"},
+            )
         await db.delete(existing)
         await db.flush()
     except Exception as exc:  # noqa: BLE001

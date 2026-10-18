@@ -139,7 +139,10 @@ When a run is stored, the worker seals its evidence ledger
   rewritten;
 - every path that deletes a stored report (the owner's `DELETE /reports/{id}`,
   a re-run superseding its report) writes a `report.delete` row on the audit
-  chain in the same transaction, naming the report and its seal's digest.
+  chain in the same transaction, naming the report and its seal's digest. When
+  that row does not land, the owner's delete is refused with 503 and nothing
+  is deleted; a re-run still stores its result and logs that the superseded
+  report went without its record.
 
 The key is derived with HKDF from `SETTINGS_ENCRYPTION_KEY` (label
 `maljan-ledger-chain-v1`); no new secret exists, and the key is never logged or
@@ -182,7 +185,17 @@ its answer names no position in the platform's chain. The answer is:
 The command exits 0, 1, 6, 4, 5 and 3 for these, and 2 on a usage or read
 error. `python -m scripts.ledger.verify --audit-chain` walks the whole audit
 chain from its first row to its head, for the operator: it is the walk that
-finds rows cut off the end of the chain.
+finds rows cut off the end of the chain. A job's verification reads the head
+first and nothing past it, so a row another job appends while it runs does not
+disturb it.
+
+Once a head fails its check, every later append is refused (logged and counted)
+and each new seal says `audit_anchored: false`; a verification names the
+refused head and the repair. The repair is
+`python -m scripts.ledger.verify --repair-head`: it walks the whole chain under
+the chain's lock and, only when every row verifies to the last one under keys
+the platform can derive, writes a new head keyed under the current key with
+the walk's `rotated_at_seq`; otherwise it refuses and prints the first break.
 
 The rotation boundary is anchored in the head: `rotated_at_seq`, covered by its
 MAC, read only from a head that verifies under the current key, never from a
@@ -199,7 +212,10 @@ the audit chain consistently, and a writer who kept an earlier audit head
 record can put it back after cutting the rows that followed it (the full
 `--audit-chain` walk then still ends at that head). A writer without the key
 who relabels every key id can push history to `unverifiable` or `other_key`,
-never to `verified`. Rotating the settings key leaves older seals reading as
+never to `verified`; in particular a forged rotation (a job's rows and the head
+relabelled to an invented key) cannot be told apart from a real one and reads
+`unverifiable`, never `verified`, and the next legitimate append is then
+refused. Rotating the settings key leaves older seals reading as
 `other_key` and older audit rows unverifiable; until the first append after a
 rotation every sealed job reads `unverifiable`. Rotating back to an earlier key
 makes the rows already under it, now before the new boundary, read as broken.

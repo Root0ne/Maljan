@@ -158,7 +158,7 @@ async def test_a_tail_cut_with_a_head_moved_back_without_the_key_is_found():
     db.head.mac = audit_chain.head_mac(2, db.rows[1].chain, 1, ledger_chain.UNKEYED)
     check = _verify(db)
     assert check.broken_at == 3
-    assert "head record does not verify" in (check.reason or "")
+    assert "head does not verify" in (check.reason or "")
 
 
 @pytest.mark.asyncio
@@ -283,7 +283,7 @@ async def test_a_tampered_head_boundary_is_a_break():
     db.head.rotated_at_seq = 4
     check = _verify(db)
     assert check.broken_at == 5
-    assert "head record does not verify" in (check.reason or "")
+    assert "head does not verify" in (check.reason or "")
 
 
 @pytest.mark.asyncio
@@ -672,3 +672,156 @@ async def test_a_successor_naming_this_job_outside_its_rows_is_broken():
     check = _own_check(db)
     assert check.broken_at == 1
     assert "names this job but is not its row" in (check.reason or "")
+
+
+@pytest.mark.asyncio
+async def test_a_deletion_whose_append_does_not_land_raises_and_the_owner_gets_a_503(
+    monkeypatch: Any,
+):
+    from fastapi import HTTPException
+
+    from app.api.v1 import reports
+
+    monkeypatch.setattr(ledger_chain, "platform_key_status", lambda: (KEY, None))
+    with pytest.raises(audit_chain.DeletionNotChained):
+        await audit_chain.record_report_deletion(
+            _ChainSession(fail=True), _Report({"digest": "d" * 64})
+        )
+
+    class _Refusing:
+        async def delete_report(self, report_id: Any, user: Any) -> bool:
+            raise audit_chain.DeletionNotChained(report_id)
+
+    with pytest.raises(HTTPException) as refused:
+        await reports.delete_report(uuid.uuid4(), user=object(), svc=_Refusing())  # type: ignore[arg-type]
+    assert refused.value.status_code == 503
+    assert "nothing was deleted" in str(refused.value.detail)
+
+
+@pytest.mark.asyncio
+async def test_the_owner_s_delete_deletes_nothing_when_its_record_does_not_land(
+    monkeypatch: Any,
+):
+    from app.services import report_service
+
+    deleted: list[Any] = []
+
+    async def _refuse(db: Any, report: Any, *, user_id: Any = None) -> None:
+        raise audit_chain.DeletionNotChained(report.id)
+
+    class _Db:
+        async def delete(self, obj: Any) -> None:
+            deleted.append(obj)
+
+        async def flush(self) -> None:
+            return None
+
+    service = report_service.ReportService(_Db())  # type: ignore[arg-type]
+    report = _Report({"digest": "e" * 64})
+
+    async def _get_report(report_id: Any, user: Any) -> Any:
+        return report
+
+    monkeypatch.setattr(report_service, "record_report_deletion", _refuse)
+    monkeypatch.setattr(service, "get_report", _get_report)
+    with pytest.raises(audit_chain.DeletionNotChained):
+        await service.delete_report(report.id, type("U", (), {"id": uuid.uuid4()})())
+    assert deleted == []
+
+
+@pytest.mark.asyncio
+async def test_a_head_rebuilt_from_an_intact_chain_verifies_and_keeps_its_boundary():
+    older = ledger_chain.derive_key("audit-test-older-material")
+    db = await _chain(2, key=older)
+    await _append(db, KEY)
+    await _append(db, KEY)
+    keys = {KEY.key_id: KEY, older.key_id: older}
+    head = audit_chain.head_for_repair(db.rows, keys, KEY.key_id)
+    assert (head["chain_seq"], head["rotated_at_seq"], head["key_id"]) == (4, 3, KEY.key_id)
+    check = audit_chain.verify_audit_chain(db.rows, keys, head, KEY.key_id)
+    assert check.broken_at is None
+
+
+@pytest.mark.asyncio
+async def test_a_head_repair_refuses_with_the_first_break():
+    db = await _chain(3)
+    db.rows[1].details = {"changed": True}
+    with pytest.raises(audit_chain.HeadRefused, match="row 2 differs from its digest"):
+        audit_chain.head_for_repair(db.rows, {KEY.key_id: KEY}, KEY.key_id)
+    rotated = await _rotated(old=2, new=1)
+    with pytest.raises(audit_chain.HeadRefused, match="row 1 is under a key"):
+        audit_chain.head_for_repair(rotated.rows, {KEY.key_id: KEY}, KEY.key_id)
+
+
+@pytest.mark.asyncio
+async def test_a_refused_head_says_how_it_is_repaired():
+    db = await _chain(2)
+    assert db.head is not None
+    db.head.mac = "0" * 64
+    assert "--repair-head" in (_verify(db).reason or "")
+    assert "--repair-head" in (_own_check(db, own_index=1).reason or "")
+
+
+class _AsyncWrite:
+    """The calls ``repair_head`` makes, answered by a synchronous SQLite connection."""
+
+    def __init__(self, conn: Any) -> None:
+        self._conn = conn
+        self.dialect = conn.dialect
+
+    async def execute(self, statement: Any, *args: Any) -> Any:
+        return self._conn.execute(statement, *args)
+
+
+@pytest.mark.asyncio
+async def test_the_repair_command_rewrites_a_refused_head(monkeypatch: Any):
+    from scripts.ledger import verify as cli
+    from sqlalchemy.dialects import postgresql
+    from sqlalchemy.ext.compiler import compiles
+
+    from app.models.audit import AuditChainHead
+
+    @compiles(postgresql.JSONB, "sqlite")
+    def _json(element, compiler, **kw):  # noqa: ANN001, ANN202
+        return "JSON"
+
+    @compiles(postgresql.INET, "sqlite")
+    def _inet(element, compiler, **kw):  # noqa: ANN001, ANN202
+        return "TEXT"
+
+    monkeypatch.setattr(ledger_chain, "platform_key_status", lambda: (KEY, None))
+    db = await _chain(3)
+    engine = sa.create_engine("sqlite://")
+    with engine.begin() as conn:
+        AuditLog.__table__.create(conn)
+        AuditChainHead.__table__.create(conn)
+        for row in db.rows:
+            values = {c.name: getattr(row, c.name) for c in AuditLog.__table__.columns}
+            conn.execute(AuditLog.__table__.insert().values(**values | {"id": uuid.uuid4()}))
+        conn.execute(
+            AuditChainHead.__table__.insert().values(
+                name=audit_chain.HEAD_NAME,
+                chain_seq=3,
+                chain=db.rows[-1].chain,
+                key_id=KEY.key_id,
+                rotated_at_seq=1,
+                mac="0" * 64,
+            )
+        )
+        answer = await cli.repair_head(_AsyncWrite(conn))
+        assert answer == {
+            "status": "repaired",
+            "head_seq": 3,
+            "rotated_at_seq": 1,
+            "key_id": KEY.key_id,
+        }
+        head = conn.execute(sa.select(AuditChainHead.__table__)).mappings().one()
+        assert audit_chain.verify_audit_chain(db.rows, {KEY.key_id: KEY}, head).broken_at is None
+        conn.execute(
+            AuditLog.__table__.update()
+            .where(AuditLog.__table__.c.chain_seq == 2)
+            .values(details={"changed": True})
+        )
+        refused = await cli.repair_head(_AsyncWrite(conn))
+        assert refused["status"] == "refused"
+        assert "row 2 differs" in refused["reason"]

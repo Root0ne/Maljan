@@ -3,6 +3,7 @@
     python -m scripts.ledger.verify --job <job uuid> [--database-url URL]
     python -m scripts.ledger.verify --run <directory>
     python -m scripts.ledger.verify --audit-chain [--database-url URL]
+    python -m scripts.ledger.verify --repair-head [--database-url URL]
 
 ``--job`` reads the job's ledger rows, its report row and its own chained audit
 rows (with the chain value before each and the head) in one read-only
@@ -15,12 +16,17 @@ present) with no database; the audit log is not in such a directory, and the
 answer says it was not checked. ``--audit-chain`` walks the whole audit chain
 from its first row to its head, for the operator: it is the walk that finds
 rows cut off the end of the chain, which a job's own verification cannot see.
+``--repair-head`` is the operator's repair after an append refused the head:
+it walks the whole chain and, only when every row verifies to the last one
+under keys the platform can derive, rewrites the head keyed under the current
+key with the walk's rotation boundary; otherwise it refuses and prints the
+first break. It is the one command here that writes.
 
 The keys are the ones the platform's settings derive
 (``SETTINGS_ENCRYPTION_KEY`` in the environment). The answer is printed as
 JSON. Exit status: 0 verified, 1 broken, 3 not sealed, 4 sealed under a key
 this environment cannot derive, 5 unverifiable, 6 deleted by its owner, 2 a
-usage or read error.
+usage or read error; ``--repair-head`` exits 0 repaired, 1 refused.
 """
 
 from __future__ import annotations
@@ -40,6 +46,8 @@ EXIT = {
     "other_key": 4,
     "unverifiable": 5,
     "deleted": 6,
+    "repaired": 0,
+    "refused": 1,
 }
 _MISSING = object()
 
@@ -160,6 +168,62 @@ async def walk_audit_chain(conn: Any) -> dict[str, Any]:
     }
 
 
+async def repair_head(conn: Any) -> dict[str, Any]:
+    """Rebuild the audit head from the whole chain, or refuse with the first break.
+
+    Runs in one write transaction under the chain's advisory lock (PostgreSQL),
+    so no append can land between the walk and the rewrite. The new head is
+    keyed under the current key with the walk's ``rotated_at_seq``
+    (``audit_chain.head_for_repair``).
+    """
+    from sqlalchemy import delete, insert, select, text
+
+    from app.models.audit import AuditChainHead, AuditLog
+    from app.services import audit_chain, ledger_chain
+
+    if conn.dialect.name == "postgresql":
+        await conn.execute(
+            text("SELECT pg_advisory_xact_lock(:lock)"), {"lock": audit_chain.AUDIT_CHAIN_LOCK}
+        )
+    log = AuditLog.__table__
+    rows = (
+        (
+            await conn.execute(
+                select(log).where(log.c.chain_seq.is_not(None)).order_by(log.c.chain_seq)
+            )
+        )
+        .mappings()
+        .all()
+    )
+    current = ledger_chain.platform_key()
+    try:
+        head = audit_chain.head_for_repair(
+            rows, ledger_chain.known_keys(), current.key_id if current is not None else None
+        )
+    except audit_chain.HeadRefused as refused:
+        return {"status": "refused", "reason": str(refused)}
+    heads = AuditChainHead.__table__
+    await conn.execute(delete(heads).where(heads.c.name == audit_chain.HEAD_NAME))
+    await conn.execute(insert(heads).values(**head))
+    return {
+        "status": "repaired",
+        "head_seq": head["chain_seq"],
+        "rotated_at_seq": head["rotated_at_seq"],
+        "key_id": head["key_id"],
+    }
+
+
+async def _write(database_url: str, work: Any) -> Any:
+    from sqlalchemy.ext.asyncio import create_async_engine
+
+    engine = create_async_engine(database_url, pool_pre_ping=False)
+    try:
+        async with engine.begin() as conn:
+            return await work(conn)
+    finally:
+        await engine.dispose()
+
+
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="python -m scripts.ledger.verify",
@@ -170,6 +234,11 @@ def _parser() -> argparse.ArgumentParser:
     where.add_argument("--run", type=Path, help="a stored-run directory")
     where.add_argument(
         "--audit-chain", action="store_true", help="walk the whole audit chain to its head"
+    )
+    where.add_argument(
+        "--repair-head",
+        action="store_true",
+        help="rebuild a refused audit head from the whole chain, or say where it breaks",
     )
     parser.add_argument(
         "--database-url", help="the database to read; DATABASE_URL or the bootstrap settings"
@@ -189,7 +258,9 @@ def main(argv: list[str] | None = None) -> int:
             from scripts.replay.database import _database_url
 
             url = _database_url(args.database_url)
-            if args.audit_chain:
+            if args.repair_head:
+                verdict = asyncio.run(_write(url, repair_head))
+            elif args.audit_chain:
                 verdict = asyncio.run(_read_only(url, walk_audit_chain))
             else:
                 verdict = asyncio.run(verify_database(args.job, url))

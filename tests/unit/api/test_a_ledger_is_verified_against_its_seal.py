@@ -695,3 +695,116 @@ async def test_the_job_is_read_from_the_database_with_only_its_own_audit_rows(mo
         verdict = await ledger_verify.verify_job(db, job_id)
         assert verdict["status"] == "broken"
         assert "the row was removed" in verdict["reason"]
+
+
+def test_a_deleted_report_is_checked_against_the_seal_its_delete_row_names():
+    job = _sealed()
+    later = _sealed()
+    core = _core(job)
+    audit = _audit(
+        {"report_id": job["report"]["id"], "seal": core},
+        {"report_id": later["report"]["id"], "seal": _core(later)},
+        deletes=[{"report_id": job["report"]["id"], "core_digest": core["digest"]}],
+    )
+    assert _verify(job, report=None, audit=audit)["status"] == "deleted"
+
+
+def test_a_deleted_report_whose_seal_never_landed_reads_unverifiable():
+    job = _sealed()
+    audit = _audit(deletes=[{"report_id": job["report"]["id"], "core_digest": "f" * 64}])
+    verdict = _verify(job, report=None, audit=audit)
+    assert verdict["status"] == "unverifiable"
+    assert "did not land" in verdict["reason"]
+
+
+class _LandsMidVerify(_AsyncConnection):
+    """Commits another job's chained row right after the head is read."""
+
+    def __init__(self, conn: Any, land: Any) -> None:
+        super().__init__(conn)
+        self._land = land
+
+    async def execute(self, statement: Any) -> Any:
+        answer = self._conn.execute(statement)
+        froms = {getattr(t, "name", "") for t in getattr(statement, "get_final_froms", list)()}
+        if "audit_chain_head" in froms and self._land is not None:
+            rows = answer.mappings().all()
+            land, self._land = self._land, None
+            land()
+
+            class _Answer:
+                def mappings(self) -> Any:
+                    return self
+
+                def first(self) -> Any:
+                    return rows[0] if rows else None
+
+            return _Answer()
+        return answer
+
+
+@pytest.mark.asyncio
+async def test_another_job_s_seal_landing_mid_verify_does_not_break_this_one(monkeypatch: Any):
+    import sqlalchemy as sa
+    from sqlalchemy.dialects import postgresql
+    from sqlalchemy.ext.compiler import compiles
+
+    from app.models.audit import AuditChainHead, AuditLog
+    from app.models.evidence import EvidenceEntry
+    from app.services import audit_chain
+
+    @compiles(postgresql.JSONB, "sqlite")
+    def _json(element, compiler, **kw):  # noqa: ANN001, ANN202
+        return "JSON"
+
+    @compiles(postgresql.INET, "sqlite")
+    def _inet(element, compiler, **kw):  # noqa: ANN001, ANN202
+        return "TEXT"
+
+    monkeypatch.setattr(ledger_chain, "platform_key_status", lambda: (KEY, None))
+    job_id = uuid.uuid4()
+    report = _report_row(job_id)
+    seal = _seal_into(report, job_id, [], ledger_chain.genesis(job_id, KEY))
+    mine = _audit_row(
+        1, None, job_id, audit_chain.LEDGER_SEAL, {"report_id": report["id"], "seal": seal}
+    )
+    theirs = _audit_row(2, mine["chain"], uuid.uuid4(), audit_chain.LEDGER_SEAL, {"seal": {}})
+    engine = sa.create_engine("sqlite://")
+    with engine.begin() as conn:
+        for model in (EvidenceEntry, AnalysisReport, AuditLog, AuditChainHead):
+            model.__table__.create(conn)
+        conn.execute(
+            AnalysisReport.__table__.insert().values(
+                **report | {"id": uuid.UUID(report["id"]), "job_id": job_id},
+                created_at=NOW,
+                updated_at=NOW,
+            )
+        )
+        conn.execute(AuditLog.__table__.insert().values(**mine))
+        heads = AuditChainHead.__table__
+        conn.execute(
+            heads.insert().values(
+                name=audit_chain.HEAD_NAME,
+                chain_seq=1,
+                chain=mine["chain"],
+                key_id=KEY.key_id,
+                rotated_at_seq=1,
+                mac=audit_chain.head_mac(1, mine["chain"], 1, KEY),
+            )
+        )
+
+        def _land() -> None:
+            conn.execute(AuditLog.__table__.insert().values(**theirs))
+            conn.execute(
+                heads.update().values(
+                    chain_seq=2,
+                    chain=theirs["chain"],
+                    mac=audit_chain.head_mac(2, theirs["chain"], 1, KEY),
+                )
+            )
+
+        verdict = await ledger_verify.verify_job(_LandsMidVerify(conn, _land), job_id)
+        assert verdict["status"] == "verified", verdict
+        assert (await ledger_verify.verify_job(_AsyncConnection(conn), job_id))[
+            "status"
+        ] == "verified"

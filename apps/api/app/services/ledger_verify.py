@@ -296,7 +296,23 @@ def _seal_without_a_report(
     chained_rows: list[Any],
     audit: JobAudit | None,
 ) -> dict[str, Any]:
-    """The seal of a job whose report row is gone, or the verdict that ends the verification."""
+    """The seal of a job whose report row is gone, or the verdict that ends the verification.
+
+    A report.delete row names the core seal of the report it deleted; that seal
+    is the one the rows are checked against, never simply the latest.
+    """
+    if audit is not None and audit.deletes:
+        named = {d.get("core_digest") for d in audit.deletes if d.get("core_digest")}
+        held = [d.get("seal") for d in audit.seals if _digest_of(d.get("seal")) in named]
+        if held and isinstance(held[-1], Mapping):
+            result.note("No report is stored for this job; the seal was read from the audit chain.")
+            return dict(held[-1])
+        if named:
+            return result.end(
+                UNVERIFIABLE,
+                "The report was deleted by its owner, but the audit append for its seal did not "
+                "land, so the seal its rows are checked against is not on the audit chain.",
+            )
     if audit is not None and audit.seals:
         seal = audit.seals[-1].get("seal")
         if isinstance(seal, Mapping):
@@ -524,11 +540,25 @@ async def verify_job(db: Any, job_id: Any) -> dict[str, Any]:
         (await db.execute(select(reports).where(reports.c.job_id == job_id))).mappings().first()
     )
     log = AuditLog.__table__
+    # The head first: it is rewritten in the same transaction as each chained
+    # row, so every row up to its seq is committed, and a row another job
+    # appends while this verification runs lies past it and is not read.
+    heads = AuditChainHead.__table__
+    head = (
+        (await db.execute(select(heads).where(heads.c.name == audit_chain.HEAD_NAME)))
+        .mappings()
+        .first()
+    )
+    within = (
+        log.c.chain_seq <= int(head["chain_seq"])
+        if head is not None
+        else log.c.chain_seq.is_not(None)
+    )
     own = (
         (
             await db.execute(
                 select(log)
-                .where(log.c.chain_seq.is_not(None), log.c.resource_id == str(job_id))
+                .where(log.c.chain_seq.is_not(None), log.c.resource_id == str(job_id), within)
                 .order_by(log.c.chain_seq)
             )
         )
@@ -543,17 +573,13 @@ async def verify_job(db: Any, job_id: Any) -> dict[str, Any]:
     successors: dict[int, dict[str, Any]] = {}
     if neighbours:
         found = (
-            (await db.execute(select(log).where(log.c.chain_seq.in_(neighbours)))).mappings().all()
+            (await db.execute(select(log).where(log.c.chain_seq.in_(neighbours), within)))
+            .mappings()
+            .all()
         )
         for neighbour in found:
             predecessors[int(neighbour["chain_seq"])] = str(neighbour["chain"])
             successors[int(neighbour["chain_seq"])] = dict(neighbour)
-    heads = AuditChainHead.__table__
-    head = (
-        (await db.execute(select(heads).where(heads.c.name == audit_chain.HEAD_NAME)))
-        .mappings()
-        .first()
-    )
     keys = ledger_chain.known_keys()
     current = ledger_chain.platform_key()
     check = audit_chain.verify_job_rows(
