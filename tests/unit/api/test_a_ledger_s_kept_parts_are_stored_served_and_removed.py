@@ -265,3 +265,120 @@ def test_the_objects_live_in_the_one_bucket() -> None:
     assert object_store.evidence_key("j", "d") == "evidence/j/d"
     assert object_store.evidence_prefix("j") == "evidence/j/"
     assert settings.minio_bucket
+
+
+class _Svc:
+    def __init__(self, owned: bool) -> None:
+        self.owned = owned
+        self.asked: list[tuple[Any, Any]] = []
+
+    async def get_job(self, job_id: Any, user: Any) -> Any:
+        self.asked.append((job_id, user))
+        return object() if self.owned else None
+
+
+class _Db:
+    def __init__(self, row: Any) -> None:
+        self.row = row
+
+    async def execute(self, statement: Any) -> Any:
+        from unittest.mock import MagicMock
+
+        result = MagicMock()
+        result.scalar_one_or_none.return_value = self.row
+        return result
+
+
+class _Readable(_Store):
+    def get_object(self, bucket: str, path: str) -> Any:
+        from unittest.mock import MagicMock
+
+        response = MagicMock()
+        response.read.return_value = self.objects[path][0]
+        return response
+
+
+class TestTheDownload:
+    def _client(self, *, owned: bool, row: Any) -> Any:
+        from fastapi import FastAPI
+        from fastapi.testclient import TestClient
+
+        from app.api.v1 import jobs
+        from app.database import get_db
+        from app.deps import get_current_user
+
+        app = FastAPI()
+        app.include_router(jobs.router, prefix="/api/v1")
+        self.svc = _Svc(owned)
+        self.user = object()
+        app.dependency_overrides[get_db] = lambda: _Db(row)
+        app.dependency_overrides[get_current_user] = lambda: self.user
+        app.dependency_overrides[jobs._get_service] = lambda: self.svc
+        return TestClient(app)
+
+    def _kept(self, job: uuid.UUID, store: _Store) -> Any:
+        from app.models.evidence import EvidenceEntry
+
+        with patch.object(object_store, "client", lambda: store):
+            ref = spill_part(object_store.evidence_spill(job), "answer", "the whole answer")
+        failed = {"part": "output", "bytes": 3, "sha256": "0" * 64, "error": "upload_failed (X)"}
+        return EvidenceEntry(job_id=job, entry_id="ev_0007", spilled=[ref, failed])
+
+    def test_the_owner_gets_the_bytes_with_their_digest(self) -> None:
+        job, store = uuid.uuid4(), _Readable()
+        client = self._client(owned=True, row=self._kept(job, store))
+
+        with patch.object(object_store, "client", lambda: store):
+            r = client.get(f"/api/v1/jobs/{job}/evidence/ev_0007/objects/answer")
+
+        assert r.status_code == 200
+        assert r.content == b"the whole answer"
+        assert r.headers["content-type"].startswith("text/plain")
+        assert r.headers["x-content-sha256"] == hashlib.sha256(b"the whole answer").hexdigest()
+        assert 'filename="ev_0007-answer.txt"' in r.headers["content-disposition"]
+        assert self.svc.asked == [(job, self.user)], "ownership checked as the evidence page does"
+
+    def test_another_user_s_job_is_not_found(self) -> None:
+        job, store = uuid.uuid4(), _Readable()
+        client = self._client(owned=False, row=self._kept(job, store))
+
+        r = client.get(f"/api/v1/jobs/{job}/evidence/ev_0007/objects/answer")
+
+        assert r.status_code == 404 and r.json()["detail"] == "Job not found"
+
+    def test_a_part_never_kept_or_not_referenced_is_not_found_with_its_reason(self) -> None:
+        job, store = uuid.uuid4(), _Readable()
+        client = self._client(owned=True, row=self._kept(job, store))
+
+        failed = client.get(f"/api/v1/jobs/{job}/evidence/ev_0007/objects/output")
+        missing = client.get(f"/api/v1/jobs/{job}/evidence/ev_0007/objects/structured")
+
+        assert failed.status_code == 404
+        assert failed.json()["detail"] == "The part was not kept: upload_failed (X)"
+        assert missing.status_code == 404
+
+    def test_a_key_outside_the_job_s_prefix_is_never_read(self) -> None:
+        from app.models.evidence import EvidenceEntry
+
+        job = uuid.uuid4()
+        row = EvidenceEntry(
+            job_id=job,
+            entry_id="ev_0007",
+            spilled=[{"part": "answer", "key": "samples/aa/aa", "bytes": 1, "sha256": "a"}],
+        )
+        client = self._client(owned=True, row=row)
+
+        r = client.get(f"/api/v1/jobs/{job}/evidence/ev_0007/objects/answer")
+
+        assert r.status_code == 404
+
+    def test_bytes_that_do_not_match_their_digest_are_refused(self) -> None:
+        job, store = uuid.uuid4(), _Readable()
+        row = self._kept(job, store)
+        store.objects[row.spilled[0]["key"]] = (b"altered", "text/plain")
+        client = self._client(owned=True, row=row)
+
+        with patch.object(object_store, "client", lambda: store):
+            r = client.get(f"/api/v1/jobs/{job}/evidence/ev_0007/objects/answer")
+
+        assert r.status_code == 502

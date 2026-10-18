@@ -7,7 +7,7 @@ import time
 import uuid
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
@@ -575,6 +575,92 @@ async def get_job_evidence(
         total=int(total),
         page=page,
         page_size=page_size,
+    )
+
+
+@router.get("/{job_id}/evidence/{entry_id}/objects/{part}")
+async def get_job_evidence_object(
+    job_id: uuid.UUID,
+    entry_id: str = Path(..., max_length=32),
+    part: str = Path(..., max_length=32),
+    user: User = Depends(get_current_user),
+    svc: AnalysisService = Depends(_get_service),
+    db: AsyncSession = Depends(get_db),
+) -> Response:
+    """One part of a ledger entry's answer the entry does not keep whole, as it was kept.
+
+    The entry's ``spilled`` reference names the part, its object key, byte
+    length and SHA-256 (``maljan.schemas.evidence_spill``). Ownership is the
+    job's, checked exactly the way the evidence page checks it. 404 when the
+    job, the entry or the reference is not there, or the part was never kept
+    (its reference states why); 502 when the store cannot hand the object
+    back or the bytes it hands back do not match the recorded digest.
+    """
+    import asyncio
+    import hashlib
+
+    from maljan.schemas.evidence_spill import CONTENT_TYPES, JSON
+    from sqlalchemy import select as sa_select
+
+    from app.models.evidence import EvidenceEntry
+    from app.services import object_store
+
+    job = await svc.get_job(job_id, user)
+    if not job:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Job not found")
+    row = (
+        await db.execute(
+            sa_select(EvidenceEntry).where(
+                EvidenceEntry.job_id == job_id, EvidenceEntry.entry_id == entry_id
+            )
+        )
+    ).scalar_one_or_none()
+    if row is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Entry not found")
+    ref = next(
+        (held for held in row.spilled or () if isinstance(held, dict) and held.get("part") == part),
+        None,
+    )
+    if ref is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="The entry keeps no such part"
+        )
+    key = ref.get("key")
+    if not key:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"The part was not kept: {ref.get('error') or 'no key recorded'}",
+        )
+    # Only a key under this job's own prefix is read, whatever the row says.
+    if not str(key).startswith(object_store.evidence_prefix(job_id)):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="The part was not kept for this job"
+        )
+    try:
+        blob = await asyncio.to_thread(object_store.read_bytes, object_store.client(), key)
+    except Exception as exc:  # noqa: BLE001 — the store's failure is logged, not served
+        logger.warning(
+            f"Evidence object {log_safe(key)} could not be read: {log_safe(type(exc).__name__)}",
+            extra={"job_id": log_safe(job_id), "user_id": log_safe(user.id)},
+        )
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY, detail="The object store did not hand it back"
+        ) from None
+    digest = hashlib.sha256(blob).hexdigest()
+    if digest != ref.get("sha256"):
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="The kept object does not match the digest its entry recorded",
+        )
+    media = CONTENT_TYPES.get(part, "application/octet-stream")
+    suffix = "json" if media == JSON else "txt"
+    return Response(
+        content=blob,
+        media_type=media,
+        headers={
+            "Content-Disposition": f'attachment; filename="{row.entry_id}-{part}.{suffix}"',
+            "X-Content-SHA256": digest,
+        },
     )
 
 
