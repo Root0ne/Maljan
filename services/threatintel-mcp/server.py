@@ -19,6 +19,10 @@ from typing import Any
 import httpx
 from mcp.server.fastmcp import FastMCP
 
+from maljan.core.stdio_safe import route_logging_to_stderr
+
+route_logging_to_stderr()
+
 from maljan.tools.arguments import says_unquoted, unquoted
 from maljan.tools.capabilities import CAPABILITIES_TOOL, ToolNeeds, env, manifest
 from maljan.tools.errors import (

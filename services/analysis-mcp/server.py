@@ -30,6 +30,10 @@ from typing import Any
 
 from mcp.server.fastmcp import FastMCP
 
+from maljan.core.stdio_safe import route_logging_to_stderr
+
+route_logging_to_stderr()
+
 from maljan.core.ctype_locale import pin_character_classification, say_on_stderr
 from maljan.core.paths import resolve_data
 from maljan.tools import (

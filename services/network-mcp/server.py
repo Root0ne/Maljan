@@ -6,6 +6,10 @@ from typing import Any
 
 from mcp.server.fastmcp import FastMCP
 
+from maljan.core.stdio_safe import route_logging_to_stderr
+
+route_logging_to_stderr()
+
 from maljan.analysis.capture_reader import Packet
 from maljan.analysis.pcap_summary import each_packet
 from maljan.tools import staging
