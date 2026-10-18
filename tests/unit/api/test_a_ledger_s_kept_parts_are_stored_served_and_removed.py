@@ -223,6 +223,24 @@ class TestTheWritesRunOffTheLoop:
         assert "key" not in entry["spilled"][0]
         sink.close()
 
+    def test_the_same_bytes_are_written_once_per_job(self) -> None:
+        class _Counting(_Store):
+            writes = 0
+
+            def put_object(self, *args: Any, **kwargs: Any) -> None:
+                type(self).writes += 1
+                super().put_object(*args, **kwargs)
+
+        store = _Counting()
+        sink = object_store.evidence_spill("job", store=store)
+        first = spill_part(sink, "answer", "same bytes")
+        second = spill_part(sink, "output", "same bytes")
+        sink.drain(5)
+
+        assert first["key"] == second["key"]
+        assert _Counting.writes == 1
+        sink.close()
+
     def test_the_writers_client_has_short_timeouts_and_one_retry(self) -> None:
         built = object_store._evidence_client()
         pool = built._http

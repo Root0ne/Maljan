@@ -224,6 +224,8 @@ class JobEvidenceSpill(EvidenceSpill):
         self._pool: Any = None
         self._pending: dict[str, Any] = {}
         self._failed: dict[str, str] = {}
+        # Keys already written or being written: the same bytes go up once per job.
+        self._written: set[str] = set()
         self._bucket_ready = False
         self.down = False
 
@@ -240,6 +242,10 @@ class JobEvidenceSpill(EvidenceSpill):
         with self._lock:
             if self.down:
                 raise SpillRefused("store unreachable")
+            if key in self._written and sha256 not in self._failed:
+                return key
+            self._written.add(key)
+            self._failed.pop(sha256, None)
             if self._pool is None:
                 self._pool = ThreadPoolExecutor(
                     max_workers=EVIDENCE_WRITERS, thread_name_prefix="evidence-writer"
