@@ -194,9 +194,16 @@ def _child_environment(run: Path) -> dict[str, str]:
     ``HOME`` and ``TMPDIR`` are the run's own directory, because capa writes a
     ruleset cache under ``$HOME/.cache/capa`` on every run and vivisect and the
     interpreter take their temporary files from ``TMPDIR``; both then go with
-    the run instead of collecting in the worker's home.
+    the run instead of collecting in the worker's home. ``server`` names it
+    in ``child_env``'s warning, should a platform secret ever be handed to it.
+
+    The worker pins ``LC_CTYPE`` in its own process (``core.ctype_locale``)
+    for C code that folds case; the child takes the locale names of the
+    environment as they are. Nothing it runs folds case in C: capa matches
+    its rules' strings and patterns in Python, which folds Unicode whatever
+    the locale, and it loads no YARA.
     """
-    return child_env({"HOME": str(run), "TMPDIR": str(run)})
+    return child_env({"HOME": str(run), "TMPDIR": str(run)}, server="capa")
 
 
 def _ended(
