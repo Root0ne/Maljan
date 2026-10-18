@@ -1782,6 +1782,16 @@ class ServiceContainer:
         # whole thread exists to protect. No corpus reads as no corpus.
         self._evidence_corpus = None
 
+        # The store for whole answers lets go of its writers; writes already
+        # handed to it still finish, and the worker drains it before it
+        # stores the ledger (``schemas.evidence_spill``).
+        spill = getattr(self, "_evidence_spill", None)
+        if spill is not None:
+            try:
+                spill.close()
+            except Exception as exc:  # noqa: BLE001 — teardown never propagates
+                logger.warning("Closing the evidence store failed (non-fatal): %s", exc)
+
     def get_narrative_agent(self) -> Any | None:
         """Return the singleton NarrativeAgent or ``None`` in mock mode.
 

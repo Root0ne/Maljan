@@ -54,12 +54,26 @@ JSON = "application/json"
 CONTENT_TYPES = {ANSWER: TEXT, STRUCTURED_CONTENT: JSON, OUTPUT: TEXT, STRUCTURED: JSON}
 
 
+class SpillRefused(Exception):
+    """A store that will not take a part now; ``reason`` is the phrase its reference states."""
+
+    def __init__(self, reason: str) -> None:
+        super().__init__(reason)
+        self.reason = reason
+
+
 class EvidenceSpill:
     """A job's store for whole answers: ``put(sha256, blob, content_type)`` returns the key.
 
     One per job, shared by every recorder of the job's agents. Copying it
     returns the same object, so an entry copied with its private attributes
     never copies a storage client.
+
+    A store may write in the background: ``put`` then answers with the key at
+    once, and :meth:`drain` waits for the writes and says how each ended, by
+    the SHA-256 of its bytes, so the references can be set right before they
+    are stored (:func:`settle_refs`). This plain store writes in ``put`` and
+    has nothing to wait for.
     """
 
     def __init__(
@@ -78,6 +92,18 @@ class EvidenceSpill:
 
     def put(self, sha256: str, blob: bytes, content_type: str) -> str:
         return str(self._put(sha256, blob, content_type))
+
+    def drain(self, timeout: float) -> dict[str, str | None]:
+        """Wait up to ``timeout`` seconds for writes still running; each one's failure by digest.
+
+        ``None`` for a write that finished, the fixed reason for one that did
+        not. Nothing is pending in a store that writes in ``put``.
+        """
+        return {}
+
+    def close(self) -> None:
+        """Let go of what the store holds; writes already handed over still finish."""
+        return None
 
     def __copy__(self) -> EvidenceSpill:
         return self
@@ -121,10 +147,32 @@ def spill_part(
         return ref
     try:
         ref["key"] = sink.put(digest, blob, CONTENT_TYPES.get(part, TEXT))
+    except SpillRefused as refused:
+        ref["error"] = f"upload_failed ({refused.reason})"
     except Exception as exc:  # noqa: BLE001 — a failed upload is stated, never fatal
         ref["error"] = f"upload_failed ({type(exc).__name__})"
         logger.warning("evidence: the %s part was not kept (%s)", part, type(exc).__name__)
     return ref
+
+
+def settle_refs(entries: Any, outcomes: dict[str, str | None]) -> int:
+    """Set each reference in ``entries`` (dumps) to how its write ended; returns how many failed.
+
+    A reference whose bytes ``outcomes`` names as failed loses its key and
+    states ``upload_failed (<reason>)``; one written, or one the outcomes do
+    not name, is left as it is.
+    """
+    failed = 0
+    for entry in entries:
+        refs = entry.get("spilled") if isinstance(entry, MutableMapping) else None
+        for ref in refs or ():
+            reason = outcomes.get(str(ref.get("sha256") or ""))
+            if reason is None or not ref.get("key"):
+                continue
+            ref.pop("key", None)
+            ref["error"] = f"upload_failed ({reason})"
+            failed += 1
+    return failed
 
 
 def add_ref(held: list[dict[str, Any]] | None, ref: dict[str, Any]) -> list[dict[str, Any]]:
@@ -162,8 +210,10 @@ __all__ = [
     "STRUCTURED",
     "STRUCTURED_CONTENT",
     "EvidenceSpill",
+    "SpillRefused",
     "add_ref",
     "part_bytes",
     "spill_into",
+    "settle_refs",
     "spill_part",
 ]

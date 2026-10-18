@@ -20,10 +20,12 @@ import io
 import os
 from typing import Any
 
+from maljan.schemas.evidence_spill import EvidenceSpill, SpillRefused
 from pydantic import SecretStr
 
 from app.config import settings
 from app.logging_config import get_logger
+from app.logsafe import log_safe
 
 logger = get_logger("api.object_store")
 
@@ -33,8 +35,8 @@ def _secret() -> str:
     return raw.get_secret_value() if isinstance(raw, SecretStr) else str(raw)
 
 
-def client() -> Any:
-    """A MinIO client built from the API's settings."""
+def client(http_client: Any = None) -> Any:
+    """A MinIO client built from the API's settings; ``http_client`` replaces the SDK's pool."""
     from minio import Minio
 
     return Minio(
@@ -42,6 +44,7 @@ def client() -> Any:
         access_key=settings.minio_access_key,
         secret_key=_secret(),
         secure=settings.minio_secure,
+        http_client=http_client,
     )
 
 
@@ -143,39 +146,159 @@ def evidence_key(job_id: object, sha256: str) -> str:
 EVIDENCE_BOUND_SETTING = "upload_max_bytes"
 
 
-def evidence_spill(job_id: object, max_bytes: int = 0) -> Any:
-    """The job's store for whole answers, writing into this bucket under the job's prefix.
+# The evidence writers' own client. The SDK's defaults (300 s to connect and
+# to read, five retries) let an unreachable store hold a writer for minutes.
+# A store on the compose network accepts a connection at once: the health
+# probe gives the whole store check 3 s, and a connection is given as long.
+EVIDENCE_CONNECT_SECONDS = 3.0
+# Between two reads of one answer; a part is written in one request, so this
+# is how long the store may go silent mid-write, not how long a write takes.
+EVIDENCE_READ_SECONDS = 60.0
+# One retry, for a store that dropped one request; a second failure is stated.
+EVIDENCE_RETRIES = 1
+# How long the worker waits for a job's writes before it stores the ledger.
+# They run while the analysts work, so only the last few are in flight then,
+# and this is half the shutdown keep's whole grace (``STOP_KEEP_GRACE``, 10 s).
+EVIDENCE_DRAIN_SECONDS = 5.0
+# Writers per job: parts are written while the analysts work, two at a time,
+# so one large part never queues every later one behind it.
+EVIDENCE_WRITERS = 2
 
-    ``max_bytes`` is the bound on one part, the operator's
-    ``upload_max_bytes`` (:func:`job_evidence_spill` reads it): a part above it
-    is referenced with that reason and not written. The client is built at the
-    first write, on the thread that writes, and reused for the job's later
-    writes. A write that fails is logged here, whole and through ``log_safe``,
-    and raises; the caller (``spill_part``) states only its class on the
-    entry's reference, which is served.
+
+def _evidence_client() -> Any:
+    """A client with the evidence writers' timeouts and one retry."""
+    import urllib3
+
+    pool = urllib3.PoolManager(
+        timeout=urllib3.Timeout(connect=EVIDENCE_CONNECT_SECONDS, read=EVIDENCE_READ_SECONDS),
+        retries=urllib3.Retry(
+            total=EVIDENCE_RETRIES,
+            backoff_factor=0.2,
+            status_forcelist=[500, 502, 503, 504],
+        ),
+    )
+    return client(pool)
+
+
+def _unreachable(exc: BaseException) -> bool:
+    """Whether ``exc`` says the store could not be reached at all (not that it refused a write)."""
+    import urllib3
+
+    return isinstance(
+        exc,
+        urllib3.exceptions.MaxRetryError
+        | urllib3.exceptions.NewConnectionError
+        | urllib3.exceptions.ConnectTimeoutError
+        | urllib3.exceptions.ProtocolError
+        | ConnectionError
+        | TimeoutError,
+    )
+
+
+class JobEvidenceSpill(EvidenceSpill):
+    """A job's store writing in the background, on its own writers and its own client.
+
+    ``put`` hands the bytes to a writer and answers with the key at once,
+    so no analyst waits on the store. The bucket is made ready once per
+    job. The first failure to reach the store marks it down: every later
+    part is refused at once (``upload_failed (store unreachable)``), and
+    :meth:`drain` reports each write by its digest.
     """
-    from maljan.schemas.evidence_spill import EvidenceSpill
 
-    from app.logsafe import log_safe
+    def __init__(self, job_id: object, max_bytes: int, *, store: Any = None) -> None:
+        super().__init__(self._submit, max_bytes=max_bytes, bound_by=EVIDENCE_BOUND_SETTING)
+        import threading
 
-    held: list[Any] = []
+        self.job_id = job_id
+        self._store = store
+        self._lock = threading.Lock()
+        self._pool: Any = None
+        self._pending: dict[str, Any] = {}
+        self._failed: dict[str, str] = {}
+        self._bucket_ready = False
+        self.down = False
 
-    def put(sha256: str, blob: bytes, content_type: str) -> str:
-        key = evidence_key(job_id, sha256)
+    def _client(self) -> Any:
+        with self._lock:
+            if self._store is None:
+                self._store = _evidence_client()
+            return self._store
+
+    def _submit(self, sha256: str, blob: bytes, content_type: str) -> str:
+        from concurrent.futures import ThreadPoolExecutor
+
+        key = evidence_key(self.job_id, sha256)
+        with self._lock:
+            if self.down:
+                raise SpillRefused("store unreachable")
+            if self._pool is None:
+                self._pool = ThreadPoolExecutor(
+                    max_workers=EVIDENCE_WRITERS, thread_name_prefix="evidence-writer"
+                )
+            self._pending[sha256] = self._pool.submit(self._write, key, sha256, blob, content_type)
+        return key
+
+    def _write(self, key: str, sha256: str, blob: bytes, content_type: str) -> None:
+        if self.down:
+            self._failed[sha256] = "store unreachable"
+            return
         try:
-            if not held:
-                held.append(client())
-            put_bytes(held[0], key, blob, content_type=content_type)
-        except Exception as exc:
+            store = self._client()
+            if not self._bucket_ready:
+                ensure_bucket(store)
+                self._bucket_ready = True
+            store.put_object(
+                settings.minio_bucket,
+                key,
+                io.BytesIO(blob),
+                length=len(blob),
+                content_type=content_type,
+            )
+        except Exception as exc:  # noqa: BLE001 — stated on the reference at the drain
+            reason = type(exc).__name__
+            if _unreachable(exc):
+                self.down = True
+                reason = "store unreachable"
+            self._failed[sha256] = reason
             logger.warning(
                 "Evidence object %s was not written: %s",
                 log_safe(key),
                 log_safe(f"{type(exc).__name__}: {exc}"),
             )
-            raise
-        return key
 
-    return EvidenceSpill(put, max_bytes=max_bytes, bound_by=EVIDENCE_BOUND_SETTING)
+    def drain(self, timeout: float) -> dict[str, str | None]:
+        from concurrent.futures import wait
+
+        with self._lock:
+            pending = dict(self._pending)
+        wait(list(pending.values()), timeout=max(0.0, float(timeout)))
+        outcomes: dict[str, str | None] = {}
+        for sha256, future in pending.items():
+            if not future.done():
+                outcomes[sha256] = "not finished"
+            else:
+                outcomes[sha256] = self._failed.get(sha256)
+        return outcomes
+
+    def close(self) -> None:
+        with self._lock:
+            pool, self._pool = self._pool, None
+        if pool is not None:
+            pool.shutdown(wait=False)
+
+
+def evidence_spill(job_id: object, max_bytes: int = 0, *, store: Any = None) -> Any:
+    """The job's store for whole answers, writing into this bucket under the job's prefix.
+
+    ``max_bytes`` is the bound on one part, the operator's
+    ``upload_max_bytes`` (:func:`job_evidence_spill` reads it): a part above it
+    is referenced with that reason and not written. Writes run in the
+    background on the job's own writers and client (``EVIDENCE_*`` above); a
+    write that fails is logged here, whole and through ``log_safe``, and its
+    reference states only a fixed reason once the worker drains the store
+    before it stores the ledger. ``store`` replaces the client, for a test.
+    """
+    return JobEvidenceSpill(job_id, max_bytes, store=store)
 
 
 async def job_evidence_spill(job_id: object) -> Any:

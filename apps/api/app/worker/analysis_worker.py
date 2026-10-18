@@ -1144,6 +1144,12 @@ def _returned_at(entry: dict[str, Any]) -> datetime | None:
         return None
 
 
+def _job_spill(container: Any) -> Any:
+    """The job's store for whole answers, as its container holds it; ``None`` without one."""
+    getter = getattr(container, "get_evidence_spill", None)
+    return getter() if callable(getter) else None
+
+
 def _evidence_row(entry: dict[str, Any], *, job_id: uuid.UUID) -> Any:
     """One ledger entry as the row that keeps it.
 
@@ -1961,6 +1967,7 @@ async def keep_the_built_report(
                 transcript=transcript,
                 incomplete_reason=note,
                 core_settings=core_settings,
+                spill=_job_spill(container),
             )
             await db.commit()
             report_id = report.id
@@ -2092,6 +2099,7 @@ async def keep_the_stopped_run(
                 transcript=transcript,
                 incomplete_reason=note,
                 core_settings=core_settings,
+                spill=_job_spill(container),
             )
             await db.commit()
             report_id = report.id
@@ -3204,6 +3212,7 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
                 run_summary=_run_summary,
                 transcript=transcript,
                 core_settings=core_settings,
+                spill=_job_spill(app.container),
             )
 
             # ── 5. Mark job complete ─────────────────────────────
@@ -4368,6 +4377,7 @@ async def _store_the_report(
     transcript: list[dict[str, Any]],
     incomplete_reason: str | None = None,
     core_settings: Any = None,
+    spill: Any = None,
 ) -> Any:
     """Add the report and everything that cites it to ``db``, uncommitted.
 
@@ -4556,17 +4566,32 @@ async def _store_the_report(
     # The last pass before it is saved: each agent's kept bytes within its
     # budget, structures dropped first, texts untouched (a no-op for a ledger
     # with no structure kept beside a prose text, every built-in's).
-    # A structure this pass drops is kept whole under the job's prefix first
-    # (``object_store.evidence_spill``), on a thread: it is an upload.
+    # A structure this pass drops is kept whole under the job's prefix first,
+    # by the job's own store (``spill``, the container's) or, for a caller
+    # without one, a store made now (``object_store.job_evidence_spill``).
+    from maljan.schemas.evidence_spill import settle_refs
+
     from app.services import object_store
 
-    _spill = await object_store.job_evidence_spill(job_id)
+    _spill = spill if spill is not None else await object_store.job_evidence_spill(job_id)
+    _dumps = [_entry for _entry in _ledger if isinstance(_entry, dict)]
     await asyncio.to_thread(
         fit_structures_to_budget,
-        [_entry for _entry in _ledger if isinstance(_entry, dict)],
+        _dumps,
         evidence_budget_of(run_summary, core_settings),
         spill=_spill,
     )
+    # The store writes in the background. Wait for it, off the loop and for a
+    # stated time (``object_store.EVIDENCE_DRAIN_SECONDS``), then set every
+    # reference to how its write ended: a write that failed, or had not
+    # finished by then, loses its key and states why.
+    _outcomes = await asyncio.to_thread(_spill.drain, object_store.EVIDENCE_DRAIN_SECONDS)
+    _unkept = settle_refs(_dumps, _outcomes)
+    if _unkept:
+        logger.warning(
+            f"{_unkept} evidence part(s) of job={job_id} were not kept; their references say why",
+            extra={"job_id": job_id},
+        )
     for _entry in rows_to_store(_ledger, job_id=job_id):
         db.add(_evidence_row(_entry, job_id=job_uuid))
 

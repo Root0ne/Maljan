@@ -27,7 +27,7 @@ from app.services import object_store
 from app.worker import analysis_worker
 from app.worker.analysis_worker import _evidence_row
 from maljan.schemas.evidence import fit_structures_to_budget
-from maljan.schemas.evidence_spill import spill_part
+from maljan.schemas.evidence_spill import settle_refs, spill_part
 
 _REV = (
     Path(__file__).resolve().parents[3]
@@ -72,12 +72,21 @@ class _Store:
         self.objects.pop(path)
 
 
+def _kept(job: Any, store: Any, part: str, value: Any, max_bytes: int = 0) -> dict[str, Any]:
+    """One part through the job's store, waited for and settled as the worker does."""
+    sink = object_store.evidence_spill(job, max_bytes, store=store)
+    entry: dict[str, Any] = {"spilled": [spill_part(sink, part, value)]}
+    settle_refs([entry], sink.drain(5))
+    sink.close()
+    return entry["spilled"][0]
+
+
 class TestTheStore:
     def test_a_part_is_written_under_the_job_s_prefix_by_its_digest(self) -> None:
         store = _Store()
         job = uuid.uuid4()
-        with patch.object(object_store, "client", lambda: store):
-            ref = spill_part(object_store.evidence_spill(job), "answer", "the whole answer")
+
+        ref = _kept(job, store, "answer", "the whole answer")
 
         digest = hashlib.sha256(b"the whole answer").hexdigest()
         assert ref == {
@@ -90,8 +99,7 @@ class TestTheStore:
         assert store.exists, "the bucket is created the one way, lazily"
 
     def test_a_refused_write_is_a_stated_reference(self) -> None:
-        with patch.object(object_store, "client", lambda: _Store(refuses=True)):
-            ref = spill_part(object_store.evidence_spill("j"), "structured", {"a": 1})
+        ref = _kept("j", _Store(refuses=True), "structured", {"a": 1})
 
         assert "key" not in ref
         assert ref["error"] == "upload_failed (OSError)"
@@ -109,8 +117,9 @@ class TestTheStore:
                 "structured_from_server": True,
             },
         ]
-        with patch.object(object_store, "client", lambda: store):
-            fit_structures_to_budget(ledger, 100, spill=object_store.evidence_spill("job"))
+        sink = object_store.evidence_spill("job", store=store)
+        fit_structures_to_budget(ledger, 100, spill=sink)
+        settle_refs(ledger, sink.drain(5))
 
         (ref,) = ledger[1]["spilled"]
         assert ledger[1]["structured"] is None
@@ -118,13 +127,105 @@ class TestTheStore:
         row = _evidence_row(ledger[1], job_id=uuid.uuid4())
         assert row.spilled == [ref]
 
-    def test_the_worker_gives_the_job_s_container_the_store_and_the_last_pass_too(self) -> None:
+    def test_the_worker_gives_the_job_s_container_the_store_and_drains_it(self) -> None:
         run = inspect.getsource(analysis_worker.run_analysis)
         stored = inspect.getsource(analysis_worker._store_the_report)
-        assert (
-            "app.container.set_evidence_spill(await object_store.job_evidence_spill(job_id))" in run
-        )
-        assert "_spill = await object_store.job_evidence_spill(job_id)" in stored
+        assert "set_evidence_spill(await object_store.job_evidence_spill(job_id))" in run
+        assert "asyncio.to_thread(_spill.drain, object_store.EVIDENCE_DRAIN_SECONDS)" in stored
+        assert stored.index("settle_refs(_dumps, _outcomes)") < stored.index("rows_to_store(")
+
+
+class _Slow(_Store):
+    def __init__(self, seconds: float) -> None:
+        super().__init__()
+        self.seconds = seconds
+
+    def put_object(self, bucket: str, path: str, data: Any, length: int, content_type: str) -> None:
+        import time
+
+        time.sleep(self.seconds)
+        super().put_object(bucket, path, data, length, content_type)
+
+
+class _Unreachable(_Store):
+    def __init__(self) -> None:
+        super().__init__()
+        self.tries = 0
+
+    def put_object(self, bucket: str, path: str, data: Any, length: int, content_type: str) -> None:
+        self.tries += 1
+        raise ConnectionRefusedError("connection refused by minio.internal:9000")
+
+
+class TestTheWritesRunOffTheLoop:
+    def test_a_slow_store_never_stops_the_loop(self) -> None:
+        import asyncio
+        import time
+
+        store = _Slow(0.5)
+        sink = object_store.evidence_spill("job", store=store)
+
+        async def run() -> tuple[int, float]:
+            ticks = 0
+
+            async def ticker() -> None:
+                nonlocal ticks
+                while True:
+                    ticks += 1
+                    await asyncio.sleep(0.01)
+
+            task = asyncio.create_task(ticker())
+            await asyncio.sleep(0.02)
+            started = time.monotonic()
+            for index in range(4):
+                spill_part(sink, "answer", f"part {index}")
+            handed = time.monotonic() - started
+            await asyncio.sleep(0.2)
+            task.cancel()
+            return ticks, handed
+
+        ticks, handed = asyncio.run(run())
+        assert handed < 0.1, "put hands the bytes over and returns"
+        assert ticks >= 10, "the loop kept turning while the store wrote"
+        assert len(sink.drain(5)) == 4
+        sink.close()
+
+    def test_the_first_unreachable_store_refuses_every_later_part_at_once(self) -> None:
+        store = _Unreachable()
+        sink = object_store.evidence_spill("job", store=store)
+        first = {"spilled": [spill_part(sink, "answer", "one")]}
+        sink.drain(5)
+
+        later = spill_part(sink, "output", "two")
+
+        assert later == {
+            "part": "output",
+            "bytes": 3,
+            "sha256": hashlib.sha256(b"two").hexdigest(),
+            "error": "upload_failed (store unreachable)",
+        }
+        assert store.tries == 1, "nothing more is sent to a store marked down"
+        settle_refs([first], sink.drain(5))
+        assert first["spilled"][0]["error"] == "upload_failed (store unreachable)"
+        assert "key" not in first["spilled"][0]
+        sink.close()
+
+    def test_a_part_still_writing_at_the_deadline_is_stated_not_finished(self) -> None:
+        store = _Slow(1.0)
+        sink = object_store.evidence_spill("job", store=store)
+        entry = {"spilled": [spill_part(sink, "answer", "slow")]}
+
+        settle_refs([entry], sink.drain(0.05))
+
+        assert entry["spilled"][0]["error"] == "upload_failed (not finished)"
+        assert "key" not in entry["spilled"][0]
+        sink.close()
+
+    def test_the_writers_client_has_short_timeouts_and_one_retry(self) -> None:
+        built = object_store._evidence_client()
+        pool = built._http
+        assert pool.connection_pool_kw["timeout"].connect_timeout == 3.0
+        assert pool.connection_pool_kw["retries"].total == 1
 
 
 class _Talkative(_Store):
@@ -139,8 +240,7 @@ class _Talkative(_Store):
 
 class TestWhatIsServed:
     def test_a_failed_upload_serves_its_class_and_logs_the_whole_failure(self, caplog: Any) -> None:
-        with patch.object(object_store, "client", lambda: _Talkative()):
-            ref = spill_part(object_store.evidence_spill("job"), "answer", "text")
+        ref = _kept("job", _Talkative(), "answer", "text")
 
         row = _evidence_row({"id": "ev_0001", "tool": "t", "spilled": [ref]}, job_id=uuid.uuid4())
         row.id = uuid.uuid4()
@@ -156,10 +256,9 @@ class TestTheBound:
         self,
     ) -> None:
         store = _Store()
-        with patch.object(object_store, "client", lambda: store):
-            sink = object_store.evidence_spill("job", 1024)
-            over = spill_part(sink, "answer", "x" * 1025)
-            at = spill_part(sink, "output", "y" * 1024)
+
+        over = _kept("job", store, "answer", "x" * 1025, max_bytes=1024)
+        at = _kept("job", store, "output", "y" * 1024, max_bytes=1024)
 
         assert over == {
             "part": "answer",
@@ -188,9 +287,8 @@ class TestTheRemoval:
     def test_a_job_s_prefix_is_removed_whole_and_no_other(self) -> None:
         store = _Store()
         job, other = uuid.uuid4(), uuid.uuid4()
-        with patch.object(object_store, "client", lambda: store):
-            for owner, text in ((job, "one"), (job, "two"), (other, "three")):
-                spill_part(object_store.evidence_spill(owner), "answer", text)
+        for owner, text in ((job, "one"), (job, "two"), (other, "three")):
+            _kept(owner, store, "answer", text)
 
         removed = object_store.remove_prefix(store, object_store.evidence_prefix(job))
 
@@ -319,8 +417,7 @@ class TestTheDownload:
     def _kept(self, job: uuid.UUID, store: _Store) -> Any:
         from app.models.evidence import EvidenceEntry
 
-        with patch.object(object_store, "client", lambda: store):
-            ref = spill_part(object_store.evidence_spill(job), "answer", "the whole answer")
+        ref = _kept(job, store, "answer", "the whole answer")
         failed = {"part": "output", "bytes": 3, "sha256": "0" * 64, "error": "upload_failed (X)"}
         return EvidenceEntry(job_id=job, entry_id="ev_0007", spilled=[ref, failed])
 
