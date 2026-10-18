@@ -212,6 +212,11 @@ class JobEvidenceSpill(EvidenceSpill):
     job. The first failure to reach the store marks it down: every later
     part is refused at once (``upload_failed (store unreachable)``), and
     :meth:`drain` reports each write by its digest.
+
+    The bytes waiting for a writer are bounded by the same setting as one
+    part: at most one part per writer (``EVIDENCE_WRITERS`` times
+    ``upload_max_bytes``). A part that would pass it is refused at once as
+    ``upload_failed (store busy)``; nothing waits and nothing is cut.
     """
 
     def __init__(self, job_id: object, max_bytes: int, *, store: Any = None) -> None:
@@ -228,6 +233,9 @@ class JobEvidenceSpill(EvidenceSpill):
         self._written: set[str] = set()
         self._bucket_ready = False
         self.down = False
+        # Bytes handed to the writers and not yet written, and their bound.
+        self._queued = 0
+        self.backlog_bytes = EVIDENCE_WRITERS * self.max_bytes
 
     def _client(self) -> Any:
         with self._lock:
@@ -244,6 +252,9 @@ class JobEvidenceSpill(EvidenceSpill):
                 raise SpillRefused("store unreachable")
             if key in self._written and sha256 not in self._failed:
                 return key
+            if self.backlog_bytes and self._queued + len(blob) > self.backlog_bytes:
+                raise SpillRefused("store busy")
+            self._queued += len(blob)
             self._written.add(key)
             self._failed.pop(sha256, None)
             if self._pool is None:
@@ -254,6 +265,13 @@ class JobEvidenceSpill(EvidenceSpill):
         return key
 
     def _write(self, key: str, sha256: str, blob: bytes, content_type: str) -> None:
+        try:
+            self._write_once(key, sha256, blob, content_type)
+        finally:
+            with self._lock:
+                self._queued -= len(blob)
+
+    def _write_once(self, key: str, sha256: str, blob: bytes, content_type: str) -> None:
         if self.down:
             self._failed[sha256] = "store unreachable"
             return

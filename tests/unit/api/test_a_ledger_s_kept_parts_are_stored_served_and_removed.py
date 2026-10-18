@@ -223,6 +223,31 @@ class TestTheWritesRunOffTheLoop:
         assert "key" not in entry["spilled"][0]
         sink.close()
 
+    def test_a_part_past_the_backlog_bound_is_refused_at_once_as_busy(self) -> None:
+        import threading
+
+        release = threading.Event()
+
+        class _Held(_Store):
+            def put_object(self, *args: Any, **kwargs: Any) -> None:
+                release.wait(5)
+                super().put_object(*args, **kwargs)
+
+        store = _Held()
+        sink = object_store.evidence_spill("job", 100, store=store)
+        assert sink.backlog_bytes == object_store.EVIDENCE_WRITERS * 100
+
+        held = [spill_part(sink, "answer", f"{index}" * 100) for index in range(2)]
+        busy = spill_part(sink, "output", "z" * 50)
+
+        assert all("key" in ref for ref in held)
+        assert busy["error"] == "upload_failed (store busy)" and "key" not in busy
+        release.set()
+        assert sink.drain(5) == {ref["sha256"]: None for ref in held}
+        assert "key" in spill_part(sink, "output", "z" * 50), "room again once written"
+        sink.drain(5)
+        sink.close()
+
     def test_the_same_bytes_are_written_once_per_job(self) -> None:
         class _Counting(_Store):
             writes = 0
