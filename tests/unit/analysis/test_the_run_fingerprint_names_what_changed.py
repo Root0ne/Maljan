@@ -306,3 +306,39 @@ def test_the_report_lines_give_the_hash_and_the_servers() -> None:
         "Tool servers as they gave themselves at attach: `analysis` as `analysis-mcp` version "
         "`1.0`. A tool's own version is not reported over MCP."
     )
+
+
+def _on_host(root: str) -> Settings:
+    settings = Settings()
+    name = sorted(settings.mcp.servers)[0]
+    server = settings.mcp.servers[name]
+    server.command = f"{root}/.venv/bin/python"
+    server.args = ["-m", "maljan.servers.analysis", "--root", f"{root}/data/samples"]
+    server.cwd = f"{root}/services/analysis"
+    return settings
+
+
+def test_the_same_setup_on_two_hosts_hashes_equal() -> None:
+    from maljan.analysis.efficiency import _settings_sections
+
+    a = _settings_sections(_on_host("/home/one/repo"), [("/home/one/repo", "<checkout>")])
+    b = _settings_sections(_on_host("/srv/two/wt-7"), [("/srv/two/wt-7", "<checkout>")])
+    unlike = _on_host("/srv/two/wt-7")
+    unlike.mcp.servers[sorted(unlike.mcp.servers)[0]].args.append("--verbose")
+    c = _settings_sections(unlike, [("/srv/two/wt-7", "<checkout>")])
+
+    assert a == b
+    assert a["mcp"] != c["mcp"]
+
+
+def test_a_host_path_is_replaced_only_as_a_whole_path() -> None:
+    from maljan.analysis.efficiency import _without_host
+
+    host = [("/home/one/repo", "<checkout>")]
+    assert _without_host(
+        ["/home/one/repo/bin", "/home/one/repo2/bin", "x=/home/one/repo"], host
+    ) == [
+        "<checkout>/bin",
+        "/home/one/repo2/bin",
+        "x=<checkout>",
+    ]

@@ -54,7 +54,9 @@ prompt is composed with the neutral format fragment (every fragment is hashed
 as its template), and the job's own identifiers the platform writes in — the
 sample's sha256, its paths and file name, the job id, taken from the job's
 known values (``core.input_meter.job_identifiers``) — are masked as whole
-tokens. Secrets never enter it: only the masked view of the settings is
+tokens. Nor does the host: the paths that belong to it (the checkout, the
+interpreter's environment, the home and working directories) are replaced in
+the settings before they are hashed. Secrets never enter it: only the masked view of the settings is
 hashed, where a secret reads as set or unset. A tool's own version is not
 reported over MCP and is not in it.
 """
@@ -62,6 +64,7 @@ reported over MCP and is not in it.
 from __future__ import annotations
 
 import json
+import re
 from collections.abc import Mapping, Sequence
 from types import SimpleNamespace
 from typing import Any
@@ -378,11 +381,57 @@ def masked_settings(config: Any) -> dict[str, Any]:
     return public_snapshot(config, secrets)
 
 
-def _settings_sections(config: Any) -> dict[str, str]:
-    """Each top-level settings section's hash, over its masked leaves."""
+def host_paths() -> list[tuple[str, str]]:
+    """``(path, placeholder)`` for each path that belongs to this host, longest first.
+
+    The checkout the code runs from, the interpreter's environment and the one
+    it was built from, the home directory and the working directory: a tool
+    server's launch command and working directory name them, and the same
+    setup on another host or in another worktree names others.
+    """
+    import os
+    import sys
+    from pathlib import Path
+
+    # In rising order of what a path says, so where two are the same path the
+    # later name is the one kept on every host.
+    candidates = [
+        (os.getcwd(), "<cwd>"),
+        (str(Path.home()), "<home>"),
+        (sys.base_prefix, "<interpreter>"),
+        (sys.prefix, "<environment>"),
+        (str(Path(__file__).resolve().parents[3]), "<checkout>"),
+    ]
+    held = {path.rstrip("/"): mark for path, mark in candidates if path.strip("/")}
+    return sorted(held.items(), key=lambda pair: -len(pair[0]))
+
+
+def _without_host(value: Any, host: Sequence[tuple[str, str]]) -> Any:
+    """``value`` with every path of ``host`` in its strings replaced by its placeholder."""
+    if isinstance(value, str):
+        for path, mark in host:
+            value = re.sub(rf"(?<![\w.-]){re.escape(path)}(?![\w.-])", mark, value)
+        return value
+    if isinstance(value, list):
+        return [_without_host(item, host) for item in value]
+    if isinstance(value, dict):
+        return {key: _without_host(item, host) for key, item in value.items()}
+    return value
+
+
+def _settings_sections(
+    config: Any, host: Sequence[tuple[str, str]] | None = None
+) -> dict[str, str]:
+    """Each top-level settings section's hash, over its masked leaves with this host's paths out.
+
+    A server's declared identity and arguments are hashed with the paths that
+    belong to this host (:func:`host_paths`) replaced, so the same setup on two
+    hosts or in two worktrees hashes equal.
+    """
+    held = host_paths() if host is None else list(host)
     sections: dict[str, dict[str, Any]] = {}
     for key, value in masked_settings(config).items():
-        sections.setdefault(str(key).split(".", 1)[0], {})[str(key)] = value
+        sections.setdefault(str(key).split(".", 1)[0], {})[str(key)] = _without_host(value, held)
     return {name: _hash(leaves) for name, leaves in sorted(sections.items())}
 
 

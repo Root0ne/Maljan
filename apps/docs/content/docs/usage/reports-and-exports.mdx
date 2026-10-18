@@ -312,7 +312,10 @@ nothing a model reads changes.
   built-in prompt does. Neither does the sample: an agent's prompt is composed
   with the neutral format fragment, and the job's own identifiers (the sample's
   sha256, its paths and file name, the job id), taken from the job's known
-  values, are masked as whole tokens. Each component and each part (per
+  values, are masked as whole tokens. Nor does the host: the paths that belong
+  to it (the checkout, the interpreter's environment, the home and working
+  directories) are replaced before the settings are hashed, so the same setup
+  on two hosts or worktrees hashes equal. Each component and each part (per
   prompt, agent, server and settings section) keeps its own hash, so two
   fingerprints that differ name what changed. A secret enters only as set or
   unset. A tool's own version is not reported over MCP and is not in the
