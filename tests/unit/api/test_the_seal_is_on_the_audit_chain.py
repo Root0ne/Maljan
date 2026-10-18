@@ -613,3 +613,62 @@ async def test_the_owner_s_delete_writes_the_deletion_before_the_row_goes(monkey
     user = type("U", (), {"id": uuid.uuid4()})()
     assert await service.delete_report(report.id, user)
     assert order == [f"chained {report.id}", f"deleted {report.id}"]
+
+
+def _own_check(
+    db: _ChainSession, own_index: int = 0, keys: dict[str, Any] | None = None
+) -> audit_chain.AuditChainCheck:
+    return audit_chain.verify_job_rows(
+        [db.rows[own_index]],
+        {r.chain_seq: r.chain for r in db.rows},
+        keys or {KEY.key_id: KEY},
+        db.head,
+        KEY.key_id,
+        successors={r.chain_seq: r for r in db.rows},
+    )
+
+
+@pytest.mark.asyncio
+async def test_a_job_row_with_an_intact_successor_verifies():
+    db = await _chain(3)
+    assert _own_check(db).verified == [1]
+
+
+@pytest.mark.asyncio
+async def test_a_tampered_successor_is_broken():
+    db = await _chain(3)
+    db.rows[1].resource_id = "moved-away"
+    check = _own_check(db)
+    assert check.broken_at == 1
+    assert "after this job's ledger.seal row differs from its digest" in (check.reason or "")
+
+
+@pytest.mark.asyncio
+async def test_a_successor_under_an_unknown_key_after_the_boundary_is_broken():
+    db = await _chain(3)
+    db.rows[1].chain_key_id = "0000000000000000"
+    db.rows[1].digest = audit_chain.audit_digest(db.rows[1])
+    check = _own_check(db)
+    assert check.broken_at == 1
+    assert "names a key the chain forbids" in (check.reason or "")
+
+
+@pytest.mark.asyncio
+async def test_a_successor_under_an_unknown_key_before_the_boundary_is_unverifiable():
+    older = ledger_chain.derive_key("audit-test-older-material")
+    db = await _chain(1, key=older)
+    await _append(db, OTHER)
+    await _append(db, KEY)
+    assert db.head is not None and db.head.rotated_at_seq == 3
+    check = _own_check(db, keys={KEY.key_id: KEY, older.key_id: older})
+    assert (check.broken_at, check.verified, check.unverifiable) == (None, [], [1])
+
+
+@pytest.mark.asyncio
+async def test_a_successor_naming_this_job_outside_its_rows_is_broken():
+    db = await _chain(3)
+    db.rows[1].resource_id = db.rows[0].resource_id
+    db.rows[1].digest = audit_chain.audit_digest(db.rows[1])
+    check = _own_check(db)
+    assert check.broken_at == 1
+    assert "names this job but is not its row" in (check.reason or "")

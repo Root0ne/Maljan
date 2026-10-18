@@ -542,14 +542,12 @@ async def verify_job(db: Any, job_id: Any) -> dict[str, Any]:
     predecessors: dict[int, str] = {}
     successors: dict[int, dict[str, Any]] = {}
     if neighbours:
-        found = await db.execute(
-            select(log.c.chain_seq, log.c.chain, log.c.digest, log.c.chain_key_id).where(
-                log.c.chain_seq.in_(neighbours)
-            )
+        found = (
+            (await db.execute(select(log).where(log.c.chain_seq.in_(neighbours)))).mappings().all()
         )
-        for seq, chain, digest, key_id in found.all():
-            predecessors[int(seq)] = str(chain)
-            successors[int(seq)] = {"chain": chain, "digest": digest, "chain_key_id": key_id}
+        for neighbour in found:
+            predecessors[int(neighbour["chain_seq"])] = str(neighbour["chain"])
+            successors[int(neighbour["chain_seq"])] = dict(neighbour)
     heads = AuditChainHead.__table__
     head = (
         (await db.execute(select(heads).where(heads.c.name == audit_chain.HEAD_NAME)))

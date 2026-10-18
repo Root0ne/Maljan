@@ -429,7 +429,7 @@ def verify_job_rows(
 
     ``own`` are the job's chained rows; ``predecessors`` maps each row's
     ``chain_seq - 1`` to the chain value stored there, and ``successors`` each
-    row's ``chain_seq + 1`` to that row (its digest, chain and key id), so
+    row's ``chain_seq + 1`` to that whole row, checked as any row is, so
     every link into and out of the job's rows is checked without reading the
     rest of the chain; a row of the job's that is the head must end the head.
     The head record gives the rotation boundary under the same rules as
@@ -442,6 +442,8 @@ def verify_job_rows(
     successors = successors or {}
     ordered = sorted(own, key=lambda r: int(_read(r, "chain_seq") or 0))
     check = AuditChainCheck(rows=len(ordered))
+    own_seqs = {int(_read(r, "chain_seq") or 0) for r in ordered}
+    job_resource = str(_read(ordered[0], "resource_id")) if ordered else ""
 
     def _broken(seq: int, reason: str) -> AuditChainCheck:
         check.broken_at = seq
@@ -499,20 +501,49 @@ def verify_job_rows(
             return _broken(seq, f"this job's {action} audit row does not link to the row before it")
         # The row after must link onto this one, or this one is the head: a
         # deleted row of this job leaves a gap or a dangling successor here.
+        # The successor is checked as any row is: its own digest, the
+        # boundary rules for its key, and, when it names this job, its place
+        # among the job's rows.
         if seq == head_seq:
             if not check.head_unverifiable and _read(head, "chain") != _read(row, "chain"):
                 return _broken(seq, f"the audit head does not end on this job's {action} row")
-        else:
-            following = successors.get(seq + 1)
-            if following is None:
-                return _broken(seq, f"the audit row after this job's {action} row is missing")
-            next_key = keys.get(_read(following, "chain_key_id") or "")
-            if next_key is not None and audit_link(
-                str(_read(row, "chain")), str(_read(following, "digest")), next_key
-            ) != _read(following, "chain"):
-                return _broken(
-                    seq, f"the audit row after this job's {action} row does not link onto it"
-                )
+            check.verified.append(seq)
+            continue
+        following = successors.get(seq + 1)
+        if following is None:
+            return _broken(seq, f"the audit row after this job's {action} row is missing")
+        if audit_digest(following) != _read(following, "digest"):
+            return _broken(
+                seq, f"the audit row after this job's {action} row differs from its digest"
+            )
+        if str(_read(following, "resource_id")) == job_resource and seq + 1 not in own_seqs:
+            return _broken(
+                seq,
+                f"the audit row after this job's {action} row names this job but is not its row",
+            )
+        next_key_id = _read(following, "chain_key_id") or ""
+        if boundary is not None and seq + 1 >= boundary and next_key_id != current:
+            return _broken(
+                seq, f"the audit row after this job's {action} row names a key the chain forbids"
+            )
+        if boundary is not None and seq + 1 < boundary and next_key_id == current:
+            return _broken(
+                seq,
+                f"the audit row after this job's {action} row claims the current key before "
+                "the rotation",
+            )
+        next_key = keys.get(next_key_id)
+        if next_key is None:
+            # Before the boundary, or with no boundary known: the link out of
+            # this row cannot be checked, so the row is not verified.
+            check.unverifiable.append(seq)
+            continue
+        if audit_link(str(_read(row, "chain")), str(_read(following, "digest")), next_key) != _read(
+            following, "chain"
+        ):
+            return _broken(
+                seq, f"the audit row after this job's {action} row does not link onto it"
+            )
         check.verified.append(seq)
     return check
 

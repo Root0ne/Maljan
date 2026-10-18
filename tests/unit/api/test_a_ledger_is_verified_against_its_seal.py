@@ -675,7 +675,7 @@ async def test_the_job_is_read_from_the_database_with_only_its_own_audit_rows(mo
         assert verdict["status"] == "verified", verdict
 
         log = AuditLog.__table__
-        conn.execute(log.update().where(log.c.chain_seq == 3).values(details={"x": 1}))
+        conn.execute(log.update().where(log.c.chain_seq == 1).values(details={"x": 1}))
         verdict = await ledger_verify.verify_job(db, job_id)
         assert verdict["status"] == "verified", "a break in another job's row does not touch it"
 
