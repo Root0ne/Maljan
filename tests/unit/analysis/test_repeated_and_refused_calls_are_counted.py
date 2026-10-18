@@ -34,7 +34,9 @@ def _zero(**counts: int) -> dict[str, int]:
 
 ARGS = {"min": 4, "path": "a"}
 LEDGER = [
-    _entry(1, args={"min": 4, "path": "a"}, server="analysis", agent="", pack_step={"s": 1}),
+    _entry(
+        1, args={"min": 4, "path": "a"}, server="analysis", agent="pipeline", pack_step={"s": 1}
+    ),
     _entry(2, args={"path": "a", "min": 4}, server="analysis", agent="dynamic"),
     _entry(3, args={"path": "a", "min": 4}, server="analysis", agent="dynamic"),
     _entry(4, args=ARGS, server="other"),
@@ -63,6 +65,19 @@ def test_each_kind_is_filed_under_its_maker() -> None:
             "strings": _zero(repeated=1, run_again=1, same_call_elsewhere=1),
         },
     }
+
+
+def test_the_pack_s_calls_belong_to_the_pack() -> None:
+    pack = {"agent": "pipeline", "pack_step": {"s": 1}}
+    record = calls_record(
+        [_entry(1, args=ARGS, **pack), _entry(2, args=ARGS, **pack), _entry(3, args=ARGS)]
+    )
+
+    assert record is not None
+    assert set(record["by_agent"]) == {"pack", "static"}
+    assert record["by_agent"]["pack"]["run_again"] == 1
+    assert record["by_agent"]["static"]["same_call_elsewhere"] == 1
+    assert "the triage pack: 1 run again" in efficiency_lines({"v": 2, "calls": record})[0]
 
 
 def test_another_maker_s_identical_call_is_never_a_run_again() -> None:

@@ -158,11 +158,14 @@ def _field(entry: Any, name: str) -> Any:
 
 
 def _maker(entry: Any) -> str:
-    """Who made the call: its agent, ``pack`` for the triage pack, ``pipeline`` otherwise."""
-    agent = str(_field(entry, "agent") or "").strip()
-    if agent:
-        return agent
-    return "pack" if _field(entry, "pack_step") is not None else "pipeline"
+    """Who made the call: ``pack`` for a step of the triage pack, else its agent or ``pipeline``.
+
+    The pack's entries carry their step (``pack_step``) and the agent name
+    ``pipeline``; the step is what says the pack made the call.
+    """
+    if _field(entry, "pack_step") is not None:
+        return "pack"
+    return str(_field(entry, "agent") or "").strip() or "pipeline"
 
 
 def _entry_id(entry: Any) -> str:
