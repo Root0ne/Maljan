@@ -80,14 +80,18 @@ before the output guardrail cut it), `structured_content` (the server's
 structured answer the entry did not keep), `output` and `structured` (what the
 byte budget or the structure eviction took) — each with `key`, `bytes` and
 `sha256`, or with `error` and no key when the part was not written
-(`upload_failed (<class>)`, or `exceeds upload_max_bytes (<n> bytes)`). It is
-absent where nothing was taken and on entries stored before it was kept.
-`GET /jobs/{job_id}/evidence/{entry_id}/objects/{part}` answers the part's
-bytes (`text/plain` for a text, `application/json` for a structure), with
-their SHA-256 in `X-Content-SHA256`, under the same ownership rule. It is a 404
-when the part was never kept, stating the reason its reference records, and a
-502 when the store cannot hand it back or the bytes do not match the recorded
-digest.
+(`upload_failed (<class>)`, `upload_failed (store unreachable)`,
+`upload_failed (store busy)`, `upload_failed (not finished)`, or
+`exceeds upload_max_bytes (<n> bytes)`). It is absent where nothing was taken
+and on entries stored before it was kept.
+`GET /jobs/{job_id}/evidence/{entry_id}/objects/{part}` streams the part's
+bytes (`text/plain` for a text, `application/json` for a structure), with the
+recorded SHA-256 in `X-Content-SHA256` and the recorded length in
+`Content-Length`, under the same ownership rule. The bytes are hashed as they
+go and the last chunk is sent only once the whole object matches the recorded
+digest, so the body is complete only when it matches; a mismatch ends the
+answer short. It is a 404 when the part was never kept, stating the reason its
+reference records, and a 502 when the store cannot hand it back.
 
 `GET /jobs/{job_id}/usage` is what the job's model calls used and cost so far,
 totalled from its `model_usage` events (one per call, committed as the call is

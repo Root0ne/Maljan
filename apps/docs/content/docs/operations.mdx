@@ -152,12 +152,23 @@ job), and the ledger entry references it with the part, the object key, the
 byte length and the SHA-256. One object is bounded by `upload_max_bytes`, read
 as each job starts; a larger part is referenced with
 `exceeds upload_max_bytes (<n> bytes)` and not written, so one job stores at
-most its number of entries times that bound (four parts at most per entry). A
-write that fails is referenced as `upload_failed (<class>)` and logged whole
-on the worker; the run goes on. Deleting a sample removes the objects of every
-job it removes, best effort and logged, as it does the sandbox-report objects;
-deleting a report keeps them with the ledger. Back them up with the MinIO
-volume.
+most its number of entries times that bound (four parts at most per entry).
+Parts are written in the background by two writers per job with their own
+client (3 s to connect, 60 s of silence mid-write, one retry), so no analyst
+waits on the store; at most one part per writer waits to be written (twice
+`upload_max_bytes`), and a part past that is referenced as
+`upload_failed (store busy)`. The first failure to reach the store marks it
+down for the job: every later part is referenced at once as
+`upload_failed (store unreachable)`. Before it stores the ledger the worker
+waits up to 5 s for the writes still running and sets every reference to how
+its write ended: a write that failed is referenced as `upload_failed (<class>)`
+(the failure is logged whole on the worker), one not finished by then as
+`upload_failed (not finished)`, and an object such a write leaves afterwards is
+removed again. The run goes on in every case. The same bytes are written once
+per job. Deleting a sample removes the objects of every job it removes, after
+the delete is committed, best effort and logged, as it does the sandbox-report
+objects; deleting a report keeps them with the ledger. Back them up with the
+MinIO volume.
 
 ## Backups
 
