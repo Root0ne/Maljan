@@ -821,6 +821,38 @@ class TestTheMeaning:
         )
         assert "see the message there" in render(register)
 
+    def test_a_site_passing_several_messages_points_at_them(self, tmp_path: Path) -> None:
+        register = _tree(
+            tmp_path,
+            """\
+            from demo.base import Violation
+
+            def reason(answer: str) -> str:
+                if not answer:
+                    return "the answer held no text."
+                return "the answer is not an object."
+
+            def shaped(answer: str, broken: bool) -> list[Violation]:
+                if broken:
+                    return [Violation(code="demo.shape", message="a field is missing")]
+                return [Violation(code="demo.shape", message="a field has the wrong type")]
+
+            def read(answer: str) -> Violation:
+                return Violation(code="demo.read", message=reason(answer))
+
+            ENTRY = (shaped, read)
+            """,
+        )
+
+        codes = _codes(register)
+        for code, site in (("demo.shape", "demo.checks:shaped"), ("demo.read", "demo.checks:read")):
+            assert (codes[code].meaning, codes[code].meaning_kind, codes[code].meaning_from) == (
+                "",
+                "messages",
+                site,
+            )
+        assert "passes more than one message for it: see the messages there" in render(register)
+
     def test_a_filled_in_value_is_named_by_its_callee_or_its_key(self, tmp_path: Path) -> None:
         register = _tree(
             tmp_path,

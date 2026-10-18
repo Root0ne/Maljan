@@ -34,7 +34,8 @@ its slots the register cannot follow are left out of the unresolved list.
 
 A code's meaning is the comment or docstring on its own constant; where there is
 none, the message a raise site passes, with each value it fills in written
-`<name>`; where there is neither, the comment written over the group of
+`<name>` (a site that passes several messages for a code is pointed at
+instead); where there is neither, the comment written over the group of
 constants it belongs to, marked as such. A code counts as tested when a Python
 test names it, in a string other than a docstring or by its constant; that does
 not prove the test makes the platform raise it. The tests are not listed here:
@@ -56,7 +57,7 @@ No comment names its meaning; the message at `maljan.pipeline.validation:absence
 
 ### `attck.claim_does_not_describe`
 
-No comment names its meaning; the message at `maljan.pipeline.validation:claim_does_not_describe_violation` reads: "CLAIM \<text> carries TECHNIQUE \<tid> \<name>, and its sentence names \<sibling> \<sibling_name>, another sub-technique of \<parent> \<parent_name>, and none of \<tid>'s own words: what it shares with \<tid> is only what every technique under \<parent> shares. A technique on a claim is published as something the sample does. Keep \<tid> only if the sample does it, and then say in the claim what it does that is \<tid>; if the claim describes \<sibling>, \<otherwise>."
+No comment names its meaning, and `maljan.pipeline.validation:claim_does_not_describe_violation` passes more than one message for it: see the messages there.
 
 - **Raised at** `maljan.pipeline.validation:claim_does_not_describe_violation`
 - **Constant** `maljan.pipeline.validation:CLAIM_DOES_NOT_DESCRIBE_CODE`
@@ -72,7 +73,7 @@ A technique named with no id. Its own code because the answer is different from 
 
 ### `attck.platform_mismatch`
 
-No comment names its meaning; the message at `maljan.pipeline.validation:validate_isr` reads: "TECHNIQUE \<technique_id> belongs to the ATT&CK \<domain> domain\<…>; this sample is \<sample_words>. Use a technique from the sample's domain, or drop the technique id."
+No comment names its meaning, and `maljan.pipeline.validation:validate_isr` passes more than one message for it: see the messages there.
 
 - **Raised at** `maljan.pipeline.validation:validate_isr`, `maljan.pipeline.validation:validate_verdict_bundle`
 - **Constant** `maljan.pipeline.validation:PLATFORM_MISMATCH_CODE`
@@ -125,7 +126,7 @@ A report section answer that writes one item again. Every list section's contrac
 
 ### `composer.schema`
 
-No comment names its meaning; the message at `maljan.pipeline.validation:schema_violations` reads: "the answer held no text. Write the JSON object the request asks for."
+No comment names its meaning, and `maljan.pipeline.validation:schema_violations` passes more than one message for it: see the messages there.
 
 - **Raised at** `maljan.pipeline.validation:schema_violations`, `maljan.reporting.composer:ReportComposer._invoke._validate`
 - **Constant** none: the code is written as a literal
@@ -231,7 +232,7 @@ No comment names its meaning; the message at `maljan.pipeline.validation:validat
 
 ### `isr.unparsed_answer`
 
-No comment names its meaning; the message at `maljan.pipeline.validation:parse_violations` reads: "Your answer has no CLAIM block that can be read, so it carries no claim and is kept as prose. Restate each finding as a block, with the confidence you hold it at: CLAIM: \<claim text> EVIDENCE: \<artifact reference, naming the tool result you read it from, for example \[ev_0002\]> CONFIDENCE: \<0.0-1.0> TECHNIQUE: \<T-ID, several separated by commas, or NONE> --- A finding you cannot put a confidence on stays in your prose."
+No comment names its meaning, and `maljan.pipeline.validation:parse_violations` passes more than one message for it: see the messages there.
 
 - **Raised at** `maljan.pipeline.validation:parse_violations`
 - **Constant** `maljan.pipeline.validation:UNPARSED_ANSWER_CODE`
@@ -241,7 +242,7 @@ No comment names its meaning; the message at `maljan.pipeline.validation:parse_v
 
 ### `narrative.schema`
 
-No comment names its meaning; the message at `maljan.pipeline.validation:schema_violations` reads: "the answer held no text. Write the JSON object the request asks for."
+No comment names its meaning, and `maljan.pipeline.validation:schema_violations` passes more than one message for it: see the messages there.
 
 - **Raised at** `maljan.pipeline.validation:schema_violations`, `maljan.reporting.narrative_agent:NarrativeAgent.generate`
 - **Constant** none: the code is written as a literal
@@ -299,7 +300,7 @@ No comment names its meaning, and the message at `maljan.pipeline.validation:cit
 
 ### `report.citation_wrong_entry`
 
-No comment names its meaning; the message at `maljan.pipeline.validation:wrong_entry_citations` reads: "\<quoted> is not in \<named>, which the text cites for it; this run's evidence holds it in \<holding>. Cite the entry that holds the value the text states."
+No comment names its meaning, and `maljan.pipeline.validation:wrong_entry_citations` passes more than one message for it: see the messages there.
 
 - **Raised at** `maljan.pipeline.validation:wrong_entry_citations`
 - **Constant** `maljan.pipeline.validation:CITATION_WRONG_ENTRY_CODE`
@@ -323,7 +324,7 @@ No comment names its meaning; the message at `maljan.pipeline.validation:misstat
 
 ### `report.flow_voice`
 
-No comment names its meaning; the message at `maljan.pipeline.validation:flow_voice_violations` reads: "step \<order> is marked observed and also cites \<named>, which are not sandbox entries. A step marked observed says the sandbox watched every part of it. Cite only the sandbox entries that show it and write what the other entries show as an assessed step of its own, or mark the step assessed."
+No comment names its meaning, and `maljan.pipeline.validation:flow_voice_violations` passes more than one message for it: see the messages there.
 
 - **Raised at** `maljan.pipeline.validation:flow_voice_violations`, `maljan.pipeline.validation:persistence_not_observed_violations`
 - **Constant** `maljan.pipeline.validation:FLOW_VOICE_CODE`
@@ -485,7 +486,7 @@ No comment names its meaning; the message at `maljan.reporting.renderers.stix_re
 
 ### `stix.malware_type_vocabulary`
 
-No comment names its meaning; the message at `maljan.pipeline.validation:malware_object_violations` reads: "the malware object \<subject> gives its kind as labels \<label>, which the export does not carry, and has no malware_types, so the export says nothing of what kind of malware it is. malware_types takes values from STIX 2.1's malware-type vocabulary: \<vocabulary>. Write the ones that fit under malware_types, or leave it out — nothing is filled in for you."
+No comment names its meaning, and `maljan.pipeline.validation:malware_object_violations` passes more than one message for it: see the messages there.
 
 - **Raised at** `maljan.pipeline.validation:malware_object_violations`
 - **Constant** `maljan.pipeline.validation:MALWARE_TYPE_VOCABULARY_CODE`
@@ -557,7 +558,7 @@ No comment names its meaning; the message at `maljan.pipeline.validation:unknown
 
 ### `stix.unknown_technique`
 
-No comment names its meaning; the message at `maljan.pipeline.validation:validate_verdict_bundle` reads: "the attack-pattern names \<tid>, which is not shaped like a MITRE ATT&CK technique id (T#### or T####.###)."
+No comment names its meaning, and `maljan.pipeline.validation:validate_verdict_bundle` passes more than one message for it: see the messages there.
 
 - **Raised at** `maljan.pipeline.validation:validate_verdict_bundle`
 - **Constant** none: the code is written as a literal
@@ -649,7 +650,7 @@ The question a call is answered with when an argument's value is the name of its
 
 ### `verdict.assessment_conflict`
 
-No comment names its meaning; the message at `maljan.pipeline.validation:assessment_conflict_violations` reads: "This bundle's verdict is \<verdict> and x_maljan_assessment.severity.rating says \<rating>; those are two different answers about the same sample. Reconcile them: either the verdict or the rating is what you meant, and the rationale should support whichever it is."
+No comment names its meaning, and `maljan.pipeline.validation:assessment_conflict_violations` passes more than one message for it: see the messages there.
 
 - **Raised at** `maljan.pipeline.validation:assessment_conflict_violations`
 - **Constant** `maljan.pipeline.validation:ASSESSMENT_CONFLICT_CODE`

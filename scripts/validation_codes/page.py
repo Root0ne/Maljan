@@ -43,7 +43,8 @@ its slots the register cannot follow are left out of the unresolved list.
 
 A code's meaning is the comment or docstring on its own constant; where there is
 none, the message a raise site passes, with each value it fills in written
-`<name>`; where there is neither, the comment written over the group of
+`<name>` (a site that passes several messages for a code is pointed at
+instead); where there is neither, the comment written over the group of
 constants it belongs to, marked as such. A code counts as tested when a Python
 test names it, in a string other than a docstring or by its constant; that does
 not prove the test makes the platform raise it. The tests are not listed here:
@@ -109,6 +110,12 @@ def _entry(code: Code) -> list[str]:
         lines += [
             "No comment of its own names its meaning; the comment over the group of constants "
             f'it belongs to, on `{code.meaning_from}`, reads: "{quoted}"',
+            "",
+        ]
+    elif code.meaning_kind == "messages":
+        lines += [
+            f"No comment names its meaning, and `{code.meaning_from}` passes more than one "
+            "message for it: see the messages there.",
             "",
         ]
     elif code.meaning_kind == "pointer":

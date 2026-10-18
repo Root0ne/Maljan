@@ -113,7 +113,8 @@ class Code:
     constants: tuple[str, ...]
     collections: tuple[str, ...]
     meaning: str
-    # comment, message, group, pointer, or "" when nothing says.
+    # comment, message, messages (a site passes several), group, pointer (the
+    # message is only filled-in values), or "" when nothing says.
     meaning_kind: str
     # The constant or site the meaning was read from.
     meaning_from: str
@@ -170,6 +171,9 @@ class Value:
 NOTHING = Value()
 NOT_A_STRING = Value(other=True)
 _BUSY = Value(why="a name defined through itself")
+# What a message reads as when it is one of several the code may pass.
+MANY = "\0several"
+
 _TOO_DEEP = Value(why=f"a chain of more than {MAX_CHAIN} names")
 
 
@@ -1747,12 +1751,19 @@ class Reader:
             )
         if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add):
             left, right = self._text(node.left, scope, seen), self._text(node.right, scope, seen)
+            if MANY in (left, right):
+                return MANY
             return left + right if left and right else ""
         if isinstance(node, ast.IfExp):
-            return self._text(node.body, scope, seen) or self._text(node.orelse, scope, seen)
+            body = self._text(node.body, scope, seen)
+            orelse = self._text(node.orelse, scope, seen)
+            if body.strip() and orelse.strip() and body != orelse:
+                return MANY
+            return body or orelse
         if isinstance(node, ast.Call):
             if isinstance(node.func, ast.Attribute) and node.func.attr == "format":
-                return _fields_named(self._text(node.func.value, scope, seen))
+                template = self._text(node.func.value, scope, seen)
+                return template if template == MANY else _fields_named(template)
             function = self.def_of(self.ref_of(node.func, scope))
             if function is not None and function.kind == "function" and id(function) not in seen:
                 return self._returned_text(function, seen | {id(function)})
@@ -1777,13 +1788,15 @@ class Reader:
         if id(function) in self._returned:
             return self._returned[id(function)]
         self._returned[id(function)] = ""
-        text = ""
+        texts: list[str] = []
         body = getattr(function.node, "body", [])
         for statement in _own_statements(body if isinstance(body, list) else []):
             if isinstance(statement, ast.Return) and statement.value is not None:
                 text = self._text(statement.value, function, seen)
-                if text.strip():
-                    break
+                if text.strip() and text not in texts:
+                    texts.append(text)
+        # A helper that returns one of several sentences gives no one meaning.
+        text = MANY if len(texts) > 1 else (texts[0] if texts else "")
         self._returned[id(function)] = text
         return text
 
@@ -1836,6 +1849,11 @@ class Reader:
 
     def _message(self, code: str, message: str, site: str, value: ast.expr) -> None:
         if not message.strip():
+            return
+        if message == MANY:
+            self.codes[code].meanings.append(
+                ((2, site, value.lineno, value.col_offset), "", "messages", site)
+            )
             return
         pointer = _placeholders_only(message)
         self.codes[code].meanings.append(
@@ -2006,10 +2024,17 @@ class Reader:
         for code in sorted(self.codes):
             record = self.codes[code]
             meaning, kind, source = "", "", ""
+            said: dict[str, set[str]] = {}
+            for _key, text, candidate_kind, candidate_source in record.meanings:
+                if candidate_kind in ("message", "messages"):
+                    said.setdefault(candidate_source, set()).add(text or MANY)
             for _key, text, candidate_kind, candidate_source in sorted(
                 record.meanings, key=lambda item: item[0]
             ):
-                if text.strip() or candidate_kind == "pointer":
+                if candidate_kind == "message" and len(said[candidate_source]) > 1:
+                    # One site passing several messages for a code gives no one meaning.
+                    text, candidate_kind = "", "messages"
+                if text.strip() or candidate_kind in ("pointer", "messages"):
                     meaning, kind, source = text.strip(), candidate_kind, candidate_source
                     break
             codes.append(
