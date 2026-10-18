@@ -693,6 +693,9 @@ class ServiceContainer:
         # caller's loop ended) are parked on ``_handed_over_evidence``.
         self._evidence_holders: list[Callable[[], Iterable[Any]]] = []
         self._handed_over_evidence: list[Any] = []
+        # Every entry ``collect_undrained_evidence`` has collected, by id, kept
+        # for the job's length so no later caller can miss one.
+        self._collected_evidence: dict[str, Any] = {}
 
         # The window this job's models were served with, and the cap it gives
         # one tool answer. Built on first use rather than here: learning the
@@ -1316,7 +1319,7 @@ class ServiceContainer:
             self._handed_over_evidence.extend(entries)
 
     def collect_undrained_evidence(self, known_ids: Iterable[str] = ()) -> list[Any]:
-        """Every entry this job's counter issued that has not reached the ledger yet.
+        """Every entry this job's counter issued that the caller's ledger lacks.
 
         The one place a path that persists or reports a ledger asks for what no
         node drained: entries handed over through ``hand_over_evidence``, and
@@ -1324,9 +1327,15 @@ class ServiceContainer:
         node never ran its drain (a revision that raised, an analyst asked at
         the verdict stage, a run stopped mid-stage), a judge loop. The ids were
         issued, and the report and the console may already have shown them, so
-        the entries belong on the ledger. ``known_ids`` are the ids the caller's
-        ledger already holds; an entry under one of them, or under an id
-        collected twice, is left out and logged. In ``seq`` order. Never raises.
+        the entries belong on the ledger.
+
+        Collecting loses nothing. Every entry ever collected is kept here, and
+        each call answers with all of them less ``known_ids``, the ids the
+        caller's ledger already holds. A caller that collected and then never
+        wrote what it got (a report node cancelled after its collection) leaves
+        the entries for the next caller (the stopped run's keep), which finds
+        them although the holders are already drained. An id collected twice
+        keeps its first entry. In ``seq`` order. Never raises.
         """
         with self._lock:
             parked = self._handed_over_evidence
@@ -1338,21 +1347,14 @@ class ServiceContainer:
                 found.extend(holder() or ())
             except Exception as exc:  # noqa: BLE001 — a ledger read never fails a run
                 logger.warning("evidence: a holder's entries could not be read (%s).", exc)
-        seen = {str(entry_id) for entry_id in known_ids}
-        collected: list[Any] = []
-        repeated = 0
-        for entry in found:
-            entry_id = str(getattr(entry, "id", "") or "")
-            if not entry_id or entry_id in seen:
-                repeated += 1
-                continue
-            seen.add(entry_id)
-            collected.append(entry)
-        if repeated:
-            logger.info(
-                "evidence: %d entr(y/ies) already on the ledger were not collected again.",
-                repeated,
-            )
+        with self._lock:
+            for entry in found:
+                entry_id = str(getattr(entry, "id", "") or "")
+                if entry_id and entry_id not in self._collected_evidence:
+                    self._collected_evidence[entry_id] = entry
+            kept = list(self._collected_evidence.items())
+        known = {str(entry_id) for entry_id in known_ids}
+        collected = [entry for entry_id, entry in kept if entry_id not in known]
         if collected:
             logger.warning(
                 "evidence: %d entr(y/ies) no node had written reach the ledger now (%s).",

@@ -195,6 +195,34 @@ async def test_a_stopped_run_stores_every_issued_id(container: ServiceContainer)
 
 
 @pytest.mark.asyncio
+async def test_a_run_stopped_after_its_report_node_collected_stores_every_issued_id(
+    container: ServiceContainer,
+) -> None:
+    """The report node collected, then was cancelled before it wrote what it got."""
+    latest = _state(_the_run_s_holders(container))
+    known = [row["id"] for row in latest["evidence_ledger"]]
+    assert len(container.collect_undrained_evidence(known)) == 6
+    app = SimpleNamespace(container=container, built_report=None, latest_state=latest)
+    job = fake_job()
+    factory = SessionFactory(rows_for(job, fake_sample(job.sample_id)))
+
+    kept = await keep_the_stopped_run(
+        factory,
+        job_uuid=job.id,
+        job_id=str(job.id),
+        app=app,
+        note=NOTE,
+        transcript=[],
+        core_settings=Settings(_env_file=None),
+        override_keys=(),
+        hash_mismatch_reason=None,
+    )
+
+    assert kept is True
+    assert _assert_every_issued_id_is_stored(container, _stored(factory)) == 12
+
+
+@pytest.mark.asyncio
 async def test_a_report_kept_from_a_failed_run_stores_every_issued_id(
     container: ServiceContainer,
 ) -> None:
@@ -236,7 +264,10 @@ class TestEachHolderAlone:
         assert network._evidence_entries == []
         late = container.collect_undrained_evidence()
         assert [entry.seq for entry in late] == [1, 2, 3]
-        assert container.collect_undrained_evidence() == []
+        # Collected once, kept: a ledger that holds them gets nothing more,
+        # and one that does not gets them again.
+        assert container.collect_undrained_evidence(["ev_0001", "ev_0002", "ev_0003"]) == []
+        assert [entry.seq for entry in container.collect_undrained_evidence()] == [1, 2, 3]
 
     def test_a_revision_that_raised_leaves_nothing_behind(
         self, container: ServiceContainer
