@@ -596,11 +596,11 @@ async def get_job_evidence_object(
     job, the entry or the reference is not there, or the part was never kept
     (its reference states why); 502 when the store cannot hand the object
     back. The bytes are streamed with the recorded digest and length in the
-    headers and hashed as they go; bytes that end on another digest drop the
-    connection before the answer completes.
+    headers and hashed as they go (:func:`verified_chunks`); the last chunk is
+    sent only once the digest matches, so the body is complete only when it
+    does.
     """
     import asyncio
-    import hashlib
 
     from maljan.schemas.evidence_spill import CONTENT_TYPES, JSON
     from sqlalchemy import select as sa_select
@@ -651,25 +651,6 @@ async def get_job_evidence_object(
         ) from None
     expected = str(ref.get("sha256") or "")
 
-    def chunks() -> Any:
-        # Streamed as it is read and hashed as it goes, so no part is held
-        # whole in memory; bytes that end on another digest drop the
-        # connection, and the client never receives a complete answer.
-        digest = hashlib.sha256()
-        try:
-            for chunk in response.stream(object_store.EVIDENCE_CHUNK_BYTES):
-                digest.update(chunk)
-                yield chunk
-        finally:
-            response.close()
-            response.release_conn()
-        if digest.hexdigest() != expected:
-            logger.warning(
-                f"Evidence object {log_safe(key)} does not match its recorded digest",
-                extra={"job_id": log_safe(job_id), "user_id": log_safe(user.id)},
-            )
-            raise EvidenceDigestMismatch(key)
-
     media = CONTENT_TYPES.get(part, "application/octet-stream")
     suffix = "json" if media == JSON else "txt"
     headers = {
@@ -678,11 +659,45 @@ async def get_job_evidence_object(
     }
     if isinstance(ref.get("bytes"), int):
         headers["Content-Length"] = str(ref["bytes"])
-    return StreamingResponse(chunks(), media_type=media, headers=headers)
+    return StreamingResponse(
+        verified_chunks(response, expected, key), media_type=media, headers=headers
+    )
 
 
 class EvidenceDigestMismatch(RuntimeError):
     """A kept part whose bytes end on another digest than its entry recorded."""
+
+
+def verified_chunks(response: Any, expected: str, key: str) -> Any:
+    """The object ``response`` streams, chunk by chunk, its last chunk only once it verifies.
+
+    Read in ``EVIDENCE_CHUNK_BYTES`` and hashed as it goes, so no part is
+    held whole; one chunk is always held back, and the last is handed over
+    only after the whole object's digest matches ``expected``. Bytes that end
+    on another digest raise :class:`EvidenceDigestMismatch` before the held
+    chunk goes out: with ``Content-Length`` set, the client sees a short body
+    and fails, and the body is complete only when it matches.
+    """
+    import hashlib
+
+    from app.services import object_store
+
+    digest = hashlib.sha256()
+    held: bytes | None = None
+    try:
+        for chunk in response.stream(object_store.EVIDENCE_CHUNK_BYTES):
+            digest.update(chunk)
+            if held is not None:
+                yield held
+            held = chunk
+    finally:
+        response.close()
+        response.release_conn()
+    if digest.hexdigest() != expected:
+        logger.warning(f"Evidence object {log_safe(key)} does not match its recorded digest")
+        raise EvidenceDigestMismatch(key)
+    if held is not None:
+        yield held
 
 
 @router.delete("/{job_id}", status_code=status.HTTP_204_NO_CONTENT)

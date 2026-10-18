@@ -603,3 +603,34 @@ class TestTheDownload:
             r = client.get(f"/api/v1/jobs/{job}/evidence/ev_0007/objects/answer")
 
         assert r.status_code == 502
+
+
+class TestTheStreamVerifies:
+    def _response(self, blob: bytes, size: int) -> Any:
+        from unittest.mock import MagicMock
+
+        response = MagicMock()
+        response.stream.return_value = (blob[i : i + size] for i in range(0, len(blob), size))
+        return response
+
+    def test_a_tampered_object_never_yields_its_final_chunk(self) -> None:
+        from app.api.v1.jobs import EvidenceDigestMismatch, verified_chunks
+
+        recorded = hashlib.sha256(b"aaaabbbbcccc").hexdigest()
+        response = self._response(b"aaaabbbbXXXX", 4)
+        sent: list[bytes] = []
+
+        with pytest.raises(EvidenceDigestMismatch):
+            for chunk in verified_chunks(response, recorded, "evidence/j/d"):
+                sent.append(chunk)
+
+        assert sent == [b"aaaa", b"bbbb"], "the last chunk is held back and never sent"
+        response.release_conn.assert_called_once()
+
+    def test_a_matching_object_is_sent_whole(self) -> None:
+        from app.api.v1.jobs import verified_chunks
+
+        blob = b"aaaabbbbcccc"
+        sent = list(verified_chunks(self._response(blob, 4), hashlib.sha256(blob).hexdigest(), "k"))
+
+        assert b"".join(sent) == blob
