@@ -12,10 +12,9 @@ prompt took, only the prompt's total. That total, where the provider reported
 it, is kept beside the parts as the provider's own figure, with the number of
 requests that reported one, and is never apportioned among them.
 
-The meter also keeps, as sha256 digests and never as text, each agent's
-system prompts as sent and the definitions of the tools its loops were bound
-to: what the run fingerprint (``analysis.efficiency``) is made of besides the
-servers and the settings.
+The run fingerprint is not read from here: it hashes the job's setup, never
+what a run sent (``analysis.setup_prompts``). This module gives it the digest,
+the tool-definition digests and the masking of the job's own identifiers.
 
 Nothing here changes what is sent: the meter reads the messages a request
 carries and keeps counts. Recording never raises — telemetry must not break
@@ -26,6 +25,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import threading
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from typing import Any
@@ -170,18 +170,15 @@ def digest(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8", "surrogatepass")).hexdigest()
 
 
-# The shortest file name taken for a job identifier: a shorter one is too
-# likely to be an ordinary word of the prompt.
-_MIN_NAME = 8
-
-
 def job_identifiers(container: Any) -> list[tuple[str, str]]:
     """``(value, placeholder)`` for each identifier of this job the platform writes into prompts.
 
     Taken from the job's known values on the container — the sample's sha256
     (as written and upper-cased), the sample's path and every path a tool
     server opens it at, its file name, and the job id — never found by a
-    pattern. Longest first, so a path is replaced before the name inside it.
+    pattern. Longest first, so a path is replaced before the name inside it;
+    each is replaced only as a whole token (:func:`without_identifiers`), so a
+    short name is masked at any length and never inside a longer word.
     """
     import os
 
@@ -197,7 +194,7 @@ def job_identifiers(container: Any) -> list[tuple[str, str]]:
         if path.strip():
             pairs.append((path, "<sample-path>"))
             name = os.path.basename(path)
-            if len(name) >= _MIN_NAME:
+            if name:
                 pairs.append((name, "<sample-name>"))
     job = str(getattr(container, "job_id", "") or "").strip()
     if job:
@@ -207,21 +204,17 @@ def job_identifiers(container: Any) -> list[tuple[str, str]]:
 
 
 def without_identifiers(text: str, identifiers: Sequence[tuple[str, str]]) -> str:
-    """``text`` with each identifier replaced by its placeholder."""
+    """``text`` with each identifier replaced by its placeholder, as a whole token only.
+
+    A token is bounded by characters that cannot be part of an identifier
+    (anything but a letter, a digit or ``_``), or by the text's ends: the
+    sample named ``a.exe`` is masked in ``open a.exe`` and left alone in
+    ``data.exe``.
+    """
     for value, mark in identifiers:
-        text = text.replace(value, mark)
+        # The placeholder escaped for ``re.sub``, which reads backslashes in it.
+        text = re.sub(rf"(?<!\w){re.escape(value)}(?!\w)", mark.replace("\\", "\\\\"), text)
     return text
-
-
-def system_prompt_digests(
-    messages: Iterable[Any], identifiers: Sequence[tuple[str, str]] = ()
-) -> list[str]:
-    """The digest of each system message of a request, its job identifiers replaced first."""
-    return [
-        digest(without_identifiers(_text_of(getattr(m, "content", "")), identifiers))
-        for m in messages
-        if str(getattr(m, "type", "") or "") == "system"
-    ]
 
 
 def tool_digests(tools: Iterable[Any]) -> dict[str, str]:
@@ -269,10 +262,6 @@ class InputMeter:
         # budget, held until the loop is closed so its identity is not reused.
         self._loops: dict[tuple[str, int], tuple[Any, dict[str, Any]]] = {}
         self._calls: dict[tuple[str, str, str], dict[str, Any]] = {}
-        # Per agent, the digests of the system prompts it sent and of the tool
-        # definitions its loops were bound to, by tool name.
-        self._prompts: dict[str, set[str]] = {}
-        self._tools: dict[str, dict[str, str]] = {}
 
     def request(
         self,
@@ -282,18 +271,15 @@ class InputMeter:
         stage: str = "",
         kind: str = TOOL_LOOP,
         loop: Any = None,
-        prompts: Iterable[str] = (),
     ) -> dict[str, Any] | None:
         """One request about to be sent; the row it was counted on (for :meth:`answered`).
 
         ``loop`` is the tool loop the request is a turn of — its turns are
         summed on one row until :meth:`close` — or ``None`` for a single call,
         summed with the agent's other calls of the same ``kind`` and stage.
-        ``prompts`` are the digests of the request's system prompts.
         """
         try:
             with self._lock:
-                self._prompts.setdefault(agent, set()).update(str(p) for p in prompts)
                 if loop is not None:
                     held = self._loops.get((agent, id(loop)))
                     if held is None or held[0] is not loop:
@@ -347,28 +333,6 @@ class InputMeter:
                         row["input_tokens"] += max(0, int(usage.get("input_tokens") or 0))
         except Exception:  # noqa: BLE001 — recording never raises
             return
-
-    def note_tools(self, agent: str, digests: Mapping[str, str]) -> None:
-        """The tool definitions a loop of ``agent`` was bound to, by name, as digests."""
-        try:
-            with self._lock:
-                self._tools.setdefault(agent, {}).update(
-                    {str(k): str(v) for k, v in digests.items()}
-                )
-        except Exception:  # noqa: BLE001 — recording never raises
-            return
-
-    def prompt_digests(self) -> dict[str, list[str]]:
-        """Per agent, the distinct digests of the system prompts it sent, sorted."""
-        with self._lock:
-            return {agent: sorted(held) for agent, held in sorted(self._prompts.items()) if held}
-
-    def tool_digests(self) -> dict[str, dict[str, str]]:
-        """Per agent, the digest of each tool definition its loops were bound to."""
-        with self._lock:
-            return {
-                agent: dict(sorted(held.items())) for agent, held in sorted(self._tools.items())
-            }
 
     def rows(self) -> list[dict[str, Any]]:
         """A plain copy of every row, in order; ``input_tokens`` only where a request reported."""

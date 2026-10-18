@@ -872,6 +872,29 @@ COMPACT_BUNDLE_RULES = (
 # sentence about the tools that attached if the fast path falls back to a loop.
 _NO_TOOLS_NEEDED = "No Threat Intelligence tools are needed for this run.\n"
 
+# The mediator's sentence about its tools, by the case: no analyst consulted a
+# reputation source and the sample's sha256 is known (``{sha256}`` is replaced
+# with it), the same with no hash to name, and a dispute to resolve with them.
+# Module constants so the run fingerprint hashes them as templates
+# (``analysis.setup_prompts``).
+MEDIATOR_LOOKUP_ONCE_BY_HASH = (
+    "You have reputation tools and no analyst has consulted one. "
+    "Look the sample's hash up once — its sha256 is {sha256} "
+    "and it is in the sample identity block below — cite what comes back "
+    "as evidence, and treat a reputation label as one source rather than "
+    "as the verdict.\n"
+)
+MEDIATOR_LOOKUP_ONCE = (
+    "You have reputation tools and no analyst has consulted one. "
+    "Look the sample up once to settle its identity, cite what comes "
+    "back as evidence, and treat a reputation label as one source "
+    "rather than as the verdict.\n"
+)
+MEDIATOR_TI_TOOLS = (
+    "You have Threat Intelligence tools to verify disputed "
+    "IPs/domains/hashes — use them only to resolve contradictions.\n"
+)
+
 
 # The question asked once after the verdict about the techniques the verdict's
 # bundle does not carry (the ones an analyst claimed, and the ones named only on
@@ -2132,7 +2155,6 @@ class JudgeAgent(BudgetMeter):
         definitions = tool_definition_chars(recorded)
         # On the budget record and the ticks, as the analysts' loop puts it.
         self._tool_definition_chars = definitions
-        self._note_tools(recorded)
 
         def _note_the_conversation(conversation: list[Any]) -> None:
             if not isinstance(room, ContextBudget):
@@ -2662,19 +2684,11 @@ class JudgeAgent(BudgetMeter):
                 "system",
                 MEDIATOR_SYSTEM_HEAD
                 + (
-                    "You have reputation tools and no analyst has consulted one. "
-                    f"Look the sample's hash up once — its sha256 is {_sha256_of(sample)} "
-                    "and it is in the sample identity block below — cite what comes back "
-                    "as evidence, and treat a reputation label as one source rather than "
-                    "as the verdict.\n"
+                    MEDIATOR_LOOKUP_ONCE_BY_HASH.replace("{sha256}", _sha256_of(sample))
                     if identity_unanswered and lookup_attached and _sha256_of(sample)
-                    else "You have reputation tools and no analyst has consulted one. "
-                    "Look the sample up once to settle its identity, cite what comes "
-                    "back as evidence, and treat a reputation label as one source "
-                    "rather than as the verdict.\n"
+                    else MEDIATOR_LOOKUP_ONCE
                     if identity_unanswered and lookup_attached
-                    else "You have Threat Intelligence tools to verify disputed "
-                    "IPs/domains/hashes — use them only to resolve contradictions.\n"
+                    else MEDIATOR_TI_TOOLS
                     if needs_tools and lookup_attached
                     else tools_statement(self.tools) + "\n"
                     if needs_tools

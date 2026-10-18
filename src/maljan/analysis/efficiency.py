@@ -40,24 +40,23 @@ validation retries (a retry, and the whole answer asked for after a retry that
 could not be merged) and its drops questions took: provider-reported output
 tokens only, with the calls that reported none counted beside them.
 
-``fingerprint`` is one sha256 over what the run was set up with (H5): the
-system prompts as each agent sent them, the definitions of the tools its loops
-were bound to, the name and version each tool server gave for itself at
-attach, and the settings the run ran with, masked as the stored snapshot masks
-them. Each of the four is hashed on its own (``components``), and each
-component per agent, per server or per settings section (``parts``), so two
-fingerprints that differ name what changed. Secrets never enter it: only the
-masked view of the settings is hashed, where a secret reads as set or unset.
-A prompt carries the run's own words where the platform writes them in (the
-mediator's names the sample's hash), so the prompts component tells two
-samples apart unless its identifiers are taken out: before a system prompt is
-hashed, the job's own identifiers the platform writes into prompts — the
-sample's sha256 (as written and upper-cased), its path and the paths the tool
-servers open it at, its file name and the job id, each taken from the job's
-known values (``core.input_meter.job_identifiers``), never by a pattern — are
-replaced with fixed placeholders, so the same configuration on two samples
-gives the same prompts hash. A tool's own version is not reported over MCP and
-is not in it.
+``fingerprint`` is one sha256 over how the job was set up (H5), never over
+what the run sent: every system prompt the platform can send for the job, read
+from where each is built (``analysis.setup_prompts``); the definitions of the
+tools each agent was resolved with, as bound; the name and version each tool
+server attached by then gave for itself; and the settings the run ran with,
+masked as the stored snapshot masks them. A retry, a revision round, a cleared
+tool answer or the mediator's fast path does not move it; editing any built-in
+prompt does. Each of the four is hashed on its own (``components``), and each
+per prompt, agent, server or settings section (``parts``), so two fingerprints
+that differ name what changed. The sample does not move it either: an agent's
+prompt is composed with the neutral format fragment (every fragment is hashed
+as its template), and the job's own identifiers the platform writes in — the
+sample's sha256, its paths and file name, the job id, taken from the job's
+known values (``core.input_meter.job_identifiers``) — are masked as whole
+tokens. Secrets never enter it: only the masked view of the settings is
+hashed, where a secret reads as set or unset. A tool's own version is not
+reported over MCP and is not in it.
 """
 
 from __future__ import annotations
@@ -388,28 +387,47 @@ def _settings_sections(config: Any) -> dict[str, str]:
 
 
 def fingerprint_record(container: Any) -> dict[str, Any] | None:
-    """``efficiency.fingerprint``, or ``None`` outside a run (no meter, registry or settings).
+    """``efficiency.fingerprint`` from the job's setup, or ``None`` outside a job.
 
-    A part the run could not read (no meter, no registry, settings that would
-    not dump) is named in ``unread`` and hashed as empty, so the fingerprint
-    still says what it is made of.
+    Read from the container's setup alone — its settings, the agents it
+    resolved and the servers attached by then — never from the requests a run
+    sent. A part the job could not give (no agent resolved yet, settings that
+    would not dump) is named in ``unread`` and hashed as what it holds, so the
+    fingerprint still says what it is made of.
     """
-    meter: Any = getattr(container, "input_meter", None)
-    versions = getattr(container, "server_versions", None)
+    from maljan.analysis.setup_prompts import setup_prompts
+    from maljan.core.input_meter import job_identifiers, tool_digests, without_identifiers
+
     config = getattr(container, "config", None)
-    if meter is None and not callable(versions) and config is None:
+    resolved_of = getattr(container, "resolved_agents", None)
+    servers_of = getattr(container, "setup_server_versions", None)
+    if config is None and not callable(resolved_of) and not callable(servers_of):
         return None
     unread: list[str] = []
     parts: dict[str, dict[str, Any]] = {"prompts": {}, "tools": {}, "servers": {}, "settings": {}}
+    identifiers = job_identifiers(container)
+
+    def mask(text: str) -> str:
+        return without_identifiers(text, identifiers)
+
     try:
         parts["prompts"] = {
-            agent: _hash(digests) for agent, digests in meter.prompt_digests().items()
+            name: _hash(texts) for name, texts in sorted(setup_prompts(container, mask).items())
         }
-        parts["tools"] = {agent: _hash(held) for agent, held in meter.tool_digests().items()}
     except Exception:  # noqa: BLE001 — an unread part is named, never guessed
-        unread.extend(["prompts", "tools"])
+        unread.append("prompts")
+    resolved = resolved_of() if callable(resolved_of) else {}
+    if not resolved:
+        unread.append("agents")
     try:
-        parts["servers"] = dict(versions()) if callable(versions) else {}
+        parts["tools"] = {
+            str(key): _hash(tool_digests(getattr(agent, "tools", None) or []))
+            for key, agent in sorted(resolved.items())
+        }
+    except Exception:  # noqa: BLE001 — an unread part is named, never guessed
+        unread.append("tools")
+    try:
+        parts["servers"] = dict(servers_of()) if callable(servers_of) else {}
     except Exception:  # noqa: BLE001 — an unread part is named, never guessed
         unread.append("servers")
     try:
@@ -578,8 +596,8 @@ def efficiency_lines(record: Any) -> list[str]:
 
 # How each component of the fingerprint is named in the report.
 _COMPONENT_LABELS = {
-    "prompts": "system prompts as sent",
-    "tools": "tool declarations",
+    "prompts": "system prompts as set up",
+    "tools": "tool definitions as bound",
     "servers": "server names and versions",
     "settings": "masked settings",
 }

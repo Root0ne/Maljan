@@ -298,17 +298,25 @@ nothing a model reads changes.
 - **Retries' share of the output** (`output`): per agent, its reported output
   tokens and the share its validation retries and its drops questions took,
   with the calls that reported no usage counted beside them.
-- **Run fingerprint** (`fingerprint`): one sha256 over the system prompts as
-  sent, the tool declarations, the name and version each tool server gave for
-  itself at attach, and the settings the run ran with, masked as the stored
-  settings snapshot masks them. Each component and each part (per agent, per
-  server, per settings section) keeps its own hash, so two fingerprints that
-  differ name what changed. A secret enters only as set or unset. Before a
-  system prompt is hashed, the job's own identifiers the platform writes into
-  it (the sample's sha256, its paths and file name, the job id), taken from
-  the job's known values, are replaced with fixed placeholders, so the same
-  configuration on two samples gives the same fingerprint. A tool's own
-  version is not reported over MCP and is not in the fingerprint.
+- **Run fingerprint** (`fingerprint`): one sha256 over how the job was set
+  up, never over what its run sent: every system prompt the platform can send
+  for the job, read from where each is built (each resolved agent's own prompt,
+  for its tools and for a tools-free call, and the revision framing, the view
+  prompts, every format fragment, the mediator's, the judge's verdict and
+  technique-question prompts, the composer's, the narrative's and the
+  summariser's, each as its fixed template); the tool definitions each agent
+  was resolved with, as bound; the name and version each tool server attached
+  by then gave for itself; and the settings the run ran with, masked as the
+  stored settings snapshot masks them. A validation retry, a revision round, a
+  cleared tool answer or the mediator's fast path does not move it; editing any
+  built-in prompt does. Neither does the sample: an agent's prompt is composed
+  with the neutral format fragment, and the job's own identifiers (the sample's
+  sha256, its paths and file name, the job id), taken from the job's known
+  values, are masked as whole tokens. Each component and each part (per
+  prompt, agent, server and settings section) keeps its own hash, so two
+  fingerprints that differ name what changed. A secret enters only as set or
+  unset. A tool's own version is not reported over MCP and is not in the
+  fingerprint.
 
 A run stopped part-way stores the counts as of the stop and says so. A report
 stored before the block existed shows none.

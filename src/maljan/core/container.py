@@ -647,6 +647,13 @@ class ServiceContainer:
         from maljan.core.input_meter import InputMeter
 
         self.input_meter = InputMeter()
+        # The job's setup as each agent was resolved: the resolution itself,
+        # and the name and version every tool server attached by then gave for
+        # itself. What the run fingerprint is made of (``analysis.efficiency``),
+        # so nothing a run does later — a retry, a revision, a clear, the
+        # mediator's fast path — moves it.
+        self._resolved_agents: dict[str, Any] = {}
+        self._setup_servers: dict[str, dict[str, str]] = {}
         # Each call, as it is recorded, on the job's event feed: the durable
         # trail of what the run spent, kept call by call by the worker.
         if event_sink is not None:
@@ -1164,15 +1171,25 @@ class ServiceContainer:
         registry = self._server_registry_cache
         return [dict(row) for row in getattr(registry, "rests", None) or []]
 
-    def server_versions(self) -> dict[str, dict[str, str]]:
-        """Per tool server this job attached, the name and version it gave, or ``{}``.
+    def _note_the_setup(self, name: str, resolved: Any) -> None:
+        """Keep agent ``name``'s resolution and the servers attached by then. Never raises."""
+        try:
+            self._resolved_agents[name] = resolved
+            registry = self._server_registry_cache
+            versions = getattr(registry, "server_versions", None)
+            if callable(versions):
+                for server, info in versions().items():
+                    self._setup_servers.setdefault(server, dict(info))
+        except Exception as exc:  # noqa: BLE001 — telemetry never costs an agent
+            logger.debug("the setup of '%s' was not noted (%s).", name, type(exc).__name__)
 
-        Reads the cached registry only, for the same reason
-        ``server_degradation_reasons`` does.
-        """
-        registry = self._server_registry_cache
-        versions = getattr(registry, "server_versions", None)
-        return versions() if callable(versions) else {}
+    def resolved_agents(self) -> dict[str, Any]:
+        """Each agent this job resolved, by key, as it was resolved."""
+        return dict(self._resolved_agents)
+
+    def setup_server_versions(self) -> dict[str, dict[str, str]]:
+        """Per tool server attached by the time its agents were resolved, its name and version."""
+        return dict(sorted(self._setup_servers.items()))
 
     def get_token_ledger(self) -> TokenLedger:
         """Return the per-run LLM token/cost ledger (findings-log §4 Item 1)."""
@@ -1601,6 +1618,7 @@ class ServiceContainer:
             # MCP init — per chunk, so up to ten of them per run.
             agent._container = self
             agent._resolved = resolved
+            self._note_the_setup(name, resolved)
             self._agent_cache[name] = agent
             self._hold_the_evidence_of(agent)
             return agent
