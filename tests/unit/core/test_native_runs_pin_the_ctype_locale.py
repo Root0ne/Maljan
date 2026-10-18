@@ -206,29 +206,164 @@ class TestTheEngineSelfTest:
                 LC_CTYPE=TURKISH,
             )
         )
-        assert _last_line(out) == ctype_locale.YARA_FOLDING_BROKEN.format(ctype=TURKISH)
+        reason = _last_line(out)
+        assert reason == ctype_locale.YARA_FOLDING_BROKEN.format(ctype=TURKISH)
+        assert "the import-hash clause" in reason
+
+    def test_an_engine_that_raises_is_not_blamed_on_the_locale(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        yara = pytest.importorskip("yara", reason="yara-python is not installed")
+
+        def raising(**_kwargs: object) -> None:
+            raise yara.Error("internal error: 30")
+
+        monkeypatch.setattr(yara, "compile", raising)
+        # The uncached function: the process's own answer stays as it was.
+        reason = ctype_locale.yara_case_folding_problem.__wrapped__()
+
+        assert reason == ctype_locale.YARA_SELF_TEST_FAILED.format(why="Error: internal error: 30")
+        assert "LC_CTYPE" not in reason
+
+    def test_its_string_is_far_longer_than_any_atom(self) -> None:
+        assert ctype_locale._SELF_TEST_TEXT == "i" * 32
+
+
+class TestFromANonUtf8Locale:
+    def test_the_pin_says_python_s_preferred_encoding_changes(self) -> None:
+        out = _finished(
+            _run(
+                """
+                import json, locale, sys
+                if locale.setlocale(locale.LC_CTYPE) != "C":
+                    sys.exit(77)
+                if locale.getpreferredencoding(False).upper().replace("-", "") == "UTF8":
+                    sys.exit(77)
+                from maljan.core import ctype_locale
+                said = []
+                chosen = ctype_locale.pin_character_classification(
+                    say=lambda level, text: said.append(text)
+                )
+                print(json.dumps({
+                    "chosen": chosen, "said": said, "now": locale.getpreferredencoding(False)
+                }))
+                """,
+                LC_CTYPE="C",
+                PYTHONCOERCECLOCALE="0",
+                PYTHONUTF8="0",
+            )
+        )
+        seen = json.loads(_last_line(out))
+        assert seen["chosen"] in ctype_locale.CANDIDATES
+        assert seen["now"] == "UTF-8"
+        assert len(seen["said"]) == 1
+        assert "Python's preferred encoding changes with it" in seen["said"][0]
+        assert "to UTF-8, as in the image" in seen["said"][0]
+
+
+# Each child records, the moment anything first imports the YARA engine,
+# whether the pin had run and the LC_CTYPE then in force; then it loads the
+# engine as a job would and asks the self-test.
+_WATCH_THE_ENGINE = """
+    import json, locale, sys
+    if locale.setlocale(locale.LC_CTYPE) != "tr_TR.UTF-8":
+        sys.exit(77)
+    first = {}
+
+    class _Watch:
+        def find_spec(self, fullname, path=None, target=None):
+            if fullname == "yara" and not first:
+                from maljan.core import ctype_locale
+                first.update(
+                    pinned=bool(ctype_locale._pinned), ctype=locale.setlocale(locale.LC_CTYPE)
+                )
+            return None
+
+    sys.meta_path.insert(0, _Watch())
+
+    def report():
+        from maljan.core import ctype_locale
+        import maljan.reporting.detection_signatures  # the engine loads here, as in a job
+        print(json.dumps({"first": first, "problem": ctype_locale.yara_case_folding_problem()}))
+"""
+
+# How production starts each of our processes, up to the point it would serve.
+_STARTS = {
+    # arq imports the settings module, then awaits the startup hook; the hook
+    # is stopped at the bootstrap check, before it touches a sample directory.
+    "worker": """
+        import asyncio
+        import app.bootstrap
+        import app.worker.analysis_worker as worker
+
+        def stop(*_args, **_kwargs):
+            raise RuntimeError("the test stops the start-up here")
+
+        app.bootstrap.require_bootstrap = stop
+        try:
+            asyncio.run(worker.startup({}))
+        except Exception:
+            pass
+    """,
+    # The console script imports the module and calls main().
+    "cli": """
+        import maljan.cli
+        sys.argv = ["maljan", "--help"]
+        try:
+            maljan.cli.main()
+        except SystemExit:
+            pass
+    """,
+    "validation runner": """
+        import runpy
+        sys.argv = ["run.py", "--help"]
+        try:
+            runpy.run_path("scripts/validation/run.py", run_name="__main__")
+        except SystemExit:
+            pass
+    """,
+    "rehearsal runner": """
+        import runpy
+        sys.argv = ["run.py", "--help"]
+        try:
+            runpy.run_path("scripts/rehearsal/run.py", run_name="__main__")
+        except SystemExit:
+            pass
+    """,
+    # Run as a script, as the worker starts it; serving stdio is skipped.
+    "analysis sidecar": """
+        import runpy
+        import mcp.server.fastmcp as fastmcp
+        fastmcp.FastMCP.run = lambda self, *args, **kwargs: None
+        runpy.run_path("services/analysis-mcp/server.py", run_name="__main__")
+    """,
+    "network sidecar": """
+        import runpy
+        import mcp.server.fastmcp as fastmcp
+        fastmcp.FastMCP.run = lambda self, *args, **kwargs: None
+        runpy.run_path("services/network-mcp/server.py", run_name="__main__")
+    """,
+}
 
 
 class TestEveryProcessOfOursPinsAtItsStart:
-    """Each entrypoint pins before the thing that would load C code or start threads."""
+    """Each entrypoint, started as production starts it, pins before the YARA engine loads."""
 
-    @pytest.mark.parametrize(
-        ("path", "before"),
-        [
-            ("apps/api/app/worker/analysis_worker.py", "concurrent_analyses_refusal(Worker"),
-            ("src/maljan/cli.py", "    app()\n"),
-            ("scripts/validation/run.py", "    raise SystemExit(main())"),
-            ("scripts/rehearsal/run.py", "    raise SystemExit(main())"),
-            ("services/analysis-mcp/server.py", 'CAPABILITIES = manifest("analysis"'),
-            ("services/network-mcp/server.py", '    mcp.run(transport="stdio")'),
-        ],
-    )
-    def test_the_entrypoint_pins_first(self, path: str, before: str) -> None:
-        text = (ROOT / path).read_text(encoding="utf-8")
-        pinned = text.find("pin_character_classification(")
+    @pytest.mark.parametrize("entrypoint", sorted(_STARTS))
+    def test_the_engine_loads_only_after_the_pin(self, entrypoint: str) -> None:
+        pytest.importorskip("yara", reason="yara-python is not installed")
+        script = (
+            textwrap.dedent(_WATCH_THE_ENGINE) + textwrap.dedent(_STARTS[entrypoint]) + "report()\n"
+        )
+        out = _finished(_run(script, LC_CTYPE=TURKISH))
+        seen = json.loads(_last_line(out))
 
-        assert pinned != -1, f"{path} never pins its character classes"
-        assert pinned < text.index(before), f"{path} pins after {before.strip()!r}"
+        assert seen["first"]["pinned"] is True, f"the {entrypoint} loads YARA before it pins"
+        assert seen["first"]["ctype"] in ctype_locale.CANDIDATES
+        assert seen["problem"] is None
+        if entrypoint.endswith("sidecar"):
+            # Standard output is a sidecar's protocol: the pin's line went to stderr.
+            assert json.loads(out) == seen
 
     def test_a_stdio_server_says_its_line_on_standard_error(self) -> None:
         for path in ("services/analysis-mcp/server.py", "services/network-mcp/server.py"):

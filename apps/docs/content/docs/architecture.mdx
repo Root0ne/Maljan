@@ -4785,14 +4785,15 @@ is assembled from what the run gathered rather than recomputed beside it:
   first match, or none), or `sample_not_checked` with the reason, which never
   names a path: no sample handed to the drafter, no path recorded, an
   unreadable file, an unread budget, no engine, an engine whose case folding
-  is broken in this process's locale, a rule or probe that did not compile, a
-  scan past its budget, an engine that refused the scan. Before anything else
-  the engine is asked, once per process, whether it folds case
-  (`core.ctype_locale.yara_case_folding_problem`: a `nocase` run of `i` longer
-  than one atom, matched against the same run of `I`, since a string that fits
-  in one atom is matched without the engine's locale-built case table); under
-  a locale whose `tolower` leaves a capital I alone its `nocase` and import-hash
-  answers would be wrong, so the draft is not checked rather than said to miss,
+  is broken in this process's locale or whose self-test raised (quoting its
+  message), a rule or probe that did not compile, a scan past its budget, an
+  engine that refused the scan. Before anything else the engine is asked, once
+  per process, whether it folds case
+  (`core.ctype_locale.yara_case_folding_problem`: a `nocase` run of 32 `i`, far
+  longer than an atom, matched against 32 `I`, since a string that fits in one
+  atom is matched without the engine's locale-built case table); under a
+  locale whose `tolower` leaves a capital I alone its `nocase` strings and its
+  import-hash clause would be wrong, so the draft is not checked rather than said to miss,
   and the platform's processes pin `LC_CTYPE` so that this does not arise (see
   [Native runs pin `LC_CTYPE`](/development/#native-runs-pin-lc_ctype)). A drafted
   rule carries the sample's own sha256, so it always matches by that clause

@@ -33,14 +33,20 @@ CANDIDATES: tuple[str, ...] = ("C.UTF-8", "C.utf8")
 # Said by a YARA pass whose engine fails the case-folding self-test.
 YARA_FOLDING_BROKEN = (
     "the YARA engine's case folding is broken in this process's locale "
-    "(LC_CTYPE={ctype}), so nocase strings cannot be checked"
+    "(LC_CTYPE={ctype}), so nocase strings and the import-hash clause cannot be checked"
 )
-# The self-test's string, longer than the engine's longest atom (four bytes). A
-# string that fits in one atom is matched through the atom's case variants,
-# which the engine builds as ASCII whatever the locale, so a test with ``"i"``
-# passes even where every longer string fails; a longer string is verified
-# through the case table the engine built by the locale.
-_SELF_TEST_TEXT = "iiiiiiii"
+# Said by a YARA pass whose engine raised instead of answering the self-test.
+YARA_SELF_TEST_FAILED = (
+    "the YARA engine's case-folding self-test failed ({why}), so nocase strings and "
+    "the import-hash clause cannot be checked"
+)
+# The self-test's string, far longer than the engine's longest atom (four bytes
+# in this build, and a build may set a longer one). A string that fits in one
+# atom is matched through the atom's case variants, which the engine builds as
+# ASCII whatever the locale, so a test with ``"i"`` passes even where every
+# longer string fails; a longer string is verified through the case table the
+# engine built by the locale.
+_SELF_TEST_TEXT = "i" * 32
 
 # The first call's answer, kept for every later call in the process.
 _pinned: list[str | None] = []
@@ -91,6 +97,7 @@ def pin_character_classification(say: Callable[[int, str], None] = _log) -> str 
     if _pinned:
         return _pinned[0]
     before = locale.setlocale(locale.LC_CTYPE)
+    encoding = locale.getpreferredencoding(False)
     chosen: str | None = None
     for name in CANDIDATES:
         try:
@@ -101,10 +108,19 @@ def pin_character_classification(say: Callable[[int, str], None] = _log) -> str 
             chosen = name
             break
     if chosen is not None:
+        # The candidates are UTF-8 locales: from a host locale that is not, the
+        # switch also makes UTF-8 Python's preferred encoding, as in the image.
+        now = locale.getpreferredencoding(False)
+        changed = (
+            f" Python's preferred encoding changes with it, from {encoding} to {now}, "
+            "as in the image."
+            if now != encoding
+            else ""
+        )
         say(
             logging.INFO,
             f"LC_CTYPE set to {chosen} (it was {before}): C code in this process folds case "
-            "as ASCII does.",
+            f"as ASCII does.{changed}",
         )
     else:
         locale.setlocale(locale.LC_CTYPE, before)
@@ -134,13 +150,15 @@ def yara_case_folding_problem() -> str | None:
     against the same run of ``I``, and the answer is kept, since the engine
     builds its case table once, when it loads. The one place a YARA pass asks
     before it trusts a ``nocase`` answer. ``None`` also when the engine is not
-    installed: nothing of its is then trusted.
+    installed: nothing of its is then trusted. An engine that raises instead of
+    answering is not trusted either, and the reason quotes its message rather
+    than blaming the locale; the test compiles text and matches bytes, so no
+    path can be in it.
     """
     try:
         import yara  # type: ignore[import-untyped]
     except ImportError:
         return None
-    ctype = locale.setlocale(locale.LC_CTYPE)
     try:
         rules = yara.compile(
             source=f'rule t {{ strings: $a = "{_SELF_TEST_TEXT}" nocase condition: $a }}',
@@ -148,10 +166,10 @@ def yara_case_folding_problem() -> str | None:
         )
         folds = bool(rules.match(data=_SELF_TEST_TEXT.upper().encode("ascii")))
     except Exception as exc:  # noqa: BLE001 - an engine that cannot run the test is not trusted
-        logger.warning("ctype_locale: the YARA case-folding self-test failed (%s).", exc)
-        folds = False
-    if folds:
-        return None
-    problem = YARA_FOLDING_BROKEN.format(ctype=ctype)
+        problem = YARA_SELF_TEST_FAILED.format(why=f"{type(exc).__name__}: {exc}")
+    else:
+        if folds:
+            return None
+        problem = YARA_FOLDING_BROKEN.format(ctype=locale.setlocale(locale.LC_CTYPE))
     logger.warning("ctype_locale: %s.", problem)
     return problem
