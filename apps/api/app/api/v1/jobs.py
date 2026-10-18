@@ -16,7 +16,11 @@ from app.deps import get_current_user
 from app.logging_config import get_logger
 from app.logsafe import log_safe
 from app.models.user import User
-from app.schemas.evidence import EvidenceEntryResponse, EvidenceListResponse
+from app.schemas.evidence import (
+    EvidenceEntryResponse,
+    EvidenceListResponse,
+    LedgerVerificationResponse,
+)
 from app.schemas.job import JobCreateRequest, JobListResponse, JobResponse, JobRoster
 from app.services import audit
 from app.services.analysis_service import AnalysisService
@@ -577,6 +581,38 @@ async def get_job_evidence(
         page=page,
         page_size=page_size,
     )
+
+
+@router.get("/{job_id}/evidence/verify", response_model=LedgerVerificationResponse)
+async def verify_job_evidence(
+    job_id: uuid.UUID,
+    user: User = Depends(get_current_user),
+    svc: AnalysisService = Depends(_get_service),
+    db: AsyncSession = Depends(get_db),
+) -> Any:
+    """Recompute the job's ledger chain from its rows and check it against the seal.
+
+    Ownership is the job's, checked exactly the way the evidence page checks
+    it. The answer always says what it found (``services.ledger_verify``):
+    ``verified``; ``broken`` with the reason and the first broken ``seq``;
+    ``other_key`` when the seal names a key the platform cannot derive;
+    ``unverifiable`` when the audit head or the job's own audit rows are under a key
+    the platform cannot derive (after a key rotation); or
+    ``not_sealed`` when the run predates sealing. Nothing is written.
+    """
+    from app.services.ledger_verify import verify_job
+
+    job = await svc.get_job(job_id, user)
+    if not job:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Job not found")
+    verdict = await verify_job(db, job_id)
+    if verdict["status"] not in ("verified", "not_sealed"):
+        logger.warning(
+            f"Ledger of job {log_safe(job_id)} did not verify: {log_safe(verdict['status'])} "
+            f"at seq {log_safe(verdict['first_broken_seq'])}",
+            extra={"job_id": log_safe(job_id), "user_id": log_safe(user.id)},
+        )
+    return LedgerVerificationResponse(**verdict)
 
 
 @router.get("/{job_id}/evidence/{entry_id}/objects/{part}")

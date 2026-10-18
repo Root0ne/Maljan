@@ -109,6 +109,145 @@ admin callers on `GET /api/v1/system/status`.
 Admins read the trail through `GET /api/v1/audit/logs` and one row at
 `/audit/logs/{log_id}`.
 
+## Sealed evidence ledger
+
+When a run is stored, the worker seals its evidence ledger
+(`apps/api/app/services/ledger_chain.py`):
+
+- each `evidence_entries` row carries `digest`, the SHA-256 of every column it
+  persists in one canonical form (the `spilled` references, with the SHA-256 of
+  each kept part, included), and `chain`, the HMAC-SHA256 of the previous row's
+  chain value and its digest in `seq` order, from a genesis value bound to the
+  job;
+- the core seal (chain head, entries and `seq` span, key id, the id of the
+  report row it describes, the digest of that row, and its own keyed digest)
+  is written onto the audit chain as a `ledger.seal` row. The append's own
+  result, known before the transaction commits, goes into the seal the report
+  carries as `audit_anchored`, beside `core_digest`, both under the seal's
+  keyed digest; that seal is written in the same transaction into
+  `analysis_reports.ledger_seal`, the report payload and the run summary as
+  `ledger_seal`. The report digest covers every column of the report row except its
+  random key, its two timestamps and the seal itself: verdict, confidence,
+  category, both STIX bundles, techniques, the analysts' reports, the
+  negotiation log, the run summary, the report payload and the incomplete
+  reason. The per-agent findings and the transcript are rows of other tables
+  and are **not** covered;
+- an enrichment that changes a sealed report afterwards appends an amendment
+  to `ledger_amendments` in the payload and the run summary (what changed it,
+  the report digest before and after, chained onto the seal or the last
+  amendment) and a `report.amend` row on the audit chain. Sealed rows are never
+  rewritten;
+- every path that deletes a stored report (the owner's `DELETE /reports/{id}`,
+  a re-run superseding its report) writes a `report.delete` row on the audit
+  chain in the same transaction, naming the report and its seal's digest. When
+  that row does not land, the owner's delete is refused with 503 and nothing
+  is deleted; a re-run still stores its result and logs that the superseded
+  report went without its record.
+
+The key is derived with HKDF from `SETTINGS_ENCRYPTION_KEY` (label
+`maljan-ledger-chain-v1`); no new secret exists, and the key is never logged or
+served. Its id (16 hex characters of a hash of the derived key) is kept beside
+the seal. A platform without a settings key seals nothing: the rows are stored
+as before, and the worker's warning names why (the variable is not set, or
+the bootstrap settings could not be read).
+
+The audit chain covers the chained rows only (`ledger.seal`, `report.amend`,
+`report.delete`): each takes the next `chain_seq` (unique), a digest of its
+columns and a keyed chain value linking it to the one before. The head record
+(`audit_chain_head`: last `chain_seq`, chain value, `rotated_at_seq` and a MAC
+over them) is rewritten by the same append. Appends are serialised by a
+PostgreSQL advisory lock inside a savepoint. An append carries the head forward
+only when the head's MAC verifies under the current key and it points at the
+last row; it accepts a rotation (a head under another key) only when no row yet
+carries the current key, the head points at the last row by seq and chain, the
+last row was chained under the head's key, and the head verifies under that key
+when the platform can derive it. Anything else refuses the append: it is logged
+and counted like a failed audit write, the stored report is kept, and nothing
+is re-signed.
+
+Verify a job with `GET /api/v1/jobs/{job_id}/evidence/verify` (owner only) or
+`python -m scripts.ledger.verify --job <id>` (read-only transaction; `--run
+<dir>` checks an exported stored-run directory with no database). A job's
+verification reads only its own ledger rows, its report row, its own chained
+audit rows with the chain value of the row before each, and the head record:
+its cost follows the job, a break elsewhere in the chain does not touch it, and
+its answer names no position in the platform's chain. The answer is:
+
+| Status | When |
+|---|---|
+| `verified` | the rows, the seal, every column the seal covers (through the amendments) and the job's own audit rows all verify, and the payload's amendments are exactly the ones the audit chain records for this seal, in order |
+| `broken` | the first thing that failed, with the first broken `seq` where a ledger row is to blame: a NULL digest, a missing, extra or reordered row, a changed row count, a changed report column with no amendment, an amendment the audit chain records but the report lacks, a seal copy that disagrees, a report row gone with no `report.delete` row |
+| `deleted` | the report row is gone and a verified `report.delete` row for its seal records the deletion; the ledger still verifies |
+| `other_key` | the seal names a key the platform's settings cannot derive (after a key rotation, or a relabelled seal); the rows' digests are still checked |
+| `unverifiable` | nothing failed, but something could not be checked: the audit append for the seal (its seal says `audit_anchored: false`) or an amendment did not land, the job's own audit rows lie before a rotation under a key the platform cannot derive, or the audit head is still under the old key |
+| `not_sealed` | a run stored before sealing, or a job that stored nothing |
+
+The command exits 0, 1, 6, 4, 5 and 3 for these, and 2 on a usage or read
+error. `python -m scripts.ledger.verify --audit-chain` walks the whole audit
+chain from its first row to its head, for the operator: it is the walk that
+finds rows cut off the end of the chain. A job's verification reads the head
+first and nothing past it, so a row another job appends while it runs does not
+disturb it.
+
+Once a head fails its check, every later append is refused (logged and counted)
+and each new seal says `audit_anchored: false`; a verification names the
+refused head and the repair. The repair is
+`python -m scripts.ledger.verify --repair-head`: it walks the whole chain under
+the chain's lock with a verification's rules (rows before the rotation boundary
+under a key the platform cannot derive are reported as an unverifiable span;
+every row from the boundary on must carry the current key and verify) and
+otherwise refuses with the first break. A repair can hide rows cut off the end
+of the chain, so check the chain first: when the old head names a seq past the
+last row, or another chain at its seq, the repair is refused unless
+`--accept-truncation-at N` names exactly the old head's seq. The boundary never
+comes from the rows' labels alone: an old head under the current key whose MAC
+verifies vouches for its `rotated_at_seq`, and every row from it on must carry
+the current key and verify; an old head that cannot vouch (missing, failing
+its MAC, or under another key) leaves the boundary the rows suggest, and the
+repair is refused unless `--accept-boundary-at N` names exactly that seq. The
+repair is written as a chained `audit.head_repair` row (the old head, the
+walked head, any acknowledged truncation and boundary), and the new head, keyed
+under the current key with that `rotated_at_seq`, points at that row.
+
+The rotation boundary is anchored in the head: `rotated_at_seq`, covered by its
+MAC, read only from a head that verifies under the current key, never from a
+row's own key id. Every row at or after it must carry the current key and
+verify; a row before it that claims the current key is broken; a row before it
+under a key the settings can derive is verified with it, and one under a key
+they cannot derive is unverifiable. A head that fails its MAC is broken, and a
+head not under the current key while some row is, is broken too.
+
+**What it proves, and what it does not.** The chain proves integrity against
+anyone who can write the database but does not hold `SETTINGS_ENCRYPTION_KEY`.
+Someone who holds that secret can rewrite the rows, the chain, the seal and
+the audit chain consistently, and a writer who kept an earlier audit head
+record can put it back after cutting the rows that followed it (the full
+`--audit-chain` walk then still ends at that head). A writer without the key
+who relabels every key id can push history to `unverifiable` or `other_key`,
+never to `verified`; in particular a forged rotation (a job's rows and the head
+relabelled to an invented key) cannot be told apart from a real one and reads
+`unverifiable`, never `verified`, and the next legitimate append is then
+refused. Rotating the settings key leaves older seals reading as
+`other_key` and older audit rows unverifiable; until the first append after a
+rotation every sealed job reads `unverifiable`. Rotating back to an earlier key
+makes the rows already under it, now before the new boundary, read as broken.
+A failed audit append leaves its seal or amendment `unverifiable` for good. A seal
+whose row landed (`audit_anchored: true`) and is gone reads `broken`, and so
+does a seal moved onto another report row. Each of the job's own audit rows is
+checked against the row before it and the row after it (or the head), so a
+deleted row next to one of the job's rows leaves a gap that reads `broken`; a
+deleted amendment row with no row of the job beside it is found only by the
+full `--audit-chain` walk.
+
+**Anchoring (not built).** The seal's `digest` is the value an external anchor
+would take. An anchor would publish it, once per stored run or batched under a
+Merkle root, to a place the platform's database role cannot rewrite: an
+RFC 3161 timestamping service, an object-locked (WORM) bucket written with
+credentials of its own, or a table owned by a separate database role the
+application only inserts into. Its receipt would be kept beside the seal (a
+`ledger_seal.anchor` entry, or a row keyed by the seal digest) and checked by
+the same verification step; nothing in the seal or the chain would change.
+
 ## Rate limits and login protection
 
 `RateLimitMiddleware` applies a Redis-backed sliding window per client address

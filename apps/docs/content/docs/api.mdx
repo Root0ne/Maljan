@@ -93,6 +93,24 @@ digest, so the body is complete only when it matches; a mismatch ends the
 answer short. It is a 404 when the part was never kept, stating the reason its
 reference records, and a 502 when the store cannot hand it back.
 
+Each entry of a sealed run also carries `digest`, the SHA-256 of every column
+its row persists in canonical form, and `chain`, the job's keyed chain value
+after it in `seq` order; both are absent on entries stored before sealing.
+`GET /jobs/{job_id}/evidence/verify` recomputes the chain from the rows and
+checks it against the seal, under the same ownership rule, and writes nothing.
+It reads only that job's rows and its own audit rows, so its cost follows the
+job. It answers `status` (`verified`; `broken`; `deleted` when the report was
+deleted by its owner and the ledger still verifies; `other_key` when the seal
+names a key the platform cannot derive; `unverifiable` when something it needs
+could not be checked, such as an audit append that did not land or a key
+rotation the audit chain cannot yet vouch for; `not_sealed` for a run stored
+before sealing),
+`reason`, `first_broken_seq`, `entries`, the recomputed `head`, the `seal`,
+the number of `amendments`, and the `checks` that held and `notes` on what was
+not checked. The seal is also served in the run summary and the full report as
+`ledger_seal`, with any `ledger_amendments` an enrichment chained onto it
+(see Operations, Sealed evidence ledger).
+
 `GET /jobs/{job_id}/usage` is what the job's model calls used and cost so far,
 totalled from its `model_usage` events (one per call, committed as the call is
 recorded): `calls`, and `retries` and `failed_attempts`, which are records but

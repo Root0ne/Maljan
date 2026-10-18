@@ -1150,13 +1150,18 @@ def _job_spill(container: Any) -> Any:
     return getter() if callable(getter) else None
 
 
-def _evidence_row(entry: dict[str, Any], *, job_id: uuid.UUID) -> Any:
+def _evidence_row(
+    entry: dict[str, Any], *, job_id: uuid.UUID, written_at: datetime | None = None
+) -> Any:
     """One ledger entry as the row that keeps it.
 
     Every one of the 30 fields ``maljan.schemas.evidence.LedgerEntry`` carries
     has a column here, which is what lets a reader of the stored ledger say why an output
     is empty instead of guessing. An absent value stays absent rather than
-    becoming a default, for the same reason.
+    becoming a default, for the same reason. ``written_at`` is the moment the
+    ledger is stored, the ``created_at`` of a call the recorder never stamped;
+    the stored ledger passes it so every column the row's digest covers is
+    known before the insert.
     """
     from app.models.evidence import EvidenceEntry
 
@@ -1167,9 +1172,9 @@ def _evidence_row(entry: dict[str, Any], *, job_id: uuid.UUID) -> Any:
         # measured run's thirty entries had one distinct ``created_at`` between
         # them. The entry knows: ``started_at`` is the call's own clock and
         # ``duration_ms`` is how long it took. A row whose entry was never
-        # stamped leaves the column to its server default rather than inventing
-        # a moment.
-        created_at=_returned_at(entry),
+        # stamped takes the moment the ledger is stored, which is what the
+        # server default gave, rather than inventing a moment.
+        created_at=_returned_at(entry) or written_at,
         job_id=job_id,
         entry_id=str(entry.get("id", ""))[:32],
         stage=str(entry.get("stage", "analysis"))[:32],
@@ -4193,6 +4198,20 @@ async def _supersede_previous_report(db: Any, job_id: Any) -> None:
             getattr(existing, "id", "<unknown>"),
             extra={"job_id": str(job_id), "component": "report"},
         )
+        # The superseded report's deletion on the audit chain, in this
+        # transaction, as every path that deletes a stored report writes it.
+        from app.services.audit_chain import DeletionNotChained, record_report_deletion
+
+        try:
+            await record_report_deletion(db, existing)
+        except DeletionNotChained:
+            # The re-run's own result must still be stored; the superseded
+            # report's verification will say its deletion was not recorded.
+            logger.warning(
+                "The superseded report of job %s is deleted without its audit record.",
+                job_id,
+                extra={"job_id": str(job_id), "component": "report"},
+            )
         await db.delete(existing)
         await db.flush()
     except Exception as exc:  # noqa: BLE001
@@ -4364,6 +4383,59 @@ def evidence_budget_of(run_summary: Mapping[str, Any] | None, core_settings: Any
         return int(value or 0)
     except (TypeError, ValueError):
         return 0
+
+
+async def _seal_the_ledger(
+    db: Any,
+    report: Any,
+    job_uuid: uuid.UUID,
+    rows: list[Any],
+    key: Any,
+    sealed_at: datetime,
+) -> dict[str, Any]:
+    """Chain ``rows``, seal them, write the seal into ``report`` and onto the audit chain.
+
+    Each row's digest over every column it persists and its place in the
+    job's hash chain in ``seq`` order (``ledger_chain``), taken from the rows
+    exactly as they are inserted: what a verifier reads back. The seal (chain
+    head, what it covers, key id, the stored report's digest) is written into
+    the report row (the mark that the job's ledger is sealed), the report
+    payload and the run summary column, and as a chained ``ledger.seal`` audit
+    row, all in ``db``'s transaction. Nothing the models saw is touched; the
+    run is over.
+    """
+    from app.services import audit_chain, ledger_chain
+
+    head = ledger_chain.chain_rows(job_uuid, rows, key)
+    # The rows and the report row go to the database first, so every column
+    # the seal's report digest covers holds what is stored, and a failure of
+    # theirs is never taken for the audit write's.
+    await db.flush()
+    core = ledger_chain.seal(
+        job_uuid,
+        rows,
+        head,
+        report_sha256=ledger_chain.report_digest(report),
+        sealed_at=sealed_at,
+        key=key,
+        report_id=report.id,
+    )
+    landed = await audit_chain.append(
+        db,
+        action=audit_chain.LEDGER_SEAL,
+        resource_type="job",
+        resource_id=str(job_uuid),
+        details={"report_id": str(report.id), "seal": core},
+        key=key,
+    )
+    # The append's own result, known before this transaction commits, goes
+    # into the keyed seal: a verifier then tells a deleted audit row from an
+    # append that never landed.
+    seal = ledger_chain.anchored(core, landed=landed is not None, key=key)
+    report.ledger_seal = seal
+    report.malware_report = ledger_chain.with_seal(report.malware_report, seal)
+    report.run_summary = ledger_chain.with_seal(report.run_summary, seal)
+    return seal
 
 
 async def _store_the_report(
@@ -4595,8 +4667,31 @@ async def _store_the_report(
             f"{_unkept} evidence part(s) of job={job_id} were not kept; their references say why",
             extra={"job_id": job_id},
         )
-    for _entry in rows_to_store(_ledger, job_id=job_id):
-        db.add(_evidence_row(_entry, job_id=job_uuid))
+    # Each row's digest over every column it persists, and its place in the
+    # job's hash chain in ``seq`` order (``ledger_chain``), taken from the rows
+    # exactly as they are inserted: what a verifier reads back.
+    from app.services import ledger_chain
+
+    # The chain is keyed by a key derived from the settings encryption key
+    # (``ledger_chain.platform_key_status``). Without one nothing is sealed:
+    # the rows are stored as before, and the warning names why.
+    _key, _no_key = ledger_chain.platform_key_status()
+    _written_at = datetime.now(UTC)
+    _rows = [
+        _evidence_row(_entry, job_id=job_uuid, written_at=_written_at)
+        for _entry in rows_to_store(_ledger, job_id=job_id)
+    ]
+    for _row in _rows:
+        db.add(_row)
+    if _key is None:
+        logger.warning(
+            "The ledger of job=%s is not sealed: %s.",
+            job_id,
+            _no_key,
+            extra={"job_id": job_id},
+        )
+    else:
+        await _seal_the_ledger(db, report, job_uuid, _rows, _key, _written_at)
 
     logger.info(
         f"Saved {len(_ledger)} evidence entries for job={job_id}",

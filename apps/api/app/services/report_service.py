@@ -30,6 +30,7 @@ from app.logsafe import log_safe
 from app.models.job import AnalysisJob
 from app.models.report import AnalysisReport
 from app.models.user import User
+from app.services.audit_chain import record_report_deletion
 
 if TYPE_CHECKING:  # pragma: no cover — import cycle-free typing only
     from maljan.reporting.models import MalwareReport
@@ -476,11 +477,14 @@ class ReportService:
         ``get_report`` so one user can never delete another's report.
         ``AnalysisReport.agent_findings`` and ``.transcript`` are both
         declared with ``cascade="all, delete-orphan"``, so the findings and
-        the stored conversation go with it.
+        the stored conversation go with it. The deletion is first written onto
+        the audit chain in this transaction; when that append does not land,
+        ``audit_chain.DeletionNotChained`` propagates and nothing is deleted.
         """
         report = await self.get_report(report_id, user)
         if report is None:
             return False
+        await record_report_deletion(self.db, report, user_id=user.id)
         await self.db.delete(report)
         await self.db.flush()
         logger.info(

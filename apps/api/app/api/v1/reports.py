@@ -518,7 +518,20 @@ async def delete_report(
     kept — only its report (and the agent findings that cascade from it) is
     removed, so the job history stays intact and the sample can be re-analysed.
     """
-    deleted = await svc.delete_report(report_id, user)
+    from app.services.audit_chain import DeletionNotChained
+
+    try:
+        deleted = await svc.delete_report(report_id, user)
+    except DeletionNotChained:
+        # A sealed report is never deleted without its record on the audit
+        # chain: nothing was deleted, and the owner can try again.
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=(
+                "The deletion could not be recorded on the audit chain, so nothing was "
+                "deleted. Try again."
+            ),
+        ) from None
     if not deleted:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,

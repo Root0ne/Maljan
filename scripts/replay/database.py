@@ -77,11 +77,17 @@ def write_run(rows: JobRows, into: Path) -> tuple[Path, list[str]]:
         "malware_category": report.get("malware_category"),
         "stix_bundle": report.get("stix_bundle"),
         "mitre_techniques": report.get("mitre_techniques"),
-        "agent_reports": report.get("agent_reports") or {},
-        "negotiation_log": report.get("negotiation_log") or {},
-        "run_summary": report.get("run_summary") or {},
+        # The report row as stored: a NULL column stays null, so a verification
+        # of the export reads what the database holds.
+        "agent_reports": report.get("agent_reports"),
+        "negotiation_log": report.get("negotiation_log"),
+        "run_summary": report.get("run_summary"),
+        "judge_stix_bundle": report.get("judge_stix_bundle"),
         "malware_report": report.get("malware_report"),
         "incomplete_reason": report.get("incomplete_reason"),
+        # The seal of the job's ledger, the mark that it is sealed
+        # (``python -m scripts.ledger.verify --run`` reads it).
+        "ledger_seal": report.get("ledger_seal"),
         "agent_findings": rows.findings,
         "transcript": sorted(rows.transcript, key=lambda m: int(m.get("seq") or 0)),
     }

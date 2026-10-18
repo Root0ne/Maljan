@@ -72,6 +72,12 @@ class EvidenceEntryResponse(BaseModel):
     # the upload failed. Absent where nothing was taken and on an older row.
     # The bytes are served by ``GET /jobs/{id}/evidence/{entry_id}/objects/{part}``.
     spilled: list[dict[str, Any]] | None = Field(default=None, exclude_if=_absent)
+    # The row's digest over every column it persists, and the job's chain value
+    # after it in ``seq`` order (``app.services.ledger_chain``); with them a
+    # reader recomputes the chain from this page alone. Absent on a row written
+    # before sealing existed.
+    digest: str | None = Field(default=None, exclude_if=_absent)
+    chain: str | None = Field(default=None, exclude_if=_absent)
 
     @field_validator("structured_from_server", mode="before")
     @classmethod
@@ -90,6 +96,28 @@ class EvidenceEntryResponse(BaseModel):
     def _absent_is_zero(cls, value: Any) -> int:
         """A row written before the column existed recorded no cut."""
         return int(value or 0)
+
+
+class LedgerVerificationResponse(BaseModel):
+    """What recomputing a job's ledger chain against its seal found (``services.ledger_verify``).
+
+    ``status`` is ``verified``, ``broken``, ``deleted``, ``other_key``, ``unverifiable`` or
+    ``not_sealed``;
+    ``reason`` says why in a sentence, ``first_broken_seq`` names the first row
+    to blame when one is, ``checks`` lists what held and ``notes`` what was not
+    checked or holds only weakly.
+    """
+
+    job_id: str
+    status: str
+    reason: str | None = None
+    first_broken_seq: int | None = None
+    entries: int = 0
+    head: str | None = None
+    seal: dict[str, Any] | None = None
+    amendments: int = 0
+    checks: list[str] = Field(default_factory=list)
+    notes: list[str] = Field(default_factory=list)
 
 
 class EvidenceListResponse(BaseModel):
