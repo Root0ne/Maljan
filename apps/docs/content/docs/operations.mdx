@@ -109,6 +109,67 @@ admin callers on `GET /api/v1/system/status`.
 Admins read the trail through `GET /api/v1/audit/logs` and one row at
 `/audit/logs/{log_id}`.
 
+## Sealed evidence ledger
+
+When a run is stored, the worker seals its evidence ledger
+(`apps/api/app/services/ledger_chain.py`):
+
+- each `evidence_entries` row carries `digest`, the SHA-256 of every column it
+  persists in one canonical form (the `spilled` references, with the SHA-256 of
+  each kept part, included), and `chain`, the HMAC-SHA256 of the previous row's
+  chain value and its digest in `seq` order, from a genesis value bound to the
+  job;
+- the seal (chain head, entries and `seq` span, key id, the digest of the
+  stored report's payload, run summary and STIX bundle, and its own keyed
+  digest) is written in the same transaction into
+  `analysis_reports.ledger_seal`, the report payload and the run summary as
+  `ledger_seal`, and onto the audit chain as a `ledger.seal` row;
+- an enrichment that changes a sealed report afterwards appends an amendment
+  to `ledger_amendments` in the payload and the run summary (what changed it,
+  the report digest before and after, chained onto the seal or the last
+  amendment) and a `report.amend` row on the audit chain. Sealed rows are never
+  rewritten.
+
+The key is derived with HKDF from `SETTINGS_ENCRYPTION_KEY` (label
+`maljan-ledger-chain-v1`); no new secret exists, and the key is never logged or
+served. Its id (a short hash of the derived key) is kept beside the seal. A
+platform without a settings key seals under no key, and the seal, the worker's
+log and every verification say so.
+
+The audit chain covers the chained rows only (`ledger.seal`, `report.amend`):
+each takes the next `chain_seq` (unique), a digest of its columns and a keyed
+chain value linking it to the one before, and the head record
+(`audit_chain_head`) is rewritten, under a MAC, by the same append. Appends are
+serialised by a PostgreSQL advisory lock inside a savepoint; a failed append is
+logged and counted like any audit write and never loses the stored report.
+
+Verify a job with `GET /api/v1/jobs/{job_id}/evidence/verify` (owner only) or
+`python -m scripts.ledger.verify --job <id>` (read-only transaction; `--run
+<dir>` checks an exported stored-run directory with no database). The answer is
+`verified`, `broken` with the reason and the first broken `seq`, `other_key`
+when the seal names a key the platform's settings cannot derive (after a
+settings-key rotation, or a relabelled seal: never verified), or `not_sealed`
+for a run stored before sealing. On a sealed job a NULL digest, a missing,
+extra or reordered row and a changed row count are each a break. Each chained
+audit row is checked under the key its id names among the keys the settings
+can derive; an unknown key id is a break.
+
+**What it proves, and what it does not.** The chain proves integrity against
+anyone who can write the database but does not hold `SETTINGS_ENCRYPTION_KEY`.
+Someone who holds that secret can rewrite the rows, the chain, the seal and
+the audit chain consistently, and a writer who kept an earlier audit head
+record can put it back after cutting the rows that followed it. Rotating the
+settings key leaves older seals reading as `other_key`.
+
+**Anchoring (not built).** The seal's `digest` is the value an external anchor
+would take. An anchor would publish it, once per stored run or batched under a
+Merkle root, to a place the platform's database role cannot rewrite: an
+RFC 3161 timestamping service, an object-locked (WORM) bucket written with
+credentials of its own, or a table owned by a separate database role the
+application only inserts into. Its receipt would be kept beside the seal (a
+`ledger_seal.anchor` entry, or a row keyed by the seal digest) and checked by
+the same verification step; nothing in the seal or the chain would change.
+
 ## Rate limits and login protection
 
 `RateLimitMiddleware` applies a Redis-backed sliding window per client address
