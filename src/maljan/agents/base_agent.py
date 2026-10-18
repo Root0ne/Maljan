@@ -54,12 +54,14 @@ from maljan.analysis.sandbox_sections import item_index_of
 from maljan.analysis.technique_ids import ID_BODY
 from maljan.core.config import get_settings
 from maljan.core.exceptions import AgentLoopCancelled, AnalystError, SampleNotOpened
+from maljan.core.input_meter import TOOL_LOOP, request_parts
 from maljan.core.logger import logger
 from maljan.core.spend import LOOP_TURN_CALL, SPEND_CAP, SpendCeilingStop, call_deadline_of
 from maljan.core.token_ledger import (
     TokenLedger,
     record_lost_retries,
     record_response_usage,
+    turn_usage,
 )
 from maljan.llm.answer_text import answer_text
 from maljan.llm.anthropic_history import (
@@ -3976,7 +3978,6 @@ class BudgetMeter:
         if sink is None:
             return
         try:
-            from maljan.core.token_ledger import turn_usage
             from maljan.llm.fallback import turn_model
             from maljan.pipeline.events import emit_agent_message_delta, scrub
 
@@ -4055,10 +4056,76 @@ class BudgetMeter:
         if cap and detail:
             record["detail"] = detail
         self._note_budget(record)
+        self._close_input_loop(ledger, messages)
         if cap:
             emit_stage_ended_at_cap(
                 self._event_sink(), stage=stage, agent=str(self.name), cap=cap, detail=detail
             )
+
+    def _input_meter(self) -> Any:
+        """The job's input meter (``core.input_meter``), or ``None`` outside a job."""
+        return getattr(getattr(self, "_container", None), "input_meter", None)
+
+    def _note_request(
+        self, messages: Sequence[Any], *, kind: str, loop: Any = None, definitions: int = 0
+    ) -> Any:
+        """What the request about to be sent is made of, onto the job's meter; its row, or ``None``.
+
+        Measures and changes nothing: ``messages`` are the ones the request
+        carries. The pack, the peer reports and this agent's own earlier
+        answers are the texts this agent was handed for the request
+        (``facts_block``, ``_measured_peers``, ``_measured_own``). Never raises.
+        """
+        meter = self._input_meter()
+        if meter is None:
+            return None
+        try:
+            replayed = getattr(self, "_replayed_run_state_chars", None)
+            parts = request_parts(
+                list(messages),
+                measure=_message_chars,
+                pack=str(
+                    getattr(self, "facts_block", "") or getattr(self, "_measured_pack", "") or ""
+                ),
+                peers=tuple(getattr(self, "_measured_peers", ()) or ()),
+                own=tuple(getattr(self, "_measured_own", ()) or ()),
+                definitions=definitions,
+                replayed=int(replayed()) if loop is not None and callable(replayed) else 0,
+            )
+            return meter.request(
+                str(getattr(self, "name", "") or ""),
+                parts,
+                stage=str(getattr(self, "pipeline_stage", "") or "analysis"),
+                kind=kind,
+                loop=loop,
+            )
+        except Exception as exc:  # noqa: BLE001 — a measure never costs a turn
+            self.logger.debug("%s: the request was not measured (%s).", self.name, exc)
+            return None
+
+    def _note_answered(self, row: Any, response: Any) -> None:
+        """A single call's provider-reported input tokens onto its row. Never raises."""
+        meter = self._input_meter()
+        if meter is None or row is None:
+            return
+        try:
+            meter.answered(row, turn_usage(response))
+        except Exception as exc:  # noqa: BLE001 — a measure never costs a turn
+            self.logger.debug("%s: the answer was not measured (%s).", self.name, exc)
+
+    def _close_input_loop(self, loop: Any, messages: Sequence[Any]) -> None:
+        """Close this loop's row on the meter, with each model turn's reported input. Never raises."""
+        meter = self._input_meter()
+        if meter is None:
+            return
+        try:
+            meter.close(
+                str(getattr(self, "name", "") or ""),
+                loop,
+                [turn_usage(m) for m in messages if is_model_turn(m)],
+            )
+        except Exception as exc:  # noqa: BLE001 — a measure never costs a turn
+            self.logger.debug("%s: the loop's input was not closed (%s).", self.name, exc)
 
     def _definitions_sent(self) -> int:
         """What this agent's tool definitions weigh with each request of its loop, or 0."""
@@ -5048,6 +5115,11 @@ class BaseAnalyst(BudgetMeter, ABC):
                 last = sent[-1]
                 noted = {**(last.response_metadata or {}), TOOL_LOOP_TURN: True}
                 sent = [*sent[:-1], last.model_copy(update={"response_metadata": noted})]
+            # What the request is made of, measured as it is sent
+            # (``core.input_meter``); nothing in it changes.
+            self._note_request(
+                sent, kind=TOOL_LOOP, loop=ledger, definitions=self._definitions_sent()
+            )
             return sent
 
         return refresh
@@ -7105,6 +7177,8 @@ class BaseAnalyst(BudgetMeter, ABC):
         from maljan.llm.context_window import output_bound_kwargs
 
         bound_kwargs = output_bound_kwargs(llm, bound) if bound is not None else {}
+        # What the call is made of, measured as it is sent (``core.input_meter``).
+        measured = self._note_request(messages, kind=what)
 
         async def _invoke() -> str:
             # ``what`` goes into the format itself so the timeout stays the
@@ -7127,6 +7201,7 @@ class BaseAnalyst(BudgetMeter, ABC):
                 call, timeout=None if timeout is None else float(timeout)
             )
             self._record_usage(response, call=what, held=bound if bound_kwargs else None)
+            self._note_answered(measured, response)
             return answer_text(response.content)
 
         _t0 = _time.monotonic()
@@ -9279,29 +9354,56 @@ class BaseAnalyst(BudgetMeter, ABC):
         """
         self.current_round = int(revision_round)
         with lock_for(self):
+            # The texts this round's requests embed, for the input meter
+            # (``_note_request``) to count as peer reports and as this agent's
+            # own answer; cleared when the round ends.
+            self._measured_peers = tuple(str(r) for r in (peer_reports or {}).values() if r)
+            self._measured_own = (str(own_report),) if own_report else ()
             try:
-                truncated = self._truncate_input(original_data)
-                self._last_loop_deadline = None
-                self._answer_unstructured = False
-                self._revision_reads = bool(read_places)
-                try:
-                    text, isr = self.revise_isr(
-                        truncated, own_report, peer_reports, mediator_feedback, revision_round
-                    )
-                finally:
-                    self._revision_reads = False
-                isr = self._drain_findings(isr)
-                if not isr.answer_text:
-                    isr.note_answer_text(strip_tool_call_scaffolding(str(text or "")))
-                checked = self._validate_isr(
-                    self._apply_consistency_gate(isr, truncated), truncated
+                return self._safe_revise_isr(
+                    original_data,
+                    own_report,
+                    peer_reports,
+                    mediator_feedback,
+                    revision_round,
+                    read_places=read_places,
                 )
-                return text, self._drain_findings(checked)
-            except AnalystError:
-                raise
-            except Exception as e:
-                self.logger.error("ISR revision failed: %s", e)
-                raise AnalystError(f"{self.name} ISR revision failed: {e}") from e
+            finally:
+                self._measured_peers = ()
+                self._measured_own = ()
+
+    def _safe_revise_isr(
+        self,
+        original_data: str,
+        own_report: str,
+        peer_reports: dict[str, str],
+        mediator_feedback: str,
+        revision_round: int,
+        *,
+        read_places: bool,
+    ) -> tuple[str, AgentISR]:
+        """:meth:`safe_revise_isr`'s body, run under the agent's lock."""
+        try:
+            truncated = self._truncate_input(original_data)
+            self._last_loop_deadline = None
+            self._answer_unstructured = False
+            self._revision_reads = bool(read_places)
+            try:
+                text, isr = self.revise_isr(
+                    truncated, own_report, peer_reports, mediator_feedback, revision_round
+                )
+            finally:
+                self._revision_reads = False
+            isr = self._drain_findings(isr)
+            if not isr.answer_text:
+                isr.note_answer_text(strip_tool_call_scaffolding(str(text or "")))
+            checked = self._validate_isr(self._apply_consistency_gate(isr, truncated), truncated)
+            return text, self._drain_findings(checked)
+        except AnalystError:
+            raise
+        except Exception as e:
+            self.logger.error("ISR revision failed: %s", e)
+            raise AnalystError(f"{self.name} ISR revision failed: {e}") from e
 
     # ------------------------------------------------------------------
     # Private helpers

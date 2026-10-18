@@ -641,6 +641,12 @@ class ServiceContainer:
 
         self._token_ledger = TokenLedger(spend=SpendMeter.from_settings(config))
         self._plan_the_verdict_and_report(self._token_ledger.spend)
+        # What each agent's requests were made of, measured as they are sent
+        # (``core.input_meter``); the report node reads it into
+        # ``run_summary.efficiency``.
+        from maljan.core.input_meter import InputMeter
+
+        self.input_meter = InputMeter()
         # Each call, as it is recorded, on the job's event feed: the durable
         # trail of what the run spent, kept call by call by the worker.
         if event_sink is not None:

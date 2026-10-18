@@ -2190,6 +2190,11 @@ class JudgeAgent(BudgetMeter):
             )
             _hold_the_turn(held_binding, self.llm, held)
             self._publish_questions(conversation, asked)
+            # What the request is made of, measured as it is sent
+            # (``core.input_meter``); nothing in it changes.
+            from maljan.core.input_meter import TOOL_LOOP
+
+            self._note_request(conversation, kind=TOOL_LOOP, loop=budget, definitions=definitions)
             # Each turn after the loop's first tool round says it is a loop
             # turn, as an analyst's does, for a provider that caches a
             # conversation it will send again (``anthropic_history``): that
@@ -2600,6 +2605,11 @@ class JudgeAgent(BudgetMeter):
             the argument carries no confidence.
         """
         self.logger.info("Mediating %d expert reports for contradictions...", len(reports))
+        # The texts this mediation's requests embed, for the input meter
+        # (``BudgetMeter._note_request``) to count as the pack and as the
+        # analysts' reports.
+        self._measured_pack = str(facts_block or "")
+        self._measured_peers = tuple(str(text) for text in (reports or {}).values() if text)
         answered_by: Any = None
         # The output bound the answer's call was sent with: what a cut is
         # measured against. ``None`` reads the model's built cap.

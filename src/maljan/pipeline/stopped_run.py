@@ -253,10 +253,29 @@ def stopped_run_summary(state: dict[str, Any], container: Any, *, note: str) -> 
             {"stages": nodes.stage_rollup(container, cast("AnalysisState", state))}
         ),
     )
+
+    def _efficiency() -> None:
+        # A record the report node built at the end of the run is complete and
+        # kept; otherwise the counts as of the stop.
+        if isinstance(summary.get("efficiency"), dict):
+            return
+        record = stopped_efficiency(state, container)
+        if record is not None:
+            summary["efficiency"] = record
+
     _part("elapsed time", _elapsed)
     if summary:
         _part("disclosure", _disclosure)
+        _part("efficiency", _efficiency)
     return _degraded(summary, note)
+
+
+def stopped_efficiency(state: dict[str, Any], container: Any) -> dict[str, Any] | None:
+    """What a stopped run had counted by the stop (``analysis.efficiency``), marked as such."""
+    from maljan.analysis.disclosure import STOPPED_PART_WAY
+    from maljan.analysis.efficiency import efficiency_record
+
+    return efficiency_record(container, partial_reason=STOPPED_PART_WAY)
 
 
 def stopped_disclosure(
@@ -489,7 +508,26 @@ def partial_report(state: dict[str, Any], container: Any, *, note: str) -> dict[
     reasons = report.get("degradation_reasons")
     report["degradation_reasons"] = [*(reasons if isinstance(reasons, list) else []), note]
     _with_disclosure(report, state, container)
+    _with_efficiency(report, state, container)
     return report
+
+
+def _with_efficiency(report: dict[str, Any], state: dict[str, Any], container: Any) -> None:
+    """The stopped run's efficiency counts on ``report``'s run summary, where it carries none yet.
+
+    A report the report node returned already carries the run's complete
+    record; a report with no run summary is left without one. Never raises.
+    """
+    summary = report.get("run_summary")
+    if not isinstance(summary, dict) or not summary or isinstance(summary.get("efficiency"), dict):
+        return
+    try:
+        record = stopped_efficiency(state, container)
+    except Exception as exc:  # noqa: BLE001 — every function here is total
+        logger.debug("stopped run: the efficiency counts were not read (%s).", type(exc).__name__)
+        return
+    if record is not None:
+        report["run_summary"] = {**summary, "efficiency": record}
 
 
 def _with_disclosure(report: dict[str, Any], state: dict[str, Any], container: Any) -> None:
