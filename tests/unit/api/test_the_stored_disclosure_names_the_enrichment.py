@@ -285,7 +285,7 @@ async def test_the_enrichment_job_adds_what_it_asked_to_the_stored_record() -> N
         assert record["nothing_left"] is False
     assert (
         "Enrichment: the follow-up job asked `rdap.arin.net` (outside this machine) about ip 1 "
-        "(RDAP)."
+        "(RDAP, the ARIN bootstrap alone: a referral to a regional registry is not followed)."
     ) in _served(report.malware_report)
 
 

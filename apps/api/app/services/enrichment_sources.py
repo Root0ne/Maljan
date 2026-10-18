@@ -192,10 +192,10 @@ async def enrichment_reach(
     credential: the secret is read only to tell whether the source is
     configured, as the job reads it.
     """
-    from maljan.analysis.disclosure import enrichment_source_row, rdap_row
+    from maljan.analysis.disclosure import enrichment_source_row, registry_rows
     from maljan.enrichment.declared import ASKED_KINDS
 
-    rows = [rdap_row()]
+    rows = registry_rows()
     ready = await ready_sources(stored, read_setting, servers)
     for item in sorted((s for s in ready if s.configured), key=lambda s: s.source.order):
         source = item.source

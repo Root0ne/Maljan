@@ -854,11 +854,25 @@ def enrichment_source_row(
 
 
 def rdap_row() -> dict[str, Any]:
-    """RDAP, which the enrichment asks about each public address with no key."""
+    """RDAP from the ARIN bootstrap, asked about a public address with no key."""
     from maljan.enrichment.whois_client import RDAP_HOST
     from maljan.enrichment.whois_client import RDAP_SOURCE as SOURCE
 
     return enrichment_source_row(SOURCE, kinds=["ip"], hosts=[RDAP_HOST])
+
+
+def registry_rows() -> list[dict[str, Any]]:
+    """Every lookup with no key an enrichment of an address may make, each with its host.
+
+    RDAP from the ARIN bootstrap, and where ipwhois is installed its own RDAP
+    and ASN lookups too (``enrichment.whois_client.registry_lookups``).
+    """
+    from maljan.enrichment.whois_client import registry_lookups
+
+    return [
+        enrichment_source_row(source, kinds=["ip"], hosts=[host])
+        for source, host in registry_lookups()
+    ]
 
 
 # Why the sources an enrichment may ask are not named.
@@ -1350,11 +1364,7 @@ def _reach(row: Mapping[str, Any], code: Callable[[str], str]) -> str:
     kinds = ", ".join(str(k) for k in row.get("kinds") or [])
     if not row.get("source"):
         return f"the configured sources ({kinds}), not named here because {row.get('why')}"
-    name = (
-        "RDAP"
-        if row.get("source") == RDAP_SOURCE
-        else f"source {code(str(row.get('source') or ''))}"
-    )
+    name, path = _source_name(row, code)
     hosts = [str(h) for h in row.get("hosts") or []]
     if row.get("server"):
         how = _how(row)
@@ -1364,19 +1374,26 @@ def _reach(row: Mapping[str, Any], code: Callable[[str], str]) -> str:
         where = "at " + ", ".join(code(h) for h in hosts)
     else:
         where = "with no host named"
-    note = " and the registry it refers an address to, with no key" if name == "RDAP" else ""
+    note = f" ({path}), with no key" if path else ""
     return f"{name} ({kinds}) {where}{note}"
+
+
+def _source_name(row: Mapping[str, Any], code: Callable[[str], str]) -> tuple[str, str]:
+    """A source as the block names it, and the path a lookup with no key takes (else ``""``)."""
+    from maljan.enrichment.whois_client import REGISTRY_LOOKUPS
+
+    source = str(row.get("source") or "")
+    if source in REGISTRY_LOOKUPS:
+        return REGISTRY_LOOKUPS[source]
+    return f"source {code(source)}", ""
 
 
 def _asked_parts(asked: list[Mapping[str, Any]], code: Callable[[str], str]) -> str:
     parts = []
     for row in asked:
         kinds = _counts(dict(row.get("kinds") or {}))
-        name = (
-            "RDAP"
-            if row.get("source") == RDAP_SOURCE
-            else f"source {code(str(row.get('source') or ''))}"
-        )
+        name, path = _source_name(row, code)
+        name = f"{name}, {path}" if path else name
         if row.get("host"):
             place = f"{code(str(row['host']))} {_mark(row)}"
         else:

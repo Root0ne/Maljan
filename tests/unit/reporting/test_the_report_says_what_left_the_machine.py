@@ -199,8 +199,9 @@ def test_the_enrichment_queued_after_the_report_is_named_then_what_it_asked() ->
     assert "Nothing left this machine" not in appendix
     assert (
         "- Enrichment: a follow-up job queued after this report may send the report's public "
-        "domains and addresses to RDAP (ip) at `rdap.arin.net` and the registry it refers "
-        "an address to, with no key; source `intel` (domain, ip) at `api.intel.example`. "
+        "domains and addresses to RDAP (ip) at `rdap.arin.net` (the ARIN bootstrap alone: a "
+        "referral to a regional registry is not followed), with no key; source `intel` "
+        "(domain, ip) at `api.intel.example`. "
         "What it sends is added here once it has run."
     ) in appendix
 
@@ -215,7 +216,7 @@ def test_the_enrichment_queued_after_the_report_is_named_then_what_it_asked() ->
     assert (
         "- Enrichment: the follow-up job asked `api.intel.example` (outside this machine) "
         "about domain 1 (source `intel`); `rdap.arin.net` (outside this machine) about ip 2 "
-        "(RDAP)."
+        "(RDAP, the ARIN bootstrap alone: a referral to a regional registry is not followed)."
     ) in _rendered(asked)
 
 

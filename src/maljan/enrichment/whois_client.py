@@ -18,10 +18,52 @@ from maljan.core.logger import logger
 
 _RDAP_BOOTSTRAP_URL = "https://rdap.arin.net/registry/ip/{address}"
 _RDAP_TIMEOUT_SECONDS = 15.0
-# How an RDAP question is named to a listener: the lookup, and the host it is
-# sent to first (the registry it refers the address to may answer it).
+# How each lookup that needs no key is named to a listener (``(source, host)``)
+# and in a run's disclosure block, with the path it takes. The fallback below
+# asks the ARIN bootstrap through the job's HTTP client, which follows no
+# redirect, so a referral to a regional registry is never reached. ipwhois,
+# when it is installed, takes its own path: RDAP from the same bootstrap,
+# following the referral, and its ASN lookup by DNS to the ASN service, with
+# the whois and HTTP fallbacks it may take; it does not say which it reached.
 RDAP_SOURCE = "rdap"
 RDAP_HOST = str(urlsplit(_RDAP_BOOTSTRAP_URL).hostname)
+IPWHOIS_RDAP_SOURCE = "rdap_ipwhois"
+IPWHOIS_ASN_SOURCE = "asn_ipwhois"
+IPWHOIS_ASN_HOST = "origin.asn.cymru.com"
+REGISTRY_LOOKUPS: dict[str, tuple[str, str]] = {
+    RDAP_SOURCE: (
+        "RDAP",
+        "the ARIN bootstrap alone: a referral to a regional registry is not followed",
+    ),
+    IPWHOIS_RDAP_SOURCE: (
+        "RDAP through ipwhois",
+        "from the ARIN bootstrap, which may refer to a regional registry",
+    ),
+    IPWHOIS_ASN_SOURCE: (
+        "ASN lookups through ipwhois",
+        "by DNS to the ASN service there, and the whois and HTTP fallbacks it may take",
+    ),
+}
+
+
+def ipwhois_available() -> bool:
+    """Whether the optional ``ipwhois`` package is installed, so its path is the one taken."""
+    import importlib.util
+
+    try:
+        return importlib.util.find_spec("ipwhois") is not None
+    except (ImportError, ValueError):
+        return False
+
+
+def registry_lookups() -> list[tuple[str, str]]:
+    """``(source, host)`` of every lookup with no key an enrichment of an address may make."""
+    first = (
+        [(IPWHOIS_RDAP_SOURCE, RDAP_HOST), (IPWHOIS_ASN_SOURCE, IPWHOIS_ASN_HOST)]
+        if ipwhois_available()
+        else []
+    )
+    return [*first, (RDAP_SOURCE, RDAP_HOST)]
 
 
 class WhoisClient:
@@ -41,13 +83,19 @@ class WhoisClient:
             return None
         from maljan.enrichment.declared import settle_asked, tell_listener
 
-        settle = await tell_listener(self._on_ask, RDAP_SOURCE, RDAP_HOST, "ip", "")
-        # 1) Try ipwhois (RDAP, locally cached).
-        result = await _try_ipwhois(address)
-        if result:
-            settle_asked(settle, True)
-            return result
+        # 1) Try ipwhois (RDAP, locally cached), which asks on its own path.
+        if ipwhois_available():
+            settles = [
+                await tell_listener(self._on_ask, source, host, "ip", "")
+                for source, host in registry_lookups()[:2]
+            ]
+            result = await _try_ipwhois(address)
+            for each in settles:
+                settle_asked(each, bool(result))
+            if result:
+                return result
         # 2) Fallback to ARIN bootstrap (network call).
+        settle = await tell_listener(self._on_ask, RDAP_SOURCE, RDAP_HOST, "ip", "")
         try:
             resp = await self._http.get(
                 _RDAP_BOOTSTRAP_URL.format(address=address),

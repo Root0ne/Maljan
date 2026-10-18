@@ -155,7 +155,12 @@ says what the run sent beyond the machine it ran on:
   (`langchain_tracing_v2`) or in the process environment; and the ledger rows
   the report could not read.
 - **Enrichment**: when enrichment is on, the follow-up job queued after the
-  report and what it may reach — RDAP, which needs no key, and every
+  report and what it may reach — RDAP, which needs no key (from the ARIN
+  bootstrap `rdap.arin.net`, whose referral to a regional registry the job's
+  client does not follow; where the optional `ipwhois` package is installed,
+  its own RDAP path, which may follow that referral, and its ASN lookup by DNS
+  to `origin.asn.cymru.com` with the fallbacks it may take, each its own row),
+  and every
   configured source with the hosts its requests name or the tool server it is
   asked through. The job then adds what it asked (service host, indicator
   kinds, counts) to the stored record, and the served report shows it. Each

@@ -4215,7 +4215,7 @@ async def enrichment_plan(core_settings: Any) -> list[dict[str, Any]] | None:
     """
     if not await runtime_config.get("enrichment_enabled"):
         return None
-    from maljan.analysis.disclosure import rdap_row, unread_sources_row
+    from maljan.analysis.disclosure import registry_rows, unread_sources_row
     from maljan.enrichment.declared import ASKED_KINDS
 
     from app.services.enrichment_sources import (
@@ -4234,7 +4234,7 @@ async def enrichment_plan(core_settings: Any) -> list[dict[str, Any]] | None:
             "enrich: the sources the follow-up job may ask could not be read (%s).",
             type(exc).__name__,
         )
-        return [rdap_row(), unread_sources_row(ASKED_KINDS)]
+        return [*registry_rows(), unread_sources_row(ASKED_KINDS)]
 
 
 def evidence_budget_of(run_summary: Mapping[str, Any] | None, core_settings: Any = None) -> int:
