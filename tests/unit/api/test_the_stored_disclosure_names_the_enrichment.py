@@ -420,3 +420,138 @@ async def test_a_job_that_asked_nothing_before_failing_leaves_the_record_as_it_w
     await _enrich_on_demand(row, _lookups)
 
     assert _records(row) == before
+
+
+@pytest.mark.asyncio
+async def test_two_enrichments_of_one_report_at_once_lose_no_row() -> None:
+    """Each write re-reads the row under its lock and merges; neither run's rows are lost."""
+    import asyncio
+
+    from app.worker.enrich_worker import enrich_threat_intel
+
+    row = _row_built_with_enrichment_off()
+    held = asyncio.Lock()
+
+    class _Session:
+        """One session over the shared row; ``get(..., with_for_update=True)`` holds the lock."""
+
+        def __init__(self) -> None:
+            self.locked = False
+
+        async def __aenter__(self) -> Any:
+            return self
+
+        async def __aexit__(self, *exc: Any) -> bool:
+            self._release()
+            return False
+
+        def _release(self) -> None:
+            if self.locked:
+                self.locked = False
+                held.release()
+
+        async def get(self, _model: Any, _key: Any, **kwargs: Any) -> Any:
+            if kwargs.get("with_for_update"):
+                await held.acquire()
+                self.locked = True
+                await asyncio.sleep(0)
+            # A row read anew, as the database would hand it back.
+            fresh = MagicMock()
+            fresh.id, fresh.job_id = row.id, row.job_id
+            fresh.malware_report = dict(row.malware_report)
+            fresh.run_summary = dict(row.run_summary)
+            self.fresh = fresh
+            return fresh
+
+        async def commit(self) -> None:
+            row.malware_report = self.fresh.malware_report
+            row.run_summary = self.fresh.run_summary
+            await asyncio.sleep(0)
+            self._release()
+
+    gate = asyncio.Event()
+
+    def _lookups_for(source: str, host: str, address: str) -> Any:
+        async def _lookups(payload: dict[str, Any], **kwargs: Any) -> dict[str, Any]:
+            (await kwargs["on_ask"](source, host, "ip", ""))(True)
+            await gate.wait()
+            enriched = {**payload, "network": dict(payload["network"])}
+            enriched["network"]["ips"] = [
+                {**ip, "reputation": {"source": source}} if ip["address"] == address else ip
+                for ip in payload["network"]["ips"]
+            ]
+            return enriched
+
+        return _lookups
+
+    row.malware_report["network"]["ips"] = [{"address": "1.2.3.4"}, {"address": "5.6.7.8"}]
+    values = {"enrichment_enabled": True, "enrichment_max_lookups": 25, "enrichment_sources": {}}
+    runs = iter(
+        [
+            _lookups_for("rdap", "rdap.arin.net", "1.2.3.4"),
+            _lookups_for("intel", "api.intel.example", "5.6.7.8"),
+        ]
+    )
+
+    async def _either(payload: dict[str, Any], **kwargs: Any) -> dict[str, Any]:
+        return await next(runs)(payload, **kwargs)
+
+    async def _open_gate() -> None:
+        await asyncio.sleep(0.05)
+        gate.set()
+
+    ctx = {"redis": AsyncMock(), "db_session": _Session}
+    with (
+        patch("maljan.enrichment.enrich_malware_report", new=AsyncMock(side_effect=_either)),
+        patch(
+            "app.worker.enrich_worker.runtime_config.get",
+            AsyncMock(side_effect=lambda name: values[name]),
+        ),
+        patch("app.worker.enrich_worker.runtime_config.get_secret", AsyncMock(return_value="")),
+        patch("app.worker.enrich_worker._get_memory_store", AsyncMock(return_value=None)),
+    ):
+        results = await asyncio.gather(
+            enrich_threat_intel(ctx, str(row.id)),
+            enrich_threat_intel(ctx, str(row.id)),
+            _open_gate(),
+        )
+
+    assert [r["status"] for r in results[:2]] == ["ok", "ok"]
+    for record in _records(row):
+        assert sorted(r["source"] for r in record["enrichment"]["asked"]) == ["intel", "rdap"]
+    reputations = {
+        ip["address"]: ip.get("reputation") for ip in row.malware_report["network"]["ips"]
+    }
+    assert reputations == {"1.2.3.4": {"source": "rdap"}, "5.6.7.8": {"source": "intel"}}
+
+
+@pytest.mark.asyncio
+async def test_a_disclosure_entry_written_during_the_lookups_survives_the_write() -> None:
+    """The job's snapshot is taken before its lookups; the write merges into the row as locked."""
+    from maljan.analysis.disclosure import with_enrichment_asked
+
+    row = _row_built_with_enrichment_off()
+    other = {"source": "misp", "host": "misp.example.org", "kinds": {"domain": 1}, "why": ""}
+
+    async def _lookups(payload: dict[str, Any], **kwargs: Any) -> dict[str, Any]:
+        (await kwargs["on_ask"]("rdap", "rdap.arin.net", "ip", ""))(True)
+        # Another writer adds a disclosure entry after the snapshot was taken.
+        row.run_summary = {
+            **row.run_summary,
+            "disclosure": with_enrichment_asked(row.run_summary["disclosure"], [other]),
+        }
+        stored = row.malware_report["run_summary"]
+        row.malware_report = {
+            **row.malware_report,
+            "run_summary": {
+                **stored,
+                "disclosure": with_enrichment_asked(stored["disclosure"], [other]),
+            },
+        }
+        return payload
+
+    result = await _enrich_on_demand(row, _lookups)
+
+    assert result["status"] == "ok"
+    for record in _records(row):
+        assert sorted(r["source"] for r in record["enrichment"]["asked"]) == ["misp", "rdap"]

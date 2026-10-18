@@ -418,7 +418,9 @@ async def enrich_threat_intel(
     written = await write_under_lock(
         db_session_factory,
         report_uuid,
-        lambda _stored, column: disclosed_enrichment(updated, column, asked),
+        lambda stored, column: disclosed_enrichment(
+            enrichment_laid_over(stored, updated), column, asked
+        ),
     )
     if not written:
         # Superseded by a re-run while the lookups were in flight. The
@@ -518,6 +520,56 @@ async def write_under_lock(
             flag_modified(report, "run_summary")
         await db.commit()
     return True
+
+
+# What an enrichment writes into an indicator row of the report's network section.
+_ENRICHED_FIELDS = ("reputation", "asn", "geo")
+_NETWORK_KEYS = {"domains": "fqdn", "ips": "address"}
+
+
+def enrichment_laid_over(stored: dict[str, Any], enriched: dict[str, Any]) -> dict[str, Any]:
+    """The stored payload, as re-read under the row lock, with this enrichment's results on it.
+
+    ``enriched`` is the copy this job read before its lookups, with what they
+    found. Only what an enrichment writes is taken from it, row by row
+    (reputation, ASN, geography, the suspicion flag it raises, and the similar
+    samples), and only where the stored row has none, so anything written to
+    the report during the lookups, another enrichment's results included, is
+    kept.
+    """
+    out = dict(stored)
+    network = dict(out.get("network") or {})
+    found = enriched.get("network") or {}
+    for section, field_name in _NETWORK_KEYS.items():
+        theirs = {
+            str(row.get(field_name)): row
+            for row in found.get(section) or []
+            if isinstance(row, dict) and row.get(field_name)
+        }
+        rows = []
+        for row in network.get(section) or []:
+            if not isinstance(row, dict):
+                rows.append(row)
+                continue
+            mine = dict(row)
+            other = theirs.get(str(row.get(field_name)))
+            if other is not None:
+                for name in _ENRICHED_FIELDS:
+                    if not mine.get(name) and other.get(name):
+                        mine[name] = other[name]
+                if other.get("is_suspicious"):
+                    mine["is_suspicious"] = True
+            rows.append(mine)
+        if section in network:
+            network[section] = rows
+    if network:
+        out["network"] = network
+    attribution = dict(out.get("attribution") or {})
+    similar = (enriched.get("attribution") or {}).get("similar_samples")
+    if similar and not attribution.get("similar_samples"):
+        attribution["similar_samples"] = similar
+        out["attribution"] = attribution
+    return out
 
 
 def disclosed(
