@@ -553,6 +553,10 @@ export interface SettingValue {
   source: "default" | "ui";
   updated_at: string | null;
   updated_by: string | null;
+  /** Why a stored row is not served (`value` is then `null`): the answer
+   *  could not be written with it in. The schema lists the same reason under
+   *  `stored_values_refused`. */
+  unreadable?: string | null;
 }
 
 export interface SettingsValues {
@@ -585,6 +589,9 @@ export interface ExportResponse {
    *  today; kept on the type so a caller that wants it does not have to
    *  guess the shape. */
   secrets_omitted: string[];
+  /** Catalog keys whose stored value the export could not write, with why;
+   *  left out of `values`. */
+  unreadable?: Record<string, string>;
 }
 
 export interface ImportRequest {

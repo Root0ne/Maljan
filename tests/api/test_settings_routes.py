@@ -85,6 +85,7 @@ def test_values_never_contain_secret_values(client):
         "source": "ui",
         "updated_at": None,
         "updated_by": None,
+        "unreadable": None,
     }
     assert body["core.llm.provider"]["value"] == "openai"
 

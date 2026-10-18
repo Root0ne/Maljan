@@ -792,7 +792,7 @@ class ApiClient {
    * as `maljan-settings.json` — no server round trip beyond the fetch
    * already made, and the viewer never sees a bare `data:` link. The
    * document is downloaded byte-for-byte as the API sent it (`format`,
-   * `exported_at`, `values`, `secrets_omitted` in that order) rather than
+   * `exported_at`, `values`, `secrets_omitted`, `unreadable` in that order) rather than
    * re-serialised, so the file on disk is exactly what `GET
    * /settings/export` returned.
    */

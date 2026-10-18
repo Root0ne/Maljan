@@ -21,7 +21,7 @@ from maljan.core.settings_annotations import (
 )
 from maljan.core.settings_overrides import redact_url
 from maljan.pipeline.conditions import validate_condition
-from pydantic import ValidationError
+from pydantic import BaseModel, ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import end_read_transaction, get_db
@@ -256,12 +256,60 @@ def default_served_schema() -> SchemaResponse:
     )
 
 
+def unwritable_reason(answer: BaseModel) -> str | None:
+    """Why ``answer`` cannot be written as a response body, or ``None`` when it can.
+
+    It is written the way the response is (the model's dump, then
+    ``json.dumps``), so the bound is the writers' own (pydantic-core's nesting
+    guard, the interpreter's recursion limit), not a depth of ours. One more
+    write of the answer: time linear in its size.
+    """
+    try:
+        json.dumps(answer.model_dump(mode="json"))
+    except (ValueError, RecursionError) as exc:
+        return unwritable_reason_of(exc)
+    return None
+
+
+def unwritable_reason_of(exc: BaseException) -> str:
+    """What :func:`unwritable_reason` says for the writer's refusal ``exc``."""
+    return (
+        "the stored value is not served: it is nested deeper than an answer can be "
+        f"written ({type(exc).__name__}: {exc}); reset this key or save it again"
+    )
+
+
+def _say_unwritable(where: str, key: str, reason: str) -> None:
+    logger.warning("Stored setting %s left out of %s: %s", log_safe(key), where, reason)
+
+
+def served_values(vals: dict[str, Any]) -> tuple[dict[str, ValueDTO], dict[str, str]]:
+    """Each value as ``GET /settings`` serves it, and the keys left unserved with why.
+
+    A stored row an answer cannot be written with (:func:`unwritable_reason`)
+    is served with no value and its reason, so one row never fails the page.
+    """
+    served: dict[str, ValueDTO] = {}
+    unreadable: dict[str, str] = {}
+    for key, info in vals.items():
+        dto = ValueDTO(**vars(info))
+        reason = unwritable_reason(ValuesResponse(values={key: dto}))
+        if reason is not None:
+            dto = ValueDTO(**{**vars(info), "value": None, "unreadable": reason})
+            unreadable[key] = reason
+        served[key] = dto
+    return served, unreadable
+
+
 @router.get("", response_model=ValuesResponse)
 async def get_values(
     _: User = Depends(require_admin), db: AsyncSession = Depends(get_db)
 ) -> ValuesResponse:
     vals = await SettingsService(db).values(extra=await stored_block_entries(db))
-    return ValuesResponse(values={k: ValueDTO(**vars(v)) for k, v in vals.items()})
+    served, unreadable = served_values(vals)
+    for key, reason in unreadable.items():
+        _say_unwritable("the settings answer", key, reason)
+    return ValuesResponse(values=served)
 
 
 @router.get("/plugins", response_model=PluginsResponse)
@@ -720,6 +768,7 @@ async def export_values(
     index = {**catalog_index(), **{entry.key: entry for entry in extra}}
     values: dict[str, Any] = {}
     secrets_omitted: list[str] = []
+    unreadable: dict[str, str] = {}
     for key, info in (await SettingsService(db).values(extra=extra)).items():
         if info.source != "ui":
             continue
@@ -729,7 +778,25 @@ async def export_values(
         if entry.secret:
             secrets_omitted.append(key)
             continue
-        sanitized, omitted_paths = _export_value(key, info.value)
+        try:
+            sanitized, omitted_paths = _export_value(key, info.value)
+        except RecursionError as exc:
+            # Too deep for the walk that strips its masks: the same bound the
+            # answer's writer has (:func:`unwritable_reason`).
+            reason: str | None = unwritable_reason_of(exc)
+        else:
+            reason = unwritable_reason(
+                ExportResponse(
+                    format=EXPORT_FORMAT,
+                    exported_at=datetime.now(UTC),
+                    values={key: sanitized},
+                    secrets_omitted=omitted_paths,
+                )
+            )
+        if reason is not None:
+            _say_unwritable("the export", key, reason)
+            unreadable[key] = reason
+            continue
         values[key] = sanitized
         secrets_omitted.extend(omitted_paths)
     response.headers["Content-Disposition"] = "attachment; filename=maljan-settings.json"
@@ -738,6 +805,7 @@ async def export_values(
         exported_at=datetime.now(UTC),
         values=values,
         secrets_omitted=sorted(secrets_omitted),
+        unreadable=unreadable,
     )
 
 

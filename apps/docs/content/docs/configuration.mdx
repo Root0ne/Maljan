@@ -4509,6 +4509,12 @@ sets `Content-Disposition: attachment; filename=maljan-settings.json`:
 - `secrets_omitted` names each credential the document does not carry, so an
   operator can see what has to be re-entered on the other side. Those paths are
   informational, not catalog keys.
+- A stored row nested deeper than an answer can be written (the bound is the
+  JSON writers' own, never a depth Maljan sets) is left out and named under
+  `unreadable` with why; an import ignores that field. `GET /api/v1/settings`
+  serves the same row with no value and its reason in `unreadable`, which the
+  console shows on the row, and a warning is logged, so one such row never
+  fails the settings page or the export.
 
 `POST /api/v1/settings/import` (admin) accepts the same document. In
 `maljan-settings/2` a built-in block's tool declarations are stored as their
