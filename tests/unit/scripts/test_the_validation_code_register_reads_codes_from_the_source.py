@@ -499,13 +499,13 @@ class TestWhatRaises:
         )
 
         assert sorted(_raised(register)) == ["demo.known", "demo.literal_place"]
-        assert register.unresolved == tuple(
+        assert register.unresolved == (
             Unresolved(
                 "demo.checks:rows",
-                repr(text),
+                "'demo.kind'",
                 "a code-shaped string where no code position is, nor a read",
-            )
-            for text in ("demo.kind", "demo.paired")
+            ),
+            Unresolved("demo.checks:rows", "'demo.paired'", LOOSE),
         )
 
     def test_a_factory_raises_where_it_is_called_and_inside_it(self, tmp_path: Path) -> None:
@@ -570,6 +570,58 @@ class TestWhatRaises:
         (code,) = register.codes
         assert code.raised_at == ()
         assert code.uncalled == ("demo.checks:_never_called",)
+
+
+# Each a code literal written where nothing files it; none may vanish.
+ROW_READ = "a code in a row handed to a call that only reads it, so nothing here files it"
+LOOSE = "a code-shaped string handed to a callback or put in a pair, which is not a code position"
+UNFILED = {
+    "a row sent over a socket": (
+        "async def send(ws: object) -> None:\n"
+        "    await ws.send_json({'code': 'demo.sent', 'message': 'm'})",
+        "send",
+        "\"code\": 'demo.sent'",
+        ROW_READ,
+    ),
+    "a row dumped as JSON": (
+        "import json\n\ndef dumped() -> str:\n    return json.dumps({'code': 'demo.dumped'})",
+        "dumped",
+        "\"code\": 'demo.dumped'",
+        ROW_READ,
+    ),
+    "a row given as a copy's update": (
+        "def copied(v: object) -> object:\n    return v.model_copy(update={'code': 'demo.copied'})",
+        "copied",
+        "\"code\": 'demo.copied'",
+        ROW_READ,
+    ),
+    "a row handed to a function that only reads it": (
+        "def emit(sink: object, kind: str, row: dict) -> bool:\n"
+        "    return kind in row\n\n"
+        "def emitted(sink: object) -> bool:\n"
+        "    return emit(sink, 'x', {'code': 'demo.emitted'})",
+        "emitted",
+        "\"code\": 'demo.emitted'",
+        ROW_READ,
+    ),
+    "a new family handed to a callback": (
+        "def asked(on_question: object) -> None:\n    on_question('other.asked')",
+        "asked",
+        "'other.asked'",
+        LOOSE,
+    ),
+}
+
+
+class TestNothingIsDroppedSilently:
+    @pytest.mark.parametrize("shape", sorted(UNFILED))
+    def test_a_code_literal_written_where_nothing_files_it_is_listed(
+        self, tmp_path: Path, shape: str
+    ) -> None:
+        source, function, expression, why = UNFILED[shape]
+        register = _tree(tmp_path, f"{source}\n\nENTRY = {function}\n")
+
+        assert Unresolved(f"demo.checks:{function}", expression, why) in register.unresolved
 
 
 # Each a use of DEAD_CODE that only reads it; LIVE_CODE is raised for real.

@@ -30,7 +30,9 @@ through plain names, a loop over a constant collection, a conditional or ``or``,
 constants at every call site (or by its default). A code slot whose value cannot
 be followed is kept as an unresolved site with the expression seen, and so is a
 code-shaped string of a known family in a position that is neither a code
-position nor a read; neither is dropped.
+position nor a read, a code written under ``"code"`` in a row that is only read
+(sent, dumped, handed to a reader), and a code-shaped string handed to a
+callback; none is dropped.
 
 Nothing is imported: the source is parsed with ``ast`` and its comments read
 with ``tokenize``. In a git checkout only tracked files are read, so the page is
@@ -716,7 +718,7 @@ class Reader:
         self._levels: dict[_Key, int] = {}
         self._deferred_loads: list[tuple[Ref, Scope, str]] = []
         self._deferred_literals: list[tuple[str, Scope, str]] = []
-        self._deferred_known: list[tuple[ast.expr, Scope, str, ast.expr | None]] = []
+        self._deferred_known: list[tuple[ast.expr, Scope, str, ast.expr | None, bool]] = []
         # What each slot target is seen to receive, and the unresolved sites
         # waiting on it: a target that receives only strings not shaped as
         # codes files another kind of code (a team rule, a tool error).
@@ -1862,9 +1864,26 @@ class Reader:
                 continue
             self.unresolved.add(unresolved)
         families = {code.partition(".")[0] for code in self.code_set}
-        for value, scope, site, text in self._deferred_known:
+        for value, scope, site, text, callback in self._deferred_known:
             found = self.entry(partial(self.value_of, value, scope))
             known = sorted(found.strings & self.code_set)
+            if (
+                not known
+                and isinstance(value, ast.Constant)
+                and is_code(value.value)
+                # A callback's code is listed whatever its family; a pair only
+                # in a family codes use, since tables of pairs hold settings
+                # keys and field paths of the same shape.
+                and (callback or str(value.value).partition(".")[0] in families)
+            ):
+                self.unresolved.add(
+                    Unresolved(
+                        site,
+                        repr(value.value),
+                        "a code-shaped string handed to a callback or put in a pair, which is "
+                        "not a code position",
+                    )
+                )
             if not known:
                 continue
             if not self.called(scope):
@@ -2162,7 +2181,9 @@ class _Walk:
             self.reader.raised(value, scope, form, text, self.site or scope.site, target)
         self.expr(value, scope, SLOT)
 
-    def known(self, value: ast.expr, scope: Scope, text: ast.expr | None) -> None:
+    def known(
+        self, value: ast.expr, scope: Scope, text: ast.expr | None, *, callback: bool
+    ) -> None:
         """A value handed to a callback, or put where a tuple finding keeps its code.
 
         Either raises a code the register already knows; neither makes a code,
@@ -2170,8 +2191,25 @@ class _Walk:
         may as well carry anything else.
         """
         if not self.flow:
-            self.reader._deferred_known.append((value, scope, self.site or scope.site, text))
-        self.expr(value, scope, PASS)
+            self.reader._deferred_known.append(
+                (value, scope, self.site or scope.site, text, callback)
+            )
+        if not isinstance(value, ast.Constant):
+            self.expr(value, scope, PASS)
+
+    def read_row_code(self, value: ast.expr, scope: Scope) -> None:
+        """A code written into a row that is only read: it exists, and nothing shows it filed."""
+        if self.flow or not isinstance(value, ast.Constant) or not is_code(value.value):
+            return
+        code = str(value.value)
+        self.reader.record(code)
+        self.reader.unresolved.add(
+            Unresolved(
+                self.site or scope.site,
+                f'"code": {code!r}',
+                "a code in a row handed to a call that only reads it, so nothing here files it",
+            )
+        )
 
     # -- statements -----------------------------------------------------------
 
@@ -2429,7 +2467,7 @@ class _Walk:
         for index, element in enumerate(node.elts):
             if shape is not None and index == shape.code_index:
                 text = node.elts[shape.text_index] if shape.text_index is not None else None
-                self.known(element, scope, text)
+                self.known(element, scope, text, callback=False)
             else:
                 self.expr(element, scope, PASS)
 
@@ -2448,6 +2486,8 @@ class _Walk:
             if value_context is not None and isinstance(key, ast.Constant) and key.value == "code":
                 self.slot(value, scope, '"code": {}', text, ("dict",))
             elif value_context is None:
+                if isinstance(key, ast.Constant) and key.value == "code":
+                    self.read_row_code(value, scope)
                 self.expr(value, scope, READ)
             elif context == BIND:
                 self.expr(value, scope, BIND)
@@ -2514,7 +2554,7 @@ class _Walk:
                     self.expr(keyword.value, scope, PASS)
         elif kind == "callback":
             for argument in [*node.args, *(k.value for k in node.keywords)]:
-                self.known(argument, scope, None)
+                self.known(argument, scope, None, callback=True)
         elif kind == "function":
             function: Scope = target
             keywords = {id(k.value): k.arg for k in node.keywords}
