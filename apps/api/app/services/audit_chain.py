@@ -55,7 +55,8 @@ HEAD_NAME = "audit"
 # operator repairs it after the full walk.
 HEAD_REFUSED = (
     "the audit head does not verify, so every chained append is refused until an operator "
-    "repairs it (python -m scripts.ledger.verify --repair-head)"
+    "repairs it (python -m scripts.ledger.verify --repair-head); a repair can hide rows cut "
+    "off the end of the chain, so check the chain (--audit-chain) before repairing"
 )
 
 
@@ -67,6 +68,7 @@ class HeadRefused(RuntimeError):
 LEDGER_SEAL = "ledger.seal"
 REPORT_AMEND = "report.amend"
 REPORT_DELETE = "report.delete"
+HEAD_REPAIR = "audit.head_repair"
 
 DIGESTED: tuple[str, ...] = (
     "chain_seq",
@@ -556,17 +558,21 @@ def verify_job_rows(
     return check
 
 
-def head_for_repair(
+def repaired_head(
     rows: Iterable[Any], keys: Mapping[str, ledger_chain.ChainKey], current: str | None
-) -> dict[str, Any]:
-    """The head the whole chain supports, keyed under the current key; :class:`HeadRefused` if none.
+) -> tuple[dict[str, Any], list[int]]:
+    """The head the whole chain supports, and the rows it could not check; or :class:`HeadRefused`.
 
-    The operator's repair after a head was refused: every chained row, from
-    the first to the last, must recompute to its digest and link to the one
-    before it under a key the platform can derive, and from the first row under
-    the current key on, every row must be under it, ending on the last row.
-    The head is then rebuilt from the walk: the last row's seq and chain value,
-    and that first current-key row as ``rotated_at_seq``. Anything else is
+    The operator's repair after a head was refused, under the rules a
+    verification uses. Every row must recompute to its digest and the chain
+    must have no gap. The boundary is the first row under the current key;
+    from it on, every row must carry the current key and link to the stored
+    chain value of the row before it, so the boundary row joins the history
+    and no older-key row may follow it. Before it, a row under a key the
+    platform can derive must link under that key, and one under a key it
+    cannot derive is counted unverifiable (returned) and allowed. The head is
+    rebuilt from the walk: the last row's seq and chain value and the boundary
+    as ``rotated_at_seq``, keyed under the current key. Anything else is
     refused with the first break; nothing is signed.
     """
     if current is None or current not in keys:
@@ -577,6 +583,7 @@ def head_for_repair(
         raise HeadRefused("there is no chained row to rebuild a head from")
     previous: str | None = None
     rotated_at: int | None = None
+    unverifiable: list[int] = []
     for expected, row in enumerate(ordered, start=1):
         seq = int(_read(row, "chain_seq") or 0)
         if seq != expected:
@@ -584,27 +591,123 @@ def head_for_repair(
         if audit_digest(row) != _read(row, "digest"):
             raise HeadRefused(f"chained audit row {seq} differs from its digest")
         key_id = _read(row, "chain_key_id") or ""
-        row_key = keys.get(key_id)
-        if row_key is None:
-            raise HeadRefused(f"chained audit row {seq} is under a key the platform cannot derive")
         if rotated_at is not None and key_id != current:
-            raise HeadRefused(f"chained audit row {seq} leaves the current key after it began")
+            raise HeadRefused(
+                f"chained audit row {seq} is under another key after the rotation boundary "
+                f"(seq {rotated_at})"
+            )
         if key_id == current and rotated_at is None:
             rotated_at = seq
-        start = previous if previous is not None else audit_genesis(row_key)
-        if audit_link(start, str(_read(row, "digest")), row_key) != _read(row, "chain"):
-            raise HeadRefused(f"chained audit row {seq} does not link to the row before it")
+        row_key = keys.get(key_id)
+        if row_key is None:
+            unverifiable.append(seq)
+        else:
+            start = previous if previous is not None else audit_genesis(row_key)
+            if audit_link(start, str(_read(row, "digest")), row_key) != _read(row, "chain"):
+                raise HeadRefused(f"chained audit row {seq} does not link to the row before it")
         previous = str(_read(row, "chain"))
     if rotated_at is None:
         raise HeadRefused("no chained row is under the current key")
     last_seq = int(_read(ordered[-1], "chain_seq"))
-    return {
+    head = {
         "name": HEAD_NAME,
         "chain_seq": last_seq,
         "chain": previous,
         "key_id": current,
         "rotated_at_seq": rotated_at,
         "mac": head_mac(last_seq, str(previous), rotated_at, key),
+    }
+    return head, unverifiable
+
+
+def head_for_repair(
+    rows: Iterable[Any], keys: Mapping[str, ledger_chain.ChainKey], current: str | None
+) -> dict[str, Any]:
+    """The head :func:`repaired_head` rebuilds, without the unverifiable rows."""
+    return repaired_head(rows, keys, current)[0]
+
+
+def plan_repair(
+    rows: Iterable[Any],
+    keys: Mapping[str, ledger_chain.ChainKey],
+    current: str | None,
+    old_head: Any,
+    *,
+    accept_truncation_at: int | None = None,
+    at: datetime | None = None,
+) -> dict[str, Any]:
+    """The chained repair row and the head that points at it; :class:`HeadRefused` if none.
+
+    The walk is :func:`repaired_head`. The old head is then compared with it: a
+    head whose seq lies beyond the last row, or whose chain differs from the
+    chain at its seq, says rows were cut off the end, and re-signing would hide
+    that. Such a repair is refused unless ``accept_truncation_at`` equals the
+    old head's seq, the operator's acknowledgement of exactly that cut. The
+    repair itself is a chained ``audit.head_repair`` row after the last row,
+    naming the old head, the head the walk supports and any acknowledged
+    truncation; the new head points at that row.
+    """
+    from app.models.audit import AuditLog
+
+    rows = list(rows)
+    walked, unverifiable = repaired_head(rows, keys, current)
+    key = keys[str(current)]
+    by_seq = {int(_read(r, "chain_seq") or 0): r for r in rows}
+    old_seq = int(_read(old_head, "chain_seq") or 0) if old_head is not None else None
+    old_chain = _read(old_head, "chain") if old_head is not None else None
+    truncated = old_seq is not None and (
+        old_seq > walked["chain_seq"]
+        or (old_seq in by_seq and _read(by_seq[old_seq], "chain") != old_chain)
+    )
+    if accept_truncation_at is not None and accept_truncation_at != old_seq:
+        raise HeadRefused(
+            f"--accept-truncation-at {accept_truncation_at} does not name the old head's seq "
+            f"({old_seq})"
+        )
+    if truncated and accept_truncation_at is None:
+        raise HeadRefused(
+            f"the old head names seq {old_seq}, past or apart from the last row "
+            f"({walked['chain_seq']}): rows were cut off the end; re-run with "
+            f"--accept-truncation-at {old_seq} only after checking what was lost"
+        )
+    seq = int(walked["chain_seq"]) + 1
+    row = AuditLog(
+        id=uuid.uuid4(),
+        user_id=None,
+        action=HEAD_REPAIR,
+        resource_type="audit_chain",
+        resource_id=HEAD_NAME,
+        details={
+            "old_head_seq": old_seq,
+            "old_head_chain": old_chain,
+            "walked_head_seq": walked["chain_seq"],
+            "walked_head_chain": walked["chain"],
+            "rotated_at_seq": walked["rotated_at_seq"],
+            "truncation_acknowledged_at": accept_truncation_at if truncated else None,
+            "unverifiable": [unverifiable[0], unverifiable[-1]] if unverifiable else None,
+        },
+        ip_address=None,
+        created_at=at or datetime.now(UTC),
+        chain_seq=seq,
+        chain_key_id=key.key_id,
+    )
+    row.digest = audit_digest(row)
+    row.chain = audit_link(str(walked["chain"]), row.digest, key)
+    rotated_at = int(walked["rotated_at_seq"])
+    head = {
+        "name": HEAD_NAME,
+        "chain_seq": seq,
+        "chain": row.chain,
+        "key_id": key.key_id,
+        "rotated_at_seq": rotated_at,
+        "mac": head_mac(seq, row.chain, rotated_at, key),
+    }
+    values = {c.name: getattr(row, c.name) for c in AuditLog.__table__.columns}
+    return {
+        "row": values,
+        "head": head,
+        "unverifiable": unverifiable,
+        "truncated": truncated,
     }
 
 

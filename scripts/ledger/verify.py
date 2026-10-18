@@ -17,10 +17,15 @@ answer says it was not checked. ``--audit-chain`` walks the whole audit chain
 from its first row to its head, for the operator: it is the walk that finds
 rows cut off the end of the chain, which a job's own verification cannot see.
 ``--repair-head`` is the operator's repair after an append refused the head:
-it walks the whole chain and, only when every row verifies to the last one
-under keys the platform can derive, rewrites the head keyed under the current
-key with the walk's rotation boundary; otherwise it refuses and prints the
-first break. It is the one command here that writes.
+it walks the whole chain under the rules a verification uses (rows before the
+rotation boundary under a key the platform cannot derive are reported as an
+unverifiable span; every row from the boundary on must verify) and refuses
+with the first break otherwise. An old head that names rows past the last one,
+or another chain at its seq, means rows were cut off the end: the repair is
+refused unless ``--accept-truncation-at N`` names the old head's seq. The
+repair is written as a chained ``audit.head_repair`` row naming the old head,
+the walked head and any acknowledged truncation, and the new head, keyed under
+the current key, points at it. It is the one command here that writes.
 
 The keys are the ones the platform's settings derive
 (``SETTINGS_ENCRYPTION_KEY`` in the environment). The answer is printed as
@@ -168,13 +173,18 @@ async def walk_audit_chain(conn: Any) -> dict[str, Any]:
     }
 
 
-async def repair_head(conn: Any) -> dict[str, Any]:
+async def repair_head(conn: Any, accept_truncation_at: int | None = None) -> dict[str, Any]:
     """Rebuild the audit head from the whole chain, or refuse with the first break.
 
     Runs in one write transaction under the chain's advisory lock (PostgreSQL),
-    so no append can land between the walk and the rewrite. The new head is
-    keyed under the current key with the walk's ``rotated_at_seq``
-    (``audit_chain.head_for_repair``).
+    so no append can land between the walk and the rewrite. The walk follows
+    a verification's rules (``audit_chain.repaired_head``): rows before the
+    rotation boundary under a key the platform cannot derive are reported as
+    unverifiable, every row from the boundary on must verify. An old head that
+    names rows past the walk's last row, or another chain at its seq, means a
+    cut tail: refused unless ``accept_truncation_at`` names the old head's seq.
+    The repair is written as a chained ``audit.head_repair`` row, and the new
+    head, keyed under the current key, points at it (``audit_chain.plan_repair``).
     """
     from sqlalchemy import delete, insert, select, text
 
@@ -195,21 +205,34 @@ async def repair_head(conn: Any) -> dict[str, Any]:
         .mappings()
         .all()
     )
+    heads = AuditChainHead.__table__
+    old_head = (
+        (await conn.execute(select(heads).where(heads.c.name == audit_chain.HEAD_NAME)))
+        .mappings()
+        .first()
+    )
     current = ledger_chain.platform_key()
     try:
-        head = audit_chain.head_for_repair(
-            rows, ledger_chain.known_keys(), current.key_id if current is not None else None
+        plan = audit_chain.plan_repair(
+            rows,
+            ledger_chain.known_keys(),
+            current.key_id if current is not None else None,
+            old_head,
+            accept_truncation_at=accept_truncation_at,
         )
     except audit_chain.HeadRefused as refused:
         return {"status": "refused", "reason": str(refused)}
-    heads = AuditChainHead.__table__
+    await conn.execute(insert(log).values(**plan["row"]))
     await conn.execute(delete(heads).where(heads.c.name == audit_chain.HEAD_NAME))
-    await conn.execute(insert(heads).values(**head))
+    await conn.execute(insert(heads).values(**plan["head"]))
+    unverifiable = plan["unverifiable"]
     return {
         "status": "repaired",
-        "head_seq": head["chain_seq"],
-        "rotated_at_seq": head["rotated_at_seq"],
-        "key_id": head["key_id"],
+        "head_seq": plan["head"]["chain_seq"],
+        "rotated_at_seq": plan["head"]["rotated_at_seq"],
+        "key_id": plan["head"]["key_id"],
+        "truncation_acknowledged": plan["truncated"],
+        "unverifiable": [unverifiable[0], unverifiable[-1]] if unverifiable else [],
     }
 
 
@@ -241,6 +264,12 @@ def _parser() -> argparse.ArgumentParser:
         help="rebuild a refused audit head from the whole chain, or say where it breaks",
     )
     parser.add_argument(
+        "--accept-truncation-at",
+        type=int,
+        metavar="N",
+        help="with --repair-head: acknowledge that rows after the old head's seq N were cut",
+    )
+    parser.add_argument(
         "--database-url", help="the database to read; DATABASE_URL or the bootstrap settings"
     )
     return parser
@@ -259,7 +288,10 @@ def main(argv: list[str] | None = None) -> int:
 
             url = _database_url(args.database_url)
             if args.repair_head:
-                verdict = asyncio.run(_write(url, repair_head))
+                accepted = args.accept_truncation_at
+                verdict = asyncio.run(
+                    _write(url, lambda conn: repair_head(conn, accept_truncation_at=accepted))
+                )
             elif args.audit_chain:
                 verdict = asyncio.run(_read_only(url, walk_audit_chain))
             else:

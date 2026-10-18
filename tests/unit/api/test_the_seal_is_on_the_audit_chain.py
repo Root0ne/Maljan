@@ -748,9 +748,51 @@ async def test_a_head_repair_refuses_with_the_first_break():
     db.rows[1].details = {"changed": True}
     with pytest.raises(audit_chain.HeadRefused, match="row 2 differs from its digest"):
         audit_chain.head_for_repair(db.rows, {KEY.key_id: KEY}, KEY.key_id)
-    rotated = await _rotated(old=2, new=1)
-    with pytest.raises(audit_chain.HeadRefused, match="row 1 is under a key"):
+
+
+@pytest.mark.asyncio
+async def test_a_repair_after_a_rotation_reports_the_unverifiable_span():
+    rotated = await _rotated(old=2, new=2)
+    head, unverifiable = audit_chain.repaired_head(rotated.rows, {KEY.key_id: KEY}, KEY.key_id)
+    assert (head["chain_seq"], head["rotated_at_seq"], unverifiable) == (4, 3, [1, 2])
+    check = audit_chain.verify_audit_chain(rotated.rows, {KEY.key_id: KEY}, head, KEY.key_id)
+    assert (check.broken_at, check.unverifiable) == (None, [1, 2])
+
+
+@pytest.mark.asyncio
+async def test_a_repair_with_an_old_key_row_after_the_boundary_is_refused():
+    rotated = await _rotated(old=2, new=2)
+    forged = rotated.rows[3]
+    forged.chain_key_id = OTHER.key_id
+    forged.digest = audit_chain.audit_digest(forged)
+    with pytest.raises(audit_chain.HeadRefused, match="row 4 is under another key after"):
         audit_chain.head_for_repair(rotated.rows, {KEY.key_id: KEY}, KEY.key_id)
+
+
+@pytest.mark.asyncio
+async def test_a_repair_over_a_cut_tail_needs_the_operator_to_name_the_old_head():
+    db = await _chain(4)
+    old_head = {"chain_seq": 4, "chain": db.rows[-1].chain}
+    cut = db.rows[:3]
+    keys = {KEY.key_id: KEY}
+    with pytest.raises(audit_chain.HeadRefused, match="cut off the end"):
+        audit_chain.plan_repair(cut, keys, KEY.key_id, old_head)
+    with pytest.raises(audit_chain.HeadRefused, match="does not name the old head's seq"):
+        audit_chain.plan_repair(cut, keys, KEY.key_id, old_head, accept_truncation_at=3)
+    plan = audit_chain.plan_repair(cut, keys, KEY.key_id, old_head, accept_truncation_at=4)
+    assert plan["truncated"] is True
+    assert plan["row"]["details"]["truncation_acknowledged_at"] == 4
+    assert plan["row"]["chain_seq"] == 4 and plan["head"]["chain_seq"] == 4
+    rows = [*cut, plan["row"]]
+    assert audit_chain.verify_audit_chain(rows, keys, plan["head"]).broken_at is None
+
+
+@pytest.mark.asyncio
+async def test_a_repair_over_another_chain_at_the_old_head_s_seq_is_refused():
+    db = await _chain(3)
+    old_head = {"chain_seq": 3, "chain": "0" * 64}
+    with pytest.raises(audit_chain.HeadRefused, match="cut off the end"):
+        audit_chain.plan_repair(db.rows, {KEY.key_id: KEY}, KEY.key_id, old_head)
 
 
 @pytest.mark.asyncio
@@ -811,12 +853,21 @@ async def test_the_repair_command_rewrites_a_refused_head(monkeypatch: Any):
         answer = await cli.repair_head(_AsyncWrite(conn))
         assert answer == {
             "status": "repaired",
-            "head_seq": 3,
+            "head_seq": 4,
             "rotated_at_seq": 1,
             "key_id": KEY.key_id,
+            "truncation_acknowledged": False,
+            "unverifiable": [],
         }
         head = conn.execute(sa.select(AuditChainHead.__table__)).mappings().one()
-        assert audit_chain.verify_audit_chain(db.rows, {KEY.key_id: KEY}, head).broken_at is None
+        chained = (
+            conn.execute(sa.select(AuditLog.__table__).order_by(AuditLog.__table__.c.chain_seq))
+            .mappings()
+            .all()
+        )
+        assert chained[-1]["action"] == audit_chain.HEAD_REPAIR
+        assert chained[-1]["details"]["old_head_seq"] == 3
+        assert audit_chain.verify_audit_chain(chained, {KEY.key_id: KEY}, head).broken_at is None
         conn.execute(
             AuditLog.__table__.update()
             .where(AuditLog.__table__.c.chain_seq == 2)
