@@ -49,6 +49,7 @@ class _Store:
         self.objects: dict[str, tuple[bytes, str]] = {}
         self.refuses = refuses
         self.exists = False
+        self.removed: list[str] = []
 
     def bucket_exists(self, bucket: str) -> bool:
         return self.exists
@@ -72,6 +73,7 @@ class _Store:
 
     def remove_object(self, bucket: str, path: str) -> None:
         self.objects.pop(path)
+        self.removed.append(path)
 
 
 def _kept(job: Any, store: Any, part: str, value: Any, max_bytes: int = 0) -> dict[str, Any]:
@@ -222,6 +224,14 @@ class TestTheWritesRunOffTheLoop:
         assert entry["spilled"][0]["error"] == "upload_failed (not finished)"
         assert "key" not in entry["spilled"][0]
         sink.close()
+        # The late write still finishes, and its object is removed again.
+        import threading
+
+        for _ in range(150):
+            if store.removed:
+                break
+            threading.Event().wait(0.02)
+        assert store.objects == {}
 
     def test_a_part_past_the_backlog_bound_is_refused_at_once_as_busy(self) -> None:
         import threading
@@ -265,6 +275,36 @@ class TestTheWritesRunOffTheLoop:
         assert first["key"] == second["key"]
         assert _Counting.writes == 1
         sink.close()
+
+    def test_a_write_that_ends_after_the_drain_leaves_no_object(self) -> None:
+        import threading
+
+        started, release = threading.Event(), threading.Event()
+
+        class _Late(_Store):
+            def put_object(self, *args: Any, **kwargs: Any) -> None:
+                started.set()
+                release.wait(5)
+                super().put_object(*args, **kwargs)
+
+        store = _Late()
+        sink = object_store.evidence_spill("job", store=store)
+        running = {"spilled": [spill_part(sink, "answer", "running")]}
+        started.wait(5)
+        spill_part(sink, "output", "second")
+        queued = {"spilled": [spill_part(sink, "structured", {"third": 3})]}
+
+        outcomes = sink.drain(0.05)
+        settle_refs([running, queued], outcomes)
+        release.set()
+        for _ in range(100):
+            if not store.objects:
+                break
+            threading.Event().wait(0.02)
+
+        assert running["spilled"][0]["error"] == "upload_failed (not finished)"
+        assert queued["spilled"][0]["error"] == "upload_failed (not finished)"
+        assert store.objects == {}, "no object outlives a reference that says not kept"
 
     def test_the_writers_client_has_short_timeouts_and_one_retry(self) -> None:
         built = object_store._evidence_client()

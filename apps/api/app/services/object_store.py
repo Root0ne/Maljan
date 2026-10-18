@@ -300,18 +300,48 @@ class JobEvidenceSpill(EvidenceSpill):
             )
 
     def drain(self, timeout: float) -> dict[str, str | None]:
+        """Wait up to ``timeout`` seconds; then give up on every write still open.
+
+        A write not started by then is cancelled. One already running is
+        stated ``not finished``, and when it does finish its object is removed
+        again (:meth:`_remove_late`), so no object outlives a reference that
+        says it was not kept.
+        """
         from concurrent.futures import wait
 
         with self._lock:
             pending = dict(self._pending)
         wait(list(pending.values()), timeout=max(0.0, float(timeout)))
         outcomes: dict[str, str | None] = {}
+        late = [(sha256, future) for sha256, future in pending.items() if not future.done()]
+        if late:
+            with self._lock:
+                pool, self._pool = self._pool, None
+            if pool is not None:
+                pool.shutdown(wait=False, cancel_futures=True)
         for sha256, future in pending.items():
-            if not future.done():
-                outcomes[sha256] = "not finished"
-            else:
-                outcomes[sha256] = self._failed.get(sha256)
+            finished = future.done() and not future.cancelled()
+            outcomes[sha256] = self._failed.get(sha256) if finished else "not finished"
+        for sha256, future in late:
+            key = evidence_key(self.job_id, sha256)
+            with self._lock:
+                self._written.discard(key)
+            future.add_done_callback(lambda done, key=key: self._remove_late(done, key))
         return outcomes
+
+    def _remove_late(self, future: Any, key: str) -> None:
+        """Remove the object a write left after its reference was stated not finished."""
+        if future.cancelled() or self._failed.get(key.rsplit("/", 1)[-1]) is not None:
+            return
+        logger.info("Evidence object %s was written after its drain; removing it", log_safe(key))
+        try:
+            remove(self._client(), key)
+        except Exception as exc:  # noqa: BLE001 — logged; the row already says not kept
+            logger.warning(
+                "Evidence object %s written after its drain could not be removed: %s",
+                log_safe(key),
+                log_safe(f"{type(exc).__name__}: {exc}"),
+            )
 
     def close(self) -> None:
         with self._lock:
