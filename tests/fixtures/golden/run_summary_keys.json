@@ -200,6 +200,16 @@
       ],
       "unit": null
     },
+    "uncited": {
+      "by_agent": "<data-keyed map>",
+      "by_tool": "<data-keyed map>",
+      "cited": null,
+      "entries": null,
+      "ids": [
+        null
+      ],
+      "uncited": null
+    },
     "v": null
   },
   "elapsed_seconds": null,

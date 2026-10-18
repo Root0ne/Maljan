@@ -275,7 +275,12 @@ def stopped_efficiency(state: dict[str, Any], container: Any) -> dict[str, Any] 
     from maljan.analysis.disclosure import STOPPED_PART_WAY
     from maljan.analysis.efficiency import efficiency_record
 
-    return efficiency_record(container, partial_reason=STOPPED_PART_WAY)
+    return efficiency_record(
+        container,
+        entries=state.get("evidence_ledger") or [],
+        isr_reports=state.get("isr_reports") or {},
+        partial_reason=STOPPED_PART_WAY,
+    )
 
 
 def stopped_disclosure(

@@ -294,7 +294,8 @@ def _efficiency() -> dict[str, Any]:
 
     One tool loop turn of the static analyst, measured as the loop's hook
     measures it, closed with the usage its provider reported, and one single
-    call; the token ledger holds the calls.
+    call; the token ledger holds the calls. Over the ledger above, a claim
+    cites the first entry and none the second.
     """
     from types import SimpleNamespace
 
@@ -320,7 +321,14 @@ def _efficiency() -> dict[str, Any]:
     ledger.add({"input_tokens": 40, "output_tokens": 5}, agent="static", model="openai/qwen")
     ledger.add({"input_tokens": 12, "output_tokens": 3}, agent="static", model="openai/qwen")
     container = SimpleNamespace(input_meter=meter, get_token_ledger=lambda: ledger)
-    record = efficiency_record(container)
+    from maljan.schemas.isr_models import AgentISR, ClaimEvidence
+
+    cites = ClaimEvidence(claim="imports", evidence_ref="pe_info [ev_0001]", confidence=0.8)
+    record = efficiency_record(
+        container,
+        entries=_ledger(),
+        isr_reports={"static": AgentISR(agent_id="static", domain="static", claims=[cites])},
+    )
     assert record is not None
     return record
 
@@ -391,6 +399,8 @@ DATA_KEYED = frozenset(
         "disclosure.enrichment.asked[].kinds",
         # Keyed by the agent that made the calls.
         "efficiency.inputs.calls",
+        "efficiency.uncited.by_agent",
+        "efficiency.uncited.by_tool",
     }
 )
 

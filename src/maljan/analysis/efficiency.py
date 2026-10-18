@@ -14,11 +14,17 @@ parts of :data:`core.input_meter.PARTS` in **characters**, with the input
 tokens the provider reported for the same requests beside them where it
 reported any. ``calls`` is each agent's model calls in the token ledger, so an
 agent whose calls the meter did not measure is named rather than left out.
+
+``uncited`` is the evidence no claim cites: of the ledger entries whose tool
+ran (a repeat and a guard's answer are not evidence of their own), those whose
+id no analyst's final claim names, in its text or its evidence field. A cited
+repeat counts for the entry that holds its answer.
 """
 
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
+from types import SimpleNamespace
 from typing import Any
 
 from maljan.core.input_meter import PARTS, TOOL_LOOP
@@ -81,21 +87,96 @@ def inputs_record(container: Any) -> dict[str, Any] | None:
     return {"unit": "characters", "loops": rows, "calls": _ledger_calls(container)}
 
 
+def _field(entry: Any, name: str) -> Any:
+    """One field of a ledger entry, a model or the dict a state channel holds."""
+    if isinstance(entry, Mapping):
+        return entry.get(name)
+    return getattr(entry, name, None)
+
+
+def _entry_id(entry: Any) -> str:
+    return str(_field(entry, "id") or "").strip().lower()
+
+
+def _ran(entry: Any) -> bool:
+    """Whether the entry's tool ran: neither a repeat of another entry nor a guard's answer."""
+    return bool(_entry_id(entry)) and not str(_field(entry, "repeated_of") or "").strip()
+
+
+def _holders(entries: Sequence[Any]) -> dict[str, str]:
+    """Each repeat's id, lower-cased, mapped to the id of the entry holding its answer."""
+    from maljan.schemas.evidence import repeat_holders
+
+    rows = [SimpleNamespace(id=_entry_id(e), repeated_of=_field(e, "repeated_of")) for e in entries]
+    return repeat_holders(rows)
+
+
+def _claims_of(report: Any) -> list[Any]:
+    claims = _field(report, "claims")
+    return list(claims) if isinstance(claims, list | tuple) else []
+
+
+def cited_ids(isr_reports: Mapping[str, Any] | None) -> set[str]:
+    """Every entry id an analyst's final claim names, in its text or its evidence field."""
+    from maljan.schemas.evidence import entry_ids_in
+
+    cited: set[str] = set()
+    for report in (isr_reports or {}).values():
+        for claim in _claims_of(report):
+            text = f"{_field(claim, 'claim') or ''} {_field(claim, 'evidence_ref') or ''}"
+            cited |= entry_ids_in(text)
+    return cited
+
+
+def uncited_record(
+    entries: Sequence[Any], isr_reports: Mapping[str, Any] | None
+) -> dict[str, Any] | None:
+    """``efficiency.uncited``: the entries that ran and no claim cites, or ``None`` for none ran."""
+    ran = [e for e in entries if _ran(e)]
+    if not ran:
+        return None
+    holders = _holders(entries)
+    cited = {holders.get(found) or found for found in cited_ids(isr_reports)}
+    uncited = [e for e in ran if _entry_id(e) not in cited]
+    by_agent: dict[str, int] = {}
+    by_tool: dict[str, int] = {}
+    for entry in uncited:
+        agent = str(_field(entry, "agent") or "") or "pipeline"
+        tool = str(_field(entry, "tool") or "")
+        by_agent[agent] = by_agent.get(agent, 0) + 1
+        by_tool[tool] = by_tool.get(tool, 0) + 1
+    return {
+        "entries": len(ran),
+        "cited": len(ran) - len(uncited),
+        "uncited": len(uncited),
+        "by_agent": dict(sorted(by_agent.items())),
+        "by_tool": dict(sorted(by_tool.items())),
+        "ids": [_entry_id(e) for e in uncited],
+    }
+
+
 def efficiency_record(
     container: Any,
     *,
+    entries: Sequence[Any] = (),
+    isr_reports: Mapping[str, Any] | None = None,
     partial_reason: str = "",
 ) -> dict[str, Any] | None:
     """``run_summary.efficiency`` as of now, or ``None`` when the run holds nothing to count.
 
-    ``partial_reason`` says why the record may miss what the step the run
-    stopped in did. Never raises.
+    ``entries`` is the run's evidence ledger, in order; ``isr_reports`` the
+    analysts' final answers. ``partial_reason`` says why the record may miss
+    what the step the run stopped in did. Never raises.
     """
     try:
         record: dict[str, Any] = {"v": EFFICIENCY_VERSION}
         inputs = inputs_record(container)
         if inputs is not None:
             record["inputs"] = inputs
+        held = list(entries or ())
+        uncited = uncited_record(held, isr_reports)
+        if uncited is not None:
+            record["uncited"] = uncited
         if len(record) == 1:
             return None
         if partial_reason:
@@ -195,4 +276,31 @@ def efficiency_lines(record: Any) -> list[str]:
     inputs = record.get("inputs")
     if isinstance(inputs, Mapping):
         lines.extend(_input_lines(inputs))
+    uncited = record.get("uncited")
+    if isinstance(uncited, Mapping):
+        lines.append(_uncited_line(uncited))
     return lines
+
+
+def _named_counts(counts: Any) -> str:
+    """``{name: n}`` as "`a` 3, `b` 1", largest first; "" for none."""
+    if not isinstance(counts, Mapping):
+        return ""
+    rows = sorted(((str(k), _int(v)) for k, v in counts.items()), key=lambda kv: (-kv[1], kv[0]))
+    return ", ".join(f"`{name}` {n:,}" for name, n in rows if n)
+
+
+def _uncited_line(uncited: Mapping[str, Any]) -> str:
+    entries, none = _int(uncited.get("entries")), _int(uncited.get("uncited"))
+    held = _count(entries, "ledger entry", "ledger entries")
+    line = (
+        f"Evidence no claim cites: {none:,} of the {held} whose tool ran are cited by no "
+        "analyst's final claim"
+    )
+    by_agent, by_tool = (
+        _named_counts(uncited.get("by_agent")),
+        _named_counts(uncited.get("by_tool")),
+    )
+    if none and by_agent:
+        line += f" (by agent: {by_agent}; by tool: {by_tool})"
+    return line + "."
