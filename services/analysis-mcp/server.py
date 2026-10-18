@@ -30,6 +30,13 @@ from typing import Any
 
 from mcp.server.fastmcp import FastMCP
 
+from maljan.core.stdio_safe import route_logging_to_stderr
+
+# Only when run as the stdio server: a test or tool that imports this module
+# in-process keeps its own logging.
+if __name__ == "__main__":
+    route_logging_to_stderr()
+
 from maljan.core.ctype_locale import pin_character_classification, say_on_stderr
 from maljan.core.paths import resolve_data
 from maljan.tools import (

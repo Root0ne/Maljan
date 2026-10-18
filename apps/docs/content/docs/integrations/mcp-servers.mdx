@@ -21,7 +21,9 @@ The transport decides, not the manifest: a stdio sidecar is never uploaded to,
 because it can already open the file.
 
 A stdio server's stdout carries protocol messages only; its logs, banners and
-progress output belong on stderr. A UTF-8 text line on stdout that is not a
+progress output belong on stderr. Maljan's own sidecars route the root
+handler and the `maljan` logger to stderr first of all (`core.stdio_safe`), so
+none of their log lines reaches stdout. A UTF-8 text line on stdout that is not a
 protocol message (a log line, a JSON log record, a dependency's download
 progress bar) does not break the connection: the client leaves it out, warns at
 the first such line of each connection and states the count when the

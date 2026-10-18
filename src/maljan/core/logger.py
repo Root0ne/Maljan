@@ -1,6 +1,8 @@
 import logging
 import sys
 
+from maljan.core.stdio_safe import is_routed
+
 # The handler this module installs, by name, so it can be told apart from one
 # a host added and taken away again when somebody else starts formatting.
 _OWN_HANDLER = "maljan.default"
@@ -20,7 +22,9 @@ def setup_logger(name: str = "maljan", level: int = logging.INFO) -> logging.Log
     # Called once, at this module's import. Calling it again after a host has
     # run ``hand_over_to_root`` would put the second writer back and restore
     # the duplicate line it exists to remove.
-    if not logger.handlers:
+    if is_routed():
+        logger.setLevel(level)
+    elif not logger.handlers:
         logger.setLevel(level)
 
         # Create console handler with a clean format

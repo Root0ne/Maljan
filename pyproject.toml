@@ -148,6 +148,8 @@ ignore = []
 [tool.ruff.lint.per-file-ignores]
 # Agent files contain LLM prompt strings that are intentionally long
 "src/maljan/agents/*.py" = ["E501"]
+# A sidecar routes logging to stderr before the imports that can log
+"services/*/server.py" = ["E402"]
 # FastAPI dependency injection and query params are standard patterns
 # (configured in apps/api/pyproject.toml because that sub-package has its own Ruff config)
 
