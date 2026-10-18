@@ -31,7 +31,9 @@ site are followed. Places are named `module:function`, without line numbers, so
 an edit elsewhere in a file leaves this page as it is. A class or factory whose
 code slots only ever receive strings of another shape files another kind of code
 (a team rule, a tool error); its slots the register cannot follow are left out
-of the unresolved list.
+of the unresolved list. A code-shaped string in a pair is listed only when its
+family is already a code family, so a code first written only as a pair literal
+in a new family is not seen; bind it to a `_CODE` name.
 
 A code's meaning is the comment or docstring on its own constant; where there is
 none, the message a raise site passes, with each value it fills in written
