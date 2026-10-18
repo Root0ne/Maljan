@@ -516,6 +516,9 @@ async def delete_sample(
     await db.flush()
 
     if job_ids:
+        # Committed first: objects are removed only once no row can name them,
+        # so a delete that rolls back never leaves a ledger pointing at nothing.
+        await db.commit()
         client = _minio_client()
         for job_id in job_ids:
             prefix = object_store.evidence_prefix(job_id)
@@ -526,8 +529,8 @@ async def delete_sample(
                     "Sample %s row deleted but the evidence objects under %s could not be "
                     "removed: %s",
                     log_safe(sample_id),
-                    prefix,
-                    exc,
+                    log_safe(prefix),
+                    log_safe(f"{type(exc).__name__}: {exc}"),
                     extra={"user_id": str(user.id), "component": "minio"},
                 )
 

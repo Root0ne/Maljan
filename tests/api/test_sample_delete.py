@@ -76,6 +76,7 @@ def test_deleting_a_sample_also_removes_its_sandbox_report_objects(monkeypatch):
     )
     db.delete = AsyncMock()
     db.flush = AsyncMock()
+    db.commit = AsyncMock()
 
     minio = MagicMock()
     monkeypatch.setattr(module, "_minio_client", lambda: minio)
@@ -131,6 +132,7 @@ def test_deleting_a_sample_with_no_sandbox_reports_touches_storage_once(monkeypa
     )
     db.delete = AsyncMock()
     db.flush = AsyncMock()
+    db.commit = AsyncMock()
 
     minio = MagicMock()
     monkeypatch.setattr(module, "_minio_client", lambda: minio)
@@ -187,6 +189,7 @@ def test_a_local_cleanup_that_fails_does_not_fail_the_delete(monkeypatch):
     )
     db.delete = AsyncMock()
     db.flush = AsyncMock()
+    db.commit = AsyncMock()
 
     minio = MagicMock()
     monkeypatch.setattr(module, "_minio_client", lambda: minio)
@@ -243,6 +246,7 @@ def test_deleting_a_sample_removes_every_job_s_evidence_objects(monkeypatch):
     )
     db.delete = AsyncMock()
     db.flush = AsyncMock()
+    db.commit = AsyncMock()
     minio = MagicMock()
     monkeypatch.setattr(module, "_minio_client", lambda: minio)
     asked: list[str] = []
@@ -253,7 +257,11 @@ def test_deleting_a_sample_removes_every_job_s_evidence_objects(monkeypatch):
             raise OSError("the store is down")
         return 2
 
-    monkeypatch.setattr(object_store, "remove_prefix", removing)
+    def removing_after_the_commit(store, prefix):
+        assert db.commit.await_count == 1, "objects go only once no row can name them"
+        return removing(store, prefix)
+
+    monkeypatch.setattr(object_store, "remove_prefix", removing_after_the_commit)
 
     r = _client(db, user).delete(f"/api/v1/samples/{sample.id}")
 
