@@ -71,7 +71,7 @@ REPORT_LABEL = "the report step"
 _ORDER = {IN_PROCESS: 0, CHILD: 1, LOCAL_SERVICE: 2, REMOTE_SERVICE: 3, UNPLACED: 4}
 
 # The namespaces compared with the worker's: its process table, its network
-# and its view of the filesystem.
+# and its mount namespace.
 _NAMESPACES = {"pid": "own_pid_namespace", "net": "own_net_namespace", "mnt": "own_mount_namespace"}
 
 # The measured fields of a process, in the order a row stores them.
@@ -785,9 +785,9 @@ def _child_line(row: Mapping[str, Any], code: Callable[[str], str]) -> str:
         ),
         _yes_no(
             row.get("own_mount_namespace"),
-            "a view of the filesystem of its own",
-            "the worker's view of the filesystem",
-            "its view of the filesystem could not be compared",
+            "a mount namespace of its own",
+            "the worker's mount namespace",
+            "its mount namespace could not be compared",
         ),
         _yes_no(
             row.get("own_net_namespace"),

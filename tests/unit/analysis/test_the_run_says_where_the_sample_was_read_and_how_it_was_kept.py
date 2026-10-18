@@ -265,6 +265,21 @@ def test_each_capability_set_is_read_and_one_that_cannot_be_read_is_absent(
     assert measure_process(4242, [])[field] is None
 
 
+@pytest.mark.parametrize(
+    "value, said",
+    [
+        (True, "a mount namespace of its own"),
+        (False, "the worker's mount namespace"),
+        (None, "its mount namespace could not be compared"),
+    ],
+)
+def test_the_mount_check_is_said_as_the_namespace_it_compares(value: Any, said: str) -> None:
+    note = {"where": CHILD, **KEPT, "own_mount_namespace": value}
+    line = isolation_lines(_part(STDIO, [_reads()], {"mcp:analysis": [note]}))[2]
+    assert f"; {said};" in line
+    assert "view of the filesystem" not in line
+
+
 @pytest.mark.skipif(not Path("/proc/self/status").exists(), reason="no procfs")
 def test_a_launcher_is_measured_with_the_server_it_started_under_it() -> None:
     launcher = subprocess.Popen(
@@ -580,7 +595,7 @@ def test_the_report_prints_the_part_inside_the_disclosure_block() -> None:
         "- Tool server `analysis` (stdio, run on this machine) read the sample. The process the "
         "worker started for it was measured at its start: it ran as user 1000 (one of its real, "
         "effective, saved or filesystem user ids is the worker's); in a group of the worker's; "
-        "sharing the worker's process table; the worker's view of the filesystem; the worker's "
+        "sharing the worker's process table; the worker's mount namespace; the worker's "
         "network; no effective, permitted or ambient capabilities; no bar on gaining "
         "privileges; its environment held none of the platform's own variables. It had no "
         "descendant process when it was measured. So: not isolated."

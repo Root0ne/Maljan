@@ -233,7 +233,7 @@ never from a tool's name:
 - **A tool server started over stdio.** The worker measures the process it
   started, once the server has initialised and before its first tool call:
   - its user, and whether that is the worker's own;
-  - whether it has its own process table, network and view of the filesystem;
+  - whether it has its own process table, network and mount namespace;
   - whether it holds any effective capability;
   - whether it can gain privileges;
   - which of the platform's own variables its environment held, read off the
