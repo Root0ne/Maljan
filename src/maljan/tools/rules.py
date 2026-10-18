@@ -359,14 +359,23 @@ def capa(
     backend: str = "auto",
     rules_dir: str = DEFAULT_CAPA_RULES,
     signatures_dir: str = DEFAULT_CAPA_SIGNATURES,
+    scratch: str | Path | None = None,
 ) -> dict[str, Any]:
     """The capabilities capa finds, each with its ATT&CK and MBC metadata.
 
-    capa runs in a spawned subprocess with the caller's budget, exactly as the
-    provider runs it (``None``, the default, is no wall clock of its own):
-    vivisect's disassembly loop has no cancellation point, so a thread-based
-    timeout can report an overrun while the work keeps running.
-    A child process can actually be killed, and on expiry this one is.
+    capa runs in a child process of its own with the caller's budget, exactly
+    as the provider runs it (``capa_yara.run_capa_document``; ``None``, the
+    default, is no wall clock of its own): vivisect's disassembly loop has no
+    cancellation point, so a thread-based timeout can report an overrun while
+    the work keeps running. A child process can actually be killed, and on
+    expiry this one is. It gets none of this process's environment.
+    ``scratch`` is the directory the run's own directory goes in, which the
+    triage pack opens in its job's staging directory; the sidecar passes none
+    and joins its own job directory.
+
+    ``library_functions`` names the functions capa's signatures identified as
+    library code, or says why none were looked for (``capa_library_functions``);
+    an empty ``signatures_dir`` runs without library identification.
     """
     target = Path(path)
     if not target.is_file():
@@ -375,15 +384,20 @@ def capa(
     if not rules.is_dir() or not any(rules.rglob("*.yml")):
         return {"error": f"capa rules directory {rules} is missing or empty", "tool": "capa"}
 
-    from maljan.providers.static.capa_yara import _BACKEND_NAMES, run_capa_document
+    from maljan.providers.static.capa_yara import (
+        _BACKEND_NAMES,
+        run_capa_document,
+        signatures_argument,
+    )
 
     backend_name = _BACKEND_NAMES.get(backend, "BACKEND_VIV")
     document = run_capa_document(
         sample_path=str(target),
         rules_dir=str(rules),
-        signatures_dir=str(resolve_data(signatures_dir)),
+        signatures_dir=signatures_argument(signatures_dir),
         backend_name=backend_name,
         timeout_seconds=None if timeout_s is None else max(1, int(timeout_s)),
+        scratch=scratch,
     )
     if document is None:
         return {
@@ -397,6 +411,7 @@ def capa(
         "capabilities": _capa_capabilities(document),
         "meta": _capa_meta(document),
         "function_starts": capa_function_starts(document),
+        "library_functions": capa_library_functions(document),
     }
 
 
@@ -438,12 +453,16 @@ def _capa_capabilities(document: dict[str, Any]) -> list[dict[str, Any]]:
 
 
 def capa_function_starts(document: dict[str, Any]) -> list[str]:
-    """Every function capa found, as the offset of its start from the image base.
+    """The start of every function capa analysed or identified as library code.
 
     Read from the document's feature counts, which list each function capa
-    analysed with its address. Only addresses inside the image are kept, and
-    only when capa names the base, so each is the number a disassembler agrees
-    with; the list says where functions start, not where they end.
+    matched rules in, and then from its library functions: a function capa's
+    signatures identify as library code is matched against no rule and left
+    out of the counts, and without its start the function before it would
+    seem to run on over it. Each start is its offset from the image base, kept
+    only when it is inside the image and capa names the base, so it is the
+    number a disassembler agrees with; the list says where functions start,
+    not where they end, in address order.
     """
     base = _capa_base_address(document)
     if base is None:
@@ -451,12 +470,52 @@ def capa_function_starts(document: dict[str, Any]) -> list[str]:
     analysis = (document.get("meta") or {}).get("analysis") or {}
     counts = analysis.get("feature_counts") or {}
     starts: list[str] = []
-    for row in counts.get("functions") or []:
+    seen: set[str] = set()
+    for row in [*(counts.get("functions") or []), *(analysis.get("library_functions") or [])]:
         address = row.get("address") if isinstance(row, dict) else None
         where = _capa_address(address, base)
-        if where and where.startswith("0x") and where not in starts:
+        if where and where.startswith("0x") and where not in seen:
+            seen.add(where)
             starts.append(where)
-    return starts
+    return sorted(starts, key=lambda start: int(start, 16))
+
+
+# What a library function's address says when capa's address for it is not a
+# place in the image (a .NET token, no address at all), as the model reads it.
+LIBRARY_FUNCTION_NOT_IN_IMAGE = "no: not a place in the image"
+
+
+def capa_library_functions(document: dict[str, Any]) -> list[dict[str, str]] | str:
+    """The functions capa's signatures identified as library code, or why none were looked for.
+
+    Each is its start (as ``capa_function_starts`` gives it) and the name its
+    signature gives it, so a reader can leave runtime and library code unread.
+    An empty list means capa looked and found none. When it did not look (no
+    signature directory, or capa loads no signatures for this format and
+    backend), the reason stands in place of the list, so its absence is never
+    read as "none".
+    """
+    from maljan.providers.static.capa_child import LIBRARY_FUNCTIONS_UNSTATED, NOT_IDENTIFIED_KEY
+
+    if NOT_IDENTIFIED_KEY not in document:
+        return LIBRARY_FUNCTIONS_UNSTATED
+    not_identified = document[NOT_IDENTIFIED_KEY]
+    if not_identified is not None:
+        return str(not_identified)
+    base = _capa_base_address(document)
+    analysis = (document.get("meta") or {}).get("analysis") or {}
+    found: list[dict[str, str]] = []
+    for row in analysis.get("library_functions") or []:
+        if not isinstance(row, dict):
+            continue
+        where = _capa_address(row.get("address"), base)
+        found.append(
+            {
+                "address": where or LIBRARY_FUNCTION_NOT_IN_IMAGE,
+                "name": str(row.get("name") or ""),
+            }
+        )
+    return found
 
 
 def _capa_base_address(document: dict[str, Any]) -> int | None:

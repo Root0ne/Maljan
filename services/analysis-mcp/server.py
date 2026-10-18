@@ -165,11 +165,6 @@ def _too_long_to_decode(encoded: str, limit: int) -> bool:
     return (len(encoded) // 4) * 3 > limit
 
 
-# How long a staged sample is kept. Every ``put_sample*`` call prunes, so a
-# long-lived server does not accumulate malware bytes without bound.
-_DEFAULT_STAGING_TTL_HOURS = 24.0
-
-
 # What a model writes when it means "I am not passing this one". A local model
 # asked for an optional filter it does not want fills the field in rather than
 # omitting it, and these are the two words it writes. Read as the absence they
@@ -1339,13 +1334,12 @@ def transform_bytes(
 
 
 def _staging_ttl_seconds() -> float:
-    """``MALJAN_STAGING_TTL_HOURS``, or a day. Zero or less disables pruning."""
-    raw = os.environ.get(staging.STAGING_TTL_ENV, "").strip()
-    try:
-        hours = float(raw) if raw else _DEFAULT_STAGING_TTL_HOURS
-    except ValueError:
-        hours = _DEFAULT_STAGING_TTL_HOURS
-    return hours * 3600.0
+    """``MALJAN_STAGING_TTL_HOURS``, or a day (``staging.staging_ttl_seconds``).
+
+    How long a staged sample is kept. Every ``put_sample*`` call prunes, so a
+    long-lived server does not accumulate malware bytes without bound.
+    """
+    return staging.staging_ttl_seconds()
 
 
 def _staging_base() -> Path:
@@ -1463,23 +1457,7 @@ def _prune_legacy_captures(cutoff: float) -> int:
     return removed
 
 
-def _newest_mtime(root: Path) -> float:
-    """The most recent mtime in this tree, the directory itself included.
-
-    Read with ``lstat`` throughout: a symlink's own timestamp is what counts,
-    never the timestamp of whatever it points at, which may be a file somebody
-    else is still writing.
-    """
-    try:
-        newest = root.lstat().st_mtime
-    except OSError:
-        return 0.0
-    for entry in root.rglob("*"):
-        try:
-            newest = max(newest, entry.lstat().st_mtime)
-        except OSError:  # an entry another call removed while this walked
-            continue
-    return newest
+_newest_mtime = staging.newest_mtime
 
 
 def _prune_job_directory(directory: Path, cutoff: float) -> int:

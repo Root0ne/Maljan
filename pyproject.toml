@@ -45,6 +45,9 @@ dependencies = [
     # extra: sandbox.provider=rest must work on a plain `uv sync`.
     "jsonpath-rfc9535>=1.0.0",
     "pyelftools>=0.32",
+    # The XML reader of an OOXML document's relationship parts: expat, with a
+    # document type, an entity declaration and an external reference refused.
+    "defusedxml>=0.7.1",
     # Report export (Phase 6). markdown-it-py converts the MarkdownRenderer
     # output to HTML with raw-HTML passthrough disabled — the XSS guard for
     # LLM/malware-derived report text. weasyprint prints that HTML to PDF; it

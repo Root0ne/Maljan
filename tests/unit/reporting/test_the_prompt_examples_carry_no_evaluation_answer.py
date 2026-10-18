@@ -235,6 +235,7 @@ from maljan.providers.base import (
 )
 from maljan.providers.sandbox.cape2 import CAPE2SandboxProvider
 from maljan.providers.sandbox.mock import MockSandboxProvider
+from maljan.providers.static import capa_child as _capa_child
 from maljan.providers.static import r2 as _r2
 from maljan.providers.static.ghidra import (
     GHIDRA_GUIDANCE,
@@ -322,6 +323,7 @@ from maljan.schemas.isr_models import (
 from maljan.schemas.sandbox_report import SECTION_IDS
 from maljan.schemas.stix_models import Bundle
 from maljan.tools import api_hashes, artefact_index, binary, knowledge, string_blobs
+from maljan.tools import rules as _capa_rules
 from maljan.tools.errors import CAPTURES_REMEDIATION, NO_CAPTURE_REMEDIATION
 
 # Every no: sentence a root reading writes, and the names of the roots.
@@ -2040,6 +2042,26 @@ PROMPTS: dict[str, str] = {
             binary.DEX_FILE_UNREAD.format(number=2),
             binary.APK_STILL_ANSWERED,
             binary.apk_unread_note(["package", "permissions"], binary.MANIFEST_UNPARSED),
+        ]
+    ),
+    "the OOXML tool's reasons for a relationship part it did not read": " ".join(
+        [
+            binary.RELATIONSHIP_PART_DOCUMENT_TYPE,
+            binary.RELATIONSHIP_PART_EXTERNAL_ENTITY,
+            binary.RELATIONSHIP_PART_NOT_XML.format(error="syntax error", line=1),
+            binary.RELATIONSHIP_MEMBER_UNREAD.format(error="BadZipFile: Bad CRC-32"),
+            binary.RELATIONSHIP_PART_OVER_CAP.format(size=2, left=1, cap=1),
+            binary.RELATIONSHIP_PART_PAST_CAP.format(left=1, cap=1),
+            binary.RELATIONSHIP_PART_AFTER_CAP.format(cap=1),
+        ]
+    ),
+    "the capa answer's reasons for library functions it did not look for": " ".join(
+        [
+            _capa_child.LIBRARY_FUNCTIONS_NO_DIRECTORY,
+            _capa_child.LIBRARY_FUNCTIONS_NOT_FOR_FORMAT,
+            _capa_child.LIBRARY_FUNCTIONS_NO_FILES,
+            _capa_child.LIBRARY_FUNCTIONS_UNSTATED,
+            _capa_rules.LIBRARY_FUNCTION_NOT_IN_IMAGE,
         ]
     ),
     "the stated candidate scan and readability test": (

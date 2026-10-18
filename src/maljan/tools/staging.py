@@ -52,6 +52,8 @@ from pathlib import Path
 STAGING_DIR_ENV = "MALJAN_STAGING_DIR"
 STAGING_JOB_ENV = "MALJAN_STAGING_JOB"
 STAGING_TTL_ENV = "MALJAN_STAGING_TTL_HOURS"
+# How long a staged file is kept when ``MALJAN_STAGING_TTL_HOURS`` is unset.
+DEFAULT_STAGING_TTL_HOURS = 24.0
 
 # The base a sidecar uses when nothing configured one. Shared rather than
 # written out in each server, because the remover has to reach the same
@@ -76,6 +78,12 @@ CAPTURES_DIRECTORY = "captures"
 # ``unpack_upx``, and the triage pack's unpacking, write there, and the
 # server's ``carved_path`` reads only there.
 CARVED_DIRECTORY = "carved"
+
+# The child of a job directory each capa run has a directory of its own in,
+# its home, temporary and working directory, removed when the run ends: the
+# triage pack's step and the capa_yara provider open it in the worker, and an
+# analysis server started for the job joins it to its own job directory.
+CAPA_DIRECTORY = "capa"
 
 # Where the release before this fetched captures. Written by nothing now; the
 # sweep still reaches it, because it is this project's directory and what is
@@ -275,6 +283,40 @@ def open_job_directory(job_id: str, child: str, environ: Mapping[str, str] | Non
         private_dir(directory)
     note_job_directory(job_id, job_dir)
     return target
+
+
+def staging_ttl_seconds(environ: Mapping[str, str] | None = None) -> float:
+    """``MALJAN_STAGING_TTL_HOURS``, or a day. Zero or less disables pruning.
+
+    One reading for every sweep: the analysis server's of its staging base,
+    and a capa run's of the temporary directories runs with no job left.
+    """
+    source = os.environ if environ is None else environ
+    raw = str(source.get(STAGING_TTL_ENV, "")).strip()
+    try:
+        hours = float(raw) if raw else DEFAULT_STAGING_TTL_HOURS
+    except ValueError:
+        hours = DEFAULT_STAGING_TTL_HOURS
+    return hours * 3600.0
+
+
+def newest_mtime(root: Path) -> float:
+    """The most recent mtime in this tree, the directory itself included.
+
+    Read with ``lstat`` throughout: a symlink's own timestamp is what counts,
+    never the timestamp of whatever it points at, which may be a file somebody
+    else is still writing.
+    """
+    try:
+        newest = root.lstat().st_mtime
+    except OSError:
+        return 0.0
+    for entry in root.rglob("*"):
+        try:
+            newest = max(newest, entry.lstat().st_mtime)
+        except OSError:  # an entry another call removed while this walked
+            continue
+    return newest
 
 
 def staging_root(environ: Mapping[str, str] | None = None) -> Path:

@@ -20,6 +20,7 @@ memory of the pack's process tree 1,600 MB → 2,291 MB.
 
 from __future__ import annotations
 
+import sys
 import time
 from pathlib import Path
 from typing import Any
@@ -29,7 +30,7 @@ import pytest
 from maljan.pipeline import triage_pack
 from maljan.pipeline.triage_pack import DECLARED, MEASURED, cgroup_headroom_bytes, room_beside
 from maljan.providers.static import capa_yara
-from maljan.tools import emulated_strings, rules
+from maljan.tools import emulated_strings, rules, staging
 from tests.unit.pipeline.test_decoded_strings_in_the_pack import (
     ROWS,
     _answer,
@@ -177,10 +178,11 @@ class TestCapaSPeakIsMeasured:
 
         assert capa_yara.measured_capa_peak_bytes() == 3 * GIB
 
-    def test_the_child_s_peak_is_read_before_its_answer(
+    def test_the_child_s_peak_is_read_as_it_is_reaped(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         monkeypatch.setattr(capa_yara, "_CAPA_PEAK_BYTES", None)
+        monkeypatch.setenv(staging.STAGING_DIR_ENV, str(tmp_path / "staging"))
         sample = tmp_path / "s.bin"
         sample.write_bytes(b"MZ")
 
@@ -190,17 +192,23 @@ class TestCapaSPeakIsMeasured:
             signatures_dir=str(tmp_path),
             backend_name="BACKEND_VIV",
             timeout_seconds=60,
-            target=_peak_then_answer,
+            child=[sys.executable, "-c", _HOLD_THEN_ANSWER],
         )
 
         assert document == {"rules": {}}
-        assert capa_yara.measured_capa_peak_bytes() == 1234 * MIB
+        peak = capa_yara.measured_capa_peak_bytes()
+        assert peak is not None and peak >= 64 * MIB
 
 
-def _peak_then_answer(sample_path, rules_dir, signatures_dir, backend_name, queue):  # type: ignore[no-untyped-def]
-    """Module-level so the spawn start method can import it in the child."""
-    queue.put(("peak", 1234 * 1024 * 1024))
-    queue.put(("ok", {"rules": {}}))
+# A child that holds 64 MiB, touched page by page, then answers: the kernel's
+# own count of its peak is what the parent reads when it reaps it.
+_HOLD_THEN_ANSWER = (
+    "import json, sys\n"
+    "held = bytearray(64 * 1024 * 1024)\n"
+    "for at in range(0, len(held), 4096):\n"
+    "    held[at] = 1\n"
+    "open(sys.argv[-1], 'w').write(json.dumps({'ok': {'rules': {}}}))\n"
+)
 
 
 @pytest.mark.usefixtures("_slow_tools")

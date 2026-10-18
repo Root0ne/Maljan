@@ -78,6 +78,10 @@ else
     || git clone --quiet --depth 1 "$SIGMA_URL" "$SIGMA_DEST"
 fi
 
+# capa's rules and its library signatures, at the capa version uv.lock pins,
+# where the settings point by default and the compose stack mounts them.
+bash "$REPO_ROOT/scripts/dev/fetch_capa_data.sh"
+
 echo
-echo "external/ and data/sigma_rules are ignored by git."
+echo "external/, data/sigma_rules, data/capa-rules and data/capa-signatures are ignored by git."
 echo "Re-run this after a fresh clone."

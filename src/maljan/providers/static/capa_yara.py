@@ -13,34 +13,30 @@ Both libraries are optional. A missing one lowers ``provides_evidence`` to
 False with one warning — the same shape as ``SandboxNotAvailableError`` —
 rather than failing a job over an integration the operator may not want.
 
-capa API surface pinned against flare-capa 9.4.0 (the version installed in
-this environment via ``uv sync --extra capa``); a few names moved since the
-7.x line this module was originally sketched against:
-
-- ``capa.rules.get_rules`` (not ``capa.loader.get_rules``).
-- ``capa.rules.cache`` must be imported explicitly — ``capa.rules.get_rules``
-  references ``capa.rules.cache.get_default_cache_directory()`` at call time
-  without importing the submodule itself, so a bare ``import capa.rules``
-  leaves that attribute missing and every call raises ``AttributeError``.
-- ``capa.loader.get_extractor`` takes an explicit ``input_format`` (there is
-  no ``FORMAT_AUTO``-does-everything shortcut inside it for the vivisect
-  backend); the format is detected up front with ``capa.helpers.get_auto_format``.
-- ``capa.loader`` has no ``BACKEND_MAP``; the per-backend constants
-  (``BACKEND_VIV`` / ``BACKEND_PEFILE`` / ``BACKEND_BINJA``) are looked up by
-  name in this module instead.
-- ``capa.render.result_document.ResultDocument.from_capa`` takes the
-  ``Capabilities.matches`` mapping, not the ``Capabilities`` object itself
-  (``collect_metadata`` takes the whole object).
+The capa pass itself runs in a child process of its own (``capa_child``, which
+holds the capa API notes), started with an environment built here rather than
+the worker's: ``run_capa_document`` is the one place a capa run is started,
+for this provider, the triage pack and the analysis server's ``capa`` tool.
 """
 
 from __future__ import annotations
 
-import multiprocessing as mp
+import contextlib
+import json
+import os
+import shutil
+import signal
+import stat
+import subprocess
+import sys
+import tempfile
 import threading
 import time
+from collections.abc import Sequence
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Protocol
+from typing import TYPE_CHECKING, Any
 
+from maljan.agents.subprocess_env import child_env
 from maljan.core.logger import logger
 from maljan.core.paths import resolve_data
 from maljan.providers.base import (
@@ -54,94 +50,37 @@ from maljan.providers.base import (
     evidence_entries,
 )
 from maljan.providers.registry import register_static_provider
+from maljan.providers.static import capa_child
+from maljan.tools import staging
 
 if TYPE_CHECKING:
     from maljan.core.config import Settings, StaticCapaConfig, StaticYaraConfig
 
-# capa backend name -> capa.loader constant, resolved lazily so importing this
-# module never requires capa to be installed.
+# capa backend name -> capa.loader constant, resolved in the capa child so
+# importing this module never requires capa to be installed. ``auto`` names no
+# constant: the child resolves it from the format capa detects.
 _BACKEND_NAMES: dict[str, str] = {
-    "auto": "BACKEND_VIV",
+    "auto": capa_child.AUTO_BACKEND,
     "vivisect": "BACKEND_VIV",
     "pefile": "BACKEND_PEFILE",
     "binja": "BACKEND_BINJA",
 }
+
+
+def signatures_argument(signatures_dir: str) -> str:
+    """The signature directory a capa run is handed: the setting resolved, or empty when it is.
+
+    An empty setting stays empty rather than resolving to the project root,
+    which every file under the project would then be searched for signatures in.
+    """
+    return str(resolve_data(signatures_dir)) if str(signatures_dir or "").strip() else ""
+
 
 # A fired capa rule's technique hit carries no confidence. capa says the
 # rule's pattern is present — an instruction sequence, a string, an API call in
 # the right context — which is a presence and not a probability; the 0.70 each
 # hit used to carry was this platform's number, read by the analysts as if capa
 # had stated it.
-
-
-class _CapaWorker(Protocol):
-    """Shape of the picklable, module-level function run in the capa subprocess."""
-
-    def __call__(
-        self,
-        sample_path: str,
-        rules_dir: str,
-        signatures_dir: str,
-        backend_name: str,
-        queue: Any,
-    ) -> None: ...
-
-
-def _capa_worker(
-    sample_path: str,
-    rules_dir: str,
-    signatures_dir: str,
-    backend_name: str,
-    queue: Any,
-) -> None:
-    """Run one capa pass to completion and put the result on ``queue``.
-
-    Runs in a ``multiprocessing.get_context("spawn")`` child, so it must be
-    module-level (picklable by reference) and its imports must be local to
-    itself: the spawn start method re-imports this module in the child
-    process, and every import this function makes is one the child actually
-    pays for. Only capa and the stdlib are imported here — never the FastAPI
-    app, never ``Settings`` — so a capa run never drags the rest of the
-    worker's dependency graph into a process whose only job is to run capa
-    and exit (or be killed).
-    """
-    try:
-        import capa.capabilities.common as capa_capabilities
-        import capa.helpers as capa_helpers
-        import capa.loader as capa_loader
-        import capa.render.result_document as capa_rd
-        import capa.rules as capa_rules
-        import capa.rules.cache  # noqa: F401 - get_rules() references this submodule
-
-        path = Path(sample_path)
-        rules_path = Path(rules_dir)
-        rules = capa_rules.get_rules([rules_path], enable_cache=False)
-        input_format = capa_helpers.get_auto_format(path)
-        backend = getattr(capa_loader, backend_name)
-        sig_dir = Path(signatures_dir)
-        sigpaths = capa_loader.get_signatures(sig_dir) if sig_dir.is_dir() else []
-        extractor = capa_loader.get_extractor(
-            path,
-            input_format,
-            capa_loader.OS_AUTO,
-            backend,
-            sigpaths,
-            should_save_workspace=False,
-            disable_progress=True,
-        )
-        capabilities = capa_capabilities.find_capabilities(rules, extractor, disable_progress=True)
-        meta = capa_loader.collect_metadata(
-            [], path, input_format, capa_loader.OS_AUTO, [rules_path], extractor, capabilities
-        )
-        document = capa_rd.ResultDocument.from_capa(meta, rules, capabilities.matches)
-        # This process's peak resident memory, measured by the kernel, before
-        # the result: the parent reads what capa costs on this host from it.
-        import resource
-
-        queue.put(("peak", resource.getrusage(resource.RUSAGE_SELF).ru_maxrss * 1024))
-        queue.put(("ok", document.model_dump(mode="json")))
-    except Exception as exc:  # noqa: BLE001 - reported to the parent, never raised here
-        queue.put(("error", f"{type(exc).__name__}: {exc}"))
 
 
 # The largest resident memory a capa child reached in this process's lifetime,
@@ -169,39 +108,146 @@ def measured_capa_peak_bytes() -> int | None:
         return _CAPA_PEAK_BYTES
 
 
-# How often a wait with no budget looks at whether its child is still alive.
-_CHILD_POLL_SECONDS = 1.0
+# The capa child is this tree's own entry file, run by its path: in isolated
+# mode ``-m`` would find the module through site-packages, which a source run
+# (a worktree, a PYTHONPATH) points at another tree, and it would import the
+# provider packages into the child.
+_CHILD_ENTRY = Path(capa_child.__file__)
+# What a run's directory is called where no job directory exists to hold it.
+_LOOSE_RUN_PREFIX = "maljan-capa-"
+# How long a child told to stop is given before it is killed.
+_GRACE_SECONDS = 5.0
+# The longest a wait sleeps between two looks at whether its child has ended.
+_POLL_SECONDS = 0.05
 
 
-def _next_message(
-    queue: Any, process: Any, timeout_seconds: float | None, started: float
-) -> tuple[str, Any]:
-    """The child's next message, within the budget left, or raise when there is none to come.
+def _sweep_loose_runs() -> None:
+    """Remove the ``maljan-capa-*`` directories runs with no job left, once past the TTL.
 
-    With no budget the wait polls, so a child that died without writing — the
-    server killed it, or it crashed — ends the wait instead of hanging it.
+    A run removes its own directory when it ends; one whose process was
+    killed outright leaves it, and no job's teardown or server's sweep looks
+    in the system's temporary directory. So the next run with no job sweeps
+    there before it makes its own: a directory of this user's whose newest
+    mtime is older than the staging TTL (``MALJAN_STAGING_TTL_HOURS``, the
+    one the analysis server sweeps its staging by) goes. A live run touches
+    its directory as capa writes its cache and its answer, and no capa run
+    lasts a TTL. Never raises: a sweep that fails costs only the sweep.
     """
-    import queue as queue_module
-
-    while True:
-        if timeout_seconds is None:
-            wait = _CHILD_POLL_SECONDS
-        else:
-            left = timeout_seconds - (time.monotonic() - started)
-            if left <= 0:
-                raise TimeoutError("capa exceeded its budget")
-            wait = min(_CHILD_POLL_SECONDS, left)
+    ttl = staging.staging_ttl_seconds()
+    if ttl <= 0:
+        return
+    cutoff = time.time() - ttl
+    try:
+        entries = list(Path(tempfile.gettempdir()).glob(f"{_LOOSE_RUN_PREFIX}*"))
+    except OSError:
+        return
+    for entry in entries:
         try:
-            message: tuple[str, Any] = queue.get(timeout=wait)
-            return message
-        except queue_module.Empty:
-            if not process.is_alive():
-                # One last look: a child can write and exit between two polls.
-                try:
-                    message = queue.get(timeout=0.1)
-                    return message
-                except queue_module.Empty:
-                    raise RuntimeError("the capa worker exited without an answer") from None
+            info = entry.lstat()
+        except OSError:
+            continue
+        if not stat.S_ISDIR(info.st_mode) or info.st_uid != os.getuid():
+            continue
+        if staging.newest_mtime(entry) < cutoff:
+            staging.remove_tree(entry)
+
+
+def _run_directory(scratch: str | Path | None) -> Path:
+    """A new directory, only this user's, for one run: in the job's own directory when one exists.
+
+    ``scratch`` is the directory a caller in the worker opened in its job's
+    staging directory (``staging.open_job_directory(job, "capa")``: the
+    triage pack's step and this provider). A tool server started for a job
+    joins its own job directory and ``capa``. Either way the run's directory
+    is ``<staging base>/job-…/capa/run-*``, which goes with the job: its
+    teardown removes the job directory, and a server's sweep removes a job
+    directory a dead worker left once it is past its TTL.
+
+    With neither — a script calling the tool, a tool server started by hand —
+    no job directory exists, and the run gets a temporary directory of its
+    own (``tempfile.mkdtemp``, 0o700, ``maljan-capa-*`` in the system's
+    temporary directory), and first sweeps the ones a killed run left there
+    past the staging TTL (``_sweep_loose_runs``). Every one is removed when
+    the run ends.
+    """
+    if scratch is not None:
+        parent = staging.private_dir(Path(scratch))
+    else:
+        base = staging.staging_base()
+        root = staging.staging_root()
+        if root == base:
+            _sweep_loose_runs()
+            return Path(tempfile.mkdtemp(prefix=_LOOSE_RUN_PREFIX))
+        staging.private_dir(base)
+        staging.private_dir(root)
+        parent = staging.private_dir(root / staging.CAPA_DIRECTORY)
+    return Path(tempfile.mkdtemp(prefix="run-", dir=parent))
+
+
+def _child_environment(run: Path) -> dict[str, str]:
+    """The capa child's environment: the stdio servers' base names, and its run as home.
+
+    ``child_env`` keeps the ``BASE_KEYS`` present (search path, locale, time
+    zone, interpreter's virtual environment) and nothing else of the worker's:
+    no database URL, no settings encryption key, no token key, no object store
+    or queue credential, no model key. Two names are set rather than inherited:
+    ``HOME`` and ``TMPDIR`` are the run's own directory, because capa writes a
+    ruleset cache under ``$HOME/.cache/capa`` on every run and vivisect and the
+    interpreter take their temporary files from ``TMPDIR``; both then go with
+    the run instead of collecting in the worker's home. ``server`` names it
+    in ``child_env``'s warning, should a platform secret ever be handed to it.
+
+    The worker pins ``LC_CTYPE`` in its own process (``core.ctype_locale``)
+    for C code that folds case; the child takes the locale names of the
+    environment as they are. Nothing it runs folds case in C: capa matches
+    its rules' strings and patterns in Python, which folds Unicode whatever
+    the locale, and it loads no YARA.
+    """
+    return child_env({"HOME": str(run), "TMPDIR": str(run)}, server="capa")
+
+
+def _ended(
+    process: subprocess.Popen[bytes], timeout_seconds: float | None, started: float
+) -> tuple[int, Any] | None:
+    """The child's exit status and resource usage once it ends, or ``None`` at the budget.
+
+    Reaped with ``os.wait4``, which hands over the child's own resource usage,
+    its peak resident memory among it, as the kernel measured it.
+    """
+    delay = 0.0005
+    while True:
+        pid, status, usage = os.wait4(process.pid, os.WNOHANG)
+        if pid:
+            process.returncode = os.waitstatus_to_exitcode(status)
+            return process.returncode, usage
+        if timeout_seconds is not None and time.monotonic() - started >= timeout_seconds:
+            return None
+        delay = min(delay * 2, _POLL_SECONDS)
+        time.sleep(delay)
+
+
+def _stop(process: subprocess.Popen[bytes]) -> Any:
+    """Stop the child, killing it after a grace, and return its resource usage.
+
+    By its pid: the child shares the caller's process group, and capa starts
+    no process of its own that outlives a call (only its Binary Ninja backend
+    runs a short lookup), so there is no group of its own to stop.
+    """
+    with contextlib.suppress(ProcessLookupError):
+        os.kill(process.pid, signal.SIGTERM)
+    ended = _ended(process, _GRACE_SECONDS, time.monotonic())
+    if ended is not None:
+        return ended[1]
+    with contextlib.suppress(ProcessLookupError):
+        os.kill(process.pid, signal.SIGKILL)
+    _, status, usage = os.wait4(process.pid, 0)
+    process.returncode = os.waitstatus_to_exitcode(status)
+    return usage
+
+
+def _note_peak(usage: Any) -> None:
+    """The child's peak resident memory, which the kernel gives in kilobytes."""
+    note_capa_peak(getattr(usage, "ru_maxrss", 0) * 1024)
 
 
 def run_capa_document(
@@ -211,99 +257,101 @@ def run_capa_document(
     signatures_dir: str,
     backend_name: str,
     timeout_seconds: float | None,
-    target: _CapaWorker | None = None,
+    child: Sequence[str] | None = None,
+    scratch: str | Path | None = None,
 ) -> dict[str, Any] | None:
-    """Run the capa pipeline in a subprocess, killed if it overruns its budget.
+    """Run one capa pass in a child process, killed if it overruns its budget.
 
     capa's vivisect backend has no cooperative cancellation point inside a
     disassembly loop, so it cannot be interrupted from inside the calling
-    process — a thread-based timeout (this function's first cut, as a provider
-    method) could only report a timeout to the caller while the actual vivisect
-    thread kept running for however long the analysis really took, and
-    ``ThreadPoolExecutor`` registers an ``atexit`` hook that joins every
-    outstanding worker thread, which would have hung an arq worker's shutdown
-    on a slow sample. A ``multiprocessing`` child process can actually be
-    killed: on expiry this calls ``terminate()``, escalates to ``kill()`` if
-    the process is still alive after a short grace period, and returns ``None``
-    either way — the existing warn-and-degrade contract, just backed by
-    something that can really stop the work.
+    process; a child process can be killed. On expiry it is told to stop, is
+    killed if it is still there after a short grace, and ``None`` is returned:
+    the existing warn-and-degrade contract, backed by something that can
+    really stop the work.
 
-    A free function rather than a provider method because the ``capa`` tool
-    runs the same pass with no provider and no ``Settings`` around it, and two
-    copies of a spawn-and-kill loop is one too many.
+    The child is ``capa_child``, run by its path as ``python -I`` in the
+    caller's process group, with the environment ``_child_environment``
+    builds, in a directory of its own (``_run_directory``: in the job's
+    staging directory, ``scratch`` when the caller opened one there). It dies
+    with its parent: the kernel kills it when the calling thread ends
+    (``capa_child.die_with_parent``, handed this process's pid), and a group
+    kill of the caller reaches it. It writes its answer to a file there, read
+    once it has ended, so a large document never waits on a pipe; the
+    directory goes when the run ends. Its peak resident memory is read as it
+    is reaped. ``child`` stands in for the ``python -I`` and entry part of the
+    command in a test; the same arguments follow it.
+
+    ``None`` is also returned, with a warning, when the child ended without an
+    answer (it crashed, or the server killed it with its run) or with capa's
+    own error. A free function rather than a provider method because the
+    ``capa`` tool runs the same pass with no provider and no ``Settings``.
     """
-    worker = target or _capa_worker
-    ctx = mp.get_context("spawn")
-    queue: Any = ctx.Queue()
-    process = ctx.Process(
-        target=worker,
-        args=(sample_path, rules_dir, signatures_dir, backend_name, queue),
-        daemon=True,
-    )
-    process.start()
-    # The server kills this child when every caller of its run has gone
-    # (``tools.children``); the wait below then sees it die rather than
-    # waiting on a queue nothing will write to.
-    from maljan.tools import children
-
-    # Only while it is alive: a reaped child's pid can be another process's.
-    children.register(
-        lambda: children.kill_process_group(int(process.pid or 0)) if process.is_alive() else None
-    )
+    run = _run_directory(scratch)
+    answer = run / "answer.json"
+    entry = list(child) if child else [sys.executable, "-I", str(_CHILD_ENTRY)]
+    command = [
+        *entry,
+        sample_path,
+        rules_dir,
+        signatures_dir,
+        backend_name,
+        str(os.getpid()),
+        str(answer),
+    ]
     try:
-        # Read before joining: the child's result is routinely well over the OS
-        # pipe buffer (a full capa ResultDocument), and a child that has put a
-        # large item blocks in its feeder thread until the parent drains the
-        # queue. Joining first therefore deadlocks the parent's wait on a child
-        # that has *already* produced its result — the join times out, the
-        # child is killed as a false "exceeded its budget", and a real result
-        # is thrown away. Draining the queue first lets that feeder thread
-        # unblock and the child exit on its own well within the same budget.
-        started = time.monotonic()
-        kind, payload = _next_message(queue, process, timeout_seconds, started)
-        # A child may say what it cost before it answers; the answer still has
-        # the rest of the same budget.
-        while kind == "peak":
-            note_capa_peak(payload)
-            kind, payload = _next_message(queue, process, timeout_seconds, started)
-    except Exception as exc:  # noqa: BLE001 - stdlib queue.Empty, or a crashed child
-        if isinstance(exc, RuntimeError):
-            # It died on its own, or was killed with its run: not a budget.
-            logger.warning(
-                "capa on %s: the worker process exited without an answer (exit code %s).",
-                sample_path,
-                process.exitcode,
+        try:
+            process = subprocess.Popen(  # noqa: S603 - our interpreter and entry, our paths
+                command,
+                env=_child_environment(run),
+                cwd=run,
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
             )
-        else:
+        except OSError as exc:
+            logger.warning(
+                "capa on %s: the worker process could not be started (%s).", sample_path, exc
+            )
+            return None
+        # The server kills this child when every caller of its run has gone
+        # (``tools.children``; it leads no group, so its pid is killed); the
+        # wait below then sees it end. Only while it runs: a reaped child's
+        # pid can be another process's.
+        from maljan.tools import children
+
+        children.register(
+            lambda: children.kill_process_group(process.pid) if process.returncode is None else None
+        )
+        ended = _ended(process, timeout_seconds, time.monotonic())
+        if ended is None:
             logger.warning(
                 "capa on %s exceeded its %ss budget; terminating the worker process.",
                 sample_path,
                 timeout_seconds,
             )
-        process.terminate()
-        process.join(5.0)
-        if process.is_alive():
-            process.kill()
-            process.join(5.0)
-        queue.close()
-        return None
-    # The result is already in hand; give the child a short grace period to
-    # exit on its own now that the queue is drained, then reap it.
-    process.join(5.0)
-    if process.is_alive():
-        process.terminate()
-        process.join(5.0)
-        if process.is_alive():
-            process.kill()
-            process.join(5.0)
-    queue.close()
-    if kind != "ok":
-        logger.warning(
-            "capa failed on %s (%s); continuing without capa evidence.", sample_path, payload
-        )
-        return None
-    result: dict[str, Any] = payload
-    return result
+            _note_peak(_stop(process))
+            return None
+        code, usage = ended
+        _note_peak(usage)
+        try:
+            written = json.loads(answer.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            # It died on its own, or was killed with its run: not a budget.
+            logger.warning(
+                "capa on %s: the worker process exited without an answer (exit code %s).",
+                sample_path,
+                code,
+            )
+            return None
+        document = written.get("ok") if isinstance(written, dict) else None
+        if not isinstance(document, dict):
+            failure = written.get("error") if isinstance(written, dict) else written
+            logger.warning(
+                "capa failed on %s (%s); continuing without capa evidence.", sample_path, failure
+            )
+            return None
+        return document
+    finally:
+        shutil.rmtree(run, ignore_errors=True)
 
 
 @register_static_provider("capa_yara")
@@ -322,6 +370,12 @@ class CapaYaraStaticProvider(StaticProvider):
         self._capa = capa
         self._yara = yara
         self._capa_available: bool | None = None
+        # The job this provider serves, set by the container that built it
+        # (``ServiceContainer.get_static_provider``): each capa run goes in
+        # that job's staging directory, which the job's teardown removes.
+        # Empty for a provider built outside a job, whose runs then get a
+        # temporary directory of their own (``_run_directory``).
+        self.job_key = ""
 
     @classmethod
     def from_settings(cls, cfg: Settings) -> CapaYaraStaticProvider:
@@ -505,22 +559,29 @@ class CapaYaraStaticProvider(StaticProvider):
         self,
         sample_path: str,
         rules_dir: Path,
-        target: _CapaWorker | None = None,
+        child: Sequence[str] | None = None,
     ) -> dict[str, Any] | None:
         """This provider's budget and backend, applied to ``run_capa_document``.
 
-        ``target`` defaults to the module-level ``_capa_worker`` and exists so
-        a test can inject a fake (module-level, picklable) target — e.g. one
-        that only sleeps — to exercise the timeout/kill path without needing
-        capa installed or a real multi-minute analysis.
+        The run goes in the job's staging directory (``job_key``), opened as
+        the triage pack opens it for its own capa step. ``child`` stands in
+        for the capa child's command so a test can run one that only sleeps,
+        crashes or writes a given answer, to exercise the timeout, kill and
+        failure paths without capa installed or a real multi-minute analysis.
         """
+        scratch = (
+            staging.open_job_directory(self.job_key, staging.CAPA_DIRECTORY)
+            if self.job_key
+            else None
+        )
         return run_capa_document(
             sample_path=sample_path,
             rules_dir=str(rules_dir),
-            signatures_dir=str(Path(resolve_data(self._capa.signatures_dir))),
+            signatures_dir=signatures_argument(self._capa.signatures_dir),
             backend_name=_BACKEND_NAMES.get(self._capa.backend, "BACKEND_VIV"),
             timeout_seconds=self._capa.timeout_seconds,
-            target=target,
+            child=child,
+            scratch=scratch,
         )
 
     # ------------------------------------------------------------------

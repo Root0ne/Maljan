@@ -25,6 +25,7 @@ import zipfile
 from pathlib import Path
 from typing import Any
 
+from maljan.core.delivery_limits import SAMPLE_UPLOAD_MAX_BYTES
 from maljan.core.logger import logger
 from maljan.core.paths import resolve_data
 
@@ -56,6 +57,39 @@ _PDF_OBJECT_RE = re.compile(rb"\b\d+\s+\d+\s+obj\b")
 
 # OLE2 streams whose mere presence means the document carries VBA.
 _OLE_MACRO_STREAMS = ("vba", "macros", "_vba_project", "dir")
+
+# An OOXML relationship, as the Open Packaging Conventions name its element
+# (namespace and local name, joined by the reader's separator).
+_RELATIONSHIP_ELEMENT = "http://schemas.openxmlformats.org/package/2006/relationships Relationship"
+# How much of a relationship part one read hands the XML reader.
+_RELATIONSHIP_CHUNK = 64 * 1024
+# The most bytes the relationship parts of one document may inflate to, all of
+# them together: the platform's fixed sample upload cap, as every
+# decompression a tool does (``transforms`` caps what its whole chain writes,
+# ``upx``). Every target read stays in the answer, and deflate lets a small
+# file carry many huge ones, so the cap is the document's and not each part's.
+RELATIONSHIP_PART_CAP = SAMPLE_UPLOAD_MAX_BYTES
+# Why a relationship part was not read, as ``relationship_parts_unread`` says it.
+RELATIONSHIP_PART_DOCUMENT_TYPE = (
+    "it declares a document type, which a relationship part never needs"
+)
+RELATIONSHIP_PART_EXTERNAL_ENTITY = "it refers to an external entity"
+RELATIONSHIP_PART_NOT_XML = "it is not well-formed XML ({error} at line {line})"
+RELATIONSHIP_MEMBER_UNREAD = "the archive member could not be read ({error})"
+RELATIONSHIP_PART_OVER_CAP = (
+    "the archive member states {size} uncompressed bytes, more than the {left} bytes left of "
+    "the platform's fixed sample upload cap of {cap} bytes, which the document's relationship "
+    "parts share; it was not inflated, and no later relationship part was read"
+)
+RELATIONSHIP_PART_PAST_CAP = (
+    "it inflated past the {left} bytes left of the platform's fixed sample upload cap of {cap} "
+    "bytes, which the document's relationship parts share, more than the archive member "
+    "states; reading stopped there, and no later relationship part was read"
+)
+RELATIONSHIP_PART_AFTER_CAP = (
+    "an earlier relationship part reached the platform's fixed sample upload cap of {cap} "
+    "bytes, which the document's relationship parts share; it was not read"
+)
 
 
 def _missing(module: str, tool: str) -> dict[str, Any]:
@@ -1134,8 +1168,10 @@ def document_info(path: str) -> dict[str, Any]:
 
     All three formats answer one question — can this document run something —
     with different evidence: an OLE2 macro storage, an OOXML ``vbaProject.bin``
-    part, a PDF ``/OpenAction``. Each is reported as a count or a presence
-    flag, never as a verdict.
+    part or relationship pointing outside the package, a PDF ``/OpenAction``.
+    Each is reported as a count, a presence flag or what the document itself
+    states (an OOXML external relationship, its target as written), never as
+    a verdict.
     """
     target = Path(path)
     if not target.is_file():
@@ -1184,15 +1220,185 @@ def _ole_info(target: Path) -> dict[str, Any]:
 
 
 def _ooxml_info(target: Path) -> dict[str, Any]:
+    """The parts, the VBA project's presence, and the relationships that point outside.
+
+    ``external_relationships`` lists each relationship a relationship part
+    marks ``TargetMode="External"`` (a remote template, an external OLE link,
+    a hyperlink): the part, its id, its type (the last segment of its Type)
+    and its target exactly as the part writes it. A tool answer carries values
+    live, as every other tool's does; the report's renderers defang them where
+    they print them for reading. It is absent when there are none.
+    ``relationship_parts_unread`` names a relationship part that could not be
+    read and why, so its silence is never taken for "none".
+
+    Every relationship part of the document is counted against one
+    ``RELATIONSHIP_PART_CAP``: the part that would cross it, by what its
+    member states or by what it inflates to, is not read, and neither is any
+    relationship part after it; each is named with the reason.
+    """
+    external: list[dict[str, str]] = []
+    unread: list[dict[str, str]] = []
+    cap = RELATIONSHIP_PART_CAP
+    left = cap
+    reached = False
     with zipfile.ZipFile(target) as archive:
         parts = archive.namelist()
+        for info in archive.infolist():
+            if not _is_relationship_part(info.filename):
+                continue
+            if reached:
+                reason = RELATIONSHIP_PART_AFTER_CAP.format(cap=cap)
+                unread.append({"part": info.filename, "reason": reason})
+                continue
+            if info.file_size > left:
+                reason = RELATIONSHIP_PART_OVER_CAP.format(size=info.file_size, left=left, cap=cap)
+                unread.append({"part": info.filename, "reason": reason})
+                reached = True
+                continue
+            counted = _CountedStream(None)
+            damaged = 0
+            try:
+                with archive.open(info) as stream:
+                    counted = _CountedStream(stream)
+                    found, _ = _external_relationships(info.filename, counted, left, cap)
+                external.extend(found)
+            except _RelationshipPartPastCap as exc:
+                unread.append({"part": info.filename, "reason": str(exc)})
+                reached = True
+            except _RelationshipPartUnread as exc:
+                unread.append({"part": info.filename, "reason": str(exc)})
+            except Exception as exc:  # noqa: BLE001 - a damaged member is stated, never raised
+                reason = RELATIONSHIP_MEMBER_UNREAD.format(error=f"{type(exc).__name__}: {exc}")
+                unread.append({"part": info.filename, "reason": reason})
+                # A damaged member may have inflated more than it handed
+                # out: zipfile checks the CRC once the last block is
+                # inflated and raises with it unreturned. It inflates no
+                # more than the member states, so that is what it costs.
+                damaged = info.file_size
+            finally:
+                # What the part inflated counts however it ended: a part
+                # refused at its end, or for an external entity, was
+                # inflated as far as it got all the same.
+                left = max(0, left - max(counted.inflated, damaged))
     lowered = [p.lower() for p in parts]
-    return {
+    answer: dict[str, Any] = {
         "format": "ooxml",
         "parts": sorted(parts),
         "vba_project_present": any(p.endswith("vbaproject.bin") for p in lowered),
-        "external_relationships": sum(1 for p in lowered if p.endswith(".rels")),
     }
+    if external:
+        answer["external_relationships"] = external
+    if unread:
+        answer["relationship_parts_unread"] = unread
+    return answer
+
+
+class _RelationshipPartUnread(Exception):
+    """A relationship part the reader refused or could not parse; the message says why."""
+
+
+class _RelationshipPartPastCap(_RelationshipPartUnread):
+    """A relationship part that inflated past what the document had left of the cap."""
+
+
+class _CountedStream:
+    """An archive member's stream that counts the inflated bytes it hands out."""
+
+    def __init__(self, stream: Any) -> None:
+        self._stream = stream
+        self.inflated = 0
+
+    def read(self, size: int = -1) -> bytes:
+        chunk: bytes = self._stream.read(size)
+        self.inflated += len(chunk)
+        return chunk
+
+
+def _is_relationship_part(name: str) -> bool:
+    """A part the Open Packaging Conventions read relationships from: ``…/_rels/<source>.rels``."""
+    folder, _, leaf = name.rpartition("/")
+    return leaf.lower().endswith(".rels") and folder.rpartition("/")[2].lower() == "_rels"
+
+
+def _external_relationships(
+    part: str, stream: Any, left: int, cap: int
+) -> tuple[list[dict[str, str]], int]:
+    """Every ``TargetMode="External"`` relationship in one part, in order, and the bytes read.
+
+    Read in chunks with defusedxml's expat reader, fed as it inflates, so the
+    time follows the part's size and the memory its longest token. Past the
+    ``left`` bytes the document has left of ``cap`` the reading stops,
+    whatever the archive member stated, and the part is refused whole
+    (``_RelationshipPartPastCap``). A document type is refused before anything
+    in it is read: a relationship part never needs one, so no entity is ever
+    declared, expanded or fetched; defusedxml also refuses an entity
+    declaration and an external reference, should one be reached.
+    """
+    from defusedxml import DTDForbidden, EntitiesForbidden, ExternalReferenceForbidden
+
+    found: list[dict[str, str]] = []
+    parser = _relationship_reader(part, found)
+    read = 0
+    try:
+        while chunk := stream.read(_RELATIONSHIP_CHUNK):
+            read += len(chunk)
+            if read > left:
+                reason = RELATIONSHIP_PART_PAST_CAP.format(left=left, cap=cap)
+                raise _RelationshipPartPastCap(reason)
+            parser.feed(chunk)
+        parser.close()
+    except (DTDForbidden, EntitiesForbidden):
+        raise _RelationshipPartUnread(RELATIONSHIP_PART_DOCUMENT_TYPE) from None
+    except ExternalReferenceForbidden:
+        raise _RelationshipPartUnread(RELATIONSHIP_PART_EXTERNAL_ENTITY) from None
+    return found, read
+
+
+class _NotXml:
+    """The reader's error handler: a part that is not well-formed XML is unread, and why."""
+
+    @staticmethod
+    def fatalError(exc: Any) -> None:  # noqa: N802 - the SAX handler's own name
+        reason = RELATIONSHIP_PART_NOT_XML.format(error=exc.getMessage(), line=exc.getLineNumber())
+        raise _RelationshipPartUnread(reason) from None
+
+    error = fatalError
+
+    @staticmethod
+    def warning(exc: Any) -> None:
+        return None
+
+
+def _relationship_reader(part: str, found: list[dict[str, str]]) -> Any:
+    """defusedxml's expat reader, refusing a document type, that lists ``part``'s External ones.
+
+    Namespace-aware, as the Open Packaging Conventions name the element; each
+    element's name and plain attributes come from expat itself, as before.
+    """
+    from defusedxml.expatreader import DefusedExpatParser
+
+    class _Reader(DefusedExpatParser):  # type: ignore[misc]
+        def start_element_ns(self, name: str, attributes: dict[str, str]) -> None:
+            # expat writes a prefixed name as "namespace local prefix".
+            if " ".join(name.split(" ")[:2]) != _RELATIONSHIP_ELEMENT:
+                return
+            if attributes.get("TargetMode") != "External":
+                return
+            found.append(
+                {
+                    "part": part,
+                    "id": attributes.get("Id", ""),
+                    "type": attributes.get("Type", "").rstrip("/").rpartition("/")[2],
+                    "target": attributes.get("Target", ""),
+                }
+            )
+
+        def end_element_ns(self, name: str) -> None:
+            return None
+
+    reader = _Reader(namespaceHandling=1, forbid_dtd=True)
+    reader.setErrorHandler(_NotXml())
+    return reader
 
 
 def _pdf_info(target: Path) -> dict[str, Any]:
