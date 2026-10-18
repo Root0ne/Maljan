@@ -65,36 +65,19 @@ from scripts.replay.record import (
 )
 from scripts.replay.stored import StoredRun
 
-# What each producer's checks are, as the platform composes them: the
-# functions the replay calls for that producer, in the platform's order, and
-# the ones it cannot call over a stored run, each with why. A test holds both
-# lists to the platform's own call sites (``test_the_replay_knows_every_check``).
-ANALYST_CHECKS: tuple[str, ...] = (
-    "claims_repeated",
-    "analyst_repeated_violation",
-    "parse_violations",
-    "undescribed_decompiles",
-    "decompiled_not_described_violation",
-    "library_only_claims_violation",
-    "check_function_claims",
-    "validate_isr",
-)
+# How the analysts' and the judge's checks are composed is not kept here: the
+# replay calls the platform's own compositions (``analyst_answer_checks``,
+# ``settle_validation_marks``, ``verdict_bundle_checks``), and a test holds the
+# names it imports to be the platform's functions. What the replay cannot call
+# over a stored run is named, with why.
 # Why the output-cap questions cannot be replayed: the record keeps the
 # answer, not whether the model's output limit ended it.
 _CUT_NOT_STORED = "whether the answer ended at the output cap is not in the stored record"
 ANALYST_NOT_REPLAYED: dict[str, str] = {"analyst_cut_violation": _CUT_NOT_STORED}
-JUDGE_CHECKS: tuple[str, ...] = (
-    "lift_misplaced_extensions",
-    "duplicate_label_violations",
-    "validate_verdict_bundle",
-    "assessment_violations",
-    "assessment_conflict_violations",
-    "stated_verdict_violations",
-    "unsupported_benign_violations",
-    "unsupported_malware_violations",
-    "unattributed_indicator_violations",
-)
 JUDGE_NOT_REPLAYED: dict[str, str] = {"verdict_cut_violation": _CUT_NOT_STORED}
+# The narrative's and the composer's checks, as each round composes them: a test
+# holds both lists to the platform's call sites, and the oracle test holds the
+# replay's whole report to the report node's.
 NARRATIVE_CHECKS: tuple[str, ...] = (
     "schema_violations",
     "narrative_capability_violations",
@@ -159,6 +142,10 @@ _NO_KEY_ORDER = (
     "order: a table rendered from them may list its rows, columns and the parts of a cell in "
     "another order than the run's report did, and a cell cut to its length then shows other parts"
 )
+# Why a report carries no summary when the narrative round's answer still broke
+# its schema after the retry: the report node's own words (the oracle test holds
+# them to it).
+_NARRATIVE_REJECTED = "the report model's answer did not fit its schema after its retry"
 # The export's objects the build makes from the sandbox report's process tree
 # and its network block (``ExtendedSTIXRenderer``: ``report.dynamic``,
 # ``report.network``).
@@ -201,6 +188,9 @@ class _Run:
     # The findings each producer was never shown, as the stored summary's rows
     # record them (``"asked": "false"``), by producer: read once.
     unshown: dict[str, list[Any]] | None = None
+    # The corpus rebuilt from the stored answers, built once, and how whole it is.
+    corpus: Any = None
+    corpus_state: Any = None
     # How the report's degradation was decided: counts only.
     degradation: dict[str, int] = field(default_factory=dict)
     not_replayed: list[dict[str, Any]] = field(default_factory=list)
@@ -436,7 +426,12 @@ class _Own:
 def _own(run: _Run, agent: str, before: datetime | None) -> _Own:
     """The analyst's own entries up to ``before`` (all of them when ``None``), and the pack's."""
     from maljan.analysis.sandbox_sections import item_index_of
-    from maljan.pipeline.validation import decompiled_functions, image_bases_in
+    from maljan.pipeline.validation import (
+        analyst_ledger_ids,
+        decompiled_functions,
+        image_bases_in,
+        run_image_bases,
+    )
 
     # An entry started after the answer was written is one the answer could
     # not cite; one with no recorded start is kept.
@@ -447,7 +442,9 @@ def _own(run: _Run, agent: str, before: datetime | None) -> _Own:
         if until is None or entry.started_at is None or float(entry.started_at) <= until
     ]
     pack = list(run.pack)
-    image_bases = tuple(dict.fromkeys([*image_bases_in(own), *image_bases_in(pack)]))
+    # The platform's own derivations; an analyst's earlier rounds are among its
+    # own entries here, which the ledger holds whole.
+    image_bases = run_image_bases(own, image_bases_in(pack))
     listed: list[Any] = []
     facts: Any = None
     failed = ""
@@ -475,7 +472,7 @@ def _own(run: _Run, agent: str, before: datetime | None) -> _Own:
             failed = facts_unread(exc)
     return _Own(
         entries=own,
-        ledger_ids=[*(str(e.id) for e in own), *(str(e.id) for e in pack)],
+        ledger_ids=analyst_ledger_ids(own, [], [e.id for e in pack]),
         items=item_index_of(pack),
         decompiled=decompiled_functions(own),
         image_bases=image_bases,
@@ -512,28 +509,31 @@ def _parse_answer(run: _Run, agent: str, domain: str, text: str, revision_round:
 
 
 def _analyst_checks(run: _Run, isr: Any, own: _Own, techniques: bool, *, whole: bool) -> list[Any]:
-    """The analyst validation turn's checks over one answer, in the platform's order."""
+    """The analyst validation turn's checks over one answer, composed by the platform's function.
+
+    ``whole`` asks the questions about the answer as a whole (its repeats; its
+    cuts are not stored) and the parse's; the claims in force are asked
+    neither, as a turn asks them of no claim it did not parse.
+    """
     from maljan.pipeline import validation as v
     from maljan.tools import knowledge
 
-    found: list[Any] = []
+    whole_answer: list[Any] = []
+    unread: list[Any] = []
     if whole:
         text = str(getattr(isr, "answer_text", "") or "") or str(
             getattr(isr, "unparsed_answer", "") or ""
         )
         margin = _snapshot_value(run, "validation.claim_repeat_margin")
-        repeated = v.claims_repeated(text, None if margin is None else int(margin))
-        if repeated is not None:
-            found.append(v.analyst_repeated_violation(repeated, techniques=techniques))
-        found.extend(v.parse_violations(isr, techniques=techniques))
-    undescribed = v.decompiled_not_described_violation(
-        v.undescribed_decompiles(isr, own.decompiled, own.image_bases)
-    )
-    if undescribed is not None:
-        found.append(undescribed)
-    library = v.library_only_claims_violation(isr)
-    if library is not None:
-        found.append(library)
+        whole_answer = v.whole_answer_questions(
+            v.claims_repeated(text, None if margin is None else int(margin)),
+            [],
+            chunk="",
+            ended=False,
+            techniques=techniques,
+        )
+        unread = v.parse_violations(isr, techniques=techniques)
+    functions: list[Any] = []
     if own.listed:
         from maljan.pipeline.function_claims import FunctionClaimCheck, check_function_claims
 
@@ -542,21 +542,34 @@ def _analyst_checks(run: _Run, isr: Any, own: _Own, techniques: bool, *, whole: 
             if own.facts_failed
             else check_function_claims(isr, own.listed, own.facts, own.image_bases)
         )
-        found.extend(check.violations)
-    found.extend(
-        v.validate_isr(
-            isr,
-            attck=knowledge,
-            ledger_ids=own.ledger_ids,
-            sample={
-                "file_type": run.identity.get("file_type", "unknown"),
-                "platform": run.identity.get("platform", "unknown"),
-            },
-            alignment=None,
-            items=own.items,
-        )
+        functions = list(check.violations)
+    threshold = _snapshot_value(run, "validation.alignment_threshold")
+    inputs = v.AnswerCheckInputs(
+        attck=knowledge,
+        ledger_ids=own.ledger_ids,
+        sample={
+            "file_type": run.identity.get("file_type", "unknown"),
+            "platform": run.identity.get("platform", "unknown"),
+        },
+        items=own.items,
+        decompiled=own.decompiled,
+        image_bases=own.image_bases,
+        techniques=techniques,
+        # The alignment gate reads the ATT&CK index, which the replay does not load.
+        alignment=None,
+        alignment_threshold=float(threshold if threshold is not None else 0.05),
+        alignment_margin=float(
+            _snapshot_value(run, "validation.alignment_margin", v.ALIGNMENT_MARGIN)
+        ),
     )
-    return found
+    return v.analyst_answer_checks(
+        isr,
+        inputs,
+        whole_answer=whole_answer,
+        unread=unread,
+        functions=functions,
+        weak_alignment_challenges=False,
+    )
 
 
 def _answer_record(
@@ -817,7 +830,7 @@ def _in_force(run: _Run, agent: str, row: Mapping[str, Any]) -> dict[str, Any]:
     or not the analyst was shown the finding, and an absence claim is noted
     only when it was (the stored ``asked: false`` rows say which it was not).
     """
-    from maljan.pipeline.validation import ABSENCE_CLAIM_CODE, mark_invalid_technique_ids
+    from maljan.pipeline.validation import settle_validation_marks
     from maljan.schemas.isr_models import AgentISR, ClaimEvidence
 
     claims: list[Any] = []
@@ -854,10 +867,9 @@ def _in_force(run: _Run, agent: str, row: Mapping[str, Any]) -> dict[str, Any]:
     found = _analyst_checks(run, isr, _own(run, agent, None), techniques, whole=False)
     # What the analyst's validation turn does with what survived its retry.
     shown = {id(v) for v in _shown_to(run, agent, found)}
-    mark_invalid_technique_ids(
-        isr, [v for v in found if v.code != ABSENCE_CLAIM_CODE or id(v) in shown]
-    )
-    run.in_force_found[agent] = [v if id(v) in shown else replace(v, asked=False) for v in found]
+    recorded = [v if id(v) in shown else replace(v, asked=False) for v in found]
+    settle_validation_marks(isr, recorded)
+    run.in_force_found[agent] = recorded
     flags = _claim_flags(found, isr, show_text=run.show_text)
     for flag, violation in zip(flags, found, strict=True):
         if id(violation) not in shown:
@@ -980,37 +992,28 @@ class _Judged:
     origins: list[Any] = field(default_factory=list)
 
 
-def _corpus_state(run: _Run) -> Any:
-    """How whole the evidence the judge's checks search is, on the run's own record.
+def _what_the_run_saw(run: _Run) -> tuple[list[str], Any]:
+    """The answers the judge's checks search, and how whole they are, as the judge node reads them.
 
-    The stored answers are what the run saw unless the byte budget blanked one
-    or the run's corpus recorded itself partial; either makes it partial, with
-    the counts, as the platform says of a corpus it fell back from.
+    The platform's own reading (``nodes._what_the_run_saw``) over the corpus
+    rebuilt from the stored answers (:func:`_run_corpus`), which counts every
+    answer it cannot hold: one the byte budget blanked, and one the run's own
+    corpus recorded as not kept.
     """
-    from maljan.agents.run_evidence_corpus import CorpusState
+    from types import SimpleNamespace
 
-    blanked = [e for e in run.ledger if getattr(e, "truncated", False) and not e.output]
-    truncation = run.stored.run_summary.get("truncation")
-    truncation = truncation if isinstance(truncation, dict) else {}
-    recorded = int(truncation.get("evidence_corpus_missing_answers") or 0)
-    reason = str(truncation.get("evidence_corpus_partial_reason") or "")
-    tools = {str(getattr(e, "tool", "") or "") for e in blanked} | {
-        str(t) for t in truncation.get("evidence_corpus_missing_tools") or []
-    }
-    tools.discard("")
-    complete = not blanked and not recorded and not reason
-    if not complete:
+    from maljan.pipeline.nodes import _what_the_run_saw as what_the_node_saw
+
+    searched, state = what_the_node_saw(
+        SimpleNamespace(get_evidence_corpus=lambda: _run_corpus(run)), run.ledger
+    )
+    if state.partial:
         run.name(
             "judge evidence",
-            f"{len(blanked)} stored answer(s) were blanked by the byte budget and the run's "
-            f"corpus recorded {recorded} missing; an absence is advisory here",
+            f"the judge's evidence is partial here ({state.missing_answers} answer(s) the "
+            "rebuilt corpus cannot hold): an absence is advisory",
         )
-    return CorpusState(
-        complete=complete,
-        missing_answers=len(blanked) + recorded,
-        missing_tools=tuple(sorted(tools)),
-        why=reason,
-    )
+    return list(searched), state
 
 
 def _shown_to_the_judge(run: _Run, found: Sequence[Any]) -> list[Any]:
@@ -1034,6 +1037,8 @@ def _judge(run: _Run, judged: _Judged) -> dict[str, Any]:
         VERDICT_FALLBACK_CODE,
         VERDICT_FALLBACK_REASON,
         JudgeAgent,
+        VerdictCheckInputs,
+        verdict_bundle_checks,
     )
     from maljan.agents.judge_postprocess import ASSESSMENT_RELOCATED_CODE, PROPERTY_NOT_CARRIED_CODE
     from maljan.pipeline import validation as v
@@ -1087,39 +1092,32 @@ def _judge(run: _Run, judged: _Judged) -> dict[str, Any]:
         "the sandbox report is not in the stored record: the judge's corpus is the stored tool "
         "answers alone",
     )
-    corpus_state = _corpus_state(run)
-    searched = [e.output for e in run.ledger if e.output]
+    searched, corpus_state = _what_the_run_saw(run)
+    run.corpus_state = corpus_state
     ledger_ids = [str(e.id) for e in run.ledger]
     claims = sum(len(getattr(isr, "claims", None) or []) for isr in run.isrs.values())
     sources = {
         tid: [source for source, _confidence in rows]
         for tid, rows in collect_technique_sources(run.isrs, run.ledger).items()
     }
-    # What the round asks: the parse's findings but the settled ones, and the
-    # checks of the bundle.
-    asked = [
-        *(f for f in shape if f.code not in _SETTLED_CODES),
-        *v.validate_verdict_bundle(
-            bundle,
-            build_evidence_corpus(interesting_strings=None, sandbox_report=None) or None,
-            attck=knowledge,
-            sample=dict(run.identity),
-            shortened_tools=sorted(_tools_that_were_shortened(run.ledger)),
-            searched=searched,
-            corpus_state=corpus_state,
-            technique_sources=sources,
-            origins=where,
-            written=written[0] if written else None,
-        ),
-        *v.assessment_violations(bundle),
-        *v.assessment_conflict_violations(bundle),
-        *v.stated_verdict_violations(bundle),
-        *v.unsupported_benign_violations(bundle, analyst_claims=claims, ledger_ids=ledger_ids),
-        *v.unsupported_malware_violations(bundle, analyst_claims=claims, ledger_ids=ledger_ids),
-        *v.unattributed_indicator_violations(
-            bundle, judge_sandbox_facts(run.ledger, run.isrs, None)
-        ),
-    ]
+    # What the round asks, composed by the platform's own function over the
+    # inputs the judge node hands the round.
+    inputs = VerdictCheckInputs(
+        evidence_corpus=build_evidence_corpus(interesting_strings=None, sandbox_report=None)
+        or None,
+        attck=knowledge,
+        sample=dict(run.identity),
+        shortened_tools=sorted(_tools_that_were_shortened(run.ledger)),
+        searched=searched,
+        corpus_state=corpus_state,
+        technique_sources=sources,
+        sandbox_facts=judge_sandbox_facts(run.ledger, run.isrs, None),
+        analyst_claims=claims,
+        ledger_ids=ledger_ids,
+    )
+    asked = verdict_bundle_checks(
+        bundle, shape, inputs, origins=where, written=written[0] if written else None
+    )
     settled = [f for f in shape if f.code in _SETTLED_CODES]
     # What the round leaves standing: each finding marked whether it was shown,
     # an unattributed indicator the judge kept after being shown the fact
@@ -1281,8 +1279,25 @@ def _decided_by_the_verdict() -> Callable[[str], bool]:
     return lambda reason: reason in fixed or bool(opening) and reason.startswith(opening)
 
 
+def _decided_by_the_corpus() -> Callable[[str], bool]:
+    """Whether a stored degradation reason is the partial-grounding one, which is decided again.
+
+    Told by its opening, read off the platform's own function
+    (``partial_grounding_reason``) for a corpus that kept nothing.
+    """
+    from maljan.agents.run_evidence_corpus import CorpusState
+    from maljan.pipeline.validation import partial_grounding_reason
+
+    try:
+        said = partial_grounding_reason(CorpusState(complete=False, missing_answers=1, why="x"))
+    except Exception:  # noqa: BLE001 — then none is told apart
+        return lambda _reason: False
+    opening = said.split(" — ", 1)[0]
+    return lambda reason: bool(opening) and reason.startswith(opening)
+
+
 def _degradation(
-    run: _Run, stored: Mapping[str, Any], decided: Sequence[str]
+    run: _Run, stored: Mapping[str, Any], decided: Sequence[str], grounding: str = ""
 ) -> tuple[list[str], bool]:
     """The report's degradation reasons and whether the run is degraded, as far as decidable.
 
@@ -1301,15 +1316,25 @@ def _degradation(
 
     stored_reasons = [str(r) for r in stored.get("degradation_reasons") or []]
     by_the_verdict = _decided_by_the_verdict()
-    kept = [reason for reason in stored_reasons if not by_the_verdict(reason)]
-    reasons = corrected_reasons([*kept, *(r for r in decided if r not in kept)], run.ledger)
-    degraded = run_is_degraded(kept, informational=informational_reasons_in_force(run.isrs))
+    by_the_corpus = _decided_by_the_corpus()
+    kept = [r for r in stored_reasons if not by_the_verdict(r) and not by_the_corpus(r)]
+    # The partial-grounding sentence, decided again over the corpus the judge's
+    # checks searched, where the judge node puts it: where the run had one, else
+    # after the reasons kept.
+    before = [r for r in stored_reasons if not by_the_verdict(r)]
+    at = next((i for i, r in enumerate(before) if by_the_corpus(r)), None)
+    grounded = list(kept)
+    if grounding:
+        place = len([r for r in before[:at] if not by_the_corpus(r)]) if at is not None else None
+        grounded.insert(len(grounded) if place is None else place, grounding)
+    reasons = corrected_reasons([*grounded, *(r for r in decided if r not in grounded)], run.ledger)
+    degraded = run_is_degraded(grounded, informational=informational_reasons_in_force(run.isrs))
     degraded = degraded or bool(decided)
     if stored.get("degraded_mode") and not stored_reasons:
         degraded = True
         run.name("report", "the stored report is degraded and states no reason: it stays degraded")
     run.degradation = {
-        "decided": len(decided),
+        "decided": len(decided) + bool(grounding),
         "stored_decided_again": len(stored_reasons) - len(kept),
         "kept_as_stored": len(kept),
     }
@@ -1403,7 +1428,14 @@ def _build(run: _Run, judged: _Judged, built: _Built) -> dict[str, Any]:
         )
         if reason
     ]
-    reasons, degraded = _degradation(run, stored, decided)
+    from maljan.pipeline.validation import partial_grounding_reason
+
+    corpus_state = run.corpus_state or _what_the_run_saw(run)[1]
+    # As the judge node: only where there was something to ground against.
+    grounding = (
+        partial_grounding_reason(corpus_state) if run.ledger or corpus_state.missing_answers else ""
+    )
+    reasons, degraded = _degradation(run, stored, decided, grounding)
 
     summary = copy.deepcopy(run.stored.run_summary)
     summary["validation"] = _replayed_validation(run)
@@ -1463,7 +1495,15 @@ def _report_inputs(run: _Run, built: _Built) -> None:
 
 
 def _run_corpus(run: _Run) -> Any:
-    """The run's in-memory corpus, rebuilt from the stored answers, as the export reads it."""
+    """The run's in-memory corpus, rebuilt from the stored answers, once per replay.
+
+    What the judge node and the export read. An answer the byte budget blanked
+    after the model read it, and one the run's own corpus recorded as not
+    kept, are counted as missing (``RunEvidenceCorpus.count_missing``), so the
+    rebuilt corpus says it is partial rather than calling the gap an absence.
+    """
+    if run.corpus is not None:
+        return run.corpus
     from maljan.agents.run_evidence_corpus import RunEvidenceCorpus
     from maljan.core.config import get_settings
 
@@ -1475,12 +1515,21 @@ def _run_corpus(run: _Run) -> Any:
             corpus.remember(str(entry.id), str(entry.tool or ""), str(entry.output))
         elif entry.truncated:
             blanked += 1
-    if blanked:
+            corpus.count_missing(str(entry.tool or ""))
+    truncation = run.stored.run_summary.get("truncation")
+    truncation = truncation if isinstance(truncation, dict) else {}
+    recorded = int(truncation.get("evidence_corpus_missing_answers") or 0)
+    tools = [str(t) for t in truncation.get("evidence_corpus_missing_tools") or []] or [""]
+    for index in range(recorded):
+        corpus.count_missing(tools[index % len(tools)])
+    if blanked or recorded:
         run.name(
             "report",
-            f"the export's corpus is rebuilt from the stored answers: {blanked} answer(s) the "
-            "byte budget blanked after the model read them are not in it",
+            f"the corpus is rebuilt from the stored answers: {blanked} answer(s) the byte budget "
+            f"blanked after the model read them, and {recorded} the run's corpus did not keep, "
+            "are counted as missing",
         )
+    run.corpus = corpus
     return corpus
 
 
@@ -2092,10 +2141,19 @@ def _narrative(run: _Run, built: _Built) -> dict[str, Any]:
         *(v.recommendation_indicator_violations(payload, answers) if answers else []),
         *v.recommendation_technique_violations(payload, published),
     ]
-    # The composer writes over the report the narrative was applied to.
-    built.report = MalwareReportBuilder.apply_narrative(report, payload)
+    # What the round does with what its retry left: a summary that over-claims
+    # or cites a stray id is kept with the finding recorded; a broken one is
+    # none, and the report says why where the summary would have been. The
+    # composer writes over the report this leaves.
+    from maljan.pipeline.validation import KEPT_WITH_A_FINDING
+
+    broken = [f for f in found if f.code not in KEPT_WITH_A_FINDING]
+    if broken:
+        built.report = MalwareReportBuilder.apply_fallback_narrative(report, _NARRATIVE_REJECTED)
+    else:
+        built.report = MalwareReportBuilder.apply_narrative(report, payload)
     flags = [_flag(f, show_text=run.show_text) for f in found]
-    return {"replayed": True, "codes": _tally(flags), "flags": flags}
+    return {"replayed": True, "kept": not broken, "codes": _tally(flags), "flags": flags}
 
 
 def _stored_at(report: Mapping[str, Any], place: str) -> Any:

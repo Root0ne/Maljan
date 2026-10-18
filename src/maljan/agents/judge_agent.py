@@ -30,7 +30,7 @@ import contextlib
 import re
 import uuid
 from collections.abc import Iterable, Mapping, Sequence
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Any, Literal, NamedTuple, cast
 
 from langchain_core.language_models.chat_models import BaseChatModel
@@ -1574,6 +1574,84 @@ def _last_ledger_facts(history: Sequence[Any], field: str = "ledger_facts") -> l
         if getattr(argument, "agent_name", "") == MEDIATOR_AGENT_NAME:
             return [str(f) for f in getattr(argument, field, None) or []]
     return []
+
+
+@dataclass(frozen=True)
+class VerdictCheckInputs:
+    """What the verdict round's bundle checks read, on the run's side.
+
+    No field has a default: an input added here is one every caller states,
+    the replay of a stored run (``scripts/replay``) included.
+    """
+
+    evidence_corpus: Any
+    attck: Any
+    sample: Any
+    shortened_tools: Sequence[str]
+    searched: Sequence[str]
+    corpus_state: Any
+    technique_sources: Mapping[str, Sequence[str]] | None
+    sandbox_facts: Any
+    analyst_claims: int
+    ledger_ids: Sequence[str] | None
+
+
+def verdict_checks(bundle: Bundle, inputs: VerdictCheckInputs) -> list[Violation]:
+    """Whether the verdict was stated, and what a Benign or a Malware one cites.
+
+    Its own function because it runs on every way the round can end, not only
+    on the one where the judge answered a bundle: prose the model stood by
+    twice, JSON that was not a bundle, and a timeout all produce a verdict, and
+    the two paths that produce one out of *text* were the two that reached a
+    report unasked. Where the loop ran them they were fed back once; everywhere
+    else they are recorded, because they annotate the verdict and never change
+    it. One reading of the verdict serves all three checks and the pipeline
+    with it (``pipeline.outcome.decide_from_bundle``).
+    """
+    return [
+        *stated_verdict_violations(bundle),
+        *unsupported_benign_violations(
+            bundle, analyst_claims=inputs.analyst_claims, ledger_ids=inputs.ledger_ids
+        ),
+        *unsupported_malware_violations(
+            bundle, analyst_claims=inputs.analyst_claims, ledger_ids=inputs.ledger_ids
+        ),
+    ]
+
+
+def verdict_bundle_checks(
+    bundle: Bundle,
+    shape: Sequence[Violation],
+    inputs: VerdictCheckInputs,
+    *,
+    origins: Any,
+    written: Any,
+) -> list[Violation]:
+    """Every finding the verdict round asks about a bundle the judge answered.
+
+    The set-aside objects of the parse (``shape``) but the settled ones (the
+    relocation is announced and done, and a retry for it would be a turn spent
+    on a problem that no longer exists), then the bundle's own checks.
+    """
+    return [
+        *(v for v in shape if v.code not in _SETTLED_CODES),
+        *validate_verdict_bundle(
+            bundle,
+            inputs.evidence_corpus,
+            attck=inputs.attck,
+            sample=inputs.sample,
+            shortened_tools=inputs.shortened_tools,
+            searched=inputs.searched,
+            corpus_state=inputs.corpus_state,
+            technique_sources=inputs.technique_sources,
+            origins=origins,
+            written=written,
+        ),
+        *assessment_violations(bundle),
+        *assessment_conflict_violations(bundle),
+        *verdict_checks(bundle, inputs),
+        *unattributed_indicator_violations(bundle, inputs.sandbox_facts),
+    ]
 
 
 class JudgeAgent(BudgetMeter):
@@ -3246,34 +3324,23 @@ class JudgeAgent(BudgetMeter):
             len(getattr(isr, "claims", None) or []) for isr in (isr_reports or {}).values()
         )
 
+        # What the round's bundle checks read, composed once with the replay of
+        # a stored run (``verdict_checks``, ``verdict_bundle_checks``).
+        inputs = VerdictCheckInputs(
+            evidence_corpus=evidence_corpus,
+            attck=_knowledge,
+            sample=sample,
+            shortened_tools=shortened_tools,
+            searched=searched,
+            corpus_state=corpus_state,
+            technique_sources=technique_sources,
+            sandbox_facts=sandbox_facts,
+            analyst_claims=_analyst_claims,
+            ledger_ids=ledger_ids,
+        )
+
         def _verdict_checks(bundle: Bundle) -> list[Violation]:
-            """Whether the verdict was stated, and what a Benign or a Malware one cites.
-
-            Its own function because it runs on every way this round can end,
-            not only on the one where the judge answered a bundle: prose the
-            model stood by twice, JSON that was not a bundle, and a timeout all
-            produce a verdict, and the two paths that produce one out of *text*
-            were the two that reached a report unasked. Where the loop ran them
-            they were fed back once; everywhere else they are recorded, because
-            they annotate the verdict and never change it.
-
-            One reading of the verdict serves all three checks and the pipeline
-            with it — ``pipeline.outcome.decide_from_bundle`` — so no ending can
-            be told the sample is one thing and the report another.
-            """
-            return [
-                *stated_verdict_violations(bundle),
-                *unsupported_benign_violations(
-                    bundle,
-                    analyst_claims=_analyst_claims,
-                    ledger_ids=ledger_ids,
-                ),
-                *unsupported_malware_violations(
-                    bundle,
-                    analyst_claims=_analyst_claims,
-                    ledger_ids=ledger_ids,
-                ),
-            ]
+            return verdict_checks(bundle, inputs)
 
         def _validate(bundle: Bundle) -> list[Violation]:
             # A timeout produced no answer, so there is nothing to give
@@ -3287,29 +3354,13 @@ class JudgeAgent(BudgetMeter):
                 return [verdict_cut_violation(int(cap), cut_text)]
             if not_json:
                 return [Violation(code="verdict.not_json", message=_NOT_JSON_FEEDBACK)]
-            return [
-                # The set-aside objects, which are the model's to explain. The
-                # relocation is not among them: it is settled, announced in
-                # ``_parse``, and a retry for it would be a turn spent on a
-                # problem that no longer exists.
-                *(v for v in shape if v.code not in _SETTLED_CODES),
-                *validate_verdict_bundle(
-                    bundle,
-                    evidence_corpus,
-                    attck=_knowledge,
-                    sample=sample,
-                    shortened_tools=shortened_tools,
-                    searched=searched,
-                    corpus_state=corpus_state,
-                    technique_sources=technique_sources,
-                    origins=where,
-                    written=as_written[0] if as_written else None,
-                ),
-                *assessment_violations(bundle),
-                *assessment_conflict_violations(bundle),
-                *_verdict_checks(bundle),
-                *unattributed_indicator_violations(bundle, sandbox_facts),
-            ]
+            return verdict_bundle_checks(
+                bundle,
+                shape,
+                inputs,
+                origins=where,
+                written=as_written[0] if as_written else None,
+            )
 
         # What the judge was shown. A finding its retry's answer raised first
         # was never put to it, and a row saying it "kept" something "when

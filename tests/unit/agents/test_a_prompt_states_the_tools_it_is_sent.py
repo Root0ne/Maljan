@@ -470,13 +470,14 @@ def test_the_validation_turn_is_told_it_carries_no_tools(monkeypatch: Any) -> No
     """The retry after a cut answer is tools-free, and its prompt says so."""
     from langchain_core.messages import AIMessage
 
-    from maljan.agents import base_agent
     from maljan.pipeline.validation import Violation
     from maljan.schemas.isr_models import AgentISR, ClaimEvidence
 
     told = [Violation(code="isr.ungrounded_technique", message="cite ev_0001")]
     answers = iter([told, told, []])
-    monkeypatch.setattr(base_agent, "validate_isr", lambda *_a, **_k: next(answers, []))
+    monkeypatch.setattr(
+        "maljan.pipeline.validation.validate_isr", lambda *_a, **_k: next(answers, [])
+    )
     agent = _static_agent([_Tool("x", "knowledge")])
     sent: list[list[Any]] = []
 
@@ -571,13 +572,14 @@ class TestAToolsFreeCallKeepsTheProvidersGuidance:
     ) -> None:
         from langchain_core.messages import AIMessage
 
-        from maljan.agents import base_agent
         from maljan.pipeline.validation import Violation
         from maljan.schemas.isr_models import AgentISR, ClaimEvidence
 
         told = [Violation(code="isr.ungrounded_technique", message="cite ev_0001")]
         answers = iter([told, told, []])
-        monkeypatch.setattr(base_agent, "validate_isr", lambda *_a, **_k: next(answers, []))
+        monkeypatch.setattr(
+            "maljan.pipeline.validation.validate_isr", lambda *_a, **_k: next(answers, [])
+        )
         agent = _static_agent([_Tool("x", "knowledge")], provider="ghidra")
         sent: list[list[Any]] = []
 

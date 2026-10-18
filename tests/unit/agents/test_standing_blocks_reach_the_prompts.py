@@ -104,7 +104,6 @@ class TestAnAnalystsPrompt:
         self, monkeypatch: Any
     ) -> None:
         """The retry asks for a ledger id; the pack is where the ids are."""
-        from maljan.agents import base_agent
         from maljan.pipeline.validation import Violation
         from maljan.schemas.isr_models import AgentISR, ClaimEvidence
 
@@ -112,7 +111,9 @@ class TestAnAnalystsPrompt:
         # look at the prior answer, and the look at the retry.
         told = [Violation(code="isr.ungrounded_technique", message="cite ev_0001")]
         answers = iter([told, told, []])
-        monkeypatch.setattr(base_agent, "validate_isr", lambda *_a, **_k: next(answers, []))
+        monkeypatch.setattr(
+            "maljan.pipeline.validation.validate_isr", lambda *_a, **_k: next(answers, [])
+        )
         agent = _briefed(_LLM())
         # Every real analyst carries a system prompt; the retry is built on it.
         agent._system_prompt = lambda _default, tools=None: "You are a static analyst."  # type: ignore[method-assign]

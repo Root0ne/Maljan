@@ -9,8 +9,8 @@
    "md5": "4a7367cffaef5fa2bdf5b9e1f8f4515a"
   }
  },
- "degraded_mode": false,
- "degradation_reasons": [],
+ "degraded_mode": true,
+ "degradation_reasons": ["zero cross-layer corroboration (3 claimed techniques)", "no sandbox report (dynamic detonation unavailable) — static-only evidence"],
  "sections": [
   {
    "key": "findings",

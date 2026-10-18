@@ -115,11 +115,14 @@ from maljan.pipeline.validation import (
     RETRY_DROPPED_CODE,
     TECHNIQUE_LINE_UNREAD_CODE,
     VALIDITY_CODE,
+    AnswerCheckInputs,
     ClaimsRepeated,
     RetryDrops,
     ValidationTally,
     Violation,
+    analyst_answer_checks,
     analyst_cut_violation,
+    analyst_ledger_ids,
     analyst_repeated_violation,
     chunk_cut_unread_sentence,
     claim_block_indexes,
@@ -127,12 +130,8 @@ from maljan.pipeline.validation import (
     claims_repeated,
     count_claim_blocks,
     decompiled_functions,
-    decompiled_not_described_violation,
     discarded_retry_row,
-    image_bases_in,
     library_only_claims,
-    library_only_claims_violation,
-    mark_invalid_technique_ids,
     parse_violations,
     read_retry_drop_answers,
     retry_drop_question,
@@ -141,10 +140,11 @@ from maljan.pipeline.validation import (
     retry_unplaced_question,
     retry_with_feedback_sync,
     retry_withdrawn_row,
-    undescribed_decompiles,
+    run_image_bases,
+    settle_validation_marks,
     unparsed_answer_rows,
-    validate_isr,
     validity_check_available,
+    whole_answer_questions,
 )
 from maljan.schemas.evidence import (
     ENTRY_ID_RE,
@@ -7947,17 +7947,10 @@ class BaseAnalyst(BudgetMeter, ABC):
         # agent was shown. Another analyst's entries are not among them. It
         # decides whether a technique claim that cites nothing is a violation:
         # an analyst with none has nothing to cite.
-        ledger_ids = [
-            str(getattr(entry, "id", ""))
-            for entry in (getattr(self, "_evidence_entries", None) or [])
-            if getattr(entry, "id", "")
-        ]
-        current = set(ledger_ids)
-        ledger_ids.extend(
-            dict.fromkeys(i for i in (_drained_ids_of(self) or []) if i not in current)
-        )
-        ledger_ids.extend(
-            str(i) for i in (getattr(self, "pack_ledger_ids", None) or []) if str(i).strip()
+        ledger_ids = analyst_ledger_ids(
+            getattr(self, "_evidence_entries", None) or [],
+            _drained_ids_of(self) or [],
+            getattr(self, "pack_ledger_ids", None) or [],
         )
         # The run's sandbox section index, read off the pack's entry: a claim
         # cites an item of the report as it cites an entry, each id one lookup.
@@ -7967,13 +7960,9 @@ class BaseAnalyst(BudgetMeter, ABC):
         decompiled = decompiled_functions(getattr(self, "_evidence_entries", None) or [])
         # The image bases the run read, the analyst's own calls' and the
         # pack's: an offset and a virtual address are matched by them.
-        image_bases = tuple(
-            dict.fromkeys(
-                [
-                    *image_bases_in(getattr(self, "_evidence_entries", None) or []),
-                    *(getattr(self, "pack_image_bases", None) or ()),
-                ]
-            )
+        image_bases = run_image_bases(
+            getattr(self, "_evidence_entries", None) or [],
+            getattr(self, "pack_image_bases", None) or (),
         )
         # The functions this analyst's own calls listed, and their facts: a
         # claim naming a call or a string its function's facts do not hold
@@ -8086,26 +8075,28 @@ class BaseAnalyst(BudgetMeter, ABC):
             return repeated_by[key]
 
         def _whole_answer_questions(candidate: AgentISR) -> list[Violation]:
-            found = _repeated(candidate)
-            cut = cuts.get(id(candidate)) or []
-            if found is not None:
-                # One question for an answer that repeated, the cut folded in:
-                # the model sees its answer up to the first repeat, and the
-                # cut question's words say it sees none of it.
-                widest = max((cap for cap, _text, _named in cut), default=0)
-                return [
-                    analyst_repeated_violation(
-                        found,
-                        chunk=chunk,
-                        cut=widest or None,
-                        ended=ended_by.get(id(candidate), False),
-                        techniques=techniques,
-                    )
-                ]
-            return [
-                analyst_cut_violation(cap, text, chunk=named, techniques=techniques)
-                for cap, text, named in cut
-            ]
+            return whole_answer_questions(
+                _repeated(candidate),
+                cuts.get(id(candidate)) or [],
+                chunk=chunk,
+                ended=ended_by.get(id(candidate), False),
+                techniques=techniques,
+            )
+
+        # What every answer of this turn is checked against, composed once
+        # with the replay of a stored run (``validation.analyst_answer_checks``).
+        inputs = AnswerCheckInputs(
+            attck=knowledge,
+            ledger_ids=ledger_ids,
+            sample=sample,
+            items=items,
+            decompiled=decompiled,
+            image_bases=image_bases,
+            techniques=techniques,
+            alignment=gate,
+            alignment_threshold=threshold,
+            alignment_margin=margin,
+        )
 
         def _validator(candidate: AgentISR) -> list[Violation]:
             first = not asked
@@ -8116,28 +8107,14 @@ class BaseAnalyst(BudgetMeter, ABC):
             # Every answer checked that no claim could be read from, the first
             # and its retry alike, goes to the run record whole.
             self._keep_unparsed_answers(unread, candidate.revision_round)
-            undescribed = decompiled_not_described_violation(
-                undescribed_decompiles(candidate, decompiled, image_bases)
+            return analyst_answer_checks(
+                candidate,
+                inputs,
+                whole_answer=_whole_answer_questions(candidate),
+                unread=unread,
+                functions=_function_check(candidate).violations,
+                weak_alignment_challenges=challenges and first,
             )
-            library_only = library_only_claims_violation(candidate)
-            return [
-                *_whole_answer_questions(candidate),
-                *unread,
-                *([undescribed] if undescribed is not None else []),
-                *([library_only] if library_only is not None else []),
-                *_function_check(candidate).violations,
-                *validate_isr(
-                    candidate,
-                    attck=knowledge,
-                    ledger_ids=ledger_ids,
-                    sample=sample,
-                    alignment=gate,
-                    alignment_threshold=threshold,
-                    alignment_margin=margin,
-                    weak_alignment_challenges=challenges and first,
-                    items=items,
-                ),
-            ]
 
         if nudged and not only_cut:
             unasked = parse_violations(isr, techniques=techniques)
@@ -8213,7 +8190,7 @@ class BaseAnalyst(BudgetMeter, ABC):
                 else v
                 for v in initial
             ]
-            mark_invalid_technique_ids(isr, [v for v in unasked if v.code != ABSENCE_CLAIM_CODE])
+            settle_validation_marks(isr, unasked)
             self.validation_findings.extend(unasked)
             BaseAnalyst._note_on_last_loop(self, "validation", detail)  # type: ignore[arg-type]
             return isr
@@ -8886,7 +8863,7 @@ class BaseAnalyst(BudgetMeter, ABC):
             ]
 
         if violations:
-            mark_invalid_technique_ids(revised, violations)
+            settle_validation_marks(revised, violations)
             self.validation_findings.extend(violations)
             self.logger.info(
                 "Validation: %d finding(s) survived the retry for '%s' (%s).",

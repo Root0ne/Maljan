@@ -162,7 +162,10 @@ def test_the_tiny_run_replays_to_its_expected_codes(record: dict[str, Any]) -> N
     published = {tid: row["published"] for tid, row in report["techniques"].items()}
     assert published == {"T1027": True, "T1055": True, "T1105": True, "T9998": False}
     assert report["export"]["attack_patterns"] == ["T1027", "T1055", "T1105"]
-    assert report["claims_not_discussed"] == {"static": [3, 4]}
+    # The narrative breaks its schema under these rules: the round would keep none, and the
+    # deterministic summary discusses none of the claims in force.
+    assert record["narrative"]["kept"] is False
+    assert report["claims_not_discussed"] == {"network": [1], "static": [1, 2, 3, 4]}
     assert report["detection_rules"] == {"suricata": 1, "yara": 1}
     # The URL the decoder recovered, its host and the sample's own digest, by
     # kind and digest, each answer by its head and a digest of its words.
@@ -172,8 +175,8 @@ def test_the_tiny_run_replays_to_its_expected_codes(record: dict[str, Any]) -> N
         "url": "yes",
     }
     assert all(set(row) == {"kind", "published", "answer"} for row in report["indicators"].values())
-    assert report["degraded"] is False
-    assert report["degradation"] == {"decided": 0, "stored_decided_again": 0, "kept_as_stored": 0}
+    assert report["degraded"] is True
+    assert report["degradation"] == {"decided": 0, "stored_decided_again": 0, "kept_as_stored": 2}
 
 
 def test_the_stored_claim_notes_are_decided_again(record: dict[str, Any]) -> None:
