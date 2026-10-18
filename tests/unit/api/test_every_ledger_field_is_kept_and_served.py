@@ -194,7 +194,8 @@ def test_an_older_row_holds_none_of_the_seven_and_the_downgrade_takes_them_away(
         conn.execute(sa.text("INSERT INTO evidence_entries (tool) VALUES ('pe_info')"))
 
         _run(conn, lambda mod: mod.upgrade())
-        row = conn.execute(sa.text(f"SELECT {', '.join(_SEVEN)} FROM evidence_entries")).one()
+        table = sa.table("evidence_entries", *(sa.column(name) for name in _SEVEN))
+        row = conn.execute(sa.select(*table.columns)).one()
         assert tuple(row) == (None,) * len(_SEVEN)
 
         _run(conn, lambda mod: mod.downgrade())
