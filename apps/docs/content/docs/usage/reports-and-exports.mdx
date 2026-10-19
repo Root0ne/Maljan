@@ -334,6 +334,105 @@ nothing a model reads changes.
 A run stopped part-way stores the counts as of the stop and says so. A report
 stored before the block existed shows none.
 
+## What looked, and what the run could not establish
+
+After the efficiency counts, Appendix B carries three coverage blocks, and the
+run summary stores them under `coverage`. Code builds them from what the run
+already recorded: the evidence ledger, the analysts' final answers, the sandbox
+report, the tool servers the job could not attach and the inputs the run
+shortened. No model writes them or reads them. The rule is that coverage never
+overstates: where the record cannot tell, the value is `partial` or `unknown`,
+and the block says why.
+
+- **What this run could not establish** (`not_established`): the tool calls
+  that failed, were not run (a missing server or input, a packed layer that was
+  never unpacked) or were refused by a guard, grouped by tool and reason. It
+  also lists the answers that were cut or not shown, each layer that no call
+  examined, a missing sandbox report or packet capture, each server that was
+  not attached, how many server rests the appendix lists above, the ledger
+  rows that could not be read and each input that was shortened. The analysts
+  that failed, were skipped or made no claims are taken from the report's own
+  analyst record, so this block and the rest of the report agree. A run that
+  recorded none of these says so.
+- **What each tool looked at, and over which input** (`tools`): one line per
+  tool on each server, with its declared kind, its calls by state and the
+  inputs it read. A path input is named; any other is counted by its declared
+  role. A guard's answer is counted apart from the calls, as the evidence
+  counts are.
+- **Negative findings and what looked** (`negatives`): each analyst claim
+  that says something was not found. No structured field marks a claim as
+  negative, so the claim is read from its wording and the block says so. The
+  claim is split at clause boundaries (a sentence mark, or "but", "however",
+  "while" and the like; "not yet" stays whole). A clause counts when a
+  negation stands over the word after it ("not packed", "no network
+  activity", "did not beacon"), when "without" or "zero" stands beside a word
+  of finding, or when it says "absent", "lacks" or "missing". A clause that
+  claims evasion ("cannot be detected by", "it is not detected") does not
+  count. A claim its analyst kept after the absence question also counts.
+  One row is written per negative clause, and only the entries cited in that
+  clause count. A claim whose every clause is negative also counts its
+  evidence field. Each call is named by its ledger entry id, which holds the
+  full arguments, with tool, server, kind and the input read. Its coverage is
+  one of these:
+  - `full`: granted, never assumed. Every cited call must meet all of these:
+    1. Its tool is declared to read its whole input. Today one declaration
+       says so: the identity and signing kinds, which state a fact about the
+       file as a whole.
+    2. It was passed only its declared input arguments. No declaration marks
+       any other argument as not narrowing.
+    3. Its answer was not cut, and has no marker at any depth that it holds
+       part of its rows (`truncated`, `more`, `has_more`, a `next_offset`,
+       `total`, `totals` or the platform's shortening note).
+    4. It read the sample.
+    5. The input's own record is complete.
+  - `input_unknown`: a cited call is of a tool that declares nothing, so the
+    record cannot tell how much it read.
+  - `partial`: one of these holds, and the block names each gap:
+    - a cited call failed, was cut or capped;
+    - a cited call was passed an argument outside its input roles;
+    - a cited call is not declared to read its whole input;
+    - a call of the same declared kind over the same input did not answer
+      (listed once under the first block, counted here);
+    - a layer of that input was never examined, or was examined by no call
+      the clause cites;
+    - an observed sandbox report names no packet capture;
+    - the calls read a layer, another file or an argument instead of the
+      sample.
+  - `failed`: no cited call answered, or the sandbox report they read was not
+    observed (a timeout, an error, no report).
+  - `unknown`: the negative clause cites no entry the ledger holds, or an
+    answer has no shape the record can read its markers from.
+
+  Expect most negatives to read `partial` or `input_unknown` today. That is
+  the honest value until more tools declare that they read their whole input.
+
+A call's input is read from its arguments by the roles its tool declares,
+never by its name. A value under a file role (`path`, `carved`) is named for
+what it is:
+
+- **the sample**: its path, or a path that ends in its file name;
+- **the packet capture**;
+- **a layer**: a file an earlier answer says it produced, under the argument
+  name file tools declare for reading one (`carved_path`), together with the
+  entry that produced it. A tool that answers its output under any other key
+  (an `output_path`, say) produces no layer the record can see. This is by
+  design: what counts is declared, never guessed from a name. No layer is
+  inferred from any other value;
+- otherwise the file, by its path.
+
+A value under any other role is kept as its role and a short digest, never the
+value. When a call leaves out a declared sample or capture argument, the
+platform fills it in if the tool's server reads the staged sample, and the
+block says so. A call under the platform's sandbox report source reads the
+sandbox report. A tool that declares nothing, such as a new MCP tool, is read
+by value. If none of its arguments holds a known input, its input is recorded
+as undeclared.
+
+Each capability subsection's "Nothing recorded" line then points to these
+blocks. A run stopped part-way stores the record as of the stop and says so. A
+report stored before the record existed shows none of this and renders as
+before.
+
 ## Comparing two runs
 
 `GET /api/v1/reports/diff?a=<id>&b=<id>` compares two stored runs (`by=job`

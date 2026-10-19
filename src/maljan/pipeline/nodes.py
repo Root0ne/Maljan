@@ -4995,6 +4995,45 @@ def _spend_ceiling_reason(container: Any) -> str:
         return ""
 
 
+def run_coverage(
+    state: Mapping[str, Any],
+    container: Any,
+    summary: Mapping[str, Any] | None,
+    ledger: Any = None,
+    partial_reason: str = "",
+    unreadable: int = 0,
+) -> dict[str, Any] | None:
+    """``run_summary.coverage`` (``analysis.coverage``) from what the run recorded. Never raises.
+
+    ``ledger`` is the run's evidence ledger, the state's where none is given,
+    and ``unreadable`` the rows of it the caller could not read; ``summary``
+    the run summary as it stands, whose server rests are counted (the appendix
+    prints them). The servers the job could not attach and the inputs it
+    shortened are read from the container.
+    """
+    from maljan.analysis.coverage import coverage_record
+
+    held = dict(summary or {})
+    server_reasons: list[str] = []
+    shortened: list[str] = []
+    with suppress(Exception):
+        server_reasons = [str(r) for r in container.server_degradation_reasons()]
+    with suppress(Exception):
+        shortened = [str(r) for r in container.get_truncation_ledger().input_shortened]
+    rests = held.get("server_rests")
+    return coverage_record(
+        entries=ledger if ledger is not None else (state.get("evidence_ledger") or []),
+        isr_reports=state.get("isr_reports") or {},
+        sample_path=str(state.get("sample_path") or ""),
+        sandbox_report=state.get("sandbox_report"),
+        server_reasons=server_reasons,
+        server_rests=sum(1 for r in rests if isinstance(r, dict)) if isinstance(rests, list) else 0,
+        unreadable=unreadable,
+        shortened=shortened,
+        partial_reason=partial_reason,
+    )
+
+
 def make_judge_node(
     container: ServiceContainer,
     *,
@@ -6747,6 +6786,22 @@ def make_report_node(
                 if _counted_input:
                     _counted_input["efficiency"] = _efficiency
                     report.run_summary = _counted_input
+            # What looked, for what and over which input, and what the run
+            # could not establish (``analysis.coverage``), read once the run's
+            # last tool call is made. No model reads it.
+            _coverage = run_coverage(
+                state,
+                container,
+                {**(state.get("run_summary") or {}), **_state_summary},
+                _ledger,
+                unreadable=_unreadable_rows,
+            )
+            if _coverage is not None:
+                _state_summary["coverage"] = _coverage
+                _covered = dict(report.run_summary or {})
+                if _covered:
+                    _covered["coverage"] = _coverage
+                    report.run_summary = _covered
         # The markdown is rendered once every field it reads is final: the
         # validation block, the corroboration's published marks, the stage
         # rollup and the elapsed time are all written above this line, and so

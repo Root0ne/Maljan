@@ -263,10 +263,19 @@ def stopped_run_summary(state: dict[str, Any], container: Any, *, note: str) -> 
         if record is not None:
             summary["efficiency"] = record
 
+    def _coverage() -> None:
+        # Kept where the report node built it; otherwise as of the stop.
+        if isinstance(summary.get("coverage"), dict):
+            return
+        record = stopped_coverage(state, container, summary)
+        if record is not None:
+            summary["coverage"] = record
+
     _part("elapsed time", _elapsed)
     if summary:
         _part("disclosure", _disclosure)
         _part("efficiency", _efficiency)
+        _part("coverage", _coverage)
     return _degraded(summary, note)
 
 
@@ -282,6 +291,21 @@ def stopped_efficiency(
         entries=state.get("evidence_ledger") or [],
         isr_reports=state.get("isr_reports") or {},
         tokens=tokens if isinstance(tokens, dict) else None,
+        partial_reason=STOPPED_PART_WAY,
+    )
+
+
+def stopped_coverage(
+    state: dict[str, Any], container: Any, summary: Any = None
+) -> dict[str, Any] | None:
+    """What looked and what could not be established by the stop (``analysis.coverage``)."""
+    from maljan.analysis.disclosure import STOPPED_PART_WAY
+    from maljan.pipeline import nodes
+
+    return nodes.run_coverage(
+        state,
+        container,
+        summary if isinstance(summary, dict) else {},
         partial_reason=STOPPED_PART_WAY,
     )
 
@@ -517,7 +541,22 @@ def partial_report(state: dict[str, Any], container: Any, *, note: str) -> dict[
     report["degradation_reasons"] = [*(reasons if isinstance(reasons, list) else []), note]
     _with_disclosure(report, state, container)
     _with_efficiency(report, state, container)
+    _with_coverage(report, state, container)
     return report
+
+
+def _with_coverage(report: dict[str, Any], state: dict[str, Any], container: Any) -> None:
+    """The stopped run's coverage on ``report``'s run summary, where it carries none yet."""
+    summary = report.get("run_summary")
+    if not isinstance(summary, dict) or not summary or isinstance(summary.get("coverage"), dict):
+        return
+    try:
+        record = stopped_coverage(state, container, summary)
+    except Exception as exc:  # noqa: BLE001 — every function here is total
+        logger.debug("stopped run: the coverage was not read (%s).", type(exc).__name__)
+        return
+    if record is not None:
+        report["run_summary"] = {**summary, "coverage": record}
 
 
 def _with_efficiency(report: dict[str, Any], state: dict[str, Any], container: Any) -> None:
