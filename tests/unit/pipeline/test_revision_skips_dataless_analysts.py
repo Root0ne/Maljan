@@ -31,7 +31,8 @@ from dataclasses import dataclass
 from typing import Any
 from unittest.mock import MagicMock
 
-from maljan.pipeline.nodes import make_revision_node
+from maljan.core.config import ChunkingConfig
+from maljan.pipeline.nodes import REVISION_INPUT_NOT_LOADED, make_revision_node
 
 
 @dataclass
@@ -63,8 +64,16 @@ def _container(chunks_by_agent: dict[str, list[_Chunk]]) -> MagicMock:
     container.config.llm.parallel_analysts = False
     agents = {name: _agent(name) for name in chunks_by_agent}
     container.get_agent.side_effect = lambda n: agents[n]
-    container.load_chunked.side_effect = lambda _h, n, room=None: chunks_by_agent[n]
-    container.load_data.side_effect = lambda _h, n: chunks_by_agent[n][0].content
+    container.config.chunking = ChunkingConfig(overlap_tokens=0)
+
+    def for_agent(name: str, *, sandbox_report: Any = None, **_kw: Any) -> list[_Chunk]:
+        # The sandbox slice where a report is given, as round 0 reads it; the
+        # sample's own data otherwise.
+        if sandbox_report:
+            return container.load_sandbox_data_for_agent(name, sandbox_report)
+        return chunks_by_agent[name]
+
+    container.load_data_for_agent.side_effect = for_agent
     container._agents = agents  # test handle
     return container
 
@@ -165,14 +174,56 @@ class TestStaticIsNeverSkipped:
         assert c._agents["static"].safe_revise_isr.called
 
 
-class TestTheGuardSurvivesALoaderFailure:
-    def test_a_raising_loader_does_not_skip_the_analyst(self) -> None:
-        """Unknown data is not absent data — fail open, revise anyway."""
-        c = _container({"static": _REAL_DATA, "dynamic": _REAL_DATA})
-        c.load_chunked.side_effect = RuntimeError("qdrant down")
-        _run(c)
+class TestAnInputThatCannotBeLoadedIsNotRevisedAndIsSaid:
+    """A revision is not made on a text it cannot read; the first answer stands, said.
 
-        assert c._agents["dynamic"].safe_revise_isr.called
+    Unknown data is not absent data, so the analyst keeps its round-0 answer
+    and claims (never an empty ISR in their place), and the run records why:
+    on the round's record, on the stage record and, through the truncation
+    ledger, in the degradation reasons the judge assembles.
+    """
+
+    def _run_failing(self) -> tuple[MagicMock, dict[str, Any], MagicMock]:
+        c = _container({"static": _REAL_DATA, "dynamic": _REAL_DATA})
+        c.load_data_for_agent.side_effect = RuntimeError("qdrant down")
+        round0 = _isr_with(3)
+        out = _run_with(c, _state_with_round0({"dynamic": round0}))
+        return c, out, round0
+
+    def test_the_analyst_is_not_revised_and_keeps_its_claims(self) -> None:
+        c, out, round0 = self._run_failing()
+
+        assert not c._agents["dynamic"].safe_revise_isr.called
+        assert out["isr_reports"]["dynamic"] is round0
+
+    def test_the_reason_is_on_the_round_record_and_in_the_ledger(self) -> None:
+        c, out, _ = self._run_failing()
+
+        reason = REVISION_INPUT_NOT_LOADED.format(reason="RuntimeError")
+        assert out["revision_rounds"][0]["not_revised"]["dynamic"] == reason
+        (sentence,) = [
+            call.args[0]
+            for call in c.get_truncation_ledger().record_input_shortened.call_args_list
+            if "dynamic" in call.args[0]
+        ]
+        assert sentence == (
+            f"The dynamic analyst's round-1 revision was not made: {reason}; "
+            "its first answer stands."
+        )
+        assert "qdrant down" not in sentence
+
+    def test_the_reason_is_on_the_stage_record(self) -> None:
+        import time
+        from types import SimpleNamespace
+
+        from maljan.pipeline.nodes import _debate_record
+
+        record = _debate_record(
+            SimpleNamespace(key="debate"), time.monotonic(), agent_reasons={"dynamic": "why"}
+        )
+        entry = record["stage_results"]["debate"]
+        assert entry["agent_reasons"] == {"dynamic": "why"}
+        assert not entry.get("failure")
 
 
 # ---------------------------------------------------------------------------

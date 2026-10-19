@@ -16,6 +16,8 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from maljan.core.config import ChunkingConfig
+from maljan.loaders.binary_chunker import ChunkStrategy, TextChunk
 from tests.stages import paper_profile
 
 # The real coroutine function, captured before any test patches the reference
@@ -185,9 +187,8 @@ def _revision_container(parallel: bool, call_order: list[str]) -> Any:
     """Container stub whose three agents return a deterministic (text, ISR).
 
     Each ``safe_revise_isr`` records its agent name in ``call_order`` so the
-    execution order is observable. ``load_chunked`` raises so
-    ``_build_revision_context`` takes its documented load_data fallback (keeps
-    the fixture free of TextChunk plumbing).
+    execution order is observable. ``load_data_for_agent`` hands each the
+    one chunk round 0 read.
     """
     from maljan.pipeline.nodes import _empty_isr
 
@@ -199,8 +200,18 @@ def _revision_container(parallel: bool, call_order: list[str]) -> Any:
     container.agent_role.side_effect = lambda n: n
     container.is_mock = False
     container.config.llm.parallel_analysts = parallel
-    container.load_chunked.side_effect = RuntimeError("force load_data fallback")
-    container.load_data.return_value = "raw analysis data"
+    container.config.chunking = ChunkingConfig(overlap_tokens=0)
+    container.load_data_for_agent.return_value = [
+        TextChunk(
+            index=0,
+            total=1,
+            strategy=ChunkStrategy.SLIDING_WINDOW,
+            content="raw analysis data",
+            char_count=17,
+            token_estimate=4,
+            domain="static",
+        )
+    ]
 
     def _get_agent(name: str) -> Any:
         agent = MagicMock()

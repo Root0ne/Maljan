@@ -21,7 +21,11 @@ from dataclasses import replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
-from maljan.agents.base_agent import NO_STRUCTURED_REPORT_STATUS, claims_under_disputes_sentence
+from maljan.agents.base_agent import (
+    NO_STRUCTURED_REPORT_STATUS,
+    claims_under_disputes_sentence,
+    describe_exception_for_log,
+)
 from maljan.agents.delegation import REFUSAL_PREFIX
 from maljan.agents.evidence_recorder import EvidenceRecorder
 from maljan.agents.judge_agent import (
@@ -444,6 +448,56 @@ def _sandbox_report_is_synthetic(state: AnalysisState) -> bool:
     """
     report = state.get("sandbox_report")
     return isinstance(report, dict) and bool(report.get("synthetic"))
+
+
+# The reason an analyst is skipped when its sources yield nothing to read.
+NO_AGENT_DATA_REASON = "no data for this agent"
+
+
+def _input_absence(chunks: list, role: str, state: AnalysisState) -> str:
+    """Why the input an analyst was handed is no input, or "" when it is one.
+
+    The no-data guard, one decision for the first analysis and for every
+    revision of it: a synthetic sandbox report for a sandbox-fed role, no
+    chunks, or the loader's "no data" sentence for a role that is not handed
+    the sample (``_is_placeholder_only``).
+    """
+    if _sandbox_fed(role) and _sandbox_report_is_synthetic(state):
+        return SYNTHETIC_SANDBOX_REASON
+    if not chunks or _is_placeholder_only(chunks, role):
+        return NO_AGENT_DATA_REASON
+    return ""
+
+
+def _reads_the_sandbox(container: Any, agent_name: str, role: str) -> bool:
+    """Whether every source agent ``agent_name`` reads is a part of the sandbox report.
+
+    Its ``data_sources`` where the definition names any (each a ``sandbox.*``
+    entry), and its role's slice otherwise (``_sandbox_fed``).
+    """
+    try:
+        definition = container.config.agents.definitions.get(agent_name)
+        sources = list(getattr(definition, "data_sources", None) or [])
+    except Exception:  # noqa: BLE001 — an unread definition is the role's slice
+        sources = []
+    if sources:
+        return all(str(source).startswith("sandbox.") for source in sources)
+    return _sandbox_fed(role)
+
+
+def _skip_cause(container: Any, agent_name: str, role: str, state: AnalysisState) -> str:
+    """What a skipped analyst lacked: sandbox data, or input data.
+
+    :data:`NO_SANDBOX_DATA_REASON` when the sandbox report is synthetic or
+    missing and every source the agent reads is a part of it; otherwise
+    :data:`NO_INPUT_DATA_REASON`. Said the same way by the analysis node that
+    skipped it and by the judge that names it.
+    """
+    report = state.get("sandbox_report")
+    no_report = _sandbox_report_is_synthetic(state) or not (isinstance(report, dict) and report)
+    if no_report and _reads_the_sandbox(container, agent_name, role):
+        return NO_SANDBOX_DATA_REASON
+    return NO_INPUT_DATA_REASON
 
 
 def sandbox_degradation_reason(report: Any, failure: str | None = None) -> str | None:
@@ -2506,6 +2560,59 @@ def added_to_head(
     return added
 
 
+def _static_provider_of(container: Any, agent_name: str) -> str | None:
+    """The static provider agent ``agent_name`` reads the sample through, or ``None`` unbuilt."""
+    try:
+        provider = container.get_agent(agent_name)._resolved.static_provider_id
+    except Exception as exc:  # noqa: BLE001 — no agent is the global mirror, never a lost revision
+        logger.debug("static provider: agent %r not built (%s)", agent_name, exc)
+        return None
+    return provider if isinstance(provider, str) else None
+
+
+def _analyst_input(
+    state: AnalysisState,
+    container: ServiceContainer,
+    agent_name: str,
+    role: str,
+    *,
+    provider_id: str | None,
+    file_hash: str,
+    room: Room | None,
+    block: str,
+) -> list:
+    """The chunks an analyst is handed, before the no-data guard and the upstream block.
+
+    Its sources at its input room (``container.load_data_for_agent``, the
+    sandbox report and the sample path given), the head source sized for what
+    the node adds to it afterwards (``block``, the upstream block, and the
+    sample path), and for a role whose tools open the sample the path written
+    into the head (``_augment_static_chunks_with_path``). The first analysis
+    and every revision of it read their input through here, so a revision is
+    grounded in the text the analyst analysed.
+
+    ``provider_id`` is the agent's own static provider: the mirror is looked
+    up by it so two static analysts on two providers each get their own mirror
+    path, with the absolute host path as the fallback a provider that mirrors
+    nothing leaves. It is read for a sample-fed role only.
+    """
+    sample_fed = role in SAMPLE_FED_ROLES
+    provider_id = provider_id if sample_fed else None
+    chunks = container.load_data_for_agent(
+        agent_name,
+        file_hash=file_hash,
+        sandbox_report=state.get("sandbox_report"),
+        sample_path=_absolute_host_sample_path(state) or None,
+        room=room,
+        head_room=head_room(
+            room, added_to_head(state, block, sample_fed=sample_fed, provider_id=provider_id)
+        ),
+    )
+    if sample_fed:
+        chunks = _augment_static_chunks_with_path(chunks, state, provider_id=provider_id)
+    return chunks
+
+
 def _with_upstream(chunks: list, block: str) -> list:
     """Put the upstream block into the first chunk, without breaking its shape.
 
@@ -3263,7 +3370,6 @@ def make_stage_agent_node(
             # as it stands: the pack at the head of its first turn, the run
             # state in its system turn on every turn.
             brief_agent(agent, state, container)
-            sandbox_report = state.get("sandbox_report")
 
             # The two roles whose tools open the sample by path need the path
             # pinned on the agent before anything else: the augmentation below
@@ -3282,35 +3388,18 @@ def make_stage_agent_node(
             # path and the upstream block — is kept out of the first chunk of
             # the head source only; every later chunk takes the whole room.
             upstream_block = upstream_findings(stage, state, container)
-            chunks = container.load_data_for_agent(
+            chunks = _analyst_input(
+                state,
+                container,
                 agent_name,
-                file_hash=state["file_hash"],
-                sandbox_report=sandbox_report,
-                sample_path=_absolute_host_sample_path(state) or None,
-                room=room,
-                head_room=head_room(
-                    room,
-                    added_to_head(
-                        state,
-                        upstream_block,
-                        sample_fed=role in SAMPLE_FED_ROLES,
-                        provider_id=(
-                            agent._resolved.static_provider_id if role in SAMPLE_FED_ROLES else None
-                        ),
-                    ),
+                role,
+                provider_id=(
+                    agent._resolved.static_provider_id if role in SAMPLE_FED_ROLES else None
                 ),
+                file_hash=state["file_hash"],
+                room=room,
+                block=upstream_block,
             )
-
-            if role in SAMPLE_FED_ROLES:
-                # The mirror is looked up by this agent's own static provider
-                # id so two static analysts on two providers each get their own
-                # mirror path, with the absolute host path as the fallback a
-                # provider that mirrors nothing leaves.
-                chunks = _augment_static_chunks_with_path(
-                    chunks,
-                    state,
-                    provider_id=agent._resolved.static_provider_id,
-                )
 
             # The no-data guard runs on what the *loaders* produced. Injecting
             # first would hide a placeholder behind the upstream block, and an
@@ -3320,8 +3409,9 @@ def make_stage_agent_node(
             # A synthetic report is an absence, not an observation, and the
             # loaders cannot tell: they are handed a well-formed report with
             # empty sections and produce chunks describing exactly that.
-            synthetic = _sandbox_fed(role) and _sandbox_report_is_synthetic(state)
-            if not chunks or synthetic or _is_placeholder_only(chunks, role):
+            absence = _input_absence(chunks, role, state)
+            synthetic = absence == SYNTHETIC_SANDBOX_REASON
+            if absence:
                 # A Linux ELF audit found that an ELF sample with no PCAP / sandbox network
                 # trace caused the network analyst to fail-hard with an
                 # AnalystError ([ERROR] prefix), which then routed into
@@ -3337,7 +3427,7 @@ def make_stage_agent_node(
                 logger.info(
                     "Agent '%s' skipped: %s — emitting an empty ISR (no-data path).",
                     agent_name,
-                    NO_SANDBOX_DATA_REASON if synthetic else NO_INPUT_DATA_REASON,
+                    _skip_cause(container, agent_name, role, state),
                 )
                 no_data_text = (
                     f"[WARN] {agent_name}: {SYNTHETIC_SANDBOX_REASON} — analyst skipped."
@@ -3367,13 +3457,7 @@ def make_stage_agent_node(
                             # The reason belongs to this agent, not to a stage
                             # that ran. The analyst's own findings row carries
                             # it too, as its ``status_reason``.
-                            agent_reasons={
-                                agent_name: (
-                                    SYNTHETIC_SANDBOX_REASON
-                                    if synthetic
-                                    else "no data for this agent"
-                                )
-                            },
+                            agent_reasons={agent_name: absence},
                             duration_ms=_elapsed_ms(),
                         ),
                     }
@@ -3658,99 +3742,82 @@ def make_stage_agent_node(
 # ---------------------------------------------------------------------------
 
 
-def _revision_input_is_absent(
+@dataclasses.dataclass(frozen=True)
+class RevisionInput:
+    """What a revision round is grounded in, or why it has nothing.
+
+    ``text`` is the RAW DATA the revision is handed; ``absent`` is why there is
+    none ("" when there is), and ``unloaded`` says that absence is an input
+    that could not be loaded again rather than one the first analysis lacked.
+    """
+
+    text: str = ""
+    absent: str = ""
+    unloaded: bool = False
+
+
+def _revision_input(
     state: AnalysisState,
     container: ServiceContainer,
     agent_name: str,
-) -> bool:
-    """True when ``agent_name`` has no data to revise against.
+) -> RevisionInput:
+    """The input a revision of ``agent_name`` reads, decided once: the input round 0 read.
 
-    Deliberately the *same* signal the analyst node uses before the initial
-    pass, so an analyst cannot be skipped on round 0 and then resurrected on
-    round 1. ``_is_placeholder_only`` carries the static carve-out with it:
-    static falls back to a metadata-only prompt rather than being skipped.
+    Built through ``_analyst_input``, the function the first analysis builds
+    its input with, at the agent's own input room (no upstream block: the
+    revision is handed its peers' reports instead), and judged by the guard
+    the first analysis is judged by (``_input_absence``), so an analyst
+    skipped on round 0 is never revised and one that read its sources is
+    never skipped. Sources that fit one chunk together are joined as round 0
+    joins them; an input that is one chunk is revised whole. For a
+    multi-chunk input the agent's consolidated analysis summary is used
+    instead, because one revision call cannot hold every chunk; with no
+    summary in state the chunks are given joined, and the analyst shortens
+    them to its room with a stated notice (``BaseAnalyst._truncate_input``).
 
-    "The same signal" has to mean the same *source*, and that is BUG 12. Round 0
-    reads ``load_sandbox_data_for_agent(agent, sandbox_report)`` whenever a
-    sandbox report exists, and only falls back to ``load_chunked`` when one does
-    not. This asked ``load_chunked`` unconditionally — which for dynamic and
-    network on a live sample is the file loader's own "No <layer> data
-    available" placeholder — so an analyst that had just analysed a full
-    detonation report was judged data-less and its round-0 claims were
-    discarded. A sandbox report that yields chunks *is* the data; the
-    placeholder check belongs to the loader path alone.
-
-    Fails **open**. A loader that raises tells us nothing about whether data
-    exists, and silently deleting an analyst on a transient Qdrant blip is a
-    far worse failure than one wasted revise call.
+    An input that cannot be loaded again is an absence too (``unloaded``),
+    with the exception's class as its reason: the revision is not made on a
+    text it cannot read, and the caller records why.
     """
-    if _sandbox_fed(container.agent_role(agent_name)) and _sandbox_report_is_synthetic(state):
-        return True
-    sandbox_report = state.get("sandbox_report")
-    # The data is chunked at the agent's own input room, as its first
-    # analysis chunked it.
+    file_hash = str(state.get("file_hash") or "")
+    # Chunked at the agent's own input room, as its first analysis was; an
+    # agent that cannot be built chunks at the size its first analysis measured.
     room = agent_input_room(container, agent_name)
-    if isinstance(sandbox_report, dict) and sandbox_report:
-        try:
-            sandbox_chunks = container.load_data_for_agent(
-                agent_name,
-                file_hash=str(state.get("file_hash") or ""),
-                sandbox_report=sandbox_report,
-                room=room,
-            )
-        except Exception as exc:  # noqa: BLE001 — fails open, same as the loader below
-            logger.debug(
-                "_revision_input_is_absent: sandbox slice failed for '%s' (%s); revising anyway.",
-                agent_name,
-                exc,
-            )
-            return False
-        if sandbox_chunks:
-            return False
     try:
-        chunks = container.load_chunked(state.get("file_hash", ""), agent_name, room=room)
-    except Exception as exc:  # noqa: BLE001
-        logger.debug(
-            "_revision_input_is_absent: load_chunked failed for '%s' (%s); revising anyway.",
+        role = container.agent_role(agent_name)
+        if _sandbox_fed(role) and _sandbox_report_is_synthetic(state):
+            # The guard answers this whatever the sources yield, so nothing
+            # is loaded for it.
+            return RevisionInput(absent=_input_absence([], role, state))
+        chunks = _analyst_input(
+            state,
+            container,
             agent_name,
-            exc,
+            role,
+            provider_id=_static_provider_of(container, agent_name),
+            file_hash=file_hash,
+            room=room,
+            block="",
         )
-        return False
-    return not chunks or _is_placeholder_only(chunks, container.agent_role(agent_name))
-
-
-def _build_revision_context(
-    state: AnalysisState,
-    container: ServiceContainer,
-    agent_name: str,
-) -> str:
-    """Select the appropriate original_data context for a revision round.
-
-    For single-chunk samples the raw chunk text is used. For multi-chunk
-    samples the agent's consolidated analysis summary is used instead of
-    re-loading data, because load_data() silently truncates large samples
-    and would make revision grounding inconsistent with initial analysis.
-    """
-    file_hash = state.get("file_hash", "")
-
-    try:
-        # Chunked at the agent's own input room, as its first analysis was:
-        # an input that fits that room is one chunk and is revised whole.
-        chunks = container.load_chunked(
-            file_hash, agent_name, room=agent_input_room(container, agent_name)
-        )
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 — a lost input is said, never a lost revision
         logger.warning(
-            "_build_revision_context: load_chunked failed for '%s/%s' (%s). "
-            "Falling back to load_data().",
+            "_revision_input: the input of '%s/%s' was not loaded (%s).",
             file_hash,
             agent_name,
-            exc,
+            describe_exception_for_log(exc),
         )
-        return container.load_data(file_hash, agent_name)
+        return RevisionInput(
+            absent=REVISION_INPUT_NOT_LOADED.format(reason=describe_exception(exc)),
+            unloaded=True,
+        )
 
+    absence = _input_absence(chunks, role, state)
+    if absence:
+        return RevisionInput(absent=absence)
+
+    chunks = joined_when_it_fits(chunks, container.config.chunking, room)
     if len(chunks) == 1:
-        return str(chunks[0].content)
+        return RevisionInput(text=str(chunks[0].content))
 
     revised = state.get("revised_reports") or {}
     reports = state.get("reports") or {}
@@ -3758,10 +3825,11 @@ def _build_revision_context(
 
     if not summary_text:
         logger.warning(
-            "_build_revision_context: no summary for '%s' in state. Falling back to load_data().",
+            "_revision_input: no summary for '%s' in state; giving its %d chunks joined.",
             agent_name,
+            len(chunks),
         )
-        return container.load_data(file_hash, agent_name)
+        return RevisionInput(text=SOURCE_SEPARATOR.join(str(chunk.content) for chunk in chunks))
 
     total_chunks = getattr(chunks[0], "total", len(chunks))
     strategy_obj = getattr(chunks[0], "strategy", None)
@@ -3774,7 +3842,50 @@ def _build_revision_context(
         "for your revision; do not contradict findings without evidence.\n"
         "--- Consolidated Analysis Summary ---"
     )
-    return f"{header}\n\n{summary_text}"
+    return RevisionInput(text=f"{header}\n\n{summary_text}")
+
+
+# Why a revision was not made when its input could not be loaded again.
+REVISION_INPUT_NOT_LOADED = "its input could not be loaded for the revision ({reason})"
+# The sentence the run records for it.
+REVISION_NOT_MADE = (
+    "The {agent} analyst's round-{round} revision was not made: {reason}; its first answer stands."
+)
+# What the RAW DATA of an absent input says, for a caller that asks for the
+# text alone. The revision node never sends it: an absent input is not revised.
+NO_REVISION_INPUT = "None. The {agent} analyst has no input to revise against ({reason})."
+
+
+def _revision_input_is_absent(
+    state: AnalysisState,
+    container: ServiceContainer,
+    agent_name: str,
+) -> bool:
+    """True when ``agent_name`` had no input of its own: round 0's guard, decided once.
+
+    ``_revision_input``'s answer. Fails **open** on an input that could not be
+    loaded again: a load that raises says nothing about whether the first
+    analysis had data, so the analyst is not called data-less for it (the
+    revision node does not revise on it either, and records why).
+    """
+    got = _revision_input(state, container, agent_name)
+    return bool(got.absent) and not got.unloaded
+
+
+def _build_revision_context(
+    state: AnalysisState,
+    container: ServiceContainer,
+    agent_name: str,
+) -> str:
+    """The original_data a revision round is grounded in (``_revision_input``'s text).
+
+    An absent input is said in words (:data:`NO_REVISION_INPUT`), never the
+    loader's placeholder.
+    """
+    got = _revision_input(state, container, agent_name)
+    if got.absent:
+        return NO_REVISION_INPUT.format(agent=agent_name, reason=got.absent)
+    return got.text
 
 
 # ---------------------------------------------------------------------------
@@ -3788,7 +3899,13 @@ def _debate_threshold(stage: Any) -> float | None:
     return None if options is None else float(options.consensus_threshold)
 
 
-def _debate_record(stage: Any, started: float, *, reason: str = "") -> dict[str, Any]:
+def _debate_record(
+    stage: Any,
+    started: float,
+    *,
+    reason: str = "",
+    agent_reasons: Mapping[str, str] | None = None,
+) -> dict[str, Any]:
     """One round's contribution to the debate stage's result.
 
     The reducer adds the durations up, so a debate of four rounds records the
@@ -3799,7 +3916,8 @@ def _debate_record(stage: Any, started: float, *, reason: str = "") -> dict[str,
     The only reason this stage ever gives is a mediation that failed or timed
     out, and that is the stage's own — it belongs to the round, not to a member
     of it — so it is passed as a failure and survives ``stage_record``'s rule
-    about a stage that ran.
+    about a stage that ran. ``agent_reasons`` are a member's own, such as an
+    analyst whose revision input could not be loaded.
     """
     if stage is None:
         return {}
@@ -3808,6 +3926,7 @@ def _debate_record(stage: Any, started: float, *, reason: str = "") -> dict[str,
         ran=True,
         reason=reason,
         failure=bool(reason),
+        agent_reasons=agent_reasons or None,
         duration_ms=int((time.monotonic() - started) * 1000),
     )
     # A debate's mediations and revision rounds follow one another, whatever
@@ -4540,6 +4659,8 @@ def make_revision_node(container: ServiceContainer, *, stage: Any = None) -> Any
 
         # The analysts this round did not ask: they had no data to revise.
         not_asked: set[str] = set()
+        # Of those, the ones whose input could not be loaded again, and why.
+        not_loaded: dict[str, str] = {}
 
         async def _revise_one(name: str) -> tuple[str, AgentISR]:
             # Same guard the analyst node applies before the initial pass. It
@@ -4554,7 +4675,21 @@ def make_revision_node(container: ServiceContainer, *, stage: Any = None) -> Any
             # LAYER_WEIGHTS["dynamic"]=0.45, above static's own 0.35.
             # Measured 2026-07-29 with CAPE unreachable: the sycophancy
             # detector flagged static vs dynamic at sim=1.000.
-            if _revision_input_is_absent(state, container, name):
+            # In a thread: the input is read from the loaders and a sandbox
+            # slice is written out per analyst, which is no work for this loop.
+            got = await asyncio.to_thread(_revision_input, state, container, name)
+            if got.unloaded:
+                # Not revised on a text it cannot read, and said: on the
+                # stage record, and in the run's degradation reasons through
+                # the truncation ledger the judge reads them from.
+                not_loaded[name] = got.absent
+                with suppress(Exception):
+                    container.get_truncation_ledger().record_input_shortened(
+                        REVISION_NOT_MADE.format(
+                            agent=name, round=int(iteration), reason=got.absent
+                        )
+                    )
+            if got.absent:
                 not_asked.add(name)
                 # Declining to revise is the point; deleting is not (BUG 12).
                 # An analyst that made claims on round 0 keeps them — whatever
@@ -4567,21 +4702,23 @@ def make_revision_node(container: ServiceContainer, *, stage: Any = None) -> Any
                 _round0 = (state.get("isr_reports") or {}).get(name)
                 if _round0 is not None and getattr(_round0, "claims", None):
                     logger.info(
-                        "Agent '%s': no data to revise — keeping its report and its "
+                        "Agent '%s': no data to revise (%s) — keeping its report and its "
                         "%d round-0 claim(s) (round %d).",
                         name,
+                        got.absent,
                         len(_round0.claims),
                         iteration,
                     )
                     return original_reports.get(name, ""), _round0
                 logger.info(
-                    "Agent '%s': no data to revise — keeping its report and "
+                    "Agent '%s': no data to revise (%s) — keeping its report and "
                     "contributing no claims (round %d).",
                     name,
+                    got.absent,
                     iteration,
                 )
                 return original_reports.get(name, ""), _empty_isr(name, revision_round=iteration)
-            data = _build_revision_context(state, container, name)
+            data = got.text
             agent = container.get_agent(name)
             brief_agent(agent, state, container)
             own_report = reports_in_force.get(name, "")
@@ -4688,7 +4825,9 @@ def make_revision_node(container: ServiceContainer, *, stage: Any = None) -> Any
             name: str, why: str, status: str = "", report: str = "", *, was_asked: bool = True
         ) -> None:
             """A revision that was not made leaves the answer in force standing, whole."""
-            not_revised[name] = NOT_ASKED_TO_REVISE if name in not_asked else why
+            not_revised[name] = (
+                not_loaded.get(name, NOT_ASKED_TO_REVISE) if name in not_asked else why
+            )
             kept = kept_isrs.get(name)
             if kept is None:
                 kept = _empty_isr(name, revision_round=iteration)
@@ -4790,7 +4929,7 @@ def make_revision_node(container: ServiceContainer, *, stage: Any = None) -> Any
                 if name in not_asked:
                     # Its answer from before the round, handed back unasked:
                     # not a revision, and not counted as one.
-                    not_revised[name] = NOT_ASKED_TO_REVISE
+                    not_revised[name] = not_loaded.get(name, NOT_ASKED_TO_REVISE)
                 else:
                     made += 1
                     revised_names.append(name)
@@ -4884,8 +5023,9 @@ def make_revision_node(container: ServiceContainer, *, stage: Any = None) -> Any
                 int(iteration),
                 "; ".join(f"{name}: {why}" for name, why in not_revised.items()) or "none asked",
             )
-        # The round's own time, added to the debate stage's.
-        out.update(_debate_record(stage, started))
+        # The round's own time, added to the debate stage's, with the analysts
+        # whose input could not be loaded named on it.
+        out.update(_debate_record(stage, started, agent_reasons=not_loaded))
         return out
 
     node_fn.__name__ = "revision_node"
@@ -5416,11 +5556,7 @@ def make_judge_node(
             _skipped_by_cause: dict[str, list[str]] = {}
             for name in _empty_analysts:
                 if name in _no_data_analysts:
-                    cause = (
-                        NO_SANDBOX_DATA_REASON
-                        if _sandbox_fed(container.agent_role(name))
-                        else NO_INPUT_DATA_REASON
-                    )
+                    cause = _skip_cause(container, name, container.agent_role(name), state)
                     _skipped_by_cause.setdefault(cause, []).append(name)
             for cause, names in _skipped_by_cause.items():
                 _degradation_reasons.append(skipped_analysts_reason(cause, names))

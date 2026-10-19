@@ -22,7 +22,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from maljan.pipeline.nodes import make_negotiation_node, make_revision_node
+from maljan.pipeline.nodes import RevisionInput, make_negotiation_node, make_revision_node
 from maljan.pipeline.routing import NOT_REVISED, debate_route
 from maljan.pipeline.state import AgentArgument
 from maljan.pipeline.sycophancy_detector import detect_sycophancy
@@ -123,10 +123,13 @@ def _revise(outcomes: dict[str, Any], absent: tuple[str, ...] = ()) -> dict[str,
     container = _revision_container(outcomes)
     with pytest.MonkeyPatch.context() as mp:
         mp.setattr(
-            "maljan.pipeline.nodes._revision_input_is_absent",
-            lambda _state, _container, name: name in absent,
+            "maljan.pipeline.nodes._revision_input",
+            lambda _state, _container, name: (
+                RevisionInput(absent="no data for this agent")
+                if name in absent
+                else RevisionInput(text="data")
+            ),
         )
-        mp.setattr("maljan.pipeline.nodes._build_revision_context", lambda *a: "data")
         return asyncio.run(make_revision_node(container)(state))
 
 

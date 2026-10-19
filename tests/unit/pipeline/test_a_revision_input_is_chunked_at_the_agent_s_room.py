@@ -108,9 +108,9 @@ class TestTheDataCheck:
         assert container.load_data_for_agent.call_args.kwargs["room"]("x") == 100_000
         assert [c.char_count for c in made[0]] == _cuts(100_000, made[0])
 
-    def test_the_loader_path_is_given_the_agent_s_room(self) -> None:
+    def test_the_load_without_a_sandbox_report_is_given_the_agent_s_room(self) -> None:
         container, made = _container("D" * 150_000, 200_000)
 
         assert _revision_input_is_absent(_state(), container, "triage") is False
-        assert container.load_chunked.call_args.kwargs["room"]("x") == 200_000
+        assert container.load_data_for_agent.call_args.kwargs["room"]("x") == 200_000
         assert [len(chunks) for chunks in made] == [1]

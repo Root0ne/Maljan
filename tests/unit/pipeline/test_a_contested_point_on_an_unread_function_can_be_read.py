@@ -33,7 +33,7 @@ from maljan.pipeline.debate_facts import (
     tools_taking_an_address,
     with_place_facts,
 )
-from maljan.pipeline.nodes import make_negotiation_node, make_revision_node
+from maljan.pipeline.nodes import RevisionInput, make_negotiation_node, make_revision_node
 from maljan.pipeline.state import AgentArgument
 from maljan.schemas.evidence import LedgerEntry
 from maljan.schemas.isr_models import AgentISR, ClaimEvidence
@@ -301,8 +301,7 @@ def _revise(argument: AgentArgument, tools: dict[str, list[Any]]) -> dict[str, A
         "discussion_history": [argument],
     }
     with pytest.MonkeyPatch.context() as mp:
-        mp.setattr("maljan.pipeline.nodes._revision_input_is_absent", lambda *a: False)
-        mp.setattr("maljan.pipeline.nodes._build_revision_context", lambda *a: "data")
+        mp.setattr("maljan.pipeline.nodes._revision_input", lambda *a: RevisionInput(text="data"))
         asyncio.run(make_revision_node(container)(state))
     return agents
 
@@ -409,7 +408,7 @@ class TestABuiltInRevisionReads:
             raise RuntimeError("stop")
 
         analyst.revise_isr = revise_isr
-        analyst._truncate_input = lambda data: data
+        analyst._truncate_input = lambda data, *a, **k: data
         analyst.current_round = 0
         with pytest.raises(Exception, match="stop"):
             analyst.safe_revise_isr("d", "r", {}, "f", 1, read_places=True)
