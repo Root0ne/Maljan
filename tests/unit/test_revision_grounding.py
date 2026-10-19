@@ -4,8 +4,8 @@ Verifies:
   - Single-chunk path: returns raw chunk content (backward-compatible)
   - Multi-chunk path: returns ISR summary with context header
   - Multi-chunk path: prefers revised report over initial report
-  - Multi-chunk path: falls back to load_data when no summary exists
-  - Graceful degradation: load_chunked failure falls back to load_data
+  - Multi-chunk path: gives the chunks joined when no summary exists
+  - A load that fails is said, never replaced by the file loader's placeholder
   - Context header format validation
 """
 
@@ -13,7 +13,8 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock
 
-from maljan.loaders.binary_chunker import ChunkStrategy, TextChunk
+from maljan.core.config import ChunkingConfig
+from maljan.loaders.binary_chunker import SOURCE_SEPARATOR, ChunkStrategy, TextChunk
 from maljan.pipeline.nodes import _build_revision_context
 
 # ---------------------------------------------------------------------------
@@ -40,9 +41,12 @@ def _make_chunk(
 
 
 def _make_container(chunks: list[TextChunk]) -> MagicMock:
+    # The input round 0 read (``load_data_for_agent``), for a role that is
+    # handed it as it is (no sample path written into its head).
     container = MagicMock()
-    container.load_chunked.return_value = chunks
-    container.load_data.return_value = "fallback raw data"
+    container.agent_role.return_value = "network"
+    container.config.chunking = ChunkingConfig(overlap_tokens=0)
+    container.load_data_for_agent.return_value = chunks
     return container
 
 
@@ -83,16 +87,18 @@ class TestSingleChunkPath:
 
         container.load_data.assert_not_called()
 
-    def test_calls_load_chunked_with_correct_args(self) -> None:
+    def test_loads_the_input_round_zero_read(self) -> None:
         chunks = [_make_chunk(0, 1)]
         container = _make_container(chunks)
         state = _make_state(file_hash="hash123")
 
         _build_revision_context(state, container, "dynamic")
 
-        container.load_chunked.assert_called_once()
-        args, kwargs = container.load_chunked.call_args
-        assert args == ("hash123", "dynamic")
+        container.load_data_for_agent.assert_called_once()
+        container.load_chunked.assert_not_called()
+        args, kwargs = container.load_data_for_agent.call_args
+        assert args == ("dynamic",)
+        assert kwargs["file_hash"] == "hash123"
         # The agent's own input room, as its first analysis was chunked at.
         assert callable(kwargs["room"])
 
@@ -114,7 +120,7 @@ class TestMultiChunkPath:
         result = _build_revision_context(state, container, "static")
 
         assert "Initial analysis found T1055 process injection." in result
-        assert container.load_data.call_count == 0
+        container.load_data.assert_not_called()
 
     def test_context_header_present(self) -> None:
         """Multi-chunk result must contain the CHUNKED ANALYSIS CONTEXT header."""
@@ -179,16 +185,16 @@ class TestMultiChunkPath:
 
         assert "Initial report text." in result
 
-    def test_falls_back_to_load_data_when_no_summary(self) -> None:
-        """Multi-chunk but no summary in state → falls back to load_data()."""
-        chunks = [_make_chunk(i, 3) for i in range(3)]
+    def test_gives_the_chunks_joined_when_no_summary(self) -> None:
+        """Multi-chunk but no summary in state → the chunks joined, shortened by the analyst."""
+        chunks = [_make_chunk(i, 3, content=f"piece {i}") for i in range(3)]
         container = _make_container(chunks)
         state = _make_state(reports={}, revised_reports={})  # no summary
 
         result = _build_revision_context(state, container, "static")
 
-        container.load_data.assert_called_once()
-        assert result == "fallback raw data"
+        container.load_data.assert_not_called()
+        assert result == SOURCE_SEPARATOR.join(["piece 0", "piece 1", "piece 2"])
 
     def test_summary_appears_after_header(self) -> None:
         """The consolidated summary section marker must precede the summary text."""
@@ -211,16 +217,16 @@ class TestMultiChunkPath:
 
 
 class TestGracefulDegradation:
-    def test_load_chunked_exception_falls_back_to_load_data(self) -> None:
-        """If load_chunked() raises, must fall back to load_data() silently."""
-        container = MagicMock()
-        container.load_chunked.side_effect = RuntimeError("chunker crashed")
-        container.load_data.return_value = "fallback data"
+    def test_a_load_that_raises_is_said(self) -> None:
+        """If the load raises, the revision is told its input could not be loaded."""
+        container = _make_container([])
+        container.load_data_for_agent.side_effect = RuntimeError("chunker crashed")
 
         result = _build_revision_context(_make_state(), container, "static")
 
-        assert result == "fallback data"
-        container.load_data.assert_called_once()
+        assert result.startswith("None. The static analyst has no input to revise against")
+        assert "could not be loaded" in result
+        container.load_data.assert_not_called()
 
     def test_empty_chunk_list_not_produced_by_chunker(self) -> None:
         """BinaryChunker always returns at least 1 chunk; test normal path."""
@@ -239,6 +245,6 @@ class TestGracefulDegradation:
         container = _make_container(chunks)
         state = {}  # no file_hash
 
-        # Should not raise; load_chunked will be called with ""
+        # Should not raise; the input is loaded with ""
         result = _build_revision_context(state, container, "static")
         assert isinstance(result, str)

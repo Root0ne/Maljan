@@ -26,9 +26,10 @@ from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from maljan.agents.judge_agent import JudgeVerdict
-from maljan.core.config import JUDGE_AGENT_KEY, Settings
+from maljan.core.config import JUDGE_AGENT_KEY, ChunkingConfig, Settings
 from maljan.core.token_ledger import TokenLedger
 from maljan.core.truncation_ledger import TruncationLedger
+from maljan.loaders.binary_chunker import ChunkStrategy, TextChunk
 from maljan.pipeline.nodes import (
     ROOM_SPEAKER,
     make_judge_node,
@@ -216,8 +217,18 @@ class TestAFailedRevisionNamesItsException:
     def _revise(self, sink: Recorder, error: BaseException, *, parallel: bool) -> dict[str, Any]:
         container = _container(sink, agents=["static"])
         container.config.llm.parallel_analysts = parallel
-        container.load_chunked.side_effect = RuntimeError("force the load_data fallback")
-        container.load_data.return_value = "raw analysis data"
+        container.config.chunking = ChunkingConfig(overlap_tokens=0)
+        container.load_data_for_agent.return_value = [
+            TextChunk(
+                index=0,
+                total=1,
+                strategy=ChunkStrategy.SLIDING_WINDOW,
+                content="raw analysis data",
+                char_count=17,
+                token_estimate=4,
+                domain="static",
+            )
+        ]
         agent = MagicMock()
         # `safe_revise_isr` is synchronous; the node runs it on a thread.
         agent.safe_revise_isr = MagicMock(side_effect=error)

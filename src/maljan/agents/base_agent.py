@@ -9409,7 +9409,11 @@ class BaseAnalyst(BudgetMeter, ABC):
     ) -> tuple[str, AgentISR]:
         """:meth:`safe_revise_isr`'s body, run under the agent's lock."""
         try:
-            truncated = self._truncate_input(original_data)
+            # The raw data sits beside the reports and the feedback in the
+            # revision prompt, so it has the input room less them.
+            beside = len(own_report or "") + len(mediator_feedback or "")
+            beside += sum(len(str(r)) for r in (peer_reports or {}).values() if r)
+            truncated = self._truncate_input(original_data, beside)
             self._last_loop_deadline = None
             self._answer_unstructured = False
             self._revision_reads = bool(read_places)
@@ -9791,7 +9795,7 @@ class BaseAnalyst(BudgetMeter, ABC):
         )
         return "static"
 
-    def _truncate_input(self, text: str) -> str:
+    def _truncate_input(self, text: str, beside: int = 0) -> str:
         """``text`` whole when it fits this analyst's input room, else shortened and said.
 
         The room is ``max_token_limit`` where an operator set it, and otherwise
@@ -9801,8 +9805,14 @@ class BaseAnalyst(BudgetMeter, ABC):
         text the model reads begins with a notice saying so, and the run's
         truncation ledger records a sentence the judge node turns into a
         degradation reason. Never a silent cut.
+
+        ``beside`` is the characters the request carries next to this input
+        that the room does not already hold — a revision's own report, its
+        peers' reports and the mediator's feedback — and is taken off the room.
         """
         room = self._input_room_chars(text)
+        if room is not None:
+            room = max(0, room - max(0, int(beside)))
         if room is None or len(text) <= room:
             return text
         shortened, sentence = shorten_input(text, room)
