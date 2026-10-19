@@ -117,7 +117,7 @@ tools = [
 
 [dependency-groups]
 dev = [
-    "fakeredis>=2.35.1",
+    "fakeredis[lua]>=2.35.1",
     "mypy>=1.20.0",
     "pre-commit>=4.2.0",
     "pytest>=9.0.2",

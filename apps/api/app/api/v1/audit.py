@@ -7,12 +7,13 @@ import uuid
 from collections.abc import Sequence
 from datetime import UTC, datetime, timedelta
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.auth.step_up import check_current_password
 from app.database import get_db
-from app.deps import get_current_user, hash_api_key, require_admin
+from app.deps import get_current_user, get_session_user, hash_api_key, require_admin
 from app.logging_config import get_logger
 from app.logsafe import log_safe
 from app.models.audit import APIKey, AuditLog
@@ -24,6 +25,7 @@ from app.schemas.audit import (
     AuditLogListResponse,
     AuditLogResponse,
 )
+from app.services import audit
 
 logger = get_logger("api.audit")
 
@@ -178,13 +180,22 @@ async def list_api_keys(
 @router.post("/api-keys", response_model=APIKeyCreateResponse, status_code=status.HTTP_201_CREATED)
 async def create_api_key(
     req: APIKeyCreateRequest,
-    user: User = Depends(get_current_user),
+    request: Request,
+    user: User = Depends(get_session_user),
     db: AsyncSession = Depends(get_db),
 ) -> APIKey:
     """Create a new API key for the current user.
 
     The raw key is returned **only once** at creation time. Store it securely.
+    Takes a bearer session: a request authenticated by an API key is refused,
+    so a leaked key cannot mint keys of its own. Asks for the current password
+    again (the same step-up and lock as a password change), so a stolen access
+    token cannot mint a key that outlives it. The key is bound to the owner's
+    token generation: the next revocation of the account's sessions retires it.
     """
+    await check_current_password(
+        user, req.current_password, request=request, action="api_key.create"
+    )
     raw_key, key_hash, prefix = _generate_api_key()
 
     expires_at = None
@@ -198,14 +209,31 @@ async def create_api_key(
         name=req.name,
         expires_at=expires_at,
         is_active=True,
+        token_generation=user.token_generation,
     )
     db.add(api_key)
     await db.flush()
     await db.refresh(api_key)
+    # Committed before the key is handed out or audited: ``get_db`` commits
+    # only after the response is sent, and a key whose row then failed to land
+    # would be shown to the caller and never work.
+    await db.commit()
 
     logger.info(
         f"API key created: id={api_key.id} prefix={prefix}",
         extra={"user_id": str(user.id), "api_key_id": str(api_key.id)},
+    )
+    await audit.record(
+        "api_key.create",
+        resource_type="api_key",
+        resource_id=str(api_key.id),
+        user_id=user.id,
+        details={
+            "name": req.name,
+            "prefix": prefix,
+            "expires_at": expires_at.isoformat() if expires_at else None,
+        },
+        request=request,
     )
 
     # Attach the raw key to the response object (not persisted)
@@ -216,10 +244,11 @@ async def create_api_key(
 @router.delete("/api-keys/{key_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def revoke_api_key(
     key_id: uuid.UUID,
-    user: User = Depends(get_current_user),
+    request: Request,
+    user: User = Depends(get_session_user),
     db: AsyncSession = Depends(get_db),
 ) -> None:
-    """Revoke (deactivate) an API key."""
+    """Revoke (deactivate) an API key. Takes a bearer session, like creation."""
     result = await db.execute(select(APIKey).where(APIKey.id == key_id, APIKey.user_id == user.id))
     api_key = result.scalar_one_or_none()
     if not api_key:
@@ -230,8 +259,19 @@ async def revoke_api_key(
 
     api_key.is_active = False
     await db.flush()
+    # Committed before the 204 and the audit row, so "revoked" is never said
+    # of a key whose deactivation was then lost.
+    await db.commit()
 
     logger.info(
         f"API key revoked: id={log_safe(key_id)}",
         extra={"user_id": log_safe(user.id), "api_key_id": log_safe(key_id)},
+    )
+    await audit.record(
+        "api_key.revoke",
+        resource_type="api_key",
+        resource_id=str(key_id),
+        user_id=user.id,
+        details={"prefix": api_key.key_prefix},
+        request=request,
     )

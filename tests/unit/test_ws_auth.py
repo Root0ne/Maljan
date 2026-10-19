@@ -116,6 +116,7 @@ async def test_ws_rejects_nonexistent_job(mock_ws: MagicMock, valid_token_payloa
     # open, and then the job, which is not there.
     account = MagicMock()
     account.is_active = True
+    account.token_generation = 0  # the generation the test tokens carry (no claim)
     user_result = MagicMock()
     user_result.scalar_one_or_none.return_value = account
     mock_result = MagicMock()
@@ -145,6 +146,7 @@ async def test_ws_rejects_wrong_owner(mock_ws: MagicMock, valid_token_payload: d
 
     job = MagicMock()
     job.created_by = uuid.uuid4()  # different user
+    job.token_generation = 0  # this row also answers the account read
 
     mock_result = MagicMock()
     mock_result.scalar_one_or_none.return_value = job
@@ -174,6 +176,7 @@ async def test_ws_accepts_valid_owner(mock_ws: MagicMock, valid_token_payload: d
 
     job = MagicMock()
     job.created_by = user_id
+    job.token_generation = 0  # this row also answers the account read
 
     mock_result = MagicMock()
     mock_result.scalar_one_or_none.return_value = job

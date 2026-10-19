@@ -9,7 +9,7 @@ from fastapi.security import APIKeyHeader, HTTPAuthorizationCredentials, HTTPBea
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.auth.jwt import decode_token
+from app.auth.jwt import decode_token, is_current_generation
 from app.config import settings
 from app.database import get_db
 from app.models.audit import APIKey
@@ -57,6 +57,10 @@ async def _user_from_api_key(raw_key: str, db: AsyncSession) -> User:
     user_result = await db.execute(select(User).where(User.id == api_key.user_id))
     user = user_result.scalar_one_or_none()
     if user is None:
+        raise invalid
+    if api_key.token_generation < user.token_generation:
+        # Created before the owner's last password change or refresh-token
+        # replay: revoked with the sessions of that generation.
         raise invalid
     if not user.is_active:
         raise HTTPException(
@@ -141,8 +145,43 @@ async def get_current_user(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="User account is deactivated",
         )
+    if not is_current_generation(payload, user):
+        # Minted before the account's last password change or refresh-token
+        # replay: revoked, however long it still has to live.
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Token has been revoked",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
 
     return user
+
+
+SESSION_ONLY_DETAIL = (
+    "This action needs a signed-in session: an API key cannot change the "
+    "password or create or revoke API keys."
+)
+
+
+def refuse_api_key_credential(api_key: str | None) -> None:
+    """Refuse a request that carries ``X-API-Key`` for a session-only action.
+
+    Changing the password and minting or revoking keys are what turn one
+    leaked credential into a permanent one, so they take a bearer session
+    only. The refusal says why rather than falling through to the bearer path.
+    """
+    if api_key and not settings.auth_disabled:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=SESSION_ONLY_DETAIL)
+
+
+async def get_session_user(
+    credentials: HTTPAuthorizationCredentials | None = Depends(security_scheme),
+    api_key: str | None = Depends(api_key_scheme),
+    db: AsyncSession = Depends(get_db),
+) -> User:
+    """Resolve the caller from a bearer access token only; an API key is refused."""
+    refuse_api_key_credential(api_key)
+    return await get_current_user(credentials=credentials, api_key=None, db=db)
 
 
 async def optional_current_user(

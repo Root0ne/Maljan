@@ -11,6 +11,8 @@ import {
 } from "react";
 import { useRouter } from "next/navigation";
 import { api } from "./api";
+import { ApiError } from "./errors";
+import { refreshWithPromptRetry, waitForNewToken } from "./refreshLock";
 
 interface AuthUser {
   id: string;
@@ -100,33 +102,63 @@ function decodeJwtExpiry(token: string): number | null {
  * `onFailure` → `logout()` → a hard redirect, so opening the app in a second
  * tab could sign you out of the first.
  *
- * Two independent guards, because either alone leaves a hole:
- *  - a Web Lock serialises the tabs that have one, and
+ * Three guards, because each alone leaves a hole:
+ *  - `withRefreshLock` serialises the tabs: a Web Lock where the browser has
+ *    them, a localStorage lease where it does not (a plain-HTTP deployment is
+ *    no secure context, so `navigator.locks` is absent there, and the tabs
+ *    used to race into the backend's reuse detection, which revokes every
+ *    session of the account);
  *  - inside the lock the access token is re-read from localStorage, so a tab
  *    that queued behind the winner sees the rotated value and stands down
- *    rather than firing a refresh the cookie can no longer honour. This is
- *    also the whole fix on browsers without `navigator.locks`.
+ *    rather than firing a refresh the cookie can no longer honour; and
+ *  - a refused refresh leaves the stored token alone (`api.refresh` does not
+ *    go through the 401-clearing path) and, outside the lock, waits briefly
+ *    for another tab's new token (`waitForNewToken`): the refusal was then
+ *    this tab losing a race (the backend answers a second use from the same
+ *    client inside its grace window with a 401 and revokes nothing), so the
+ *    new token is adopted instead of signing out.
  */
 async function runRefresh(
+  scheduledWith: string,
+  onSuccess: (access: string) => void,
+  onAlreadyRefreshed: (access: string) => void,
+  signal?: AbortSignal
+): Promise<unknown> {
+  const current = localStorage.getItem("access_token");
+  if (!current) return null;
+  if (current !== scheduledWith) {
+    // Another tab got there first. Adopt its token and re-arm.
+    onAlreadyRefreshed(current);
+    return null;
+  }
+  try {
+    const tokens = await api.refresh(signal);
+    localStorage.setItem("access_token", tokens.access_token);
+    onSuccess(tokens.access_token);
+    return null;
+  } catch (err) {
+    return err;
+  }
+}
+
+async function refreshOnce(
   scheduledWith: string,
   onSuccess: (access: string) => void,
   onFailure: (error: unknown) => void,
   onAlreadyRefreshed: (access: string) => void
 ): Promise<void> {
-  const current = localStorage.getItem("access_token");
-  if (!current) return;
-  if (current !== scheduledWith) {
-    // Another tab got there first. Adopt its token and re-arm.
-    onAlreadyRefreshed(current);
-    return;
-  }
-  try {
-    const tokens = await api.refresh();
-    localStorage.setItem("access_token", tokens.access_token);
-    onSuccess(tokens.access_token);
-  } catch (err) {
-    onFailure(err);
-  }
+  // A transport failure (aborted, network down; anything that is not an API
+  // answer) is retried once at once, inside the server's grace window, before
+  // the normal schedule and its floor take over (`refreshWithPromptRetry`).
+  const failed = await refreshWithPromptRetry(
+    (signal) => runRefresh(scheduledWith, onSuccess, onAlreadyRefreshed, signal),
+    (error) => !(error instanceof ApiError)
+  );
+  if (!failed) return;
+  // Waited for outside the lock, so the tab that won can finish under it.
+  const fresh = isSessionRejection(failed) ? await waitForNewToken(scheduledWith) : null;
+  if (fresh) onAlreadyRefreshed(fresh);
+  else onFailure(failed);
 }
 
 function scheduleRefresh(
@@ -140,14 +172,7 @@ function scheduleRefresh(
   const msBefore = Math.max(msUntilExpiry - 60_000, 5_000); // refresh 60s before expiry, min 5s
 
   return setTimeout(() => {
-    const attempt = () =>
-      runRefresh(accessToken, onSuccess, onFailure, onAlreadyRefreshed);
-    const locks = globalThis.navigator?.locks;
-    if (locks) {
-      void locks.request("maljan-token-refresh", attempt);
-    } else {
-      void attempt();
-    }
+    void refreshOnce(accessToken, onSuccess, onFailure, onAlreadyRefreshed);
   }, msBefore);
 }
 

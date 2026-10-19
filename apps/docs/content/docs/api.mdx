@@ -24,9 +24,10 @@ Authorization: Bearer <access token>
 X-API-Key: <key>
 ```
 
-A request carrying `X-API-Key` is judged on that key. The refresh token is an
-HttpOnly cookie scoped to `/api/v1/auth` and is never sent by hand. See
-[security.md](/security/).
+A request carrying `X-API-Key` is judged on that key, except that changing the
+password and minting or revoking API keys take a bearer session and refuse a
+key with 403. The refresh token is an HttpOnly cookie scoped to `/api/v1/auth`
+and is never sent by hand. See [security.md](/security/).
 
 ## Router groups
 

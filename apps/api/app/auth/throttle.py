@@ -17,7 +17,7 @@ transition (down, restored) logs exactly one warning.
 from __future__ import annotations
 
 import time
-from typing import Any
+from typing import Any, NamedTuple
 
 import redis.asyncio as aioredis
 
@@ -29,6 +29,12 @@ from app.runtime_config import runtime_config
 logger = get_logger("auth.throttle")
 
 _REFRESH_KEY = "auth:refresh:{user_id}:{jti}"
+# Written when a refresh token is consumed, for ``refresh_reuse_grace_seconds``,
+# holding a keyed hash of the client that consumed it: a second presentation
+# of that jti inside the window from the same client is a retry or a race
+# between tabs, refused without revoking anything; from another client it is
+# a replay.
+_REFRESH_GRACE_KEY = "auth:refresh:grace:{user_id}:{jti}"
 _LOGIN_FAIL_KEY = "auth:login:fail:{email}"
 
 RETRY_AFTER_S = 30.0
@@ -135,6 +141,77 @@ async def refresh_token_consume(user_id: str | None, jti: str) -> bool:
         )
         await _mark_down(exc)
         return False
+
+
+# Consume the active jti and open its grace window in one step. Two separate
+# commands left a gap in which a second request found the jti neither active
+# nor in grace and was read as a replay, revoking every session. KEYS[1] is
+# the active key, KEYS[2] the grace key; ARGV[1] the client fingerprint,
+# ARGV[2] the window in seconds (0 opens none). Returns 1 when the jti was
+# active and is now consumed, else 0.
+ROTATE_SCRIPT = (
+    "local deleted = redis.call('DEL', KEYS[1]) "
+    "if deleted == 1 and tonumber(ARGV[2]) > 0 then "
+    "redis.call('SET', KEYS[2], ARGV[1], 'EX', tonumber(ARGV[2])) end "
+    "return deleted"
+)
+
+
+class GraceLookup(NamedTuple):
+    """A grace record read back: ``readable`` False when the store failed."""
+
+    readable: bool
+    fingerprint: str | None
+
+
+async def refresh_token_rotate(user_id: str | None, jti: str, fingerprint: str) -> bool:
+    """Atomically consume a refresh token's jti and open its reuse grace window.
+
+    ``True`` only when the store confirmed the jti was active and is now gone,
+    as ``refresh_token_consume``; the grace record, holding ``fingerprint``
+    (a keyed hash, never the address itself) for ``refresh_reuse_grace_seconds``,
+    is written by the same script, so no request can fall between the two.
+    """
+    if not user_id or not jti:
+        return False
+    grace = int(await runtime_config.get("refresh_reuse_grace_seconds"))
+    r = await _redis()
+    if r is None:
+        return False
+    try:
+        deleted = await r.eval(
+            ROTATE_SCRIPT,
+            2,
+            _REFRESH_KEY.format(user_id=user_id, jti=jti),
+            _REFRESH_GRACE_KEY.format(user_id=user_id, jti=jti),
+            fingerprint,
+            str(max(grace, 0)),
+        )
+        return bool(int(deleted))
+    except Exception as exc:  # noqa: BLE001
+        logger.debug(  # nosemgrep: python.lang.security.audit.logging.logger-credential-leak.python-logger-credential-disclosure — logs only the exception's class name, never the exception itself  # noqa: E501
+            "refresh_token_rotate failed: %s", type(exc).__name__
+        )
+        await _mark_down(exc)
+        return False
+
+
+async def refresh_token_grace(user_id: str | None, jti: str) -> GraceLookup:
+    """The fingerprint stored when this jti was rotated, if within the window."""
+    if not user_id or not jti:
+        return GraceLookup(readable=True, fingerprint=None)
+    r = await _redis()
+    if r is None:
+        return GraceLookup(readable=False, fingerprint=None)
+    try:
+        value = await r.get(_REFRESH_GRACE_KEY.format(user_id=user_id, jti=jti))
+    except Exception as exc:  # noqa: BLE001
+        logger.debug(  # nosemgrep: python.lang.security.audit.logging.logger-credential-leak.python-logger-credential-disclosure — logs only the exception's class name, never the exception itself  # noqa: E501
+            "refresh_token_grace failed: %s", type(exc).__name__
+        )
+        await _mark_down(exc)
+        return GraceLookup(readable=False, fingerprint=None)
+    return GraceLookup(readable=True, fingerprint=str(value) if value is not None else None)
 
 
 async def record_login_failure(email: str) -> None:

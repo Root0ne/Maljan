@@ -8,6 +8,9 @@ import type {
   RunSummary,
 } from "@/types/malware-report";
 import { ApiError } from "@/lib/errors";
+import type { ProfileUpdateBody, ProfileUpdateResponse } from "@/lib/profileUpdate";
+import { withRefreshLock } from "@/lib/refreshLock";
+import { refreshAccessToken } from "@/lib/refreshRequest";
 import { SettingsConflictError, SettingsValidationError } from "@/types/settings";
 import { exportUnreadable } from "@/lib/settingsExport";
 import type {
@@ -601,23 +604,45 @@ class ApiClient {
     }>("/api/v1/auth/me");
   }
 
-  updateMe(body: { full_name?: string; password?: string }) {
-    return this.request<{
-      id: string;
-      email: string;
-      full_name: string;
-      role: string;
-    }>("/api/v1/auth/me", {
-      method: "PATCH",
-      body: JSON.stringify(body),
-    });
+  /**
+   * Update the caller's profile. A new `password` needs `current_password`.
+   *
+   * A password change revokes every earlier session and API key of the
+   * account; the answer carries this session's replacement access token (and
+   * sets the replacement refresh cookie, hence `credentials: "include"`). It
+   * is stored here, where every other access token is, so the next request and
+   * the refresh timer (which adopts a token it did not schedule) carry on as
+   * the same session. A password change holds the refresh lock
+   * (`withRefreshLock`), so no tab's refresh races the cookie it replaces.
+   */
+  async updateMe(body: ProfileUpdateBody) {
+    const save = async (signal?: AbortSignal) => {
+      const updated = await this.request<ProfileUpdateResponse>("/api/v1/auth/me", {
+        method: "PATCH",
+        body: JSON.stringify(body),
+        credentials: "include",
+        signal,
+      });
+      if (updated.access_token && typeof window !== "undefined") {
+        localStorage.setItem("access_token", updated.access_token);
+      }
+      return updated;
+    };
+    return body.password ? withRefreshLock(save) : save();
   }
 
-  refresh() {
-    return this.request<{ access_token: string; token_type: string }>(
-      "/api/v1/auth/refresh",
-      { method: "POST", credentials: "include" }
-    );
+  /**
+   * Exchange the refresh cookie for a new access token.
+   *
+   * Not through `request()`: that clears the stored access token on any 401,
+   * and a refresh refused because another tab rotated the cookie first would
+   * then wipe the token the winning tab just stored, signing every tab out.
+   * A refusal here leaves storage alone and throws the same `Unauthorized`
+   * error, so the caller decides (see `runRefresh` in `auth.tsx`). `signal`
+   * aborts the request when the refresh lock's lease ends.
+   */
+  refresh(signal?: AbortSignal) {
+    return refreshAccessToken(this.baseUrl, fetch, signal);
   }
 
   logout() {
@@ -1091,11 +1116,16 @@ class ApiClient {
     );
   }
 
-  createApiKey(name: string, expiresInDays?: number) {
-    return this.request<ApiKeyCreateDTO>(
-      "/api/v1/audit/api-keys",
-      { method: "POST", body: JSON.stringify({ name, expires_in_days: expiresInDays || null }) }
-    );
+  /** A key outlives the access token, so the API asks for the password again. */
+  createApiKey(name: string, currentPassword: string, expiresInDays?: number) {
+    return this.request<ApiKeyCreateDTO>("/api/v1/audit/api-keys", {
+      method: "POST",
+      body: JSON.stringify({
+        name,
+        expires_in_days: expiresInDays || null,
+        current_password: currentPassword,
+      }),
+    });
   }
 
   revokeApiKey(keyId: string) {

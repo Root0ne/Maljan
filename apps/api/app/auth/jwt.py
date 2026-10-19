@@ -8,6 +8,9 @@ and refresh-token rotation/reuse detection.
 
 from __future__ import annotations
 
+import hashlib
+import hmac
+import ipaddress
 import uuid
 from datetime import UTC, datetime, timedelta
 from typing import Any, cast
@@ -188,6 +191,69 @@ def create_refresh_token(data: dict) -> tuple[str, str]:
         ),
     )
     return token, claims["jti"]
+
+
+# The claim that binds a token to the account's ``users.token_generation``.
+# A password change or a detected refresh-token replay moves the account's
+# generation on, and every access and refresh token minted under an earlier
+# one is refused from then on (``deps.get_current_user``, ``/auth/refresh``,
+# the WebSocket handshake and its periodic re-check).
+TOKEN_GENERATION_CLAIM = "gen"
+
+
+def session_claims(user: Any) -> dict[str, Any]:
+    """The subject and generation claims a token minted for ``user`` carries."""
+    return {"sub": str(user.id), TOKEN_GENERATION_CLAIM: int(user.token_generation)}
+
+
+def token_generation(payload: dict[str, Any]) -> int | None:
+    """The generation a decoded token was minted under, or ``None`` if unreadable.
+
+    A token minted before the claim existed carries none and reads as
+    generation 0, the column's default, so an upgrade does not sign every
+    session out; the account's first revocation retires it like any other.
+    A claim that is present but not an integer is no generation and never
+    matches.
+    """
+    value = payload.get(TOKEN_GENERATION_CLAIM, 0)
+    if isinstance(value, bool) or not isinstance(value, int):
+        return None
+    return value
+
+
+def is_current_generation(payload: dict[str, Any], user: Any) -> bool:
+    """Whether a decoded token was minted under the account's current generation."""
+    minted = token_generation(payload)
+    return minted is not None and minted == user.token_generation
+
+
+# Domain label for the key the client fingerprint is hashed under, derived
+# from the signing secret so the signing key itself never keys anything else.
+_FINGERPRINT_LABEL = b"maljan-refresh-client-fingerprint-v1"
+# An IPv6 client's privacy extensions rotate the low 64 bits; the /64 is the
+# stable part that names the client's network.
+IPV6_FINGERPRINT_PREFIX = 64
+
+
+def _coarse_address(ip: str) -> str:
+    try:
+        address = ipaddress.ip_address(ip)
+    except ValueError:
+        return ip
+    if address.version == 6:
+        return str(ipaddress.ip_network(f"{address}/{IPV6_FINGERPRINT_PREFIX}", strict=False))
+    return str(address)
+
+
+def client_fingerprint(ip: str, user_agent: str) -> str:
+    """A keyed hash of the client (address, IPv6 coarsened to its /64, and user agent).
+
+    Held in a refresh token's reuse grace record so a second use inside the
+    window can be told apart by client without storing the address itself.
+    """
+    key = hmac.new(_secret().encode(), _FINGERPRINT_LABEL, hashlib.sha256).digest()
+    material = f"{_coarse_address(ip)}\n{user_agent}".encode()
+    return hmac.new(key, material, hashlib.sha256).hexdigest()
 
 
 def decode_token(token: str) -> dict[str, Any] | None:

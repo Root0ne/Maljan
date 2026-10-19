@@ -22,7 +22,7 @@ import redis.asyncio as aioredis
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from sqlalchemy import select
 
-from app.auth.jwt import decode_token
+from app.auth.jwt import decode_token, is_current_generation
 from app.config import settings
 from app.database import async_session_factory
 from app.logging_config import get_logger
@@ -41,21 +41,30 @@ router = APIRouter(tags=["WebSocket"])
 # indexed read per socket.
 ACTIVE_RECHECK_SECONDS = 60.0
 
+# One reason for a closed account and a revoked token alike: the socket says
+# no more than the HTTP 401 does about which of the two it was.
+_ACCOUNT_CLOSED_REASON = "Unauthorized: account is deactivated or the session was revoked"
 
-async def _account_is_open(db: Any, user_id: str) -> bool:
-    """Whether this account still exists and is still active.
+
+async def _account_is_open(db: Any, user_id: str, payload: dict[str, Any] | None = None) -> bool:
+    """Whether this account still exists, is still active and the token still holds.
 
     The same question ``deps.require_active_user`` asks on every mutating
     HTTP request, asked here because the handshake never did: a user an admin
     deactivated kept the live feed of their own jobs — and everything the
-    events on it carry — until their access token expired.
+    events on it carry — until their access token expired. With the token's
+    ``payload`` it also asks whether the token was minted under the account's
+    current generation, so a password change or a refresh-token replay closes
+    the feed too; under ``auth_disabled`` there is no token and no payload.
     """
     try:
         user_uuid = uuid.UUID(str(user_id))
     except (ValueError, AttributeError, TypeError):
         return False
     row = (await db.execute(select(User).where(User.id == user_uuid))).scalar_one_or_none()
-    return bool(row is not None and getattr(row, "is_active", False))
+    if row is None or not getattr(row, "is_active", False):
+        return False
+    return payload is None or is_current_generation(payload, row)
 
 
 async def _reject(websocket: WebSocket, code: int, reason: str) -> None:
@@ -348,6 +357,9 @@ async def ws_analysis(websocket: WebSocket, job_id: str, since: int | None = Non
             return
         user_id = sub
 
+    # The token's claims, for the generation check; none under auth_disabled.
+    token_payload: dict[str, Any] | None = None if settings.auth_disabled else payload
+
     # ── Job ownership check ──────────────────────────────────────────
     try:
         job_uuid = uuid.UUID(job_id)
@@ -371,7 +383,7 @@ async def ws_analysis(websocket: WebSocket, job_id: str, since: int | None = Non
     async with async_session_factory() as db:
         # The account first, and before the job: a caller whose account is
         # closed learns nothing about whether the job exists.
-        account_open = await _account_is_open(db, user_id)
+        account_open = await _account_is_open(db, user_id, token_payload)
         owner: str | None = None
         job_exists = False
         if account_open:
@@ -383,11 +395,11 @@ async def ws_analysis(websocket: WebSocket, job_id: str, since: int | None = Non
 
     if not account_open:
         logger.warning(
-            "WebSocket rejected: account is not active (user=%s job=%s)",
+            "WebSocket rejected: account closed or session revoked (user=%s job=%s)",
             log_safe(user_id),
             log_safe(job_id),
         )
-        await _reject(websocket, 1008, "Unauthorized: account is deactivated")
+        await _reject(websocket, 1008, _ACCOUNT_CLOSED_REASON)
         return
 
     if not job_exists:
@@ -437,7 +449,7 @@ async def ws_analysis(websocket: WebSocket, job_id: str, since: int | None = Non
         _checked_at = _time.monotonic()
         try:
             async with async_session_factory() as db:
-                return await _account_is_open(db, user_id)
+                return await _account_is_open(db, user_id, token_payload)
         except Exception as exc:  # noqa: BLE001 — a database blip is not a verdict
             logger.warning(
                 "WebSocket account re-check failed (job=%s): %s",
@@ -464,11 +476,11 @@ async def ws_analysis(websocket: WebSocket, job_id: str, since: int | None = Non
                 # once more first.
                 if not await _still_allowed():
                     logger.warning(
-                        "WebSocket closed: account deactivated mid-stream (user=%s job=%s).",
+                        "WebSocket closed: account closed or session revoked (user=%s job=%s).",
                         log_safe(user_id),
                         log_safe(job_id),
                     )
-                    await _close_unauthorized("Unauthorized: account is deactivated")
+                    await _close_unauthorized(_ACCOUNT_CLOSED_REASON)
                     break
 
                 # Handle client ping
@@ -477,11 +489,11 @@ async def ws_analysis(websocket: WebSocket, job_id: str, since: int | None = Non
             except TimeoutError:
                 if not await _still_allowed():
                     logger.warning(
-                        "WebSocket closed: account deactivated mid-stream (user=%s job=%s).",
+                        "WebSocket closed: account closed or session revoked (user=%s job=%s).",
                         log_safe(user_id),
                         log_safe(job_id),
                     )
-                    await _close_unauthorized("Unauthorized: account is deactivated")
+                    await _close_unauthorized(_ACCOUNT_CLOSED_REASON)
                     break
                 # Re-check token expiry on every heartbeat boundary.
                 if _token_exp_ts is not None and _time.time() >= _token_exp_ts:
