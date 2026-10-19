@@ -1888,6 +1888,7 @@ def make_triage_node(
             ),
             carve_environ=_carve_server_environ(container),
             steps=steps,
+            pack_chars=upstream_chars(container),
         )
 
         def _elapsed_ms() -> int:

@@ -180,6 +180,7 @@ def _tables() -> dict[str, Callable[[str], bool]]:
         "validation._RULE_MATCH_SECTION_SOURCES": names(legacy.RULE_MATCH_SECTION_SOURCES),
         "triage_pack._REPUTATION_TOOLS": names(legacy.FILE_ASSESSMENT_TOOLS),
         "triage_pack.RULE_TOOLS": names(legacy.RULE_TOOLS),
+        "triage_pack.directed_text_sources": names(("floss", "decode_string_blobs")),
         "run_state.reputation": names(legacy.FILE_ASSESSMENT_TOOLS),
         "network_analyst._PCAP_TOOLS": names(legacy.PCAP_TOOLS),
         "function_map": names(legacy.FUNCTION_MAP_TOOLS),

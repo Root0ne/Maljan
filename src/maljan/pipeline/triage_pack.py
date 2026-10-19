@@ -83,6 +83,18 @@ can be checked against the run. The items themselves are served by the
 ``sandbox_items`` tool. It comes after every other step, so every id issued
 before it keeps its value; its line takes room as any other line does.
 
+Last of all, phrases of the families written for an AI or an analyst reader
+(``maljan.analysis.directed_text``): "ignore all previous instructions", a
+classification asked of an analyst or a detector, a chat role marker, a tool
+call written out. The file is read whole, with every unpacked program an
+earlier step wrote out, the texts of the declared recovered-text kinds, an
+archive's member names and the files a sandbox saw dropped; the matches are
+grouped by family and normalised phrase with their counts, quoted in the line
+as the decoded strings are, and content that could not be read is named with
+why. It runs under the pack's time budget. It is a pass line: among the passes
+with a fact no other line carries it comes in entry order, last, after the
+others, and before the passes with no such fact.
+
 When the pack does not fit its room, every pass line takes only the room the
 earlier lines leave, a pass with a fact no other line carries first; a pass
 entry with no room is counted in the trailer, which takes only free room or
@@ -110,7 +122,7 @@ from pathlib import Path
 from typing import Any, cast
 
 from maljan.agents.evidence_recorder import EvidenceRecorder, result_text
-from maljan.analysis import sandbox_sections
+from maljan.analysis import directed_text, sandbox_sections
 from maljan.analysis.anti_analysis import (
     PASS_FAILED_PREFIX,
     RULE_KIND,
@@ -155,6 +167,7 @@ from maljan.pipeline.sandbox_status import (
 )
 from maljan.providers import sandbox_tools
 from maljan.schemas.evidence import LedgerEntry, apply_budget
+from maljan.schemas.sandbox_document import place as report_place
 from maljan.tools import (
     api_hashes,
     artefact_index,
@@ -514,6 +527,10 @@ class PackInputs:
     # The steps to run, in order (``core.pack_steps``); ``None`` runs the
     # shipped list.
     steps: tuple[PackStep, ...] | None = None
+    # What the pack's whole block may hold, in characters (the bound every
+    # agent is shown it at, ``nodes.upstream_chars``): the longest phrase or
+    # name the directed-text pass holds whole. Zero: no bound known.
+    pack_chars: int = 0
     # The environment the UPX carve reads its staging base from: the server
     # declaring the unpack tool's kind, kept apart from the decoder's server.
     # ``None`` reads ``floss.environ``.
@@ -1597,6 +1614,38 @@ class _Pack:
             started=time.monotonic(),
         )
 
+    def _directed_text(self, step: PackStep) -> None:
+        """Phrases of the directed-text families, in the file and in what the pack recovered.
+
+        Last, so every id issued before it keeps its value. It runs under the
+        pack's own time budget: begun after the budget is spent it is a not-run
+        entry, and a budget that runs out while it reads stops it with a
+        partial answer saying where it stood (``directed_text_answer``).
+        """
+        path = self.inputs.sample_path
+        entries = list(self.recorder.entries)
+        report = observed_report(self.inputs.sandbox_report)
+        budget = float(self.inputs.budget_s or 0)
+        listed = frozenset(
+            name for s in self.steps if s.renderer in LISTED_RENDERERS for name in s.formats
+        )
+        self.record(
+            directed_text.TOOL,
+            {"path": path},
+            partial(
+                directed_text_answer,
+                path,
+                self.format_facts,
+                entries,
+                self._whole_rows,
+                report,
+                deadline=self.started + budget if budget > 0 else None,
+                routed=self.routed,
+                listed_formats=listed,
+                room=self.inputs.pack_chars or None,
+            ),
+        )
+
 
 # How a step's peak memory is known.
 MEASURED = "measured"
@@ -1663,6 +1712,7 @@ _BUILTIN_STEPS: dict[str, Callable[[_Pack, PackStep], None]] = {
     artefact_index.TOOL: _Pack._function_index,
     upx.TOOL: _Pack._unpacked_upx,
     sandbox_sections.SECTIONS_TOOL: _Pack._sandbox_sections,
+    directed_text.TOOL: _Pack._directed_text,
 }
 
 
@@ -2044,6 +2094,277 @@ INDEX_SOURCE_UNREADABLE = "no: [{entry}] holds no readable answer"
 def _one_line(text: str | None) -> str:
     """``text`` whole, on one line: the head that carries it is bounded by the pack's room."""
     return " ".join(str(text or "").split())
+
+
+# The consumer whose declared kinds are the answers holding texts the pack
+# recovered that the file does not hold as written (``CONSUMER_KINDS``): an
+# emulator's strings and a decoder's blobs as shipped, and any plug-in
+# decoder's answer of those kinds.
+DIRECTED_TEXT_SOURCES = "triage_pack.directed_text_sources"
+# The reader of an answer that wrote an unpacked program out as a file.
+UNPACKED_READER = "unpacked_image"
+# The renderers of the steps that list a container's members or streams
+# without extracting them: a sample routed as one of their formats holds
+# content the directed-text pass cannot read.
+LISTED_RENDERERS = frozenset({"archive_listing", "document_facts", "apk_manifest"})
+# The kind of an archive's listing, whose member names the pass reads.
+ARCHIVE_LISTING_KIND = "archive_listing"
+# What the directed-text answer names the files a sandbox saw dropped by.
+DROPPED_SOURCE = "sandbox dropped files"
+# Said of a source the pack's time budget kept the pass from.
+BUDGET_SPENT = "the pack's time budget was spent before it"
+
+
+def _whole_or_page(
+    entry: LedgerEntry, facts: ToolFacts, whole: Callable[[], list[dict[str, Any]]] | None
+) -> tuple[list[Any], str]:
+    """An answer's rows whole where its step keeps them whole, else its page; and what was partial.
+
+    The second value says why only a page was read (``""`` when the rows are
+    whole): the whole rows could not be read, or the entry holds a page.
+    """
+    why = ""
+    if whole is not None:
+        try:
+            rows = whole()
+        except Exception as exc:  # noqa: BLE001 — the page the entry holds is still read
+            rows = []
+            why = f"its whole rows could not be read ({type(exc).__name__})"
+        if rows:
+            return list(rows), ""
+    data = entry.structured if isinstance(entry.structured, dict) else {}
+    if not why and (data.get("truncated") or data.get("next_offset") is not None):
+        why = "the entry holds a page of its rows"
+    return select(entry.structured, facts.rows), why
+
+
+@dataclass
+class _DirectedRead:
+    """What the directed-text pass read and did not, as it goes."""
+
+    groups: directed_text.Groups = field(default_factory=directed_text.Groups)
+    scanned: list[dict[str, Any]] = field(default_factory=list)
+    unread: list[dict[str, str]] = field(default_factory=list)
+
+    def not_read(self, source: str, reason: str, entry: str = "") -> None:
+        row = {
+            "source": pack_escaped(source, delimiters=True),
+            "reason": pack_escaped(_one_line(reason), delimiters=True),
+        }
+        if entry:
+            row["entry"] = entry
+        self.unread.append(row)
+
+
+def _read_file(
+    read: _DirectedRead,
+    path: str,
+    format_facts: Mapping[str, Any] | None,
+    deadline: float | None,
+) -> None:
+    """The sample's own bytes, each match placed in the regions its format answer gives."""
+    try:
+        blob = Path(path).read_bytes()
+    except OSError as exc:
+        read.not_read(directed_text.FILE_SOURCE, f"{type(exc).__name__}: {exc}")
+        return
+    regions, unplaced = directed_text.file_regions(format_facts)
+    row: dict[str, Any] = {"source": directed_text.FILE_SOURCE, "bytes": len(blob)}
+    if unplaced:
+        row["sections_unplaced"] = unplaced
+    read.scanned.append(row)
+    directed_text.scan_bytes_into(read.groups, blob, directed_text.FILE_SOURCE, regions, deadline)
+
+
+def _read_unpacked(
+    read: _DirectedRead, entries: Sequence[LedgerEntry], deadline: float | None
+) -> bool:
+    """Every unpacked program an earlier answer wrote out; whether any was read."""
+    any_read = False
+    for entry in entries:
+        facts = facts_of(entry)
+        if facts is None or facts.reader != UNPACKED_READER or not entry.ok:
+            continue
+        data = entry.structured if isinstance(entry.structured, dict) else {}
+        child = data.get("child")
+        carved = str(child.get("carved_path") or "") if isinstance(child, dict) else ""
+        if not carved:
+            continue
+        try:
+            blob = Path(carved).read_bytes()
+        except OSError as exc:
+            read.not_read("the unpacked image", f"{type(exc).__name__}", entry.id)
+            continue
+        any_read = True
+        read.scanned.append({"source": "unpacked image", "entry": entry.id, "bytes": len(blob)})
+        directed_text.scan_bytes_into(
+            read.groups, blob, "unpacked image", deadline=deadline, extra={"entry": entry.id}
+        )
+    return any_read
+
+
+def _read_recovered(
+    read: _DirectedRead,
+    entries: Sequence[LedgerEntry],
+    whole_rows: Mapping[str, Callable[[], list[dict[str, Any]]]],
+    deadline: float | None,
+) -> None:
+    """The texts of every pack answer of a declared recovered-text kind.
+
+    Each row's declared ``text``, with its first declared place that has a
+    value. A call that was never made has its own line and is not repeated
+    here; one that was made and failed is named. Rows read from a page only,
+    and rows with no text, are said.
+    """
+    kinds = consumer_kinds(DIRECTED_TEXT_SOURCES)
+    for entry in entries:
+        if entry.agent != PIPELINE:
+            continue
+        facts = facts_of(entry)
+        if facts is None or facts.kind not in kinds:
+            continue
+        name = display_name(entry)
+        if not entry.ok or entry.structured is None:
+            if not _was_not_made(entry):
+                read.not_read(name, str(entry.error or entry.output or "no answer"), entry.id)
+            continue
+        rows, why = _whole_or_page(entry, facts, whole_rows.get(entry.id))
+        text_path = facts.values.get("text", "")
+        items: list[directed_text.TextItem] = []
+        skipped = 0
+        for row in rows:
+            text = first(row, text_path) if text_path else None
+            if not isinstance(text, str) or not text:
+                skipped += 1
+                continue
+            where = ""
+            for place_name, place_path in facts.places.items():
+                value = first(row, place_path)
+                if value not in (None, ""):
+                    where = f"{place_name} {value}"
+                    break
+            items.append(directed_text.TextItem(text, name, where, entry.id))
+        said: dict[str, Any] = {"source": pack_escaped(name, delimiters=True), "entry": entry.id}
+        said["texts"] = len(items)
+        if skipped:
+            said["skipped"] = skipped
+        if why:
+            said["page_only"] = why
+        read.scanned.append(said)
+        directed_text.scan_items_into(read.groups, items, deadline)
+
+
+def _read_member_names(
+    read: _DirectedRead, entries: Sequence[LedgerEntry], deadline: float | None
+) -> None:
+    """The member names an archive listing gave: the one part of a container the platform reads."""
+    for entry in entries:
+        facts = facts_of(entry)
+        if facts is None or facts.kind != ARCHIVE_LISTING_KIND or not entry.ok:
+            continue
+        data = entry.structured if isinstance(entry.structured, dict) else {}
+        members = [m for m in data.get("members") or [] if isinstance(m, dict)]
+        items = [
+            directed_text.TextItem(str(m["name"]), "archive member names", f"member {i}", entry.id)
+            for i, m in enumerate(members)
+            if m.get("name")
+        ]
+        read.scanned.append(
+            {"source": "archive member names", "entry": entry.id, "texts": len(items)}
+        )
+        directed_text.scan_items_into(read.groups, items, deadline)
+
+
+def _read_dropped(
+    read: _DirectedRead, report: dict[str, Any] | None, deadline: float | None
+) -> None:
+    """Every string the sandbox report holds about the files it saw dropped, with its path."""
+    if report is None:
+        return
+    dropped = report_place(report, "dropped_files")
+    if dropped is None:
+        return
+    if not isinstance(dropped, list):
+        read.not_read(DROPPED_SOURCE, "the report's dropped-files part is not a list")
+        return
+    items = [
+        directed_text.TextItem(text, DROPPED_SOURCE, f"/dropped_files{path}")
+        for path, text in directed_text.strings_in(dropped)
+    ]
+    read.scanned.append({"source": DROPPED_SOURCE, "files": len(dropped), "texts": len(items)})
+    if dropped:
+        read.not_read(
+            f"the {len(dropped)} dropped files' bytes",
+            "the sandbox report holds what its reader kept of them, read here, not the files",
+        )
+    directed_text.scan_items_into(read.groups, items, deadline)
+
+
+def _packers(format_facts: Mapping[str, Any] | None) -> list[str]:
+    """The packer names a format answer's packer signatures give."""
+    rows = (format_facts or {}).get("packer_signatures") if format_facts else None
+    return [
+        str(row.get("name") or row) if isinstance(row, dict) else str(row)
+        for row in (rows or [])
+        if row
+    ]
+
+
+def directed_text_answer(
+    path: str,
+    format_facts: Mapping[str, Any] | None,
+    entries: Sequence[LedgerEntry],
+    whole_rows: Mapping[str, Callable[[], list[dict[str, Any]]]],
+    report: dict[str, Any] | None,
+    *,
+    deadline: float | None = None,
+    routed: str = "",
+    listed_formats: frozenset[str] = frozenset(),
+    room: int | None = None,
+) -> dict[str, Any]:
+    """The directed-text pass's answer over everything the pack can hand it, in order.
+
+    The file, every unpacked program an earlier answer wrote out, the texts of
+    the declared recovered-text kinds, an archive listing's member names and
+    the files a sandbox saw dropped. Content the pass could not read is named
+    under ``not_scanned`` with why: a container's compressed members or
+    streams (a sample routed as a format the platform lists and does not
+    extract), a packed image nobody unpacked, a dropped file's bytes. A
+    ``deadline`` that passes stops the pass cleanly: the answer holds what it
+    found, ``partial`` says where it stood, and each source it did not reach is
+    named.
+    """
+    read = _DirectedRead(groups=directed_text.Groups(room=room))
+    unpacked: list[bool] = []
+    steps: list[tuple[str, Callable[[], None]]] = [
+        (directed_text.FILE_SOURCE, lambda: _read_file(read, path, format_facts, deadline)),
+        ("unpacked images", lambda: unpacked.append(_read_unpacked(read, entries, deadline))),
+        ("recovered texts", lambda: _read_recovered(read, entries, whole_rows, deadline)),
+        ("archive member names", lambda: _read_member_names(read, entries, deadline)),
+        (DROPPED_SOURCE, lambda: _read_dropped(read, report, deadline)),
+    ]
+    partial = ""
+    for index, (name, run) in enumerate(steps):
+        if deadline is not None and time.monotonic() > deadline:
+            partial = partial or f"stopped before {name}"
+            read.not_read(name, BUDGET_SPENT)
+            continue
+        try:
+            run()
+        except directed_text.Spent as spent:
+            partial = f"stopped by the pack's time budget in {spent.at}"
+            for later, _run in steps[index + 1 :]:
+                read.not_read(later, BUDGET_SPENT)
+            break
+    if routed and routed in listed_formats:
+        read.not_read(
+            f"the {routed} sample's compressed members or streams",
+            "the platform lists them and does not extract them",
+        )
+    packers = _packers(format_facts)
+    if packers and not any(unpacked):
+        read.not_read("the packed image", f"packed by {', '.join(packers)} and not unpacked")
+    return directed_text.answer(read.groups, read.scanned, read.unread, partial, deadline)
 
 
 def run_pack(
@@ -2659,6 +2980,9 @@ def _novel_view(entry: LedgerEntry) -> LedgerEntry | None:
         if not new:
             return None
         view = {**data, "stated": new, "also_stated": len(rows) - len(new)}
+    elif renderer == directed_text.RENDERER:
+        # No other line carries these phrases: every group is new.
+        return entry if data.get("groups") else None
     else:
         return None
     return entry.model_copy(update={"structured": view})
@@ -3695,7 +4019,9 @@ def _decoded_blobs(data: dict[str, Any], max_chars: int | None = None) -> str:
 
 # The renderers of the deobfuscation passes: their lines take only the room the
 # others leave.
-PASS_RENDERERS = frozenset({"crypto_constants", "anti_analysis_scan", "unpacked_image"})
+PASS_RENDERERS = frozenset(
+    {"crypto_constants", "anti_analysis_scan", "unpacked_image", directed_text.RENDERER}
+)
 # The renderer of a rule matcher's answer, whose addresses take what room is left.
 RULES_RENDERER = "capability_rules"
 # What a pass's row calls the rules that agree with it where any came from a
@@ -4121,6 +4447,165 @@ def _unpacked(data: dict[str, Any], max_chars: int | None = None) -> str:
     return ""
 
 
+# Said in the directed-text line before its phrases: they are the sample's own
+# words, quoted, and stated as evidence with no weight of their own.
+DIRECTED_TEXT_STANDING = (
+    "stated as evidence about the sample; it neither raises nor lowers the verdict by itself"
+)
+
+
+def _directed_sources(scanned: list[dict[str, Any]], views: list[str]) -> str:
+    """What the pass read, each source with what of it was partial."""
+    said: list[str] = []
+    readings = " and ".join(str(e).upper() for e in directed_text.ENCODINGS)
+    also = ", ".join(str(v) for v in views[1:])
+    for row in scanned:
+        source = str(row.get("source") or "")
+        entry = f" [{row.get('entry')}]" if row.get("entry") else ""
+        if "bytes" in row:
+            unplaced = (
+                f"; {_n(row['sections_unplaced'])} sections with no readable offset"
+                if row.get("sections_unplaced")
+                else ""
+            )
+            also_said = f", also {also}" if also else ""
+            said.append(
+                f"the {source}{entry} ({_n(row.get('bytes'))} bytes as {readings}{also_said}"
+                f"{unplaced})"
+            )
+            continue
+        if "files" in row:
+            said.append(f"{_n(row.get('texts'))} texts of {_n(row.get('files'))} {source}")
+            continue
+        notes = []
+        if row.get("page_only"):
+            notes.append(f"page only: {row['page_only']}")
+        if row.get("skipped"):
+            notes.append(f"{_n(row['skipped'])} rows with no text")
+        noted = f" ({'; '.join(notes)})" if notes else ""
+        said.append(f"{source}'s {_n(row.get('texts'))} texts{entry}{noted}")
+    return ", ".join(said) or "no source it could read"
+
+
+def _directed_unread(unread: list[dict[str, Any]]) -> str:
+    """``; not read: <what> [id] (why), ...`` for every source the pass could not read."""
+    said = [
+        f"{row.get('source')}"
+        + (f" [{row.get('entry')}]" if row.get("entry") else "")
+        + f" ({_short(str(row.get('reason') or ''))})"
+        for row in unread
+    ]
+    return f"; not read: {', '.join(said)}" if said else ""
+
+
+def _directed_place(where: Any) -> str:
+    """Where one match stands, from fields the answer already holds escaped."""
+    if not isinstance(where, dict):
+        return ""
+    entry = f" [{where.get('entry')}]" if where.get("entry") else ""
+    if "offset" in where:
+        parts = [
+            f"{_n(where.get('length'))} bytes",
+            str(where.get("encoding") or ""),
+            str(where.get("region") or ""),
+        ]
+        within = ", ".join(part for part in parts if part)
+        return f"{where.get('offset')} ({where.get('source')}{entry}, {within})"
+    place = f" {where.get('place')}" if where.get("place") else ""
+    return f"({where.get('source')}{entry}{place}, character {_n(where.get('at_character'))})"
+
+
+def _quoted_escaped(escaped: str) -> str:
+    """A phrase the answer already holds escaped, quoted and cut as :func:`_quoted` cuts.
+
+    It is not escaped again. A cut that would leave a lone backslash before the
+    closing quote drops it, so the quote always closes the value.
+    """
+    width = _detail().string_chars
+    if width is not None and len(escaped) > width:
+        cut = escaped[: max(1, width - 1)]
+        trailing = len(cut) - len(cut.rstrip("\\"))
+        if trailing % 2:
+            cut = cut[:-1]
+        escaped = cut + "…"
+    return f'"{escaped}"'
+
+
+def _held_phrase(held: Any) -> str:
+    """A held phrase quoted: whole, or its prefix with its full length and digest."""
+    if isinstance(held, dict):
+        return (
+            f"{_quoted_escaped(str(held.get('prefix') or '') + '…')} "
+            f"({_n(held.get('characters'))} characters, sha256 {held.get('sha256')})"
+        )
+    return _quoted_escaped(str(held or ""))
+
+
+def _directed_item(row: dict[str, Any]) -> str:
+    """``family "phrase" ×count at <first> to <last> (how it was disguised)``."""
+    last = row.get("last")
+    span = f" to {_directed_place(last)}" if last else ""
+    disguised = row.get("disguises") or []
+    how = f" ({', '.join(str(d) for d in disguised)})" if disguised else ""
+    inside = row.get("inside_template")
+    within = f" ({_n(inside)} {directed_text.INSIDE_TEMPLATE})" if inside else ""
+    if row.get("distinct_names"):
+        within += f" ({_n(row['distinct_names'])} distinct names, listed in the entry)"
+    return (
+        f"{row.get('family')} {_held_phrase(row.get('phrase'))} "
+        f"×{_n(row.get('count'))} at {_directed_place(row.get('first'))}{span}{how}{within}"
+    )
+
+
+def _directed_text(data: dict[str, Any], max_chars: int | None = None) -> str:
+    """The directed-text pass: per-family counts, then each phrase group as room allows.
+
+    Neutral: phrases of these families were found, never that the sample means
+    anything by them. What was read, every source it could not read and where
+    the pack's time budget stopped it are said; a negative over a source it
+    could not read is never stated as a plain ``no:``.
+    """
+    rows = [r for r in (data.get("groups") or []) if isinstance(r, dict)]
+    checked = [str(name) for name in data.get("families_checked") or []]
+    views = [str(v) for v in data.get("views") or []]
+    sources = _directed_sources(
+        [r for r in data.get("scanned") or [] if isinstance(r, dict)], views
+    )
+    unread = _directed_unread([r for r in data.get("not_scanned") or [] if isinstance(r, dict)])
+    partial = f"; {data['partial']}" if data.get("partial") else ""
+    families = f"the {_n(len(checked))} phrase families ({', '.join(checked)})"
+    if not rows:
+        if unread or partial:
+            line = f"no phrase of {families} in what was read: {sources}{unread}{partial}"
+        else:
+            line = f"no: none of {families} in {sources}"
+        return line if max_chars is None or len(line) <= max_chars else ""
+    counts = data.get("counts")
+    counted = ", ".join(
+        f"{family} ×{_n(n)}" for family, n in (counts.items() if isinstance(counts, dict) else ())
+    )
+    head = (
+        f"{_n(data.get('total'))} phrase matches of {families} were found ({counted}) in "
+        f"{sources}{unread}{partial}; {DECODED_STRINGS_PROVENANCE}; "
+        f'{DIRECTED_TEXT_STANDING}; each as family "phrase" ×count at its first place to its '
+        "last"
+    )
+    total = len(rows)
+
+    def _line(shown: int) -> str:
+        said = (
+            ""
+            if shown >= total
+            else f" ({PASS_ROOM_SENTENCE.format(shown=_n(shown), total=_n(total))})"
+        )
+        items = "; ".join(_directed_item(row) for row in rows[:shown])
+        return f"{head}{said}: {items}"
+
+    head_count = _detail().list_head
+    shown = total if head_count is None else min(total, head_count)
+    return _fit_some(_line, shown, max_chars)
+
+
 def _function_matches(data: dict[str, Any]) -> str:
     rows = [r for r in (data.get("matches") or []) if isinstance(r, dict)]
     families = sorted({str(r.get("family") or "") for r in rows if r.get("family")})
@@ -4441,6 +4926,7 @@ _RENDERERS: dict[str, Callable[[dict[str, Any]], str]] = {
     "crypto_constants": _constant_sets,
     "anti_analysis_scan": _anti_analysis,
     "unpacked_image": _unpacked,
+    directed_text.RENDERER: _directed_text,
 }
 
 # The lines that can say less and still say something, each given the room it
@@ -4454,4 +4940,5 @@ _SHORTER_RENDERERS: dict[str, Callable[[dict[str, Any], int], str]] = {
     "crypto_constants": lambda data, room: _constant_sets(data, max_chars=room),
     "anti_analysis_scan": lambda data, room: _anti_analysis(data, max_chars=room),
     "unpacked_image": lambda data, room: _unpacked(data, max_chars=room),
+    directed_text.RENDERER: lambda data, room: _directed_text(data, max_chars=room),
 }

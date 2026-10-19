@@ -224,6 +224,31 @@ class ExportRow(BaseModel):
     rva: str | None = None
 
 
+class DirectedText(BaseModel):
+    """One phrase group of the directed-text families the sample carries.
+
+    As the triage pack's directed-text pass recorded it
+    (``analysis.directed_text``): the family, the normalised phrase in the
+    pack's quoted-data form (escaped, never raw), how many times it stands,
+    where it first stands (a file offset with its byte length, encoding and
+    region, or the place in the source that recovered it, every part held
+    escaped), how it was disguised, how many of its matches stand inside a
+    chat template structure of their own text, and the ledger entry. Every
+    match is counted as a finding either way. It is evidence about the
+    sample and moves no verdict by itself.
+    """
+
+    model_config = _STRICT_CONFIG
+
+    family: str
+    text: str
+    count: int = 1
+    where: str = ""
+    disguises: list[str] = Field(default_factory=list)
+    inside_template: int = 0
+    evidence_id: str = ""
+
+
 class StaticAnalysis(BaseModel):
     """Findings from binary parsing / disassembly (no execution)."""
 
@@ -1414,6 +1439,14 @@ class MalwareReport(BaseModel):
 
     # --- Deterministic analyses ---
     static: StaticAnalysis | None = None
+    # The phrase groups of the directed-text families the pack's pass found
+    # (``ledger_projection.directed_text_from_ledger``), apart from ``static``
+    # so they add no static block to a run that has none. Left out of the JSON
+    # when there are none, so a report stored before the field existed, or one
+    # with nothing found, reads as it did.
+    directed_text: list[DirectedText] = Field(
+        default_factory=list, exclude_if=lambda value: not value
+    )
     dynamic: DynamicBehavior | None = None
     network: NetworkIOCs | None = None
     persistence: list[PersistenceMechanism] = Field(default_factory=list)

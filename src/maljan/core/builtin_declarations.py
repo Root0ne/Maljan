@@ -544,6 +544,15 @@ _PACK_TOOLS: dict[str, dict[str, Any]] = {
         "report_sections": ["packing_obfuscation", "evasion_antiforensics"],
     },
     "function_matches": {"kind": "function_matches"},
+    # Phrases of the directed-text families (``analysis.directed_text``): one
+    # row per family and normalised phrase, with where it first stands.
+    "find_directed_text": {
+        "kind": "directed_text",
+        "rows": "/groups/*",
+        "places": {"offset": "/first/offset", "place": "/first/place"},
+        "values": {"text": "/phrase", "family": "/family"},
+        "arguments": {"path": "path"},
+    },
     # The pack's own entry for a reputation lookup that did not happen
     # (``triage_pack.REPUTATION_STEP``), which ``run_state`` shows beside a lookup.
     "reputation": {"kind": "reputation_not_asked"},
@@ -669,6 +678,8 @@ CONSUMER_KINDS: dict[str, dict[str, Any]] = {
     "markdown._SANDBOX_TOOLS": {"same_as": "evidence_bundles.SANDBOX_TOOL_PREFIXES"},
     "triage_pack._REPUTATION_TOOLS": {"kinds": [*REPUTATION_KINDS, "reputation_not_asked"]},
     "triage_pack.RULE_TOOLS": {"kinds": ["capability_rules", "signature_rules"]},
+    # The answers whose texts the directed-text pass reads beside the file.
+    "triage_pack.directed_text_sources": {"kinds": ["emulated_strings", "decoded_strings"]},
     "run_state.reputation": {"kinds": [*REPUTATION_KINDS, "reputation_not_asked"]},
     "network_analyst._PCAP_TOOLS": {"kinds": ["packet_overview", "dns", "http"]},
     "function_map": {

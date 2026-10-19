@@ -70,6 +70,7 @@
   "pack::elf_info": [[true, null], [true, null], [true, null], [true, null], [true, null], [false, "the binary is not loaded"], [true, null], [true, null], [true, null], [true, null]],
   "pack::find_anti_analysis_techniques": [[true, null], [true, null], [true, null], [true, null], [true, null], [false, "the binary is not loaded"], [true, null], [true, null], [true, null], [true, null]],
   "pack::find_crypto_constants": [[true, null], [true, null], [true, null], [true, null], [true, null], [false, "the binary is not loaded"], [true, null], [true, null], [true, null], [true, null]],
+  "pack::find_directed_text": [[true, null], [true, null], [true, null], [true, null], [true, null], [false, "the binary is not loaded"], [true, null], [true, null], [true, null], [true, null]],
   "pack::floss": [[true, null], [true, null], [true, null], [true, null], [true, null], [false, "the binary is not loaded"], [true, null], [true, null], [true, null], [true, null]],
   "pack::function_index": [[true, null], [true, null], [true, null], [true, null], [true, null], [false, "the binary is not loaded"], [true, null], [true, null], [true, null], [true, null]],
   "pack::function_matches": [[true, null], [true, null], [true, null], [true, null], [true, null], [false, "the binary is not loaded"], [true, null], [true, null], [true, null], [true, null]],

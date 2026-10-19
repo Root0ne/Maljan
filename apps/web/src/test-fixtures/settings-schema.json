@@ -10789,6 +10789,10 @@
        {
         "meaning": "a function index, placed in the room the rest of the pack leaves",
         "name": "function_table"
+       },
+       {
+        "meaning": "phrases of the directed-text families, counted and quoted by group",
+        "name": "directed_text"
        }
       ],
       "replacing_fields": [
@@ -11036,6 +11040,11 @@
         "kind": "called_api_catalogue",
         "renderer": "api_catalogue",
         "tool": "api_capability"
+       },
+       {
+        "display_name": "directed-text phrases",
+        "id": "find_directed_text",
+        "renderer": "directed_text"
        }
       ],
       "shipped_compared": {
@@ -11073,6 +11082,10 @@
        },
        "find_crypto_constants": {
         "called": "find_crypto_constants",
+        "server": ""
+       },
+       "find_directed_text": {
+        "called": "find_directed_text",
         "server": ""
        },
        "floss": {

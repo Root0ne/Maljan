@@ -183,13 +183,14 @@ class TestTheStep:
         deobfuscation passes and the function index follow it."""
         _installed(monkeypatch, _answer(ROWS))
         result = _pack(tmp_path)
-        assert [entry.tool for entry in result.entries[-6:]] == [
+        assert [entry.tool for entry in result.entries[-7:]] == [
             "sandbox_status",
             "floss",
             "resolve_api_hashes",
             "decode_string_blobs",
             "find_crypto_constants",
             "function_index",
+            "find_directed_text",
         ]
         entry = _floss_entry(result)
         assert entry.ok is True
