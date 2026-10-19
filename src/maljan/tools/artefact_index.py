@@ -95,7 +95,6 @@ The sample is only read; nothing in it is run.
 
 from __future__ import annotations
 
-import heapq
 import re
 from bisect import bisect_left, bisect_right
 from collections.abc import Iterable, Mapping, Sequence
@@ -207,60 +206,21 @@ class _Graph:
 
 
 class _Sections:
-    """Which section holds an RVA, answered by bisection rather than by a scan of every section.
+    """Which section holds an RVA: ``pe_image.Image.section_at_rva``, answered by bisection.
 
-    The same answer ``pe_image.Image.section_at_rva`` gives (the first section
-    in the header's order whose range, the larger of its virtual and raw size,
-    holds the RVA), computed once: the ranges are cut into the intervals
-    between their ends, each interval given the first section that covers it,
-    with a sweep over the sorted ends. Building it costs the sections times
-    their logarithm, and each lookup the logarithm of the intervals, so the
-    walk costs calls plus sections, not their product.
+    The image builds its first-match lookup over the section ranges once, so
+    the walk costs calls plus sections, not their product.
     """
 
     def __init__(self, image: Image) -> None:
         self.image = image
-        spans = [
-            (s.rva, s.rva + max(s.virtual_size, s.raw_size), index)
-            for index, s in enumerate(image.sections)
-            if max(s.virtual_size, s.raw_size) > 0
-        ]
-        ends = sorted({point for lo, hi, _ in spans for point in (lo, hi)})
-        by_start = sorted(spans)
-        self.starts: list[int] = []
-        self.owners: list[int | None] = []
-        active: list[tuple[int, int]] = []  # (header index, end), a heap by index
-        position = 0
-        for point in ends:
-            while position < len(by_start) and by_start[position][0] == point:
-                lo, hi, index = by_start[position]
-                heapq.heappush(active, (index, hi))
-                position += 1
-            while active and active[0][1] <= point:
-                heapq.heappop(active)
-            # A section whose end is passed but is not on top stays in the heap;
-            # it is dropped when it reaches the top, before it can answer.
-            self.starts.append(point)
-            self.owners.append(active[0][0] if active else None)
 
     def at(self, rva: int) -> Section | None:
-        position = bisect_right(self.starts, rva) - 1
-        if position < 0:
-            return None
-        index = self.owners[position]
-        if index is None:
-            return None
-        section = self.image.sections[index]
-        if section.rva <= rva < section.rva + max(section.virtual_size, section.raw_size):
-            return section
-        return None
+        return self.image.section_at_rva(rva)
 
     def offset(self, rva: int) -> int | None:
         """``pe_image.Image.offset_of_rva``, through the same lookup."""
-        section = self.at(rva)
-        if section is None or rva - section.rva >= section.mapped_size:
-            return None
-        return section.raw_offset + (rva - section.rva)
+        return self.image.offset_of_rva(rva)
 
 
 def _data_address(image: Image, code: bytes, at: int, ins: Instruction, rva_end: int) -> int | None:
@@ -1870,7 +1830,7 @@ def _answer(
         "unplaced": dict(sorted(unplaced.items())),
         "total": len(out),
         "rows": out,
-    }
+    } | ({"imports_cut": image.imports_note} if image.imports_note else {})
 
 
 # The sources when no answer listed function starts.
@@ -2002,6 +1962,8 @@ def head_text(data: Mapping[str, Any], rows: int) -> str:
     if unplaced:
         counted = ", ".join(f"{tool} {n}" for tool, n in unplaced.items())
         said += f"; places no function holds, not counted: {counted}"
+    if data.get("imports_cut"):
+        said += f"; imports: {data['imports_cut']}"
     if not rows:
         return said
     return (
@@ -2282,6 +2244,8 @@ def served_index(path: str | Path, address: Any = None) -> dict[str, Any]:
     data["joined"] = sorted(answers)
     rows = rows_of(data)
     out = {key: data[key] for key in _SERVED_KEYS}
+    if data.get("imports_cut"):
+        out["imports_cut"] = data["imports_cut"]
     if not readings:
         table = [head_text(data, len(rows)), *(row_line(row, THIS_ANSWER) for row in rows)]
         return out | {"table": "\n".join(table)}

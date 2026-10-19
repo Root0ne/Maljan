@@ -49,6 +49,9 @@ algorithm or two, carries both; one is never picked. Each hit lists every place
 in the file where the value is stored (little-endian, aligned or not), with the
 RVA, the section and, inside code, the start of the function the file's own
 function table puts around it (``maljan.tools.pe_image``); no start is guessed.
+The places the rows list, all rows together, stop at what the largest tool
+answer any model is given holds (``pe_image.PLACE_BUDGET``); past it the answer
+says once how many it left out (``occurrences_cut``).
 
 Nothing is limited by default: ``limit`` pages the answer only when the caller
 asks for pages.
@@ -387,19 +390,29 @@ def resolve_api_hashes(
             for value, readings in resolved.items()
             if any(per_algorithm[r["algorithm"]] > 1 for r in readings)
         ]
-        lone_values = [value for value in resolved if value not in set(hit_values)]
+        chosen = set(hit_values)
+        lone_values = [value for value in resolved if value not in chosen]
+
+    # Every resolved value's places, found in one pass over the file.
+    stored = pe_image.value_offsets(image.data, resolved)
+
+    # The places every row lists, all rows together, at most the answer's budget.
+    budget = pe_image.PlaceBudget()
+
+    def _first(value: int) -> tuple[int, int]:
+        offsets = stored[value]
+        return (0, int(offsets[0])) if len(offsets) else (1, 0)
 
     def _row(value: int) -> dict[str, Any]:
-        places = [image.where(at) for at in image.occurrences(value)]
+        places = budget.take(stored[value], image.where)
         return {"value": f"{value:#010x}", "readings": resolved[value], "occurrences": places}
 
-    hits = [_row(value) for value in hit_values]
-    hits.sort(key=lambda row: _first_place(row))
-    lone = [_row(value) for value in lone_values]
-    lone.sort(key=lambda row: _first_place(row))
+    ordered = sorted(hit_values, key=_first)
     start = max(0, int(offset or 0))
-    page = hits[start:] if limit is None else hits[start : start + max(0, int(limit))]
-    more = start + len(page) < len(hits)
+    paged = ordered[start:] if limit is None else ordered[start : start + max(0, int(limit))]
+    page = [_row(value) for value in paged]
+    lone = [_row(value) for value in sorted(lone_values, key=_first)]
+    more = start + len(page) < len(ordered)
     answer: dict[str, Any] = {
         "tool": TOOL,
         "image_base": hex(image.image_base),
@@ -419,7 +432,7 @@ def resolve_api_hashes(
             else {"scanned": len(values), "how": SCAN_HEURISTIC}
         ),
         "hits": page,
-        "total": len(hits),
+        "total": len(ordered),
         "page_offset": start,
         "next_offset": start + len(page) if more else None,
     }
@@ -429,11 +442,6 @@ def resolve_api_hashes(
             answer["unreadable"] = unreadable
     else:
         answer["lone_hits"] = lone
+    if budget.cut:
+        answer["occurrences_cut"] = budget.cut
     return answer
-
-
-def _first_place(row: dict[str, Any]) -> tuple[int, int]:
-    places = row.get("occurrences") or []
-    if not places:
-        return (1, 0)
-    return (0, int(str(places[0]["offset"]), 16))

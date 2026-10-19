@@ -451,28 +451,33 @@ def _callee(image: Image, call_rva: int, instruction: Instruction) -> dict[str, 
     kind, value = instruction.target
     after = call_rva + instruction.length
     imports = image.imports_by_slot()
+    # Where the import tables were not read whole, a slot without a name says why.
+    unread = {"imports_cut": image.imports_note} if image.imports_note else {}
     if kind == "rel":
         target = after + value
         slot = _thunk_slot(image, target)
         if slot is not None and slot in imports:
             return {"import": imports[slot], "function": hex(target)}
-        return {"function": hex(target)}
+        return {"function": hex(target), **(unread if slot is not None else {})}
     if kind == "mem":
         slot = after + value if instruction.rip_relative else value - image.image_base
         if slot in imports:
             return {"import": imports[slot], "slot": hex(slot)}
-        return {"slot": hex(slot)}
+        return {"slot": hex(slot), **unread}
     return None
 
 
 def _callee_words(joined: dict[str, Any]) -> str:
     stated = joined.get("callee")
     callee: dict[str, Any] = stated if isinstance(stated, dict) else {}
-    return (
+    named = (
         str(callee.get("import") or "")
         or (f"the function at {callee['function']}" if callee.get("function") else "")
         or (f"the pointer stored at {callee['slot']}" if callee.get("slot") else "")
     )
+    if named and callee.get("imports_cut"):
+        named += f" (no import name read for it: {callee['imports_cut']})"
+    return named
 
 
 def _call_words(joined: Any) -> str:

@@ -4180,6 +4180,8 @@ def _resolved_hashes(data: dict[str, Any], max_chars: int | None = None) -> str:
         else f"{_n(candidates.get('given'))} values given"
     )
     names = data.get("names") or {}
+    # Said when the answer listed fewer places than hold the values it found.
+    cut = f" ({data['occurrences_cut']})" if data.get("occurrences_cut") else ""
 
     def _lone(listed: bool) -> str:
         if not lone:
@@ -4195,7 +4197,7 @@ def _resolved_hashes(data: dict[str, Any], max_chars: int | None = None) -> str:
         if not rows:
             return (
                 f"no value the file holds names a Windows function or module ({looked})"
-                f"{_lone(listed)}"
+                f"{_lone(listed)}{cut}"
             )
         return (
             f"{_n(total)} values the file holds name Windows functions or modules ({looked}, "
@@ -4204,7 +4206,7 @@ def _resolved_hashes(data: dict[str, Any], max_chars: int | None = None) -> str:
             f"module names){_lone(listed)}; each as value = DLL!name [algorithm] or module name "
             "[algorithm] @ the offsets from the image base where the value stands (in the "
             "function the file's table puts around it, or after the nearest function start "
-            "another tool listed)"
+            f"another tool listed){cut}"
         )
 
     def _line(shown: int, listed: bool) -> str:
@@ -4705,9 +4707,10 @@ def _constant_sets(data: dict[str, Any], max_chars: int | None = None) -> str:
         if agreeing
         else ""
     )
+    cut = f" ({data['places_cut']})" if data.get("places_cut") else ""
     head = (
         f"{_n(total + agreeing)} of {searched} published constant sets stand in the file"
-        f"{agree_said}{lone_said}"
+        f"{agree_said}{lone_said}{cut}"
     )
 
     def _line(shown: int) -> str:
@@ -4862,8 +4865,9 @@ def _unpacked(data: dict[str, Any], max_chars: int | None = None) -> str:
         f"both adler32 checksums {'matched' if matched else 'stated'}; {where} "
         f"(sha256 {child.get('sha256')}, {_n(child.get('size'))} bytes, "
         f"{len(data.get('sections') or [])} sections, {_n(data.get('import_count'))} imports "
-        f"from {_n(data.get('import_libraries'))} libraries, entry point "
-        f"{data.get('entry_point')})"
+        f"from {_n(data.get('import_libraries'))} libraries"
+        + (f" ({data['import_count_cut']})" if data.get("import_count_cut") else "")
+        + f", entry point {data.get('entry_point')})"
     )
     for line in (whole, where):
         if max_chars is None or len(line) <= max_chars:
