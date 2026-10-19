@@ -39,6 +39,7 @@ from __future__ import annotations
 
 import json
 import re
+import sys
 import threading
 from collections.abc import Mapping, Sequence
 from typing import Any
@@ -65,6 +66,26 @@ _ID_DIGITS = 4
 # that writes ``EV_0002`` back is citing the same entry, and a false flag
 # here costs a full analyst feedback turn.
 ENTRY_ID_RE = re.compile(r"\bev_\d{3,}\b", re.IGNORECASE)
+
+# Where an entry id's prefix meets its digits. A text that only mentions an id,
+# such as a sample's string written into a triage pack line, has this underscore
+# written out (``utils.written_forms.ids_written_out``). Neither ``ENTRY_ID_RE``
+# nor a reader then finds a citation in it. On raw text it matches only where
+# ``ENTRY_ID_RE`` would begin: ``ev_`` after a word boundary and before a digit,
+# so ``prev_2024`` and ``dev_1`` are left alone. On text whose control characters
+# are already written out, an id that stands right after an escape is matched
+# too: ``\n``, ``\t``, ``\r``, ``\"`` and ``\x`` with any number of hex digits
+# up to the widest code point. One hex digit covers the id whose ``e`` is the
+# escape's own last digit (``\x0e`` then ``v_0003``), which a reader sees as
+# ``ev_0003``.
+_ESCAPE_HEX_DIGITS = len(f"{sys.maxunicode:x}")
+_AFTER_AN_ESCAPE = "|".join(
+    [r'(?<=\\[ntr"])'] + [rf"(?<=\\x[0-9a-f]{{{n}}})" for n in range(1, _ESCAPE_HEX_DIGITS + 1)]
+)
+ENTRY_ID_JOIN_RE = re.compile(rf"(?:(?<!\w)|{_AFTER_AN_ESCAPE})ev_(?=\d)", re.IGNORECASE)
+# The same, only right after an escape: on a line the platform built, whose own
+# ids stand after no escape, these are the ids a written-out control brought.
+ENTRY_ID_AFTER_ESCAPE_RE = re.compile(rf"(?:{_AFTER_AN_ESCAPE})ev_(?=\d)", re.IGNORECASE)
 
 
 def entry_ids_in(text: str) -> set[str]:
