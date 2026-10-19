@@ -122,6 +122,100 @@ def _list_at(report: dict[str, Any], name: str) -> list[Any] | None:
     return value if isinstance(value, list) else None
 
 
+# What a view says of a part the report does not hold. An empty list says the
+# sandbox watched and saw nothing; a part that is not there says nothing
+# either way, and answering it as ``[]`` read as "no network activity".
+_ABSENT_STATEMENT = (
+    "The report does not hold this part, so whether there was any is not known. "
+    "This is not the same as none."
+)
+
+
+def _absent(*parts: str) -> dict[str, Any]:
+    """The answer for parts the report does not hold: named absent, with no empty list."""
+    return {"absent": list(parts), "statement": _ABSENT_STATEMENT}
+
+
+def _unavailable(report: dict[str, Any]) -> frozenset[str]:
+    """The report's own ``unavailable`` list, each name as the platform's section id.
+
+    A reader lays every part out, as an empty list where its sandbox could not
+    give it, and names those parts here; read alone, the empty list would say
+    "none observed".
+    """
+    from maljan.schemas.sandbox_report import section_id
+
+    named = place(report, "unavailable")
+    return frozenset(section_id(n) for n in named) if isinstance(named, list) else frozenset()
+
+
+def _fills(normalised_by: Sequence[str] | None) -> frozenset[str] | None:
+    """The list fields the job's reader declares it fills, or ``None`` when it is not known.
+
+    ``normalised_by`` is ``(provider, source_format[, read_from])``
+    (``normalised_by_of``); the declaration is the reader's own
+    (``schemas.sandbox_report.normaliser_reading``), the one the sandbox
+    sections read too.
+    """
+    if not normalised_by or len(normalised_by) not in (2, 3):
+        return None
+    from maljan.schemas.sandbox_report import normaliser_reading
+
+    provider, source_format, *rest = (str(part or "").strip() for part in normalised_by)
+    reading = normaliser_reading(source_format, provider, rest[0] if rest else "")
+    return reading.fills if reading is not None else None
+
+
+# A view's source under the reader's word for it, where the two differ
+# (``schemas.sandbox_report.REPORT_LIST_FIELDS``); every other source is its own.
+_FILL_NAMES: dict[str, str] = {"calls": "processes.calls"}
+
+
+def _held(
+    report: dict[str, Any],
+    part: str,
+    unavailable: frozenset[str],
+    fills: frozenset[str] | None = None,
+) -> bool:
+    """Whether the report holds ``part``: present, filled by its reader, not named unavailable.
+
+    A part the job's reader declares it never fills (``fills``) is laid out
+    empty whatever the sandbox saw, and is not held. A part is named
+    unavailable by its own name, by its last component (``dns`` for
+    ``network.dns``, ``mutexes`` for ``summary.mutexes``), or, for a network
+    kind, by ``network``. ``calls`` is held where the flat call list or any
+    process's own call list is present (``api_calls`` names it).
+    """
+    from maljan.schemas.sandbox_report import section_id
+
+    if fills is not None and _FILL_NAMES.get(part, part) not in fills:
+        return False
+    leaf = part.rsplit(".", 1)[-1]
+    names = {section_id(part), section_id(leaf)}
+    if part.startswith("network."):
+        names.add("network")
+    if names & unavailable:
+        return False
+    if part == "calls":
+        if isinstance(place(report, "calls"), list):
+            return True
+        return any(
+            isinstance(proc, dict) and isinstance(proc.get("calls"), list)
+            for proc in _list_at(report, "processes") or []
+        )
+    return place(report, part) is not None
+
+
+def _absent_of(
+    report: dict[str, Any], *sources: str, normalised_by: Sequence[str] | None = None
+) -> dict[str, Any] | None:
+    """``_absent`` naming ``sources`` when the report holds none of them, else ``None``."""
+    unavailable, fills = _unavailable(report), _fills(normalised_by)
+    if any(_held(report, source, unavailable, fills) for source in sources):
+        return None
+    return _absent(*sources)
+
+
 def sandbox_report_section(
     report: dict[str, Any] | None, section: str, offset: int = 0, limit: int = 0
 ) -> dict[str, Any]:
@@ -163,7 +257,11 @@ def _without_host_paths(value: Any) -> Any:
 
 
 def sandbox_processes(
-    report: dict[str, Any] | None, offset: int = 0, limit: int = 0
+    report: dict[str, Any] | None,
+    offset: int = 0,
+    limit: int = 0,
+    *,
+    normalised_by: Sequence[str] | None = None,
 ) -> dict[str, Any]:
     """The process tree: pid, parent, name and command line, one row each.
 
@@ -175,8 +273,12 @@ def sandbox_processes(
     if report is None or _no_sandbox_ran(report):
         return _no_report(report)
     processes = place(report, "processes")
+    if not isinstance(processes, list) or _absent_of(
+        report, "processes", normalised_by=normalised_by
+    ):
+        return _absent("processes")
     rows: list[dict[str, Any]] = []
-    page, meta = _page(processes if isinstance(processes, list) else [], offset, limit)
+    page, meta = _page(processes, offset, limit)
     if page:
         for proc in page:
             if not isinstance(proc, dict):
@@ -191,12 +293,15 @@ def sandbox_processes(
                     "call_count": len(proc.get("calls") or []),
                 }
             )
-    total = len(processes) if isinstance(processes, list) else 0
-    return {"processes": rows, "total": total, **meta}
+    return {"processes": rows, "total": len(processes), **meta}
 
 
 def sandbox_network(
-    report: dict[str, Any] | None, offset: int = 0, limit: int = 0
+    report: dict[str, Any] | None,
+    offset: int = 0,
+    limit: int = 0,
+    *,
+    normalised_by: Sequence[str] | None = None,
 ) -> dict[str, Any]:
     """DNS lookups, hosts, HTTP requests, TCP/UDP endpoints and TLS, per kind.
 
@@ -207,18 +312,24 @@ def sandbox_network(
     """
     if report is None or _no_sandbox_ran(report):
         return _no_report(report)
-    if not isinstance(report.get("network"), dict):
-        return {"dns": [], "hosts": [], "http": [], "tcp": [], "udp": []}
+    unavailable, fills = _unavailable(report), _fills(normalised_by)
+    if not isinstance(report.get("network"), dict) or "network" in unavailable:
+        return _absent("network")
     out: dict[str, Any] = {}
+    absent: list[str] = []
     for key in NETWORK_VIEW_KINDS:
         rows = _list_at(report, f"network.{key}")
-        if rows is not None:
+        if rows is None or not _held(report, f"network.{key}", unavailable, fills):
+            absent.append(f"network.{key}")
+        else:
             page, meta = _page(rows, offset, limit)
             out[key] = [_with_resolver_fact(row) for row in page]
             if meta:
                 out[f"{key}_total"] = len(rows)
                 if "next_offset" in meta:
                     out[f"{key}_next_offset"] = meta["next_offset"]
+    if absent:
+        out.update(_absent(*absent))
     return out
 
 
@@ -273,7 +384,11 @@ def _signature_techniques(sig: Mapping[str, Any]) -> list[str]:
 
 
 def sandbox_signatures(
-    report: dict[str, Any] | None, offset: int = 0, limit: int = 0
+    report: dict[str, Any] | None,
+    offset: int = 0,
+    limit: int = 0,
+    *,
+    normalised_by: Sequence[str] | None = None,
 ) -> dict[str, Any]:
     """The sandbox's own signature hits, with their severity.
 
@@ -284,8 +399,12 @@ def sandbox_signatures(
     if report is None or _no_sandbox_ran(report):
         return _no_report(report)
     signatures = place(report, "signatures")
+    if not isinstance(signatures, list) or _absent_of(
+        report, "signatures", normalised_by=normalised_by
+    ):
+        return _absent("signatures")
     rows: list[dict[str, Any]] = []
-    page, meta = _page(signatures if isinstance(signatures, list) else [], offset, limit)
+    page, meta = _page(signatures, offset, limit)
     if page:
         for sig in page:
             if not isinstance(sig, dict):
@@ -305,12 +424,15 @@ def sandbox_signatures(
             if tags:
                 row["technique_ids"] = tags
             rows.append(row)
-    total = len(signatures) if isinstance(signatures, list) else 0
-    return {"signatures": rows, "total": total, **meta}
+    return {"signatures": rows, "total": len(signatures), **meta}
 
 
 def sandbox_dropped_files(
-    report: dict[str, Any] | None, offset: int = 0, limit: int = 0
+    report: dict[str, Any] | None,
+    offset: int = 0,
+    limit: int = 0,
+    *,
+    normalised_by: Sequence[str] | None = None,
 ) -> dict[str, Any]:
     """Files the sample wrote, with the hashes the sandbox computed for them."""
     if report is None or _no_sandbox_ran(report):
@@ -319,8 +441,14 @@ def sandbox_dropped_files(
     if not isinstance(dropped, list):
         # A document written before the parts were declared named the list so.
         dropped = report.get("dropped_files")
+    if (
+        not isinstance(dropped, list)
+        or {"dropped_files", "dropped"} & _unavailable(report)
+        or "dropped_files" not in (_fills(normalised_by) or {"dropped_files"})
+    ):
+        return _absent("dropped_files")
     rows: list[dict[str, Any]] = []
-    page, meta = _page(dropped if isinstance(dropped, list) else [], offset, limit)
+    page, meta = _page(dropped, offset, limit)
     if page:
         for entry in page:
             if not isinstance(entry, dict):
@@ -334,8 +462,7 @@ def sandbox_dropped_files(
                     "type": entry.get("type"),
                 }
             )
-    total = len(dropped) if isinstance(dropped, list) else 0
-    return {"dropped": rows, "total": total, **meta}
+    return {"dropped": rows, "total": len(dropped), **meta}
 
 
 # Registry APIs, and what each one does to the key it names. A call the table
@@ -476,7 +603,11 @@ def _outcome_code(recorded: Any) -> int | None:
 
 
 def sandbox_registry_ops(
-    report: dict[str, Any] | None, limit: int = 0, offset: int = 0
+    report: dict[str, Any] | None,
+    limit: int = 0,
+    offset: int = 0,
+    *,
+    normalised_by: Sequence[str] | None = None,
 ) -> dict[str, Any]:
     """Registry keys the sample touched, with the operation and the value written.
 
@@ -496,6 +627,9 @@ def sandbox_registry_ops(
     """
     if report is None or _no_sandbox_ran(report):
         return _no_report(report)
+    missing = _absent_of(report, "registry", "calls", normalised_by=normalised_by)
+    if missing is not None:
+        return missing
     rows: dict[str, dict[str, Any]] = {}
     for key in _summary_list(report, "registry"):
         rows.setdefault(key, {"key": key, "operation": "access", "value": None})
@@ -552,6 +686,8 @@ def sandbox_api_calls(
     name: str | None = None,
     limit: int = 0,
     offset: int = 0,
+    *,
+    normalised_by: Sequence[str] | None = None,
 ) -> dict[str, Any]:
     """The API-call histogram, with the first call of each API.
 
@@ -571,6 +707,9 @@ def sandbox_api_calls(
     """
     if report is None or _no_sandbox_ran(report):
         return _no_report(report)
+    missing = _absent_of(report, "apistats", "calls", normalised_by=normalised_by)
+    if missing is not None:
+        return missing
 
     names_by_pid = {
         str(proc.get("pid")): str(proc.get("process_name") or proc.get("name") or "")
@@ -639,7 +778,11 @@ def sandbox_api_calls(
 
 
 def sandbox_mutexes(
-    report: dict[str, Any] | None, offset: int = 0, limit: int = 0
+    report: dict[str, Any] | None,
+    offset: int = 0,
+    limit: int = 0,
+    *,
+    normalised_by: Sequence[str] | None = None,
 ) -> dict[str, Any]:
     """The named mutexes the sample created or opened.
 
@@ -649,6 +792,9 @@ def sandbox_mutexes(
     """
     if report is None or _no_sandbox_ran(report):
         return _no_report(report)
+    missing = _absent_of(report, "summary.mutexes", "calls", normalised_by=normalised_by)
+    if missing is not None:
+        return missing
     names: list[str] = list(_summary_list(report, "summary.mutexes"))
     for call in _calls(report):
         if str(call.get("api") or "").lower() not in _MUTEX_APIS:
@@ -661,7 +807,11 @@ def sandbox_mutexes(
 
 
 def sandbox_services_and_tasks(
-    report: dict[str, Any] | None, offset: int = 0, limit: int = 0
+    report: dict[str, Any] | None,
+    offset: int = 0,
+    limit: int = 0,
+    *,
+    normalised_by: Sequence[str] | None = None,
 ) -> dict[str, Any]:
     """Services installed or started, scheduled tasks, and the commands run.
 
@@ -671,6 +821,16 @@ def sandbox_services_and_tasks(
     """
     if report is None or _no_sandbox_ran(report):
         return _no_report(report)
+    missing = _absent_of(
+        report,
+        "summary.created_services",
+        "summary.started_services",
+        "summary.executed_commands",
+        "calls",
+        normalised_by=normalised_by,
+    )
+    if missing is not None:
+        return missing
     services: list[str] = [
         *_summary_list(report, "summary.created_services"),
         *_summary_list(report, "summary.started_services"),
@@ -810,6 +970,7 @@ def sandbox_tools(container: Any) -> list[BaseTool]:
     from langchain_core.tools import StructuredTool
 
     report = _report_of(container)
+    normalised_by = normalised_by_of(container)
 
     def _report_section(section: str, offset: int = 0, limit: int = 0) -> dict[str, Any]:
         """Read one top-level section of the sandbox report by name.
@@ -825,7 +986,7 @@ def sandbox_tools(container: Any) -> list[BaseTool]:
         ``offset`` and ``limit`` ask for one page (0 = every row); a page that
         stops short names the next offset.
         """
-        return sandbox_processes(report, offset, limit)
+        return sandbox_processes(report, offset, limit, normalised_by=normalised_by)
 
     def _network(offset: int = 0, limit: int = 0) -> dict[str, Any]:
         """List the DNS lookups, hosts, HTTP requests and endpoints observed.
@@ -833,7 +994,7 @@ def sandbox_tools(container: Any) -> list[BaseTool]:
         ``offset`` and ``limit`` ask for one page (0 = every row); a page that
         stops short names the next offset.
         """
-        return sandbox_network(report, offset, limit)
+        return sandbox_network(report, offset, limit, normalised_by=normalised_by)
 
     def _signatures(offset: int = 0, limit: int = 0) -> dict[str, Any]:
         """List the sandbox's own signature hits and their severity.
@@ -841,7 +1002,7 @@ def sandbox_tools(container: Any) -> list[BaseTool]:
         ``offset`` and ``limit`` ask for one page (0 = every row); a page that
         stops short names the next offset.
         """
-        return sandbox_signatures(report, offset, limit)
+        return sandbox_signatures(report, offset, limit, normalised_by=normalised_by)
 
     def _dropped_files(offset: int = 0, limit: int = 0) -> dict[str, Any]:
         """List the files the sample wrote, with their hashes.
@@ -849,7 +1010,7 @@ def sandbox_tools(container: Any) -> list[BaseTool]:
         ``offset`` and ``limit`` ask for one page (0 = every row); a page that
         stops short names the next offset.
         """
-        return sandbox_dropped_files(report, offset, limit)
+        return sandbox_dropped_files(report, offset, limit, normalised_by=normalised_by)
 
     def _channels(name: str = "", offset: int = 0, limit: int = 0) -> dict[str, Any]:
         """List the platform channels, or read one of them by name.
@@ -865,7 +1026,7 @@ def sandbox_tools(container: Any) -> list[BaseTool]:
         ``offset`` and ``limit`` ask for one page (0 = every row); a page that
         stops short names the next offset.
         """
-        return sandbox_registry_ops(report, limit, offset)
+        return sandbox_registry_ops(report, limit, offset, normalised_by=normalised_by)
 
     def _api_calls(
         process: str = "", name: str = "", offset: int = 0, limit: int = 0
@@ -879,7 +1040,9 @@ def sandbox_tools(container: Any) -> list[BaseTool]:
         ``offset`` and ``limit`` ask for one page (0 = every row); a page that
         stops short names the next offset.
         """
-        return sandbox_api_calls(report, process or None, name or None, limit, offset)
+        return sandbox_api_calls(
+            report, process or None, name or None, limit, offset, normalised_by=normalised_by
+        )
 
     def _mutexes(offset: int = 0, limit: int = 0) -> dict[str, Any]:
         """List the named mutexes the sample created or opened.
@@ -887,7 +1050,7 @@ def sandbox_tools(container: Any) -> list[BaseTool]:
         ``offset`` and ``limit`` ask for one page (0 = every row); a page that
         stops short names the next offset.
         """
-        return sandbox_mutexes(report, offset, limit)
+        return sandbox_mutexes(report, offset, limit, normalised_by=normalised_by)
 
     def _services_and_tasks(offset: int = 0, limit: int = 0) -> dict[str, Any]:
         """List services installed or started, scheduled tasks, and commands run.
@@ -895,7 +1058,7 @@ def sandbox_tools(container: Any) -> list[BaseTool]:
         ``offset`` and ``limit`` ask for one page (0 = every row); a page that
         stops short names the next offset.
         """
-        return sandbox_services_and_tasks(report, offset, limit)
+        return sandbox_services_and_tasks(report, offset, limit, normalised_by=normalised_by)
 
     sizer = _answer_sizer(container)
     return [
@@ -914,7 +1077,7 @@ def sandbox_tools(container: Any) -> list[BaseTool]:
                 (_channels, "sandbox_channels"),
             )
         ),
-        items_tool(report, sizer, normalised_by_of(container)),
+        items_tool(report, sizer, normalised_by),
     ]
 
 

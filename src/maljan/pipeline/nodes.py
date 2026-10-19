@@ -446,15 +446,23 @@ def _sandbox_report_is_synthetic(state: AnalysisState) -> bool:
     return isinstance(report, dict) and bool(report.get("synthetic"))
 
 
-def sandbox_degradation_reason(report: Any) -> str | None:
+def sandbox_degradation_reason(report: Any, failure: str | None = None) -> str | None:
     """The degradation reason a run whose sandbox never ran carries, or ``None``.
 
-    No report at all keeps the reason it always had. The mock sandbox's empty
-    stand-in is the same absence, said with its cause; a report with contents,
-    a recorded fixture included, carries none.
+    No report at all keeps the reason it always had, with the sandbox failure
+    the job recorded (``container.sandbox_failure``) inside it when there is
+    one: a refused report and an unreachable sandbox are not the same absence.
+    The failure is outside text (the sandbox's or an exception's words), so it
+    is quoted as one escaped value (``tool_fence.excerpt_view``) and cannot
+    read as a line, a heading or an instruction of the platform's.
+    The mock sandbox's empty stand-in is the same absence, said with its cause;
+    a report with contents, a recorded fixture included, carries none.
     """
     if not isinstance(report, dict) or not report:
-        return "no sandbox report (dynamic detonation unavailable) — static-only evidence"
+        from maljan.agents.tool_fence import excerpt_view
+
+        cause = f": {excerpt_view(failure)}" if failure else ""
+        return f"no sandbox report (dynamic detonation unavailable{cause}) — static-only evidence"
     if sandbox_status(report).status == SANDBOX_NOT_RUN:
         return (
             "no sandbox ran (the mock sandbox has no recorded report for this sample) "
@@ -5337,7 +5345,9 @@ def make_judge_node(
             # confidence shipped for a verdict formed without any dynamic
             # evidence. Verified live: the only operator signal was a single
             # "Sandbox submission failed" line in the worker log.
-            _no_sandbox = sandbox_degradation_reason(state.get("sandbox_report"))
+            _no_sandbox = sandbox_degradation_reason(
+                state.get("sandbox_report"), getattr(container, "sandbox_failure", None)
+            )
             if _no_sandbox:
                 _degradation_reasons.append(_no_sandbox)
             # A container we accept but cannot open. A .docm reaches here

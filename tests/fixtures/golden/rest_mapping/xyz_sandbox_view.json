@@ -43,6 +43,12 @@
     "total": 0
   },
   "sandbox_network": {
+    "absent": [
+      "network.hosts",
+      "network.http",
+      "network.udp",
+      "network.domains"
+    ],
     "dns": [
       {
         "answers": [
@@ -52,18 +58,15 @@
         "type": "A"
       }
     ],
-    "domains": [],
-    "hosts": [],
-    "http": [],
     "icmp": [],
+    "statement": "The report does not hold this part, so whether there was any is not known. This is not the same as none.",
     "tcp": [
       {
         "dport": 443,
         "dst": "185.220.101.42"
       }
     ],
-    "tls": [],
-    "udp": []
+    "tls": []
   },
   "sandbox_processes": {
     "processes": [

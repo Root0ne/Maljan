@@ -21,11 +21,18 @@ from maljan.core.cancellation import bound
 from maljan.core.config import Settings
 from maljan.core.container import ServiceContainer
 from maljan.core.logger import logger
+from maljan.loaders.cape2_client import BODY_SHOWN
 from maljan.loaders.sandbox_client import SubmissionResult
 from maljan.pipeline.builder import build_graph
 from maljan.pipeline.events import EventSink
 from maljan.pipeline.state import AnalysisState
 from maljan.schemas.sandbox_document import sandbox_document
+
+# How much of a sandbox failure's words the degradation reason carries, the
+# cut mark included: room for the client's own prefix and the response body it
+# quotes (``loaders.cape2_client.BODY_SHOWN``) twice over, and no more of an
+# outside text in the judge's prompt and the report than that.
+SANDBOX_FAILURE_CHARS = 2 * BODY_SHOWN
 
 
 def _remember_the_secrets_of(config: Settings) -> None:
@@ -269,12 +276,14 @@ class MaljanApp:
         self.container.sandbox_normalised = None
         self.container.sandbox_signature_scale = None
         self.container.sample_uploads = []
+        self.container.sandbox_failure = None
         if not sample_path or self.container.is_mock:
             return None
 
         path = Path(sample_path)
         if not path.exists():
             logger.warning("Sample path does not exist: %s", sample_path)
+            self._sandbox_failed("the sample file to submit was not found")
             return None
 
         try:
@@ -286,6 +295,7 @@ class MaljanApp:
                     run = provider.fetch("uploaded")
                 except Exception as exc:  # noqa: BLE001 — same degrade contract as a failed submit
                     logger.error("Attached sandbox report unusable: %s", exc)
+                    self._sandbox_failed(f"the attached sandbox report is unusable: {exc}")
                     return None
                 self._note_the_reader(provider, run)
                 return sandbox_document(run.report)
@@ -386,6 +396,9 @@ class MaljanApp:
                         "Treating as failure.",
                         type(result.report).__name__,
                     )
+                    self._sandbox_failed(
+                        f"the sandbox report is a {type(result.report).__name__}, not a document"
+                    )
                     return None
                 logger.info(
                     "Sandbox analysis complete: %d signatures, %d TTPs.",
@@ -394,10 +407,31 @@ class MaljanApp:
                 )
                 return result.report  # type: ignore[no-any-return]
             logger.warning("Sandbox task ended with status=%s: %s", result.status, result.error)
+            self._sandbox_failed(
+                f"sandbox task {result.task_id} ended with status {result.status!r}"
+                + ("" if result.status not in ("reported", "partial") else " and no report")
+            )
             return None
         except Exception as exc:
             logger.error("Sandbox submission failed: %s", exc)
+            self._sandbox_failed(str(exc) or type(exc).__name__)
             return None
+
+    def _sandbox_failed(self, reason: str) -> None:
+        """Keep why this job has no sandbox report, for its degradation reason.
+
+        The words are the sandbox's or an exception's, and they reach the
+        judge's prompt and the report: a URL loses its credentials
+        (``redact_url``), every line break becomes a space so the text cannot
+        start a line of its own, and it is cut to ``SANDBOX_FAILURE_CHARS``
+        with the cut mark. The degradation reason then quotes it as one value
+        (``pipeline.nodes.sandbox_degradation_reason``).
+        """
+        from maljan.core.settings_overrides import redact_url
+        from maljan.utils.marked_cut import marked_cut
+
+        one_line = " ".join(redact_url(str(reason)).splitlines())
+        self.container.sandbox_failure = marked_cut(one_line, SANDBOX_FAILURE_CHARS)
 
     async def arun(
         self,
