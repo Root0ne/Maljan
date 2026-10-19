@@ -32,6 +32,7 @@ from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
 from maljan.agents.output_shortening import BOOKKEEPING_KEY, our_key_in
+from maljan.analysis import behaviour_code
 from maljan.analysis.technique_ids import says_no_technique, sigma_technique_ids
 from maljan.core.reputation import reputation_of
 from maljan.core.tool_declarations import first, select
@@ -936,6 +937,78 @@ def _sandbox_status(acc: _Sections, entry: LedgerEntry, data: dict[str, Any]) ->
     acc.credit(section, entry)
 
 
+# The section of the behaviour links (``analysis.behaviour_code``), and its
+# columns that hold the sample's or the sandbox's own text: the report writes
+# each of those as a code span (``renderers.markdown``).
+BEHAVIOUR_CODE_SECTION = "behaviour_code_links"
+BEHAVIOUR_CODE_COLUMNS = ["Observed", "Value", "Sandbox items", "Held at", "Match", "Function"]
+BEHAVIOUR_CODE_SAMPLE_COLUMNS = (1, 3)
+# The platform's own words a "Held at" cell holds where no place holds the value.
+BEHAVIOUR_CODE_PLAIN_WORDS = (behaviour_code.OBSERVED_ONLY, behaviour_code.PARTLY_READ)
+
+
+def _behaviour_code(acc: _Sections, entry: LedgerEntry, data: dict[str, Any]) -> None:
+    """Each value the sandbox observed, one row per static place that holds it, or observed only.
+
+    The text above the rows says what was compared, how much of each answer,
+    and where the functions came from or why none could be stated.
+    """
+    links = [row for row in data.get("links") or [] if isinstance(row, dict)]
+    table = acc.get(
+        BEHAVIOUR_CODE_SECTION,
+        "Observed behaviour linked to code",
+        "table",
+        columns=list(BEHAVIOUR_CODE_COLUMNS),
+    )
+    functions = data.get("functions")
+    compared = [row for row in data.get("compared") or [] if isinstance(row, dict)]
+    read = ", ".join(behaviour_code.compared_words(row) for row in compared)
+    only = _text(data.get("observed_only_label")) or behaviour_code.OBSERVED_ONLY
+    said = [
+        f"{data.get('observed', 0)} values the sandbox observed, compared exactly (after the "
+        f"platform's normalisation for each kind) with the texts of {read or 'no static answer'}: "
+        f"{data.get('held', 0)} held, {data.get('observed_only', 0)} {only}."
+    ]
+    if isinstance(functions, dict):
+        said.append(f"Functions from [{functions.get('entry')}] {functions.get('tool')}.")
+    else:
+        said.append(f"Functions: {functions}.")
+    for key, reason in (data.get("absent") or {}).items():
+        said.append(f"{key}: {reason}.")
+    said.extend(f"{one[:1].upper()}{one[1:]}." for one in behaviour_code.unread_words(data))
+    table.text = _cut_text(" ".join(said), entry.id)
+    for row in links:
+        kind, value = _text(row.get("kind")), _text(row.get("value"))
+        items = ", ".join(str(item) for item in row.get("items") or [])
+        if row.get("attribution") == behaviour_code.NOT_ATTRIBUTED:
+            items += f" ({behaviour_code.NOT_ATTRIBUTED})"
+        held = [h for h in row.get("held") or [] if isinstance(h, dict)]
+        if not held:
+            acc.add_row(table, [kind, value, items, only, "", ""])
+            continue
+        for holding in held:
+            details = behaviour_code.place_details(holding)
+            place = f"[{holding.get('entry')}] {behaviour_code.place_words(holding)}"
+            if details:
+                place += f" ({', '.join(details)})"
+            how = _text(holding.get("matched")) or behaviour_code.EXACT
+            if how != behaviour_code.EXACT:
+                # The text that held the value, beside the place: it is not the value.
+                place += f": {_text(holding.get('text'))}"
+            acc.add_row(
+                table,
+                [
+                    kind,
+                    value,
+                    items,
+                    place,
+                    how,
+                    behaviour_code.function_words(holding, functions),
+                ],
+            )
+    acc.credit(table, entry)
+
+
 def _pcap(acc: _Sections, entry: LedgerEntry, data: dict[str, Any]) -> None:
     summary = data.get("summary")
     if not summary:
@@ -1021,6 +1094,7 @@ _BUILDERS: dict[str, Any] = {
         _sandbox_section,
         _sandbox_items,
         _sandbox_status,
+        _behaviour_code,
         _pcap,
         _reputation,
     )

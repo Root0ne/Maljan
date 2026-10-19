@@ -932,7 +932,7 @@ item as its flow and a DNS item as its query. Every check looks a cited id up
 in the index; no list of every item id is built.
 
 **Phrases written for an AI or an analyst reader are a finding.** The pack's
-last step, `find_directed_text` (`analysis.directed_text`, declared kind
+last step but the behaviour links, `find_directed_text` (`analysis.directed_text`, declared kind
 `directed_text`), looks for words a sample holds for whoever examines it
 rather than for the machine it runs on. There are six phrase families. Each one
 requires the AI or analyst context that defines it, and each match names its
@@ -1061,6 +1061,62 @@ holds the groups as `MalwareReport.directed_text`, apart from the static block
 so that it adds none to a run without one, and left out of the JSON when
 empty. Section 7 prints them under "Phrases of the directed-text families". A
 report stored before the field renders as it did.
+
+**Observed behaviour is linked to the code that holds it, by exact match
+only.** Where a sandbox produced a report, the pack's last step, after
+`find_directed_text` (whose answer holds no text it compares, so every id
+issued before it keeps its value), is `behaviour_code_links` (`analysis.behaviour_code`, kind
+`behaviour_code_links`, line `behaviour to code`). It reads the values the
+sandbox observed from the report's sections, whichever provider produced it
+(mutexes, registry keys and values, file paths and named pipes, domains,
+addresses, URLs, user agents, services and command lines, each with its item
+ids), and the pack's own static answers by their declared kinds: the
+printable runs (`strings`, with their file offsets, the section each falls in
+read from the PE header), the strings recovered at a call site (whole where
+the step keeps them whole), the static decoder's texts and their base64 layers
+(with offset, section, scheme and encoding) and the function index's plain
+and decoded strings. A value is held where a static text equals it after the
+platform's normalisation for its kind (`reporting.dedupe.indicator_fingerprint`:
+registry keys and Windows paths fold case and separators, hosts and addresses
+fold case, defanging is undone, a mutex, URL, user agent, service or command
+keeps its case); a UTF-16LE run or a decoded blob is compared as the text it
+spells. A text that only contains the value is not a match, with two
+structured readings that are still exact and are labelled with how they
+matched: an observed domain or address equal to the host of a held URL (read
+by the platform's `url_host`, defanging undone first) is held `host of a held
+URL`, and an observed registry key whose path after its hive equals a held
+path that names no hive (the hive read off by the platform's `hiveless_key`:
+short, long and kernel spellings) is held `held without its hive`; any other
+holding is `exact`. Hosts are read by one shared form on both sides
+(`network_extractor.host_form`: port, brackets and trailing dot off, IDNA,
+canonical IPv6); an HTTP row's path is joined with its own host and stated
+scheme into the URL, and a path with neither is a `url path`, never a URL; a
+registry key is read with no IOC-table suffix taken off (`Vendor App (x86)` is
+a key name), and every key that maps to a hiveless held path is linked. A
+network value is linked only where the sandbox attributes a row of it to the
+sample's process tree (`sample_process_tree`); a value no row attributes is
+marked `process not attributed`, and one every row of which belongs to another
+process is not linked and is counted. Items of a section with no value under
+the fields read are counted. The step runs under the pack's time budget, like
+the other late steps, and stops with a `partial` answer. The function is
+the one the holding's own answer names (a blob's references, a recovered
+string's routine), else the one the function index places that text in,
+said as `same text elsewhere in function X` since the index places the text,
+not this copy of it; a section is the innermost raw range holding the offset,
+both named where two of equal size hold it;
+without a function index the answer, the line and the report say so. A value
+held nowhere is listed as `observed only`, after the held ones; a static text
+no sandbox observed is not listed. Where an answer holds a page of its texts
+(the strings head, a page of recovered strings), the answer says how many of
+how many were compared, decodings no code refers to are said not compared, and
+an observed value held nowhere then reads `observed; static side partly read`,
+as it does where a static answer could not be read or the time ran out. The
+join is hash lookups over each input once, so it is linear. **Decision:** the
+pack line takes the pack's own room like every other line (as many values as
+fit, then "the rest are in this entry's full output"), every value quoted by
+the pack's escaping; the ledger entry holds every link, and the report's
+evidence appendix prints them as the table "Observed behaviour linked to code",
+each value and place written as a code span.
 
 Ghidra's emulation is not run by the pack: Ghidra's `emulate_function`
 ignores its step limit and cannot be stopped, and one emulation took 130 to

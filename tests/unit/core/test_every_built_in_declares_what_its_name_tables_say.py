@@ -273,12 +273,19 @@ def test_the_stored_run_tools_land_where_the_tables_put_them(declared: ToolDecla
     assert iocs.kind not in BUILDER_OF_KIND
 
 
+# The built-in tools shipped after the name tables were kept as they were
+# (``reporting.legacy_tool_names``): no entry of one was stored without a
+# source, so none has a name reading, and its declared kind alone draws it.
+SHIPPED_AFTER_THE_NAME_TABLES = {"behaviour_code_links": "_behaviour_code"}
+
+
 def test_the_section_builders_are_drawn_by_kind(declared: ToolDeclarations) -> None:
     from maljan.reporting import legacy_tool_names
 
+    assert not set(SHIPPED_AFTER_THE_NAME_TABLES) & set(legacy_tool_names.BUILDERS)
     differ = []
     for source, name, facts in _built_in_tools(declared):
-        expected = legacy_tool_names.BUILDERS.get(name)
+        expected = legacy_tool_names.BUILDERS.get(name) or SHIPPED_AFTER_THE_NAME_TABLES.get(name)
         by_kind = BUILDER_OF_KIND.get(facts.kind)  # type: ignore[attr-defined]
         if expected != by_kind:
             differ.append((source, name, expected, by_kind))

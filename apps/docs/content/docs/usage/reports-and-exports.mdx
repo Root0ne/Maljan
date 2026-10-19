@@ -488,6 +488,34 @@ blocks. A run stopped part-way stores the record as of the stop and says so. A
 report stored before the record existed shows none of this and renders as
 before.
 
+## Observed behaviour linked to code
+
+Where a sandbox produced a report, the evidence appendix carries the table
+**Observed behaviour linked to code**, built from the pack's
+`behaviour_code_links` entry. Each value the sandbox observed (a mutex, a
+registry key or value, a file path or named pipe, a domain, an address, a URL,
+a user agent, a service or a command line) is one row per static place that
+holds it: the entry, the source (`strings`, `recovered string`, `decoded
+blob`, `decoded blob layer` or `function index`), the file offset, the
+section, the scheme and the encoding, and the function, or why no function is
+stated (no function index was made). A value held nowhere reads `observed
+only`, or `observed; static side partly read` where part of the static side
+was not compared. A network value no row of which the sandbox attributes to
+the sample's process tree is marked `process not attributed` beside its items,
+and one only other processes made is not listed. The match is exact after the
+platform's normalisation for the value's
+kind: a registry key or a Windows path differing only in case or separators
+is held, a mutex differing in case is not, and a text that only contains the
+value is not a match. The **Match** column says how a row matched: `exact`,
+`host of a held URL` (an observed domain or address that is the host of a URL
+the sample holds; the held URL is shown beside the place) or `held without its
+hive` (an observed registry key whose path after `HKCU`, `HKEY_CURRENT_USER`
+or another spelling of its hive is held with no hive). The text above the table names each static answer
+compared and how much of it (the strings head is a page and says so). Every
+value and place is written as a code span. The analysts read the same links
+as the pack's `behaviour to code` line. A report stored before the step
+existed shows no such table.
+
 ## Comparing two runs
 
 `GET /api/v1/reports/diff?a=<id>&b=<id>` compares two stored runs (`by=job`

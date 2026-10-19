@@ -680,6 +680,39 @@ def url_host(raw_url: Any) -> str:
         return ""
 
 
+def host_form(value: Any) -> str:
+    """One host in the form two writers of it share, ``""`` for none.
+
+    A host as a sandbox or a URL writes it: a port is split off (``host:443``,
+    ``[2001:db8::1]:443``), IPv6 brackets are taken off, a trailing dot is
+    dropped, an address is written in its canonical form (``2001:DB8:0::1`` is
+    ``2001:db8::1``), an internationalised name in its IDNA (punycode) form and
+    every name in lower case. Read the same way on both sides of a comparison,
+    so a name in DNS and the host of a URL are one value when they are one host.
+    """
+    text = str(value or "").strip()
+    if text.startswith("["):
+        inner, bracket, _rest = text[1:].partition("]")
+        text = inner if bracket else text
+    else:
+        try:
+            return str(ipaddress.ip_address(text.rstrip(".")))
+        except ValueError:
+            pass
+        name, colon, port = text.rpartition(":")
+        if colon and port.isdigit() and ":" not in name:
+            text = name
+    text = text.rstrip(".")
+    try:
+        return str(ipaddress.ip_address(text))
+    except ValueError:
+        pass
+    try:
+        return text.encode("idna").decode("ascii").lower()
+    except UnicodeError:
+        return text.lower()
+
+
 # One DNS label: letters, digits and hyphens, not starting or ending with a
 # hyphen, at most sixty-three characters. The internet's own rule, which is the
 # only rule that can be applied to a name nobody has tried to resolve.

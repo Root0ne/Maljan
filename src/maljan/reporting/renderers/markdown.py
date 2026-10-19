@@ -78,6 +78,9 @@ from maljan.reporting.judge_reasons import (
 from maljan.reporting.ledger_projection import cell_network_values, listing_kind
 from maljan.reporting.ledger_report import (
     ANALYST_SECTION_SOURCES,
+    BEHAVIOUR_CODE_PLAIN_WORDS,
+    BEHAVIOUR_CODE_SAMPLE_COLUMNS,
+    BEHAVIOUR_CODE_SECTION,
     CAPABILITIES_TITLE,
     analyst_persistence,
     listed_by,
@@ -4843,14 +4846,31 @@ def _evidence_rows(section: Any, write: Callable[[str], str] = _as_is) -> list[s
     if section.kind in {"table", "kv"} and section.rows:
         columns = section.columns or [f"Column {i + 1}" for i in range(len(section.rows[0]))]
         out = [_row(*columns), _divider(len(columns))]
+        # The columns of a section that hold the sample's or a sandbox's own
+        # text, each written as one code span after its cut, so the value
+        # cannot open a link, a tag or a fence (``ledger_report``).
+        spans, plain = _SAMPLE_TEXT_COLUMNS.get(str(getattr(section, "key", "") or ""), ((), ()))
         for row in section.rows:
-            cells = [_truncate(write(str(cell)), 160) for cell in row]
+            cells = [
+                _code_span(_one_line(_truncate(write(str(cell)), 160)))
+                if at in spans and str(cell) and str(cell) not in plain
+                else _truncate(write(str(cell)), 160)
+                for at, cell in enumerate(row)
+            ]
             cells += [""] * (len(columns) - len(cells))
             out.append(_row(*cells[: len(columns)]))
         return out
     if section.kind == "list" and section.items:
         return [_item(_truncate(write(str(item)), 200)) for item in section.items]
     return []
+
+
+# The sections whose table columns hold the sample's or a sandbox's own text,
+# by section key: each such column by its position, and the platform's own
+# words a cell of one may hold instead, written plain (``ledger_report``).
+_SAMPLE_TEXT_COLUMNS: dict[str, tuple[tuple[int, ...], tuple[str, ...]]] = {
+    BEHAVIOUR_CODE_SECTION: (BEHAVIOUR_CODE_SAMPLE_COLUMNS, BEHAVIOUR_CODE_PLAIN_WORDS),
+}
 
 
 _MBC_ID_RE = re.compile(r"^[BCF]\d{4}(?:\.\d{3})?$")

@@ -841,20 +841,30 @@ _HIVE_PREFIX_RE = re.compile(
 _VALUE_NAME_SUFFIX_RE = re.compile(r" \([^()]*\)$")
 
 
-def _hiveless_key(value: Any) -> str:
-    """A registry path without its hive or a trailing value name, in the case written.
+# Every hive prefix a key opens with, as one anchored match of the repeated
+# prefix: read in one pass, so a text of many prefixes costs its length once.
+_HIVE_PREFIXES_RE = re.compile(r"^(?:" + _HIVE_PREFIX_RE.pattern.removeprefix("^") + r")+", re.I)
 
-    Hive prefixes are stripped until the text stops changing, so a key a
-    sandbox wrote in long form under a short-name prefix
-    (``HKCU\\HKEY_CURRENT_USER\\...``) reads as the key. A value that is not
-    a registry path passes through.
+
+def hiveless_key(value: Any, *, value_suffix: bool = True) -> str:
+    """A registry path without its hive, in the case written; the IOC table's suffix too.
+
+    Every hive prefix the key opens with is stripped, so a key a sandbox
+    wrote in long form under a short-name prefix (``HKCU\\HKEY_CURRENT_USER\\...``)
+    reads as the key; the prefixes are read by one anchored match, in time
+    linear in the text. ``value_suffix`` also strips the trailing
+    `` (<value name>)`` the IOC table writes after a key: true for a row of
+    that table, false for a key read as written (``Vendor App (x86)`` is a key
+    name). A value that is not a registry path passes through.
     """
-    text = _VALUE_NAME_SUFFIX_RE.sub("", str(value or "").strip().replace("/", "\\"))
-    while True:
-        stripped = _HIVE_PREFIX_RE.sub("", text, count=1)
-        if stripped == text:
-            return text.strip("\\")
-        text = stripped
+    text = str(value or "").strip().replace("/", "\\")
+    if value_suffix:
+        text = _VALUE_NAME_SUFFIX_RE.sub("", text)
+    return _HIVE_PREFIXES_RE.sub("", text, count=1).strip("\\")
+
+
+# The name this module's own callers read it by.
+_hiveless_key = hiveless_key
 
 
 def _registry_form(value: Any) -> str:
