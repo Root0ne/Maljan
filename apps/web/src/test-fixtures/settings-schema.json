@@ -14092,6 +14092,7 @@
    "category": "",
    "discloses_sample": false,
    "display_name": "",
+   "effects": null,
    "long_running": false,
    "memory_peak_mb": null,
    "read_only": false,

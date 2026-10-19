@@ -64,6 +64,8 @@ from maljan.analysis.run_summary import (
     tokens_sentence,
 )
 from maljan.analysis.technique_ids import ID_BODY
+from maljan.analysis.tool_effects import INTRO_SENTENCE as EFFECTS_INTRO
+from maljan.analysis.tool_effects import effects_lines
 from maljan.core.logger import logger
 from maljan.reporting import tool_kinds
 from maljan.reporting.dedupe import distinct_processes, distinct_signatures
@@ -2183,6 +2185,14 @@ class MarkdownRenderer:
             if isolated:
                 lines.extend(["", ISOLATION_INTRO, ""])
                 lines.extend(_item(line) for line in isolated)
+            # What each tool the run called is declared to do beyond answering
+            # (``analysis.tool_effects``); a record stored before the part
+            # existed shows none.
+            effects = held.get("effects") if isinstance(held, dict) else None
+            effected = effects_lines(effects, code)
+            if effected:
+                lines.extend(["", EFFECTS_INTRO, ""])
+                lines.extend(_item(line) for line in effected)
             lines.extend(["", DISCLOSURE_FOOTNOTE])
         # What the run spent its input on, where its summary records it
         # (``analysis.efficiency``); a summary stored without it shows none.

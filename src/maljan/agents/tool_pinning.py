@@ -52,6 +52,10 @@ SERVER_FRAGMENT_METADATA_KEY = "maljan_server_fragment"
 SERVER_OWN_WORDS_METADATA_KEY = "maljan_server_own_words"
 # Set on a tool its own server marks read-only (MCP ``readOnlyHint`` true).
 READ_ONLY_METADATA_KEY = "maljan_read_only"
+# The MCP hints its own server gave a tool when it was attached
+# (``core.declared_reading.SERVER_HINTS``), kept on each of its entries for
+# the run's tool-effects part (``analysis.tool_effects``).
+SERVER_HINTS_METADATA_KEY = "maljan_server_hints"
 
 # An argument whose *name* looks like it takes a file. Substring matches cover
 # ``file``, ``file_path``, ``filepath``, ``filename``, ``path``, ``target_file``;

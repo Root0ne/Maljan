@@ -839,6 +839,13 @@ KIND_FREE_SAMPLES: dict[str, Any] = {
     "words": ["sectioner"],
     "arguments": {"report": "task_report", "address": "offset_va"},
     "discloses_sample": True,
+    "effects": {
+        "executes": "emulation",
+        "network": False,
+        "third_party": "no",
+        "why_undeclared": "",
+        "when": "",
+    },
 }
 
 

@@ -674,19 +674,26 @@ class MCPLangChainToolkit:
         # an identical call answers the same, so a revision that repeats one
         # of an earlier round is answered from its entry
         # (``tool_pinning.answers_again``).
-        from maljan.agents.tool_pinning import READ_ONLY_METADATA_KEY
+        from maljan.agents.tool_pinning import READ_ONLY_METADATA_KEY, SERVER_HINTS_METADATA_KEY
+        from maljan.core.declared_reading import hints_of_annotations
 
         hints = getattr(mcp_tool, "annotations", None)
         read_only = getattr(hints, "readOnlyHint", None)
         if read_only is None and isinstance(hints, Mapping):
             read_only = hints.get("readOnlyHint")
+        metadata: dict[str, Any] = {READ_ONLY_METADATA_KEY: True} if read_only is True else {}
+        # Every MCP hint the server gave, read here at attach time and kept on
+        # each entry of the tool (``core.declared_reading.with_hints``).
+        given = hints_of_annotations(hints)
+        if given:
+            metadata[SERVER_HINTS_METADATA_KEY] = given
         return StructuredTool.from_function(
             func=None,  # Not supporting sync execution since MCP client is async
             coroutine=arun_tool,
             name=mcp_tool.name,
             description=description,
             args_schema=args_schema,
-            metadata={READ_ONLY_METADATA_KEY: True} if read_only is True else None,
+            metadata=metadata or None,
         )
 
     async def _call(

@@ -3195,7 +3195,19 @@ def _was_not_made(entry: LedgerEntry) -> bool:
     The message says so, whatever the tool: a reputation lookup that was
     skipped writes the prefix, one that was made and broke does not.
     """
-    return str(entry.error or entry.output or "").startswith(NOT_RUN_PREFIX)
+    return was_not_made(entry)
+
+
+def was_not_made(entry: Any) -> bool:
+    """Whether an entry, or its stored mapping, records a call that was never made.
+
+    The one rule for it (:func:`_was_not_made`), read by the run's tool effects.
+    """
+    if isinstance(entry, Mapping):
+        text = entry.get("error") or entry.get("output")
+    else:
+        text = getattr(entry, "error", None) or getattr(entry, "output", None)
+    return str(text or "").startswith(NOT_RUN_PREFIX)
 
 
 def _short(text: str | None, limit: int | None = None) -> str:
