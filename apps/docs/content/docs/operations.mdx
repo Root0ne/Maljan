@@ -248,6 +248,110 @@ application only inserts into. Its receipt would be kept beside the seal (a
 `ledger_seal.anchor` entry, or a row keyed by the seal digest) and checked by
 the same verification step; nothing in the seal or the chain would change.
 
+## Job package
+
+A job's package is one file that carries the job's evidence and can be checked
+on its own. Download it with `GET /api/v1/jobs/{job_id}/package` (owner only),
+or build it offline from an exported run directory with
+`python -m scripts.package.build --run <dir> --out <file> [--unsigned]
+[--upload-max-bytes N]` (the directory
+`python -m scripts.replay.run --job <id> --job-dir <dir>` writes). Both use the
+same builder (`services.job_package`), so the same run gives the same bytes on
+the same build of zlib: `manifest.json` first, `manifest.sig` second, every
+other entry sorted by path, plain USTAR regular files only, every timestamp 0,
+mode 0644, owner 0:0, and a gzip header with no name and no time. Another zlib
+build may compress the same tar differently; the uncompressed tar is the same
+everywhere. Every row set is read in a fixed order, and a report stored
+without a generation time is dated with the job's stored completion time,
+never the build's clock (with neither, the Markdown is listed as absent).
+
+| Path | What it holds |
+|---|---|
+| `manifest.json` | every other file's SHA-256 and size, each part's path, each absent part with why, the sample's hashes |
+| `manifest.sig` | optional: the manifest's HMAC-SHA256 |
+| `run/` | the stored run as exported: `job.json` (with the sample's hash and name), `report-byjob.json`, `report.json`, `evidence.json`, `run-summary.json`, `stix-judge.json`, `events.json`, as present |
+| `report/report.md` | the report rendered by the Markdown exporter |
+| `export/stix-bundle.json` | the STIX bundle the report row serves |
+| `ledger/spilled.json`, `ledger/objects/<sha256>` | every part an entry spilled, with its digest; its bytes where the build read them back and they matched |
+| `seal.json` | the ledger seal and its verification at build time |
+
+A part the job lacks is listed in the manifest's `absent` with the reason: no
+run summary, no judge's bundle, no sandbox behaviour in the report, and the
+MISP event, which the platform has no exporter for. The sample file itself is
+not included; spilled tool answers may contain bytes from it.
+
+A spilled part is packaged only when its bytes verify against the digest its
+entry recorded. The API reads each from the object store under the job's own
+prefix, and the read stops as soon as more bytes arrive than the reference
+records, which must itself lie within `upload_max_bytes` (the bound the part
+was kept under). A part with no recorded length, or a build with no valid
+bound, is listed as absent with why. An offline build reads no store, so it
+lists each part with its digest and why the bytes are absent.
+
+Every file is bounded by `upload_max_bytes`, as a verification bounds it. A
+file above it is still packaged as far as it can be: it is hashed as it
+streams, left out of the archive, and listed in the manifest's `oversized`
+and `absent` with its SHA-256, its size and the reason "larger than the
+package bound". Such a file is never parsed by the build. The manifest
+records the bound (`package_bound`); a verification refuses a manifest that
+lists a file above it, or declares one left out that is not larger than it.
+A verification reports a left-out file there, not as `broken`; when it is a
+run file the seal check reads (any but `events.json`), the seal is not
+checked and the answer is `seal_unverifiable`, but only after every failure
+(`other_key`, an unsigned package where the key is held) has been ruled out. Only a manifest above the bound makes a build refuse (the
+API answers 422). An offline build and verification read no runtime
+settings and take `--upload-max-bytes`, by default the setting's default.
+
+The API reads the job's rows and verifies the seal in one snapshot (a
+`REPEATABLE READ READ ONLY` transaction, rolled back), with the job's audit
+rows; an offline build verifies the seal from the directory
+(`scripts.ledger.verify --run`, no audit log). The archive is staged on disk
+file by file, hashed as it is written, and streamed into an anonymous
+temporary file the download is served from. The API holds the job's ledger
+rows once, shared by the seal verification and the written run, and drops
+them once written; an offline build loads `evidence.json` once to find the
+spilled references, and the seal verification of the directory loads it
+again. Building uses about three times the package size of temporary disk (the
+run, the staged files, the spool). No limit of its own bounds concurrent
+builds: the per-client request rate limit (`rate_limit_requests` per
+`rate_limit_window_seconds`) applies, as to every route.
+
+`python -m scripts.package.verify <file> [--allow-unsigned]
+[--upload-max-bytes N]` reads the archive in one pass, to the gzip end (its
+CRC is checked) with nothing after the tar end marker but its zero padding.
+Every entry must be a plain USTAR regular file (no link, device, sparse file,
+or PAX or GNU extended header) under a safe relative name (no absolute path, no
+`..`, no duplicate). The manifest must come first and be no larger than
+`upload_max_bytes`, and every size it lists must be within that bound; every
+later entry must be listed, and its header's size must equal the listed size
+before a byte of it is read, so the whole read is bounded by the manifest. The
+signature, when present, comes second and is checked. The `run/` files are
+written into a temporary directory under names checked first, and the seal is
+checked there with the ledger verification of a run directory; nothing is
+extracted anywhere else. Corrupt or malformed input (bad gzip data, a bad CRC,
+an over-deep JSON nesting, a malformed signature) reads `broken`, never an
+error. Every reason is fixed platform text; what a manifest says of its
+missing signature is quoted apart as `manifest_says`. It prints JSON and
+exits:
+
+| Status | Exit | When |
+|---|---|---|
+| `verified` | 0 | every file matches the signed manifest, the signature verifies and the seal verifies |
+| `broken` | 1 | `file` names what failed: an unsafe, unplain or unlisted entry, a missing file, a size or digest that differs, a manifest that fails its signature, a signature file removed from a manifest that says it is signed, data after the end marker, a seal that does not verify, or an unsigned package where this environment holds the package key and `--allow-unsigned` was not given |
+| `unsigned` | 3 | every file matches and the seal verifies, but the package carries no signature, and either no package key is held or `--allow-unsigned` was given; the files outside `run/` are then not authenticated by a key |
+| `seal_unverifiable` | 4 | every file matches, but the seal cannot be verified (`other_key`, `not_sealed`, `unverifiable`, or a run file it reads was left out for its size) |
+| `other_key` | 5 | the manifest is signed under a key this environment cannot derive, named in the reason (a package signed before a settings key rotation) |
+
+**What the signature proves.** It is an HMAC under a key derived with HKDF
+from `SETTINGS_ENCRYPTION_KEY` under its own purpose label
+(`maljan-job-package-v1`), so it is not the ledger chain's key and no new
+secret exists. It proves the manifest, and through its digests every file,
+unchanged only to a holder of that key; a holder can also sign another
+manifest, and anyone without the key cannot check it. The manifest's digests
+cover every file whether or not it is signed: a file changed without its
+manifest entry reads `broken`. Rotating the settings key leaves older packages
+reading `other_key`, as the ledger's own seals do.
+
 ## Rate limits and login protection
 
 `RateLimitMiddleware` applies a Redis-backed sliding window per client address

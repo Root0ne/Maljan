@@ -6,53 +6,28 @@ the job, its report, the per-agent findings, the transcript, the evidence
 ledger and the job's events — and writes them into a directory per job, in
 the layout :mod:`scripts.replay.stored` reads. The transaction is rolled back
 when the read ends. Nothing in the database is written, locked for writing
-or changed.
+or changed. The reader and the writer are the platform's own
+(``app.services.run_export``), which the job package uses as well.
 """
 
 from __future__ import annotations
 
 import asyncio
-import json
 import os
 import uuid
-from collections.abc import Iterable, Mapping, Sequence
-from dataclasses import dataclass, field
-from datetime import date, datetime
-from decimal import Decimal
+from collections.abc import Iterable, Sequence
 from pathlib import Path
-from typing import Any
 
+from app.services.run_export import (
+    JobRows,
+    jsonable,
+    read_job_rows,
+    run_files,
+    with_sample,
+    write_files,
+)
 
-@dataclass
-class JobRows:
-    """One job's rows, each as a mapping of column to value."""
-
-    job: dict[str, Any]
-    report: dict[str, Any] | None = None
-    findings: list[dict[str, Any]] = field(default_factory=list)
-    transcript: list[dict[str, Any]] = field(default_factory=list)
-    evidence: list[dict[str, Any]] = field(default_factory=list)
-    events: list[dict[str, Any]] = field(default_factory=list)
-
-
-def jsonable(value: Any) -> Any:
-    """A column value as JSON holds it: ids and times as strings, numbers as numbers."""
-    if isinstance(value, uuid.UUID):
-        return str(value)
-    if isinstance(value, datetime | date):
-        return value.isoformat()
-    if isinstance(value, Decimal):
-        return float(value)
-    if isinstance(value, Mapping):
-        return {str(k): jsonable(v) for k, v in value.items()}
-    if isinstance(value, list | tuple):
-        return [jsonable(v) for v in value]
-    return value
-
-
-def _row(mapping: Any) -> dict[str, Any]:
-    """A database row (a ``RowMapping``) as a dict of JSON values."""
-    return {str(k): jsonable(v) for k, v in dict(mapping).items()}
+__all__ = ["JobRows", "export_jobs", "jsonable", "read_jobs", "with_sample", "write_run"]
 
 
 def write_run(rows: JobRows, into: Path) -> tuple[Path, list[str]]:
@@ -68,46 +43,7 @@ def write_run(rows: JobRows, into: Path) -> tuple[Path, list[str]]:
     cleared = sorted(name for name in FILES if (into / name).is_file())
     for name in cleared:
         (into / name).unlink()
-    report = rows.report or {}
-    byjob = {
-        "id": report.get("id"),
-        "job_id": rows.job.get("id"),
-        "verdict": report.get("verdict"),
-        "overall_confidence": report.get("overall_confidence"),
-        "malware_category": report.get("malware_category"),
-        "stix_bundle": report.get("stix_bundle"),
-        "mitre_techniques": report.get("mitre_techniques"),
-        # The report row as stored: a NULL column stays null, so a verification
-        # of the export reads what the database holds.
-        "agent_reports": report.get("agent_reports"),
-        "negotiation_log": report.get("negotiation_log"),
-        "run_summary": report.get("run_summary"),
-        "judge_stix_bundle": report.get("judge_stix_bundle"),
-        "malware_report": report.get("malware_report"),
-        "incomplete_reason": report.get("incomplete_reason"),
-        # The seal of the job's ledger, the mark that it is sealed
-        # (``python -m scripts.ledger.verify --run`` reads it).
-        "ledger_seal": report.get("ledger_seal"),
-        "agent_findings": rows.findings,
-        "transcript": sorted(rows.transcript, key=lambda m: int(m.get("seq") or 0)),
-    }
-    files: dict[str, Any] = {
-        "job.json": rows.job,
-        "report-byjob.json": byjob,
-        "evidence.json": {
-            "total": len(rows.evidence),
-            "items": sorted(rows.evidence, key=lambda e: int(e.get("seq") or 0)),
-        },
-        "events.json": sorted(rows.events, key=lambda e: int(e.get("seq") or 0)),
-    }
-    if report.get("malware_report") is not None:
-        files["report.json"] = report["malware_report"]
-    if report.get("run_summary") is not None:
-        files["run-summary.json"] = report["run_summary"]
-    if report.get("judge_stix_bundle") is not None:
-        files["stix-judge.json"] = report["judge_stix_bundle"]
-    for name, value in files.items():
-        (into / name).write_text(json.dumps(value, indent=1, sort_keys=True), encoding="utf-8")
+    write_files(run_files(rows), into)
     return into, cleared
 
 
@@ -121,50 +57,10 @@ def _database_url(given: str | None) -> str:
     return str(settings.database_url)
 
 
-def with_sample(job: dict[str, Any], sample: Mapping[str, Any] | None) -> dict[str, Any]:
-    """The job row with its sample's hash and name, read from the joined sample row.
-
-    A job whose sample row is gone keeps ``None`` for both and says so
-    (``sample_row``): the replay then names the identity it reads from the
-    report alone, rather than taking it from there in silence.
-    """
-    out = dict(job)
-    if sample is None:
-        out["sample_sha256"] = None
-        out["sample_filename"] = None
-        out["sample_row"] = "absent"
-    else:
-        out["sample_sha256"] = sample.get("sha256")
-        out["sample_filename"] = sample.get("original_filename")
-    return out
-
-
-async def _sample_row(conn: Any, job: Any) -> dict[str, Any] | None:
-    """The sample row of ``job`` (a database row), or ``None`` when it names none or it is gone."""
-    from sqlalchemy import select
-
-    from app.models.sample import Sample
-
-    sample_id = job.get("sample_id")
-    if sample_id is None:
-        return None
-    found = (
-        (await conn.execute(select(Sample.__table__).where(Sample.__table__.c.id == sample_id)))
-        .mappings()
-        .first()
-    )
-    return _row(found) if found is not None else None
-
-
 async def read_jobs(job_ids: Sequence[str], database_url: str) -> list[JobRows]:
     """Each job's rows, read in one read-only transaction that is rolled back."""
-    from sqlalchemy import select, text
+    from sqlalchemy import text
     from sqlalchemy.ext.asyncio import create_async_engine
-
-    from app.models.evidence import EvidenceEntry
-    from app.models.job import AnalysisJob
-    from app.models.job_event import JobEvent
-    from app.models.report import AgentFinding, AgentMessage, AnalysisReport
 
     engine = create_async_engine(database_url, pool_pre_ping=False)
     out: list[JobRows] = []
@@ -175,74 +71,9 @@ async def read_jobs(job_ids: Sequence[str], database_url: str) -> list[JobRows]:
                 await conn.execute(text("SET TRANSACTION READ ONLY"))
                 for raw in job_ids:
                     job_id = uuid.UUID(str(raw))
-                    job = (
-                        (
-                            await conn.execute(
-                                select(AnalysisJob.__table__).where(
-                                    AnalysisJob.__table__.c.id == job_id
-                                )
-                            )
-                        )
-                        .mappings()
-                        .first()
-                    )
-                    if job is None:
+                    rows = await read_job_rows(conn, job_id)
+                    if rows is None:
                         raise LookupError(f"no job {job_id}")
-                    rows = JobRows(job=with_sample(_row(job), await _sample_row(conn, job)))
-                    report = (
-                        (
-                            await conn.execute(
-                                select(AnalysisReport.__table__).where(
-                                    AnalysisReport.__table__.c.job_id == job_id
-                                )
-                            )
-                        )
-                        .mappings()
-                        .first()
-                    )
-                    if report is not None:
-                        rows.report = _row(report)
-                        report_id = report["id"]
-                        rows.findings = [
-                            _row(m)
-                            for m in (
-                                await conn.execute(
-                                    select(AgentFinding.__table__).where(
-                                        AgentFinding.__table__.c.report_id == report_id
-                                    )
-                                )
-                            ).mappings()
-                        ]
-                        rows.transcript = [
-                            _row(m)
-                            for m in (
-                                await conn.execute(
-                                    select(AgentMessage.__table__).where(
-                                        AgentMessage.__table__.c.report_id == report_id
-                                    )
-                                )
-                            ).mappings()
-                        ]
-                    rows.evidence = [
-                        _row(m)
-                        for m in (
-                            await conn.execute(
-                                select(EvidenceEntry.__table__).where(
-                                    EvidenceEntry.__table__.c.job_id == job_id
-                                )
-                            )
-                        ).mappings()
-                    ]
-                    rows.events = [
-                        _row(m)
-                        for m in (
-                            await conn.execute(
-                                select(JobEvent.__table__).where(
-                                    JobEvent.__table__.c.job_id == job_id
-                                )
-                            )
-                        ).mappings()
-                    ]
                     out.append(rows)
             finally:
                 await transaction.rollback()

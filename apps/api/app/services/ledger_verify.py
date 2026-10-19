@@ -509,8 +509,17 @@ def _check_report(
     return None
 
 
-async def verify_job(db: Any, job_id: Any) -> dict[str, Any]:
+async def verify_job(
+    db: Any,
+    job_id: Any,
+    *,
+    preloaded: tuple[Sequence[Mapping[str, Any]], Mapping[str, Any] | None] | None = None,
+) -> dict[str, Any]:
     """Read one job's ledger, report and own chained audit rows through ``db`` and verify them.
+
+    ``preloaded`` is the job's ledger rows and report row when the caller has
+    already read them in the same transaction (the job package): they are
+    used as they are rather than read and held a second time.
 
     ``db`` is an ``AsyncSession`` or an ``AsyncConnection``: only Core
     ``SELECT``\\s are issued, so a read-only transaction serves it. Only this
@@ -525,20 +534,25 @@ async def verify_job(db: Any, job_id: Any) -> dict[str, Any]:
     from app.models.report import AnalysisReport
     from app.services import audit_chain
 
-    evidence = EvidenceEntry.__table__
-    rows = (
-        (
-            await db.execute(
-                select(evidence).where(evidence.c.job_id == job_id).order_by(evidence.c.seq)
+    rows: Sequence[Mapping[str, Any]]
+    report: Mapping[str, Any] | None
+    if preloaded is not None:
+        rows, report = preloaded
+    else:
+        evidence = EvidenceEntry.__table__
+        rows = (
+            (
+                await db.execute(
+                    select(evidence).where(evidence.c.job_id == job_id).order_by(evidence.c.seq)
+                )
             )
+            .mappings()
+            .all()
         )
-        .mappings()
-        .all()
-    )
-    reports = AnalysisReport.__table__
-    report = (
-        (await db.execute(select(reports).where(reports.c.job_id == job_id))).mappings().first()
-    )
+        reports = AnalysisReport.__table__
+        report = (
+            (await db.execute(select(reports).where(reports.c.job_id == job_id))).mappings().first()
+        )
     log = AuditLog.__table__
     # The head first: it is rewritten in the same transaction as each chained
     # row, so every row up to its seq is committed, and a row another job
@@ -607,7 +621,7 @@ async def verify_job(db: Any, job_id: Any) -> dict[str, Any]:
     )
     return verify_ledger(
         job_id,
-        [dict(r) for r in rows],
+        rows if preloaded is not None else [dict(r) for r in rows],
         report=dict(report) if report is not None else None,
         audit=audit,
         keys=keys,
