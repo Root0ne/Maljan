@@ -64,6 +64,7 @@ from urllib.parse import urlsplit
 from maljan.analysis.sandbox_sections import Sections
 from maljan.extractors.network_extractor import host_form
 from maljan.reporting.dedupe import canonical_path, canonical_value, indicator_fingerprint
+from maljan.schemas.sandbox_document import dns_row_name
 from maljan.schemas.sandbox_report import SAMPLE_TREE_KEY
 
 TOOL = "behaviour_code_links"
@@ -134,11 +135,10 @@ _COMMAND_FIELDS = ("command", "cmdline", "command_line")
 _SERVICE_FIELDS = ("name", "service")
 _MUTEX_FIELDS = ("name", "mutex")
 _URL_FIELDS = ("url", "uri")
-_HOST_FIELDS = ("host", "hostname", "domain")
+_HOST_FIELDS = ("host",)
 _ADDRESS_FIELDS = ("dst", "ip", "address")
 _SNI_FIELDS = ("sni", "server_name")
 _USER_AGENT_FIELDS = ("user_agent", "user-agent", "useragent")
-_DNS_FIELDS = ("request", "query", "hostname", "domain", "name")
 _SCHEME_FIELDS = ("scheme", "protocol")
 _PORT_FIELDS = ("port", "dport")
 # The ports a URL leaves unwritten for its scheme (RFC 3986's default ports).
@@ -329,11 +329,12 @@ def _network_values(
         yield _host_kind(scalar), scalar
         return
     if kind == "dns":
-        name = _field(lowered, _DNS_FIELDS)
+        name = dns_row_name(lowered)
         if name:
-            yield "domain", name.strip()
+            yield "domain", name
         return
-    host = _field(lowered, _HOST_FIELDS)
+    # A row's host, else the name it names as the one DNS row reader reads it.
+    host = _field(lowered, _HOST_FIELDS) or dns_row_name(lowered)
     url = _field(lowered, _URL_FIELDS)
     if url and "://" in url:
         yield "url", url
@@ -387,24 +388,24 @@ def observed_values(
     found: dict[tuple[str, str], Observed] = {}
     absent: dict[str, str] = {}
     no_value: dict[str, int] = {}
-    for name in SECTIONS_READ:
-        section = sections.sections[name]
+    for section_name in SECTIONS_READ:
+        section = sections.sections[section_name]
         if section.no:
-            absent[name] = section.no
+            absent[section_name] = section.no
             continue
-        for item in sections.items(name):
+        for item in sections.items(section_name):
             read = False
-            for kind, value in _values_of(name, item):
+            for kind, value in _values_of(section_name, item):
                 read = True
                 key = _key(FINGERPRINT_KIND[kind], value)
                 held = found.get(key)
                 if held is None:
                     held = found[key] = Observed(kind, value)
                 held.observed_in(str(item.get("id") or ""))
-                if name == "network":
+                if section_name == "network":
                     held.tree.add(_sample_tree(item))
             if not read:
-                no_value[name] = no_value.get(name, 0) + 1
+                no_value[section_name] = no_value.get(section_name, 0) + 1
     values = [one for one in found.values() if one.attribution != ""]
     return ObservedValues(values, absent, no_value, len(found) - len(values))
 

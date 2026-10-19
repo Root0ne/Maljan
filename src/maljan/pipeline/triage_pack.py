@@ -2123,12 +2123,18 @@ def behaviour_inputs(
         out.sections = [
             row for row in joined.pe_info[1].get("sections") or [] if isinstance(row, Mapping)
         ]
-    # Why a recovered-strings or decoder input is not read: the index's own
-    # words for the two inputs it shares with the links.
+    # Why a recovered-strings or decoder input is not read, in the index's
+    # words: each call-site answer that holds no readable answer, and the
+    # decoder's where none was joined. Found by the entry's declared slot.
     for entry in pack:
-        if _index_slot(entry) in ("call_sites", "blobs") and str(entry.tool) in joined.absent:
-            out.absent[str(entry.tool)] = joined.absent[str(entry.tool)]
-            out.unread.append(str(entry.tool))
+        slot = _index_slot(entry)
+        readable = entry.ok and isinstance(entry.structured, dict)
+        if readable or slot not in ("call_sites", "blobs"):
+            continue
+        if slot == "blobs" and joined.blobs is not None:
+            continue
+        out.absent[str(entry.tool)] = _absence(entry)
+        out.unread.append(str(entry.tool))
     for kind in ("emulated_strings", "decoded_strings"):
         if kind in joined.absent:
             out.absent[kind] = joined.absent[kind]
