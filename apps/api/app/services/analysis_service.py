@@ -10,7 +10,7 @@ from typing import Any
 import redis.asyncio as aioredis
 from arq import ArqRedis
 from arq.jobs import Job as ArqJob
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -22,6 +22,9 @@ from app.models.sample import Sample
 from app.models.user import User
 
 logger = get_logger("service.analysis")
+
+# The statuses an operator's cancel may still change.
+_CANCELLABLE: tuple[str, ...] = ("pending", "running")
 
 # How many completed runs the dashboard's "Tools used" list reads by default,
 # and the most a caller may ask it to read.
@@ -194,11 +197,30 @@ class AnalysisService:
         if not job:
             raise ValueError(f"Job {job_id} not found")
 
-        if job.status not in ("pending", "running"):
+        if job.status not in _CANCELLABLE:
             raise RuntimeError(f"Cannot cancel job with status '{job.status}'")
 
+        # Guarded in the statement, not on the row read above: the worker may
+        # complete the job between that read and this write, and a cancel
+        # written over ``completed`` would hide a finished report. The worker
+        # holds the row while it stores its report, so this waits for that
+        # commit and then matches nothing.
+        cancelled_at = datetime.now(UTC)
+        result = await self.db.execute(
+            update(AnalysisJob)
+            .where(AnalysisJob.id == job_id, AnalysisJob.status.in_(_CANCELLABLE))
+            .values(status="cancelled", completed_at=cancelled_at)
+            .execution_options(synchronize_session=False)
+        )
+        count = getattr(result, "rowcount", None)
+        if isinstance(count, int) and count == 0:
+            await self.db.refresh(job)
+            raise RuntimeError(
+                f"Cannot cancel job with status '{job.status}': it moved on before the "
+                "cancel landed"
+            )
         job.status = "cancelled"
-        job.completed_at = datetime.now(UTC)
+        job.completed_at = cancelled_at
         await self.db.flush()
 
         # This used to ONLY publish to PubSub, which had
