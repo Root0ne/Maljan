@@ -116,6 +116,10 @@ export interface CatalogEntry {
    *  the settings model (`core.pack_steps.step_vocabulary`). Absent from an
    *  API older than the field: the steps are then edited as JSON only. */
   pack_step_vocabulary?: PackStepVocabulary | null;
+  /** A change to this setting is saved only with the admin's current
+   *  password beside it (the sign-in policy). Absent from an API older than
+   *  the field: nothing is asked. */
+  needs_current_password?: boolean;
 }
 
 /** One field a declared pack step may set, as the model's JSON schema states
@@ -597,6 +601,8 @@ export interface ExportResponse {
 export interface ImportRequest {
   format: string;
   values: Record<string, unknown>;
+  /** Sent when `values` changes a setting marked `needs_current_password`. */
+  current_password?: string;
 }
 
 /** One tool of a server's capability manifest: what it needs on the server's

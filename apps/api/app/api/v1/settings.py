@@ -9,7 +9,7 @@ from contextlib import suppress
 from datetime import UTC, datetime
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
+from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request, Response, status
 from fastapi.responses import JSONResponse
 from maljan.core.model_assignments import endpoint_label
 from maljan.core.plugins import ALLOW_LIST_KEY
@@ -19,13 +19,15 @@ from maljan.core.settings_annotations import (
     RENAMED_SETTINGS,
     RETIRED_SETTINGS,
 )
+from maljan.core.settings_masking import mask_left_in
 from maljan.core.settings_overrides import redact_url
 from maljan.pipeline.conditions import validate_condition
 from pydantic import BaseModel, ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.auth.step_up import check_current_password
 from app.database import end_read_transaction, get_db
-from app.deps import require_admin
+from app.deps import require_admin, require_admin_session
 from app.logging_config import get_logger
 from app.logsafe import log_safe
 from app.models.user import User
@@ -51,6 +53,7 @@ from app.schemas.settings import (
     PluginsResponse,
     ProbeRequest,
     ProbeResponse,
+    ResetRequest,
     ResetResponse,
     SchemaResponse,
     TeamFindingDTO,
@@ -86,12 +89,14 @@ from app.services.settings_probes import (
     with_staged_sources,
 )
 from app.services.settings_service import (
+    NESTED_SECRET_KEYS,
     SettingsService,
     SettingsValidationError,
     cleared_plugin_block_keys,
     core_settings_cache,
     effective_core_settings,
     lenient_imported_declarations,
+    shown_setting,
     unknown_key_reason,
 )
 
@@ -304,7 +309,7 @@ def served_values(vals: dict[str, Any]) -> tuple[dict[str, ValueDTO], dict[str, 
 
 @router.get("", response_model=ValuesResponse)
 async def get_values(
-    _: User = Depends(require_admin), db: AsyncSession = Depends(get_db)
+    _: User = Depends(require_admin_session), db: AsyncSession = Depends(get_db)
 ) -> ValuesResponse:
     vals = await SettingsService(db).values(extra=await stored_block_entries(db))
     served, unreadable = served_values(vals)
@@ -558,11 +563,49 @@ async def _unprobed_models_in(db: AsyncSession, changes: dict[str, Any]) -> list
     return await unprobed_models_being_saved(db, settings, changes, stored)
 
 
+async def _sign_in_policy_confirmed(
+    keys: Any, current_password: str | None, user: User, request: Request
+) -> JSONResponse | None:
+    """``None`` when the write may go on; the refusal when it changes the sign-in policy unasked.
+
+    A setting marked ``needs_current_password`` (the login lockout, the
+    trusted proxies, the token lifetimes) is changed only with the admin's
+    current password beside it: the same step-up, lock and audit as a password
+    change (``auth.step_up``), so a stolen session cannot weaken how every
+    other account signs in. Without one the answer names the settings that
+    asked for it; a wrong one is refused there, counted against the lock.
+    """
+    index = catalog_index()
+    policy = sorted(
+        key
+        for key in keys
+        if (entry := index.get(key)) is not None and entry.needs_current_password
+    )
+    if not policy:
+        return None
+    if not current_password:
+        return JSONResponse(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            content={
+                "errors": {
+                    "current_password": (
+                        f"{', '.join(policy)} change how accounts sign in: confirm the "
+                        "change with your current password."
+                    )
+                }
+            },
+        )
+    await check_current_password(
+        user, current_password, request=request, action="settings.sign_in_policy"
+    )
+    return None
+
+
 @router.patch("", response_model=PatchResponse)
 async def patch_values(
     body: PatchRequest,
     request: Request,
-    user: User = Depends(require_admin),
+    user: User = Depends(require_admin_session),
     db: AsyncSession = Depends(get_db),
 ) -> PatchResponse | JSONResponse:
     """Save a set of staged values at once.
@@ -577,6 +620,9 @@ async def patch_values(
     stored map marked.
     """
     changes = _current_keys(body.changes)
+    refused = await _sign_in_policy_confirmed(changes, body.current_password, user, request)
+    if refused is not None:
+        return refused
     unprobed = await _unprobed_models_in(db, changes)
     if unprobed:
         from app.services.model_probes import AGENT_MODELS_KEY, refusal_sentence
@@ -585,7 +631,7 @@ async def patch_values(
         # saved here is one a run will call, and finding out at submit time
         # means finding out somewhere else.
         return JSONResponse(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             content={"errors": {AGENT_MODELS_KEY: refusal_sentence(unprobed)}},
         )
     # A plugin whose own block this save changes is loaded to read it; a block
@@ -612,7 +658,7 @@ async def patch_values(
             res = await SettingsService(db).save(changes, user_id=user.id, ip=_client_ip(request))
     except SettingsValidationError as exc:
         return JSONResponse(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, content={"errors": exc.errors}
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, content={"errors": exc.errors}
         )
     runtime_config.invalidate()
     core_settings_cache.invalidate()
@@ -626,11 +672,39 @@ async def patch_values(
     )
 
 
+async def _reset_confirmed(
+    db: AsyncSession, keys: list[str], body: ResetRequest | None, user: User, request: Request
+) -> JSONResponse | None:
+    """A reset of a stored sign-in policy setting asks for the password as a save does.
+
+    Putting the login lockout or a token lifetime back to its default changes
+    how accounts sign in as much as saving a value does
+    (:func:`_sign_in_policy_confirmed`). A key with nothing stored is no
+    change, so it asks for nothing.
+    """
+    index = catalog_index()
+    policy = [
+        key
+        for key in keys
+        if (entry := index.get(key)) is not None and entry.needs_current_password
+    ]
+    if not policy:
+        return None
+    stored = await SettingsService(db).load_overrides()
+    return await _sign_in_policy_confirmed(
+        [key for key in policy if key in stored],
+        body.current_password if body is not None else None,
+        user,
+        request,
+    )
+
+
 @router.delete("", response_model=ResetResponse)
 async def reset_group(
     request: Request,
     group: str = Query(...),
-    user: User = Depends(require_admin),
+    body: ResetRequest | None = Body(None),
+    user: User = Depends(require_admin_session),
     db: AsyncSession = Depends(get_db),
 ) -> ResetResponse | JSONResponse:
     # A plugin block's stored rows go with their group, read as stored: a
@@ -642,12 +716,15 @@ async def reset_group(
     ]
     if not keys:
         raise HTTPException(status.HTTP_404_NOT_FOUND, f"unknown group: {group}")
+    refused = await _reset_confirmed(db, keys, body, user, request)
+    if refused is not None:
+        return refused
     try:
         async with report_formats_serialised(db, needed=touches_report_formats(keys)):
             removed = await SettingsService(db).reset(keys, user_id=user.id, ip=_client_ip(request))
     except SettingsValidationError as exc:
         return JSONResponse(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, content={"errors": exc.errors}
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, content={"errors": exc.errors}
         )
     runtime_config.invalidate()
     core_settings_cache.invalidate()
@@ -658,12 +735,16 @@ async def reset_group(
 async def reset_key(
     key: str,
     request: Request,
-    user: User = Depends(require_admin),
+    body: ResetRequest | None = Body(None),
+    user: User = Depends(require_admin_session),
     db: AsyncSession = Depends(get_db),
 ) -> ResetResponse | JSONResponse:
     # A row whose key left the catalog (a later deploy renamed the field) must
     # still be removable, so the catalog check only decides between 404 and
     # an empty reset when nothing is stored either.
+    refused = await _reset_confirmed(db, [key], body, user, request)
+    if refused is not None:
+        return refused
     try:
         async with report_formats_serialised(db, needed=touches_report_formats([key])):
             removed = await SettingsService(db).reset(
@@ -671,7 +752,7 @@ async def reset_key(
             )
     except SettingsValidationError as exc:
         return JSONResponse(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, content={"errors": exc.errors}
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, content={"errors": exc.errors}
         )
     if not removed and key not in catalog_index():
         raise HTTPException(status.HTTP_404_NOT_FOUND, f"unknown setting: {key}")
@@ -719,68 +800,61 @@ def _strip_masks(value: Any, path: str) -> tuple[Any, list[str]]:
     return value, []
 
 
-def _export_value(key: str, value: Any) -> tuple[Any, list[str]]:
-    """The value as it goes into the export document, plus any paths it cost.
+def _export_value(key: str, value: Any, entry: Any) -> tuple[Any, list[str]]:
+    """The value as it goes into the export document, plus the paths it masks or omits.
 
-    Two composite leaves carry credentials inside them: ``core.mcp.servers``
-    (one ``auth_token`` per server) and ``core.llm.frontier.arms`` (one
-    ``api_key`` per arm). Both reach here as the mask, and both are stripped by
-    ``_strip_masks`` above, together with anything else masked at any depth.
-    The server map additionally carries the synthetic ``auth_token_source``
-    (not an ``MCPServerConfig`` field, so it would not import back), which is
-    dropped without being listed.
+    Masked as ``values()`` serves it and as the run settings snapshot masks it
+    (``settings_service.shown_setting``, applied again here so the document
+    never depends on the read having done it): a server's ``env`` values, a
+    credential a flag of its arguments names, every URL's user name, password,
+    query values and fragment, and an open mapping's credential-named entries.
+    Those masks stay in the document and are listed in ``secrets_omitted``; an
+    import back reads each one as the stored value it stands for, and refuses
+    one with nothing stored behind it (``settings_service.unmasked_changes``).
 
-    The paths returned name every credential the export did not carry, e.g.
-    ``core.mcp.servers.<name>.auth_token`` or
-    ``core.llm.frontier.arms.<arm>.api_key``. They are informational only, not
-    catalog keys: importing a document that includes one back as a top-level
-    key is rejected as ``unknown key``, the same as any other stray field.
-    They exist so an operator reading the export can see which servers and
-    arms lost their credential, rather than silently ending up with none on
-    the next import.
+    A value that is exactly the mask inside a server entry (outside its
+    ``env`` and ``args``, where the name or the position is part of the value)
+    or inside a composite whose credentials are rows of their own is such a
+    credential (a server's ``auth_token``, a frontier arm's ``api_key``, an
+    enrichment source's key, or a field a composite grows later) and is left
+    out, at any depth (``_strip_masks``). The server
+    map's synthetic ``auth_token_source`` (not an ``MCPServerConfig`` field, so
+    it would not import back) is dropped without being listed.
+
+    The paths returned are informational only, not catalog keys: importing a
+    document that includes one back as a top-level key is rejected as
+    ``unknown key``, the same as any other stray field.
     """
+    value = shown_setting(entry, value)
     if key != SERVER_MAP_KEY or not isinstance(value, dict):
-        return _strip_masks(value, key)
-    value = {
-        name: (
-            {k: v for k, v in entry.items() if k != "auth_token_source"}
-            if isinstance(entry, dict)
-            else entry
-        )
-        for name, entry in value.items()
-    }
-    sanitized, omitted = _strip_masks(value, key)
-    return _mask_server_env(sanitized, omitted)
-
-
-def _mask_server_env(servers: Any, omitted: list[str]) -> tuple[Any, list[str]]:
-    """Every ``env`` value masked, and its variable named in ``omitted``.
-
-    A server's ``env`` map is the one place a credential can live without
-    being typed as one, which is why
-    ``public_snapshot`` masks it in run summaries. An export is a file on an
-    operator's disk and the weaker of the two paths, so it masks them too. The
-    variable names stay -- an operator reading the document needs to see what
-    the server was handed -- and only the values go; a masked value coming
-    back on import means "keep the stored one" (``split_server_secrets``).
-    """
-    if not isinstance(servers, dict):
-        return servers, omitted
-    out: dict[str, Any] = {}
-    for name, entry in servers.items():
-        if not isinstance(entry, dict) or not isinstance(entry.get("env"), dict):
-            out[name] = entry
+        # An open mapping's credential-named entry is masked in place and
+        # comes back on import as the stored value; only a composite whose
+        # credentials are rows of their own drops its masks.
+        stripped, omitted = _strip_masks(value, key) if key in NESTED_SECRET_KEYS else (value, [])
+        return stripped, omitted + [
+            f"{key}.{path}" if path else key for path in mask_left_in(stripped, TOKEN_MASK)
+        ]
+    servers: dict[str, Any] = {}
+    omitted = []
+    for name, server in value.items():
+        if not isinstance(server, dict):
+            servers[name] = server
             continue
-        env = entry["env"]
-        out[name] = {**entry, "env": {var: TOKEN_MASK for var in env}}
-        omitted.extend(f"{SERVER_MAP_KEY}.{name}.env.{var}" for var in env)
-    return out, omitted
+        kept = {k: v for k, v in server.items() if k not in ("auth_token_source", "env", "args")}
+        stripped, paths = _strip_masks(kept, f"{key}.{name}")
+        omitted.extend(paths)
+        for field in ("env", "args"):
+            if field in server:
+                stripped[field] = server[field]
+        servers[name] = {k: stripped[k] for k in server if k in stripped}
+    omitted.extend(f"{key}.{path}" for path in mask_left_in(servers, TOKEN_MASK))
+    return servers, sorted(set(omitted))
 
 
 @router.get("/export", response_model=ExportResponse)
 async def export_values(
     response: Response,
-    _: User = Depends(require_admin),
+    _: User = Depends(require_admin_session),
     db: AsyncSession = Depends(get_db),
 ) -> ExportResponse:
     # A plugin block this process has not read is exported as stored; an
@@ -800,7 +874,7 @@ async def export_values(
             secrets_omitted.append(key)
             continue
         try:
-            sanitized, omitted_paths = _export_value(key, info.value)
+            sanitized, omitted_paths = _export_value(key, info.value, entry)
         except RecursionError as exc:
             # Too deep for the walk that strips its masks: the same bound the
             # answer's writer has (:func:`unwritable_reason`).
@@ -848,12 +922,12 @@ def _current_keys(values: dict[str, Any]) -> dict[str, Any]:
 async def import_values(
     body: ImportRequest,
     request: Request,
-    user: User = Depends(require_admin),
+    user: User = Depends(require_admin_session),
     db: AsyncSession = Depends(get_db),
 ) -> PatchResponse | JSONResponse:
     if body.format not in IMPORT_FORMATS:
         return JSONResponse(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             content={"errors": {"format": "unsupported format"}},
         )
     # A plugin whose own block the document changes is loaded to read it,
@@ -883,19 +957,22 @@ async def import_values(
             errors[key] = "read-only"
     if errors:
         return JSONResponse(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, content={"errors": errors}
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, content={"errors": errors}
         )
     # A declaration another version wrote may hold what this one does not
     # read: it is left out with a warning, never a refusal of the file. Both
     # formats are read alike: a map marked as changes is its changes, one
     # without the mark its whole map.
     values, left_out = lenient_imported_declarations(values)
+    refused = await _sign_in_policy_confirmed(values, body.current_password, user, request)
+    if refused is not None:
+        return refused
     try:
         async with report_formats_serialised(db, needed=touches_report_formats(values)):
             res = await SettingsService(db).save(values, user_id=user.id, ip=_client_ip(request))
     except SettingsValidationError as exc:
         return JSONResponse(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, content={"errors": exc.errors}
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, content={"errors": exc.errors}
         )
     if res.applied:
         await audit_record(
@@ -1002,7 +1079,7 @@ async def test_mcp_server(
     body: ProbeRequest,
     request: Request,
     server: str = Query(..., description="key in mcp.servers"),
-    user: User = Depends(require_admin),
+    user: User = Depends(require_admin_session),
     db: AsyncSession = Depends(get_db),
 ) -> ProbeResponse:
     """Launch one configured MCP server, report the tools it offers and propose declarations.
@@ -1039,7 +1116,7 @@ async def test_mcp_server(
 async def obtain_server_credential(
     key: str,
     request: Request,
-    user: User = Depends(require_admin),
+    user: User = Depends(require_admin_session),
     db: AsyncSession = Depends(get_db),
 ) -> CredentialBootstrapResponse | JSONResponse:
     """Obtain server ``key``'s credential by its declared request, store it and enable it.
@@ -1094,7 +1171,7 @@ async def obtain_server_credential(
         await service.save({SERVER_MAP_KEY: updated}, user_id=user.id, ip=_client_ip(request))
     except SettingsValidationError as exc:
         return JSONResponse(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, content={"errors": exc.errors}
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, content={"errors": exc.errors}
         )
     await audit_record(
         "settings.servers.credential",
@@ -1153,7 +1230,7 @@ async def test_agent(
     body: ProbeRequest,
     request: Request,
     name: str = Query(..., description="key in agents.definitions"),
-    user: User = Depends(require_admin),
+    user: User = Depends(require_admin_session),
     db: AsyncSession = Depends(get_db),
 ) -> ProbeResponse:
     """Resolve one agent definition and report what it would get.
@@ -1199,7 +1276,7 @@ async def test_probe(
     probe: str,
     body: ProbeRequest,
     request: Request,
-    user: User = Depends(require_admin),
+    user: User = Depends(require_admin_session),
     db: AsyncSession = Depends(get_db),
 ) -> ProbeResponse:
     stored = await SettingsService(db).load_overrides()

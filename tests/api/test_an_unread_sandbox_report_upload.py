@@ -198,13 +198,15 @@ def test_a_declaration_that_does_not_validate_saves_nothing(monkeypatch) -> None
     saved.assert_not_awaited()
 
 
-def test_accepting_needs_an_admin() -> None:
-    from app.deps import require_admin
+def test_accepting_needs_an_admin_session() -> None:
+    """An accept saves settings: an admin's bearer session, never an API key (AUD-75)."""
+    from app.deps import require_admin, require_admin_session
 
     route = next(
         r for r in module.formats_router.routes if getattr(r, "path", "").endswith("/accept")
     )
-    assert any(dep.call is require_admin for dep in route.dependant.dependencies)
+    session = next(dep for dep in route.dependant.dependencies if dep.call is require_admin_session)
+    assert any(dep.call is require_admin for dep in session.dependencies)
 
 
 def test_the_listing_says_an_unread_row_is_unread(monkeypatch) -> None:

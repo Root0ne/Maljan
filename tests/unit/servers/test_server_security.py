@@ -36,10 +36,9 @@ def test_a_server_token_never_appears_in_a_run_summary():
     snap = settings_snapshot(cfg)
     dumped = json.dumps(snap)
     assert "s3cr3t" not in dumped and "r3st" not in dumped
-    # Not merely absent — masked in the specific shape each field's type
-    # produces: a nested server token by ``SecretStr``'s own serializer (ten
-    # asterisks), a catalog leaf by ``public_snapshot``'s own convention.
-    assert snap["mcp.servers.custom.auth_token"] == "**********"
+    # Not merely absent — masked by ``public_snapshot``'s own convention,
+    # a nested server token as a catalog leaf is.
+    assert snap["mcp.servers.custom.auth_token"] == "***"
     assert snap["sandbox.rest.auth.token"] == "***"
 
 

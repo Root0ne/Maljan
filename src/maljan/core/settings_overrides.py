@@ -540,27 +540,71 @@ def effective_source(*, overridden: bool) -> Source:
     return "ui" if overridden else "default"
 
 
-# ``mcp.servers.<key>.env.<VAR>`` after flattening: an open-ended mapping an
-# admin fills in, and the natural place for a server's own credential (a token
-# a sidecar reads from its environment).
-_SERVER_ENV_VALUE = re.compile(r"^mcp\.servers\.[^.]+\.env\.")
+def _scrubbed(value: Any, secrets: list[str]) -> Any:
+    """``value`` with no configured secret value left in it."""
+    from maljan.core.settings_masking import SNAPSHOT_MASK
+
+    if isinstance(value, str):
+        if value in secrets:
+            return SNAPSHOT_MASK
+        for secret in secrets:
+            value = value.replace(secret, SNAPSHOT_MASK)
+        return value
+    if isinstance(value, list):
+        return [_scrubbed(item, secrets) for item in value]
+    if isinstance(value, dict):
+        return {key: _scrubbed(item, secrets) for key, item in value.items()}
+    return value
 
 
-def public_snapshot(settings: Settings, secret_keys: Iterable[str]) -> dict[str, Any]:
+def masked_settings_tree(settings: Settings) -> tuple[dict[str, Any], list[str]]:
+    """``(the settings dump masked for a record, the secret leaf paths)``.
+
+    The one masking of a settings instance for a record (``public_snapshot``,
+    and through it the efficiency fingerprint): ``settings_masking.masked_dump``
+    (each tool-server block's env values with their names kept, credential
+    flags in its arguments, every URL, every open-mapping entry whose key names
+    a credential).
+    """
+    from maljan.core.settings_catalog import snapshot_hidden_paths
+    from maljan.core.settings_masking import masked_dump
+
+    typed, _servers = snapshot_hidden_paths(settings)
+    return masked_dump(settings, settings.model_dump(mode="json")), typed
+
+
+def public_snapshot(settings: Settings, secret_keys: Iterable[str] = ()) -> dict[str, Any]:
     """The settings as they ran, with nothing in them a reader may not see.
 
-    ``secret_keys`` names the leaves typed as secrets. To those this adds
-    the one place a credential can live without being typed as one: a
-    server's ``env`` map. This snapshot reaches the job owner
-    through ``run_summary.settings_snapshot``, so every value under such a map
-    is masked. The variable names stay -- an operator debugging a server needs
-    to see what it was handed -- and only the values go.
+    This snapshot reaches everyone who may read the report, through
+    ``run_summary.settings_snapshot`` and the disclosure record, so it carries
+    no secret:
+
+    * every leaf the catalogue types as a secret, wherever it sits
+      (``settings_catalog.snapshot_hidden_paths``), and each of
+      ``secret_keys``, is ``"***"`` when set and ``None`` when not;
+    * every tool server's ``env`` value is ``"***"``, its names kept; a
+      credential a flag of its arguments names is ``"***"``
+      (``settings_masking.masked_server``);
+    * every URL keeps no user name, password, query value or fragment, and
+      every entry whose key names a credential is ``"***"``
+      (``settings_masking.masked_value``);
+    * every value the settings hold as a secret by the event scrub's rules
+      (``settings_catalog.configured_secret_values``) is masked wherever it
+      still appears.
     """
-    secrets = set(secret_keys)
-    snap = flatten(settings.model_dump(mode="json"))
-    for key in list(snap):
-        if key in secrets or _SERVER_ENV_VALUE.match(key):
-            snap[key] = "***" if snap[key] else None
+    from maljan.core.settings_catalog import configured_secret_values
+    from maljan.core.settings_masking import SNAPSHOT_MASK
+
+    tree, typed = masked_settings_tree(settings)
+    secrets = set(secret_keys) | set(typed)
+    values = sorted(configured_secret_values(settings), key=len, reverse=True)
+    snap: dict[str, Any] = {}
+    for key, value in flatten(tree).items():
+        if key in secrets:
+            snap[key] = SNAPSHOT_MASK if value else None
+        else:
+            snap[key] = _scrubbed(value, values)
     return snap
 
 

@@ -8,6 +8,7 @@ import type { PatchResult } from "@/types/settings";
 import { usableFields } from "./declarationFields";
 import { buildImportPreview, type ImportDoc, type ImportPreview } from "./importPreview";
 import { useSettingsContext } from "./SettingsContext";
+import { keysNeedingPassword } from "./signInPolicy";
 import { appliesSummary, APPLIES_SENTENCE } from "./vocabulary";
 
 /** Reads the picked file and normalises whatever JSON it holds into the
@@ -59,6 +60,7 @@ export default function ImportDialog({ onClose }: { onClose: () => void }) {
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [serverErrors, setServerErrors] = useState<Record<string, string> | null>(null);
   const [result, setResult] = useState<PatchResult | null>(null);
+  const [currentPassword, setCurrentPassword] = useState("");
 
   // Moves focus in on mount and — Important 1 — back out to whatever had it
   // before the dialog opened (the "Import configuration" button, always)
@@ -132,7 +134,17 @@ export default function ImportDialog({ onClose }: { onClose: () => void }) {
   const changedCount = preview?.lines.length ?? 0;
   const errorCount = preview ? Object.keys(preview.errors).length : 0;
   const unchangedCount = preview ? totalKeys - preview.lines.length - errorCount : 0;
-  const canImport = doc !== null && preview !== null && changedCount > 0 && errorCount === 0;
+  // A file that changes the sign-in policy is imported only with the current password.
+  const policyKeys = keysNeedingPassword(
+    (preview?.lines ?? []).map((line) => line.key),
+    ctx.entriesByKey
+  );
+  const canImport =
+    doc !== null &&
+    preview !== null &&
+    changedCount > 0 &&
+    errorCount === 0 &&
+    (policyKeys.length === 0 || currentPassword !== "");
 
   const onImport = async () => {
     if (!doc || !preview) return;
@@ -143,13 +155,18 @@ export default function ImportDialog({ onClose }: { onClose: () => void }) {
     setSubmitError(null);
     setServerErrors(null);
     try {
-      const res = await api.importSettings({ format: doc.format, values });
+      const res = await api.importSettings(
+        policyKeys.length > 0
+          ? { format: doc.format, values, current_password: currentPassword }
+          : { format: doc.format, values }
+      );
       setResult(res);
       await ctx.reload();
     } catch (e) {
       if (e instanceof SettingsValidationError) setServerErrors(e.errors);
       else setSubmitError(getErrorMessage(e));
     } finally {
+      setCurrentPassword("");
       setSubmitting(false);
     }
   };
@@ -259,6 +276,27 @@ export default function ImportDialog({ onClose }: { onClose: () => void }) {
                         </li>
                       ))}
                     </ul>
+                  )}
+
+                  {policyKeys.length > 0 && (
+                    <div className="mt-3">
+                      <label
+                        htmlFor="import-current-password"
+                        className="block text-xs text-text-secondary"
+                      >
+                        {policyKeys.join(", ")} change how accounts sign in. Confirm with your
+                        current password.
+                      </label>
+                      <input
+                        id="import-current-password"
+                        name="current_password"
+                        type="password"
+                        autoComplete="current-password"
+                        value={currentPassword}
+                        onChange={(e) => setCurrentPassword(e.target.value)}
+                        className="mt-1 w-full max-w-xs rounded border border-border bg-bg-deep px-2 py-1 text-sm text-text-primary"
+                      />
+                    </div>
                   )}
 
                   {errorCount > 0 && (

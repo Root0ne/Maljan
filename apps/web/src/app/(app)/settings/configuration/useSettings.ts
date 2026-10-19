@@ -5,6 +5,7 @@ import { api } from "@/lib/api";
 import { getErrorMessage } from "@/lib/errors";
 import { SettingsConflictError, SettingsValidationError } from "@/types/settings";
 import { deepEqual } from "./deepEqual";
+import { keysNeedingPassword, passwordRefusal } from "./signInPolicy";
 import type {
   CatalogEntry,
   PatchResult,
@@ -15,6 +16,13 @@ import type {
 
 /** key -> staged value; `null` means "clear this secret". */
 export type Pending = Record<string, unknown>;
+
+/** A save or a reset of the sign-in policy waiting for the admin's current
+ *  password: the keys that asked for it, and the answer (`null`: cancelled). */
+export interface PasswordAsk {
+  keys: string[];
+  answer: (password: string | null) => void;
+}
 
 /**
  * The error map with everything the server said about one leaf taken out.
@@ -180,12 +188,47 @@ export function useSettings() {
     setErrors((e) => withoutErrorsFor(e, key));
   }, []);
 
-  const apply = useCallback(async () => {
+  const [passwordAsk, setPasswordAsk] = useState<PasswordAsk | null>(null);
+  /** Asks for the current password (`CurrentPasswordDialog`); `null` when cancelled. */
+  const askPassword = useCallback(
+    (keys: string[]) =>
+      new Promise<string | null>((resolve) =>
+        setPasswordAsk({
+          keys,
+          answer: (password) => {
+            setPasswordAsk(null);
+            resolve(password);
+          },
+        })
+      ),
+    []
+  );
+  /** The keys among `keys` a reset would remove from the store that ask for the password. */
+  const storedPolicyKeys = useCallback(
+    (keys: string[]) =>
+      keysNeedingPassword(
+        keys.filter((key) => values[key]?.source === "ui"),
+        entriesByKey
+      ),
+    [values, entriesByKey]
+  );
+
+  /** `currentPassword` goes with the save when a staged key is marked
+   *  `needs_current_password` (`keysNeedingPassword`); a caller that has none
+   *  (a guide) is asked for it here. */
+  const apply = useCallback(async (currentPassword?: string) => {
+    let password = currentPassword;
+    const policy = keysNeedingPassword(Object.keys(pending), entriesByKey);
+    if (policy.length > 0 && password === undefined) {
+      const answer = await askPassword(policy);
+      if (answer === null) return null;
+      password = answer;
+    }
     setSaving(true);
     setErrors({});
     setActionError(null);
     try {
-      const res = await api.patchSettings(pending, loadedVersions(pending, values));
+      const res = await api.patchSettings(pending, loadedVersions(pending, values), password);
       setLastResult(res);
       setPending({});
       await reload();
@@ -207,6 +250,13 @@ export function useSettings() {
         return null;
       }
       if (e instanceof SettingsValidationError) {
+        const refusal = passwordRefusal(e.errors);
+        if (refusal !== null) {
+          // The sign-in policy asked for the current password: said as that,
+          // never as a stored override gone invalid.
+          setActionError(refusal);
+          return null;
+        }
         setErrors(e.errors);
         // The server validates the whole merged set, so a stored override
         // that stopped validating (a later deploy narrowed its field) blocks
@@ -232,7 +282,7 @@ export function useSettings() {
     } finally {
       setSaving(false);
     }
-  }, [pending, reload, values]);
+  }, [pending, reload, values, entriesByKey, askPassword]);
 
   // Callers fire-and-forget these (`void s.reset(key)`), so a rejected
   // promise here would surface only as an unhandled-rejection console entry
@@ -244,22 +294,40 @@ export function useSettings() {
   const reset = useCallback(
     async (key: string) => {
       setActionError(null);
+      let password: string | undefined;
+      const policy = storedPolicyKeys([key]);
+      if (policy.length > 0) {
+        const answer = await askPassword(policy);
+        if (answer === null) return;
+        password = answer;
+      }
       try {
-        await api.resetSetting(key);
+        await api.resetSetting(key, password);
         unstage(key);
         await reload();
       } catch (e) {
-        setActionError(getErrorMessage(e));
+        const refusal =
+          e instanceof SettingsValidationError ? passwordRefusal(e.errors) : null;
+        setActionError(refusal ?? getErrorMessage(e));
       }
     },
-    [reload, unstage]
+    [reload, unstage, storedPolicyKeys, askPassword]
   );
 
   const resetGroup = useCallback(
     async (group: string) => {
       setActionError(null);
+      const groupKeys =
+        schema?.groups.find((g) => g.key === group)?.entries.map((e) => e.key) ?? [];
+      let password: string | undefined;
+      const policy = storedPolicyKeys(groupKeys);
+      if (policy.length > 0) {
+        const answer = await askPassword(policy);
+        if (answer === null) return;
+        password = answer;
+      }
       try {
-        await api.resetSettingsGroup(group);
+        await api.resetSettingsGroup(group, password);
         // Only unstage the keys that belong to *this* group — `setPending({})`
         // used to wipe every group's pending edits, so resetting one group's
         // overrides silently discarded unrelated in-flight edits elsewhere.
@@ -276,10 +344,12 @@ export function useSettings() {
         });
         await reload();
       } catch (e) {
-        setActionError(getErrorMessage(e));
+        const refusal =
+          e instanceof SettingsValidationError ? passwordRefusal(e.errors) : null;
+        setActionError(refusal ?? getErrorMessage(e));
       }
     },
-    [reload, schema]
+    [reload, schema, storedPolicyKeys, askPassword]
   );
 
   const probe = useCallback(
@@ -311,6 +381,7 @@ export function useSettings() {
     apply,
     reset,
     resetGroup,
+    passwordAsk,
     probe,
     reload,
   };

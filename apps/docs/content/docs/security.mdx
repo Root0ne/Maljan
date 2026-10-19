@@ -57,6 +57,21 @@ Two credentials are accepted, and an explicit one wins.
   minting also asks for `current_password`, so a stolen access token cannot
   mint a key that outlives it. Both write an audit row (`api_key.create`,
   `api_key.revoke`).
+- **Settings reads and writes** — reading and exporting the settings, saving,
+  resetting and importing them, obtaining a server's credential, every
+  connection test and accepting a sandbox report format take an admin's bearer
+  session and refuse `X-API-Key` (403) before the key is looked up, so a leaked
+  admin key cannot read a server's credentials, turn the login lockout off,
+  trust a proxy or repoint a provider. A save, an import or a reset that
+  changes a stored setting marked `needs_current_password`
+  (`rate_limit_enabled`, `rate_limit_requests`, `rate_limit_window_seconds`,
+  `rate_limit_whitelist`, `login_max_attempts`, `login_lockout_seconds`,
+  `trusted_proxy_ips`,
+  `jwt_access_token_expire_minutes`, `jwt_refresh_token_expire_days`,
+  `refresh_reuse_grace_seconds`) asks for `current_password` again (422
+  without it, 400 when wrong, counted against the same per-account lock); the
+  console asks for it in the change review, the import dialog, and a dialog
+  before a guide's save or a reset.
 
 **Revocation.** Every token carries the account's token generation (claim
 `gen`), and every API key records the generation it was created under. A
@@ -142,15 +157,43 @@ object-store key, the settings key, a JWT signing key) in `env_allow` or `env`
 is refused, and the spawn drops one whatever a block says
 ([configuration](/configuration/#which-directories-a-sidecar-may-read)).
 
+## What a run's settings snapshot leaves out
+
+The settings a run ran with are stored as `run_summary.settings_snapshot` and
+read by everyone who may read the report, and the disclosure record and the
+efficiency fingerprint are built from the same masking
+(`maljan.core.settings_masking`, through `settings_overrides.public_snapshot`).
+It carries no secret: every leaf the settings catalogue types as a secret, a
+tool server's `auth_token` under `mcp.servers` included, is `***` when set;
+every tool server's `env` value (`mcp.servers.*`, `static.ghidra`,
+`static.r2`, `sandbox.cape2.mcp`) is `***`, its variable names kept and
+sorted; in a server's arguments the value after a flag whose name marks a
+credential (`--api-key T`) and the value of such a `--flag=T` are `***`;
+every URL's user name, password, query values (the keys stay) and fragment
+are each replaced by `***`; an open mapping's entry whose key names a credential (such as
+`sandbox.cape2.submit_options` or `sandbox.rest.submit.*_fields`) is `***`;
+and every value the event scrub holds as a secret is masked wherever it still
+appears. The fingerprint's per-server digests are taken over the masked
+fields. A summary stored before this is read as stored and is not scrubbed
+again: its ledger seal covers it.
+
 ## What an export leaves out
 
 A JSON export is a file on an operator's disk, so it carries no credential at
-all: secret entries are skipped, masked values nested inside composites are
-stripped at any depth, and every value in an MCP server's `env` map is masked
-while its variable names remain. Each omission is listed in `secrets_omitted`,
-so the operator can see what must be re-entered on the other side. A mask that
-comes back on import means "keep the stored value", never "set the literal
-mask" — the failure mode that the old `.env` export had.
+all. Secret entries are skipped, and a credential kept in a row of its own (a
+server's `auth_token`, a frontier arm's `api_key`, an enrichment source's
+key) is stripped at any depth. Every other value is masked as the console's
+read serves it and as the run snapshot masks it: a server's `env` values with
+their names kept, a credential a flag of its arguments names, every URL's user
+name, password, query values and fragment, and an open mapping's
+credential-named entries. Each omission and each mask is listed in
+`secrets_omitted`, so the operator can see what must be re-entered on the
+other side. A mask that comes back on import, or in a save from the console,
+means "keep the stored value", and the value read back is masked again where
+it lands; one with nothing stored behind it, or one whose stored value would
+land where it is not masked (a hidden argument moved behind another flag), is
+refused, named, never stored as the literal mask — the failure mode that the old
+`.env` export had.
 
 ## Transport and browser surface
 

@@ -493,15 +493,20 @@ def declared_server(config: Any) -> dict[str, Any]:
     and tool filter — what identifies the server without attaching it — are
     hashed with this host's paths replaced: one digest of the whole identity
     and one per field, so a diff still names the field. Nothing of the values
-    is kept, so a token an argument or an address carries is never stored,
-    masked or not, whatever its shape.
+    is kept, and what is hashed is each field masked as the settings snapshot
+    masks it (``settings_masking.masked_server``: a credential a flag names,
+    every URL's user name, password, query values and fragment), so no digest
+    is taken over a credential either.
     """
+    from maljan.core.settings_masking import masked_server
+
     held = host_paths()
-    fields: dict[str, Any] = {}
+    raw: dict[str, Any] = {}
     for field in ("transport", "command", "args", "url", "cwd", "tools"):
         value = getattr(config, field, None)
         if value not in (None, "", []):
-            fields[field] = _without_host(list(value) if isinstance(value, tuple) else value, held)
+            raw[field] = list(value) if isinstance(value, tuple) else value
+    fields = {field: _without_host(value, held) for field, value in masked_server(raw).items()}
     return {
         "not_attached": True,
         "identity": _hash(fields),

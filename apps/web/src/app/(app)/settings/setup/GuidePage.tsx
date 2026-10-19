@@ -269,6 +269,8 @@ export default function GuidePage({ guide }: { guide: GuideDef }) {
   const result = probeId ? probeResult(probeId) : undefined;
 
   const onApply = async () => {
+    // A staged sign-in policy setting is confirmed with the current password:
+    // `apply` asks for it (`CurrentPasswordDialog`) before anything is sent.
     const res = await ctx.apply();
     if (res) setApplied(res);
   };

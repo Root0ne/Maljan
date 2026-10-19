@@ -159,7 +159,7 @@ async def get_current_user(
 
 SESSION_ONLY_DETAIL = (
     "This action needs a signed-in session: an API key cannot change the "
-    "password or create or revoke API keys."
+    "password, create or revoke API keys, or change the settings."
 )
 
 
@@ -247,4 +247,24 @@ async def require_admin(user: User = Depends(require_active_user)) -> User:
             status_code=status.HTTP_403_FORBIDDEN,
             detail=f"Admin role required (current role: {user.role})",
         )
+    return user
+
+
+async def refuse_api_key(api_key: str | None = Depends(api_key_scheme)) -> None:
+    """A dependency that refuses ``X-API-Key`` before any credential is resolved."""
+    refuse_api_key_credential(api_key)
+
+
+async def require_admin_session(
+    _session_only: None = Depends(refuse_api_key),
+    user: User = Depends(require_admin),
+) -> User:
+    """``require_admin`` from a bearer session only; an API key is refused first.
+
+    For the settings writes (a save, a reset, an import, a server credential's
+    bootstrap, a probe that sends a stored credential to a staged address):
+    with an API key, one leaked key could turn the login lockout off, trust a
+    proxy, stretch the token lifetimes or repoint a provider. The key is
+    refused before it is looked up, as ``get_session_user`` refuses it.
+    """
     return user
