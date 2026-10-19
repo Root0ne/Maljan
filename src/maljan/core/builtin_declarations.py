@@ -831,6 +831,81 @@ def _serving_formats(
     }
 
 
+# What each built-in tool's call does beyond answering (``ToolFacts.effects``):
+# whether it runs the sample's code, reaches a network service beyond its own
+# server, and what of the sample it sends to a third party. A tool that sends
+# the sample's bytes out says so by ``discloses_sample``, which the effects read
+# as bytes sent (``analysis.tool_effects.sends_sample_bytes``). Every built-in
+# tool declares all three, held so by
+# ``tests/unit/analysis/test_each_tool_s_effects_are_declared_and_reported.py``;
+# only a tool that runs whatever script or command it is given declares none,
+# and says why (``why_undeclared``).
+_NO_EFFECT: dict[str, Any] = {"executes": "no", "network": False, "third_party": "no"}
+_EMULATES: dict[str, Any] = {**_NO_EFFECT, "executes": "emulation"}
+# Reaches the network only to fetch or refresh the reference data it keeps:
+# the ATT&CK bundle once it is stale (``memory.attck_loader``) and the
+# embedding model's weights on first use (``memory.embeddings``).
+_REFRESHES: dict[str, Any] = {**_NO_EFFECT, "network": "on_refresh"}
+# Reads the configured case-memory store, wherever the disclosure places it.
+_READS_THE_CASE_STORE: dict[str, Any] = {**_NO_EFFECT, "network": "case_store"}
+# What the sandbox service the CAPE sidecar fronts (its API, at the address the
+# operator configured) is asked: its status, a search by the sample's hash, a
+# task's status, report, IOCs or extracted configuration. Whether that service
+# is the operator's own is not shipped: the report derives it from where the
+# disclosure places the call (``analysis.tool_effects``), and says it cannot be
+# told where the disclosure cannot place it.
+_ASKS_THE_OPERATOR_SANDBOX: dict[str, Any] = {**_NO_EFFECT, "network": "operator_sandbox"}
+# Hands the sample to that sandbox service, which runs it; the bytes going
+# out are the tool's ``discloses_sample``.
+_SUBMITS_TO_THE_OPERATOR_SANDBOX: dict[str, Any] = {
+    "executes": "sandbox",
+    "network": "operator_sandbox",
+}
+# A tool that runs whatever script or command it is given: what it does is
+# what it is told, so none of its effects can be declared.
+# radare2's analysis: at level 2 and above r2mcp runs ``aaa`` (the provider's
+# own account of the levels, ``providers.static.r2``), whose type matching
+# (``aaft``) emulates each function with ESIL; the levels below do not.
+_ANALYSES: dict[str, Any] = {
+    **_NO_EFFECT,
+    "executes": "emulation",
+    "when": "at analysis level 2 and above, where radare2's aaa type matching (aaft) emulates "
+    "each function with ESIL",
+}
+_RUNS_ANYTHING: dict[str, Any] = {
+    "why_undeclared": "it runs whatever script or command it is given, so what it does is "
+    "whatever that does"
+}
+# Asks an outside service about an indicator (a domain, an address, a URL).
+_ASKS_ABOUT_AN_INDICATOR: dict[str, Any] = {"executes": "no", "network": True, "third_party": "no"}
+# Asks an outside service about the sample by its hash, or by the id of its
+# submission there.
+_ASKS_ABOUT_THE_SAMPLE: dict[str, Any] = {**_ASKS_ABOUT_AN_INDICATOR, "third_party": "hash"}
+# Hands the sample to a third party's sandboxes (VirusTotal's), which may run
+# it; the bytes going out are the tool's ``discloses_sample``.
+_SUBMITS_THE_SAMPLE: dict[str, Any] = {"executes": "sandbox", "network": True}
+
+
+def _with_effects(
+    tools: Mapping[str, Mapping[str, Any]],
+    effects: Mapping[str, Mapping[str, Any]],
+    *,
+    default: Mapping[str, Any] | None = None,
+) -> dict[str, dict[str, Any]]:
+    """``tools`` with each one's ``effects``: its own in ``effects``, else ``default``.
+
+    Every name in ``effects`` is one of ``tools``.
+    """
+    missing = sorted(set(effects) - set(tools))
+    if missing:
+        raise KeyError(f"effects for undeclared tools: {missing}")
+    out: dict[str, dict[str, Any]] = {}
+    for name, facts in tools.items():
+        held = effects.get(name, default)
+        out[name] = {**facts, "effects": dict(held)} if held is not None else dict(facts)
+    return out
+
+
 # Each built-in server's declaration. ``roles``: ``reputation`` on the two
 # servers that declare a reputation lookup. ``reads_staged_sample`` on the
 # three servers whose path-taking tools read the sample the platform staged
@@ -849,27 +924,69 @@ _SERVER_BLOCKS: dict[str, dict[str, Any]] = {
         ],
         "reads_staged_sample": True,
         "platform_owned": True,
-        "tool_facts": _serving_formats(
-            _marked_read_only(_ANALYSIS_TOOLS, ANALYSIS_READ_ONLY), ANALYSIS_ROUTED_FORMATS
+        "tool_facts": _with_effects(
+            _serving_formats(
+                _marked_read_only(_ANALYSIS_TOOLS, ANALYSIS_READ_ONLY), ANALYSIS_ROUTED_FORMATS
+            ),
+            {"floss": _EMULATES},
+            default=_NO_EFFECT,
         ),
     },
     "knowledge": {
         "roles": ["reference"],
         "required_env_allow": ["MALJAN_INDEX_RETRY_SECONDS", "MALJAN_ATTCK_REFRESH_DAYS"],
         "reads_staged_sample": True,
-        "tool_facts": _marked_read_only(_KNOWLEDGE_TOOLS, KNOWLEDGE_READ_ONLY),
+        "tool_facts": _with_effects(
+            _marked_read_only(_KNOWLEDGE_TOOLS, KNOWLEDGE_READ_ONLY),
+            dict.fromkeys(
+                (
+                    "attck_lookup",
+                    "attck_validate",
+                    "family_lookup",
+                    "resolve_technique",
+                    "similar_cases",
+                ),
+                _REFRESHES,
+            ),
+            default=_NO_EFFECT,
+        ),
     },
     "network": {
         "roles": ["capture"],
         "required_env_allow": ["MALJAN_STAGING_DIR", "MALJAN_SAMPLE_ROOTS"],
         "reads_staged_sample": True,
-        "tool_facts": _marked_read_only(_NETWORK_TOOLS, NETWORK_READ_ONLY),
+        "tool_facts": _with_effects(
+            _marked_read_only(_NETWORK_TOOLS, NETWORK_READ_ONLY), {}, default=_NO_EFFECT
+        ),
     },
-    "threatintel": {"roles": ["reputation"], "tool_facts": _THREATINTEL_TOOLS},
+    "threatintel": {
+        "roles": ["reputation"],
+        "tool_facts": _with_effects(
+            _THREATINTEL_TOOLS,
+            {
+                "check_domain_reputation": _ASKS_ABOUT_AN_INDICATOR,
+                "check_hash": _ASKS_ABOUT_THE_SAMPLE,
+                "check_ip_reputation": _ASKS_ABOUT_AN_INDICATOR,
+            },
+            default=_NO_EFFECT,
+        ),
+    },
     "virustotal": {
         "roles": ["reputation"],
         "reference_urls": ["https://www.virustotal.com/gui/file/{sha256}"],
-        "tool_facts": _VIRUSTOTAL_TOOLS,
+        "tool_facts": _with_effects(
+            _VIRUSTOTAL_TOOLS,
+            {
+                "get_analysis": _ASKS_ABOUT_THE_SAMPLE,
+                "get_domain_report": _ASKS_ABOUT_AN_INDICATOR,
+                "get_file_report": _ASKS_ABOUT_THE_SAMPLE,
+                "get_ip_report": _ASKS_ABOUT_AN_INDICATOR,
+                "get_submission": _ASKS_ABOUT_THE_SAMPLE,
+                "get_url_report": _ASKS_ABOUT_AN_INDICATOR,
+                "submit_file": _SUBMITS_THE_SAMPLE,
+                "submit_local_file": _SUBMITS_THE_SAMPLE,
+            },
+        ),
         "credential_bootstrap": _VIRUSTOTAL_BOOTSTRAP,
     },
 }
@@ -892,7 +1009,16 @@ _PROVIDER_BLOCKS: dict[str, dict[str, Any]] = {
         "prompt_fragment": GHIDRA_WORKFLOW,
         "variable_names": ["GHIDRA_CONTAINER_SAMPLES_PATH"],
         "auto_name_prefixes": ["FUN_", "LAB_", "SUB_"],
-        "tool_facts": GHIDRA_TOOLS,
+        "tool_facts": _with_effects(
+            GHIDRA_TOOLS,
+            {
+                "emulate_function": _EMULATES,
+                "emulate_hash_batch": _EMULATES,
+                "run_ghidra_script": _RUNS_ANYTHING,
+                "run_script_inline": _RUNS_ANYTHING,
+            },
+            default=_NO_EFFECT,
+        ),
     },
     "r2": {
         "work_dir": "r2-work",
@@ -900,7 +1026,11 @@ _PROVIDER_BLOCKS: dict[str, dict[str, Any]] = {
         "prompt_fragment": R2_WORKFLOW,
         "error_patterns": list(R2_ERROR_PATTERNS),
         "auto_name_prefixes": ["fcn.", "loc.", "sub.", "func."],
-        "tool_facts": R2_TOOLS,
+        "tool_facts": _with_effects(
+            R2_TOOLS,
+            {"analyze": _ANALYSES, "run_command": _RUNS_ANYTHING},
+            default=_NO_EFFECT,
+        ),
     },
     # The workflow's ``submit_file`` sends the sample to the sandbox: declared
     # so the run's disclosure block names the upload. It names no kind on
@@ -910,22 +1040,52 @@ _PROVIDER_BLOCKS: dict[str, dict[str, Any]] = {
     # would file every failed submission as an answer. A declaration with no
     # kind gives no reading, so it reads the name no other way than the
     # VirusTotal server's ``submit_file``, which the legacy reading by name
-    # takes first.
+    # takes first. Each tool of its workflow declares its effects, and no kind,
+    # so every other reading of them is as it was.
     "cape2_mcp": {
         "roles": ["sandbox"],
         "prompt_fragment": CAPE_WORKFLOW,
-        "tool_facts": {"submit_file": {"discloses_sample": True}},
+        "tool_facts": _with_effects(
+            {
+                "get_cuckoo_status": {},
+                "get_task_config": {},
+                "get_task_iocs": {},
+                "get_task_report": {},
+                "get_task_status": {},
+                "search_task": {},
+                "submit_file": {"discloses_sample": True},
+            },
+            {"submit_file": _SUBMITS_TO_THE_OPERATOR_SANDBOX},
+            default=_ASKS_THE_OPERATOR_SANDBOX,
+        ),
     },
 }
 
 # The platform's own in-process sources, declared like any server.
 _IN_PROCESS_BLOCKS: dict[str, dict[str, Any]] = {
-    "pack": {"label": "Triage pack", "platform_owned": True, "tool_facts": _PACK_TOOLS},
-    "sandbox": {"label": "Sandbox report", "roles": ["sandbox"], "tool_facts": _SANDBOX_TOOLS},
+    # The pack's FLOSS step emulates the sample's code in the worker; its
+    # function matches read the configured case store, which may be at an
+    # address.
+    "pack": {
+        "label": "Triage pack",
+        "platform_owned": True,
+        "tool_facts": _with_effects(
+            _PACK_TOOLS,
+            {"floss": _EMULATES, "function_matches": _READS_THE_CASE_STORE},
+            default=_NO_EFFECT,
+        ),
+    },
+    "sandbox": {
+        "label": "Sandbox report",
+        "roles": ["sandbox"],
+        "tool_facts": _with_effects(_SANDBOX_TOOLS, {}, default=_NO_EFFECT),
+    },
     "provider:capa_yara": {
         "label": "capa and YARA",
         "roles": ["rule_scanner"],
-        "tool_facts": {"capa": _CAPABILITY_RULES, "yara_scan": _SIGNATURE_RULES},
+        "tool_facts": _with_effects(
+            {"capa": _CAPABILITY_RULES, "yara_scan": _SIGNATURE_RULES}, {}, default=_NO_EFFECT
+        ),
     },
 }
 

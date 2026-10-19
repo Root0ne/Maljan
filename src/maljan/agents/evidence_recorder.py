@@ -359,6 +359,7 @@ class EvidenceRecorder:
         structured_content: dict[str, Any] | None = None,
         whole: str | None = None,
         whole_structure: dict[str, Any] | None = None,
+        hints: Any = None,
     ) -> LedgerEntry:
         """Append one entry and return it, so the caller can quote its id.
 
@@ -385,7 +386,9 @@ class EvidenceRecorder:
         (``schemas.evidence_spill``): the answer when the guardrail cut it or
         the conversation had no room for it, the structure when the entry
         keeps none although it adds something to the text. A repeat keeps
-        neither; the entry it names holds the answer.
+        neither; the entry it names holds the answer. ``hints`` are the MCP
+        hints the tool's own server gave it when it was attached, kept on the
+        entry's facts record beside the declaration.
         """
         if repeated_of:
             repeated_of = self.holder_of(repeated_of)
@@ -416,6 +419,7 @@ class EvidenceRecorder:
             structured_content=structured_content,
             agent_role=self.agent_role,
             agent_tab=self.agent_tab,
+            hints=hints,
         )
         entry._spill = self.spill
         if self.spill is not None and not repeated_of:
@@ -1236,6 +1240,11 @@ def _record_tool(
     source = declared_source_of(tool)
     # What the tool declares about itself, read once for every call it makes.
     facts = declared_facts_of(tool)
+    # What its own MCP server said of it when it was attached, kept on each
+    # entry beside the declaration (``core.declared_reading.with_hints``).
+    from maljan.agents.tool_pinning import SERVER_HINTS_METADATA_KEY
+
+    hints = (getattr(tool, "metadata", None) or {}).get(SERVER_HINTS_METADATA_KEY)
     accepted = tuple(getattr(args_schema, "model_fields", {}) or {})
 
     # The arguments of this tool that reach a part its answer left out, read
@@ -1455,6 +1464,7 @@ def _record_tool(
             args=kwargs,
             server=server,
             source=source,
+            hints=hints,
             output=read_again_note(holder),
             ok=not recorder.entry_failed(holder),
             started_at=wall_clock,
@@ -1513,6 +1523,7 @@ def _record_tool(
             args=kwargs,
             server=server,
             source=source,
+            hints=hints,
             # A repeat keeps the note, not a second copy of the listing the
             # entry it names already holds.
             output=same or text,
@@ -1575,6 +1586,7 @@ def _record_tool(
             args=sent if sent is not None else kwargs,
             server=server,
             source=source,
+            hints=hints,
             output=message,
             ok=False,
             error=message,

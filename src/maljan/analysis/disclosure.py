@@ -25,7 +25,13 @@ from the run's own records and nothing else:
 * the effective tracing state (``core.tracing``);
 * what the job noted of the processes that read the sample, for the isolation
   part (``analysis.isolation``), which says where the sample's bytes were read
-  and what kept each reader from the worker.
+  and what kept each reader from the worker;
+* what each tool the run called is declared to do beyond answering, for the
+  effects part (``analysis.tool_effects``): run the sample's code, reach the
+  network, send the sample's hash or bytes to a third party. A tool that sends
+  the sample's bytes is an upload row here by the same rule
+  (``tool_effects.sends_sample_bytes``), and a tool that ran the sample's code
+  is told with the isolation row of its source.
 
 Never a tool's name. Every host is classified by the one rule in
 ``core.host_locality``.
@@ -46,7 +52,11 @@ In particular:
   it cannot be placed. A lookup or an upload through any local server cannot
   be placed either;
 * a call to a tool that declares nothing at all cannot be shown to stay on
-  the machine;
+  the machine; one that declares no kind but declares that it reaches no
+  network (``ToolEffects.network`` false) is placed by its server;
+* a call through a local server to a tool that declares that it reaches the
+  network cannot be placed; a server's own hint (``openWorldHint``) moves no
+  call to another row, and is said on the undeclared row it stays in;
 * a ledger row the report could not read is a call that cannot be placed.
 
 When the block does say "nothing", it says what it rests on. When enrichment
@@ -72,8 +82,10 @@ from maljan.core.host_locality import (
 )
 
 # The version of the stored record's shape. Version 2 adds the isolation part
-# (``analysis.isolation``); a version-1 record has none and renders as before.
-DISCLOSURE_VERSION = 2
+# (``analysis.isolation``), version 3 the effects part (``analysis.tool_effects``);
+# a record of an earlier version has neither of the later parts and renders as
+# before.
+DISCLOSURE_VERSION = 3
 
 # The transports a tool server is reached over at an address.
 HTTP_TRANSPORTS = frozenset({"http", "streamable-http", "sse"})
@@ -119,6 +131,9 @@ _GATEWAY = (
     "go on to a service the settings do not name"
 )
 _NOT_A_RUNTIME = "a local address that did not answer as a model runtime may forward the prompts"
+# Why a call through a local server to a tool declared to reach the network
+# cannot be placed.
+_REACHES = "its tool declares that it reaches the network, and " + _LOCAL_SERVER
 # What "nothing" assumes of a runtime answer: the probe proves a runtime
 # answered, not where it runs, and a tunnel or proxy looks the same.
 RUNTIME_ASSUMPTION = (
@@ -366,11 +381,12 @@ def gateway_blocks(snapshot: Mapping[str, Any]) -> frozenset[str]:
     whose tools declares a kind that reaches outside the deployment by its
     meaning (``builtin_declarations.OUTWARD_KINDS``: the lookups and the
     submissions), an indicator argument role, or that it sends the sample out
-    (``tool_facts.<tool>.discloses_sample``).
+    (``tool_facts.<tool>.discloses_sample``, or ``effects.third_party`` of
+    ``bytes``: ``tool_effects.sends_sample_bytes``).
     """
     from maljan.core.builtin_declarations import OUTWARD_KINDS
     from maljan.core.reputation import INDICATOR_ARGUMENTS, REPUTATION_ROLE
-    from maljan.core.tool_declarations import SANDBOX_ROLE
+    from maljan.core.tool_declarations import SANDBOX_ROLE, THIRD_PARTY_BYTES
 
     lookup_kinds = set(OUTWARD_KINDS)
     roles = {REPUTATION_ROLE, SANDBOX_ROLE}
@@ -380,6 +396,8 @@ def gateway_blocks(snapshot: Mapping[str, Any]) -> frozenset[str]:
         head, sep, rest = text.partition(".tool_facts.")
         if sep:
             if rest.endswith(".discloses_sample") and value is True:
+                out.add(head)
+            elif rest.endswith(".effects.third_party") and value == THIRD_PARTY_BYTES:
                 out.add(head)
             elif rest.endswith(".kind") and value in lookup_kinds:
                 out.add(head)
@@ -462,14 +480,23 @@ class _ToolRows:
     servers: dict[tuple[Any, ...], dict[str, Any]] = field(default_factory=dict)
     undeclared: dict[tuple[Any, ...], dict[str, Any]] = field(default_factory=dict)
     local_servers: dict[str, None] = field(default_factory=dict)
+    # Where each ``(source, tool)`` was placed, as its row says it: read by the
+    # effects part, so the two never place one call differently.
+    places: dict[tuple[str, str], dict[str, str]] = field(default_factory=dict)
 
 
 def _tool_rows(snapshot: Mapping[str, Any], entries: Iterable[Any]) -> _ToolRows:
     """The ledger's calls, each once: lookups, uploads by a tool, servers, undeclared tools."""
-    from maljan.agents.delegation import TEAM_SERVER
+    from maljan.analysis.tool_effects import (
+        DECLARED,
+        entry_effects,
+        is_platform_internal,
+        sends_sample_bytes,
+    )
     from maljan.core.builtin_declarations import OUTWARD_KINDS
-    from maljan.core.declared_reading import kind_free_facts
+    from maljan.core.declared_reading import kind_free_facts, server_hints
     from maljan.core.reputation import INDICATOR_ARGUMENTS, asks_about_an_indicator
+    from maljan.core.tool_declarations import NETWORK_OPERATOR_SANDBOX
 
     in_process = _in_process_sources()
     gateways = gateway_blocks(snapshot)
@@ -482,12 +509,12 @@ def _tool_rows(snapshot: Mapping[str, Any], entries: Iterable[Any]) -> _ToolRows
         source = str(_field(entry, "source") or "")
         if source in in_process:
             continue
+        if is_platform_internal(entry):
+            # An in-process tool (no server), or a question put to another
+            # agent of the team, whose own calls are entries of their own.
+            continue
         if not source:
             name = str(_field(entry, "server") or "")
-            if not name or name == TEAM_SERVER:
-                # An in-process tool (no server), or a question put to another
-                # agent of the team, whose own calls are entries of their own.
-                continue
             unrouted = _Route("", _Place(why=_NO_SOURCE))
             key: tuple[Any, ...] = (name, unrouted.place.key)
             row = out.servers.setdefault(key, _tool_row(name, unrouted, unrouted.place))
@@ -498,26 +525,40 @@ def _tool_rows(snapshot: Mapping[str, Any], entries: Iterable[Any]) -> _ToolRows
         route = routes[source]
         facts = kind_free_facts(entry)
         lookup = asks_about_an_indicator(facts)
+        sends = sends_sample_bytes(facts)
+        effects = entry_effects(entry)
+        # Only a declaration places a call by its network: a server's own hint
+        # adds to what is said of a call, never moves it to another row.
+        reaches = effects.network_by == DECLARED and (
+            effects.network is True or effects.network == NETWORK_OPERATOR_SANDBOX
+        )
         kind = _stored_kind(entry)
         outward = kind in OUTWARD_KINDS
         place = route.place
         local = place.where == LOCAL
-        if local and (facts.discloses_sample or lookup or outward or route.gateway):
+        if local and (sends or lookup or outward or route.gateway or reaches):
             # A local server is not where a lookup, a sample sent out, a call of
-            # a kind that reaches outside or a call through a declared gateway
-            # ends: it goes on to a service the settings do not name.
-            if facts.discloses_sample or lookup:
+            # a kind that reaches outside, a call through a declared gateway or
+            # a call of a tool that reaches the network ends: it goes on to a
+            # service the settings do not name.
+            if sends or lookup:
                 why = _LOCAL_SERVER
             elif route.gateway:
                 why = _GATEWAY
-            else:
+            elif outward:
                 why = (
                     f"its tool declares the kind {kind}, which {OUTWARD_KINDS[kind]} outside "
                     "the deployment, and " + _LOCAL_SERVER
                 )
+            else:
+                why = _REACHES
             place = _Place(host=place.host, why=why)
+        out.places.setdefault(
+            (source, str(_field(entry, "tool") or "")),
+            {"where": place.where, "host": place.host, "why": place.why},
+        )
         key = (source, route.transport, place.key)
-        if facts.discloses_sample:
+        if sends:
             row = out.uploads.setdefault(
                 key, {"by": BY_TOOL, **_tool_row(source, route, place), "failed": 0}
             )
@@ -540,12 +581,19 @@ def _tool_rows(snapshot: Mapping[str, Any], entries: Iterable[Any]) -> _ToolRows
                 row["kinds"][role] = row["kinds"].get(role, 0) + 1
             if not roles:
                 row["without_indicator"] += 1
-        elif local and (route.gateway or outward):
+        elif local and (route.gateway or outward or reaches):
             row = out.servers.setdefault(key, _tool_row(source, route, place))
             row["calls"] += 1
-        elif local and not _declares_a_kind(entry):
+        elif (
+            local
+            and not _declares_a_kind(entry)
+            and not (effects.network is False and effects.network_by == DECLARED)
+        ):
             row = out.undeclared.setdefault(key, _tool_row(source, route, place))
             row["calls"] += 1
+            if server_hints(entry).get("openWorldHint") is True:
+                # Said, not placed: the row stays undeclared.
+                row["open_world_hints"] = int(row.get("open_world_hints") or 0) + 1
         elif local:
             out.local_servers.setdefault(source, None)
             if not route.on_this_machine:
@@ -795,6 +843,14 @@ def disclosure_record(
         "addressed": addressed_hosts(snapshot),
         "isolation": _isolation(snapshot, entries, opened or {}, worker, sample_paths),
     }
+    from maljan.analysis.tool_effects import effects_part
+
+    record["effects"] = effects_part(
+        entries,
+        isolation=record["isolation"],
+        partial_reason=record["partial_reason"],
+        places=tools.places,
+    )
     record["nothing_left"] = _nothing_left(record)
     return record
 
@@ -1397,9 +1453,16 @@ def _undeclared_line(rows: list[Mapping[str, Any]], code: Callable[[str], str]) 
         f"{_server(str(row.get('source') or ''), code)} ({_how(row)}) {int(row.get('calls') or 0)}"
         for row in rows
     )
+    hinted = sum(int(row.get("open_world_hints") or 0) for row in rows)
+    said = (
+        f"; the servers' own hints (openWorldHint) say {count_label(hinted, 'of them', 'of them')} "
+        "may reach it"
+        if hinted
+        else ""
+    )
     return (
         f"Tool calls: {count_label(total, 'call')} to tools that declare no effects "
-        f"({by_server}): whether they reached the network cannot be told."
+        f"({by_server}): whether they reached the network cannot be told{said}."
     )
 
 

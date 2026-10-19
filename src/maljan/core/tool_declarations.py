@@ -436,7 +436,7 @@ NO_KIND = "unclassified"
 # kind. A kind-free field is read from the live declaration whatever the kind
 # (the guard's budget, a call's argument roles, the tag a description is shown
 # with, the words and name a tool is given, whether it discloses the sample,
-# the routed formats it serves).
+# the routed formats it serves, what a call does beyond answering).
 # A kind-dependent field is read only through the kind (an answer's rows and
 # the paths inside them, its techniques and reputation, a reader of its shape,
 # the report sections it is shown to): a declaration that names no kind may
@@ -454,6 +454,7 @@ KIND_FREE_FIELDS: tuple[str, ...] = (
     "read_only",
     "arguments",
     "routed_formats",
+    "effects",
 )
 KIND_DEPENDENT_FIELDS: tuple[str, ...] = (
     "asserts_techniques",
@@ -822,6 +823,113 @@ class ReputationFacts(BaseModel):
         return None
 
 
+# What a tool's call does with the sample's code (``ToolEffects.executes``):
+# nothing, or runs it natively on its server's host, under an emulator, or in a
+# sandbox. Empty: the declaration does not say.
+EXECUTES_NO = "no"
+EXECUTES_NATIVE = "native"
+EXECUTES_EMULATION = "emulation"
+EXECUTES_SANDBOX = "sandbox"
+EXECUTION_MODES: tuple[str, ...] = (
+    EXECUTES_NO,
+    EXECUTES_NATIVE,
+    EXECUTES_EMULATION,
+    EXECUTES_SANDBOX,
+)
+# What of the sample a call sends to a third party (``ToolEffects.third_party``):
+# nothing, its hash, or its bytes. Empty: the declaration does not say.
+THIRD_PARTY_NO = "no"
+THIRD_PARTY_HASH = "hash"
+THIRD_PARTY_BYTES = "bytes"
+THIRD_PARTY_SENDS: tuple[str, ...] = (THIRD_PARTY_NO, THIRD_PARTY_HASH, THIRD_PARTY_BYTES)
+# Where a tool's call reaches a network, when it reaches one only in a named
+# way (``ToolEffects.network``, beside ``true`` and ``false``):
+# ``on_refresh``: only to fetch or refresh reference data the tool keeps (a
+# technique catalogue, model weights), never with anything of the sample;
+# ``case_store``: the configured case-memory store, wherever it is, which the
+# disclosure's case-memory row places;
+# ``operator_sandbox``: the operator's own sandbox service the tool's server
+# fronts (its API), which is not a third party.
+NETWORK_ON_REFRESH = "on_refresh"
+NETWORK_CASE_STORE = "case_store"
+NETWORK_OPERATOR_SANDBOX = "operator_sandbox"
+NETWORK_MODES: tuple[str, ...] = (
+    NETWORK_ON_REFRESH,
+    NETWORK_CASE_STORE,
+    NETWORK_OPERATOR_SANDBOX,
+)
+# The network answers that carry nothing of the sample out.
+_CLOSED_NETWORKS: tuple[bool | str, ...] = (False, NETWORK_ON_REFRESH, NETWORK_CASE_STORE)
+# The declaration fields merged one level deeper, sub-field by sub-field
+# (:func:`merge_tool_facts`, :func:`tool_facts_changes`): an operator's change of
+# one sub-field keeps the shipped value of every other, and a later release's
+# correction of another still reaches the tool. ``null`` clears the field.
+SUBFIELD_MERGED: tuple[str, ...] = ("effects",)
+
+
+class ToolEffects(BaseModel):
+    """What one tool's call does beyond answering, as its declaration says.
+
+    ``executes`` says whether the call runs the sample's code, and how
+    (:data:`EXECUTION_MODES`); ``network`` whether the tool itself reaches a
+    network service beyond its own server (a lookup, a submission, a fetch),
+    ``true`` or ``false``, or one of :data:`NETWORK_MODES` where it reaches
+    one only in that named way; ``third_party`` what of the sample it sends to
+    a third party (:data:`THIRD_PARTY_SENDS`). Each left unset (``""``,
+    ``None``) is not declared, and is said to be undeclared, never taken as
+    "no"; ``why_undeclared`` says why one is left unset, where the platform
+    cannot vouch for it (a tool that runs whatever script it is given), and
+    ``when`` the condition under which a declared effect happens, where it
+    happens only under one (an analysis level). The
+    sample's bytes going out are ``ToolFacts.discloses_sample`` as well:
+    either one declares it, and the run's disclosure block reads the same
+    rule (``analysis.tool_effects.sends_sample_bytes``); a tool whose network
+    is ``operator_sandbox`` hands them to the operator's own sandbox.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    executes: str = ""
+    network: bool | str | None = None
+    third_party: str = ""
+    why_undeclared: str = ""
+    when: str = ""
+
+    def with_bytes_sent(self) -> ToolEffects:
+        """These effects with the sample's bytes sent out: ``third_party`` ``bytes``, and a
+        network that carries them (``true`` unless it already names the operator's sandbox)."""
+        network = True if self.network is None or self.network in _CLOSED_NETWORKS else self.network
+        return self.model_copy(update={"third_party": THIRD_PARTY_BYTES, "network": network})
+
+    @field_validator("network")
+    @classmethod
+    def _a_known_network(cls, value: bool | str | None) -> bool | str | None:
+        if isinstance(value, str) and value not in NETWORK_MODES:
+            raise ValueError(
+                f"effects.network {value!r} is not true, false or one of: "
+                + ", ".join(NETWORK_MODES)
+            )
+        return value
+
+    @field_validator("executes")
+    @classmethod
+    def _a_known_mode(cls, value: str) -> str:
+        if value and value not in EXECUTION_MODES:
+            raise ValueError(
+                f"effects.executes {value!r} is not one of: " + ", ".join(EXECUTION_MODES)
+            )
+        return value
+
+    @field_validator("third_party")
+    @classmethod
+    def _a_known_send(cls, value: str) -> str:
+        if value and value not in THIRD_PARTY_SENDS:
+            raise ValueError(
+                f"effects.third_party {value!r} is not one of: " + ", ".join(THIRD_PARTY_SENDS)
+            )
+        return value
+
+
 class ToolFacts(BaseModel):
     """What one tool's answer is, and where its facts sit in it.
 
@@ -865,6 +973,9 @@ class ToolFacts(BaseModel):
     formats a format-specific tool serves (``pe_info`` serves ``pe``): when the
     tool cannot answer on its server, a sample of another known format loses
     nothing by it, and its unavailability is not recorded for that sample.
+    ``effects`` says what a call does beyond answering (:class:`ToolEffects`):
+    whether it runs the sample's code, reaches the network, or sends the
+    sample's hash or bytes to a third party.
     """
 
     # A key this model does not know is refused in an operator's edit
@@ -895,6 +1006,7 @@ class ToolFacts(BaseModel):
     display_name: str = ""
     category: str = ""
     routed_formats: tuple[str, ...] = ()
+    effects: ToolEffects | None = None
 
     @model_validator(mode="before")
     @classmethod
@@ -996,6 +1108,24 @@ class ToolFacts(BaseModel):
             raise ValueError("source names a corroborating tool; set asserts_techniques")
         if (self.places or self.values) and not self.rows:
             raise ValueError("places and values are read inside rows; declare rows")
+        effects = self.effects
+        if effects is not None and self.discloses_sample:
+            # A tick of ``discloses_sample`` (an operator's, over a shipped
+            # tool's effects) is the explicit word: the sample's bytes go out,
+            # so the effects say so, field by field, and are never refused for
+            # what the tick overrides.
+            lifted = effects.with_bytes_sent()
+            if lifted != effects:
+                object.__setattr__(self, "effects", lifted)
+        elif effects is not None and STRICT_DECLARATIONS.get():
+            # Refused in an operator's edit only; a record already accepted is
+            # read with the cautious answer (``analysis.tool_effects``).
+            sends = effects.third_party in (THIRD_PARTY_HASH, THIRD_PARTY_BYTES)
+            if sends and effects.network in _CLOSED_NETWORKS:
+                raise ValueError(
+                    "a tool that sends the sample or its hash out reaches the network with it; "
+                    "effects.network cannot be false, on_refresh or case_store"
+                )
         if not self.kind and STRICT_DECLARATIONS.get():
             held = self.model_dump(exclude_defaults=True)
             held.pop("kind", None)
@@ -1409,16 +1539,45 @@ def sent_names_refusal(sent: Mapping[str, Any], kept: Iterable[str] = (), server
     return ""
 
 
+# The declaration fields no release that stored a tool map whole knew
+# (``ToolFacts.effects``). Such a map leaves them out because it predates them,
+# never to clear them, so for a tool the block ships each one it leaves out
+# follows the shipped declaration, merged per field as :func:`merge_tool_facts`
+# merges a change: a value the map sets is the operator's and wins.
+FIELDS_AFTER_WHOLE_MAPS: tuple[str, ...] = ("effects",)
+
+
+def _with_later_fields(held: Any, shipped: Any) -> Any:
+    """A whole map's declaration of a shipped tool, with the later fields it leaves out shipped."""
+    if not isinstance(held, Mapping) or not isinstance(shipped, Mapping):
+        return held
+    later: dict[str, Any] = {}
+    for name in FIELDS_AFTER_WHOLE_MAPS:
+        if name not in shipped:
+            continue
+        below, above = shipped[name], held.get(name)
+        if name not in held:
+            later[name] = _copy(below)
+        elif name in SUBFIELD_MERGED and isinstance(below, Mapping) and isinstance(above, Mapping):
+            # Merged sub-field by sub-field, as :func:`merge_tool_facts` merges it.
+            later[name] = {**_copy(dict(below)), **_copy(dict(above))}
+    return {**held, **later} if later else held
+
+
 def whole_as_changes(whole: Mapping[str, Any], shipped: Mapping[str, Any]) -> dict[str, Any]:
     """A map stored whole, as the changes over ``shipped`` that put the same in force.
 
     Read whole, a shipped tool the map does not name was removed (``None``),
     and a field a shipped tool's declaration leaves out is at its default,
-    not at the shipped value. Time linear in the two maps.
+    not at the shipped value, except a field no release that stored a map
+    whole knew (:data:`FIELDS_AFTER_WHOLE_MAPS`), which follows the shipped
+    value. Time linear in the two maps.
     """
     unset = ToolFacts.model_construct().model_dump(mode="json")
     filled = {
-        tool: {**unset, **held} if tool in shipped and isinstance(held, Mapping) else held
+        tool: {**unset, **_with_later_fields(held, shipped[tool])}
+        if tool in shipped and isinstance(held, Mapping)
+        else held
         for tool, held in without_mark(whole).items()
     }
     return tool_facts_changes(filled, shipped)
@@ -1513,14 +1672,17 @@ def stored_in_force(
     A map marked as changes (:func:`holds_changes`) is merged over
     ``shipped`` one tool at a time (:func:`merge_tool_facts`). A map without
     the mark was stored whole by an earlier release and is in force as
-    stored, as it was then. Either way, each tool the stored map names is
-    read as the model reads a stored declaration (leniently); one the model
-    refuses (its name, or a field it sets that needs one this release no
-    longer ships, also for a tool this release no longer ships at all) is
-    left out: the tool is in force as shipped, or not at all where nothing
-    ships for it, its name is returned, and one warning names it. ``server``
-    is the block's tool-server key, if it is one, under which a name spelled
-    as its renamed tool is refused (:func:`check_own_prefix`). A stored value
+    stored, as it was then, but for the fields that release did not know
+    (:data:`FIELDS_AFTER_WHOLE_MAPS`), which a shipped tool it names takes
+    from the shipped declaration where it leaves them out. Either way, each
+    tool the stored map names is read as the model reads a stored
+    declaration (leniently); one the model refuses (its name, or a field it
+    sets that needs one this release no longer ships, also for a tool this
+    release no longer ships at all) is left out: the tool is in force as
+    shipped, or not at all where nothing ships for it, its name is returned,
+    and one warning names it. ``server`` is the block's tool-server key, if
+    it is one, under which a name spelled as its renamed tool is refused
+    (:func:`check_own_prefix`). A stored value
     whose form no release writes (:func:`unreadable_map`) is read as absent:
     what ships is in force, the mark's key is returned for the whole map, and
     one warning says so. So no stored map of tool declarations ever stops the
@@ -1534,7 +1696,9 @@ def stored_in_force(
         in_force = merge_tool_facts(shipped, named)
     else:
         named = dict(stored)
-        in_force = _copy(named)
+        in_force = {
+            tool: _copy(_with_later_fields(held, shipped.get(tool))) for tool, held in named.items()
+        }
     refused = [
         tool for tool in named if tool in in_force and _refused_tool(tool, in_force[tool], server)
     ]
@@ -1617,7 +1781,12 @@ def merge_tool_facts(shipped: Mapping[str, Any], stored: Mapping[str, Any]) -> d
         if change is None:
             continue
         if isinstance(change, Mapping) and isinstance(facts, Mapping):
-            out[tool] = {**_copy(dict(facts)), **_copy(dict(change))}
+            merged = {**_copy(dict(facts)), **_copy(dict(change))}
+            for name in SUBFIELD_MERGED:
+                below, above = facts.get(name), change.get(name)
+                if isinstance(below, Mapping) and isinstance(above, Mapping):
+                    merged[name] = {**_copy(dict(below)), **_copy(dict(above))}
+            out[tool] = merged
         else:
             out[tool] = _copy(change)
     for tool, change in stored.items():
@@ -1649,6 +1818,18 @@ def tool_facts_changes(in_force: Mapping[str, Any], shipped: Mapping[str, Any]) 
                 for name, value in held.items()
                 if name not in facts or not _same(value, facts[name])
             }
+            for name in SUBFIELD_MERGED:
+                below, above = facts.get(name), changed.get(name)
+                if isinstance(below, Mapping) and isinstance(above, Mapping):
+                    sub = {
+                        str(key): _copy(value)
+                        for key, value in above.items()
+                        if key not in below or not _same(value, below[key])
+                    }
+                    if sub:
+                        changed[name] = sub
+                    else:
+                        changed.pop(name)
             if changed:
                 out[tool] = changed
         elif not _same(held, facts):

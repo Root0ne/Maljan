@@ -12,8 +12,10 @@ entry (``LedgerEntry.facts``), versioned and small: ``{"v": 1, "kind": ...}``
 and, where set, ``reader``, ``asserts_techniques``, ``source``,
 ``display_name``, ``rows``, ``places``, ``values``, ``techniques``,
 ``reputation``, ``words``, ``report_sections``, ``arguments``, ``holds_strings``,
-``function_starts`` and ``discloses_sample``. ``{"v": 1}`` alone records
-that the source declares nothing for the tool.
+``function_starts``, ``discloses_sample`` and ``effects``. ``{"v": 1}`` alone
+records that the source declares nothing for the tool. Beside them, under
+``hints``, the hints the tool's own MCP server gave it when it was attached
+(:func:`with_hints`), which are not a declaration.
 
 **The reader** (:func:`facts_of`, :func:`kind_of`, :func:`reads_as`). It reads
 the facts the entry stored, never the reading process's settings, so a run
@@ -93,6 +95,22 @@ STORED_FACT_FIELDS: tuple[str, ...] = (
     # Whether the tool sends the sample out of the deployment, read by the
     # run's disclosure block (``analysis.disclosure``) whatever the kind.
     "discloses_sample",
+    # What a call does beyond answering (``ToolEffects``), read by the run's
+    # tool-effects part (``analysis.tool_effects``) whatever the kind.
+    "effects",
+)
+
+# The key of the stored record that keeps what the tool's own MCP server said
+# of it when the tool was attached (its ``annotations``: the hints of
+# :data:`SERVER_HINTS`), beside what its source declares. Not a declaration:
+# read only by the tool-effects part, for what no declaration says.
+HINTS_KEY = "hints"
+# The MCP tool annotations a server may give, each a yes or no.
+SERVER_HINTS: tuple[str, ...] = (
+    "readOnlyHint",
+    "destructiveHint",
+    "idempotentHint",
+    "openWorldHint",
 )
 
 # The stored fields read without a kind (``tool_declarations.KIND_FREE_FIELDS``),
@@ -210,6 +228,47 @@ def facts_record(
 
         logger.debug("declared facts of %s under %s not recorded (%s).", tool, source, exc)
         return None
+
+
+def hints_of_annotations(annotations: Any) -> dict[str, bool]:
+    """The hints of :data:`SERVER_HINTS` an MCP tool's ``annotations`` give, as yes or no.
+
+    ``annotations`` is the SDK's object or a mapping; a hint absent, or not a
+    yes or no, is not given. ``{}`` for none.
+    """
+    out: dict[str, bool] = {}
+    if annotations is None:
+        return out
+    for name in SERVER_HINTS:
+        value = (
+            annotations.get(name)
+            if isinstance(annotations, Mapping)
+            else getattr(annotations, name, None)
+        )
+        if isinstance(value, bool):
+            out[name] = value
+    return out
+
+
+def with_hints(record: dict[str, Any] | None, hints: Any) -> dict[str, Any] | None:
+    """``record`` with the server's hints kept under :data:`HINTS_KEY`; as it was with none.
+
+    A record that could not be written (``None``) keeps no hints: the entry is
+    then read as an undeclared tool, which is all the hints could have
+    narrowed.
+    """
+    given = hints_of_annotations(hints)
+    if record is None or not given:
+        return record
+    return {**record, HINTS_KEY: given}
+
+
+def server_hints(entry: Any) -> dict[str, bool]:
+    """The hints the entry's tool's own server gave it when attached, as the entry stored them."""
+    held = _field(entry, "facts")
+    if not isinstance(held, Mapping):
+        return {}
+    return hints_of_annotations(held.get(HINTS_KEY))
 
 
 # ---------------------------------------------------------------------------

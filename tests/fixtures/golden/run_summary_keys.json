@@ -150,6 +150,29 @@
     "addressed": [
       null
     ],
+    "effects": {
+      "partial_reason": null,
+      "tools": [
+        {
+          "calls": null,
+          "completed": null,
+          "executes": null,
+          "failed": null,
+          "hints": {},
+          "network": null,
+          "network_by": null,
+          "not_run": null,
+          "refused": null,
+          "server": null,
+          "source": null,
+          "third_party": null,
+          "tool": null,
+          "when": null,
+          "why_undeclared": null
+        }
+      ],
+      "v": null
+    },
     "enrichment": {
       "asked": [
         {

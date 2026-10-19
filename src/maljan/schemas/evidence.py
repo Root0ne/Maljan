@@ -467,6 +467,7 @@ def build_entry(
     structured_content: dict[str, Any] | None = None,
     agent_role: str | None = None,
     agent_tab: str | None = None,
+    hints: Any = None,
 ) -> LedgerEntry:
     """One entry, with the output trimmed and parsed the same way every time.
 
@@ -515,6 +516,10 @@ def build_entry(
     (the text is not JSON and the object is not the text wrapped again) and
     the entry holds the whole answer: an answer cut, not shown or repeated
     keeps no structure the model did not read.
+
+    ``hints`` are the MCP hints the tool's own server gave it when it was
+    attached: kept on the facts record, beside what its source declares
+    (``core.declared_reading.with_hints``).
     """
     safe_args = dict(args) if isinstance(args, dict) else {}
     full = str(output or "")
@@ -527,7 +532,7 @@ def build_entry(
             _code, message, hint = returned
             ok, error = False, message
             remediation = remediation or hint
-    facts = _facts_at_write(source, tool)
+    facts = _facts_at_write(source, tool, hints)
     if ok and error is None and not repeated_of and _declares_no_kind(facts):
         # A tool its source declares nothing for has no declared way to say
         # it failed: an answer that is only an error line is filed as failed.
@@ -585,13 +590,16 @@ def build_entry(
     )
 
 
-def _facts_at_write(source: str | None, tool: str) -> dict[str, Any] | None:
-    """The tool's declared facts under ``source``, resolved now, to be stored with the entry."""
+def _facts_at_write(source: str | None, tool: str, hints: Any = None) -> dict[str, Any] | None:
+    """The tool's declared facts under ``source``, resolved now, to be stored with the entry.
+
+    With the hints its own server gave it, where it gave any.
+    """
     if not source:
         return None
-    from maljan.core.declared_reading import facts_record
+    from maljan.core.declared_reading import facts_record, with_hints
 
-    return facts_record(source, tool)
+    return with_hints(facts_record(source, tool), hints)
 
 
 def _declares_no_kind(facts: dict[str, Any] | None) -> bool:

@@ -464,7 +464,7 @@ def test_a_group_id_or_a_supplementary_group_of_the_workers_shares_a_group(
 
 def test_the_record_carries_the_part_and_says_its_version() -> None:
     record = disclosure_record(STDIO, entries=[_reads()], worker=WORKER)
-    assert record["v"] == DISCLOSURE_VERSION == 2
+    assert record["v"] == DISCLOSURE_VERSION == 3
     assert record["isolation"]["rows"][0]["source"] == "mcp:analysis"
 
 

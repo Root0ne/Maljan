@@ -913,6 +913,10 @@ def test_a_tools_name_decides_nothing() -> None:
         snapshot, entries=[_entry("mcp:intel", "get_file_report", args={"h": "x"})]
     )
 
+    # The effects part names each tool it lists, and decides nothing by it.
+    for record in (one, other):
+        for row in record["effects"]["tools"]:
+            row.pop("tool")
     assert one == other
     assert plain["lookups"] == [] and plain["servers"][0]["calls"] == 1
 

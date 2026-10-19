@@ -198,7 +198,9 @@ local by their tools' declarations, where the case-memory store is, that the
 sample went only to local addresses, that no lookup was asked and that tracing
 is off. Wherever it cannot tell, it says what and why instead: a call it
 cannot place, a lookup or an upload through a local tool server, a call
-through a local gateway, a call to a tool that declares no effects, a local
+through a local gateway, a call through a local tool server to a tool that
+declares that it reaches the network, a call to a
+tool that declares no effects, a local
 model endpoint that did not answer as a runtime, a configured endpoint with
 no answered call, tracing on, a queued enrichment, an unread ledger row, or a
 run stopped part-way, whose last step may have made calls its record does not
@@ -255,6 +257,59 @@ never from a tool's name:
 when at least one reader exists and every one was measured and passed. A run
 that recorded no read of the sample says so, and claims nothing. A version-1
 record has no isolation part and renders as before.
+
+### What each tool did beyond answering
+
+Inside the same block, after the isolation part and under its own **Tool
+effects** lead, the report says, for every tool the run called (a repeat and
+a guard's answer are not calls), whether it ran the sample's code (natively,
+under emulation or in a sandbox), whether it reached the network, and what of
+the sample it sent to a third party (its hash or its bytes). A tool that reaches
+a network only in a named way says which: only to refresh reference data it
+keeps, the configured case store, or the sandbox service its server fronts.
+For the last, the line says where the disclosure placed that call: the
+operator's own and not a third party only where it is placed on this machine,
+the host the settings name where it is outside, and that it cannot be told,
+with the disclosure's own reason, where the disclosure cannot place it. A
+submission to VirusTotal is said to hand the sample to a third party's
+sandbox, which may run what it is sent.
+
+Only a call that completed had an effect. Each tool's calls are counted by how
+they ended: completed, failed (made, and broke), not run (the pipeline wrote
+that it never made it, as the triage pack does for a step its budget stopped
+or a tool that is not installed) and refused (a guard answered it with no tool
+run). A tool with no completed call is said to have failed ("whether its
+declared effects happened cannot be told"), not to have been run ("none of its
+declared effects happened") or to have been refused ("nothing was sent"),
+never to have run or sent anything. The platform's own in-process tools, such
+as `read_evidence`, are left out by the disclosure's rule (no source and no
+server). A server's own hint never moves a call to another row of the
+disclosure: a tool that declares nothing stays an undeclared call, and the
+hint is added to what that row says. The run summary
+stores this as `disclosure.effects`, in records of version 3. Each answer is
+read, in this order:
+
+1. from the tool's declaration (`effects` and `discloses_sample` in its
+   `tool_facts`, the built-ins' shipped declarations and an operator's alike),
+   as its ledger entry stored it when the call was made;
+2. for the network only, from the `openWorldHint` the tool's own MCP server
+   gave it when it was attached, said to be the server's own hint;
+3. otherwise the tool is listed as **undeclared** for that answer, and is not
+   taken as safe, with the reason its declaration gives (only the built-in
+   tools that run whatever script or command they are given are undeclared). An entry that recorded no source is undeclared on every
+   count; it is never read by its tool's name.
+
+The part shares its facts with the rest of the block rather than repeating
+them. A tool said to send the sample's bytes is an upload row of the
+disclosure, by the same rule. A tool that ran the sample's code natively or
+under emulation is told with where its source read the sample, as the
+isolation part placed it (in the worker process, in a process the worker
+started and whether it was kept from the worker, at a local server, outside
+this machine). A tool through a local tool server that declares that it
+reaches the network cannot be placed in the disclosure,
+and a tool of no kind that declares it reaches no network is placed by its
+server. A stopped run's part says it may be incomplete. A record of an
+earlier version has no effects part and renders as before.
 
 A run whose block was not built stores why (`{"not_built": …}`: reporting
 off, no run summary as in a mock run, or a build that failed), so it is told

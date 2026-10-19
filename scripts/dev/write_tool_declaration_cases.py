@@ -37,6 +37,7 @@ _GOOD: dict[str, Any] = {
     "read_only": True,
     "arguments": {"path": "file_path"},
     "routed_formats": ["pe"],
+    "effects": {"executes": "emulation", "network": False},
     "asserts_techniques": True,
     "source": "sigma",
     "holds_strings": True,
