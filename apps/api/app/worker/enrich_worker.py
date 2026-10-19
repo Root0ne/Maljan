@@ -414,12 +414,13 @@ async def enrich_threat_intel(
             # Failed, timed out or cancelled after it began asking: what it
             # asked until then is recorded, each question not finished marked.
             stopped = asks.rows(_servers())
+            withheld = tools.withheld_rows() if tools is not None else []
             try:
                 await write_under_lock(
                     db_session_factory,
                     report_uuid,
                     lambda stored, column: disclosed_enrichment(
-                        stored, column, stopped, state=ENRICHMENT_STOPPED
+                        stored, column, stopped, state=ENRICHMENT_STOPPED, withheld=withheld
                     ),
                     kind="enrichment_stopped",
                 )
@@ -427,11 +428,12 @@ async def enrich_threat_intel(
                 logger.warning("enrich: what the stopped job asked was not recorded (%s).", exc)
 
     asked = asks.rows(_servers())
+    withheld = tools.withheld_rows() if tools is not None else []
     written = await write_under_lock(
         db_session_factory,
         report_uuid,
         lambda stored, column: disclosed_enrichment(
-            enrichment_laid_over(stored, updated), column, asked
+            enrichment_laid_over(stored, updated), column, asked, withheld=withheld
         ),
     )
     if not written:
@@ -666,16 +668,20 @@ def disclosed_enrichment(
     asked: list[dict[str, Any]],
     *,
     state: str = "done",
+    withheld: list[dict[str, str]] | None = None,
 ) -> tuple[dict[str, Any], dict[str, Any] | None]:
     """The stored payload and run summary with the enrichment's questions in their disclosure.
 
-    Each gets the rows of what was asked, and neither then says that nothing
-    left the machine (:func:`disclosed`).
+    Each gets the rows of what was asked, and of the source tools their host
+    withheld (never asked, with the reason), and neither then says that
+    nothing left the machine (:func:`disclosed`).
     """
     from maljan.analysis.disclosure import with_enrichment_asked
 
     return disclosed(
-        payload, run_summary, lambda record: with_enrichment_asked(record, asked, state=state)
+        payload,
+        run_summary,
+        lambda record: with_enrichment_asked(record, asked, state=state, withheld=withheld or ()),
     )
 
 

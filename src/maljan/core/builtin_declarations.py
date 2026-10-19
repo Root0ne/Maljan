@@ -408,11 +408,18 @@ _NETWORK_TOOLS: dict[str, dict[str, Any]] = {
     "read_pcap_summary": {**_PCAP_SUMMARY, "kind": "packet_overview", "reader": "packet_lines"},
 }
 
-# The threat-intel sidecar answers in prose. The live sidecar writes
-# "42/71 malicious, 0/71 suspicious" (``services/threatintel-mcp/server.py``);
-# its mock writes "55/70 detections". Both are declared. Its rank puts it
-# after VirusTotal's own server, which the triage pack asks first when both
-# are enabled.
+# The threat-intel sidecar's hash lookup answers JSON
+# (``services/threatintel-mcp/server.py``): the engine counts under
+# ``last_analysis_stats``, the sidecar's own sentence under ``summary``, and the
+# service's text about the file (a submitted name, which the sample's author
+# chooses) under ``file``, where no count is read. The one text pattern reads
+# an answer the sidecar wrote in prose before it answered JSON, and only that
+# answer's fixed head and tail, anchored to both ends of the text: a name inside
+# such an answer is always followed by the tail, so it is never where a count
+# is read.
+# Without a key the sidecar answers nothing in the service's place. Its rank
+# puts it after VirusTotal's own server, which the triage pack asks first when
+# both are enabled.
 _THREATINTEL_TOOLS: dict[str, dict[str, Any]] = {
     "capabilities": _CAPABILITIES,
     "check_domain_reputation": {
@@ -424,10 +431,14 @@ _THREATINTEL_TOOLS: dict[str, dict[str, Any]] = {
         "arguments": {"hash": "file_hash"},
         "display_name": "Threat intelligence",
         "reputation": {
+            "stats": "/last_analysis_stats",
+            "malicious": "/last_analysis_stats/malicious",
+            "suspicious": "/last_analysis_stats/suspicious",
+            "summary": "/summary",
             "text_patterns": [
-                r"(?i)\b(?P<malicious>\d+)\s*/\s*(?P<total>\d+)\s+detections?\b",
-                r"(?i)\b(?P<malicious>\d+)\s*/\s*(?P<total>\d+)\s+malicious\b"
-                r"(?:,\s*(?P<suspicious>\d+)\s*/\s*\d+\s+suspicious\b)?",
+                r"(?s)\AHash [0-9A-Fa-f]+ \(.*\): (?:clean|suspicious|malicious) — "
+                r"(?P<malicious>\d+)/(?P<total>\d+) malicious, (?P<suspicious>\d+)/\d+ "
+                r"suspicious\.\s*\z",
             ],
             "rank": 20,
         },

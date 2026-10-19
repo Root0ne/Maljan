@@ -755,7 +755,8 @@ class ReputationFacts(BaseModel):
     ``link`` are paths tried in order, the first that names a value giving it
     (a date as an ISO-8601 text or whole seconds since the epoch, a link as an
     ``http(s)`` URL). ``summary`` is the path of the service's own sentence
-    about the sample; empty, an answer written in prose is its own summary.
+    about the sample in a JSON answer; an answer written in prose is its own
+    summary.
     ``text_patterns`` read an answer written in prose: regular expressions with
     a ``malicious`` group and optionally ``total`` and ``suspicious`` groups,
     each *searched* for anywhere in the answer, the first pattern that finds a

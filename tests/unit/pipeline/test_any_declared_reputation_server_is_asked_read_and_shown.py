@@ -477,7 +477,10 @@ class TestOnlyTheServicesAnswerIsARecord:
             id="ev_0003", tool="check_hash", server="threatintel", output=note, truncated=True
         )
         answered = LedgerEntry(
-            id="ev_0004", tool="check_hash", server="threatintel", output="3/9 detections"
+            id="ev_0004",
+            tool="check_hash",
+            server="threatintel",
+            output='{"last_analysis_stats": {"malicious": 3, "undetected": 6}}',
         )
         blanked = LedgerEntry(
             id="ev_0005", tool="check_hash", server="threatintel", output="", truncated=True

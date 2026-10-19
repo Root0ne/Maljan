@@ -267,15 +267,19 @@ class TestTheLines:
         shown = line.split("most first): ", 1)[1]
         assert shown.endswith("… ×2")
 
-    def test_the_threat_intel_prose_is_read_for_its_count(self) -> None:
+    def test_the_threat_intel_answer_is_read_for_its_count(self) -> None:
         entry = _entry(
             "check_hash",
-            "Hash abc identified as Ransomware (LockBit) with 55/70 detections.",
+            '{"hash": "abc", "service": "VirusTotal", "found": true, '
+            '"summary": "malicious — 55/70 malicious, 0/70 suspicious.", '
+            '"last_analysis_stats": {"malicious": 55, "suspicious": 0, "undetected": 15}}',
             server="threatintel",
         )
         line = render_pack([entry], 0)
-        # Named by the lookup's declared display name.
-        assert line.startswith("[ev_0001] reputation: Threat intelligence 55 malicious (")
+        # Named by the lookup's declared display name, and read from its counts.
+        assert line == (
+            "[ev_0001] reputation: Threat intelligence: 55 of 70 engines flag it as malicious"
+        )
 
     def test_a_skipped_reputation_says_why(self) -> None:
         entry = _entry(

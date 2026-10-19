@@ -48,7 +48,10 @@ def _report() -> dict[str, Any]:
 def _client() -> httpx.AsyncClient:
     def _answer(request: httpx.Request) -> httpx.Response:
         if request.url.host == VT_HOST:
-            return httpx.Response(200, json={"data": {"attributes": {}}})
+            stats = {"malicious": 0, "undetected": 70}
+            return httpx.Response(
+                200, json={"data": {"attributes": {"last_analysis_stats": stats}}}
+            )
         return httpx.Response(404)
 
     return httpx.AsyncClient(transport=httpx.MockTransport(_answer))
