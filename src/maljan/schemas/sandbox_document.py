@@ -104,6 +104,38 @@ PLACES: dict[str, Path] = {
 }
 _PATH_PLACES: dict[Path, str] = {path: name for name, path in PLACES.items()}
 
+# The fields a row of the ``processes`` part holds a process's own id, its
+# parent's id, its image's name, its image's full path and its command line
+# under, each read from the first of its fields the row fills. A row is the
+# form's (:func:`_process_row`: ``pid``, ``ppid``, ``process_name``,
+# ``command_line``) or, where the reader kept its source's arrangement, the
+# source's own (``process_id``, ``parent_id``, ``module_path``, and the
+# command line in the process's recorded environment, ``environ.CommandLine``).
+PROCESS_ID_KEYS: tuple[str, ...] = ("pid", "process_id")
+PROCESS_PARENT_KEYS: tuple[str, ...] = ("ppid", "parent_id")
+PROCESS_NAME_KEYS: tuple[str, ...] = ("process_name", "name")
+PROCESS_IMAGE_PATH_KEYS: tuple[str, ...] = ("module_path",)
+PROCESS_COMMAND_LINE_PATHS: tuple[Path, ...] = (
+    ("command_line",),
+    ("cmd",),
+    ("environ", "CommandLine"),
+)
+
+# The Sigma events a report's telemetry is read into (``analysis.sigma_layer``):
+# per kind, the Sigma logsource categories an event of that kind is, and the
+# Sigma fields it can carry. An event carries a field only where the report
+# holds it; every other field was not collected, so a rule's test of it is
+# unknown, never false (and never ``null``).
+SIGMA_EVENT_KINDS: dict[str, tuple[tuple[str, ...], tuple[str, ...]]] = {
+    "process_creation": (("process_creation",), ("Image", "CommandLine", "ParentImage")),
+    "registry_add": (("registry_add", "registry_event"), ("Image", "TargetObject", "Details")),
+    "registry_set": (("registry_set", "registry_event"), ("Image", "TargetObject", "Details")),
+    "registry_delete": (
+        ("registry_delete", "registry_event"),
+        ("Image", "TargetObject", "Details"),
+    ),
+}
+
 # The places a reader fills with rows as its sandbox published them, with no
 # row shape of the platform's own to coerce them into: what a mapping
 # (``sandbox.rest.mapping.places``) may point a JSONPath at beside its fixed

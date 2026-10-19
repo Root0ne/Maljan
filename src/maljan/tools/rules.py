@@ -280,49 +280,45 @@ def sigma_match(events: list[dict[str, Any]], ruleset: str = "default") -> dict[
     normalised = [
         {str(k): str(v) for k, v in row.items()} for row in events if isinstance(row, dict)
     ]
+    return _sigma_result(layer, layer.scan(normalised))
+
+
+def _sigma_result(layer: Any, scan: Any) -> dict[str, Any]:
+    """The tool's answer for one scan.
+
+    A rule the corpus carries that raises while being evaluated (a value whose
+    regex does not compile, a condition pySigma cannot parse) is skipped and
+    counted, and the scan continues with the rest of the corpus.
+    """
     rows: list[dict[str, Any]] = []
-    rule_errors = 0
-    for rule, evaluator in getattr(layer, "_evaluators", []) or []:
-        for event in normalised:
-            # A rule the corpus carries with no parseable detection block
-            # raises inside pySigma rather than evaluating to "no match". One
-            # such rule must not take the whole corpus down with it, so the
-            # rule is skipped, counted, and the scan continues.
-            try:
-                matched = evaluator.evaluate(event, strict=True)
-            except Exception as exc:  # noqa: BLE001
-                rule_errors += 1
-                logger.debug("sigma_match: rule %s could not be evaluated (%s).", rule.id, exc)
-                break
-            if matched is None:
-                continue
-            logsource = rule.logsource
-            rows.append(
-                {
-                    "rule": str(rule.id) if rule.id else "unknown",
-                    "title": str(rule.title),
-                    "level": str(rule.level.name).lower() if rule.level else "",
-                    "logsource": {
-                        "product": str(logsource.product or "") if logsource else "",
-                        "category": str(logsource.category or "") if logsource else "",
-                        "service": str(logsource.service or "") if logsource else "",
-                    },
-                    "tags": [str(tag) for tag in rule.tags],
-                    "matched_fields": matched,
-                }
-            )
-            break  # a rule fires at most once per batch
-    if rule_errors:
+    for _position, rule, matched in scan.hits:
+        logsource = rule.logsource
+        rows.append(
+            {
+                "rule": str(rule.id) if rule.id else "unknown",
+                "title": str(rule.title),
+                "level": str(rule.level.name).lower() if rule.level else "",
+                "logsource": {
+                    "product": str(logsource.product or "") if logsource else "",
+                    "category": str(logsource.category or "") if logsource else "",
+                    "service": str(logsource.service or "") if logsource else "",
+                },
+                "tags": [str(tag) for tag in rule.tags],
+                "matched_fields": matched,
+            }
+        )
+    if scan.rule_errors:
         logger.warning(
             "sigma_match: %d of %d rules could not be evaluated; the scan used the rest.",
-            rule_errors,
+            scan.rule_errors,
             int(getattr(layer, "rule_count", 0)),
         )
-    return {
+    result = {
         "matches": rows,
         "rule_count": int(getattr(layer, "rule_count", 0)),
-        "rule_errors": rule_errors,
+        "rule_errors": scan.rule_errors,
     }
+    return result
 
 
 def sandbox_events(report: dict[str, Any] | None) -> list[dict[str, str]]:
@@ -340,11 +336,65 @@ def sandbox_events(report: dict[str, Any] | None) -> list[dict[str, str]]:
     return build_events_from_sandbox(report)
 
 
+def _runs(indices: list[int]) -> list[list[int]]:
+    """Ascending positions as ``[first, last]`` runs of consecutive ones."""
+    runs: list[list[int]] = []
+    for index in indices:
+        if runs and index == runs[-1][1] + 1:
+            runs[-1][1] = index
+        else:
+            runs.append([index, index])
+    return runs
+
+
 def sigma_match_sandbox(report: dict[str, Any] | None, ruleset: str = "default") -> dict[str, Any]:
-    """``sigma_match`` over the events derived from a sandbox report."""
-    events = sandbox_events(report)
-    result = sigma_match([dict(event) for event in events], ruleset=ruleset)
+    """``sigma_match`` over the events derived from a sandbox report.
+
+    The events are read as what the sandbox collected
+    (``sigma_layer.SandboxEvents.contexts``): a rule meets only the events of
+    its logsource category, and fires only where its condition is true. The
+    answer says what could not be decided: ``not_evaluable`` gives, for the
+    events (by position, as ``[first, last]`` runs) alike in it, how many
+    rules that did not fire ended unknown on each and the fields that made
+    them so (a field not collected, or ``"<field> path"`` where the image has
+    no path); ``no_events_of`` counts, per logsource the report holds no
+    events of, the rules not run.
+    """
+    from maljan.analysis.sigma_layer import NOT_EVALUABLE, read_sandbox_events
+
+    read = read_sandbox_events(report)
+    events = read.events
+    try:
+        layer = _sigma_layer(ruleset)
+    except Exception as exc:  # noqa: BLE001
+        return {
+            "error": f"ruleset load failed: {type(exc).__name__}: {exc}",
+            "tool": "sigma_match",
+            "event_count": len(events),
+        }
+    scan = layer.scan([dict(event) for event in events], contexts=read.contexts())
+    result = _sigma_result(layer, scan)
     result["event_count"] = len(events)
+    if scan.not_evaluable:
+        # Events alike in what was undecided share one row, their positions as
+        # [first, last] runs: complete, and as long as the distinct shapes.
+        shapes: dict[tuple[int, tuple[tuple[str, int], ...]], list[int]] = {}
+        distinct: set[int] = set()
+        for index in sorted(scan.not_evaluable):
+            held = scan.not_evaluable[index]
+            fields: dict[str, int] = {}
+            for position, names in held:
+                distinct.add(position)
+                for name in names:
+                    fields[name] = fields.get(name, 0) + 1
+            shapes.setdefault((len(held), tuple(sorted(fields.items()))), []).append(index)
+        rows = [
+            {"events": _runs(indices), "rules": count, "fields": dict(fields_held)}
+            for (count, fields_held), indices in shapes.items()
+        ]
+        result["not_evaluable"] = {"note": NOT_EVALUABLE, "rules": len(distinct), "rows": rows}
+    if scan.no_events_of:
+        result["no_events_of"] = dict(sorted(scan.no_events_of.items()))
     return result
 
 

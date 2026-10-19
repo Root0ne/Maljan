@@ -3784,7 +3784,37 @@ def _sigma(data: dict[str, Any]) -> str:
     matches = [m for m in (data.get("matches") or []) if isinstance(m, dict)]
     names = [str(m.get("title") or m.get("rule") or "") for m in matches]
     text = f"{len(matches)} hits over {data.get('event_count', '?')} events"
-    return f"{text} ({_names(names)})" if names else text
+    text = f"{text} ({_names(names)})" if names else text
+    # What could not be decided is said here, or its silence reads as a negative.
+    unknown = data.get("not_evaluable")
+    rows = unknown.get("rows") if isinstance(unknown, dict) else None
+    if isinstance(unknown, dict) and isinstance(rows, list) and rows:
+
+        def counted(row: Any) -> int:
+            runs = row.get("events") if isinstance(row, dict) else None
+            return sum(
+                int(run[1]) - int(run[0]) + 1
+                for run in (runs if isinstance(runs, list) else [])
+                if isinstance(run, list) and len(run) == 2
+            )
+
+        events = sum(counted(row) for row in rows)
+        pathless = sum(
+            counted(row)
+            for row in rows
+            if isinstance(row, dict)
+            and any(str(name).endswith(" path") for name in (row.get("fields") or {}))
+        )
+        text += (
+            f"; {unknown.get('rules', '?')} rules not evaluable on {events} events "
+            "(a field not collected"
+            + (f", or image path unknown on {pathless} events)" if pathless else ")")
+        )
+    absent = data.get("no_events_of")
+    if isinstance(absent, dict) and absent:
+        total = sum(n for n in absent.values() if isinstance(n, int))
+        text += f"; {total} rules not run (no events of their logsource)"
+    return text
 
 
 def _api_capability(data: dict[str, Any]) -> str:
