@@ -416,14 +416,14 @@ class TestWhatASectionIsShown:
 
         text = _bundle_text("packing_obfuscation", bundle, _texts())
 
-        assert f"`{MARKER}` is in ev_0012 (floss)" in text
+        assert f'"{MARKER}" is in ev_0012 (floss)' in text
 
     def test_a_claim_is_shown_as_written_when_no_entry_holds_its_quote(self) -> None:
         bundle = {"claims": [{"claim": "It uses `nothing-here`.", "evidence_ref": "x"}]}
 
         text = _bundle_text("packing_obfuscation", bundle, _texts())
 
-        assert "- It uses `nothing-here`. — x\n" in text + "\n"
+        assert '- "It uses `nothing-here`. — x"\n' in text + "\n"
         assert "the run's evidence" not in text
 
     def test_every_section_is_shown_the_published_techniques(self) -> None:

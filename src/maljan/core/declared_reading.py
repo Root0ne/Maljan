@@ -12,8 +12,8 @@ entry (``LedgerEntry.facts``), versioned and small: ``{"v": 1, "kind": ...}``
 and, where set, ``reader``, ``asserts_techniques``, ``source``,
 ``display_name``, ``rows``, ``places``, ``values``, ``techniques``,
 ``reputation``, ``words``, ``report_sections``, ``arguments``, ``holds_strings``,
-``function_starts``, ``discloses_sample`` and ``effects``. ``{"v": 1}`` alone
-records that the source declares nothing for the tool. Beside them, under
+``reads_delay_imports``, ``function_starts``, ``discloses_sample`` and ``effects``.
+``{"v": 1}`` alone records that the source declares nothing for the tool. Beside them, under
 ``hints``, the hints the tool's own MCP server gave it when it was attached
 (:func:`with_hints`), which are not a declaration.
 
@@ -91,6 +91,9 @@ STORED_FACT_FIELDS: tuple[str, ...] = (
     "report_sections",
     "arguments",
     "holds_strings",
+    # Whether the tool's import rows cover the late-bound imports, read by the
+    # report's binary facts before it calls an import list complete.
+    "reads_delay_imports",
     "function_starts",
     # Whether the tool sends the sample out of the deployment, read by the
     # run's disclosure block (``analysis.disclosure``) whatever the kind.

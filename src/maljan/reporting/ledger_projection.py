@@ -286,6 +286,37 @@ def _hashes_of(sample_path: str | None) -> dict[str, Any]:
     }
 
 
+# The flag a format answer states a damaged import directory by. No
+# declaration names such a signal, so the answer's own word is read.
+IMPORT_TABLE_DAMAGED_KEY = "import_table_damaged"
+
+
+def _import_read_partial(entry: LedgerEntry, data: dict[str, Any]) -> str:
+    """Why one answer's import tables may hold part of the binary's imports; ``""`` when whole.
+
+    A shortened answer (``LedgerEntry.truncated``: the guardrail cut it or
+    dropped rows of its lists); an answer the shared completeness reading
+    reads as holding part of its rows (``answer_completeness.read_answer``:
+    a ``truncated`` flag, a next page, a count above the rows); one that
+    reads the import directory as damaged; and a read that does not cover the
+    late-bound imports: its answer carries no ``delay_imports`` list and its
+    tool does not declare ``reads_delay_imports``.
+    """
+    from maljan.schemas.answer_completeness import read_answer
+
+    if getattr(entry, "truncated", False):
+        return f"{entry.id}: the answer was shortened"
+    args = entry.args if isinstance(entry.args, dict) else None
+    if read_answer(data, args=args).capped:
+        return f"{entry.id}: the answer says it holds part of its rows"
+    if data.get(IMPORT_TABLE_DAMAGED_KEY):
+        return f"{entry.id}: the import directory reads as damaged"
+    facts = tool_kinds.facts_of(entry)
+    if "delay_imports" not in data and not (facts is not None and facts.reads_delay_imports):
+        return f"{entry.id}: this tool does not read the delay-load table"
+    return ""
+
+
 def _opt(value: Any) -> str | None:
     text = str(value or "").strip()
     return text or None
@@ -305,8 +336,18 @@ def static_from_ledger(ledger: list[LedgerEntry]) -> StaticAnalysis | None:
     """
     static = StaticAnalysis()
     seen = False
+    # One note per answer that read the sample's import tables: ``""`` for a
+    # whole read.
+    import_reads: list[str] = []
+    # Which file each call read (``evidence_roots.files_read``): ``""`` for
+    # the sample. The import tables are the sample's: a carved payload's or an
+    # unpacked child's read is that file's, and joins neither the sample's
+    # list nor its completeness.
+    from maljan.analysis.evidence_roots import files_read
 
-    for _entry, data in _payloads(ledger, "format_info"):
+    file_of = files_read(ledger)
+
+    for format_entry, data in _payloads(ledger, "format_info"):
         seen = True
         for row in data.get("sections") or []:
             if not isinstance(row, dict):
@@ -322,12 +363,18 @@ def static_from_ledger(ledger: list[LedgerEntry]) -> StaticAnalysis | None:
                     characteristics=str(row.get("characteristics") or ""),
                 )
             )
-        for row in data.get("imports") or []:
-            if not isinstance(row, dict):
-                continue
-            static.imports.append(
-                ImportRow(dll=str(row.get("dll") or ""), function=str(row.get("function") or ""))
-            )
+        of_sample = file_of(format_entry) == ""
+        for key, table in (("imports", static.imports), ("delay_imports", static.delay_imports)):
+            for row in (data.get(key) or []) if of_sample else []:
+                if not isinstance(row, dict):
+                    continue
+                table.append(
+                    ImportRow(
+                        dll=str(row.get("dll") or ""), function=str(row.get("function") or "")
+                    )
+                )
+        if of_sample and ("imports" in data or "delay_imports" in data):
+            import_reads.append(_import_read_partial(format_entry, data))
         static.exports.extend(str(name) for name in data.get("exports") or [])
         for row in data.get("export_rows") or []:
             if isinstance(row, dict):
@@ -479,6 +526,11 @@ def static_from_ledger(ledger: list[LedgerEntry]) -> StaticAnalysis | None:
     # call's rows printed every section and export twice.
     static.sections = _once(static.sections, lambda s: (s.name, s.virtual_address, s.raw_offset))
     static.imports = _once(static.imports, lambda row: (row.dll, row.function))
+    static.delay_imports = _once(static.delay_imports, lambda row: (row.dll, row.function))
+    # One whole read holds every row any other read holds; with none, each
+    # read says why it may hold part of them.
+    if import_reads and all(import_reads):
+        static.imports_partial = import_reads
     static.exports = list(dict.fromkeys(static.exports))
     static.export_rows = _once(static.export_rows, lambda row: (row.name, row.ordinal, row.rva))
     # capa run twice over one file fires the same rules twice.

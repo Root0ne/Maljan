@@ -256,6 +256,17 @@ class StaticAnalysis(BaseModel):
 
     sections: list[PESection] = Field(default_factory=list)
     imports: list[ImportRow] = Field(default_factory=list)
+    # The delay-load import table, as the format tool read it beside
+    # ``imports``: a binary that resolves its APIs through ``.didat`` imports
+    # them as surely. Kept apart, so the import table every surface prints is
+    # unchanged; left out of the dump when empty, as on a report stored before
+    # the field existed.
+    delay_imports: list[ImportRow] = Field(default_factory=list, exclude_if=lambda value: not value)
+    # Why the import tables read may hold part of the binary's imports, one
+    # note per answer that read them, when no answer read them whole: shortened,
+    # saying itself truncated, or reading the import directory as damaged.
+    # Empty when an answer read them whole, and then left out of the dump.
+    imports_partial: list[str] = Field(default_factory=list, exclude_if=lambda value: not value)
     exports: list[str] = Field(default_factory=list)
     # The same exports with their ordinal and address, when the format tool
     # reported them. ``exports`` stays the plain list every older consumer and

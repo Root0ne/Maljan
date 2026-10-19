@@ -293,9 +293,10 @@ class TestTheClaimsShareTheWindow:
 
         text = _bundle_text("introduction", {"claims": claims}, None, 60)
 
-        shown = [line for line in text.splitlines() if line.startswith("- x")]
+        # Each claim is one quoted value: its quotes beside the share it fills.
+        shown = [line for line in text.splitlines() if line.startswith('- "x')]
         assert len(shown) == 25
-        assert all(line.endswith(CUT_MARK) and len(line) <= 62 for line in shown)
+        assert all(line.endswith(CUT_MARK + '"') and len(line) <= 64 for line in shown)
 
     def test_a_full_window_says_there_was_no_room_for_a_claim(self) -> None:
         from maljan.reporting.composer import NO_ROOM_FOR_THE_ANSWER, _bundle_text
@@ -326,9 +327,14 @@ class TestTheClaimsShareTheWindow:
             if line.startswith("- [static claim ") and "The sample writes" in line
         ]
         assert len(shown) == 40
-        assert all(line.endswith(CUT_MARK) for line in shown)
-        assert len(prompt) <= (4000 - 1000) * CHARS_PER_TOKEN
-        assert len(prompt) > (4000 - 1000) * CHARS_PER_TOKEN * 3 // 4
+        assert all(line.endswith(CUT_MARK + '"') for line in shown)
+        # The system text shares the room with the human turn
+        # (``ReportComposer._item_chars`` counts both).
+        from maljan.reporting.composer import _SYSTEM
+
+        whole = len(_SYSTEM) + len(prompt)
+        assert whole <= (4000 - 1000) * CHARS_PER_TOKEN
+        assert whole > (4000 - 1000) * CHARS_PER_TOKEN * 3 // 4
 
 
 def _compose(isr_reports: dict[str, Any], report: Any = None, **composer: int) -> dict[str, str]:

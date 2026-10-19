@@ -105,14 +105,19 @@ def _read(entry: dict[str, Any]) -> dict[str, Any]:
 
 
 def _with_shipped_effects(entry: dict[str, Any], shipped: dict[str, Any]) -> dict[str, Any]:
-    """``entry`` as a whole map's tool is read: the shipped ``effects`` where it has none.
+    """``entry`` as a whole map's tool is read: each later field shipped where it has none.
 
-    ``effects`` came after every release that stored a map whole
-    (``tool_declarations.FIELDS_AFTER_WHOLE_MAPS``).
+    ``effects`` and ``reads_delay_imports`` came after every release that
+    stored a map whole (``tool_declarations.FIELDS_AFTER_WHOLE_MAPS``).
     """
-    if "effects" in entry or (shipped or {}).get("effects") is None:
-        return entry
-    return {**entry, "effects": shipped["effects"]}
+    from maljan.core.tool_declarations import FIELDS_AFTER_WHOLE_MAPS
+
+    later = {
+        name: (shipped or {})[name]
+        for name in FIELDS_AFTER_WHOLE_MAPS
+        if name not in entry and (shipped or {}).get(name) is not None
+    }
+    return {**entry, **later} if later else entry
 
 
 def _full(entry: dict[str, Any]) -> dict[str, Any]:
