@@ -1979,7 +1979,7 @@ def sample_text(value: Any) -> str:
     """A value the sample wrote (a name from its tables), quoted with the pack's escaping."""
     from maljan.utils.written_forms import pack_escaped
 
-    return f'"{pack_escaped(str(value or ""))}"'
+    return f'"{pack_escaped(str(value or ""), ids=True)}"'
 
 
 def head_text(data: Mapping[str, Any], rows: int) -> str:

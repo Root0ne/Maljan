@@ -166,7 +166,13 @@ from maljan.pipeline.sandbox_status import (
     sandbox_status,
 )
 from maljan.providers import sandbox_tools
-from maljan.schemas.evidence import LedgerEntry, apply_budget
+from maljan.schemas.evidence import (
+    ENTRY_ID_AFTER_ESCAPE_RE,
+    ENTRY_ID_JOIN_RE,
+    ENTRY_ID_RE,
+    LedgerEntry,
+    apply_budget,
+)
 from maljan.schemas.sandbox_document import place as report_place
 from maljan.tools import (
     api_hashes,
@@ -185,7 +191,13 @@ from maljan.tools import (
 )
 from maljan.tools.errors import error_parts, normalise_error
 from maljan.tools.knowledge import RESOLVED_AT_RUNTIME
-from maljan.utils.written_forms import pack_escaped
+from maljan.utils.written_forms import (
+    ENTRY_ID_JOIN_ESCAPE,
+    controls_written_out,
+    ids_written_out,
+    pack_escaped,
+    sample_written_out,
+)
 
 __all__ = [
     "ESSENTIAL_TOOLS",
@@ -2282,7 +2294,7 @@ class _DirectedRead:
     def not_read(self, source: str, reason: str, entry: str = "") -> None:
         row = {
             "source": pack_escaped(source, delimiters=True),
-            "reason": pack_escaped(_one_line(reason), delimiters=True),
+            "reason": pack_escaped(_one_line(reason), delimiters=True, ids=True),
         }
         if entry:
             row["entry"] = entry
@@ -2779,10 +2791,16 @@ def render_pack(entries: list[LedgerEntry], max_chars: int) -> str:
         whole = _render_lines(entries, WHOLE)
         if max_chars <= 0 or _joined_len(whole) <= max_chars:
             return "\n".join(whole)
-        passes = [entry for entry in entries if _is_pass(entry)]
-        if not passes:
-            return _render_fitted(entries, max_chars)
-        return _render_with_passes(entries, max_chars)[0]
+        # No string of an answer longer than the whole room is kept whole, so a
+        # field no renderer cuts cannot push the later lines out.
+        token = _LEAF_ROOM.set(max_chars)
+        try:
+            passes = [entry for entry in entries if _is_pass(entry)]
+            if not passes:
+                return _render_fitted(entries, max_chars)
+            return _render_with_passes(entries, max_chars)[0]
+        finally:
+            _LEAF_ROOM.reset(token)
 
 
 @dataclass
@@ -3257,10 +3275,10 @@ def _within_room(entry: LedgerEntry, room: int) -> str | None:
         return None
     head = f"[{entry.id}] {_label_of(entry)}: "
     try:
-        body = shorter(data, room - len(head))
+        body = shorter(_guarded(data), room - len(head))
     except Exception:  # noqa: BLE001 — a renderer must never cost the block
         return None
-    line = head + body
+    line = _line_safe(head + body)
     return line if body and len(line) <= room else None
 
 
@@ -3272,10 +3290,16 @@ def pack_block(entries: list[LedgerEntry], max_chars: int) -> str:
 
 
 def _pack_line(entry: LedgerEntry) -> str:
-    """One entry as one line. Never raises: an unreadable answer is named as such."""
+    """One entry as one line. Never raises: an unreadable answer is named as such.
+
+    Whatever a renderer let through, no character of the line can break it:
+    an unprintable one is written out (``controls_written_out``). Each
+    sample-sourced field is already written by :func:`_sample_text`, so this
+    is the last guard, not the rule.
+    """
     token = _CURRENT.set(entry)
     try:
-        return _line_of(entry)
+        return _line_safe(_line_of(entry))
     finally:
         _CURRENT.reset(token)
 
@@ -3290,16 +3314,16 @@ def _line_of(entry: LedgerEntry) -> str:
         # ``no:`` line with the reason, as a pass that found nothing is.
         said = str(entry.error or entry.output or "")
         if _was_not_made(entry):
-            return f"[{entry.id}] {label}: no: {_short(said[len(NOT_RUN_PREFIX) :].strip())}"
+            return f"[{entry.id}] {label}: no: {_sample(_one_line(said[len(NOT_RUN_PREFIX) :]))}"
         # The failure is the scanner's own words; the class they travelled in is not.
         said = PASS_FAILED_PREFIX.sub("", said, count=1)
-        return f"[{entry.id}] {label}: no: the pass failed: {_short(said)}"
+        return f"[{entry.id}] {label}: no: the pass failed: {_sample(_one_line(said))}"
     if not entry.ok:
         # A call the pipeline did not make — a lookup with no server to ask,
         # a step after the budget — is not a failure and is not called one;
         # a call that was made and broke is.
         verb = "not done" if _was_not_made(entry) else "failed"
-        return f"[{entry.id}] {label}: {verb} ({_short(entry.error or entry.output)})"
+        return f"[{entry.id}] {label}: {verb} ({_sample(_one_line(entry.error or entry.output))})"
     shown, data = _shown(entry)
     render = _RENDERERS.get(shown)
     answer = reputation_of(entry) if lookup else None
@@ -3309,10 +3333,13 @@ def _line_of(entry: LedgerEntry) -> str:
         # apply_budget dropped the result; "recorded" would read as one.
         return f"[{entry.id}] {label}: output dropped (evidence byte budget); call the tool for it"
     if render is None or data is None:
+        # An answer no renderer reads is the tool's own text, which can be the
+        # sample's: on one line, cut, its ids written out, as any sample text.
         declared = _declared_rows(entry)
-        return f"[{entry.id}] {label}: {declared or _short(entry.output) or 'recorded'}"
+        said = _sample(" ".join(str(entry.output or "").split()))
+        return f"[{entry.id}] {label}: {declared or said or 'recorded'}"
     try:
-        return f"[{entry.id}] {label}: {render(data)}"
+        return f"[{entry.id}] {label}: {render(_guarded(data))}"
     except Exception as exc:  # noqa: BLE001 — a renderer must never cost the block
         logger.debug("pack line for %s could not be rendered (%s).", entry.tool, exc)
         return f"[{entry.id}] {label}: recorded"
@@ -3363,6 +3390,153 @@ def _names(values: Any, head: int | None = None) -> str:
     return f"{', '.join(items[:head])} (+{len(items) - head} more)"
 
 
+def _cut(raw: str, width: int | None, *, path: bool = False) -> str:
+    """``raw`` whole, or cut to ``width`` characters with ``…`` where text was left out.
+
+    ``None`` is no cut. A path or a name (``path``) is cut from the middle, so
+    what identifies it survives: the last component whole where it fits beside
+    the start (``C:\\Win…\\rundll32.exe``), else both ends of it. Any other
+    text keeps its start.
+    """
+    if width is None or len(raw) <= width:
+        return raw
+    keep = max(1, width - 1)
+    if not path:
+        return raw[:keep] + "…"
+    cut_at = max(raw.rfind("\\"), raw.rfind("/"))
+    last = raw[cut_at:] if cut_at > 0 else ""
+    if last and len(last) < keep:
+        return raw[: keep - len(last)] + "…" + last
+    head = (keep + 1) // 2
+    return raw[:head] + "…" + (raw[len(raw) - (keep - head) :] if keep > head else "")
+
+
+def _sample_text(text: Any, width: int | None, *, quoted: bool = False, path: bool = False) -> str:
+    """Text the sample controls, as a pack line holds it. Every such field goes through here.
+
+    The text is cut first, to ``width`` characters (:func:`_cut`; ``None``:
+    whole), so one long name cannot push later lines out of the pack. Its
+    control characters are then written as :func:`pack_escaped` writes them,
+    and after them every ledger id in it (``ids_written_out``), so an id
+    standing right after an escape is caught. The text can neither start a
+    line nor read as a citation: a zip member named
+    ``x\\n[ev_0003] reputation: …`` shows as ``x\\n[ev\\x5f0003] reputation: …``.
+    Quoted (:func:`_quoted`), the quote is written out too, so the value
+    cannot close its own quotes. Bare, a quote means nothing and is left as
+    it is.
+    """
+    raw = _cut(str(text), width, path=path)
+    if quoted:
+        return pack_escaped(raw, ids=True)
+    return sample_written_out(raw)
+
+
+def _sample(text: Any, *, path: bool = False) -> str:
+    """One sample-sourced value at the pack's detail (``PackDetail.text_head``)."""
+    return _sample_text(text, _detail().text_head, path=path)
+
+
+def _sample_names(values: Any, *, path: bool = False) -> str:
+    """Sample-sourced names, each written by :func:`_sample`, listed as :func:`_names` lists."""
+    return _names([_sample(value, path=path) for value in values or []])
+
+
+# The pack's room while it is cut to it (``render_pack``): no string of an
+# answer longer than the whole room can be shown, and such a string is cut as a
+# text is. ``None``: no bound, the whole pack fits.
+_LEAF_ROOM: ContextVar[int | None] = ContextVar("pack_leaf_room", default=None)
+# A ledger id in a text, with its digits, where ``ENTRY_ID_JOIN_RE`` finds one.
+_ID_IN_TEXT = re.compile(ENTRY_ID_JOIN_RE.pattern + r"(\d+)", re.IGNORECASE)
+
+
+def _guarded_text(text: str, room: int | None, known: Mapping[str, Any]) -> str:
+    """One string of an answer as any line may print it.
+
+    A string longer than the whole ``room`` is cut to one character more than
+    the pack's detail keeps of a text, so the renderer's own cut still sees it
+    is long and says so. An id inside a longer text that no entry in view
+    carries (``known``) is written out: it cites nothing the pack holds. An id
+    of an entry in view (an absence's ``no: [id]``), and a field that is an id
+    and nothing else (a behaviour link's holding), are the platform's own
+    references and are kept. Control characters are left to the renderer, which may flatten
+    them, and to the line's own guard (:func:`_line_safe`).
+    """
+    if room is not None and len(text) > room:
+        head = _detail().text_head
+        text = _cut(text, room if head is None else min(room, head + 1))
+    if ENTRY_ID_RE.fullmatch(text):
+        # A field that is an id and nothing else is a reference the answer
+        # makes (a holding's entry), never a forged fact around one.
+        return text
+
+    def written(match: re.Match[str]) -> str:
+        found = match.group()
+        if found.lower() in known:
+            return found
+        return found[:2] + ENTRY_ID_JOIN_ESCAPE + match.group(1)
+
+    return _ID_IN_TEXT.sub(written, text)
+
+
+def _line_safe(line: str) -> str:
+    """A finished line that no character of it can break, and no escape in it can cite from.
+
+    An unprintable character is written out (``controls_written_out``), and
+    then any ledger id standing right after one of those escapes
+    (``ENTRY_ID_AFTER_ESCAPE_RE``): the platform writes no control character,
+    so such an id is never its own. A line with no unprintable character is
+    returned as it is.
+    """
+    if line.isprintable():
+        return line
+    return ENTRY_ID_AFTER_ESCAPE_RE.sub(
+        lambda m: m.group()[:-1] + ENTRY_ID_JOIN_ESCAPE, controls_written_out(line)
+    )
+
+
+def _guarded(data: dict[str, Any]) -> dict[str, Any]:
+    """``data`` with every string in it, keys and values, as :func:`_guarded_text` writes it.
+
+    The guard under every renderer, whatever field it prints: a field the
+    sample controls is also written by :func:`_sample_text`, which writes out
+    every id and cuts to the pack's detail. Linear in the answer.
+    """
+    room = _LEAF_ROOM.get()
+    view = _IN_VIEW.get()
+    known: Mapping[str, Any] = view.before if view is not None else {}
+
+    def walk(value: Any) -> Any:
+        if isinstance(value, str):
+            return _guarded_text(value, room, known)
+        if isinstance(value, dict):
+            return {
+                (_guarded_text(k, None, known) if isinstance(k, str) else k): walk(v)
+                for k, v in value.items()
+            }
+        if isinstance(value, list):
+            return [walk(item) for item in value]
+        return value
+
+    return cast("dict[str, Any]", walk(data))
+
+
+def _escaped_sample(escaped: str) -> str:
+    """Sample text an answer already holds escaped, cut as :func:`_sample_text` cuts it.
+
+    It is not escaped again, only its ledger ids are written out. A cut that
+    would leave a lone backslash at the end drops it, so the text never ends
+    in half an escape.
+    """
+    width = _detail().string_chars
+    if width is not None and len(escaped) > width:
+        cut = escaped[: max(1, width - 1)]
+        trailing = len(cut) - len(cut.rstrip("\\"))
+        if trailing % 2:
+            cut = cut[:-1]
+        escaped = cut + "…"
+    return ids_written_out(escaped)
+
+
 def _n(value: Any) -> str:
     try:
         return f"{int(value):,}"
@@ -3408,7 +3582,7 @@ def _signature(data: dict[str, Any]) -> str:
     present = []
     auth = data.get("authenticode") or {}
     if isinstance(auth, dict) and auth.get("present"):
-        who = ", ".join(f"{k} {auth[k]}" for k in ("subject", "issuer") if auth.get(k))
+        who = ", ".join(f"{k} {_sample(auth[k])}" for k in ("subject", "issuer") if auth.get(k))
         present.append(f"authenticode present{f' ({who})' if who else ''}")
     apk = data.get("apk") or {}
     if isinstance(apk, dict) and apk.get("present"):
@@ -3427,7 +3601,7 @@ def _imports_summary(data: dict[str, Any]) -> str:
     if delayed:
         text += f", {len(delayed)} delay-loaded"
     if libraries:
-        text += f" ({_names(libraries)})"
+        text += f" ({_sample_names(libraries, path=True)})"
     return text
 
 
@@ -3436,9 +3610,10 @@ def _sections_summary(data: dict[str, Any]) -> str:
     if not sections:
         return "no section table"
     top = max(sections, key=lambda s: float(s.get("entropy") or 0))
+    name = str(top.get("name") or "").strip()
     return (
         f"{len(sections)} sections, highest entropy {float(top.get('entropy') or 0):.2f}"
-        f" ({str(top.get('name') or '').strip() or '?'})"
+        f" ({_sample(name, path=True) if name else '?'})"
     )
 
 
@@ -3460,17 +3635,17 @@ def _pe(data: dict[str, Any]) -> str:
     if isinstance(overlay, dict) and overlay.get("present"):
         parts.append(f"overlay {_n(overlay.get('size'))} bytes")
     if data.get("pdb_path"):
-        parts.append(f"pdb {data['pdb_path']}")
+        parts.append(f"pdb {_sample(data['pdb_path'], path=True)}")
     return ", ".join(parts)
 
 
 def _elf(data: dict[str, Any]) -> str:
     parts = [f"{data.get('bitness')}-bit {data.get('endianness')}-endian"]
     if data.get("interpreter"):
-        parts.append(f"interpreter {data['interpreter']}")
+        parts.append(f"interpreter {_sample(data['interpreter'], path=True)}")
     needed = data.get("needed") or data.get("dt_needed") or []
     if needed:
-        parts.append(f"needs {_names(needed)}")
+        parts.append(f"needs {_sample_names(needed, path=True)}")
     parts.append(_sections_summary(data))
     parts.append(_imports_summary(data))
     return ", ".join(parts)
@@ -3484,7 +3659,7 @@ def _macho(data: dict[str, Any]) -> str:
     parts.append(f"{len(commands)} load commands")
     dylibs = data.get("dylibs") or []
     if dylibs:
-        parts.append(f"dylibs {_names(dylibs)}")
+        parts.append(f"dylibs {_sample_names(dylibs, path=True)}")
     if "entitlements_present" in data:
         parts.append(f"entitlements {'present' if data['entitlements_present'] else 'absent'}")
     return ", ".join(parts)
@@ -3494,40 +3669,42 @@ def _apk(data: dict[str, Any]) -> str:
     # A fact androguard could not read is one of the tool's own ``no: <reason>``
     # strings, not a list; the degraded note beside it already names what was
     # not read. A package name the manifest wrote is printed as written,
-    # whatever it starts with.
+    # whatever it starts with, escaped as every sample-sourced value is.
     from maljan.tools.binary import is_apk_unread
 
     parts = []
     package = data.get("package")
     if package and not is_apk_unread(str(package)):
-        parts.append(f"package {package}")
+        parts.append(f"package {_sample(package, path=True)}")
     if data.get("degraded"):
-        parts.append(str(data["degraded"]))
+        # The tool's reason, which can quote what the sample's manifest wrote.
+        parts.append(_sample(data["degraded"]))
     for key in ("permissions", "activities", "services", "receivers", "providers"):
         if isinstance(data.get(key), list) and data[key]:
             parts.append(f"{len(data[key])} {key}")
     if isinstance(data.get("permissions"), list) and data["permissions"]:
-        parts.append(f"permissions {_names(data['permissions'])}")
+        parts.append(f"permissions {_sample_names(data['permissions'], path=True)}")
     if data.get("dex_count") is not None:
         parts.append(f"{data['dex_count']} dex")
     if data.get("abis"):
-        parts.append(f"abis {_names(data['abis'])}")
+        parts.append(f"abis {_sample_names(data['abis'], path=True)}")
     if data.get("cert_files"):
-        parts.append(f"cert files {_names(data['cert_files'])}")
+        parts.append(f"cert files {_sample_names(data['cert_files'], path=True)}")
     return ", ".join(parts) or "zip-level facts only"
 
 
 def _document(data: dict[str, Any]) -> str:
-    parts = [str(data.get("format") or "document")]
+    """The document's format, then each field it states: its metadata is the sample's text."""
+    parts = [_sample(data.get("format") or "document")]
     for key, value in data.items():
         if key in ("format", "tool", "size") or value in (None, "", [], {}, False, 0):
             continue
         if isinstance(value, dict):
-            parts.append(f"{key} {_names([f'{k} {v}' for k, v in value.items()])}")
+            parts.append(f"{key} {_sample_names([f'{k} {v}' for k, v in value.items()])}")
         elif isinstance(value, list):
             parts.append(f"{len(value)} {key}")
         else:
-            parts.append(f"{key} {value}")
+            parts.append(f"{key} {_sample(value)}")
     return ", ".join(parts)
 
 
@@ -3535,7 +3712,7 @@ def _archive(data: dict[str, Any]) -> str:
     members = [m for m in (data.get("members") or []) if isinstance(m, dict)]
     names = [str(m.get("name") or "") for m in members]
     text = f"{data.get('format') or 'archive'}, {data.get('total', len(members))} members"
-    return f"{text} ({_names(names)})" if names else text
+    return f"{text} ({_sample_names(names, path=True)})" if names else text
 
 
 def _strings(data: dict[str, Any]) -> str:
@@ -3554,7 +3731,7 @@ def _iocs(data: dict[str, Any]) -> str:
         kind = str(row.get("kind") or "other")
         counts[kind] = counts.get(kind, 0) + 1
     summary = ", ".join(f"{n} {kind}" for kind, n in sorted(counts.items()))
-    first = _names([str(r.get("value") or "") for r in rows])
+    first = _sample_names([str(r.get("value") or "") for r in rows])
     return f"{summary} ({first})"
 
 
@@ -3645,9 +3822,10 @@ def _lolbin(data: dict[str, Any]) -> str:
 
 def _sandbox_processes(data: dict[str, Any]) -> str:
     rows = [r for r in (data.get("processes") or []) if isinstance(r, dict)]
+    # A process's image name is the sample's to choose.
     names = [str(r.get("name") or "") for r in rows]
     text = f"{data.get('total', len(rows))} processes"
-    return f"{text} ({_names(names)})" if names else text
+    return f"{text} ({_sample_names(names, path=True)})" if names else text
 
 
 def _sandbox_network(data: dict[str, Any]) -> str:
@@ -3692,7 +3870,7 @@ def _sandbox_sections(data: dict[str, Any]) -> str:
         # The name as ``sandbox_items`` takes it, written as an identifier.
         named = f"`{name}`"
         if row.get("no"):
-            parts.append(f"{named} {_short(str(row['no']))}")
+            parts.append(f"{named} {_sample(row['no'])}")
             continue
         count = row.get("items")
         prefix = str(row.get("prefix") or "")
@@ -3805,14 +3983,13 @@ def _quoted(text: str) -> str:
     Backslashes are left as FLOSS gave them, so a Windows path reads as a
     path; only the quote and the control characters are written out, and a
     backslash that would end the string, where it would read as escaping the
-    closing quote.
+    closing quote. A ledger id inside it is written out
+    (:func:`_sample_text`).
     """
-    width = _detail().string_chars
-    value = text if width is None or len(text) <= width else text[: max(1, width - 1)] + "…"
     # One escaping rule, read by the grounding search too
     # (``utils.written_forms``), so a value a model copied out of this line is
     # found again in the entry it came from.
-    return f'"{pack_escaped(value)}"'
+    return f'"{_sample_text(text, _detail().string_chars, quoted=True)}"'
 
 
 def _decoded_item(row: dict[str, Any]) -> str:
@@ -4551,7 +4728,8 @@ def _anti_analysis_item(group: tuple[tuple[str, str], list[dict[str, Any]]]) -> 
     """``category: what @ 0x1010 (in F) 0x2020 (in G)``: one exact match, every place."""
     (category, what), rows = group
     places = [
-        str(row.get("offset")) + (f" (in {row.get('function')})" if row.get("function") else "")
+        str(row.get("offset"))
+        + (f" (in {_sample(row['function'])})" if row.get("function") else "")
         for row in rows
     ]
     head = _detail().list_head
@@ -4671,7 +4849,7 @@ def _unpacked(data: dict[str, Any], max_chars: int | None = None) -> str:
     """
     said = data.get("unpacked")
     if said != "yes":
-        line = str(said or "")
+        line = _sample(said or "")
         return line if max_chars is None or len(line) <= max_chars else ""
     header = data.get("pack_header") or {}
     child = data.get("child") or {}
@@ -4764,17 +4942,11 @@ def _directed_place(where: Any) -> str:
 def _quoted_escaped(escaped: str) -> str:
     """A phrase the answer already holds escaped, quoted and cut as :func:`_quoted` cuts.
 
-    It is not escaped again. A cut that would leave a lone backslash before the
-    closing quote drops it, so the quote always closes the value.
+    It is not escaped again (:func:`_escaped_sample`). A cut that would leave a
+    lone backslash before the closing quote drops it, so the quote always
+    closes the value.
     """
-    width = _detail().string_chars
-    if width is not None and len(escaped) > width:
-        cut = escaped[: max(1, width - 1)]
-        trailing = len(cut) - len(cut.rstrip("\\"))
-        if trailing % 2:
-            cut = cut[:-1]
-        escaped = cut + "…"
-    return f'"{escaped}"'
+    return f'"{_escaped_sample(escaped)}"'
 
 
 def _held_phrase(held: Any) -> str:
@@ -4878,12 +5050,12 @@ def _reputation_facts(entry: LedgerEntry, answer: ReputationRecord) -> str:
             "as malicious"
         ]
         if answer.labels:
-            parts.append(f"labels {_names(answer.labels)}")
+            parts.append(f"labels {_sample_names(answer.labels)}")
         detections = _detection_labels(answer.detections)
         if detections:
             parts.append(detections)
         return ", ".join(parts)
-    text = _short(entry.output or answer.summary)
+    text = _sample(_one_line(entry.output or answer.summary))
     count = answer.malicious
     return f"{service} {count} malicious ({text})" if count is not None else f"{service}: {text}"
 
@@ -4910,7 +5082,10 @@ def _detection_labels(labels: list[str]) -> str:
     text = (
         f"{len(labels)} detection labels, {len(ranked)} distinct "
         f"(engines per label, most first{bound}): "
-        + ", ".join(f"{_short(label, detail.label_chars)} ×{counts[label]}" for label in shown)
+        + ", ".join(
+            f"{_sample_text(_one_line(label), detail.label_chars)} ×{counts[label]}"
+            for label in shown
+        )
     )
     if len(ranked) > len(shown):
         text += f" (+{len(ranked) - len(shown)} more distinct labels)"
@@ -5020,7 +5195,8 @@ def _declared_rules(entry: LedgerEntry) -> dict[str, Any] | None:
             continue
         rows.append(
             {
-                "rule": rule,
+                # A third-party matcher's row may be named by its text, the sample's words.
+                "rule": _sample(rule),
                 "addresses": _flat(select(row, facts.places[place])) if place else [],
                 "attck": row_technique_ids(row, facts) if facts.asserts_techniques else [],
             }
@@ -5101,11 +5277,13 @@ def _declared_rows(entry: LedgerEntry) -> str:
         read = {name: first(row, path) for name, path in facts.values.items()}
         text = _row_named(read, values)
         held = first(row, facts.places[place]) if place else None
-        where = " ".join(_flat([held])) if held is not None else ""
+        # The declared place is the tool's answer too, which a sample's path can fill.
+        where = _sample(" ".join(_flat([held])), path=True) if held is not None else ""
+        # A row's text is the tool's answer, which can be the sample's own words.
         if text and where:
-            items.append(f"{_short(text)} @ {where}")
+            items.append(f"{_sample(text)} @ {where}")
         elif text:
-            items.append(_short(text))
+            items.append(_sample(text))
         elif where:
             items.append(f"@ {where}")
     kind = f" of kind {facts.kind}" if facts.kind else ""
@@ -5136,7 +5314,8 @@ def _label_of(entry: LedgerEntry) -> str:
     args = entry.args if isinstance(entry.args, dict) else {}
     data = entry.structured if isinstance(entry.structured, dict) else {}
     provider = str(args.get("provider") or data.get("server") or "")
-    return f"{label} ({_scanner(provider)[0]})" if provider else label
+    # A provider no longer registered is named by the id its answer gave.
+    return f"{label} ({_sample(_scanner(provider)[0])})" if provider else label
 
 
 # Each renderer of ``core.pack_steps.PACK_RENDERERS`` that reads the answer's data.

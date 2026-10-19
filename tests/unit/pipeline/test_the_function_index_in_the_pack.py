@@ -246,7 +246,8 @@ class TestTheSamplesTextStaysQuotedData:
         lines = text.split("\n")
         assert len(lines) == 2
         row = lines[1]
-        quoted = f'"{pack_escaped(self.INJECTED)}"'
+        # The ledger id the sample wrote is written out too.
+        quoted = f'"{pack_escaped(self.INJECTED, ids=True)}"'
         assert "\n" not in pack_escaped(self.INJECTED)
         assert row.startswith(
             f"- 0x401000 (export {quoted}, entry point): calls {quoted} (ev_0006)"
