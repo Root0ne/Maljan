@@ -1040,6 +1040,9 @@ def _upx_sentences() -> str:
         for name, blob in files.items():
             (Path(folder) / name).write_bytes(blob)
             answers.append(upx.unpack_upx(str(Path(folder) / name), Path(folder)))
+        # The temporary folder's random name is not a sentence the module
+        # writes; it could spell a scored term by chance.
+        answers = [json.loads(json.dumps(a).replace(folder, "/work")) for a in answers]
     entries = [
         LedgerEntry(id=f"ev_000{i}", tool=upx.TOOL, structured=a, ok="error" not in a)
         for i, a in enumerate(answers, 1)
