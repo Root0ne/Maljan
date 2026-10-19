@@ -203,22 +203,26 @@ def test_the_cut_reserves_only_the_kept_part_s_escapes() -> None:
 
     from maljan.agents.mcp_client import TRUNCATION_MARKER, MCPLangChainToolkit
     from maljan.agents.tool_fence import escapes, fence_lines_room, fenced
+    from maljan.schemas.answer_completeness import cut_line_room
 
+    # The completeness line the recorder appends to a cut answer is kept back too.
     for lines in (5_000, 30_000):
         toolkit = MCPLangChainToolkit(MagicMock(), max_output_chars=20_000)
         text = "\n".join(f'<string id="{k}">value {k}</string>' for k in range(lines))
         kept = toolkit._apply_output_guardrail(text)
-        assert len(kept) == 20_000 - fence_lines_room()
+        assert len(kept) == 20_000 - fence_lines_room() - cut_line_room(len(text))
         assert len(fenced("ev_" + "9" * 16, kept)) <= 20_000
     # Escapes far past the cut take no room; the ones kept do.
     text = "a" * 30_000 + "<<" * 20_000
     toolkit = MCPLangChainToolkit(MagicMock(), max_output_chars=20_000)
-    assert len(toolkit._apply_output_guardrail(text)) == 20_000 - fence_lines_room()
+    room = cut_line_room(len(text))
+    assert len(toolkit._apply_output_guardrail(text)) == 20_000 - fence_lines_room() - room
     text = "<<" * 20_000
+    room = cut_line_room(len(text))
     kept = toolkit._apply_output_guardrail(text)
     body = kept[: -len(TRUNCATION_MARKER)]
-    assert len(kept) + escapes(body) + fence_lines_room() <= 20_000
-    assert len(kept) + escapes(body) + fence_lines_room() >= 20_000 - 1
+    assert len(kept) + escapes(body) + fence_lines_room() + room <= 20_000
+    assert len(kept) + escapes(body) + fence_lines_room() + room >= 20_000 - 1
     assert len(fenced("ev_" + "9" * 16, kept)) <= 20_000
 
 

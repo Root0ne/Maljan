@@ -427,16 +427,20 @@ class GhidraHTTPClient:
         better of the two: the summariser answers in English prose, and prose
         is exactly what leaves the record with nothing structured in it. A
         decompilation that arrives as plain text still reaches the summariser
-        and then the character cut, byte for byte as before.
+        and then the character cut, which keeps back the room of the
+        completeness line the recorder appends to a cut answer
+        (``schemas.answer_completeness.cut_line_room``).
         """
         from maljan.agents.output_shortening import shorten_json_document, shorten_target
         from maljan.agents.tool_fence import cut_length, view_room
         from maljan.core.truncation_ledger import record_guardrail_outcome
         from maljan.llm.context_window import (
+            note_answer_line_room,
             note_answer_not_shown,
             note_answer_whole,
             output_limit,
         )
+        from maljan.schemas.answer_completeness import cut_line_room, shortened_line_room
 
         chars_in = len(output)
         limit = output_limit(self._max_output_chars, self._context_budget)
@@ -478,7 +482,19 @@ class GhidraHTTPClient:
             limit,
         )
 
-        attempt = shorten_json_document(output, shorten_target(limit, narrowing), cap=limit)
+        # The completeness line under a shortened document is kept back from
+        # the shortening's target as its sentence is, so the answer, the
+        # sentence and the line together are inside the limit; the compact
+        # form is still measured against the limit itself.
+        # Kept back only while the shortening still has a target left;
+        # otherwise the line is charged by the recorder.
+        target = shorten_target(limit, narrowing) - shortened_line_room(output, narrowing)
+        line_kept_back = target >= 1
+        if not line_kept_back:
+            target = shorten_target(limit, narrowing)
+        attempt = shorten_json_document(output, target, cap=limit)
+        if attempt.shortened and line_kept_back:
+            note_answer_line_room()
         if attempt.compacted:
             record_guardrail_outcome(
                 self._truncation_ledger,
@@ -507,7 +523,13 @@ class GhidraHTTPClient:
             except Exception as exc:
                 logger.warning("Output guardrail failed: %s - falling back to truncation.", exc)
             else:
-                self._charge_overage(len(summarised) + view_room(summarised), limit)
+                # The completeness line the recorder appends to a cut answer
+                # (``schemas.answer_completeness``) enters the conversation too.
+                self._charge_overage(
+                    len(summarised) + view_room(summarised) + cut_line_room(chars_in, narrowing),
+                    limit,
+                )
+                note_answer_line_room()
                 record_guardrail_outcome(
                     self._truncation_ledger,
                     chars_in=chars_in,
@@ -519,8 +541,19 @@ class GhidraHTTPClient:
                 return summarised
 
         # The kept part is text and fenced: the fence and the escapes inside
-        # the kept part, never the whole answer's, are kept back.
-        result = output[: cut_length(output, truncation_target(limit))] + TRUNCATION_MARKER
+        # the kept part, never the whole answer's, are kept back, and so is the
+        # completeness line the recorder appends to it, so the answer and the
+        # line together are inside the limit.
+        # Kept back only while some of the answer still fits beside it; a
+        # limit too small for both keeps the answer's place, as it always
+        # did, and the recorder charges the line instead.
+        room = cut_line_room(chars_in, narrowing)
+        kept = cut_length(output, max(0, truncation_target(limit) - room))
+        if kept > 0:
+            note_answer_line_room()
+        else:
+            kept = cut_length(output, truncation_target(limit))
+        result = output[:kept] + TRUNCATION_MARKER
         self._charge_overage(len(result) + view_room(result), limit)
         record_guardrail_outcome(
             self._truncation_ledger,

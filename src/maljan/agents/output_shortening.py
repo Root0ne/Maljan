@@ -61,7 +61,10 @@ __all__ = [
     "Shortening",
     "MAX_NARROWING_NAMES",
     "MAX_SENTENCE_ROOM",
+    "bounding_arguments",
+    "is_plain_name",
     "narrowing_arguments",
+    "paging_arguments",
     "our_key_in",
     "shorten_json_document",
     "shorten_target",
@@ -439,9 +442,12 @@ def _our_key(document: dict[str, Any]) -> str:
 # The built-in sidecars between them offer every name here: ``strings`` pages
 # with ``limit``/``offset`` and filters with ``pattern``/``start``/``end``, the
 # network tools bound with ``packet_limit``, the knowledge tools with ``k``,
-# and ``archive_list``/``apk_info`` with ``limit``.
+# and ``archive_list``/``apk_info`` with ``limit``. A ``cursor`` is how an MCP
+# server, and many others, page: the answer names the next one and the call
+# passes it back.
 _NARROWING_NAMES = frozenset(
     {
+        "cursor",
         "end",
         "filter",
         "k",
@@ -460,7 +466,7 @@ _NARROWING_NAMES = frozenset(
 # ``block_size`` name a machine detail and narrow nothing, so it counts only
 # under a name that already reads as a bound.
 _NARROWING_PREFIXES = ("max_",)
-_NARROWING_SUFFIXES = ("_limit", "_offset", "_page")
+_NARROWING_SUFFIXES = ("_cursor", "_limit", "_offset", "_page")
 _SIZE_SUFFIX = "_size"
 _SIZE_PREFIXES = ("page_", "max_")
 
@@ -477,6 +483,11 @@ MAX_NARROWING_NAME_CHARS = 40
 # model is reading a list instead of narrowing a call, and the cap is what
 # bounds what a server can spend of the answer's own budget.
 MAX_NARROWING_NAMES = 6
+
+
+def is_plain_name(name: str) -> bool:
+    """Whether ``name`` is a plain identifier the platform's own sentences may name."""
+    return bool(_PLAIN_NAME_RE.match(str(name)))
 
 
 def narrowing_arguments(names: Any) -> tuple[str, ...]:
@@ -504,6 +515,48 @@ def narrowing_arguments(names: Any) -> tuple[str, ...]:
             found.append(name)
         if len(found) == MAX_NARROWING_NAMES:
             break
+    return tuple(found)
+
+
+# Of the narrowing names, the ones that bound how many rows come back rather
+# than choose which: ``limit``, ``k``, a ``max_`` or ``_limit`` name, a page or
+# maximum ``_size``. ``offset``, ``page``, ``pattern`` and the rest choose.
+_BOUNDING_NAMES = frozenset({"k", "limit"})
+_BOUNDING_SUFFIXES = ("_limit",)
+
+
+# Of the narrowing names, the ones that choose which rows rather than page
+# through them: a filter reaches a different answer, never the rest of this one.
+_FILTER_NAMES = frozenset({"end", "filter", "pattern", "query", "start"})
+
+
+def paging_arguments(names: Any) -> tuple[str, ...]:
+    """Of a tool's narrowing arguments, those that page its answer: never a filter.
+
+    ``offset``, ``limit``, ``cursor``, ``page``, ``k`` and their declared forms
+    (``…_offset``, ``…_limit``, ``…_cursor``, ``…_page``, ``max_…``,
+    ``page_size``). What the completeness line (``schemas.answer_completeness``)
+    names as reading further.
+    """
+    return tuple(name for name in narrowing_arguments(names) if name.lower() not in _FILTER_NAMES)
+
+
+def bounding_arguments(names: Any) -> tuple[str, ...]:
+    """Of a tool's narrowing arguments (:func:`narrowing_arguments`), those that bound a count.
+
+    Read by the completeness line (``schemas.answer_completeness``): a call
+    that passed one and got back a list exactly that long has a full page.
+    """
+    found: list[str] = []
+    for name in narrowing_arguments(names):
+        lowered = name.lower()
+        if (
+            lowered in _BOUNDING_NAMES
+            or lowered.startswith(_NARROWING_PREFIXES)
+            or lowered.endswith(_BOUNDING_SUFFIXES)
+            or (lowered.endswith(_SIZE_SUFFIX) and lowered.startswith(_SIZE_PREFIXES))
+        ):
+            found.append(name)
     return tuple(found)
 
 
