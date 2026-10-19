@@ -196,7 +196,182 @@ class TestAHeaderThatStatesWhereTheTextEnds:
         assert "32 bytes" in answer["readable_test"]
 
 
+def _rows(answer: dict) -> list[tuple[str, str]]:
+    return [
+        (row["scheme"], row["text"])
+        for row in answer["results"] + answer.get("unreferenced_results", [])
+    ]
+
+
+class TestTheKeyThatMakesTheTerminator:
+    """A key near the right one reads the letters as other letters and the NUL as one more."""
+
+    @pytest.mark.parametrize(
+        ("text", "key"),
+        [
+            (b"cobalt meadow lantern 52817", 0x86),
+            (b"harbor violet thistle 40466", 0x99),
+            (b"saffron quiver ledger 31275", 0xAB),
+            (b"advapi32.dll", 0xC1),
+            (b"open the settings file", 0x99),
+            (b"Hello world", 0x80),
+        ],
+    )
+    def test_one_key_byte_with_its_nul_encoded(self, tmp_path: Path, text: bytes, key: int) -> None:
+        row = _only(_decode(tmp_path, _with_blob(_xor8(text + b"\0", key))))
+        assert (row["scheme"], row["parameters"]["key"], row["text"]) == (
+            "xor8",
+            f"{key:#04x}",
+            text.decode(),
+        )
+
+    @pytest.mark.parametrize(
+        ("text", "first"),
+        [
+            (b"cobalt meadow lantern 52817", 0xC5),
+            (b"harbor violet thistle 40466", 0xC1),
+            (b"kernel32.dll", 0xC5),
+            (b"GetProcAddress", 0xB3),
+        ],
+    )
+    def test_a_rising_key_with_its_nul_encoded(
+        self, tmp_path: Path, text: bytes, first: int
+    ) -> None:
+        row = _only(_decode(tmp_path, _with_blob(_rising(text + b"\0", first))))
+        assert (row["scheme"], row["parameters"]["first_key"], row["text"]) == (
+            "xor8_rolling",
+            f"{first:#04x}",
+            text.decode(),
+        )
+
+    def test_near_key_readings_of_the_same_scheme_are_set_aside_and_counted(
+        self, tmp_path: Path
+    ) -> None:
+        answer = _decode(tmp_path, _with_blob(_xor8(b"harbor violet thistle 40466\0", 0x99)))
+        assert _rows(answer) == [("xor8", "harbor violet thistle 40466")]
+        assert answer["outranked_spans"] == 1, "one string, not one per reading set aside"
+
+    def test_the_other_sweep_s_reading_of_the_terminator_is_stated_not_dropped(
+        self, tmp_path: Path
+    ) -> None:
+        # The rising key reads the byte the single key byte turned into its NUL
+        # as one more character, not white space, and reads worse on both
+        # measures: the terminated reading is the row, the other is beside it.
+        answer = _decode(tmp_path, _with_blob(_xor8(b"cobalt meadow lantern 52817\0", 0x86)))
+        row = _only(answer)
+        assert row["text"] == "cobalt meadow lantern 52817"
+        assert [other["scheme"] for other in row["parameters"]["also_read_as"]] == ["xor8_rolling"]
+        assert answer["outranked_spans"] == 0, "nothing of the other sweep is set aside"
+
+    def test_a_header_found_inside_a_terminated_text_is_set_aside(self, tmp_path: Path) -> None:
+        # Bytes of this text read as a seed-and-length header with a stated
+        # length that fits; they are characters of the text the key ended.
+        answer = _decode(tmp_path, _with_blob(_xor8(b"lantern orchid 13395\0", 0xBA)))
+        assert _rows(answer) == [("xor8", "lantern orchid 13395")]
+
+    def test_terminated_readings_of_both_sweeps_that_tie_are_ambiguous(
+        self, tmp_path: Path
+    ) -> None:
+        # Both keys turn the byte after the text into a NUL and each sweep read
+        # the span under two keys before: as before, no reading is chosen.
+        answer = _decode(
+            tmp_path, _with_blob(_rising(b"Hello world\0", 0x82)), include_unreferenced=True
+        )
+        assert _rows(answer) == []
+        assert answer["ambiguous_spans"] >= 1
+
+    def test_a_tie_the_earlier_rules_decided_is_decided_as_before(self, tmp_path: Path) -> None:
+        # The rising key read this span under two keys, the single key byte
+        # under one: the earlier rules answered the single key byte.
+        row = _only(_decode(tmp_path, _with_blob(_xor8(b"advapi32\0", 0x8E))))
+        assert (row["scheme"], row["text"]) == ("xor8", "advapi32")
+        row = _only(_decode(tmp_path, _with_blob(_rising(b"kernel32.dll\0", 0xF3))))
+        assert (row["scheme"], row["text"]) == ("xor8_rolling", "kernel32.dll")
+
+    @pytest.mark.parametrize(
+        "blob",
+        [
+            _xor8(b"Hello world\n", 0x9C) + b"\0",
+            _xor8(b"Injection done\n", 0xD1) + b"\0",
+            _xor8(b"Usage: program ", 0x9C) + b"\0",
+            _xor8(b"Hello world\n", 0x9C),
+            _xor8(b"Hello world\n\0", 0x9C),
+            _xor8(b"pASSWORD ", 0xF6) + b"\0",
+            _rising(b"Hello world\n", 0xBF) + b"\0",
+        ],
+        ids=[
+            "newline-zero",
+            "newline-zero-2",
+            "space-zero",
+            "section-edge",
+            "newline-nul",
+            "case-flip",
+            "rising-newline-zero",
+        ],
+    )
+    def test_a_text_ending_in_white_space_is_left_as_it_was(
+        self, tmp_path: Path, blob: bytes
+    ) -> None:
+        # The near key that turns the trailing newline or space into a NUL
+        # reads the letters no worse, so nothing is set aside and the span
+        # stays ambiguous, as before; no third reading gets through.
+        answer = _decode(tmp_path, _with_blob(blob), include_unreferenced=True)
+        assert _rows(answer) == []
+
+    @pytest.mark.parametrize(
+        "blob",
+        [
+            _rising(b"Content-Type: text/html\t", 0xA3) + b"\0",
+            _rising(b"CreateMutexA ", 0xB4) + b"\0",
+        ],
+        ids=["tab-zero", "space-zero"],
+    )
+    def test_the_other_sweep_never_sets_a_rising_key_text_aside(
+        self, tmp_path: Path, blob: bytes
+    ) -> None:
+        rows = _rows(_decode(tmp_path, _with_blob(blob), include_unreferenced=True))
+        assert not any(scheme == "xor8" for scheme, _ in rows), rows
+        assert ("xor8_rolling", "cREATEmUTEXa") not in rows
+
+    def test_a_decoder_that_recovered_the_other_reading_is_said_apart(self, tmp_path: Path) -> None:
+        target = tmp_path / "s.exe"
+        target.write_bytes(_with_blob(_xor8(b"cobalt meadow lantern 52817\0", 0x86)).build())
+        other = "`ococx-gnimy`4ys}dtlq<((#).&"
+        recovered = [
+            {
+                "kind": "decoded",
+                "string": other,
+                "function_rva": "0x1100",
+                "called_at_rva": "0x1180",
+            }
+        ]
+        word = string_blobs.decoder_word(shipped=False)
+        answer = decode_string_blobs(str(target), recovered=recovered, decoder=word)
+        row = _only(answer)
+        assert row["text"] == "cobalt meadow lantern 52817"
+        assert word not in row and answer["also_recovered_by_decoder"] == 0
+        assert row["decoder_matches_the_alternative"] == {
+            "text": other,
+            "scheme": "xor8_rolling",
+            "function_rva": "0x1100",
+            "called_at_rva": "0x1180",
+        }
+
+
 class TestWhatIsNotReported:
+    def test_random_runs_between_zero_bytes_decode_to_nothing(self, tmp_path: Path) -> None:
+        noise = random.Random(23)
+        image = _image()
+        at = 0
+        while at < 0xF00:
+            run = bytes(noise.randrange(1, 256) for _ in range(noise.randrange(8, 40)))
+            image.put("data", at, run)
+            image.lea_to(0x100 + at // 0x40 * 8, DATA_RVA + at)
+            at += len(run) + noise.randrange(1, 4)
+        answer = _decode(tmp_path, image, include_unreferenced=True)
+        assert answer["results"] == []
+        assert answer["unreferenced_results"] == []
+
     def test_random_bytes_decode_to_nothing(self, tmp_path: Path) -> None:
         noise = random.Random(11)
         image = _image()
