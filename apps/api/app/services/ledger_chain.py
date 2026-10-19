@@ -198,20 +198,27 @@ KEY_ID_LENGTH = 16
 UNKEYED = ChainKey(key=b"", key_id="")
 
 
-def derive_key(secret: str) -> ChainKey:
-    """The chain key derived from ``secret`` (the settings encryption key's text)."""
+def derive_key(secret: str, label: bytes = KEY_LABEL) -> ChainKey:
+    """The key derived from ``secret`` (the settings encryption key's text) under ``label``.
+
+    ``label`` is the HKDF purpose label: the chain's own (:data:`KEY_LABEL`)
+    by default; another use of the same secret (the job package's signature)
+    names its own, so neither key can stand in for the other.
+    """
     from cryptography.hazmat.primitives import hashes
     from cryptography.hazmat.primitives.kdf.hkdf import HKDF
 
-    key = HKDF(algorithm=hashes.SHA256(), length=32, salt=None, info=KEY_LABEL).derive(
+    key = HKDF(algorithm=hashes.SHA256(), length=32, salt=None, info=label).derive(
         secret.encode("utf-8")
     )
     digest = hashlib.sha256(b"maljan-ledger-chain-key-id/1\n" + key).hexdigest()
     return ChainKey(key=key, key_id=digest[:KEY_ID_LENGTH])
 
 
-def platform_key_status() -> tuple[ChainKey | None, str | None]:
+def platform_key_status(label: bytes = KEY_LABEL) -> tuple[ChainKey | None, str | None]:
     """The key derived from the settings encryption key, or ``None`` with the reason there is none.
+
+    ``label`` is the purpose label it is derived under (:func:`derive_key`).
 
     The bootstrap settings are read first; only a failure to import or to
     validate them is caught, and it is named in the reason. The process
@@ -233,7 +240,7 @@ def platform_key_status() -> tuple[ChainKey | None, str | None]:
     if not secret:
         secret = os.environ.get(ENV_VAR, "").strip()
     if secret:
-        return derive_key(secret), None
+        return derive_key(secret, label), None
     if unread is not None:
         return None, (
             f"the bootstrap settings could not be read ({unread}) and {ENV_VAR} is not set "

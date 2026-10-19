@@ -615,6 +615,69 @@ async def verify_job_evidence(
     return LedgerVerificationResponse(**verdict)
 
 
+@router.get("/{job_id}/package")
+async def get_job_package(
+    job_id: uuid.UUID,
+    user: User = Depends(get_current_user),
+    svc: AnalysisService = Depends(_get_service),
+    db: AsyncSession = Depends(get_db),
+) -> StreamingResponse:
+    """The job's verifiable package: a deterministic ``.tar.gz`` (``services.job_package``).
+
+    It holds the stored run (report, evidence ledger, run summary, the judge's
+    bundle), the Markdown report, the STIX bundle, the spilled parts with
+    their digests, the ledger seal with its verification at build time and a
+    manifest of every file's SHA-256 and size, signed with an HMAC under a key
+    derived from the settings encryption key when the platform holds one. A
+    part the job lacks is listed in the manifest as absent, with why. The
+    sample file itself is not included; spilled tool answers may contain bytes
+    from it. Ownership is the job's, checked exactly the way the evidence page
+    checks it: 404 for anyone else. The rows and the seal's verification are
+    read in one snapshot; the package is built into an anonymous temporary
+    file and streamed from it. A file above ``upload_max_bytes`` is left out
+    and listed in the manifest as absent with its SHA-256 and size; 422 only
+    when the manifest itself would be above it. No limit
+    of its own bounds concurrent builds: the platform's per-client request
+    rate limit (``rate_limit_requests``) applies, as to every route.
+    """
+    import tempfile
+
+    from app.services import job_package
+
+    job = await svc.get_job(job_id, user)
+    if not job:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Job not found")
+    spool = tempfile.TemporaryFile()  # noqa: SIM115 — closed by the stream it feeds
+    try:
+        manifest = await job_package.build_for_job(db.bind, job_id, spool)
+    except job_package.PackageError as exc:
+        spool.close()
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)
+        ) from None
+    except BaseException:
+        spool.close()
+        raise
+    if manifest is None:
+        spool.close()
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Job not found")
+    seal_status = str((manifest.get("seal") or {}).get("status") or "")
+    if seal_status not in ("verified", "not_sealed"):
+        logger.warning(
+            f"Package of job {log_safe(job_id)} built with a ledger seal that reads "
+            f"{log_safe(seal_status)}",
+            extra={"job_id": log_safe(job_id), "user_id": log_safe(user.id)},
+        )
+    headers = {
+        "Content-Disposition": f'attachment; filename="maljan-job-{job_id}.tar.gz"',
+        "X-Package-Seal-Status": seal_status,
+        "X-Package-Signed": "true" if "key_id" in (manifest.get("signature") or {}) else "false",
+    }
+    return StreamingResponse(
+        job_package.copy_chunks(spool), media_type="application/gzip", headers=headers
+    )
+
+
 @router.get("/{job_id}/evidence/{entry_id}/objects/{part}")
 async def get_job_evidence_object(
     job_id: uuid.UUID,

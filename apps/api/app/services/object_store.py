@@ -397,6 +397,14 @@ def evidence_spill(job_id: object, max_bytes: int = 0, *, store: Any = None) -> 
 
 async def job_evidence_spill(job_id: object) -> Any:
     """:func:`evidence_spill` bounded by the operator's ``upload_max_bytes``, read now."""
+    return evidence_spill(job_id, await evidence_bound())
+
+
+async def evidence_bound() -> int:
+    """The bound on one kept part: the operator's ``upload_max_bytes``, read now.
+
+    The setting's own default stands when it cannot be read, and that is logged.
+    """
     from maljan.core.delivery_limits import SAMPLE_UPLOAD_MAX_BYTES
 
     from app.runtime_config import runtime_config
@@ -410,7 +418,7 @@ async def job_evidence_spill(job_id: object) -> Any:
             type(exc).__name__,
         )
         bound = SAMPLE_UPLOAD_MAX_BYTES
-    return evidence_spill(job_id, bound)
+    return bound
 
 
 def remove_prefix(store: Any, prefix: str) -> int:

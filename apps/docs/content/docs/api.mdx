@@ -111,6 +111,27 @@ not checked. The seal is also served in the run summary and the full report as
 `ledger_seal`, with any `ledger_amendments` an enrichment chained onto it
 (see Operations, Sealed evidence ledger).
 
+`GET /jobs/{job_id}/package` downloads the job's verifiable package, a
+deterministic `.tar.gz` (`application/gzip`, served as
+`maljan-job-<job_id>.tar.gz`), under the same ownership rule: another
+account's job is not found. It holds the stored run in the replay export's
+layout under `run/` (the report row and document, the evidence ledger, the run
+summary, the judge's bundle, the events, the job row with the sample's hash
+and name), `report/report.md`, `export/stix-bundle.json`,
+`ledger/spilled.json` with each spilled part's bytes under
+`ledger/objects/<sha256>` where they were read back and verified, `seal.json`
+(the seal and its verification at build time) and `manifest.json` (every
+file's SHA-256 and size, each part's path, and each absent part with why),
+plus `manifest.sig` when the platform holds a settings encryption key. The
+`X-Package-Seal-Status` header is the build-time verification's status and
+`X-Package-Signed` says whether the manifest is signed. The rows and the
+seal's verification are read in one snapshot. The sample file itself is not
+included; spilled tool answers may contain bytes from it. A file above
+`upload_max_bytes` is left out and listed in the manifest's `oversized` and
+`absent` with its SHA-256, its size and the reason "larger than the package
+bound". Check one with `python -m scripts.package.verify <file>` (see
+Operations, Job package).
+
 `GET /jobs/{job_id}/usage` is what the job's model calls used and cost so far,
 totalled from its `model_usage` events (one per call, committed as the call is
 recorded): `calls`, and `retries` and `failed_attempts`, which are records but
