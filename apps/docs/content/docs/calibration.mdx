@@ -1,0 +1,196 @@
+---
+title: "Calibration set"
+description: "Synthetic PE files whose ground truth is known, a deterministic scorer over stored runs, a held-out half, and the answer-key leak check."
+---
+
+A benchmark scored against one real sample can be tuned to that sample. The
+**calibration set** is a set of synthetic PE files built from seeds, each with
+a manifest of what it holds and what it does not, so a run can be scored with
+no human key and no model. It sits beside the [replay](/replay/) and
+[blind scoring](/blind-scoring/). Everything lives in `scripts/calibration/`,
+and none of it ships in the product.
+
+## The cases
+
+`scripts/calibration/seeds.json` lists one seed and one format per case
+(`pe64`, `pe32`, `upx`). Each case is built with the test suite's own PE
+writers (`tests/unit/tools/synthetic_pe.py`, `synthetic_upx.py`). The same
+seed always gives the same bytes and the same manifest. The bytes are benign.
+The files are written as `.bin` and are never run.
+
+The code is a short call graph laid out back to back. The entry calls one
+function. That function takes the address of each part a fact says the code
+uses, calls the imports the code uses, and returns. A disassembler therefore
+finds every reference a fact claims, and none for a trap. In a packed case,
+the unpacked program's entry calls a block at the end of `.text`. That block
+calls the present imports and returns, and it never calls the dead one. The
+test traces it from the entry. The case is packed with LZMA, and generation
+fails if a hard import name stays readable in the packed file.
+
+The packed bytes come from the LZMA encoder that Python links (liblzma), and
+xz does not promise that its output stays byte-for-byte the same across
+versions. If a packed case's pinned digest moves while the plain cases' do
+not, the test failure names the liblzma version it found. The library is not
+pinned.
+
+Every surface a case shows is drawn from its seed: the APIs, the comment
+phrasing, the URL shape, and the config's layout, field names and separator.
+Each catalogue is split in two. A tuning case draws from one half and a
+held-out case from the other, so what is learnt about the tuning cases'
+surface does not carry over to the held-out cases.
+
+A manifest has three lists:
+
+| List | What it holds |
+| :-- | :-- |
+| `facts` | What the file holds, each `easy` or `hard`, with the terms a report states it by. A term may have several spellings, and a fact the code refers to carries its `rva`. Easy facts: an import the code calls, a plain string, a writable and executable section, the packer, an export of the packed file. Hard facts: a one-byte XOR string, a table of ROR-13 API hashes, a repeating-XOR config with its key stored in front, an import of a packed file. |
+| `traps` | What looks like a capability and is not: an import no code calls, an API name inside a comment string, a URL in a resource or overlay nothing refers to. Each trap lists the techniques and indicators that would claim it. No two traps share a technique. |
+| `absent` | Catalogue capabilities the case does not have, each with the technique ids that would claim it. |
+
+```bash
+python scripts/calibration/run.py split                      # each case's format and half
+python scripts/calibration/run.py build --out calibration-set
+python scripts/calibration/run.py manifest cal-pe64-1101
+```
+
+`build` writes every case, an `index.json` without answers, and the manifests
+the mode may read. Its default output, `calibration-set/`, is gitignored.
+Running the cases through the platform is a live run, so it needs the same
+approval as any paid run.
+
+A decoy's host is a random name under `.com`. The publish rule never publishes
+a reserved name (`.example`, `.invalid`, `.test`, `.localhost`, `.local`,
+`.onion`), so a decoy under one could never be claimed. **A live run of the
+set looks these hosts up through the configured threat-intel servers**, like
+any other indicator. The config's host is under `.invalid`.
+
+## Scoring a stored run
+
+```bash
+python scripts/calibration/run.py score runs/cal-pe64-1101 [--json score.json]
+```
+
+The scorer reads only the run's directory, with the replay's reader, and
+digests every file before and after the read. Everything is read as the run
+stored it, so no publish rule or table is computed again with today's code.
+Free text can only make an item **mentioned**, never found or false.
+
+| Part | Where it comes from |
+| :-- | :-- |
+| Tool and pack rows | `static` and `emulated_strings` of `report.json`, and the cells of every report section a tool's answer or the routing wrote (section source `tool:` or `routing`) |
+| Kept claims | the claims in force (`agent_findings` in `report-byjob.json`), each with the text of the ledger entries it cites |
+| Publications, as stored | the ATT&CK table's technique ids (`ttp_mappings`), the capability matrix cells stored with an empty `not_published`, and the stored IOC rows whose stored publish answer is yes (the sample's own digests aside) |
+| Held back | matrix cells stored with a `not_published` reason, stored IOC rows answered no, and positive claims in force whose technique is not published. A claim that reads as absence is not a claim of the item: its stored `kept_after_absence_question` flag, or the platform's own absence reading, decides. |
+| Free text | every other string of `report.json` (narrative, an analyst's `artifact:` table, findings sections, notes) and of the report row. The bookkeeping fields `evidence_index`, `tool_queries`, `tool_sightings`, `run_summary`, `front_matter` and `version_history` count as neither tool rows nor free text. |
+| Evidence | each ledger entry's answer in `evidence.json` |
+
+A part the run did not store, such as the IOC table without publish answers,
+is listed under `not_read`, and an item that depends on it is **not recorded**.
+The case is found by the run's sample SHA-256 (`job.json`, or the report's
+identity). `--case` names it when the run does not.
+
+How each fact type is read from the tool and pack rows (case-folded, with
+defanging undone):
+
+| Fact type | Held when |
+| :-- | :-- |
+| `import`, `export`, `string`, `api_hash`, `packed` | each term is a whole token of a tool row: an import or export row, a strings-table cell, a hash resolver's answer, a packer field |
+| `xor_string`, `config` | each term is inside a tool row: a recovered string, a decoder's text or key |
+| `section_anomaly` | `static.sections` holds the section flagged (`is_suspicious`, or WRITE and EXECUTE); listed but not flagged is partial |
+
+| Verdict | When |
+| :-- | :-- |
+| found | a tool or pack row holds every term, a kept claim states every term and the ledger entries it cites hold every term, or the report publishes the fact's own indicator |
+| partial | the rows hold some terms, only the fact's technique is published (that is no evidence of the specific import, string or key), or only the evidence holds every term |
+| mentioned | only free text names the fact, trap or absence (a denial included) |
+| missed | none of these |
+| false | the stored publications claim the trap or absent capability: a published technique (a sub-technique claims its parent), a published capability cell, or a published indicator that names it. The total counts each published technique or indicator once. |
+| withheld | the platform held a positive claim of it back; never a false positive |
+| not recorded | the part it would be published in was not stored |
+| beyond | a published technique or indicator that no fact, trap or absence covers |
+
+Both the output and the totals split facts by difficulty.
+
+## The held-out half
+
+The split is stratified by format. For each format, the cases are shuffled
+with the split seed in `seeds.json`. The first half tunes and the rest is held
+out (the extra case of an odd count is held out). Every manifest records its
+half and the split seed.
+
+`--mode` is `tuning` unless you give it. In tuning mode, `manifest` and `score`
+refuse a held-out case with status 2, and `build` writes the bytes of a
+held-out case but not its manifest. A gate reads only the held-out half:
+
+```bash
+python scripts/calibration/run.py gate runs/cal-* [--json gate.json]
+```
+
+`gate` builds no tuning case. It names a run of a tuning case as not scored,
+and names each held-out case that has no run. It prints ids, kinds, verdicts
+and totals, and never a term or a claimed value. In `--mode heldout`, `score`
+reads a held-out case, but still prints and writes no term of it.
+
+## The answer-key leak check
+
+```bash
+python scripts/calibration/run.py leak-check [--terms FILE] [--settings-export FILE] [--allow-entries]
+```
+
+This is a local check to run before promotion. It scans the files that ship
+what a model is told, tracked or not (a file git ignores is not read):
+
+- `src/maljan`: prompts, provider fragments, built-in agents, profiles and teams;
+- `services`: tool descriptions;
+- `apps/api`: seeded defaults;
+- `data`;
+- `scripts/validation`: the validation scenarios' prompts.
+
+With `--settings-export FILE`, it also scans every string of a settings export,
+which covers the agents, teams and profiles the database holds. Each such hit
+is named `FILE#json.path:line`. The terms it looks for:
+
+- every case's generated values (`leak_terms`), from both halves, and the
+  generator's template phrases;
+- the private term list: `answer-key-terms.txt` at the repository root, which
+  is gitignored and supplied locally. It holds the reference samples' key
+  terms. The file is UTF-8 with one term per line. Blank lines and lines
+  starting with `#` are skipped. A line starting with `cs:` is matched case
+  for case, and any other line is matched case-folded. Use terms specific to
+  the sample: a common word hits everywhere.
+
+When the default private file is absent, the check says so and runs on the
+other terms. The verdict line says `private list: not read`. A file named with
+`--terms` that does not exist is an error (status 2).
+
+A term matches only as a whole token. A hex term also matches with `0x` before
+it, with spaces or colons between its bytes, and in any case. Each hit is
+printed as `path:line: term` and fails the check with status 1, unless an
+allow-list allows that occurrence. There are two lists, in one format:
+
+- `answer-key-allow.json` at the repository root. It sits beside the private
+  term list, is gitignored and is supplied locally (`--private-allow` names
+  another file), and it holds the entries for the private terms. An unsalted
+  digest of a private word could be reversed with a dictionary, so these
+  entries are never committed.
+- `scripts/calibration/leak_allow.json` is committed. It may allow only a
+  calibration term, which is public anyway, and it is empty today. An entry in
+  it never allows a private term.
+
+Neither list holds a term. Each entry is:
+
+- `path`;
+- `term_sha256`;
+- `line_sha256`, the SHA-256 of the exact line;
+- `reason`, one line.
+
+An entry allows one occurrence on that line, so an edited line needs a new
+entry. `--allow-entries` prints the entry for each hit, ready to review. An
+allowed hit is printed with its reason, and an entry that matched nothing is
+named.
+
+Third-party tables (IANA's root zone, the Wine export names, the ATT&CK tables)
+are named and not scanned. A scanned file that is not UTF-8, an allow-list
+with an unknown key, and an unreadable settings export are errors that name
+the file. A hit on a held-out term prints that term: by then it has already
+leaked.

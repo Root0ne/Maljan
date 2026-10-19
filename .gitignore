@@ -93,3 +93,11 @@ logs/
 
 # Rehearsal outputs (scripts/rehearsal/run.py --out default) and its in-process work files.
 rehearsal-results/
+
+# Calibration set outputs (scripts/calibration/run.py build --out default): the
+# synthetic cases' bytes are rebuilt from scripts/calibration/seeds.json, never kept.
+calibration-set/
+# The private answer-key term list the leak check reads (scripts/calibration/leak_check.py).
+/answer-key-terms.txt
+# Its allow-list: digests of the private terms, kept beside them.
+/answer-key-allow.json

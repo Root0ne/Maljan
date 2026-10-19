@@ -240,6 +240,7 @@ ICON_AT = RSRC + 0x200
 ENTRY = TEXT + 0x10
 PE_OFFSET = 0x80
 UPX1_RAW = 0x400
+CALL_BLOCK = TEXT + 0x1000 - 0x28  # past the out-of-range call near the code's end
 FILE_ALIGNMENT = 0x200
 CTO = 0x7A
 
@@ -289,6 +290,9 @@ class Program:
     wipe_resource_directory: bool = True
     icon_count: int = 3
     overlay: bytes = b""
+    # Imports the code calls through their IAT slots, from a block at
+    # ``CALL_BLOCK`` that ends in ``ret``; none by default.
+    calls: list[str] = field(default_factory=list)
 
     @property
     def image_base(self) -> int:
@@ -317,6 +321,38 @@ def _code(size: int) -> bytearray:
     for at in range(0x20, 0x60, 4):
         code[at] = 0x55 + (at & 0x1F)
     return code
+
+
+def iat_slot(program: Program, name: str) -> int:
+    """The RVA of ``name``'s IAT slot, as the packed program's import table lays it out."""
+    for index, entries in enumerate(program.imports.values()):
+        if name in entries:
+            return IAT + 0x40 * index + program.width * entries.index(name)
+    raise ValueError(f"{name} is not imported")
+
+
+def _write_calls(code: bytearray, program: Program) -> None:
+    """``call [slot]`` for each of ``program.calls`` at ``CALL_BLOCK``, then ``ret``.
+
+    The entry's first instruction becomes ``call CALL_BLOCK`` (it replaces a
+    five-byte jump of the same length), so the block is reached from the entry.
+    """
+    if not program.calls:
+        return
+    entry = ENTRY - TEXT
+    code[entry : entry + 5] = b"\xe8" + struct.pack("<i", CALL_BLOCK - (ENTRY + 5))
+    at = CALL_BLOCK - TEXT
+    if at + 6 * len(program.calls) + 1 > len(code):
+        raise ValueError(f"{len(program.calls)} calls do not fit in the call block")
+    for name in program.calls:
+        slot = iat_slot(program, name)
+        if program.is64:
+            operand = struct.pack("<i", slot - (TEXT + at + 6))
+        else:
+            operand = struct.pack("<I", program.image_base + slot)
+        code[at : at + 6] = b"\xff\x15" + operand
+        at += 6
+    code[at] = 0xC3
 
 
 def _optional_header(program: Program, directories: dict[int, tuple[int, int]]) -> bytes:
@@ -445,6 +481,7 @@ def build(program: Program | None = None) -> Packed:
         image[rva - RVAMIN : rva - RVAMIN + len(data)] = data
 
     code = _code(0x1000)
+    _write_calls(code, program)
     put(TEXT, code)
     data_section = bytearray(0x1000)
     relocated: list[int] = []
