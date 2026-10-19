@@ -330,6 +330,9 @@ class GhidraStaticProvider(StaticProvider):
         self._toolkit: Any = None
         self._all_tools: list[Any] = []
         self.tools: list[Any] = []
+        # The tools withheld because they could not be made to carry the job's
+        # program on a shared Ghidra, each with its reason.
+        self.withheld_tools: dict[str, str] = {}
 
     @classmethod
     def from_settings(cls, cfg: Settings) -> GhidraStaticProvider:
@@ -551,20 +554,42 @@ class GhidraStaticProvider(StaticProvider):
         nodes.py) whenever the model supplies a different one. Fail-safe:
         any wrapping error keeps the original tool.
         """
-        from maljan.providers.sample_open import wrap_open_tool
+        from maljan.providers.sample_open import (
+            REMOTE_TRANSPORTS,
+            pin_program_argument,
+            wrap_open_tool,
+        )
 
-        # First the general opener, with the tools the Ghidra block declares,
-        # then the pin around it.
+        # First the general opener, with the tools the Ghidra block declares;
+        # then, on a Ghidra other jobs share, every call held to the job's own
+        # programs and sample (Ghidra's current program is the server's); then
+        # the pin around load_program, outermost, so a model's invented path is
+        # replaced with the held one before anything is checked or sent.
+        cfg = getattr(self, "_cfg", None)
+        key = server_note_key(cfg, str(getattr(self, "note_instance", "") or ""))
+        spec = getattr(cfg, "sample_open", None)
+        notes = getattr(self, "sample_notes", None)
+        shared = str(getattr(cfg, "transport", "")) in REMOTE_TRANSPORTS
         tools = wrap_open_tool(
             tools,
             tools,
-            server=server_note_key(
-                getattr(self, "_cfg", None), str(getattr(self, "note_instance", "") or "")
-            ),
-            spec=getattr(getattr(self, "_cfg", None), "sample_open", None),
-            notes=getattr(self, "sample_notes", None),
+            server=key,
+            spec=spec,
+            notes=notes,
             held_path=self._held_path,
+            shared=shared,
         )
+        withheld: dict[str, str] = {}
+        tools = pin_program_argument(
+            tools,
+            server=key,
+            spec=spec,
+            notes=notes,
+            shared=shared,
+            held_path=self._held_path,
+            withheld=withheld,
+        )
+        self.withheld_tools = withheld
         out: list[Any] = []
         for tool in tools:
             if getattr(tool, "name", "") == "load_program":
@@ -574,6 +599,11 @@ class GhidraStaticProvider(StaticProvider):
                     logger.warning("load_program pin skipped: %s", e)
             out.append(tool)
         return out
+
+    def withheld_reasons(self) -> list[str]:
+        """Why each tool Ghidra offers is withheld for this job, for the run's degraded record."""
+        withheld = dict(getattr(self, "withheld_tools", None) or {})
+        return [withheld[name] for name in sorted(withheld)]
 
     def _wrap_load_program(self, tool: Any) -> Any:
         """Rebuild the load_program StructuredTool with a path-pinning coroutine.
@@ -734,11 +764,14 @@ class GhidraStaticProvider(StaticProvider):
         return True
 
     def call_graph(self, path: str) -> CallGraph | None:
-        """The current program's whole call graph, read from Ghidra's REST API.
+        """The job's program's whole call graph, read from Ghidra's REST API.
 
-        The program the open before the loop made current. ``None`` when
-        Ghidra is not reached over ``http``; a request that fails raises, and
-        the pre-pass reads that as no hint.
+        The program the job opened at ``path`` (its note), named in the
+        request by the argument Ghidra's block declares, never Ghidra's
+        current program, which is the server's and not the job's. ``None``
+        when Ghidra is not reached over ``http`` or the job opened no program
+        at ``path``; a request that fails raises, and the pre-pass reads that
+        as no hint.
 
         The whole graph, in one answer: the server's ``limit`` counts distinct
         call edges, defaults to 1000 when absent, and ``0`` means none; the
@@ -746,13 +779,31 @@ class GhidraStaticProvider(StaticProvider):
         does not name, ``json`` among them) with one ``CALLER -> CALLEE`` line
         per call, the text ``call_graph_from_text`` reads.
         """
+        from maljan.providers.sample_open import REMOTE_TRANSPORTS, SampleOpener, program_argument
+
         if not self._over_http():
             return None
-        with self._rest_client() as http:
-            resp = http.get(
-                f"{self._cfg.url.rstrip('/')}/get_full_call_graph",
-                params=CALL_GRAPH_PARAMS,
+        params = dict(CALL_GRAPH_PARAMS)
+        spec = getattr(self._cfg, "sample_open", None)
+        argument = program_argument(spec)
+        key = server_note_key(self._cfg, str(getattr(self, "note_instance", "") or ""))
+        program = SampleOpener(key, spec, sample_notes_of(self)).name_of(path) if argument else None
+        if argument and program:
+            params[argument] = program
+        elif self._cfg.transport in REMOTE_TRANSPORTS:
+            # Ghidra's current program is the server's: the graph it would
+            # answer may be another job's sample. No graph is said, not wrong.
+            logger.warning(
+                "Ghidra call graph: %s; no graph rather than whichever program is current on "
+                "%s, which other jobs share.",
+                f"{path} is not a program this job opened"
+                if argument
+                else "the Ghidra block declares no program argument (sample_open)",
+                key,
             )
+            return None
+        with self._rest_client() as http:
+            resp = http.get(f"{self._cfg.url.rstrip('/')}/get_full_call_graph", params=params)
             resp.raise_for_status()
         return call_graph_from_text(resp.text)
 
@@ -800,6 +851,7 @@ class GhidraStaticProvider(StaticProvider):
 
     def function_hashes(self, job: StaticJobContext) -> list[tuple[str, str]]:
         """Ghidra's per-function hashes of the job's mirror, over its REST API."""
+        from maljan.providers.sample_open import REMOTE_TRANSPORTS
         from maljan.providers.static.ghidra.function_hashes import fetch_bulk_function_hashes
 
         if not self.capabilities.provides_function_hashes or not job.mirror_sample_path:
@@ -812,6 +864,7 @@ class GhidraStaticProvider(StaticProvider):
             sample_open=getattr(self._cfg, "sample_open", None),
             sample_notes=getattr(self, "sample_notes", None),
             note_key=server_note_key(self._cfg, str(getattr(self, "note_instance", "") or "")),
+            shared=self._cfg.transport in REMOTE_TRANSPORTS,
         )
 
     async def probe(self) -> ProviderProbe:

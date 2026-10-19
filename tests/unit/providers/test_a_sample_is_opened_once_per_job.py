@@ -350,6 +350,9 @@ class TestOneServerOneNote:
         for handle in (first, second):
             handle._all_tools = server.tools()
             handle.sample_notes = notes
+            # The job's own copy of the sample: on a server other jobs share,
+            # the only path an open may name.
+            handle.error_sample_path = lambda: PATH
         assert first.note_key == second.note_key == "remote http://decompiler.invalid:9000/mcp"
         _open(first)
         _open(second)

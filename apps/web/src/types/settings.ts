@@ -277,6 +277,10 @@ export interface SampleOpenEntry {
   select_argument: string;
   analyse_tool: string;
   analyse_argument: string;
+  program_arguments?: string[];
+  open_path_arguments?: string[];
+  job_safe_tools?: string[];
+  shared_withheld_tools?: string[];
 }
 
 /** One way a server's plain-text answer says "error". */

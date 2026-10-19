@@ -3347,6 +3347,26 @@ built-in or added, may declare which of its tools opens a sample under
 | `select_argument` | the argument the opened name goes in |
 | `analyse_tool` | the tool that runs or awaits the server's analysis after the first open (optional) |
 | `analyse_argument` | the argument the opened name goes in; empty calls it with none |
+| `program_arguments` | further arguments a tool names an opened program by (a diff's two programs, say) |
+| `open_path_arguments` | further arguments that name a file a tool opens, beside `path_argument` |
+| `job_safe_tools` | tools that take no program or path argument and read nothing a job opened |
+| `shared_withheld_tools` | tools withheld on a shared server whatever they take (ones that run code or change the whole project) |
+
+On a server other jobs share (`http`, `streamable-http`, `sse`), the server's
+current program is every job's, so each call is held to the job's own. Every
+program argument a call carries (`select_argument`, `analyse_argument` and
+`program_arguments`) must name a program this job opened there, and one the
+tool takes that the call leaves out is given the program the job opened or
+selected last; every path argument (`path_argument` and `open_path_arguments`)
+may only name the job's own copy of the sample. Anything else is refused before
+the server is asked (`foreign_program`), as is a call naming no program before
+the job opened one (`no_job_program`). A tool whose input schema takes none of
+these arguments, or cannot be read, is withheld with its reason on the run's
+degraded record unless `job_safe_tools` lists it, and a tool
+`shared_withheld_tools` lists is withheld whatever it takes. The arguments
+checked are the ones a call carries, so one its schema does not declare is held
+to the job too. On a server no other job shares, the tools are offered as they
+are.
 
 With `open_tool` set, the platform keeps a note per job and per server of each
 path once it has been opened, and analysed where `analyse_tool` is named. A

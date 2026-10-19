@@ -296,7 +296,7 @@ export function acceptServerField(
     // Fills only the fields the server leaves empty: a declared field stays.
     const held: SampleOpenEntry = { ...EMPTY_SAMPLE_OPEN, ...(server.sample_open ?? {}) };
     const filled = { ...held };
-    for (const key of Object.keys(EMPTY_SAMPLE_OPEN) as (keyof SampleOpenEntry)[]) {
+    for (const key of Object.keys(EMPTY_SAMPLE_OPEN) as SampleOpenTextKey[]) {
       const value = proposed.value[key];
       if (!held[key] && typeof value === "string") filled[key] = value;
     }
@@ -304,6 +304,11 @@ export function acceptServerField(
   }
   return {};
 }
+
+/** The declaration's one-name fields; its lists are not proposed. */
+type SampleOpenTextKey = {
+  [K in keyof SampleOpenEntry]-?: SampleOpenEntry[K] extends string ? K : never;
+}[keyof SampleOpenEntry];
 
 const EMPTY_SAMPLE_OPEN: SampleOpenEntry = {
   open_tool: "",

@@ -51,7 +51,9 @@ def test_every_tool_the_server_offers_is_exposed():
         args_schema=create_model("Args", file=(str, ...)),
     )
     pool = [_Tool(f"t{i}") for i in range(100)] + [load] + [_Tool(f"u{i}") for i in range(100)]
-    exposed = _provider()._pin_load_program_path(pool)
+    # On a Ghidra no other job shares; a shared one holds each tool to the
+    # job (tests/unit/providers/test_a_job_reads_its_own_program.py).
+    exposed = _provider(transport="stdio")._pin_load_program_path(pool)
     assert [t.name for t in exposed] == [t.name for t in pool]
     assert exposed[100] is not load and exposed[100].name == "load_program"
     assert all(a is b for a, b in zip(exposed[:100], pool[:100], strict=True))
