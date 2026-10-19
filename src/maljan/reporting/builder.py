@@ -671,7 +671,7 @@ def ioc_table(report: MalwareReport, *, raise_unread: bool = False) -> list[Cons
 def _build_consolidated_iocs(report: MalwareReport) -> list[ConsolidatedIOC]:
     from maljan.extractors.network_extractor import url_host
     from maljan.reporting.ledger_projection import listed_non_network_values
-    from maljan.reporting.ledger_report import artifact_sections, listed_rows
+    from maljan.reporting.ledger_report import artifact_sections, listed_headings, listed_rows
     from maljan.reporting.renderers.stix_renderer import (
         corroborating_values,
         emulation_kwargs,
@@ -830,8 +830,9 @@ def _build_consolidated_iocs(report: MalwareReport) -> list[ConsolidatedIOC]:
     # so a value a tool recorded keeps the tool's row. A value the judge names
     # is the judge's row.
     for kind, section in artifact_sections(report.sections):
+        headings = listed_headings(section)
         for analyst, _cited, cells in listed_rows(section):
-            for ioc_kind, value, _payload in listed_non_network_values(kind, [cells]):
+            for ioc_kind, value, _payload in listed_non_network_values(kind, [cells], headings):
                 if (ioc_kind, value.strip().lower()) in judged:
                     continue
                 listed = f"an artifact of the {analyst} analyst" if analyst else ""

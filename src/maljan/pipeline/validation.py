@@ -10086,8 +10086,8 @@ def _indicator_problem(
         HASH_HEX_LENGTHS,
         IOC_FILE_EXTENSIONS,
         IOC_OS_RESOURCE_PREFIXES,
-        URL_DENY_HOSTS,
         malformed_hash_in,
+        on_a_denied_url_host,
     )
 
     if not pattern.strip():
@@ -10196,7 +10196,7 @@ def _indicator_problem(
             continue
         if path.startswith("url:"):
             host = _url_host(literal)
-            if host and any(host.endswith(d) or d in host for d in URL_DENY_HOSTS):
+            if host and on_a_denied_url_host(literal):
                 return (
                     f"the URL host in {safe_finding_value(literal)!r} is documentation or "
                     "vendor infrastructure."

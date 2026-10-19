@@ -33,7 +33,11 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
 
 from maljan.analysis.directed_text import KIND as DIRECTED_TEXT_KIND
-from maljan.analysis.technique_ids import api_capability_hits, sigma_technique_ids
+from maljan.analysis.technique_ids import (
+    api_capability_hits,
+    sigma_technique_ids,
+    technique_ids_in,
+)
 from maljan.core.logger import logger
 from maljan.core.tool_declarations import first, select
 from maljan.reporting import tool_kinds
@@ -386,14 +390,13 @@ def static_from_ledger(ledger: list[LedgerEntry]) -> StaticAnalysis | None:
                         rva=_opt(row.get("rva")),
                     )
                 )
-        # An APK's declared permissions are its import table: the same
-        # question — what did the author ask the platform for — answered in
-        # the vocabulary Android uses.
+        # An APK's declared permissions: what its author asked the platform
+        # for, in a list of their own (they used to be written as exports).
         # A permission list androguard could not read is a ``no: <reason>``
         # string, which lists no permission.
         permissions = data.get("permissions")
         if isinstance(permissions, list):
-            static.exports.extend(str(name) for name in permissions)
+            static.permissions.extend(str(name) for name in permissions)
         if data.get("pdb_path"):
             static.pdb_path = str(data["pdb_path"])
         rows = [row for row in data.get("packer_signatures") or [] if row]
@@ -532,6 +535,7 @@ def static_from_ledger(ledger: list[LedgerEntry]) -> StaticAnalysis | None:
     if import_reads and all(import_reads):
         static.imports_partial = import_reads
     static.exports = list(dict.fromkeys(static.exports))
+    static.permissions = list(dict.fromkeys(static.permissions))
     static.export_rows = _once(static.export_rows, lambda row: (row.name, row.ordinal, row.rva))
     # capa run twice over one file fires the same rules twice.
     static.api_technique_hits = _once(
@@ -775,6 +779,9 @@ def dynamic_from_ledger(ledger: list[LedgerEntry]) -> DynamicBehavior | None:
                     name=str(row.get("name") or ""),
                     description=str(row.get("description") or ""),
                     severity=_int(row.get("severity")),
+                    # The ids the sandbox tags the signature with, under the
+                    # key the tool writes them (``sandbox_signatures``).
+                    technique_ids=technique_ids_in(row.get("technique_ids")),
                 )
             )
 
@@ -1240,16 +1247,37 @@ def value_key(kind: str, value: Any) -> str:
     """One spelling of a value for every lookup: an address canonical, anything else folded.
 
     An address loses its brackets and is written in its compressed lower-case
-    form; any other value is lower-cased with a trailing dot taken off. The
-    sightings are keyed with it and looked up with it, so a spelling cannot
-    miss.
+    form; a URL has its scheme and its host lower-cased (a trailing dot off the
+    host) and its path, query and fragment as written, since a server may read
+    those by case; any other value is lower-cased with a trailing dot taken
+    off. The sightings are keyed with it and looked up with it, so a spelling
+    cannot miss.
     """
     text = str(value or "").strip()
     if kind == "ip":
         canonical = address_key(text.strip("[]"))
         if _parses_as_an_address(canonical):
             return canonical
+    if kind == "path":
+        # One separator, run or not, either way round: a path a STIX file
+        # names in its directory is read back joined by one separator.
+        unc = text.startswith(("\\\\", "//"))
+        folded = _PATH_SEPARATORS_RE.sub("\\\\", text.lower())
+        return (("\\" if unc else "") + folded).rstrip(".")
+    if kind == "url":
+        parts = _URL_PARTS_RE.match(text)
+        if parts is not None and (parts.group("scheme") or parts.group("rest")):
+            host = parts.group("host").lower()
+            host = host[:-1] if host.endswith(".") else host
+            return (parts.group("scheme") or "").lower() + host + parts.group("rest")
     return text.lower().rstrip(".")
+
+
+_PATH_SEPARATORS_RE = re.compile(r"[\\\\/]+")
+# A URL as its scheme, its authority and the rest (path, query, fragment).
+_URL_PARTS_RE = re.compile(
+    r"^(?P<scheme>[A-Za-z][A-Za-z0-9+.\-]*://)?(?P<host>[^/?#]*)(?P<rest>.*)$", re.S
+)
 
 
 def _strings_in(value: Any) -> Iterator[str]:
@@ -1297,20 +1325,46 @@ def tool_sightings(
         for entry in ledger or []
         if entry.ok
     ]
-    seen: dict[str, list[tuple[str, str]]] = {}
-    queried: dict[str, list[tuple[str, str]]] = {}
+    # Each value is searched for as it is spelled (``searched_spelling``) and
+    # keyed by ``value_key``: two spellings of one key (``/tmp/x``,
+    # ``\\tmp\\x``) hold what either is seen in.
+    spellings: dict[str, list[str]] = {}
     for kind, value in values:
         key = value_key(kind, value)
-        if not key or key in seen:
-            continue
+        searched = searched_spelling(kind, value)
+        if key and searched and searched not in spellings.setdefault(key, []):
+            spellings[key].append(searched)
+    seen: dict[str, list[tuple[str, str]]] = {}
+    queried: dict[str, list[tuple[str, str]]] = {}
+    for key, searched_as in spellings.items():
         holding = [
-            (eid, tool, whole_value_in(key, asked))
+            (eid, tool, any(whole_value_in(spelled, asked) for spelled in searched_as))
             for eid, tool, text, asked in texts
-            if whole_value_in(key, text)
+            if any(whole_value_in(spelled, text) for spelled in searched_as)
         ]
         seen[key] = [(eid, tool) for eid, tool, was_asked in holding if not was_asked]
         queried[key] = [(eid, tool) for eid, tool, was_asked in holding if was_asked]
     return seen, queried
+
+
+def searched_spelling(kind: str, value: Any) -> str:
+    """How a value is searched for in a tool's text: lower-cased as written, a trailing dot off.
+
+    The text is the tool's own, so a path is searched with its own separators
+    (``value_key`` writes one separator for indexing, which no text holds);
+    an address is searched in its canonical form. It is also the key a report
+    stored before ``value_key`` normalised URLs and paths keyed its sightings by.
+    """
+    if kind == "ip":
+        return value_key(kind, value)
+    return str(value or "").strip().lower().rstrip(".")
+
+
+def sighting_keys(kind: str, value: Any) -> list[str]:
+    """The keys a value's sightings may be held under: ``value_key``, then the stored spelling."""
+    return list(
+        dict.fromkeys(k for k in (value_key(kind, value), searched_spelling(kind, value)) if k)
+    )
 
 
 # The artifact kinds that list a network value as an indicator: the analyst's
@@ -1485,18 +1539,118 @@ _LISTED_PERSISTENCE_KINDS = {
 }
 
 
-def listed_non_network_values(kind: Any, rows: Iterable[Any]) -> list[tuple[str, str, str]]:
+# The headings an analyst's listing names its type, its value and its payload
+# under, each list in the order a heading is preferred: a persistence table
+# headed "Kind | Target | Value" holds the target under "Target" and what was
+# written under "Value".
+_LISTED_TYPE_HEADINGS = (
+    "type",
+    "kind",
+    "mechanism",
+    "category",
+    "method",
+    "ioc type",
+    "indicator type",
+    "field",
+    "label",
+)
+_LISTED_VALUE_HEADINGS = (
+    "target",
+    "location",
+    "key",
+    "registry key",
+    "path",
+    "file",
+    "service",
+    "task",
+    "name",
+    "indicator",
+    "ioc",
+    "value",
+)
+_LISTED_PAYLOAD_HEADINGS = (
+    "payload",
+    "command",
+    "command line",
+    "commandline",
+    "binary",
+    "image",
+    "executable",
+    "program",
+    "data",
+)
+
+
+def listed_columns(columns: Iterable[Any] | None) -> tuple[int, int, int | None] | None:
+    """``(type, value, payload)`` columns a listing's headings name, or ``None``.
+
+    ``None`` when the headings do not name both a type and a value column, and
+    the row is read by position (type, value, payload), as a listing with no
+    headings is. Named, the payload is the column a payload heading names, or
+    a second ``value`` column; otherwise the first cell past the headings,
+    which only a row longer than its headings holds.
+    """
+    headings = [str(h or "").strip().lower() for h in columns or []]
+
+    def _first(names: tuple[str, ...], taken: tuple[int, ...] = ()) -> int | None:
+        for name in names:
+            for index, heading in enumerate(headings):
+                if heading == name and index not in taken:
+                    return index
+        return None
+
+    typed = _first(_LISTED_TYPE_HEADINGS)
+    if typed is None:
+        return None
+    valued = _first(_LISTED_VALUE_HEADINGS, (typed,))
+    if valued is None:
+        return None
+    payload = _first(_LISTED_PAYLOAD_HEADINGS, (typed, valued))
+    if payload is None:
+        payload = _first(("value",), (typed, valued))
+    if payload is None:
+        # No heading names one: the first cell past the headings, which a row
+        # longer than them (a merged artifact's payload) holds.
+        payload = len(headings)
+    return typed, valued, payload
+
+
+def listed_cells(cells: list[str], columns: tuple[int, int, int | None] | None) -> list[str]:
+    """``[type, value, payload]`` of one listed row, read by its headings where they name them.
+
+    By position — the row's own cells — when the headings name no columns or
+    the row is too short for them.
+    """
+    if columns is None:
+        return cells
+    typed, valued, payload = columns
+    if max(typed, valued) >= len(cells):
+        return cells
+    return [
+        cells[typed],
+        cells[valued],
+        cells[payload] if payload is not None and payload < len(cells) else "",
+    ]
+
+
+def listed_non_network_values(
+    kind: Any, rows: Iterable[Any], columns: Iterable[Any] | None = None
+) -> list[tuple[str, str, str]]:
     """``(IOC kind, value, payload)`` for each non-network value an analyst's table lists.
 
     An IOC list's row typed as a mutex, a path or a registry key, and a
     persistence table's Run key, scheduled task or service target. Read the
     same way from an artifact at build time and from its Appendix A section
-    of a stored report, so both answer alike.
+    of a stored report, so both answer alike. Each row is read by the
+    ``columns`` its headings name (:func:`listed_columns`), by position when
+    they name none.
     """
     kind = artifact_kind(kind)
+    named = listed_columns(columns)
     out: list[tuple[str, str, str]] = []
     for row in rows:
         cells = [str(cell).strip() for cell in row] if isinstance(row, list | tuple) else []
+        cells = listed_cells(cells, named)
         if len(cells) < 2 or not cells[1]:
             continue
         if kind in _IOC_LIST_KINDS:
@@ -1527,7 +1681,9 @@ def analyst_listed_values(isrs: dict[str, AgentISR] | None) -> list[tuple[str, s
             values.extend(
                 (kind, value)
                 for kind, value, _payload in listed_non_network_values(
-                    getattr(artifact, "kind", ""), _rows_of(artifact)
+                    getattr(artifact, "kind", ""),
+                    _rows_of(artifact),
+                    getattr(artifact, "columns", None),
                 )
             )
     return list(dict.fromkeys(values))
@@ -1921,24 +2077,51 @@ def _first_str(row: Any, *keys: str) -> str:
 # ---------------------------------------------------------------------------
 
 
-# Registry paths that mean "run this again", and the mechanism each one is.
-_AUTOSTART_MARKERS: tuple[tuple[str, str], ...] = (
-    ("\\currentversion\\run", "registry_run"),
-    ("\\currentversion\\runonce", "registry_run"),
-    ("\\currentversion\\runservices", "registry_run"),
-    ("\\currentversion\\windows\\load", "registry_run"),
-    ("\\image file execution options", "image_hijack"),
-    ("\\windows nt\\currentversion\\windows\\appinit_dlls", "appinit_dll"),
-    ("\\winlogon", "winlogon_helper"),
-    ("\\currentcontrolset\\services", "service"),
+# Registry paths that mean "run this again", and the mechanism each one is. Each
+# is matched at its components' boundaries (a trailing separator allowed), and
+# to the component that arranges a run: a write under
+# ``Services\SharedAccess\Parameters\FirewallPolicy`` or a Winlogon value
+# that logs a user on configures the machine, it registers nothing to start. A
+# service is its own key (created), the image or DLL it runs, or its
+# ``Parameters`` key; a write of only ``Start``, ``Type`` or ``Security`` under
+# a service configures one that exists, and a new service is caught by its key.
+# Winlogon is its key (a write that names no value) or a value it starts a
+# program from.
+_CONTROL_SET = r"\\(?:currentcontrolset|controlset\d+)"
+_AUTOSTART_PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = tuple(
+    (re.compile(pattern), kind)
+    for pattern, kind in (
+        (
+            r"\\currentversion\\(?:run|runonce|runonceex|runservices|runservicesonce)(?:\\|$)",
+            "registry_run",
+        ),
+        (r"\\currentversion\\windows\\load\\?$", "registry_run"),
+        (r"\\image file execution options(?:\\|$)", "image_hijack"),
+        (r"\\windows nt\\currentversion\\windows\\appinit_dlls\\?$", "appinit_dll"),
+        (
+            r"\\windows nt\\currentversion\\winlogon(?:\\?$"
+            r"|\\(?:userinit|shell|taskman|appsetup|vmapplet|ginadll|system)\\?$"
+            r"|\\notify(?:\\|$))",
+            "winlogon_helper",
+        ),
+        (
+            _CONTROL_SET + r"\\services\\[^\\]+"
+            r"(?:\\(?:imagepath|servicedll|parameters|parameters\\servicedll|failurecommand))?"
+            r"\\?$",
+            "service",
+        ),
+    )
 )
 
 
 def _autostart_kind(key: str) -> str | None:
-    """The persistence mechanism a registry path names, or None when it names none."""
-    lowered = key.strip().lower()
-    for marker, kind in _AUTOSTART_MARKERS:
-        if marker in lowered:
+    """The persistence mechanism a registry path names, or None when it names none.
+
+    Separators a key is written with at its end are not part of it.
+    """
+    lowered = key.strip().lower().rstrip("\\").rstrip()
+    for pattern, kind in _AUTOSTART_PATTERNS:
+        if pattern.search(lowered):
             return kind
     return None
 

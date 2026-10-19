@@ -112,8 +112,9 @@ class TestBinaryBuilders:
     def test_the_static_projection_takes_an_unread_permission_list_as_no_permissions(
         self,
     ) -> None:
-        """An APK's permissions become the static block's exports; the string
-        ``no: <reason>`` iterated there would be one export per character."""
+        """An APK's permissions become the static block's permissions, never its
+        exports; the string ``no: <reason>`` iterated there would be one
+        permission per character."""
         from maljan.reporting.ledger_projection import static_from_ledger
         from maljan.schemas.evidence import LedgerEntry
 
@@ -123,7 +124,8 @@ class TestBinaryBuilders:
                 [LedgerEntry(id="ev_0001", agent="static", tool="apk_info", structured=answer)]
             )
             assert static is not None
-            return list(static.exports)
+            assert static.exports == []
+            return list(static.permissions)
 
         assert _static("no: the manifest could not be parsed") == []
         assert _static(["android.permission.INTERNET"]) == ["android.permission.INTERNET"]

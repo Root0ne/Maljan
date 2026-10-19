@@ -276,6 +276,10 @@ class StaticAnalysis(BaseModel):
     # reported them. ``exports`` stays the plain list every older consumer and
     # every stored report reads.
     export_rows: list[ExportRow] = Field(default_factory=list)
+    # The permissions an Android package declares in its manifest: what its
+    # author asked the platform for. Never exports, which a package has none
+    # of. Empty for every other format, and then left out of the dump.
+    permissions: list[str] = Field(default_factory=list, exclude_if=lambda value: not value)
     interesting_strings: list[StringIOC] = Field(default_factory=list)
     embedded_resources: list[dict[str, Any]] = Field(default_factory=list)
     packer_hint: str | None = None

@@ -1342,6 +1342,11 @@ class MarkdownRenderer:
                 lines.extend(_left_out(len(names), 60, "exports"))
             lines.append("")
 
+        if static.permissions:
+            lines.extend([_plain_heading("Declared permissions"), ""])
+            lines.extend(_item(_code_span(ctx.plain(name))) for name in static.permissions)
+            lines.append("")
+
         if static.embedded_resources:
             plain = [r for r in static.embedded_resources if not r.get("carved")]
             if plain:

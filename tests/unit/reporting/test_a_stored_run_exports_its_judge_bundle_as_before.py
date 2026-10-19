@@ -30,8 +30,9 @@ STORED_EXPORTS = {
 }
 # ``(markdown, html with the nonce "fixed", normalised STIX)`` for haiku4. The
 # Markdown and HTML were re-pinned when a sample's, a tool's or a finding's text
-# came to print escaped (F7); the STIX did not change.
-HAIKU4_RENDERS = ("2c784244bd9860ae", "97c871866f938c96", "7a36a22e070d70fd")
+# came to print escaped (F7), and when an analyst's listing came to be read by
+# its headings (AUD-43); the STIX did not change.
+HAIKU4_RENDERS = ("230d0d43a8a40244", "269dc8fdf849c364", "7a36a22e070d70fd")
 
 _UUID = re.compile(r"--[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
 _STAMP = re.compile(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})")

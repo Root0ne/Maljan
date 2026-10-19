@@ -94,6 +94,9 @@ class Comparison:
     # still reads such a value — as the backslash it plainly means — so the
     # questions about it can be asked; this says the pattern is not valid.
     stray_backslash: bool = False
+    # Which observation expression (``[...]``) of the pattern the comparison
+    # is in, counted from 0.
+    observation: int = 0
 
     @property
     def path(self) -> str:
@@ -130,6 +133,7 @@ def _quoted_spans(pattern: str) -> list[tuple[str, int, int, Comparison | None]]
     prop = ""
     operator = ""
     observation_closed = False
+    observation = 0
     index = 0
     while index < len(text):
         if text[index] != "'":
@@ -147,6 +151,8 @@ def _quoted_spans(pattern: str) -> list[tuple[str, int, int, Comparison | None]]
         index = end
         outside = end
         paths = list(_OBJECT_PATH_RE.finditer(before))
+        if "]" in before and not observation_closed:
+            observation += 1
         if paths:
             object_type = paths[-1].group(1).lower()
             written_type = paths[-1].group(1)
@@ -174,6 +180,7 @@ def _quoted_spans(pattern: str) -> list[tuple[str, int, int, Comparison | None]]
                     literal=literal,
                     readable=closed and bool(object_type),
                     stray_backslash=stray,
+                    observation=observation,
                 ),
             )
         )
