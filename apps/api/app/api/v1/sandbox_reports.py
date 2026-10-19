@@ -55,6 +55,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_db
 from app.deps import get_current_user, require_active_user, require_admin_session
 from app.logging_config import get_logger
+from app.middleware.upload_bound_middleware import too_large_detail, upload_bound
 from app.models.sample import Sample
 from app.models.sandbox_report import SandboxReportRow
 from app.models.user import User
@@ -98,6 +99,14 @@ async def _sandbox_settings(db: AsyncSession) -> SandboxConfig:
 
 async def _max_report_bytes(db: AsyncSession) -> int:
     return int((await _sandbox_settings(db)).upload.max_report_bytes)
+
+
+async def _report_upload_max_bytes() -> int:
+    """``sandbox.upload.max_report_bytes`` as stored now: the bound of one report upload."""
+    from app.database import async_session_factory
+
+    async with async_session_factory() as db:
+        return await _max_report_bytes(db)
 
 
 async def _maybe_await(value: Any) -> Any:
@@ -160,8 +169,27 @@ async def _read_payload(file: UploadFile, db: AsyncSession) -> tuple[bytes, dict
     body, never the extension, so there was nothing left for a filename to
     do here. Dropped rather than wired up to avoid a second, redundant way
     to decide the same thing.
+
+    The read and the inflate are seconds of work for a large report, so both
+    run in a worker thread, like the parse, and never hold the event loop.
     """
     limit = await _max_report_bytes(db)
+    body = await asyncio.to_thread(_read_capped, file, limit)
+    try:
+        # Read at any nesting depth: a report nested past ``json.loads``'s
+        # recursion is read again iteratively (``core.safe_json``). Linear in
+        # the body, but a large body is still seconds of work, so it is read in
+        # a worker thread and never holds the event loop.
+        payload = await asyncio.to_thread(_parsed, body)
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "File is not valid JSON") from exc
+    if not isinstance(payload, dict):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "A sandbox report must be a JSON object")
+    return body, payload
+
+
+def _read_capped(file: UploadFile, limit: int) -> bytes:
+    """The upload's bytes, inflated when gzipped, each refused past ``limit`` (blocking)."""
     raw = bytearray()
     while True:
         chunk = file.file.read(_CHUNK)
@@ -170,8 +198,7 @@ async def _read_payload(file: UploadFile, db: AsyncSession) -> tuple[bytes, dict
         raw.extend(chunk)
         if len(raw) > limit:
             raise HTTPException(
-                status.HTTP_413_CONTENT_TOO_LARGE,
-                f"Report too large. Maximum: {limit // (1024 * 1024)} MB",
+                status.HTTP_413_CONTENT_TOO_LARGE, too_large_detail(limit, "Report")
             )
     body = bytes(raw)
     if body[:2] == b"\x1f\x8b":
@@ -192,17 +219,7 @@ async def _read_payload(file: UploadFile, db: AsyncSession) -> tuple[bytes, dict
             raise HTTPException(
                 status.HTTP_400_BAD_REQUEST, "File looks gzipped but could not be decompressed"
             ) from exc
-    try:
-        # Read at any nesting depth: a report nested past ``json.loads``'s
-        # recursion is read again iteratively (``core.safe_json``). Linear in
-        # the body, but a large body is still seconds of work, so it is read in
-        # a worker thread and never holds the event loop.
-        payload = await asyncio.to_thread(_parsed, body)
-    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, "File is not valid JSON") from exc
-    if not isinstance(payload, dict):
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, "A sandbox report must be a JSON object")
-    return body, payload
+    return body
 
 
 def _parsed(body: bytes) -> Any:
@@ -299,6 +316,7 @@ async def _persist(db: AsyncSession, row: SandboxReportRow) -> SandboxReportRow:
     response_model=SandboxReportResponse,
     status_code=status.HTTP_201_CREATED,
 )
+@upload_bound(_report_upload_max_bytes)
 async def upload_sandbox_report(
     request: Request,
     sample_id: uuid.UUID,

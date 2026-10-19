@@ -36,6 +36,7 @@ from maljan.core.settings_overrides import redact_url
 
 from app.config import settings
 from app.logging_config import get_logger
+from app.logsafe import log_safe
 from app.models.report import AnalysisReport
 from app.runtime_config import runtime_config
 from app.worker.queues import ANALYSIS_QUEUE, ENRICHMENT_QUEUE, build_redis_settings
@@ -219,13 +220,37 @@ async def enqueue_enrichment(pool: Any, report_id: Any) -> str | None:
     # triggers for one report — and which would also refuse to re-queue a
     # report after the setting flipped, leaving it waiting on the queue it was
     # first put in. One id per queue keeps the coalescing and drops that.
+    job_id = f"enrich:{queue}:{report_id}"
+    await _forget_finished_enrichment(pool, job_id)
     job = await pool.enqueue_job(
         "enrich_threat_intel",
         str(report_id),
-        _job_id=f"enrich:{queue}:{report_id}",
+        _job_id=job_id,
         _queue_name=queue,
     )
     return str(job.job_id) if job is not None else None
+
+
+async def _forget_finished_enrichment(pool: Any, job_id: str) -> None:
+    """Drop the kept result of a finished enrichment under ``job_id``. Never raises.
+
+    arq refuses an id while its job key *or* its result key exists, and keeps
+    a result for an hour after the job ends. The job key is what makes a
+    second trigger coalesce with a queued or running enrichment, and it stays;
+    the result only says an earlier one finished, and refusing on it answered
+    "already queued" for an hour to an operator who asked for a fresh one
+    while nothing was queued at all. Nothing reads the result.
+    """
+    try:
+        from arq.constants import result_key_prefix
+
+        await pool.delete(result_key_prefix + job_id)
+    except Exception as exc:  # noqa: BLE001 — the enqueue says what Redis is doing
+        logger.debug(
+            "enrich: the kept result of %s was not dropped (%s).",
+            log_safe(job_id),
+            type(exc).__name__,
+        )
 
 
 # Process-wide singleton cache for the configured LTM store. Two flags so we

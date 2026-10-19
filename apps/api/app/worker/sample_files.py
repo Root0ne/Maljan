@@ -23,13 +23,15 @@ its copies cannot go in the hidden shared one (BUG 10, live on 2026-09-07).
 
 from __future__ import annotations
 
+import contextlib
+import fcntl
 import functools
 import os
 import re
 import shutil
 import stat
 import time
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Iterator
 from pathlib import Path
 
 from maljan.providers.base import DEFAULT_WORK_DIR
@@ -310,6 +312,151 @@ def private_copy(src: Path, dest: Path) -> None:
             os.fchmod(out.fileno(), 0o600)
     finally:
         os.close(dir_fd)
+
+
+# A job's hold on a copy it shares: an empty file beside the copy, named for the
+# copy and the job. Its name reads as a copy's (a SHA-256 and a plain suffix),
+# so the age sweep and a sample's delete take a hold a crashed job left behind
+# together with the copies.
+_HOLD_INFIX = ".held-by-"
+# A copy a job is still writing, beside the name it will take, read as a copy too.
+_STAGING_INFIX = ".part-"
+_HOLD_TAG = re.compile(r"[A-Za-z0-9-]{1,64}")
+
+
+def _hold_name(copy_name: str, job_id: str) -> str | None:
+    tag = str(job_id or "")
+    return f"{copy_name}{_HOLD_INFIX}{tag}" if _HOLD_TAG.fullmatch(tag) else None
+
+
+def _holders(dir_fd: int, copy_name: str) -> set[str]:
+    prefix = f"{copy_name}{_HOLD_INFIX}"
+    with os.scandir(dir_fd) as entries:
+        return {
+            entry.name[len(prefix) :]
+            for entry in entries
+            if entry.name.startswith(prefix) and entry.is_file(follow_symlinks=False)
+        }
+
+
+def hold_copy(dest: Path, job_id: str, make: Callable[[Path], None]) -> None:
+    """Hold ``dest`` for ``job_id``, making it unless another job holding it already did.
+
+    The copies are named by the sample's SHA-256, so two jobs on one sample —
+    two workers sharing these directories — reach the same name. Each job
+    writes a hold beside the copy before it uses it, and :func:`release_copy`
+    removes the copy only with the last hold. A copy another job holds is not
+    written again (it holds the same bytes) and has its time renewed, so the
+    age sweep measures it from its latest use.
+
+    ``make(target)`` writes the copy to ``target``. It writes a staging file of
+    this job's own beside ``dest``, outside any lock, so a slow download never
+    holds the directory; the staging file is then renamed over ``dest`` in one
+    step, so no reader of ``dest`` ever sees half a file. The hold and the
+    rename run under an exclusive lock on the directory, so a release never
+    interleaves with either. A job with no usable id makes ``dest`` in place,
+    unheld, as before.
+    """
+    hold = _hold_name(dest.name, job_id)
+    if hold is None:
+        make(dest)
+        return
+    staging = dest.with_name(f"{dest.name}{_STAGING_INFIX}{job_id}")
+    dir_fd = os.open(dest.parent, _DIR_FLAGS)
+    try:
+        with _locked(dir_fd):
+            others = _holders(dir_fd, dest.name) - {str(job_id)}
+            fd = os.open(hold, os.O_WRONLY | os.O_CREAT | os.O_NOFOLLOW, 0o600, dir_fd=dir_fd)
+            os.close(fd)
+            if others and _is_regular(dir_fd, dest.name):
+                os.utime(dest.name, dir_fd=dir_fd, follow_symlinks=False)
+                return
+        try:
+            make(staging)
+            with _locked(dir_fd):
+                others = _holders(dir_fd, dest.name) - {str(job_id)}
+                if others and _is_regular(dir_fd, dest.name):
+                    # Another job finished the same copy first; its bytes are these.
+                    os.unlink(staging.name, dir_fd=dir_fd)
+                else:
+                    os.rename(staging.name, dest.name, src_dir_fd=dir_fd, dst_dir_fd=dir_fd)
+        except BaseException:
+            # A copy this job could not make is not one it holds.
+            with _locked(dir_fd):
+                for name in (staging.name, hold):
+                    with contextlib.suppress(OSError):
+                        os.unlink(name, dir_fd=dir_fd)
+            raise
+    finally:
+        os.close(dir_fd)
+
+
+@contextlib.contextmanager
+def _locked(dir_fd: int) -> Iterator[None]:
+    """An exclusive lock on the open directory, for the length of the block."""
+    fcntl.flock(dir_fd, fcntl.LOCK_EX)
+    try:
+        yield
+    finally:
+        fcntl.flock(dir_fd, fcntl.LOCK_UN)
+
+
+def held_copy(src: Path, dest: Path, *, job_id: str) -> None:
+    """:func:`private_copy` of ``src`` to ``dest`` under ``job_id``'s hold (:func:`hold_copy`)."""
+    hold_copy(dest, job_id, lambda target: private_copy(src, target))
+
+
+def release_copy(path: Path | str | None, *, job_id: str) -> bool:
+    """Drop ``job_id``'s hold on ``path``, and remove the copy when no other job holds it.
+
+    Never raises; returns whether the copy was removed. A copy another job
+    still holds is left for that job's own release; one a crashed job's hold
+    keeps goes with the age sweep. A job with no usable id removes the copy as
+    before (:func:`remove_quietly`).
+    """
+    if not path:
+        return False
+    p = Path(path)
+    hold = _hold_name(p.name, job_id)
+    if hold is None:
+        remove_quietly(p, job_id=job_id)
+        return True
+    try:
+        dir_fd = os.open(p.parent, _DIR_FLAGS)
+    except OSError as exc:
+        logger.warning(
+            "Could not open %s: %s", p.parent, type(exc).__name__, extra={"job_id": job_id}
+        )
+        return False
+    try:
+        with _locked(dir_fd):
+            with contextlib.suppress(FileNotFoundError):
+                os.unlink(hold, dir_fd=dir_fd)
+            others = _holders(dir_fd, p.name)
+            if others:
+                logger.debug(
+                    "Left %s for the %d other job(s) holding it.",
+                    p,
+                    len(others),
+                    extra={"job_id": job_id},
+                )
+                return False
+            if _is_regular(dir_fd, p.name):
+                os.unlink(p.name, dir_fd=dir_fd)
+        logger.debug("Removed %s", p, extra={"job_id": job_id})
+        return True
+    except OSError as exc:
+        logger.warning("Could not remove %s: %s", p, type(exc).__name__, extra={"job_id": job_id})
+        return False
+    finally:
+        os.close(dir_fd)
+
+
+def _is_regular(dir_fd: int, name: str) -> bool:
+    try:
+        return stat.S_ISREG(os.stat(name, dir_fd=dir_fd, follow_symlinks=False).st_mode)
+    except FileNotFoundError:
+        return False
 
 
 def remove_quietly(path: Path | str | None, *, job_id: str | None = None) -> None:

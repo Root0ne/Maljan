@@ -7,7 +7,7 @@ from alembic import context
 from app.config import settings
 
 # Import all models so Alembic can detect them
-from app.database import Base
+from app.database import Base, config_option_value
 from app.models import *  # noqa: F401, F403
 from sqlalchemy import pool
 from sqlalchemy.engine import Connection
@@ -20,8 +20,12 @@ config = context.config
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
-# Set the database URL from app settings
-config.set_main_option("sqlalchemy.url", settings.database_url)
+# Set the database URL from app settings. The option goes through
+# configparser's interpolation, where ``%`` starts a reference: a password
+# holding one (a percent-encoded character) would stop the migration with an
+# error that prints the whole DSN, password included. Escaped, it reads back
+# exactly as written.
+config.set_main_option("sqlalchemy.url", config_option_value(settings.database_url))
 
 # Target metadata for autogenerate
 target_metadata = Base.metadata

@@ -123,3 +123,23 @@ def test_the_overlay_replaces_the_read_only_mounts_when_compose_merges_them(
         assert read_only(developed[name])["/app/data"] is False, name
     assert "--reload" not in " ".join(shipped["backend-api"]["command"])
     assert "--reload" in " ".join(developed["backend-api"]["command"])
+
+
+def test_no_backend_process_can_gain_a_privilege() -> None:
+    """``no-new-privileges`` on every service built from the backend image (AUD-32)."""
+    services = _services(PRODUCTION)
+    for name in BACKEND:
+        assert "no-new-privileges:true" in (services[name].get("security_opt") or []), name
+
+
+def test_the_frontend_runs_unprivileged_with_no_capability() -> None:
+    frontend = _services(PRODUCTION)["frontend"]
+    assert frontend.get("cap_drop") == ["ALL"]
+    assert "no-new-privileges:true" in (frontend.get("security_opt") or [])
+    dockerfile = (ROOT / "docker" / "Dockerfile.frontend").read_text(encoding="utf-8")
+    runner = dockerfile.split("AS runner", 1)[1]
+    assert "\nUSER node\n" in runner
+    assert runner.index("USER node") < runner.index("CMD ")
+    for line in runner.splitlines():
+        if line.startswith("COPY --from=builder"):
+            assert "--chown=node:node" in line, line

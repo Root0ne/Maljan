@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING, Any
 
 import redis.asyncio as aioredis
 from fastapi import APIRouter, Depends, HTTPException, status
-from maljan.core.settings_overrides import redact_url
+from maljan.core.settings_masking import masked_text
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -323,12 +323,13 @@ async def ltm_purge(
     try:
         store = await _build_memory_store(db)
     except Exception as exc:
-        logger.warning("ltm_purge: failed to build memory store: %s", exc)
+        # The store's own error names the URL it was built with, and that URL
+        # may carry an API key or a password: masked in the log and the answer.
+        said = masked_text(f"{type(exc).__name__}: {exc}")
+        logger.warning("ltm_purge: failed to build memory store: %s", said)
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            # The store's own error names the URL it was built with, and that
-            # URL may carry an API key or a password.
-            detail=redact_url(f"memory store unavailable: {exc}"),
+            detail=masked_text(f"memory store unavailable: {exc}"),
         ) from exc
 
     # The settings that name the store have been read; the purge itself may

@@ -68,9 +68,11 @@ def test_deleting_a_sample_also_removes_its_sandbox_report_objects(monkeypatch):
         side_effect=[
             sample_result,
             no_active_jobs,
+            None,  # lock_sample_bytes
             report_paths_result,
             _jobs(),
             None,
+            None,  # lock_sample_bytes, taken again
             still_shared,
         ]
     )
@@ -120,9 +122,11 @@ def test_deleting_a_sample_with_no_sandbox_reports_touches_storage_once(monkeypa
         side_effect=[
             sample_result,
             no_active_jobs,
+            None,  # lock_sample_bytes
             no_reports,
             _jobs(),
             None,
+            None,  # lock_sample_bytes, taken again
             not_shared,
             # The delete handler resolves the configured mirror directories
             # through effective_core_settings(db), which reads the same
@@ -177,9 +181,11 @@ def test_a_local_cleanup_that_fails_does_not_fail_the_delete(monkeypatch):
         side_effect=[
             sample_result,
             no_active_jobs,
+            None,  # lock_sample_bytes
             no_reports,
             _jobs(),
             None,
+            None,  # lock_sample_bytes, taken again
             not_shared,
             # The delete handler resolves the configured mirror directories
             # through effective_core_settings(db), which reads the same
@@ -238,9 +244,11 @@ def test_deleting_a_sample_removes_every_job_s_evidence_objects(monkeypatch):
         side_effect=[
             sample_result,
             no_active_jobs,
+            None,  # lock_sample_bytes
             no_reports,
             _jobs(first, second),
             None,
+            None,  # lock_sample_bytes, taken again
             still_shared,
         ]
     )

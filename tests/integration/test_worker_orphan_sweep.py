@@ -31,9 +31,11 @@ from app.worker.analysis_worker import (
 from tests.integration._session_probe import SessionFactory, updates_to
 
 
-def _row(job_id: uuid.UUID, *, age_seconds: float) -> tuple[Any, ...]:
+def _row(job_id: uuid.UUID, *, age_seconds: float, status: str = "running") -> tuple[Any, ...]:
     started = datetime.now(UTC) - timedelta(seconds=age_seconds)
-    return (job_id, started, started)
+    if status == "pending":
+        return (job_id, None, started, status)
+    return (job_id, started, started, status)
 
 
 def _factory(rows: list[tuple[Any, ...]]) -> SessionFactory:
@@ -419,3 +421,98 @@ class TestTheClaimIsReleasedPromptly:
 
         assert waited < 1.0, "the release waited on Redis"
         assert job_id not in _OWNED_JOBS, "the job is no longer this process's"
+
+
+# ── pending rows nothing will start (AUD-36) ─────────────────────
+
+
+@pytest.mark.asyncio
+async def test_a_pending_job_still_queued_is_left_alone() -> None:
+    """A long queue behind a long run is no reason to fail a job: its entry is there."""
+    from arq.constants import job_key_prefix
+
+    queued = uuid.uuid4()
+    factory = _factory([_row(queued, age_seconds=3 * 86400, status="pending")])
+
+    await _sweep_orphan_jobs(factory, _redis({job_key_prefix + str(queued): b"x"}))
+
+    assert updates_to(factory, "analysis_jobs") == []
+
+
+@pytest.mark.asyncio
+async def test_a_pending_job_arq_has_claimed_is_left_alone() -> None:
+    from arq.constants import in_progress_key_prefix
+
+    taken = uuid.uuid4()
+    factory = _factory([_row(taken, age_seconds=JOB_OWNER_TTL_SECONDS + 60, status="pending")])
+
+    await _sweep_orphan_jobs(factory, _redis({in_progress_key_prefix + str(taken): b"1"}))
+
+    assert updates_to(factory, "analysis_jobs") == []
+
+
+@pytest.mark.asyncio
+async def test_a_pending_job_a_worker_is_holding_is_left_alone() -> None:
+    claimed = uuid.uuid4()
+    factory = _factory([_row(claimed, age_seconds=JOB_OWNER_TTL_SECONDS + 60, status="pending")])
+
+    await _sweep_orphan_jobs(factory, _redis({job_owner_key(str(claimed)): WORKER_ID}))
+
+    assert updates_to(factory, "analysis_jobs") == []
+
+
+@pytest.mark.asyncio
+async def test_a_pending_job_nothing_will_start_is_failed_with_its_reason() -> None:
+    """The queue entry expired, or the worker stopped between taking it and running it."""
+    stuck = uuid.uuid4()
+    factory = _factory([_row(stuck, age_seconds=JOB_OWNER_TTL_SECONDS + 60, status="pending")])
+
+    await _sweep_orphan_jobs(factory, _redis({}))
+
+    failed = updates_to(factory, "analysis_jobs")
+    assert len(failed) == 1
+    assert failed[0]["status"] == "failed"
+    assert "never started" in failed[0]["error_message"]
+    assert "queue entry is gone" in failed[0]["error_message"]
+
+
+@pytest.mark.asyncio
+async def test_a_pending_job_just_committed_is_left_for_the_next_pass() -> None:
+    """The API commits the row a moment before it queues it."""
+    fresh = uuid.uuid4()
+    factory = _factory([_row(fresh, age_seconds=5, status="pending")])
+
+    await _sweep_orphan_jobs(factory, _redis({}))
+
+    assert updates_to(factory, "analysis_jobs") == []
+
+
+@pytest.mark.asyncio
+async def test_an_unreadable_queue_leaves_pending_jobs_alone() -> None:
+    stuck = uuid.uuid4()
+    factory = _factory([_row(stuck, age_seconds=JOB_OWNER_TTL_SECONDS + 6000, status="pending")])
+    redis = _redis({})
+    redis.mget = AsyncMock(side_effect=ConnectionError("queue unreachable"))
+
+    await _sweep_orphan_jobs(factory, redis)
+
+    assert updates_to(factory, "analysis_jobs") == []
+
+
+@pytest.mark.asyncio
+async def test_running_and_pending_orphans_each_say_their_own_reason() -> None:
+    lost = uuid.uuid4()
+    stuck = uuid.uuid4()
+    factory = _factory(
+        [
+            _row(lost, age_seconds=JOB_OWNER_TTL_SECONDS + 60),
+            _row(stuck, age_seconds=JOB_OWNER_TTL_SECONDS + 60, status="pending"),
+        ]
+    )
+
+    await _sweep_orphan_jobs(factory, _redis({}))
+
+    reasons = [row["error_message"] for row in updates_to(factory, "analysis_jobs")]
+    assert len(reasons) == 2
+    assert any("No worker is holding" in r for r in reasons)
+    assert any("This job was never" in r for r in reasons)
