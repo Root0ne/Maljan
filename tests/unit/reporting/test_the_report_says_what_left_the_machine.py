@@ -221,13 +221,15 @@ def test_the_enrichment_queued_after_the_report_is_named_then_what_it_asked() ->
 
 
 # ``(markdown, html with the nonce "fixed")`` as dev 0517a43e renders the stored runs,
-# none of which carries the record.
+# none of which carries the record. Re-pinned when a sample's, a tool's or a
+# finding's text came to print escaped (F7): every line that changed holds one
+# of Markdown's own characters.
 STORED_RENDERS = {
-    "run7": ("5a98e8f996754f33", "80c0f1e1efc22387"),
-    "run5": ("6c8ad459731fe4f2", "f3cb9aca3dcebfc9"),
-    "run4": ("4932dab8f2f2c210", "cb4460ea310cdaa4"),
-    "local8": ("5a1913468ca02123", "fccb9cb35eba3fb4"),
-    "haiku4": ("323fd6816b055763", "2cd3dbc93fd5eb4d"),
+    "run7": ("10450fac1da78b0d", "c898eb0ef67822cf"),
+    "run5": ("5ccad835542f23f0", "a06ab76f09a2cb09"),
+    "run4": ("1e0160478a729008", "e32e52a8e99b4a47"),
+    "local8": ("9e6cf8ded02592af", "d1dce0f05d49d9d0"),
+    "haiku4": ("2c784244bd9860ae", "97c871866f938c96"),
 }
 
 

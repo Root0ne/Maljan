@@ -24,6 +24,7 @@ Two properties matter for safety and are covered by tests:
 from __future__ import annotations
 
 import re
+import secrets
 from html import escape, unescape
 from typing import Any
 
@@ -54,8 +55,13 @@ _FIGURE_ANCHORS: dict[str, tuple[str, ...]] = {
 # MarkdownRenderer._safe_section emits an HTML comment when a section blows up.
 # With html=False that would render as visible escaped angle brackets, so it is
 # promoted to a real callout instead — a reader of the PDF should be told a
-# section is missing rather than shown "&lt;!-- ... --&gt;".
-_SECTION_FAILED_RE = re.compile(r"<!--\s*section '([^']+)' rendering failed[^>]*-->")
+# section is missing rather than shown "&lt;!-- ... --&gt;". The comment
+# carries a marker drawn for the one render (``_body_html``), and only a
+# comment with that marker is promoted: the same words written by a sample or
+# a model stay text.
+_SECTION_FAILED = r"<!--\s*section '([^']+)' rendering failed {marker} [^>]*-->"
+# How many random bytes the marker is drawn from.
+_MARKER_BYTES = 16
 
 _H2_SPLIT_RE = re.compile(r"(?=<h2>)")
 _H2_HEAD_RE = re.compile(r"^<h2>(.*?)</h2>", re.DOTALL)
@@ -172,21 +178,18 @@ _LINKED_SCHEMES = ("http:", "https:", "mailto:")
 def _report_link(url: str) -> bool:
     """Whether a Markdown link's target becomes an anchor in the HTML report.
 
-    An http, https or mailto target; a place in the page (``#…``); or a path
-    relative to the page that starts with neither ``/`` nor a backslash and
-    holds no backslash. A protocol-relative target (``//host/…``) names a host
-    no reader can vouch for, and on Windows a backslash path is a share.
+    An http, https or mailto target, or a place in the page (``#…``); nothing
+    else. A path relative to the page names a file no reader of an exported
+    report has, and a protocol-relative target (``//host/…``) a host no reader
+    can vouch for.
     """
     target = str(url or "").strip()
-    lowered = target.lower()
-    if lowered.startswith(_LINKED_SCHEMES) or target.startswith("#"):
-        return True
-    if re.match(r"[a-z][a-z0-9+.-]*:", lowered):
+    # The Markdown escapes the "&" of every character reference it holds, so
+    # an "&" here is one the source held: a target spelled with a reference
+    # ("https&#58;//…") is no link the report makes.
+    if "&" in target:
         return False
-    # The parser hands the target over percent-encoded: a backslash is "%5C",
-    # an encoded slash "%2F", which some viewers decode before resolving.
-    backslash = "\\" in target or "%5c" in lowered or "%2f" in lowered
-    return bool(target) and not target.startswith("/") and not backslash and ":" not in target
+    return target.lower().startswith(_LINKED_SCHEMES) or target.startswith("#")
 
 
 def _no_image(renderer: Any, tokens: Any, idx: int, options: Any, env: Any) -> str:
@@ -255,8 +258,10 @@ class HtmlRenderer:
         return report_title(report)
 
     def _body_html(self, report: MalwareReport) -> str:
-        markdown = MarkdownRenderer().render(report)
-        markdown = _SECTION_FAILED_RE.sub(
+        marker = secrets.token_hex(_MARKER_BYTES)
+        markdown = MarkdownRenderer(failed_marker=marker).render(report)
+        failed = re.compile(_SECTION_FAILED.format(marker=re.escape(marker)))
+        markdown = failed.sub(
             lambda m: (
                 f"> **Section '{m.group(1)}' could not be rendered.** "
                 "The underlying data is present in the JSON report; see the server "

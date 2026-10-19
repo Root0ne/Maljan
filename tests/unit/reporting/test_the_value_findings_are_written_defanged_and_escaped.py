@@ -63,8 +63,11 @@ def _clean(line: str) -> None:
 
     for live in ("http://", "evil.example.com", "op@mail", "203.0.113.5"):
         assert live not in line, (live, line)
-    for opener in (r"\]\(", r"<script", r"`x"):
+    for opener in (r"\]\(", r"<script"):
         assert not re.search(r"(?<!\\)" + opener, line), (opener, line)
+    # A backtick pair the text quotes is kept as a code span that closes; an
+    # unpaired one is escaped.
+    assert len(re.findall(r"(?<!\\)`", line)) % 2 == 0, line
 
 
 class TestTheMarkAfterAKeptSentence:

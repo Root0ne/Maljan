@@ -20,11 +20,13 @@ from maljan.reporting.models import MalwareReport
 from tests.unit.reporting.test_an_entry_without_a_source_is_read_as_before import _benchmark
 
 # ``(markdown, html with the nonce "fixed", normalised STIX)`` as dev 2c2522b2 renders them.
+# The Markdown and HTML were re-pinned when a sample's, a tool's or a finding's
+# text came to print escaped (F7); the STIX did not change.
 STORED_RENDERS = {
-    "run7": ("5a98e8f996754f33", "80c0f1e1efc22387", "91afd1649c923cbb"),
-    "run5": ("6c8ad459731fe4f2", "f3cb9aca3dcebfc9", "901ef9efc8afb317"),
-    "run4": ("4932dab8f2f2c210", "cb4460ea310cdaa4", "84bc0f9a2a45529f"),
-    "local8": ("5a1913468ca02123", "fccb9cb35eba3fb4", "ddc1552bd2bc0f89"),
+    "run7": ("10450fac1da78b0d", "c898eb0ef67822cf", "91afd1649c923cbb"),
+    "run5": ("5ccad835542f23f0", "a06ab76f09a2cb09", "901ef9efc8afb317"),
+    "run4": ("1e0160478a729008", "e32e52a8e99b4a47", "84bc0f9a2a45529f"),
+    "local8": ("9e6cf8ded02592af", "d1dce0f05d49d9d0", "ddc1552bd2bc0f89"),
 }
 
 _UUID = re.compile(r"--[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")

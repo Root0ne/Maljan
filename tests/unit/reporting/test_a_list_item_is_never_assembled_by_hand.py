@@ -134,3 +134,92 @@ def test_the_reviewer_s_setext_probe_opens_no_heading() -> None:
     html = HtmlRenderer().render(report, embed_figures=False)
     assert "Verdict revised: Benign</h" not in html
     assert html.count("<h1") == 1
+
+
+# The one function that may open a code span around a value: it fences the
+# span longer than any backtick run inside the value.
+SPAN_WRITER = "_code_span"
+
+
+def _spans_by_hand(tree: ast.AST) -> list[tuple[int, str]]:
+    """Every f-string value that stands inside a code span the f-string opened by hand.
+
+    A value after an odd number of backticks in its f-string's literal text
+    stands in a span the literal opened, wherever the backtick is
+    (``f"`{a}`"``, ``f"`[{a}]`"``, ``f"(`/r/{a}/x`)"``).
+    """
+    owner = _enclosing_functions(tree)
+    found: list[tuple[int, str]] = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.JoinedStr) or owner.get(node.lineno) == SPAN_WRITER:
+            continue
+        ticks = 0
+        for part in node.values:
+            if isinstance(part, ast.Constant):
+                ticks += str(part.value).count("`")
+            elif ticks % 2:
+                found.append((node.lineno, owner.get(node.lineno, "<module>")))
+                break
+    return found
+
+
+class TestTheRendererCannotWriteACodeSpanByHand:
+    """A one-backtick span around a value is closed by a backtick in the value.
+
+    What follows the backtick then renders as Markdown, a link included; every
+    span around a value is built by :func:`_code_span`, which fences it longer
+    than any backtick run the value holds.
+    """
+
+    def test_no_f_string_opens_a_code_span_around_a_value(self) -> None:
+        offenders = _spans_by_hand(ast.parse(RENDERER.read_text(encoding="utf-8")))
+        assert not offenders, "\n".join(
+            f"markdown.py:{lineno} in {where}: build the span with _code_span()"
+            for lineno, where in offenders
+        )
+
+    @pytest.mark.parametrize(
+        "written", ['f"PDB: `{path}`"', 'f"`[{rating}]`"', 'f"(`/reports/{rid}/stix`)"']
+    )
+    def test_the_guard_would_catch_one(self, written: str) -> None:
+        tree = ast.parse(f"def _section():\n    return {written}\n")
+        assert _spans_by_hand(tree) == [(2, "_section")]
+
+    def test_the_guard_lets_a_closed_span_before_a_value_be(self) -> None:
+        tree = ast.parse('def _section():\n    return f"`code` {value}"\n')
+        assert _spans_by_hand(tree) == []
+
+    def test_the_span_writer_is_still_there(self) -> None:
+        names = {
+            node.name
+            for node in ast.parse(RENDERER.read_text(encoding="utf-8")).body
+            if isinstance(node, ast.FunctionDef)
+        }
+        assert SPAN_WRITER in names
+
+
+@pytest.mark.parametrize(
+    ("text", "written"),
+    [
+        ("> x", "\\> x"),
+        ("1. > x", "1. \\> x"),
+        ("- - > x", "- - \\> x"),
+        ("-\t> x", "-\t\\> x"),
+        ("2) > x", "2) \\> x"),
+        ("a > b", "a > b"),
+        ("->x", "->x"),
+        ("1234567890. > x", "1234567890. > x"),
+    ],
+)
+def test_a_quote_mark_after_list_markers_is_escaped(text: str, written: str) -> None:
+    from maljan.reporting.renderers.markdown import _item, _step, _unquoted
+
+    assert _unquoted(text) == written
+    assert _item(text) == f"- {written}"
+    assert _step(3, text) == f"3. {written}"
+
+
+def test_a_step_is_one_line() -> None:
+    from maljan.reporting.renderers.markdown import _step
+
+    assert _step(2, "a\n## b") == "2. a ## b"
