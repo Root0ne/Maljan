@@ -25,12 +25,15 @@ from __future__ import annotations
 
 import hashlib
 import math
+import sys
 import threading
+import zlib
 from collections import Counter
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from maljan.core.delivery_limits import SAMPLE_UPLOAD_MAX_BYTES
 from maljan.core.logger import logger
 from maljan.reporting.models import (
     ImportRow,
@@ -38,6 +41,8 @@ from maljan.reporting.models import (
     StaticAnalysis,
     StringIOC,
 )
+from maljan.tools.byte_counts import STRETCH as _INFLATE_STRETCH
+from maljan.tools.byte_counts import counter_entropy, pefile_section_entropies, range_entropies
 
 # Re-exported rather than redefined. Every name below moved to
 # ``maljan.tools.strings`` when the string scan became a tool; importing them
@@ -80,6 +85,10 @@ _SPARSE_IMPORT_THRESHOLD = 15
 _MEMO_LOCK = threading.Lock()
 _MEMO: dict[tuple[str, int, int], StaticAnalysis | None] = {}
 _MEMO_MAX_ENTRIES = 4
+# Where the overlay of a PE this process parsed starts, by the bytes' length
+# and SHA-256, so ``carve_payloads`` on the same bytes does not parse them
+# again. Bounded like the memo above.
+_OVERLAYS: dict[tuple[int, bytes], int] = {}
 
 # ---------------------------------------------------------------------------
 # Public API
@@ -138,6 +147,7 @@ def reset_static_analysis_cache() -> None:
     """Clear the memo (test hook; also called on worker recycle)."""
     with _MEMO_LOCK:
         _MEMO.clear()
+        _OVERLAYS.clear()
 
 
 def _build_static_analysis_uncached(path: Path) -> StaticAnalysis | None:
@@ -151,9 +161,13 @@ def _build_static_analysis_uncached(path: Path) -> StaticAnalysis | None:
 
     if blob[:2] == b"MZ":
         parsed = _parse_pe(blob)
+        if len(blob) <= _MAX_CARVE_INPUT:
+            _remember_overlay(blob, _overlay_offset(parsed.sections))
         parsed.embedded = parsed.embedded + _carve_embedded(blob, parsed.sections)
     elif blob[:4] == b"\x7fELF":
-        parsed.sections = _parse_elf_sections(blob)
+        parsed.sections, sections_stopped = _elf_sections(blob)
+        if sections_stopped:
+            parsed.sections_partial = [sections_stopped]
         parsed.imports = _parse_elf_imports(blob)
         parsed.exports = _parse_elf_exports(blob)
 
@@ -179,6 +193,7 @@ def _build_static_analysis_uncached(path: Path) -> StaticAnalysis | None:
         obfuscation_indicators=obfuscation,
         packer_matches=parsed.packer_matches,
         pdb_path=parsed.pdb_path,
+        sections_partial=parsed.sections_partial,
     )
 
 
@@ -205,6 +220,8 @@ class _PEParse:
     obfuscation: list[str] = field(default_factory=list)
     packer_matches: list[dict[str, Any]] = field(default_factory=list)
     pdb_path: str | None = None
+    # Said when the section table was not read whole (``ELF_SECTIONS_STOPPED``).
+    sections_partial: list[str] = field(default_factory=list)
 
 
 def _parse_pe(blob: bytes) -> _PEParse:
@@ -254,14 +271,24 @@ def _parse_pe(blob: bytes) -> _PEParse:
 
 
 def _pe_sections(pe: Any) -> list[PESection]:
+    """The section table as the report states it.
+
+    Each section's entropy is ``pefile``'s ``get_entropy()``, computed with
+    every distinct range of the file counted once
+    (``byte_counts.pefile_section_entropies``): a table of many sections
+    naming the same bytes, or overlapping ones, costs the file's size and
+    not the sections times it.
+    """
     out: list[PESection] = []
-    for sect in getattr(pe, "sections", []):
+    sections = list(getattr(pe, "sections", []) or [])
+    entropies = pefile_section_entropies(pe) if sections else []
+    for sect, section_entropy in zip(sections, entropies, strict=True):
         raw_name = sect.Name or b""
         try:
             name = raw_name.decode("utf-8", errors="replace").strip("\x00 ")
         except Exception:  # noqa: BLE001
             name = repr(raw_name)
-        entropy = float(sect.get_entropy() or 0.0)
+        entropy = float(section_entropy or 0.0)
         char = int(getattr(sect, "Characteristics", 0))
         is_writable = bool(char & 0x80000000)
         is_executable = bool(char & 0x20000000)
@@ -586,6 +613,15 @@ def _pe_obfuscation_indicators(sections: list[PESection], imports: list[ImportRo
 
 def _parse_elf_sections(blob: bytes) -> list[PESection]:
     """Compute entropy per ELF section. Falls back to whole-binary stats."""
+    return _elf_sections(blob)[0]
+
+
+def _elf_sections(blob: bytes) -> tuple[list[PESection], str]:
+    """The ELF section table and, when it stopped at the inflation cap, the sentence saying so.
+
+    The sentence is empty unless the compressed sections would have inflated
+    past ``ELF_INFLATE_CAP`` in all (``ELF_SECTIONS_STOPPED``).
+    """
     try:
         from elftools.elf.elffile import ELFFile  # type: ignore[import-not-found]
     except ImportError:
@@ -601,16 +637,22 @@ def _parse_elf_sections(blob: bytes) -> list[PESection]:
                 characteristics="ELF",
                 is_suspicious=False,
             )
-        ]
+        ], ""
 
-    out: list[PESection] = []
+    # The header fields of each section read, and its bytes: a range of the
+    # file, or the entropy of a section with no range of its own (no bytes,
+    # zeros, or compressed bytes inflated and counted as they stream). A
+    # section that cannot be read ends the table there, as it always has.
+    # The fields are held as a tuple (name, address, size, characteristics):
+    # a table may hold a section for every 64 bytes of the file.
+    rows: list[tuple[tuple[str, str, int, str], tuple[int, int] | float]] = []
+    stopped = ""
     try:
         from io import BytesIO
 
         elf = ELFFile(BytesIO(blob))
+        inflation = _Inflation()
         for section in elf.iter_sections():
-            data = section.data() if section.data_size else b""
-            entropy = _shannon_entropy(data) if data else 0.0
             flags = []
             sh_flags = int(getattr(section.header, "sh_flags", 0))
             if sh_flags & 0x4:
@@ -619,20 +661,148 @@ def _parse_elf_sections(blob: bytes) -> list[PESection]:
                 flags.append("WRITE")
             if sh_flags & 0x2:
                 flags.append("ALLOC")
+            fields = (
+                section.name or "(unnamed)",
+                f"0x{int(section.header.sh_addr):08x}",
+                int(section.header.sh_size or 0),
+                "|".join(flags) or f"0x{sh_flags:08x}",
+            )
+            try:
+                where = _elf_section_bytes(section, len(blob), inflation)
+            except _InflationCapReached:
+                stopped = ELF_SECTIONS_STOPPED.format(
+                    index=len(rows), name=fields[0], cap=ELF_INFLATE_CAP
+                )
+                logger.warning("pe_extractor: %s", stopped)
+                break
+            rows.append((fields, where))
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("pe_extractor: ELF parse failed (%s)", exc)
+    entropies = range_entropies(
+        blob, [where for _, where in rows if isinstance(where, tuple)], counter_entropy
+    )
+    out: list[PESection] = []
+    try:
+        for (name, address, size, characteristics), where in rows:
+            entropy = entropies.get(where, 0.0) if isinstance(where, tuple) else where
             out.append(
                 PESection(
-                    name=section.name or "(unnamed)",
-                    virtual_address=f"0x{int(section.header.sh_addr):08x}",
-                    virtual_size=int(section.header.sh_size or 0),
-                    raw_size=int(section.header.sh_size or 0),
+                    name=name,
+                    virtual_address=address,
+                    virtual_size=size,
+                    raw_size=size,
+                    characteristics=characteristics,
                     entropy=round(entropy, 3),
-                    characteristics="|".join(flags) or f"0x{sh_flags:08x}",
                     is_suspicious=(entropy >= _HIGH_ENTROPY_THRESHOLD),
                 )
             )
     except Exception as exc:  # noqa: BLE001
         logger.warning("pe_extractor: ELF parse failed (%s)", exc)
-    return out
+    return out, stopped
+
+
+# The most bytes the compressed sections of one ELF are inflated to, all of
+# them together: the platform's fixed sample upload cap, as every
+# decompression a tool does (``tools.transforms``, ``tools.upx``, the OOXML
+# relationship parts and the tar listing in ``tools.binary``).
+ELF_INFLATE_CAP = SAMPLE_UPLOAD_MAX_BYTES
+# What the answer says when the section table stopped at that cap.
+ELF_SECTIONS_STOPPED = (
+    "the section table stops before section {index} ({name}): its compressed bytes would "
+    "inflate the file's compressed sections past {cap} bytes in all, the platform's sample "
+    "upload cap, which every decompression a tool does stops at; it and the sections after "
+    "it are not listed"
+)
+
+
+class _InflationCapReached(Exception):
+    """The compressed sections of one ELF would inflate past ``ELF_INFLATE_CAP``."""
+
+
+class _Inflation:
+    """The compressed sections of one ELF inflated so far: each range's entropy, and the bytes.
+
+    A compressed range of the file named again is answered from its entropy,
+    never inflated twice; only the number is kept, never the inflated bytes.
+    """
+
+    def __init__(self) -> None:
+        self.entropies: dict[tuple[int, int], float] = {}
+        self.inflated = 0
+
+
+def _elf_section_bytes(section: Any, size: int, inflation: _Inflation) -> tuple[int, int] | float:
+    """An ELF section's bytes as ``section.data()`` reads them: a range, or their entropy.
+
+    A plain section's bytes are a range of the file, handed back as its bounds
+    so every distinct range is counted once (``byte_counts.range_entropies``).
+    A section of no bytes, or of ``SHT_NOBITS`` (zeros, all one value), has
+    entropy zero. A compressed section is inflated a stretch at a time and its
+    bytes counted as they come (``_inflated_entropy``), once per compressed
+    range of the file. What ``data()`` raises is raised here too: a seek or a
+    read past the largest size Python can index, or an inflation that fails.
+    """
+    data_size = section.data_size
+    if not data_size:
+        return 0.0
+    if section.header["sh_type"] == "SHT_NOBITS":
+        if data_size > sys.maxsize:
+            raise OverflowError("cannot fit 'int' into an index-sized integer")
+        return 0.0
+    offset = int(section["sh_offset"])
+    if section.compressed:
+        # The compressed range: its offset and its stored (compressed) size;
+        # the compression header the inflation reads stands at that offset.
+        key = (offset, int(section["sh_size"]))
+        if key not in inflation.entropies:
+            inflation.entropies[key] = _inflated_entropy(section, inflation)
+        return inflation.entropies[key]
+    if offset > sys.maxsize or data_size > sys.maxsize:
+        raise OverflowError("Python int too large to convert to C ssize_t")
+    start = min(offset, size)
+    return start, min(start + data_size, size) if offset < size else start
+
+
+def _inflated_entropy(section: Any, inflation: _Inflation) -> float:
+    """The entropy of a compressed section's ``data()``, inflated and counted a stretch at a time.
+
+    The same reads and checks as ``data()``: the bytes after the compression
+    header to the section's end, inflated to at most the stated size, which
+    they must reach. Each stretch is counted into one ``Counter``, which keeps
+    the values in the order they first occur as a count of the whole does, so
+    the entropy is the one ``_shannon_entropy(section.data())`` gives. Raises
+    ``_InflationCapReached`` before the file's compressed sections would
+    inflate past ``ELF_INFLATE_CAP`` in all.
+    """
+    from elftools.common.exceptions import ELFCompressionError  # type: ignore[import-not-found]
+
+    c_type = section._compression_type
+    if c_type != "ELFCOMPRESS_ZLIB":
+        if isinstance(c_type, int):
+            raise ELFCompressionError(f"Unknown compression type: {c_type:#0x}")
+        raise ELFCompressionError(f"Unknown compression type: {c_type!r}")
+    data_size = section.data_size
+    header = section.structs.Elf_Chdr.sizeof()
+    section.stream.seek(section["sh_offset"] + header)
+    pending: bytes = section.stream.read(section["sh_size"] - header)
+    stream = zlib.decompressobj()
+    counts: Counter[int] = Counter()
+    total = 0
+    while total < data_size:
+        piece = stream.decompress(pending, min(data_size - total, _INFLATE_STRETCH))
+        pending = stream.unconsumed_tail
+        if not piece:
+            break
+        if inflation.inflated + len(piece) > ELF_INFLATE_CAP:
+            raise _InflationCapReached
+        inflation.inflated += len(piece)
+        total += len(piece)
+        counts.update(piece)
+    if total != data_size:
+        raise ELFCompressionError(
+            f"Decompressed data is {total} bytes long, should be {data_size} bytes long"
+        )
+    return counter_entropy(list(counts.values()))
 
 
 def _parse_elf_imports(blob: bytes) -> list[ImportRow]:
@@ -775,10 +945,13 @@ def _carve_embedded(blob: bytes, sections: list[PESection]) -> list[dict[str, An
     """
     if len(blob) > _MAX_CARVE_INPUT:
         return []
+    return _carve_from(blob, _overlay_offset(sections))
 
+
+def _carve_from(blob: bytes, overlay_start: int) -> list[dict[str, Any]]:
+    """``_carve_embedded`` with the overlay's start already read from the section table."""
     out: list[dict[str, Any]] = []
     seen_offsets: set[int] = set()
-    overlay_start = _overlay_offset(sections)
 
     for magic, kind in _CARVE_SIGNATURES:
         start = 1  # never offset 0 — that is the sample itself
@@ -821,17 +994,43 @@ def carve_payloads(blob: bytes) -> list[tuple[str, bytes]]:
     """
     if not blob or len(blob) > _MAX_CARVE_INPUT:
         return []
-    sections: list[PESection] = []
+    overlay_start = 0
     if blob[:2] == b"MZ":
-        try:
-            sections = _parse_pe(blob).sections
-        except Exception:  # noqa: BLE001 — carving must never break the judge
-            sections = []
+        # Only the section table's raw ranges matter here. The static analysis
+        # of the same bytes in this process already parsed it; otherwise it is
+        # parsed once, the way that analysis parses it.
+        key = _overlay_key(blob)
+        with _MEMO_LOCK:
+            known = _OVERLAYS.get(key)
+        if known is not None:
+            overlay_start = known
+        else:
+            try:
+                overlay_start = _overlay_offset(_parse_pe(blob).sections)
+            except Exception:  # noqa: BLE001 — carving must never break the judge
+                overlay_start = 0
+            else:
+                _remember_overlay(blob, overlay_start, key)
     out: list[tuple[str, bytes]] = []
-    for row in _carve_embedded(blob, sections):
+    for row in _carve_from(blob, overlay_start):
         offset = int(row["offset"])
         out.append((str(row["id"]), blob[offset : offset + _MAX_CARVE_BYTES]))
     return out
+
+
+def _overlay_key(blob: bytes) -> tuple[int, bytes]:
+    return len(blob), hashlib.sha256(blob).digest()
+
+
+def _remember_overlay(
+    blob: bytes, overlay_start: int, key: tuple[int, bytes] | None = None
+) -> None:
+    """Keep where ``blob``'s overlay starts, for ``carve_payloads`` on the same bytes."""
+    key = key or _overlay_key(blob)
+    with _MEMO_LOCK:
+        if len(_OVERLAYS) >= _MEMO_MAX_ENTRIES:
+            _OVERLAYS.clear()
+        _OVERLAYS[key] = overlay_start
 
 
 def _shannon_entropy(data: bytes) -> float:

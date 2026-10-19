@@ -41,12 +41,14 @@ The sample is only read; nothing in it is run.
 
 from __future__ import annotations
 
+import functools
 import heapq
 import json
 import struct
 from array import array
 from bisect import bisect_right
-from collections.abc import Iterator, Mapping, Sequence
+from collections import Counter
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, overload
@@ -123,6 +125,9 @@ _DLL_NAME_BOUND = int(pefile.MAX_DLL_LENGTH)
 # How many 32-bit values ``Image.occurrences_of`` compares at a time: it bounds
 # the scan's working memory (a few megabytes), never what the scan finds.
 _SCAN_WORDS = 1 << 18
+# The positions ``Image.references`` reads, for the tests that hold it linear.
+# Counted, never timed.
+WORK: Counter[str] = Counter()
 # How many import entries are read at a time: each takes some hundred bytes of
 # working arrays while it is read, so this bounds that memory, never what is read.
 _IMPORT_STRETCH = _SCAN_WORDS >> 4
@@ -176,6 +181,35 @@ class PlaceBudget:
         if not self.skipped:
             return ""
         return PLACES_CUT.format(skipped=self.skipped, budget=self.budget)
+
+
+# A run of the file's bytes as the code readers take it: a copy, or a view of
+# the file (``Image.section_view``).
+Code = bytes | memoryview
+# What a view says when an index runs past its end, and what the bytes said.
+_VIEW_INDEX_ERROR = "index out of bounds on dimension 1"
+_BYTES_INDEX_ERROR = "index out of range"
+
+
+def read_as_bytes[R: Callable[..., Any]](reader: R) -> R:
+    """``reader`` with an index past a view's end raised as the same index past the bytes' end.
+
+    The code readers index the file through views (``Image.section_view``)
+    where they once indexed copies; an index past the end is the same
+    ``IndexError`` either way, said in the words the bytes used, so an answer
+    that carries the error reads as before.
+    """
+
+    @functools.wraps(reader)
+    def read(*args: Any, **kwargs: Any) -> Any:
+        try:
+            return reader(*args, **kwargs)
+        except IndexError as exc:
+            if str(exc) == _VIEW_INDEX_ERROR:
+                raise IndexError(_BYTES_INDEX_ERROR) from None
+            raise
+
+    return read  # type: ignore[return-value]
 
 
 class NotAPortableExecutable(ValueError):
@@ -361,6 +395,10 @@ class Image:
     _covers: dict[str, tuple[tuple[int, int], _FirstCover]] = field(
         default_factory=dict, repr=False
     )
+    # What the readers of the code remember of this image's bytes between calls
+    # (``call_sites``: each function decoded once), dropped whenever ``data``
+    # is replaced.
+    _walks: dict[Any, Any] = field(default_factory=dict, repr=False, compare=False)
 
     def __setattr__(self, name: str, value: Any) -> None:
         if name == "sections" and not isinstance(value, SectionList):
@@ -408,6 +446,17 @@ class Image:
 
     def section_bytes(self, section: Section) -> bytes:
         return self.data[section.raw_offset : section.raw_offset + section.mapped_size]
+
+    def section_view(self, section: Section) -> memoryview:
+        """:meth:`section_bytes` as a view of the file's bytes, never a copy."""
+        return memoryview(self.data)[section.raw_offset : section.raw_offset + section.mapped_size]
+
+    def walks(self) -> dict[Any, Any]:
+        """The memory the code readers keep for these bytes, emptied when ``data`` changes."""
+        if self._walks.get("of") is not self.data:
+            self._walks.clear()
+            self._walks["of"] = self.data
+        return self._walks
 
     def data_bytes(self, section: Section) -> bytes:
         """A data section's bytes with the exception directory's bytes set to zero."""
@@ -572,44 +621,146 @@ class Image:
         """For each target RVA, the file offsets of the bytes that refer to it.
 
         Relative references are looked for in executable sections of an x64
-        image; absolute ones in every section.
+        image; absolute ones in every section. A section counts from four
+        bytes of the file on.
+
+        The file is read once whatever the sections overlap: the bytes under
+        the union of the section ranges are read a window at a time. An
+        absolute reference is the bytes alone, kept where the whole value lies
+        inside one section. A relative one lands at ``q + 4 + disp`` plus the
+        section's address less its file offset; the landings ``q + 4 + disp``
+        of a window are sorted once, and each section that holds positions of
+        the window looks its targets up there, less its own difference, and
+        keeps the positions inside it. Every place is stated once.
         """
         found: dict[int, list[int]] = {target: [] for target in targets}
         if not targets:
             return found
         wanted = np.fromiter(sorted(targets), dtype=np.int64)
+        array = np.frombuffer(self.data, dtype=np.uint8)
+        # Each place once per target, however many sections hold it.
+        places: dict[int, set[int]] = {target: set() for target in targets}
+        spans: list[tuple[int, int, Section]] = []
         for section in self.sections:
-            raw = self.section_bytes(section)
-            if len(raw) < 4:
-                continue
-            if self.is64 and section.executable:
-                for shift in range(4):
-                    usable = (len(raw) - shift) // 4 * 4
-                    if usable <= 0:
-                        continue
-                    disp = np.frombuffer(raw[shift : shift + usable], dtype="<i4").astype(np.int64)
-                    positions = np.arange(shift, shift + usable, 4, dtype=np.int64)
-                    landing = section.rva + positions + 4 + disp
-                    for index in np.nonzero(np.isin(landing, wanted))[0]:
-                        found[int(landing[index])].append(
-                            section.raw_offset + int(positions[index])
-                        )
-            width = 8 if self.is64 else 4
-            kind = "<u8" if self.is64 else "<u4"
-            absolute = {self.image_base + target: target for target in targets}
-            wanted_va = np.fromiter(sorted(absolute), dtype=np.uint64)
-            for shift in range(width):
-                usable = (len(raw) - shift) // width * width
-                if usable <= 0:
+            length = len(self.section_view(section))
+            if length >= 4:
+                spans.append((section.raw_offset, section.raw_offset + length, section))
+        if not spans:
+            return found
+        width = 8 if self.is64 else 4
+        absolute = {self.image_base + target: target for target in targets}
+        wanted_va = np.fromiter(sorted(absolute), dtype=np.uint64)
+        if self.is64:
+            executable = sorted(
+                {(low, high, s.rva - low) for low, high, s in spans if s.executable}
+            )
+            if executable:
+                self._relative_references(array, wanted, executable, places)
+        self._absolute_references(array, width, absolute, wanted_va, spans, places)
+        return {target: sorted(held) for target, held in places.items()}
+
+    def _absolute_references(
+        self,
+        array: np.ndarray,
+        width: int,
+        absolute: dict[int, int],
+        wanted_va: np.ndarray,
+        spans: list[tuple[int, int, Section]],
+        found: dict[int, set[int]],
+    ) -> None:
+        """The places in the sections holding a target as an absolute address."""
+        ordered = sorted((low, high) for low, high, _ in spans)
+        lows = np.asarray([low for low, _ in ordered], dtype=np.int64)
+        # The furthest end of any section starting at or before each one.
+        reach = np.maximum.accumulate(np.asarray([high for _, high in ordered], dtype=np.int64))
+        for low, high in _merged(ordered):
+            last = high - width
+            for begin in range(low, last + 1, _SCAN_WORDS):
+                stop = min(last + 1, begin + _SCAN_WORDS)
+                WORK["positions"] += stop - begin
+                value = np.zeros(stop - begin, dtype=np.uint64)
+                for index in range(width):
+                    piece = array[begin + index : stop + index].astype(np.uint64)
+                    value |= piece << np.uint64(8 * index)
+                hits = np.flatnonzero(np.isin(value, wanted_va))
+                if not len(hits):
                     continue
-                values = np.frombuffer(raw[shift : shift + usable], dtype=kind).astype(np.uint64)
-                hits = np.nonzero(np.isin(values, wanted_va))[0]
-                for index in hits:
-                    target = absolute[int(values[index])]
-                    found[target].append(section.raw_offset + shift + int(index) * width)
-        for target in found:
-            found[target] = sorted(set(found[target]))
-        return found
+                places = hits + begin
+                holder = np.searchsorted(lows, places, side="right") - 1
+                inside = reach[holder] >= places + width
+                for at, hit in zip(places[inside].tolist(), hits[inside].tolist(), strict=True):
+                    found[absolute[int(value[hit])]].add(at)
+
+    def _relative_references(
+        self,
+        array: np.ndarray,
+        wanted: np.ndarray,
+        executable: list[tuple[int, int, int]],
+        found: dict[int, set[int]],
+    ) -> None:
+        """The places in the executable sections whose displacement lands on a target.
+
+        Sections with the same address less file offset (``delta``) land the
+        same bytes on the same address, so they are taken together: their
+        ranges are merged per delta, and a position counts where its four
+        bytes lie inside one of them. Each position is then looked up once
+        per distinct delta, however many sections name it.
+        """
+        by_delta: dict[int, list[tuple[int, int]]] = {}
+        for low, high, delta in executable:
+            by_delta.setdefault(delta, []).append((low, high))
+        # Per delta: its merged ranges, and the starts and furthest ends of its
+        # sections, for the test that four bytes lie inside one of them.
+        pieces: list[tuple[int, int, int, np.ndarray, np.ndarray]] = []
+        for delta, ranges in sorted(by_delta.items()):
+            ordered = sorted(ranges)
+            lows = np.asarray([low for low, _ in ordered], dtype=np.int64)
+            reach = np.maximum.accumulate(np.asarray([high for _, high in ordered], dtype=np.int64))
+            for low, high in _merged(ordered):
+                pieces.append((low, high, delta, lows, reach))
+        piece_lows = np.asarray([piece[0] for piece in pieces], dtype=np.int64)
+        piece_lasts = np.asarray([piece[1] - 4 for piece in pieces], dtype=np.int64)
+        for low, high in _merged([(low, high) for low, high, _ in executable]):
+            last = high - 4
+            for begin in range(low, last + 1, _SCAN_WORDS):
+                stop = min(last + 1, begin + _SCAN_WORDS)
+                WORK["positions"] += stop - begin
+                disp = np.zeros(stop - begin, dtype=np.int64)
+                for index in range(4):
+                    disp |= array[begin + index : stop + index].astype(np.int64) << (8 * index)
+                disp -= (disp >= 1 << 31) * (1 << 32)
+                places = np.arange(begin, stop, dtype=np.int64)
+                landing = places + 4 + disp
+                order = np.argsort(landing, kind="stable")
+                landing = landing[order]
+                places = places[order]
+                holding = np.flatnonzero((piece_lows <= stop - 1) & (piece_lasts >= begin))
+                for index in holding.tolist():
+                    first, final, delta, lows, reach = pieces[index]
+                    sought = wanted - delta
+                    WORK["lookups"] += len(sought)
+                    left = np.searchsorted(landing, sought, side="left")
+                    right = np.searchsorted(landing, sought, side="right")
+                    for which in np.flatnonzero(right > left).tolist():
+                        at = places[left[which] : right[which]]
+                        at = at[(at >= first) & (at <= final - 4)]
+                        if not len(at):
+                            continue
+                        holder = np.searchsorted(lows, at, side="right") - 1
+                        at = at[reach[holder] >= at + 4]
+                        WORK["appends"] += len(at)
+                        found[int(wanted[which])].update(at.tolist())
+
+
+def _merged(spans: list[tuple[int, int]]) -> list[tuple[int, int]]:
+    """The union of ``[low, high)`` ranges, as ascending ranges that neither overlap nor touch."""
+    out: list[tuple[int, int]] = []
+    for low, high in sorted(spans):
+        if out and low <= out[-1][1]:
+            out[-1] = (out[-1][0], max(out[-1][1], high))
+        else:
+            out.append((low, high))
+    return out
 
 
 def value_offsets(data: bytes, values: Any, width: int = 4) -> dict[int, np.ndarray]:

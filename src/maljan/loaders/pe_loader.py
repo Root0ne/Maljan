@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import Any
 
 from maljan.core.logger import logger
+from maljan.tools.byte_counts import pefile_section_entropies
 
 
 def _detect_file_type(path: Path) -> str:
@@ -105,9 +106,11 @@ class PELoader:
         if not pe:
             return []
         sections: list[dict[str, Any]] = []
-        for section in pe.sections:
+        # Each distinct range of the file counted once, however many sections
+        # name it (``byte_counts``): the same numbers as ``get_entropy()``.
+        entropies = pefile_section_entropies(pe)
+        for section, entropy in zip(pe.sections, entropies, strict=True):
             name = section.Name.decode("utf-8", errors="ignore").strip("\x00")
-            entropy = section.get_entropy()
             sections.append(
                 {
                     "name": name,

@@ -267,6 +267,10 @@ class StaticAnalysis(BaseModel):
     # saying itself truncated, or reading the import directory as damaged.
     # Empty when an answer read them whole, and then left out of the dump.
     imports_partial: list[str] = Field(default_factory=list, exclude_if=lambda value: not value)
+    # Said when the section table was not read whole: an ELF whose compressed
+    # sections would inflate past the platform's sample upload cap stops there
+    # (``extractors.pe_extractor.ELF_SECTIONS_STOPPED``).
+    sections_partial: list[str] = Field(default_factory=list, exclude_if=lambda value: not value)
     exports: list[str] = Field(default_factory=list)
     # The same exports with their ordinal and address, when the format tool
     # reported them. ``exports`` stays the plain list every older consumer and

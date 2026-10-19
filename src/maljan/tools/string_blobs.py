@@ -131,8 +131,9 @@ from __future__ import annotations
 import base64
 import binascii
 import re
-from collections.abc import Iterator, Mapping, Sequence
-from dataclasses import dataclass, field
+from collections import Counter
+from collections.abc import Callable, Iterator, Mapping, Sequence
+from dataclasses import dataclass, field, replace
 from typing import Any
 
 import numpy as np
@@ -308,8 +309,61 @@ def _xor(raw: bytes, stream: bytes) -> bytes:
     )
 
 
+# How many positions the sweeps read at a time: it bounds their working arrays
+# (a few bytes per position), never what they find.
+_WINDOW = pe_image._SCAN_WORDS
+
+# The most bytes a two-byte length field states, so the farthest past its
+# start a header's stated text reaches.
+_TWO_BYTE_REACH = 1 << 16
+
+# The work the sweeps do, counted for the tests that hold them linear: the
+# positions each pass over a section reads. Counted, never timed.
+WORK: Counter[str] = Counter()
+
+
+def _long_runs(
+    mask_of: Callable[[int, int], np.ndarray], size: int, span: int
+) -> tuple[np.ndarray, np.ndarray]:
+    """The starts and ends of the maximal runs of a mask at least ``span`` long, ascending.
+
+    ``mask_of(low, high)`` is the mask over ``[low, high)``. A window of
+    positions at a time: a position starts ``span`` set places in a row when
+    the count of set places over the ``span`` from it is ``span``, read off a
+    running count; the positions that do, in a row, are one run's, which
+    starts at the first of them and ends ``span`` past the last. A run that
+    goes on into the next window is joined to the rest of it there.
+    """
+    firsts: list[np.ndarray] = []
+    lasts: list[np.ndarray] = []
+    for low in range(0, size, _WINDOW):
+        high = min(size, low + _WINDOW)
+        piece = mask_of(low, min(size, high + span - 1))
+        WORK["positions"] += len(piece)
+        if len(piece) < span:
+            break
+        running = np.concatenate(([0], np.cumsum(piece, dtype=np.int64)))
+        hits = np.flatnonzero((running[span:] - running[:-span])[: high - low] == span)
+        if not len(hits):
+            continue
+        hits += low
+        breaks = np.flatnonzero(np.diff(hits) != 1)
+        first = hits[np.concatenate(([0], breaks + 1))]
+        last = hits[np.concatenate((breaks, [len(hits) - 1]))]
+        if lasts and lasts[-1][-1] + 1 == first[0]:
+            lasts[-1][-1] = last[0]
+            first, last = first[1:], last[1:]
+        if len(first):
+            firsts.append(first)
+            lasts.append(last)
+    if not firsts:
+        empty = np.zeros(0, dtype=np.int64)
+        return empty, empty
+    return np.concatenate(firsts), np.concatenate(lasts) + span
+
+
 def _bounded_runs(
-    zeros: np.ndarray, decoded: bytes, min_len: int
+    zeros: np.ndarray, decoded: np.ndarray, min_len: int
 ) -> Iterator[tuple[int, int, bool]]:
     """The printable runs of ``decoded`` bounded on both sides as the test says.
 
@@ -322,26 +376,36 @@ def _bounded_runs(
     a given byte, so the key then says where the text ends as a header does,
     while a wrong key near the right one reads the same letters as other
     letters and runs on through that byte as one more character.
+
+    Only runs of at least ``min_len`` are looked at, found by array operations
+    a window at a time (``_long_runs``) rather than one match per run.
     """
-    if zeros.any():
-        masked = np.frombuffer(decoded, dtype=np.uint8).copy()
-        masked[zeros] = 0
-        decoded = masked.tobytes()
-    for match in _RUN.finditer(decoded):
-        start, end = match.span()
-        if end - start < min_len:
-            continue
-        before = start == 0 or decoded[start - 1] == 0
-        after = end == len(decoded) or decoded[end] == 0
-        if before and after:
-            yield start, end, end < len(decoded) and not zeros[end]
+    size = len(decoded)
+
+    def printable(low: int, high: int) -> np.ndarray:
+        mask: np.ndarray = _PRINTABLE_TABLE[decoded[low:high]] & ~zeros[low:high]
+        return mask
+
+    starts, ends = _long_runs(printable, size, max(1, min_len))
+    if not len(starts):
+        return
+    # Bounded: the byte before and the byte after are a zero of the section,
+    # a decoded NUL, or the section's edge.
+    before_at = np.maximum(starts - 1, 0)
+    after_at = np.minimum(ends, size - 1)
+    before = (starts == 0) | zeros[before_at] | (decoded[before_at] == 0)
+    after = (ends == size) | zeros[after_at] | (decoded[after_at] == 0)
+    terminated = (ends < size) & ~zeros[after_at]
+    for index in np.flatnonzero(before & after).tolist():
+        yield int(starts[index]), int(ends[index]), bool(terminated[index])
 
 
 def _xor8(raw: bytes, base: int, min_len: int) -> Iterator[Found]:
     zeros = np.frombuffer(raw, dtype=np.uint8) == 0
     for key in range(1, 256):
         decoded = raw.translate(bytes(b ^ key for b in range(256)))
-        for start, end, terminated in _bounded_runs(zeros, decoded, min_len):
+        decoded_array = np.frombuffer(decoded, dtype=np.uint8)
+        for start, end, terminated in _bounded_runs(zeros, decoded_array, min_len):
             text = decoded[start:end]
             if _reads_as_text(raw[start:end]) or not _passes(text, min_len):
                 continue
@@ -355,35 +419,61 @@ def _xor8(raw: bytes, base: int, min_len: int) -> Iterator[Found]:
             )
 
 
-def _le(array: np.ndarray, at: np.ndarray, width: int) -> np.ndarray:
-    """The little-endian unsigned ints of ``width`` bytes starting at each of ``at``."""
-    value = np.zeros(len(at), dtype=np.int64)
-    for index in range(width):
-        value |= array[at + index].astype(np.int64) << (8 * index)
-    return value
+def _seed_groups(array: np.ndarray, ramp: bytes) -> list[np.ndarray] | None:
+    """Every place a seed-and-length header could stand, grouped by its ramp constant.
 
-
-def _seed_headers(array: np.ndarray) -> list[tuple[np.ndarray, np.ndarray, np.ndarray, bool]]:
-    """Every place a seed-and-length header could stand, per variant.
-
-    Each variant is the blob starts, the stated text lengths and, for each, the
-    constant ``c`` of the absolute key ramp (key at position ``p`` is
-    ``(c + p) & 0xFF``) the header's seed puts the text under.
+    At position ``p`` the seed's low byte ``s`` puts the text, which starts at
+    ``p + 6``, under the absolute key ramp constant ``(s + extra - (p + 6)) &
+    0xFF`` (``extra`` 0 or 1, the key starting at the seed's low byte or one
+    past it). Group ``g`` holds, ascending, the positions where ``(s - (p +
+    6)) & 0xFF`` is ``g``; constant ``c`` with ``extra`` reads group ``(c -
+    extra) & 0xFF``. Grouped a window at a time with a stable sort of one byte
+    per position, so the groups hold one number per position and nothing
+    else. ``None`` when the section is too short to hold a header.
     """
     size = len(array)
     if size < 6 + _HEADER_MIN_LENGTH:
-        return []
-    at = np.arange(0, size - 6, dtype=np.int64)
-    seed = _le(array, at, 4)
-    stored = _le(array, at + 4, 2)
-    variants = []
-    for masked in (False, True):
-        length = stored ^ (seed & 0xFFFF) if masked else stored
-        fits = (length >= _HEADER_MIN_LENGTH) & (length <= size - (at + 6))
-        for extra in (0, 1):
-            constant = ((seed + extra) - (at + 6)) & 0xFF
-            variants.append((at[fits], length[fits], constant[fits], masked))
-    return variants
+        return None
+    count = size - 6
+    pieces: list[list[np.ndarray]] = [[] for _ in range(256)]
+    for low in range(0, count, _WINDOW):
+        high = min(count, low + _WINDOW)
+        WORK["positions"] += high - low
+        shifted = np.frombuffer(ramp, dtype=np.uint8, count=high - low, offset=(low + 6) % 256)
+        group = array[low:high] - shifted
+        order = np.argsort(group, kind="stable")
+        bounds = np.concatenate(([0], np.cumsum(np.bincount(group, minlength=256))))
+        for value in np.flatnonzero(bounds[1:] > bounds[:-1]).tolist():
+            pieces[value].append(order[bounds[value] : bounds[value + 1]] + low)
+    return [np.concatenate(piece) if piece else np.zeros(0, dtype=np.int64) for piece in pieces]
+
+
+def _clean_spans(decoded: np.ndarray, starts: np.ndarray, stops: np.ndarray) -> np.ndarray:
+    """Whether each span ``[start, stop)`` of ``decoded`` holds only printable or zero bytes.
+
+    The spans are a header's stated text, so none is longer than a two-byte
+    length states (``_TWO_BYTE_REACH``). A window of starts at a time: a
+    running count of the other bytes over the window and the reach past it
+    answers every span that starts in the window.
+    """
+    clean = np.zeros(len(starts), dtype=bool)
+    if not len(starts):
+        return clean
+    order = np.argsort(starts, kind="stable")
+    ordered = starts[order]
+    size = len(decoded)
+    for low in range(0, size, _WINDOW):
+        high = min(size, low + _WINDOW)
+        first, last = np.searchsorted(ordered, (low, high))
+        if last <= first:
+            continue
+        piece = decoded[low : min(size, high + _TWO_BYTE_REACH)]
+        WORK["positions"] += len(piece)
+        other = ~(_PRINTABLE_TABLE[piece] | (piece == 0))
+        running = np.concatenate(([0], np.cumsum(other, dtype=np.int64)))
+        chosen = order[first:last]
+        clean[chosen] = running[stops[chosen] - low] == running[starts[chosen] - low]
+    return clean
 
 
 def _rolling(raw: bytes, base: int, min_len: int, sweep: bool, headers: bool) -> Iterator[Found]:
@@ -396,15 +486,16 @@ def _rolling(raw: bytes, base: int, min_len: int, sweep: bool, headers: bool) ->
     size = len(raw)
     array = np.frombuffer(raw, dtype=np.uint8)
     zeros = array == 0
-    variants = _seed_headers(array) if headers else []
     ramp = bytes(range(256)) * (size // 256 + 2)
+    groups = _seed_groups(array, ramp) if headers else None
     for constant in range(256):
-        stream = ramp[constant : constant + size]
-        decoded = _xor(raw, stream)
-        yield from _seeded(raw, base, decoded, stream, constant, variants)
+        stream = np.frombuffer(ramp, dtype=np.uint8, count=size, offset=constant)
+        decoded = array ^ stream
+        if groups is not None:
+            yield from _seeded(raw, base, decoded, constant, groups)
         if sweep:
             for start, end, terminated in _bounded_runs(zeros, decoded, min_len):
-                text = decoded[start:end]
+                text = decoded[start:end].tobytes()
                 encoded = raw[start:end]
                 if _reads_as_text(encoded) or _repeats(encoded) or not _passes(text, min_len):
                     continue
@@ -412,7 +503,7 @@ def _rolling(raw: bytes, base: int, min_len: int, sweep: bool, headers: bool) ->
                     base + start,
                     base + start,
                     "xor8_rolling",
-                    {"first_key": f"{stream[start]:#04x}", "step": 1},
+                    {"first_key": f"{(constant + start) & 0xFF:#04x}", "step": 1},
                     text,
                     terminated=terminated,
                 )
@@ -421,28 +512,41 @@ def _rolling(raw: bytes, base: int, min_len: int, sweep: bool, headers: bool) ->
 def _seeded(
     raw: bytes,
     base: int,
-    decoded: bytes,
-    stream: bytes,
+    decoded: np.ndarray,
     constant: int,
-    variants: list[tuple[np.ndarray, np.ndarray, np.ndarray, bool]],
+    groups: list[np.ndarray],
 ) -> Iterator[Found]:
-    """The seed-and-length headers whose seed puts their text under this ramp constant."""
-    if not variants:
-        return
-    decoded_array = np.frombuffer(decoded, dtype=np.uint8)
-    # Printable or zero: a UTF-16LE text has a zero byte after each character.
-    plain = _PRINTABLE_TABLE[decoded_array] | (decoded_array == 0)
-    bad = np.concatenate(([0], np.cumsum(~plain, dtype=np.int64)))
-    for at, length, constants, masked in variants:
-        chosen = constants == constant
-        if not chosen.any():
-            continue
-        start = at[chosen] + 6
-        stop = start + length[chosen]
-        clean = bad[stop] - bad[start] == 0
-        for index in np.nonzero(clean)[0]:
+    """The seed-and-length headers whose seed puts their text under this ramp constant.
+
+    Four variants, in this order: the length stored plain or XOR the seed's
+    low 16 bits, each with the key starting at the seed's low byte or one
+    past it; each variant's headers ascending by position.
+    """
+    size = len(raw)
+    array = np.frombuffer(raw, dtype=np.uint8)
+    places = [groups[(constant - extra) & 0xFF] for extra in (0, 1)]
+    variants: list[tuple[np.ndarray, np.ndarray, bool]] = []
+    for masked in (False, True):
+        for extra in (0, 1):
+            at = places[extra]
+            stored = array[at + 4].astype(np.int64) | (array[at + 5].astype(np.int64) << 8)
+            if masked:
+                stored ^= array[at].astype(np.int64) | (array[at + 1].astype(np.int64) << 8)
+            fits = (stored >= _HEADER_MIN_LENGTH) & (stored <= size - (at + 6))
+            start = at[fits] + 6
+            variants.append((start, start + stored[fits], masked))
+    every = _clean_spans(
+        decoded,
+        np.concatenate([start for start, _, _ in variants]),
+        np.concatenate([stop for _, stop, _ in variants]),
+    )
+    taken = 0
+    for start, stop, masked in variants:
+        clean = every[taken : taken + len(start)]
+        taken += len(start)
+        for index in np.flatnonzero(clean).tolist():
             first, last = int(start[index]), int(stop[index])
-            read = _header_text(decoded[first:last], raw[first:last], rolling=True)
+            read = _header_text(decoded[first:last].tobytes(), raw[first:last], rolling=True)
             if read is None:
                 continue
             text, encoding = read
@@ -456,7 +560,7 @@ def _seeded(
                     + (", XOR the seed's low 16 bits" if masked else "")
                     + "), text",
                     "seed": f"{seed:#010x}",
-                    "first_key": f"{stream[first]:#04x}",
+                    "first_key": f"{(constant + first) & 0xFF:#04x}",
                     "step": 1,
                 },
                 text,
@@ -732,6 +836,9 @@ class Decoded:
     # Strings (spans) whose near-key readings, or a header inside them, were
     # set aside (``_through_readings``, ``_headers_inside_terminated_text``).
     outranked: int = 0
+    # The data sections whose ranges of the file overlap, in groups, each with
+    # the one range of the file its group was decoded as (``_read_together``).
+    overlapping: list[tuple[list[str], int, int]] = field(default_factory=list)
 
 
 def _span_length(item: Found) -> int:
@@ -980,13 +1087,23 @@ def decode(
     """
     wanted = set(schemes)
     candidates: list[Found] = []
+    # Sections whose ranges of the file overlap are decoded together, as the
+    # one range their union is, once: every byte of the file is read at most
+    # once and every byte a data section holds is read. A section that
+    # overlaps no other is decoded as it always was (``_read_together``).
+    groups = _read_together(image)
     for section in image.data_sections():
+        held = groups.get(id(section))
+        if held is None:
+            continue
+        section = held[0]
         raw = image.data_bytes(section)
         base = section.raw_offset
+        found: list[Found] = []
         if "xor_keyed_header" in wanted:
-            candidates.extend(_keyed_headers(raw, base, min_len))
+            found.extend(_keyed_headers(raw, base, min_len))
         if "xor8_rolling" in wanted or "xor8_rolling_header" in wanted:
-            candidates.extend(
+            found.extend(
                 _rolling(
                     raw,
                     base,
@@ -996,9 +1113,10 @@ def decode(
                 )
             )
         if "xor8" in wanted:
-            candidates.extend(_xor8(raw, base, min_len))
+            found.extend(_xor8(raw, base, min_len))
         if "base64" in wanted:
-            candidates.extend(_plain_base64(raw, base))
+            found.extend(_plain_base64(raw, base))
+        candidates.extend(found)
 
     outranked, outranked_spans = _through_readings(candidates)
     readings: dict[tuple[str, int], set[bytes]] = {}
@@ -1100,7 +1218,66 @@ def decode(
         items=sorted(accepted.values(), key=lambda item: item.text_offset),
         ambiguous=len(ambiguous) + tied,
         outranked=outranked_spans,
+        overlapping=[
+            (names, union.raw_offset, union.raw_offset + union.raw_size)
+            for union, names in groups.values()
+            if len(names) > 1
+        ],
     )
+
+
+def _read_together(image: pe_image.Image) -> dict[int, tuple[pe_image.Section, list[str]]]:
+    """The range each group of overlapping data sections is decoded as, by its first section.
+
+    The data sections are grouped where their ranges of the file overlap (a
+    shared byte, not a shared edge: sections that only touch stay apart). A
+    group of one section is decoded as that section. A larger one is decoded
+    as one section over the union of their ranges, the first section's in
+    the header's order with the range widened, and is keyed by that first
+    section, so the groups are read in the order their first sections stand;
+    each comes with its sections' names in that order.
+    """
+    sections = image.data_sections()
+    spans = sorted(
+        (s.raw_offset, s.raw_offset + len(image.section_bytes(s)), index)
+        for index, s in enumerate(sections)
+    )
+    members: list[list[int]] = []
+    high = -1
+    for low, end, index in spans:
+        if members and low < high:
+            members[-1].append(index)
+            high = max(high, end)
+        else:
+            members.append([index])
+            high = end
+    out: dict[int, tuple[pe_image.Section, list[str]]] = {}
+    for group in members:
+        first = sections[min(group)]
+        names = [sections[i].name for i in sorted(group)]
+        if len(group) == 1:
+            out[id(first)] = (first, names)
+            continue
+        low = min(sections[i].raw_offset for i in group)
+        end = max(sections[i].raw_offset + len(image.section_bytes(sections[i])) for i in group)
+        union = replace(first, raw_offset=low, raw_size=end - low, virtual_size=end - low)
+        out[id(first)] = (union, names)
+    return out
+
+
+def _sections_said(decoded: Decoded) -> dict[str, str]:
+    """What the answer says of data sections that overlap; nothing where none do."""
+    if not decoded.overlapping:
+        return {}
+    return {
+        "sections_read_together": "; ".join(
+            f"{', '.join(names)} overlap in the file and were decoded together as the one range "
+            f"{low:#x}-{high:#x}"
+            for names, low, high in decoded.overlapping
+        )
+        + ": each byte was decoded once and each decoding is stated once, under the first "
+        "section in the header's order that holds it"
+    }
 
 
 # The word the answer's fields name a decoder by where its rows came from any
@@ -1311,4 +1488,5 @@ def decode_string_blobs(
         "ambiguous_spans": decoded.ambiguous,
         "outranked_spans": decoded.outranked,
         **({"unreferenced_results": unreferenced} if include_unreferenced else {}),
+        **_sections_said(decoded),
     }
