@@ -103,6 +103,13 @@ class APIKey(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     last_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    # The owner's ``users.token_generation`` when the key was created. A key
+    # is refused once the owner's generation has moved past it, so every
+    # revocation of the account's sessions (a password change, a replayed
+    # refresh token) retires its keys too (``deps._user_from_api_key``).
+    token_generation: Mapped[int] = mapped_column(
+        Integer, default=0, server_default="0", nullable=False
+    )
 
     # Relationships
     user = relationship("User", back_populates="api_keys")

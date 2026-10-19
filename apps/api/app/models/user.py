@@ -2,7 +2,7 @@
 
 import enum
 
-from sqlalchemy import Boolean, Enum, String
+from sqlalchemy import Boolean, Enum, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
@@ -44,6 +44,13 @@ class User(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         nullable=False,
     )
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    # Every token carries the generation it was minted under
+    # (``app.auth.jwt.TOKEN_GENERATION_CLAIM``); moving this on revokes every
+    # access and refresh token of the account at once. A password change and a
+    # replayed refresh token move it (``app.auth.revocation``).
+    token_generation: Mapped[int] = mapped_column(
+        Integer, default=0, server_default="0", nullable=False
+    )
 
     # Relationships
     samples = relationship("Sample", back_populates="uploaded_by_user", lazy="selectin")

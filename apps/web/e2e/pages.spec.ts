@@ -179,6 +179,7 @@ test.describe("Settings", () => {
 
     await page.goto("/settings/api-keys");
     await page.getByLabel("Key name").fill("copy test");
+    await page.getByLabel("Current password").fill("account-password");
     await page.getByRole("button", { name: "Create", exact: true }).click();
 
     const copy = page.getByRole("button", { name: "Copy", exact: true });

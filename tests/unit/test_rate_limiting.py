@@ -330,3 +330,45 @@ class TestTrustedProxyNetworks:
         mw = RateLimitMiddleware(mock_app, redis_url="redis://localhost:6379/0")
         result = await _peer_ip(mw, "198.51.100.7", "203.0.113.9", ["10.0.0.0/8"], monkeypatch)
         assert result == "198.51.100.7"
+
+    async def test_a_spoofed_left_most_hop_is_never_believed(
+        self, mock_app, fake_redis, monkeypatch
+    ):
+        """The client writes the left of X-Forwarded-For; the proxy appends the right."""
+        mw = RateLimitMiddleware(mock_app, redis_url="redis://localhost:6379/0")
+        honest = await _peer_ip(mw, "10.0.0.2", "203.0.113.9", ["10.0.0.0/8"], monkeypatch)
+        spoofed = await _peer_ip(
+            mw, "10.0.0.2", "6.6.6.6, 1.2.3.4, 203.0.113.9", ["10.0.0.0/8"], monkeypatch
+        )
+        assert honest == spoofed == "203.0.113.9"
+
+    async def test_the_right_most_untrusted_hop_behind_a_proxy_chain(
+        self, mock_app, fake_redis, monkeypatch
+    ):
+        mw = RateLimitMiddleware(mock_app, redis_url="redis://localhost:6379/0")
+        result = await _peer_ip(
+            mw, "10.0.0.2", "6.6.6.6, 203.0.113.9, 10.0.0.7", ["10.0.0.0/8"], monkeypatch
+        )
+        assert result == "203.0.113.9"
+
+    async def test_a_spoofed_hop_moves_neither_the_rate_limit_key_nor_the_fingerprint(
+        self, mock_app, fake_redis, monkeypatch
+    ):
+        from app.auth.jwt import client_fingerprint
+        from app.middleware.rate_limit_middleware import request_client_ip
+
+        async def _ip(xff: str) -> str:
+            from app.middleware import rate_limit_middleware as rlm
+
+            async def _get(name):
+                return ["10.0.0.0/8"] if name == "trusted_proxy_ips" else None
+
+            monkeypatch.setattr(rlm.runtime_config, "get", _get)
+            request = MagicMock()
+            request.client.host = "10.0.0.2"
+            request.headers = {"x-forwarded-for": xff}
+            return await request_client_ip(request)
+
+        honest, spoofed = await _ip("203.0.113.9"), await _ip("6.6.6.6, 203.0.113.9")
+        assert honest == spoofed
+        assert client_fingerprint(honest, "ua") == client_fingerprint(spoofed, "ua")

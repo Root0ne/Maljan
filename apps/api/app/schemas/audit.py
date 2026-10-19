@@ -76,6 +76,15 @@ class APIKeyCreateRequest(BaseModel):
     expires_in_days: int | None = Field(
         None, ge=1, le=365, description="Optional expiration in days"
     )
+    current_password: str = Field(
+        ...,
+        min_length=1,
+        max_length=128,
+        description=(
+            "The caller's password, asked again: a key outlives the access token, "
+            "so a token alone cannot mint one"
+        ),
+    )
 
 
 class APIKeyResponse(BaseModel):

@@ -52,6 +52,7 @@ from app.services.settings_catalog_api import (
     API_DEFAULTS,
     _masked,
     catalog_index,
+    refresh_grace_problem,
     validate_editable_api_value,
 )
 
@@ -848,6 +849,9 @@ class SettingsService:
             msg = validate_editable_api_value(entry, value)
             if msg:
                 errors[f"api.{name}"] = msg
+        grace_problem = refresh_grace_problem(merged_api)
+        if grace_problem:
+            errors.setdefault("api.refresh_reuse_grace_seconds", grace_problem)
         if errors:
             raise SettingsValidationError(errors)
 

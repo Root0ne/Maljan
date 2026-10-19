@@ -14,6 +14,7 @@ def _user():
     u.id = __import__("uuid").uuid4()
     u.is_active = True
     u.hashed_password = "h"
+    u.token_generation = 0
     return u
 
 
@@ -32,6 +33,8 @@ def client(monkeypatch):
     monkeypatch.setattr(auth_module, "clear_login_throttle", AsyncMock())
     monkeypatch.setattr(auth_module, "refresh_token_register", AsyncMock())
     monkeypatch.setattr(auth_module, "refresh_token_consume", AsyncMock(return_value=True))
+    monkeypatch.setattr(auth_module, "refresh_token_rotate", AsyncMock(return_value=True))
+    monkeypatch.setattr(auth_module, "request_client_ip", AsyncMock(return_value="198.51.100.1"))
     monkeypatch.setattr(auth_module, "_audit", AsyncMock())
     monkeypatch.setattr(auth_module, "create_refresh_token", lambda d: ("refresh-jwt", "jti-1"))
     monkeypatch.setattr(auth_module, "create_access_token", lambda d: "access-jwt")

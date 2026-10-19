@@ -15,7 +15,8 @@ def test_refresh_answers_401_when_the_session_store_is_unavailable(monkeypatch):
     monkeypatch.setattr(
         auth_module, "decode_token", lambda t: {"type": "refresh", "sub": "u1", "jti": "j1"}
     )
-    monkeypatch.setattr(auth_module, "refresh_token_consume", AsyncMock(return_value=False))
+    monkeypatch.setattr(auth_module, "refresh_token_rotate", AsyncMock(return_value=False))
+    monkeypatch.setattr(auth_module, "request_client_ip", AsyncMock(return_value="198.51.100.1"))
     audit = AsyncMock()
     monkeypatch.setattr(auth_module, "_audit", audit)
     monkeypatch.setattr(

@@ -43,10 +43,11 @@ class _FakeJob:
 
 
 class _FakeUser:
-    """Stand-in for ``User`` with just the field the account check reads."""
+    """Stand-in for ``User`` with just the fields the account check reads."""
 
-    def __init__(self, is_active: bool = True) -> None:
+    def __init__(self, is_active: bool = True, token_generation: int = 0) -> None:
         self.is_active = is_active
+        self.token_generation = token_generation
 
 
 # The default account: open, because that is what every test about something

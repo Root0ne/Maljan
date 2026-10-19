@@ -12,6 +12,7 @@ export default function SettingsApiKeysPage() {
   const [apiKeysLoading, setApiKeysLoading] = useState(false);
   const [apiKeysError, setApiKeysError] = useState<string | null>(null);
   const [newKeyName, setNewKeyName] = useState("");
+  const [keyPassword, setKeyPassword] = useState("");
   const [createdKey, setCreatedKey] = useState<ApiKeyCreateDTO | null>(null);
   /* Native alert()/confirm() replaced by the in-page
    * banner + toast + confirm-modal pattern already used by jobs/page.tsx. */
@@ -64,13 +65,14 @@ export default function SettingsApiKeysPage() {
 
   async function handleCreateKey(e: React.FormEvent) {
     e.preventDefault();
-    if (!newKeyName.trim()) return;
+    if (!newKeyName.trim() || !keyPassword) return;
     setKeyActionError(null);
     try {
-      const key = await api.createApiKey(newKeyName.trim());
+      const key = await api.createApiKey(newKeyName.trim(), keyPassword);
       setCreatedKey(key);
       setCopyState("idle");
       setNewKeyName("");
+      setKeyPassword("");
       loadApiKeys();
     } catch (err: unknown) {
       setKeyActionError(getErrorMessage(err) || "Failed to create API key.");
@@ -130,13 +132,34 @@ export default function SettingsApiKeysPage() {
               className="w-full h-9 px-3 text-sm bg-bg-deep border border-border rounded text-text-primary focus:border-accent focus:outline-none"
             />
           </div>
+          <div className="flex-1">
+            <label htmlFor="settings-api-key-password" className="block text-xs text-text-secondary mb-1.5">
+              Current password
+            </label>
+            <input
+              id="settings-api-key-password"
+              name="current_password"
+              type="password"
+              autoComplete="current-password"
+              required
+              aria-describedby="settings-api-key-password-why"
+              value={keyPassword}
+              onChange={(e) => setKeyPassword(e.target.value)}
+              className="w-full h-9 px-3 text-sm bg-bg-deep border border-border rounded text-text-primary focus:border-accent focus:outline-none"
+            />
+          </div>
           <button
             type="submit"
+            disabled={!newKeyName.trim() || !keyPassword}
             className="h-9 px-4 text-xs bg-accent-fill text-white rounded hover:bg-accent-fill-hover"
           >
             Create
           </button>
         </form>
+        <p id="settings-api-key-password-why" className="mt-2 text-xs text-text-muted">
+          A key outlives your session, so creating one asks for your password. Changing the
+          password, or a sign-in found replayed, revokes every key.
+        </p>
         {createdKey && (
           <div className="mt-3 p-3 bg-status-green/10 border border-status-green/20 rounded">
             <p className="text-xs text-status-green font-medium mb-1">API key created successfully. Copy it now — it will not be shown again.</p>

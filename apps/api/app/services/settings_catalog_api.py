@@ -12,6 +12,7 @@ name as the entry's ``path`` (the catalog key without its ``api.`` prefix).
 from __future__ import annotations
 
 import ipaddress
+import math
 from collections.abc import Iterable
 from dataclasses import replace
 from functools import lru_cache
@@ -56,6 +57,28 @@ def dedicated_enrichment_worker_default() -> bool:
     import os
 
     return os.environ.get("ENRICHMENT_DEDICATED_WORKER", "false").strip().lower() == "true"
+
+
+# The console's refresh timing, mirrored from apps/web/src/lib/refreshLock.ts
+# (``LEASE_MS``, ``TRANSPORT_RETRY_ACQUIRE_MS`` and ``LEASE_POLL_MS``; a test
+# pins the two sides together). A refresh that rotated the cookie but whose
+# answer was lost is aborted at the lease's end and retried at once under a
+# fresh lease acquired within the retry budget (plus one poll to confirm it),
+# so the old cookie can reach the API again up to their sum, plus the
+# network's latency, after the rotation. A grace window shorter than that
+# would read the console's own retry as a replay and revoke every session.
+CONSOLE_REFRESH_LEASE_SECONDS = 7
+CONSOLE_REFRESH_RETRY_SECONDS = 1
+CONSOLE_REFRESH_POLL_SECONDS = 0.05
+# The network's allowance: the retry's request travelling to the API, and
+# the clocks of the two ends not starting at the same instant.
+CONSOLE_REFRESH_LATENCY_MARGIN_SECONDS = 1
+MIN_REFRESH_REUSE_GRACE_SECONDS = math.ceil(
+    CONSOLE_REFRESH_LEASE_SECONDS
+    + CONSOLE_REFRESH_RETRY_SECONDS
+    + CONSOLE_REFRESH_POLL_SECONDS
+    + CONSOLE_REFRESH_LATENCY_MARGIN_SECONDS
+)
 
 
 API_DEFAULTS: dict[str, Any] = {
@@ -199,6 +222,11 @@ API_DEFAULTS: dict[str, Any] = {
     "trusted_proxy_ips": [],
     "jwt_access_token_expire_minutes": 30,
     "jwt_refresh_token_expire_days": 7,
+    # Long enough for a retried request or two tabs refreshing at once, short
+    # against the access token's lifetime: a stolen refresh token presented
+    # after the window still revokes every session of the account. Equal to
+    # ``MIN_REFRESH_REUSE_GRACE_SECONDS`` (10), the console's worst case.
+    "refresh_reuse_grace_seconds": 10,
 }
 
 API_EDITABLE: dict[str, dict[str, Any]] = {
@@ -359,6 +387,20 @@ API_EDITABLE: dict[str, dict[str, Any]] = {
         "title": "Refresh token lifetime (days)",
         "description": "How long an issued refresh token, and its cookie, stay valid.",
     },
+    "refresh_reuse_grace_seconds": {
+        "type": "int",
+        "minimum": 0,
+        "group": "api",
+        "title": "Refresh reuse grace (s)",
+        "description": (
+            "How long after a refresh token is used a second use of it counts as a "
+            "retry or a race between tabs: refused, but nothing is revoked. A use "
+            "after the window revokes every session of the account. 0 turns the window "
+            "off (every second use is a replay); otherwise at least "
+            f"{MIN_REFRESH_REUSE_GRACE_SECONDS} s, the console's refresh lease, its "
+            "prompt retry and a network allowance, and shorter than the access token lifetime."
+        ),
+    },
 }
 
 API_READONLY: dict[str, dict[str, Any]] = {
@@ -453,6 +495,42 @@ def _masked(name: str, value: Any) -> Any:
     if isinstance(value, str) and "://" in value:
         return redact_url(value)
     return value
+
+
+def refresh_grace_problem(merged_api: dict[str, Any]) -> str | None:
+    """Why the refresh reuse grace window does not fit, or ``None``.
+
+    The window is 0 (off) or at least ``MIN_REFRESH_REUSE_GRACE_SECONDS``, so
+    the console's own prompt retry lands inside it. It must be shorter than
+    the access token's lifetime: a window as
+    long as the token lets a replayed refresh token pass as a retry for as
+    long as the token it would mint. Values absent from ``merged_api`` are read
+    from ``API_DEFAULTS``; a value of the wrong type is its own leaf's error.
+    """
+    grace = merged_api.get(
+        "refresh_reuse_grace_seconds", API_DEFAULTS["refresh_reuse_grace_seconds"]
+    )
+    minutes = merged_api.get(
+        "jwt_access_token_expire_minutes", API_DEFAULTS["jwt_access_token_expire_minutes"]
+    )
+    if isinstance(grace, bool) or isinstance(minutes, bool):
+        return None
+    if not isinstance(grace, int) or not isinstance(minutes, int):
+        return None
+    if 0 < grace < MIN_REFRESH_REUSE_GRACE_SECONDS:
+        return (
+            f"must be 0 (off) or at least {MIN_REFRESH_REUSE_GRACE_SECONDS} s: the console's "
+            f"refresh lease ({CONSOLE_REFRESH_LEASE_SECONDS} s), its prompt retry "
+            f"({CONSOLE_REFRESH_RETRY_SECONDS} s) and a network allowance "
+            f"({CONSOLE_REFRESH_LATENCY_MARGIN_SECONDS} s); a shorter window reads the "
+            "console's own retry as a replay and revokes every session"
+        )
+    if grace >= minutes * 60:
+        return (
+            f"must be shorter than the access token lifetime ({minutes * 60} s, from "
+            "jwt_access_token_expire_minutes)"
+        )
+    return None
 
 
 def validate_editable_api_value(entry: CatalogEntry, value: Any) -> str | None:
