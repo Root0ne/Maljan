@@ -31,6 +31,7 @@ from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
 from pydantic import BaseModel, ConfigDict, Field
 
 from maljan.agents.base_agent import retry_on_connection_error
+from maljan.agents.tool_fence import QUOTED_VALUE_STATEMENT, quoted_value
 from maljan.analysis.sandbox_sections import ItemIndex
 from maljan.core.config import REPORTER_AGENT_KEY
 from maljan.core.logger import logger
@@ -75,7 +76,6 @@ from maljan.reporting.models import (
     confidence_text,
 )
 from maljan.utils.json_cleaner import safe_parse_json
-from maljan.utils.written_forms import pack_escaped
 
 # ---------------------------------------------------------------------------
 # Structured output schema
@@ -209,7 +209,7 @@ _SYSTEM_PROMPT_TEMPLATE = (
     "1. DO NOT invent capabilities, families, or TTPs. Only describe what the "
     "deterministic evidence below supports. A sandbox answer with nothing in it is "
     "not an execution: describe sandbox behaviour, seen or absent, only where a "
-    "sandbox entry above records some.\n"
+    "sandbox entry above records some. " + QUOTED_VALUE_STATEMENT + "\n"
     "2. Every MITRE ATT&CK technique you cite must appear in parentheses with "
     "its ID, e.g. 'inhibit system recovery (T1490)'.\n"
     "3. executive_summary: one paragraph of at least 120 characters, no headings. This "
@@ -372,8 +372,10 @@ def claims_in_force_lines(isr_reports: Any) -> list[str]:
         return []
     lines = [CLAIMS_IN_FORCE_HEADING]
     for claim in claims:
-        evidence = f" — {claim.evidence_ref}" if claim.evidence_ref.strip() else ""
-        lines.append(f"  - [{claim.label}] {claim.claim}{evidence}")
+        # Another model's words, which may carry the sample's text: each
+        # quoted and escaped, one value on one line.
+        evidence = f" — {quoted_value(claim.evidence_ref)}" if claim.evidence_ref.strip() else ""
+        lines.append(f"  - [{claim.label}] {quoted_value(claim.claim)}{evidence}")
     lines.append("")
     return lines
 
@@ -397,9 +399,13 @@ def build_prompt_text(report: MalwareReport, isr_reports: Any = None) -> str:
             else f"Overall confidence: {report.overall_confidence:.2f}"
         ),
         (f"Severity: {report.severity.rating}" if report.severity else "Severity: not assessed"),
-        f"Malware category: {report.malware_category or 'unknown'}",
+        # The category is a model's word: quoted as any value from outside.
+        "Malware category: "
+        + (quoted_value(report.malware_category) if report.malware_category else "unknown"),
         (
-            f"Attribution family: {report.attribution.family or 'unknown'} "
+            "Attribution family: "
+            + (quoted_value(report.attribution.family) if report.attribution.family else "unknown")
+            + " "
             + (
                 "(confidence not assessed)"
                 if report.attribution.family_confidence is None
@@ -424,7 +430,8 @@ def build_prompt_text(report: MalwareReport, isr_reports: Any = None) -> str:
 
         rule_only = rule_match_only(report)
         for mapping in report.ttp_mappings:
-            quote = " | ".join(q for q in mapping.evidence_quotes if q)
+            # Each quote is the evidence's own text: quoted and escaped.
+            quote = " | ".join(quoted_value(q) for q in mapping.evidence_quotes if q)
             layers = ",".join(mapping.contributing_layers) or "-"
             # The layers that said something of their own: copies count once.
             independent = (
@@ -454,7 +461,7 @@ def build_prompt_text(report: MalwareReport, isr_reports: Any = None) -> str:
     if report.dynamic and report.dynamic.sandbox_signatures:
         for sig in report.dynamic.sandbox_signatures:
             ttps = ",".join(sig.technique_ids) or "-"
-            lines.append(f"  - {sig.name} (severity {sig.severity}, ATT&CK={ttps})")
+            lines.append(f"  - {quoted_value(sig.name)} (severity {sig.severity}, ATT&CK={ttps})")
     else:
         lines.append("  (none)")
     lines.append("")
@@ -467,7 +474,8 @@ def build_prompt_text(report: MalwareReport, isr_reports: Any = None) -> str:
             cited = ", ".join(report.static.api_capabilities_evidence_ids)
             lines.append(
                 "  "
-                + ", ".join(f"{cat} x{count}" for cat, count in ordered)
+                # A category name is the knowledge tool's text: quoted.
+                + ", ".join(f"{quoted_value(str(cat))} x{count}" for cat, count in ordered)
                 + (f" [{cited}]" if cited else "")
             )
         else:
@@ -486,23 +494,27 @@ def build_prompt_text(report: MalwareReport, isr_reports: Any = None) -> str:
             cited_resolved = ", ".join(report.static.api_capabilities_resolved_evidence_ids)
             lines.append(
                 f"  Names {RESOLVED_AT_RUNTIME}, not imports: "
-                + ", ".join(f"{cat} x{count}" for cat, count in ordered_resolved)
+                + ", ".join(f"{quoted_value(str(cat))} x{count}" for cat, count in ordered_resolved)
                 + (f" [{cited_resolved}]" if cited_resolved else "")
             )
         for hit in rule_hits:
             at_runtime = [str(a) for a in (hit.get("resolved_apis") or [])]
+            # An API name is the sample's import or resolved name: quoted.
             apis = ", ".join(
-                f"{a} ({RESOLVED_AT_RUNTIME})" if str(a) in at_runtime else str(a)
+                f"{quoted_value(str(a))} ({RESOLVED_AT_RUNTIME})"
+                if str(a) in at_runtime
+                else quoted_value(str(a))
                 for a in (hit.get("matched_apis") or [])
             )
             cite = f" [{hit['evidence_id']}]" if hit.get("evidence_id") else ""
             # The rule's own label, because a row is a rule: two rules for one
             # technique carry the catalogue's name twice and rendered as two
             # lines the model could only read as a duplicate.
-            rule = f" ({hit['rule']})" if hit.get("rule") else ""
-            lines.append(
-                f"  - {hit.get('technique_id', '?')} {hit.get('name', '')}{rule}: {apis}{cite}"
-            )
+            # The rule's label and the technique's name are the tool's text:
+            # quoted. The id is shape-checked where the hit is read.
+            rule = f" ({quoted_value(str(hit['rule']))})" if hit.get("rule") else ""
+            name = f" {quoted_value(str(hit['name']))}" if hit.get("name") else " "
+            lines.append(f"  - {hit.get('technique_id', '?')}{name}{rule}: {apis}{cite}")
     else:
         lines.append("  (no static analysis)")
     lines.append("")
@@ -517,7 +529,7 @@ def build_prompt_text(report: MalwareReport, isr_reports: Any = None) -> str:
         # is shown quoted and escaped, one value on one line.
         for dom in domains:
             reason = dom.reason or "observed"
-            lines.append(f'  - domain: "{pack_escaped(str(dom.fqdn))}" ({reason})')
+            lines.append(f"  - domain: {quoted_value(str(dom.fqdn))} ({reason})")
         for ip in report.network.ips:
             note = ip.reputation.get("_heuristic_reason") if ip.reputation else None
             tag = note or ("suspicious" if ip.is_suspicious else "observed")
@@ -531,7 +543,7 @@ def build_prompt_text(report: MalwareReport, isr_reports: Any = None) -> str:
     if report.persistence:
         for mech in report.persistence:
             lines.append(
-                f'  - {mech.kind}: "{pack_escaped(str(mech.target or ""))}" '
+                f"  - {mech.kind}: {quoted_value(str(mech.target or ''))} "
                 f"({mech.technique_id or 'no-ATT&CK-id'})"
             )
     else:
@@ -541,9 +553,9 @@ def build_prompt_text(report: MalwareReport, isr_reports: Any = None) -> str:
     # --- Static hints --------------------------------------------------
     if report.static:
         if report.static.packer_hint:
-            lines.append(f"Packer hint: {report.static.packer_hint}")
+            lines.append(f"Packer hint: {quoted_value(report.static.packer_hint)}")
         if report.static.obfuscation_indicators:
-            ind = ", ".join(report.static.obfuscation_indicators)
+            ind = ", ".join(quoted_value(i) for i in report.static.obfuscation_indicators)
             lines.append(f"Obfuscation indicators: {ind}")
         lines.append("")
 

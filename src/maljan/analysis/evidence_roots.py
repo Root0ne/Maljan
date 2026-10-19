@@ -80,7 +80,7 @@ from __future__ import annotations
 
 import bisect
 import re
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -670,6 +670,17 @@ class _Files:
         if id(entry) in self._file:
             return self._file[id(entry)]
         return self._named(entry)[1]
+
+
+def files_read(entries: Sequence[Any]) -> Callable[[Any], str | None]:
+    """Which file each of ``entries`` is about, as one lookup (:class:`_Files`).
+
+    The lookup answers ``""`` for the sample, another file's name (the leading
+    digits of its SHA-256, or its path quoted) for any other, and ``None`` for
+    a call whose ``carved_path`` names no one file. Ask it only of the entries
+    it was built from.
+    """
+    return _Files(list(entries)).of
 
 
 # -- each file's layout ------------------------------------------------------------

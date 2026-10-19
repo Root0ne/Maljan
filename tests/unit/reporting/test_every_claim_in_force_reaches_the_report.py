@@ -18,6 +18,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
+from maljan.agents.tool_fence import excerpt_view
 from maljan.reporting.claim_coverage import (
     body_text,
     claim_label,
@@ -214,7 +215,7 @@ class TestTheReportModelsAreHandedEveryClaimUnderItsLabel:
 
         assert CLAIMS_IN_FORCE_HEADING in text
         for claim in claims_in_force(isrs):
-            assert f"[{claim.label}] {claim.claim}" in text
+            assert f"[{claim.label}] {excerpt_view(claim.claim)}" in text
 
     def test_without_claims_the_narrative_prompt_has_no_claims_block(self) -> None:
         assert CLAIMS_IN_FORCE_HEADING not in build_prompt_text(_report())

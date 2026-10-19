@@ -498,7 +498,10 @@ class TestAgainstTheSequentialBase:
     from that commit's tree by ``scripts/goldens/capture_composer_requests.py``
     (its request bodies, Markdown and HTML are those of d92a76fc too; only the
     report's JSON took the stopped-run fields added between them),
-    with a shared head (pack facts and run state) on every request.
+    with a shared head (pack facts and run state) on every request. Its
+    request bodies were recaptured, written one after another, when the
+    sections began to show the sample's and the tools' text quoted and fenced
+    (AUD-41); its report, Markdown and HTML digests did not change.
     """
 
     def test_the_requests_and_the_report_are_those_of_the_base(self) -> None:

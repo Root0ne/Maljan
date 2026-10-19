@@ -361,7 +361,11 @@ _ANALYSIS_TOOLS: dict[str, dict[str, Any]] = {
     "carve_payloads": _file("carve"),
     "decode_string_blobs": _DECODED_STRINGS,
     "document_info": _file("document_info"),
-    "elf_info": _file("format_info"),
+    # The PE and ELF parsers' import rows cover the late-bound imports: the PE
+    # delay-load table, and the one import table ELF keeps them in. The Mach-O
+    # parser does not declare it: its lazily bound imports are not shown to
+    # be in the rows it answers.
+    "elf_info": {**_file("format_info"), "reads_delay_imports": True},
     "find_crypto_constants": _file("crypto_constants"),
     "floss": _EMULATED_STRINGS,
     "function_index": {**_file("function_index", "function_table")},
@@ -370,7 +374,7 @@ _ANALYSIS_TOOLS: dict[str, dict[str, Any]] = {
     "iocs_from_file": _file("file_iocs"),
     "iocs_from_text": {"kind": "text_iocs", "arguments": {"text": "text"}},
     "macho_info": _file("format_info"),
-    "pe_info": _file("format_info", "pe_header"),
+    "pe_info": {**_file("format_info", "pe_header"), "reads_delay_imports": True},
     "put_sample": {"kind": "sample_delivery"},
     "put_sample_begin": {"kind": "sample_delivery"},
     "put_sample_chunk": {"kind": "sample_delivery"},

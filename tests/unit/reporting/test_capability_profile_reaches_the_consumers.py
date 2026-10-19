@@ -112,8 +112,10 @@ class TestTheNarrativePrompt:
         report, entry_id = _report()
         text = build_prompt_text(report)
         assert "Import capability profile" in text
-        assert f"process_injection x3, registry x1 [{entry_id}]" in text
-        assert "- T1055 Process Injection (allocating or writing memory in another process" in text
+        assert f'"process_injection" x3, "registry" x1 [{entry_id}]' in text
+        assert (
+            '- T1055 "Process Injection" ("allocating or writing memory in another process' in text
+        )
         assert "Suspicious imports" not in text
 
 

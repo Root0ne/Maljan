@@ -288,7 +288,7 @@ class TestPromptBuilder:
         text = build_prompt_text(report)
 
         assert all(f"T999{i} " in text for i in range(20))
-        assert all(f"sig-{i} " in text for i in range(9))
+        assert all(f'"sig-{i}" ' in text for i in range(9))
         assert all(f"relay{i}.example.net" in text for i in range(7))
         assert all(f"192.0.2.{i} " in text for i in range(7))
         assert all(f"HKCU\\Example\\{i}" + "y" * 150 in text for i in range(6))

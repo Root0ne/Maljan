@@ -460,6 +460,7 @@ KIND_DEPENDENT_FIELDS: tuple[str, ...] = (
     "asserts_techniques",
     "source",
     "holds_strings",
+    "reads_delay_imports",
     "rows",
     "places",
     "values",
@@ -949,6 +950,11 @@ class ToolFacts(BaseModel):
     round's entry. ``holds_strings`` marks a tool whose answer holds the
     sample's strings as data though its kind is not a strings kind (a report
     that anchors strings to the functions referring to them).
+    ``reads_delay_imports`` marks a format tool whose import rows cover the
+    imports the format binds late: the PE delay-load table, or, for a format
+    that keeps its late-bound imports in the one table the tool reads (ELF),
+    that table. A read of a tool that declares it, or whose answer
+    carries a ``delay_imports`` list, can be the binary's complete import list.
 
     ``rows`` is the path of the answer's rows; ``places`` names, per kind of
     place (``offset``, ``rva``, ``address``, ``addresses``, ``call_site``,
@@ -994,6 +1000,7 @@ class ToolFacts(BaseModel):
     discloses_sample: bool = False
     read_only: bool = False
     holds_strings: bool = False
+    reads_delay_imports: bool = False
     rows: str = ""
     places: dict[str, str] = Field(default_factory=dict)
     values: dict[str, str] = Field(default_factory=dict)
@@ -1541,11 +1548,12 @@ def sent_names_refusal(sent: Mapping[str, Any], kept: Iterable[str] = (), server
 
 
 # The declaration fields no release that stored a tool map whole knew
-# (``ToolFacts.effects``). Such a map leaves them out because it predates them,
+# (``ToolFacts.effects``, ``ToolFacts.reads_delay_imports``). Such a map leaves
+# them out because it predates them,
 # never to clear them, so for a tool the block ships each one it leaves out
 # follows the shipped declaration, merged per field as :func:`merge_tool_facts`
 # merges a change: a value the map sets is the operator's and wins.
-FIELDS_AFTER_WHOLE_MAPS: tuple[str, ...] = ("effects",)
+FIELDS_AFTER_WHOLE_MAPS: tuple[str, ...] = ("effects", "reads_delay_imports")
 
 
 def _with_later_fields(held: Any, shipped: Any) -> Any:
