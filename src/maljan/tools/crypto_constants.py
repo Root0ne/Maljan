@@ -31,18 +31,23 @@ How the file is searched, stated in every answer (``SCAN_RULE``):
 
 Each place is the file offset and, for a PE, the offset from the image base,
 the section and the function the file's own function table puts around it
-(``pe_image``), with no start guessed. Nothing is limited: every place of every
-value is listed. The sample is only read; nothing in it is run.
+(``pe_image``), with no start guessed. Every place of every value is listed,
+all values together up to what the largest tool answer any model is given holds
+(``pe_image.PLACE_BUDGET``); past it the answer says once how many it left out
+(``places_cut``). The sample is only read; nothing in
+it is run.
 """
 
 from __future__ import annotations
 
 import math
-from bisect import bisect_left
+from array import array
 from collections.abc import Sequence
 from dataclasses import dataclass
 from functools import lru_cache
 from typing import Any
+
+import numpy as np
 
 from maljan.tools import pe_image
 
@@ -447,13 +452,58 @@ def _fowler_noll_vo(bits: int) -> tuple[int, int]:
 # ---------------------------------------------------------------------------
 
 
-def _offsets(data: bytes, needle: bytes) -> list[int]:
-    found: list[int] = []
+def _offsets(data: bytes, needle: bytes) -> np.ndarray:
+    """Every offset of ``needle`` in ``data``, overlapping ones too, ascending."""
+    found = array("q")
     start = data.find(needle)
     while start != -1:
         found.append(start)
         start = data.find(needle, start + 1)
-    return found
+    return np.frombuffer(found, dtype=np.int64) if found else _NONE
+
+
+_NONE = np.empty(0, dtype=np.int64)
+
+
+def _member(sorted_offsets: np.ndarray, offsets: np.ndarray) -> np.ndarray:
+    """Whether each of ``offsets`` is one of ``sorted_offsets``."""
+    if not len(sorted_offsets):
+        return np.zeros(len(offsets), dtype=bool)
+    index = np.minimum(np.searchsorted(sorted_offsets, offsets), len(sorted_offsets) - 1)
+    return np.asarray(sorted_offsets[index] == offsets, dtype=bool)
+
+
+class _Standing:
+    """Where every value of the catalogue stands in the file, found in one pass per width.
+
+    A number is looked up in one array per value (``pe_image.value_offsets``);
+    a value written as bytes is found by a search of its own.
+    """
+
+    def __init__(self, data: bytes, entries: Sequence[ConstantSet]) -> None:
+        self.data = data
+        wanted: dict[int, set[int]] = {}
+        for entry in entries:
+            if entry.kind == TABLE:
+                continue
+            for value in entry.values:
+                if not isinstance(value, bytes):
+                    wanted.setdefault(entry.width, set()).add(int(value))
+            if entry.width == 8:
+                # The 32-bit halves the sets that are halves of it look for apart.
+                for value in entry.values:
+                    wanted.setdefault(4, set()).update((value & 0xFFFFFFFF, value >> 32))
+        self.by_width = {
+            width: pe_image.value_offsets(data, values, width) for width, values in wanted.items()
+        }
+
+    def of(self, value: Any, width: int) -> np.ndarray:
+        if isinstance(value, bytes):
+            return _offsets(self.data, value)
+        held = self.by_width.get(width, {}).get(int(value))
+        if held is None:
+            return _offsets(self.data, _value_bytes(value, width))
+        return held
 
 
 def _packed(values: Sequence[int], width: int, order: str) -> bytes:
@@ -480,60 +530,78 @@ class _Places:
     def __init__(self, data: bytes, image: pe_image.Image | None) -> None:
         self.data = data
         self.image = image
+        # The places every value lists, all values together (``pe_image.PlaceBudget``).
+        self.budget = pe_image.PlaceBudget()
 
     def where(self, offset: int) -> dict[str, Any]:
         if self.image is None:
             return {"offset": hex(offset)}
         return dict(self.image.where(offset))
 
+    def listed(self, offsets: Any) -> list[dict[str, Any]]:
+        """The places of ``offsets`` while the answer's place budget lasts."""
+        return self.budget.take(offsets, self.where)
 
-def _tables(entry: ConstantSet, places: _Places) -> list[dict[str, Any]]:
+
+def _table_offsets(entry: ConstantSet, data: bytes) -> list[tuple[str, np.ndarray]]:
+    """Where ``entry``'s values stand whole, by byte order; empty when nowhere."""
     orders = [("", "little")] if entry.width == 1 else [("little-endian", "little")]
     if entry.width > 1:
         orders.append(("big-endian", "big"))
-    found: list[dict[str, Any]] = []
+    found: list[tuple[str, np.ndarray]] = []
     for said, order in orders:
-        needle = _packed(entry.values, entry.width, order)
-        for offset in _offsets(places.data, needle):
-            found.append({"byte_order": said, "place": places.where(offset)})
+        offsets = _offsets(data, _packed(entry.values, entry.width, order))
+        if len(offsets):
+            found.append((said, offsets))
     return found
 
 
-def _value_offsets(entry: ConstantSet, data: bytes) -> dict[Any, list[int]]:
-    """Every distinct value of ``entry`` that stands in ``data``, with its offsets."""
-    found: dict[Any, list[int]] = {}
+def _tables(found: list[tuple[str, np.ndarray]], places: _Places) -> list[dict[str, Any]]:
+    """The whole-set places, stated while the answer's place budget lasts."""
+    return [
+        {"byte_order": said, "place": place}
+        for said, offsets in found
+        for place in places.listed(offsets)
+    ]
+
+
+def _value_offsets(entry: ConstantSet, standing: _Standing) -> dict[Any, np.ndarray]:
+    """Every distinct value of ``entry`` that stands in the file, with its offsets."""
+    found: dict[Any, np.ndarray] = {}
     for value in entry.values:
         if value in found:
             continue
-        offsets = _offsets(data, _value_bytes(value, entry.width))
-        if offsets:
+        offsets = standing.of(value, entry.width)
+        if len(offsets):
             found[value] = offsets
     return found
 
 
 def _outside_quadwords(
-    offsets: dict[Any, list[int]], quadwords: set[int], half: str
-) -> dict[Any, list[int]]:
+    offsets: dict[Any, np.ndarray], quadwords: np.ndarray, half: str
+) -> dict[Any, np.ndarray]:
     """The 32-bit places that are not the ``half`` of a 64-bit value found at ``quadwords``."""
     shift = 4 if half == "high" else 0
-    kept: dict[Any, list[int]] = {}
+    kept: dict[Any, np.ndarray] = {}
     for value, places in offsets.items():
-        outside = [at for at in places if at - shift not in quadwords]
-        if outside:
+        outside = places[~_member(quadwords, places - shift)]
+        if len(outside):
             kept[value] = outside
     return kept
 
 
-def _other_halves_stand(wide: ConstantSet, data: bytes, quadwords: set[int], half: str) -> bool:
+def _other_halves_stand(
+    wide: ConstantSet, standing: _Standing, quadwords: np.ndarray, half: str
+) -> bool:
     """Whether two or more of ``wide``'s other 32-bit halves stand apart from its 64-bit values."""
     other = [(value & 0xFFFFFFFF) if half == "high" else (value >> 32) for value in wide.values]
     shift = 0 if half == "high" else 4
-    standing = 0
+    count = 0
     for value in set(other):
-        places = _offsets(data, int(value).to_bytes(4, "little"))
-        if any(at - shift not in quadwords for at in places):
-            standing += 1
-            if standing >= 2:
+        places = standing.of(value, 4)
+        if len(places) and not _member(quadwords, places - shift).all():
+            count += 1
+            if count >= 2:
                 return True
     return False
 
@@ -543,19 +611,25 @@ def _other_halves_stand(wide: ConstantSet, data: bytes, quadwords: set[int], hal
 REQUIRED_NEAR = 64
 
 
-def _required_beside(entry: ConstantSet, offsets: dict[Any, list[int]]) -> bool:
+def _required_beside(entry: ConstantSet, offsets: dict[Any, Any]) -> bool:
     """Whether a distinguishing value stands within ``REQUIRED_NEAR`` bytes of another value."""
-    others = sorted(
-        at for value, places in offsets.items() if value not in entry.requires for at in places
-    )
-    if not others:
+    parts = [
+        np.asarray(places, dtype=np.int64)
+        for value, places in offsets.items()
+        if value not in entry.requires
+    ]
+    others = np.sort(np.concatenate(parts)) if parts else _NONE
+    if not len(others):
         return False
     for value in entry.requires:
-        for at in offsets.get(value, []):
-            # The nearest other place at or after ``at - REQUIRED_NEAR`` decides.
-            index = bisect_left(others, at - REQUIRED_NEAR)
-            if index < len(others) and others[index] <= at + REQUIRED_NEAR:
-                return True
+        at = np.asarray(offsets.get(value, []), dtype=np.int64)
+        if not len(at):
+            continue
+        # The nearest other place at or after ``at - REQUIRED_NEAR`` decides.
+        index = np.searchsorted(others, at - REQUIRED_NEAR)
+        near = others[np.minimum(index, len(others) - 1)] <= at + REQUIRED_NEAR
+        if (near & (index < len(others))).any():
+            return True
     return False
 
 
@@ -588,16 +662,17 @@ def find_crypto_constants(
     except OSError as exc:
         return {"error": f"the file could not be read: {exc}", "tool": TOOL}
     try:
-        image: pe_image.Image | None = pe_image.load(path)
+        image: pe_image.Image | None = pe_image.parse(data)
     except (pe_image.NotAPortableExecutable, ValueError):
         image = None
     if image is not None:
         pe_image.take_function_starts(image, function_starts, function_source)
     places = _Places(data, image)
     sets = {entry.id: entry for entry in catalogue()}
+    standing = _Standing(data, catalogue())
     # Where each 64-bit set's values stand, for the sets that are their halves.
     quadwords = {
-        entry.id: {at for offsets in _value_offsets(entry, data).values() for at in offsets}
+        entry.id: np.unique(np.concatenate([_NONE, *_value_offsets(entry, standing).values()]))
         for entry in sets.values()
         if entry.width == 8
     }
@@ -606,39 +681,37 @@ def find_crypto_constants(
     lone: list[dict[str, Any]] = []
     for entry in catalogue():
         if entry.kind == TABLE:
-            tables = _tables(entry, places)
-            if tables:
+            whole = _table_offsets(entry, data)
+            if whole:
+                tables = _tables(whole, places)
                 found.append(_row(entry, matched=len(set(entry.values)), tables=tables))
             continue
-        offsets = _value_offsets(entry, data)
+        offsets = _value_offsets(entry, standing)
         algorithm = entry.algorithm
         if entry.halves_of:
-            wide = quadwords.get(entry.halves_of, set())
+            wide = quadwords.get(entry.halves_of, _NONE)
             offsets = _outside_quadwords(offsets, wide, entry.half)
-            if offsets and _other_halves_stand(sets[entry.halves_of], data, wide, entry.half):
+            if offsets and _other_halves_stand(sets[entry.halves_of], standing, wide, entry.half):
                 algorithm = entry.family
         if entry.requires and not _required_beside(entry, offsets):
             continue
-        tables = _tables(entry, places) if entry.also_whole else []
+        whole = _table_offsets(entry, data) if entry.also_whole else []
         if not offsets:
             continue
-        values = [
-            {
-                "value": _said(value, entry.width),
-                "places": [places.where(at) for at in offsets[value]],
-            }
-            for value in entry.values
-            if value in offsets
-        ]
-        # A value listed twice in a set is one value.
-        values = list({row["value"]: row for row in values}.values())
+        tables = _tables(whole, places)
+        # A value listed twice in a set is one value, stated once.
+        values: list[dict[str, Any]] = []
+        for value in dict.fromkeys(entry.values):
+            if value in offsets:
+                said = _said(value, entry.width)
+                values.append({"value": said, "places": places.listed(offsets[value])})
         row = _row(entry, matched=len(values), values=values)
         row["algorithm"] = algorithm
         if algorithm != entry.algorithm:
             row["shared_with"] = sets[entry.halves_of].algorithm
-        if tables:
+        if whole:
             row["tables"] = tables
-        if len(values) >= 2 or row["of"] == 1 or tables:
+        if len(values) >= 2 or row["of"] == 1 or whole:
             found.append(row)
         else:
             lone.append(row)
@@ -656,4 +729,6 @@ def find_crypto_constants(
     if image is not None:
         answer["image_base"] = hex(image.image_base)
         answer["function_table"] = image.function_table
+    if places.budget.cut:
+        answer["places_cut"] = places.budget.cut
     return answer
