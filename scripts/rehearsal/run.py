@@ -691,7 +691,7 @@ class SettingsGuard:
         self.saved: dict[str, dict[str, Any]] = {}
 
     def keep(self, values: dict[str, dict[str, Any]], keys: list[str]) -> None:
-        self.saved = {
+        saved = {
             key: {
                 "source": (values.get(key) or {}).get("source", "default"),
                 "value": (values.get(key) or {}).get("value"),
@@ -699,7 +699,18 @@ class SettingsGuard:
             for key in keys
         }
         self.snapshot.parent.mkdir(parents=True, exist_ok=True)
-        self.snapshot.write_text(json.dumps(self.saved, indent=1, default=str), encoding="utf-8")
+        # Exclusive create: a snapshot an earlier run left holds the operator's real
+        # settings (this run would only see the stub's), so it is never overwritten.
+        try:
+            with self.snapshot.open("x", encoding="utf-8") as handle:
+                handle.write(json.dumps(saved, indent=1, default=str))
+        except FileExistsError:
+            raise SystemExit(
+                f"refusing to start: {self.snapshot} already exists, a snapshot an earlier "
+                f"run did not restore. Put it back with `--restore {self.snapshot}` "
+                "(it is deleted once restored) before another run."
+            ) from None
+        self.saved = saved
 
     def restore(self) -> list[str]:
         """Put every kept key back; answer what could not be (the snapshot stays for it)."""
