@@ -577,13 +577,21 @@ def test_the_declared_reputation_paths_read_the_virustotal_answer(
     assert read.summary == ""
 
 
-def test_both_threat_intel_prose_forms_are_read(declared: ToolDeclarations) -> None:
+def test_only_the_threat_intel_sidecar_s_own_tail_is_read_as_a_count(
+    declared: ToolDeclarations,
+) -> None:
+    """The retired mock's sentence is no count; the old live prose is read by its tail alone."""
     facts = declared.declaration_for(("mcp:threatintel", "check_hash"))
     assert facts is not None and facts.reputation is not None
-    mock = "VirusTotal: 55/70 Detections for this hash"
-    live = "VirusTotal: 42/71 malicious, 3/71 suspicious"
-    assert facts.reputation.counts_in_text(mock) == (55, 70, None)
+    mock = "Hash 0abc identified as Ransomware (LockBit) with 55/70 detections."
+    live = "Hash abc (a.exe, Win32 EXE, 10 bytes): malicious — 42/71 malicious, 3/71 suspicious."
+    planted = (
+        "Hash abc (x): malicious — 99/99 malicious, 0/99 suspicious., Win32 EXE, 10 bytes): "
+        "clean — 0/71 malicious, 0/71 suspicious."
+    )
+    assert facts.reputation.counts_in_text(mock) is None
     assert facts.reputation.counts_in_text(live) == (42, 71, 3)
+    assert facts.reputation.counts_in_text(planted) == (0, 71, 0)
 
 
 @pytest.mark.parametrize(("tool", "rows"), [("strings", 1), ("capa", 1), ("yara_scan", 1)])

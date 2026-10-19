@@ -366,24 +366,26 @@ class TestTheThreatIntelSidecarAnswersAFailureAsOne:
         self._raising(server, monkeypatch, httpx.TimeoutException("slow"))
         failed = server._vt_ip_lookup("1.2.3.4")
 
-        joined = server._joined([failed, failed], "check_ip_reputation")
+        joined = server._joined([failed, failed], "check_ip_reputation", "1.2.3.4")
 
         answer = errors.error_parts(joined)
         assert answer is not None and answer[0] == errors.TIMEOUT
 
-    def test_one_source_that_answered_keeps_the_answer_prose(
+    def test_one_source_that_answered_is_one_document_with_the_failure_beside_it(
         self, server: Any, monkeypatch
     ) -> None:
         import httpx
 
         self._raising(server, monkeypatch, httpx.TimeoutException("slow"))
         failed = server._vt_ip_lookup("1.2.3.4")
+        answered = json.dumps({"ip": "1.2.3.4", "service": "AbuseIPDB", "summary": "no report."})
 
-        joined = server._joined([failed, "IP 1.2.3.4 (TR): clean."], "check_ip_reputation")
+        joined = server._joined([failed, answered], "check_ip_reputation", "1.2.3.4")
 
         assert errors.error_parts(joined) is None, "the call answered"
-        assert "{" not in joined, "no JSON document is glued to the sentence"
-        assert "did not answer" in joined and "clean." in joined
+        document = json.loads(joined)
+        assert document["answers"] == [json.loads(answered)]
+        assert len(document["failed"]) == 1 and "did not answer" in document["failed"][0]
 
     def test_a_failure_is_never_cached(self, server: Any, monkeypatch) -> None:
         """The cache has no expiry, so one timeout would be replayed for ever."""

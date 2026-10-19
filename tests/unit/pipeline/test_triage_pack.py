@@ -485,12 +485,25 @@ class TestTheReputationStep:
                 7,
             ),
             ("get_file_report", '{"last_analysis_stats": {"malicious": 0, "undetected": 60}}', 0),
+            # The sidecar's retired mock: a sentence no service wrote is no count.
             (
                 "check_hash",
                 "Hash abc identified as Ransomware (LockBit) with 55/70 detections.",
-                55,
+                None,
             ),
-            ("check_hash", "Hash abc: malicious — 42/71 malicious, 3/71 suspicious.", 42),
+            (
+                "check_hash",
+                '{"hash": "abc", "summary": "malicious — 42/71 malicious, 3/71 suspicious.", '
+                '"last_analysis_stats": {"malicious": 42, "suspicious": 3, "undetected": 26}}',
+                42,
+            ),
+            # The prose the sidecar answered before JSON, read by its fixed tail.
+            (
+                "check_hash",
+                "Hash abc (a.exe, Win32 EXE, 10 bytes): malicious — 42/71 malicious, "
+                "3/71 suspicious.",
+                42,
+            ),
             ("check_hash", "Hash abc not found in VirusTotal database.", None),
             ("check_hash", "", None),
             ("get_file_report", '{"tool_error": "exception"}', None),

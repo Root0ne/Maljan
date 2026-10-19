@@ -22,6 +22,12 @@ class _Tool:
         return '{"score": 70}'
 
 
+# The tools the stub host withholds, with the manifest's reason.
+WITHHELD: dict[str, str] = {
+    "withheld_lookup": "server.intelsrv.withheld_lookup_unavailable(INTEL_KEY is not configured)"
+}
+
+
 class _Handle:
     made: list[_Handle] = []
 
@@ -37,6 +43,9 @@ class _Handle:
 
     def tools(self) -> list[_Tool]:
         return [self.tool]
+
+    def withheld_reason(self, name: str) -> str | None:
+        return WITHHELD.get(name)
 
     async def aclose(self) -> None:
         self.closed = True
@@ -87,3 +96,32 @@ async def test_a_server_that_is_off_or_not_a_reputation_server_is_not_asked(
         assert await caller("intelsrv", "lookup_address", {"addr": "8.8.4.4"}) is None
         assert await caller("absent", "lookup_address", {}) is None
     assert _Handle.made == []
+
+
+@pytest.mark.asyncio
+async def test_a_withheld_tool_is_recorded_with_its_reason_and_said_in_the_disclosure() -> None:
+    from maljan.analysis.disclosure import disclosure_lines, with_enrichment_asked
+
+    _Handle.made = []
+    caller = ServerToolCaller(_settings(intelsrv=_server()), job_key="enrich-1")
+    with patch("maljan.providers.servers.ServerHandle", _Handle):
+        reason = await caller.withheld_reason("intelsrv", "withheld_lookup")
+        assert reason == WITHHELD["withheld_lookup"]
+        assert await caller.withheld_reason("intelsrv", "lookup_address") is None
+        assert await caller("intelsrv", "withheld_lookup", {"addr": "8.8.4.4"}) is None
+        assert await caller("intelsrv", "nothing_here", {}) is None
+        await caller.aclose()
+
+    rows = caller.withheld_rows()
+    assert rows == [
+        {"server": "intelsrv", "tool": "withheld_lookup", "reason": WITHHELD["withheld_lookup"]}
+    ]
+    record = with_enrichment_asked(
+        {"models": [], "enrichment": {"may_reach": []}}, [], withheld=rows
+    )
+    assert record["enrichment"]["withheld"] == rows
+    again = with_enrichment_asked(record, [], withheld=rows)
+    assert again["enrichment"]["withheld"] == rows, "a re-run adds no duplicate"
+    lines = [line for line in disclosure_lines(again) if "was not asked" in line]
+    assert len(lines) == 1 and "INTEL_KEY is not configured" in lines[0]
+    assert "withheld" not in with_enrichment_asked({}, [])["enrichment"]

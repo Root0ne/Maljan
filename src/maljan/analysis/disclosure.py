@@ -1027,8 +1027,14 @@ def with_enrichment_asked(
     asked: Iterable[Mapping[str, Any]],
     *,
     state: str = ENRICHMENT_DONE,
+    withheld: Iterable[Mapping[str, Any]] = (),
 ) -> dict[str, Any]:
     """``record`` with what the enrichment job asked: per source and host, the kinds and counts.
+
+    ``withheld`` are the server tools a source names that their host withheld
+    (``server``, ``tool``, ``reason``: a credential not configured, a library
+    not installed): kept under ``withheld``, added to an earlier enrichment's,
+    and said in the block, so a source that was never asked is not silent.
 
     Added to what an earlier enrichment of the same report asked, so a report
     enriched twice says every question either run sent. A row's ``failed``
@@ -1062,6 +1068,13 @@ def with_enrichment_asked(
             kept["kinds"][str(kind)] = kept["kinds"].get(str(kind), 0) + int(count or 0)
         kept["failed"] += int(row.get("failed") or 0)
     rows = [{**row, "kinds": dict(sorted(row["kinds"].items()))} for row in merged.values()]
+    kept_withheld: dict[tuple[str, str, str], dict[str, str]] = {}
+    for row in [*list(held.get("withheld") or []), *withheld]:
+        if isinstance(row, Mapping):
+            entry = {name: str(row.get(name) or "") for name in ("server", "tool", "reason")}
+            kept_withheld[(entry["server"], entry["tool"], entry["reason"])] = entry
+    if kept_withheld:
+        held["withheld"] = [kept_withheld[key] for key in sorted(kept_withheld)]
     held["state"] = state
     held["asked"] = sorted(rows, key=lambda r: (r["source"], r["host"]))
     out = _with_addressed(out, (row["host"] for row in rows))
@@ -1538,7 +1551,22 @@ def _asked_parts(asked: list[Mapping[str, Any]], code: Callable[[str], str]) -> 
     return "; ".join(parts)
 
 
+def _withheld_lines(held: Mapping[str, Any], code: Callable[[str], str]) -> list[str]:
+    """One sentence per source tool its host withheld, so it was never asked."""
+    return [
+        f"Enrichment: {code(str(row.get('server') or ''))}'s tool "
+        f"{code(str(row.get('tool') or ''))} was not asked, because its host withheld it: "
+        f"{row.get('reason') or 'no reason was given'}."
+        for row in held.get("withheld") or []
+        if isinstance(row, Mapping)
+    ]
+
+
 def _enrichment_lines(held: Mapping[str, Any], code: Callable[[str], str]) -> list[str]:
+    return _enrichment_state_lines(held, code) + _withheld_lines(held, code)
+
+
+def _enrichment_state_lines(held: Mapping[str, Any], code: Callable[[str], str]) -> list[str]:
     state = held.get("state")
     asked = [row for row in held.get("asked") or [] if isinstance(row, Mapping)]
     if state == ENRICHMENT_DONE:

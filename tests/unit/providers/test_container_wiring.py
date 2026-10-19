@@ -65,9 +65,19 @@ async def test_aclose_closes_the_registry_only_when_one_was_built():
     registry.close_all.assert_called_once()
 
 
+# The threat-intel lookups, each withheld by its host without its service's key.
+LOOKUPS = ("check_domain_reputation", "check_hash", "check_ip_reputation")
+INTEL_KEYS = ("VIRUSTOTAL_API_KEY", "ABUSEIPDB_API_KEY")
+
+
 @pytest.mark.asyncio
-async def test_the_judge_agent_the_container_hands_out_can_reach_the_registry(monkeypatch):
+@pytest.mark.parametrize("keys", [False, True], ids=["no_intel_keys", "intel_keys_set"])
+async def test_the_judge_agent_the_container_hands_out_can_reach_the_registry(monkeypatch, keys):
     """``get_judge_agent`` must wire ``_container`` the same way ``get_agent`` does.
+
+    Run without the threat-intel keys (the lookups are withheld, each with its
+    reason) and with placeholder keys (every pinned tool arrives; attaching
+    asks no service).
 
     Without it, ``JudgeAgent._server_registry()`` always reads ``None`` and
     the judge runs with zero threat-intel tools in production — the bug this
@@ -93,6 +103,11 @@ async def test_the_judge_agent_the_container_hands_out_can_reach_the_registry(mo
         pytest.skip("no python interpreter available to launch the sidecar")
 
     monkeypatch.setenv("OPENAI_API_KEY", "sk-test-not-real")
+    for name in INTEL_KEYS:
+        if keys:
+            monkeypatch.setenv(name, "attach-only")
+        else:
+            monkeypatch.delenv(name, raising=False)
 
     container = ServiceContainer(config=Settings(_env_file=None), mock=False)
 
@@ -107,11 +122,35 @@ async def test_the_judge_agent_the_container_hands_out_can_reach_the_registry(mo
         # offered arrives from the second prefixed with that server's key,
         # which is what both sidecars' ``capabilities`` tool now does. The
         # role-bound server attaches first, the definition's reference after.
+        #
+        # A tool its host withholds (its manifest says a setting it needs is
+        # missing) does not arrive, and the registry records why: those are
+        # read from the registry's own degradation reasons, so the check is
+        # "every tool the host can run arrived, and every other is accounted
+        # for", whichever keys the host holds.
+        reasons = list(container.get_server_registry().degradation_reasons)
+        withheld = {
+            (key, name)
+            for reason in reasons
+            for key in ("threatintel", "knowledge")
+            for prefix in (f"server.{key}.",)
+            if reason.startswith(prefix) and "_unavailable(" in reason
+            for name in (reason[len(prefix) :].split("_unavailable(", 1)[0],)
+        }
         expected: list[str] = []
         for key in ("threatintel", "knowledge"):
             for name in json.loads((goldens / f"{key}.json").read_text(encoding="utf-8"))["tools"]:
+                if (key, name) in withheld:
+                    continue
                 expected.append(f"{key}__{name}" if name in expected else name)
         assert sorted(t.name for t in judge.tools) == sorted(expected)
+        if keys:
+            assert withheld == set(), reasons
+        else:
+            assert {name for key, name in withheld if key == "threatintel"} == set(LOOKUPS)
+            for name in LOOKUPS:
+                (said,) = [r for r in reasons if r.startswith(f"server.threatintel.{name}_")]
+                assert "is not configured" in said, said
     finally:
         await judge.aclose()
 

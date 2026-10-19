@@ -1138,6 +1138,18 @@ class ServerHandle:
             return []
         return [u.degradation_reason for u in self.capabilities.unavailable(sorted(withheld))]
 
+    def withheld_reason(self, name: str) -> str | None:
+        """Why the tool ``name`` is withheld on this host, or ``None`` when it is not.
+
+        A caller asking for one tool by name is told the manifest's reason (a
+        credential not configured, a library not installed) and its remedy,
+        not only that the tool is missing.
+        """
+        if self.capabilities is None or name not in self.capabilities.unusable():
+            return None
+        found = self.capabilities.unavailable([name])
+        return found[0].degradation_reason if found else None
+
     def _teardown(self, toolkit: Any) -> None:
         """Best-effort close of ``toolkit``, attached or abandoned mid-open. Never raises.
 
@@ -1714,7 +1726,9 @@ class ServerRegistry:
         wanted = str(ref.name)
         picked = [tool for tool in available if str(getattr(tool, "name", "")) == wanted]
         if not picked:
-            return [], [AGENT_TOOL_UNAVAILABLE_REASON.format(server=handle.name, name=wanted)]
+            unavailable = AGENT_TOOL_UNAVAILABLE_REASON.format(server=handle.name, name=wanted)
+            withheld = handle.withheld_reason(wanted)
+            return [], [f"{unavailable}: {withheld}" if withheld else unavailable]
         return picked, []
 
     def _record(self, reasons: list[str]) -> None:

@@ -278,9 +278,11 @@ def read_answer(
             malicious, said_total, said_suspicious = counted
             total = total if total is not None else said_total
             suspicious = suspicious if suspicious is not None else said_suspicious
-    if declared.summary:
+    if declared.summary and document is not None:
         summary = next(iter(_texts(document, [declared.summary])), "")
     else:
+        # An answer written in prose is its own summary, also for a lookup
+        # whose declared summary path reads its JSON answers.
         summary = "" if document is not None else str(output or "").strip()
     return ReputationRecord(
         service=declared.service or facts.display_name or str(server or ""),
