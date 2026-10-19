@@ -32,6 +32,32 @@ if TYPE_CHECKING:
     from maljan.schemas.sandbox_report import SandboxRun
 
 
+def _probe_refusal(response: Any) -> str | None:
+    """The reason CAPE's ``{"error": true}`` envelope states for the probe, or ``None``.
+
+    The probe asks about task 1, which need not exist: CAPE saying the task
+    was not found still proves the URL and the token, so that envelope is no
+    refusal. Any other envelope (an API that is disabled, a token CAPE refused
+    in words) is, with the reason CAPE stated. A body that is not JSON keeps
+    the status code's answer.
+    """
+    from maljan.loaders.cape2_client import CAPEv2Client
+    from maljan.loaders.sandbox_client import SandboxError
+
+    try:
+        data = response.json()
+    except ValueError:
+        return None
+    if not isinstance(data, dict):
+        return None
+    try:
+        CAPEv2Client.raise_for_envelope(data, "probe")
+    except SandboxError as exc:
+        reason = " ".join(redact_url(str(exc)).splitlines())
+        return None if "not found" in reason.lower() else reason
+    return None
+
+
 @register_sandbox_provider("cape2")
 class CAPE2SandboxProvider(SandboxProvider):
     """CAPEv2 behind the provider contract.
@@ -290,9 +316,14 @@ class CAPE2SandboxProvider(SandboxProvider):
                 detail=redact_url(f"{type(exc).__name__}: {exc}"),
                 latency_ms=int((time.perf_counter() - t0) * 1000),
             )
+        ok = response.status_code < 400
+        detail = f"HTTP {response.status_code}"
+        refusal = _probe_refusal(response) if ok else None
+        if refusal is not None:
+            ok, detail = False, f"{detail}: {refusal}"
         return ProviderProbe(
-            ok=response.status_code < 400,
-            detail=f"HTTP {response.status_code}",
+            ok=ok,
+            detail=detail,
             latency_ms=int((time.perf_counter() - t0) * 1000),
         )
 

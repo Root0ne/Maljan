@@ -605,6 +605,12 @@ class ServiceContainer:
         # none; set by ``app.arun`` beside it and recorded on the run summary
         # (``report_formats.recorded_signature_scale``).
         self.sandbox_signature_scale: dict[str, Any] | None = None
+        # Why the job has no sandbox report, in words, where its submission
+        # failed (a refused report, a failed task state, an unreachable host);
+        # set by ``app._submit_to_sandbox`` and carried into the report's
+        # degradation reason (``pipeline.nodes.sandbox_degradation_reason``).
+        # ``None`` where the sandbox answered or was never asked.
+        self.sandbox_failure: str | None = None
         # Each submission of the sample to the job's sandbox provider
         # (``analysis.disclosure.upload_record``), set by ``app.arun`` as it
         # submits and read by the run's disclosure block. Empty outside a job.

@@ -118,11 +118,13 @@ def test_the_rendered_report_still_answers_what_the_raw_one_answered(name, raw):
     )
     rendered = sandbox_document(report)
     raw_view, new_view = sandbox_view(raw), sandbox_view(rendered)
-    assert len(new_view["sandbox_processes"]["processes"]) == len(
-        raw_view["sandbox_processes"]["processes"]
+    # A part the raw report does not hold is named absent by its view and
+    # holds no rows; the comparison is of the rows each side carries.
+    assert len(new_view["sandbox_processes"].get("processes", [])) == len(
+        raw_view["sandbox_processes"].get("processes", [])
     )
-    assert [s["name"] for s in new_view["sandbox_signatures"]["signatures"]] == [
-        s["name"] for s in raw_view["sandbox_signatures"]["signatures"]
+    assert [s["name"] for s in new_view["sandbox_signatures"].get("signatures", [])] == [
+        s["name"] for s in raw_view["sandbox_signatures"].get("signatures", [])
     ]
     # Empty kinds are dropped before the comparison: the render carries a
     # ``tls`` placeholder the raw report does not and omits an ``icmp`` one it
@@ -131,8 +133,10 @@ def test_the_rendered_report_still_answers_what_the_raw_one_answered(name, raw):
 
 
 def _nonempty(view: dict) -> dict:
-    """One tool answer with the kinds it found nothing for left out."""
-    return {key: value for key, value in view.items() if value}
+    """One tool answer's rows, with the kinds it found nothing for and its absence note left out."""
+    return {
+        key: value for key, value in view.items() if value and key not in ("absent", "statement")
+    }
 
 
 def test_pcap_path_and_unavailable_survive_the_render():

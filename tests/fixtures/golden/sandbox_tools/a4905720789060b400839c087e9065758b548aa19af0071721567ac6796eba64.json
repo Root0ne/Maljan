@@ -815,8 +815,10 @@
     "total": 90
   },
   "sandbox_dropped_files": {
-    "dropped": [],
-    "total": 0
+    "absent": [
+      "dropped_files"
+    ],
+    "statement": "The report does not hold this part, so whether there was any is not known. This is not the same as none."
   },
   "sandbox_mutexes": {
     "mutexes": [
@@ -827,6 +829,9 @@
     "total": 3
   },
   "sandbox_network": {
+    "absent": [
+      "network.tls"
+    ],
     "dns": [
       {
         "answers": [],
@@ -1969,6 +1974,7 @@
     ],
     "http": [],
     "icmp": [],
+    "statement": "The report does not hold this part, so whether there was any is not known. This is not the same as none.",
     "tcp": [
       {
         "dport": 443,

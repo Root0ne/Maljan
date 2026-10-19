@@ -23,12 +23,16 @@ Authentication:
 
 Error handling:
   - HTTP errors raise SandboxError with the status code and response body.
+  - CAPE's own refusal envelope, ``{"error": true, "error_value": ...}`` sent
+    with HTTP 200 (report API disabled, a TLP RED task, no report), raises
+    SandboxError with the reason CAPE stated, on every endpoint read.
   - Timeout raises SandboxTimeoutError.
   - Missing httpx raises SandboxNotAvailableError at instantiation.
 """
 
 from __future__ import annotations
 
+import json
 import os
 import time
 from pathlib import Path
@@ -40,6 +44,18 @@ from maljan.loaders.sandbox_client import (
     SandboxNotAvailableError,
     SandboxTimeoutError,
     SubmissionResult,
+)
+
+# How much of a response body an error message quotes.
+BODY_SHOWN = 200
+
+# The task states after which CAPE writes no report: its own failure states
+# (``lib/cuckoo/common/constants.py``: ``TASK_FAILED_ANALYSIS``,
+# ``TASK_FAILED_PROCESSING``, ``TASK_FAILED_REPORTING``, ``TASK_BANNED``) and
+# the two names an earlier instance answered with. Waiting on one of them only
+# burns the budget: the task will never reach ``reported``.
+FAILED_STATES: frozenset[str] = frozenset(
+    {"failed", "aborted", "failed_analysis", "failed_processing", "failed_reporting", "banned"}
 )
 
 
@@ -187,13 +203,14 @@ class CAPEv2Client:
                 raise SandboxError(f"Submission request failed: {exc}") from exc
 
         self._raise_for_status(response, "submit")
-        data = response.json()
+        data = self._payload(response, "submit")
 
         # Upstream CAPEv2 wraps the payload as
         # ``{"error": false, "data": {"task_ids": [42]}, ...}``. Older
         # versions returned flat ``{"task_id": 42}`` or ``{"task_ids": [...]}``;
         # we accept either shape to stay compatible with both.
-        inner = data.get("data") if isinstance(data.get("data"), dict) else {}
+        wrapped = data.get("data")
+        inner: dict[str, Any] = wrapped if isinstance(wrapped, dict) else {}
         task_id = (
             data.get("task_id")
             or (data.get("task_ids") or [None])[0]
@@ -214,8 +231,8 @@ class CAPEv2Client:
     ) -> str:
         """Poll GET /apiv2/tasks/view/{task_id}/ until status is terminal.
 
-        Terminal statuses: "reported", "failed", "aborted".
-        Non-terminal: "pending", "running", "processing".
+        Terminal statuses: "reported" and every state in ``FAILED_STATES``,
+        returned the moment the task reaches one. Anything else is waited on.
 
         Args:
             task_id:                Task ID from submit().
@@ -227,9 +244,10 @@ class CAPEv2Client:
 
         Raises:
             SandboxTimeoutError: When timeout_seconds elapses.
-            SandboxError:        On a permanent API error (auth, unknown task).
+            SandboxError:        On a permanent API error (auth, unknown task),
+                                 CAPE's ``{"error": true}`` envelope included.
         """
-        terminal = {"reported", "failed", "aborted"}
+        terminal = {"reported", *FAILED_STATES}
         deadline = time.monotonic() + timeout_seconds
 
         logger.info(
@@ -264,8 +282,16 @@ class CAPEv2Client:
                     # will still be bad in twenty minutes, so abort rather
                     # than burn the budget. Propagates past this handler.
                     self._raise_for_status(response, "poll")
+                    # An unparsable or non-object body stays transient, as it
+                    # always was; a refusal CAPE states is a verdict.
                     data = response.json()
-                    status = str(data.get("data", {}).get("status", "unknown"))
+                    if not isinstance(data, dict):
+                        raise ValueError(f"a {type(data).__name__}, not a JSON object")
+                    self.raise_for_envelope(data, "poll")
+                    inner = data.get("data")
+                    status = str(
+                        (inner if isinstance(inner, dict) else {}).get("status", "unknown")
+                    )
             except SandboxError:
                 raise
             except Exception as exc:
@@ -295,7 +321,8 @@ class CAPEv2Client:
             logger.debug("CAPEv2Client: task %s status=%s.", task_id, status)
 
             if status in terminal:
-                logger.info("CAPEv2Client: task %s -> %s.", task_id, status)
+                log = logger.warning if status in FAILED_STATES else logger.info
+                log("CAPEv2Client: task %s -> %s.", task_id, status)
                 return str(status)
 
             time.sleep(poll_interval_seconds)
@@ -322,7 +349,9 @@ class CAPEv2Client:
             SubmissionResult with the report dict.
 
         Raises:
-            SandboxError: When the report is unavailable.
+            SandboxError: When the report is unavailable, CAPE's
+                ``{"error": true}`` envelope included: a refused report is a
+                failed fetch with its reason, never a report of nothing.
         """
         logger.info("CAPEv2Client: fetching report for task %s.", task_id)
         try:
@@ -331,7 +360,7 @@ class CAPEv2Client:
             raise SandboxError(f"Report request failed: {exc}") from exc
 
         self._raise_for_status(response, "fetch_report")
-        report: dict[str, Any] = response.json()
+        report: dict[str, Any] = self._payload(response, "fetch_report")
 
         # A real CAPEv2 report nests sample identity under target.file.* —
         # target itself carries only "category" and "file" (empirically
@@ -377,6 +406,15 @@ class CAPEv2Client:
                         "CAPEv2Client: PCAP fetch HTTP %d for task %s.",
                         resp.status_code,
                         task_id,
+                    )
+                    return None
+                # A refusal comes back as CAPE's JSON envelope with HTTP 200;
+                # written to disk it would pass the size floor as a capture.
+                if "json" in str(resp.headers.get("content-type") or "").lower():
+                    logger.warning(
+                        "CAPEv2Client: no PCAP for task %s: %s",
+                        task_id,
+                        self._refusal_of(resp.read(), "fetch_pcap"),
                     )
                     return None
                 # 0o600 from the first byte, with ``O_NOFOLLOW``: a capture
@@ -425,5 +463,44 @@ class CAPEv2Client:
         """Raise SandboxError for non-2xx responses."""
         if response.status_code >= 400:
             raise SandboxError(
-                f"CAPEv2 {operation} failed (HTTP {response.status_code}): {response.text[:200]}"
+                f"CAPEv2 {operation} failed (HTTP {response.status_code}): "
+                f"{response.text[:BODY_SHOWN]}"
             )
+
+    @classmethod
+    def _payload(cls, response: Any, operation: str) -> dict[str, Any]:
+        """The response's JSON object; SandboxError where CAPE refused or sent no object."""
+        try:
+            data = response.json()
+        except ValueError as exc:
+            raise SandboxError(f"CAPEv2 {operation} answered no JSON: {exc}") from exc
+        cls.raise_for_envelope(data, operation)
+        return data  # type: ignore[no-any-return]
+
+    @classmethod
+    def _refusal_of(cls, body: bytes, operation: str) -> str:
+        """What a JSON body sent where bytes were asked for says, as one reason."""
+        try:
+            cls.raise_for_envelope(json.loads(body), operation)
+        except SandboxError as exc:
+            return str(exc)
+        except ValueError:
+            return f"CAPEv2 {operation} answered an unparsable JSON body"
+        return f"CAPEv2 {operation} answered a JSON body instead of the file"
+
+    @staticmethod
+    def raise_for_envelope(data: Any, operation: str) -> None:
+        """Raise SandboxError for CAPE's refusal envelope or a body that is no JSON object.
+
+        CAPE answers a refusal with HTTP 200 and ``{"error": true,
+        "error_value": "..."}``; the reason it states goes into the error.
+        """
+        if not isinstance(data, dict):
+            raise SandboxError(
+                f"CAPEv2 {operation} answered a {type(data).__name__}, not a JSON object"
+            )
+        if not data.get("error"):
+            return
+        stated = data.get("error_value") or data.get("message") or data.get("data")
+        reason = str(stated)[:BODY_SHOWN] if stated else "no reason stated"
+        raise SandboxError(f"CAPEv2 {operation} refused: {reason}")
