@@ -34,6 +34,7 @@ drop is recorded in the run summary rather than happening quietly.
 
 from __future__ import annotations
 
+import json
 import uuid
 from collections.abc import Mapping
 from typing import TYPE_CHECKING, Any
@@ -77,6 +78,20 @@ PROPERTY_NOT_CARRIED_CODE = "stix.property_not_carried"
 # judge's copy is recorded as not carried, like an undeclared key, and dropped.
 PLATFORM_ONLY_PROPERTIES: frozenset[str] = frozenset(
     {"x_maljan_evidence_refs", "x_maljan_support", "x_maljan_support_note"}
+)
+
+# A leaf of the judge's assessment written in a type it does not take, and with
+# one reading in the type it does (``schemas.judgement.read_assessment``): read
+# so and recorded as settled, like the relocation; nothing is left to ask.
+ASSESSMENT_READ_LOOSELY_CODE = "verdict.assessment_read_loosely"
+
+# A leaf of the judge's assessment that cannot be read in the type it takes.
+# Left absent — never guessed — and the judge is asked about it once with its
+# own value quoted; one still unreadable after that is published absent, and
+# the report reader is told so.
+ASSESSMENT_UNREADABLE_CODE = "verdict.assessment_unreadable"
+ASSESSMENT_UNREADABLE_REASON = (
+    "a part of the judge's assessment could not be read and is left absent"
 )
 
 
@@ -262,6 +277,73 @@ def lift_misplaced_extensions(bundle_dict: dict[str, Any]) -> list[Violation]:
             len(kept),
         )
     return found
+
+
+def assessment_rows(notes: list[Any]) -> list[Violation]:
+    """The rows for what reading the judge's assessment took (``read_assessment``'s notes).
+
+    A reading taken is settled and recorded; a leaf left absent is put to the
+    judge once, its own value quoted back.
+    """
+    from maljan.pipeline.events import safe_finding_value
+    from maljan.pipeline.validation import Violation
+    from maljan.schemas.stix_models import ASSESSMENT_PROPERTY
+
+    rows: list[Violation] = []
+    for note in notes:
+        # The path is made of the schema's own field names, and still goes
+        # through the helper with every other value of the row.
+        where = safe_finding_value(
+            f"{ASSESSMENT_PROPERTY}.{note.path}" if note.path else ASSESSMENT_PROPERTY
+        )
+        # Quoted as JSON first, so an empty list, a zero, ``false`` or an empty
+        # object is shown as what was written rather than as nothing.
+        written = safe_finding_value(json.dumps(note.written, default=str))
+        reason = safe_finding_value(note.reason)
+        if note.readable:
+            read_as = safe_finding_value(json.dumps(note.read_as, default=str))
+            rows.append(
+                Violation(
+                    code=ASSESSMENT_READ_LOOSELY_CODE,
+                    message=f"{where} was written as {written}, {reason}: {read_as}.",
+                    path=where,
+                )
+            )
+        else:
+            rows.append(
+                Violation(
+                    code=ASSESSMENT_UNREADABLE_CODE,
+                    message=(
+                        f"{where} is {written}, which cannot be read: "
+                        f"{reason}. It is left absent and the rest "
+                        "of the bundle was read. Write it again in the form the field takes, "
+                        "or leave it out."
+                    ),
+                    path=where,
+                )
+            )
+    return rows
+
+
+def read_judge_assessment(bundle_dict: dict[str, Any]) -> list[Violation]:
+    """Read the bundle's assessment apart from its objects, leaf by leaf.
+
+    The assessment is replaced by what could be read of it (removed when none
+    of it could), so a mistyped leaf never fails the Bundle and never costs
+    the judge's objects. What the reading took is returned as rows
+    (:func:`assessment_rows`). A bundle without an assessment is untouched.
+    """
+    from maljan.schemas.judgement import read_assessment
+    from maljan.schemas.stix_models import ASSESSMENT_PROPERTY
+
+    if bundle_dict.get(ASSESSMENT_PROPERTY) is None:
+        return []
+    read, notes = read_assessment(bundle_dict[ASSESSMENT_PROPERTY])
+    if read is None:
+        del bundle_dict[ASSESSMENT_PROPERTY]
+    else:
+        bundle_dict[ASSESSMENT_PROPERTY] = read
+    return assessment_rows(notes)
 
 
 DUPLICATE_LABEL_CODE = "stix.duplicate_label"

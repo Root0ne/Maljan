@@ -32,6 +32,10 @@ from maljan.agents.judge_agent import (
     VERDICT_TIMEOUT_CODE,
     VERDICT_TIMEOUT_REASON,
 )
+from maljan.agents.judge_postprocess import (
+    ASSESSMENT_UNREADABLE_CODE,
+    ASSESSMENT_UNREADABLE_REASON,
+)
 from maljan.agents.run_evidence_corpus import (
     NO_CORPUS,
     CorpusState,
@@ -5537,6 +5541,16 @@ def make_judge_node(
             # retry was asked to correct still standing; the reader is told.
             if VERDICT_RETRY_FAILED_CODE in _verdict_codes:
                 _degradation_reasons.append(VERDICT_RETRY_FAILED_REASON)
+                _degraded_mode = True
+            # A leaf of the judge's assessment that could not be read is
+            # published absent; the reader is told which.
+            _absent_leaves = [
+                v.path for v in verdict.violations if v.code == ASSESSMENT_UNREADABLE_CODE
+            ]
+            if _absent_leaves:
+                _degradation_reasons.append(
+                    f"{ASSESSMENT_UNREADABLE_REASON}: {', '.join(_absent_leaves)}"
+                )
                 _degraded_mode = True
             # A verdict prompt shortened to fit the judge's window says so in
             # the prompt; the reader is told here.
