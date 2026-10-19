@@ -663,14 +663,29 @@ class _JobEventBuffer:
         self._pending: list[dict[str, Any]] = []
         self._last_flush = time.monotonic()
         self._lock = asyncio.Lock()
+        # Characters written out of the queued events (``store_text``),
+        # reported with the batch that carried them. ``_publish_event`` writes
+        # them out before an event reaches any sink, so this is the table's
+        # own guarantee and counts only what reached it some other way.
+        self._nul_replaced = 0
 
     async def add(self, seq: int, event_type: str, data: dict[str, Any], ts: str) -> None:
-        """Queue one event, writing the batch when it is full or old enough."""
+        """Queue one event, writing the batch when it is full or old enough.
+
+        A NUL or a lone surrogate in the type or the payload is written out
+        first: PostgreSQL refuses both in text and jsonb, and one such event
+        would drop the whole batch it was queued in.
+        """
+        from app.services import store_text
+
+        event_type, in_type = store_text.without_nul(str(event_type))
+        data, in_data = store_text.without_nul(data)
         async with self._lock:
+            self._nul_replaced += in_type + in_data
             self._pending.append(
                 {
                     "seq": int(seq),
-                    "type": str(event_type)[:64],
+                    "type": event_type[:64],
                     "payload": data,
                     "ts": _parse_event_ts(ts),
                 }
@@ -686,9 +701,22 @@ class _JobEventBuffer:
         """Write what is queued. Never raises."""
         async with self._lock:
             rows, self._pending = self._pending, []
+            replaced, self._nul_replaced = self._nul_replaced, 0
             self._last_flush = time.monotonic()
         if not rows:
             return
+        if replaced:
+            from app.services import store_text
+
+            logger.warning(
+                "%d refused character(s) in %d event(s) of job %s are stored written out "
+                "(NUL as %s).",
+                replaced,
+                len(rows),
+                self.job_id,
+                store_text.NUL_WRITTEN,
+                extra={"job_id": self.job_id, "component": "pubsub"},
+            )
         try:
             from app.models.job_event import JobEvent
 
@@ -711,6 +739,11 @@ class _JobEventBuffer:
 # threaded through every call site.
 _EVENT_BUFFERS: dict[str, _JobEventBuffer] = {}
 
+# Per job, how many characters the publisher wrote out of its events
+# (``store_text``); read into the run summary when the report is stored and
+# forgotten with the feed.
+_EVENT_REPLACED: dict[str, int] = {}
+
 
 def _start_event_feed(job_id: str, db_session: async_sessionmaker) -> None:
     """Persist this job's feed from here on, in batches."""
@@ -727,6 +760,7 @@ async def _stop_event_feed(job_id: str) -> None:
     """
     buffer = _EVENT_BUFFERS.pop(job_id, None)
     _LAST_SEQ.pop(job_id, None)
+    _EVENT_REPLACED.pop(job_id, None)
     if buffer is not None:
         await buffer.flush()
 
@@ -1002,7 +1036,7 @@ async def _publish_event(
     data: dict[str, Any] | None = None,
     stamp: dict[str, Any] | None = None,
 ) -> None:
-    """Publish a pipeline progress event to Redis PubSub + Stream + the table.
+    """Publish a pipeline progress event to Redis PubSub + Stream + the table. Never raises.
 
     PubSub channel ``analysis:{job_id}`` is used by the live WebSocket
     fan-out. A parallel Redis Stream ``analysis:{job_id}:events`` keeps
@@ -1033,76 +1067,111 @@ async def _publish_event(
     identity, and a console merging the two collapses them instead of drawing
     both.
     """
-    import json
-
-    seq = await _next_seq(redis_conn, job_id)
-    if stamp is not None:
-        stamp["seq"] = seq
-    # Scrubbed here, once, for all three sinks. Seven producers build these
-    # payloads and a new one cannot be relied on to remember; the publisher is
-    # where the wire begins, so it is where the guarantee belongs. Producers
-    # may still scrub, and this second pass changes nothing for two reasons:
-    # the scrub repeats its passes until they change nothing, so it is
-    # idempotent over its own output; and the producers that bound scrubbed
-    # text — the argument and result summaries — cut it with
-    # ``events._cut_whole``, which keeps a digest or an identifier whole and
-    # moves a cut that a scrub would change (inside a URL, after a scheme word)
-    # back to the start of its word. A producer that cuts scrubbed text any
-    # other way has no such guarantee. The recorder's copy is
-    # scrubbed where it is taken (``_make_event_sink``), not here: it is taken
-    # before this coroutine is even scheduled, and on the paths the recorder
-    # exists for this coroutine never runs.
-    stamped = {**scrubbed(data or {}), "seq": seq}
-    ts = datetime.now(UTC).isoformat()
-    payload = {
-        "type": event_type,
-        "data": stamped,
-        "ts": ts,
-    }
-    message = json.dumps(payload)
-    buffer = _EVENT_BUFFERS.get(job_id)
-    if buffer is not None:
-        await buffer.add(seq, event_type, stamped, ts)
-    if event_type == MODEL_USAGE_EVENT:
-        # A model call's usage is committed as soon as this publish runs,
-        # with whatever is queued before it: the run summary that would carry
-        # it is built only at the end of the run, and a process killed before
-        # then would otherwise take what the run spent with it. The publish
-        # is scheduled from the call's own thread rather than awaited by it,
-        # so the guarantee is "committed once the loop runs the publish",
-        # normally milliseconds after the call is recorded; a process killed
-        # inside that window loses that one call's row. One transaction per
-        # model call, which takes seconds anyway.
-        #
-        # It is a record, not progress: the console draws nothing from it,
-        # and the live socket and the 1,000-entry replay stream are left to
-        # the events a reader follows. ``job_events`` keeps it, for as long
-        # as it keeps the rest of the feed (``core.events.retention_days``).
-        if buffer is not None:
-            await buffer.flush()
-        return
-    await redis_conn.publish(f"analysis:{job_id}", message)
-    # Persist into the bounded Stream so the live page can replay missed
-    # events when it mounts after the worker already started publishing.
     try:
-        await redis_conn.xadd(
-            stream_key(job_id),
-            {"payload": message},
-            maxlen=1000,
-            approximate=True,
-        )
-        # 24h TTL — every read keeps the key fresh; idle keys vanish.
-        await redis_conn.expire(stream_key(job_id), STREAM_TTL_SECONDS)
-    except Exception as exc:  # noqa: BLE001
+        import json
+
+        seq = await _next_seq(redis_conn, job_id)
+        if stamp is not None:
+            stamp["seq"] = seq
+        # Scrubbed here, once, for all three sinks. Seven producers build these
+        # payloads and a new one cannot be relied on to remember; the publisher is
+        # where the wire begins, so it is where the guarantee belongs. Producers
+        # may still scrub, and this second pass changes nothing for two reasons:
+        # the scrub repeats its passes until they change nothing, so it is
+        # idempotent over its own output; and the producers that bound scrubbed
+        # text — the argument and result summaries — cut it with
+        # ``events._cut_whole``, which keeps a digest or an identifier whole and
+        # moves a cut that a scrub would change (inside a URL, after a scheme word)
+        # back to the start of its word. A producer that cuts scrubbed text any
+        # other way has no such guarantee. The recorder's copy is
+        # scrubbed where it is taken (``_make_event_sink``), not here: it is taken
+        # before this coroutine is even scheduled, and on the paths the recorder
+        # exists for this coroutine never runs.
+        stamped = {**scrubbed(data or {}), "seq": seq}
+        # Written out once, here, so the socket, the replay stream and the
+        # table carry one payload (``store_text``): the table refuses a NUL or
+        # a lone surrogate, and a live feed that differed from its replay
+        # would be two records of one event. Counted for the run summary.
+        from app.services import store_text
+
+        stamped, _in_data = store_text.storable(stamped)
+        event_type, _in_type = store_text.storable(str(event_type))
+        _replaced = _in_data.total + _in_type.total
+        if _replaced:
+            _EVENT_REPLACED[job_id] = _EVENT_REPLACED.get(job_id, 0) + _replaced
+            logger.warning(
+                "The %s event of job %s carried %d character(s) PostgreSQL refuses; they "
+                "are sent and stored written out (NUL as %s).",
+                event_type,
+                job_id,
+                _replaced,
+                store_text.NUL_WRITTEN,
+                extra={"job_id": job_id, "component": "pubsub"},
+            )
+        ts = datetime.now(UTC).isoformat()
+        payload = {
+            "type": event_type,
+            "data": stamped,
+            "ts": ts,
+        }
+        message = json.dumps(payload)
+        buffer = _EVENT_BUFFERS.get(job_id)
+        if buffer is not None:
+            await buffer.add(seq, event_type, stamped, ts)
+        if event_type == MODEL_USAGE_EVENT:
+            # A model call's usage is committed as soon as this publish runs,
+            # with whatever is queued before it: the run summary that would carry
+            # it is built only at the end of the run, and a process killed before
+            # then would otherwise take what the run spent with it. The publish
+            # is scheduled from the call's own thread rather than awaited by it,
+            # so the guarantee is "committed once the loop runs the publish",
+            # normally milliseconds after the call is recorded; a process killed
+            # inside that window loses that one call's row. One transaction per
+            # model call, which takes seconds anyway.
+            #
+            # It is a record, not progress: the console draws nothing from it,
+            # and the live socket and the 1,000-entry replay stream are left to
+            # the events a reader follows. ``job_events`` keeps it, for as long
+            # as it keeps the rest of the feed (``core.events.retention_days``).
+            if buffer is not None:
+                await buffer.flush()
+            return
+        await redis_conn.publish(f"analysis:{job_id}", message)
+        # Persist into the bounded Stream so the live page can replay missed
+        # events when it mounts after the worker already started publishing.
+        try:
+            await redis_conn.xadd(
+                stream_key(job_id),
+                {"payload": message},
+                maxlen=1000,
+                approximate=True,
+            )
+            # 24h TTL — every read keeps the key fresh; idle keys vanish.
+            await redis_conn.expire(stream_key(job_id), STREAM_TTL_SECONDS)
+        except Exception as exc:  # noqa: BLE001
+            logger.debug(
+                "Event stream xadd failed (%s); pubsub-only.",
+                exc,
+                extra={"job_id": job_id, "component": "pubsub"},
+            )
         logger.debug(
-            "Event stream xadd failed (%s); pubsub-only.",
+            f"Published event: type={event_type} job={job_id[:8]}...",
+            extra={"job_id": job_id, "component": "pubsub"},
+        )
+    except Exception as exc:  # noqa: BLE001 — a lost feed never costs a run
+        # Total, as every caller relies on: the run's own record is the
+        # report, the ledger and the transcript, and a Redis that dropped its
+        # connection must not take a finished report with it. Said, never
+        # swallowed: the event is named with the reason it did not go out.
+        logger.warning(
+            "Could not publish the %s event of job %s (%s: %s); the run continues "
+            "without it on the live feed.",
+            event_type,
+            job_id,
+            type(exc).__name__,
             exc,
             extra={"job_id": job_id, "component": "pubsub"},
         )
-    logger.debug(
-        f"Published event: type={event_type} job={job_id[:8]}...",
-        extra={"job_id": job_id, "component": "pubsub"},
-    )
 
 
 def _parse_event_ts(value: Any) -> datetime | None:
@@ -1911,6 +1980,82 @@ def kept_report_note(failed_step: str, exc: BaseException, error_id: str) -> str
     )
 
 
+# Where a run failed when the graph had returned and the worker then failed on
+# its way to the store, as a kept report's note names it.
+POST_GRAPH_STEP = "the worker storing the result the graph returned"
+
+
+def storable_after_graph(result: Mapping[str, Any] | None, core_settings: Any) -> bool:
+    """Whether ``result``, the graph's return, is a report the completed path would store.
+
+    Not an absent analysis (``absent_analysis_message``), not a report node
+    that raised (``report_error``), and carrying a report unless reporting is
+    off for the job, the same three checks the completed path makes.
+    """
+    if not isinstance(result, Mapping):
+        return False
+    if absent_analysis_message(dict(result)) or result.get("report_error"):
+        return False
+    reporting = getattr(getattr(core_settings, "reporting", None), "enabled", True)
+    return bool(result.get("malware_report")) or not reporting
+
+
+def swept_while_running() -> Any:
+    """A row the orphan sweep marked failed, which a finished run may still complete.
+
+    The sweep marks a running job failed when its owner heartbeat expired
+    (``_SWEPT_NO_OWNER``), which a Redis outage longer than the heartbeat's TTL
+    does to a job that is still running. Its result is still this run's to
+    record. A cancelled row, a completed one and one failed for any other
+    reason stand.
+    """
+    from app.models.job import AnalysisJob
+
+    return (AnalysisJob.status == "failed") & (AnalysisJob.error_message == _SWEPT_NO_OWNER)
+
+
+def stored_after_note(row_status: str | None) -> str:
+    """What a report stored under a job that was no longer running says about itself."""
+    return (
+        f"Stored after the job was {row_status or 'removed'}: the run finished and its "
+        "report is kept, but the job row's status stands and the run was not recorded "
+        "as completed."
+    )
+
+
+async def job_status_in(db: Any, job_uuid: uuid.UUID) -> str | None:
+    """The job row's status as ``db`` reads it; ``None`` when there is no row."""
+    from app.models.job import AnalysisJob
+
+    result = await db.execute(select(AnalysisJob.status).where(AnalysisJob.id == job_uuid))
+    value = result.scalar_one_or_none()
+    return value if isinstance(value, str) else None
+
+
+async def job_status_now(db_session: async_sessionmaker, job_uuid: uuid.UUID) -> str | None:
+    """The job row's status on a session of its own. Never raises; ``None`` when unread."""
+    try:
+        async with db_session() as db:
+            return await job_status_in(db, job_uuid)
+    except Exception as exc:  # noqa: BLE001 — a read that fails decides nothing
+        logger.warning(
+            "Could not read the status of job %s (%s).",
+            job_uuid,
+            type(exc).__name__,
+            extra={"job_id": str(job_uuid)},
+        )
+        return None
+
+
+def completion_missed(result: Any) -> bool:
+    """Whether a status update matched no row, as its driver result says.
+
+    A result that does not say (no integer ``rowcount``) is taken as matched.
+    """
+    count = getattr(result, "rowcount", None)
+    return isinstance(count, int) and count == 0
+
+
 async def keep_the_built_report(
     db_session: async_sessionmaker,
     *,
@@ -2127,6 +2272,11 @@ async def keep_the_stopped_run(
         return False
 
 
+# The statuses a failure never overwrites: the operator's cancel, and a
+# completion already recorded.
+_FAILURE_LEAVES_ALONE: tuple[str, ...] = ("cancelled", "completed")
+
+
 async def mark_job_failed(
     db_session: async_sessionmaker,
     job_uuid: uuid.UUID,
@@ -2144,15 +2294,20 @@ async def mark_job_failed(
     written even when the job's own connection is gone.
 
     A ``cancelled`` row is left alone: the operator's decision outranks
-    whatever the run raised on its way down.
+    whatever the run raised on its way down. A ``completed`` row is left alone
+    too: a report stored and recorded as complete is never turned into a
+    failure by a step after it. A row left alone is said in the log.
     """
     from app.models.job import AnalysisJob
 
     try:
         async with db_session() as db:
-            await db.execute(
+            result = await db.execute(
                 update(AnalysisJob)
-                .where(AnalysisJob.id == job_uuid, AnalysisJob.status != "cancelled")
+                .where(
+                    AnalysisJob.id == job_uuid,
+                    AnalysisJob.status.notin_(_FAILURE_LEAVES_ALONE),
+                )
                 .values(
                     status="failed",
                     error_message=reason[:2000],
@@ -2160,6 +2315,14 @@ async def mark_job_failed(
                 )
             )
             await db.commit()
+        if completion_missed(result):
+            logger.warning(
+                "Job %s was not marked failed: its row is %s or gone (error_id=%s).",
+                job_uuid,
+                " or ".join(_FAILURE_LEAVES_ALONE),
+                error_id,
+                extra={"job_id": str(job_uuid), "error_id": error_id},
+            )
         return True
     except Exception as exc:  # noqa: BLE001 — the run has already failed
         logger.error(
@@ -2314,6 +2477,12 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
     # the pipeline — and a stop note's "seconds into the run" is read off the
     # same clock from the same instant, so the two numbers cannot disagree.
     job_started = job_clock()
+    # The graph's result once it returned, so a failure on the way to the
+    # store keeps the report rather than discarding it (``storable_after_graph``).
+    post_graph_result: dict[str, Any] | None = None
+    # Set once the completion is committed: from then on nothing may record
+    # this job as failed.
+    completion_recorded = False
     # Registered here rather than above the session: this is the statement
     # before the ``try`` whose ``finally`` unregisters it, so there is no
     # window in which a raise leaves a buffer in the module-global map for
@@ -3114,6 +3283,7 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
                 await heartbeat_task
             except asyncio.CancelledError:
                 pass
+        post_graph_result = pipeline_result
 
         # Announce that all analysts have finished (pipeline -> negotiation phase)
         for agent_name in registered_agents:
@@ -3155,6 +3325,7 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
         from maljan.pipeline.state import with_undrained_evidence
 
         pipeline_result = with_undrained_evidence(pipeline_result, getattr(app, "container", None))
+        post_graph_result = pipeline_result
         # The enrichment job queued after a stored report is named in its
         # disclosure block, with what it may reach, so that block never says
         # nothing left the machine while a lookup is still to come.
@@ -3208,19 +3379,11 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
         # a "completed" row with no report under it, is worse than one more
         # run of the analysis.
         async with db_session() as db:
-            report = await _store_the_report(
-                db,
-                job_uuid=job_uuid,
-                job_id=job_id,
-                pipeline_result=pipeline_result,
-                stix_bundle=stix_bundle_for_persist,
-                run_summary=_run_summary,
-                transcript=transcript,
-                core_settings=core_settings,
-                spill=_job_spill(app.container),
-            )
-
             # ── 5. Mark job complete ─────────────────────────────
+            # First in the transaction, so the row is held until the report
+            # under it commits: a cancel that arrives meanwhile waits for the
+            # commit and then finds the job completed, instead of the two
+            # overwriting each other.
             # Use Python ``datetime.now(UTC)`` instead of Postgres ``NOW()``.
             # ``func.now()`` resolves to ``transaction_timestamp()`` which is
             # the START of the current transaction — that equals
@@ -3230,18 +3393,64 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
             now = datetime.now(UTC)
             # The status travels in the statement rather than on a loaded
             # row: this session has never seen the job row, and the one that
-            # read it was closed before the pipeline started.
-            await db.execute(
+            # read it was closed before the pipeline started. Only a row this
+            # run still owns is completed: its running row, or the one the
+            # orphan sweep took from it (``swept_while_running``). An
+            # operator's cancel that landed first stands.
+            done: dict[str, Any] = dict(
+                status="completed",
+                completed_at=now,
+                # Round to one decimal so sub-second jobs (~0.7s) don't
+                # collapse to zero; the column is ``Numeric(10,2)`` so
+                # fractional values survive the round-trip.
+                duration_seconds=round(float(elapsed), 1),
+            )
+            completion = await db.execute(
                 update(AnalysisJob)
-                .where(AnalysisJob.id == job_uuid)
-                .values(
-                    status="completed",
-                    completed_at=now,
-                    # Round to one decimal so sub-second jobs (~0.7s) don't
-                    # collapse to zero; the column is ``Numeric(10,2)`` so
-                    # fractional values survive the round-trip.
-                    duration_seconds=round(float(elapsed), 1),
+                .where(AnalysisJob.id == job_uuid, AnalysisJob.status == "running")
+                .values(**done)
+            )
+            if completion_missed(completion):
+                # The sweep's message goes with its ``failed``.
+                completion = await db.execute(
+                    update(AnalysisJob)
+                    .where(AnalysisJob.id == job_uuid, swept_while_running())
+                    .values(**done, error_message=None)
                 )
+                if not completion_missed(completion):
+                    logger.warning(
+                        "Job %s had been marked failed by the orphan sweep while it ran "
+                        "(its owner heartbeat lapsed); its finished run completes it.",
+                        job_id,
+                        extra={"job_id": job_id, "component": "lifecycle"},
+                    )
+            row_status: str | None = None
+            stored_note: str | None = None
+            if completion_missed(completion):
+                # The row moved on while the report was being built: an
+                # operator's cancel, most likely. Its status stands, and the
+                # report the run finished is stored under it saying so.
+                row_status = await job_status_in(db, job_uuid)
+                stored_note = stored_after_note(row_status)
+                _run_summary = {
+                    **_run_summary,
+                    "degraded_mode": True,
+                    "degradation_reasons": [
+                        *(_run_summary.get("degradation_reasons") or []),
+                        stored_note,
+                    ],
+                }
+            report = await _store_the_report(
+                db,
+                job_uuid=job_uuid,
+                job_id=job_id,
+                pipeline_result=pipeline_result,
+                stix_bundle=stix_bundle_for_persist,
+                run_summary=_run_summary,
+                transcript=transcript,
+                incomplete_reason=stored_note,
+                core_settings=core_settings,
+                spill=_job_spill(app.container),
             )
             await db.commit()
             # Read off the report while its session is still open, so nothing
@@ -3250,6 +3459,31 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
             report_verdict = report.verdict
             report_confidence = report.overall_confidence
             report_has_malware_report = bool(report.malware_report)
+
+        if stored_note is not None:
+            # Not announced as completed, nor remembered, nor enriched: the
+            # job is what its row says. The feed is told where the report went.
+            logger.warning(
+                "Job %s was %s when its report was stored (report=%s); its status was "
+                "left as it was and the run is not announced as completed.",
+                job_id,
+                row_status or "gone",
+                report_uuid,
+                extra={"job_id": job_id, "component": "lifecycle"},
+            )
+            await _publish_event(
+                redis_conn,
+                job_id,
+                "status_change",
+                {"status": row_status, "report_id": str(report_uuid), "note": stored_note},
+            )
+            return {
+                "status": "not_running_at_completion",
+                "row_status": row_status,
+                "job_id": job_id,
+                "report_id": str(report_uuid),
+            }
+        completion_recorded = True
 
         await _publish_event(
             redis_conn,
@@ -3332,6 +3566,27 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
         )
 
         reason = failure_reason(exc, error_id)
+        if (
+            not completion_recorded
+            and post_graph_result is not None
+            and job_uuid is not None
+            and await job_status_now(db_session, job_uuid) == "completed"
+        ):
+            # The completion committed and only its acknowledgement was lost:
+            # the complete report is stored, and an incomplete copy kept now
+            # would supersede it.
+            completion_recorded = True
+        if completion_recorded:
+            # The report is stored and the row says ``completed``; a step after
+            # that (remembering the run, say) failed. The completion stands.
+            logger.error(
+                "Job %s failed after its completion was recorded (error_id=%s); the job "
+                "stays completed.",
+                job_id,
+                error_id,
+                extra={"job_id": job_id, "error_id": error_id},
+            )
+            return {"status": "completed", "job_id": job_id, "error_after_completion": reason}
         if job_uuid is not None:
             # A session of its own, always. The session this job read through
             # was closed before the pipeline started, and the one that was
@@ -3351,6 +3606,15 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
             # never raises, so the row below is always marked.
             built = getattr(app, "built_report", None) if app is not None else None
             failed_step = getattr(app, "failed_step", None) if app is not None else None
+            # The graph returned and the worker failed on its way to the store:
+            # the result the graph returned is the report to keep, when it is
+            # one the completed path would have stored.
+            if (
+                not (built and failed_step)
+                and post_graph_result is not None
+                and storable_after_graph(post_graph_result, core_settings)
+            ):
+                built, failed_step = post_graph_result, POST_GRAPH_STEP
             if built and failed_step:
                 await keep_the_built_report(
                     db_session,
@@ -4538,6 +4802,14 @@ async def _store_the_report(
         malware_report=pipeline_result.get("malware_report"),
         incomplete_reason=incomplete_reason,
     )
+    # Every NUL and lone surrogate in a sample-derived string is written out
+    # before anything is stored or digested (``store_text``): PostgreSQL
+    # refuses both in text and jsonb, and one refused value would refuse this
+    # whole transaction. Counted across every row below and recorded in the
+    # run summary.
+    from app.services import store_text
+
+    _nul_replaced = store_text.sanitise_row(report)
     # A re-run supersedes its predecessor. ``analysis_reports.job_id``
     # is unique and this path only ever inserted, so an arq retry --
     # which arq schedules on its own -- reached the end of a full
@@ -4620,6 +4892,7 @@ async def _store_the_report(
             status=status,
             status_reason=status_reason,
         )
+        _nul_replaced.add(store_text.sanitise_row(finding))
         db.add(finding)
 
     logger.info(
@@ -4682,7 +4955,52 @@ async def _store_the_report(
         for _entry in rows_to_store(_ledger, job_id=job_id)
     ]
     for _row in _rows:
+        _nul_replaced.add(store_text.sanitise_row(_row))
         db.add(_row)
+    # The transcript rows are built here and added after the seal, as they
+    # always were, so their replacements are counted in the run summary the
+    # seal's report digest covers.
+    # Whether the publisher numbered this run at all. A run it never
+    # reached — one whose loop was already closing, or whose recorder
+    # raised — falls back to the position in the recording, which is
+    # the order the lines were said in and all this column ever meant.
+    # A run it numbered *partly* may not: the position and the
+    # publisher's count share the low integers, so a line that missed
+    # its stamp would borrow a number another line already owns and
+    # the console would draw the two as one. Those get ``0``, which is
+    # outside the publisher's range — it counts from 1 — and which
+    # every reader already treats as "no number".
+    _numbered = any(int(m.get("seq") or 0) > 0 for m in transcript)
+    _transcript_rows: list[Any] = []
+    for index, message in enumerate(transcript):
+        _stamped = int(message.get("seq") or 0)
+        _transcript_rows.append(
+            _transcript_row(
+                message,
+                report_id=report.id,
+                seq=_stamped or (0 if _numbered else index),
+            )
+        )
+    for _message_row in _transcript_rows:
+        _nul_replaced.add(store_text.sanitise_row(_message_row))
+    # What the live feed of this job had replaced by now, so the one count a
+    # reader of the report sees covers the events too.
+    _events_replaced = _EVENT_REPLACED.get(job_id, 0)
+    if _nul_replaced.total or _events_replaced:
+        report.run_summary = store_text.recorded(
+            report.run_summary, _nul_replaced, events=_events_replaced
+        )
+        logger.warning(
+            "Job=%s carried characters PostgreSQL refuses in what it stores (%s; events "
+            "%d); each is stored written out (NUL as %s) and the run summary records the "
+            "count under %s.",
+            job_id,
+            _nul_replaced.record(),
+            _events_replaced,
+            store_text.NUL_WRITTEN,
+            store_text.RUN_SUMMARY_KEY,
+            extra={"job_id": job_id, "component": "report"},
+        )
     if _key is None:
         logger.warning(
             "The ledger of job=%s is not sealed: %s.",
@@ -4704,27 +5022,10 @@ async def _store_the_report(
     # *ended up*; this records what was said and in what order, which
     # is the only place the per-round positions, the sycophancy
     # intervention and the revised prose survive past the 24 h Redis
-    # stream. See ``AgentMessage`` for the full rationale.
-    # Whether the publisher numbered this run at all. A run it never
-    # reached — one whose loop was already closing, or whose recorder
-    # raised — falls back to the position in the recording, which is
-    # the order the lines were said in and all this column ever meant.
-    # A run it numbered *partly* may not: the position and the
-    # publisher's count share the low integers, so a line that missed
-    # its stamp would borrow a number another line already owns and
-    # the console would draw the two as one. Those get ``0``, which is
-    # outside the publisher's range — it counts from 1 — and which
-    # every reader already treats as "no number".
-    _numbered = any(int(m.get("seq") or 0) > 0 for m in transcript)
-    for index, message in enumerate(transcript):
-        _stamped = int(message.get("seq") or 0)
-        db.add(
-            _transcript_row(
-                message,
-                report_id=report.id,
-                seq=_stamped or (0 if _numbered else index),
-            )
-        )
+    # stream. See ``AgentMessage`` for the full rationale. Built and
+    # numbered above, before the seal; added here.
+    for _message_row in _transcript_rows:
+        db.add(_message_row)
 
     logger.info(
         f"Saved {len(transcript)} transcript messages for report={report.id}",
