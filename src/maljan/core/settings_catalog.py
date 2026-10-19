@@ -143,6 +143,10 @@ class CatalogEntry:
     # template is read by, the routed formats, the renderers and the shipped
     # steps, served so the console's step editor keeps no copy of any of them.
     pack_step_vocabulary: dict[str, Any] | None = None
+    # A change to this setting asks for the admin's current password again
+    # (the API's sign-in policy: the login lockout, the trusted proxies, the
+    # token lifetimes), so a stolen session cannot weaken it on its own.
+    needs_current_password: bool = False
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -490,6 +494,43 @@ def _url_secrets(url: str) -> list[str]:
         if value and (names_a_credential_value(key) or key.lower() in _CREDENTIAL_QUERY_KEYS):
             found.append(value)
     return found
+
+
+def snapshot_hidden_paths(settings: BaseModel) -> tuple[list[str], list[str]]:
+    """``(secret leaves, tool-server blocks)`` of a settings instance, by dotted path.
+
+    A secret leaf is what this catalogue types as a secret (a ``SecretStr``,
+    or a field named in ``_SECRET_NAMES``) wherever it sits, a model inside a
+    mapping included (each tool server's ``auth_token`` under
+    ``mcp.servers``). A tool-server block is every ``MCPServerConfig``
+    (``mcp.servers.<key>``, ``static.ghidra``, ``static.r2``,
+    ``sandbox.cape2.mcp``): its ``env`` map is where a server's own
+    credential is written and no type marks it, and its arguments and address
+    can carry one (``settings_masking.masked_server``). The paths are those of
+    ``model_dump``, the form the run settings snapshot is read from
+    (``settings_overrides.public_snapshot``).
+    """
+    from maljan.core.config import MCPServerConfig
+
+    secrets: list[str] = []
+    servers: list[str] = []
+
+    def _walk(value: Any, path: str) -> None:
+        if isinstance(value, BaseModel):
+            if isinstance(value, MCPServerConfig):
+                servers.append(path.removesuffix("."))
+            for key, field in type(value).model_fields.items():
+                tp, _ = _unwrap_optional(field.annotation)
+                if tp is SecretStr or key in _SECRET_NAMES:
+                    secrets.append(f"{path}{key}")
+                else:
+                    _walk(getattr(value, key, None), f"{path}{key}.")
+        elif isinstance(value, Mapping):
+            for key, item in value.items():
+                _walk(item, f"{path}{key}.")
+
+    _walk(settings, "")
+    return secrets, servers
 
 
 def configured_secret_values(*sources: Any) -> set[str]:

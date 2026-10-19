@@ -321,6 +321,7 @@ API_EDITABLE: dict[str, dict[str, Any]] = {
         ),
     },
     "rate_limit_enabled": {
+        "needs_current_password": True,
         "type": "bool",
         "group": "api",
         "title": "Rate limiting",
@@ -329,6 +330,7 @@ API_EDITABLE: dict[str, dict[str, Any]] = {
         ),
     },
     "rate_limit_requests": {
+        "needs_current_password": True,
         "type": "int",
         "minimum": 1,
         "group": "api",
@@ -336,6 +338,7 @@ API_EDITABLE: dict[str, dict[str, Any]] = {
         "description": "Requests allowed per window per IP and path.",
     },
     "rate_limit_window_seconds": {
+        "needs_current_password": True,
         "type": "int",
         "minimum": 1,
         "group": "api",
@@ -343,12 +346,14 @@ API_EDITABLE: dict[str, dict[str, Any]] = {
         "description": "Length of the rate-limit window.",
     },
     "rate_limit_whitelist": {
+        "needs_current_password": True,
         "type": "list",
         "group": "api",
         "title": "Rate limit: whitelisted paths",
         "description": "Paths that bypass rate limiting entirely (e.g. health checks).",
     },
     "login_max_attempts": {
+        "needs_current_password": True,
         "type": "int",
         "minimum": 1,
         "group": "api",
@@ -358,6 +363,7 @@ API_EDITABLE: dict[str, dict[str, Any]] = {
         ),
     },
     "login_lockout_seconds": {
+        "needs_current_password": True,
         "type": "int",
         "minimum": 1,
         "group": "api",
@@ -365,6 +371,7 @@ API_EDITABLE: dict[str, dict[str, Any]] = {
         "description": "How long a locked account stays locked.",
     },
     "trusted_proxy_ips": {
+        "needs_current_password": True,
         "type": "list",
         "group": "api",
         "title": "Trusted proxy IPs",
@@ -374,6 +381,7 @@ API_EDITABLE: dict[str, dict[str, Any]] = {
         ),
     },
     "jwt_access_token_expire_minutes": {
+        "needs_current_password": True,
         "type": "int",
         "minimum": 1,
         "group": "api",
@@ -381,6 +389,7 @@ API_EDITABLE: dict[str, dict[str, Any]] = {
         "description": "How long an issued access token stays valid.",
     },
     "jwt_refresh_token_expire_days": {
+        "needs_current_password": True,
         "type": "int",
         "minimum": 1,
         "group": "api",
@@ -388,6 +397,7 @@ API_EDITABLE: dict[str, dict[str, Any]] = {
         "description": "How long an issued refresh token, and its cookie, stay valid.",
     },
     "refresh_reuse_grace_seconds": {
+        "needs_current_password": True,
         "type": "int",
         "minimum": 0,
         "group": "api",
@@ -625,6 +635,7 @@ def api_catalog() -> list[CatalogEntry]:
                 order=0,
                 choices_from=None,
                 editor=None,
+                needs_current_password=bool(ann.get("needs_current_password")),
             )
         )
     for name, ann in API_READONLY.items():

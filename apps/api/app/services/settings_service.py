@@ -21,6 +21,15 @@ from maljan.core.plugins import (
     install_allow_list,
 )
 from maljan.core.settings_catalog import PLUGIN_CHOICE_KINDS, _registry_choices
+from maljan.core.settings_masking import (
+    mask_left_in,
+    masked_server,
+    masked_server_map,
+    masked_strings,
+    masked_value,
+    unmasked,
+    value_at,
+)
 from maljan.core.settings_overrides import (
     SERVER_MAP_PATH,
     build_settings,
@@ -492,10 +501,104 @@ class SaveResult:
 # enrichment sources.
 NESTED_SECRET_MAPS: tuple[NestedSecretMap, ...] = (ARMS, SOURCE_SECRETS)
 _NESTED_BY_KEY = {spec.key: spec for spec in NESTED_SECRET_MAPS}
+NESTED_SECRET_KEYS = frozenset(_NESTED_BY_KEY)
 _COMPOSITE_SECRET_SUFFIX = {
     SERVER_MAP_KEY: ".auth_token",
     **{spec.key: spec.suffix for spec in NESTED_SECRET_MAPS},
 }
+
+
+def shown_setting(entry: Any, value: Any) -> Any:
+    """A stored or default value as the console and the export may see it.
+
+    Masked as the run settings snapshot masks it, with the console's
+    ``TOKEN_MASK`` (``maljan.core.settings_masking``): the tool-server map by
+    ``masked_server`` (every ``env`` value, a credential a flag of the
+    arguments names, every URL), an open mapping (``dict``) by
+    ``masked_value`` (every entry whose key names a credential, every URL),
+    and every other value's URLs by ``masked_strings``. A secret leaf and a
+    nested-secret composite are masked by their own rules and pass through; a
+    stored row served beside the catalogue (an unloaded plugin's block) is read
+    as an open mapping, its leaf name included.
+    A value sent back as shown keeps what is stored (:func:`unmasked_changes`).
+    """
+    if value is None or entry.secret or entry.key in _NESTED_BY_KEY:
+        return value
+    if entry.key not in catalog_index():
+        # Served beside the catalogue, as stored (a plugin block this process
+        # has not loaded): no model says what its keys are, so it is read as
+        # an open mapping, its own leaf name included.
+        leaf = entry.path.rsplit(".", 1)[-1]
+        return masked_value({leaf: value}, TOKEN_MASK)[leaf]
+    if entry.key == SERVER_MAP_KEY:
+        return masked_server_map(value, TOKEN_MASK) if isinstance(value, dict) else value
+    if entry.type == "dict":
+        return masked_value(value, TOKEN_MASK)
+    return masked_strings(value, TOKEN_MASK)
+
+
+def _without_tokens(servers: dict[str, Any]) -> dict[str, Any]:
+    """The server map without its ``auth_token`` fields, which keep their own mask rule."""
+    return {
+        name: (
+            {k: v for k, v in entry.items() if k != "auth_token"}
+            if isinstance(entry, dict)
+            else entry
+        )
+        for name, entry in servers.items()
+    }
+
+
+def unmasked_changes(
+    changes: dict[str, Any], current: dict[str, Any], index: dict[str, Any]
+) -> dict[str, Any]:
+    """``changes`` with every part sent back as shown read as what is stored.
+
+    The console and the export show settings masked (:func:`shown_setting`);
+    a part that comes back exactly as shown keeps the stored value it stands
+    for. A mask left with nothing stored behind it is refused, named: it would
+    otherwise be saved as the literal characters of the mask. A server's
+    ``auth_token`` keeps its own rule (``split_server_secrets``), and so does
+    an ``env`` value, which is dropped when nothing is stored behind it.
+    """
+    out: dict[str, Any] = {}
+    errors: dict[str, str] = {}
+    for key, value in changes.items():
+        entry = index.get(key)
+        if entry is None or value is None or entry.secret or key in _NESTED_BY_KEY:
+            out[key] = value
+            continue
+        stored = current.get(key)
+        if key == SERVER_MAP_KEY and isinstance(value, dict):
+            bare = _without_tokens(stored) if isinstance(stored, dict) else {}
+            restored, paths = unmasked(value, bare, masked_server_map(bare, TOKEN_MASK))
+            left = [
+                path
+                for path in mask_left_in(_without_tokens(restored), TOKEN_MASK)
+                if ".env." not in f".{path}"
+            ]
+        else:
+            restored, paths = unmasked(value, stored, shown_setting(entry, stored))
+            left = mask_left_in(restored, TOKEN_MASK)
+        # A stored value read back is masked again where it now stands, and
+        # must read there exactly as the reader sent it; one that would be
+        # shown otherwise (an argument, or a URL argument's host and path,
+        # moved behind a flag that names no credential) is refused.
+        reshown = shown_setting(entry, restored)
+        left += [
+            ".".join(str(part) for part in path)
+            for path in paths
+            if value_at(reshown, path) != value_at(value, path)
+        ]
+        if left:
+            errors[key] = (
+                f"{', '.join(left) if left != [''] else 'the value'} still holds the mask "
+                f"({TOKEN_MASK}) with no stored value behind it: type the value again."
+            )
+        out[key] = restored
+    if errors:
+        raise SettingsValidationError(errors)
+    return out
 
 
 def _merge_nested(overrides: dict[str, Any]) -> dict[str, Any]:
@@ -651,10 +754,11 @@ class SettingsService:
                 continue
             if row is not None:
                 held = row.value
-                shown_value = (
+                shown_value = shown_setting(
+                    entry,
                     served_tool_facts(held, _shipped_leaf(key))
                     if isinstance(held, dict) and _is_declaration_leaf(key, held)
-                    else held
+                    else held,
                 )
                 out[key] = ValueInfo(shown_value, None, None, "ui", row.updated_at, row.updated_by)
             else:
@@ -666,7 +770,11 @@ class SettingsService:
                 # URL-shaped values go through the same credential
                 # mask the catalog's default uses, so a password never
                 # reaches the response either way.
-                shown = default_value if entry.editable else _masked(entry.path, default_value)
+                shown = (
+                    shown_setting(entry, default_value)
+                    if entry.editable
+                    else _masked(entry.path, default_value)
+                )
                 src = effective_source(overridden=False)
                 out[key] = ValueInfo(shown, None, None, src)
         for entry in extra:
@@ -688,7 +796,12 @@ class SettingsService:
                 )
             else:
                 out[entry.key] = ValueInfo(
-                    row.value, None, None, "ui", row.updated_at, row.updated_by
+                    shown_setting(entry, row.value),
+                    None,
+                    None,
+                    "ui",
+                    row.updated_at,
+                    row.updated_by,
                 )
         return out
 
@@ -720,7 +833,9 @@ class SettingsService:
         """
         out: dict[str, Any] = {}
         for name, entry in stored_map.items():
-            shown = dict(entry)
+            # Masked as the run snapshot masks a server (``shown_setting``):
+            # every env value, a credential a flag names, every URL.
+            shown = masked_server(dict(entry), TOKEN_MASK)
             if isinstance(shown.get("tool_facts"), dict):
                 shown["tool_facts"] = served_tool_facts(
                     shown["tool_facts"], shipped_tool_facts(f"{SERVER_MAP_PATH}.{name}")
@@ -910,6 +1025,9 @@ class SettingsService:
             # refuse among the keys that passed is said beside it.
             raise self._with_value_errors(refused, changes, current) from None
         index = catalog_index()
+        # What the console and the export were shown masked comes back as the
+        # stored value it stands for (``shown_setting``).
+        changes = unmasked_changes(changes, current, index)
         # An import document carries the mask wherever a secret was omitted.
         # For a secret leaf the mask means "unchanged", exactly as it does in
         # a composite editor -- never a credential whose literal characters

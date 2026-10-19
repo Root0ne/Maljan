@@ -53,7 +53,7 @@ from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
-from app.deps import get_current_user, require_active_user, require_admin
+from app.deps import get_current_user, require_active_user, require_admin_session
 from app.logging_config import get_logger
 from app.models.sample import Sample
 from app.models.sandbox_report import SandboxReportRow
@@ -637,7 +637,7 @@ def _trial_read(payload: dict[str, Any], declaration: ReportFormat, fallback: An
 async def accept_report_format(
     body: AcceptReportFormatRequest,
     request: Request,
-    user: User = Depends(require_admin),
+    user: User = Depends(require_admin_session),
     db: AsyncSession = Depends(get_db),
 ) -> SandboxReportResponse | Any:
     """Save an operator-accepted format declaration and read the unread upload as it.

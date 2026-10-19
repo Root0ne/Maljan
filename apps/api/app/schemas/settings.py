@@ -50,6 +50,7 @@ class CatalogEntryDTO(BaseModel):
     builtin_agent_keys: list[str] | None = None
     always_enabled_agent_keys: list[str] | None = None
     pack_step_vocabulary: dict[str, Any] | None = None
+    needs_current_password: bool = False
 
 
 class GroupDTO(BaseModel):
@@ -120,6 +121,9 @@ class PatchRequest(BaseModel):
     # any more (saved, accepted or reset since) is refused with 409, nothing
     # is saved, and the page reloads it. A key left out is not checked.
     versions: dict[str, datetime | None] = Field(default_factory=dict, max_length=500)
+    # Asked again when ``changes`` holds a setting marked
+    # ``needs_current_password`` (the sign-in policy); ignored otherwise.
+    current_password: str | None = Field(None, max_length=128)
 
 
 class PatchResponse(BaseModel):
@@ -130,6 +134,12 @@ class PatchResponse(BaseModel):
     # operator was editing, for a configuration that is legal and will not do
     # what they expect.
     warnings: dict[str, str] = Field(default_factory=dict)
+
+
+class ResetRequest(BaseModel):
+    """The optional body of a reset: the password a sign-in policy reset asks for."""
+
+    current_password: str | None = Field(None, max_length=128)
 
 
 class ResetResponse(BaseModel):
@@ -163,6 +173,8 @@ class ExportResponse(BaseModel):
 class ImportRequest(BaseModel):
     format: str
     values: dict[str, Any] = Field(default_factory=dict)
+    # As on ``PatchRequest``: asked when ``values`` changes the sign-in policy.
+    current_password: str | None = Field(None, max_length=128)
 
 
 class ProbeRequest(BaseModel):

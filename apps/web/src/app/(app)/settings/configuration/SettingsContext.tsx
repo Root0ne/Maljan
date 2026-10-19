@@ -3,6 +3,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import { usePathname } from "next/navigation";
 import type { CatalogEntry, SettingValue } from "@/types/settings";
+import CurrentPasswordDialog from "./CurrentPasswordDialog";
 import { useSettings } from "./useSettings";
 
 /** The value a dependency currently holds: what the user staged, else what the
@@ -177,6 +178,7 @@ export function SettingsProvider({
     <SettingsCtx.Provider value={value}>
       {chrome}
       {body}
+      {s.passwordAsk && <CurrentPasswordDialog ask={s.passwordAsk} />}
     </SettingsCtx.Provider>
   );
 

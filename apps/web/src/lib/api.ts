@@ -681,30 +681,40 @@ class ApiClient {
 
   /** `versions` names, per changed key, the `updated_at` the page was served
    *  it with (`null`: no stored row); a key changed since is refused with a
-   *  `SettingsConflictError` and nothing is saved. */
+   *  `SettingsConflictError` and nothing is saved. `currentPassword` is sent
+   *  when a change touches a setting marked `needs_current_password`. */
   async patchSettings(
     changes: Record<string, unknown>,
-    versions: Record<string, string | null> = {}
+    versions: Record<string, string | null> = {},
+    currentPassword?: string
   ): Promise<PatchResult> {
+    const body = currentPassword
+      ? { changes, versions, current_password: currentPassword }
+      : { changes, versions };
     const res = await this.settingsFetch("/api/v1/settings", {
       method: "PATCH",
-      body: JSON.stringify({ changes, versions }),
+      body: JSON.stringify(body),
     });
     return res.json();
   }
 
-  resetSetting(key: string) {
-    return this.request<{ reset: string[] }>(
-      `/api/v1/settings/${encodeURIComponent(key)}`,
-      { method: "DELETE" }
-    );
+  /** `currentPassword` is sent when the reset removes a stored setting
+   *  marked `needs_current_password`; a 422 for a missing one is a
+   *  `SettingsValidationError` naming `current_password`. */
+  async resetSetting(key: string, currentPassword?: string): Promise<{ reset: string[] }> {
+    const res = await this.settingsFetch(`/api/v1/settings/${encodeURIComponent(key)}`, {
+      method: "DELETE",
+      ...(currentPassword ? { body: JSON.stringify({ current_password: currentPassword }) } : {}),
+    });
+    return res.json();
   }
 
-  resetSettingsGroup(group: string) {
-    return this.request<{ reset: string[] }>(
-      `/api/v1/settings?group=${encodeURIComponent(group)}`,
-      { method: "DELETE" }
-    );
+  async resetSettingsGroup(group: string, currentPassword?: string): Promise<{ reset: string[] }> {
+    const res = await this.settingsFetch(`/api/v1/settings?group=${encodeURIComponent(group)}`, {
+      method: "DELETE",
+      ...(currentPassword ? { body: JSON.stringify({ current_password: currentPassword }) } : {}),
+    });
+    return res.json();
   }
 
   /** The window the configured models serve. Read-only, and costs no tokens. */

@@ -1139,3 +1139,34 @@ class TestTheCommandLine:
         ran = CliRunner().invoke(cli.app, ["analyze", "abc", "--provider", "acme_llm"])
         assert ran.exit_code == 1, ran.output
         assert seen == [("acme_llm", "acme-xl", "acme-xs")]
+
+
+def test_an_unloaded_plugins_stored_block_is_served_masked(
+    installed: dict[str, list[FakePoint]],
+) -> None:
+    """A plugin block the API has not loaded is served as stored, masked as the export
+    masks it: a URL's password, and a value under a key that names a credential."""
+    imported: list[str] = []
+    kind, name = "memory", "ending_memory"
+    installed[kind].append(ends_the_process(kind, name, imported))
+    secret_url = "http://user:f10plugpw@ending.local:6333"
+    rows = _ending_rows(
+        kind,
+        "core.memory.backend",
+        {"url": secret_url, "extra": {"api_token": "f10plugtok", "mode": "fast"}, "token": "x9"},
+    )
+    client = TestClient(_app(db=_db(rows)))
+    values = client.get("/api/v1/settings")
+    exported = client.get("/api/v1/settings/export")
+    assert values.status_code == 200 and exported.status_code == 200
+    assert "f10plug" not in values.text and "f10plug" not in exported.text
+    served = values.json()["values"]
+    mask = "**********"
+    assert served[f"core.{kind}.{name}.url"]["value"] == f"http://{mask}@ending.local:6333"
+    assert served[f"core.{kind}.{name}.extra"]["value"] == {"api_token": mask, "mode": "fast"}
+    assert served[f"core.{kind}.{name}.token"]["value"] == mask
+    assert exported.json()["values"][f"core.{kind}.{name}.extra"] == {
+        "api_token": mask,
+        "mode": "fast",
+    }
+    assert imported == []
