@@ -36,6 +36,7 @@ from maljan.pipeline.outcome import (
 from maljan.reporting.dedupe import MergeTally
 from maljan.reporting.ledger_projection import (
     analyst_listed_values,
+    directed_text_from_ledger,
     dynamic_from_ledger,
     identity_from_ledger,
     network_from_ledger,
@@ -160,6 +161,7 @@ class MalwareReportBuilder:
         # empty otherwise. The network block also reads which values the
         # analysts listed, which it states and never publishes on alone.
         static = static_from_ledger(ledger)
+        directed = directed_text_from_ledger(ledger)
         dynamic = dynamic_from_ledger(ledger)
         # What only a recovering tool read. Each domain, address and URL in it
         # is a candidate row of its own, whether or not a model named it: a
@@ -220,6 +222,7 @@ class MalwareReportBuilder:
             degradation_reasons=self.degradation_reasons,
             identity=identity,
             static=static,
+            directed_text=directed,
             dynamic=dynamic,
             network=network,
             persistence=persistence,

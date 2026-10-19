@@ -65,18 +65,31 @@ def _escaped_run(match: re.Match[str]) -> str:
     return "".join(_escape(ch) for ch in run)
 
 
-def pack_escaped(text: str) -> str:
+# The characters a model's chat template builds its control tokens from
+# (``<|im_start|>``, ``[INST]``, ``<s>``), written out the way a control
+# character is when ``pack_escaped`` is asked to defang them: a tokenizer that
+# parses special tokens inside message text then finds none in the value.
+TOKEN_DELIMITERS: dict[str, str] = {ch: f"\\x{ord(ch):02x}" for ch in "<>|[]"}
+_TOKEN_DELIMITERS = str.maketrans(TOKEN_DELIMITERS)
+
+
+def pack_escaped(text: str, *, delimiters: bool = False) -> str:
     """``text`` as the pack writes it between its quotes, without the quotes.
 
     The quote and the control characters are written out and every other
     character is left as it is, backslashes included, so a Windows path reads
     as a path; a backslash that would end the string is written ``\\x5c``,
-    where it would otherwise read as escaping the closing quote.
+    where it would otherwise read as escaping the closing quote. With
+    ``delimiters`` the characters of a chat template's control tokens
+    (``TOKEN_DELIMITERS``) are written out too, for a value that may carry
+    one; without, the output is as it always was.
     """
     if text.isprintable():  # the common case, decided in one pass in C
         out = text.replace('"', PACK_ESCAPES['"'])
     else:
         out = _unprintable().sub(_escaped_run, text)
+    if delimiters:
+        out = out.translate(_TOKEN_DELIMITERS)
     if out.endswith("\\"):
         out = out[:-1] + "\\x5c"
     return out
@@ -137,6 +150,7 @@ def written_forms(value: str) -> tuple[str, ...]:
             _json_body(base, ascii_only=True),
             capitals,
             pack_escaped(base),
+            pack_escaped(base, delimiters=True),
         ):
             if form and form not in forms:
                 forms.append(form)

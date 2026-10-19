@@ -32,12 +32,14 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
 
+from maljan.analysis.directed_text import KIND as DIRECTED_TEXT_KIND
 from maljan.analysis.technique_ids import api_capability_hits, sigma_technique_ids
 from maljan.core.logger import logger
 from maljan.core.tool_declarations import first, select
 from maljan.reporting import tool_kinds
 from maljan.reporting.dedupe import distinct_signatures, process_identity
 from maljan.reporting.models import (
+    DirectedText,
     DynamicBehavior,
     ExportRow,
     FileHashes,
@@ -491,6 +493,56 @@ def static_from_ledger(ledger: list[LedgerEntry]) -> StaticAnalysis | None:
         ),
     )
     return static
+
+
+def directed_text_from_ledger(ledger: list[LedgerEntry]) -> list[DirectedText]:
+    """The phrase groups the pack's directed-text pass stated, each with its ledger id."""
+    out: list[DirectedText] = []
+    for entry, data in _payloads(ledger, DIRECTED_TEXT_KIND):
+        for row in data.get("groups") or []:
+            if isinstance(row, dict) and row.get("phrase"):
+                out.append(_directed_text_row(row, entry.id))
+    return out
+
+
+def _directed_place(where: Any) -> str:
+    """Where a group first stands, in a few words, from the fields the answer holds escaped."""
+    if not isinstance(where, dict):
+        return ""
+    entry = f" [{where['entry']}]" if where.get("entry") else ""
+    if where.get("offset"):
+        said = [f"{where['length']} bytes" if where.get("length") else ""]
+        said += [str(where[key]) for key in ("encoding", "region") if where.get(key)]
+        within = ", ".join(part for part in said if part)
+        return f"{where.get('source')}{entry} {where['offset']}" + (
+            f" ({within})" if within else ""
+        )
+    place = f" {where['place']}" if where.get("place") else ""
+    return f"{where.get('source')}{entry}{place}"
+
+
+def _held_phrase(held: Any) -> str:
+    """A held phrase as the report prints it: whole, or its prefix, length and digest."""
+    if isinstance(held, dict):
+        return (
+            f"{held.get('prefix')}… ({held.get('characters')} characters, "
+            f"sha256 {held.get('sha256')})"
+        )
+    return str(held or "")
+
+
+def _directed_text_row(row: dict[str, Any], evidence_id: str) -> DirectedText:
+    """One directed-text group as the report holds it."""
+    count = row.get("count")
+    return DirectedText(
+        family=str(row.get("family") or ""),
+        text=_held_phrase(row.get("phrase")),
+        count=count if isinstance(count, int) else 1,
+        where=_directed_place(row.get("first")),
+        disguises=[str(d) for d in row.get("disguises") or []],
+        inside_template=_int(row.get("inside_template")),
+        evidence_id=evidence_id,
+    )
 
 
 def _canonical(name: str) -> str:

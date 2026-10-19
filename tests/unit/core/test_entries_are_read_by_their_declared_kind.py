@@ -208,6 +208,9 @@ DEV_BRANCH: dict[str, str] = {
     "sandbox_signatures": "sandbox_signatures",
     "sandbox_items": "report_items",
     "yara_scan": "signature_rules",
+    # Added after dev: the pack's directed-text pass declares its rows, so a
+    # claim citing it is read through them.
+    "find_directed_text": "declared_rows",
 }
 
 

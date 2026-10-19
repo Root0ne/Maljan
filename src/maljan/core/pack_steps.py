@@ -140,6 +140,7 @@ PACK_RENDERERS: dict[str, str] = {
     "anti_analysis_scan": "the exact part of an anti-analysis scan",
     "unpacked_image": "an unpacked program and where it now is",
     "function_table": "a function index, placed in the room the rest of the pack leaves",
+    "directed_text": "phrases of the directed-text families, counted and quoted by group",
 }
 
 # The validation context under which a step is one of the shipped list's:
@@ -414,6 +415,13 @@ def _shipped() -> tuple[PackStep, ...]:
             renderer="api_catalogue",
             kind=CALLED_API_CATALOGUE,
             display_name="sandbox-called api catalogue",
+        ),
+        # Phrases of the directed-text families, in the file and in what the
+        # steps above recovered; last, so every earlier id keeps its value.
+        _o(
+            id="find_directed_text",
+            renderer="directed_text",
+            display_name="directed-text phrases",
         ),
     )
 

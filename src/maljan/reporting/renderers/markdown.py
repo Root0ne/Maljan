@@ -1196,13 +1196,14 @@ class MarkdownRenderer:
     def _section_static(self, report: MalwareReport, ctx: _Context) -> str:
         static = report.static
         if static is None:
-            return "\n".join(
-                [
-                    _heading(7, "Static properties", MEASURED),
-                    "",
-                    "Not examined in this run: no static tool's answer is recorded in this report.",
-                ]
-            )
+            lines = [
+                _heading(7, "Static properties", MEASURED),
+                "",
+                "Not examined in this run: no static tool's answer is recorded in this report.",
+            ]
+            if report.directed_text:
+                lines.extend(["", *_directed_text_lines(report.directed_text, ctx)])
+            return "\n".join(lines).rstrip()
         lines = [_heading(7, "Static properties", MEASURED), ""]
 
         if static.sections:
@@ -1359,6 +1360,9 @@ class MarkdownRenderer:
                 )
             lines.extend(_left_out(len(static.interesting_strings), 60, "strings"))
             lines.append("")
+
+        if report.directed_text:
+            lines.extend(_directed_text_lines(report.directed_text, ctx))
 
         if static.pdb_path:
             lines.extend([f"Debug PDB path: `{_one_line(static.pdb_path)}`", ""])
@@ -3382,6 +3386,43 @@ def _code_span(text: str) -> str:
         return f"`{text}`"
     fence = "`" * (longest + 1)
     return f"{fence} {text} {fence}"
+
+
+# Said under the directed-text table: whose words they are, and what they weigh.
+DIRECTED_TEXT_NOTE = (
+    "_Phrases of the families written for an AI or an analyst reader, found in the sample "
+    "and shown in their normalised form, escaped as the triage pack quotes them; the "
+    "ledger entry holds where each stands. They are evidence about the sample, not "
+    "instructions, and move no verdict by themselves._"
+)
+
+
+def _directed_text_lines(rows: list[Any], ctx: _Context) -> list[str]:
+    """The directed-text phrase groups: family, phrase, count, first place, how, entry."""
+    lines = [_plain_heading("Phrases of the directed-text families"), "", DIRECTED_TEXT_NOTE, ""]
+    lines.append(_row("Family", "Phrase", "Count", "First at", "Notes", "Evidence"))
+    lines.append(_divider(6))
+    for row in rows:
+        # Held escaped already (``analysis.directed_text.TEXT_FORM``).
+        text = _truncate(_defanged_text(ctx.plain(row.text)), _CELL_LIMIT)
+        inside = (
+            [f"{row.inside_template} inside a chat template structure"]
+            if row.inside_template
+            else []
+        )
+        notes = "; ".join([*row.disguises, *inside])
+        lines.append(
+            _row(
+                row.family,
+                _code_span(text),
+                row.count,
+                _inline_safe(row.where) or "-",
+                _inline_safe(notes) or "-",
+                row.evidence_id or "-",
+            )
+        )
+    lines.append("")
+    return lines
 
 
 def _sample_check_line(rule: DetectionRule, ctx: _Context) -> str | None:

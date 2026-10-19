@@ -92,7 +92,12 @@ def _line(result: Any) -> str:
 def test_the_unpacking_comes_last_and_writes_beside_the_carved_files(tmp_path: Path) -> None:
     path = _sample(tmp_path, su.build().data)
     result = _pack(path, tmp_path)
-    assert [e.tool for e in result.entries][-2:] == ["function_index", upx.TOOL]
+    # Only the directed-text pass, the pack's last step, follows it.
+    assert [e.tool for e in result.entries][-3:] == [
+        "function_index",
+        upx.TOOL,
+        "find_directed_text",
+    ]
     entry = _entry(result)
     assert entry.ok and entry.args == {"path": path}
     child = entry.structured["child"]
@@ -132,8 +137,9 @@ def test_the_ids_before_it_are_the_ids_a_pack_without_it_gives(
     monkeypatch.setattr(triage_pack, "_names_upx", lambda facts: False)
     monkeypatch.setattr(triage_pack, "_holds_a_pack_header", lambda path: False)
     without = _pack(path, tmp_path)
-    assert [(e.id, e.tool) for e in with_step.entries][:-1] == [
-        (e.id, e.tool) for e in without.entries
+    last = "find_directed_text"
+    assert [(e.id, e.tool) for e in with_step.entries if e.tool != last][:-1] == [
+        (e.id, e.tool) for e in without.entries if e.tool != last
     ]
 
 
