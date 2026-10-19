@@ -46,7 +46,7 @@ not prove the test makes the platform raise it. The tests are not listed here:
 one nothing raises any more and stored runs still carry; the comment on that
 name says what reads it.
 
-**86 codes in 9 families:** [attck](#attck) 6 · [attribution](#attribution) 1 · [composer](#composer) 3 · [isr](#isr) 13 · [narrative](#narrative) 5 · [report](#report) 12 · [stix](#stix) 32 · [tool](#tool) 1 · [verdict](#verdict) 13. 13 code positions the register could not resolve are [listed at the end](#unresolved-code-positions).
+**88 codes in 9 families:** [attck](#attck) 6 · [attribution](#attribution) 1 · [composer](#composer) 3 · [isr](#isr) 13 · [narrative](#narrative) 5 · [report](#report) 12 · [stix](#stix) 32 · [tool](#tool) 1 · [verdict](#verdict) 15. 13 code positions the register could not resolve are [listed at the end](#unresolved-code-positions).
 
 ## attck
 
@@ -667,6 +667,14 @@ No comment names its meaning; the message at `maljan.pipeline.validation:assessm
 - **Constant** `maljan.pipeline.validation:ASSESSMENT_MISSING_CODE`
 - **Docs** none
 
+### `verdict.assessment_read_loosely`
+
+A leaf of the judge's assessment written in a type it does not take, and with one reading in the type it does (`schemas.judgement.read_assessment`): read so and recorded as settled, like the relocation; nothing is left to ask.
+
+- **Raised at** `maljan.agents.judge_postprocess:assessment_rows`
+- **Constant** `maljan.agents.judge_postprocess:ASSESSMENT_READ_LOOSELY_CODE`
+- **Docs** none
+
 ### `verdict.assessment_relocated`
 
 No comment names its meaning; the message at `maljan.agents.judge_postprocess:lift_misplaced_extensions` reads: "\<ASSESSMENT_PROPERTY> was written inside objects\[\<index>\] and belongs beside the list; it was moved there unchanged and read from there. Write it as a sibling of "objects" next time."
@@ -674,6 +682,14 @@ No comment names its meaning; the message at `maljan.agents.judge_postprocess:li
 - **Raised at** `maljan.agents.judge_postprocess:lift_misplaced_extensions`
 - **Constant** `maljan.agents.judge_postprocess:ASSESSMENT_RELOCATED_CODE`
 - **Docs** [Architecture](/architecture/)
+
+### `verdict.assessment_unreadable`
+
+A leaf of the judge's assessment that cannot be read in the type it takes. Left absent — never guessed — and the judge is asked about it once with its own value quoted; one still unreadable after that is published absent, and the report reader is told so.
+
+- **Raised at** `maljan.agents.judge_postprocess:assessment_rows`
+- **Constant** `maljan.agents.judge_postprocess:ASSESSMENT_UNREADABLE_CODE`
+- **Docs** none
 
 ### `verdict.cut_at_output_cap`
 

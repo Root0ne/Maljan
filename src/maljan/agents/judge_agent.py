@@ -60,7 +60,9 @@ from maljan.agents.base_agent import (
     synthesis_budget_chars,
 )
 from maljan.agents.judge_postprocess import (
+    ASSESSMENT_READ_LOOSELY_CODE,
     ASSESSMENT_RELOCATED_CODE,
+    ASSESSMENT_UNREADABLE_CODE,
     PROPERTY_NOT_CARRIED_CODE,
 )
 from maljan.agents.prompt_fragments import tools_statement
@@ -128,8 +130,15 @@ if TYPE_CHECKING:
     from maljan.memory.long_term_memory import MemoryStore
 
 # Rows the judge's parse settles itself, so the retry is never spent on them:
-# an assessment moved to its property, and a property the export does not carry.
-_SETTLED_CODES = frozenset({ASSESSMENT_RELOCATED_CODE, PROPERTY_NOT_CARRIED_CODE})
+# an assessment moved to its property, an assessment leaf read in the one
+# reading its type allows, and a property the export does not carry.
+_SETTLED_CODES = frozenset(
+    {ASSESSMENT_RELOCATED_CODE, ASSESSMENT_READ_LOOSELY_CODE, PROPERTY_NOT_CARRIED_CODE}
+)
+
+# The settled rows that are announced as resolved when the parse makes them:
+# the act is done and nothing is left to ask.
+_RESOLVED_BY_THE_PARSE = frozenset({ASSESSMENT_RELOCATED_CODE, ASSESSMENT_READ_LOOSELY_CODE})
 
 # How many times the judge is asked again about a verdict answer that was
 # wrong. One: a second correction has never produced a better bundle than the
@@ -248,11 +257,13 @@ def _was_cut(answer: Any, cap: int | None) -> bool:
 _ASSESSMENT_KEY = '"x_maljan_assessment"'
 
 
-def stated_assessment_in(text: str) -> Any | None:
+def stated_assessment_in(text: str, notes: list[Any] | None = None) -> Any | None:
     """The assessment an unreadable answer stated whole, read by the bundle's own readers.
 
-    The JSON object written under ``"x_maljan_assessment"``, validated as a
-    ``JudgeAssessment`` and kept only when its verdict is one
+    The JSON object written under ``"x_maljan_assessment"``, read leaf by leaf
+    as a ``JudgeAssessment`` (``schemas.judgement.read_assessment``: a
+    mistyped leaf is left absent, not the reason the whole is) and kept only
+    when its verdict is one
     ``pipeline.outcome.normalise_verdict`` recognises; then its confidence,
     severity and family are the judge's own statements. The last whole one
     counts: an answer that drafted an assessment in reasoning spilled into its
@@ -261,22 +272,22 @@ def stated_assessment_in(text: str) -> Any | None:
     only then through the repairing reader a whole answer goes through, which
     rewrites comments and quotes. ``None`` when no occurrence is whole and
     states a verdict that can be read. Nothing is inferred from prose.
+    ``notes`` receives what reading the kept one took.
     """
     import json
 
     from maljan.pipeline.outcome import normalise_verdict
-    from maljan.schemas.judgement import JudgeAssessment
+    from maljan.schemas.judgement import read_assessment
     from maljan.utils.json_cleaner import extract_json, safe_parse_json
 
     at = text.rfind(_ASSESSMENT_KEY)
     while at >= 0:
         found = _assessment_at(text, at, json, extract_json, safe_parse_json)
         if found is not None:
-            try:
-                assessment = JudgeAssessment.model_validate(found)
-            except Exception:  # noqa: BLE001 — one that does not validate states nothing
-                assessment = None
+            assessment, read = read_assessment(found)
             if assessment is not None and normalise_verdict(assessment.verdict) is not None:
+                if notes is not None:
+                    notes.extend(read)
                 return assessment
         at = text.rfind(_ASSESSMENT_KEY, 0, at)
     return None
@@ -1695,6 +1706,23 @@ def verdict_checks(bundle: Bundle, inputs: VerdictCheckInputs) -> list[Violation
         *unsupported_malware_violations(
             bundle, analyst_claims=inputs.analyst_claims, ledger_ids=inputs.ledger_ids
         ),
+    ]
+
+
+def _unasked_unreadable_leaves(
+    shape: Sequence[Violation], violations: Sequence[Violation]
+) -> list[Violation]:
+    """The assessment leaves a text fallback's stated assessment left absent, not yet recorded.
+
+    A fallback bundle's round asks about the answer's shape, not its leaves, so
+    these were never put to the judge; they are recorded as such, because a
+    leaf left absent is never left absent in silence.
+    """
+    have = {(v.code, v.path) for v in violations}
+    return [
+        replace(v, asked=False)
+        for v in shape
+        if v.code == ASSESSMENT_UNREADABLE_CODE and (v.code, v.path) not in have
     ]
 
 
@@ -3485,10 +3513,11 @@ class JudgeAgent(BudgetMeter):
                 labels=labels,
                 as_written=as_written,
             )
-            # The relocation is done and nothing is left to ask about, so it is
-            # published as settled and counted where the round's other codes
+            # The relocation, or the one reading of a mistyped assessment leaf,
+            # is done and nothing is left to ask about, so it is published as
+            # settled and counted where the round's other codes
             # are, rather than spending the one retry this round has.
-            moved = [v for v in shape if v.code == ASSESSMENT_RELOCATED_CODE]
+            moved = [v for v in shape if v.code in _RESOLVED_BY_THE_PARSE]
             if moved:
                 tally.count(moved)
                 announce_resolved(
@@ -3615,6 +3644,7 @@ class JudgeAgent(BudgetMeter):
                 violations.append(
                     Violation(code=VERDICT_FALLBACK_CODE, message=VERDICT_FALLBACK_REASON)
                 )
+            violations.extend(_unasked_unreadable_leaves(shape, violations))
             # The indicators the answer wrote whole are asked what every
             # bundle's indicator is asked. Nobody can be asked again, so what
             # is wrong is recorded, and an ungrounded one is dropped below
@@ -3981,7 +4011,7 @@ class JudgeAgent(BudgetMeter):
                 "LLM did not return a JSON object (got %s). Attempting text-based fallback.",
                 type(data).__name__,
             )
-            return self._fallback_bundle_from_text(raw, reports, isr_reports)
+            return self._fallback_bundle_from_text(raw, reports, isr_reports, record=record)
 
         try:
             # No technique-id filter here. Dropping the object silently is what
@@ -3993,6 +4023,7 @@ class JudgeAgent(BudgetMeter):
                 duplicate_label_violations,
                 lift_misplaced_extensions,
                 postprocess_judge_bundle,
+                read_judge_assessment,
             )
 
             # Before the schema, and before anything that walks the objects: an
@@ -4022,7 +4053,13 @@ class JudgeAgent(BudgetMeter):
             data = postprocess_judge_bundle(
                 data, ledger=getattr(self, "truncation_ledger", None), labels=labels
             )
+            # The assessment is read apart from the objects, leaf by leaf: one
+            # mistyped leaf is left absent and asked about, never the reason
+            # the objects are lost.
+            read_rows = read_judge_assessment(data)
             bundle = Bundle.model_validate(data)
+            if record is not None:
+                record.extend(read_rows)
             if origins is not None:
                 origins[:] = [written.get(id(obj), (None, "")) for obj in data["objects"]]
             return bundle
@@ -4030,7 +4067,7 @@ class JudgeAgent(BudgetMeter):
             self.logger.warning(
                 "LLM did not return a valid Bundle: %s. Attempting text-based fallback.", exc
             )
-            return self._fallback_bundle_from_text(raw, reports, isr_reports)
+            return self._fallback_bundle_from_text(raw, reports, isr_reports, record=record)
 
     async def _extract_mediator_verdict(
         self,
@@ -4173,8 +4210,12 @@ class JudgeAgent(BudgetMeter):
         isr_reports: dict[str, AgentISR] | None = None,
         *,
         extracted: bool = True,
+        record: list[Violation] | None = None,
     ) -> Bundle:
         """Build a minimal STIX Bundle when the LLM fails to produce valid JSON.
+
+        ``record`` collects what reading the stated assessment took
+        (``read_assessment``), as ``_bundle_from_response``'s does.
 
         The verdict is read out of the judge's own text and the bundle's object
         set follows it: a ``malware`` object only when the verdict is Malware.
@@ -4196,7 +4237,12 @@ class JudgeAgent(BudgetMeter):
         # first — has said its verdict, confidence, severity and family, and
         # those are kept as it said them. Anything less is read for the
         # verdict word alone.
-        stated = stated_assessment_in(text) if extracted else None
+        notes: list[Any] = []
+        stated = stated_assessment_in(text, notes) if extracted else None
+        if stated is not None and record is not None:
+            from maljan.agents.judge_postprocess import assessment_rows
+
+            record.extend(assessment_rows(notes))
         if stated is not None:
             decision = str(normalise_verdict(stated.verdict))
         else:

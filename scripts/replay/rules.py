@@ -1033,14 +1033,16 @@ def _shown_to_the_judge(run: _Run, found: Sequence[Any]) -> list[Any]:
 
 def _judge(run: _Run, judged: _Judged) -> dict[str, Any]:
     from maljan.agents.judge_agent import (
+        _RESOLVED_BY_THE_PARSE,
         _SETTLED_CODES,
         VERDICT_FALLBACK_CODE,
         VERDICT_FALLBACK_REASON,
         JudgeAgent,
         VerdictCheckInputs,
+        _unasked_unreadable_leaves,
         verdict_bundle_checks,
     )
-    from maljan.agents.judge_postprocess import ASSESSMENT_RELOCATED_CODE, PROPERTY_NOT_CARRIED_CODE
+    from maljan.agents.judge_postprocess import PROPERTY_NOT_CARRIED_CODE
     from maljan.pipeline import validation as v
     from maljan.schemas.stix_models import Bundle
     from maljan.tools import knowledge
@@ -1125,10 +1127,11 @@ def _judge(run: _Run, judged: _Judged) -> dict[str, Any]:
     left = v.kept_after_the_sandbox_fact(v.not_asked(asked, _shown_to_the_judge(run, asked)))
     if fallback:
         left.append(v.Violation(code=VERDICT_FALLBACK_CODE, message=VERDICT_FALLBACK_REASON))
+        left.extend(_unasked_unreadable_leaves(shape, left))
     else:
         left.extend(f for f in settled if f.code == PROPERTY_NOT_CARRIED_CODE)
     dropped = v.drop_ungrounded_indicators(bundle, left, origins=where)
-    relocated = [f for f in settled if f.code == ASSESSMENT_RELOCATED_CODE]
+    relocated = [f for f in settled if f.code in _RESOLVED_BY_THE_PARSE]
     run.judge_left = left
     run.judge_settled = relocated
     run.judge_codes = {f.code for f in left}
