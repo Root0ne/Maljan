@@ -40,6 +40,11 @@ from types import SimpleNamespace
 from typing import Any
 from urllib.parse import urlparse
 
+from maljan.analysis.coverage import ABSENCE_POINTER as COVERAGE_POINTER
+from maljan.analysis.coverage import LOOKED_INTRO as COVERAGE_LOOKED_INTRO
+from maljan.analysis.coverage import NEGATIVES_INTRO as COVERAGE_NEGATIVES_INTRO
+from maljan.analysis.coverage import NOT_ESTABLISHED_INTRO as COVERAGE_MISSING_INTRO
+from maljan.analysis.coverage import coverage_lines
 from maljan.analysis.disclosure import FOOTNOTE_SENTENCE as DISCLOSURE_FOOTNOTE
 from maljan.analysis.disclosure import INTRO_SENTENCE as DISCLOSURE_INTRO
 from maljan.analysis.disclosure import disclosure_lines
@@ -2183,6 +2188,28 @@ class MarkdownRenderer:
         if counted:
             lines.extend(["", EFFICIENCY_INTRO, ""])
             lines.extend(_item(line) for line in counted)
+        # What the run could not establish, what each tool looked for and over
+        # which input, and the coverage of each negative claim, where the
+        # summary records them (``analysis.coverage``); a summary stored
+        # without the record shows none.
+        # The analysts are read from the report's own analyst record
+        # (``_AnalystStates``), so the block and the rest of the report agree.
+        recorded = run_summary.get("coverage")
+        states = _AnalystStates(report) if isinstance(recorded, dict) else None
+        missing, looked, negatives = coverage_lines(
+            recorded,
+            lambda text: _code_span(_one_line(text)),
+            lambda text: _inline_safe(_one_line(text)),
+            (states.failed, states.skipped, states.silent) if states is not None else None,
+        )
+        for intro, block in (
+            (COVERAGE_MISSING_INTRO, missing),
+            (COVERAGE_LOOKED_INTRO, looked),
+            (COVERAGE_NEGATIVES_INTRO, negatives),
+        ):
+            if block:
+                lines.extend(["", intro, ""])
+                lines.extend(_item(line) for line in block)
         return "\n".join(lines)
 
     def _appendix_references(self, report: MalwareReport) -> str:
@@ -2462,7 +2489,13 @@ class _Context:
         said = f"the tools that ran over the file ({named}) recorded no {what}"
         if blind:
             said += f", and {self.no_sandbox_clause()}"
-        return f"Nothing recorded in this run: {said}; the report model wrote nothing on it."
+        line = f"Nothing recorded in this run: {said}; the report model wrote nothing on it."
+        # Where the run recorded what each tool looked for and over which
+        # input (``analysis.coverage``), the line says where; a report stored
+        # without the record prints the line as before.
+        if isinstance((self.report.run_summary or {}).get("coverage"), dict):
+            line += f" {COVERAGE_POINTER}"
+        return line
 
     @classmethod
     def of(cls, report: MalwareReport) -> _Context:

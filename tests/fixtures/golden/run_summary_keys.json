@@ -16,6 +16,130 @@
   ],
   "budget": "<data-keyed map>",
   "corroboration": "<data-keyed map>",
+  "coverage": {
+    "negatives": [
+      {
+        "agent": null,
+        "claim": null,
+        "coverage": null,
+        "gaps": [
+          {
+            "by": [
+              null
+            ],
+            "entries": [
+              null
+            ],
+            "entry": null,
+            "from": null,
+            "gap": null,
+            "over": [
+              {
+                "digest": null,
+                "input": null,
+                "path": null,
+                "role": null
+              }
+            ],
+            "path": null,
+            "state": null
+          }
+        ],
+        "looked": [
+          {
+            "capped": null,
+            "dropped": null,
+            "entry": null,
+            "kind": null,
+            "limits": [
+              null
+            ],
+            "narrowed_by": [
+              null
+            ],
+            "over": [
+              {
+                "digest": null,
+                "filled": null,
+                "from": null,
+                "from_tool": null,
+                "input": null,
+                "path": null,
+                "role": null,
+                "server_reads_staged_sample": null
+              }
+            ],
+            "read": null,
+            "reason": null,
+            "server": null,
+            "state": null,
+            "tool": null
+          }
+        ],
+        "negative": null,
+        "not_in_ledger": [
+          null
+        ],
+        "read_by": null,
+        "why": {
+          "answer_shape": [
+            null
+          ],
+          "input": null,
+          "statement": null
+        }
+      }
+    ],
+    "not_established": [
+      {
+        "count": null,
+        "dropped": null,
+        "entries": [
+          null
+        ],
+        "from": null,
+        "from_tool": null,
+        "input": null,
+        "kind": null,
+        "over": [
+          {
+            "digest": null,
+            "input": null,
+            "role": null
+          }
+        ],
+        "path": null,
+        "reason": null,
+        "server": null,
+        "state": null,
+        "tool": null,
+        "what": null
+      }
+    ],
+    "partial_reason": null,
+    "tools": [
+      {
+        "calls": null,
+        "guard_answers": null,
+        "kind": null,
+        "over": [
+          {
+            "filled": null,
+            "from": null,
+            "from_tool": null,
+            "input": null,
+            "path": null,
+            "server_reads_staged_sample": null
+          }
+        ],
+        "roles": "<data-keyed map>",
+        "server": null,
+        "states": "<data-keyed map>",
+        "tool": null
+      }
+    ],
+    "v": null
+  },
   "dedupe": {
     "findings_merged": null,
     "indicators_merged": null
