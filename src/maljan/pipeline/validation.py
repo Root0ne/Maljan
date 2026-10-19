@@ -27,7 +27,7 @@ import re
 from collections.abc import Awaitable, Callable, Collection, Iterable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from fractions import Fraction
-from functools import cache, lru_cache
+from functools import cache, cached_property, lru_cache
 from typing import Any, get_args, get_origin
 
 from pydantic import ValidationError
@@ -887,7 +887,13 @@ _OWN_VERB_RE = re.compile(
 )
 # A cue that sets aside only the phrase right after it: a dash ends its reach
 # whatever follows ("loops instead of exiting visibly — sandbox evasion").
-_SET_ASIDE_CUE_RE = re.compile(r"\b(?:instead\s+of|rather\s+than)\b[^.;:!?\n]*$", re.IGNORECASE)
+_SET_ASIDE_CUE = r"\b(?:instead\s+of|rather\s+than)\b"
+_SET_ASIDE_STOPS = r".;:!?\n"
+_SET_ASIDE_CUE_RE = re.compile(rf"{_SET_ASIDE_CUE}[^{_SET_ASIDE_STOPS}]*$", re.IGNORECASE)
+# The cue alone, and the characters its reach stops at, for reading every dash
+# of a text in one pass (:func:`_read_dashes`).
+_SET_ASIDE_CUE_ALONE_RE = re.compile(_SET_ASIDE_CUE, re.IGNORECASE)
+_SET_ASIDE_STOP_RE = re.compile(rf"[{_SET_ASIDE_STOPS}]")
 
 
 def _read_dashes(text: str) -> str:
@@ -910,13 +916,29 @@ def _read_dashes(text: str) -> str:
             for at in range(first, second + 1):
                 chars[at] = " "
             paired.update({first, second})
-    for at in dashes:
-        if at in paired:
-            continue
-        rest = text[at + 1 :]
-        stop = _CLAUSE_BREAK_RE.search(rest)
-        after = rest[: stop.start()] if stop else rest
-        if _OWN_VERB_RE.search(after) or _SET_ASIDE_CUE_RE.search(text[:at]):
+    single = [at for at in dashes if at not in paired]
+    if not single:
+        return "".join(chars)
+    # Read once for every single dash, not once per dash: where each clause
+    # break begins, where each verb of its own stands, where each set-aside cue
+    # ends, and the characters that cue's reach stops at.
+    break_starts = [found.start() for found in _CLAUSE_BREAK_RE.finditer(text)]
+    verbs = [found.span() for found in _OWN_VERB_RE.finditer(text)]
+    verb_starts = [begin for begin, _end in verbs]
+    cue_ends = [found.end() for found in _SET_ASIDE_CUE_ALONE_RE.finditer(text)]
+    stops = [found.start() for found in _SET_ASIDE_STOP_RE.finditer(text)]
+    for at in single:
+        # A verb of its own in the clause after the dash, up to its next break.
+        k = bisect.bisect_left(break_starts, at + 1)
+        stop = break_starts[k] if k < len(break_starts) else len(text)
+        v = bisect.bisect_left(verb_starts, at + 1)
+        own_verb = v < len(verbs) and verbs[v][1] <= stop
+        # A set-aside cue before the dash with no stop between them; a line
+        # break right before the dash is read past (``$`` matches before it).
+        reach = at - 1 if at > 0 and text[at - 1] == "\n" else at
+        s = bisect.bisect_left(stops, reach) - 1
+        c = bisect.bisect_left(cue_ends, stops[s] + 1 if s >= 0 else 0)
+        if own_verb or (c < len(cue_ends) and cue_ends[c] <= reach):
             chars[at] = ";"
     return "".join(chars)
 
@@ -965,12 +987,25 @@ def _governed_absence(text: str, start: int) -> bool:
 # exfiltration mechanisms". Determiners and hedges may open it. Each item is up
 # to four words, so a list never swallows a clause that has its own verb and
 # object before any head noun.
-_LIST_ITEM = r"[A-Za-z][\w-]*(?:\s+[A-Za-z(][\w()-]*){0,3}"
+_LIST_ITEM_START, _LIST_ITEM_REST = r"[A-Za-z]", r"[\w-]"
+_LIST_MORE_START, _LIST_MORE_REST = r"[A-Za-z(]", r"[\w()-]"
+_LIST_ITEM_MORE_WORDS = 3
+_LIST_ITEM = (
+    rf"{_LIST_ITEM_START}{_LIST_ITEM_REST}*"
+    rf"(?:\s+{_LIST_MORE_START}{_LIST_MORE_REST}*){{0,{_LIST_ITEM_MORE_WORDS}}}"
+)
+_LIST_HEDGE = r"(?:any|obvious|apparent|clear|signs?\s+of|evidence\s+of|indications?\s+of)\s+"
+_LIST_JOIN = r"\s*,\s*"
+_LIST_JOINERS = r"or|and"
+_LIST_LAST = rf"\s*,?\s+(?:{_LIST_JOINERS})\s+"
+_LIST_HEADS = (
+    r"mechanisms?|techniques?|capabilit(?:y|ies)|behaviou?rs?|activit(?:y|ies)"
+    r"|functionality|methods?|patterns?"
+)
 _NEGATED_NOUN_LIST_RE = re.compile(
-    r"^\s*(?:(?:any|obvious|apparent|clear|signs?\s+of|evidence\s+of|indications?\s+of)\s+)*"
-    rf"(?P<items>{_LIST_ITEM}(?:\s*,\s*{_LIST_ITEM})*\s*,?\s+(?:or|and)\s+{_LIST_ITEM})"
-    r"\s+(?:mechanisms?|techniques?|capabilit(?:y|ies)|behaviou?rs?|activit(?:y|ies)"
-    r"|functionality|methods?|patterns?)\b",
+    rf"^\s*(?:{_LIST_HEDGE})*"
+    rf"(?P<items>{_LIST_ITEM}(?:{_LIST_JOIN}{_LIST_ITEM})*{_LIST_LAST}{_LIST_ITEM})"
+    rf"\s+(?:{_LIST_HEADS})\b",
     re.IGNORECASE,
 )
 
@@ -987,29 +1022,10 @@ def _absent_by_its_own_statement(text: str, start: int, end: int) -> bool:
     registry APIs required for persistence"). The same cue words and clause
     breaks as the capability check's reader, and a cue that opens an assertion
     ("no longer") negates no list and no object. One reading, asked by the
-    absence question and by the capability check alike.
+    absence question and by the capability check alike. Read by
+    :class:`_NegationReader`.
     """
-    if _subject_is_absent(text, start, end):
-        return True
-    if _in_a_negated_object(text, start):
-        return True
-    head = text[:start]
-    breaks = list(_CLAUSE_BREAK_RE.finditer(head))
-    clause_start = breaks[-1].end() if breaks else 0
-    tail_break = _CLAUSE_BREAK_RE.search(text, end)
-    clause = text[clause_start : tail_break.start() if tail_break else len(text)]
-    at = start - clause_start
-    lowered = clause.lower()
-    for cue in _NEGATION_RE.finditer(clause[:at]):
-        if lowered.startswith(_NOT_A_NEGATION, cue.start()):
-            continue
-        rest = clause[cue.end() :]
-        if _CUE_THAT_ASSERTS_RE.match(rest):
-            continue
-        listed = _NEGATED_NOUN_LIST_RE.match(rest)
-        if listed and cue.end() + listed.start("items") <= at < cue.end() + listed.end("items"):
-            return True
-    return False
+    return _NegationReader(text).absent_by_its_own_statement(start, end)
 
 
 # What stands right before a mention that ends a noun phrase rather than
@@ -1027,13 +1043,10 @@ def _subject_is_absent(text: str, start: int, end: int) -> bool:
 
     The mention is followed by the absence predicate (a category noun may stand
     between them) and either opens its clause or ends the subject's noun
-    phrase, attached by a preposition to the noun before it.
+    phrase, attached by a preposition to the noun before it. Read by
+    :class:`_NegationReader`.
     """
-    if not _SUBJECT_ABSENT_RE.match(text[end:]):
-        return False
-    return _starts_its_clause(text, start) or bool(
-        _NOUN_COMPLEMENT_BEFORE_RE.search(text[max(0, start - _NEGATION_WINDOW) : start])
-    )
+    return _NegationReader(text).subject_is_absent(start, end)
 
 
 # A negated verb: "does not import", "did not contain", "never calls".
@@ -1050,6 +1063,10 @@ _NEGATED_OBJECT_RE = re.compile(
     r"|specific)\s+)?(?:for|of|to|with)\s+(?:(?:any|the|its|their|common|typical|such)\s+)?$",
     re.IGNORECASE,
 )
+# The words a negated verb's object runs over before the mention, at most
+# (``_NEGATED_OBJECT_RE``: the verb, six words, a participle and a preposition,
+# a determiner).
+_NEGATED_OBJECT_WORDS = 10
 
 
 def _in_a_negated_object(text: str, start: int) -> bool:
@@ -1060,20 +1077,10 @@ def _in_a_negated_object(text: str, start: int) -> bool:
     the mention with no comma, no coordinator, and nothing that ends the
     negation's reach between them, and the mention is attached to the object's
     head noun by a preposition; "does not hide its use of injection" is read as
-    absence too, which costs a flag, never a withheld claim.
+    absence too, which costs a flag, never a withheld claim. Read by
+    :class:`_NegationReader`.
     """
-    head = text[:start]
-    breaks = list(_CLAUSE_BREAK_RE.finditer(head))
-    clause = head[breaks[-1].end() :] if breaks else head
-    cues = list(_NEGATED_VERB_RE.finditer(clause))
-    if not cues:
-        return False
-    after = clause[cues[-1].end() :]
-    if _CUE_THAT_ASSERTS_RE.match(after) or _NEED_VERB_RE.match(after):
-        return False
-    if "," in after or _ASSERTION_BETWEEN_RE.search(after) or _reach_ends(after):
-        return False
-    return bool(_NEGATED_OBJECT_RE.match(after))
+    return _NegationReader(text).in_a_negated_object(start)
 
 
 def states_absence(text: str, pattern: re.Pattern[str] | None) -> bool:
@@ -1097,11 +1104,10 @@ def states_absence(text: str, pattern: re.Pattern[str] | None) -> bool:
     matches = list(pattern.finditer(text))
     if not matches:
         return False
+    reader = _NegationReader(text)
     negated_to: int | None = None
     for match in matches:
-        if (
-            _is_negated(text, match.start(), match.end()) and _governed_absence(text, match.start())
-        ) or _absent_by_its_own_statement(text, match.start(), match.end()):
+        if reader.named_as_absent(match.start(), match.end()):
             negated_to = match.end()
             continue
         if negated_to is not None:
@@ -1770,6 +1776,7 @@ def described_by_its_words(text: str, technique_id: str) -> bool:
     break_starts = [start for start, _end in breaks]
     written: set[str] = set()
     asked: set[tuple[str, int]] = set()
+    readers: dict[tuple[int, int], _NegationReader] = {}
     for stem, match in _description_words(text):
         start, end = match.span()
         if stem in written or stem not in vocabulary or negated(start):
@@ -1781,8 +1788,9 @@ def described_by_its_words(text: str, technique_id: str) -> bool:
         asked.add((stem, begin))
         after = bisect.bisect_left(break_starts, end)
         finish = break_starts[after] if after < len(break_starts) else len(text)
-        clause = text[begin:finish]
-        if not _named_as_absent(clause, start - begin, end - begin):
+        if (begin, finish) not in readers:
+            readers[begin, finish] = _NegationReader(text[begin:finish])
+        if not readers[begin, finish].named_as_absent(start - begin, end - begin):
             written.add(stem)
     for phrase in phrases:
         hits = [weight for stem, weight in phrase.items() if stem in written]
@@ -1813,9 +1821,7 @@ def _joined_word_places(text: str, stems: Collection[str]) -> list[tuple[int, in
 def _named_as_absent(text: str, start: int, end: int) -> bool:
     """Whether the mention at ``text[start:end]`` is named to say it is absent, as the
     absence question reads a mention (:func:`states_absence`)."""
-    return (
-        _is_negated(text, start, end) and _governed_absence(text, start)
-    ) or _absent_by_its_own_statement(text, start, end)
+    return _NegationReader(text).named_as_absent(start, end)
 
 
 def _procedure_places(
@@ -1837,8 +1843,9 @@ def _names_a_procedure(text: str, technique_id: str, stems: Collection[str]) -> 
     text = _read_dashes(text)
     if _NOT_SEEN_RE.search(text):
         return False
+    reader = _NegationReader(text)
     return any(
-        not _named_as_absent(text, start, end)
+        not reader.named_as_absent(start, end)
         for start, end in _procedure_places(text, technique_id, stems)
     )
 
@@ -3146,7 +3153,14 @@ class CapabilityGrounding:
             return True
         if any(key in self.evidence_keys for key in keys):
             return True
-        return bool(self.evidence_text and _claimed(pattern, self.evidence_text))
+        return bool(
+            self.evidence_text and _claimed(pattern, self.evidence_text, self._evidence_reader)
+        )
+
+    @cached_property
+    def _evidence_reader(self) -> _NegationReader:
+        """The reader of the run's evidence, built once for every term it is asked about."""
+        return _NegationReader(self.evidence_text)
 
     def summary(self) -> str:
         """What the run does have, for the feedback turn to offer instead."""
@@ -3303,7 +3317,10 @@ def _network_observed(network: Any) -> bool:
 # sandbox run, establish command-and-control" is one clause with a
 # parenthetical in it, and treating the commas as boundaries threw the cue
 # away and re-flagged the honest negative. The window below is the limiter.
-_CLAUSE_BREAK_RE = re.compile(r"[.;:!?\n]|\bbut\b|\bhowever\b|\bwhereas\b", re.IGNORECASE)
+_CLAUSE_BREAK_WORDS = ("but", "however", "whereas")
+_CLAUSE_BREAK_RE = re.compile(
+    r"[.;:!?\n]|" + "|".join(rf"\b{word}\b" for word in _CLAUSE_BREAK_WORDS), re.IGNORECASE
+)
 
 # The cues that turn a capability word into a report of its absence.
 #
@@ -3315,12 +3332,18 @@ _CLAUSE_BREAK_RE = re.compile(r"[.;:!?\n]|\bbut\b|\bhowever\b|\bwhereas\b", re.I
 # them aside as well: "standard for a client application rather than a C2
 # agent" and "the absence of a sandbox run prevents confirmation of runtime C2
 # behaviour" claim nothing.
-_NEGATION_RE = re.compile(
-    r"\b(?:no|not|never|without|lack(?:s|ed|ing)?|absence|none)\b|n't\b|\bfailed to\b"
-    r"|\brather\s+than\b|\binstead\s+of\b"
-    r"|\b(?:prevents?|precludes?)\s+(?:any\s+)?(?:confirmation|observation)\s+of\b",
-    re.IGNORECASE,
+#
+# The first cue is one word; each other one ends in a word of its own after
+# another, or (``n't``) starts inside a word.
+_NEGATION_CUES = (
+    r"\b(?:no|not|never|without|lack(?:s|ed|ing)?|absence|none)\b",
+    r"n't\b",
+    r"\bfailed to\b",
+    r"\brather\s+than\b",
+    r"\binstead\s+of\b",
+    r"\b(?:prevents?|precludes?)\s+(?:any\s+)?(?:confirmation|observation)\s+of\b",
 )
+_NEGATION_RE = re.compile("|".join(_NEGATION_CUES), re.IGNORECASE)
 
 # The phrases that open with a cue and assert the opposite of one. "There is no
 # doubt that the sample exfiltrates data" is a claim, and "not only does it
@@ -3365,9 +3388,9 @@ _NEGATION_REACH_END_RE = re.compile(
 # end: the complement of "no evidence that …" and the "such as" of a list the
 # negation names. "There is no evidence that the sample exfiltrates data" and
 # "no network activity such as exfiltration" are statements of absence.
-_INSIDE_A_NEGATION_RE = re.compile(
-    r"^\s*(?:evidence|indications?|signs?|traces?)\s+that\b|\bsuch\s+as\b", re.IGNORECASE
-)
+_INSIDE_LEAD = r"\s*(?:evidence|indications?|signs?|traces?)\s+that\b"
+_INSIDE_SUCH_AS = r"\bsuch\s+as\b"
+_INSIDE_A_NEGATION_RE = re.compile(rf"^{_INSIDE_LEAD}|{_INSIDE_SUCH_AS}", re.IGNORECASE)
 # A noun negation: "no evidence of", "without any sign of". Its reach runs
 # through a ", such as …" list it names, however long, to the end of its clause.
 _NOUN_NEGATION_RE = re.compile(
@@ -3391,28 +3414,24 @@ def _reach_ends(after_cue: str) -> bool:
     return _NEGATION_REACH_END_RE.search(_INSIDE_A_NEGATION_RE.sub(" ", after_cue)) is not None
 
 
+# The ", such as" a noun negation names its list with; a list's last word
+# "and"; and a term that opens a new subject after it ("…, and credentials
+# are stolen").
+_NAMED_LIST_RE = re.compile(r",\s*such\s+as\b", re.IGNORECASE)
+_AND_AT_END_RE = re.compile(r"\band\s*$", re.IGNORECASE)
+_NEW_SUBJECT_RE = re.compile(r"\w+(?:\s+\w+)?\s+(?:is|are|was|were|has|have|had)\b", re.IGNORECASE)
+
+
 def _in_a_named_list(text: str, start: int) -> bool:
-    """Whether the term at ``start`` is in the ", such as …" list a noun negation names."""
-    head = text[:start]
-    breaks = list(_CLAUSE_BREAK_RE.finditer(head))
-    clause = head[breaks[-1].end() :] if breaks else head
-    cues = list(_NOUN_NEGATION_RE.finditer(clause))
-    if not cues:
-        return False
-    after = clause[cues[-1].end() :]
-    named = re.search(r",\s*such\s+as\b", after, re.IGNORECASE)
-    if named is None or _reach_ends(after):
-        return False
-    # The list ends at its first comma not followed by "or"/"and", or at a
-    # coordinating break; a term past that point is outside the negation.
-    listed = after[named.end() :]
-    if _LIST_END_RE.search(listed):
-        return False
-    # "…, and credentials are stolen": the term itself opens the new subject.
-    return not (
-        re.search(r"\band\s*$", listed, re.IGNORECASE)
-        and re.match(r"\w+(?:\s+\w+)?\s+(?:is|are|was|were|has|have|had)\b", text[start:], re.I)
-    )
+    """Whether the term at ``start`` is in the ", such as …" list a noun negation names.
+
+    The last noun negation of the term's clause names a list (``_NAMED_LIST_RE``)
+    with nothing that ends its reach after it; the list ends at its first comma
+    not followed by "or"/"and", or at a coordinating break, and a term past that
+    point is outside the negation, as is a term that opens a new subject after
+    a final "and". Read by :class:`_NegationReader`.
+    """
+    return _NegationReader(text).in_a_named_list(start)
 
 
 # A purpose that names the term as its object: "to prevent lateral movement".
@@ -3427,14 +3446,16 @@ _PURPOSE_OBJECT_RE = re.compile(
 # the evidence". "Persistence is missing a cleanup routine" is not one.
 # A category noun may stand between the term and its verb: "Persistence
 # mechanisms were not observed".
-_SUBJECT_ABSENT_RE = re.compile(
-    r"^(?:\s+(?:mechanisms?|techniques?|capabilit(?:y|ies)|behaviou?rs?|activit(?:y|ies)"
-    r"|functionality|methods?|patterns?))?"
+_SUBJECT_CATEGORY = (
+    r"(?:mechanisms?|techniques?|capabilit(?:y|ies)|behaviou?rs?|activit(?:y|ies)"
+    r"|functionality|methods?|patterns?)"
+)
+_SUBJECT_PREDICATE = (
     r"\s+(?:is|was|are|were|remains?)\s+"
     r"(?:absent\b|missing\s+from\b"
-    r"|not\s+(?:present|observed|seen|found|detected|supported|established|confirmed)\b)",
-    re.IGNORECASE,
+    r"|not\s+(?:present|observed|seen|found|detected|supported|established|confirmed)\b)"
 )
+_SUBJECT_ABSENT_RE = re.compile(rf"^(?:\s+{_SUBJECT_CATEGORY})?{_SUBJECT_PREDICATE}", re.IGNORECASE)
 
 
 def _is_negated(text: str, start: int, end: int | None = None) -> bool:
@@ -3452,15 +3473,19 @@ def _is_negated(text: str, start: int, end: int | None = None) -> bool:
     purpose ("to prevent lateral movement"), and the absence question's own
     readings (:func:`_absent_by_its_own_statement`): the term in the subject of
     "is absent" or "is missing from", an item of a negated noun list, and the
-    end of a negated verb's object.
+    end of a negated verb's object. Read by :class:`_NegationReader`; a text
+    asked about many terms is read once by one reader.
     """
-    if _PURPOSE_OBJECT_RE.search(text[max(0, start - _NEGATION_WINDOW) : start]):
-        return True
-    if end is not None and _absent_by_its_own_statement(text, start, end):
-        return True
-    if _in_a_named_list(text, start):
-        return True
+    return _NegationReader(text).is_negated(start, end)
+
+
+def _negated_nearby(text: str, start: int) -> bool:
+    """The readings of :func:`_is_negated` that read only the ``_NEGATION_WINDOW``
+    characters before the term: a purpose that names it as its object, and a cue
+    of its own clause there that nothing ends the reach of."""
     window = text[max(0, start - _NEGATION_WINDOW) : start]
+    if _PURPOSE_OBJECT_RE.search(window):
+        return True
     breaks = list(_CLAUSE_BREAK_RE.finditer(window))
     if breaks:
         window = window[breaks[-1].end() :]
@@ -3474,11 +3499,830 @@ def _is_negated(text: str, start: int, end: int | None = None) -> bool:
 
 
 def _starts_its_clause(text: str, start: int) -> bool:
-    """Whether the term at ``start`` opens its clause, a determiner or adjective allowed."""
-    head = text[:start]
-    breaks = list(_CLAUSE_BREAK_RE.finditer(head))
-    clause = head[breaks[-1].end() :] if breaks else head
-    return len(clause.split()) <= 2
+    """Whether the term at ``start`` opens its clause, a determiner or adjective allowed:
+    at most two words between the clause's start and the term."""
+    return _NegationReader(text).starts_its_clause(start)
+
+
+# --- The readings of absence, read once per text ----------------------------
+#
+# The readings above were written against a copy of the text before a mention
+# (``text[:start]``) and of its clause, so asking them of every mention of a
+# long text read that text again for each one: the square of its length.
+# ``_NegationReader`` answers each of them as that copy would, from what it
+# reads of the text once: where its clauses break, where each cue, list and
+# word stands, and each cue's own reading, worked out once per cue, with the
+# readings past one list item shared by every list of the clause. A copy ends
+# at the mention, so it reads a word the mention starts inside as cut there
+# ("no" in "notification"), sees nothing past the cut that a lookahead would,
+# and closes on a space before it; what the cut can change is read at the
+# mention, from the words next to it.
+
+
+def _read_at(pattern: re.Pattern[str]) -> re.Pattern[str]:
+    """``pattern`` read from a position of the whole text: its leading ``^`` dropped
+    (none of these patterns looks behind that position)."""
+    return re.compile(pattern.pattern.removeprefix("^"), pattern.flags)
+
+
+def _cut_short(pattern: re.Pattern[str]) -> re.Pattern[str]:
+    """``pattern`` without its closing ``\\b``: what a copy that ends right after the
+    match still reads as one."""
+    return re.compile(pattern.pattern.removesuffix(r"\b"), pattern.flags)
+
+
+def _at_every_position(body: str, flags: int) -> re.Pattern[str]:
+    """``body`` tried at every position of a text, its match there as group 1."""
+    return re.compile(rf"(?=({body}))", flags)
+
+
+_ASSERTS_AT = _read_at(_CUE_THAT_ASSERTS_RE)
+_NEED_AT = _read_at(_NEED_VERB_RE)
+_NEGATED_OBJECT_AT = _read_at(_NEGATED_OBJECT_RE)
+_LEAD_AT = re.compile(_INSIDE_LEAD, re.IGNORECASE)
+_LEAD_CUT_AT = _cut_short(_LEAD_AT)
+_SUCH_AS_RE = re.compile(_INSIDE_SUCH_AS, re.IGNORECASE)
+_SUCH_AS_CUT_RE = _cut_short(_SUCH_AS_RE)
+_NOUN_NEGATION_CUT_RE = _cut_short(_NOUN_NEGATION_RE)
+_NAMED_LIST_CUT_RE = _cut_short(_NAMED_LIST_RE)
+# A clause break word as a copy ending right after it reads one.
+_CLAUSE_BREAK_WORD_CUT_RE = re.compile(
+    "|".join(rf"\b{word}" for word in _CLAUSE_BREAK_WORDS), re.IGNORECASE
+)
+# The cues after the first one-word cue, cut short, tried everywhere: each
+# reads one way only, so where it would end is known in one pass.
+_NEGATION_LATER_CUT_RE = _at_every_position(
+    "|".join(cue.removesuffix(r"\b") for cue in _NEGATION_CUES[1:]), re.IGNORECASE
+)
+_PREDICATE_AT_SPACE_RE = re.compile(rf"(?<!\s)(?={_SUBJECT_PREDICATE})", re.IGNORECASE)
+_SUBJECT_CATEGORY_RE = re.compile(_SUBJECT_CATEGORY, re.IGNORECASE)
+_NEW_SUBJECT_AT_WORD_RE = re.compile(rf"(?<!\w)(?={_NEW_SUBJECT_RE.pattern})", re.IGNORECASE)
+_REACH_END_EVERYWHERE_RE = _at_every_position(
+    _NEGATION_REACH_END_RE.pattern, _NEGATION_REACH_END_RE.flags
+)
+_LIST_END_EVERYWHERE_RE = _at_every_position(_LIST_END_RE.pattern, _LIST_END_RE.flags)
+# The noun list's parts, read one at a time (:meth:`_NegationReader._noun_list`).
+_LIST_HEDGE_EVERYWHERE_RE = _at_every_position(_LIST_HEDGE, re.IGNORECASE)
+_LIST_ITEM_START_RE = re.compile(_LIST_ITEM_START, re.IGNORECASE)
+_LIST_MORE_START_RE = re.compile(_LIST_MORE_START, re.IGNORECASE)
+_LIST_ITEM_RUN_RE = re.compile(rf"{_LIST_ITEM_REST}+")
+_LIST_MORE_RUN_RE = re.compile(rf"{_LIST_MORE_REST}+")
+_LIST_JOINER_RE = re.compile(_LIST_JOINERS, re.IGNORECASE)
+_LIST_HEAD_RE = re.compile(_LIST_HEADS, re.IGNORECASE)
+_SPACES_RE = re.compile(r"\s+")
+_TOKENS_RE = re.compile(r"\S+")
+_WORDS_RE = re.compile(r"\w+")
+_COMMA_RE = re.compile(",")
+
+
+def _is_word_character(char: str) -> bool:
+    """Whether ``char`` is a word character as the patterns read ``\\w``."""
+    return char.isalnum() or char == "_"
+
+
+class _Runs:
+    """Where one pattern's matches stand in a text, for the one around a position."""
+
+    def __init__(self, pattern: re.Pattern[str], text: str) -> None:
+        found = [match.span() for match in pattern.finditer(text)]
+        self.starts = [begin for begin, _end in found]
+        self.ends = [end for _begin, end in found]
+
+    def around(self, index: int) -> int:
+        """The number of the match that holds ``index``, or -1."""
+        k = bisect.bisect_right(self.starts, index) - 1
+        return k if k >= 0 and self.ends[k] > index else -1
+
+    def first_from(self, index: int) -> int:
+        """The number of the first match that starts at or after ``index``."""
+        return bisect.bisect_left(self.starts, index)
+
+
+def _suffix_least(values: list[int]) -> list[int]:
+    """For each place, the least of ``values`` from there on."""
+    least = list(values)
+    for k in range(len(least) - 2, -1, -1):
+        least[k] = min(least[k], least[k + 1])
+    return least
+
+
+class _NegationReader:
+    """The readings of absence of one text, asked at each mention without reading it again.
+
+    Each method answers as the function of the same name does for this text
+    and a place in it; the indexes it reads are built the first time one is
+    needed, each in one pass over the text.
+    """
+
+    def __init__(self, text: str) -> None:
+        self.text = text
+        self._absent: dict[tuple[int, int], bool] = {}
+        self._verb_cues: dict[int, tuple[int | None, ...]] = {}
+        self._noun_cues: dict[int, tuple[int | None, ...]] = {}
+        self._lists: dict[tuple[int, int], tuple[list[int], list[int], list[tuple[int, ...]]]] = {}
+        self._after_item: dict[int, dict[int, int | None]] = {}
+
+    # The text's runs and breaks ----------------------------------------------
+
+    @cached_property
+    def _breaks(self) -> _Runs:
+        return _Runs(_CLAUSE_BREAK_RE, self.text)
+
+    @cached_property
+    def _break_word_ends(self) -> set[int]:
+        return {match.end() for match in _CLAUSE_BREAK_WORD_CUT_RE.finditer(self.text)}
+
+    @cached_property
+    def _spaces(self) -> _Runs:
+        return _Runs(_SPACES_RE, self.text)
+
+    @cached_property
+    def _tokens(self) -> _Runs:
+        return _Runs(_TOKENS_RE, self.text)
+
+    @cached_property
+    def _words(self) -> _Runs:
+        return _Runs(_WORDS_RE, self.text)
+
+    @cached_property
+    def _commas(self) -> list[int]:
+        return [match.start() for match in _COMMA_RE.finditer(self.text)]
+
+    def clause_start(self, start: int) -> int:
+        """Where the clause ``start`` stands in begins: where the last break of
+        ``text[:start]`` ends, a break word that ends right at ``start`` among them."""
+        if start in self._break_word_ends:
+            return start
+        ends = self._breaks.ends
+        k = bisect.bisect_right(ends, start) - 1
+        return ends[k] if k >= 0 else 0
+
+    def clause_end(self, end: int) -> int:
+        """Where the first break at or after ``end`` begins, or the text's end."""
+        k = self._breaks.first_from(end)
+        return self._breaks.starts[k] if k < len(self._breaks.starts) else len(self.text)
+
+    def _break_end_after(self, at: int) -> int:
+        """Where the first break that ends after ``at`` ends, or the text's end."""
+        ends = self._breaks.ends
+        k = bisect.bisect_right(ends, at)
+        return ends[k] if k < len(ends) else len(self.text)
+
+    def _space_start(self, pos: int) -> int:
+        """Where the white space that ends at ``pos`` begins, or ``pos``."""
+        k = self._spaces.around(pos - 1) if pos > 0 else -1
+        return self._spaces.starts[k] if k >= 0 else pos
+
+    def _space_end(self, pos: int, limit: int) -> int:
+        """Where the white space from ``pos`` ends, short of ``limit``, or ``pos``."""
+        if pos >= limit:
+            return pos
+        k = self._spaces.around(pos)
+        return min(self._spaces.ends[k], limit) if k >= 0 else pos
+
+    def _word_start(self, pos: int) -> int:
+        """Where the word that ``text[:pos]`` ends in begins, or ``pos``."""
+        k = self._words.around(pos - 1) if pos > 0 else -1
+        return self._words.starts[k] if k >= 0 else pos
+
+    def _word_end(self, pos: int, limit: int) -> int:
+        """Where the word from ``pos`` ends, short of ``limit``, or ``pos``."""
+        if pos >= limit:
+            return pos
+        k = self._words.around(pos)
+        return min(self._words.ends[k], limit) if k >= 0 else pos
+
+    def _cut_inside_a_word(self, start: int) -> bool:
+        """Whether ``start`` cuts a word in two: only there can a copy that ends at
+        ``start`` read a word as ending that the whole text reads as going on."""
+        text = self.text
+        return (
+            0 < start < len(text)
+            and _is_word_character(text[start - 1])
+            and _is_word_character(text[start])
+        )
+
+    # The readings ------------------------------------------------------------
+
+    def starts_its_clause(self, start: int) -> bool:
+        """:func:`_starts_its_clause`: at most two words of the clause before ``start``."""
+        begin = self.clause_start(start)
+        tokens = self._tokens
+        words = bisect.bisect_left(tokens.starts, start) - bisect.bisect_right(tokens.ends, begin)
+        return words <= 2
+
+    @cached_property
+    def _predicates(self) -> set[int]:
+        return {match.start() for match in _PREDICATE_AT_SPACE_RE.finditer(self.text)}
+
+    def subject_is_absent(self, start: int, end: int) -> bool:
+        """:func:`_subject_is_absent`."""
+        text = self.text
+        if end >= len(text) or not text[end].isspace():
+            return False
+        # The predicate (a category noun before it) reads the same from any
+        # place in the white space after the mention as from the space's start.
+        space = self._spaces.around(end)
+        if self._spaces.starts[space] not in self._predicates:
+            after = self._spaces.ends[space]
+            word = self._tokens.around(after)
+            if word < 0:
+                return False
+            noun_end = self._tokens.ends[word]
+            if (
+                noun_end >= len(text)
+                or noun_end not in self._predicates
+                or not _SUBJECT_CATEGORY_RE.fullmatch(text, after, noun_end)
+            ):
+                return False
+        return self.starts_its_clause(start) or bool(
+            _NOUN_COMPLEMENT_BEFORE_RE.search(text[max(0, start - _NEGATION_WINDOW) : start])
+        )
+
+    # A negated verb's object.
+
+    @cached_property
+    def _verbs(self) -> _Runs:
+        return _Runs(_NEGATED_VERB_RE, self.text)
+
+    @cached_property
+    def _assertions(self) -> _Runs:
+        return _Runs(_ASSERTION_BETWEEN_RE, self.text)
+
+    def _verb_cue(self, k: int) -> tuple[int | None, ...]:
+        """What is read once after the ``k``-th negated verb: where an assertion
+        opened by it, a verb of need after it and the lead of an evidence phrase
+        after it end, each read up to where no mention it could govern reaches."""
+        if k not in self._verb_cues:
+            text, verbs = self.text, self._verbs
+            at = verbs.ends[k]
+            bound = min(
+                verbs.ends[k + 1] if k + 1 < len(verbs.ends) else len(text),
+                self._break_end_after(at),
+            )
+            self._verb_cues[k] = tuple(
+                found.end() if found else None
+                for found in (
+                    _ASSERTS_AT.match(text, at, bound),
+                    _NEED_AT.match(text, at, bound),
+                    _LEAD_AT.match(text, at, bound),
+                    _LEAD_CUT_AT.match(text, at, bound),
+                )
+            )
+        return self._verb_cues[k]
+
+    def in_a_negated_object(self, start: int) -> bool:
+        """:func:`_in_a_negated_object`."""
+        text = self.text
+        # The object closes on white space (``_NEGATED_OBJECT_RE`` ends ``\s+$``).
+        if start <= 0 or start > len(text) or not text[start - 1].isspace():
+            return False
+        begin = self.clause_start(start)
+        verbs = self._verbs
+        k = bisect.bisect_right(verbs.ends, start) - 1
+        if k < 0 or verbs.starts[k] < begin:
+            return False
+        at = verbs.ends[k]
+        asserted, needed, lead, lead_cut = self._verb_cue(k)
+        if (asserted is not None and asserted <= start) or (needed is not None and needed <= start):
+            return False
+        c = bisect.bisect_left(self._commas, at)
+        if c < len(self._commas) and self._commas[c] < start:
+            return False
+        a = self._assertions.first_from(at)
+        if a < len(self._assertions.starts) and self._assertions.ends[a] <= start:
+            return False
+        if self._reach_ends_in(at, start, self._lead(lead, lead_cut, start)):
+            return False
+        tokens = self._tokens
+        words = bisect.bisect_left(tokens.starts, start) - bisect.bisect_right(tokens.ends, at)
+        if words > _NEGATED_OBJECT_WORDS:
+            return False
+        return _NEGATED_OBJECT_AT.match(text, at, start) is not None
+
+    @staticmethod
+    def _lead(lead: int | None, lead_cut: int | None, start: int) -> int | None:
+        """Where the lead of an evidence phrase ("evidence that") after a cue ends in a
+        copy cut at ``start``: where it ends if that is before the cut, or at the cut
+        if its last word ends there."""
+        if lead is not None and lead <= start:
+            return lead
+        return start if lead_cut == start else None
+
+    # What ends a negation's reach (``_reach_ends``).
+
+    @cached_property
+    def _such_as(self) -> _Runs:
+        return _Runs(_SUCH_AS_RE, self.text)
+
+    @cached_property
+    def _such_as_by_end(self) -> dict[int, int]:
+        return dict(zip(self._such_as.ends, self._such_as.starts, strict=True))
+
+    @cached_property
+    def _such_as_cut_by_end(self) -> dict[int, int]:
+        return {match.end(): match.start() for match in _SUCH_AS_CUT_RE.finditer(self.text)}
+
+    @cached_property
+    def _shrunk(self) -> list[int]:
+        """How much shorter the text is, before each "such as", once each reads as one space."""
+        shrunk = [0]
+        for begin, end in zip(self._such_as.starts, self._such_as.ends, strict=True):
+            shrunk.append(shrunk[-1] + end - begin - 1)
+        return shrunk
+
+    def _spaced(self, pos: int) -> int:
+        """Where ``pos`` (outside every "such as") stands once each reads as one space."""
+        return pos - self._shrunk[bisect.bisect_right(self._such_as.ends, pos)]
+
+    @cached_property
+    def _reach_ends_spaced(self) -> tuple[list[int], list[int]]:
+        """Every place the reach-end words match once each "such as" reads as one
+        space, and from each place on, the least end of one."""
+        text, last = self.text, 0
+        pieces: list[str] = []
+        for begin, end in zip(self._such_as.starts, self._such_as.ends, strict=True):
+            pieces.extend((text[last:begin], " "))
+            last = end
+        pieces.append(text[last:])
+        found = [
+            (match.start(), match.end(1))
+            for match in _REACH_END_EVERYWHERE_RE.finditer("".join(pieces))
+        ]
+        return [at for at, _end in found], _suffix_least([end for _at, end in found])
+
+    def _inside_such_as(self, pos: int) -> bool:
+        """Whether ``pos`` falls inside a "such as", past its start."""
+        k = self._such_as.around(pos)
+        return k >= 0 and self._such_as.starts[k] < pos
+
+    @cached_property
+    def _space_runs(self) -> dict[int, int]:
+        """For the end of each white space and each "such as", where the run of them
+        that ends there begins, read in one pass."""
+        parts = sorted(
+            [
+                *zip(self._spaces.starts, self._spaces.ends, strict=True),
+                *zip(self._such_as.starts, self._such_as.ends, strict=True),
+            ]
+        )
+        runs: dict[int, int] = {}
+        begin, reach = -1, -1
+        for start, end in parts:
+            if start > reach:
+                begin = start
+            reach = max(reach, end)
+            runs[end] = begin
+        return runs
+
+    def _reach_ends_in(self, at: int, start: int, lead: int | None) -> bool:
+        """``_reach_ends(text[at:start])``, the lead of an evidence phrase after the cue
+        ending at ``lead`` (one space after the substitution, and nothing to read)."""
+        text = self.text
+        region = at if lead is None else lead
+        if region >= start:
+            return False
+        # Up to ``differ`` the copy reads as the whole text with each "such as" a
+        # space; a "such as" the cut splits, or ends that the text goes on past,
+        # reads otherwise.
+        differ = start
+        k = bisect.bisect_right(self._such_as.starts, start - 1) - 1
+        if k >= 0 and self._such_as.starts[k] >= region and self._such_as.ends[k] > start:
+            differ = self._such_as.starts[k]
+        else:
+            cut = self._such_as_cut_by_end.get(start)
+            if cut is not None and cut >= region and start not in self._such_as_by_end:
+                differ = cut
+        places, least = self._reach_ends_spaced
+        p = bisect.bisect_left(places, self._spaced(region))
+        if p < len(places):
+            limit = self._spaced(differ)
+            if least[p] < limit or (differ == start and least[p] <= limit):
+                return True
+        # What reaches the cut: the word before it, the run of space and "such as"
+        # before that (all space after the substitution, so one space reads as it
+        # does), and the "and" or comma the run follows.
+        word = max(self._word_start(differ), region)
+        q = word
+        if q > region and text[q - 1].isspace():
+            q = max(self._space_start(q), region)
+        if q > region and q in self._such_as_by_end:
+            q = max(self._space_runs[q], region)
+        run = q
+        if q > region and text[q - 1] == ",":
+            q -= 1
+        else:
+            q = max(self._word_start(q), region)
+        before = text[q - 1 : run] if q > 0 else text[q:run]
+        if run < word and not self._inside_such_as(run) and not self._inside_such_as(word):
+            piece = f"{_SUCH_AS_RE.sub(' ', before)} {_SUCH_AS_RE.sub(' ', text[word:start])}"
+        else:
+            piece = _SUCH_AS_RE.sub(" ", before + text[run:start])
+        return _NEGATION_REACH_END_RE.search(piece, 1 if q > 0 else 0) is not None
+
+    # A list a noun negation names (``_in_a_named_list``).
+
+    @cached_property
+    def _nouns(self) -> _Runs:
+        return _Runs(_NOUN_NEGATION_RE, self.text)
+
+    @cached_property
+    def _noun_cut_by_end(self) -> dict[int, int]:
+        return {match.end(): match.start() for match in _NOUN_NEGATION_CUT_RE.finditer(self.text)}
+
+    @cached_property
+    def _named(self) -> _Runs:
+        return _Runs(_NAMED_LIST_RE, self.text)
+
+    @cached_property
+    def _named_cut_by_end(self) -> dict[int, int]:
+        return {match.end(): match.start() for match in _NAMED_LIST_CUT_RE.finditer(self.text)}
+
+    def _noun_cue(self, k: int) -> tuple[int | None, ...]:
+        """The lead of an evidence phrase after the ``k``-th noun negation, read once."""
+        if k not in self._noun_cues:
+            text, nouns = self.text, self._nouns
+            at = nouns.ends[k]
+            bound = min(
+                nouns.ends[k + 1] if k + 1 < len(nouns.ends) else len(text),
+                self._break_end_after(at),
+            )
+            lead = _LEAD_AT.match(text, at, bound)
+            lead_cut = _LEAD_CUT_AT.match(text, at, bound)
+            self._noun_cues[k] = (
+                lead.end() if lead else None,
+                lead_cut.end() if lead_cut else None,
+            )
+        return self._noun_cues[k]
+
+    def in_a_named_list(self, start: int) -> bool:
+        """:func:`_in_a_named_list`."""
+        begin = self.clause_start(start)
+        cut = self._noun_cut_by_end.get(start)
+        if cut is not None and cut >= begin:
+            return False
+        nouns = self._nouns
+        k = bisect.bisect_right(nouns.ends, start) - 1
+        if k < 0 or nouns.starts[k] < begin:
+            return False
+        at = nouns.ends[k]
+        named = self._named.first_from(at)
+        if named < len(self._named.starts) and self._named.ends[named] <= start:
+            listed = self._named.ends[named]
+        else:
+            named_cut = self._named_cut_by_end.get(start)
+            if named_cut is None or named_cut < at:
+                return False
+            listed = start
+        lead, lead_cut = self._noun_cue(k)
+        if self._reach_ends_in(at, start, self._lead(lead, lead_cut, start)):
+            return False
+        if self._list_ends_in(listed, start):
+            return False
+        return not (self._ends_with_and(listed, start) and self._opens_a_subject(start))
+
+    @cached_property
+    def _list_end_commas(self) -> list[int]:
+        """The commas ``_LIST_END_RE`` ends a list at, each read up to the end of
+        the word its lookahead reads after it."""
+        text = self.text
+        return [
+            comma
+            for comma in self._commas
+            if _LIST_END_RE.match(text, comma, self._comma_reach(comma))
+        ]
+
+    def _comma_reach(self, comma: int) -> int:
+        """How far ``_LIST_END_RE`` reads after a comma: the space and the word after it."""
+        text = self.text
+        space_end = self._space_end(comma + 1, len(text))
+        word_end = self._word_end(space_end, len(text))
+        return word_end if word_end > space_end else min(space_end + 1, len(text))
+
+    @cached_property
+    def _list_end_words(self) -> tuple[list[int], list[int]]:
+        """Every place ``_LIST_END_RE`` matches a word or "and …" (not a comma), and
+        from each place on, the least end of one."""
+        text = self.text
+        found = [
+            (match.start(), match.end(1))
+            for match in _LIST_END_EVERYWHERE_RE.finditer(text)
+            if text[match.start()] != ","
+        ]
+        return [at for at, _end in found], _suffix_least([end for _at, end in found])
+
+    def _list_ends_in(self, listed: int, start: int) -> bool:
+        """``_LIST_END_RE.search(text[listed:start])``."""
+        text = self.text
+        if listed >= start:
+            return False
+        commas = self._commas
+        first, past = bisect.bisect_left(commas, listed), bisect.bisect_left(commas, start)
+        if past > first:
+            last = commas[past - 1]
+            ending = self._list_end_commas
+            if bisect.bisect_left(ending, listed) < bisect.bisect_left(ending, last):
+                return True
+            # The last comma's lookahead may read past the cut.
+            if start >= self._comma_reach(last):
+                k = bisect.bisect_left(ending, last)
+                if k < len(ending) and ending[k] == last:
+                    return True
+            elif _LIST_END_RE.match(text, last, start):
+                return True
+        places, least = self._list_end_words
+        p = bisect.bisect_left(places, listed)
+        if p < len(places) and least[p] <= start:
+            return True
+        if not self._cut_inside_a_word(start):
+            return False
+        # A word the cut ends ("so" in "soon"), or a verb it ends after "and" and a word.
+        word = self._word_start(start)
+        if word >= listed and _LIST_END_RE.fullmatch(text, word, start):
+            return True
+        space = self._space_start(word)
+        before = self._word_start(space)
+        space_before = self._space_start(before)
+        joined = self._word_start(space_before)
+        return (
+            word > space > before > space_before > joined >= listed
+            and _LIST_END_RE.fullmatch(text, joined, start) is not None
+        )
+
+    def _ends_with_and(self, listed: int, start: int) -> bool:
+        """``_AND_AT_END_RE.search(text[listed:start])``."""
+        word = self._word_start(self._space_start(start))
+        return _AND_AT_END_RE.search(self.text, max(listed, word), start) is not None
+
+    @cached_property
+    def _subject_openings(self) -> set[int]:
+        return {match.start() for match in _NEW_SUBJECT_AT_WORD_RE.finditer(self.text)}
+
+    def _opens_a_subject(self, start: int) -> bool:
+        """``_NEW_SUBJECT_RE.match(text[start:])``: it reads the same from any place
+        in the word ``start`` stands in as from the word's start."""
+        text = self.text
+        if start >= len(text) or not _is_word_character(text[start]):
+            return False
+        return self._words.starts[self._words.around(start)] in self._subject_openings
+
+    # A negated noun list (the rest of ``_absent_by_its_own_statement``).
+
+    @cached_property
+    def _cues(self) -> _Runs:
+        return _Runs(_NEGATION_RE, self.text)
+
+    @cached_property
+    def _later_cuts_by_end(self) -> dict[int, list[int]]:
+        by_end: dict[int, list[int]] = {}
+        for match in _NEGATION_LATER_CUT_RE.finditer(self.text):
+            by_end.setdefault(match.end(1), []).append(match.start())
+        return by_end
+
+    @cached_property
+    def _longer_in_lower_case(self) -> tuple[list[int], list[int]]:
+        """Where a character's lower case is longer than it ("İ"), and the sum of how
+        much longer, up to each: a clause's lower case is read at its own offsets."""
+        text = self.text
+        if text.isascii():
+            return [], [0]
+        places = [k for k, char in enumerate(text) if len(char.lower()) != 1]
+        longer = [0]
+        for k in places:
+            longer.append(longer[-1] + len(text[k].lower()) - 1)
+        return places, longer
+
+    def _lower_starts_with_not_a_negation(self, begin: int, finish: int, at: int) -> bool:
+        """``text[begin:finish].lower().startswith(_NOT_A_NEGATION, at - begin)``."""
+        text = self.text
+        places, longer = self._longer_in_lower_case
+        offset = at - begin
+
+        def lowered(count: int) -> int:
+            """Where the clause's ``count``-th character starts in its lower case."""
+            return (
+                count
+                + longer[bisect.bisect_left(places, begin + count)]
+                - longer[bisect.bisect_left(places, begin)]
+            )
+
+        low, high = 0, finish - begin
+        if lowered(high) <= offset:
+            return False
+        while low < high:
+            middle = (low + high + 1) // 2
+            if lowered(middle) <= offset:
+                low = middle
+            else:
+                high = middle - 1
+        longest = max(len(phrase) for phrase in _NOT_A_NEGATION)
+        piece = text[begin + low : min(finish, begin + low + longest + 1)].lower()
+        return piece[offset - lowered(low) :].startswith(_NOT_A_NEGATION)
+
+    def _cut_cue(self, start: int, begin: int) -> int | None:
+        """Where a negation cue that only a copy cut at ``start`` reads as ending there
+        begins, if the copy's own reading of the clause meets it."""
+        if not self._cut_inside_a_word(start):
+            return None
+        text, cues = self.text, self._cues
+        starts: set[int] = {self._word_start(start), *self._later_cuts_by_end.get(start, [])}
+        for at in sorted(starts):
+            if at < begin:
+                continue
+            k = bisect.bisect_right(cues.starts, at - 1) - 1
+            if k >= 0 and at < cues.ends[k] <= start:
+                continue
+            found = _NEGATION_RE.match(text, at, start)
+            if found is not None and found.end() == start:
+                return at
+        return None
+
+    def _not_asserting(self, at: int, end: int, finish: int) -> bool:
+        """Whether no assertion opens at a cue's end (``_CUE_THAT_ASSERTS_RE``), read
+        up to the next cue's end: no assertion reads into a cue."""
+        cues = self._cues
+        k = cues.first_from(end)
+        bound = min(finish, cues.ends[k] if k < len(cues.ends) else finish)
+        return _ASSERTS_AT.match(self.text, end, bound) is None
+
+    def _negated_lists(
+        self, begin: int, finish: int
+    ) -> tuple[list[int], list[int], list[tuple[int, ...]]]:
+        """For the clause ``text[begin:finish]``: each negation cue's negated noun list,
+        as (cue start, first item, end of the items), by first item, and the farthest
+        end of the lists that start at or before each."""
+        key = (begin, finish)
+        if key not in self._lists:
+            cues = self._cues
+            spans: list[tuple[int, ...]] = []
+            for k in range(cues.first_from(begin), len(cues.starts)):
+                cue_start, cue_end = cues.starts[k], cues.ends[k]
+                if cue_end > finish:
+                    break
+                if self._lower_starts_with_not_a_negation(begin, finish, cue_start):
+                    continue
+                if not self._not_asserting(cue_start, cue_end, finish):
+                    continue
+                listed = self._noun_list(cue_end, finish)
+                if listed is not None:
+                    spans.append((cue_start, *listed))
+            spans.sort(key=lambda span: span[1])
+            farthest: list[int] = []
+            for _cue, _first, last in spans:
+                farthest.append(max(last, farthest[-1]) if farthest else last)
+            self._lists[key] = ([first for _cue, first, _last in spans], farthest, spans)
+        return self._lists[key]
+
+    def in_a_negated_list(self, start: int, end: int) -> bool:
+        """Whether a negation cue of the mention's clause negates a noun list that
+        holds it (the loop of ``_absent_by_its_own_statement``)."""
+        begin = self.clause_start(start)
+        if begin >= start:
+            return False
+        finish = self.clause_end(end)
+        cut = self._cut_cue(start, begin)
+        firsts, farthest, spans = self._negated_lists(begin, finish)
+        cues = self._cues
+        if cut is None or cues.first_from(cut) >= bisect.bisect_right(cues.ends, start):
+            k = bisect.bisect_right(firsts, start) - 1
+            if k >= 0 and farthest[k] > start:
+                return True
+        elif any(at < cut and first <= start < last for at, first, last in spans):
+            return True
+        if cut is None:
+            return False
+        if self._lower_starts_with_not_a_negation(begin, finish, cut):
+            return False
+        if not self._not_asserting(cut, start, finish):
+            return False
+        listed = self._noun_list(start, finish)
+        return listed is not None and listed[0] == start
+
+    # The noun list itself (``_NEGATED_NOUN_LIST_RE``).
+
+    @cached_property
+    def _hedges(self) -> dict[int, int]:
+        return {
+            match.start(): match.end(1) for match in _LIST_HEDGE_EVERYWHERE_RE.finditer(self.text)
+        }
+
+    @cached_property
+    def _item_runs(self) -> _Runs:
+        return _Runs(_LIST_ITEM_RUN_RE, self.text)
+
+    @cached_property
+    def _more_runs(self) -> _Runs:
+        return _Runs(_LIST_MORE_RUN_RE, self.text)
+
+    def _item_ends(self, at: int, finish: int) -> list[int]:
+        """Where an item (``_LIST_ITEM``) from ``at`` can end, most words first."""
+        text = self.text
+        if at >= finish or not _LIST_ITEM_START_RE.match(text, at, at + 1):
+            return []
+        ends = [min(self._item_runs.ends[self._item_runs.around(at)], finish)]
+        for _word in range(_LIST_ITEM_MORE_WORDS):
+            more = self._space_end(ends[-1], finish)
+            if more == ends[-1] or more >= finish:
+                break
+            if not _LIST_MORE_START_RE.match(text, more, more + 1):
+                break
+            ends.append(min(self._more_runs.ends[self._more_runs.around(more)], finish))
+        return ends[::-1]
+
+    def _next_item_ends(self, at: int, finish: int) -> list[int]:
+        """Where the item after ``_LIST_JOIN`` from ``at`` can end, most words first."""
+        comma = self._space_end(at, finish)
+        if comma >= finish or self.text[comma] != ",":
+            return []
+        return self._item_ends(self._space_end(comma + 1, finish), finish)
+
+    def _last_item_end(self, at: int, finish: int) -> int | None:
+        """Where the list closes after the item that ends at ``at``: the last item
+        after ``_LIST_LAST``, before its head noun (``_LIST_HEADS``)."""
+        text = self.text
+        joiner = self._space_end(at, finish)
+        if joiner < finish and text[joiner] == ",":
+            after = self._space_end(joiner + 1, finish)
+            if after == joiner + 1:
+                return None
+            joiner = after
+        elif joiner == at:
+            return None
+        joiner_end = self._word_end(joiner, finish)
+        if (
+            joiner_end == joiner
+            or joiner_end >= finish
+            or not text[joiner_end].isspace()
+            or not _LIST_JOINER_RE.fullmatch(text, joiner, joiner_end)
+        ):
+            return None
+        for end in self._item_ends(self._space_end(joiner_end, finish), finish):
+            head = self._space_end(end, finish)
+            head_end = self._word_end(head, finish)
+            if head > end and head_end > head and _LIST_HEAD_RE.fullmatch(text, head, head_end):
+                return end
+        return None
+
+    def _items_end_after(self, at: int, finish: int) -> int | None:
+        """Where the items end after an item that ends at ``at``, as the pattern's
+        order reads them: one more joined item first, then the last one. Each
+        place is read once for every list of the clause."""
+        memo = self._after_item.setdefault(finish, {})
+        stack = [at]
+        while stack:
+            place = stack[-1]
+            if place in memo:
+                stack.pop()
+                continue
+            ends = self._next_item_ends(place, finish)
+            unread = [end for end in ends if end not in memo]
+            if unread:
+                stack.extend(unread)
+                continue
+            found = next((memo[end] for end in ends if memo[end] is not None), None)
+            memo[place] = found if found is not None else self._last_item_end(place, finish)
+            stack.pop()
+        return memo[at]
+
+    def _noun_list(self, at: int, finish: int) -> tuple[int, int] | None:
+        """The items of ``_NEGATED_NOUN_LIST_RE`` read at ``at`` up to ``finish``, as
+        (start, end): the most hedges first, then the most words of each item."""
+        starts = [self._space_end(at, finish)]
+        while starts[-1] in self._hedges and self._hedges[starts[-1]] <= finish:
+            starts.append(self._hedges[starts[-1]])
+        for first in reversed(starts):
+            for end in self._item_ends(first, finish):
+                last = self._items_end_after(end, finish)
+                if last is not None:
+                    return first, last
+        return None
+
+    # The readings asked of a mention ------------------------------------------
+
+    def absent_by_its_own_statement(self, start: int, end: int) -> bool:
+        """:func:`_absent_by_its_own_statement`."""
+        key = (start, end)
+        if key not in self._absent:
+            self._absent[key] = (
+                self.subject_is_absent(start, end)
+                or self.in_a_negated_object(start)
+                or self.in_a_negated_list(start, end)
+            )
+        return self._absent[key]
+
+    def is_negated(self, start: int, end: int | None = None) -> bool:
+        """:func:`_is_negated`."""
+        return (
+            _negated_nearby(self.text, start)
+            or (end is not None and self.absent_by_its_own_statement(start, end))
+            or self.in_a_named_list(start)
+        )
+
+    def named_as_absent(self, start: int, end: int) -> bool:
+        """:func:`_named_as_absent`."""
+        return (
+            self.is_negated(start, end) and _governed_absence(self.text, start)
+        ) or self.absent_by_its_own_statement(start, end)
 
 
 # Where one sentence of checked text ends: a stop, a bang or a question mark
@@ -3556,25 +4400,41 @@ def _claiming_sentences(
     (:func:`masked_values`); the sentences are quoted from ``text``.
     """
     read = text if masked is None or len(masked) != len(text) else masked
+    reader = _NegationReader(read)
+    # Where each sentence ends, read once (:func:`_sentence_around` per match
+    # read the text from its start again).
+    ends = [found.span() for found in _STATEMENT_END_RE.finditer(text)]
+    end_starts = [begin for begin, _end in ends]
     found: list[str] = []
+    seen: set[str] = set()
+    read_sentences: set[int] = set()
     for match in pattern.finditer(read):
-        if _is_negated(read, match.start(), match.end()):
+        if reader.is_negated(match.start(), match.end()):
             continue
-        sentence = _sentence_around(text, match.start())
-        if sentence and sentence not in found:
+        k = bisect.bisect_left(end_starts, match.start())
+        if k in read_sentences:
+            continue
+        read_sentences.add(k)
+        begin = ends[k - 1][1] if k > 0 else 0
+        sentence = text[begin : end_starts[k] if k < len(ends) else len(text)].strip()
+        if sentence and sentence not in seen:
+            seen.add(sentence)
             found.append(sentence)
     return found
 
 
-def _claimed(pattern: re.Pattern[str], text: str) -> bool:
+def _claimed(pattern: re.Pattern[str], text: str, reader: _NegationReader | None = None) -> bool:
     """Whether ``text`` claims the capability rather than reporting its absence.
 
     One surviving match is enough: a report that says the sample does not
     exfiltrate data in one sentence and does exfiltrate it in another has made
-    the claim, and it is the claim that has to be grounded.
+    the claim, and it is the claim that has to be grounded. ``reader`` is one
+    already reading ``text``, so a text asked about many capabilities is read
+    once.
     """
+    reader = reader if reader is not None and reader.text == text else _NegationReader(text)
     return any(
-        not _is_negated(text, match.start(), match.end()) for match in pattern.finditer(text)
+        not reader.is_negated(match.start(), match.end()) for match in pattern.finditer(text)
     )
 
 
