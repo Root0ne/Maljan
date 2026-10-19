@@ -1,0 +1,4 @@
+{
+ "about": "Occurrences of a calibration-generated term the leak check allows, each on one line: the path, the SHA-256 of the term, the SHA-256 of the exact line, and why. Entries for the private answer-key terms live in the gitignored answer-key-allow.json beside the private term list, never here.",
+ "allow": []
+}

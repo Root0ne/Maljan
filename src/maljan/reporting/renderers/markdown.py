@@ -1505,7 +1505,7 @@ class MarkdownRenderer:
                     _row(
                         row.type,
                         # A file or host value that holds a network value
-                        # ("//relay.example.net/live/" read as a path) holds
+                        # ("//relay.example.net/path/" read as a path) holds
                         # it defanged; any other is printed as it is.
                         _code_span(ctx.plain(row.value)),
                         ctx.plain(row.context) if row.context else "-",
