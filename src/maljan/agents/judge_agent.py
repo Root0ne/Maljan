@@ -419,6 +419,15 @@ def _indicator_findings(bundle: Any, found: Iterable[Violation]) -> list[Violati
 VERDICT_TIMEOUT_CODE = "verdict.timeout"
 VERDICT_TIMEOUT_REASON = "the judge did not answer within its budget"
 
+# What is recorded when the judge's one retry failed — it timed out, answered
+# prose, or answered JSON that was not a bundle — after a first answer that was
+# a bundle. The first bundle is kept, with what was still wrong with it: a
+# failed correction says nothing about the sample, and a valid verdict replaced
+# by the text fallback or by a timeout published what the judge never wrote.
+# The row says the retry was spent and how it failed.
+VERDICT_RETRY_FAILED_CODE = "verdict.retry_failed"
+VERDICT_RETRY_FAILED_REASON = "the judge's retry failed and its first bundle was kept"
+
 
 def _answer_text(answer: Any) -> str:
     """The text of a model answer, whatever shape it arrived in, thinking aside."""
@@ -455,16 +464,32 @@ MEDIATION_CALL_SPANS = 4
 # able to end the negotiation, and must not be mistakable for a real score.
 _UNREADABLE_AGREEMENT = 0.0
 
-# ``agreement_confidence: 0.95`` / ``**confidence**= 95%`` / ``"confidence": 0.9``
-# / ``The confidence score is: 0.78``.
-#
-# A short run of anything-but-a-separator is allowed between the key and the
-# ``:``/``=`` so ordinary phrasing parses, but the number must follow the
-# separator **immediately**. That is the whole point: "Confidence: 0.95 (based
-# on 3 agents)" must yield 0.95, never the 3 — see
-# ``_extract_confidence_from_text`` for the false consensus that produced.
+# ``agreement_confidence: 0.95`` / ``**agreement_confidence:** 95%`` /
+# ``"agreement_confidence": 0.9`` / ``Agreement confidence = 0.9`` — the key the
+# system prompt asks for, written with an underscore or a space, and nothing
+# else. Any other "confidence: x" (a claim's, a technique's, the
+# mediator's own certainty) is not the agents' agreement, and read as one it
+# ended the negotiation on a consensus nobody stated. Only markdown emphasis and
+# quotes may sit around the separator; the number must follow them
+# immediately, so "agreement_confidence: 0.95 (based on 3 agents)" yields 0.95,
+# never the 3.
 _AGREEMENT_RE = re.compile(
-    r"confidence[^\n:=]{0,24}?[:=]\s*(\d*\.?\d+)\s*(%?)",
+    r"\bagreement(?:_|[^\S\n])confidence\b[*_`\"']*[^\S\n]*[:=][*_`\"'\s]*(\d*\.?\d+)\s*(%?)",
+    re.IGNORECASE,
+)
+
+# An explicit verdict statement in the judge's prose: ``Verdict: Benign``,
+# ``**Verdict:** Malware``, ``Verdict:`` with the word on the next line,
+# ``Final verdict - Malware.``, ``the verdict is suspicious``,
+# ``"verdict": "Malware"``. Only emphasis and quotes may sit around the
+# separator; the word must follow them, stand whole and end the statement (a
+# sentence or clause end, a parenthesis, a line end), so "the verdict is not
+# malware", "verdict: malware-free" and "the analysts' verdict - benign - is
+# wrong" state nothing; :func:`maljan.pipeline.outcome.normalise_verdict` is
+# what reads the word.
+_VERDICT_STATEMENT_RE = re.compile(
+    r"\bverdict\b[*_`\"']*[^\S\n]*(?:[:=\-\u2013\u2014]|\bis\b)[*_`\"'\s]*"
+    r"([A-Za-z]+)\b(?![-'\w])(?=[*_`\"']*[^\S\n]*(?:[.;:!?,(\n]|\Z))",
     re.IGNORECASE,
 )
 
@@ -1610,6 +1635,11 @@ def _who_is_asked(message: Any) -> str | None:
 def _seconds_or_none(value: Any) -> float | None:
     """``value`` as seconds, or ``None`` for no limit."""
     return None if value is None else float(value)
+
+
+def _prompt_chars(messages: Sequence[Any]) -> int:
+    """How many characters a call's turns carry, which its wait is sized from."""
+    return sum(len(str(getattr(message, "content", ""))) for message in messages)
 
 
 def _last_ledger_facts(history: Sequence[Any], field: str = "ledger_facts") -> list[str]:
@@ -3249,10 +3279,8 @@ class JudgeAgent(BudgetMeter):
         # And then held to the model's measured pace: the verdict may take its
         # whole ``judge_max_tokens``, which a slow model cannot generate inside
         # a timeout chosen for a fast one (``llm.generation_rate``).
-        timeout = self._verdict_timeout(
-            _seconds_or_none(loop_limits("judge")[0]),
-            sum(len(str(getattr(message, "content", ""))) for message in messages),
-        )
+        configured_timeout = _seconds_or_none(loop_limits("judge")[0])
+        timeout = self._verdict_timeout(configured_timeout, _prompt_chars(messages))
         self.logger.info(
             "JudgeAgent invoking verdict LLM (timeout=%s)...", limit_text(timeout, "s")
         )
@@ -3289,9 +3317,26 @@ class JudgeAgent(BudgetMeter):
             record_judge_response(getattr(self, "truncation_ledger", None), answer, cap=cap)
             return answer
 
+        # How many verdict calls were sent. The retry's prompt is the first
+        # one with the answer and the feedback after it, so its wait is sized
+        # from its own prompt at the model's pace, as the first call's was —
+        # a retry held to the first call's wait timed out where its longer
+        # prompt needed longer.
+        calls = 0
+
         async def _run(turns: list[Any]) -> Any:
-            nonlocal timed_out
+            nonlocal timed_out, calls
             timed_out = False
+            calls += 1
+            wait = timeout
+            if calls > 1:
+                wait = self._verdict_timeout(
+                    configured_timeout, _prompt_chars(turns), call="judge:verdict_retry"
+                )
+                self.logger.info(
+                    "JudgeAgent invoking verdict retry (timeout=%s)...", limit_text(wait, "s")
+                )
+                restart_models(self.llm, loop_seconds=wait, share=self._turn_share())
             try:
                 # On the shared agent loop, not on the graph's. The judge's
                 # model is one cached client and the mediator has already used
@@ -3304,11 +3349,9 @@ class JudgeAgent(BudgetMeter):
                 # connection and the retry, opening a fresh one, always
                 # succeeded. See ``run_on_agent_loop`` for the same fault in
                 # the mediator, and for why one loop owns every LLM call.
-                return await run_on_agent_loop(_ask(turns), timeout, label="judge:verdict")
+                return await run_on_agent_loop(_ask(turns), wait, label="judge:verdict")
             except TimeoutError:
-                self.logger.error(
-                    "JudgeAgent verdict timed out after %s.", limit_text(timeout, "s")
-                )
+                self.logger.error("JudgeAgent verdict timed out after %s.", limit_text(wait, "s"))
                 timed_out = True
                 return "[TIMEOUT]"
 
@@ -3335,7 +3378,78 @@ class JudgeAgent(BudgetMeter):
         as_written: list[dict[str, Any]] = []
         tally = ValidationTally()
 
+        # What the first parse left for the checks to read, so that a first
+        # bundle kept over a failed retry is validated as it was, not with the
+        # retry's state; and how the failed retry failed, for its row.
+        first_state: dict[str, Any] | None = None
+        retry_failure = ""
+
         def _parse(answer: Any) -> Bundle:
+            nonlocal first_state
+            parsed = _parse_answer(answer)
+            if attempts == 1:
+                first_state = {
+                    "timed_out": timed_out,
+                    "not_json": not_json,
+                    "cut_at": cut_at,
+                    "cut_text": cut_text,
+                    "shape": list(shape),
+                    "where": list(where),
+                    "labels": dict(labels),
+                    "as_written": list(as_written),
+                }
+            return parsed
+
+        def _keep(first: Bundle, last: Bundle) -> Bundle:
+            """The first bundle when the retry failed and the first was a bundle; else the last.
+
+            A retry that timed out, or answered prose or JSON that was not a
+            bundle without stating an assessment, has said nothing about the
+            sample, and the bundle the first answer stated is the judge's
+            verdict, with what is still wrong with it. A retry that stated its
+            assessment is kept, however it ended. The first parse's state is restored, so it is
+            validated, dropped from and published as it was.
+            """
+            nonlocal timed_out, not_json, cut_at, cut_text, retry_failure
+            state = first_state
+            if (
+                state is None
+                or state["timed_out"]
+                or state["not_json"]
+                or first.x_maljan_fallback_verdict is not None
+            ):
+                return last
+            if not timed_out and last.x_maljan_assessment is not None:
+                # The retry stated its assessment — whole, cut after it, or in
+                # JSON that was not a bundle — and that statement is its
+                # correction, read as written.
+                return last
+            if timed_out:
+                failure = "it did not answer within its budget"
+            elif not_json:
+                failure = "it answered with text that is not a JSON bundle"
+            elif last.x_maljan_fallback_verdict is not None:
+                failure = "it answered JSON that is not a bundle"
+            else:
+                return last
+            timed_out = state["timed_out"]
+            not_json = state["not_json"]
+            cut_at = state["cut_at"]
+            cut_text = state["cut_text"]
+            shape[:] = state["shape"]
+            where[:] = state["where"]
+            labels.clear()
+            labels.update(state["labels"])
+            as_written[:] = state["as_written"]
+            retry_failure = failure
+            self.logger.warning(
+                "Judge verdict: the retry failed (%s); the first bundle is kept with what is "
+                "still wrong with it.",
+                failure,
+            )
+            return first
+
+        def _parse_answer(answer: Any) -> Bundle:
             nonlocal not_json, attempts, cut_at, cut_text
             attempts += 1
             cut_at = None
@@ -3458,12 +3572,23 @@ class JudgeAgent(BudgetMeter):
             stage=str(getattr(self, "pipeline_stage", "") or "verdict"),
             # The cut answer is described, not repeated: see verdict_cut_violation.
             drop_answer_for=frozenset({VERDICT_CUT_CODE}),
+            keep=_keep,
             # A kept indicator after the sandbox's fact is the judge's answer,
             # and the conversation is told so before it is told the rest.
             answered=lambda left, told: kept_after_the_sandbox_fact(not_asked(left, told)),
         )
         violations = kept_after_the_sandbox_fact(not_asked(violations, shown))
         _from_the_loop = list(violations)
+        if retry_failure:
+            # The first bundle stands; the retry's failure is its own row, not
+            # a timeout or a fallback of the verdict the run publishes.
+            violations = [
+                *violations,
+                Violation(
+                    code=VERDICT_RETRY_FAILED_CODE,
+                    message=f"{VERDICT_RETRY_FAILED_REASON}: {retry_failure}",
+                ),
+            ]
         if timed_out:
             # No answer at all, so there is nothing to feed back and nothing
             # was: the bundle is this pipeline's own conservative verdict.
@@ -4021,31 +4146,25 @@ class JudgeAgent(BudgetMeter):
 
     @staticmethod
     def _verdict_from_text(text: str) -> str:
-        """Token-level verdict extraction.
+        """The verdict the judge's prose states explicitly, or the inconclusive one.
 
-        The previous implementation searched for ``"malware"`` and
-        ``"benign"`` as substrings, which let phrases like *"not malware"*
-        or *"likely not benign"* flip the result. We now tokenise into
-        word-shape segments and ignore negation neighbours.
+        Only a verdict statement counts (``_VERDICT_STATEMENT_RE``). Statements
+        that disagree — the judge's own and a quoted one, a draft and a
+        correction — leave the verdict inconclusive: which one is the judge's
+        cannot be read from the words. Any other mention of a verdict word is
+        not a verdict. The previous reader
+        took the first "malware" not preceded by a negator, before it looked
+        for "benign" at all, so "isn't malware", "no evidence of malware" and
+        "a legitimate anti-malware updater" were published as Malware.
         """
-        import re
+        from maljan.pipeline.outcome import INCONCLUSIVE_VERDICT, normalise_verdict
 
-        tokens = re.findall(r"[a-z]+", text.lower())
-        if not tokens:
-            return "Suspicious"
-
-        negators = {"not", "no", "non", "neither", "without", "isn't"}
-        for i, tok in enumerate(tokens):
-            if tok == "malware":
-                prev = tokens[i - 1] if i > 0 else ""
-                if prev not in negators and prev != "non":
-                    return "Malware"
-        for i, tok in enumerate(tokens):
-            if tok in {"benign", "clean"} or tok.startswith("non-malicious"):
-                prev = tokens[i - 1] if i > 0 else ""
-                if prev not in negators:
-                    return "Benign"
-        return "Suspicious"
+        stated: set[str] = set()
+        for match in _VERDICT_STATEMENT_RE.finditer(text or ""):
+            word = normalise_verdict(match.group(1))
+            if word is not None:
+                stated.add(word)
+        return next(iter(stated)) if len(stated) == 1 else INCONCLUSIVE_VERDICT
 
     def _fallback_bundle_from_text(
         self,
@@ -4374,16 +4493,20 @@ class JudgeAgent(BudgetMeter):
     def _extract_confidence_from_text(text: str) -> float | None:
         """Read the mediator's agreement score, or ``None`` if it is not there.
 
-        The number must sit **adjacent to the key** — the previous version
+        Only the ``agreement_confidence`` line the system prompt asks for is
+        read (``_AGREEMENT_RE``); anything else is unreadable, which the caller
+        records as ``_UNREADABLE_AGREEMENT``. The bare word used to be accepted
+        too, so a claim's "confidence: 0.92" quoted in the reasoning was read
+        as the agents' agreement and ended the negotiation on a consensus no
+        one stated.
+
+        The number must sit **adjacent to the key** — an earlier version
         accepted any token on any line mentioning "confidence" and clamped it
         into range, so ``"Confidence: 0.95 (based on 3 agents)"`` scanned in
         reverse, hit ``3``, clamped to 1.0 and declared instant consensus off
         a number that was never a score. Out-of-range values are therefore
         rejected rather than clamped: clamping is what made the wrong token
         look legitimate.
-
-        The reasoning prompt asks for ``agreement_confidence``; the bare word
-        is accepted too because the model does not always echo the key.
         """
         matches = _AGREEMENT_RE.findall(text or "")
         for raw, pct in reversed(matches):  # the model's last word wins

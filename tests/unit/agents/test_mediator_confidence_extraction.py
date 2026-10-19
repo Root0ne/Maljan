@@ -22,8 +22,11 @@ Two defects, both measured on 2026-07-29 against the shipped implementation:
    consensus off a hallucinated agreement. Clamping is what made the wrong
    token look legitimate, so the fix rejects out-of-range values instead.
 
-The reasoning prompt asks the model for ``agreement_confidence``, so both that
-key and the bare word must parse.
+3. **Any confidence, read as agreement.** The bare word was accepted beside
+   the key, so a claim's "confidence: 0.92" quoted in the reasoning was read as
+   the agents' agreement and ended the negotiation on a consensus nobody
+   stated. The system prompt asks for the ``agreement_confidence`` line and
+   promises that anything else is unreadable, so only that key is read.
 """
 
 from __future__ import annotations
@@ -43,7 +46,10 @@ class TestTheScoreIsReadWhenItIsThere:
             ("**agreement_confidence**: 0.95", 0.95),
             ("agreement_confidence = 0.95", 0.95),
             ('{"agreement_confidence": 0.95}', 0.95),
-            ("Confidence: 0.8", 0.8),
+            ("**agreement_confidence:** 0.9", 0.9),
+            ("agreement_confidence: **0.9**", 0.9),
+            ("Agreement confidence: 0.9", 0.9),
+            ("agreement confidence = 0.9", 0.9),
             ("AGREEMENT_CONFIDENCE: 1.0", 1.0),
             ("agreement_confidence: 0", 0.0),
         ],
@@ -64,19 +70,53 @@ class TestAnUnrelatedNumberIsNeverMistakenForTheScore:
     """The defect that could end a negotiation on a hallucinated agreement."""
 
     def test_a_trailing_parenthetical_count_is_not_the_score(self) -> None:
-        assert _extract("Confidence: 0.95 (based on 3 agents)") == pytest.approx(0.95)
+        assert _extract("agreement_confidence: 0.95 (based on 3 agents)") == pytest.approx(0.95)
 
     def test_a_bare_count_on_a_confidence_line_is_rejected(self) -> None:
         assert _extract("Confidence in this assessment: derived from 3 agents") is None
-
-    def test_ordinary_phrasing_between_key_and_separator_still_parses(self) -> None:
-        """Adjacency is about the *number*, not about forbidding words."""
-        assert _extract("The confidence score is: 0.78") == pytest.approx(0.78)
 
     def test_an_out_of_range_number_is_rejected_not_clamped(self) -> None:
         """Clamping is what made the wrong token look legitimate."""
         assert _extract("agreement_confidence: 3") is None
         assert _extract("agreement_confidence: -2") is None
+
+
+class TestOnlyTheAgreementLineIsRead:
+    """Any other confidence is not the agents' agreement (JA-3)."""
+
+    @pytest.mark.parametrize(
+        "text",
+        [
+            "Confidence: 0.8",
+            "The confidence score is: 0.78",
+            "**confidence**= 95%",
+            '{"confidence": 0.9}',
+            "static claims T1055 (claim confidence: 0.92) and dynamic agrees.\n"
+            "CONTRADICTIONS: NONE\n",
+            "technique_confidence: 0.9",
+            "agreement-confidence: 0.9",
+            "agreement\nconfidence: 0.9",
+            "disagreement_confidence: 0.9",
+        ],
+    )
+    def test_another_confidence_is_unreadable(self, text: str) -> None:
+        assert _extract(text) is None
+
+    def test_a_claim_confidence_beside_the_line_does_not_replace_it(self) -> None:
+        text = "agreement_confidence: 0.4\nstatic's claim (confidence: 0.99) stands."
+        assert _extract(text) == pytest.approx(0.4)
+
+    def test_the_probe_reasoning_does_not_end_the_negotiation(self) -> None:
+        from maljan.agents.judge_agent import _UNREADABLE_AGREEMENT, CONSENSUS_THRESHOLD
+
+        agent = JudgeAgent.__new__(JudgeAgent)
+        agent.logger = JudgeAgent.__init__.__globals__["logger"].getChild("judge")
+        verdict = agent._fallback_mediate(
+            "static claims T1055 (claim confidence: 0.92) and dynamic agrees.\n"
+            "CONTRADICTIONS: NONE\n"
+        )
+        assert verdict.confidence == _UNREADABLE_AGREEMENT
+        assert verdict.confidence < CONSENSUS_THRESHOLD
 
 
 class TestFailureIsReportedNotInvented:
