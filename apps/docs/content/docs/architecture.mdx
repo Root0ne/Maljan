@@ -3904,6 +3904,87 @@ hundred long parameters cannot shrink the budget its own answer is shortened
 into. An answer no guardrail saw — an in-process tool's — is not shortened at
 all and carries no notice.
 
+**How complete an answer is.** A page of rows read as the whole is how a short
+or empty page becomes "none". Every tool answer the recorder hands a model
+carries one more line, of fixed platform wording beginning `Completeness:`,
+when the answer is known to be partial, and nothing when it is not or when that
+cannot be read (`schemas.answer_completeness`). The rule is the coverage
+record's: never say "partial" about a complete answer, and where the structure
+cannot bind a number to a list, say nothing.
+
+Paging words are read in the answer's *paged mappings*: its top level, and any
+mapping that holds a list and is not itself inside a list (a row is data, never
+a page), each together with its list-free mapping children, where an answer
+keeps its paging block whatever it calls it (`meta`, `links`, `pageInfo`). A
+flag is read in any mapping. The line is built only from:
+
+- the answer's explicit words, from one generic list: a true flag (`truncated`,
+  `more`, `has_more`, `hasNextPage`, `IsTruncated`, matched ignoring case and
+  underscores); a given next field (`next`, `cursor`, `<part>_next_offset`, or
+  a `next…` name ending in offset, cursor, page, token, url, link or marker:
+  `nextCursor`, `next_page_token`, `NextContinuationToken`). A paged mapping
+  that carries any of these has said whether it is complete, so a `total` of
+  runs scanned beside a filtered last page is not read as a missing page;
+- counts the structure binds to a list: `total` when the mapping holds exactly
+  one list, `total_<name>` or `<name>_total` for the list `<name>`, a `totals`
+  entry for the list of its name. A `total` beside several lists binds to none
+  and says nothing. A bound count is partial only when no placing of the page
+  makes it the last: the page starts at the answer's own offset field, else
+  the call's `offset` argument, else page N times its size counted from 0 or
+  1, else 0. A last page (offset plus rows shown reaching the count) gets no
+  line;
+- page fields: page N of M only when it is before the last whichever way pages
+  are counted (page 0 of 1 is complete), and a page number with no count, no
+  bound count and no explicit word, the one case "unknown" is said;
+- the call's declared paging arguments: a call that passed a bounding argument
+  of its tool's schema (`limit`, `k`, `max_…`, `…_limit`, `page_size`:
+  `output_shortening.bounding_arguments`) and got back a primary list (the
+  answer itself, or the top level's only list) exactly that long, with no
+  explicit word, bound count or page field at the top level, is told it holds
+  as many rows as that argument allowed;
+- the platform's own cut: the characters the guardrail left out
+  (`chars_dropped`), whether it cut the text, summarised it or left it out. A
+  JSON answer shortened as a document carries the sentence above: the cut is
+  not stated twice, and its counts and top-level `truncated` are not read,
+  since the shortening may have made them. Where the job keeps a store the
+  whole answer is kept beside the entry, and the line does not say so: what
+  the model reads never depends on whether the job has a store.
+
+A count, page, offset or size whose digits outnumber the characters of the
+answer's own text cannot have come from it: the shape reads as unknown and no
+structural clause is written. The line is therefore fixed wording, a handful of
+names of at most forty characters (anything but a plain identifier is written
+`a field`, and a name is written escaped), and numbers no longer than the
+answer; no value the tool sent is quoted.
+
+Every line ends with "Anything not shown here is unknown, not absent" and how
+to read further. Only the paging arguments of the tool that made the answer
+are named (`output_shortening.paging_arguments`: offset, limit, cursor, page,
+`k` and their declared forms, never a filter such as `pattern` or `query`), and
+only where what is partial is the top level they page; a partial part further
+down is "no argument of this tool pages that part". A `read_evidence` answer
+names the paging arguments of the tool whose answer it reads, not its own.
+
+Both guardrails keep the line's room back: beside a text cut or a summary
+(`answer_completeness.cut_line_room`) and from a shortening's target
+(`answer_completeness.shortened_line_room`, read off the original, which the
+shortening leaves every paging word of), so a cut answer and its line together
+stay inside the limit, while some of the answer still fits beside the line: a
+limit too small for both keeps the answer's place as it always did. The
+guardrail says which on the call (`context_window.note_answer_line_room`), and
+any line whose room was not kept back is charged to the agent's conversation.
+The line appears under a call's own answer, under a decompile answered with a
+function an earlier entry holds, under a `read_evidence` answer (with the cut
+the held entry recorded, or the read's own if larger) and under an earlier
+chunk's or round's recorded result (with the cut its first showing stated);
+never in the ledger, which keeps what the tool said, and never in a system
+prompt.
+
+The coverage record reads the same answers with the same reading
+(`read_answer(...).capped`, `platform_cut`): a call is `capped` exactly where
+the line speaks of its structure, a complete `total` caps nothing, and an
+answer with a malformed number reads as of no readable shape.
+
 The sentence a reader sees is drawn above the section's table, not as a row in
 it: the bookkeeping is this system's account of its own handling, and a
 key-value table is a table of facts about the sample. The map's every path

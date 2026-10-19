@@ -42,13 +42,18 @@ read its whole input, by the one declaration that says so today (the
 tool of any other kind never reads whole; (b) every argument it was passed is
 a declared input role, since no declaration marks any other argument as not
 narrowing, so any other argument makes the read part, named; (c) the answer
-was not cut and carries no marker, at any depth, that it holds part of its
-rows (``truncated``, ``more``, ``has_more``, a ``next_offset``, ``total``,
-``totals``, the shortening bookkeeping), and an answer of no readable shape
-reads ``unknown``; (d) the input's own record is complete: a negative over a
-sandbox report that was not observed is ``failed``, and one over an observed
-report naming no capture is ``partial``; (e) the input read is the sample: a
-read of a layer, another file or an argument alone does not stand for it.
+was not cut and is not known to hold part of its rows or an unknown share of
+them, by the one reading the line under every tool answer is built from
+(``schemas.answer_completeness``): a true paging flag, a given next field, a
+count bound to its list and above the rows shown however the page is placed,
+a page before the last, a page of unknown count, the shortening bookkeeping. A
+complete ``total`` caps nothing, so the record and the line agree on every
+answer. An answer of no readable shape, or one holding a number longer than
+its own text, reads ``unknown``; (d) the input's own record is
+complete: a negative over a sandbox report that was not observed is
+``failed``, and one over an observed report naming no capture is ``partial``;
+(e) the input read is the sample: a read of a layer, another file or an
+argument alone does not stand for it.
 Most calls read ``partial`` or ``input_unknown`` today, which is the honest
 value.
 
@@ -339,6 +344,7 @@ def _entry_id(entry: Any) -> str:
 def _state(entry: Any) -> str:
     """How the entry's answer stands (:data:`ANSWERED`, :data:`CUT` …)."""
     from maljan.pipeline.triage_pack import NOT_RUN_PREFIX
+    from maljan.schemas.answer_completeness import platform_cut
     from maljan.schemas.evidence import answer_not_shown, is_guard_answer
 
     if is_guard_answer(entry):
@@ -348,7 +354,7 @@ def _state(entry: Any) -> str:
         return NOT_RUN if said.startswith(NOT_RUN_PREFIX) else CALL_FAILED
     if answer_not_shown(entry):
         return NOT_SHOWN
-    if int(_field(entry, "chars_dropped") or 0) > 0:
+    if platform_cut(entry) > 0:
         return CUT
     return ANSWERED
 
@@ -400,36 +406,28 @@ def _structure(entry: Any) -> Any:
     return parse_structured(str(_field(entry, "output") or ""))
 
 
-# The words the platform's answers say they hold part of their rows by: a
-# ``truncated`` or ``more`` flag, a ``next_offset`` (or ``<part>_next_offset``),
-# a ``total`` or a ``totals`` map beside a list cut at its limit
-# (``tools.binary._within_limit``), and the shortening bookkeeping
-# (``output_shortening.BOOKKEEPING_KEY``). Read at any depth.
-_CAP_FLAGS = frozenset({"truncated", "more", "has_more"})
-_CAP_COUNTS = frozenset({"total", "totals"})
+def _reading(entry: Any, structure: Any) -> Any:
+    """The answer's completeness reading, the one the line under every tool answer is built from.
 
+    ``schemas.answer_completeness.read_answer``, with the call's arguments (its
+    ``offset`` places a page) and the answer's text length (no number in it can
+    be longer). ``capped`` is true exactly where the line speaks of the
+    answer's structure: a true paging flag, a given next field, a count bound
+    to its list and above the rows shown on every placing of the page, a page
+    before the last, a page of unknown count, or the shortening bookkeeping. A
+    complete ``total`` caps nothing.
+    """
+    from maljan.schemas.answer_completeness import read_answer
 
-def _capped(structure: Any) -> bool:
-    """Whether the answer says, anywhere in it, that it holds part of its rows. One pass."""
-    from maljan.agents.output_shortening import BOOKKEEPING_KEY
-
-    stack = [structure]
-    while stack:
-        node = stack.pop()
-        if isinstance(node, Mapping):
-            for key, value in node.items():
-                name = str(key)
-                if name == BOOKKEEPING_KEY or name in _CAP_COUNTS:
-                    return True
-                if name in _CAP_FLAGS and value is True:
-                    return True
-                if (name == "next_offset" or name.endswith("_next_offset")) and value is not None:
-                    return True
-                if isinstance(value, Mapping | list | tuple):
-                    stack.append(value)
-        elif isinstance(node, list | tuple):
-            stack.extend(node)
-    return False
+    args = _field(entry, "args")
+    # The text the structure was read from bounds its numbers; a structure the
+    # server returned beside its text has no such text.
+    held = _field(entry, "structured") is not None
+    return read_answer(
+        structure,
+        args=args if isinstance(args, Mapping) else None,
+        text_chars=None if held else len(str(_field(entry, "output") or "")),
+    )
 
 
 # The consumer table naming the kinds declared to state a fact about the file
@@ -559,7 +557,8 @@ def _call(
     # any as not narrowing, so each one may narrow the read.
     narrowed = [name for name in args if name not in used and not _empty(args.get(name))]
     structure = _structure(entry) if state in _READ else None
-    capped = _capped(structure)
+    reading = _reading(entry, structure)
+    capped = reading.capped
     whole = declared and _declared_whole(entry)
     limits: list[str] = []
     if state == CUT:
@@ -574,8 +573,9 @@ def _call(
         read = NOT_KNOWN
     elif limits:
         read = PART
-    elif state in _READ and not isinstance(structure, Mapping | list):
-        # The answer has no shape the record can read its markers from.
+    elif state in _READ and (not isinstance(structure, Mapping | list) or reading.malformed):
+        # The answer has no shape the record can read its markers from, or a
+        # number in it longer than the text it came from.
         read = SHAPE_UNKNOWN
     else:
         read = WHOLE
@@ -597,7 +597,9 @@ def _call(
     if state in (CALL_FAILED, NOT_RUN):
         call["reason"] = _reason(entry)
     if state == CUT:
-        call["dropped"] = int(_field(entry, "chars_dropped") or 0)
+        from maljan.schemas.answer_completeness import platform_cut
+
+        call["dropped"] = platform_cut(entry)
     return call
 
 

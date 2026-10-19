@@ -270,6 +270,10 @@ class EvidenceRecorder:
         # Each entry by its id, kept beside the list so following a repeat to
         # its holder is one lookup per hop.
         self._by_id: dict[str, LedgerEntry] = {}
+        # The narrowing arguments the tool that made each entry's answer
+        # offered, by the entry's id: what a read-again answer's completeness
+        # line names for the tool that made it, never looked up by a name.
+        self._narrowing: dict[str, tuple[str, ...]] = {}
         # ``None`` outside a job, which makes every emit a no-op, exactly as
         # it does everywhere else in the pipeline.
         self.sink = sink
@@ -323,6 +327,25 @@ class EvidenceRecorder:
     def filed(self, entry_id: str) -> bool:
         """Whether this loop filed an entry under this id."""
         return str(entry_id or "").strip() in self._by_id
+
+    def entry_of(self, entry_id: str) -> LedgerEntry | None:
+        """The entry this loop filed under this id, or ``None``."""
+        return self._by_id.get(str(entry_id or "").strip())
+
+    def cut_of(self, entry_id: str) -> int:
+        """The characters the platform left out of the answer this entry holds (``platform_cut``)."""
+        from maljan.schemas.answer_completeness import platform_cut
+
+        entry = self._by_id.get(str(entry_id or "").strip())
+        return platform_cut(entry) if entry is not None else 0
+
+    def note_narrowing(self, entry_id: str, narrowing: Sequence[str]) -> None:
+        """Remember the narrowing arguments the tool that answered this entry offered."""
+        self._narrowing[str(entry_id or "").strip()] = tuple(narrowing)
+
+    def narrowing_of(self, entry_id: str) -> tuple[str, ...]:
+        """The narrowing arguments of the tool that made this entry's answer, as it offered them."""
+        return self._narrowing.get(str(entry_id or "").strip(), ())
 
     def entry_failed(self, entry_id: str) -> bool:
         """Whether the entry with this id recorded a failure.
@@ -635,6 +658,9 @@ class RepeatGuard:
         # a call on that server that may change state makes the seed stale
         # (:meth:`forget_round_seeds`).
         self._seed_servers: dict[str, str] = {}
+        # The characters the platform left out of each seeded answer
+        # (``platform_cut``), which its replay states as its first showing did.
+        self._cuts: dict[str, int] = {}
 
     def _seeded_count(self, key: str) -> int:
         """Where a seeded call's count starts: one served retry for a failure or an unkept result."""
@@ -652,6 +678,7 @@ class RepeatGuard:
         rerun: bool = False,
         origin: str = "",
         server: str = "",
+        cut: int = 0,
     ) -> None:
         """A call an earlier chunk made: an identical one is answered from its entry, not run.
 
@@ -678,6 +705,8 @@ class RepeatGuard:
             self._seeded_reruns.add(str(entry_id))
         elif recorded is not None:
             self._recorded.setdefault(str(entry_id), str(recorded))
+            if cut:
+                self._cuts.setdefault(str(entry_id), int(cut))
         self._first.setdefault(key, str(entry_id))
         self._count[key] = max(self._count.get(key, 0), self._seeded_count(key))
 
@@ -694,6 +723,10 @@ class RepeatGuard:
             return None
         self._told.add(key)
         return entry, self._recorded[entry]
+
+    def recorded_cut(self, entry_id: str) -> int:
+        """The characters the platform left out of a seeded answer when it was first shown."""
+        return self._cuts.get(str(entry_id), 0)
 
     def first_touch_of_seed(self, tool: str, kwargs: dict[str, Any]) -> bool:
         """Whether this is the conversation's first ask of a seeded call; marks it asked.
@@ -920,7 +953,17 @@ def seeded_repeat_guard(
             guard.seed(tool, args, entry_id, rerun=True, origin=origin, server=server)
             continue
         output = str(getattr(entry, "output", "") or "")
-        guard.seed(tool, args, entry_id, recorded=output, origin=origin, server=server)
+        from maljan.schemas.answer_completeness import platform_cut
+
+        guard.seed(
+            tool,
+            args,
+            entry_id,
+            recorded=output,
+            origin=origin,
+            server=server,
+            cut=platform_cut(entry),
+        )
         if entry_decompiles(entry):
             guard.note_function(listed_function(output), entry_id, output)
     return guard
@@ -974,6 +1017,9 @@ def earlier_chunk_answer(
     narrowing: Sequence[str] = (),
     *,
     origin: str = EARLIER_CHUNK,
+    args: Mapping[str, Any] | None = None,
+    cut: int = 0,
+    charge: Callable[[str], str] | None = None,
 ) -> str:
     """What a later chunk's call an earlier chunk made is answered with.
 
@@ -981,14 +1027,24 @@ def earlier_chunk_answer(
     a call's own answer is stamped, and one sentence saying where it came
     from. No tool runs. The call is filed as a repeat of that entry
     (``EvidenceRecorder.record_repeat``), whose id the model is not shown:
-    the entry that holds the result is the one to cite.
+    the entry that holds the result is the one to cite. ``cut`` is the
+    characters the platform left out of it when it was first shown, which its
+    completeness line states again; ``charge`` charges that line to the
+    conversation it enters.
     """
     # The notice the original answer carried when it was shortened, read off
     # the recorded text the same way (``_stamp``).
     shortened = shortened_notice(recorded, narrowing=narrowing)
+    # And how complete the recorded answer is, read off it the same way, with
+    # the cut its first showing stated.
+    complete = completeness_notice(
+        recorded, narrowing=narrowing, args=args, cut=cut, shortened=bool(shortened)
+    )
+    if charge is not None:
+        complete = charge(complete)
     shown = fenced(entry_id, recorded)
     said = earlier_chunk_sentence(tool, entry_id, origin=origin)
-    return f"[{entry_id}]\n{shown}{shortened}\n\n{said}"
+    return f"[{entry_id}]\n{shown}{shortened}{complete}\n\n{said}"
 
 
 def earlier_chunk_sentence(tool: str, entry_id: str, *, origin: str = EARLIER_CHUNK) -> str:
@@ -1048,6 +1104,46 @@ def shortened_notice(text: str, *, narrowing: Sequence[str] = ()) -> str:
     if not ours:
         return ""
     return shortening_sentence(narrowing, key=ours)
+
+
+def completeness_notice(
+    text: str,
+    *,
+    narrowing: Sequence[str] = (),
+    bounds: Sequence[str] = (),
+    args: Mapping[str, Any] | None = None,
+    cut: int = 0,
+    shortened: bool = False,
+    original: str | None = None,
+) -> str:
+    """The line under an answer known to be partial, or ``""`` (``schemas.answer_completeness``).
+
+    Read off the answer as the model reads it, before any notice is appended:
+    its own paging words and counts, the call's bounding arguments, and the
+    characters the platform left out of it. An answer whose completeness
+    cannot be read gets nothing. A reading that fails costs the call nothing
+    and is logged. ``shortened`` says the platform shortened the answer as a
+    document; the line is then read off the ``original`` when it is at hand,
+    exactly as the guardrail measured the room it kept for it
+    (``answer_completeness.shortened_line_room``).
+    """
+    from maljan.schemas.answer_completeness import completeness_line
+    from maljan.schemas.evidence import parse_structured
+
+    read = original if shortened and original is not None else text
+    try:
+        return completeness_line(
+            parse_structured(read),
+            narrowing=narrowing,
+            bounds=() if shortened else bounds,
+            args=args,
+            cut=cut,
+            text_chars=len(read),
+            platform_shortened=shortened,
+        )
+    except Exception as exc:  # noqa: BLE001 — a notice is never worth a lost call
+        logger.warning("completeness of a tool answer could not be read: %s", exc)
+        return ""
 
 
 # What both notices say on the call before the loop ends. One sentence, in one
@@ -1224,7 +1320,7 @@ def _record_tool(
     """
     from langchain_core.tools import StructuredTool
 
-    from maljan.agents.output_shortening import narrowing_arguments
+    from maljan.agents.output_shortening import bounding_arguments, narrowing_arguments
     from maljan.agents.tool_pinning import declared_facts_of, declared_source_of, server_of
 
     func = getattr(tool, "func", None)
@@ -1255,6 +1351,9 @@ def _record_tool(
     # is being given two accounts of the same tool. The guardrail that shortens
     # an answer reserves room for the sentence naming exactly these.
     narrowing = narrowing_arguments(accepted)
+    # Of those, the ones that bound how many rows come back: a call that passed
+    # one and got a list exactly that long is told its page is full.
+    bounds = bounding_arguments(accepted)
     # The read-again tool (``agents.tool_answer_clearing``): its answer is
     # another entry's, filed as a repeat of it.
     from maljan.agents.tool_answer_clearing import READS_EVIDENCE
@@ -1264,6 +1363,20 @@ def _record_tool(
     from maljan.agents.tool_pinning import answers_again
 
     reads_only = answers_again(tool)
+
+    def _charged(line: str, reserved: bool = False) -> str:
+        """``line``, charged to this agent's conversation: it enters it beside the answer.
+
+        Not where the guardrail kept the line's room for this call's answer
+        (``reserved``, ``context_window.note_answer_line_room``): beside a text
+        cut or a summary (``answer_completeness.cut_line_room``) or from a
+        shortening's target (``answer_completeness.shortened_line_room``).
+        """
+        from maljan.llm.context_window import ContextBudget
+
+        if line and not reserved and isinstance(context_budget, ContextBudget):
+            context_budget.charge(len(line), recorder.agent)
+        return line
 
     def _the_room_is_gone(kwargs: dict[str, Any]) -> str | None:
         """The line a call gets once this agent's conversation has no room left.
@@ -1356,8 +1469,15 @@ def _record_tool(
                 first=earlier,
                 said=earlier_chunk_sentence(name, earlier, origin=repeats.origin_of(earlier)),
             )
+            # Charged whole: this answer went through no guardrail now.
             return earlier_chunk_answer(
-                name, *recorded, narrowing, origin=repeats.origin_of(earlier)
+                name,
+                *recorded,
+                narrowing,
+                origin=repeats.origin_of(earlier),
+                args=kwargs,
+                cut=repeats.recorded_cut(earlier),
+                charge=_charged,
             )
         if not repeats.first_touch_of_seed(name, kwargs):
             repeats.note_repeat()
@@ -1474,8 +1594,23 @@ def _record_tool(
         )
         _note(kwargs, holder)
         shortened = shortened_notice(text, narrowing=narrowing)
+        # How complete the held answer is: the cut its first showing stated or
+        # the cut this read made, whichever is more, and the paging arguments
+        # of the tool that made it. Charged whole: the room this read's own
+        # guardrail kept was for a line naming no argument.
+        held = recorder.entry_of(holder)
+        held_args = getattr(held, "args", None)
+        complete = _charged(
+            completeness_notice(
+                text,
+                narrowing=recorder.narrowing_of(holder),
+                args=held_args if isinstance(held_args, Mapping) else None,
+                cut=max(recorder.cut_of(holder), int(cut or 0)),
+                shortened=bool(shortened),
+            )
+        )
         failed = recorder.entry_failed(holder)
-        return f"[{holder}]\n{fenced(holder, text)}{shortened}" + _steering(
+        return f"[{holder}]\n{fenced(holder, text)}{shortened}{complete}" + _steering(
             kwargs, repeated, failed=failed
         )
 
@@ -1489,6 +1624,7 @@ def _record_tool(
         cut: int | None = None,
         whole: str | None = None,
         whole_structure: dict[str, Any] | None = None,
+        line_room: bool = False,
     ) -> str:
         text = result_text(value)
         raw = _was_repaired(kwargs)
@@ -1538,6 +1674,9 @@ def _record_tool(
             whole=whole,
             whole_structure=whole_structure,
         )
+        # Kept by the entry's id, so a read-again answer of it names this
+        # tool's paging arguments, not its own.
+        recorder.note_narrowing(entry.id, narrowing)
         # A repeat is noted under the entry that holds its answer, so a later
         # served or refused identical call names that entry, never the repeat.
         _note(kwargs, entry.repeated_of or entry.id)
@@ -1546,20 +1685,51 @@ def _record_tool(
             # what the window keeps of this conversation. It is stamped with
             # the entry that holds the function, which is the one to cite.
             shortened = shortened_notice(text, narrowing=narrowing)
+            complete = _charged(
+                completeness_notice(
+                    text,
+                    narrowing=narrowing,
+                    bounds=bounds,
+                    args=kwargs,
+                    cut=int(cut or 0),
+                    shortened=bool(shortened),
+                    original=whole,
+                ),
+                line_room,
+            )
             repaired = REPAIRED_NOTICE if raw is not None else ""
-            return f"[{holder}]\n{fenced(str(holder), text)}{repaired}{shortened}\n\n{same}"
+            return (
+                f"[{holder}]\n{fenced(str(holder), text)}{repaired}{shortened}{complete}\n\n{same}"
+            )
         if repeats is not None and entry.ok and function is not None:
             repeats.note_function(function, entry.id, text)
         # Read off the answer itself, before any notice is appended to it: a
         # notice is prose and prose does not parse.
         shortened = shortened_notice(text, narrowing=narrowing)
+        # How complete the answer is known to be (``schemas.answer_completeness``):
+        # its own paging words, the call's bounding arguments, and the cut the
+        # platform made, which the entry holds as the coverage record reads it.
+        from maljan.schemas.answer_completeness import platform_cut
+
+        complete = _charged(
+            completeness_notice(
+                text,
+                narrowing=narrowing,
+                bounds=bounds,
+                args=kwargs,
+                cut=platform_cut(entry),
+                shortened=bool(shortened),
+                original=whole,
+            ),
+            line_room,
+        )
         # The answer as the one view shows it (``agents.tool_fence``): a text
         # answer inside a fence its content cannot close, a JSON one with its
         # raw breaks escaped; the platform's own notices stand outside it.
         text = fenced(entry.id, text)
         if raw is not None:
             text = f"{text}{REPAIRED_NOTICE}"
-        text = f"{text}{shortened}"
+        text = f"{text}{shortened}{complete}"
         # ``text``, not ``entry.output``: the ledger trims what it stores, and
         # what the model reads is not the ledger's business. The size of a tool
         # result in a prompt is decided where it has always been decided —
@@ -1662,6 +1832,7 @@ def _record_tool(
                     call_answer.cut,
                     call_answer.whole,
                     call_answer.structure,
+                    call_answer.line_room,
                 )
             except SampleNotOpened as exc:
                 return _stopped(kwargs, started, wall_clock, exc, repeated)
@@ -1701,6 +1872,7 @@ def _record_tool(
                     call_answer.cut,
                     call_answer.whole,
                     call_answer.structure,
+                    call_answer.line_room,
                 )
             except SampleNotOpened as exc:
                 return _stopped(kwargs, started, wall_clock, exc, repeated)

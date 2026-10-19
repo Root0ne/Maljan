@@ -125,6 +125,7 @@ __all__ = [
     "model_family",
     "no_room_sentence",
     "note_answer_cut",
+    "note_answer_line_room",
     "note_answer_not_shown",
     "note_answer_structure",
     "note_answer_whole",
@@ -1897,12 +1898,16 @@ class CallAnswer:
     its text (:func:`note_answer_structure`): what the recorder keeps whole
     for an entry that does not hold them (``schemas.evidence_spill``). Neither
     reaches the conversation.
+    ``line_room`` says the guardrail kept back, or charged, the room of the
+    completeness line the recorder appends to a cut answer
+    (:func:`note_answer_line_room`); the recorder charges the line otherwise.
     """
 
     not_shown: int | None = None
     cut: int | None = None
     whole: str | None = None
     structure: dict[str, Any] | None = None
+    line_room: bool = False
 
 
 _CALL_ANSWER: ContextVar[CallAnswer | None] = ContextVar("maljan_call_answer", default=None)
@@ -1945,6 +1950,13 @@ def note_answer_structure(content: Any) -> None:
     answer = _CALL_ANSWER.get()
     if answer is not None and isinstance(content, dict) and content:
         answer.structure = content
+
+
+def note_answer_line_room() -> None:
+    """Say, for the call being answered, that the guardrail kept the completeness line's room."""
+    answer = _CALL_ANSWER.get()
+    if answer is not None:
+        answer.line_room = True
 
 
 def note_answer_cut(chars: int) -> None:
