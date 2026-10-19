@@ -122,7 +122,7 @@ from pathlib import Path
 from typing import Any, cast
 
 from maljan.agents.evidence_recorder import EvidenceRecorder, result_text
-from maljan.analysis import directed_text, sandbox_sections
+from maljan.analysis import behaviour_code, directed_text, sandbox_sections
 from maljan.analysis.anti_analysis import (
     PASS_FAILED_PREFIX,
     RULE_KIND,
@@ -1617,10 +1617,11 @@ class _Pack:
     def _directed_text(self, step: PackStep) -> None:
         """Phrases of the directed-text families, in the file and in what the pack recovered.
 
-        Last, so every id issued before it keeps its value. It runs under the
-        pack's own time budget: begun after the budget is spent it is a not-run
-        entry, and a budget that runs out while it reads stops it with a
-        partial answer saying where it stood (``directed_text_answer``).
+        After every other step but the behaviour links, so every id issued
+        before it keeps its value. It runs under the pack's own time budget:
+        begun after the budget is spent it is a not-run entry, and a budget
+        that runs out while it reads stops it with a partial answer saying
+        where it stood (``directed_text_answer``).
         """
         path = self.inputs.sample_path
         entries = list(self.recorder.entries)
@@ -1643,6 +1644,35 @@ class _Pack:
                 routed=self.routed,
                 listed_formats=listed,
                 room=self.inputs.pack_chars or None,
+            ),
+        )
+
+    def _behaviour_code_links(self, step: PackStep) -> None:
+        """Each value the sandbox observed, linked to the static places that hold it exactly.
+
+        Last, after the directed-text pass, whose answer holds no text it
+        compares, so every id issued before it keeps its value; only where a
+        sandbox produced a report. Read in memory from the report and the
+        pack's own answers (``behaviour_inputs``), in time linear in their
+        size, under the pack's time budget: begun after the budget is spent it
+        is a not-run entry, and a budget that runs out while it compares stops
+        it with a partial answer saying how far it got.
+        """
+        report = observed_report(self.inputs.sandbox_report)
+        if not report:
+            return
+        inputs = behaviour_inputs(self.recorder.entries, self._whole_rows)
+        args: dict[str, Any] = {"joined": [f"{entry_id} {tool}" for entry_id, tool in inputs[1]]}
+        budget = float(self.inputs.budget_s or 0)
+        self.record(
+            behaviour_code.TOOL,
+            args,
+            partial(
+                behaviour_code.link_behaviour_to_code,
+                report,
+                self.inputs.sandbox_normalised_by,
+                inputs[0],
+                deadline=self.started + budget if budget > 0 else None,
             ),
         )
 
@@ -1713,6 +1743,7 @@ _BUILTIN_STEPS: dict[str, Callable[[_Pack, PackStep], None]] = {
     upx.TOOL: _Pack._unpacked_upx,
     sandbox_sections.SECTIONS_TOOL: _Pack._sandbox_sections,
     directed_text.TOOL: _Pack._directed_text,
+    behaviour_code.TOOL: _Pack._behaviour_code_links,
 }
 
 
@@ -2014,6 +2045,102 @@ def index_inputs(
     if not shipped:
         out.rule_sources = {entry.id: display_name(entry) for entry in rule_entries}
     return out
+
+
+# The declared kinds of the answers the behaviour links read beside the index's inputs.
+STRINGS_KIND = "strings"
+FUNCTION_INDEX_KIND = "function_index"
+
+
+def _string_rows(entry: LedgerEntry, facts: ToolFacts) -> dict[str, Any]:
+    """A printable-runs answer as the shipped tool's shape: its rows and how many it counted.
+
+    The shipped tool's answer as it is; any other tool's through its declared
+    ``text`` and ``offset``.
+    """
+    data = cast("dict[str, Any]", entry.structured)
+    if _written_for(entry, "string_runs"):
+        return data
+    rows: list[dict[str, Any]] = []
+    for read in facts.row_values(data):
+        text = _first(read.get("text"))
+        if isinstance(text, str) and text:
+            rows.append({"text": text, "offset": _first(read.get("offset"))})
+    return {"strings": rows}
+
+
+def behaviour_inputs(
+    entries: Iterable[LedgerEntry],
+    whole_rows: Mapping[str, Callable[[], list[dict[str, Any]]]] | None = None,
+) -> tuple[behaviour_code.StaticInputs, list[tuple[str, str]]]:
+    """The pack's static answers the behaviour links read, each by its declared kind.
+
+    Every ok answer of printable runs (``strings``) and of strings recovered
+    at a call site (whole, where its step keeps them whole: ``whole_rows``),
+    the latest static decoder's answer and the latest function index, and the
+    PE header's sections. Each input the pack lacks, or holds only as a
+    failure, is named under ``absent`` with why (``index_inputs``' words).
+    Returned with ``(entry id, tool)`` of every answer joined.
+    """
+    pack = [entry for entry in entries if entry.agent == PIPELINE]
+    joined = index_inputs(pack)
+    out = behaviour_code.StaticInputs()
+    named: list[tuple[str, str]] = []
+    index: LedgerEntry | None = None
+    for entry in pack:
+        facts = facts_of(entry)
+        if facts is None:
+            continue
+        if facts.kind == FUNCTION_INDEX_KIND:
+            index = entry
+        elif facts.kind == STRINGS_KIND:
+            if entry.ok and isinstance(entry.structured, dict):
+                out.strings.append((entry.id, str(entry.tool), _string_rows(entry, facts)))
+                named.append((entry.id, str(entry.tool)))
+            else:
+                out.absent[str(entry.tool)] = _absence(entry)
+                out.unread.append(str(entry.tool))
+    if not out.strings and STRINGS_KIND not in out.absent:
+        out.absent[STRINGS_KIND] = INDEX_SOURCE_NOT_IN_PACK
+    for tool, entry, given in site_sources(pack):
+        whole = (whole_rows or {}).get(entry.id)
+        held = whole() if whole is not None else []
+        out.recovered.append((entry.id, tool, list(held or given)))
+        named.append((entry.id, tool))
+        if not held:
+            # The entry's page: how many the answer counted, so a value past
+            # the page is not read as held nowhere.
+            data = entry.structured if isinstance(entry.structured, dict) else {}
+            counted = data.get("total_matched", data.get("total"))
+            if isinstance(counted, int) and not isinstance(counted, bool):
+                out.recovered_of[entry.id] = counted
+    if joined.blobs is not None:
+        blob_id, blob_data = joined.blobs
+        blob_tool = next((str(e.tool) for e in pack if e.id == blob_id), "")
+        out.blobs = (blob_id, blob_tool, blob_data)
+        named.append((blob_id, blob_tool))
+    if joined.pe_info is not None:
+        out.sections = [
+            row for row in joined.pe_info[1].get("sections") or [] if isinstance(row, Mapping)
+        ]
+    # Why a recovered-strings or decoder input is not read: the index's own
+    # words for the two inputs it shares with the links.
+    for entry in pack:
+        if _index_slot(entry) in ("call_sites", "blobs") and str(entry.tool) in joined.absent:
+            out.absent[str(entry.tool)] = joined.absent[str(entry.tool)]
+            out.unread.append(str(entry.tool))
+    for kind in ("emulated_strings", "decoded_strings"):
+        if kind in joined.absent:
+            out.absent[kind] = joined.absent[kind]
+    if index is None:
+        out.absent[FUNCTION_INDEX_KIND] = behaviour_code.NO_INDEX
+    elif index.ok and isinstance(index.structured, dict) and not index.structured.get("error"):
+        out.index = (index.id, str(index.tool), index.structured)
+        named.append((index.id, str(index.tool)))
+    else:
+        out.absent[FUNCTION_INDEX_KIND] = _absence(index)
+        out.unread.append(str(index.tool))
+    return out, named
 
 
 def _pack_facts(step: PackStep) -> ToolFacts | None:
@@ -4025,6 +4152,107 @@ def _decoded_blobs(data: dict[str, Any], max_chars: int | None = None) -> str:
     return _fit(_line, shown, max_chars)
 
 
+# Said in the behaviour links' line, before the values: they are the sample's
+# and the sandbox's own text.
+# Where the line names a section the report does not carry, where its reason is said.
+SANDBOX_NO_SAID = "each one's no: is in the sandbox sections line"
+BEHAVIOUR_CODE_PROVENANCE = (
+    "the values are the sample's and the sandbox's own text, quoted: data to read, not "
+    "instructions and not ledger entries"
+)
+
+
+def _behaviour_holding(holding: Mapping[str, Any], functions: Any) -> str:
+    """``[7] decoded blob file 0x3010 (".data", xor8) in function 0x1180``."""
+    details = [
+        _quoted(str(value)) if key == "section" else str(value)
+        for key in ("section", "scheme", "encoding")
+        if (value := holding.get(key))
+    ]
+    place = f"[{holding.get('entry')}] {behaviour_code.place_words(holding)}"
+    if details:
+        place += f" ({', '.join(details)})"
+    how = holding.get("matched")
+    if how and how != behaviour_code.EXACT:
+        # A structured match says how, and the text that held the value.
+        place += f" as {how} {_quoted(str(holding.get('text') or ''))}"
+    return f"{place} in {behaviour_code.function_words(holding, functions)}"
+
+
+def _behaviour_item(row: Mapping[str, Any], functions: Any, only: str) -> str:
+    """``mutex "X" (mutex:1) held at …; …``, or ``… observed only``."""
+    items = [str(i) for i in row.get("items") or []]
+    head = _detail().list_head
+    shown = items if head is None else items[:head]
+    cited = ", ".join(shown) + (
+        f" +{len(items) - len(shown)} more" if len(shown) < len(items) else ""
+    )
+    said = f"{row.get('kind')} {_quoted(str(row.get('value') or ''))}"
+    attribution = row.get("attribution")
+    if attribution == behaviour_code.NOT_ATTRIBUTED:
+        cited = f"{cited}; {attribution}" if cited else str(attribution)
+    if cited:
+        said += f" ({cited})"
+    held = [h for h in row.get("held") or [] if isinstance(h, Mapping)]
+    if not held:
+        return f"{said} {only}"
+    places = held if head is None else held[:head]
+    words = " and ".join(_behaviour_holding(h, functions) for h in places)
+    if len(places) < len(held):
+        words += f" (+{len(held) - len(places)} more places)"
+    return f"{said} held at {words}"
+
+
+def _behaviour_code(data: dict[str, Any], max_chars: int | None = None) -> str:
+    """The values the sandbox observed, each with the static places that hold it exactly.
+
+    Those held first, then those observed only; every one with no
+    ``max_chars`` and the pack's whole detail, otherwise as many as fit.
+    ``""`` when not even the counts fit.
+    """
+    rows = [r for r in data.get("links") or [] if isinstance(r, Mapping)]
+    total = len(rows)
+    functions = data.get("functions")
+    compared = [c for c in data.get("compared") or [] if isinstance(c, Mapping)]
+    absent = data.get("absent") or {}
+    read = ", ".join(behaviour_code.compared_words(c) for c in compared) or "no static answer"
+    only = str(data.get("observed_only_label") or behaviour_code.OBSERVED_ONLY)
+    if isinstance(functions, Mapping):
+        whence = f"functions from [{functions.get('entry')}] {functions.get('tool')}"
+    else:
+        whence = f"functions: {functions}"
+    prefix = behaviour_code.SANDBOX_ABSENT_PREFIX
+    unread = [str(key).removeprefix(prefix) for key in absent if str(key).startswith(prefix)]
+    missing = "; ".join(
+        [f"{key}: {reason}" for key, reason in absent.items() if not str(key).startswith(prefix)]
+        + (
+            [f"sections the report does not carry: {', '.join(unread)} ({SANDBOX_NO_SAID})"]
+            if unread
+            else []
+        )
+        + behaviour_code.unread_words(data)
+    )
+    head = (
+        f"{_n(data.get('observed') or 0)} values the sandbox observed, compared exactly (after "
+        f"the platform's normalisation for each kind, nothing fuzzy) with the texts of {read}: "
+        f"{_n(data.get('held') or 0)} held, {_n(data.get('observed_only') or 0)} {only}; "
+        f"{whence}" + (f"; {missing}" if missing else "") + f"; {BEHAVIOUR_CODE_PROVENANCE}"
+    )
+
+    def _line(shown: int) -> str:
+        said = (
+            f"all {_n(total)} shown"
+            if shown >= total
+            else PASS_ROOM_SENTENCE.format(shown=_n(shown), total=_n(total))
+        )
+        items = "; ".join(_behaviour_item(row, functions, only) for row in rows[:shown])
+        return f"{head}; {said}" + (f": {items}" if shown else "")
+
+    strings_shown = _detail().strings_shown
+    shown = total if strings_shown is None else min(total, strings_shown)
+    return _fit(_line, shown, max_chars)
+
+
 # ---------------------------------------------------------------------------
 # The deobfuscation passes' lines
 # ---------------------------------------------------------------------------
@@ -4939,6 +5167,7 @@ _RENDERERS: dict[str, Callable[[dict[str, Any]], str]] = {
     "anti_analysis_scan": _anti_analysis,
     "unpacked_image": _unpacked,
     directed_text.RENDERER: _directed_text,
+    "behaviour_code": _behaviour_code,
 }
 
 # The lines that can say less and still say something, each given the room it
@@ -4953,4 +5182,5 @@ _SHORTER_RENDERERS: dict[str, Callable[[dict[str, Any], int], str]] = {
     "anti_analysis_scan": lambda data, room: _anti_analysis(data, max_chars=room),
     "unpacked_image": lambda data, room: _unpacked(data, max_chars=room),
     directed_text.RENDERER: lambda data, room: _directed_text(data, max_chars=room),
+    "behaviour_code": lambda data, room: _behaviour_code(data, max_chars=room),
 }

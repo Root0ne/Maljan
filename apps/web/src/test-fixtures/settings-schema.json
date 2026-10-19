@@ -10793,6 +10793,10 @@
        {
         "meaning": "phrases of the directed-text families, counted and quoted by group",
         "name": "directed_text"
+       },
+       {
+        "meaning": "values a sandbox observed, each with the static places that hold it exactly",
+        "name": "behaviour_code"
        }
       ],
       "replacing_fields": [
@@ -11045,6 +11049,11 @@
         "display_name": "directed-text phrases",
         "id": "find_directed_text",
         "renderer": "directed_text"
+       },
+       {
+        "display_name": "behaviour to code",
+        "id": "behaviour_code_links",
+        "renderer": "behaviour_code"
        }
       ],
       "shipped_compared": {
@@ -11058,6 +11067,10 @@
        },
        "archive_list": {
         "called": "archive_list",
+        "server": ""
+       },
+       "behaviour_code_links": {
+        "called": "behaviour_code_links",
         "server": ""
        },
        "capa": {

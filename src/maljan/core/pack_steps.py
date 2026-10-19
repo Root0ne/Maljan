@@ -141,6 +141,7 @@ PACK_RENDERERS: dict[str, str] = {
     "unpacked_image": "an unpacked program and where it now is",
     "function_table": "a function index, placed in the room the rest of the pack leaves",
     "directed_text": "phrases of the directed-text families, counted and quoted by group",
+    "behaviour_code": "values a sandbox observed, each with the static places that hold it exactly",
 }
 
 # The validation context under which a step is one of the shipped list's:
@@ -417,12 +418,17 @@ def _shipped() -> tuple[PackStep, ...]:
             display_name="sandbox-called api catalogue",
         ),
         # Phrases of the directed-text families, in the file and in what the
-        # steps above recovered; last, so every earlier id keeps its value.
+        # steps above recovered; after every other step but the behaviour
+        # links, so every earlier id keeps its value.
         _o(
             id="find_directed_text",
             renderer="directed_text",
             display_name="directed-text phrases",
         ),
+        # The values the sandbox observed linked to the static places that
+        # hold them, read from the answers above: last, after the directed-text
+        # pass (which holds no text it compares), so every id issued before keeps its value.
+        _o(id="behaviour_code_links", renderer="behaviour_code", display_name="behaviour to code"),
     )
 
 

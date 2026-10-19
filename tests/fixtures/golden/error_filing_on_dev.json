@@ -64,6 +64,7 @@
   "pack::api_capability": [[true, null], [true, null], [true, null], [true, null], [true, null], [false, "the binary is not loaded"], [true, null], [true, null], [true, null], [true, null]],
   "pack::apk_info": [[true, null], [true, null], [true, null], [true, null], [true, null], [false, "the binary is not loaded"], [true, null], [true, null], [true, null], [true, null]],
   "pack::archive_list": [[true, null], [true, null], [true, null], [true, null], [true, null], [false, "the binary is not loaded"], [true, null], [true, null], [true, null], [true, null]],
+  "pack::behaviour_code_links": [[true, null], [true, null], [true, null], [true, null], [true, null], [false, "the binary is not loaded"], [true, null], [true, null], [true, null], [true, null]],
   "pack::capa": [[true, null], [true, null], [true, null], [true, null], [true, null], [false, "the binary is not loaded"], [true, null], [true, null], [true, null], [true, null]],
   "pack::decode_string_blobs": [[true, null], [true, null], [true, null], [true, null], [true, null], [false, "the binary is not loaded"], [true, null], [true, null], [true, null], [true, null]],
   "pack::document_info": [[true, null], [true, null], [true, null], [true, null], [true, null], [false, "the binary is not loaded"], [true, null], [true, null], [true, null], [true, null]],

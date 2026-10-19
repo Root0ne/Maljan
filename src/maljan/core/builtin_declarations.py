@@ -559,6 +559,7 @@ _PACK_TOOLS: dict[str, dict[str, Any]] = {
     "pcap_summary": _PCAP_SUMMARY,
     "sandbox_status": {"kind": "sandbox_status"},
     "sandbox_sections": {"kind": "sandbox_sections"},
+    "behaviour_code_links": {"kind": "behaviour_code_links"},
     **{
         name: _SANDBOX_TOOLS[name]
         for name in (
@@ -720,6 +721,7 @@ BUILDER_OF_KIND: dict[str, str] = {
     "sandbox_report_section": "_sandbox_section",
     "sandbox_items": "_sandbox_items",
     "sandbox_status": "_sandbox_status",
+    "behaviour_code_links": "_behaviour_code",
     "pcap": "_pcap",
     **{kind: "_reputation" for kind in REPUTATION_KINDS},
 }

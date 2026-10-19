@@ -355,6 +355,7 @@ class TestTheSandboxSteps:
             "function_index",
             "sandbox_sections",
             "find_directed_text",
+            "behaviour_code_links",
         ]
         (lolbin,) = [entry for entry in result.entries if entry.tool == "lolbin_lookup"]
         assert lolbin.args == {"command_lines": ["rundll32.exe javascript:x"]}
