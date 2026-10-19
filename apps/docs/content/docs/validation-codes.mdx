@@ -46,7 +46,7 @@ not prove the test makes the platform raise it. The tests are not listed here:
 one nothing raises any more and stored runs still carry; the comment on that
 name says what reads it.
 
-**85 codes in 9 families:** [attck](#attck) 6 · [attribution](#attribution) 1 · [composer](#composer) 3 · [isr](#isr) 13 · [narrative](#narrative) 5 · [report](#report) 12 · [stix](#stix) 32 · [tool](#tool) 1 · [verdict](#verdict) 12. 13 code positions the register could not resolve are [listed at the end](#unresolved-code-positions).
+**86 codes in 9 families:** [attck](#attck) 6 · [attribution](#attribution) 1 · [composer](#composer) 3 · [isr](#isr) 13 · [narrative](#narrative) 5 · [report](#report) 12 · [stix](#stix) 32 · [tool](#tool) 1 · [verdict](#verdict) 13. 13 code positions the register could not resolve are [listed at the end](#unresolved-code-positions).
 
 ## attck
 
@@ -698,6 +698,14 @@ No comment names its meaning; the message at `maljan.agents.judge_agent:JudgeAge
 
 - **Raised at** `maljan.agents.judge_agent:JudgeAgent.give_verdict._validate`
 - **Constant** none: the code is written as a literal
+- **Docs** none
+
+### `verdict.retry_failed`
+
+What is recorded when the judge's one retry failed — it timed out, answered prose, or answered JSON that was not a bundle — after a first answer that was a bundle. The first bundle is kept, with what was still wrong with it: a failed correction says nothing about the sample, and a valid verdict replaced by the text fallback or by a timeout published what the judge never wrote. The row says the retry was spent and how it failed.
+
+- **Raised at** `maljan.agents.judge_agent:JudgeAgent.give_verdict`
+- **Constant** `maljan.agents.judge_agent:VERDICT_RETRY_FAILED_CODE`
 - **Docs** none
 
 ### `verdict.severity_enum`

@@ -263,8 +263,8 @@ class TestTheAnswerStillDegradesGracefully:
     async def test_a_non_json_answer_falls_back_to_a_text_bundle(self) -> None:
         """After the one retry: the judge is asked again for a bundle first."""
         judge, _llm = _judge(
-            "The sample is malware. No JSON for you.",
-            "Still malware, still no JSON.",
+            "Verdict: Malware. No JSON for you.",
+            "Verdict: Malware, still no JSON.",
         )
 
         verdict = await judge.give_verdict(

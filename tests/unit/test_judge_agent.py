@@ -211,7 +211,7 @@ class TestJudgeAgentExtractConfidence:
     """Tests for the private text-based confidence extractor (fallback path)."""
 
     def test_extracts_valid_float(self) -> None:
-        text = "The confidence score is: 0.78\nAll experts agree."
+        text = "agreement_confidence: 0.78\nAll experts agree."
         result = JudgeAgent._extract_confidence_from_text(text)
         assert result == pytest.approx(0.78)
 
@@ -228,10 +228,10 @@ class TestJudgeAgentExtractConfidence:
     # See tests/unit/agents/test_mediator_confidence_extraction.py.
 
     def test_rejects_above_one_instead_of_clamping(self) -> None:
-        assert JudgeAgent._extract_confidence_from_text("confidence: 1.5") is None
+        assert JudgeAgent._extract_confidence_from_text("agreement_confidence: 1.5") is None
 
     def test_rejects_below_zero_instead_of_clamping(self) -> None:
-        assert JudgeAgent._extract_confidence_from_text("confidence: -0.3") is None
+        assert JudgeAgent._extract_confidence_from_text("agreement_confidence: -0.3") is None
 
     def test_returns_none_when_not_found(self) -> None:
         assert JudgeAgent._extract_confidence_from_text("No score mentioned here.") is None
@@ -318,7 +318,7 @@ class TestFallbackBundleFailsClosed:
     def test_what_was_dropped_is_recorded_on_a_malware_verdict_too(self, judge) -> None:
         record = self._record(
             judge._fallback_bundle_from_text(
-                "This is malware; T1486 and T1490 look likely.", {}, self._isr("T1055.001")
+                "Verdict: Malware; T1486 and T1490 look likely.", {}, self._isr("T1055.001")
             )
         )
         assert record["type"] == "malware"

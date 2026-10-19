@@ -9861,6 +9861,7 @@ async def retry_with_feedback[T](
     can_retry: Callable[[list[Any]], bool] | None = None,
     answered: Callable[[list[Violation], list[Violation]], list[Violation]] | None = None,
     reply_to_calls: bool = False,
+    keep: Callable[[T, T], T] | None = None,
 ) -> tuple[T, list[Violation], int]:
     """Run, validate, and give the model one chance to fix what it got wrong.
 
@@ -9895,21 +9896,29 @@ async def retry_with_feedback[T](
     first answer was asked with, and which sends nothing after the loop: an
     answer that is only a call of it is corrected in the call's reply
     (:func:`_with_feedback`). Every other caller's retry is sent no call.
+
+    ``keep`` is :func:`retry_with_feedback_sync`'s: the caller's choice between
+    the first answer and the last, made before ``answered`` maps the leftovers
+    and before anything is published. The kept answer is validated again, so
+    the violations returned and published are the kept answer's; a caller
+    whose validators read state its ``parse`` set restores that state in
+    ``keep`` before it returns the first answer.
     """
     feed = _feed(sink, agent, stage)
     turns = list(messages)
     answer = await run(turns)
     parsed = parse(answer)
+    first = parsed
     violations = _collect(parsed, validators)
     retries = 0
     shown: list[Violation] = []
     while violations and retries < max_retries:
-        keep = not any(v.code in drop_answer_for for v in violations)
+        keep_answer = not any(v.code in drop_answer_for for v in violations)
         following = _with_feedback(
             turns,
             answer,
             violations,
-            keep_answer=keep,
+            keep_answer=keep_answer,
             reply_to_calls=reply_to_calls,
             # Another retry of this loop sends the conversation again.
             sent_again=retries + 1 < max_retries,
@@ -9925,6 +9934,11 @@ async def retry_with_feedback[T](
             answer = await run(turns)
         parsed = parse(answer)
         violations = _collect(parsed, validators)
+    if retries and keep is not None:
+        kept = keep(first, parsed)
+        if kept is not parsed:
+            parsed = kept
+            violations = _collect(parsed, validators)
     if answered is not None:
         violations = answered(violations, shown)
     if feed is not None:

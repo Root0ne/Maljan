@@ -310,7 +310,7 @@ class TestTheFallbackBundleKeepsThemToo:
         from maljan.agents.judge_agent import JudgeAgent
 
         judge = JudgeAgent(llm=MagicMock())
-        return judge._fallback_bundle_from_text("This is malware.", {}, _isr(KNOWN))
+        return judge._fallback_bundle_from_text("Verdict: Malware.", {}, _isr(KNOWN))
 
     def test_its_annotated_relationship_survives_the_rebuild(self) -> None:
         base = self._fallback()

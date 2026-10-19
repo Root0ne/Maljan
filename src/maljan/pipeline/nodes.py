@@ -27,6 +27,8 @@ from maljan.agents.evidence_recorder import EvidenceRecorder
 from maljan.agents.judge_agent import (
     VERDICT_FALLBACK_CODE,
     VERDICT_FALLBACK_REASON,
+    VERDICT_RETRY_FAILED_CODE,
+    VERDICT_RETRY_FAILED_REASON,
     VERDICT_TIMEOUT_CODE,
     VERDICT_TIMEOUT_REASON,
 )
@@ -5530,6 +5532,11 @@ def make_judge_node(
                 _degraded_mode = True
             if VERDICT_TIMEOUT_CODE in _verdict_codes:
                 _degradation_reasons.append(VERDICT_TIMEOUT_REASON)
+                _degraded_mode = True
+            # The verdict is the judge's first bundle, with what its failed
+            # retry was asked to correct still standing; the reader is told.
+            if VERDICT_RETRY_FAILED_CODE in _verdict_codes:
+                _degradation_reasons.append(VERDICT_RETRY_FAILED_REASON)
                 _degraded_mode = True
             # A verdict prompt shortened to fit the judge's window says so in
             # the prompt; the reader is told here.

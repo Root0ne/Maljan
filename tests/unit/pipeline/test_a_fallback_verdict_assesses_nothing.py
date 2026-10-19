@@ -427,6 +427,38 @@ class TestAJudgeThatAnsweredWithNoVerdict:
         assert report["overall_confidence"] is None
         assert "NO CONFIDENCE ASSESSED" in markdown
 
+    def test_a_failed_retry_is_told_to_the_reader(self) -> None:
+        """The first bundle stands; the report says the judge's retry failed."""
+        from unittest.mock import AsyncMock
+
+        from maljan.agents.judge_agent import (
+            VERDICT_RETRY_FAILED_CODE,
+            VERDICT_RETRY_FAILED_REASON,
+            JudgeVerdict,
+        )
+        from maljan.pipeline.validation import Violation
+        from maljan.schemas.stix_models import Bundle
+
+        container = _Container(EvidenceCounter())
+        judge = container.get_judge_agent(role="judge")
+        judge.give_verdict = AsyncMock(
+            return_value=JudgeVerdict(
+                bundle=Bundle.model_validate({"objects": []}),
+                violations=[
+                    Violation(
+                        code=VERDICT_RETRY_FAILED_CODE,
+                        message=f"{VERDICT_RETRY_FAILED_REASON}: it timed out",
+                    )
+                ],
+                retries=1,
+                fed_back={},
+            )
+        )
+        update = asyncio.run(make_judge_node(container)(_state()))
+
+        assert VERDICT_RETRY_FAILED_REASON in update["degradation_reasons"]
+        assert update["verdict_fallback"] is None
+
     def test_the_note_the_judge_already_recorded_is_not_written_again(self) -> None:
         update = _run_report(
             {"decision": "Suspicious", "failure": "verdict.timeout", "recorded": True}
