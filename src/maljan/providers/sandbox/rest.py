@@ -33,8 +33,12 @@ from maljan.providers.sandbox.rest_mapping import compile_mapping
 from maljan.providers.sandbox.triage import (
     _BACKOFF_FACTOR,
     _MAX_INTERVAL_SECONDS,
+    POLL_TRANSPORT_ERRORS,
     _parse_retry_after,
     _safe_path_component,
+    poll_deadline_error,
+    poll_failure,
+    wait_after_poll_failure,
 )
 
 if TYPE_CHECKING:
@@ -266,15 +270,24 @@ class RestSandboxProvider(SandboxProvider):
         url = _fill_task_id(self._cfg.status.path, _safe_path_component(str(task_id)))
         done = {v.lower() for v in self._cfg.status.done_values}
         failed = {v.lower() for v in self._cfg.status.failed_values}
+        what = f"Sandbox task {task_id}"
+        last_error = ""
         while True:
             # Checked at the top of every iteration, including the rate-limit
             # branch: a server that keeps answering 429 past the deadline must
             # raise rather than loop forever.
             if self._now() >= deadline:
-                raise ProviderError(
-                    f"Sandbox task {task_id} did not complete within {budget:.0f}s."
+                raise poll_deadline_error(what, budget, last_error)
+            # A poll that failed in transit, or a 5xx, is the sandbox busy and
+            # not a verdict: waited out to the deadline, as Triage's is.
+            try:
+                response = http.get(url)
+            except POLL_TRANSPORT_ERRORS as exc:
+                last_error = f"{type(exc).__name__}: {exc}"
+                interval = wait_after_poll_failure(
+                    self._sleep, self._now, interval, deadline, what, last_error
                 )
-            response = http.get(url)
+                continue
             if response.status_code in (429, 503):
                 retry_after = response.headers.get("Retry-After")
                 parsed = _parse_retry_after(retry_after, self._now()) if retry_after else None
@@ -290,8 +303,20 @@ class RestSandboxProvider(SandboxProvider):
                 if not honoured:
                     interval = min(interval * _BACKOFF_FACTOR, _MAX_INTERVAL_SECONDS)
                 continue
-            self._raise_for_status(response, "status check")
-            state = self._select_one(self._cfg.status.state_path, response.json(), "status").lower()
+            failure = poll_failure(response)
+            if failure is None:
+                self._raise_for_status(response, "status check")
+                try:
+                    payload = response.json()
+                except ValueError as exc:
+                    failure = f"an unparsable status body ({exc})"
+            if failure is not None:
+                last_error = failure
+                interval = wait_after_poll_failure(
+                    self._sleep, self._now, interval, deadline, what, last_error
+                )
+                continue
+            state = self._select_one(self._cfg.status.state_path, payload, "status").lower()
             if state in done:
                 return "reported"
             if state in failed:

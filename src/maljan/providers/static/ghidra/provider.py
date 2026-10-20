@@ -93,20 +93,40 @@ GHIDRA_DID_NOT_MAKE_IT_CURRENT: str = (
 )
 
 
+# And when Ghidra loaded the sample but refused the declared analysis right
+# after: an import holds no call or code reference for the agent to read. Not
+# remembered either, so the next loop loads it again.
+GHIDRA_DID_NOT_ANALYSE: str = (
+    "Ghidra loaded the job's sample but refused to analyse it ({words}); this loop "
+    "stops, and the next one loads the sample again"
+)
+
+
 def not_made_current(answer: str) -> SampleNotOpened | None:
-    """The stop for a select the opener says was refused right after a fresh load, or ``None``.
+    """The stop for a declared step the opener says was refused right after a fresh load.
 
-    Read from the opener's own marker (``sample_open.SELECT_REFUSED_AFTER_OPEN``)
-    with its one reader of answers; it names the select's refusal, not the
-    samples mount, and the caller does not remember it.
+    ``None`` when the answer carries neither marker. Read from the opener's
+    own markers (``sample_open.SELECT_REFUSED_AFTER_OPEN``,
+    ``sample_open.ANALYSIS_REFUSED_AFTER_OPEN``) with its one reader of
+    answers; each names the step's refusal, not the samples mount, and the
+    caller does not remember it.
     """
-    from maljan.providers.sample_open import SELECT_REFUSED_AFTER_OPEN, answer_object
+    from maljan.providers.sample_open import (
+        ANALYSIS_REFUSED_AFTER_OPEN,
+        SELECT_REFUSED_AFTER_OPEN,
+        answer_object,
+    )
 
+    sentences = {
+        SELECT_REFUSED_AFTER_OPEN: GHIDRA_DID_NOT_MAKE_IT_CURRENT,
+        ANALYSIS_REFUSED_AFTER_OPEN: GHIDRA_DID_NOT_ANALYSE,
+    }
     payload = answer_object(answer)
-    if payload is None or payload.get("tool_error") != SELECT_REFUSED_AFTER_OPEN:
+    sentence = sentences.get(str(payload.get("tool_error"))) if payload is not None else None
+    if payload is None or sentence is None:
         return None
     words = _one_line(str(payload.get("detail") or ""))
-    return SampleNotOpened(GHIDRA_DID_NOT_MAKE_IT_CURRENT.format(words=words), provider="ghidra")
+    return SampleNotOpened(sentence.format(words=words), provider="ghidra")
 
 
 def ghidra_not_answering(address: str, what: str) -> SampleNotOpened:
@@ -193,7 +213,13 @@ def open_ghidra_sample(
     loop retries a connection and raises when Ghidra did not answer). ``key``
     names the server in the job's note (``sample_open.server_note_key``).
     """
-    from maljan.providers.sample_open import SampleOpener, declared
+    from maljan.providers.sample_open import (
+        SELECT_REFUSED_AFTER_OPEN,
+        SampleOpener,
+        declared,
+        is_refusal,
+        refused_after_open,
+    )
     from maljan.providers.static.ghidra.program import (
         SWITCH_PARAM,
         SWITCH_PATH,
@@ -215,7 +241,14 @@ def open_ghidra_sample(
     )
     name = program_name_from_load(loaded)
     if name:
-        rest_tool_call(http, base)(SWITCH_PATH.lstrip("/"), {SWITCH_PARAM: name})
+        switch = SWITCH_PATH.lstrip("/")
+        switched = rest_tool_call(http, base)(switch, {SWITCH_PARAM: name})
+        if is_refusal(switched):
+            # Loaded but not made current: Ghidra reads another binary, so the
+            # open is handed on as failed, with the switch's words.
+            return refused_after_open(
+                SELECT_REFUSED_AFTER_OPEN, switch, UNDECLARED_LOAD_TOOL, switched, loaded
+            )
     return str(loaded)
 
 
@@ -865,6 +898,11 @@ class GhidraStaticProvider(StaticProvider):
             sample_notes=getattr(self, "sample_notes", None),
             note_key=server_note_key(self._cfg, str(getattr(self, "note_instance", "") or "")),
             shared=self._cfg.transport in REMOTE_TRANSPORTS,
+            # The walk is one call's worth of the job's guard budget for this
+            # server, so a server answering pages forever cannot hold the job.
+            walk_budget=self.call_budget(get_settings_or_none()),
+            # And the deadline of the stage or job it runs in, where there is one.
+            deadline=job.deadline,
         )
 
     async def probe(self) -> ProviderProbe:

@@ -232,6 +232,20 @@ class TestOnceAPath:
         assert server.names().count("open_thing") == 2
         assert handle.sample_notes.get(handle.note_key, PATH) is None
 
+    def test_an_analysis_refused_after_the_open_hands_on_the_refusal(self) -> None:
+        """PS-M6: a declared analysis that failed is the open failing, never its success."""
+        from maljan.providers.sample_open import ANALYSIS_REFUSED_AFTER_OPEN, is_refusal
+
+        server = _Server(study_refused=True)
+        handle = _handle(server)
+        said = _open(handle)
+        assert is_refusal(said)
+        answer = json.loads(said)
+        assert answer["tool_error"] == ANALYSIS_REFUSED_AFTER_OPEN
+        assert answer["tool"] == "study"
+        assert "analysis failed" in answer["detail"] and '"handle": "h1"' in answer["detail"]
+        assert server.names() == ["open_thing", "pick", "study"]
+
     def test_a_refused_open_is_answered_and_not_noted(self) -> None:
         server = _Server()
         handle = _handle(server)

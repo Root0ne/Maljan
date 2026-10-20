@@ -401,6 +401,13 @@ class StaticAnalyst(BaseAnalyst):
                     StaticJobContext(mirror_sample_path=file_path)
                 )
                 if not functions:
+                    unread = getattr(functions, "unavailable", "")
+                    if unread:
+                        self.logger.warning(
+                            "Function-hash pre-pass: no hashes could be read (%s); "
+                            "continuing without prior.",
+                            unread,
+                        )
                     return ""
 
                 from maljan.memory.long_term_memory import match_functions, memory_owner_of

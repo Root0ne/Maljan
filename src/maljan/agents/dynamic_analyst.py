@@ -185,7 +185,12 @@ class DynamicAnalyst(BaseAnalyst):
             sandbox_tools = stamp_source(
                 provider.dynamic_tools(), PROVIDER_FAMILY, declared=provider_source(provider)
             )
-            self.toolkit = getattr(provider, "_toolkit", None)
+            # A provider whose server goes through the shared lifecycle hands
+            # over its handle, closed by its own bounded ``aclose``; any other
+            # hands over its toolkit, as before.
+            self.toolkit = getattr(provider, "server_handle", None) or getattr(
+                provider, "_toolkit", None
+            )
         else:
             self.logger.info("Sandbox provider '%s' exposes no tools.", provider.id)
         own = [*sandbox_tools, *self._definition_sandbox_tools()]
