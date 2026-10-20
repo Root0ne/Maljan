@@ -4660,8 +4660,8 @@ class Settings(BaseSettings):
         """The agent rules that need more than ``AgentsConfig`` to check.
 
         Three references leave the model that owns them: a ``ToolRef`` names a
-        server in ``mcp.servers``, a definition may name a static provider in
-        the provider registry, and a server names the agents it is bound to.
+        server in ``mcp.servers``, a definition or a team may name a static
+        provider in the provider registry, and a server names the agents it is bound to.
         Checking them here rather than in ``AgentsConfig`` is what lets a single
         PATCH that adds a server *and* an agent that uses it validate as one
         unit instead of failing on whichever half pydantic built first.
@@ -4687,6 +4687,21 @@ class Settings(BaseSettings):
                     self._check_server_tool(repr(key), str(ref.server), ref.name)
                 except ValueError as exc:
                     _refuse_at(("agents", "definitions", key, "tools", index), str(exc), ref.server)
+
+        # A team's static provider outranks each member's own choice at run
+        # time, so it is judged as a definition's is, at the team's own key.
+        for name, team in self.agents.profiles.items():
+            if team.static_provider is None:
+                continue
+            refused = id_refusal("static", team.static_provider, self.plugins.allowed)
+            if refused:
+                available = ", ".join(sorted(shipped_ids("static")))
+                _refuse_at(
+                    ("agents", "profiles", name, "static_provider"),
+                    f"team {name!r}: unknown static provider "
+                    f"{team.static_provider!r}. Available: {available}; {refused}",
+                    team.static_provider,
+                )
 
         # A triage pack step that calls a server's tool is checked as an
         # agent's reference is, so a list that cannot run is refused here, and

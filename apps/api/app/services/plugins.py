@@ -217,11 +217,17 @@ def selected_plugins(
     """The allowed plugins of ``kinds`` the core overrides ``core`` select for ``agent``.
 
     ``core`` holds dotted paths. What ``agent`` runs on: the shared provider
-    settings, its own ``static_provider`` and its own model and fallbacks.
+    settings, its own ``static_provider``, each team's ``static_provider``
+    (a team's choice outranks its members' own at run time) and its own model
+    and fallbacks.
     """
     listed = usable_list(allowed)
     wanted = set(kinds)
-    own = (f"core.agents.definitions.{agent}.", f"core.llm.agents.{agent.lower()}.")
+    own = (
+        f"core.agents.definitions.{agent}.",
+        f"core.llm.agents.{agent.lower()}.",
+        "core.agents.profiles.",
+    )
     return list(
         dict.fromkeys(
             f"{kind}:{name}"

@@ -257,7 +257,11 @@ def finding_path(finding: TeamFinding) -> str:
 
 
 def validate_profiles(
-    value: Any, *, definitions: dict[str, Any], active: str = "default"
+    value: Any,
+    *,
+    definitions: dict[str, Any],
+    active: str = "default",
+    plugins_allowed: list[Any] | None = None,
 ) -> dict[str, Any]:
     """Return the profile map to store, or raise with one message per offender.
 
@@ -272,7 +276,13 @@ def validate_profiles(
     keep a disabled member while some other profile is the one selected,
     exactly as ``AgentsConfig`` allows: disabling a member of ``default`` is
     harmless as long as ``default`` itself is not the profile that will run.
+
+    ``plugins_allowed`` is the plugin allow-list the save leaves in force: a
+    team's static provider is judged as a definition's is
+    (:func:`validate_definitions`).
     """
+    from maljan.core.plugins import id_refusal, shipped_ids
+
     if not isinstance(value, dict):
         raise AgentMapError(
             _qualified(
@@ -312,6 +322,17 @@ def validate_profiles(
         # dump is what gets stored and a PATCH that edits a migrated team's
         # stages stops it being re-derived over — whether it came from the
         # console, a script or an imported document.
+        refused = (
+            id_refusal("static", model.static_provider, plugins_allowed or [])
+            if model.static_provider is not None
+            else ""
+        )
+        if refused:
+            errors[f"{AGENT_PROFILES_KEY}.{name}.static_provider"] = (
+                f"unknown static provider {model.static_provider!r}. "
+                f"Available: {', '.join(sorted(shipped_ids('static')))}; {refused}"
+            )
+            continue
         out[name] = model.model_dump(mode="json")
 
     if errors:
@@ -553,7 +574,12 @@ def validate_agent_map(changes: dict[str, Any], stored: dict[str, Any]) -> dict[
         active = stored.get(AGENT_PROFILE_KEY) or "default"
     active = str(active)
 
-    profiles = validate_profiles(profiles_raw, definitions=definitions, active=active)
+    profiles = validate_profiles(
+        profiles_raw,
+        definitions=definitions,
+        active=active,
+        plugins_allowed=merged_allow_list(changes, stored),
+    )
     if AGENT_PROFILES_KEY in changes and changes[AGENT_PROFILES_KEY] is not None:
         out[AGENT_PROFILES_KEY] = profiles
 
