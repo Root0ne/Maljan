@@ -16,6 +16,7 @@ still exists and answers ``{"error": "<module> is not installed"}``.
 from __future__ import annotations
 
 import hashlib
+import io
 import json
 import os
 import re
@@ -69,6 +70,18 @@ _RELATIONSHIP_CHUNK = 64 * 1024
 # ``upx``). Every target read stays in the answer, and deflate lets a small
 # file carry many huge ones, so the cap is the document's and not each part's.
 RELATIONSHIP_PART_CAP = SAMPLE_UPLOAD_MAX_BYTES
+# How far into a tar stream ``archive_list`` reads, inflated bytes for a
+# compressed tar: the platform's fixed sample upload cap, as every
+# decompression a tool does (``RELATIONSHIP_PART_CAP``, ``transforms``,
+# ``upx``), or the file's own size when that is larger.
+ARCHIVE_STREAM_CAP = SAMPLE_UPLOAD_MAX_BYTES
+# What the answer says when the tar stream was not read to its end.
+TAR_LISTING_STOPPED = (
+    "the listing stopped after {members} members: reading on would take the tar stream (inflated "
+    "bytes for a compressed tar) past byte {bound}, the larger of the file's size and the "
+    "platform's sample upload cap, which every decompression a tool does stops at; the member "
+    "or header being read there and everything after it are neither listed nor counted in total"
+)
 # Why a relationship part was not read, as ``relationship_parts_unread`` says it.
 RELATIONSHIP_PART_DOCUMENT_TYPE = (
     "it declares a document type, which a relationship part never needs"
@@ -461,11 +474,12 @@ def elf_info(path: str) -> dict[str, Any]:
         return {"error": "not an ELF file (no \\x7fELF magic)", "tool": "elf_info"}
 
     from maljan.extractors.pe_extractor import (
+        _elf_sections,
         _parse_elf_exports,
         _parse_elf_imports,
-        _parse_elf_sections,
     )
 
+    sections, sections_stopped = _elf_sections(blob)
     out: dict[str, Any] = {
         "bitness": 64 if blob[4:5] == b"\x02" else 32,
         "endianness": "little" if blob[5:6] == b"\x01" else "big",
@@ -479,11 +493,13 @@ def elf_info(path: str) -> dict[str, Any]:
                 "entropy": round(float(s.entropy), 4),
                 "characteristics": s.characteristics,
             }
-            for s in _parse_elf_sections(blob)
+            for s in sections
         ],
         "imports": [{"dll": row.dll, "function": row.function} for row in _parse_elf_imports(blob)],
         "exports": list(_parse_elf_exports(blob)),
     }
+    if sections_stopped:
+        out["sections_stopped"] = sections_stopped
     out.update(_elf_dynamic_view(blob))
     return out
 
@@ -1056,8 +1072,11 @@ def archive_list(path: str, limit: int = 500) -> dict[str, Any]:
     """Members of a zip, 7z, tar or gzip archive, without extracting anything.
 
     Listing is not extraction: nothing is written and no member is decompressed,
-    so a zip bomb costs a directory read. ``compressed`` and ``crc`` are absent
-    for the formats whose directory does not carry them.
+    so a zip bomb costs a directory read. A compressed tar is the exception the
+    format makes: its headers stand between the members' data in one
+    compressed stream, so reaching each header inflates the members before it,
+    and that read stops at a stated bound (``_tar_members``). ``compressed``
+    and ``crc`` are absent for the formats whose directory does not carry them.
     """
     target = Path(path)
     if not target.is_file():
@@ -1066,8 +1085,12 @@ def archive_list(path: str, limit: int = 500) -> dict[str, Any]:
 
     if zipfile.is_zipfile(target):
         return _zip_members(target, limit)
-    if tarfile.is_tarfile(target):
-        return _tar_members(target, limit)
+    # ``tarfile.is_tarfile`` would read the first member through an unbounded
+    # stream (a long name or a pax header of any size), so the listing itself
+    # is the test: ``None`` when no way of opening the file reads a tar header.
+    listed = _tar_members(target, limit)
+    if listed is not None:
+        return listed
     blob_head = target.open("rb").read(6)
     if blob_head[:6] == b"7z\xbc\xaf\x27\x1c":
         return _sevenzip_members(target, limit)
@@ -1097,19 +1120,120 @@ def _zip_members(target: Path, limit: int) -> dict[str, Any]:
     }
 
 
-def _tar_members(target: Path, limit: int) -> dict[str, Any]:
-    with tarfile.open(target) as archive:
-        infos = archive.getmembers()
-        members = [
-            {"name": info.name, "size": int(info.size), "is_dir": info.isdir()}
-            for info in infos[:limit]
-        ]
-    return {
-        "format": "tar",
-        "members": members,
-        "total": len(infos),
-        "truncated": len(infos) > limit,
-    }
+class _ArchiveStreamCapReached(Exception):
+    """The tar stream read past its bound (``_tar_members``)."""
+
+
+class _BoundedStream(io.RawIOBase):
+    """A decompressed tar stream that counts the bytes read from it and stops past a bound.
+
+    Every byte the tar reader takes passes through ``read``, a member's
+    header, a GNU long name or a pax header as much as a member's data, so
+    no header of any size reads past the bound.
+    """
+
+    def __init__(self, inner: Any, bound: int) -> None:
+        super().__init__()
+        self.inner = inner
+        self.bound = bound
+        self.count = 0
+
+    def readable(self) -> bool:
+        return True
+
+    def read(self, size: int | None = -1) -> bytes:
+        if self.count > self.bound:
+            raise _ArchiveStreamCapReached
+        wanted = -1 if size is None or size < 0 else size
+        # Never more than one byte past the bound, so the overrun is seen
+        # without inflating what lies beyond it.
+        room = self.bound + 1 - self.count
+        data: bytes = self.inner.read(room if wanted < 0 else min(wanted, room))
+        self.count += len(data)
+        if self.count > self.bound:
+            raise _ArchiveStreamCapReached
+        return data
+
+
+def _tar_openers() -> list[tuple[Any, tuple[type[BaseException], ...]]]:
+    """How ``tarfile.open`` in its default mode tries a file, in its order, and what moves it on.
+
+    Every compression first (gzip, bzip2, xz) and the plain tar last, as
+    ``tarfile.open`` sorts its methods: a file that reads both as a gzip
+    stream and as a plain tar is listed as the gzip stream's tar. With each
+    opener, the errors on its first header that make ``tarfile.open`` try
+    the next (its ``gzopen``, ``bz2open``, ``xzopen`` and ``taropen``); any
+    other error is raised, as it is there.
+    """
+    import bz2
+    import gzip
+    import lzma
+
+    tar_errors = (tarfile.ReadError, tarfile.CompressionError)
+    return [
+        (lambda path: gzip.GzipFile(path, "rb"), (*tar_errors, OSError)),
+        (lambda path: bz2.BZ2File(path, "rb"), (*tar_errors, OSError, EOFError)),
+        (lambda path: lzma.LZMAFile(path, "rb"), (*tar_errors, lzma.LZMAError, EOFError)),
+        (lambda path: open(path, "rb"), tar_errors),  # noqa: SIM115 - closed by the caller
+    ]
+
+
+def _tar_members(target: Path, limit: int) -> dict[str, Any] | None:
+    """The members of a tar stream, plain or compressed, read header after header.
+
+    A member's header stands after the previous member's data, so a
+    compressed tar is inflated through every member before it to reach the
+    next header: a few kilobytes of bzip2 can stand for a gigabyte of zeros
+    in front of it. The file is opened the way ``tarfile.open`` tries it
+    (gzip, bzip2 and xz, then plain), the decompressed stream is read through
+    a counter (``_BoundedStream``) by the tar reader in streaming mode, and
+    the read stops before it passes the larger of the file's own size, which
+    a plain tar never passes, and ``ARCHIVE_STREAM_CAP``, whatever part of
+    the tar the bytes are; the answer then says so under ``listing_stopped``
+    and ``total`` counts the members read whole. ``None`` when no way of
+    opening the file reads a tar header, where ``tarfile.is_tarfile`` says no.
+    """
+
+    bound = max(ARCHIVE_STREAM_CAP, target.stat().st_size)
+    members: list[dict[str, Any]] = []
+    total = 0
+    stopped = ""
+    for opener, next_opener in _tar_openers():
+        inner = opener(target)
+        try:
+            stream = _BoundedStream(inner, bound)
+            try:
+                # A block at a time, as the default mode reads a header: a
+                # stream that ends inside the first record still opens.
+                archive = tarfile.open(fileobj=stream, mode="r|", bufsize=tarfile.BLOCKSIZE)
+            except next_opener:
+                continue
+            try:
+                while True:
+                    info = archive.next()
+                    if info is None:
+                        break
+                    total += 1
+                    if len(members) < limit:
+                        members.append(
+                            {"name": info.name, "size": int(info.size), "is_dir": info.isdir()}
+                        )
+            finally:
+                archive.close()
+        except _ArchiveStreamCapReached:
+            stopped = TAR_LISTING_STOPPED.format(members=total, bound=bound)
+        finally:
+            inner.close()
+        answer: dict[str, Any] = {
+            "format": "tar",
+            "members": members,
+            "total": total,
+            "truncated": total > limit or bool(stopped),
+        }
+        if stopped:
+            answer["listing_stopped"] = stopped
+        return answer
+    return None
 
 
 def _sevenzip_members(target: Path, limit: int) -> dict[str, Any]:
