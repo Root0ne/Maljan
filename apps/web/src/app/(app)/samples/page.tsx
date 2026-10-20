@@ -4,6 +4,9 @@ import { Suspense, useState, useRef, useCallback, useEffect } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Upload, X } from "lucide-react";
 import { api } from "@/lib/api";
+import { fetchAllPages } from "@/lib/pages";
+import ShowMoreRows from "@/components/ui/ShowMoreRows";
+import { ROWS_PER_STEP, visibleRows } from "@/lib/pagedRows";
 import type { SampleDTO, SandboxReportDTO } from "@/lib/api";
 import ReportFormatProposal from "./ReportFormatProposal";
 import { isUnread, readProposal } from "./reportFormatProposal";
@@ -47,6 +50,8 @@ function SamplesPageContent() {
   const { staticProviders, sandboxProviders, profiles, staticTitles, sandboxTitles } =
     useProviderChoices();
   const [samples, setSamples] = useState<SampleRow[]>([]);
+  /* Every sample is read; a long list is drawn a step at a time (`lib/pagedRows`). */
+  const [shown, setShown] = useState(ROWS_PER_STEP);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
@@ -212,7 +217,7 @@ function SamplesPageContent() {
   useEffect(() => {
     (async () => {
       try {
-        const res = await api.getSamples();
+        const res = await fetchAllPages((page, size) => api.getSamples(page, size));
         setSamples(res.items.map(mapSample));
       } catch (err) {
         setError(getErrorMessage(err) || "Failed to load samples.");
@@ -254,7 +259,7 @@ function SamplesPageContent() {
     setActionError(null);
     try {
       await api.uploadSample(file);
-      const res = await api.getSamples();
+      const res = await fetchAllPages((page, size) => api.getSamples(page, size));
       setSamples(res.items.map(mapSample));
       setToast(`Uploaded ${file.name}.`);
     } catch (err) {
@@ -403,7 +408,7 @@ function SamplesPageContent() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-border-light">
-                {samples.map((s) => (
+                {visibleRows(samples, shown).visible.map((s) => (
                   <tr key={s.id} className="hover:bg-bg-hover">
                     <td className="px-4 py-2.5">
                       <span className="text-sm text-text-primary">{s.filename}</span>
@@ -460,6 +465,7 @@ function SamplesPageContent() {
                 ))}
               </tbody>
             </table>
+            <ShowMoreRows shown={Math.min(shown, samples.length)} total={samples.length} onShow={setShown} />
           </div>
         )}
       </div>

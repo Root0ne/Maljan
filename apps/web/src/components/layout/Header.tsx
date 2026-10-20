@@ -50,7 +50,7 @@ export default function Header() {
             }}
             onFocus={() => setPaletteOpen(true)}
             onKeyDown={() => setPaletteOpen(true)}
-            placeholder="Search for files, hashes, IPs, or malware families..."
+            placeholder="Search for files, hashes, runs, or malware families..."
             className="w-full h-8 pl-9 pr-12 text-xs bg-bg-deep border border-border rounded text-text-primary placeholder:text-text-tertiary focus:border-accent focus:outline-none"
             // The input drives a popup palette, so it is an ARIA combobox.
             // aria-expanded/aria-controls are only allowed on that role — without
@@ -58,7 +58,7 @@ export default function Header() {
             // "form field should have an id or name" DevTools issue; aria-label
             // names the field for screen readers (placeholder is not a name).
             role="combobox"
-            aria-label="Search files, hashes, IPs, or malware families"
+            aria-label="Search files, hashes, runs, or malware families"
             aria-autocomplete="list"
             aria-haspopup="listbox"
             aria-expanded={paletteOpen}

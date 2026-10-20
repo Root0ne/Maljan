@@ -1,6 +1,8 @@
 "use client";
 
 import { useReport } from "../layout";
+import ReportAbsent from "@/components/analysis/ReportAbsent";
+import { reportAbsence } from "@/components/analysis/reportAbsence";
 import RuleMatchesPanel from "@/components/analysis/RuleMatchesPanel";
 import GeneratedRulesPanel from "@/components/analysis/GeneratedRulesPanel";
 import StixPanel from "@/components/analysis/StixPanel";
@@ -20,12 +22,19 @@ import { hasRuleMatches } from "@/components/analysis/ruleMatches";
  *      produced for you to deploy to your own SOC tooling.
  */
 export default function DetectionTab() {
-  const { report } = useReport();
+  const { report, job, loading, reportError } = useReport();
   const mr = report?.malware_report;
   const generated = mr?.detection_signatures ?? [];
   const matched = hasRuleMatches(report?.agent_findings, mr?.sections);
   // A bundle with no objects in it is a bundle nobody wants to export.
   const stix = Object.keys(mr?.stix_bundle_extended ?? report?.stix_bundle ?? {}).length > 0;
+
+  if (loading) {
+    return <div className="p-4 text-sm text-text-secondary">Loading...</div>;
+  }
+  /* No report is not an empty report (`reportAbsence`). */
+  const absent = reportAbsence({ report, job, reportError });
+  if (absent) return <ReportAbsent absence={absent} />;
 
   return (
     <div className="space-y-6">

@@ -13,6 +13,7 @@ import { useRouter } from "next/navigation";
 import { api } from "./api";
 import { ApiError } from "./errors";
 import { refreshWithPromptRetry, waitForNewToken } from "./refreshLock";
+import { currentSignOutGeneration, noteSignOut } from "./sessionRenewal";
 
 interface AuthUser {
   id: string;
@@ -131,8 +132,11 @@ async function runRefresh(
     onAlreadyRefreshed(current);
     return null;
   }
+  const generation = currentSignOutGeneration();
   try {
     const tokens = await api.refresh(signal);
+    // Signed out while the refresh was in flight: store nothing.
+    if (generation !== currentSignOutGeneration()) return null;
     localStorage.setItem("access_token", tokens.access_token);
     onSuccess(tokens.access_token);
     return null;
@@ -310,6 +314,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       return;
     }
     clearRefreshTimer();
+    // A renewal still running must not store its token after this.
+    noteSignOut();
     // The refresh cookie is HttpOnly, so only the server can clear it; a
     // failed request here (offline, server down) must still sign the user
     // out locally, hence the swallow rather than a rethrow.

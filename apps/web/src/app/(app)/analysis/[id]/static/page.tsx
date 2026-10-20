@@ -4,6 +4,10 @@ import { useMemo, useState } from "react";
 import Link from "next/link";
 
 import { useReport } from "../layout";
+import ShowMoreRows from "@/components/ui/ShowMoreRows";
+import { ROWS_PER_STEP, visibleRows } from "@/lib/pagedRows";
+import ReportAbsent from "@/components/analysis/ReportAbsent";
+import { reportAbsence } from "@/components/analysis/reportAbsence";
 import { entropyClass, formatBytes } from "@/lib/report-utils";
 import Th from "@/components/ui/Th";
 import { ArtifactSections } from "@/components/analysis/ArtifactTable";
@@ -37,8 +41,14 @@ const STRING_KINDS: (StringIOCKind | "all")[] = [
 ];
 
 export default function StaticTab() {
-  const { report, loading } = useReport();
+  const { report, job, loading, reportError } = useReport();
   const [stringKind, setStringKind] = useState<StringIOCKind | "all">("all");
+  /* How many rows each long table draws; every row stays reachable
+   * (`lib/pagedRows`). */
+  const [shown, setShown] = useState<Record<string, number>>({});
+  const shownOf = (table: string) => shown[table] ?? ROWS_PER_STEP;
+  const show = (table: string) => (count: number) =>
+    setShown((current) => ({ ...current, [table]: count }));
 
   const staticData = report?.malware_report?.static;
   const fileType = report?.malware_report?.identity?.file_type;
@@ -108,6 +118,11 @@ export default function StaticTab() {
   if (loading) {
     return <div className="p-4 text-sm text-text-secondary">Loading...</div>;
   }
+
+  /* No report is not an empty report: say which absence this is rather than
+   * drawing this tab's negative (`reportAbsence`). */
+  const absent = reportAbsence({ report, job, reportError });
+  if (absent) return <ReportAbsent absence={absent} />;
 
   if (!staticData) {
     return (
@@ -312,9 +327,9 @@ export default function StaticTab() {
           )}
           {staticData.obfuscation_indicators.length > 0 && (
             <div className="flex flex-wrap gap-1.5 mt-1">
-              {staticData.obfuscation_indicators.map((ind) => (
+              {staticData.obfuscation_indicators.map((ind, i) => (
                 <span
-                  key={ind}
+                  key={`${ind}-${i}`}
                   className="text-[11px] px-1.5 py-0.5 rounded bg-status-orange/10 text-status-orange"
                 >
                   {ind}
@@ -348,7 +363,7 @@ export default function StaticTab() {
               </tr>
             </thead>
             <tbody className="divide-y divide-border-light">
-              {staticData.sections.map((s, i) => (
+              {visibleRows(staticData.sections, shownOf("sections")).visible.map((s, i) => (
                 <tr key={`${s.name}-${i}`} className="hover:bg-bg-hover">
                   <td className="px-4 py-2 text-xs font-mono text-text-primary">
                     {s.name}
@@ -382,6 +397,11 @@ export default function StaticTab() {
               ))}
             </tbody>
           </table>
+        <ShowMoreRows
+          shown={Math.min(shownOf("sections"), staticData.sections.length)}
+          total={staticData.sections.length}
+          onShow={show("sections")}
+        />
       </div>
       )}
 
@@ -400,7 +420,7 @@ export default function StaticTab() {
               </tr>
             </thead>
             <tbody className="divide-y divide-border-light">
-              {imports.slice(0, 500).map((row, i) => (
+              {visibleRows(imports, shownOf("imports")).visible.map((row, i) => (
                 <tr key={i} className="hover:bg-bg-hover">
                   <td className="px-4 py-2 text-xs font-mono text-text-secondary">{row.dll}</td>
                   <td className="px-4 py-2 text-xs font-mono text-text-primary">{row.function}</td>
@@ -408,11 +428,11 @@ export default function StaticTab() {
               ))}
             </tbody>
           </table>
-        {imports.length > 500 && (
-          <div className="px-4 py-2 text-[11px] text-text-muted border-t border-border">
-            Showing first 500 of {imports.length}.
-          </div>
-        )}
+        <ShowMoreRows
+          shown={Math.min(shownOf("imports"), imports.length)}
+          total={imports.length}
+          onShow={show("imports")}
+        />
       </div>
       )}
 
@@ -452,7 +472,7 @@ export default function StaticTab() {
               </tr>
             </thead>
             <tbody className="divide-y divide-border-light">
-              {filteredStrings.slice(0, 300).map((s, i) => (
+              {visibleRows(filteredStrings, shownOf("strings")).visible.map((s, i) => (
                 <tr key={i} className="hover:bg-bg-hover">
                   <td className="px-4 py-2 text-[11px] uppercase tracking-wider text-text-muted">
                     {s.kind}
@@ -466,11 +486,11 @@ export default function StaticTab() {
             </tbody>
           </table>
         )}
-        {filteredStrings.length > 300 && (
-          <div className="px-4 py-2 text-[11px] text-text-muted border-t border-border">
-            Showing first 300 of {filteredStrings.length}.
-          </div>
-        )}
+        <ShowMoreRows
+          shown={Math.min(shownOf("strings"), filteredStrings.length)}
+          total={filteredStrings.length}
+          onShow={show("strings")}
+        />
       </div>
       )}
 
@@ -494,7 +514,7 @@ export default function StaticTab() {
                 </tr>
               </thead>
               <tbody>
-                {(staticData.export_rows ?? []).map((row, i) => (
+                {visibleRows(staticData.export_rows ?? [], shownOf("exports")).visible.map((row, i) => (
                   <tr key={`${row.name}-${i}`} className="border-t border-border">
                     <td className="px-4 py-1 font-mono text-text-secondary">
                       {row.name || "(unnamed)"}
@@ -507,13 +527,26 @@ export default function StaticTab() {
             </table>
           ) : (
             <div className="p-4 flex flex-wrap gap-1">
-              {staticData.exports.map((e) => (
-                <span key={e} className="text-[11px] font-mono px-1.5 py-0.5 rounded bg-bg-active text-text-secondary">
+              {/* Two exports can share a name (forwarders, ordinals): the key
+                  is the position, so neither is dropped by React. */}
+              {visibleRows(staticData.exports, shownOf("exports")).visible.map((e, i) => (
+                <span
+                  key={`${e}-${i}`}
+                  className="text-[11px] font-mono px-1.5 py-0.5 rounded bg-bg-active text-text-secondary"
+                >
                   {e}
                 </span>
               ))}
             </div>
           )}
+          <ShowMoreRows
+            shown={Math.min(
+              shownOf("exports"),
+              (staticData.export_rows ?? []).length || staticData.exports.length,
+            )}
+            total={(staticData.export_rows ?? []).length || staticData.exports.length}
+            onShow={show("exports")}
+          />
         </div>
       )}
     </div>

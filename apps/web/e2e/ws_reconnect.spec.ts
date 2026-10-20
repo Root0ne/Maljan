@@ -81,14 +81,28 @@ test.describe("WebSocket reconnect", () => {
     expect(attempts).toBe(1);
   });
 
-  test("does not retry after a rejected-credential close (4401)", async ({
+  test("renews once after a rejected-credential close (4401), redials once, then stops", async ({
     authenticatedPage,
   }) => {
-    // Sibling of the 1008 case above: 4401 is the server's dedicated
-    // "credential rejected" code (apps/api/app/api/ws.py), used once the
-    // access token travels only in the maljan.v1 subprotocol. Same
-    // reasoning applies — retrying just resends the same bad token.
+    // 4401 is the server's dedicated "credential rejected" code
+    // (apps/api/app/api/ws.py). The run store no longer gives up on it at
+    // once: an access token that expired mid-run is replaced through the
+    // refresh cookie and the feed redialled with the new one. The mocked
+    // refresh answers with a new token (e2e/mocks.ts), so there is exactly one
+    // redial; this server refuses that one too, and a second credential
+    // refusal before any socket has established is final — one renewal per
+    // refusal chain, so a server that refuses every token cannot become a
+    // refresh-and-redial loop.
     let attempts = 0;
+    let refreshes = 0;
+    await authenticatedPage.route("**/api/v1/auth/refresh", (route) => {
+      refreshes += 1;
+      return route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ access_token: "mock_access_token_2", token_type: "bearer" }),
+      });
+    });
     await authenticatedPage.routeWebSocket("**/ws/analysis/**", (ws) => {
       attempts += 1;
       ws.close({ code: 4401, reason: "e2e: credential rejected" });
@@ -96,11 +110,14 @@ test.describe("WebSocket reconnect", () => {
 
     await authenticatedPage.goto(`/analysis/${JOB_ID}/conversation`);
 
-    await expect.poll(() => attempts, { timeout: 10_000 }).toBe(1);
+    // The first dial, the renewal, and the one redial with the new token.
+    await expect.poll(() => attempts, { timeout: 10_000 }).toBe(2);
+    expect(refreshes).toBe(1);
 
-    // Longer than the 1 s base delay by a wide margin, so a regression that
-    // dropped the 4401 check would have reconnected several times by now.
-    await authenticatedPage.waitForTimeout(3_000);
-    expect(attempts).toBe(1);
+    // Well past the backoff (its first windows are 1 s and 2 s): a regression
+    // that renewed on every refusal would have redialled again by now.
+    await authenticatedPage.waitForTimeout(5_000);
+    expect(attempts).toBe(2);
+    expect(refreshes).toBe(1);
   });
 });

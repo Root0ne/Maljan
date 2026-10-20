@@ -9,12 +9,15 @@
 
 import type {
   C2Channel,
+  ClaimNotDiscussed,
   CommandRow,
   ConfigItem,
+  FlaggedStatement,
   FlowStep,
   HostIdentifier,
   KeyFinding,
   MalwareReport,
+  TechnicalSubsection,
 } from "@/types/malware-report";
 
 /** The voice every block in this module speaks with. */
@@ -159,6 +162,157 @@ export function hasTechnicalAnalysis(mr: MalwareReport | null | undefined): bool
     configuration(mr).length > 0 ||
     hostIdentifiers(mr).length > 0 ||
     commands(mr).length > 0 ||
-    c2Channels(mr).length > 0
+    c2Channels(mr).length > 0 ||
+    technicalSubsections(mr).length > 0
   );
+}
+
+/** One further block of the technical analysis, in the shape the panel draws. */
+export interface TechnicalBlock {
+  key: string;
+  title: string;
+  /** Prose, as the model wrote it. */
+  body: string;
+  /** Verbatim items: commands, flags, list entries. */
+  items: string[];
+  /** Labelled facts, in declaration order, each with a value. */
+  facts: Array<[string, string]>;
+  evidence: string[];
+}
+
+const PROSE_SUBSECTIONS: Array<[keyof NonNullable<MalwareReport["technical_analysis"]>, string]> = [
+  ["command_and_control", "Command and control"],
+  ["payloads", "Payloads"],
+  ["packing_obfuscation", "Packing and obfuscation"],
+  ["string_resolution", "String resolution"],
+  ["discovery", "Discovery"],
+  ["persistence_detail", "Persistence detail"],
+  ["message_packet_structure", "Message and packet structure"],
+  ["evasion_antiforensics", "Evasion and anti-forensics"],
+];
+
+function said(value: unknown): string {
+  return typeof value === "string" ? value.trim() : "";
+}
+
+function list(value: unknown): string[] {
+  return Array.isArray(value) ? value.map(said).filter(Boolean) : [];
+}
+
+/**
+ * The technical-analysis subsections beyond the flow, configuration, host
+ * identifiers and commands: the free-prose ones, the command-line flags, the
+ * service and process kill list, the shadow-copy commands, the encryption
+ * scheme and the ransom note.
+ *
+ * The report carried all thirteen and the console typed none of them, so a
+ * run whose model wrote an encryption scheme or a ransom note showed neither.
+ * A subsection is a block only when it says something: an empty body, an
+ * empty list, a scheme whose every field is unset is absent, as the exported
+ * report leaves it absent.
+ */
+export function technicalSubsections(mr: MalwareReport | null | undefined): TechnicalBlock[] {
+  const ta = mr?.technical_analysis;
+  if (!ta) return [];
+  const blocks: TechnicalBlock[] = [];
+  const push = (block: TechnicalBlock) => {
+    if (block.body || block.items.length > 0 || block.facts.length > 0) blocks.push(block);
+  };
+  for (const [key, fallback] of PROSE_SUBSECTIONS) {
+    const sub = ta[key] as TechnicalSubsection | null | undefined;
+    if (!sub || typeof sub !== "object") continue;
+    push({
+      key: String(key),
+      title: said(sub.title) || fallback,
+      body: said(sub.body),
+      items: [],
+      facts: [],
+      evidence: list(sub.evidence_refs),
+    });
+  }
+  const flags = (ta.cli_flags ?? []).filter((f) => said(f?.flag));
+  push({
+    key: "cli_flags",
+    title: "Command-line flags",
+    body: "",
+    items: flags.map((f) => (said(f.description) ? `${f.flag} — ${f.description}` : f.flag)),
+    facts: [],
+    evidence: flags.map((f) => said(f.evidence_ref)).filter(Boolean),
+  });
+  const kill = ta.service_process_kill;
+  if (kill) {
+    const facts: Array<[string, string]> = [];
+    if (said(kill.mechanism)) facts.push(["Mechanism", said(kill.mechanism)]);
+    if (list(kill.kill_list).length > 0) facts.push(["Stops", list(kill.kill_list).join(", ")]);
+    if (list(kill.white_list).length > 0) facts.push(["Spares", list(kill.white_list).join(", ")]);
+    push({ key: "service_process_kill", title: "Services and processes stopped", body: "", items: [], facts, evidence: [] });
+  }
+  push({
+    key: "shadow_copy_destruction",
+    title: "Shadow-copy destruction",
+    body: "",
+    items: list(ta.shadow_copy_destruction),
+    facts: [],
+    evidence: [],
+  });
+  const enc = ta.encryption_scheme;
+  if (enc) {
+    const facts: Array<[string, string]> = [];
+    const field = (label: string, value: unknown) => {
+      if (said(value)) facts.push([label, said(value)]);
+    };
+    field("Cipher", enc.cipher);
+    field("Mode", enc.mode);
+    field("Library", enc.library);
+    field("Key source", enc.key_source);
+    field("Key management", enc.key_management);
+    field("IV", enc.iv);
+    field("File marker", enc.file_marker);
+    field("Extension", enc.extension);
+    field("Partial encryption", enc.partial_threshold);
+    // A per-file key the model did not establish is left out, not said as "no".
+    if (enc.per_file_key === true) facts.push(["Per-file key", "yes"]);
+    if (enc.per_file_key === false) facts.push(["Per-file key", "no"]);
+    push({
+      key: "encryption_scheme",
+      title: "Encryption scheme",
+      body: "",
+      items: [],
+      facts,
+      evidence: said(enc.evidence_ref) ? [said(enc.evidence_ref)] : [],
+    });
+  }
+  const note = ta.ransom_note;
+  if (note) {
+    const facts: Array<[string, string]> = [];
+    if (said(note.filename)) facts.push(["File name", said(note.filename)]);
+    if (said(note.company_id_hash)) facts.push(["Company id hash", said(note.company_id_hash)]);
+    push({
+      key: "ransom_note",
+      title: "Ransom note",
+      body: said(note.verbatim_content),
+      items: list(note.sections),
+      facts,
+      evidence: [],
+    });
+  }
+  return blocks;
+}
+
+/** The sentences a check flagged and the retry left standing. */
+export function flaggedStatements(mr: MalwareReport | null | undefined): FlaggedStatement[] {
+  return (mr?.flagged_statements ?? []).filter((f) => said(f?.sentence));
+}
+
+/** What a flagged sentence's mark says, as the exported report says it. */
+export function flaggedMark(statement: FlaggedStatement): string {
+  const found = said(statement.label) || statement.code;
+  return statement.asked === false
+    ? `${found} — the model was not asked about it`
+    : `${found} — asked about and left standing`;
+}
+
+/** The analyst claims in force the body neither cites nor discusses. */
+export function claimsNotDiscussed(mr: MalwareReport | null | undefined): ClaimNotDiscussed[] {
+  return (mr?.claims_not_discussed ?? []).filter((c) => said(c?.claim));
 }

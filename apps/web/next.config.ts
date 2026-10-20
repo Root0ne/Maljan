@@ -1,5 +1,7 @@
 import type { NextConfig } from "next";
 
+import { SECURITY_HEADERS } from "./src/lib/securityHeaders";
+
 /* The routes that moved, and where they moved to.
  *
  * Nine analysis routes were retired onto two destinations, and `/reports`
@@ -40,6 +42,12 @@ const nextConfig: NextConfig = {
     return Promise.resolve(
       MOVED.map(([source, destination]) => ({ source, destination, permanent: true })),
     );
+  },
+
+  /* Every page refuses to be framed and is served with the other headers in
+   * `SECURITY_HEADERS` (src/lib/securityHeaders.ts says why each is there). */
+  headers() {
+    return Promise.resolve([{ source: "/:path*", headers: [...SECURITY_HEADERS] }]);
   },
 
   /* There is deliberately no `/api/:path*` rewrite proxy here.

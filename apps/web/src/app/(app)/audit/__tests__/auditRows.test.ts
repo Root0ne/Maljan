@@ -39,14 +39,15 @@ describe("an audit row", () => {
     expect(actorLabel("", "  ")).toBe("the platform");
   });
 
-  it("keeps the id beside a name, and does not repeat an id it already shows", () => {
+  it("keeps the full id behind a name and behind the eight characters that stand in for one", () => {
     const [named] = auditRows([log({})]);
     expect(named.actor).toBe("Ada Lovelace");
     expect(named.actorId).toBe("6f1d9a2e-0000-4000-8000-000000000000");
 
+    // The cell shows eight characters; the whole id stays reachable.
     const [unnamed] = auditRows([log({ actor: null })]);
     expect(unnamed.actor).toBe("6f1d9a2e");
-    expect(unnamed.actorId).toBe("");
+    expect(unnamed.actorId).toBe("6f1d9a2e-0000-4000-8000-000000000000");
 
     const [platform] = auditRows([log({ actor: null, user_id: null })]);
     expect(platform.actor).toBe("the platform");
@@ -63,6 +64,29 @@ describe("an audit row", () => {
       log({ action: "job.cancel", resource_type: "sample", resource_id: "abcdef1234567890" }),
     ]);
     expect(row.resource).toBe("sample abcdef12");
+    // The cell cuts the id; the row keeps all of it for the cell's title.
+    expect(row.resourceId).toBe("abcdef1234567890");
+  });
+
+  it("carries what the entry recorded beyond its columns", () => {
+    const [row] = auditRows([
+      log({
+        action: "api_key.create",
+        details: { prefix: "mlj_ab12", keys: ["core.a", "core.b"], count: 2, note: null },
+      }),
+    ]);
+    expect(row.details).toEqual([
+      ["prefix", "mlj_ab12"],
+      ["keys", '["core.a","core.b"]'],
+      ["count", "2"],
+      ["note", "null"],
+    ]);
+    expect(auditColumns([row]).details).toBe(true);
+  });
+
+  it("carries no details for an entry that recorded none", () => {
+    const [row] = auditRows([log({ details: null })]);
+    expect(row.details).toEqual([]);
   });
 });
 
@@ -71,11 +95,12 @@ describe("the columns a page earns", () => {
     expect(auditColumns(auditRows([log({}), log({ id: "2" })]))).toEqual({
       resource: false,
       ip: false,
+      details: false,
     });
   });
 
   it("draws a column as soon as one row has something to put in it", () => {
     const rows = auditRows([log({}), log({ id: "2", ip_address: "10.0.0.4" })]);
-    expect(auditColumns(rows)).toEqual({ resource: false, ip: true });
+    expect(auditColumns(rows)).toEqual({ resource: false, ip: true, details: false });
   });
 });

@@ -24,7 +24,7 @@
 
 import { humaniseKey, humaniseValue } from "@/lib/humanise";
 import { saysSomething } from "./reportSections";
-import type { EvidenceSection } from "@/types/malware-report";
+import type { EvidenceSection, SignatureInfo } from "@/types/malware-report";
 
 /** Hash names the File hashes block draws, in the order it draws them. */
 export const HASH_FIELDS = [
@@ -186,4 +186,31 @@ export function readIdentitySection(
 
   if (rows.length === 0) return { section: null, hashes, signing, states };
   return { section: { ...section, rows }, hashes, signing, states };
+}
+
+/** The badge the typed identity block draws for the sample's signature. */
+export interface SigningBadge {
+  label: string;
+  tone: "signed" | "invalid" | "unsigned" | "unchecked";
+}
+
+/**
+ * What the report establishes about the signature, as a badge.
+ *
+ * `is_signed` is false by default, so a report on which no signing check ran
+ * — a format the check does not read, a run whose pack left it out, a report
+ * stored before the check existed — carried the same `false` as a sample the
+ * check looked at and found unsigned, and both were drawn UNSIGNED. The check
+ * stamps its ledger entry on the facts (`evidence_id`), so "unsigned" is said
+ * only where an entry says it; without one the signature was not checked and
+ * the badge says that. A signed sample is signed whichever way it was read.
+ */
+export function signingBadge(signing: SignatureInfo | null | undefined): SigningBadge {
+  if (signing?.is_signed) {
+    return signing.signature_valid === false
+      ? { label: "SIGNED (INVALID)", tone: "invalid" }
+      : { label: "SIGNED", tone: "signed" };
+  }
+  if (signing?.evidence_id) return { label: "UNSIGNED", tone: "unsigned" };
+  return { label: "SIGNATURE NOT CHECKED", tone: "unchecked" };
 }

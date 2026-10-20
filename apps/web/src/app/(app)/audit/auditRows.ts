@@ -31,12 +31,18 @@ export interface AuditRow {
    */
   actorId: string;
   ip: string;
+  /** The resource's full id, kept as the cell's title where the cell shows
+   *  eight characters of it; empty when it carries none. */
+  resourceId: string;
+  /** What the entry recorded beyond its columns, one `[key, value]` per field. */
+  details: Array<[string, string]>;
 }
 
 /** The columns a page of rows has something to put in. */
 export interface AuditColumns {
   resource: boolean;
   ip: boolean;
+  details: boolean;
 }
 
 /** `settings.update` as a sentence, keeping every word the key carries. */
@@ -76,6 +82,30 @@ function resourceOf(log: AuditLogDTO): string {
   return "";
 }
 
+/**
+ * What an entry recorded beyond its columns, as `[key, value]` pairs.
+ *
+ * The endpoint returns `details` on every row — the key prefix an API key was
+ * made with, the settings keys a save changed, why a sign-in was refused —
+ * and the log dropped it, so an entry said that something happened and never
+ * what. A value that is not text is written as JSON so nothing is lost.
+ */
+export function auditDetails(details: Record<string, unknown> | null | undefined): Array<[string, string]> {
+  if (!details || typeof details !== "object") return [];
+  return Object.entries(details).map(([key, value]) => {
+    let text: string;
+    if (typeof value === "string") text = value;
+    else {
+      try {
+        text = JSON.stringify(value) ?? String(value);
+      } catch {
+        text = String(value);
+      }
+    }
+    return [key, text];
+  });
+}
+
 /** One page of log entries, as rows. */
 export function auditRows(logs: AuditLogDTO[]): AuditRow[] {
   return logs.map((log) => {
@@ -87,8 +117,12 @@ export function auditRows(logs: AuditLogDTO[]): AuditRow[] {
       action: actionLabel(log.action),
       resource: resourceOf(log),
       actor,
-      actorId: actor === id.slice(0, 8) || !id ? "" : id,
+      // The full id behind the cell whenever the cell does not already show
+      // all of it: a name, or the eight characters that stand in for one.
+      actorId: !id || actor === id ? "" : id,
       ip: (log.ip_address ?? "").trim(),
+      resourceId: (log.resource_id ?? "").trim(),
+      details: auditDetails(log.details),
     };
   });
 }
@@ -98,5 +132,6 @@ export function auditColumns(rows: AuditRow[]): AuditColumns {
   return {
     resource: rows.some((row) => row.resource !== ""),
     ip: rows.some((row) => row.ip !== ""),
+    details: rows.some((row) => row.details.length > 0),
   };
 }

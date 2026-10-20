@@ -3,12 +3,20 @@
 import { useParams } from "next/navigation";
 
 import { useReport } from "../layout";
+import ReportAbsent from "@/components/analysis/ReportAbsent";
+import { reportAbsence } from "@/components/analysis/reportAbsence";
 import { formatBytes } from "@/lib/report-utils";
 import CopyButton from "@/components/ui/CopyButton";
 import Field from "@/components/ui/Field";
 import { ArtifactSections } from "@/components/analysis/ArtifactTable";
 import ReputationSection from "@/components/analysis/ReputationSection";
-import { readIdentitySection, type HashField } from "@/components/analysis/identitySection";
+import {
+  readIdentitySection,
+  signingBadge,
+  type HashField,
+  type SigningBadge,
+} from "@/components/analysis/identitySection";
+import EvidenceChips from "@/components/analysis/EvidenceChips";
 import {
   binarySectionKeys,
   isCoveredBySection,
@@ -20,13 +28,18 @@ import { fileTypeLabel, platformLabel } from "@/types/malware-report";
 import type { EvidenceSection, SampleIdentity } from "@/types/malware-report";
 
 export default function IdentityTab() {
-  const { report, loading } = useReport();
+  const { report, job, loading, reportError } = useReport();
   const params = useParams();
   const jobId = (params.id as string) ?? "";
 
   if (loading) {
     return <div className="p-4 text-sm text-text-secondary">Loading...</div>;
   }
+
+  /* No report is not an empty report: say which absence this is rather than
+   * drawing this tab's negative (`reportAbsence`). */
+  const absent = reportAbsence({ report, job, reportError });
+  if (absent) return <ReportAbsent absence={absent} />;
 
   const identity: SampleIdentity | undefined = report?.malware_report?.identity;
   // What the identifying tools returned, in their own shape: the `identity`
@@ -97,12 +110,8 @@ export default function IdentityTab() {
     );
   }
 
-  const sig = identity.signing;
-  const sigState = sig.is_signed
-    ? sig.signature_valid === false
-      ? { label: "SIGNED (INVALID)", cls: "text-status-red bg-status-red/10 border-status-red/30" }
-      : { label: "SIGNED", cls: "text-status-green bg-status-green/10 border-status-green/30" }
-    : { label: "UNSIGNED", cls: "text-text-muted bg-bg-active border-border" };
+  const sigBadge = signingBadge(identity.signing);
+  const sigState = { label: sigBadge.label, cls: SIGNING_TONE[sigBadge.tone] };
 
   return (
     <div className="space-y-4">
@@ -122,6 +131,11 @@ export default function IdentityTab() {
             >
               {sigState.label}
             </span>
+          )}
+          {/* The signing check's own entry, so the badge can be followed back
+              to the call that established it. */}
+          {!sectionStatesSigning && identity.signing.evidence_id && (
+            <EvidenceChips ids={[identity.signing.evidence_id]} />
           )}
         </div>
         {/* A row whose value is nothing is not a row. Seven labels above
@@ -224,6 +238,14 @@ function readableHeader(section: EvidenceSection): EvidenceSection {
   if (section.kind !== "kv" || !/_header$/.test(section.key)) return section;
   return { ...section, rows: (section.rows ?? []).map(humaniseRow) };
 }
+
+/** How each signing answer is coloured; "not checked" is drawn apart from "no". */
+const SIGNING_TONE: Record<SigningBadge["tone"], string> = {
+  signed: "text-status-green bg-status-green/10 border-status-green/30",
+  invalid: "text-status-red bg-status-red/10 border-status-red/30",
+  unsigned: "text-text-muted bg-bg-active border-border",
+  unchecked: "text-text-muted bg-bg-surface border-dashed border-border",
+};
 
 /** The hashes a reader knows by name, in the order they are usually quoted. */
 const HASH_ROWS: { field: HashField; label: string }[] = [
