@@ -160,6 +160,8 @@ def collect(
         seen[tid].add(source)
         rows.setdefault(tid, []).append((source, confidence))
 
+    invalid = invalid_technique_ids(ledger)
+    refused = refused_technique_ids(isrs, invalid)
     for name, isr in (isrs or {}).items():
         source = str(getattr(isr, "agent_id", "") or name)
         for claim in getattr(isr, "claims", None) or []:
@@ -171,9 +173,10 @@ def collect(
         for finding in getattr(isr, "findings", None) or []:
             confidence = _as_confidence(getattr(finding, "confidence", None))
             for raw in getattr(finding, "technique_ids", None) or []:
-                add(str(raw).strip().upper(), source, confidence)
+                tid = str(raw).strip().upper()
+                if tid not in refused:
+                    add(tid, source, confidence)
 
-    invalid = invalid_technique_ids(ledger)
     for entry in ledger or []:
         if asserting_source(entry) is None:
             continue
@@ -279,14 +282,17 @@ def technique_evidence(
             return
         found.setdefault(tid, set()).add(eid)
 
+    invalid = invalid_technique_ids(ledger)
+    refused = refused_technique_ids(isrs, invalid)
     for isr in (isrs or {}).values():
         for finding in getattr(isr, "findings", None) or []:
             cited = list(getattr(finding, "evidence_ids", None) or [])
             for tid in getattr(finding, "technique_ids", None) or []:
+                if str(tid or "").strip().upper() in refused:
+                    continue
                 for eid in cited:
                     add(tid, eid)
 
-    invalid = invalid_technique_ids(ledger)
     for entry in ledger or []:
         if asserting_source(entry) is None:
             continue
@@ -300,6 +306,33 @@ def technique_evidence(
 def _entry_id(entry: Any) -> str:
     """A ledger entry's own id, ``ev_0007``, under either name the entry types use."""
     return str(getattr(entry, "id", None) or getattr(entry, "entry_id", None) or "").strip()
+
+
+def unverified_claim_ids(isr: Any) -> set[str]:
+    """The technique ids ``isr``'s own claims carry flagged as not in the catalogue.
+
+    The analyst was told the id is not a technique and kept it
+    (``technique_id_valid=False``); the same id named in a finding is the
+    same unverified id (``refused_technique_ids``).
+    """
+    return {
+        str(getattr(claim, "technique_id", "") or "").strip().upper()
+        for claim in getattr(isr, "claims", None) or []
+        if getattr(claim, "technique_id", None) and not getattr(claim, "technique_id_valid", True)
+    }
+
+
+def refused_technique_ids(isrs: dict[str, Any] | None, invalid: set[str]) -> set[str]:
+    """The ids no finding is counted under: ``invalid``, and every id any claim flagged.
+
+    Whether an id is a technique is a fact about the id, not about the analyst
+    who wrote it: one analyst's claim flagged as not in the catalogue makes the
+    id unverified in every finding of the run.
+    """
+    refused = set(invalid)
+    for isr in (isrs or {}).values():
+        refused |= unverified_claim_ids(isr)
+    return refused
 
 
 def invalid_technique_ids(ledger: Sequence[Any] | None) -> set[str]:

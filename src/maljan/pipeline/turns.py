@@ -34,6 +34,7 @@ def with_question(
     """
     from langchain_core.messages import HumanMessage
 
+    from maljan.llm.anthropic_history import RUN_STATE_ATTACHED
     from maljan.pipeline.run_state import is_run_state_block, without_run_state_tail
 
     turns = list(messages)
@@ -42,16 +43,20 @@ def with_question(
     if not isinstance(last, HumanMessage):
         turns.append(HumanMessage(content=text, response_metadata=extra))
         return turns
+    # Only the block the platform noted it attached comes off: a turn that
+    # ends on markers the sample or a tool wrote keeps them as written.
+    noted_block = (last.response_metadata or {}).get(RUN_STATE_ATTACHED)
+    attached = noted_block if isinstance(noted_block, str) else ""
     noted = {"response_metadata": {**(last.response_metadata or {}), **extra}} if extra else {}
     content = last.content
     if isinstance(content, list):
         parts = list(content)
         tail = parts[-1] if parts else None
-        if isinstance(tail, dict) and is_run_state_block(tail.get("text")):
+        if isinstance(tail, dict) and is_run_state_block(tail.get("text"), attached):
             parts = parts[:-1]
         asked = [*parts, {"type": "text", "text": text}]
         turns[-1] = last.model_copy(update={"content": asked, **noted})
         return turns
-    said = without_run_state_tail(str(content or ""))
+    said = without_run_state_tail(str(content or ""), attached)
     turns[-1] = last.model_copy(update={"content": f"{said}\n\n{text}" if said else text, **noted})
     return turns

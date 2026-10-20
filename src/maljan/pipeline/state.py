@@ -290,8 +290,14 @@ class AnalysisState(TypedDict):
     # Per-round mean-confidence values for adaptive termination
     confidence_history: Annotated[list[float], operator.add]
 
-    # Iteration tracking
+    # Iteration tracking: every mediation of the run, whichever debate held it.
     iteration_count: int
+    # Where each debate stage began, by stage key: the run's mediation count,
+    # confidence series length and discussion length when its first mediation
+    # was held (``routing.debate_start``). The router counts a debate's rounds
+    # and reads its confidence series from there, so a second debate is not
+    # ended by the rounds and the numbers of the first. Written once per stage.
+    debate_starts: Annotated[dict[str, dict[str, int]], _merge_dicts]
     # ``None`` when consensus did not apply (see ``consensus_applicable``).
     is_consensus: bool | None
     # ``False`` when the debate had fewer than two analysts that produced

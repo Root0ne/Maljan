@@ -98,7 +98,7 @@ def _run_state_chars(message: Any) -> int:
 
         if not content.endswith(block):
             return 0
-        return len(content) - len(without_run_state_tail(content))
+        return len(content) - len(without_run_state_tail(content, block))
     if isinstance(content, list) and content:
         last = content[-1]
         if isinstance(last, Mapping) and last.get("text") == block:
