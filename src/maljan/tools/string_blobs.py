@@ -803,6 +803,18 @@ def _error(message: str) -> dict[str, Any]:
     return {"error": message, "tool": TOOL}
 
 
+# The count of decodings no code refers to that were compared with only part
+# of a decoder's rows (``recovered_partial``), kept apart from ``unreferenced``.
+NOT_COMPARED = "not_compared"
+
+# What an answer says when it read this process's emulated strings for the
+# file and none were held.
+ROWS_NOT_HELD = (
+    "no emulated strings are held for this file in this process: the emulator did not run on "
+    "it here, or its result is no longer remembered; nothing was compared"
+)
+
+
 def _remembered_rows(path: str) -> tuple[list[dict[str, Any]], str]:
     """This process's emulated strings for this file, and why they could not be read, or ``""``.
 
@@ -1335,6 +1347,7 @@ def decode_string_blobs(
     function_source: str = "",
     recovered: Sequence[Mapping[str, Any]] | None = None,
     decoder: str = "",
+    recovered_partial: str = "",
 ) -> dict[str, Any]:
     """Decode the text a PE keeps encoded in its data sections (see the module docstring).
 
@@ -1351,6 +1364,20 @@ def decode_string_blobs(
     tool ran here. A decoding one of them recovered too is marked and counted
     under the answer's fields for it, named by ``decoder`` (empty: the
     shipped emulator's name, :func:`decoder_word`).
+
+    ``recovered_partial`` says why ``recovered`` is only part of the
+    decoder's rows (``""``: they are whole). A decoding no code refers to and
+    none of those rows recovered may then be one the rest recovered: it is
+    counted under ``not_compared`` rather than ``unreferenced``, listed under
+    ``not_compared_results`` with ``include_unreferenced``, and the reason is
+    stated under ``<decoder>_rows_partial``.
+
+    Where it stops: with ``recovered`` ``None`` the rows are what this
+    process remembers of the emulator's results for the file at the moment
+    of the call. Where none are held (the emulator did not run on the file
+    here, or its result is no longer remembered) the answer says so under
+    ``<decoder>_rows_not_held`` and compares with nothing. A caller that
+    holds the rows hands them in.
     """
     wanted = tuple(SCHEMES) if not schemes else tuple(str(s).strip() for s in schemes)
     unknown = [scheme for scheme in wanted if scheme not in SCHEMES]
@@ -1370,8 +1397,10 @@ def decode_string_blobs(
     row_field, compared_field, also_field = decoder_fields(decoder or decoder_word())
     recovered_by: dict[str, Mapping[str, Any]] = {}
     unread = ""
+    not_held = False
     if recovered is None:
         recovered, unread = _remembered_rows(path)
+        not_held = not recovered and not unread
     for recovered_row in recovered:
         if (
             isinstance(recovered_row, Mapping)
@@ -1390,6 +1419,7 @@ def decode_string_blobs(
 
     results: list[dict[str, Any]] = []
     unreferenced: list[dict[str, Any]] = []
+    not_compared: list[dict[str, Any]] = []
     also = 0
     for item in items:
         text = item.text.rstrip(b"\0").decode("latin-1")
@@ -1471,6 +1501,8 @@ def decode_string_blobs(
             }
         if row["references"] or row_field in row or alternative_field in row:
             results.append(row)
+        elif recovered_partial:
+            not_compared.append(row)
         else:
             unreferenced.append(row)
 
@@ -1490,6 +1522,12 @@ def decode_string_blobs(
         compared_field: None if unread else len(recovered_by),
         also_field: None if unread else also,
         **({f"{row_field}_rows_unread": unread} if unread else {}),
+        **({f"{row_field}_rows_not_held": ROWS_NOT_HELD} if not_held else {}),
+        **(
+            {f"{row_field}_rows_partial": recovered_partial, NOT_COMPARED: len(not_compared)}
+            if recovered_partial
+            else {}
+        ),
         "results": page,
         "total": len(results),
         "page_offset": start,
@@ -1498,5 +1536,10 @@ def decode_string_blobs(
         "ambiguous_spans": decoded.ambiguous,
         "outranked_spans": decoded.outranked,
         **({"unreferenced_results": unreferenced} if include_unreferenced else {}),
+        **(
+            {"not_compared_results": not_compared}
+            if include_unreferenced and recovered_partial
+            else {}
+        ),
         **_sections_said(decoded),
     }

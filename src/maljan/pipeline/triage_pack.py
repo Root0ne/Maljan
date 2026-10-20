@@ -660,6 +660,11 @@ class _Pack:
         # An answer whose step can give its rows whole where its entry holds a
         # page of them, by entry id.
         self._whole_rows: dict[str, Callable[[], list[dict[str, Any]]]] = {}
+        # The emulator's whole rows, the result its call paged its answer
+        # from, held for this job by step id: the emulator's own memory is
+        # the process's, and another job's run may clear it before this
+        # pack's readers come to compare with it.
+        self._floss_rows: dict[str, list[dict[str, Any]]] = {}
         self._clocks: dict[str, int | None] = {}
 
     # -- recording --------------------------------------------------------
@@ -1286,13 +1291,25 @@ class _Pack:
                 if settings.job_id
                 else None
             )
-            return emulated_strings.floss(
+            # The whole result first, then the entry's page of it: the page
+            # and the rows the pack's readers compare with are one result,
+            # never a second read of the emulator's process-wide memory.
+            found = emulated_strings.recovered(
+                path, timeout_s=timeout, environ=settings.environ, scratch=scratch
+            )
+            if "error" in found:
+                return found
+            answer = emulated_strings.floss(
                 path,
                 limit=DECODED_STRINGS_ROWS,
                 timeout_s=timeout,
                 environ=settings.environ,
                 scratch=scratch,
+                found=found,
             )
+            if isinstance(answer, dict) and "error" not in answer:
+                self._floss_rows[step.id] = list(found["rows"])
+            return answer
 
         return call
 
@@ -1313,7 +1330,6 @@ class _Pack:
         waited for here and recorded with its own clock.
         """
         args = self._floss_args(step)
-        path = self.inputs.sample_path
         held = len(self.recorder.entries)
         early = self._early.pop(step.id, None)
         if early is not None:
@@ -1353,11 +1369,12 @@ class _Pack:
             if step.id not in self.result.schedules:
                 self.result.schedules[step.id] = "in turn"
             self.record("floss", args, self._floss_call(step))
-        # Its entry holds a page of the rows; the whole document stays with
-        # the emulator in this process, for the readers that compare with it.
+        # Its entry holds a page of the rows; the whole rows its page was cut
+        # from stay with this pack for the readers that compare with them.
+        whole = self._floss_rows.pop(step.id, None)
         for entry in self.recorder.entries[held:]:
-            if entry.ok:
-                self._whole_rows[entry.id] = partial(emulated_strings.remembered_rows, path)
+            if entry.ok and whole is not None:
+                self._whole_rows[entry.id] = partial(list, whole)
 
     # -- the readings of a PE's bytes -----------------------------------------
 
@@ -1403,7 +1420,11 @@ class _Pack:
         """
         path = self.inputs.sample_path
         args, label, starts = self._starts_args()
-        recovered, decoder = self._recovered_rows()
+        recovered, decoder, unheld = self._recovered_rows()
+        if unheld:
+            # The comparison is with part of a decoder's rows: said in the
+            # entry's arguments and its line, never read as complete.
+            args["decoder_rows_partial"] = unheld
         self.record(
             "decode_string_blobs",
             args,
@@ -1413,25 +1434,30 @@ class _Pack:
                 function_source=label,
                 recovered=recovered,
                 decoder=decoder,
+                recovered_partial=unheld,
             ),
         )
 
-    def _recovered_rows(self) -> tuple[list[Mapping[str, Any]], str]:
+    def _recovered_rows(self) -> tuple[list[Mapping[str, Any]], str, str]:
         """The rows of every ok call-site strings answer, whole where its step keeps them whole.
 
         And the word the decoder's answer names their source by: the shipped
-        emulator's name where every row came from it (``string_blobs.decoder_word``).
+        emulator's name where every row came from it (``string_blobs.decoder_word``);
+        and which answers gave only part of their rows, and why (``""``: every
+        answer's rows are whole).
         """
         rows: list[Mapping[str, Any]] = []
+        unheld: list[str] = []
         sources = site_sources(self.recorder.entries)
-        for _tool, entry, given in sources:
-            whole = self._whole_rows.get(entry.id)
-            held = whole() if whole is not None else []
-            rows.extend(held or given)
+        for tool, entry, given in sources:
+            held, why = _site_rows_held(entry, given, self._whole_rows.get(entry.id))
+            rows.extend(held)
+            if why:
+                unheld.append(f"{entry.id} {tool}: {why}")
         shipped = _from_shipped(
             (entry for _tool, entry, _rows in sources), DECODER_RENDERER, self.steps
         )
-        return rows, string_blobs.decoder_word(shipped)
+        return rows, string_blobs.decoder_word(shipped), "; ".join(unheld)
 
     def _resolved_api_capability(self, step: PackStep) -> None:
         """The catalogue asked about the names the resolution read that the import table lacks.
@@ -2270,6 +2296,24 @@ DROPPED_SOURCE = "sandbox dropped files"
 BUDGET_SPENT = "the pack's time budget was spent before it"
 
 
+def _site_rows_held(
+    entry: LedgerEntry,
+    given: list[Mapping[str, Any]],
+    whole: Callable[[], list[dict[str, Any]]] | None,
+) -> tuple[list[Mapping[str, Any]], str]:
+    """A call-site strings answer's rows, whole where held; and why only part, or ``""``."""
+    why = ""
+    if whole is not None:
+        try:
+            return list(whole()), ""
+        except Exception as exc:  # noqa: BLE001 — the page the entry holds is still read
+            why = f"its whole rows could not be read ({type(exc).__name__})"
+    data = entry.structured if isinstance(entry.structured, dict) else {}
+    if not why and (data.get("truncated") or data.get("next_offset") is not None):
+        why = "the entry holds a page of its rows"
+    return given, why
+
+
 def _whole_or_page(
     entry: LedgerEntry, facts: ToolFacts, whole: Callable[[], list[dict[str, Any]]] | None
 ) -> tuple[list[Any], str]:
@@ -2743,17 +2787,40 @@ def rules_already_recorded(rows: Any, kinds: Iterable[str] | None = None) -> boo
     )
 
 
-def pack_entries(rows: Any) -> list[LedgerEntry]:
+class PackEntries(list[LedgerEntry]):
+    """The pack's entries, and the error class of each ledger row that could not be read.
+
+    ``render_pack`` ends the block with a sentence counting those rows
+    (``unread_rows_sentence``), so a row left out is never silent.
+    """
+
+    unread: list[str]
+
+    def __init__(self, entries: Iterable[LedgerEntry] = (), unread: Iterable[str] = ()) -> None:
+        super().__init__(entries)
+        self.unread = list(unread)
+
+
+def pack_entries(rows: Any) -> PackEntries:
     """The pack's entries out of the run's ledger rows, in ledger order.
 
     Read off ``agent`` rather than ``server``: the reputation call is
-    recorded under the server it was made to and is still the pack's.
+    recorded under the server it was made to and is still the pack's. A row
+    that is not a ledger entry is left out, logged, and counted under the
+    answer's ``unread``.
     """
-    out: list[LedgerEntry] = []
+    out = PackEntries()
     for row in rows or []:
         try:
             entry = row if isinstance(row, LedgerEntry) else LedgerEntry.model_validate(row)
-        except Exception:  # noqa: BLE001 — one unreadable row is not a lost block
+        except Exception as exc:  # noqa: BLE001 — one unreadable row is not a lost block
+            said = row.get("id") if isinstance(row, Mapping) else None
+            logger.warning(
+                "triage pack: ledger row %s is not a ledger entry and is left out (%s).",
+                said if isinstance(said, str) else f"of type {type(row).__name__}",
+                type(exc).__name__,
+            )
+            out.unread.append(type(exc).__name__)
             continue
         if entry.agent == PIPELINE:
             out.append(entry)
@@ -2761,7 +2828,51 @@ def pack_entries(rows: Any) -> list[LedgerEntry]:
     return out
 
 
+def unread_rows_sentence(entries: Sequence[LedgerEntry]) -> str:
+    """How many ledger rows ``pack_entries`` could not read, and why, or ``""``."""
+    unread = list(getattr(entries, "unread", None) or [])
+    if not unread:
+        return ""
+    many = len(unread) != 1
+    classes = ", ".join(dict.fromkeys(unread))
+    return (
+        f"{len(unread)} ledger row{'s' if many else ''} could not be read and "
+        f"{'are' if many else 'is'} left out ({classes})"
+    )
+
+
 def render_pack(entries: list[LedgerEntry], max_chars: int) -> str:
+    """The pack within ``max_chars`` (``_render_entries``), ending with the unread rows' count.
+
+    Where ``pack_entries`` could not read some ledger rows, the block's last
+    line says how many and the error classes (``unread_rows_sentence``), and
+    the entries take the room that line leaves.
+    """
+    unread = unread_rows_sentence(entries)
+    if not unread:
+        return _render_entries(entries, max_chars)
+    body = _render_entries(entries, _entries_room(entries, max_chars)) if entries else ""
+    block = f"{body}\n{unread}" if body else unread
+    if max_chars <= 0 or len(block) <= max_chars:
+        return block
+    # A room too small for the entries beside the sentence: the sentence
+    # alone, or nothing where even it does not fit (the rows are logged).
+    return unread if len(unread) <= max_chars else ""
+
+
+def _entries_room(entries: Sequence[LedgerEntry], max_chars: int) -> int:
+    """The room the entries are rendered in: ``max_chars`` less the unread rows' line.
+
+    ``render_pack`` and ``pack_unsaid`` both read it, so the run summary's
+    record of what the pack left out is of the pack as rendered.
+    """
+    unread = unread_rows_sentence(entries)
+    if max_chars <= 0 or not unread:
+        return max_chars
+    return max(1, max_chars - len(unread) - 1)
+
+
+def _render_entries(entries: list[LedgerEntry], max_chars: int) -> str:
     """The pack as one line per entry, ``[ev_id] group: facts``, within ``max_chars``.
 
     Facts only: counts, names, the values the tools returned, each whole when
@@ -3004,7 +3115,9 @@ def pack_unsaid(entries: list[LedgerEntry], max_chars: int) -> list[LedgerEntry]
     They are the ones for which the trailer found no room of its own and capa's
     addresses had none to give: the pack then stays as the earlier lines are,
     and the triage node records them in its pack record (``NO_PACK_ROOM``).
+    Read in the room ``render_pack`` gives the entries (``_entries_room``).
     """
+    max_chars = _entries_room(entries, max_chars)
     with _viewing(entries):
         if any(_is_index(entry) for entry in entries):
             return _with_index(entries, max_chars)[1]
@@ -3294,7 +3407,7 @@ def _within_room(entry: LedgerEntry, room: int) -> str | None:
 
 def pack_block(entries: list[LedgerEntry], max_chars: int) -> str:
     """The heading and the rendered pack, or ``""`` when there is no pack."""
-    if not entries:
+    if not entries and not unread_rows_sentence(entries):
         return ""
     return f"{PACK_HEADING}\n{render_pack(entries, max_chars)}"
 
@@ -3351,8 +3464,12 @@ def _line_of(entry: LedgerEntry) -> str:
     try:
         return f"[{entry.id}] {label}: {render(_guarded(data))}"
     except Exception as exc:  # noqa: BLE001 — a renderer must never cost the block
-        logger.debug("pack line for %s could not be rendered (%s).", entry.tool, exc)
-        return f"[{entry.id}] {label}: recorded"
+        logger.warning("pack line for %s could not be rendered (%s).", entry.tool, exc)
+        # Not "recorded": that reads as an answer with nothing to say.
+        return (
+            f"[{entry.id}] {label}: not rendered ({type(exc).__name__} in the pack's "
+            "renderer); call the tool for its answer"
+        )
 
 
 # How an entry the pipeline wrote about a call it did not make begins.
@@ -4349,6 +4466,24 @@ DECODED_BLOBS_RECALL = (
 )
 
 
+# Said in the decoded-blobs line when the decoder rows it compared with were
+# only part of them (the entry's ``decoder_rows_partial`` argument).
+DECODED_BLOBS_PARTIAL_COMPARE = (
+    "compared with only part of the decoder's rows, so a decoding no code refers to that "
+    "those rows did not recover is counted apart as not compared, not among the unreferenced"
+)
+
+
+def _partial_compare() -> str:
+    """Why the line's decodings were compared with part of a decoder's rows, or ``""``."""
+    current = _CURRENT.get()
+    args = current.args if current is not None and isinstance(current.args, dict) else {}
+    said = args.get("decoder_rows_partial")
+    if not said:
+        return ""
+    return f"{DECODED_BLOBS_PARTIAL_COMPARE} ({_one_line(str(said))})"
+
+
 def _decoded_blobs(data: dict[str, Any], max_chars: int | None = None) -> str:
     """The texts the platform decoded from the data sections, and who refers to each.
 
@@ -4361,10 +4496,19 @@ def _decoded_blobs(data: dict[str, Any], max_chars: int | None = None) -> str:
     # Under the answer's field for it, whichever decoder's strings it compared.
     also = int(string_blobs.also_recovered(data) or 0)
     decoders = _decoders_in_view()
+    partial_compare = _partial_compare()
+    not_compared = int(data.get(string_blobs.NOT_COMPARED) or 0)
+    apart = (
+        f"; {_n(not_compared)} more decodings no code refers to and not compared with the "
+        "decoder's whole rows, not shown, listed with include_unreferenced"
+        if not_compared
+        else ""
+    )
     counts = (
         f"{f'{_n(also)} also recovered by {decoders}; ' if decoders else ''}"
         f"{_n(unreferenced)} more decodings no code refers "
         "to, not shown, one decode_string_blobs call away with include_unreferenced"
+        f"{apart}{f'; {partial_compare}' if partial_compare else ''}"
     )
     if not rows:
         return (

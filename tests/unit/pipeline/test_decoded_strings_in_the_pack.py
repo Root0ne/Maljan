@@ -120,6 +120,15 @@ def _installed(monkeypatch: pytest.MonkeyPatch, answer: dict[str, Any]) -> _Flos
     fake = _Floss(answer)
     monkeypatch.setattr(emulated_strings, "floss_unavailable", lambda environ=None: None)
     monkeypatch.setattr(emulated_strings, "floss", fake)
+
+    def recovered(path: str, **_: Any) -> dict[str, Any]:
+        # The whole result the pack pages its entry from: the answer's own
+        # rows, or its error as the emulator would give it.
+        if "error" in answer:
+            return answer
+        return {"rows": list(answer.get("strings") or []), "meta": answer.get("meta") or {}}
+
+    monkeypatch.setattr(emulated_strings, "recovered", recovered)
     return fake
 
 
