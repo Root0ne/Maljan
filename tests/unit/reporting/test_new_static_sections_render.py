@@ -146,6 +146,34 @@ class TestCarvedPayloadsAreLocatable:
         assert "RT_ICON" not in payloads
         assert "RT_ICON" in md.split("### Resources", 1)[1]
 
+    def test_the_carvers_cap_note_stands_with_the_carved_payloads(self) -> None:
+        """What the carve cap left out is said beside what it carved, and is
+        no resource: it neither appears in that list nor counts toward it."""
+        note = {
+            "type": "8 carved, the platform's cap; 3 more candidates not carved (PE 3; 0 of "
+            "them validated)",
+            "left_out": 3,
+            "kinds": {"PE": 3},
+            "kinds_validated": {},
+            "left_out_validated": 0,
+            "carved": False,
+        }
+        icons = [{"type": f"RT_ICON{n}", "id": n, "size": 10} for n in range(20)]
+        md = _render(
+            StaticAnalysis(
+                embedded_resources=[
+                    *icons,
+                    {"type": "carved:PE", "id": "overlay+0x100", "size": 9999, "carved": True},
+                    note,
+                ]
+            )
+        )
+        payloads = md.split("### 5.8 Payloads and dropped files", 1)[1].split("## ", 1)[0]
+        assert "3 more candidates not carved" in payloads
+        resources = md.split("### Resources", 1)[1].split("###", 1)[0]
+        assert "not carved" not in resources
+        assert "more resources" not in resources
+
 
 class TestASectionCanBeFoundInTheFile:
     """``PESection.raw_offset`` is PointerToRawData. It was extracted, stored

@@ -295,3 +295,17 @@ def test_a_well_known_host_is_not_kept_through_a_url_on_it() -> None:
     artifact = Artifact(kind="endpoints", rows=[["url", "https://www.googleapis.com/x"]])
 
     assert kept_network_values(artifact) == [("url", "https://www.googleapis.com/x")]
+
+
+def test_a_tenant_host_of_shared_hosting_is_not_kept_through_a_url_on_it() -> None:
+    """A bucket's name needs evidence of its own: the URL is kept, its host is not."""
+    url = "https://evil-bucket.s3.amazonaws.com/x"
+    artifact = Artifact(kind="endpoints", rows=[["url", url]])
+
+    assert kept_network_values(artifact) == [("url", url)]
+
+
+def test_a_tenant_host_listed_itself_is_kept() -> None:
+    artifact = Artifact(kind="endpoints", rows=[["domain", "evil-bucket.s3.amazonaws.com"]])
+
+    assert kept_network_values(artifact) == [("domain", "evil-bucket.s3.amazonaws.com")]

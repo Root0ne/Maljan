@@ -90,9 +90,12 @@ class TestCarvingDoesNotInventFindings:
         assert _carve_embedded(_PE_MAGIC + b"\x00" * 40000, []) == []
 
     def test_the_child_count_is_bounded(self) -> None:
-        """A blob full of MZ headers must not produce a hundred rows."""
+        """A blob full of MZ headers must not produce a hundred rows: eight
+        carved, and one row saying how many more the cap left out."""
         blob = _PE_MAGIC + b"".join(_PE_MAGIC + b"\x41" * 2048 for _ in range(60))
-        assert len(_carve_embedded(blob, [])) <= 8
+        rows = _carve_embedded(blob, [])
+        assert len([r for r in rows if r["carved"]]) <= 8
+        assert [r["left_out"] for r in rows if not r["carved"]] == [52]
 
     def test_an_oversized_input_is_skipped(self) -> None:
         from maljan.extractors import pe_extractor

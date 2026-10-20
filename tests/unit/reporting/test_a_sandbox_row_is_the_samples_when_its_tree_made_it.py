@@ -19,9 +19,17 @@ from __future__ import annotations
 import json
 from typing import Any
 
+import pytest
+
 from maljan.providers.sandbox_tools import sandbox_network
 from maljan.reporting.ledger_projection import network_from_ledger
-from maljan.reporting.models import JudgeIndicator, MalwareReport, NetworkDomain, NetworkIOCs
+from maljan.reporting.models import (
+    JudgeIndicator,
+    MalwareReport,
+    NetworkDomain,
+    NetworkIOCs,
+    NetworkIP,
+)
 from maljan.reporting.renderers.stix_renderer import emulation_kwargs, publish_answer, publishes
 from maljan.schemas.evidence import build_entry
 from maljan.schemas.isr_models import AgentISR, Artifact, ClaimEvidence
@@ -428,6 +436,50 @@ class TestThePublishRule:
         )
 
         assert publishes(_answer(report, "domain", "relay-alpha-7f3c.top"))
+
+
+# Tenants' names on shared hosting: a CloudFront distribution, Akamai edge
+# labels and a Fastly name the provider did not reserve for itself.
+TENANT_NAMES = [
+    "d1y3fbs6jcl0nj.cloudfront.net",
+    "e1234.dscx.akamaiedge.net",
+    "a248.e.akamai.net",
+    "prod.r.fastly.net",
+]
+
+
+def _tenant(name: str, *, tree: bool | None = None) -> NetworkIOCs:
+    """``name`` resolved by the guest, to an address a flow reached when ``tree`` says whose."""
+    if tree is None:
+        return NetworkIOCs(domains=[NetworkDomain(fqdn=name, source="sandbox")])
+    return NetworkIOCs(
+        domains=[NetworkDomain(fqdn=name, source="sandbox", resolved_ips=[CONTACT])],
+        ips=[NetworkIP(address=CONTACT, source="sandbox", sample_process_tree=tree)],
+    )
+
+
+@pytest.mark.parametrize("name", TENANT_NAMES)
+class TestATenantNameTheGuestResolved:
+    """Guest DNS is not a tenant name's own evidence: like a well-known name the
+    guest resolved, it waits for the judge's keep, a flow of the sample's
+    process tree, or a recovery."""
+
+    def test_guest_dns_alone_holds_it(self, name: str) -> None:
+        for network in (_tenant(name), _tenant(name, tree=False)):
+            answer = _answer(_report(network), "domain", name)
+
+            assert answer.startswith(
+                "no: a tenant's name on shared hosting the sandbox's guest resolved"
+            ), answer
+
+    def test_the_judge_keeping_it_publishes_it(self, name: str) -> None:
+        report = _report(_tenant(name), run_summary=answered_the_sandbox_fact(f"domain:{name}"))
+        report.judge_indicators = [JudgeIndicator(kind="domain", value=name)]
+
+        assert publishes(_answer(report, "domain", name))
+
+    def test_a_flow_of_the_samples_tree_publishes_it(self, name: str) -> None:
+        assert publishes(_answer(_report(_tenant(name, tree=True)), "domain", name))
 
 
 class TestTheWholeReportIsRead:

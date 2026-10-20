@@ -315,9 +315,15 @@ def capture_facts(pcap_path: str, packet_limit: Any = None) -> dict[str, Any] | 
     Keys: ``packets_read``, ``packets_in_capture``, ``packet_limit`` (the
     caller's, or ``None``), ``bytes``, ``duration_s``, ``protocols`` (count per
     ``tcp``/``udp``/``other`` of the IP packets read), ``conversations`` (every
-    external destination as ``{dst, dport, proto, packets, bytes}``, the
-    heaviest first), ``sni`` (``{name: ClientHello count}``) and ``beacons``
-    (``{dst, dport, proto, callbacks, interval_s}``).
+    external host and port as ``{dst, dport, proto, packets, bytes}``, both
+    directions counted, the heaviest first; ``packets_from_host`` and
+    ``bytes_from_host`` added when the external host sent any of them, and
+    ``inbound_only`` when it sent all of them),
+    ``sni`` (``{name: ClientHello count}``) and ``beacons`` (``{dst, dport,
+    proto, callbacks, interval_s}``, measured on the packets toward the host;
+    when those are not regular, on the TCP connections the other side opened
+    toward it, one per SYN source address and port, and then marked ``unit:
+    "connection"``).
     """
     times: list[float] = []
     proto_counts: dict[str, int] = defaultdict(int)
@@ -338,9 +344,10 @@ def capture_facts(pcap_path: str, packet_limit: Any = None) -> dict[str, Any] | 
             if pkt.ip_dst is None and not pkt.ipv6:
                 return
             dst = pkt.ip_dst
+            sport = 0
             if pkt.tcp is not None:
                 proto = "tcp"
-                dport = pkt.tcp.dport
+                sport, dport = pkt.tcp.sport, pkt.tcp.dport
                 if dport == 443:
                     name = _extract_sni(pkt)
                     if name:
@@ -350,20 +357,42 @@ def capture_facts(pcap_path: str, packet_limit: Any = None) -> dict[str, Any] | 
                             unwritten.append(exc)
             elif pkt.udp is not None:
                 proto = "udp"
-                dport = pkt.udp.dport
+                sport, dport = pkt.udp.sport, pkt.udp.dport
             else:
                 proto = "other"
                 dport = 0
             proto_counts[proto] += 1
             # An IPv6 datagram is counted by its next header; its addresses are
             # not read, so it names no conversation.
-            if dst is None or not _is_external(dst):
-                return  # the summary is about the external (C2) surface
-            c = convs.setdefault((dst, dport, proto), {"pkts": 0, "bytes": 0, "times": []})
+            if dst is None:
+                return
+            # The summary is about the external (C2) surface: a conversation is
+            # an external host and its port, and holds the packets both ways.
+            # A packet to an external address is toward it, as it always was;
+            # one from an external address to an internal one is from it.
+            if _is_external(dst):
+                key, from_host = (dst, dport, proto), False
+            elif pkt.ip_src is not None and _is_external(pkt.ip_src):
+                key, from_host = (pkt.ip_src, sport, proto), True
+            else:
+                return
+            c = convs.setdefault(key, _conversation())
             c["pkts"] += 1
             c["bytes"] += plen
+            if from_host:
+                c["pkts_from"] += 1
+                c["bytes_from"] += plen
+                return
+            # The beacon is measured on the packets toward the host, as before,
+            # and on the connections the sandbox's side opened toward it: one
+            # per source address and port, so a retransmitted SYN is one.
             if t:
                 c["times"].append(t)
+                if pkt.tcp is not None and pkt.tcp.opens:
+                    opener = (pkt.ip_src, sport)
+                    if opener not in c["openers"]:
+                        c["openers"].add(opener)
+                        c["opens"].append(t)
         except Exception:  # noqa: BLE001 — one malformed packet is not a lost capture
             return
 
@@ -379,21 +408,21 @@ def capture_facts(pcap_path: str, packet_limit: Any = None) -> dict[str, Any] | 
 
     beacons: list[dict[str, Any]] = []
     for (dst, dport, proto), c in convs.items():
-        ts = sorted(c["times"])
-        if len(ts) < _BEACON_MIN_HITS:
-            continue
-        deltas = [b - a for a, b in zip(ts, ts[1:], strict=False) if (b - a) > 0]
-        if len(deltas) < _BEACON_MIN_HITS - 1:
-            continue
-        interval = _mean(deltas)
-        if interval >= _BEACON_MIN_INTERVAL_S and _cv(deltas) <= _BEACON_MAX_CV:
+        beacon = _beacon(c["times"])
+        unit: dict[str, str] = {}
+        if beacon is None:
+            beacon = _beacon(c["opens"])
+            unit = {"unit": "connection"}
+        if beacon is not None:
+            callbacks, interval = beacon
             beacons.append(
                 {
                     "dst": dst,
                     "dport": dport,
                     "proto": proto,
-                    "callbacks": len(ts),
+                    "callbacks": callbacks,
                     "interval_s": round(interval, 1),
+                    **unit,
                 }
             )
 
@@ -403,21 +432,81 @@ def capture_facts(pcap_path: str, packet_limit: Any = None) -> dict[str, Any] | 
         "bytes": total_bytes,
         "duration_s": round(max(times) - min(times), 1) if len(times) >= 2 else 0.0,
         "protocols": dict(sorted(proto_counts.items())),
-        "conversations": [
-            {"dst": dst, "dport": dport, "proto": proto, "packets": c["pkts"], "bytes": c["bytes"]}
-            for (dst, dport, proto), c in ranked
-        ],
+        "conversations": [_conversation_row(key, c) for key, c in ranked],
         "sni": dict(sorted(snis.items())),
         "beacons": beacons,
     }
 
 
+def _conversation() -> dict[str, Any]:
+    return {
+        "pkts": 0,
+        "bytes": 0,
+        "pkts_from": 0,
+        "bytes_from": 0,
+        "times": [],
+        "opens": [],
+        "openers": set(),
+    }
+
+
+def _conversation_row(key: tuple[str, int, str], c: dict[str, Any]) -> dict[str, Any]:
+    """One conversation's row: packets and bytes both ways, and the part from
+    the external host when there is one."""
+    dst, dport, proto = key
+    row: dict[str, Any] = {
+        "dst": dst,
+        "dport": dport,
+        "proto": proto,
+        "packets": c["pkts"],
+        "bytes": c["bytes"],
+    }
+    if c["pkts_from"]:
+        row["packets_from_host"] = c["pkts_from"]
+        row["bytes_from_host"] = c["bytes_from"]
+    if c["pkts_from"] == c["pkts"]:
+        # Every packet came from the external host: the sandbox never sent to
+        # it, so it is no host the sample contacted.
+        row["inbound_only"] = True
+    return row
+
+
+def _beacon(times: list[float]) -> tuple[int, float] | None:
+    """``(callbacks, mean interval)`` when ``times`` are a regular callback, else ``None``.
+
+    Regular: at least ``_BEACON_MIN_HITS`` times whose gaps (equal times
+    dropped) average at least ``_BEACON_MIN_INTERVAL_S`` with a coefficient of
+    variation at most ``_BEACON_MAX_CV``.
+    """
+    ts = sorted(times)
+    if len(ts) < _BEACON_MIN_HITS:
+        return None
+    deltas = [b - a for a, b in zip(ts, ts[1:], strict=False) if (b - a) > 0]
+    if len(deltas) < _BEACON_MIN_HITS - 1:
+        return None
+    interval = _mean(deltas)
+    if interval >= _BEACON_MIN_INTERVAL_S and _cv(deltas) <= _BEACON_MAX_CV:
+        return len(ts), interval
+    return None
+
+
 def conversation_line(row: dict[str, Any]) -> str:
-    """``"<dst>:<port>/<proto> — N pkts, M bytes"``: one conversation as every surface writes it."""
-    return (
+    """``"<dst>:<port>/<proto> — N pkts, M bytes"``: one conversation as every surface writes it.
+
+    Both directions are in the totals; the part from the external host follows
+    when the row states one: ``"(K pkts, B bytes from the host)"``.
+    """
+    line = (
         f"{row.get('dst')}:{row.get('dport')}/{row.get('proto')} — "
         f"{row.get('packets')} pkts, {row.get('bytes')} bytes"
     )
+    if row.get("packets_from_host"):
+        line += (
+            f" ({row.get('packets_from_host')} pkts, "
+            f"{row.get('bytes_from_host')} bytes from the host"
+            + ("; inbound only)" if row.get("inbound_only") else ")")
+        )
+    return line
 
 
 def summary_text(facts: dict[str, Any]) -> str:
@@ -458,8 +547,9 @@ def summary_text(facts: dict[str, Any]) -> str:
             "",
             "Beaconing detected (periodic callbacks — strong C2 signal):",
             *[
-                f"- {b['dst']}:{b['dport']}/{b['proto']} — {b['callbacks']} callbacks, "
-                f"~{b['interval_s']:.1f}s interval (regular; likely C2 beacon)"
+                f"- {b['dst']}:{b['dport']}/{b['proto']} — {b['callbacks']} "
+                + ("connections opened" if b.get("unit") == "connection" else "callbacks")
+                + f", ~{b['interval_s']:.1f}s interval (regular; likely C2 beacon)"
                 for b in beacons
             ],
         ]

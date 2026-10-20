@@ -150,10 +150,11 @@ class CaptureFormatError(Exception):
 
 @dataclass(frozen=True, slots=True)
 class Segment:
-    """A TCP header's ports, and where its payload lies in the record.
+    """A TCP header's ports and flags, and where its payload lies in the record.
 
     ``data`` is the segment's payload as its IP header bounds it, sliced from
     the record when asked for; bytes past the datagram are trailer or padding.
+    ``flags`` is the header's flag byte (``0x02`` SYN, ``0x10`` ACK, ...).
     """
 
     sport: int
@@ -161,6 +162,12 @@ class Segment:
     frame: bytes
     data_start: int
     data_end: int
+    flags: int = 0
+
+    @property
+    def opens(self) -> bool:
+        """Whether this segment opens a connection: SYN set and ACK not."""
+        return bool(self.flags & 0x02) and not self.flags & 0x10
 
     @property
     def data(self) -> bytes:
@@ -1026,7 +1033,7 @@ class _Walk:
         sport, dport = struct.unpack("!HH", frame[start : start + 4])
         data_start = min(start + max(20, (frame[start + 12] >> 4) * 4), end)
         if not quoted and self.packet.tcp is None:
-            self.packet.tcp = Segment(sport, dport, frame, data_start, end)
+            self.packet.tcp = Segment(sport, dport, frame, data_start, end, frame[start + 13])
         if sport == 53 or dport == 53:
             self.question(_dns_over_tcp(frame[data_start:end]))
         return None
