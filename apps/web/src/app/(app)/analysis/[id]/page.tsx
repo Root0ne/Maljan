@@ -1,5 +1,6 @@
 "use client";
 
+import { correctionLine } from "./correctionLine";
 import { useState } from "react";
 import Link from "next/link";
 
@@ -22,7 +23,7 @@ import { useRun } from "@/lib/useRun";
 import { rosterNames } from "@/lib/rosterNames";
 import { formatStageDuration, stageTiming } from "@/components/analysis/stageTimeline";
 import { getErrorMessage } from "@/lib/errors";
-import { ENRICH_BUTTON_LABEL, ENRICH_STATUS_MESSAGE } from "@/lib/enrichment";
+import { ENRICH_BUTTON_LABEL, enrichMessage } from "@/lib/enrichment";
 import { degradedBannerText } from "@/lib/degradedBanner";
 import { validationRowClass, validationRowText } from "@/lib/validationRows";
 import EvidenceChips from "@/components/analysis/EvidenceChips";
@@ -36,6 +37,7 @@ import {
   keyFindings,
   noSummaryReason,
 } from "@/components/analysis/reportProse";
+import { endpointCounts } from "@/components/analysis/networkFacts";
 import { severityTone } from "@/lib/severity";
 import type { FpWarning, MalwareReport, NoToolCallAsk } from "@/types/malware-report";
 
@@ -51,26 +53,14 @@ function countNetworkIOCs(mr: MalwareReport): {
   const staticIocs = (mr.static?.interesting_strings ?? []).filter(
     (s) => s.kind === "domain" || s.kind === "ip" || s.kind === "url",
   );
-  const staticDomains = staticIocs.filter((s) => s.kind === "domain").length;
-  const staticIps = staticIocs.filter((s) => s.kind === "ip").length;
-  const staticUrls = staticIocs.filter((s) => s.kind === "url").length;
+  const counts = endpointCounts(n, staticIocs);
   if (!n) {
-    return {
-      domains: staticDomains,
-      ips: staticIps,
-      urls: staticUrls,
-      suspicious: 0,
-    };
+    return { ...counts, suspicious: 0 };
   }
   const susp =
     n.domains.filter((d) => d.is_suspicious).length +
     n.ips.filter((i) => i.is_suspicious).length;
-  return {
-    domains: n.domains.length + staticDomains,
-    ips: n.ips.length + staticIps,
-    urls: n.urls.length + staticUrls,
-    suspicious: susp,
-  };
+  return { ...counts, suspicious: susp };
 }
 
 export default function SummaryTab() {
@@ -648,9 +638,7 @@ function RunRecord({
               </li>
             )}
             <li>
-              {validation?.retries
-                ? `${countLabel(validation.retries, "correction turn")} were spent on producers that answered in the wrong shape.`
-                : "No producer needed a correction turn."}
+              {correctionLine(validation, countLabel)}
             </li>
             {spent && <li>{spent}</li>}
             {fallbacks.map((row, i) => (
@@ -911,7 +899,7 @@ function EnrichButton({ reportId }: { reportId: string }) {
       // skipped_no_network_iocs — say which one happened rather than always
       // promising a refresh.
       const res = await api.enrichReport(reportId);
-      setMessage(ENRICH_STATUS_MESSAGE[res.status] ?? ENRICH_STATUS_MESSAGE.queued);
+      setMessage(enrichMessage(res.status));
     } catch (err) {
       setMessage(`Could not queue enrichment: ${getErrorMessage(err)}`);
     } finally {

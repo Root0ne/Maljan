@@ -228,8 +228,10 @@ export default function GroupPage({ section, group }: { section: string; group: 
       await ctx.resetGroup(resolved.backendGroup);
       return;
     }
+    ctx.clearActionError();
     for (const entry of overriddenKeys) {
-      await ctx.reset(entry.key);
+      const outcome = await ctx.reset(entry.key, { accumulate: true });
+      if (outcome === "cancelled") break;
     }
   };
 

@@ -11,6 +11,7 @@ import type {
 import { deepEqual } from "./mapEditorHelpers";
 import { useOptionalSettingsContext } from "./SettingsContext";
 import {
+  DECLARATION_PANEL_COPY,
   readCredentialBootstrap,
   readEnvNames,
   readErrorPatterns,
@@ -335,9 +336,7 @@ export default function DeclarationFields({
     <details className="border border-border rounded p-2" data-declaration={serverKey}>
       <summary className="text-xs text-text-muted cursor-pointer">Declaration</summary>
       <p className="text-[11px] text-text-secondary mt-1">
-        What the platform reads about this server and its tools. A built-in ships its own; a
-        server you add needs none to work. Nothing reads the declaration yet besides
-        sample_open. See the configuration guide for every field.
+        {DECLARATION_PANEL_COPY}
       </p>
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs mt-2">
         <fieldset className="sm:col-span-2 border border-border rounded p-2">

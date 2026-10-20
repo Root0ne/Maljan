@@ -15,6 +15,7 @@
  */
 
 import type { AgentFindingDTO } from "@/lib/api";
+import type { JobRoster } from "@/types";
 
 /** One claim of an analyst's final ISR, as the pipeline records it. */
 export interface AnalystClaim {
@@ -32,13 +33,15 @@ export interface AnalystClaims {
 /** Every dynamic analyst that said something, with what it said. */
 export function dynamicAnalystClaims(
   findings: readonly AgentFindingDTO[] | null | undefined,
+  roster?: JobRoster | null,
 ): AnalystClaims[] {
+  // What the data declares: the finding's own domain, or the role the run's
+  // roster gives the agent. Never a substring of the agent's name.
+  const dynamicRoles = new Set(
+    (roster?.agents ?? []).filter((a) => a.role?.toLowerCase() === "dynamic").map((a) => a.key),
+  );
   return (findings ?? [])
-    .filter(
-      (f) =>
-        f.domain?.toLowerCase() === "dynamic" ||
-        f.agent_name?.toLowerCase().includes("dynamic"),
-    )
+    .filter((f) => f.domain?.toLowerCase() === "dynamic" || dynamicRoles.has(f.agent_name))
     .map((f) => ({ agent: f.agent_name, claims: (f.claims ?? []) as AnalystClaim[] }))
     .filter((f) => f.claims.length > 0);
 }

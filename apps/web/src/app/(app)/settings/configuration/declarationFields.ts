@@ -283,3 +283,13 @@ export function showJson(value: unknown): string {
   if (isObject(value) && Object.keys(value).length === 0) return "";
   return JSON.stringify(value, null, 2);
 }
+
+/** What the Declaration panel says it is for. The platform reads a tool's
+ *  declaration well beyond where a sample is opened (the kind of answer a tool
+ *  gives, what it needs, what it does to the host), so the copy names no
+ *  single field as the only one read. */
+export const DECLARATION_PANEL_COPY =
+  "What the platform reads about this server and its tools: the kind of answer " +
+  "each tool gives, what it needs, what it does, and how a sample is opened. A " +
+  "built-in ships its own; a server you add needs none to work. See the " +
+  "configuration guide for every field.";

@@ -735,7 +735,9 @@ export const MOCK_SETTINGS_SCHEMA = withServedDeclarations({
         },
         {
           key: "core.agents.profiles", namespace: "core", path: "agents.profiles",
-          type: "json", default: {}, nullable: false, choices: null,
+          // The API serves the code default, which holds the seeded teams; the
+          // console locks a team whose key is in it.
+          type: "json", default: { default: { label: "Default", stages: PAPER_STAGES(), analysts: ["static", "dynamic", "network"] } }, nullable: false, choices: null,
           minimum: null, maximum: null, secret: false, group: "agents",
           title: "Teams",
           description: "Named teams, each an ordered list of stages.",
@@ -1326,7 +1328,9 @@ export const MOCK_SETTINGS_SCHEMA_FULL: SettingsSchema = withServedDeclarations(
         },
         {
           key: "core.agents.profiles", namespace: "core", path: "agents.profiles",
-          type: "json", default: {}, nullable: false, choices: null,
+          // The API serves the code default, which holds the seeded teams; the
+          // console locks a team whose key is in it.
+          type: "json", default: { default: { label: "Default", stages: PAPER_STAGES(), analysts: ["static", "dynamic", "network"] } }, nullable: false, choices: null,
           minimum: null, maximum: null, secret: false, group: "agents",
           title: "Teams",
           description: "Named teams, each an ordered list of stages.",

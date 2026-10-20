@@ -2,6 +2,8 @@
 
 import { useState } from "react";
 
+import { canStageSecret } from "./boxReading";
+
 const input =
   "w-full bg-bg-deep border border-border rounded px-2 py-1.5 text-sm text-text-primary focus:outline-none focus:border-accent disabled:opacity-50 disabled:cursor-not-allowed";
 
@@ -105,7 +107,8 @@ export default function SecretField({
           />
           <button
             type="button"
-            className="text-xs text-accent-strong"
+            className="text-xs text-accent-strong disabled:opacity-50"
+            disabled={!canStageSecret(draft)}
             onClick={() => {
               onStage(draft);
               setEditing(false);

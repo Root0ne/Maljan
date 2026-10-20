@@ -22,7 +22,9 @@ import { stageTimeline } from "@/components/analysis/stageTimeline";
 import type { StageEvent, StageTimelineRow } from "@/components/analysis/stageTimeline";
 import type { StageRow } from "@/components/analysis/pipelineSteps";
 import { api } from "@/lib/api";
-import { getErrorMessage } from "@/lib/errors";
+import { ApiError, getErrorMessage, isNetworkFailure } from "@/lib/errors";
+import { pollDelay, pollFailure } from "@/app/(app)/analysis/[id]/polling";
+import { API_BASE } from "@/lib/apiBase";
 import { knownKind } from "@/lib/conversation";
 import type { TranscriptRow } from "@/lib/conversation";
 import type { JobRoster } from "@/types";
@@ -107,7 +109,7 @@ export interface RunTransport {
 }
 
 function defaultWsBase(): string {
-  const base = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000";
+  const base = API_BASE;
   return (process.env.NEXT_PUBLIC_WS_URL || base).replace(/^http/, "ws");
 }
 
@@ -701,6 +703,40 @@ function topSeq(page: IncomingEvent[]): number {
  * remove. The reading stops instead, silently: a run the store was told to
  * forget has no reader to tell anything to.
  */
+/**
+ * One page of the recording, asked again when the API may recover: no answer
+ * at all, a 5xx, a 408 or a 429, waiting the longer of the backoff and the
+ * server's `Retry-After` (the rule the job poll uses). The failure is said
+ * while it lasts and cleared when a page arrives. A refusal is thrown to the
+ * caller, which says it; `null` means the run was forgotten while waiting.
+ */
+async function readPageAgain(
+  entry: RunEntry,
+  jobId: string,
+  since: number | undefined,
+  held: () => boolean,
+): Promise<IncomingEvent[] | null> {
+  let failures = 0;
+  for (;;) {
+    try {
+      const page = await transport.readEvents(jobId, since);
+      if (failures > 0 && held()) patch(entry, { feedError: null });
+      return page;
+    } catch (error) {
+      if (!(error instanceof ApiError || isNetworkFailure(error))) throw error;
+      const failure = pollFailure(error);
+      if (failure.kind !== "retry") throw error;
+      if (!held()) return null;
+      patch(entry, {
+        feedError: `Earlier events could not be replayed (${failure.message}); asking again.`,
+      });
+      await new Promise((resolve) => setTimeout(resolve, pollDelay(failures, failure.retryAfterMs)));
+      failures += 1;
+      if (!held()) return null;
+    }
+  }
+}
+
 async function backfill(entry: RunEntry): Promise<void> {
   if (entry.asked) return;
   entry.asked = true;
@@ -712,8 +748,8 @@ async function backfill(entry: RunEntry): Promise<void> {
     let since: number | undefined;
     let truncated: string | null = null;
     for (;;) {
-      const page = await transport.readEvents(jobId, since);
-      if (!held()) return;
+      const page = await readPageAgain(entry, jobId, since, held);
+      if (page === null || !held()) return;
       applyRunEvents(jobId, page);
       /* A page short of the cap is the end of the recording. The count
        * against the cap is the whole of what the endpoint says about that. */

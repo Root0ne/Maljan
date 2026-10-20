@@ -33,12 +33,15 @@ const STATE_DOT: Record<ParticipantState, string> = {
 };
 
 /** What this participant has done, in the fewest words that stay true. */
-function work(
+export function work(
   participant: Participant,
   toolCounts: Record<string, number>,
   partial: boolean,
+  unavailable = false,
 ): string {
   const said = participant.messages;
+  // A ledger that could not be read is not a count of zero.
+  if (unavailable) return `${said} said \u00b7 tool count unavailable`;
   const tools = toolCounts[participant.key] ?? 0;
   const floor = partial ? "+" : "";
   return `${said} said · ${tools}${floor} tool${tools === 1 && !partial ? "" : "s"}`;
@@ -48,6 +51,7 @@ export default function ParticipantsBar({
   participants,
   toolCounts,
   countsArePartial,
+  countsUnavailable = false,
   selected,
   onToggle,
 }: {
@@ -55,6 +59,8 @@ export default function ParticipantsBar({
   /** Answered calls per agent, from the one selector that counts them. */
   toolCounts: Record<string, number>;
   countsArePartial: boolean;
+  /** The ledger the counts come from could not be read. */
+  countsUnavailable?: boolean;
   selected: ReadonlySet<string>;
   onToggle: (key: string) => void;
 }) {
@@ -115,7 +121,7 @@ export default function ParticipantsBar({
               <span className="flex items-center gap-1 text-[11px] text-text-muted">
                 {via.length > 0 && <CornerDownRight size={11} aria-hidden="true" />}
                 <span className="truncate">
-                  {via.length > 0 ? `via ${via.join(", ")}` : work(participant, toolCounts, countsArePartial)}
+                  {via.length > 0 ? `via ${via.join(", ")}` : work(participant, toolCounts, countsArePartial, countsUnavailable)}
                 </span>
               </span>
             </span>

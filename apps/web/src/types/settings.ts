@@ -367,9 +367,10 @@ export interface AgentDefinitionEntry {
  *  `maljan.core.config.DebateOptions`. `null` on a stage means the global
  *  negotiation settings it was seeded from. */
 export interface DebateOptionsEntry {
-  max_rounds: number;
-  consensus_threshold: number;
-  sycophancy_check: boolean;
+  /** A field left out takes the value the API gives it. */
+  max_rounds?: number;
+  consensus_threshold?: number;
+  sycophancy_check?: boolean;
 }
 
 export type StageKind = "triage" | "analysis" | "debate" | "verdict" | "report";

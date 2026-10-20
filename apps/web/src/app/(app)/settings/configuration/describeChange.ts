@@ -1,3 +1,4 @@
+import { describeDebate } from "./debateOptions";
 /**
  * Turns one staged catalog change into a human-readable review line for the
  * changes bar and the guide's review step. Pure and side-effect free: no
@@ -400,9 +401,7 @@ function describeStage(profile: string, before: StageEntry, after: StageEntry): 
   }
   if (!deepEqual(before.debate, after.debate)) {
     lines.push(
-      after.debate
-        ? `${field}: debate ${after.debate.max_rounds} round(s), threshold ${after.debate.consensus_threshold}`
-        : `${field}: debate options cleared`
+      `${field}: ${describeDebate(after.debate)}`
     );
   }
   if (before.label !== after.label) lines.push(`${field}: label changed`);

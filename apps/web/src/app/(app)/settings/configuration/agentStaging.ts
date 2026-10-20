@@ -31,14 +31,32 @@ import type {
   ProbeResult,
 } from "@/types/settings";
 
-/** Re-seeded by the settings model, so they lock rather than delete. */
-export const BUILTIN_AGENT_KEYS: ReadonlySet<string> = new Set([
+/** The built-ins an API older than `CatalogEntry.builtin_agent_keys` leaves
+ *  unnamed. Used only when the served list is absent; every reader that has
+ *  the catalog entry passes its list through `builtinAgentKeys`. */
+const FALLBACK_BUILTIN_AGENT_KEYS: ReadonlySet<string> = new Set([
   "static",
   "dynamic",
   "network",
   "judge",
   "reporter",
 ]);
+
+/** The seeded definition keys, which lock rather than delete: the list the API
+ *  serves for `core.agents.definitions`, else the five an older API leaves. */
+export function builtinAgentKeys(served: readonly string[] | null | undefined): ReadonlySet<string> {
+  return served && served.length > 0 ? new Set(served) : FALLBACK_BUILTIN_AGENT_KEYS;
+}
+
+/** The served list, read off the settings schema's own entry for the leaf. */
+export function builtinAgentKeysOf(
+  schema: { groups: { entries: { key: string; builtin_agent_keys?: string[] | null }[] }[] } | null | undefined,
+): ReadonlySet<string> {
+  const entry = schema?.groups
+    .flatMap((g) => g.entries)
+    .find((e) => e.key === AGENT_DEFINITIONS_KEY);
+  return builtinAgentKeys(entry?.builtin_agent_keys);
+}
 
 /** The fields a built-in's staged entry carries. */
 export type BuiltinOverride = Pick<AgentDefinitionEntry, "role" | "enabled">;
@@ -51,10 +69,13 @@ export type StagedDefinitionMap = Record<string, AgentDefinitionEntry | BuiltinO
 export const AGENT_DEFINITIONS_KEY = "core.agents.definitions";
 
 /** Every built-in of a map reduced to what may be edited about it. */
-export function narrowBuiltins(map: DefinitionMap): StagedDefinitionMap {
+export function narrowBuiltins(
+  map: DefinitionMap,
+  builtins: ReadonlySet<string> = FALLBACK_BUILTIN_AGENT_KEYS,
+): StagedDefinitionMap {
   const out: StagedDefinitionMap = {};
   for (const [key, entry] of Object.entries(map)) {
-    out[key] = BUILTIN_AGENT_KEYS.has(key)
+    out[key] = builtins.has(key)
       ? { role: entry.role, enabled: entry.enabled }
       : entry;
   }
@@ -62,13 +83,17 @@ export function narrowBuiltins(map: DefinitionMap): StagedDefinitionMap {
 }
 
 /** The map to stage for `core.agents.definitions`. */
-export function stagedDefinitions(next: DefinitionMap, saved: DefinitionMap): StagedDefinitionMap {
+export function stagedDefinitions(
+  next: DefinitionMap,
+  saved: DefinitionMap,
+  builtins: ReadonlySet<string> = FALLBACK_BUILTIN_AGENT_KEYS,
+): StagedDefinitionMap {
   // A map that is back where it started is staged as it stands, so the apply
   // bar's revert check recognises it and drops the pending key. A narrowed map
   // never deep-equals the stored one, and would leave "1 change" on screen
   // after an add and a remove that cancelled out.
   if (deepEqual(next, saved)) return next;
-  return narrowBuiltins(next);
+  return narrowBuiltins(next, builtins);
 }
 
 /**
@@ -81,16 +106,21 @@ export function stagedDefinitions(next: DefinitionMap, saved: DefinitionMap): St
  * built-ins were about to be rewritten, which is the sentence the whole fix
  * exists to stop printing. Both sides are narrowed before they are compared.
  */
-export function comparableSaved(key: string, saved: unknown): unknown {
+export function comparableSaved(
+  key: string,
+  saved: unknown,
+  builtins: ReadonlySet<string> = FALLBACK_BUILTIN_AGENT_KEYS,
+): unknown {
   if (key !== AGENT_DEFINITIONS_KEY) return saved;
   if (!saved || typeof saved !== "object" || Array.isArray(saved)) return saved;
-  return narrowBuiltins(saved as DefinitionMap);
+  return narrowBuiltins(saved as DefinitionMap, builtins);
 }
 
 /** The map the editor draws, given what is staged and what is stored. */
 export function displayedDefinitions(
   staged: StagedDefinitionMap | null | undefined,
   saved: DefinitionMap,
+  builtins: ReadonlySet<string> = FALLBACK_BUILTIN_AGENT_KEYS,
 ): DefinitionMap {
   if (!staged) return saved;
 
@@ -100,14 +130,14 @@ export function displayedDefinitions(
   for (const [key, entry] of Object.entries(saved)) {
     const stagedEntry = staged[key];
     if (stagedEntry === undefined) {
-      if (BUILTIN_AGENT_KEYS.has(key)) out[key] = entry;
+      if (builtins.has(key)) out[key] = entry;
       continue;
     }
     // A built-in is staged narrowed to what may be edited about it, so it is
     // drawn over its stored entry. Any other agent is staged whole and the
     // settings model stores it as staged, replacing the stored entry: a field
     // the edit took out (a stored off switch turned back on) is drawn out.
-    out[key] = BUILTIN_AGENT_KEYS.has(key)
+    out[key] = builtins.has(key)
       ? { ...entry, ...stagedEntry }
       : (stagedEntry as AgentDefinitionEntry);
   }

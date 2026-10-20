@@ -1,5 +1,6 @@
 "use client";
 
+import { CONFIDENCE_BAR_COLOR, confidencePercent } from "./agentConfidence";
 import { useReport } from "@/app/(app)/analysis/[id]/layout";
 import { rosterNames } from "@/lib/rosterNames";
 import { statusTone } from "@/lib/status";
@@ -87,11 +88,11 @@ export default function AgentsTab({ roster = null }: { roster?: JobRoster | null
   }
 
   const agents = (report?.agent_findings ?? []).map((f) => {
-    const pct = Math.round(f.final_confidence * 100);
+    const pct = confidencePercent(f.final_confidence);
     const status: AgentFindingStatus = (f.status ?? "complete") as AgentFindingStatus;
     // Signal strength only makes sense for completed runs. For failed /
     // timed-out / no-data the lifecycle status is the entire story.
-    const signal = status === "complete" ? confidenceToSignal(pct) : "unknown";
+    const signal = status === "complete" && pct !== null ? confidenceToSignal(pct) : "unknown";
     // Extract first claim description as key finding
     let keyFinding = "No specific findings recorded.";
     if (f.claims && Array.isArray(f.claims) && f.claims.length > 0) {
@@ -210,19 +211,14 @@ export default function AgentsTab({ roster = null }: { roster?: JobRoster | null
                     )}
                   </td>
                   <td className="px-4 py-3">
-                    {agent.status === "complete" ? (
+                    {agent.status === "complete" && agent.confidence !== null ? (
                       <div className="flex items-center gap-2">
                         <div className="w-12 h-1.5 bg-bg-deep rounded-sm overflow-hidden">
                           <div
                             className="h-full rounded-sm"
                             style={{
                               width: `${agent.confidence}%`,
-                              backgroundColor:
-                                agent.confidence >= 75
-                                  ? "var(--status-red)"
-                                  : agent.confidence >= 45
-                                  ? "var(--status-orange)"
-                                  : "var(--status-green)",
+                              backgroundColor: CONFIDENCE_BAR_COLOR,
                               opacity: 0.7,
                             }}
                           />

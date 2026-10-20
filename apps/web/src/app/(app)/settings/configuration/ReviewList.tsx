@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import type { ChangeLine } from "./describeChange";
-import { comparableSaved } from "./agentStaging";
+import { AGENT_DEFINITIONS_KEY, builtinAgentKeys, comparableSaved } from "./agentStaging";
 import { describeChange } from "./describeChange";
 import { usableFields } from "./declarationFields";
 import { groupsBySection, pathForKey } from "./sections";
@@ -70,7 +70,11 @@ export function buildReviewItems(ctx: ReviewSource): ReviewItem[] {
       // The stored value in the shape the staged one is sent in: for the agent
       // map those differ, and comparing them raw named five untouched
       // built-ins as changed.
-      comparableSaved(key, values[key]?.value),
+      comparableSaved(
+        key,
+        values[key]?.value,
+        builtinAgentKeys(entriesByKey[AGENT_DEFINITIONS_KEY]?.builtin_agent_keys),
+      ),
       pending[key],
       usableFields(schema.tool_declaration_fields),
     );
