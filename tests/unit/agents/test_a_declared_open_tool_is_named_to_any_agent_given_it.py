@@ -234,3 +234,52 @@ def test_the_real_tool_fixtures_name_only_their_open_tools() -> None:
             if _opens_read_only(tool["name"], tool, tool.get("annotations")):
                 accepted.add(tool["name"])
     assert accepted == {"import_file", "load_program", "open_file"}
+
+
+def _human_turn_of(analyst: ConfigurableAnalyst, call: Any) -> str:
+    """The human turn ``call`` sends, the loop stopped before any model runs."""
+    from maljan.agents.configurable_analyst import _Run
+
+    sent: list[list[tuple[str, str]]] = []
+
+    def _capture(messages: list[tuple[str, str]], what: str) -> _Run:
+        sent.append(messages)
+        return _Run(text="", degraded=True)
+
+    analyst._run = _capture  # type: ignore[method-assign]
+    call()
+    return dict(sent[0])["human"]
+
+
+def test_the_isr_analysis_names_the_open_tool_as_the_text_analysis_does() -> None:
+    analyst = _generic(mark_open_tool([_tool("import_it"), _tool("list_it")], SPEC))
+    human = _human_turn_of(analyst, lambda: analyst.analyze_isr(HEAD_CHUNK))
+    assert load_line("import_it", "binary_path", PATH) in human
+
+
+def test_a_delegated_task_names_the_open_tool_to_its_callee() -> None:
+    from maljan.agents.delegation import _task_turn
+
+    callee = _generic(mark_open_tool([_tool("import_it"), _tool("list_it")], SPEC))
+    turn = _task_turn("lead", "list the exports", "", callee)
+    assert load_line("import_it", "binary_path", PATH).rstrip() in turn
+    # A callee offered no declared open tool is told the path alone.
+    plain = _task_turn("lead", "list the exports", "", _generic([_tool("list_it")]))
+    assert "LOAD THIS BINARY FIRST" not in plain
+    assert PATH in plain
+
+
+def test_a_built_in_callee_is_told_its_declared_open_tool() -> None:
+    from unittest.mock import MagicMock
+
+    from maljan.agents.delegation import _task_turn
+    from maljan.agents.dynamic_analyst import DynamicAnalyst
+
+    callee = DynamicAnalyst(llm=MagicMock(), name="dynamic")
+    callee.tools = mark_open_tool([_tool("import_it"), _tool("list_it")], SPEC)
+    callee._analysis_file_path = PATH
+    assert load_line("import_it", "binary_path", PATH).rstrip() in _task_turn(
+        "lead", "t", "", callee
+    )
+    callee.tools = [_tool("list_it")]
+    assert "LOAD THIS BINARY FIRST" not in _task_turn("lead", "t", "", callee)

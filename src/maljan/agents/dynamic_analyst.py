@@ -386,7 +386,11 @@ class DynamicAnalyst(BaseAnalyst):
         dissent = _parse_disputes(content)
 
         if not claims:
-            return content, self._text_to_isr(content, revision_round=revision_round)
+            # The lenient reading keeps the disputes the answer wrote: a
+            # revision's dissent is what it says, whichever reader read it.
+            lenient = self._text_to_isr(content, revision_round=revision_round)
+            lenient.dissent_items = dissent
+            return content, lenient
 
         isr = AgentISR(
             agent_id=self.name,

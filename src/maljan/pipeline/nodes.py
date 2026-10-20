@@ -4949,11 +4949,19 @@ def make_revision_node(container: ServiceContainer, *, stage: Any = None) -> Any
             mine = place_facts_for(name, places, agent_names)
             can_read = bool(tools_taking_an_address(getattr(agent, "tools", None) or ()))
             reads = can_read and names_an_unlisted_place(mine)
+            # The reports are what models wrote: a run-state marker in one is
+            # written out, so the debate never shows one as the platform's
+            # block. One character for one: every length read of them holds.
+            from maljan.utils.written_forms import markers_written_out
+
             return await asyncio.to_thread(
                 agent.safe_revise_isr,
                 data,
-                own_report,
-                peer_reports,
+                markers_written_out(own_report) if isinstance(own_report, str) else own_report,
+                {
+                    peer: markers_written_out(text) if isinstance(text, str) else text
+                    for peer, text in peer_reports.items()
+                },
                 # The ledger counts of the lines that name this analyst.
                 with_place_facts(
                     with_ledger_facts(directive, facts_naming(name, ledger_facts)),
