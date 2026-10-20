@@ -1903,17 +1903,25 @@ class ServiceContainer:
         # here for the sole purpose of closing it, and a misconfigured
         # ``provider`` id turned a harmless teardown into a
         # ``ProviderConfigurationError`` landing in this warning handler.
-        for provider in list(self._static_provider_cache.values()):
-            try:
-                provider.close()
-            except Exception as exc:  # noqa: BLE001 — teardown never raises
-                logger.warning("Static provider '%s' did not close cleanly: %s", provider.id, exc)
-
+        # ``close`` is synchronous and a provider may block in it (a Ghidra
+        # bridge waits up to 20 s): run each in an executor so the loop, and
+        # every fence on it, stays live. No limit of its own is added here.
+        loop = asyncio.get_running_loop()
+        closing: list[tuple[str, Any]] = [
+            (f"Static provider '{provider.id}'", provider.close)
+            for provider in list(self._static_provider_cache.values())
+        ]
         if self._sandbox_provider_cache is not None:
-            try:
-                self._sandbox_provider_cache.close()
-            except Exception as exc:  # noqa: BLE001 — teardown never propagates
-                logger.warning("Closing sandbox provider failed (non-fatal): %s", exc)
+            closing.append(("Sandbox provider", self._sandbox_provider_cache.close))
+        # Every close is handed to the executor before any is awaited: if the
+        # worker's fence cancels this wait, the closes already submitted still
+        # run, and none is left unsubmitted behind a slow one.
+        futures = [loop.run_in_executor(None, close) for _, close in closing]
+        if futures:
+            results = await asyncio.gather(*futures, return_exceptions=True)
+            for (name, _), result in zip(closing, results, strict=True):
+                if isinstance(result, Exception):
+                    logger.warning("%s did not close cleanly: %s", name, result)
 
         # Same rule as the providers above: close the *cached* registry, never
         # ``get_server_registry()`` — a job that never attached a tool server
@@ -1927,7 +1935,6 @@ class ServiceContainer:
             # precisely the way a teardown outlasts a budget nobody can
             # enforce. In an executor it costs a worker thread instead, and
             # every fence above stays live.
-            loop = asyncio.get_running_loop()
             try:
                 await asyncio.wait_for(
                     loop.run_in_executor(None, registry.close_all), timeout=_CLOSE_ALL_BUDGET

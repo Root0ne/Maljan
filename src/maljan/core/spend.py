@@ -465,13 +465,43 @@ class Price:
     def highest_over(self, start: datetime, seconds: float) -> Price:
         """The highest prices in force at any instant from ``start`` for ``seconds``."""
         until = start + timedelta(seconds=max(0.0, float(seconds)))
-        best = self.at(start)
+        found: list[Price] = [self.at(start)]
         for window in self.windows:
             for edge in window.edges(start, until):
-                found = self.at(edge)
-                if (found.output, found.input) > (best.output, best.input):
-                    best = found
-        return best
+                found.append(self.at(edge))
+        distinct = list({id(price): price for price in found}.values())
+        if len(distinct) == 1:
+            return distinct[0]
+        return Price._dearest_of(distinct)
+
+    @staticmethod
+    def _dearest_of(rows: list[Price]) -> Price:
+        """One price holding, for each component, the highest of ``rows``' figures.
+
+        A window dearer only on input must not hide behind one dearer on
+        output: the worst case of a call is each component at its own worst.
+        Tiers are merged the same way at every threshold any row names.
+        """
+        thresholds = sorted({over for row in rows for over, _ in row.tiers})
+        tiers = (
+            tuple(
+                (over, Price._dearest_of([row.for_prompt(over + 1) for row in rows]))
+                for over in thresholds
+            )
+            if thresholds
+            else ()
+        )
+        base = [row.for_prompt(0) if tiers else row for row in rows]
+        return Price(
+            max(row.input for row in base),
+            max(row.output for row in base),
+            max(row.cached for row in base),
+            rows[0].source,
+            (),
+            cache_write=max(row.written for row in base),
+            cache_write_1h=max(row.written_1h for row in base),
+            tiers=tiers,
+        )
 
     @property
     def cached(self) -> float:
@@ -590,12 +620,31 @@ def _tier_from(row: Any, parent_source: str) -> tuple[int, Price] | None:
 
 
 _table: dict[str, Price] | None = None
+# Why the last read of the vendored table failed, or ``None``; read by the
+# unpriced statement so a model it could not price is not blamed alone.
+table_failure: str | None = None
 _table_lock = threading.Lock()
+# The table file's stat (existence, mtime, size) at the last failed read; an
+# unchanged stat is not read again. ``None``: no failure is held.
+_failed_stat: tuple[bool, int, int] | None = None
+
+
+def _stat_of(path: Path) -> tuple[bool, int, int]:
+    try:
+        info = path.stat()
+    except OSError:
+        return (False, 0, 0)
+    return (True, info.st_mtime_ns, info.st_size)
 
 
 def table_prices() -> dict[str, Price]:
-    """The vendored model table's ``prices`` rows, read once; keyed by lower-cased model name."""
-    global _table
+    """The vendored model table's ``prices`` rows, read once; keyed by lower-cased model name.
+
+    A failed read is not kept as the table: it is read again once the file's
+    stat differs from the one recorded at the failure, and warned about only
+    when its text changes.
+    """
+    global _table, table_failure, _failed_stat
     from maljan.core.paths import resolve_data
     from maljan.llm.context_window import TABLE_PATH
 
@@ -603,8 +652,12 @@ def table_prices() -> dict[str, Price]:
         if _table is not None:
             return _table
         rows: dict[str, Price] = {}
+        path: Path | None = None
         try:
-            raw = json.loads(Path(resolve_data(TABLE_PATH)).read_text(encoding="utf-8"))
+            path = Path(resolve_data(TABLE_PATH))
+            if _failed_stat is not None and _stat_of(path) == _failed_stat:
+                return rows
+            raw = json.loads(path.read_text(encoding="utf-8"))
             for key, row in (raw.get("prices") or {}).items():
                 if str(key).startswith("_"):
                     continue
@@ -612,8 +665,19 @@ def table_prices() -> dict[str, Price]:
                 if price is not None and price.source:
                     rows[str(key).lower()] = price
         except Exception as exc:  # noqa: BLE001 — a fallback table never fails a run
-            logger.debug("the vendored price table could not be read: %s", exc)
+            said = f"{type(exc).__name__}: {exc}"
+            _failed_stat = _stat_of(path) if path is not None else None
+            if said != table_failure:
+                logger.warning(
+                    "the vendored price table could not be read (%s); models are priced from "
+                    "the operator's llm.model_prices only until it can be",
+                    exc,
+                )
+            table_failure = said
+            return {}
         _table = rows
+        table_failure = None
+        _failed_stat = None
         return _table
 
 
@@ -927,9 +991,10 @@ class SpendMeter:
         if first:
             logger.warning(
                 "spend ceiling: model %r has no price (llm.model_prices or the vendored "
-                "table), so its calls are not counted; the ceiling is compared with what "
+                "table%s), so its calls are not counted; the ceiling is compared with what "
                 "the priced calls cost, which the job has spent at least.",
                 name,
+                f"; the table could not be read: {table_failure}" if table_failure else "",
             )
 
     # ── What was spent ────────────────────────────────────────────────────
@@ -2007,6 +2072,9 @@ class SpendMeter:
                     + ": their calls are not counted, so spent_usd is what the priced calls "
                     "cost and the job spent at least that"
                 )
+                if table_failure:
+                    out["note"] += f"; price table could not be read: {table_failure}"
+                    out["price_table_error"] = table_failure
             return out
 
 
