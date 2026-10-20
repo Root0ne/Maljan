@@ -1011,8 +1011,9 @@ class SettingsService:
                 merged[key] = value
         core = {split_key(k)[1]: v for k, v in merged.items() if k.startswith("core.")}
         api = {split_key(k)[1]: v for k, v in merged.items() if k.startswith("api.")}
+        stored_api = {split_key(k)[1]: v for k, v in current.items() if k.startswith("api.")}
         try:
-            self.validate(core, api)
+            self.validate(core, api, stored_api)
         except SettingsValidationError as more:
             for key, message in more.errors.items():
                 errors.setdefault(key, message)
@@ -1030,7 +1031,19 @@ class SettingsService:
             pass
         return SettingsValidationError(errors)
 
-    def validate(self, merged_core: dict[str, Any], merged_api: dict[str, Any]) -> None:
+    def validate(
+        self,
+        merged_core: dict[str, Any],
+        merged_api: dict[str, Any],
+        stored_api: dict[str, Any] | None = None,
+    ) -> None:
+        """Refuse what the merged values do not allow.
+
+        ``stored_api`` is what is saved now: an api leaf equal to its stored
+        value is not held to its minimum and maximum again (a stored value
+        outside them is clamped on read), so one such row never blocks a save
+        of other keys. A new or changed value is.
+        """
         errors: dict[str, str] = {}
         try:
             built = build_settings(merged_core)
@@ -1057,7 +1070,8 @@ class SettingsService:
             entry = index.get(f"api.{name}")
             if entry is None:
                 continue
-            msg = validate_editable_api_value(entry, value)
+            unchanged = stored_api is not None and name in stored_api and stored_api[name] == value
+            msg = validate_editable_api_value(entry, value, check_bounds=not unchanged)
             if msg:
                 errors[f"api.{name}"] = msg
         grace_problem = refresh_grace_problem(merged_api)
@@ -1249,8 +1263,9 @@ class SettingsService:
         # changed ones held to the strict rules) and the tool declarations it
         # changes.
         refusals: dict[str, str] = {}
+        stored_api = {split_key(k)[1]: v for k, v in current.items() if k.startswith("api.")}
         try:
-            self.validate(core, api)
+            self.validate(core, api, stored_api)
         except SettingsValidationError as refused:
             refusals.update(refused.errors)
         stored_core = {split_key(k)[1]: v for k, v in current.items() if k.startswith("core.")}

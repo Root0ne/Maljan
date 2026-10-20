@@ -23,6 +23,7 @@ Three defects the memory had, and the rules that replace them:
 from __future__ import annotations
 
 import math
+from datetime import UTC, datetime
 from types import SimpleNamespace
 from typing import Any
 
@@ -622,3 +623,204 @@ def test_without_the_model_the_repair_waits_and_leaves_no_marker(
     names = {c.name for c in qdrant._client.get_collections().collections}
     assert REPAIR_COLLECTION not in names
     assert repair_memory(InMemoryStore()).startswith("nothing to repair")
+
+
+# ── adopting the ownerless memory leaves one point per sample ─────────────
+
+
+def _points(store: QdrantStore) -> list[Any]:
+    return list(store._client.scroll(store._collection, limit=100, with_payload=True)[0])
+
+
+def test_adoption_leaves_one_point_per_sample_and_a_later_store_overwrites_it(
+    model: None, qdrant: QdrantStore
+) -> None:
+    qdrant.store(_case("both"))
+    _legacy_point(qdrant, "only-ownerless", embeddings.encode_with_backend(TEXT)[0])
+    qdrant.store(_case("both", owner=ALICE, text=TEXT + " newer"))
+
+    counts = qdrant.adopt_unowned(ALICE)
+    assert (counts["cases"], counts["dropped_cases"]) == (1, 1)
+    points = _points(qdrant)
+    assert sorted(p.payload["sample_id"] for p in points) == ["both", "only-ownerless"]
+    assert all(p.payload[OWNER_KEY] == ALICE for p in points)
+    # The owner's newer copy won over the ownerless one.
+    assert (
+        next(p for p in points if p.payload["sample_id"] == "both")
+        .payload["summary_text"]
+        .endswith("newer")
+    )
+    assert [c.sample_id for c in qdrant.retrieve(TEXT, top_k=10, owner=ALICE)].count("both") == 1
+    assert qdrant.retrieve(TEXT, top_k=10, owner=None) == []
+
+    # Idempotent, and a re-store replaces the adopted point in place.
+    assert qdrant.adopt_unowned(ALICE)["cases"] == 0
+    qdrant.store(_case("only-ownerless", owner=ALICE, text="rewritten"))
+    assert len(_points(qdrant)) == 2
+
+
+def _fh(client: Any) -> list[Any]:
+    return list(client.scroll("fh", limit=100, with_payload=True)[0])
+
+
+def _hash_index() -> tuple[Any, FunctionHashStore]:
+    client = _local_client()
+    return client, FunctionHashStore(url="http://qdrant.test:6333", collection="fh", client=client)
+
+
+def test_a_sample_whose_owner_holds_hashes_keeps_none_of_the_ownerless_ones(model: None) -> None:
+    from maljan.memory.memory_repair import adopt_unowned
+
+    client, index = _hash_index()
+    index.upsert_sample("s1", "FamilyU", [("h1", "f1"), ("h2", "f2")])
+    index.upsert_sample("s1", "FamilyA", [("h1", "f1")], owner=ALICE)
+    index.upsert_sample("s2", "FamilyU", [("h9", "f9")])
+    out = adopt_unowned(client, "cases", "fh", ALICE)
+    # s1 is kept from the owner's side alone (h2 is dropped too); s2 is adopted.
+    assert (out["function_hashes"], out["dropped_function_hashes"]) == (1, 2)
+    points = _fh(client)
+    assert {(p.payload["sample_id"], p.payload["func_hash"]) for p in points} == {
+        ("s1", "h1"),
+        ("s2", "h9"),
+    }
+    assert all(p.payload["owner"] == ALICE for p in points)
+    assert {p.payload["family"] for p in points if p.payload["sample_id"] == "s1"} == {"FamilyA"}
+    again = adopt_unowned(client, "cases", "fh", ALICE)
+    assert again["function_hashes"] == again["dropped_function_hashes"] == 0
+    index.upsert_sample("s2", "FamilyB", [("h9", "f9")], owner=ALICE)
+    assert len(_fh(client)) == 2
+
+
+def _case_at(sample: str, when: datetime, owner: str | None = None, text: str = TEXT) -> StoredCase:
+    return StoredCase(
+        sample_id=sample, summary_text=text, technique_ids=[], owner=owner, created_at=when
+    )
+
+
+def test_the_newer_case_wins_and_a_newer_ownerless_one_replaces_the_owners_hashes(
+    model: None, qdrant: QdrantStore
+) -> None:
+    from maljan.memory.memory_repair import adopt_unowned
+
+    old, new = datetime(2026, 1, 1, tzinfo=UTC), datetime(2026, 6, 1, tzinfo=UTC)
+    qdrant.store(_case_at("ownerless-newer", new))
+    qdrant.store(_case_at("ownerless-newer", old, ALICE, "owners old text"))
+    qdrant.store(_case_at("owner-newer", old))
+    qdrant.store(_case_at("owner-newer", new, ALICE, "owners new text"))
+    qdrant.store(_case_at("tie", old))
+    qdrant.store(_case_at("tie", old, ALICE, "owners tie text"))
+    # An owner's point with no created_at counts as older than any dated one.
+    qdrant.store(_case_at("dateless-owner", old))
+    qdrant.store(_case_at("dateless-owner", old, ALICE, "owners dateless text"))
+    qdrant._client.delete_payload(
+        qdrant._collection,
+        keys=["created_at"],
+        points=[_stable_id(f"{ALICE}\x1fdateless-owner")],
+    )
+    client = qdrant._client
+    index = FunctionHashStore(url="http://qdrant.test:6333", collection="fh", client=client)
+    index.upsert_sample("ownerless-newer", "FamilyU", [("h1", "f1")])
+    index.upsert_sample("ownerless-newer", "FamilyA", [("hX", "fX")], owner=ALICE)
+
+    out = adopt_unowned(client, qdrant._collection, "fh", ALICE)
+    texts = {p.payload["sample_id"]: p.payload["summary_text"] for p in _points(qdrant)}
+    assert texts["ownerless-newer"] == TEXT
+    assert texts["owner-newer"] == "owners new text"
+    assert texts["tie"] == "owners tie text"
+    assert texts["dateless-owner"] == TEXT
+    assert len(_points(qdrant)) == 4
+    assert (out["cases"], out["dropped_cases"]) == (2, 2)
+    # The replaced case's sample takes the ownerless hashes and loses the owner's stale ones.
+    assert {p.payload["func_hash"] for p in _fh(client)} == {"h1"}
+
+
+def test_the_owner_point_is_read_again_before_the_write(model: None, qdrant: QdrantStore) -> None:
+    from maljan.memory import memory_repair
+
+    old, new = datetime(2026, 1, 1, tzinfo=UTC), datetime(2026, 6, 1, tzinfo=UTC)
+    qdrant.store(_case_at("raced", old))
+    real = memory_repair._ownerless_pages
+
+    def pages(client: Any, collection: str) -> Any:
+        for page in real(client, collection):
+            # The owner files a newer copy after the page was read, before it is written.
+            qdrant.store(_case_at("raced", new, ALICE, "owners newer text"))
+            yield page
+
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(memory_repair, "_ownerless_pages", pages)
+        out = qdrant.adopt_unowned(ALICE)
+    (point,) = _points(qdrant)
+    assert point.payload["summary_text"] == "owners newer text"
+    assert (out["cases"], out["dropped_cases"]) == (0, 1)
+
+
+def test_a_point_with_no_sample_id_is_skipped_and_counted(model: None, qdrant: QdrantStore) -> None:
+    from qdrant_client.models import PointStruct
+
+    qdrant.store(_case("keyed"))
+    qdrant._client.upsert(
+        qdrant._collection,
+        points=[
+            PointStruct(
+                id=7,
+                vector=embeddings.encode_with_backend(TEXT)[0],
+                payload={"summary_text": TEXT},
+            )
+        ],
+        wait=True,
+    )
+    out = qdrant.adopt_unowned(ALICE)
+    assert (out["cases"], out["skipped_cases"]) == (1, 1)
+    assert [p.id for p in _points(qdrant) if OWNER_KEY not in p.payload] == [7]
+    assert qdrant.adopt_unowned(ALICE)["skipped_cases"] == 1
+
+
+def test_a_failure_part_way_carries_the_partial_counts(model: None, qdrant: QdrantStore) -> None:
+    from maljan.memory.memory_repair import AdoptionFailed
+
+    qdrant.store(_case("one"))
+    real = qdrant._client.upsert
+
+    def down(*_a: Any, **_k: Any) -> None:
+        raise RuntimeError("down")
+
+    qdrant._client.upsert = down
+    with pytest.raises(AdoptionFailed) as exc:
+        qdrant.adopt_unowned(ALICE)
+    assert isinstance(exc.value.__cause__, RuntimeError)
+    assert exc.value.counts["cases"] == 0
+    qdrant._client.upsert = real
+    assert qdrant.adopt_unowned(ALICE)["cases"] == 1
+
+
+def test_a_rerun_after_a_failure_mid_sample_adopts_every_remaining_hash(model: None) -> None:
+    from maljan.memory import memory_repair
+    from maljan.memory.memory_repair import AdoptionFailed, adopt_unowned
+
+    client, index = _hash_index()
+    index.upsert_sample("s1", "FamilyU", [("h1", "f1"), ("h2", "f2"), ("h3", "f3")])
+    real = client.upsert
+    calls = {"n": 0}
+
+    def flaky(*args: Any, **kwargs: Any) -> Any:
+        calls["n"] += 1
+        if calls["n"] == 2:
+            raise RuntimeError("down")
+        return real(*args, **kwargs)
+
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(memory_repair, "_PAGE", 1)
+        client.upsert = flaky
+        with pytest.raises(AdoptionFailed) as exc:
+            adopt_unowned(client, "cases", "fh", ALICE)
+        assert exc.value.counts["function_hashes"] == 1
+        client.upsert = real
+        out = adopt_unowned(client, "cases", "fh", ALICE)
+    assert out["dropped_function_hashes"] == 0
+    points = _fh(client)
+    assert sorted(p.payload["func_hash"] for p in points) == ["h1", "h2", "h3"]
+    assert all(p.payload["owner"] == ALICE for p in points)
+    # The owner's own later store writes no marker, so it counts as theirs from then on.
+    index.upsert_sample("s1", "FamilyB", [("h1", "f1")], owner=ALICE)
+    assert "adopted" not in next(p for p in _fh(client) if p.payload["func_hash"] == "h1").payload

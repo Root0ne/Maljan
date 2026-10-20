@@ -3667,6 +3667,15 @@ stores no case and finds none, rather than mix bag-of-words vectors with the
 model's, and each job's memory is its owner's alone (`long_term_memory.recall`).
 On a server, memory stored before owner scoping is kept but is not read by
 owned jobs: it carries no owner, and no owner is chosen for it automatically.
+An admin who wants it kept for one user adopts it explicitly with
+`POST /system/ltm/adopt` (`{"user_id": ...}`, a bearer session only): every
+ownerless case and function hash is filed under that existing user, a second
+call finds none, an unknown user is refused, and the call leaves an `ltm.adopt`
+audit row naming the actor, the owner and the counts (adopted, dropped, skipped;
+`outcome=failed` with the counts so far if it stops part way). Where the user
+already holds the same case the newer copy by `created_at` is kept, and a
+sample's function hashes are kept from one side only. Run it while no jobs are
+running.
 
 ## The evidence ledger
 
