@@ -73,11 +73,18 @@ class AnalysisService:
             ValueError: If the sample doesn't exist.
         """
         # Verify sample exists AND belongs to the requesting user (IDOR guard).
+        # Lock order, on every path: the sample row, then its sandbox report.
+        # A sample delete removes the sample and cascades to the report, so a
+        # create that took the report first and the sample second could
+        # deadlock against it. FOR SHARE keeps concurrent creates for one
+        # sample parallel and blocks only the delete.
         result = await self.db.execute(
-            select(Sample).where(
+            select(Sample)
+            .where(
                 Sample.id == sample_id,
                 Sample.uploaded_by == user.id,
             )
+            .with_for_update(read=True)
         )
         sample = result.scalar_one_or_none()
         if not sample:
@@ -241,7 +248,10 @@ class AnalysisService:
             )
         job.status = "cancelled"
         job.completed_at = cancelled_at
-        await self.db.flush()
+        # Committed here, before any Redis call: the UPDATE holds the row lock
+        # until the transaction ends, and the Redis writes below have no bound
+        # on how long they take. A worker storing its report waits on this row.
+        await self.db.commit()
 
         # This used to ONLY publish to PubSub, which had
         # two consequences:

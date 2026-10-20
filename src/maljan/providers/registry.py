@@ -225,6 +225,15 @@ def static_provider_ids() -> list[str]:
     return sorted(_STATIC_REGISTRY)
 
 
+def static_provider_servers(name: str, cfg: Any) -> frozenset[str]:
+    """The registry servers the static provider ``name`` calls for a job; none if unknown."""
+    discover_providers()
+    cls = _STATIC_REGISTRY.get(name)
+    if cls is None:
+        return frozenset()
+    return frozenset(cls.registry_servers(cfg))  # type: ignore[attr-defined]
+
+
 def sandbox_provider_ids() -> list[str]:
     discover_providers()
     return sorted(_SANDBOX_REGISTRY)

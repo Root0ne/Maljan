@@ -148,30 +148,33 @@ def test_missing_credential_accepts_before_closing_with_4401(
 
 
 @pytest.mark.parametrize(
-    "protocols, job_lookup, expected_reason",
+    "protocols, job_lookup, expected_reason, expected_code",
     [
         pytest.param(
             ["maljan.v1", "maljan.v1.bad"],
             None,
             "invalid token",
+            4401,
             id="invalid-token",
         ),
         pytest.param(
             ["maljan.v1", "maljan.v1.good"],
             "not_found",
             "does not exist",
+            4404,
             id="job-not-found",
         ),
     ],
 )
-def test_rejection_branches_accept_before_closing_with_1008(
+def test_rejection_branches_accept_before_closing_with_their_own_code(
     client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
     protocols: list[str],
     job_lookup: str | None,
     expected_reason: str,
+    expected_code: int,
 ) -> None:
-    """1008 branches must accept before closing too, same as the 4401 one.
+    """Every refusal accepts before closing, each with the code that says why.
 
     These go through the shared ``_reject`` helper (Fix round 2), so the
     close code reaches the client as a real close frame rather than being
@@ -187,7 +190,7 @@ def test_rejection_branches_accept_before_closing_with_1008(
         with client.websocket_connect(f"/ws/analysis/{job_id}", subprotocols=protocols) as ws:
             ws.receive_text()
 
-    assert exc.value.code == 1008
+    assert exc.value.code == expected_code
     assert expected_reason in (exc.value.reason or "")
 
 
@@ -250,7 +253,7 @@ def test_a_resume_cursor_does_not_bypass_the_ownership_check(
         ) as ws:
             ws.receive_text()
 
-    assert exc.value.code == 1008
+    assert exc.value.code == 4404
     assert "job does not exist" in (exc.value.reason or "")
     assert replayed == []
 
@@ -330,7 +333,7 @@ class TestADeactivatedAccountIsRefused:
             ) as ws:
                 ws.receive_text()
 
-        assert exc.value.code == 1008
+        assert exc.value.code == 4401
         assert "deactivated" in (exc.value.reason or "")
 
     def test_an_account_that_no_longer_exists_cannot_open_the_socket(
@@ -349,7 +352,7 @@ class TestADeactivatedAccountIsRefused:
             ) as ws:
                 ws.receive_text()
 
-        assert exc.value.code == 1008
+        assert exc.value.code == 4401
 
     def test_the_account_is_read_before_the_job(
         self, client: TestClient, monkeypatch: pytest.MonkeyPatch
@@ -399,7 +402,7 @@ class TestADeactivatedAccountIsRefused:
                 ws.send_text("ping")
                 ws.receive_text()
 
-        assert exc.value.code == 1008
+        assert exc.value.code == 4401
         assert "deactivated" in (exc.value.reason or "")
 
     def test_an_active_account_keeps_its_socket(

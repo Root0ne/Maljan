@@ -145,3 +145,24 @@ def test_a_redis_that_refuses_the_transaction_is_logged_and_never_breaks_the_can
     said = [r.getMessage() for r in caplog.records if str(job_id) in r.getMessage()]
     assert len(said) == 1 and "ConnectionError" in said[0], said
     assert not [kind for kind, _ in redis.calls if kind == "transaction"]
+
+
+def test_the_cancel_is_committed_before_redis_is_touched(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The row lock is not held across Redis I/O."""
+    from app.services import analysis_service as svc_mod
+
+    order: list[str] = []
+    redis = _Redis()
+    monkeypatch.setattr(
+        svc_mod.aioredis,
+        "from_url",
+        lambda *a, **k: (order.append("redis"), redis)[1],
+    )
+    monkeypatch.setattr(svc_mod, "_abort_queued_analysis", AsyncMock())
+    db = AsyncMock()
+    db.commit.side_effect = lambda: order.append("commit")
+    service = svc_mod.AnalysisService(db)
+    job = SimpleNamespace(status="running", completed_at=None)
+    service.get_job = AsyncMock(return_value=job)  # type: ignore[method-assign]
+    asyncio.run(service.cancel_job(uuid.uuid4(), SimpleNamespace(id=uuid.uuid4())))
+    assert order[0] == "commit" and "redis" in order

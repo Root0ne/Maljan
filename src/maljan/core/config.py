@@ -261,7 +261,9 @@ def _tunnelled(host: str) -> bool:
     )
 
 
-def credential_in_clear_refusal(url: object, what: str) -> str:
+def credential_in_clear_refusal(
+    url: object, what: str, *, can_allow_plain_http: bool = True
+) -> str:
     """Why a provider's credential may not be sent to ``url``; ``""`` when it may.
 
     The rule for every address a provider sends its API key to: ``https``
@@ -275,6 +277,9 @@ def credential_in_clear_refusal(url: object, what: str) -> str:
     http one that HTTP clients may read differently (a backslash, a space or a
     control character in it), because the host checked would not be the host
     called. Anthropic's own base URL keeps its stricter rule (``AnthropicConfig``).
+
+    ``can_allow_plain_http`` says whether the caller's block has an
+    ``allow_plain_http`` field: the message names that switch only where it exists.
     """
     from urllib.parse import urlsplit
 
@@ -303,8 +308,9 @@ def credential_in_clear_refusal(url: object, what: str) -> str:
     return (
         f"{what} would send the API key in clear to {shown}: plain http is taken only for a "
         "host inside this deployment (loopback, a private or link-local address, a container "
-        "host name, a .local or .internal name, a single-label service name), unless the "
-        "provider's allow_plain_http is set; use https"
+        "host name, a .local or .internal name, a single-label service name)"
+        + (", unless the provider's allow_plain_http is set" if can_allow_plain_http else "")
+        + "; use https"
     )
 
 
@@ -658,7 +664,9 @@ class FrontierArm(BaseModel):
         """
         if self.api_key is None or not self.api_key.get_secret_value():
             return self
-        refused = credential_in_clear_refusal(self.base_url, "the frontier arm's base_url")
+        refused = credential_in_clear_refusal(
+            self.base_url, "the frontier arm's base_url", can_allow_plain_http=False
+        )
         if refused:
             # Located, with no input echoed: the arm's block holds its key.
             _refuse_at(("base_url",), refused)

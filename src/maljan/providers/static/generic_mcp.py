@@ -168,6 +168,12 @@ class GenericMCPStaticProvider(StaticProvider):
         return ServerHandle(name, cfg.model_copy(update={"command": command}))
 
     @classmethod
+    def registry_servers(cls, cfg: Any) -> frozenset[str]:
+        """The registry entry ``static.generic.server`` names, when it names one."""
+        name = cfg.static.generic.server
+        return frozenset({str(name)}) if name else frozenset()
+
+    @classmethod
     def from_settings(cls, cfg: Settings) -> GenericMCPStaticProvider:
         """The registry entry ``static.generic.server`` names, or an inert handle.
 

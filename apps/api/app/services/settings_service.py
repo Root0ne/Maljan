@@ -51,7 +51,7 @@ from sqlalchemy.orm.attributes import flag_modified
 from app.config import settings as api_settings
 from app.models import RuntimeSetting
 from app.services.enrichment_sources import SOURCE_SECRETS
-from app.services.frontier_arms import ARMS
+from app.services.frontier_arms import ARMS, ARMS_KEY
 from app.services.nested_secrets import NestedSecretMap
 from app.services.server_map import (
     SERVER_ENV_SUFFIX,
@@ -684,6 +684,60 @@ def refusing_undecryptable_secrets() -> Iterator[None]:
         yield
     finally:
         _refuse_undecryptable.reset(token)
+
+
+_SERVER_SECRET_PREFIX = f"{SERVER_MAP_KEY}."
+
+
+async def refused_secrets_a_job_uses(
+    db: AsyncSession, refused: dict[str, str], config: dict[str, Any] | None
+) -> dict[str, str]:
+    """The refused secrets a job with ``config`` would read, keyed as they were refused.
+
+    A tool server's token or env belongs to that server, and a frontier arm's
+    key to an evaluation arm no job opens: a refusal of either that the job
+    never uses is no reason to refuse the job. Any other secret, and any key
+    whose owner cannot be told, stays refused, so the narrowing never lets a
+    job run on a default in place of a credential it reads.
+    """
+    server_suffixes = (".auth_token", SERVER_ENV_SUFFIX)
+    arm_prefix = f"{ARMS_KEY}."
+    owned = {
+        key
+        for key in refused
+        if key.startswith(_SERVER_SECRET_PREFIX) and key.endswith(server_suffixes)
+    }
+    arms = {key for key in refused if key.startswith(arm_prefix)}
+    if not owned and not arms:
+        return dict(refused)
+
+    from maljan.agents.composition import servers_a_job_calls
+
+    # Read past the refusal: the secret that cannot be read is simply absent,
+    # which is all the question "which servers does this job call" needs.
+    overrides = await load_core_overrides(db)
+    profile = str((config or {}).get("profile") or "")
+    if profile:
+        overrides = {**overrides, "agents.profile": profile}
+    provider = (config or {}).get("static_provider")
+    try:
+        used = servers_a_job_calls(
+            settings_from_store(overrides), global_provider=str(provider) if provider else None
+        )
+    except Exception:  # noqa: BLE001 - what the job calls is unknown, so every refusal stands
+        return dict(refused)
+
+    still: dict[str, str] = {}
+    for key, why in refused.items():
+        if key in arms:
+            continue
+        if key in owned:
+            name = key[len(_SERVER_SECRET_PREFIX) :]
+            name = name.removesuffix(".auth_token").removesuffix(SERVER_ENV_SUFFIX)
+            if name not in used:
+                continue
+        still[key] = why
+    return still
 
 
 class SettingsService:

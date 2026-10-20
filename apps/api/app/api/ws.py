@@ -68,6 +68,17 @@ async def _account_is_open(db: Any, user_id: str, payload: dict[str, Any] | None
     return payload is None or is_current_generation(payload, row)
 
 
+# The close code says why a socket was refused, so a client never has to read
+# the reason text. 4401 is the credential (missing, invalid, expired, revoked):
+# renew it and dial again. 4404 is the job: it does not exist or is not the
+# caller's, one code for both because two would tell any signed-in caller which
+# job ids exist (a 4403 for somebody else's job would be that oracle). 4400 is
+# a request that names no job at all. No code renews or redials the last two.
+CLOSE_CREDENTIAL = 4401
+CLOSE_BAD_REQUEST = 4400
+CLOSE_JOB_NOT_FOUND = 4404
+
+
 async def _reject(websocket: WebSocket, code: int, reason: str) -> None:
     """Accept the handshake, then immediately close it with ``code``/``reason``.
 
@@ -344,7 +355,7 @@ async def ws_analysis(websocket: WebSocket, job_id: str, since: int | None = Non
             logger.warning(  # nosemgrep
                 "WebSocket rejected: invalid token (job=%s)", log_safe(job_id)
             )
-            await _reject(websocket, 1008, "Unauthorized: invalid token")
+            await _reject(websocket, CLOSE_CREDENTIAL, "Unauthorized: invalid token")
             return
         payload = decoded
 
@@ -352,7 +363,7 @@ async def ws_analysis(websocket: WebSocket, job_id: str, since: int | None = Non
             logger.warning(  # nosemgrep
                 "WebSocket rejected: wrong token type (job=%s)", log_safe(job_id)
             )
-            await _reject(websocket, 1008, "Unauthorized: access token required")
+            await _reject(websocket, CLOSE_CREDENTIAL, "Unauthorized: access token required")
             return
 
         sub = payload.get("sub")
@@ -360,7 +371,7 @@ async def ws_analysis(websocket: WebSocket, job_id: str, since: int | None = Non
             logger.warning(  # nosemgrep
                 "WebSocket rejected: token missing subject (job=%s)", log_safe(job_id)
             )
-            await _reject(websocket, 1008, "Unauthorized: token missing subject")
+            await _reject(websocket, CLOSE_CREDENTIAL, "Unauthorized: token missing subject")
             return
         user_id = sub
 
@@ -372,7 +383,7 @@ async def ws_analysis(websocket: WebSocket, job_id: str, since: int | None = Non
         job_uuid = uuid.UUID(job_id)
     except ValueError:
         logger.warning("WebSocket rejected: invalid job_id format (%s)", log_safe(job_id))
-        await _reject(websocket, 1008, "Bad request: invalid job ID")
+        await _reject(websocket, CLOSE_BAD_REQUEST, "Bad request: invalid job ID")
         return
 
     # One spelling from here on. ``uuid.UUID`` accepts the uppercase,
@@ -406,7 +417,7 @@ async def ws_analysis(websocket: WebSocket, job_id: str, since: int | None = Non
             log_safe(user_id),
             log_safe(job_id),
         )
-        await _reject(websocket, 1008, _ACCOUNT_CLOSED_REASON)
+        await _reject(websocket, CLOSE_CREDENTIAL, _ACCOUNT_CLOSED_REASON)
         return
 
     # One answer for a job that is not there and a job that is somebody
@@ -414,7 +425,7 @@ async def ws_analysis(websocket: WebSocket, job_id: str, since: int | None = Non
     # The log keeps the two apart for the operator.
     if not job_exists:
         logger.warning("WebSocket rejected: job not found (%s)", log_safe(job_id))
-        await _reject(websocket, 1008, _JOB_NOT_FOUND_REASON)
+        await _reject(websocket, CLOSE_JOB_NOT_FOUND, _JOB_NOT_FOUND_REASON)
         return
 
     if owner != user_id:
@@ -423,7 +434,7 @@ async def ws_analysis(websocket: WebSocket, job_id: str, since: int | None = Non
             log_safe(user_id),
             log_safe(job_id),
         )
-        await _reject(websocket, 1008, _JOB_NOT_FOUND_REASON)
+        await _reject(websocket, CLOSE_JOB_NOT_FOUND, _JOB_NOT_FOUND_REASON)
         return
 
     # ── Connection accepted ──────────────────────────────────────────
@@ -436,7 +447,7 @@ async def ws_analysis(websocket: WebSocket, job_id: str, since: int | None = Non
     # ``exp``, but a long-lived connection could outlive its token. Read
     # the original ``exp`` claim once and revalidate against the wall
     # clock on every heartbeat tick (~30 s). When expired, close the
-    # connection with policy code 1008 so the client must re-auth before
+    # connection with code 4401 so the client must re-auth before
     # reconnecting.
     import time as _time
 
@@ -470,7 +481,7 @@ async def ws_analysis(websocket: WebSocket, job_id: str, since: int | None = Non
 
     async def _close_unauthorized(reason: str) -> None:
         try:
-            await websocket.close(code=1008, reason=reason)
+            await websocket.close(code=CLOSE_CREDENTIAL, reason=reason)
         except Exception:  # noqa: BLE001 — the socket may already be gone
             pass
 

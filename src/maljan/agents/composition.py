@@ -1318,3 +1318,85 @@ async def aresolve_agent(key: str, container: Any, job_key: str = "job") -> Reso
         path_by_server=staged,
         attck_techniques=definition.attck_techniques,
     )
+
+
+def servers_a_job_calls(settings: Settings, *, global_provider: str | None = None) -> set[str]:
+    """Every tool server a job under ``settings`` can call, by key.
+
+    The one answer for "does this job use this server", read by the submit
+    check, the worker's check of a stored secret and the sample mirroring. It
+    covers what the run can reach, never less:
+
+    * the servers bound (``servers_bound_to``) to every agent the profile's
+      stages run, every agent those ask in turn, every enabled judge- or
+      report-role definition, the mediator when a debate stage exists and the
+      summariser while it is on, each followed through its references;
+    * the reputation lookups of the triage pack, unless ``core.triage.reputation``
+      is off (``pipeline.nodes`` chooses them the same way, from ``pack_lookups``);
+    * ``static.generic.server`` when the global static provider, the team's or
+      any reached agent's is ``generic_mcp`` (``global_provider`` is the one
+      a submitted job names).
+    """
+    from maljan.core.config import MEDIATOR_AGENT_KEY, SUMMARIZER_AGENT_KEY
+    from maljan.core.declared_reading import declarations
+    from maljan.core.reputation import pack_lookups
+
+    team = active_profile(settings)
+    named = [str(agent) for stage in team.stages for agent in stage.agents]
+    named += [
+        key
+        for key, definition in settings.agents.definitions.items()
+        if definition.enabled and definition.role in ("judge", "report") and key not in named
+    ]
+    if any(getattr(stage, "kind", "") == "debate" for stage in team.stages):
+        named.append(MEDIATOR_AGENT_KEY)
+    if settings.preprocessing.use_function_summarizer:
+        named.append(SUMMARIZER_AGENT_KEY)
+    agents = [
+        key for key in reachable_agents(settings, named) if key in settings.agents.definitions
+    ]
+    used: set[str] = set()
+    for key in agents:
+        used |= servers_bound_to(settings, key)
+    if str(settings.triage.reputation) != "off":
+        used |= {
+            lookup.server
+            for lookup in pack_lookups(settings.mcp.servers, declarations(settings))
+            if lookup.enabled
+        }
+    # The triage pack: a step an operator declared calls its own server, and
+    # the capa, decoder and carve steps run in process on the env of the server
+    # declaring their tool.
+    from maljan.core.pack_servers import (
+        _CAPA_RENDERER,
+        _carve_server_key,
+        _decoder_server_key,
+        _step_server_key,
+    )
+    from maljan.core.pack_steps import effective_steps
+
+    steps = effective_steps(getattr(settings.triage, "steps", None) or ())
+    used |= {
+        str(step.server) for step in steps if step.enabled and not step.builtin and step.server
+    }
+    servers = settings.mcp.servers
+    used |= {
+        key
+        for key in (
+            _decoder_server_key(servers, steps),
+            _step_server_key(servers, steps, _CAPA_RENDERER, purpose="capa"),
+            _carve_server_key(servers),
+        )
+        if key
+    }
+    # The registry servers each static provider the job runs calls, as the
+    # provider itself names them.
+    from maljan.providers.registry import static_provider_servers
+
+    providers = {str(global_provider or settings.static.provider)} | {
+        str(static_provider_id_for(settings, key, global_provider=global_provider))
+        for key in agents
+    }
+    for provider in providers:
+        used |= static_provider_servers(provider, settings)
+    return used
