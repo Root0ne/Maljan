@@ -3590,6 +3590,14 @@ def _signature(data: dict[str, Any]) -> str:
     macho = data.get("macho") or {}
     if isinstance(macho, dict) and macho.get("present"):
         present.append("mach-o code signature present")
+    if not present and isinstance(macho, dict) and "present" in macho and macho["present"] is None:
+        # A header the tool could not walk whole is not an unsigned one.
+        reason = str(macho.get("reason") or "not checked")
+        lead = f"{identify.NOT_A_FAT_HEADER}: "
+        if reason.startswith(lead):
+            detail = _sample_text(reason[len(lead) :], None)
+            return f"unknown (not a readable fat Mach-O: {detail})"
+        return f"unknown ({_sample_text(reason, None)})"
     return "; ".join(present) or "none"
 
 
@@ -3739,7 +3747,15 @@ def _yara(data: dict[str, Any]) -> str:
     matches = [m for m in (data.get("matches") or []) if isinstance(m, dict)]
     names = [str(m.get("rule") or m.get("name") or "") for m in matches]
     text = f"{len(matches)} hits of {data.get('rule_count', '?')} rules"
-    return f"{text} ({_names(names)})" if names else text
+    if names:
+        text = f"{text} ({_names(names)})"
+    if data.get("engine") == "literal_fallback":
+        # The rules' literal strings were searched, not the rules run: a
+        # rule not listed is not checked, and the engine's failure is named.
+        failed = data.get("native_error")
+        why = f"the YARA engine failed ({failed})" if failed else "no YARA engine"
+        text = f"{text}; {why}: literal strings only, rule conditions not checked"
+    return text
 
 
 def _capa(data: dict[str, Any]) -> str:

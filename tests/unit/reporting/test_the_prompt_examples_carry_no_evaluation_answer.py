@@ -985,7 +985,6 @@ def _transform_sentences() -> str:
             transforms.CAPABILITY_FACTS,
             transforms.REMEDIATION,
             transforms._cap_sentence(),
-            transforms._scan_stopped_sentence(9),
             transforms._left_out_sentence(3, 6000),
             transforms._stopped(2, 4, "the output reached the platform's sample upload cap"),
             transforms._stopped(
@@ -1002,7 +1001,6 @@ def _transform_sentences() -> str:
                             "shown",
                             "utf16le_note",
                             "indicators_left_out",
-                            "indicator_scan_stopped",
                         )
                     }
                 )

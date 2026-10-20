@@ -854,15 +854,14 @@ def _entropy(counts: Any, total: int) -> float:
     return round(float(-(shares * np.log2(shares)).sum()), 4)
 
 
-def _indicators(shown: bytes, start: int) -> tuple[list[dict[str, Any]], int | None]:
+def _indicators(shown: bytes, start: int) -> list[dict[str, Any]]:
     """The indicator reader's rows over the part shown, each at the offset its match stands.
 
     The offset is the reader's own match (``string_iocs_with_spans``), as an
-    offset in the whole output; the second value is the output offset at which
-    the reader's run bound stopped it, or ``None``.
+    offset in the whole output. The reader reads every run of the part.
     """
-    rows, stopped = string_iocs_with_spans(shown, INDICATOR_KINDS)
-    found = [
+    rows = string_iocs_with_spans(shown, INDICATOR_KINDS)
+    return [
         {
             "kind": row["kind"],
             "value": pack_escaped(str(row["value"])),
@@ -871,7 +870,6 @@ def _indicators(shown: bytes, start: int) -> tuple[list[dict[str, Any]], int | N
         }
         for row in rows
     ]
-    return found, (None if stopped is None else start + stopped)
 
 
 def _measures(data: bytes) -> tuple[Any, int, int]:
@@ -914,7 +912,6 @@ def _fixed_output_chars() -> int:
         },
         "hex_head": "00" * HEX_HEAD_BYTES,
         "utf16le_note": _UTF16_NOTE,
-        "indicator_scan_stopped": _scan_stopped_sentence(big),
         "indicators": [],
         "indicators_left_out": _left_out_sentence(big, big),
         "ascii": "",
@@ -1007,9 +1004,7 @@ def _output_facts(
     }
     if len(shown) % 2:
         facts["utf16le_note"] = _UTF16_NOTE
-    rows, stopped = _indicators(shown, start)
-    if stopped is not None:
-        facts["indicator_scan_stopped"] = _scan_stopped_sentence(stopped)
+    rows = _indicators(shown, start)
     # The rows take what the part's room leaves after everything else,
     # the sentence saying some were left out included.
     left_out = _left_out_sentence(len(rows), room)
@@ -1024,13 +1019,6 @@ def _output_facts(
         facts["indicators_left_out"] = _left_out_sentence(len(rows) - len(kept), room)
     facts.update(readings)
     return facts
-
-
-def _scan_stopped_sentence(at: int) -> str:
-    return (
-        "the indicator reader's bound on the runs it reads stopped it at output byte "
-        f"{at}; indicators after it are not stated"
-    )
 
 
 def _left_out_sentence(count: int, room: int) -> str:

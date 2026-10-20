@@ -272,17 +272,34 @@ async def _enrich_domains(
             # 452 s, and fifteen of them were fragments of longer names.
             skipped += 1
             continue
+        if _has_successful_rep(dom):
+            # Already answered: no question is spent on it, so it holds no
+            # place under the cap. Skipped after the cap, a stored report's
+            # answered rows used to take every place and the rest went unasked.
+            continue
         askable.append(dom)
-    # The cap is applied to what is worth asking about, not to the raw list:
+    # The cap is applied to what is still to ask about, not to the raw list:
     # a page of string noise at the front used to spend the whole budget
     # before the first name anything else had seen.
     for dom in askable[:cap]:
-        if _has_successful_rep(dom):
-            continue
         found = await _first_record(sources, asker, "domain", str(dom["fqdn"]))
         if found is not None:
             _keep(dom, found)
+    _say_over_cap("domain", len(askable), cap)
     return skipped
+
+
+def _say_over_cap(kind: str, pending: int, cap: int) -> None:
+    """Log how many rows of ``kind`` still to ask about the cap left unasked."""
+    if pending > cap:
+        # The cap is named, not printed: it is read from the runtime settings,
+        # and a value read there is logged by name only.
+        logger.warning(
+            "enrich: %d %s rows still to look up were not asked: the per-kind lookup cap "
+            "(enrichment_max_lookups) was reached.",
+            pending - cap,
+            kind,
+        )
 
 
 async def _enrich_ips(
@@ -309,13 +326,16 @@ async def _enrich_ips(
             # is not worth a paid lookup, and one live run spent its whole
             # enrichment budget on twenty-five of them.
             continue
+        if (not sources or _has_successful_rep(ip)) and ip.get("asn") and ip.get("geo"):
+            # Nothing left to look up for it: it holds no place under the cap.
+            continue
         askable.append(ip)
-    # The cap is applied to what is worth asking about, as it is for the
+    # The cap is applied to what is still to look up, as it is for the
     # domains: a page of string noise at the front used to spend the budget
     # before the first address anything else had seen.
     for ip in askable[:cap]:
         address = str(ip["address"])
-        if not _has_successful_rep(ip):
+        if sources and not _has_successful_rep(ip):
             found = await _first_record(sources, asker, "ip", address)
             if found is not None:
                 _keep(ip, found)
@@ -327,3 +347,4 @@ async def _enrich_ips(
             geo = whois.geoip(address)
             if geo:
                 ip["geo"] = geo
+    _say_over_cap("ip", len(askable), cap)

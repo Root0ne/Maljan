@@ -141,22 +141,33 @@ def yara_scan(
         }
     rule_count = len(getattr(layer, "_rules", []) or [])
     compiled = getattr(layer, "_yara_rules", None)
+    answer: dict[str, Any] = {"rule_count": rule_count, "filtered": 0}
     if compiled is not None:
-        matches = _yara_native_matches(compiled, layer, data, timeout_s)
-    else:
-        matches = _yara_regex_matches(layer, data)
-    return {"matches": matches, "rule_count": rule_count, "filtered": 0}
+        try:
+            hits = compiled.match(data=data, timeout=max(1, int(timeout_s)))
+        except Exception as exc:  # noqa: BLE001 — the engine's failure is stated, not hidden
+            logger.warning("yara_scan: native scan failed (%s); literal fallback used.", exc)
+            answer["native_error"] = f"{type(exc).__name__}: {exc}"
+        else:
+            return {"matches": _yara_native_matches(layer, hits), "engine": "yara", **answer}
+    # The literal fallback reads each rule's strings, not its condition: a
+    # rule it does not list was not checked by the YARA engine, and an
+    # engine failure (a timeout among them) is named in ``native_error``
+    # rather than passed off as the engine's own empty answer.
+    answer["engine"] = "literal_fallback"
+    answer["engine_note"] = LITERAL_FALLBACK_NOTE
+    return {"matches": _yara_regex_matches(layer, data), **answer}
 
 
-def _yara_native_matches(
-    compiled: Any, layer: Any, data: bytes, timeout_s: int
-) -> list[dict[str, Any]]:
+# What an answer from the literal fallback says about what it checked.
+LITERAL_FALLBACK_NOTE = (
+    "the YARA engine did not scan: each rule's literal strings were searched instead, "
+    "so a rule's condition was not checked and a rule not listed is not shown absent"
+)
+
+
+def _yara_native_matches(layer: Any, hits: Any) -> list[dict[str, Any]]:
     """yara-python's own match objects, flattened to plain rows."""
-    try:
-        hits = compiled.match(data=data, timeout=max(1, int(timeout_s)))
-    except Exception as exc:  # noqa: BLE001
-        logger.warning("yara_scan: native scan failed (%s); falling back to regex.", exc)
-        return _yara_regex_matches(layer, data)
     id_map: dict[str, str] = getattr(layer, "_yara_id_map", {}) or {}
     rows: list[dict[str, Any]] = []
     for hit in hits:
@@ -200,9 +211,13 @@ def _yara_regex_matches(layer: Any, data: bytes) -> list[dict[str, Any]]:
 
     Reports the same row shape, offsets included: the fallback searches the
     same bytes, so it knows where each literal was found even though it never
-    compiled a YARA rule.
+    compiled a YARA rule. Each offset is a byte offset into ``data`` and each
+    ``data_hex`` the bytes found there: the bytes are decoded with every
+    undecodable byte kept as one escaped character, so the text maps back to
+    the bytes exactly. A replacement character used to stand for one or more
+    bytes, and the offsets were character indices that drifted from the file.
     """
-    decoded = data.decode("utf-8", errors="replace")
+    decoded = data.decode("utf-8", errors="surrogateescape")
     rows: list[dict[str, Any]] = []
     for rule in getattr(layer, "_rules", []) or []:
         rule_id = rule.id
@@ -213,15 +228,20 @@ def _yara_regex_matches(layer: Any, data: bytes) -> list[dict[str, Any]]:
         fired = layer.literal_matches(rule, decoded)
         strings: list[dict[str, Any]] = []
         for pattern in fired:
+            # The byte offset is carried from match to match, so each match
+            # encodes only the text since the one before it.
+            chars = 0
+            at = 0
             for match in re.finditer(re.escape(pattern), decoded, re.IGNORECASE):
+                at += len(decoded[chars : match.start()].encode("utf-8", "surrogateescape"))
+                chars = match.start()
+                raw = match.group().encode("utf-8", "surrogateescape")
                 strings.append(
                     {
-                        "offset": match.start(),
+                        "offset": at,
                         "identifier": f"${_identifier_for(rule, pattern)}",
-                        "data_hex": match.group()
-                        .encode("utf-8", errors="replace")[:_MAX_MATCH_BYTES]
-                        .hex(),
-                        "length": len(match.group().encode("utf-8", errors="replace")),
+                        "data_hex": raw[:_MAX_MATCH_BYTES].hex(),
+                        "length": len(raw),
                     }
                 )
         if not strings:

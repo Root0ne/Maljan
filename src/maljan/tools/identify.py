@@ -47,6 +47,7 @@ _MACHO_THIN_MAGICS = (
     b"\xcf\xfa\xed\xfe",
 )
 _MACHO_FAT_MAGIC = b"\xca\xfe\xba\xbe"
+_MACHO_FAT64_MAGIC = b"\xca\xfe\xba\xbf"
 # LC_CODE_SIGNATURE. The presence of the load command is the fact this tool
 # reports; validating the blob is a different job and needs the whole chain.
 _LC_CODE_SIGNATURE = 0x1D
@@ -149,7 +150,7 @@ def _routed_scheme(file_type: str | None, target: Path, blob: bytes) -> tuple[st
         return routed, _SIGNING_SCHEMES.get(routed)
     if blob[:2] == b"MZ":
         return "pe", "authenticode"
-    if blob[:4] in _MACHO_THIN_MAGICS or blob[:4] == _MACHO_FAT_MAGIC:
+    if blob[:4] in (*_MACHO_THIN_MAGICS, _MACHO_FAT_MAGIC, _MACHO_FAT64_MAGIC):
         return "mach-o", "macho"
     if _looks_like_an_apk(target):
         return "apk", "apk"
@@ -276,32 +277,111 @@ def _apk_block_schemes(blob: bytes) -> list[str]:
 
 
 def _macho_signing(blob: bytes) -> dict[str, Any]:
-    """Walk the thin header's load commands looking for LC_CODE_SIGNATURE."""
-    if blob[:4] == _MACHO_FAT_MAGIC:
-        # A fat binary's slices each carry their own header; reporting the
-        # container as unknown is honest, and ``macho_info`` is the tool that
-        # actually walks the slices.
-        return {"present": False, "reason": "fat binary; inspect each slice"}
-    little = blob[:4] in (b"\xce\xfa\xed\xfe", b"\xcf\xfa\xed\xfe")
-    sixty_four = blob[:4] in (b"\xfe\xed\xfa\xcf", b"\xcf\xfa\xed\xfe")
+    """Whether the Mach-O carries LC_CODE_SIGNATURE: the thin header, or each slice of a fat one.
+
+    ``present`` is ``True`` when a header (one slice of a fat binary is
+    enough) carries the load command, ``False`` only when every header was
+    walked to its end without one, and ``None`` with a ``reason`` when a
+    header could not be walked whole: a header this tool did not read is not
+    reported unsigned. A fat binary also lists each slice's answer.
+    """
+    if blob[:4] in (_MACHO_FAT_MAGIC, _MACHO_FAT64_MAGIC):
+        return _fat_macho_signing(blob)
+    return _thin_macho_signing(blob, 0, len(blob))
+
+
+def _fat_macho_signing(blob: bytes) -> dict[str, Any]:
+    """Each slice's answer, and the container's from them.
+
+    Linear by construction, with no cap: the slices are sorted by offset and
+    a fat header whose slices overlap (two at one offset included) or run
+    past the file's end is malformed and nothing is walked. Each walk is then
+    held inside its own slice (``_thin_macho_signing``), so the bytes walked
+    over all slices are at most the file's size.
+    """
+    wide = blob[:4] == _MACHO_FAT64_MAGIC
+    entry, layout = (32, ">iiQQI") if wide else (20, ">iiIII")
+    if len(blob) < 8:
+        return _not_a_fat_header("the header is cut short")
+    count = int.from_bytes(blob[4:8], "big")
+    if 8 + count * entry > len(blob):
+        return _not_a_fat_header(f"it lists {count} slices past the file's end")
+    if not count:
+        return _not_a_fat_header("it lists no slice")
+    listed: list[tuple[int, int, int]] = []
+    for index in range(count):
+        cpu, _sub, offset, size, _align = struct.unpack_from(layout, blob, 8 + index * entry)
+        listed.append((int(offset), int(size), int(cpu)))
+    ordered = sorted(listed)
+    for offset, size, _cpu in ordered:
+        if offset + size > len(blob):
+            return _not_a_fat_header(f"a slice at {offset} runs past the file's end")
+    for (before, size, _cpu), (after, _size, _next) in zip(ordered, ordered[1:], strict=False):
+        if after < before + size or after == before:
+            return _not_a_fat_header(f"the slices at {before} and {after} overlap")
+    slices: list[dict[str, Any]] = []
+    for offset, size, cpu in listed:
+        answer = _thin_macho_signing(blob, offset, offset + size)
+        slices.append({"cputype": cpu, "offset": offset, **answer})
+    states = [row["present"] for row in slices]
+    if any(state is True for state in states):
+        present: bool | None = True
+    elif states and all(state is False for state in states):
+        present = False
+    else:
+        present = None
+    # ``present`` and ``reason`` before the slices: an answer cut from its
+    # end to fit its reader keeps them however many slices follow.
+    out: dict[str, Any] = {"present": present}
+    if present is None:
+        out["reason"] = "a slice's header could not be walked whole"
+    out["slices"] = slices
+    return out
+
+
+# What a CAFEBABE file whose fat header does not hold is: it may not be a fat
+# Mach-O at all (a Java class file starts with the same four bytes).
+NOT_A_FAT_HEADER = "not a fat Mach-O header, or a malformed one"
+
+
+def _not_a_fat_header(why: str) -> dict[str, Any]:
+    return {"present": None, "reason": f"{NOT_A_FAT_HEADER}: {why}"}
+
+
+# Why a walk stopped before the load commands' end: not "unsigned".
+LOAD_COMMANDS_UNREAD = "load commands unread: {why}"
+
+
+def _thin_macho_signing(blob: bytes, start: int, end: int) -> dict[str, Any]:
+    """Walk one thin header's load commands, at ``start`` and inside ``end``, for LC_CODE_SIGNATURE.
+
+    Every command read advances at least 8 bytes and ends inside the slice,
+    so the walk reads no more than the slice whatever ``ncmds`` says. The
+    first command whose size is under 8 or whose end runs past the slice
+    stops it, and that is stated with ``present: None``.
+    """
+    magic = blob[start : start + 4]
+    if magic not in _MACHO_THIN_MAGICS:
+        return {"present": None, "reason": "no thin Mach-O header at this offset"}
+    little = magic in (b"\xce\xfa\xed\xfe", b"\xcf\xfa\xed\xfe")
+    sixty_four = magic in (b"\xfe\xed\xfa\xcf", b"\xcf\xfa\xed\xfe")
     endian = "<" if little else ">"
     header_size = 32 if sixty_four else 28
-    if len(blob) < header_size:
-        return {"present": False}
-    try:
-        ncmds = struct.unpack_from(endian + "I", blob, 16)[0]
-    except struct.error:
-        return {"present": False}
-    cursor = header_size
-    for _ in range(min(int(ncmds), 4096)):
-        if cursor + 8 > len(blob):
-            break
-        try:
-            cmd, cmd_size = struct.unpack_from(endian + "II", blob, cursor)
-        except struct.error:
-            break
+    if end - start < header_size:
+        return {"present": None, "reason": "header cut short"}
+    ncmds = struct.unpack_from(endian + "I", blob, start + 16)[0]
+    cursor = start + header_size
+    for _ in range(int(ncmds)):
+        if cursor + 8 > end:
+            why = "the next command runs past the slice's end"
+            return {"present": None, "reason": LOAD_COMMANDS_UNREAD.format(why=why)}
+        cmd, cmd_size = struct.unpack_from(endian + "II", blob, cursor)
         if cmd_size < 8:
-            break
+            why = "a command's size is under 8 bytes"
+            return {"present": None, "reason": LOAD_COMMANDS_UNREAD.format(why=why)}
+        if cursor + int(cmd_size) > end:
+            why = "a command's end runs past the slice's end"
+            return {"present": None, "reason": LOAD_COMMANDS_UNREAD.format(why=why)}
         if int(cmd) == _LC_CODE_SIGNATURE:
             return {"present": True, "load_command": "LC_CODE_SIGNATURE"}
         cursor += int(cmd_size)
