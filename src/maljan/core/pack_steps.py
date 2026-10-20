@@ -53,6 +53,7 @@ the same kind.
 from __future__ import annotations
 
 import re
+from collections import deque
 from collections.abc import Callable, Iterable, Iterator, Mapping
 from typing import Any, NamedTuple
 
@@ -695,7 +696,8 @@ def _effective(
     for step in default_steps():
         held[step.id] = step
         link(step.id, tail)
-    for step in declared:
+
+    def place(step: PackStep) -> None:
         if step.id in held:
             held[step.id] = _laid_over(held[step.id], step)
             anchor = unlink(step.id)
@@ -711,6 +713,59 @@ def _effective(
             else:
                 anchor = step.after
         link(step.id, anchor)
+
+    # A step that comes after one declared and not yet placed waits for it, so
+    # the order of the declarations decides nothing. Each step waits once and is
+    # released when its anchor is placed. What still waits at the end comes
+    # after each other in a cycle, which is named and refused.
+    pending: dict[str, int] = {}
+    for step in declared:
+        pending[step.id] = pending.get(step.id, 0) + 1
+    waiting: dict[str, list[tuple[int, PackStep]]] = {}
+    done: set[int] = set()
+
+    def place_with_followers(step: PackStep) -> None:
+        queue = deque([step])
+        while queue:
+            current = queue.popleft()
+            place(current)
+            done.add(id(current))
+            pending[current.id] -= 1
+            queue.extend(later for _, later in waiting.pop(current.id, []))
+
+    for position, step in enumerate(declared):
+        if (
+            step.after
+            and step.after != step.id
+            and step.after not in held
+            and pending.get(step.after, 0) > 0
+        ):
+            waiting.setdefault(step.after, []).append((position, step))
+        else:
+            place_with_followers(step)
+    if waiting:
+        stuck = sorted(
+            (entry for entries in waiting.values() for entry in entries), key=lambda e: e[0]
+        )
+        anchor_of = {step.id: step.after for _, step in stuck}
+        walk = stuck[0][1].id
+        seen: list[str] = []
+        while walk in anchor_of and walk not in seen:
+            seen.append(walk)
+            walk = anchor_of[walk]
+        cycle = seen[seen.index(walk) :] if walk in seen else seen
+        said = (
+            "steps " + ", ".join(repr(i) for i in cycle) + " each come after the next, "
+            "round in a cycle"
+        )
+        if found is None:
+            raise ValueError(said)
+        for _, step in stuck:
+            if id(step) in done:
+                continue
+            done.add(id(step))
+            found.setdefault(step.id, []).append(said)
+            place_with_followers(step.model_copy(update={"after": ""}))
     steps: list[PackStep] = []
     cursor = head
     while cursor:

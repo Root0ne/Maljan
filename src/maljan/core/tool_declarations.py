@@ -420,7 +420,9 @@ class ErrorPattern(BaseModel):
         found = fullmatch_pattern(self.match, text)
         if found is None:
             return None
-        return message_lines(found.group(self.message_group) if self.message_group else text)
+        said = found.group(self.message_group) if self.message_group else text
+        # An optional group that took part in no match is no message: the whole text stands.
+        return message_lines(text if said is None else said)
 
     def remediation_for(self, sample_path: str | None) -> str:
         """The remediation, naming ``sample_path`` where the pattern has a form for it."""
@@ -814,7 +816,7 @@ class ReputationFacts(BaseModel):
         """
         for pattern in self.text_patterns:
             found = search_pattern(pattern, text)
-            if found is not None:
+            if found is not None and found.group("malicious") is not None:
                 groups = compile_pattern(pattern).groupindex
 
                 def _group(name: str, held: Any = found, named: Any = groups) -> int | None:

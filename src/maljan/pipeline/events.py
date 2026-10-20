@@ -30,7 +30,7 @@ from collections.abc import Callable, Iterable
 from typing import Any
 
 from maljan.core.logger import logger
-from maljan.utils.marked_cut import CUT_MARK, marked_cut
+from maljan.utils.marked_cut import CUT_MARK
 
 # (event_type, payload) -> None. Must be safe to call from any thread.
 EventSink = Callable[[str, dict[str, Any]], None]
@@ -377,13 +377,21 @@ def summarize_claims(claims: Any, *, speaker: str, source: str = "") -> str:
     # markdown emphasis. This is a one-line headline, so collapse it — the
     # expandable claim list below shows the value verbatim.
     lead = " ".join(str(getattr(items[0], "claim", "") or "").split())
-    if len(lead) > 240:
-        lead = lead[:239] + "…"
+    lead = _scrubbed_cut(lead, 240, layout=False)
     plural = "" if len(items) == 1 else "s"
     headline = (
         f"{len(items)} evidence-backed claim{plural} from {source or f'the {speaker} layer'}."
     )
     return f"{headline} Leading: {lead}" if lead else headline
+
+
+def _cut_kept(text: str, limit: int) -> str:
+    """``text``, its own lines kept, scrubbed and then cut: never cut first.
+
+    A cut in front of the scrub leaves the head of a secret that no longer has
+    the shape the scrub knows.
+    """
+    return _scrubbed_cut(text, limit, layout=True)
 
 
 def claims_to_payload(claims: Any, limit: int = 12) -> list[dict[str, Any]]:
@@ -399,8 +407,8 @@ def claims_to_payload(claims: Any, limit: int = 12) -> list[dict[str, Any]]:
         try:
             out.append(
                 {
-                    "claim": marked_cut(str(getattr(claim, "claim", "") or ""), 400),
-                    "evidence_ref": marked_cut(str(getattr(claim, "evidence_ref", "") or ""), 300),
+                    "claim": _cut_kept(str(getattr(claim, "claim", "") or ""), 400),
+                    "evidence_ref": _cut_kept(str(getattr(claim, "evidence_ref", "") or ""), 300),
                     "confidence": round(float(getattr(claim, "confidence", 0.0) or 0.0), 4),
                     "technique_id": getattr(claim, "technique_id", None),
                 }
@@ -408,7 +416,7 @@ def claims_to_payload(claims: Any, limit: int = 12) -> list[dict[str, Any]]:
             # The heading's note, where the debate is read; only when there is one.
             note = getattr(claim, "heading_note", None)
             if note:
-                out[-1]["heading_note"] = marked_cut(str(note), 300)
+                out[-1]["heading_note"] = _cut_kept(str(note), 300)
         except Exception:  # noqa: BLE001 — one malformed claim must not drop the rest
             continue
     return out
@@ -1987,7 +1995,7 @@ _WHOLE_RUN = re.compile(
 )
 
 
-def _cut_whole(text: str, limit: int) -> str:
+def _cut_whole(text: str, limit: int, *, layout: bool = False, more: bool = False) -> str:
     """``text`` bounded near ``limit`` and marked, never cut inside a value the scrub kept.
 
     ``text`` is already scrubbed. A digest or an identifier the cut would
@@ -1999,26 +2007,87 @@ def _cut_whole(text: str, limit: int) -> str:
     that changes it, the cut moves back to the start of the word it falls in,
     so scrubbing the result again changes nothing.
     """
-    if len(text) <= limit:
+    if len(text) <= limit and not more:
         return text
-    cut = limit - 1
+    cut = min(limit - 1, len(text))
     for found in _WHOLE_RUN.finditer(text):
         if found.start() < cut < found.end():
             cut = found.end()
             break
     if cut >= len(text):
-        return text
+        if not more:
+            return text
+        cut = len(text)
     for found in _VALUE_RUN.finditer(text):
         if found.start() < cut < found.end():
             if _looks_like_a_credential(text[found.start() : cut]):
                 cut = found.start()
             break
-    made = text[:cut] + CUT_MARK
-    while cut > 0 and scrub(made) != made:
+    made = _marked(text, cut)
+    again = scrub_keeping_layout if layout else scrub
+    while cut > 0 and again(made) != made:
         cut = text.rfind(" ", 0, cut)
         cut = max(cut, 0)
-        made = text[:cut].rstrip() + CUT_MARK
+        made = _marked(text, cut)
     return made
+
+
+def _marked(text: str, cut: int) -> str:
+    """``text[:cut]`` with the cut mark, none added where it already ends in one.
+
+    A scrubbed URL ends in the mark; a second one is folded back into it by the
+    next scrub, which read as a change and backed the cut up past every URL.
+    """
+    head = text[:cut].rstrip()
+    return head if head.endswith(CUT_MARK) else head + CUT_MARK
+
+
+def _scrub_window(text: str, limit: int) -> tuple[str, bool]:
+    """The part of ``text`` worth scrubbing for a cut at ``limit``, and whether it is a part.
+
+    Every secret the scrub knows is whitespace-delimited, and the widest one
+    reads two words (an authorization scheme and the word after it). So the
+    window ends after the two whole words that follow ``limit``: a secret on
+    the cut is whole inside it, and the rest of a long text is never scrubbed.
+
+    The window reaches no further than twice ``limit``. A word that runs past
+    that edge is not read to its end: the text before it is kept and the word
+    is put as the mask, so no head of it is left and the cost stays in the
+    window however long the word is.
+    """
+    edge = 2 * limit
+    stop = limit
+    for _ in range(2):
+        gap = _SPACE.search(text, stop, edge + 1)
+        if gap is None:
+            return (text, False) if len(text) <= edge else _masked_tail(text, edge)
+        word = _WORD.search(text, gap.end(), edge + 1)
+        if word is None:
+            if gap.end() >= len(text):
+                return text, False
+            return text[: gap.start()], True
+        if word.end() > edge:
+            return _masked_tail(text, edge)
+        stop = word.end()
+    return text[:stop], stop < len(text)
+
+
+def _masked_tail(text: str, edge: int) -> tuple[str, bool]:
+    """``text`` up to the word that runs past ``edge``, that word as the mask."""
+    head = text[:edge]
+    blank = max(head.rfind(c) for c in " \n\t\r")
+    return head[: blank + 1] + _REDACTED, True
+
+
+_WORD = re.compile(r"\S+")
+_SPACE = re.compile(r"\s")
+
+
+def _scrubbed_cut(text: str, limit: int, *, layout: bool) -> str:
+    """``text`` scrubbed and then bounded at ``limit``: the scrub is read over a window only."""
+    window, partial = _scrub_window(text, limit)
+    scrubbed = scrub_keeping_layout(window) if layout else scrub(window)
+    return _cut_whole(scrubbed, limit, layout=layout, more=partial)
 
 
 def summarize_args(args: Any) -> str:

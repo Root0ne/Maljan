@@ -1301,6 +1301,7 @@ def check_function_claims(
         sources: list[_Held] = [facts.listings[i] for i in listing_ids if i in facts.listings]
         reason = ""
         starts: list[int] = []
+        asked_about: list[DecompiledFunction] = []
         for function in about:
             start = facts.offset(function.address)
             if start is None:
@@ -1313,26 +1314,34 @@ def check_function_claims(
             if facts.shown is not None and start in facts.rows and start not in facts.shown:
                 reason = ROW_NOT_SHOWN.format(address=facts.va(start))
                 break
-            starts.append(start)
+            if start not in starts:
+                starts.append(start)
+                asked_about.append(function)
         if not reason and facts.undecoded is None:
             reason = UNDECODED_UNKNOWN.format(entry=facts.index_entry)
         reached: _Reached | None = None
         if not reason:
             reached = facts.reach(starts)
             if reached.stopped:
-                reason = UNDECODED.format(address=facts.va(starts[0]))
+                reason = UNDECODED.format(
+                    address=facts.va(_first_start(starts, reached, "stopped"))
+                )
         if reason or reached is None:
             out.not_checked.append(f"claim {number}: {reason}")
             continue
         out.checked += 1
-        where = facts.va(starts[0])
         api_reason = ""
         if facts.unnamed is None:
             api_reason = UNNAMED_UNKNOWN.format(entry=facts.index_entry)
         elif not reached.whole:
-            api_reason = CALLEES_UNKNOWN.format(entry=facts.index_entry, address=where)
+            api_reason = CALLEES_UNKNOWN.format(
+                entry=facts.index_entry,
+                address=facts.va(_first_start(starts, reached, "whole", missing=True)),
+            )
         elif reached.unnamed:
-            api_reason = UNNAMED_CALLS.format(address=where)
+            api_reason = UNNAMED_CALLS.format(
+                address=facts.va(_first_start(starts, reached, "unnamed"))
+            )
         # Each value is the function's only where the claim gives it to it: the
         # function it last names before the value, in the value's own clause.
         apis: list[str] = []
@@ -1382,7 +1391,7 @@ def check_function_claims(
                 index,
                 number,
                 sentence,
-                about,
+                asked_about,
                 starts,
                 reached.count() - len(starts),
                 unheld,
@@ -1391,6 +1400,20 @@ def check_function_claims(
             )
         )
     return out
+
+
+def _first_start(
+    starts: Sequence[int], reached: _Reached, flag: str, *, missing: bool = False
+) -> int:
+    """The first of ``starts`` whose own reach has ``flag`` set (or lacks it, ``missing``).
+
+    ``reached`` holds one part per start, in order, so a message naming
+    the function the fault is in names that one and not the claim's first.
+    """
+    for start, part in zip(starts, reached.parts, strict=False):
+        if bool(getattr(part, flag)) is not missing:
+            return start
+    return starts[0]
 
 
 def _attribution(

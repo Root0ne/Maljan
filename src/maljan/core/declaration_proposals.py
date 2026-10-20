@@ -73,6 +73,7 @@ from maljan.core.tool_declarations import (
     ToolFacts,
     check_auto_name_prefixes,
     check_tool_name,
+    fullmatch_pattern,
     strict_declarations,
 )
 from maljan.core.undeclared_tools import (
@@ -402,7 +403,36 @@ class Proposed:
 # ---------------------------------------------------------------------------
 
 _HEX_LENGTHS = {32, 40, 64}
-_HEX_PATTERN = re.compile(r"[0-9a-fA-F]|a-f|A-F")
+_HEX_DIGITS = "0a1b2c3d4e5f6789"
+
+
+def _counts_a_hex_class(regex: str) -> bool:
+    """Whether ``regex`` takes a hash's hex digits and nothing near them.
+
+    Decided by what it does, not by how it is written: it must match a hex
+    string of 32, 40 or 64 characters whole, and refuse the same string with a
+    non-hex character swapped in (first and last place), with one character
+    more and with one fewer. A pattern the platform's engine cannot run is none.
+    """
+    try:
+        for n in sorted(_HEX_LENGTHS):
+            digits = (_HEX_DIGITS * 4)[:n]
+            if fullmatch_pattern(regex, digits) is None:
+                continue
+            if any(
+                fullmatch_pattern(regex, bad) is not None
+                for bad in (
+                    "g" + digits[1:],
+                    digits[:-1] + "g",
+                    digits + "a",
+                    digits[:-1],
+                )
+            ):
+                continue
+            return True
+    except ValueError:
+        return False
+    return False
 
 
 def _argument_role(name: str, shape: _Shape) -> tuple[str, str, str] | None:
@@ -415,11 +445,7 @@ def _argument_role(name: str, shape: _Shape) -> tuple[str, str, str] | None:
         tokens
     ):
         return "hash", HIGH, "name"
-    if (
-        shape.regex
-        and _HEX_PATTERN.search(shape.regex)
-        and any(f"{{{n}}}" in shape.regex for n in _HEX_LENGTHS)
-    ):
+    if shape.regex and _counts_a_hex_class(shape.regex):
         return "hash", HIGH, "pattern"
     if (
         shape.min_length == shape.max_length
