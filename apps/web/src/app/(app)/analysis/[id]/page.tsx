@@ -4,6 +4,8 @@ import { useState } from "react";
 import Link from "next/link";
 
 import { useReport } from "./layout";
+import ReportAbsent from "@/components/analysis/ReportAbsent";
+import { reportAbsence } from "@/components/analysis/reportAbsence";
 import { api } from "@/lib/api";
 import {
   bundleLossSentence,
@@ -28,6 +30,9 @@ import TechnicalAnalysisPanel from "@/components/analysis/TechnicalAnalysisPanel
 import {
   MEASURED_VOICE,
   REPORT_MODEL_VOICE,
+  claimsNotDiscussed,
+  flaggedMark,
+  flaggedStatements,
   keyFindings,
   noSummaryReason,
 } from "@/components/analysis/reportProse";
@@ -69,19 +74,17 @@ function countNetworkIOCs(mr: MalwareReport): {
 }
 
 export default function SummaryTab() {
-  const { report, job, loading } = useReport();
+  const { report, job, loading, reportError } = useReport();
 
   if (loading) {
     return <div className="p-4 text-sm text-text-secondary">Loading...</div>;
   }
 
-  if (!report && (!job || job.status !== "completed")) {
-    return (
-      <div className="p-4 text-sm text-text-secondary animate-pulse">
-        Analysis in progress... Gathering intelligence.
-      </div>
-    );
-  }
+  /* No report at all — still running, unreadable, or never written — is not
+   * a report old enough to carry no structured payload, which is what the
+   * legacy summary below says. Each absence is said as itself. */
+  const absent = reportAbsence({ report, job, reportError });
+  if (absent) return <ReportAbsent absence={absent} />;
 
   const mr = report?.malware_report ?? null;
   return mr ? <MalwareReportSummary mr={mr} /> : <LegacySummary />;
@@ -462,6 +465,8 @@ function MalwareReportSummary({ mr }: { mr: MalwareReport }) {
       )}
 
       <TechnicalAnalysisPanel report={mr} />
+
+      <ReportChecks mr={mr} />
 
       {/* How the run was set up and what it spent, in the one place that
           answers it. This is the rollup the retired pipeline panel carried:
@@ -929,5 +934,76 @@ function EnrichButton({ reportId }: { reportId: string }) {
         </p>
       )}
     </>
+  );
+}
+
+/* ── What the report's own checks left standing ──────────────────────
+ *
+ * Two lists the report carries and the console never drew: the report
+ * model's sentences a capability or rule-match check asked about and the
+ * retry left standing, and the analyst claims in force the body neither cites
+ * nor discusses. The exported report prints both; a reader of the console saw
+ * the body without either caveat. Nothing is drawn for a report that carries
+ * neither, or that was stored before the fields existed.
+ */
+function ReportChecks({ mr }: { mr: MalwareReport }) {
+  const flagged = flaggedStatements(mr);
+  const undiscussed = claimsNotDiscussed(mr);
+  if (flagged.length === 0 && undiscussed.length === 0) return null;
+  return (
+    <div className="bg-bg-surface border border-border rounded">
+      <div className="px-4 py-3 border-b border-border">
+        <h2 className="text-xs font-medium text-text-primary uppercase tracking-wider">
+          What the report&apos;s checks left standing
+        </h2>
+      </div>
+      <div className="p-4 space-y-4">
+        {flagged.length > 0 && (
+          <section>
+            <h3 className="text-[11px] uppercase tracking-wider text-text-muted mb-1.5">
+              Flagged statements
+            </h3>
+            <ul className="space-y-1.5">
+              {flagged.map((statement, i) => (
+                <li key={`${statement.code}-${i}`} className="text-sm text-text-secondary">
+                  &ldquo;{statement.sentence}&rdquo;
+                  <span className="ml-2 text-[10px] italic text-status-orange">
+                    ({flaggedMark(statement)})
+                  </span>
+                </li>
+              ))}
+            </ul>
+          </section>
+        )}
+        {undiscussed.length > 0 && (
+          <section>
+            <h3 className="text-[11px] uppercase tracking-wider text-text-muted mb-1.5">
+              Claims the report does not discuss
+            </h3>
+            <ul className="space-y-1.5">
+              {undiscussed.map((claim) => (
+                <li
+                  key={`${claim.agent}-${claim.claim_number}`}
+                  className="text-sm text-text-secondary"
+                >
+                  <span className="text-text-primary font-medium">
+                    {claim.agent} #{claim.claim_number}
+                  </span>{" "}
+                  {claim.claim}
+                  {(claim.missing ?? []).length > 0 && (
+                    <span className="ml-2 text-[11px] text-text-muted">
+                      not named in the body: {(claim.missing ?? []).join(", ")}
+                    </span>
+                  )}
+                  {claim.evidence_ref && (
+                    <EvidenceChips ids={[claim.evidence_ref]} className="ml-2" />
+                  )}
+                </li>
+              ))}
+            </ul>
+          </section>
+        )}
+      </div>
+    </div>
   );
 }

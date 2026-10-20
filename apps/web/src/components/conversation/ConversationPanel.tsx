@@ -47,6 +47,7 @@ const CONNECTION_LABEL: Record<RunConnection, string> = {
   reconnecting: "Reconnecting",
   closed: "Feed closed",
   unauthorized: "Sign in again to follow this run",
+  refused: "The server refused to stream this run",
 };
 
 /** How far from the bottom still counts as following the conversation. */

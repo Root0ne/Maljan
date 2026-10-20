@@ -3,6 +3,8 @@
 import { useState } from "react";
 
 import { useReport } from "../layout";
+import ReportAbsent from "@/components/analysis/ReportAbsent";
+import { reportAbsence } from "@/components/analysis/reportAbsence";
 import { copyToClipboard, truncateMiddle } from "@/lib/report-utils";
 import Field from "@/components/ui/Field";
 import { attributionSaysSomething } from "@/components/analysis/analysisTabs";
@@ -19,11 +21,16 @@ type SimilarSample = {
 };
 
 export default function AttributionTab() {
-  const { report, loading } = useReport();
+  const { report, job, loading, reportError } = useReport();
 
   if (loading) {
     return <div className="p-4 text-sm text-text-secondary">Loading...</div>;
   }
+
+  /* No report is not an empty report: say which absence this is rather than
+   * drawing this tab's negative (`reportAbsence`). */
+  const absent = reportAbsence({ report, job, reportError });
+  if (absent) return <ReportAbsent absence={absent} />;
 
   const attribution: FamilyAttribution | undefined =
     report?.malware_report?.attribution;

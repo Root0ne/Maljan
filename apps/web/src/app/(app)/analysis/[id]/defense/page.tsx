@@ -1,6 +1,8 @@
 "use client";
 
 import { useReport } from "../layout";
+import ReportAbsent from "@/components/analysis/ReportAbsent";
+import { reportAbsence } from "@/components/analysis/reportAbsence";
 import { PRIORITY_STYLES } from "@/types/malware-report";
 import type { DefensiveCategory, Priority } from "@/types/malware-report";
 
@@ -17,11 +19,16 @@ const CATEGORY_LABELS: Record<DefensiveCategory, string> = {
 const PRIORITY_ORDER: Priority[] = ["P0", "P1", "P2"];
 
 export default function DefenseTab() {
-  const { report, loading } = useReport();
+  const { report, job, loading, reportError } = useReport();
 
   if (loading) {
     return <div className="p-4 text-sm text-text-secondary">Loading...</div>;
   }
+
+  /* No report is not an empty report: say which absence this is rather than
+   * drawing this tab's negative (`reportAbsence`). */
+  const absent = reportAbsence({ report, job, reportError });
+  if (absent) return <ReportAbsent absence={absent} />;
 
   const recommendations = report?.malware_report?.defensive_recommendations ?? [];
   if (recommendations.length === 0) {

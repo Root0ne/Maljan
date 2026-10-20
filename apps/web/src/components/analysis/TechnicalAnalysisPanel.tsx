@@ -15,6 +15,7 @@ import {
   hasTechnicalAnalysis,
   hostIdentifiers,
   identifierFindings,
+  technicalSubsections,
 } from "./reportProse";
 import type { MalwareReport } from "@/types/malware-report";
 
@@ -39,6 +40,7 @@ export default function TechnicalAnalysisPanel({ report }: { report: MalwareRepo
   const uncitedConfig = configFindings(report);
   const identifiers = hostIdentifiers(report);
   const uncitedIdentifiers = identifierFindings(report);
+  const blocks = technicalSubsections(report);
 
   return (
     <div className="bg-bg-surface border border-border rounded">
@@ -208,6 +210,41 @@ export default function TechnicalAnalysisPanel({ report }: { report: MalwareRepo
             </ul>
           </section>
         )}
+
+        {/* The rest of the spine: prose subsections, flags, the kill list,
+            shadow-copy commands, the encryption scheme and the ransom note. */}
+        {blocks.map((block) => (
+          <section key={block.key}>
+            <h3 className="text-[11px] uppercase tracking-wider text-text-muted mb-1.5">
+              {block.title}
+            </h3>
+            {block.body && (
+              <p className="text-sm text-text-secondary whitespace-pre-wrap break-words">
+                {block.body}
+              </p>
+            )}
+            {block.facts.length > 0 && (
+              <dl className="mt-1 grid grid-cols-[max-content_1fr] gap-x-3 gap-y-1 text-xs">
+                {block.facts.map(([label, value]) => (
+                  <div key={label} className="contents">
+                    <dt className="text-text-muted">{label}</dt>
+                    <dd className="font-mono break-all text-text-secondary">{value}</dd>
+                  </div>
+                ))}
+              </dl>
+            )}
+            {block.items.length > 0 && (
+              <ul className="mt-1 space-y-0.5">
+                {block.items.map((item, i) => (
+                  <li key={`${item}-${i}`} className="text-xs font-mono break-all text-text-secondary">
+                    {item}
+                  </li>
+                ))}
+              </ul>
+            )}
+            <Cited ids={block.evidence} />
+          </section>
+        ))}
       </div>
     </div>
   );

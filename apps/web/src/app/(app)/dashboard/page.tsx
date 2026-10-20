@@ -11,6 +11,7 @@ import { formatDuration, timeAgo } from "@/lib/report-utils";
 import { statusTone } from "@/lib/status";
 import { verdictBucket, verdictLabel, verdictTone } from "@/lib/verdict";
 import { enrichmentWorkerNotice } from "./enrichmentNotice";
+import { mockModeNotice } from "./mockModeNotice";
 import { toolBars } from "./toolBars";
 import {
   PieChart,
@@ -105,6 +106,9 @@ export default function DashboardPage() {
   const [stats, setStats] = useState<DisplayStats | null>(null);
   const [jobs, setJobs] = useState<AnalysisRow[]>([]);
   const [systemStatus, setSystemStatus] = useState<SystemStatusDTO | null>(null);
+  /* Why the system status could not be read; the mock-mode gate is then
+   * unknown, not off (`mockModeNotice`). */
+  const [statusError, setStatusError] = useState<string | null>(null);
   const [toolUsage, setToolUsage] = useState<ToolUsageDTO | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -120,7 +124,10 @@ export default function DashboardPage() {
           // out rather than the whole dashboard unrendered. A row without its
           // verdict is drawn by its status.
           api.getReports(1, REPORTS_FOR_LATEST).catch(() => null),
-          api.getSystemStatus().catch(() => null),
+          api.getSystemStatus().catch((err: unknown) => {
+            setStatusError(getErrorMessage(err) || "the status endpoint did not answer");
+            return null;
+          }),
           api.getDashboardTools().catch(() => null),
         ]);
         setStats(mapApiStats(s));
@@ -187,6 +194,7 @@ export default function DashboardPage() {
     systemStatus?.enrichment_sources ?? [],
   );
   const bars = toolBars(toolUsage);
+  const mockMode = mockModeNotice(systemStatus, statusError);
 
   return (
     <div>
@@ -197,7 +205,20 @@ export default function DashboardPage() {
       {/* Mock-mode banner: operators
           frequently miss the worker log line announcing mock mode. Red
           banner makes the configuration impossible to overlook. */}
-      {systemStatus?.mock_mode_allowed && (
+      {mockMode?.kind === "unknown" && (
+        <div
+          role="alert"
+          className="mb-4 flex items-start gap-3 rounded border border-status-orange/40 bg-status-orange/10 p-3 text-sm"
+        >
+          <span className="font-semibold text-status-orange">MOCK MODE UNKNOWN</span>
+          <span className="text-text-secondary">
+            The system status could not be read ({mockMode.reason}), so whether the
+            worker accepts mock runs is not known. Treat verdicts with care until
+            the status can be read.
+          </span>
+        </div>
+      )}
+      {mockMode?.kind === "allowed" && (
         <div
           role="alert"
           className="mb-4 flex items-start gap-3 rounded border border-status-red/40 bg-status-red/10 p-3 text-sm"

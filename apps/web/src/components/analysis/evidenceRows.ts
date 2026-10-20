@@ -191,3 +191,136 @@ export function formatCallDuration(ms: number): string {
   if (value < 1000) return `${value} ms`;
   return `${(value / 1000).toFixed(1)} s`;
 }
+
+/** The extension a saved spilled part is named with, from its content type. */
+const EXTENSIONS: Record<string, string> = {
+  "application/json": "json",
+  "application/x-ndjson": "ndjson",
+  "application/xml": "xml",
+  "application/pdf": "pdf",
+  "application/zip": "zip",
+  "application/gzip": "gz",
+  "application/octet-stream": "bin",
+  "text/plain": "txt",
+  "text/csv": "csv",
+  "text/html": "html",
+  "text/xml": "xml",
+};
+
+/** `ev_0007-structured_content.json`: the entry, the part and the type's extension. */
+export function spilledFileName(entryId: string, part: string, contentType: string): string {
+  const type = contentType.split(";")[0].trim().toLowerCase();
+  const ext =
+    EXTENSIONS[type] ??
+    (type.endsWith("+json") ? "json" : type.startsWith("text/") ? "txt" : "bin");
+  return `${entryId}-${part}.${ext}`;
+}
+
+function hex(buffer: ArrayBuffer): string {
+  return [...new Uint8Array(buffer)].map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+/**
+ * Why a fetched spilled part must not be saved, or `null` when it may.
+ *
+ * The ledger records each kept part's size and SHA-256. A body shorter than
+ * the response or the ledger says, or one whose digest differs, is not the
+ * part the run kept, and saving it would hand the reader a file that reads as
+ * evidence and is not.
+ */
+export interface SpilledCheck {
+  /** Why the part must not be saved; `null` when it may. */
+  problem: string | null;
+  /** Set when the digest could not be checked, said beside the saved file. */
+  unverified: string | null;
+}
+
+/** The browser's digest, absent outside a secure context (plain http off localhost). */
+type Subtle = Pick<SubtleCrypto, "digest"> | undefined;
+
+function browserSubtle(): Subtle {
+  return globalThis.crypto?.subtle;
+}
+
+export async function spilledProblem(
+  bytes: ArrayBuffer,
+  ref: { bytes?: number; sha256?: string },
+  declaredLength: number | null,
+  subtle: Subtle | null = browserSubtle() ?? null,
+): Promise<SpilledCheck> {
+  const got = bytes.byteLength;
+  if (declaredLength !== null && got !== declaredLength) {
+    return {
+      problem: `The download was cut short (${got} of ${declaredLength} bytes); nothing was saved.`,
+      unverified: null,
+    };
+  }
+  if (typeof ref.bytes === "number" && got !== ref.bytes) {
+    return {
+      problem: `The download is ${got} bytes but the ledger kept ${ref.bytes}; nothing was saved.`,
+      unverified: null,
+    };
+  }
+  if (ref.sha256) {
+    /* `crypto.subtle` exists only in a secure context, so a console served
+     * over plain http on a LAN address has no digest to check with. The
+     * length was checked above; the file is saved and the reader told the
+     * digest was not. */
+    if (!subtle) {
+      return {
+        problem: null,
+        unverified: "Saved; its digest was not checked (this page is not a secure context).",
+      };
+    }
+    const digest = hex(await subtle.digest("SHA-256", bytes));
+    if (digest !== ref.sha256.toLowerCase()) {
+      return {
+        problem: "The download does not match the digest the ledger recorded; nothing was saved.",
+        unverified: null,
+      };
+    }
+  }
+  return { problem: null, unverified: null };
+}
+
+/**
+ * What the ledger recorded about how this call's answer was kept, said where
+ * the row is drawn.
+ *
+ * Four facts an entry can carry were stored and never shown: that the answer
+ * the model read was cut (`truncated`, `chars_dropped`), that parts of it are
+ * kept whole elsewhere (`spilled`), that the call was answered from an earlier
+ * identical one (`repeated_of`), and that the model's arguments arrived cut
+ * off and were closed before the call ran (`args_repaired`). A reader of the
+ * row saw a whole answer, a fresh call and the model's own arguments in all
+ * four cases. Each is a sentence here; a row that carries none of them says
+ * nothing, because what is not recorded is not asserted.
+ */
+export function entryNotes(entry: EvidenceEntry): string[] {
+  const notes: string[] = [];
+  const dropped = Number(entry.chars_dropped) || 0;
+  if (dropped > 0) {
+    notes.push(
+      `The tool-output guardrail cut ${dropped.toLocaleString("en-US")} characters from the answer the model read.`,
+    );
+  } else if (entry.truncated && entry.output) {
+    notes.push("The answer the model read was shortened to keep this agent inside its byte budget.");
+  }
+  for (const ref of entry.spilled ?? []) {
+    const part = ref.part.replace(/_/g, " ");
+    if (ref.key) {
+      const size =
+        typeof ref.bytes === "number" ? ` (${ref.bytes.toLocaleString("en-US")} bytes)` : "";
+      notes.push(`The full ${part}${size} is kept whole in object storage.`);
+    } else {
+      notes.push(`The full ${part} could not be kept${ref.error ? `: ${ref.error}` : "."}`);
+    }
+  }
+  if (entry.repeated_of) {
+    notes.push(`Answered from the earlier identical call ${entry.repeated_of}, not run again.`);
+  }
+  if (entry.args_repaired) {
+    notes.push("The model's arguments arrived cut off and were closed before the call ran.");
+  }
+  return notes;
+}

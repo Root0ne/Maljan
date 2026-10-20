@@ -88,3 +88,46 @@ export function reputationFromReport(
   }
   return null;
 }
+
+/**
+ * A network endpoint's enrichment record, as the badge beside the row says it.
+ *
+ * The badge used to colour the record red, orange or green by thresholds of
+ * its own (70 / 30 on a score, 5 / 1 on a count), which disagreed with the
+ * thresholds the source declares (`malicious_when`): an AbuseIPDB score of 50
+ * that the source calls malicious drew orange, a VirusTotal answer with three
+ * `suspicious` engines and no `malicious` one — malicious by its declaration —
+ * drew green. The declared verdict is what the enrichment writes into the row
+ * itself (`is_suspicious`), so the badge no longer second-guesses it: it names
+ * the source and the figure the record carries, under the field's own name,
+ * in a neutral tone.
+ */
+export function endpointReputation(
+  record: Record<string, unknown> | null | undefined,
+): { source: string; figure: string | null } | null {
+  if (!record || typeof record !== "object") return null;
+  const source = text(record.source) ?? "intel";
+  const malicious = count(record.malicious);
+  const suspicious = count(record.suspicious);
+  const abuse = count(record.abuse_confidence);
+  const parts: string[] = [];
+  if (malicious !== null) parts.push(`malicious ${malicious}`);
+  if (suspicious !== null && suspicious > 0) parts.push(`suspicious ${suspicious}`);
+  if (abuse !== null) parts.push(`abuse ${abuse}`);
+  return { source, figure: parts.length > 0 ? parts.join(" · ") : null };
+}
+
+/**
+ * The detections figure as the section prints it: the malicious count over
+ * the engines, or words saying the count was not given.
+ *
+ * An answer that counted its engines but not the malicious verdicts among
+ * them used to print `0/70` — a clean bill of health the service never gave.
+ * The count the answer did not carry is said as missing, not as zero.
+ */
+export function detectionsFigure(
+  reputation: Pick<Reputation, "malicious" | "engines">,
+): { count: string; known: boolean } {
+  if (reputation.malicious === null) return { count: "not counted", known: false };
+  return { count: String(reputation.malicious), known: true };
+}

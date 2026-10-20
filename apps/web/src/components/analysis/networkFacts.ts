@@ -1,0 +1,66 @@
+/**
+ * What the report records about who reached an endpoint and who listed it,
+ * as sentences under the row.
+ *
+ * The rows carried these facts and the console drew none of them: whether the
+ * sample's own process tree reached an address, which other processes did,
+ * the processes the sandbox's mark and the file's own tree disagree about,
+ * whether the address is a public resolver, whether a name was seen only in
+ * the capture's TLS names, and which analysts kept or merely mentioned the
+ * value. They are the reasons a row is or is not published, so a reader
+ * comparing two rows needs them.
+ *
+ * A fact the row does not carry is not said: an unset `sample_process_tree`
+ * is "the report does not say", which is not the same as "no".
+ */
+
+import type { NetworkDomain, NetworkIP } from "@/types/malware-report";
+
+function names(values: string[] | null | undefined): string {
+  return (values ?? []).filter((v) => typeof v === "string" && v.trim()).join(", ");
+}
+
+/** Who listed or mentioned the value; shared by every network kind. */
+function listedBy(row: { kept_by?: string[]; mentioned_by?: string[] }): string[] {
+  const lines: string[] = [];
+  if (names(row.kept_by)) lines.push(`Kept as an indicator by ${names(row.kept_by)}.`);
+  if (names(row.mentioned_by)) lines.push(`Mentioned without being kept by ${names(row.mentioned_by)}.`);
+  return lines;
+}
+
+export function domainFacts(domain: NetworkDomain): string[] {
+  const lines: string[] = [];
+  if (domain.capture_only) {
+    lines.push(
+      "Seen only in the capture's TLS names, with no DNS or HTTP view naming it, so nothing says which process connected.",
+    );
+  }
+  return [...lines, ...listedBy(domain)];
+}
+
+export function ipFacts(ip: NetworkIP): string[] {
+  const lines: string[] = [];
+  if (ip.sample_process_tree === true) {
+    lines.push("The sandbox saw the sample's own process tree reach this address.");
+  } else if (ip.sample_process_tree === false) {
+    lines.push(
+      names(ip.outside_processes)
+        ? `Every flow the sandbox attributes came from outside the sample's tree: ${names(ip.outside_processes)}.`
+        : "Every flow the sandbox attributes came from outside the sample's tree.",
+    );
+  }
+  if (names(ip.marked_only_processes)) {
+    lines.push(
+      `Named the sample's only by ${ip.marked_by?.trim() || "the sandbox"}'s own mark: ${names(ip.marked_only_processes)}.`,
+    );
+  }
+  if (names(ip.file_only_processes)) {
+    lines.push(
+      `Named the sample's only by the submitted file's process tree: ${names(ip.file_only_processes)}.`,
+    );
+  }
+  if (ip.public_resolver) {
+    lines.push("A public DNS resolver, which a sandbox guest reaches whatever the sample does.");
+  }
+  return [...lines, ...listedBy(ip)];
+}

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api } from "@/lib/api";
 import { getErrorMessage } from "@/lib/errors";
 import { SettingsConflictError, SettingsValidationError } from "@/types/settings";
@@ -48,16 +48,56 @@ export function withoutErrorsFor(
 
 /** Per staged key the page was served, the `updated_at` it was served with
  *  (`null`: no stored row then), for the API to refuse a key changed since.
- *  A key the page was never served is left out and not checked. */
+ *  A key the page was never served is left out and not checked.
+ *
+ *  `base` is the version each key had when it was first staged
+ *  (`withBaseVersion`), and wins over `values`: the page reloads its values
+ *  after every reset, every conflict and every other save, and a version read
+ *  at apply time is whatever the last reload fetched — another writer's save
+ *  included — so the guard compared the edit against the very value it was
+ *  meant to protect and let it through. */
 export function loadedVersions(
   pending: Pending,
-  values: Record<string, SettingValue>
+  values: Record<string, SettingValue>,
+  base: Record<string, string | null> = {}
 ): Record<string, string | null> {
   const out: Record<string, string | null> = {};
   for (const key of Object.keys(pending)) {
-    if (key in values) out[key] = values[key].updated_at ?? null;
+    if (key in base) out[key] = base[key];
+    else if (key in values) out[key] = values[key].updated_at ?? null;
   }
   return out;
+}
+
+/**
+ * The stage-time versions with `key`'s added, if it is not held yet.
+ *
+ * The first staging of a key records the version the edit was made over; a
+ * second edit of the same key before Apply keeps the first, because the edit
+ * is still made over that value. A key the page was never served is not
+ * recorded, the same rule `loadedVersions` applies.
+ */
+export function withBaseVersion(
+  base: Record<string, string | null>,
+  key: string,
+  values: Record<string, SettingValue>
+): Record<string, string | null> {
+  if (key in base || !(key in values)) return base;
+  return { ...base, [key]: values[key].updated_at ?? null };
+}
+
+/** The stage-time versions without `keys`: unstaged, saved or reset. */
+export function withoutBaseVersions(
+  base: Record<string, string | null>,
+  keys: Iterable<string>
+): Record<string, string | null> {
+  let next = base;
+  for (const key of keys) {
+    if (!(key in next)) continue;
+    if (next === base) next = { ...base };
+    delete next[key];
+  }
+  return next;
 }
 
 /** What the page says when a save is refused over keys changed since it loaded them. */
@@ -92,6 +132,10 @@ export function useSettings() {
   const [actionError, setActionError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [lastResult, setLastResult] = useState<PatchResult | null>(null);
+  /* The version each staged key had when it was first staged, which is what
+   * Apply sends (`loadedVersions`). A ref: it is read at apply time and never
+   * drawn. */
+  const baseVersions = useRef<Record<string, string | null>>({});
 
   const reload = useCallback(async () => {
     setLoading(true);
@@ -167,6 +211,9 @@ export function useSettings() {
       const entry = entries.get(key);
       const saved = key in values ? values[key].value : entry?.default;
       const revert = !entry?.secret && deepEqual(value, saved);
+      baseVersions.current = revert
+        ? withoutBaseVersions(baseVersions.current, [key])
+        : withBaseVersion(baseVersions.current, key, values);
       setPending((p) => {
         if (!revert) return { ...p, [key]: value };
         if (!(key in p)) return p;
@@ -180,6 +227,7 @@ export function useSettings() {
   );
 
   const unstage = useCallback((key: string) => {
+    baseVersions.current = withoutBaseVersions(baseVersions.current, [key]);
     setPending((p) => {
       const n = { ...p };
       delete n[key];
@@ -228,8 +276,13 @@ export function useSettings() {
     setErrors({});
     setActionError(null);
     try {
-      const res = await api.patchSettings(pending, loadedVersions(pending, values), password);
+      const res = await api.patchSettings(
+        pending,
+        loadedVersions(pending, values, baseVersions.current),
+        password
+      );
       setLastResult(res);
+      baseVersions.current = withoutBaseVersions(baseVersions.current, Object.keys(pending));
       setPending({});
       await reload();
       return res;
@@ -239,6 +292,7 @@ export function useSettings() {
         // this page loaded the key: its edit is dropped, the key reloaded,
         // and the row says why. Every other staged edit stays staged.
         const stale = Object.keys(e.errors);
+        baseVersions.current = withoutBaseVersions(baseVersions.current, stale);
         setErrors(e.errors);
         setPending((p) => {
           const n = { ...p };
@@ -332,6 +386,7 @@ export function useSettings() {
         // used to wipe every group's pending edits, so resetting one group's
         // overrides silently discarded unrelated in-flight edits elsewhere.
         const keys = schema?.groups.find((g) => g.key === group)?.entries.map((e) => e.key) ?? [];
+        baseVersions.current = withoutBaseVersions(baseVersions.current, keys);
         setPending((p) => {
           const n = { ...p };
           for (const k of keys) delete n[k];

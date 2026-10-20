@@ -71,5 +71,7 @@ export function progressTone(state: string | null | undefined): StatusTone {
   const key = String(state ?? "").trim().toLowerCase();
   if (key === "running" || key === "working") return TONES.running;
   if (key === "done") return TONES.completed;
+  // A stage that ran and went wrong is coloured as a failed run is.
+  if (key === "failed") return TONES.failed;
   return TONES.pending;
 }

@@ -21,13 +21,14 @@
 
 import type { StageRow } from "./pipelineSteps";
 
-export type StageStatus = "pending" | "running" | "done" | "skipped";
+export type StageStatus = "pending" | "running" | "done" | "skipped" | "failed";
 
 export interface StageTimelineRow {
   key: string;
   kind: string;
   status: StageStatus;
-  /** Why the stage declined. Empty unless it was skipped. */
+  /** Why the stage declined, or how it failed. Empty for a stage that ran
+   *  cleanly, is running or has not started. */
   reason: string;
   agents: string[];
   duration_ms: number;
@@ -61,11 +62,15 @@ export function stageTimeline(
   const rows = new Map<string, StageTimelineRow>();
 
   for (const row of stored ?? []) {
+    /* A stage that ran and went wrong — a crashed pack, a mediation that
+     * timed out — is failed, with its reason, rather than drawn DONE: the
+     * stored row says so with `failure`, the same flag `pipelineSteps` reads. */
+    const failed = row.ran && Boolean(row.failure);
     rows.set(row.key, {
       key: row.key,
       kind: row.kind,
-      status: row.ran ? "done" : "skipped",
-      reason: row.ran ? "" : row.reason || "did not run",
+      status: failed ? "failed" : row.ran ? "done" : "skipped",
+      reason: failed ? row.reason || "the stage failed" : row.ran ? "" : row.reason || "did not run",
       agents: row.agents ?? [],
       duration_ms: row.duration_ms ?? 0,
     });
@@ -102,11 +107,20 @@ export function stageTimeline(
         duration_ms: 0,
       });
     } else {
+      /* `stage_finished` carries a reason only for a stage that failed: the
+       * pipeline clears the reason of one that ran cleanly. A `failure` flag
+       * is read where the event carries one, and a stage the stored rollup
+       * already knows failed stays failed under a finish that says nothing. */
+      const reason = String(event.data.reason ?? "").trim();
+      const failed =
+        event.data.failure === true ||
+        (event.data.failure !== false && reason !== "") ||
+        (current.status === "failed" && event.data.failure !== false);
       rows.set(key, {
         ...current,
         kind,
-        status: "done",
-        reason: "",
+        status: failed ? "failed" : "done",
+        reason: failed ? reason || current.reason || "the stage failed" : "",
         agents: agents.length > 0 ? agents : current.agents,
         duration_ms: Number(event.data.duration_ms ?? current.duration_ms) || 0,
       });

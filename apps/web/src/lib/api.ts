@@ -7,10 +7,11 @@ import type {
   MalwareReport,
   RunSummary,
 } from "@/types/malware-report";
-import { ApiError } from "@/lib/errors";
+import { ApiError, getErrorMessage, parseRetryAfter } from "@/lib/errors";
 import type { ProfileUpdateBody, ProfileUpdateResponse } from "@/lib/profileUpdate";
 import { withRefreshLock } from "@/lib/refreshLock";
 import { refreshAccessToken } from "@/lib/refreshRequest";
+import { renewSession, type Renewal } from "@/lib/sessionRenewal";
 import { SettingsConflictError, SettingsValidationError } from "@/types/settings";
 import { exportUnreadable } from "@/lib/settingsExport";
 import type {
@@ -31,6 +32,15 @@ import type {
 } from "@/types/settings";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000";
+
+/** Whether the API refused the credential: a 401, or the 403 the backend
+ *  answers a missing one with. */
+async function isCredentialRefusal(res: Response): Promise<boolean> {
+  if (res.status === 401) return true;
+  if (res.status !== 403) return false;
+  const body = (await res.clone().json().catch(() => ({}))) as { detail?: unknown };
+  return body?.detail === "Not authenticated";
+}
 
 /* ── Shared response types ────────────────────────────── */
 
@@ -403,23 +413,63 @@ class ApiClient {
     return localStorage.getItem("access_token");
   }
 
+  /**
+   * Send a request with the stored token, renewing the session once when the
+   * API refuses a token it was sent.
+   *
+   * A 401 used to clear the token on the spot, which sent a tab whose token
+   * had merely expired to /login while its refresh cookie was still good. The
+   * refusal now asks for a new token first (`renewSession`, one per tab at a
+   * time and serialised across tabs) and the request is sent again with it.
+   * Only a refused renewal leaves the 401 standing for the caller to clear;
+   * a renewal that got no answer at all is said as that, not as a sign-out.
+   * Sign-in, registration and sign-out are sent with `renew: false`: their 401
+   * is about the password, not the token.
+   */
+  private async authedFetch(
+    path: string,
+    build: (token: string | null) => RequestInit,
+    renew = true
+  ): Promise<Response> {
+    const token = this.getToken();
+    const res = await fetch(`${this.baseUrl}${path}`, build(token));
+    if (!renew || !token || !(await isCredentialRefusal(res))) return res;
+    const renewal = await this.renewSession(token);
+    if (renewal.kind === "renewed") {
+      return fetch(`${this.baseUrl}${path}`, build(renewal.token));
+    }
+    if (renewal.kind === "unreachable") {
+      throw new Error(
+        `The session could not be renewed (${getErrorMessage(renewal.error) || "no answer"}).`
+      );
+    }
+    return res;
+  }
+
+  /** Replace a refused access token through the refresh cookie (`sessionRenewal.ts`). */
+  renewSession(refused: string | null): Promise<Renewal> {
+    return renewSession(refused, { refresh: (signal) => this.refresh(signal) });
+  }
+
   private async request<T>(
     path: string,
-    options: RequestInit = {}
+    options: RequestInit = {},
+    { renew = true }: { renew?: boolean } = {}
   ): Promise<T> {
-    const token = this.getToken();
-    const headers: Record<string, string> = {
-      "Content-Type": "application/json",
-      ...(options.headers as Record<string, string>),
-    };
-    if (token) {
-      headers["Authorization"] = `Bearer ${token}`;
-    }
-
-    const res = await fetch(`${this.baseUrl}${path}`, {
-      ...options,
-      headers,
-    });
+    const res = await this.authedFetch(
+      path,
+      (token) => {
+        const headers: Record<string, string> = {
+          "Content-Type": "application/json",
+          ...(options.headers as Record<string, string>),
+        };
+        if (token) {
+          headers["Authorization"] = `Bearer ${token}`;
+        }
+        return { ...options, headers };
+      },
+      renew
+    );
 
     if (res.status === 401 || (res.status === 403 && (await res.clone().json().catch(() => ({})))?.detail === "Not authenticated")) {
       if (typeof window !== "undefined") {
@@ -430,7 +480,11 @@ class ApiClient {
 
     if (!res.ok) {
       const body = await res.json().catch(() => ({}));
-      throw new ApiError(body.detail || `Request failed: ${res.status}`, res.status);
+      throw new ApiError(
+        body.detail || `Request failed: ${res.status}`,
+        res.status,
+        parseRetryAfter(res.headers.get("Retry-After"))
+      );
     }
 
     if (res.status === 204) return {} as T;
@@ -446,15 +500,14 @@ class ApiClient {
    * it, not re-serialised.
    */
   private async settingsFetch(path: string, options: RequestInit = {}): Promise<Response> {
-    const token = this.getToken();
-    const res = await fetch(`${this.baseUrl}${path}`, {
+    const res = await this.authedFetch(path, (token) => ({
       ...options,
       headers: {
         ...(options.body ? { "Content-Type": "application/json" } : {}),
         ...(token ? { Authorization: `Bearer ${token}` } : {}),
         ...(options.headers as Record<string, string>),
       },
-    });
+    }));
     if (res.status === 401) {
       if (typeof window !== "undefined") {
         localStorage.removeItem("access_token");
@@ -486,17 +539,14 @@ class ApiClient {
     path: string,
     options: RequestInit = {}
   ): Promise<string> {
-    const token = this.getToken();
-    const headers: Record<string, string> = {
-      ...(options.headers as Record<string, string>),
-    };
-    if (token) {
-      headers["Authorization"] = `Bearer ${token}`;
-    }
-
-    const res = await fetch(`${this.baseUrl}${path}`, {
-      ...options,
-      headers,
+    const res = await this.authedFetch(path, (token) => {
+      const headers: Record<string, string> = {
+        ...(options.headers as Record<string, string>),
+      };
+      if (token) {
+        headers["Authorization"] = `Bearer ${token}`;
+      }
+      return { ...options, headers };
     });
 
     if (res.status === 401) {
@@ -519,15 +569,15 @@ class ApiClient {
     path: string,
     options: RequestInit = {}
   ): Promise<Blob> {
-    const token = this.getToken();
-    const headers: Record<string, string> = {
-      ...(options.headers as Record<string, string>),
-    };
-    if (token) {
-      headers["Authorization"] = `Bearer ${token}`;
-    }
-
-    const res = await fetch(`${this.baseUrl}${path}`, { ...options, headers });
+    const res = await this.authedFetch(path, (token) => {
+      const headers: Record<string, string> = {
+        ...(options.headers as Record<string, string>),
+      };
+      if (token) {
+        headers["Authorization"] = `Bearer ${token}`;
+      }
+      return { ...options, headers };
+    });
 
     if (res.status === 401) {
       if (typeof window !== "undefined") {
@@ -550,17 +600,11 @@ class ApiClient {
     path: string,
     formData: FormData
   ): Promise<T> {
-    const token = this.getToken();
-    const headers: Record<string, string> = {};
-    if (token) {
-      headers["Authorization"] = `Bearer ${token}`;
-    }
-
-    const res = await fetch(`${this.baseUrl}${path}`, {
+    const res = await this.authedFetch(path, (token) => ({
       method: "POST",
-      headers,
+      headers: (token ? { Authorization: `Bearer ${token}` } : {}) as Record<string, string>,
       body: formData,
-    });
+    }));
 
     if (res.status === 401 || (res.status === 403 && (await res.clone().json().catch(() => ({})))?.detail === "Not authenticated")) {
       if (typeof window !== "undefined") {
@@ -584,14 +628,16 @@ class ApiClient {
         method: "POST",
         body: JSON.stringify({ email, password }),
         credentials: "include",
-      }
+      },
+      { renew: false }
     );
   }
 
   register(email: string, password: string, full_name: string) {
     return this.request<{ id: string; email: string }>(
       "/api/v1/auth/register",
-      { method: "POST", body: JSON.stringify({ email, password, full_name }) }
+      { method: "POST", body: JSON.stringify({ email, password, full_name }) },
+      { renew: false }
     );
   }
 
@@ -646,10 +692,11 @@ class ApiClient {
   }
 
   logout() {
-    return this.request<Record<string, never>>("/api/v1/auth/logout", {
-      method: "POST",
-      credentials: "include",
-    });
+    return this.request<Record<string, never>>(
+      "/api/v1/auth/logout",
+      { method: "POST", credentials: "include" },
+      { renew: false }
+    );
   }
 
   /* ── Dashboard ─────────────────────────────────────── */
@@ -876,9 +923,10 @@ class ApiClient {
   }
 
   /* ── Samples ───────────────────────────────────────── */
-  getSamples(page = 1, pageSize = 50) {
+  getSamples(page = 1, pageSize = 50, signal?: AbortSignal) {
     return this.request<PaginatedResponse<SampleDTO>>(
-      `/api/v1/samples?page=${page}&page_size=${pageSize}`
+      `/api/v1/samples?page=${page}&page_size=${pageSize}`,
+      { signal }
     );
   }
 
@@ -898,7 +946,13 @@ class ApiClient {
   /* ── Jobs ──────────────────────────────────────────── */
   /** One page of the caller's jobs; `sampleId` narrows it to one sample's
    *  runs, which is how a run finds its siblings to compare with. */
-  getJobs(page = 1, pageSize = 50, status?: string, sampleId?: string) {
+  getJobs(
+    page = 1,
+    pageSize = 50,
+    status?: string,
+    sampleId?: string,
+    signal?: AbortSignal
+  ) {
     const params = new URLSearchParams({
       page: String(page),
       page_size: String(pageSize),
@@ -906,7 +960,8 @@ class ApiClient {
     if (status) params.set("status", status);
     if (sampleId) params.set("sample_id", sampleId);
     return this.request<PaginatedResponse<JobDTO>>(
-      `/api/v1/jobs?${params}`
+      `/api/v1/jobs?${params}`,
+      { signal }
     );
   }
 
@@ -1007,6 +1062,34 @@ class ApiClient {
    * Filters narrow to one stage, one agent or one tool; the order is always
    * the order the calls were made in.
    */
+  /** One part of an entry's answer kept whole in object storage (`spilled`). */
+  async getEvidenceObject(
+    jobId: string,
+    entryId: string,
+    part: string
+  ): Promise<{ bytes: ArrayBuffer; contentType: string; declaredLength: number | null }> {
+    const path = `/api/v1/jobs/${encodeURIComponent(jobId)}/evidence/${encodeURIComponent(entryId)}/objects/${encodeURIComponent(part)}`;
+    const res = await this.authedFetch(path, (token) => ({
+      headers: token ? { Authorization: `Bearer ${token}` } : ({} as Record<string, string>),
+    }));
+    if (res.status === 401) {
+      if (typeof window !== "undefined") localStorage.removeItem("access_token");
+      throw new ApiError("Unauthorized", res.status);
+    }
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      throw new ApiError(body.detail || `Request failed: ${res.status}`, res.status);
+    }
+    const length = Number(res.headers.get("Content-Length"));
+    return {
+      bytes: await res.arrayBuffer(),
+      contentType: res.headers.get("Content-Type") ?? "",
+      // Absent under a compressed transfer, where the header counts the wire bytes.
+      declaredLength:
+        res.headers.get("Content-Encoding") || !Number.isFinite(length) || length <= 0 ? null : length,
+    };
+  }
+
   getJobEvidence(jobId: string, query: EvidenceQuery = {}) {
     const params = new URLSearchParams({
       page: String(query.page ?? 1),
@@ -1075,9 +1158,10 @@ class ApiClient {
     );
   }
 
-  getReports(page = 1, pageSize = 50) {
+  getReports(page = 1, pageSize = 50, signal?: AbortSignal) {
     return this.request<PaginatedResponse<ReportSummaryDTO>>(
-      `/api/v1/reports?page=${page}&page_size=${pageSize}`
+      `/api/v1/reports?page=${page}&page_size=${pageSize}`,
+      { signal }
     );
   }
 

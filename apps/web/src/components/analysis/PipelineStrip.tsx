@@ -27,6 +27,7 @@ const STATUS_STYLE: Record<string, string> = {
   running: tone("running"),
   done: tone("done"),
   skipped: "border-border bg-bg-surface text-text-muted",
+  failed: tone("failed"),
   pending: "border-border bg-bg-surface text-text-disabled",
 };
 
@@ -63,6 +64,10 @@ export default function PipelineStrip({
             <span className="uppercase tracking-wider">{stage.status}</span>
             {members.length > 0 && (
               <span className="text-text-muted">{members.join(", ")}</span>
+            )}
+            {/* How it failed, in words: the tooltip reaches a pointer only. */}
+            {stage.status === "failed" && stage.reason && (
+              <span className="text-text-secondary">{stage.reason}</span>
             )}
             {formatStageDuration(stage.duration_ms) && (
               <span className="font-mono">{formatStageDuration(stage.duration_ms)}</span>

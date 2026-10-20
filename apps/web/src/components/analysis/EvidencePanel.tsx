@@ -5,7 +5,8 @@ import { useSearchParams } from "next/navigation";
 import { api } from "@/lib/api";
 import { getErrorMessage } from "@/lib/errors";
 import { humaniseKey } from "@/lib/humanise";
-import type { EvidenceEntry } from "@/types/evidence";
+import { downloadObject } from "@/lib/report-utils";
+import type { EvidenceEntry, EvidenceObjectRef } from "@/types/evidence";
 import {
   EMPTY_OPTIONS,
   EVIDENCE_PAGE_SIZE,
@@ -14,7 +15,10 @@ import {
   argsSummary,
   deepLinkView,
   emptyOutputNote,
+  entryNotes,
   evidenceQuery,
+  spilledFileName,
+  spilledProblem,
   formatCallDuration,
   mergeOptions,
   outputPreview,
@@ -201,6 +205,7 @@ export default function EvidencePanel({ jobId }: { jobId: string }) {
                   const showAllArgs = fullArgs.has(entry.entry_id);
                   const preview = outputPreview(entry.output, fullOutput.has(entry.entry_id));
                   const cited = deepLink === entry.entry_id;
+                  const notes = entryNotes(entry);
                   return (
                     <Fragment key={entry.entry_id}>
                       <tr
@@ -264,6 +269,13 @@ export default function EvidencePanel({ jobId }: { jobId: string }) {
                           </td>
                         </tr>
                       )}
+                      {notes.length > 0 && (
+                        <tr className="border-b border-border-light bg-status-orange/5">
+                          <td colSpan={7} className="px-3 py-1.5 text-[11px] text-status-orange">
+                            {notes.join(" ")}
+                          </td>
+                        </tr>
+                      )}
                       {expanded && (
                         <tr className="border-b border-border-light bg-bg-deep">
                           <td colSpan={7} className="px-3 pb-3 pt-1 space-y-3">
@@ -275,6 +287,30 @@ export default function EvidencePanel({ jobId }: { jobId: string }) {
                               >
                                 {showAllArgs ? "Hide arguments" : "Show all arguments"}
                               </button>
+                            )}
+                            {entry.args_repaired && entry.args_raw && (
+                              <div>
+                                <h3 className="text-[10px] uppercase tracking-wider text-text-muted mb-1">
+                                  Arguments as the model wrote them
+                                </h3>
+                                <pre className="text-[11px] text-text-secondary overflow-auto max-h-64 whitespace-pre-wrap break-all">
+                                  {entry.args_raw}
+                                </pre>
+                              </div>
+                            )}
+                            {(entry.spilled ?? []).some((ref) => ref.key) && (
+                              <div className="flex flex-wrap items-center gap-2">
+                                {(entry.spilled ?? [])
+                                  .filter((ref) => ref.key)
+                                  .map((ref) => (
+                                    <SpilledDownload
+                                      key={ref.part}
+                                      jobId={jobId}
+                                      entryId={entry.entry_id}
+                                      spilled={ref}
+                                    />
+                                  ))}
+                              </div>
                             )}
                             {(showAllArgs || !summary.truncated) && entry.args && (
                               <div>
@@ -376,5 +412,61 @@ export default function EvidencePanel({ jobId }: { jobId: string }) {
         </div>
       </div>
     </div>
+  );
+}
+
+/** Fetches one part an entry keeps whole in object storage, checks it
+ *  against the ledger's size and digest, and saves it. */
+function SpilledDownload({
+  jobId,
+  entryId,
+  spilled,
+}: {
+  jobId: string;
+  entryId: string;
+  spilled: EvidenceObjectRef;
+}) {
+  const [error, setError] = useState<string | null>(null);
+  const [note, setNote] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const part = spilled.part;
+  return (
+    <span className="inline-flex items-center gap-2">
+      <button
+        type="button"
+        disabled={busy}
+        className="text-[11px] text-accent-strong hover:underline disabled:opacity-50"
+        onClick={async () => {
+          setBusy(true);
+          setError(null);
+          setNote(null);
+          try {
+            const got = await api.getEvidenceObject(jobId, entryId, part);
+            const check = await spilledProblem(got.bytes, spilled, got.declaredLength);
+            if (check.problem) {
+              setError(check.problem);
+              return;
+            }
+            setNote(check.unverified);
+            downloadObject(
+              new Blob([got.bytes], { type: got.contentType || "application/octet-stream" }),
+              spilledFileName(entryId, part, got.contentType),
+            );
+          } catch (err) {
+            setError(getErrorMessage(err));
+          } finally {
+            setBusy(false);
+          }
+        }}
+      >
+        Download the full {part.replace(/_/g, " ")}
+      </button>
+      {error && (
+        <span role="alert" className="text-[11px] text-status-red">
+          {error}
+        </span>
+      )}
+      {note && <span className="text-[11px] text-status-orange">{note}</span>}
+    </span>
   );
 }

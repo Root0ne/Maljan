@@ -3,12 +3,17 @@
 import { useEffect, useState } from "react";
 import { X } from "lucide-react";
 import { api } from "@/lib/api";
+import { fetchAllPages } from "@/lib/pages";
+import ShowMoreRows from "@/components/ui/ShowMoreRows";
+import { ROWS_PER_STEP, visibleRows } from "@/lib/pagedRows";
 import type { ApiKeyDTO, ApiKeyCreateDTO } from "@/lib/api";
 import { getErrorMessage } from "@/lib/errors";
 import { formatDateTime } from "@/lib/report-utils";
 
 export default function SettingsApiKeysPage() {
   const [apiKeys, setApiKeys] = useState<ApiKeyDTO[]>([]);
+  /* Every key is read; a long list is drawn a step at a time (`lib/pagedRows`). */
+  const [shown, setShown] = useState(ROWS_PER_STEP);
   const [apiKeysLoading, setApiKeysLoading] = useState(false);
   const [apiKeysError, setApiKeysError] = useState<string | null>(null);
   const [newKeyName, setNewKeyName] = useState("");
@@ -55,7 +60,7 @@ export default function SettingsApiKeysPage() {
   function loadApiKeys() {
     setApiKeysLoading(true);
     setApiKeysError(null);
-    api.getApiKeys(1, 50)
+    fetchAllPages((page, size) => api.getApiKeys(page, size))
       .then((res) => setApiKeys(res.items))
       .catch((err: unknown) => {
         setApiKeysError(getErrorMessage(err) || "Failed to load API keys.");
@@ -228,7 +233,7 @@ export default function SettingsApiKeysPage() {
         <div className="text-xs text-text-muted">No API keys found.</div>
       ) : (
         <div className="space-y-3">
-          {apiKeys.map((key) => (
+          {visibleRows(apiKeys, shown).visible.map((key) => (
             <div key={key.id} className="bg-bg-surface border border-border rounded">
               <div className="flex items-center justify-between p-4">
                 <div className="flex-1 min-w-0">
@@ -271,6 +276,7 @@ export default function SettingsApiKeysPage() {
               </div>
             </div>
           ))}
+          <ShowMoreRows shown={Math.min(shown, apiKeys.length)} total={apiKeys.length} onShow={setShown} />
         </div>
       )}
 
