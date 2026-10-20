@@ -45,6 +45,31 @@ from maljan.memory.long_term_memory import family_key, owner_key
 
 # 1-dim dummy vector: we only ever filter by payload, never search by vector.
 _DUMMY_VECTOR: list[float] = [1.0]
+
+# Words a model writes where it has no family to name. A report still prints
+# them as written; the corpus never files code under a name made of nothing
+# else (``Generic``, ``Trojan.Generic``, ``generic trojan``, ``GENERIC-``),
+# since every sample sharing a routine would become "the same family".
+FILING_PLACEHOLDER_WORDS = frozenset({"generic", "unclassified", "trojan"})
+
+
+def names_no_family(key: str) -> bool:
+    """Whether a family key is only placeholder words, one or more, in any order.
+
+    ``key`` is ``family_key``'s spelling, so separators are already gone; the
+    words are found by one pass over it, never by backtracking.
+    """
+    words = {family_key(word) for word in FILING_PLACEHOLDER_WORDS}
+    reachable = [True] + [False] * len(key)
+    for end in range(1, len(key) + 1):
+        reachable[end] = any(
+            reachable[end - len(word)] and key.endswith(word, 0, end)
+            for word in words
+            if len(word) <= end
+        )
+    return bool(key) and reachable[len(key)]
+
+
 # Cap the MatchAny list size per scroll so a 1000-function binary does not
 # build a single pathological filter.
 _MATCH_BATCH = 256
@@ -136,15 +161,17 @@ class FunctionHashStore:
         filtered by the caller for meaningful instruction counts). ``owner``
         files them under the job's owner; ``None`` files them unscoped.
         Returns the number of points written; 0 on any failure (fail-safe),
-        and 0 for a placeholder family (``reporting.models.NO_FAMILY_WORDS``)
+        and 0 for a placeholder family (``reporting.models.NO_FAMILY_WORDS``,
+        ``FILING_PLACEHOLDER_WORDS``)
         or one with no spelling left once normalised.
         """
         from maljan.reporting.models import stated_family
 
         # A placeholder ("Unknown", "none", "n/a") names no family: filed, it
         # would make every sample sharing a routine "the same family".
-        key = family_key(stated_family(family))
-        if not functions or not key:
+        written = stated_family(family)
+        key = family_key(written)
+        if not functions or not key or names_no_family(key):
             return 0
         scope = owner_key(owner)
         try:

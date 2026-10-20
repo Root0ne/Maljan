@@ -424,7 +424,11 @@ class RetryRecorder(BaseCallbackHandler):
         """Charge one failed attempt to the spend ceiling as the provider bills it.
 
         A failure before any piece of the answer arrived (a 5xx, a refused
-        connection) generated nothing and is charged nothing. A failure after
+        connection) generated nothing and is charged nothing, except a request
+        cancelled from outside: whether it was sent before it was cancelled is
+        not detectable here, so it is charged the prompt as a labelled
+        estimate (``CANCELLED_ATTEMPT_ESTIMATE``) that may overstate when it
+        was cancelled before it left. A failure after
         pieces streamed is charged the usage the error carries where it carries
         one, and otherwise a stated estimate: the prompt at
         ``CHARS_PER_TOKEN`` characters a token, priced with the share of the
@@ -448,10 +452,24 @@ class RetryRecorder(BaseCallbackHandler):
             if self._charge_streamed(exc):
                 return
             pieces = int(getattr(exc, PIECES_ATTRIBUTE, 0) or 0)
-            if pieces <= 0:
-                return
             from maljan.core.spend import AT_CACHED_SHARE
             from maljan.llm.context_window import tokens_for_chars
+
+            if pieces <= 0:
+                # A request cancelled from outside was sent, and its provider
+                # bills the prompt it read; any other failure before a piece
+                # arrived (a refused connection, a 5xx) read nothing.
+                if _cancelled(exc):
+                    self._charge(
+                        None,
+                        {
+                            "input_tokens": tokens_for_chars(_prompt_chars(prompt)),
+                            "output_tokens": 0,
+                            "source": CANCELLED_ATTEMPT_ESTIMATE,
+                            AT_CACHED_SHARE: True,
+                        },
+                    )
+                return
 
             estimate = {
                 "input_tokens": tokens_for_chars(_prompt_chars(prompt)),
@@ -518,6 +536,21 @@ class RetryRecorder(BaseCallbackHandler):
         settle = getattr(getattr(self.ledger, "spend", None), "settle", None)
         if callable(settle):
             settle(usage, self.model, FAILED_ATTEMPT_CALL, estimated=estimated)
+
+
+# How a cancelled request that streamed nothing is charged: the prompt it sent.
+CANCELLED_ATTEMPT_ESTIMATE = (
+    "estimated: the request was cancelled before any of its answer arrived; "
+    "its prompt may have been billed"
+)
+
+
+def _cancelled(exc: BaseException) -> bool:
+    """Whether ``exc`` is a cancellation from outside the request."""
+    import asyncio
+    from concurrent.futures import CancelledError
+
+    return isinstance(exc, asyncio.CancelledError | CancelledError)
 
 
 # What the spend meter names a failed attempt's charge, and how its estimate
@@ -782,6 +815,28 @@ ABANDONED_ANSWER_ESTIMATE = (
 )
 
 
+def _answer_chars(answer: Any) -> int:
+    """The characters an answer carries: its text, and the arguments of the tool calls it made.
+
+    A structured request answered by calling its schema's tool leaves the text
+    empty and the answer in the call's arguments.
+    """
+    import json
+
+    from maljan.llm.generation_rate import _content_chars
+
+    total = _content_chars([answer])
+    for call in list(getattr(answer, "tool_calls", None) or []):
+        args = call.get("args") if isinstance(call, dict) else getattr(call, "args", None)
+        if args:
+            total += len(json.dumps(args, ensure_ascii=False, default=str))
+    for call in list(getattr(answer, "invalid_tool_calls", None) or []):
+        sent = call.get("args") if isinstance(call, dict) else None
+        if isinstance(sent, str):
+            total += len(sent)
+    return total
+
+
 def charge_abandoned(model: Any, answer: Any, prompt: Any) -> None:
     """Charge an answer ``model`` billed that nobody received. Never raises.
 
@@ -803,13 +858,12 @@ def charge_abandoned(model: Any, answer: Any, prompt: Any) -> None:
             return
         from maljan.core.spend import AT_CACHED_SHARE
         from maljan.llm.context_window import tokens_for_chars
-        from maljan.llm.generation_rate import _content_chars
 
         recorder._charge(
             None,
             {
                 "input_tokens": tokens_for_chars(_prompt_chars(prompt)),
-                "output_tokens": tokens_for_chars(_content_chars([answer])),
+                "output_tokens": tokens_for_chars(_answer_chars(answer)),
                 "source": ABANDONED_ANSWER_ESTIMATE,
                 AT_CACHED_SHARE: True,
             },

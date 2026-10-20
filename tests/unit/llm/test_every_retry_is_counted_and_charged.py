@@ -255,6 +255,35 @@ class TestAFailedAttemptIsChargedAsBilled:
 
         assert spend.failed_attempts() == []
 
+    def test_a_cancelled_request_is_charged_the_prompt_it_sent(self) -> None:
+        from maljan.llm.transient import recorder_of
+
+        spend = _Spend()
+        ledger = TokenLedger(spend=spend)
+        llm = attach_retry_recorder(_model([]), ledger, "static")
+
+        recorder_of(llm).charge_failed(asyncio.CancelledError(), "x" * 400)  # type: ignore[union-attr]
+
+        ((usage, _model_name, _call, estimated),) = spend.failed_attempts()
+        assert usage is None
+        assert estimated["input_tokens"] > 0
+        assert estimated["output_tokens"] == 0
+        assert "cancelled" in estimated["source"]
+
+    def test_an_abandoned_structured_answer_is_charged_its_tool_call_arguments(self) -> None:
+        from maljan.llm.transient import charge_abandoned
+
+        spend = _Spend()
+        llm = attach_retry_recorder(_model([]), TokenLedger(spend=spend), "static")
+        answer = AIMessage(
+            content="", tool_calls=[{"name": "Out", "args": {"verdict": "y" * 400}, "id": "c1"}]
+        )
+
+        charge_abandoned(llm, answer, "hi")
+
+        ((_usage, _model_name, _call, estimated),) = spend.failed_attempts()
+        assert estimated["output_tokens"] >= 100
+
     @pytest.mark.asyncio
     async def test_a_failure_after_pieces_is_charged_a_stated_estimate(self) -> None:
         spend = _Spend()

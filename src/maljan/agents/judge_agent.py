@@ -859,6 +859,40 @@ def fit_prompt_parts(parts: Mapping[str, str], room: int | None) -> tuple[dict[s
     return shown, notice
 
 
+_MEMORY_END = "=== END LONG-TERM MEMORY ==="
+
+
+def closed_memory_cut(shown: str, whole: str) -> str:
+    """The long-term memory block as fitted, its quoted value and its end line closed after a cut.
+
+    A cut ends the block mid-line, and a case's summary is one quoted value
+    (``tool_fence.quoted_value``): left open, its quote would run into the
+    rest of the prompt. The quote is closed in front of the cut mark, found by
+    a scan that reads a backslash as escaping the character after it (a lone
+    backslash the cut left at the end is dropped). A block that was not cut is
+    returned as it is, and so is one with nothing of it left (only the cut
+    mark's own line).
+    """
+    from maljan.utils.marked_cut import CUT_MARK
+
+    if shown == whole or not shown.startswith("=== LONG-TERM MEMORY"):
+        return shown
+    cut = shown.endswith(CUT_MARK)
+    body = shown[: -len(CUT_MARK)] if cut else shown
+    inside = False
+    escaped = False
+    for char in body.rsplit("\n", 1)[-1]:
+        if escaped:
+            escaped = False
+        elif char == "\\":
+            escaped = True
+        elif char == '"':
+            inside = not inside
+    if inside:
+        body = f'{body[:-1] if escaped else body}"'
+    return f"{body}{CUT_MARK if cut else ''}\n{_MEMORY_END}"
+
+
 # The key the negotiation history is fitted under beside the report parts.
 _HISTORY_PART = "negotiation history"
 # Kept back for the shortening notice itself, which is written only once the
@@ -1926,15 +1960,17 @@ class JudgeAgent(BudgetMeter):
             return None
         if holdable is None:
             holdable = accepts_output_bound(self.llm)
+        # As an analyst's call is measured: tool calls and reasoning counted
+        # with the text, and the tool definitions sent with it.
+        prompt_chars = sum(_message_chars(m) for m in messages) + max(
+            0, int(getattr(self, "_tool_definition_chars", 0) or 0)
+        )
         return cast(
             "int | None",
             meter.admit(
                 kind=kind,
                 model=self._model_label() or model_name_of(self.llm),
-                # As an analyst's call is measured: tool calls and reasoning
-                # counted with the text, and the tool definitions sent with it.
-                prompt_chars=sum(_message_chars(m) for m in messages)
-                + max(0, int(getattr(self, "_tool_definition_chars", 0) or 0)),
+                prompt_chars=prompt_chars,
                 cap_tokens=int(self._output_cap().tokens or 0),
                 slot=slot,
                 holdable=holdable,
@@ -3353,6 +3389,10 @@ class JudgeAgent(BudgetMeter):
         fixed = len(JUDGE_VERDICT_SYSTEM) + len(_human(dict.fromkeys(whole, ""), ""))
         room = self._question_room(fixed + _NOTICE_ROOM, int(cap or 0))
         fitted, notice = fit_prompt_parts(whole, room)
+        if "long-term memory" in fitted:
+            fitted["long-term memory"] = closed_memory_cut(
+                fitted["long-term memory"], whole["long-term memory"]
+            )
         self.verdict_prompt_notice = notice
         if notice:
             self.logger.warning("JudgeAgent verdict prompt: %s", notice)
@@ -4724,5 +4764,5 @@ class JudgeAgent(BudgetMeter):
             lines.append(f"  Past techniques: {ttps}")
             lines.append(f"  Behavioral summary: {summary}")
 
-        lines.append("=== END LONG-TERM MEMORY ===")
+        lines.append(_MEMORY_END)
         return "\n".join(lines)

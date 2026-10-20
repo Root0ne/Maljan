@@ -88,6 +88,16 @@ class AgentArgument(BaseModel):
             "(``sycophancy_detector.convergence_flags``), as it was told them."
         ),
     )
+    sycophancy_flagged: bool | None = Field(
+        default=None,
+        repr=False,
+        description=(
+            "For the mediator: whether the platform's sycophancy check flagged the round this "
+            "mediation closed, whatever flagged it (the convergence flags or the cosine check) "
+            "and even when the mediation itself failed. ``None`` on state written before the "
+            "flag was kept, where only ``converged`` says."
+        ),
+    )
     revise: list[str] | None = Field(
         default=None,
         repr=False,

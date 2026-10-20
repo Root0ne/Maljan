@@ -495,13 +495,36 @@ def test_two_single_sample_families_on_one_hash_hold_no_majority() -> None:
     assert [r.distinctive_functions for r in aggregate_matches(matches)] == [0, 0]
 
 
-@pytest.mark.parametrize("placeholder", ["Unknown", "none", "N/A", " "])
+@pytest.mark.parametrize(
+    "placeholder",
+    [
+        "Unknown",
+        "none",
+        "N/A",
+        " ",
+        "Generic",
+        "UNCLASSIFIED",
+        " trojan ",
+        "Trojan.Generic",
+        "generic trojan",
+        "GENERIC-",
+        "Generic_Trojan_Unclassified",
+    ],
+)
 def test_a_placeholder_family_is_never_filed(placeholder: str) -> None:
     index = FunctionHashStore(
         url="http://qdrant.test:6333", collection="fh", client=_local_client()
     )
     assert index.upsert_sample("s1", placeholder, [("h1", "f1")]) == 0
     assert match_functions(index, ["h1"]) == []
+
+
+def test_a_name_that_only_contains_a_placeholder_word_is_still_a_family() -> None:
+    index = FunctionHashStore(
+        url="http://qdrant.test:6333", collection="fh", client=_local_client()
+    )
+    assert index.upsert_sample("s1", "Trojan.Generic.Agent", [("h1", "f1")]) == 1
+    assert index.upsert_sample("s2", "Genericam", [("h2", "f2")]) == 1
 
 
 # ── the one-time repair ───────────────────────────────────────────────────
@@ -610,6 +633,77 @@ def test_the_relabel_never_overwrites_a_restored_case_nor_revives_a_purged_one(
     assert restored.payload["summary_text"] == "restored with its own text"
     expected = embeddings.encode("restored with its own text")
     assert max(abs(a - b) for a, b in zip(restored.vector, expected, strict=True)) < 1e-5
+
+
+def test_a_case_stored_between_the_check_and_the_write_keeps_its_own_vector(
+    qdrant: QdrantStore, model: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from maljan.memory import memory_repair
+
+    _repair_fixture(qdrant)
+    real = memory_repair._still_unlabelled
+
+    def _after_the_check(client: Any, collection: str, ids: list[Any]) -> list[Any]:
+        still = real(client, collection, ids)
+        qdrant.store(_case("relevant", text="stored in the window"))
+        return still
+
+    monkeypatch.setattr(memory_repair, "_still_unlabelled", _after_the_check)
+    memory_repair.repair_memory(qdrant)
+    points, _ = qdrant._client.scroll(
+        collection_name="cases", with_payload=True, with_vectors=True, limit=50
+    )
+    restored = {p.payload["sample_id"]: p for p in points}["relevant"]
+    assert restored.payload["summary_text"] == "stored in the window"
+    expected = embeddings.encode("stored in the window")
+    assert max(abs(a - b) for a, b in zip(restored.vector, expected, strict=True)) < 1e-5
+
+
+def test_the_read_back_after_the_write_is_one_read_not_a_loop(
+    qdrant: QdrantStore, model: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from maljan.memory import memory_repair
+
+    _repair_fixture(qdrant)
+    reads: list[int] = []
+    real = memory_repair._re_embed_changed_text
+
+    def _counted(client: Any, collection: str, embedded: dict[Any, str], backend: str) -> None:
+        reads.append(len(embedded))
+        real(client, collection, embedded, backend)
+
+    monkeypatch.setattr(memory_repair, "_re_embed_changed_text", _counted)
+    memory_repair.repair_memory(qdrant)
+    assert len(reads) == 1
+
+
+def test_a_backend_that_changed_meanwhile_is_logged_and_the_vector_left(
+    qdrant: QdrantStore,
+    model: None,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    import logging
+
+    from maljan.memory import memory_repair
+
+    _repair_fixture(qdrant)
+    real_still = memory_repair._still_unlabelled
+    real_encode = embeddings.encode_batch_with_backend
+
+    def _after_the_check(client: Any, collection: str, ids: list[Any]) -> list[Any]:
+        still = real_still(client, collection, ids)
+        qdrant.store(_case("relevant", text="stored in the window"))
+        # The model is gone by the time the changed text is embedded again.
+        monkeypatch.setattr(
+            embeddings, "encode_batch_with_backend", lambda t: (real_encode(t)[0], "fallback")
+        )
+        return still
+
+    monkeypatch.setattr(memory_repair, "_still_unlabelled", _after_the_check)
+    with caplog.at_level(logging.WARNING):
+        memory_repair.repair_memory(qdrant)
+    assert any("embedding backend" in r.getMessage() for r in caplog.records)
 
 
 def test_without_the_model_the_repair_waits_and_leaves_no_marker(

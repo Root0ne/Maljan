@@ -203,6 +203,58 @@ def validation_retry() -> Iterator[None]:
         _RETRYING.reset(token)
 
 
+class Admission:
+    """What one admitted call was admitted as, for the fallback attempts made in its place.
+
+    The kind of call, the prompt it was measured over and the slot its worst
+    case is reserved under. A model list that moves to its next model asks the
+    meter again under the same slot, at that model's own price and output cap
+    (``llm.fallback``). Copying one gives the same object: it names a
+    reservation of the meter and is never a value of its own.
+    """
+
+    __slots__ = ("kind", "meter", "prompt_chars", "slot")
+
+    def __init__(self, meter: SpendMeter, kind: str, prompt_chars: int, slot: Any) -> None:
+        self.meter = meter
+        self.kind = kind
+        self.prompt_chars = prompt_chars
+        self.slot = slot
+
+    def __copy__(self) -> Admission:
+        return self
+
+    def __deepcopy__(self, memo: Any) -> Admission:
+        return self
+
+    def held(self) -> bool:
+        """Whether its reservation is still held, so a later call may use its slot."""
+        return self.meter.holds(self.slot)
+
+
+# The admission of the call being made, per task and thread: set by the admission
+# itself, carried across the hop to the agent loop with the stream rule
+# (``agents.base_agent._submit_to_agent_loop``), and ignored once its slot is
+# released, so a call nobody admitted never borrows an earlier one's.
+_ADMISSION: ContextVar[Admission | None] = ContextVar("maljan_spend_admission", default=None)
+
+
+def current_admission() -> Admission | None:
+    """The admission of the call this task is making, while its reservation is held."""
+    found = _ADMISSION.get()
+    return found if found is not None and found.held() else None
+
+
+@contextlib.contextmanager
+def carrying(admission: Admission | None) -> Iterator[None]:
+    """Make ``admission`` the one of the calls made inside the block."""
+    token = _ADMISSION.set(admission)
+    try:
+        yield
+    finally:
+        _ADMISSION.reset(token)
+
+
 def _meter_of(ledger: Any) -> SpendMeter | None:
     meter = getattr(ledger, "spend", None)
     return meter if isinstance(meter, SpendMeter) else None
@@ -822,6 +874,9 @@ class SpendMeter:
         # A running loop's turns so far, and the worst case of each call in flight.
         self._in_flight: dict[Any, float] = {}
         self._reserved: dict[Any, float] = {}
+        # Every slot an admitted call holds now, priced or not: a model with
+        # no price reserves nothing, and its call is still in flight.
+        self._active: set[Any] = set()
         self._unpriced: dict[str, int] = {}
         self._priced_from: dict[str, set[str]] = {}
         self._reached_at: float | None = None
@@ -1187,6 +1242,7 @@ class SpendMeter:
                 self._in_flight[key] = total
                 self._loop_inputs[key] = inputs
                 self._reserved.pop(key, None)
+                self._active.discard(key)
                 self._drained.notify_all()
             self._after_drain()
         except Exception as exc:  # noqa: BLE001 — telemetry never costs a run
@@ -1204,6 +1260,7 @@ class SpendMeter:
                 sums[0] += total
                 sums[1] += cached
             self._reserved.pop(key, None)
+            self._active.discard(key)
             self._drained.notify_all()
         self._after_drain()
 
@@ -1211,6 +1268,7 @@ class SpendMeter:
         """The call reserved under ``slot`` has returned and its cost is on the ledger."""
         with self._lock:
             self._reserved.pop(slot, None)
+            self._active.discard(slot)
             self._drained.notify_all()
         self._after_drain()
 
@@ -1662,8 +1720,14 @@ class SpendMeter:
         holdable: bool = True,
         deadline_s: float | None = None,
         wait_s: float | None = None,
+        attempt: bool = False,
     ) -> int | None:
         """Whether a call may be made, before it is: ``None`` as it is, a number as a held cap.
+
+        ``attempt`` is a model list's fallback attempt at a call already
+        admitted: the same logical call at another model's price, so it is not
+        counted as a call of its kind and takes nothing from the planned tail.
+        Given the call's own ``slot`` it replaces that reservation.
 
         With no ceiling every call is made as it is. With one, a call is made
         with its output cap held to what the spend it may use pays for after
@@ -1718,7 +1782,7 @@ class SpendMeter:
             # reached is read against the latch.
             self.reached()
             with self._lock:
-                if not noted:
+                if not noted and not attempt:
                     self._note_kind_locked(kind, model, prompt_tokens, cap, holdable, deadline_s)
                     noted = True
                 decision = self._decide_locked(
@@ -1755,19 +1819,23 @@ class SpendMeter:
                         continue
                 if not decision.refused:
                     key = self._prompt_key(kind)
-                    if prompt_tokens > self._largest_prompt.get(key, 0):
+                    if not attempt and prompt_tokens > self._largest_prompt.get(key, 0):
                         self._largest_prompt[key] = prompt_tokens
                     made = self._calls_made.setdefault(kind, [0, 0])
-                    made[1 if retrying else 0] += 1
+                    if not attempt:
+                        made[1 if retrying else 0] += 1
                     if (
-                        not retrying
+                        not attempt
+                        and not retrying
                         and kind in TAIL_KINDS
                         and kind in self._tail
                         and self._tail[kind][1] > 0
                     ):
                         self._tail[kind][1] -= 1
-                    if slot is not None and price is not None:
-                        self._reserved[slot] = decision.reservation
+                    if slot is not None:
+                        self._active.add(slot)
+                        if price is not None:
+                            self._reserved[slot] = decision.reservation
             break
         if decision.refused:
             if gave_up:
@@ -1816,7 +1884,14 @@ class SpendMeter:
                     else ""
                 )
             )
+        if slot is not None and not attempt:
+            _ADMISSION.set(Admission(self, kind, int(prompt_chars), slot))
         return decision.bound
+
+    def holds(self, slot: Any) -> bool:
+        """Whether ``slot`` has a reservation held now."""
+        with self._lock:
+            return slot in self._active
 
     @contextlib.contextmanager
     def held(

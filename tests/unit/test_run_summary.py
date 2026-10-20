@@ -444,3 +444,22 @@ class TestSycophancyEventsAreThePlatformsFlags:
     def test_the_last_rounds_flag_counts_when_no_round_recorded_one(self) -> None:
         history = [self._mediation("Round one."), self._mediation("Round two.")]
         assert self._events(history, detected=True) == 1
+
+    def test_each_flagged_round_counts_whatever_flagged_it(self) -> None:
+        from maljan.core.config import MEDIATOR_AGENT_NAME
+        from maljan.pipeline.state import AgentArgument
+
+        def _round(flagged: bool | None) -> object:
+            return AgentArgument(
+                agent_name=MEDIATOR_AGENT_NAME,
+                finding="x",
+                confidence_score=None,
+                sycophancy_flagged=flagged,
+            )
+
+        # Two rounds flagged and one not, then one kept before the flag existed,
+        # whose flag the state's latest ``sycophancy_detected`` stands in for.
+        history = [_round(True), _round(False), _round(True), _round(None)]
+        assert self._events(history, detected=True) == 3
+        assert self._events(history, detected=False) == 2
+        assert self._events([_round(True), _round(True), _round(True)], detected=True) == 3
