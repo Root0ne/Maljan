@@ -112,7 +112,13 @@ def test_the_ref_is_in_every_url_and_a_moving_ref_is_said(
     )
     assert all(f"/{_SHA}/" in url for _, url in fetcher.calls)
     assert "not a commit sha" not in capsys.readouterr().out
+    # The default is a commit sha: nothing is said, and every URL carries it.
+    fetcher.calls.clear()
     mod.prepare(fetcher=fetcher, **_paths(tmp_path))
+    assert "not a commit sha" not in capsys.readouterr().out
+    assert mod.DEFAULT_ATTACK_REF in mod.ENTERPRISE_ATTACK_URL
+    assert all(f"/{mod.DEFAULT_ATTACK_REF}/" in url for _, url in fetcher.calls)
+    mod.prepare(fetcher=fetcher, ref="master", **_paths(tmp_path))
     assert "not a commit sha" in capsys.readouterr().out
 
 

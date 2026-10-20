@@ -184,3 +184,67 @@ def test_building_from_a_manifest_needs_its_cohorts(
                   "--out", str(tmp_path / "o.json"))  # fmt: skip
     assert status == 2
     assert "--cohorts" in capsys.readouterr().err
+
+
+def test_a_built_catalogue_has_a_record_of_the_cohorts_folded_into_it(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    out = tmp_path / "catalog.json"
+    code = _run(
+        monkeypatch,
+        "--manifest", str(_manifest(tmp_path / "m.json")),
+        "--held-out", "test",
+        "--csv", str(_csv(tmp_path / "f.csv")),
+        "--text-cols", "imports",
+        "--id-cols", "sha256",
+        "--sha-col", "sha256",
+        "--min-per-family", "1",
+        "--out", str(out),
+    )  # fmt: skip
+    assert code == 0
+    record = json.loads(kb.build_manifest_path(out).read_text(encoding="utf-8"))
+    assert record["held_out_cohorts"] == ["test"]
+    assert record["training_cohorts"] == []
+    assert record["held_out_sample_count"] == 1
+    assert record["families"] == {"FamA": 2}
+    assert record["catalog_sha256"] == hashlib.sha256(out.read_bytes()).hexdigest()
+
+
+def test_a_samples_dir_build_records_its_tree_and_no_cohorts(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root = tmp_path / "tree"
+    (root / "FamA").mkdir(parents=True)
+    for name in ("one.bin", "two.bin"):
+        (root / "FamA" / name).write_bytes(name.encode())
+    monkeypatch.setattr(kb, "build_static_analysis", lambda sample_path: object())
+    monkeypatch.setattr(kb, "build_sample_profile_text", lambda static: "imports: CreateFileW")
+    out = tmp_path / "catalog.json"
+    code = _run(monkeypatch, "--samples-dir", str(root), "--min-per-family", "1", "--out", str(out))
+    assert code == 0
+    record = json.loads(kb.build_manifest_path(out).read_text(encoding="utf-8"))
+    assert record["inputs"]["samples_dir"] == str(root)
+    assert record["inputs"]["manifest"] is None and record["inputs"]["csv"] == []
+    assert record["training_cohorts"] == [] and record["held_out_cohorts"] == []
+    assert record["families"] == {"FamA": 2}
+
+
+def test_a_csv_only_build_records_its_files_and_no_cohorts(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    out = tmp_path / "catalog.json"
+    csv_path = _csv(tmp_path / "f.csv")
+    code = _run(
+        monkeypatch,
+        "--csv", str(csv_path),
+        "--text-cols", "imports",
+        "--id-cols", "sha256",
+        "--min-per-family", "1",
+        "--out", str(out),
+    )  # fmt: skip
+    assert code == 0
+    record = json.loads(kb.build_manifest_path(out).read_text(encoding="utf-8"))
+    assert record["inputs"]["csv"] == [str(csv_path)]
+    assert record["held_out_cohorts"] == [] and record["held_out_sample_count"] == 0
+    assert set(record["families"]) == {"FamA", "FamB"}
+    assert not list(tmp_path.glob(".*.part"))

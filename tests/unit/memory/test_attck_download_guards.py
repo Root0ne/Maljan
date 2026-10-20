@@ -187,3 +187,62 @@ class TestRedirects:
         request = urllib.request.Request("https://raw.githubusercontent.com/a.json")
         with pytest.raises(urllib.error.HTTPError, match="refused"):
             self._handler().redirect_request(request, None, 302, "Found", {}, target)
+
+
+def test_the_first_download_is_read_at_a_commit_and_release_discovery_is_not() -> None:
+    import re
+
+    sha = attck_loader._PINNED_COMMIT
+    assert re.fullmatch(r"[0-9a-f]{40}", sha)
+    assert all(f"/{sha}/" in url for url in attck_loader.ATTCK_BUNDLE_URLS.values())
+    assert attck_loader.ATTCK_BUNDLE_URL == attck_loader.ATTCK_BUNDLE_URLS["enterprise"]
+    # The index and the versioned files follow the branch, so a new release is found.
+    assert attck_loader._BUNDLE_BASE_URL.endswith("/master")
+
+
+@pytest.mark.parametrize("force_refresh", [False, True])
+def test_a_cached_newer_release_is_never_replaced_by_the_pinned_bundle(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, force_refresh: bool
+) -> None:
+    """Stale by age, or forced: the pinned download is for an empty cache only."""
+    import os
+
+    bundle = tmp_path / "enterprise-attack.json"
+    newer = {
+        "type": "bundle",
+        "objects": [{"type": "x-mitre-collection", "x_mitre_version": "20.1"}],
+    }
+    bundle.write_text(json.dumps(newer), encoding="utf-8")
+    long_ago = time.time() - 400 * 86400
+    os.utime(bundle, (long_ago, long_ago))
+
+    def no_download(url: str) -> dict:
+        raise AssertionError(f"the pinned bundle was fetched: {url}")
+
+    monkeypatch.setattr(attck_loader, "_fetch_bundle", no_download)
+    raw = attck_loader._load_raw_bundle(
+        attck_loader.ATTCK_BUNDLE_URL, bundle, force_refresh=force_refresh, max_age_days=7
+    )
+    assert raw == newer
+    assert json.loads(bundle.read_text(encoding="utf-8")) == newer
+
+
+def test_an_empty_cache_is_filled_from_the_pinned_bundle(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    fetched: list[str] = []
+    bundle_doc = {"type": "bundle", "objects": []}
+
+    def fetch(url: str) -> dict:
+        fetched.append(url)
+        return bundle_doc
+
+    monkeypatch.setattr(attck_loader, "_fetch_bundle", fetch)
+    monkeypatch.setattr(attck_loader, "_save_cache", lambda raw, path: None)
+    from maljan.memory import attck_update
+
+    monkeypatch.setattr(attck_update, "refresh_refusal", lambda raw, compared: None)
+    attck_loader._load_raw_bundle(
+        attck_loader.ATTCK_BUNDLE_URL, tmp_path / "enterprise-attack.json", False, 7
+    )
+    assert fetched == [attck_loader.ATTCK_BUNDLE_URL]

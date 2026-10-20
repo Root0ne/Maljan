@@ -57,7 +57,7 @@ import signal
 import sys
 import time
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 from urllib.parse import urlsplit
 
 _ROOT = Path(__file__).resolve().parents[2]
@@ -506,6 +506,10 @@ def third_party_off(values: dict[str, dict[str, Any]]) -> dict[str, Any]:
 REACHES = "reaches"
 LOCAL = "local"
 UNDECLARED = "undeclared"
+# Some tools declare an effect, others declare none: named as kept like an
+# undeclared server, since the tools without a declaration are used at full
+# strength.
+PARTLY_DECLARED = "partly declared"
 
 
 def server_effects(key: str, server: dict[str, Any]) -> str:
@@ -519,7 +523,13 @@ def server_effects(key: str, server: dict[str, Any]) -> str:
     nothing). A network reached only in a named way (the operator's own
     sandbox, the case store, a reference-data refresh) is not an outside
     service the rehearsal must keep from. :data:`UNDECLARED` when no tool
-    declares any effect; :data:`LOCAL` otherwise.
+    declares any effect; :data:`PARTLY_DECLARED` when some tools do and others
+    do not; :data:`LOCAL` when every tool does. "Every tool" is the server's
+    stored allow-list (``tools``) when it has one, joined to the tools that have
+    an entry in the declarations in force; a server with no allow-list advertises
+    tools the rehearsal cannot list without starting it, so a tool with no entry
+    at all is unknown there and only an entry that declares nothing counts as
+    undeclared.
     """
     from maljan.analysis.tool_effects import sends_sample_bytes
     from maljan.core.builtin_declarations import server_declaration
@@ -539,10 +549,12 @@ def server_effects(key: str, server: dict[str, Any]) -> str:
     )
     if refused:
         return REACHES
-    declared = False
+    declared = 0
+    tools = 0
     for raw in in_force.values():
         if not isinstance(raw, dict):
             continue
+        tools += 1
         try:
             facts = ToolFacts.model_validate(raw)
         except ValueError:
@@ -559,8 +571,15 @@ def server_effects(key: str, server: dict[str, Any]) -> str:
         if effects is not None and (
             effects.executes or effects.network is not None or effects.third_party
         ):
-            declared = True
-    return LOCAL if declared else UNDECLARED
+            declared += 1
+    # A tool the operator's allow-list names that has no entry at all declares
+    # nothing either.
+    allowed = server.get("tools")
+    if isinstance(allowed, list):
+        tools += sum(1 for name in allowed if name not in in_force)
+    if not declared:
+        return UNDECLARED
+    return LOCAL if declared == tools else PARTLY_DECLARED
 
 
 def describe_changes(values: dict[str, dict[str, Any]], changes: dict[str, Any]) -> dict[str, Any]:
@@ -576,10 +595,12 @@ def describe_changes(values: dict[str, dict[str, Any]], changes: dict[str, Any])
     )
     kept = {
         key: "kept: effects not declared"
+        if effects == UNDECLARED
+        else "kept: effects not declared for some tools"
         for key, server in sorted(servers_during.items())
         if isinstance(server, dict)
         and server.get("enabled", True)
-        and server_effects(str(key), server) == UNDECLARED
+        and (effects := server_effects(str(key), server)) in (UNDECLARED, PARTLY_DECLARED)
     }
     return {
         "settings": {
@@ -807,7 +828,7 @@ def queued_elsewhere(redis_url: str) -> int:
 
     client = redis.Redis.from_url(redis_url, socket_timeout=5)
     try:
-        waiting = int(client.zcard("arq:queue") or 0)
+        waiting = int(cast(int, client.zcard("arq:queue")) or 0)
         running = sum(1 for _ in client.scan_iter("arq:in-progress:*"))
     finally:
         client.close()
@@ -1048,7 +1069,7 @@ def run_against_stack(args: argparse.Namespace) -> list[RunRecord]:
             guard.keep(values, list(changes))
             applied = client.save(changes)
             print(f"pointed {len(applied)} setting(s) at the stub: {', '.join(sorted(applied))}")
-        params = {
+        params: dict[str, Any] = {
             "loop_steps": brain.loop_steps,
             "slow_seconds": brain.slow_seconds,
             "job_timeout_s": _job_timeout(args, values),

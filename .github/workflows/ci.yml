@@ -204,8 +204,8 @@ jobs:
   # from each lockfile with no install. A job of its own and not a required
   # check: an advisory published overnight must not block an unrelated merge,
   # and the registry being unreachable is not a finding. The console fails at
-  # high or critical; the docs site is a static export, so its audit is
-  # reported only. Each audit is retried once for the network.
+  # high or critical, and so does the docs site. Each audit is retried once
+  # for the network.
   npm-audit:
     name: npm audit
     runs-on: ubuntu-latest
@@ -229,13 +229,14 @@ jobs:
             npm audit --audit-level=high --omit=dev
           }
 
-      - name: Audit the docs site (report only)
+      - name: Audit the docs site (high and above fail)
+        if: ${{ !cancelled() }}
         working-directory: apps/docs
         run: |
-          npm audit --omit=dev || {
+          npm audit --audit-level=high --omit=dev || {
             sleep 20
-            npm audit --omit=dev
-          } || echo "::warning title=apps/docs npm audit::advisories reported or the audit could not run (report only)"
+            npm audit --audit-level=high --omit=dev
+          }
 
   e2e:
     name: E2E Tests (Playwright)

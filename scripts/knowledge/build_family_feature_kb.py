@@ -35,6 +35,14 @@ Per family the per-sample profiles are aggregated into one discriminative
 fingerprint description (``build_family_fingerprint_text``). Output JSON stores
 TEXT only (no vectors); the runtime index embeds it on load.
 
+Every build also writes ``<out stem>.build.json`` beside the catalogue: the inputs,
+the training and held-out cohorts, the held-out sample count and the families it
+folded in. The vendored ``data/family_fingerprints_v1.json`` predates that record,
+so the cohorts it was built from are UNKNOWN: rebuild it with ``--cohorts`` and
+``--held-out`` (which writes the record) before family RAG is used in a scored run;
+the family-RAG loader warns while no record sits beside the catalogue. The record
+names what the command line asked for; it does not verify the input files.
+
 Run:
     uv run python scripts/knowledge/build_family_feature_kb.py --samples-dir ./rats \
         --out data/family_fingerprints_v1.json --min-per-family 3
@@ -46,6 +54,7 @@ import argparse
 import csv
 import hashlib
 import json
+import os
 import sys
 from collections import defaultdict
 from pathlib import Path
@@ -56,6 +65,7 @@ from maljan.analysis.family_feature_rag import (
     build_sample_profile_text,
 )
 from maljan.extractors.pe_extractor import build_static_analysis
+from maljan.memory.family_fingerprint_index import build_record_path
 
 _CATALOG_SCHEMA = "maljan-family-fingerprints/v1"
 _EMBED_MODEL = "BAAI/bge-small-en-v1.5"  # what the runtime index embeds the text with
@@ -246,6 +256,58 @@ def _profiles_from_manifest(
     return out
 
 
+def build_manifest_path(out_path: Path) -> Path:
+    """Where the record of what a catalogue was built from is kept, beside it."""
+    return build_record_path(out_path)
+
+
+def _write_atomically(target: Path, text: str) -> None:
+    """Write ``text`` beside ``target`` and rename it over ``target``."""
+    part = target.with_name(f".{target.name}.part")
+    part.write_text(text, encoding="utf-8")
+    os.replace(part, target)
+
+
+def build_manifest(
+    *,
+    out_path: Path,
+    catalog_bytes: bytes,
+    samples_dir: str | None,
+    manifest: Path | None,
+    flat_dir: str | None,
+    cohorts: list[str],
+    held_out: list[str],
+    held_out_sample_count: int,
+    csv_files: list[str],
+    min_per_family: int,
+    families: list[dict],
+) -> dict[str, Any]:
+    """The cohorts and inputs a catalogue was built from, so a scored run can check them.
+
+    Written beside every catalogue the script writes. The catalogue itself
+    keeps its schema; this record is what answers "was a held-out cohort folded
+    in?" for it. It records what the command line named, not a check of the
+    files: a catalogue with no such record has unknown cohorts, and the
+    family-RAG loader warns about it.
+    """
+    return {
+        "schema": "maljan-family-fingerprints-build/v1",
+        "catalog": out_path.name,
+        "catalog_sha256": hashlib.sha256(catalog_bytes).hexdigest(),
+        "inputs": {
+            "samples_dir": samples_dir,
+            "manifest": str(manifest) if manifest is not None else None,
+            "flat_dir": flat_dir,
+            "csv": csv_files,
+        },
+        "training_cohorts": cohorts,
+        "held_out_cohorts": held_out,
+        "held_out_sample_count": held_out_sample_count,
+        "min_per_family": min_per_family,
+        "families": {str(f["family_id"]): int(f["sample_count"]) for f in families},
+    }
+
+
 def _names(raw: str) -> list[str]:
     return [c.strip() for c in raw.split(",") if c.strip()]
 
@@ -384,18 +446,37 @@ def main() -> int:
 
     out_path = Path(args.out)
     out_path.parent.mkdir(parents=True, exist_ok=True)
-    out_path.write_text(
-        json.dumps(
-            {
-                "schema": _CATALOG_SCHEMA,
-                "embed_model": _EMBED_MODEL,
-                "families": families,
-            },
-            indent=2,
-        ),
-        encoding="utf-8",
+    catalog_text = json.dumps(
+        {
+            "schema": _CATALOG_SCHEMA,
+            "embed_model": _EMBED_MODEL,
+            "families": families,
+        },
+        indent=2,
     )
+    _write_atomically(out_path, catalog_text)
     print(f"Wrote {out_path}: {len(families)} family fingerprints.", flush=True)
+    _write_atomically(
+        build_manifest_path(out_path),
+        json.dumps(
+            build_manifest(
+                out_path=out_path,
+                catalog_bytes=catalog_text.encode("utf-8"),
+                samples_dir=args.samples_dir or None,
+                manifest=man,
+                flat_dir=args.flat_dir or None,
+                cohorts=cohorts,
+                held_out=held_out,
+                held_out_sample_count=len(held),
+                csv_files=list(args.csv or []),
+                min_per_family=args.min_per_family,
+                families=families,
+            ),
+            indent=2,
+        )
+        + "\n",
+    )
+    print(f"Wrote {build_manifest_path(out_path)}: the cohorts folded in.", flush=True)
     print(
         "Enable at runtime with PREPROCESSING__USE_FAMILY_FEATURE_RAG=true and "
         f"PREPROCESSING__FAMILY_FINGERPRINT_CATALOG_PATH={out_path}",

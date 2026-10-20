@@ -338,6 +338,47 @@ class TestTheGateChangesOnlyTheEndpoints:
         assert described["servers_kept"] == {"mine": "kept: effects not declared"}
         assert described["servers_disabled"] == []
 
+    def test_a_server_with_some_tools_undeclared_is_kept_and_named(self) -> None:
+        declared = {"effects": {"executes": "no", "network": False, "third_party": "no"}}
+        values = _values(
+            **{
+                "core.mcp.servers": {
+                    "value": {
+                        "mixed": {
+                            "enabled": True,
+                            "transport": "stdio",
+                            "tool_facts": {"read": declared, "other": {}},
+                        },
+                    },
+                    "source": "ui",
+                },
+            }
+        )
+        changes = third_party_off(values)
+        assert "core.mcp.servers" not in changes
+        described = describe_changes(values, changes)
+        assert described["servers_kept"] == {"mixed": "kept: effects not declared for some tools"}
+
+    def test_an_allowed_tool_with_no_entry_at_all_makes_the_server_partly_declared(self) -> None:
+        declared = {"effects": {"executes": "no", "network": False, "third_party": "no"}}
+        servers = {
+            "listed": {
+                "enabled": True,
+                "transport": "stdio",
+                "tools": ["read", "write"],
+                "tool_facts": {"read": declared},
+            },
+            "whole": {
+                "enabled": True,
+                "transport": "stdio",
+                "tools": ["read"],
+                "tool_facts": {"read": declared},
+            },
+        }
+        values = _values(**{"core.mcp.servers": {"value": servers, "source": "ui"}})
+        described = describe_changes(values, third_party_off(values))
+        assert described["servers_kept"] == {"listed": "kept: effects not declared for some tools"}
+
     def test_the_harness_mode_touches_no_key_and_keeps_the_stack_s_tools(self) -> None:
         changes = harness_changes("openai", STUB)
         assert changes["core.sandbox.provider"] == "mock"
