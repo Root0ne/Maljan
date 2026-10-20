@@ -223,12 +223,14 @@ whichever sandbox is configured, never on the Maljan host. The production
 compose file mounts the source trees read-only in every container built from
 the backend image, and runs the API without `--reload`. A parser bug in a
 process that opens a sample therefore cannot rewrite the platform's own
-sources. The backend containers still run as root, with the image's virtual
-environment and the bind-mounted data directory writable: an existing
-deployment's data is owned by whoever created it, and another user would lose
-write access to it. What they do not allow is gaining a privilege a process was
-not started with (`no-new-privileges`). The frontend runs as an unprivileged
-user with every capability dropped. Recreate the backend containers after an
+sources. The backend containers run as an unprivileged uid with every
+capability dropped and `no-new-privileges`, over a root-owned virtual
+environment and a read-only `data/`; only the sample mirrors, the upload
+staging and the ATT&CK cache are writable. A one-shot service hands what root
+owns in those to that uid on a deployment that ran as root before, and refuses
+to start the stack over files another user owns; see
+[Volume ownership](/deployment/#volume-ownership). The frontend runs as an
+unprivileged user with every capability dropped. Recreate the backend containers after an
 incident rather than restarting them, so nothing written into the image layer
 survives; see [The compose stack](/deployment/#the-compose-stack).
 

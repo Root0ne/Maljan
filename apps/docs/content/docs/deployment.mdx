@@ -90,9 +90,52 @@ The API, the workers and the migration mount `src/`, `apps/`, `tests/` and
 `services/` read-only, and the API runs without `--reload`. A process in those
 containers opens hostile bytes, so it must not be able to plant code that the
 API or a later worker would run, or rewrite the host's working tree. `data/`
-stays writable, for the uploads and the sample mirrors. A source edit reaches a
+is read-only too; only `data/samples/` and `data/uploads/` under it are
+writable, for the sample mirrors and the uploads. A source edit reaches a
 production container only when it restarts. The development overlay (`make
 dev-up`) mounts the sources writable and reloads the API on an edit.
+
+The API, the workers and the migration run as an unprivileged account (uid and
+gid 10001 by default) with every Linux capability dropped and
+`no-new-privileges`. The image's virtual environment and sources are owned by
+root, so that account can only read them. Set `MALJAN_UID` and `MALJAN_GID` in
+`docker/.env` to run them under another id; on a machine where a login user
+also works in this checkout's `data/`, use that user's ids (`id -u`, `id -g`)
+so the files stay theirs. `make docker-up` and `make dev-up` set both to the
+invoking user's ids (under `sudo`, the user who ran it) when neither the
+environment nor `docker/.env` sets them, and to 10001 when that user is root.
+
+### Volume ownership
+
+Before the backend ran unprivileged it ran as root, so a deployment created
+then has entries in `data/samples/`, `data/uploads/` and the `attck_cache`
+volume owned by root. The one-shot `volume-init` service hands the
+root-owned ones to `MALJAN_UID:MALJAN_GID` before the API and the worker
+start, on every `up`:
+
+- It never takes a file from anyone else. An entry owned by a uid or gid that
+  is neither root nor the target stops it before it has changed anything, with
+  the id to set, for example `volume-init: data/samples is owned by uid 1000;
+  set MALJAN_UID/MALJAN_GID=1000 in docker/.env`. The API and the worker then
+  do not start.
+- It changes ownership only (`chown -h`), never a file's content or mode, never
+  through a symbolic link, never past the mount it was given, and executes
+  nothing it finds.
+- It touches only root-owned entries, so after the first run it changes
+  nothing.
+- It runs as root with only the `CHOWN` and `DAC_READ_SEARCH` capabilities
+  (the second lets it enter the 0700 work directories), with no network, and
+  exits. It refuses a uid or gid that is 0 or not a number.
+
+Nothing needs doing by hand: the first `docker compose up -d` after the upgrade
+runs it. To run it alone, `docker compose run --rm volume-init`. The ATT&CK
+cache now mounts at `/home/maljan/.cache/maljan` (the volume keeps its name),
+so its contents carry over.
+
+The worker writes its sample mirrors 0700 and 0600 as `MALJAN_UID`. The
+`ghidra-mcp` container reads them through its read-only mount only because its
+image runs as root. A Ghidra image that runs as another user needs a group it
+shares with the worker, and mirrors written 0750 and 0640 for that group.
 
 ## Where a tool server sees the sample
 

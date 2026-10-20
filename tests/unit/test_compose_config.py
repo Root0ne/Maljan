@@ -1,3 +1,4 @@
+import re
 import shutil
 import subprocess
 from pathlib import Path
@@ -162,6 +163,62 @@ def test_every_pulled_image_names_a_version() -> None:
         reference = image.rsplit("/", 1)[-1]
         assert ":" in reference, f"{name}: {image} names no tag"
         assert reference.split(":", 1)[1] != "latest", f"{name}: {image}"
+
+
+DIGEST = re.compile(r"@sha256:[0-9a-f]{64}$")
+
+
+def test_every_pulled_and_base_image_is_pinned_by_digest() -> None:
+    # A tag can be pushed again; a digest names one image (AUD-33-L1). Each
+    # reference keeps its tag beside the digest so a reader and Dependabot
+    # still see the version.
+    config = yaml.safe_load((ROOT / "docker" / "docker-compose.yml").read_text())
+    for name, service in config["services"].items():
+        if "image" in service and "build" not in service:
+            assert DIGEST.search(service["image"]), f"{name}: {service['image']}"
+    for dockerfile in sorted((ROOT / "docker").glob("Dockerfile.*")):
+        text = dockerfile.read_text(encoding="utf-8")
+        stages = set(re.findall(r"^FROM \S+ AS (\S+)$", text, re.MULTILINE))
+        for base in re.findall(r"^FROM (\S+)", text, re.MULTILINE):
+            assert DIGEST.search(base), f"{dockerfile.name}: FROM {base}"
+        for source in re.findall(r"COPY --from=(\S+)", text):
+            if source not in stages:
+                assert DIGEST.search(source), f"{dockerfile.name}: COPY --from={source}"
+
+
+def _workflow_service_images() -> dict[str, str]:
+    images = {}
+    for workflow in sorted((ROOT / ".github" / "workflows").glob("*.yml")):
+        for job_name, job in (yaml.safe_load(workflow.read_text()).get("jobs") or {}).items():
+            for name, service in (job.get("services") or {}).items():
+                images[f"{workflow.name}:{job_name}:{name}"] = service["image"]
+    return images
+
+
+def test_every_workflow_service_image_is_pinned_by_digest() -> None:
+    images = _workflow_service_images()
+    assert images
+    for where, image in images.items():
+        assert DIGEST.search(image), f"{where}: {image}"
+
+
+def test_ci_tests_against_the_qdrant_compose_runs() -> None:
+    config = yaml.safe_load((ROOT / "docker" / "docker-compose.yml").read_text())
+    compose = config["services"]["qdrant"]["image"]
+    ci = [image for image in _workflow_service_images().values() if "qdrant" in image]
+    assert ci == [compose]
+
+
+def test_every_action_is_pinned_by_commit_with_its_version() -> None:
+    uses = re.compile(r"^\s*(?:-\s+)?uses:\s*(\S+)(.*)$")
+    for workflow in sorted((ROOT / ".github" / "workflows").glob("*.yml")):
+        for line in workflow.read_text(encoding="utf-8").splitlines():
+            match = uses.match(line)
+            if not match or match.group(1).startswith("./"):
+                continue
+            action, rest = match.groups()
+            assert re.search(r"@[0-9a-f]{40}$", action), f"{workflow.name}: {line.strip()}"
+            assert re.match(r"\s+# v\d", rest), f"{workflow.name}: {line.strip()}"
 
 
 def _render_ghidra(tmp_path: Path, **extra: str) -> dict:
