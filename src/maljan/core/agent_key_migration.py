@@ -213,6 +213,31 @@ def set_if_list(mapping: Any, field: str, renames: dict[str, str]) -> Any:
     return {**mapping, field: rewritten}
 
 
+def _retarget_agent_tools(entry: Any, renames: dict[str, str]) -> Any:
+    """``entry`` with each agent tool reference moved to the renamed key.
+
+    Returns ``entry`` itself when none of its references moved, as
+    :func:`set_if_list` does, so an untouched definition stays the same object.
+    """
+    if not isinstance(entry, dict):
+        return entry
+    tools = entry.get("tools")
+    if not isinstance(tools, list):
+        return entry
+    rewritten = [
+        {**ref, "agent": renames[ref["agent"]]}
+        if isinstance(ref, dict)
+        and ref.get("kind") == "agent"
+        and isinstance(ref.get("agent"), str)
+        and ref["agent"] in renames
+        else ref
+        for ref in tools
+    ]
+    if rewritten == tools:
+        return entry
+    return {**entry, "tools": rewritten}
+
+
 def _rewrite_keys(mapping: Any, renames: dict[str, str]) -> Any:
     if not isinstance(mapping, dict):
         return mapping
@@ -252,6 +277,14 @@ def _rename_agents_document(
                 renamed[new_key] = entry
             else:
                 renamed[key] = entry
+        if renames.definitions:
+            # A lead's agent tool (``{"kind": "agent", "agent": ...}``) names
+            # another definition. Left under the old name it would call the
+            # built-in now seeded there instead of the operator's own agent.
+            renamed = {
+                key: _retarget_agent_tools(entry, renames.definitions)
+                for key, entry in renamed.items()
+            }
         out["definitions"] = renamed
 
     profiles = out.get("profiles")

@@ -18,6 +18,8 @@ from __future__ import annotations
 
 from typing import Any
 
+import pytest
+
 DEEPSEEK = "https://api.deepseek.com"
 
 
@@ -322,31 +324,27 @@ class TestTheWindowsModels:
 
 
 class TestAnEntryTheRegistryCannotBuild:
-    def test_it_is_read_as_the_role_s_global_model_as_the_builder_builds_it(self) -> None:
-        from maljan.core.model_assignments import assignment_chain_for
+    def test_it_is_refused_rather_than_read_as_the_role_s_global_model(self) -> None:
+        from pydantic import ValidationError
 
-        settings = _deepseek(
-            "deepseek-v4-flash",
-            "deepseek-v3",
-            **{"llm.agents": {"judge": {"provider": "no-such-provider", "model": "x"}}},
-        )
-
-        chain = assignment_chain_for(settings, "judge", role="judge")
-
-        assert [a.model for a in chain] == ["deepseek-v3"]
-        assert _judge_cap(settings).tokens < 65536
+        with pytest.raises(ValidationError, match="'no-such-provider', which is not registered"):
+            _deepseek(
+                "deepseek-v4-flash",
+                "deepseek-v3",
+                **{"llm.agents": {"judge": {"provider": "no-such-provider", "model": "x"}}},
+            )
 
     def test_a_provider_registered_later_is_read_as_built(self) -> None:
         from maljan.core.model_assignments import assignment_chain_for
         from maljan.llm.registry import _PROVIDER_REGISTRY
 
-        settings = _deepseek(
-            "deepseek-v4-flash",
-            "deepseek-v3",
-            **{"llm.agents": {"judge": {"provider": "acme-plugged", "model": "acme-judge"}}},
-        )
         _PROVIDER_REGISTRY["acme-plugged"] = object
         try:
+            settings = _deepseek(
+                "deepseek-v4-flash",
+                "deepseek-v3",
+                **{"llm.agents": {"judge": {"provider": "acme-plugged", "model": "acme-judge"}}},
+            )
             chain = assignment_chain_for(settings, "judge", role="judge")
         finally:
             _PROVIDER_REGISTRY.pop("acme-plugged", None)

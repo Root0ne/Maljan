@@ -27,7 +27,7 @@ from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from datetime import date as _date
 from pathlib import PurePosixPath
-from typing import Annotated, Any, Literal
+from typing import Annotated, Any, Literal, NoReturn
 
 from pydantic import (
     BaseModel,
@@ -93,6 +93,29 @@ from maljan.core.tool_declarations import (
 # by almost everything, including the logging setup itself, and it has exactly
 # one thing to say — a stored value it had to fall back from.
 logger = logging.getLogger(__name__)
+
+
+def _refuse_at(loc: tuple[str | int, ...], reason: str, value: Any = None) -> NoReturn:
+    """Refuse from a model validator at ``loc``, the setting the refusal is about.
+
+    A whole-document validator that raises a bare ``ValueError`` is reported
+    at no location, so nothing can say which stored key to read past (the
+    console then cannot open to repair it) and the error echoes the document
+    itself. ``value`` is what the refusal shows as its input: never a secret.
+    """
+    from pydantic_core import InitErrorDetails, PydanticCustomError, ValidationError
+
+    raise ValidationError.from_exception_data(
+        "Settings",
+        [
+            InitErrorDetails(
+                type=PydanticCustomError("value_error", "{reason}", {"reason": reason}),
+                loc=loc,
+                input=value,
+            )
+        ],
+    )
+
 
 # ---------------------------------------------------------------------------
 # Per-provider LLM configs
@@ -162,6 +185,12 @@ class OpenAIConfig(BaseModel):
     # the salvage conversation to a fraction of the window rather than to a
     # fixed number of characters chosen for one deployment.
     context_size: Annotated[int, Field(ge=0)] = 0
+    # Plain http to ``base_url`` (and to an agent entry's own endpoint on this
+    # provider) is taken, with a key set, only for a host inside this
+    # deployment. Set, it is taken for any host: the API key then travels in
+    # clear to that address, which is the operator's decision to make for a
+    # keyed server on a network they trust.
+    allow_plain_http: bool = False
 
 
 # The levels Anthropic's ``output_config.effort`` takes, in order: part of the
@@ -210,6 +239,73 @@ def _is_docker_host(host: str) -> bool:
     if not isinstance(address, ipaddress.IPv4Address):
         return False
     return ipaddress.IPv4Address("172.17.0.0") <= address <= ipaddress.IPv4Address("172.31.255.255")
+
+
+# IPv6 prefixes that carry, and route to, an IPv4 address elsewhere: 6to4,
+# Teredo, and NAT64 in its well-known and its local-use prefix. ``host_locality``
+# reads them as the address they carry, which is right for saying where a call
+# went and too generous for letting a key cross in clear: the hop to the relay
+# is not inside the deployment.
+_TUNNELLED_PREFIXES = ("2002::/16", "2001::/32", "64:ff9b::/96", "64:ff9b:1::/48")
+
+
+def _tunnelled(host: str) -> bool:
+    import ipaddress
+
+    try:
+        address = ipaddress.ip_address(host.strip("[]"))
+    except ValueError:
+        return False
+    return isinstance(address, ipaddress.IPv6Address) and any(
+        address in ipaddress.ip_network(prefix) for prefix in _TUNNELLED_PREFIXES
+    )
+
+
+def credential_in_clear_refusal(url: object, what: str) -> str:
+    """Why a provider's credential may not be sent to ``url``; ``""`` when it may.
+
+    The rule for every address a provider sends its API key to: ``https``
+    anywhere, plain ``http`` only to a host inside this deployment as
+    ``core.host_locality`` places it from its text alone (loopback, a private,
+    shared or link-local address, a container runtime's name for its host, a
+    ``.local`` or ``.internal`` name, a single-label service name), never an
+    IPv6 address that tunnels to IPv4 elsewhere (6to4, Teredo, NAT64). Any
+    other host would receive the key in clear over a network nobody here
+    controls. An address that cannot be read is refused, and so is a plain
+    http one that HTTP clients may read differently (a backslash, a space or a
+    control character in it), because the host checked would not be the host
+    called. Anthropic's own base URL keeps its stricter rule (``AnthropicConfig``).
+    """
+    from urllib.parse import urlsplit
+
+    from maljan.core.host_locality import LOCAL, host_locality
+
+    text = str(url or "").strip()
+    if not text:
+        return ""
+    try:
+        parts = urlsplit(text)
+        host = parts.hostname or ""
+        parts.port  # noqa: B018 — read for the ValueError an unusable port raises
+    except ValueError:
+        return f"{what} cannot be read as an address, so where it sends the API key is not known"
+    if parts.scheme.lower() != "http":
+        return ""
+    if any(ch == "\\" or ch.isspace() or ord(ch) < 32 or ord(ch) == 127 for ch in text):
+        return (
+            f"{what} holds a backslash, a space or a control character, which HTTP clients "
+            "read differently; with plain http the API key could go to a host other than the "
+            "one checked"
+        )
+    if host_locality(host) == LOCAL and not _tunnelled(host):
+        return ""
+    shown = host or "a host this address does not name"
+    return (
+        f"{what} would send the API key in clear to {shown}: plain http is taken only for a "
+        "host inside this deployment (loopback, a private or link-local address, a container "
+        "host name, a .local or .internal name, a single-label service name), unless the "
+        "provider's allow_plain_http is set; use https"
+    )
 
 
 class AnthropicConfig(BaseModel):
@@ -553,6 +649,20 @@ class FrontierArm(BaseModel):
     total_params_b: Annotated[float, Field(ge=0)] = 0.0
     active_params_b: Annotated[float, Field(ge=0)] = 0.0
     quantisation: str = ""
+
+    @model_validator(mode="after")
+    def _no_key_in_clear(self) -> "FrontierArm":
+        """The arm sends its own key to its own address: the provider address rule applies.
+
+        An arm with no key sends none, and is not held to it.
+        """
+        if self.api_key is None or not self.api_key.get_secret_value():
+            return self
+        refused = credential_in_clear_refusal(self.base_url, "the frontier arm's base_url")
+        if refused:
+            # Located, with no input echoed: the arm's block holds its key.
+            _refuse_at(("base_url",), refused)
+        return self
 
 
 class FrontierConfig(FrontierArm):
@@ -4564,14 +4674,19 @@ class Settings(BaseSettings):
                 refused = id_refusal("static", definition.static_provider, self.plugins.allowed)
                 if refused:
                     available = ", ".join(sorted(shipped_ids("static")))
-                    raise ValueError(
+                    _refuse_at(
+                        ("agents", "definitions", key, "static_provider"),
                         f"{key!r}: unknown static provider "
-                        f"{definition.static_provider!r}. Available: {available}; {refused}"
+                        f"{definition.static_provider!r}. Available: {available}; {refused}",
+                        definition.static_provider,
                     )
-            for ref in definition.tools:
+            for index, ref in enumerate(definition.tools):
                 if ref.kind != "mcp":
                     continue
-                self._check_server_tool(repr(key), str(ref.server), ref.name)
+                try:
+                    self._check_server_tool(repr(key), str(ref.server), ref.name)
+                except ValueError as exc:
+                    _refuse_at(("agents", "definitions", key, "tools", index), str(exc), ref.server)
 
         # A triage pack step that calls a server's tool is checked as an
         # agent's reference is, so a list that cannot run is refused here, and
@@ -4579,7 +4694,7 @@ class Settings(BaseSettings):
         for step in effective_steps(self.triage.steps):
             problem = self.pack_step_problem(step)
             if problem:
-                raise ValueError(problem)
+                _refuse_at(("triage", "steps"), problem, step.id)
 
         self._rederive_converted_profiles()
 
@@ -4588,10 +4703,84 @@ class Settings(BaseSettings):
             for agent in server.agents:
                 if agent not in known:
                     available = ", ".join(sorted(known))
-                    raise ValueError(
+                    _refuse_at(
+                        ("mcp", "servers", name, "agents"),
                         f"server {name!r} is bound to unknown agent {agent!r}. "
-                        f"Available: {available}"
+                        f"Available: {available}",
+                        agent,
                     )
+        return self
+
+    @model_validator(mode="after")
+    def _agent_models_name_a_registered_provider(self) -> "Settings":
+        """Refuse an ``llm.agents`` entry, or a fallback, naming no registered LLM provider.
+
+        Such an entry used to be saved and then built on the role's global
+        model with a warning, so the agent ran a model nobody chose for it and
+        the probe gate checked that one instead. Accepted: a registered
+        provider, or an installed plugin these settings' own allow-list names
+        (``plugins.id_refusal``, read from package metadata); the worker that
+        loads the plugin refuses at build time if it then fails to load.
+        """
+        for key, entry in self.llm.agents.items():
+            for position, choice in enumerate(entry.chain()):
+                refused = id_refusal("llm", choice.provider, self.plugins.allowed)
+                if not refused:
+                    continue
+                loc: tuple[str | int, ...] = ("llm", "agents", key, "provider")
+                if position:
+                    loc = ("llm", "agents", key, "fallbacks", position - 1, "provider")
+                _refuse_at(
+                    loc,
+                    f"agent {key!r} names LLM provider {choice.provider!r}, which is not "
+                    f"registered: {refused}",
+                    choice.provider,
+                )
+        return self
+
+    @model_validator(mode="after")
+    def _no_provider_key_in_clear(self) -> "Settings":
+        """Refuse a provider address that would carry a configured API key in clear off-site.
+
+        Every registered provider that holds a credential and sends it to an
+        address of its settings (``credential_leaf`` and ``base_url_leaf``), a
+        plugin's included, and every ``llm.agents`` entry or fallback with an
+        endpoint of its own (it authenticates with its provider's key), is
+        held to :func:`credential_in_clear_refusal`, located at that address.
+        Not held to it: a provider with no key set (it sends none; the flat
+        ``*_api_key`` settings are merged in by now), and one whose block sets
+        ``allow_plain_http``, the operator's explicit acceptance that the key
+        travels in clear to that address.
+        """
+        from maljan.llm.provider_base import facts_of, registered_facts
+
+        def _sends_a_key(facts: Any) -> bool:
+            if not facts.credential_leaf or not facts.api_key(self):
+                return False
+            block = facts.settings_block(self)
+            return getattr(block, "allow_plain_http", False) is not True
+
+        for facts in registered_facts():
+            if not facts.base_url_leaf or not _sends_a_key(facts):
+                continue
+            url = getattr(facts.settings_block(self), facts.base_url_leaf, None)
+            refused = credential_in_clear_refusal(url, f"llm.{facts.name}.{facts.base_url_leaf}")
+            if refused:
+                # No input echoed: an address can carry a user name and password.
+                _refuse_at(("llm", facts.name, facts.base_url_leaf), refused)
+        for key, entry in self.llm.agents.items():
+            for position, choice in enumerate(entry.chain()):
+                if not choice.base_url or unloaded_plugin("llm", choice.provider):
+                    continue
+                if not _sends_a_key(facts_of(choice.provider)):
+                    continue
+                refused = credential_in_clear_refusal(choice.base_url, f"agent {key!r}'s base_url")
+                if not refused:
+                    continue
+                loc: tuple[str | int, ...] = ("llm", "agents", key, "base_url")
+                if position:
+                    loc = ("llm", "agents", key, "fallbacks", position - 1, "base_url")
+                _refuse_at(loc, refused)
         return self
 
     def pack_step_problem(self, step: PackStep) -> str:

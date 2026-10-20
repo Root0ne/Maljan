@@ -201,13 +201,12 @@ class TestBuildModelForAgent:
             registry.build_model_for_agent("judge", fallback_role="judge")
             mock_build.assert_called_once_with(role="judge")
 
-    def test_an_unknown_agent_provider_falls_back_to_the_given_role(self) -> None:
+    def test_an_unknown_agent_provider_is_refused_not_run_on_the_role(self) -> None:
+        from pydantic import ValidationError
+
         agents = {"judge": AgentLLMConfig(provider="no-such-provider", model="x")}
-        registry = self._make_registry_patched(agents=agents)
-        with patch.object(registry, "build_model") as mock_build:
-            mock_build.return_value = MagicMock()
-            registry.build_model_for_agent("judge", fallback_role="judge")
-            mock_build.assert_called_once_with(role="judge")
+        with pytest.raises(ValidationError, match="'no-such-provider', which is not registered"):
+            self._make_registry_patched(agents=agents)
 
     def test_override_uses_agent_temperature(self) -> None:
         agents = {"network": AgentLLMConfig(provider="openai", model="gpt-4o", temperature=0.3)}
@@ -237,16 +236,24 @@ class TestBuildModelForAgent:
         call_kwargs = mock_provider.build_model.call_args
         assert call_kwargs.kwargs.get("temperature") == pytest.approx(0.1)
 
-    def test_unknown_provider_in_override_falls_back(self) -> None:
-        """Unknown provider in override falls back to global expert LLM with a warning."""
-        agents = {"static": AgentLLMConfig(provider="nonexistent", model="foo")}
-        registry = self._make_registry_patched(agents=agents)
+    def test_unknown_provider_in_override_is_refused_by_the_builder(self) -> None:
+        """An entry past the save check is refused at build, never built on the global model."""
+        from maljan.core.exceptions import LLMError
 
+        registry = self._make_registry_patched(agents={})
+        registry._config.llm.agents["static"] = AgentLLMConfig.model_construct(
+            provider="nonexistent",
+            model="foo",
+            temperature=None,
+            base_url=None,
+            effort=None,
+            fallbacks=[],
+        )
         with patch.object(registry, "build_model") as mock_build:
-            mock_build.return_value = MagicMock()
             with patch("maljan.llm.registry._PROVIDER_REGISTRY", {"openai": MagicMock()}):
-                registry.build_model_for_agent("static")
-            mock_build.assert_called_once_with(role="expert")
+                with pytest.raises(LLMError, match="not registered"):
+                    registry.build_model_for_agent("static")
+            mock_build.assert_not_called()
 
 
 class TestPerAgentBaseUrl:

@@ -10,6 +10,7 @@ least.
 
 from __future__ import annotations
 
+import json
 import logging
 
 import pytest
@@ -227,3 +228,113 @@ class TestUnreportedUsage:
         assert snapshot["unreported_calls"] == 2
         assert sum("reported no usage" in r.getMessage() for r in caplog.records) == 1
         assert spend_lines(snapshot)[0].startswith("Spent at least 0.0000 USD")
+
+
+class TestACallSentWithNoCapOfItsOwn:
+    """Cap 0: no output cap of its own, priced at the most it may answer, never refused for it."""
+
+    MODEL = "unlisted-model-x"
+
+    @pytest.fixture(autouse=True)
+    def _nothing_learned(self):
+        from maljan.llm import model_output_limits
+
+        model_output_limits.forget_learned()
+        yield
+        model_output_limits.forget_learned()
+
+    def _meter(self, ceiling: float = 1.0) -> SpendMeter:
+        price = {"input_usd_per_mtok": 1.0, "output_usd_per_mtok": 4.0}
+        return SpendMeter(ceiling, {self.MODEL: price}, table={})
+
+    def _declare(self, tokens: int) -> None:
+        from maljan.llm import model_output_limits
+
+        model_output_limits.note_declared(self.MODEL, tokens, "a test's model list")
+
+    def test_it_is_made_and_latches_nothing(self) -> None:
+        meter = self._meter()
+        meter.admit(kind="summary", model=self.MODEL, prompt_chars=400, cap_tokens=0)
+        assert not meter.exhausted()
+        assert not meter.snapshot().get("held_calls")
+
+    def test_the_fallback_figure_is_sent_as_its_cap_so_the_reservation_holds(self) -> None:
+        meter = self._meter()
+        assert meter.admit(kind="summary", model=self.MODEL, prompt_chars=400, cap_tokens=0) == (
+            8_192
+        )
+        assert (
+            meter.preview(kind="summary", model=self.MODEL, prompt_chars=400, cap_tokens=0) == 8_192
+        )
+        # Not a hold: nothing the ceiling decided is recorded as one.
+        assert not meter.snapshot().get("held_calls")
+
+    def test_a_model_s_declared_maximum_is_not_sent_as_a_cap(self) -> None:
+        self._declare(2_000)
+        meter = self._meter()
+        assert meter.admit(kind="summary", model=self.MODEL, prompt_chars=0, cap_tokens=0) is None
+
+    def test_one_that_cannot_be_held_with_no_declared_maximum_is_refused(self) -> None:
+        """Nothing bounds it: the fallback figure would only be a guess, so it is not made."""
+        from maljan.core.spend import SpendCeilingStop
+
+        meter = self._meter()
+        with pytest.raises(SpendCeilingStop, match="cannot be bounded under the spend ceiling"):
+            meter.admit(
+                kind="summary", model=self.MODEL, prompt_chars=0, cap_tokens=0, holdable=False
+            )
+
+    def test_one_that_cannot_be_held_is_made_when_its_declared_maximum_fits(self) -> None:
+        self._declare(2_000)
+        meter = self._meter()
+        meter.settle({"input_tokens": 990_000, "output_tokens": 0}, self.MODEL)
+        # 2,000 tokens fit the 2,500 the 0.01 USD left pays for: made as it is.
+        assert (
+            meter.admit(
+                kind="summary", model=self.MODEL, prompt_chars=0, cap_tokens=0, holdable=False
+            )
+            is None
+        )
+
+    def test_one_that_cannot_be_held_is_refused_when_its_declared_maximum_does_not_fit(
+        self,
+    ) -> None:
+        from maljan.core.spend import SpendCeilingStop
+
+        self._declare(4_000)
+        meter = self._meter()
+        meter.settle({"input_tokens": 990_000, "output_tokens": 0}, self.MODEL)
+        with pytest.raises(SpendCeilingStop, match="4,000 tokens it may answer with"):
+            meter.admit(
+                kind="summary", model=self.MODEL, prompt_chars=0, cap_tokens=0, holdable=False
+            )
+
+    def test_where_little_is_left_it_is_held_to_what_that_pays_for(self) -> None:
+        meter = self._meter()
+        # 0.99 USD spent, with an answer of 2,500 tokens measured: the 0.01 USD
+        # left at 4 USD a million output tokens pays for 2,500 tokens.
+        meter.settle({"input_tokens": 980_000, "output_tokens": 2_500}, self.MODEL)
+        held = meter.admit(kind="summary", model=self.MODEL, prompt_chars=0, cap_tokens=0)
+        assert held == 2_500
+        (said,) = meter.snapshot()["held_calls"]
+        assert "sent with no cap of its own, so it may answer 8,192 tokens" in said
+        assert "its cap was 0" not in said
+
+    def test_with_nothing_measured_it_needs_the_most_it_may_answer(self) -> None:
+        from maljan.core.spend import SpendCeilingStop
+
+        meter = self._meter()
+        meter.settle({"input_tokens": 990_000, "output_tokens": 0}, self.MODEL)
+        with pytest.raises(SpendCeilingStop, match="the most it may answer, sent with no cap"):
+            meter.admit(kind="summary", model=self.MODEL, prompt_chars=0, cap_tokens=0)
+
+    @pytest.mark.parametrize("kind", ["verdict", "report"])
+    def test_a_planned_tail_call_with_no_cap_is_reserved_for_the_most_it_may_answer(
+        self, kind: str
+    ) -> None:
+        meter = self._meter()
+        meter.plan_tail({kind: (self.MODEL, 1, 0, 0)})
+        snapshot = meter.snapshot()
+        # 8,192 output tokens at 4 USD a million, for the call and its planned retry.
+        assert snapshot["reserve_usd"] >= 8_192 * 4.0 / 1_000_000
+        assert "the most it may answer, sent with no cap" in json.dumps(snapshot["reserve"])

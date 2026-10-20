@@ -222,8 +222,8 @@ def builds_provider(provider: str) -> bool:
     Read from the registry itself (every provider ``register_provider``
     named, the built-in ones discovered first), so a provider a deployment
     plugs in counts as soon as it is registered. An entry naming one the
-    registry does not build is built on its role's global model instead
-    (``build_model_for_agent``), and is read that way here too.
+    registry does not build is refused when it is built
+    (``build_model_for_agent``).
     """
     try:
         from maljan.llm.registry import _PROVIDER_REGISTRY, discover_providers
@@ -250,12 +250,13 @@ def assignment_chain_for(
     model for ``role`` alone when the agent has no entry. A fallback is a
     model the run can reach exactly as the first one is, so everything that
     asks what a run will call — the probe gate, the context window — asks
-    this. An entry whose provider the registry builds nothing for is read as
-    no entry, because the builder then builds the role's global model.
+    this. An entry is read as written even when its provider is not
+    registered here: the builder refuses such an entry rather than build the
+    role's global model, so the gate asks about the model the entry names.
     """
     llm = settings.llm  # type: ignore[attr-defined]
     override = llm.agents.get(agent)
-    if override is not None and builds_provider(str(getattr(override, "provider", ""))):
+    if override is not None:
         chain = override.chain() if hasattr(override, "chain") else [override]
         return [
             _assignment(
