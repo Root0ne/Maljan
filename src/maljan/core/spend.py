@@ -617,6 +617,35 @@ def table_prices() -> dict[str, Price]:
         return _table
 
 
+def _uncapped_output(name: str) -> tuple[int, str]:
+    """``(tokens, where from)``: the most a call sent with no output cap may answer.
+
+    :func:`_uncapped_is_declared` says which of the two it is.
+
+    The model's declared maximum output where its provider or the vendored
+    table states one, else the documented fallback reply the derived caps use
+    for a hosted API that declares none (``context_window.DEFAULT_REPLY_TOKENS``).
+    Only a priced call is asked about, and a priced model is a hosted one.
+    """
+    from maljan.llm.context_window import DEFAULT_REPLY_TOKENS
+    from maljan.llm.model_output_limits import declared_output
+
+    tokens, where = declared_output(name)
+    if tokens > 0:
+        return tokens, f"the model's declared maximum output, from {where}"
+    return DEFAULT_REPLY_TOKENS, (
+        f"the documented fallback reply of {DEFAULT_REPLY_TOKENS:,} tokens, the model "
+        "declaring no maximum output"
+    )
+
+
+def _uncapped_is_declared(name: str) -> bool:
+    """Whether :func:`_uncapped_output` for ``name`` is the model's own declared maximum."""
+    from maljan.llm.model_output_limits import declared_output
+
+    return declared_output(name)[0] > 0
+
+
 def _clean(model: str) -> str:
     """A model name as the tables key it: lower-cased, without its endpoint or vendor path.
 
@@ -662,6 +691,7 @@ class _Decision:
         "available",
         "bound",
         "cap",
+        "fallback_cap",
         "input_cost",
         "minimum",
         "minimum_said",
@@ -684,6 +714,9 @@ class _Decision:
         self.minimum = 0
         self.minimum_said = ""
         self.cap = 0
+        # Set when a call sent with no cap of its own is given one only because
+        # the most it may answer is the fallback figure, not a model's limit.
+        self.fallback_cap = 0
 
 
 class SpendMeter:
@@ -1185,7 +1218,9 @@ class SpendMeter:
         ``{kind: (model, calls[, prompt tokens[, output cap]])}``: the prompt is
         what the window accounting allows that kind of call (its window less
         its output budget), ``0`` where no window is known; the cap is the
-        output cap the call is admitted with, ``0`` unknown.
+        output cap the call is admitted with, ``0`` for none known, which is
+        planned, with nothing measured, at the most a call sent with no cap may
+        answer (the model's declared maximum output, else the fallback reply).
         """
         with self._lock:
             for kind, row in calls.items():
@@ -1262,6 +1297,11 @@ class SpendMeter:
                     break
         if tokens and cap and tokens > cap:
             return cap, f"{said}, bounded by its cap of {cap:,}"
+        if not tokens and cap <= 0:
+            # Planned with no cap of its own and nothing measured: reserved for
+            # the most it may answer, never for nothing.
+            most, where = _uncapped_output(name)
+            return most, f"the most it may answer, sent with no cap ({where})"
         return tokens, said
 
     def _planned_retries_locked(self, kind: str, firsts: int) -> tuple[int, str]:
@@ -1391,6 +1431,11 @@ class SpendMeter:
                     min(measured, cap) if cap else measured,
                     f"the largest {what} this job has measured of {name}",
                 )
+        if cap <= 0:
+            # Sent with no cap of its own: the most it may answer is what it
+            # may need, so a planned call of it is reserved for that.
+            tokens, said = _uncapped_output(name)
+            return tokens, f"the most it may answer, sent with no cap ({said})"
         return cap, "its configured output cap, with no answer of its kind measured yet"
 
     def _decide_locked(
@@ -1416,6 +1461,22 @@ class SpendMeter:
             return decision
         if price is None:
             return decision
+        # A call sent with no output cap of its own (cap 0) is not refused for
+        # want of one: it is priced at the most it may answer, the model's
+        # declared maximum output, else the documented fallback reply.
+        uncapped_said = ""
+        if cap <= 0:
+            if not holdable and not _uncapped_is_declared(name):
+                # Nothing bounds its answer: no cap is sent, none can be, and
+                # the model declares no maximum, so no reservation could hold.
+                decision.refused = (
+                    "it is sent with no output cap, its model takes none per call, and the "
+                    "model declares no maximum output, so what it may cost cannot be bounded "
+                    "under the spend ceiling"
+                )
+                return decision
+            cap, uncapped_said = _uncapped_output(name)
+            decision.cap = cap
         others = (
             sum(v for k, v in self._reserved.items() if k is not slot) if count_reserved else 0.0
         )
@@ -1424,6 +1485,11 @@ class SpendMeter:
         available = float(self.ceiling_usd or 0.0) - committed - reserve
         input_cost = prompt_tokens * price.input / MILLION
         minimum, minimum_said = self._minimum_locked(kind, name, cap)
+        if uncapped_said and minimum == cap:
+            minimum_said = (
+                f"the most it may answer, sent with no cap ({uncapped_said}), with no answer "
+                "of its kind measured yet"
+            )
         # A loop turn keeps room for the loop's closing answer after it.
         closing = input_cost + minimum * price.output / MILLION if kind in LOOP_KINDS else 0.0
         spendable = available - input_cost - closing
@@ -1438,16 +1504,23 @@ class SpendMeter:
         if spendable >= 0 and (price.output <= 0 or (cap and room >= cap)):
             decision.bound = None
             decision.reservation = input_cost + cap * price.output / MILLION
+            if uncapped_said and holdable and price.output > 0 and not _uncapped_is_declared(name):
+                # The fallback figure is what was reserved, and only a model's
+                # own limit stops an uncapped answer from running past it: it
+                # is sent as the call's cap, so the reservation holds.
+                decision.bound = cap
+                decision.fallback_cap = cap
             return decision
         if holdable and cap and room >= max(minimum, 1):
             decision.bound = room
             decision.reservation = input_cost + room * price.output / MILLION
             return decision
-        needed = (
-            f"its whole {cap:,}-token cap (its model takes no cap of its own per call)"
-            if not holdable
-            else f"the {minimum:,} tokens of the smallest answer it can give ({minimum_said})"
-        )
+        if not holdable and uncapped_said:
+            needed = f"the {cap:,} tokens it may answer with, sent with no cap ({uncapped_said})"
+        elif not holdable:
+            needed = f"its whole {cap:,}-token cap (its model takes no cap of its own per call)"
+        else:
+            needed = f"the {minimum:,} tokens of the smallest answer it can give ({minimum_said})"
         decision.refused = (
             f"the {decision.available:.4f} USD it may spend under the spend ceiling of "
             f"{self.ceiling_usd:.4f} USD"
@@ -1647,10 +1720,24 @@ class SpendMeter:
             self._note_held(said)
             self._exhaust_if_nothing_fits(said, now)
             raise SpendCeilingStop(said)
-        if decision.bound is not None:
+        if decision.fallback_cap:
+            logger.debug(
+                "spend ceiling: the %s call of %s, sent with no cap of its own, is sent with a "
+                "cap of %d tokens: the most it was reserved for, its model declaring no maximum "
+                "output.",
+                kind,
+                name,
+                decision.fallback_cap,
+            )
+        elif decision.bound is not None:
+            had = (
+                f"its cap was {cap:,}"
+                if cap
+                else f"it was sent with no cap of its own, so it may answer {decision.cap:,} tokens"
+            )
             self._note_held(
                 f"the {kind} call of {name} was held to {decision.bound:,} output tokens "
-                f"(its cap was {cap:,}): what the {decision.available:.4f} USD it may spend "
+                f"({had}): what the {decision.available:.4f} USD it may spend "
                 "under the spend ceiling pays for after its prompt "
                 f"({decision.input_cost:.4f} USD)"
                 + (

@@ -259,7 +259,8 @@ class LLMProviderRegistry:
             agent_name: The agent registry key (e.g. "static", "dynamic",
                         "network"). Case-insensitive lookup.
             fallback_role: Role passed to ``build_model`` when the agent has
-                        no usable override.
+                        no override. An override naming a provider that is
+                        not registered raises ``LLMError``.
             **kwargs:   Extra kwargs forwarded to the provider.
 
         Returns:
@@ -279,13 +280,12 @@ class LLMProviderRegistry:
         # Per-agent override found
         provider_cls = _PROVIDER_REGISTRY.get(agent_cfg.provider)
         if provider_cls is None:
-            logger.warning(
-                "Agent '%s': %s. Falling back to the %s role's model.",
-                agent_name,
-                unknown_provider(agent_cfg.provider),
-                fallback_role,
+            # Never the role's global model in its place: the agent would run a
+            # model nobody chose for it, which is what its entry exists to stop.
+            raise LLMError(
+                f"Agent '{agent_name}' names a provider that is not registered: "
+                f"{unknown_provider(agent_cfg.provider)}."
             )
-            return self.build_model(role=fallback_role, **kwargs)
 
         fallbacks = list(getattr(agent_cfg, "fallbacks", None) or [])
         primary = self._build_choice(agent_name, agent_cfg, None, 0, **kwargs)

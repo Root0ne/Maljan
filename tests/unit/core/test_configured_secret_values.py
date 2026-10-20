@@ -196,3 +196,36 @@ def test_every_sandbox_api_token_stays_secret_by_the_generic_rules() -> None:
     # A stored map keyed by the retired flat name is still a credential key.
     assert names_a_credential_value("cape2_api_token")
     assert configured_secret_values({"stored": {"cape2_api_token": held}}) == {held}
+
+
+def test_a_block_kept_as_an_extra_key_is_scrubbed() -> None:
+    """A block no field declares (a plugin's ``llm.<id>``) is read as a field is."""
+    from pydantic import ConfigDict
+
+    class _Open(BaseModel):
+        model_config = ConfigDict(extra="allow")
+        provider: str = "acme"
+
+    class _PluginBlock(BaseModel):
+        api_key: SecretStr | None = None
+        model: str = "acme-small"
+
+    as_model, as_stored, flat = password(variant=1), password(variant=2), password(variant=3)
+    held = _Open(
+        acme=_PluginBlock(api_key=SecretStr(as_model)),
+        unloaded={"api_key": as_stored, "model": "kept-as-stored"},
+        api_key=flat,
+    )
+
+    found = configured_secret_values(held)
+
+    assert {as_model, as_stored, flat} <= found
+    assert "acme-small" not in found and "kept-as-stored" not in found
+
+
+def test_an_unregistered_provider_block_in_the_settings_is_scrubbed() -> None:
+    from maljan.core.config import Settings
+
+    secret = password(variant=4)
+    built = Settings(_env_file=None, llm={"someplugin": {"api_key": secret}})
+    assert secret in configured_secret_values(built)

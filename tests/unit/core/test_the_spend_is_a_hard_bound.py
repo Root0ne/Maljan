@@ -159,10 +159,13 @@ class TestTheReserveForTheVerdictAndTheReport:
             )
         assert meter.snapshot().get("reserve_usd") is None
 
-    def test_with_nothing_measured_it_is_not_sized(self) -> None:
+    def test_with_nothing_measured_and_no_cap_it_is_sized_at_the_most_it_may_answer(self) -> None:
+        """Never sized at nothing: a planned call with no cap may answer its model's most."""
         meter = _meter(measured=0)
         meter.plan_tail({"verdict": (MODEL, 1), "report": (MODEL, 16)})
-        assert "reserve_usd" not in meter.snapshot()
+        snapshot = meter.snapshot()
+        assert snapshot["reserve_usd"] > 0
+        assert "the most it may answer, sent with no cap" in str(snapshot["reserve"])
 
 
 class TestASimulatedJob:

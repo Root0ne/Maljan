@@ -1088,11 +1088,17 @@ class OpenAIProvider(LLMProvider):
     guide_leaves = (
         "api_key",
         "base_url",
+        "allow_plain_http",
         "disable_thinking",
         "reasoning_effort",
         "repetition_penalty",
     )
-    guide_advanced_leaves = ("disable_thinking", "reasoning_effort", "repetition_penalty")
+    guide_advanced_leaves = (
+        "allow_plain_http",
+        "disable_thinking",
+        "reasoning_effort",
+        "repetition_penalty",
+    )
     sdk_packages = frozenset({"openai"})
     llm_types = ("openai-chat",)
     timeout_kwarg = "request_timeout"

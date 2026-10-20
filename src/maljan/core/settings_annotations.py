@@ -691,10 +691,26 @@ ANNOTATIONS: dict[str, Annotation] = {
             "Overrides the OpenAI API endpoint to target an OpenAI-compatible server "
             "instead of api.openai.com — a local llama.cpp/ik_llama.cpp server, Kimi "
             "(Moonshot), DeepSeek, or Azure OpenAI. Leave empty to use OpenAI's own "
-            "endpoint."
+            "endpoint. With an API key set, plain http is taken only for a host inside this "
+            "deployment (loopback, a private or link-local address, a container host name, a "
+            ".local or .internal name, a single-label service name) unless "
+            "llm.openai.allow_plain_http is set; an agent's own base_url on this provider "
+            "follows the same rule."
         ),
         "probe": "llm",
         "subgroup": "OpenAI",
+    },
+    "llm.openai.allow_plain_http": {
+        "title": "Plain http to any host",
+        "description": (
+            "Off by default: with an API key set, a plain-http OpenAI base URL (or an agent's "
+            "own base_url on this provider) is taken only for a host inside this deployment. "
+            "On, it is taken for any host, and the API key is then sent in clear text to that "
+            "address with every request, readable by anything on the network between. Turn "
+            "it on only for a keyed server on a network you trust; prefer https."
+        ),
+        "subgroup": "OpenAI",
+        "advanced": True,
     },
     "llm.openai.compat": {
         "title": "OpenAI endpoint dialect",

@@ -571,6 +571,13 @@ def configured_secret_values(*sources: Any) -> set[str]:
                 if key in _FIELD_MAPS:
                     continue
                 _walk(getattr(value, key, None), key, key in _SECRET_NAMES)
+            # A model that keeps extra keys holds blocks no field declares: a
+            # plugin's ``llm.<id>`` or ``memory.<id>`` settings, read with its
+            # own settings model or kept as stored. Their keys are read as a
+            # field's are, so a plugin's credential is scrubbed like a shipped one.
+            for key, item in (getattr(value, "__pydantic_extra__", None) or {}).items():
+                name = str(key)
+                _walk(item, name, name in _SECRET_NAMES or names_a_credential_value(name))
         elif isinstance(value, dict):
             for key, item in value.items():
                 _walk(item, str(key), names_a_credential_value(str(key)))
