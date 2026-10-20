@@ -4827,8 +4827,19 @@ class BaseAnalyst(BudgetMeter, ABC):
         See ``agents.tool_pinning`` for what the guard does and why it is this
         narrow. With no pinned path the resolved tools come back unwrapped.
         """
+        from maljan.agents.composition import hold_sample_paths
         from maljan.agents.tool_pinning import pin_paths
 
+        # The job's own copy of the sample on each server behind these tools:
+        # on a server other jobs share, the only path an open may name.
+        try:
+            registry = self._server_registry()
+        except Exception:  # noqa: BLE001 - no registry holds no path; opens stay refused
+            registry = None
+        if registry is not None:
+            hold_sample_paths(
+                registry, list(self.tools), self._path_by_server, self._analysis_file_path
+            )
         return pin_paths(
             list(self.tools),
             default_path=self._analysis_file_path,

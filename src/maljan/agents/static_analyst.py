@@ -251,6 +251,13 @@ class StaticAnalyst(BaseAnalyst):
         pool = stamp_source(
             provider.get_tools(), PROVIDER_FAMILY, declared=provider_source(provider)
         )
+        # A tool the provider withholds is said where it is withheld.
+        from maljan.providers.base import record_provider_withheld
+
+        own = list(getattr(self, "degradation_reasons", None) or [])
+        record_provider_withheld(provider, self._server_registry(), own)
+        if own:
+            self.degradation_reasons = own
         # No ``self.toolkit`` assignment here: the provider holds its own client
         # privately and closes it itself (``ServiceContainer.aclose`` calls
         # ``get_static_provider().close()``), so there is nothing for this

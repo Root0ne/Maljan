@@ -24,6 +24,7 @@ from typing import Any
 import pytest
 from pydantic import SecretStr
 
+from maljan.core.config import GHIDRA_SAMPLE_OPEN
 from maljan.core.exceptions import SampleNotOpened
 from maljan.providers.static.ghidra.program import program_name_from_load
 
@@ -90,7 +91,9 @@ def _patch_settings(monkeypatch: pytest.MonkeyPatch, analyst: Any) -> None:
         transport = "http"
         url = "http://ghidra.invalid"
         auth_token = SecretStr("")
-        sample_open = None
+        # Declared, as Ghidra ships: on a Ghidra other jobs share (http), the
+        # graph is read only for the program the job opened.
+        sample_open = GHIDRA_SAMPLE_OPEN
 
     class _P:
         use_sink_reachability = True

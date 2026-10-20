@@ -506,6 +506,16 @@ class StaticProvider(ABC):
 
         return get_settings().preprocessing
 
+    def withheld_reasons(self) -> list[str]:
+        """Why each tool this provider holds back from its agents is withheld, for the run.
+
+        Empty by default. A provider that withholds a tool (on a server other
+        jobs share, one it cannot hold to the job's own program) says why
+        here, and the agent attaching its tools puts each reason on the job's
+        degraded record (``record_provider_withheld``).
+        """
+        return []
+
     def call_graph(self, path: str) -> CallGraph | None:
         """The opened program's call graph in the neutral shape, or ``None`` without one.
 
@@ -861,3 +871,20 @@ class SandboxProvider(ABC):
 
     def close(self) -> None:
         return None
+
+
+def record_provider_withheld(provider: Any, registry: Any, own: list[str] | None = None) -> None:
+    """Put each tool ``provider`` withholds, with its reason, on the job's degraded record.
+
+    ``registry`` is the job's server registry, whose ``degradation_reasons``
+    the run summary reads; ``own``, when given, an agent's own list, which
+    is extended in place. Each reason is put once.
+    """
+    reader = getattr(provider, "withheld_reasons", None)
+    reasons = reader() if callable(reader) else []
+    held = getattr(registry, "degradation_reasons", None)
+    for reason in reasons if isinstance(reasons, list) else []:
+        if own is not None and reason not in own:
+            own.append(reason)
+        if isinstance(held, list) and reason not in held:
+            held.append(reason)

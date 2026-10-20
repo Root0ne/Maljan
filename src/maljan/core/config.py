@@ -1260,6 +1260,19 @@ class SampleOpenConfig(BaseModel):
     opened (the value the select and analysis tools are given); empty means
     the path itself. All empty declares nothing, and the server's tools are
     offered as they are.
+
+    On a server other jobs share (one reached at an address), the server's
+    current program is every job's, so each call is held to the job's own
+    (``sample_open.pin_program_argument``): ``program_arguments`` names the
+    further arguments a tool names an opened program by (a diff's two
+    programs, say), checked against the programs the job opened beside
+    ``select_argument`` and ``analyse_argument``; ``open_path_arguments`` the
+    further arguments that name a file a tool opens, beside
+    ``path_argument``, which may only name the job's own copy of the sample;
+    and ``job_safe_tools`` the tools that take neither and read nothing a job
+    opened (a number converter, a lookup). Any other tool is withheld there,
+    as is every tool ``shared_withheld_tools`` lists (one that runs code or
+    changes the whole project), whatever arguments it takes.
     """
 
     open_tool: str = ""
@@ -1269,13 +1282,25 @@ class SampleOpenConfig(BaseModel):
     select_argument: str = ""
     analyse_tool: str = ""
     analyse_argument: str = ""
+    program_arguments: list[str] = Field(default_factory=list)
+    open_path_arguments: list[str] = Field(default_factory=list)
+    job_safe_tools: list[str] = Field(default_factory=list)
+    shared_withheld_tools: list[str] = Field(default_factory=list)
 
     @model_validator(mode="after")
     def _an_open_tool_names_its_path(self) -> "SampleOpenConfig":
         rest = (self.name_field, self.select_tool, self.select_argument, self.analyse_tool)
         if self.open_tool and not self.path_argument:
             raise ValueError("sample_open.open_tool needs path_argument, where the path goes")
-        if not self.open_tool and (self.path_argument or any(rest) or self.analyse_argument):
+        held = (
+            self.program_arguments,
+            self.open_path_arguments,
+            self.job_safe_tools,
+            self.shared_withheld_tools,
+        )
+        if not self.open_tool and (
+            self.path_argument or any(rest) or self.analyse_argument or any(held)
+        ):
             raise ValueError("sample_open declares a select or analysis tool but no open_tool")
         return self
 
@@ -1292,6 +1317,16 @@ GHIDRA_SAMPLE_OPEN = SampleOpenConfig(
     select_argument="program",
     analyse_tool="run_analysis",
     analyse_argument="program",
+    # Held to the job on a Ghidra other jobs share: the further arguments
+    # that name a program, the further one that names a file to open, and the
+    # tools that take neither and read nothing a job opened.
+    program_arguments=["program_a", "program_b", "source_program", "target_program"],
+    open_path_arguments=["file_path"],
+    # Ghidra's own tools that take no program and read nothing a job opened.
+    job_safe_tools=["convert_number", "list_scripts"],
+    # Ghidra's tools that run code or change the whole project, whatever
+    # program they are given.
+    shared_withheld_tools=["create_folder", "run_ghidra_script", "run_script_inline"],
 )
 
 

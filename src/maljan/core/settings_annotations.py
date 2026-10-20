@@ -1826,6 +1826,32 @@ def mcp_server_annotations(
             "analysis tool's argument",
             "The argument the opened name goes in; empty calls the tool with none.",
         ),
+        (
+            "program_arguments",
+            "further program arguments",
+            "Further arguments a tool names an opened program by (a diff's two programs, "
+            "say). On a server other jobs share, each one a call carries must name a "
+            "program this job opened, and one it leaves out is given the job's program.",
+        ),
+        (
+            "open_path_arguments",
+            "further open path arguments",
+            "Further arguments that name a file a tool opens, beside the open tool's. On "
+            "a server other jobs share, each may only name the job's own copy of the sample.",
+        ),
+        (
+            "job_safe_tools",
+            "job-safe tools",
+            "Tools that take no program or path argument and read nothing a job opened (a "
+            "number converter, a lookup). On a server other jobs share, any other tool "
+            "whose schema takes no declared program or path argument is withheld.",
+        ),
+        (
+            "shared_withheld_tools",
+            "tools withheld when shared",
+            "Tools withheld on a server other jobs share whatever arguments they take: "
+            "ones that run code or change the whole project, past the job's own program.",
+        ),
     ):
         entries[f"{sample_open}.{leaf}"] = ann(
             f"{label} {title}", description, subgroup="Opening the sample", advanced=True

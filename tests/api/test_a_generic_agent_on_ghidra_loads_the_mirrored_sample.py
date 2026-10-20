@@ -93,9 +93,15 @@ def _provider(url: str) -> GhidraStaticProvider:
     return provider
 
 
-def _load(provider: GhidraStaticProvider, file: str) -> None:
+def _load(provider: GhidraStaticProvider, file: str) -> str:
     tool = next(t for t in provider.get_tools() if t.name == "load_program")
-    run_coro_blocking(tool.coroutine(file=file), hard_timeout=20.0, label="test-load")
+    return str(run_coro_blocking(tool.coroutine(file=file), hard_timeout=20.0, label="test-load"))
+
+
+def _refused_as_foreign(answer: str) -> bool:
+    """Whether ``answer`` is the refusal of a path that is not the job's own sample."""
+    error = (json.loads(answer) or {}).get("error") or {}
+    return error.get("code") == "foreign_program"
 
 
 class _Registry:
@@ -146,15 +152,18 @@ def test_the_container_path_is_what_ghidra_is_asked_to_load(ghidra, sent: str) -
     assert handler.loaded == [MIRROR]
 
 
-def test_without_the_pin_the_model_s_path_went_through(ghidra) -> None:
-    """The state the pin fixes: resolution's attach knew no path."""
+def test_without_the_pin_the_model_s_path_is_not_sent(ghidra) -> None:
+    """The state the pin fixes: resolution's attach knew no path. The model's
+    path used to go through; on a Ghidra other jobs share (http) a path that is
+    not the job's own sample is refused before it is sent, and said."""
     url, handler = ghidra
     provider = _provider(url)
     try:
-        _load(provider, HOST)
+        answer = _load(provider, HOST)
     finally:
         provider.close()
-    assert handler.loaded == [HOST]
+    assert handler.loaded == []
+    assert _refused_as_foreign(answer)
 
 
 def test_an_agent_without_the_provider_s_tools_pins_nothing(ghidra) -> None:
@@ -164,10 +173,13 @@ def test_an_agent_without_the_provider_s_tools_pins_nothing(ghidra) -> None:
         agent = _reverser(provider)
         agent.tools = []
         pin_provider_sample(agent, {"ghidra": MIRROR})
-        _load(provider, HOST)
+        answer = _load(provider, HOST)
     finally:
         provider.close()
-    assert handler.loaded == [HOST]
+    # Nothing pinned: the model's path is not the job's held sample, so it is
+    # refused rather than sent to a Ghidra other jobs share.
+    assert handler.loaded == []
+    assert _refused_as_foreign(answer)
 
 
 def test_the_analyst_node_pins_it_with_the_agent_s_own_mirror(ghidra) -> None:
@@ -230,11 +242,14 @@ def test_only_the_provider_s_own_mirror_is_pinned(ghidra) -> None:
         agent.degradation_reasons = []
         pin_provider_sample(agent, {"ghidra": MIRROR})
         pin_provider_sample(agent, {"none": HOST})
-        _load(provider, "/tmp/invented/sample.exe")
+        answer = _load(provider, "/tmp/invented/sample.exe")
         registry = agent._container.registry
     finally:
         provider.close()
-    assert handler.loaded == ["/tmp/invented/sample.exe"]
+    # The pin from before is cleared, so no path is the job's own on this
+    # shared Ghidra: the invented one is refused, never sent.
+    assert handler.loaded == []
+    assert _refused_as_foreign(answer)
     assert agent.degradation_reasons == ["sample not mirrored for ghidra"]
     assert registry.degradation_reasons == ["sample not mirrored for ghidra"]
 
@@ -265,3 +280,22 @@ def test_a_delegation_pins_the_callee_s_own_mirror(ghidra) -> None:
     finally:
         provider.close()
     assert handler.loaded == [MIRROR]
+
+
+def test_on_a_ghidra_no_other_job_shares_the_model_s_path_goes_through(ghidra) -> None:
+    """Unshared, as on stdio: with no pin, the model's own load runs as it was
+    made, the behaviour before the shared-server rules (one Ghidra per job holds
+    only that job's programs)."""
+    url, handler = ghidra
+    provider = _provider(url)
+    try:
+        # The same client and fake Ghidra, the block declared a local process:
+        # what decides "shared" is the transport the block names.
+        provider._cfg = provider._cfg.model_copy(update={"transport": "stdio"})
+        provider._all_tools = provider._pin_load_program_path(
+            provider._reading_errors(provider._toolkit.get_tools())
+        )
+        _load(provider, HOST)
+    finally:
+        provider.close()
+    assert handler.loaded == [HOST]

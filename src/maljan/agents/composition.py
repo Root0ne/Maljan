@@ -616,8 +616,16 @@ def _provider_tools(container: Any, definition: AgentDefinition, provider_id: st
         )
     )
     from maljan.agents.prompt_fragments import PROVIDER_FAMILY, provider_source, stamp_source
+    from maljan.providers.base import record_provider_withheld
 
-    return stamp_source(provider.get_tools(), PROVIDER_FAMILY, declared=provider_source(provider))
+    tools = provider.get_tools()
+    # A tool the provider withholds is said where it is withheld.
+    try:
+        registry = container.get_server_registry()
+    except Exception:  # noqa: BLE001 - the reasons are still logged where withheld
+        registry = None
+    record_provider_withheld(provider, registry)
+    return stamp_source(tools, PROVIDER_FAMILY, declared=provider_source(provider))
 
 
 def _sandbox_tools(container: Any, definition: AgentDefinition) -> list[Any]:
@@ -985,6 +993,37 @@ def _mounted(container: Any, tools: list[Any], staged: dict[str, str]) -> dict[s
     return out
 
 
+def hold_sample_paths(
+    registry: Any,
+    tools: list[Any],
+    path_by_server: dict[str, str] | None,
+    default_path: str | None = None,
+) -> None:
+    """Note on the job's registry where each server behind ``tools`` holds the job's sample.
+
+    The server's own path (``path_by_server``: its mirror under the declared
+    mount, or where the sample was staged to it), else ``default_path``, the
+    agent's own, which never replaces a server's own path another agent
+    noted: on a server other jobs share, the only path an open may name
+    (``ServerRegistry.hold_sample_path``). With neither, nothing is noted and
+    every open there stays refused.
+    """
+    hold = getattr(registry, "hold_sample_path", None)
+    if not callable(hold):
+        return
+    from maljan.agents.tool_pinning import server_of
+
+    paths = dict(path_by_server or {})
+    for key in dict.fromkeys(server_of(tool) for tool in tools):
+        if not key:
+            continue
+        if paths.get(key):
+            hold(key, paths[key])
+        elif default_path:
+            # The agent's own path: never in the place of a server's own.
+            hold(key, default_path, fallback=True)
+
+
 def _stage(container: Any, tools: list[Any], job_key: str) -> tuple[dict[str, str], list[str]]:
     """``_astage`` for the synchronous resolver, on the shared agent loop.
 
@@ -1058,6 +1097,7 @@ def resolve_agent(key: str, container: Any, job_key: str = "job") -> ResolvedAge
     deduped = _dedupe(tools)
     staged, staging_reasons = _stage(container, deduped, job_key)
     staged = _mounted(container, deduped, staged)
+    hold_sample_paths(registry, deduped, staged)
     reasons.extend(staging_reasons)
     note_for_resolved(settings, definition, key, deduped)
     return ResolvedAgent(
@@ -1135,6 +1175,7 @@ async def aresolve_agent(key: str, container: Any, job_key: str = "job") -> Reso
         container.get_server_registry(), container, deduped, job_key
     )
     staged = _mounted(container, deduped, staged)
+    hold_sample_paths(registry, deduped, staged)
     reasons.extend(staging_reasons)
     note_for_resolved(settings, definition, key, deduped)
     return ResolvedAgent(

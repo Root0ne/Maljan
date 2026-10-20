@@ -248,6 +248,10 @@ class ServerHandle:
     """One configured MCP server, attached for at most one job at a time."""
 
     def __init__(self, name: str, config: MCPServerConfig) -> None:
+        # The tools decided for the manifest this handle holds (``tools``),
+        # and how many times a manifest was attached: the key it is kept by.
+        self._tools_cache: tuple[Any, list[Any]] | None = None
+        self._attach_count = 0
         self.name = name
         self.config = config
         self._toolkit: Any = None
@@ -285,7 +289,11 @@ class ServerHandle:
         # What the server said it can do on its host, read once per attach
         # from its ``capabilities`` tool when it offers one; ``None`` for a
         # server that does not, or whose answer could not be read.
-        self.capabilities: ServerCapabilities | None = None
+        self._capabilities: ServerCapabilities | None = None
+        # The tools withheld because they could not be made to carry the
+        # job's program on a shared server (``sample_open.pin_program_argument``),
+        # each with its reason; read with the manifest's in ``withheld_reasons``.
+        self._unpinned: dict[str, str] = {}
         # The name and version the server gave for itself at its last attach
         # (MCP ``serverInfo``), kept after the handle closes: the run
         # fingerprint is read once the run's last tool call is made.
@@ -304,7 +312,7 @@ class ServerHandle:
         # (``providers.sample_open``), set by the registry that owns the
         # handle; a handle built outside one has none and offers its open tool
         # as it is.
-        self.sample_notes: Any = None
+        self._sample_notes: Any = None
         # How this server's answers say "error" is its declaration
         # (``error_patterns``), read by one function for every server
         # (``providers.declared_errors``). An adapter that reads them itself,
@@ -313,6 +321,11 @@ class ServerHandle:
         # job's sample, which a remediation may name.
         self.reads_own_errors = False
         self.error_sample_path: Callable[[], str | None] | None = None
+        # The job's own copy of the sample on this server, set by the job's
+        # registry once an agent's sample is mirrored or staged there
+        # (``ServerRegistry.hold_sample_path``): on a server other jobs share,
+        # the only path an open may name. ``None`` refuses every open there.
+        self.held_sample_path: str | None = None
         # This handle's own process, for a local server's note key; a number
         # never reused, unlike an object's id.
         from maljan.providers.sample_open import new_instance
@@ -320,6 +333,28 @@ class ServerHandle:
         self._note_instance = new_instance()
         _LIVE_HANDLES.add(self)
         _register_retirement_hook()
+
+    @property
+    def capabilities(self) -> ServerCapabilities | None:
+        """What the server said it can do on its host, read at its attach."""
+        return self._capabilities
+
+    @capabilities.setter
+    def capabilities(self, manifest: ServerCapabilities | None) -> None:
+        # Another host manifest withholds other tools.
+        self._capabilities = manifest
+        self._tools_cache = None
+
+    @property
+    def sample_notes(self) -> Any:
+        """The job's note of the paths this server opened (``providers.sample_open``)."""
+        return self._sample_notes
+
+    @sample_notes.setter
+    def sample_notes(self, notes: Any) -> None:
+        # Another job's note is another decision about the tools.
+        self._sample_notes = notes
+        self._tools_cache = None
 
     @property
     def is_open(self) -> bool:
@@ -556,6 +591,7 @@ class ServerHandle:
         self._note_isolation()
         self._all_tools = list(toolkit.get_tools())
         self._read_capabilities()
+        self._attach_count += 1
         allowed = self.config.tools
         if allowed:
             manifest = {str(getattr(t, "name", "")) for t in self._all_tools}
@@ -627,6 +663,7 @@ class ServerHandle:
         self._note_isolation()
         self._all_tools = list(toolkit.get_tools())
         await self._aread_capabilities()
+        self._attach_count += 1
 
     async def _acleanup(self, toolkit: Any) -> bool:
         """Best-effort async close of ``toolkit`` **on the caller's loop**.
@@ -1064,7 +1101,36 @@ class ServerHandle:
             return
         self._keep_capabilities(payload)
 
+    def _held_path(self) -> str | None:
+        """The job's own copy of the sample on this server: the path the job
+        holds there (``held_sample_path``), else the one its provider answers."""
+        if self.held_sample_path:
+            return self.held_sample_path
+        answer = self.error_sample_path() if self.error_sample_path is not None else None
+        return answer if isinstance(answer, str) and answer else None
+
     def tools(self) -> list[BaseTool]:
+        """The tools the model may call, decided once per manifest (:meth:`_build_tools`).
+
+        Every reader (an agent's merge, a reference, ``withheld_reasons``)
+        reads the same decision, so the wrappers are built once for each
+        manifest, allow-list, host manifest, declaration and job note this
+        handle holds, not once per reader.
+        """
+        allowed = self.config.tools
+        key = (
+            tuple(str(getattr(tool, "name", "")) for tool in self._all_tools),
+            self._attach_count,
+            None if allowed is None else tuple(allowed),
+            self.config.transport,
+            repr(getattr(self.config, "sample_open", None)),
+            self.reads_own_errors,
+        )
+        if self._tools_cache is None or self._tools_cache[0] != key:
+            self._tools_cache = (key, self._build_tools())
+        return list(self._tools_cache[1])
+
+    def _build_tools(self) -> list[BaseTool]:
         """The tools the model may call: the allow-list applied to the manifest.
 
         ``None`` is "everything the server offers" and is what the two
@@ -1080,7 +1146,12 @@ class ServerHandle:
         it, so the reason and the remedy reach the operator and the degraded
         block. A server that answered no manifest is offered whole, as before.
         """
-        from maljan.providers.sample_open import mark_open_tool, wrap_open_tool
+        from maljan.providers.sample_open import (
+            REMOTE_TRANSPORTS,
+            mark_open_tool,
+            pin_program_argument,
+            wrap_open_tool,
+        )
 
         allowed = self.config.tools
         withheld = self.capabilities.unusable() if self.capabilities else frozenset()
@@ -1112,31 +1183,58 @@ class ServerHandle:
         # A server that declares its open tool has that tool answered through
         # the job's note: a path opened once is not opened again.
         spec = getattr(self.config, "sample_open", None)
-        return mark_open_tool(
+        shared = self.config.transport in REMOTE_TRANSPORTS
+        marked = mark_open_tool(
             wrap_open_tool(
                 offered,
                 every_tool,
                 server=self.note_key,
                 spec=spec,
                 notes=self.sample_notes,
+                held_path=self._held_path,
+                shared=shared,
             ),
             spec,
             every_tool,
         )
+        # On a server other jobs share, every call is held to the job's own
+        # programs and sample: the server's current program is every client's.
+        unpinned: dict[str, str] = {}
+        offered = pin_program_argument(
+            marked,
+            server=self.note_key,
+            spec=spec,
+            notes=self.sample_notes,
+            shared=shared,
+            held_path=self._held_path,
+            withheld=unpinned,
+        )
+        self._unpinned = unpinned
+        return offered
+
+    def _decide_unpinned(self) -> None:
+        """Make the shared-server withholding decisions for the tools this handle holds."""
+        if self._all_tools:
+            self.tools()
 
     def withheld_reasons(self) -> list[str]:
         """The degradation reasons for the tools this host cannot run.
 
         Said where the tool is withheld rather than where it would have been
         bound, so dropping it from the model's list does not also drop the
-        sentence that explains the gap.
+        sentence that explains the gap. The tools withheld on a shared server
+        for want of the job's program (``pin_program_argument``) are decided
+        here afresh, so the answer does not depend on ``tools`` being read first.
         """
+        self._decide_unpinned()
+        unpinned = [self._unpinned[name] for name in sorted(self._unpinned)]
         if self.capabilities is None:
-            return []
+            return unpinned
         withheld = self.capabilities.unusable()
         if not withheld:
-            return []
-        return [u.degradation_reason for u in self.capabilities.unavailable(sorted(withheld))]
+            return unpinned
+        found = self.capabilities.unavailable(sorted(withheld))
+        return [u.degradation_reason for u in found] + unpinned
 
     def withheld_reason(self, name: str) -> str | None:
         """Why the tool ``name`` is withheld on this host, or ``None`` when it is not.
@@ -1145,6 +1243,9 @@ class ServerHandle:
         credential not configured, a library not installed) and its remedy,
         not only that the tool is missing.
         """
+        self._decide_unpinned()
+        if name in self._unpinned:
+            return self._unpinned[name]
         if self.capabilities is None or name not in self.capabilities.unusable():
             return None
         found = self.capabilities.unavailable([name])
@@ -1460,6 +1561,8 @@ class ServerRegistry:
                 # The job's note: a remote server's opens are noted under its
                 # address, a local process's under its own handle.
                 replica.sample_notes = handle.sample_notes
+                # The job's own copy of the sample there, the same for every loop.
+                replica.held_sample_path = handle.held_sample_path
                 replica.declared_source = handle.declared_source
                 replica.measures_isolation = handle.measures_isolation
                 self._loop_handles[key] = replica
@@ -1469,6 +1572,26 @@ class ServerRegistry:
                     handle.name,
                 )
             return replica
+
+    def hold_sample_path(self, server: str, path: str | None, *, fallback: bool = False) -> None:
+        """Note ``path`` as the job's own copy of the sample on ``server``, on every handle.
+
+        The path the server opens for the job (its mirror under the declared
+        mount, or where the sample was staged to it): on a server other jobs
+        share, the only path an open may name (``pin_program_argument``). Set
+        on the handle and on each of its per-loop replicas; a replica made
+        later copies it. A ``fallback`` path (an agent's own, not the
+        server's) never replaces one already held.
+        """
+        if not path:
+            return
+        with self._lock:
+            handles = [h for h in (self._handles.get(server),) if h is not None]
+            handles += [h for (name, _loop), h in self._loop_handles.items() if name == server]
+        for handle in handles:
+            if fallback and handle.held_sample_path:
+                continue
+            handle.held_sample_path = path
 
     def _all_handles(self) -> list[ServerHandle]:
         """Every handle this registry has handed out, per-loop ones included."""
@@ -1600,8 +1723,8 @@ class ServerRegistry:
         # the stage that binds it can no longer be the thing that reports it.
         # It is reported here instead, where it is withheld, and reaches the
         # degraded block exactly as it did before.
-        self._record(handle.withheld_reasons())
         offered = handle.tools()
+        self._record(handle.withheld_reasons())
         return self.merge_tools(
             handle.name,
             offered,

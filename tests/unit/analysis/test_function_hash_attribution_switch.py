@@ -71,6 +71,9 @@ class TestAFailedSwitchSkipsAttribution:
                 file_path="/data/samples/.work/s.exe",
                 min_instructions=3,
                 note_key="remote http://ghidra:80",
+                # The undeclared load-and-switch is read only on a Ghidra no
+                # other job shares; on a shared one there are no hashes at all.
+                shared=False,
             )
 
         assert result == []

@@ -51,6 +51,7 @@ def fetch_bulk_function_hashes(
     note_key: str,
     sample_open: Any = None,
     sample_notes: Any = None,
+    shared: bool = True,
 ) -> list[tuple[str, str]]:
     """Return ``(func_name, func_hash)`` for the binary's meaningful functions.
 
@@ -58,6 +59,10 @@ def fetch_bulk_function_hashes(
     block declares (``sample_open``) and the job's note (``sample_notes``), so
     a path the job already opened is selected rather than imported again; with
     none declared, a best-effort ``load_program`` + switch + ``run_analysis``.
+    Every page names the job's program by the argument the block declares.
+    On a server other jobs share (``shared``), no declaration, no declared
+    argument or no program the job opened yields no hashes, with the reason
+    logged; Ghidra's current program is read only on one no other job shares.
     Then paginates ``get_bulk_function_hashes``
     and keeps only functions with at least ``min_instructions`` instructions.
     Fail-safe: any error yields an empty list.
@@ -73,7 +78,7 @@ def fetch_bulk_function_hashes(
     out: list[tuple[str, str]] = []
     seen: set[str] = set()
     try:
-        from maljan.providers.sample_open import declared
+        from maljan.providers.sample_open import SampleOpener, declared, program_argument
         from maljan.providers.static.ghidra.program import (
             SWITCH_PARAM,
             SWITCH_PATH,
@@ -87,11 +92,38 @@ def fetch_bulk_function_hashes(
             # without it `get_bulk_function_hashes` below returns the hashes of
             # whichever binary the container looked at first — attributing this
             # sample to another sample's functions, silently and plausibly.
+            # The program each request names: Ghidra's current program is the
+            # server's, and another job may have made another one current.
+            program: dict[str, str] = {}
             if declared(sample_open):
                 if not _opened_for_hashes(
                     http, base, file_path, sample_open, sample_notes, note_key
                 ):
                     return []
+                from maljan.providers.static.ghidra.provider import sample_notes_of
+
+                argument = program_argument(sample_open)
+                opened = SampleOpener(note_key, sample_open, sample_notes_of(sample_notes))
+                name = opened.name_of(file_path)
+                if argument and name:
+                    program = {argument: name}
+                elif shared:
+                    logger.warning(
+                        "function-hash fetch: %s; no hashes rather than whichever program is "
+                        "current on %s, which other jobs share.",
+                        f"{file_path} is not a program this job opened"
+                        if argument
+                        else "the Ghidra block declares no program argument (sample_open)",
+                        note_key,
+                    )
+                    return []
+            elif shared:
+                logger.warning(
+                    "function-hash fetch: the Ghidra block declares no sample_open; no hashes "
+                    "rather than whichever program is current on %s, which other jobs share.",
+                    note_key,
+                )
+                return []
             else:
                 try:
                     loaded = http.post(f"{base}/load_program", json={"file": file_path})
@@ -124,7 +156,7 @@ def fetch_bulk_function_hashes(
             for _ in range(max_pages):
                 resp = http.get(
                     f"{base}/get_bulk_function_hashes",
-                    params={"offset": offset, "limit": page_limit},
+                    params={"offset": offset, "limit": page_limit, **program},
                 )
                 resp.raise_for_status()
                 items = _extract_functions(resp.json() if resp.text.strip() else None)
