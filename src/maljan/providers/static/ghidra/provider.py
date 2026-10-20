@@ -588,7 +588,7 @@ class GhidraStaticProvider(StaticProvider):
         any wrapping error keeps the original tool.
         """
         from maljan.providers.sample_open import (
-            REMOTE_TRANSPORTS,
+            is_shared_address,
             pin_program_argument,
             wrap_open_tool,
         )
@@ -602,7 +602,7 @@ class GhidraStaticProvider(StaticProvider):
         key = server_note_key(cfg, str(getattr(self, "note_instance", "") or ""))
         spec = getattr(cfg, "sample_open", None)
         notes = getattr(self, "sample_notes", None)
-        shared = str(getattr(cfg, "transport", "")) in REMOTE_TRANSPORTS
+        shared = is_shared_address(cfg)
         tools = wrap_open_tool(
             tools,
             tools,
@@ -821,7 +821,7 @@ class GhidraStaticProvider(StaticProvider):
         does not name, ``json`` among them) with one ``CALLER -> CALLEE`` line
         per call, the text ``call_graph_from_text`` reads.
         """
-        from maljan.providers.sample_open import REMOTE_TRANSPORTS, SampleOpener, program_argument
+        from maljan.providers.sample_open import SampleOpener, is_shared_address, program_argument
 
         if not self._over_http():
             return None
@@ -832,7 +832,7 @@ class GhidraStaticProvider(StaticProvider):
         program = SampleOpener(key, spec, sample_notes_of(self)).name_of(path) if argument else None
         if argument and program:
             params[argument] = program
-        elif self._cfg.transport in REMOTE_TRANSPORTS:
+        elif is_shared_address(self._cfg):
             # Ghidra's current program is the server's: the graph it would
             # answer may be another job's sample. No graph is said, not wrong.
             logger.warning(
@@ -893,7 +893,7 @@ class GhidraStaticProvider(StaticProvider):
 
     def function_hashes(self, job: StaticJobContext) -> list[tuple[str, str]]:
         """Ghidra's per-function hashes of the job's mirror, over its REST API."""
-        from maljan.providers.sample_open import REMOTE_TRANSPORTS
+        from maljan.providers.sample_open import is_shared_address
         from maljan.providers.static.ghidra.function_hashes import fetch_bulk_function_hashes
 
         if not self.capabilities.provides_function_hashes or not job.mirror_sample_path:
@@ -906,7 +906,7 @@ class GhidraStaticProvider(StaticProvider):
             sample_open=getattr(self._cfg, "sample_open", None),
             sample_notes=getattr(self, "sample_notes", None),
             note_key=server_note_key(self._cfg, str(getattr(self, "note_instance", "") or "")),
-            shared=self._cfg.transport in REMOTE_TRANSPORTS,
+            shared=is_shared_address(self._cfg),
             # The walk is one call's worth of the job's guard budget for this
             # server, so a server answering pages forever cannot hold the job.
             walk_budget=self.call_budget(get_settings_or_none()),
@@ -1026,7 +1026,33 @@ class GhidraStaticProvider(StaticProvider):
         except Exception as exc:  # noqa: BLE001 - teardown never propagates
             logger.warning("Ghidra provider teardown failed (non-fatal): %s", exc)
 
+    def _close_job_programs(self) -> None:
+        """Close the programs this job opened on a Ghidra other jobs share, where declared.
+
+        Through the close tool the block's ``sample_open`` names; with none
+        declared, nothing is called. Never raises.
+        """
+        from maljan.providers.sample_open import close_job_programs, is_shared_address
+        from maljan.providers.static.ghidra.program import rest_tool_call
+
+        spec = getattr(self._cfg, "sample_open", None)
+        if not is_shared_address(self._cfg) or not getattr(spec, "close_tool", ""):
+            return
+        if not self._over_http():
+            return
+        try:
+            with self._rest_client() as http:
+                close_job_programs(
+                    server_note_key(self._cfg, str(getattr(self, "note_instance", "") or "")),
+                    spec,
+                    sample_notes_of(self),
+                    rest_tool_call(http, self._cfg.url.rstrip("/")),
+                )
+        except Exception as exc:  # noqa: BLE001 - teardown never propagates
+            logger.warning("Ghidra program close failed (non-fatal): %s", exc)
+
     def close(self) -> None:
+        self._close_job_programs()
         self._close_toolkit()
 
 

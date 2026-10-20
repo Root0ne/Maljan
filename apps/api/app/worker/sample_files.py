@@ -324,6 +324,20 @@ _STAGING_INFIX = ".part-"
 _HOLD_TAG = re.compile(r"[A-Za-z0-9-]{1,64}")
 
 
+def copy_name(sha256: str, extension: str, job_id: str = "") -> str:
+    """The name of one job's mirror copy: the SHA-256, the job's id, the upload's suffix.
+
+    A server that names a program by the file it was handed (Ghidra) would
+    otherwise see two jobs on one sample as one program, and one job's
+    re-import would replace the other's analysed program on a shared server.
+    A job with no usable id keeps the plain name. The digest stays the first
+    dot-separated part and the suffix the last, so every reader of a copy's
+    name (:func:`_is_sample_copy`, a sandbox's profile choice) reads it as before.
+    """
+    tag = str(job_id or "")
+    return f"{sha256}.{tag}{extension}" if _HOLD_TAG.fullmatch(tag) else f"{sha256}{extension}"
+
+
 def _hold_name(copy_name: str, job_id: str) -> str | None:
     tag = str(job_id or "")
     return f"{copy_name}{_HOLD_INFIX}{tag}" if _HOLD_TAG.fullmatch(tag) else None

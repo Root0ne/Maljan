@@ -1391,6 +1391,11 @@ class SampleOpenConfig(BaseModel):
     opened (a number converter, a lookup). Any other tool is withheld there,
     as is every tool ``shared_withheld_tools`` lists (one that runs code or
     changes the whole project), whatever arguments it takes.
+
+    ``close_tool`` and ``close_argument`` name the tool that closes or deletes
+    an opened program and the argument the program's name goes in. Declared,
+    the platform closes each program the job opened there when the job ends;
+    empty, a program the job opened stays on the server.
     """
 
     open_tool: str = ""
@@ -1404,10 +1409,21 @@ class SampleOpenConfig(BaseModel):
     open_path_arguments: list[str] = Field(default_factory=list)
     job_safe_tools: list[str] = Field(default_factory=list)
     shared_withheld_tools: list[str] = Field(default_factory=list)
+    close_tool: str = ""
+    close_argument: str = ""
 
     @model_validator(mode="after")
     def _an_open_tool_names_its_path(self) -> "SampleOpenConfig":
-        rest = (self.name_field, self.select_tool, self.select_argument, self.analyse_tool)
+        rest = (
+            self.name_field,
+            self.select_tool,
+            self.select_argument,
+            self.analyse_tool,
+            self.close_tool,
+            self.close_argument,
+        )
+        if bool(self.close_tool) != bool(self.close_argument):
+            raise ValueError("sample_open.close_tool and close_argument are declared together")
         if self.open_tool and not self.path_argument:
             raise ValueError("sample_open.open_tool needs path_argument, where the path goes")
         held = (
@@ -1445,6 +1461,10 @@ GHIDRA_SAMPLE_OPEN = SampleOpenConfig(
     # Ghidra's tools that run code or change the whole project, whatever
     # program they are given.
     shared_withheld_tools=["create_folder", "run_ghidra_script", "run_script_inline"],
+    # Ghidra's tool that closes an open program by its name, the one
+    # ``load_program`` answered under ``name_field``.
+    close_tool="close_program",
+    close_argument="name",
 )
 
 

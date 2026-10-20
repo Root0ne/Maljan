@@ -32,6 +32,8 @@ export interface ProposedField {
   evidence: string[];
   confidence: Confidence;
   requires?: string[];
+  /** Fields only the operator can say, declared before this is accepted. */
+  incomplete?: string[];
 }
 
 export interface ToolProposal {
@@ -81,11 +83,13 @@ function readField(value: unknown): ProposedField | null {
     ? (value.confidence as Confidence)
     : "low";
   const requires = Array.isArray(value.requires) ? strings(value.requires) : undefined;
+  const incomplete = Array.isArray(value.incomplete) ? strings(value.incomplete) : [];
   return {
     value: value.value,
     evidence: strings(value.evidence),
     confidence,
     ...(requires && requires.length ? { requires } : {}),
+    ...(incomplete.length ? { incomplete } : {}),
   };
 }
 
@@ -268,6 +272,20 @@ export function acceptTool(
   return staged(server, tool, { ...proposal.facts }, declared);
 }
 
+/** What an incomplete server-wide proposal still lacks in the entry: nothing once declared. */
+export function stillIncomplete(
+  server: McpServerEntry,
+  field: string,
+  proposed: ProposedField,
+): string[] {
+  if (field !== "sample_open") return [];
+  const held = (server.sample_open ?? {}) as unknown as Record<string, unknown>;
+  return (proposed.incomplete ?? []).filter((name) => {
+    const value = held[name];
+    return !(Array.isArray(value) && value.length > 0);
+  });
+}
+
 /**
  * The server entry with one proposed server-wide field accepted.
  *
@@ -293,6 +311,8 @@ export function acceptServerField(
     return { auto_name_prefixes: [...held, ...added] };
   }
   if (field === "sample_open" && isRecord(proposed.value)) {
+    // An incomplete proposal is staged only once the operator declared what it lacks.
+    if (stillIncomplete(server, field, proposed).length > 0) return {};
     // Fills only the fields the server leaves empty: a declared field stays.
     const held: SampleOpenEntry = { ...EMPTY_SAMPLE_OPEN, ...(server.sample_open ?? {}) };
     const filled = { ...held };

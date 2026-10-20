@@ -8,6 +8,7 @@ import {
   OPEN_UP_TO,
   acceptField,
   acceptServerField,
+  stillIncomplete,
   acceptTool,
   alsoStaged,
   hasProposal,
@@ -23,12 +24,15 @@ function FieldRow({
   field,
   also,
   accepted,
+  missing = [],
   onAccept,
 }: {
   label: string;
   field: ProposedField;
   also: string[];
   accepted: boolean;
+  /** Fields to declare before this can be accepted. */
+  missing?: string[];
   onAccept: () => void;
 }) {
   return (
@@ -47,12 +51,17 @@ function FieldRow({
         <button
           type="button"
           className="text-[11px] text-accent-strong disabled:opacity-50"
-          disabled={accepted}
+          disabled={accepted || missing.length > 0}
           aria-label={`accept ${label}`}
           onClick={onAccept}
         >
           {accepted ? "accepted" : "accept"}
         </button>
+        {!accepted && missing.length > 0 && (
+          <div className="text-[10px] text-text-muted" data-proposal-incomplete>
+            declare first: {missing.join(", ")}
+          </div>
+        )}
         {!accepted && also.length > 0 && (
           <div className="text-[10px] text-text-muted">also stages {also.join(", ")}</div>
         )}
@@ -227,6 +236,7 @@ export default function DeclarationProposals({
                   field={held}
                   also={[]}
                   accepted={false}
+                  missing={stillIncomplete(server, field, held)}
                   onAccept={() => put(acceptServerField(server, field, held))}
                 />
               ))}

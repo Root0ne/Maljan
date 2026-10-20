@@ -386,6 +386,9 @@ class Proposed:
     evidence: list[str]
     confidence: str
     requires: tuple[str, ...] = ()
+    # Fields only the operator can say, without which the value does less than
+    # it seems to; the console accepts it only once they are declared.
+    incomplete: tuple[str, ...] = ()
 
     def as_dict(self) -> dict[str, Any]:
         out: dict[str, Any] = {
@@ -395,6 +398,8 @@ class Proposed:
         }
         if self.requires:
             out["requires"] = list(self.requires)
+        if self.incomplete:
+            out["incomplete"] = list(self.incomplete)
         return out
 
 
@@ -1523,6 +1528,18 @@ ROLE_HINT = (
 )
 
 
+# The note for a server at an address other jobs share whose schemas suggest a
+# ``sample_open``: offered incomplete, because only the operator can say which tools
+# name an opened program and which read nothing a job opened.
+SHARED_OPEN_INCOMPLETE = ("program_arguments", "job_safe_tools")
+SHARED_OPEN_NOTE = (
+    "sample_open is incomplete: {tool} opens a file and other tools take what it opened, but "
+    "this server is reached at an address other jobs share, and a declaration without "
+    "program_arguments and job_safe_tools would offer only the tools that take a path. "
+    "Declare program_arguments and job_safe_tools beside it before accepting it."
+)
+
+
 def propose(
     definitions: Iterable[Any],
     *,
@@ -1530,6 +1547,7 @@ def propose(
     answers: Mapping[str, tuple[ProbeCall, Any]] | None = None,
     skip: Iterable[str] = (),
     sandbox_source: bool = False,
+    remote: bool = False,
 ) -> dict[str, Any]:
     """The proposals for every tool ``definitions`` lists, as JSON the console reads.
 
@@ -1544,7 +1562,12 @@ def propose(
     holds the hint, for a server that is not, that names the tools whose rows
     read like a sandbox run's (:data:`ROLE_HINT`): nothing is proposed from
     them, since such rows are also what a memory image, a capture or a lookup
-    answers with, and the admin knows which this server is.
+    answers with, and the admin knows which this server is. ``remote`` says the
+    server is reached at an address other jobs share: a ``sample_open`` read
+    from the schemas names no ``program_arguments`` and no ``job_safe_tools``,
+    and accepted there it would offer only the tools that take a path, so it is
+    offered marked ``incomplete`` (``program_arguments``, ``job_safe_tools``),
+    with a note that says what to declare (:data:`SHARED_OPEN_NOTE`).
     """
     definitions = list(definitions)
     cells = _manifest_cells(capabilities)
@@ -1599,11 +1622,17 @@ def propose(
         server["auto_name_prefixes"] = prefixes.as_dict()
     named = [d for d in definitions if isinstance(_get(d, "name"), str)]
     opens = sample_open_in(d for d in named if _get(d, "name") not in skipped)
+    notes: list[str] = []
+    if opens is not None and remote:
+        opens.incomplete = SHARED_OPEN_INCOMPLETE
+        notes.append(SHARED_OPEN_NOTE.format(tool=opens.value["open_tool"]))
     if opens is not None:
         server["sample_open"] = opens.as_dict()
     out: dict[str, Any] = {"v": PROPOSALS_VERSION, "tools": tools, "server": server}
     if shaped:
-        out["notes"] = [ROLE_HINT.format(tools=", ".join(shaped), role=SANDBOX_ROLE)]
+        notes.append(ROLE_HINT.format(tools=", ".join(shaped), role=SANDBOX_ROLE))
+    if notes:
+        out["notes"] = notes
     if planned:
         out["planned"] = planned
     if failed:

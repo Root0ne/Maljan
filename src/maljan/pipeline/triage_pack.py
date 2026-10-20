@@ -1141,7 +1141,9 @@ class _Pack:
 
     def _lolbin_lookup(self, step: PackStep) -> None:
         report = observed_report(self.inputs.sandbox_report)
-        if report:
+        # A report that holds no process tree has no command lines to look up:
+        # a lookup over none would be recorded as a fact about nothing.
+        if report and not sandbox_tools.sandbox_processes(report).get("absent"):
             commands = _command_lines(report)
             self.record(
                 "lolbin_lookup",

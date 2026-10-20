@@ -3113,11 +3113,14 @@ class _ReferenceScan:
     # After a fence opened after spaces, which a viewer may have closed where
     # its list item ended, no later fence is known to be where it seems.
     fences_known: bool = True
+    # Whether the line just yielded opened a fence, and where its info string starts.
+    opened_at: int | None = None
 
     def lines(self, text: str) -> Iterator[tuple[str, str]]:
         """Each line of ``text`` with its line break, and how it stands (``_TEXT`` and so on)."""
         for line in text.splitlines(keepends=True):
             body = line.rstrip("\r\n")
+            self.opened_at = None
             if self.fence is not None:
                 char, length, kind = self.fence
                 stripped = body.lstrip(" ")
@@ -3138,6 +3141,7 @@ class _ReferenceScan:
                     self.fences_known = False
                 kind = _CODE if self.fences_known else _UNSURE
                 self.fence = (opener.group(1)[0], len(opener.group(1)), kind)
+                self.opened_at = opener.end()
                 yield line, kind
                 continue
             yield line, _TEXT
@@ -3234,7 +3238,16 @@ def _escaped_references(text: str, scan: _ReferenceScan | None = None) -> str:
         if kind != _TEXT or not line.strip():
             _write_block(block, out)
             block = []
-            out.append(_every_reference_escaped(line) if kind == _UNSURE else line)
+            if kind == _UNSURE:
+                out.append(_every_reference_escaped(line))
+            elif scan.opened_at is not None:
+                # A viewer decodes a reference in the info string into the code
+                # block's class attribute, whatever the fence holds below it.
+                out.append(
+                    line[: scan.opened_at] + _every_reference_escaped(line[scan.opened_at :])
+                )
+            else:
+                out.append(line)
         else:
             block.append(line)
     _write_block(block, out)
@@ -3291,6 +3304,7 @@ def _defanged_piece(text: str) -> str:
     marks: dict[int, str] = {}
     _mark_links(text, marks)
     _mark_scheme_openers(text, marks)
+    _mark_protocol_relative_targets(text, marks)
     _mark_mailboxes(text, marks)
     _mark_hosts(text, marks)
     if not marks:
@@ -3399,6 +3413,73 @@ _SCHEME_WITHOUT_SLASHES = re.compile(
     + _PIPE
     + r"data):(?=[^\s:])"
 )
+
+
+# A link or image target, a reference definition's, or the value of a raw HTML
+# attribute that fetches or follows, that starts with two slashes or
+# backslashes: a protocol-relative target a viewer resolves against the page's
+# own scheme, whatever its host (a single label, a decimal address). What
+# stands before it is a link's own opener (``](``), a reference definition
+# (a line start, after any block quote or list markers and up to three
+# spaces, so ``case a[0]: //`` in code is no target), or an attribute name and
+# ``=``. White space, a line ending and an optional ``<`` may stand between.
+# A URL parser drops a tab, a carriage return and a line feed from anywhere in
+# a target, so they may stand between the two slashes too.
+# Every run of white space is possessive and each branch spends its own, so none
+# can be split between two quantifiers and given back: nothing backtracks.
+_GAP = r"[ \t\r\n]*+"
+_OPTIONAL_BRACKET = r"(?:<" + _GAP + r")?"
+_PROTOCOL_RELATIVE_TARGET = re.compile(
+    r"(?:\]\("
+    + _GAP
+    + _OPTIONAL_BRACKET
+    + _PIPE
+    + r"(?m:^)(?:[ ]{0,3}(?:>"
+    + _PIPE
+    + r"[-+*]"
+    + _PIPE
+    + r"\d{1,9}[.)])[ \t]*+)*+[ ]{0,3}\[[^\]\n]*(?<!\[[.:@])\]:"
+    + _GAP
+    + _OPTIONAL_BRACKET
+    + _PIPE
+    + r"(?i:\b(?:"
+    + _PIPE.join(
+        (
+            "href",
+            "src",
+            "action",
+            "formaction",
+            "poster",
+            "data",
+            "srcset",
+            "background",
+            "ping",
+            "cite",
+            "longdesc",
+            "lowsrc",
+            "dynsrc",
+            "icon",
+            "manifest",
+            "codebase",
+        )
+    )
+    + r"))"
+    + _GAP
+    + r"="
+    + _GAP
+    + r"[\"']?"
+    # A URL parser strips every C0 control and space before an attribute's
+    # value, so any of them may stand before its first slash.
+    + r"[\x00-\x20]*+"
+    + _OPTIONAL_BRACKET
+    + r")(?=[/\\][\t\r\n]*+[/\\])"
+)
+
+
+def _mark_protocol_relative_targets(text: str, marks: dict[int, str]) -> None:
+    """Every protocol-relative link target: its first slash bracketed, so it is no ``//``."""
+    for found in _PROTOCOL_RELATIVE_TARGET.finditer(text):
+        marks[found.end()] = f"[{text[found.end()]}]"
 
 
 def _mark_scheme_openers(text: str, marks: dict[int, str]) -> None:

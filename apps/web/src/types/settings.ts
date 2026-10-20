@@ -281,6 +281,8 @@ export interface SampleOpenEntry {
   open_path_arguments?: string[];
   job_safe_tools?: string[];
   shared_withheld_tools?: string[];
+  close_tool?: string;
+  close_argument?: string;
 }
 
 /** One way a server's plain-text answer says "error". */

@@ -3351,6 +3351,8 @@ built-in or added, may declare which of its tools opens a sample under
 | `open_path_arguments` | further arguments that name a file a tool opens, beside `path_argument` |
 | `job_safe_tools` | tools that take no program or path argument and read nothing a job opened |
 | `shared_withheld_tools` | tools withheld on a shared server whatever they take (ones that run code or change the whole project) |
+| `close_tool` | the tool that closes or deletes an opened program; declared, each program the job opened is closed when the job ends, otherwise it stays on the server |
+| `close_argument` | the argument the program's name goes in (declared together with `close_tool`) |
 
 On a server other jobs share (`http`, `streamable-http`, `sse`), the server's
 current program is every job's, so each call is held to the job's own. Every
