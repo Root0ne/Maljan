@@ -465,7 +465,8 @@ def build_prompt_text(report: MalwareReport, isr_reports: Any = None) -> str:
     if report.dynamic and report.dynamic.sandbox_signatures:
         for sig in report.dynamic.sandbox_signatures:
             ttps = ",".join(sig.technique_ids) or "-"
-            lines.append(f"  - {quoted_value(sig.name)} (severity {sig.severity}, ATT&CK={ttps})")
+            severity = "unknown" if sig.severity is None else sig.severity
+            lines.append(f"  - {quoted_value(sig.name)} (severity {severity}, ATT&CK={ttps})")
     elif report.dynamic is None:
         # No sandbox observation: nothing was watched, so nothing is absent.
         lines.append(f"  ({NO_SANDBOX_OBSERVATION})")

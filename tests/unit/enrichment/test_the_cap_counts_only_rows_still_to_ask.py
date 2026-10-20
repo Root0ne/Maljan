@@ -98,4 +98,4 @@ async def test_rows_the_cap_leaves_unasked_are_counted_in_the_log() -> None:
 
     assert len(wire.asked) == 2
     warned = [call.args for call in log.warning.call_args_list]
-    assert any(args[1:] == (3, "domain") for args in warned), warned
+    assert any(args[1:3] == (3, "domain") for args in warned), warned

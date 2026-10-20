@@ -29,7 +29,7 @@ from maljan.enrichment.declared import (
     SourceAsker,
     ToolCaller,
     annotate_age,
-    is_malicious,
+    declared_verdict,
 )
 from maljan.enrichment.whois_client import WhoisClient
 from maljan.extractors.attribution import populate_similar_samples
@@ -46,6 +46,7 @@ if TYPE_CHECKING:
 # network list and the field holding the value. ``hash`` and ``url`` have no
 # reputation slot in the report, so a source answering only those is asked
 # nothing here.
+NOT_ASKED_KEY = "enrichment_not_asked"
 SLOTS: dict[str, tuple[str, str]] = {"domain": ("domains", "fqdn"), "ip": ("ips", "address")}
 
 
@@ -200,13 +201,13 @@ async def enrich_malware_report(
         if not ready:
             logger.warning("enrich: no enrichment source configured; reputation fields left null.")
 
-        domains_skipped = await _enrich_domains(
+        domains_skipped, domains_unasked = await _enrich_domains(
             domains,
             sources=[s for s in ready if s.answers("domain")],
             asker=asker,
             cap=max_lookups_per_kind,
         )
-        await _enrich_ips(
+        ips_unasked = await _enrich_ips(
             ips,
             sources=[s for s in ready if s.answers("ip")],
             asker=asker,
@@ -216,6 +217,15 @@ async def enrich_malware_report(
     finally:
         if own_client:
             await client.aclose()
+
+    # What the cap left unasked is stated in the report, not only logged; an
+    # enrichment that left none removes an earlier statement (those rows were
+    # asked now), so the field is the last enrichment's and never stale.
+    unasked = [*domains_unasked, *ips_unasked]
+    if unasked:
+        malware_report[NOT_ASKED_KEY] = unasked
+    else:
+        malware_report.pop(NOT_ASKED_KEY, None)
 
     logger.info(
         "enrich: completed (domains=%d, ips=%d, domains_not_looked_up=%d).",
@@ -241,10 +251,19 @@ def _keep(row: dict[str, Any], found: tuple[ReadySource, dict[str, Any]]) -> Non
     source, rep = found
     annotate_age(rep, source.source)
     _carry_seeded_context(row.get("reputation"), rep)
+    # The source's declared verdict (``malicious_when``) is stored with the
+    # record, so a reader shows what the source called it and does not guess
+    # from the figures. Absent where the source declares none or the record
+    # holds no count it reads: unknown is not "not malicious".
+    verdict = declared_verdict(rep, source.source)
+    if verdict is None:
+        rep.pop("malicious_verdict", None)
+    else:
+        rep["malicious_verdict"] = verdict
     row["reputation"] = rep
     # Feed verified reputation back into the heuristic suspicion flag so an
     # enriched-malicious indicator is not stuck at is_suspicious=False.
-    if is_malicious(rep, source.source):
+    if verdict is True:
         row["is_suspicious"] = True
 
 
@@ -254,10 +273,11 @@ async def _enrich_domains(
     sources: Sequence[ReadySource],
     asker: SourceAsker,
     cap: int,
-) -> int:
+) -> tuple[int, list[dict[str, Any]]]:
+    """Ask about the domains; the count left aside, and the rows the cap left unasked."""
     skipped = 0
     if not sources:
-        return skipped
+        return skipped, []
     askable: list[dict[str, Any]] = []
     for dom in domains:
         fqdn = dom.get("fqdn")
@@ -285,20 +305,30 @@ async def _enrich_domains(
         found = await _first_record(sources, asker, "domain", str(dom["fqdn"]))
         if found is not None:
             _keep(dom, found)
-    _say_over_cap("domain", len(askable), cap)
-    return skipped
+    unasked = [
+        {"kind": "domain", "value": str(dom["fqdn"]), "questions": ["reputation"], "cap": cap}
+        for dom in askable[cap:]
+    ]
+    _say_over_cap("domain", unasked)
+    return skipped, unasked
 
 
-def _say_over_cap(kind: str, pending: int, cap: int) -> None:
-    """Log how many rows of ``kind`` still to ask about the cap left unasked."""
-    if pending > cap:
-        # The cap is named, not printed: it is read from the runtime settings,
-        # and a value read there is logged by name only.
+def _say_over_cap(kind: str, unasked: Sequence[Mapping[str, Any]]) -> None:
+    """Log how many rows of ``kind`` the cap left unasked, and how many questions of each sort."""
+    if unasked:
+        asked_not: dict[str, int] = {}
+        for row in unasked:
+            for question in row["questions"]:
+                asked_not[question] = asked_not.get(question, 0) + 1
+        # The log names the cap (a value read from the runtime settings is
+        # logged by name only); the report states its value as a fact of the run
+        # (``enrichment_not_asked[].cap``).
         logger.warning(
-            "enrich: %d %s rows still to look up were not asked: the per-kind lookup cap "
-            "(enrichment_max_lookups) was reached.",
-            pending - cap,
+            "enrich: %d %s rows were not asked (questions not asked: %s): the per-kind lookup "
+            "cap (enrichment_max_lookups) was reached.",
+            len(unasked),
             kind,
+            ", ".join(f"{name} x{count}" for name, count in asked_not.items()),
         )
 
 
@@ -309,7 +339,8 @@ async def _enrich_ips(
     asker: SourceAsker,
     whois: WhoisClient,
     cap: int,
-) -> None:
+) -> list[dict[str, Any]]:
+    """Ask about the addresses; the rows the cap left unasked, with the questions not asked."""
     askable: list[dict[str, Any]] = []
     for ip in ips:
         address = ip.get("address")
@@ -347,4 +378,21 @@ async def _enrich_ips(
             geo = whois.geoip(address)
             if geo:
                 ip["geo"] = geo
-    _say_over_cap("ip", len(askable), cap)
+    unasked: list[dict[str, Any]] = []
+    for ip in askable[cap:]:
+        # Only the questions the row still lacks an answer to: an address that
+        # holds its reputation but no ASN is not asked the ASN, not the reputation.
+        questions = [
+            name
+            for name, lacking in (
+                ("reputation", bool(sources) and not _has_successful_rep(ip)),
+                ("asn", not ip.get("asn")),
+                ("geo", not ip.get("geo")),
+            )
+            if lacking
+        ]
+        unasked.append(
+            {"kind": "ip", "value": str(ip["address"]), "questions": questions, "cap": cap}
+        )
+    _say_over_cap("ip", unasked)
+    return unasked

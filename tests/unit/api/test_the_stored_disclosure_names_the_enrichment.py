@@ -612,3 +612,42 @@ def test_a_successful_stored_record_is_kept_over_the_live_one() -> None:
     (row,) = enrichment_laid_over(stored, enriched)["network"]["ips"]
 
     assert (row["reputation"], row["asn"], row["geo"]) == (kept, "AS1 X", "US")
+
+
+def test_the_last_enrichments_unasked_rows_replace_an_earlier_statement() -> None:
+    from app.worker.enrich_worker import enrichment_laid_over
+
+    old = [{"kind": "ip", "value": "1.2.3.4", "questions": ["reputation"], "cap": 1}]
+    new = [{"kind": "domain", "value": "a.example", "questions": ["reputation"], "cap": 1}]
+    stored = {"enrichment_not_asked": old}
+
+    merged = enrichment_laid_over(stored, {"enrichment_not_asked": new})
+    assert merged["enrichment_not_asked"] == new
+    assert "enrichment_not_asked" not in enrichment_laid_over(stored, {})
+
+
+def test_the_unasked_questions_are_read_against_the_laid_over_row() -> None:
+    from app.worker.enrich_worker import enrichment_laid_over
+
+    stored = {
+        "network": {
+            "ips": [
+                {"address": "1.1.1.1", "reputation": {"source": "x"}, "asn": "AS1 X"},
+                {"address": "2.2.2.2"},
+            ],
+            "domains": [{"fqdn": "a.example", "reputation": {"source": "y"}}],
+        }
+    }
+    unasked = [
+        {"kind": "ip", "value": "1.1.1.1", "questions": ["reputation", "asn", "geo"], "cap": 1},
+        {"kind": "ip", "value": "2.2.2.2", "questions": ["reputation", "asn"], "cap": 1},
+        {"kind": "domain", "value": "a.example", "questions": ["reputation"], "cap": 1},
+    ]
+    enriched = {"network": stored["network"], "enrichment_not_asked": unasked}
+
+    rows = enrichment_laid_over(stored, enriched)["enrichment_not_asked"]
+
+    assert [(r["value"], r["questions"]) for r in rows] == [
+        ("1.1.1.1", ["geo"]),
+        ("2.2.2.2", ["reputation", "asn"]),
+    ]

@@ -763,7 +763,7 @@ class MarkdownRenderer:
             measured.append(_divider(3))
             for sig in evasive[:10]:
                 measured.append(
-                    _row(sig.name, sig.severity, _truncate(sig.description, _CELL_LIMIT))
+                    _row(sig.name, _severity_cell(sig), _truncate(sig.description, _CELL_LIMIT))
                 )
             measured.extend(_left_out(len(evasive), 10, "evasion signatures"))
         blocks.append(
@@ -1605,6 +1605,7 @@ class MarkdownRenderer:
                     cells.append(reputation.get(row.value.strip().lower().rstrip("."), "-"))
                 lines.append(_row(*cells))
             lines.append("")
+        lines.extend(_enrichment_not_asked_lines(report))
         rid = _one_line((report.run_summary or {}).get("report_id") or "{report_id}")
         lines.append(
             "Network values are defanged for reading. The STIX 2.1 bundle "
@@ -3910,6 +3911,29 @@ def _reputations(report: MalwareReport) -> dict[str, str]:
     return out
 
 
+def _enrichment_not_asked_lines(report: MalwareReport) -> list[str]:
+    """The network values the enrichment left unasked, each with the questions not asked.
+
+    Empty for a report that states none, so a stored report renders as it did.
+    """
+    rows = report.enrichment_not_asked or []
+    if not rows:
+        return []
+    listed = "; ".join(
+        f"{row.kind} {_code_span(defang(row.value, row.kind))} ({', '.join(row.questions) or '-'})"
+        for row in rows
+    )
+    caps = sorted({row.cap for row in rows})
+    return [
+        f"_Post-hoc enrichment did not ask about {len(rows)} network "
+        f"value{'s' if len(rows) != 1 else ''}: the per-kind lookup cap "
+        f"({', '.join(str(c) for c in caps)}, setting enrichment_max_lookups) was reached. "
+        f"A missing reputation, ASN or geography on them is not asked, not clean. "
+        f"Not asked: {listed}._",
+        "",
+    ]
+
+
 def _title_heading(title: str) -> str:
     """The report's H1: its title, on one line."""
     return f"# {_one_line(title)}"
@@ -5437,6 +5461,11 @@ def _registry_row(reg: RegistryMod, plain: Callable[[str], str] = lambda text: t
     )
 
 
+def _severity_cell(sig: SandboxSignature) -> Any:
+    """A signature's severity as stated; ``unknown`` where the sandbox gave none, never 0."""
+    return "unknown" if sig.severity is None else sig.severity
+
+
 def _signature_row(sig: SandboxSignature) -> str:
     ttps = ", ".join(sig.technique_ids) if sig.technique_ids else "-"
-    return _row(sig.name, sig.severity, ttps, _truncate(sig.description or "-", _CELL_LIMIT))
+    return _row(sig.name, _severity_cell(sig), ttps, _truncate(sig.description or "-", _CELL_LIMIT))

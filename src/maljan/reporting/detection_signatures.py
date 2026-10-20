@@ -974,7 +974,9 @@ def _collect_signature_names(report: MalwareReport) -> list[str]:
     out: list[str] = []
     seen: set[str] = set()
     sigs: list[SandboxSignature] = sorted(
-        report.dynamic.sandbox_signatures, key=lambda s: s.severity, reverse=True
+        report.dynamic.sandbox_signatures,
+        key=lambda s: -1 if s.severity is None else s.severity,
+        reverse=True,
     )
     for sig in sigs:
         text = (sig.description or sig.name).strip()

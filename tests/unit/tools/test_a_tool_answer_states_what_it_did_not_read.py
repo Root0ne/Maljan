@@ -471,7 +471,28 @@ class TestTheGzipName:
         answer = binary._gzip_member(target)
 
         assert answer["members"][0]["name"] == ""
-        assert answer["name_unread"] == "the gzip header ends before its name's zero byte"
+        assert answer["name_unread"] == binary.GZIP_NAME_UNENDED.format(room=8)
+
+    def test_a_name_that_leaves_the_member_no_room_is_cut_and_said(self, tmp_path: Path) -> None:
+        target = tmp_path / "x.gz"
+        # 3 MB with no zero byte: read once, not held, the room stated.
+        target.write_bytes(bytes(_gzip_with(0x08, b""))[:10] + b"A" * (3 * 1024 * 1024))
+
+        answer = binary._gzip_member(target)
+
+        assert answer["members"][0]["name"] == ""
+        room = 3 * 1024 * 1024 - binary._GZIP_AFTER_NAME
+        assert answer["name_unread"] == binary.GZIP_NAME_UNENDED.format(room=room)
+
+    def test_a_zero_byte_inside_the_trailer_does_not_end_a_name(self, tmp_path: Path) -> None:
+        target = tmp_path / "x.gz"
+        target.write_bytes(bytes(_gzip_with(0x08, b""))[:10] + b"abcdef\x00" + b"123456789")
+
+        answer = binary._gzip_member(target)
+
+        assert answer["members"][0]["name"] == "abcdef"
+        target.write_bytes(bytes(_gzip_with(0x08, b""))[:10] + b"abcdef" + b"1234\x00678")
+        assert "name_unread" in binary._gzip_member(target)
 
     def test_an_extra_field_past_the_end_is_said(self, tmp_path: Path) -> None:
         target = tmp_path / "x.gz"
@@ -529,3 +550,55 @@ def test_unread_decoder_rows_leave_the_comparison_unknown(
     row_field, compared, also = string_blobs.decoder_fields(string_blobs.decoder_word())
     assert answer[compared] is None and answer[also] is None
     assert answer[f"{row_field}_rows_unread"] == "RuntimeError: remembered store unreadable"
+
+
+class TestTheGzipNameAtTheBlockEdge:
+    def _answer(self, tmp_path: Path, name_length: int) -> dict[str, Any]:
+        target = tmp_path / "x.gz"
+        target.write_bytes(
+            bytes(_gzip_with(0x08, b""))[:10] + b"n" * name_length + b"\x00" + b"D" * 9
+        )
+        return binary._gzip_member(target)
+
+    def test_a_zero_byte_exactly_at_the_block_size(self, tmp_path: Path) -> None:
+        size = binary._GZIP_NAME_BLOCK
+        answer = self._answer(tmp_path, size)
+        assert answer["members"][0]["name"] == "n" * size
+        assert "name_unread" not in answer
+
+    def test_a_zero_byte_one_past_the_block_size(self, tmp_path: Path) -> None:
+        size = binary._GZIP_NAME_BLOCK + 1
+        answer = self._answer(tmp_path, size)
+        assert answer["members"][0]["name"] == "n" * size
+
+    def test_a_zero_byte_one_before_the_block_size(self, tmp_path: Path) -> None:
+        size = binary._GZIP_NAME_BLOCK - 1
+        answer = self._answer(tmp_path, size)
+        assert answer["members"][0]["name"] == "n" * size
+
+
+def test_a_fifty_megabyte_name_is_cut_by_the_answer_guardrail(tmp_path: Path) -> None:
+    """A name with a zero byte is stated whole by the tool; the answer layer cuts it.
+
+    Every tool answer meets the output guardrail before a model reads it or the
+    ledger stores it (``MCPLangChainToolkit._apply_output_guardrail``): the
+    operator's ``max_output_chars`` or, without one, the served model's room. An
+    answer too large for the document shortener (``MAX_SHORTENABLE_CHARS``) is cut
+    by characters there, so the tool holds no limit of its own.
+    """
+    from maljan.agents.mcp_client import MCPLangChainToolkit
+
+    length = 50 * 1024 * 1024
+    target = tmp_path / "big.gz"
+    target.write_bytes(bytes(_gzip_with(0x08, b""))[:10] + b"n" * length + b"\x00" + b"D" * 9)
+
+    answer = binary.archive_list(str(target))
+    assert len(answer["members"][0]["name"]) == length
+
+    limit = 20_000
+    kept = MCPLangChainToolkit(
+        max_output_chars=limit, truncation_ledger=None
+    )._apply_output_guardrail(json.dumps(answer))
+
+    assert len(kept) <= limit
+    assert len(kept) < length

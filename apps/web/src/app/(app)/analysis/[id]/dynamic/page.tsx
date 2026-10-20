@@ -7,7 +7,7 @@ import ReportAbsent from "@/components/analysis/ReportAbsent";
 import { reportAbsence } from "@/components/analysis/reportAbsence";
 import type { ProcessNode } from "@/types/malware-report";
 import { confidenceClass } from "@/lib/report-utils";
-import { runSignatureScale, signatureScore } from "@/lib/severity";
+import { bySignatureSeverity, runSignatureScale, signatureScore } from "@/lib/severity";
 import Th from "@/components/ui/Th";
 import { ArtifactSections } from "@/components/analysis/ArtifactTable";
 import { hasSection, isCoveredBySection, sectionsForTab } from "@/components/analysis/reportSections";
@@ -108,9 +108,7 @@ export default function DynamicTab() {
    * scales were is read by the legacy table. */
   const signatureScale = runSignatureScale(report?.run_summary);
 
-  const sortedSignatures = [...dyn.sandbox_signatures].sort(
-    (a, b) => b.severity - a.severity,
-  );
+  const sortedSignatures = [...dyn.sandbox_signatures].sort(bySignatureSeverity);
 
   // D10: detect anti-emulation / anti-VM / anti-debug signatures so the
   // empty process-tree state can explain why the sandbox traced nothing.

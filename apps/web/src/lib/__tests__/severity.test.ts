@@ -19,6 +19,7 @@ import {
   ladderDots,
   runSignatureScale,
   signatureScore,
+  bySignatureSeverity,
   severityRank,
   severityRung,
   severityTone,
@@ -262,4 +263,26 @@ describe("severity is compared and coloured in one place", () => {
       expect(offenders).toEqual([]);
     });
   }
+});
+
+describe("a signature with no severity", () => {
+  it("is drawn as unknown in the neutral tone, never as a number", () => {
+    expect(signatureScore(null, stored("cape2"))).toMatchObject({
+      tone: NEUTRAL_TONE,
+      rung: null,
+      label: "unknown",
+      text: "unknown",
+    });
+    expect(signatureScore(null, null).text).toBe("unknown");
+  });
+
+  it("sorts below every number, zero included", () => {
+    const rows = [
+      { name: "a", severity: null },
+      { name: "b", severity: 0 },
+      { name: "c", severity: 3 },
+      { name: "d", severity: null },
+    ];
+    expect([...rows].sort(bySignatureSeverity).map((r) => r.name)).toEqual(["c", "b", "a", "d"]);
+  });
 });

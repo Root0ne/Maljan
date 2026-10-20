@@ -513,14 +513,26 @@ def annotate_age(record: dict[str, Any], source: EnrichmentSource) -> None:
             record["stale"] = True
 
 
+def declared_verdict(record: dict[str, Any] | None, source: EnrichmentSource) -> bool | None:
+    """The source's own verdict on a fresh record, or ``None`` where it gives none.
+
+    ``True`` when a threshold whose field holds a count is reached (the
+    thresholds are alternatives, so one is enough). ``False`` only when every
+    threshold's field holds a count and none is reached. ``None`` (unknown, never
+    ``False``) in every other case: the source declares no threshold, the record
+    is stale, or a threshold's field holds no count and no other threshold is reached.
+    """
+    if not isinstance(record, dict) or record.get("stale") or not source.malicious_when:
+        return None
+    counts = [(_count(record.get(t.field)), t.at_least) for t in source.malicious_when]
+    if any(counted is not None and counted >= at_least for counted, at_least in counts):
+        return True
+    return False if all(counted is not None for counted, _ in counts) else None
+
+
 def is_malicious(record: dict[str, Any] | None, source: EnrichmentSource) -> bool:
     """Whether a fresh record reaches any of the source's ``malicious_when`` thresholds."""
-    if not isinstance(record, dict) or record.get("stale"):
-        return False
-    return any(
-        (counted := _count(record.get(t.field))) is not None and counted >= t.at_least
-        for t in source.malicious_when
-    )
+    return declared_verdict(record, source) is True
 
 
 # ---------------------------------------------------------------------------

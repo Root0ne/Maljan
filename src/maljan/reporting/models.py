@@ -364,7 +364,9 @@ class SandboxSignature(BaseModel):
 
     name: str
     description: str = ""
-    severity: int = 0
+    # ``None`` where the sandbox gave no severity the report can read: unknown,
+    # never 0 (a stored row that holds 0 reads as 0).
+    severity: int | None = None
     technique_ids: list[str] = Field(default_factory=list)
     marks: list[str] = Field(default_factory=list)
 
@@ -540,6 +542,24 @@ class NetworkIOCs(BaseModel):
 # ---------------------------------------------------------------------------
 # Persistence
 # ---------------------------------------------------------------------------
+
+
+class EnrichmentNotAsked(BaseModel):
+    """A network value the post-verdict enrichment left unasked, and the questions it did not ask.
+
+    The enrichment asks at most the operator's per-kind lookup cap
+    (``enrichment_max_lookups``, ``cap`` here) of the values still to ask about;
+    every value past it is listed, with each question it would have been asked
+    (``reputation``, ``asn``, ``geo``), so a missing reputation is read as
+    "not asked" and never as "clean".
+    """
+
+    model_config = _STRICT_CONFIG
+
+    kind: Literal["domain", "ip"]
+    value: str
+    questions: list[str] = Field(default_factory=list)
+    cap: int
 
 
 class PersistenceMechanism(BaseModel):
@@ -1567,6 +1587,13 @@ class MalwareReport(BaseModel):
     # an empty list says the run's lookups established nothing.
     reputation: Annotated[list[ReputationAnswer] | None, BeforeValidator(_readable_reputation)] = (
         Field(default=None, exclude_if=lambda value: value is None)
+    )
+    # The network values the last enrichment left unasked because the
+    # operator's per-kind lookup cap was reached (``EnrichmentNotAsked``).
+    # ``None`` where none was left (and on a report stored before the field),
+    # and then left out of the dump, so a stored report reads and dumps as it did.
+    enrichment_not_asked: list[EnrichmentNotAsked] | None = Field(
+        default=None, exclude_if=lambda value: value is None
     )
     # The stored ledger's seal and the amendments chained onto it since,
     # written by the worker when the run is stored and by an enrichment that
