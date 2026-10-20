@@ -257,7 +257,7 @@ def stopped_run_summary(state: dict[str, Any], container: Any, *, note: str) -> 
     def _efficiency() -> None:
         # A record the report node built at the end of the run is complete and
         # kept; otherwise the counts as of the stop.
-        if isinstance(summary.get("efficiency"), dict):
+        if _is_built(summary.get("efficiency")):
             return
         record = stopped_efficiency(state, container, summary.get("tokens"))
         if record is not None:
@@ -265,7 +265,7 @@ def stopped_run_summary(state: dict[str, Any], container: Any, *, note: str) -> 
 
     def _coverage() -> None:
         # Kept where the report node built it; otherwise as of the stop.
-        if isinstance(summary.get("coverage"), dict):
+        if _is_built(summary.get("coverage")):
             return
         record = stopped_coverage(state, container, summary)
         if record is not None:
@@ -277,6 +277,11 @@ def stopped_run_summary(state: dict[str, Any], container: Any, *, note: str) -> 
         _part("efficiency", _efficiency)
         _part("coverage", _coverage)
     return _degraded(summary, note)
+
+
+def _is_built(record: Any) -> bool:
+    """Whether ``record`` is a block built from the run, not a ``not_built`` note."""
+    return isinstance(record, dict) and "v" in record
 
 
 def stopped_efficiency(
@@ -548,7 +553,7 @@ def partial_report(state: dict[str, Any], container: Any, *, note: str) -> dict[
 def _with_coverage(report: dict[str, Any], state: dict[str, Any], container: Any) -> None:
     """The stopped run's coverage on ``report``'s run summary, where it carries none yet."""
     summary = report.get("run_summary")
-    if not isinstance(summary, dict) or not summary or isinstance(summary.get("coverage"), dict):
+    if not isinstance(summary, dict) or not summary or _is_built(summary.get("coverage")):
         return
     try:
         record = stopped_coverage(state, container, summary)
@@ -566,7 +571,7 @@ def _with_efficiency(report: dict[str, Any], state: dict[str, Any], container: A
     record; a report with no run summary is left without one. Never raises.
     """
     summary = report.get("run_summary")
-    if not isinstance(summary, dict) or not summary or isinstance(summary.get("efficiency"), dict):
+    if not isinstance(summary, dict) or not summary or _is_built(summary.get("efficiency")):
         return
     try:
         record = stopped_efficiency(state, container, summary.get("tokens"))

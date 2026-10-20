@@ -1062,7 +1062,9 @@ def coverage_record(
         from maljan.core.logger import logger
 
         logger.warning("coverage: the record could not be built; the report carries none.")
-        return None
+        from maljan.analysis.disclosure import NOT_BUILT_UNREAD, not_built
+
+        return not_built(NOT_BUILT_UNREAD)
 
 
 # ---------------------------------------------------------------------------

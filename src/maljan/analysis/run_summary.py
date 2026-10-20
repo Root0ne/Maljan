@@ -2398,7 +2398,9 @@ class RunSummaryBuilder:
                 termination_reason="unknown",
                 sycophancy_events=0,
                 confidence_history=[],
-                final_confidence=0.0,
+                # Nothing was recorded, so no agreement was measured: none is
+                # stated, and 0.0 would say one was.
+                final_confidence=None,
             )
 
         return RunSummary(

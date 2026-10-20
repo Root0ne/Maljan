@@ -665,7 +665,8 @@ def efficiency_record(
     ``entries`` is the run's evidence ledger, in order; ``isr_reports`` the
     analysts' final answers; ``tokens`` the summary's own ``tokens`` block, whose
     figures the record states. ``partial_reason`` says why the record may miss
-    what the step the run stopped in did. Never raises.
+    what the step the run stopped in did. Never raises: a build that fails
+    returns ``analysis.disclosure.not_built``.
     """
     try:
         record: dict[str, Any] = {"v": EFFICIENCY_VERSION}
@@ -694,7 +695,11 @@ def efficiency_record(
             record["partial_reason"] = str(partial_reason)
         return record
     except Exception:  # noqa: BLE001 — telemetry must never break a report
-        return None
+        # Said, not silent: a record that says it was not built is told apart
+        # from a run whose counts were never taken.
+        from maljan.analysis.disclosure import NOT_BUILT_UNREAD, not_built
+
+        return not_built(NOT_BUILT_UNREAD)
 
 
 # How the block being written prints a value that came from a run — an agent's,

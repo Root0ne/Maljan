@@ -151,7 +151,12 @@ def _print_run_summary_inline(run_summary_dict: dict) -> None:
 
     typer.echo("\n--- Analysis Summary ---")
     final = neg.get("final_confidence")
-    shown = "not applicable" if final is None else f"{final:.3f}"
+    if final is not None:
+        shown = f"{final:.3f}"
+    elif neg.get("termination_reason", "unknown") == "unknown":
+        shown = "not recorded"
+    else:
+        shown = "not applicable"
     typer.echo(
         f"Termination: {neg.get('termination_reason', 'unknown')} | Final confidence: {shown}"
     )
@@ -243,10 +248,7 @@ def _write_markdown_report(result: dict, report_path: str) -> None:
             sycophancy_events=n_data.get("sycophancy_events", 0),
             confidence_history=n_data.get("confidence_history", []),
             # Absent when no agreement was measured; ``None`` then, not 0.0.
-            final_confidence=n_data.get(
-                "final_confidence",
-                None if n_data.get("termination_reason") == "not_applicable" else 0.0,
-            ),
+            final_confidence=n_data.get("final_confidence"),
         )
 
         agent_stats = [
@@ -290,6 +292,8 @@ def _write_markdown_report(result: dict, report_path: str) -> None:
             elapsed_seconds=run_summary_dict.get("elapsed_seconds", 0.0),
             corroboration=dict(run_summary_dict.get("corroboration") or {}),
             timestamp=run_summary_dict.get("timestamp", 0.0),
+            degraded_mode=bool(run_summary_dict.get("degraded_mode", False)),
+            degradation_reasons=[str(r) for r in run_summary_dict.get("degradation_reasons") or []],
         )
 
         Path(report_path).write_text(summary.to_markdown(), encoding="utf-8")
