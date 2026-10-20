@@ -692,7 +692,7 @@ class NarrativeAgent:
         """
         return NARRATIVE_ATTEMPTS + (1 if structured_output_supported_for_llm(self.llm) else 0)
 
-    def round_timeout(self, configured: float, prompt_chars: int = 0) -> float:
+    def round_timeout(self, configured: float | None, prompt_chars: int = 0) -> float | None:
         """This round's wait: configured, or what its calls need at the model's pace.
 
         The composer section's rule (``ReportComposer._section_timeout``):
@@ -700,29 +700,34 @@ class NarrativeAgent:
         output cap takes at that pace (``GenerationRates.call_timeout``, with
         the prompt read at the reading rate where one is measured), and the
         round holds :meth:`attempts` such calls; where it is not, or the round
-        has no output cap, the configured wait stands. Recorded in the run
-        summary as ``narrative:round``.
+        has no output cap, the configured wait stands. ``None`` configured is
+        a round with no wait of its own: ``None`` whether or not a pace is
+        measured (the paced time is still recorded). Recorded in the run summary as
+        ``narrative:round``.
         """
-        configured = float(configured)
         rates = getattr(self, "generation_rates", None)
         if rates is None:
-            return configured
+            return None if configured is None else float(configured)
         from maljan.llm.context_window import tokens_for_chars
         from maljan.llm.generation_rate import model_name_of
 
-        per_call = float(
-            rates.call_timeout(
-                "narrative:round",
-                model_name_of(self.llm),
-                configured,
-                int(getattr(self, "output_cap", 0) or 0),
-                budget=str(getattr(self, "budget_note", "") or ""),
-                prompt_tokens=tokens_for_chars(prompt_chars),
-            )
+        per_call = rates.call_timeout(
+            "narrative:round",
+            model_name_of(self.llm),
+            None if configured is None else float(configured),
+            int(getattr(self, "output_cap", 0) or 0),
+            budget=str(getattr(self, "budget_note", "") or ""),
+            prompt_tokens=tokens_for_chars(prompt_chars),
         )
-        if per_call <= configured:
-            return configured
-        return per_call * self.attempts()
+        if configured is None or per_call is None:
+            # Nothing configured: no outer cut. The paced time is recorded
+            # (above) and each call is bound by its own deadline, which grows
+            # with the progress it shows, so a slow model is never cut to the
+            # template by a wait shorter than its calls'.
+            return None
+        if float(per_call) <= float(configured):
+            return float(configured)
+        return float(per_call) * self.attempts()
 
     def _call_bound(self, turns: Sequence[BaseMessage]) -> int | None:
         """The ``max_tokens`` one call of this round is held to, or ``None``.
@@ -841,6 +846,13 @@ class NarrativeAgent:
         # the ISRs, a capability an analyst stated in a claim would be a
         # violation here and a pass there, on one run.
         grounding = CapabilityGrounding.from_report(report, isr_reports, ledger=evidence)
+        if grounding.unread:
+            unread = (
+                "the report's capability claims were not checked against the run's evidence: "
+                f"the evidence could not be read ({grounding.unread})"
+            )
+            if unread not in self.degradations:
+                self.degradations.append(unread)
         # What the run publishes, which is what a recommendation may act on:
         # its indicators and its techniques.
         answers = published_answers(report)

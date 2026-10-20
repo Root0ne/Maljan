@@ -331,14 +331,24 @@ def _lines(
     # a call a guard answered with no tool run — is not a failed tool; the
     # pack line says "not done" for it, and so does this one by leaving it out.
     # Tool and agent names are written as the pack writes a value, on one line.
-    failed = [
-        f"{pack_escaped(str(_get(row, 'tool')))} "
-        f"({pack_escaped(str(_get(row, 'agent') or PIPELINE))})"
-        for row in rows
-        if _get(row, "ok") is False and not _was_not_made(row) and not is_guard_answer(row)
-    ]
-    if failed:
-        lines.append("tools failed: " + ", ".join(failed))
+    # One name a tool and agent, with how many times it failed: a tool that
+    # failed forty times is one item (``name (agent) ×40``), not forty. Every
+    # distinct failure is still listed — no count of them is cut.
+    failed_counts: dict[str, int] = {}
+    for row in rows:
+        if _get(row, "ok") is False and not _was_not_made(row) and not is_guard_answer(row):
+            name = (
+                f"{pack_escaped(str(_get(row, 'tool')))} "
+                f"({pack_escaped(str(_get(row, 'agent') or PIPELINE))})"
+            )
+            failed_counts[name] = failed_counts.get(name, 0) + 1
+    if failed_counts:
+        lines.append(
+            "tools failed: "
+            + ", ".join(
+                f"{name} ×{count}" if count > 1 else name for name, count in failed_counts.items()
+            )
+        )
 
     line = budget_line(steps_left, seconds_left)
     if line:

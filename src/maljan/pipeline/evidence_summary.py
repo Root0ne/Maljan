@@ -195,6 +195,9 @@ EVIDENCE_ID_RE = re.compile(r"^ev_[0-9]+$")
 # catalogue, whose rows are associations.
 _SIGNATURE_RULES = "evidence_summary.yara_rule_strings"
 _API_CATALOGUE = "evidence_summary.catalogue_associations"
+# An answer that says what something is rather than reading the sample
+# (``evidence_roots``'s reference tools): the kind that says an id is no technique.
+_ID_REFERENCE = "evidence_roots._REFERENCE_TOOLS"
 
 
 def yara_rule_strings(ledger: Sequence[Any] | None) -> dict[str, list[dict[str, Any]]]:
@@ -338,14 +341,20 @@ def refused_technique_ids(isrs: dict[str, Any] | None, invalid: set[str]) -> set
 def invalid_technique_ids(ledger: Sequence[Any] | None) -> set[str]:
     """Every id a ledger entry of this run answered as not a technique.
 
-    ``attck_lookup`` says ``valid: false`` beside the id, ``attck_validate``
-    lists the id under ``invalid``. An id any source marks invalid is never
-    counted as asserted, whichever rule named it.
+    A reference tool's answer says ``valid: false`` beside the id or lists the
+    id under ``invalid`` (read for entries of a tool declared as a reference
+    only). An id any such source marks invalid is never counted as asserted,
+    whichever rule named it.
     """
     found: set[str] = set()
     for entry in ledger or []:
         structured = getattr(entry, "structured", None)
         if not isinstance(structured, dict):
+            continue
+        # Only a tool declared as a reference answers what an id is. Any other
+        # entry's ``valid`` or ``invalid`` key is a field of its own answer (a
+        # sample's data, a signature check), not a verdict on a technique id.
+        if not reads_as(entry, _ID_REFERENCE):
             continue
         if structured.get("valid") is False:
             tid = str(structured.get("technique_id") or "").strip().upper()

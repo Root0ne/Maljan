@@ -552,7 +552,8 @@ class PackInputs:
 # The one reputation call, made by the node through the tool server. It takes
 # the recorder so the entry it writes lands in the pack's own sequence, and it
 # answers with the entry it wrote.
-ReputationLookup = Callable[[EvidenceRecorder], LedgerEntry]
+# Called with the recorder, and with ``left=`` when it sets ``takes_left``.
+ReputationLookup = Callable[..., LedgerEntry]
 
 # The exact-match attribution step, made by the node when a function-hash
 # store and a provider that can hash functions are both present. It answers
@@ -1195,7 +1196,13 @@ class _Pack:
             self._record_not_run(REPUTATION_STEP, {"sha256": self.inputs.sha256}, spent)
             return
         try:
-            entry = self.reputation(self.recorder)
+            # A lookup that takes the pack's remaining budget (``takes_left``,
+            # as a server step's call does) is given it.
+            entry = (
+                self.reputation(self.recorder, left=self._budget_left())
+                if getattr(self.reputation, "takes_left", False)
+                else self.reputation(self.recorder)
+            )
         except Exception as exc:  # noqa: BLE001 — the lookup degrades, the pack goes on
             message = f"{type(exc).__name__}: {exc}"
             entry = self.recorder.record(

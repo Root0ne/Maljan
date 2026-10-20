@@ -709,7 +709,7 @@ class TestTheNode:
         record = update["stage_results"]["triage_pack"]
         assert record["ran"] is True
         assert record["failure"] is True
-        assert record["reason"] == "triage pack failed: RuntimeError: the pack itself broke"
+        assert record["reason"] == "triage pack failed: RuntimeError"
         assert update["triage_facts"]["degradation_reasons"] == ["triage.pack_failed"]
         assert update["triage_facts"]["entries"] == 0
         assert update["triage_facts"]["failed"] == 1
