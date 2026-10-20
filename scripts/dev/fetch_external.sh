@@ -46,7 +46,10 @@ for spec in "${targets[@]}"; do
 
   if [[ -d "$dest/.git" ]]; then
     have=$(git -C "$dest" rev-parse --short HEAD)
-    if git -C "$dest" merge-base --is-ancestor "$ref" HEAD 2>/dev/null \
+    # The pin is an exact ref: a tree merely ahead of it was not built or
+    # measured against it, so only HEAD == ref counts as in place.
+    want=$(git -C "$dest" rev-parse --verify --quiet "${ref}^{commit}" 2>/dev/null || true)
+    if [[ -n "$want" && "$(git -C "$dest" rev-parse HEAD)" == "$want" ]] \
        || [[ "$have" == "${ref:0:${#have}}" ]]; then
       echo "  ok       $name at $have"
       continue
@@ -69,13 +72,24 @@ done
 
 
 if [[ -d "$SIGMA_DEST/.git" ]]; then
-  echo "  ok       sigma rules at $(git -C "$SIGMA_DEST" rev-parse --short HEAD)"
+  # Exact pin, as above: a tree ahead of (or behind) the ref is not the corpus measured.
+  want=$(git -C "$SIGMA_DEST" rev-parse --verify --quiet "${SIGMA_REF}^{commit}" 2>/dev/null || true)
+  if [[ -n "$want" && "$(git -C "$SIGMA_DEST" rev-parse HEAD)" == "$want" ]]; then
+    echo "  ok       sigma rules at $(git -C "$SIGMA_DEST" rev-parse --short HEAD)"
+  else
+    echo "  checkout sigma rules -> $SIGMA_REF"
+    git -C "$SIGMA_DEST" fetch --quiet --depth 1 origin "refs/tags/$SIGMA_REF:refs/tags/$SIGMA_REF" \
+      || git -C "$SIGMA_DEST" fetch --quiet --tags origin \
+      || { echo "  FAIL     cannot fetch sigma rules $SIGMA_REF" >&2; exit 1; }
+    git -C "$SIGMA_DEST" checkout --quiet "$SIGMA_REF" \
+      || { echo "  FAIL     sigma rules $SIGMA_REF not available" >&2; exit 1; }
+  fi
 elif [[ -e "$SIGMA_DEST" ]]; then
   echo "  SKIP     $SIGMA_DEST exists and is not a git checkout" >&2
 else
   echo "  clone    sigma rules $SIGMA_REF"
   git clone --quiet --depth 1 --branch "$SIGMA_REF" "$SIGMA_URL" "$SIGMA_DEST" \
-    || git clone --quiet --depth 1 "$SIGMA_URL" "$SIGMA_DEST"
+    || { echo "  FAIL     cannot clone sigma rules at $SIGMA_REF" >&2; exit 1; }
 fi
 
 # capa's rules and its library signatures, at the capa version uv.lock pins,

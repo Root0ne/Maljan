@@ -23,7 +23,11 @@ import json
 from pathlib import Path
 from typing import Any
 
-FIXTURE = Path("apps/web/src/test-fixtures/tool-declaration-generated.json")
+# Anchored on this file, not on the working directory the script is run from.
+FIXTURE = (
+    Path(__file__).resolve().parents[2]
+    / "apps/web/src/test-fixtures/tool-declaration-generated.json"
+)
 
 # A valid value of each field, written as an operator would.
 _GOOD: dict[str, Any] = {

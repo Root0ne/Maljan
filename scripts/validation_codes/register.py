@@ -298,8 +298,13 @@ def tracked_files(root: Path) -> set[str] | None:
             check=True,
             timeout=120,
         ).stdout
-    except (OSError, subprocess.SubprocessError):
-        return None
+    except (OSError, subprocess.SubprocessError) as exc:
+        # A checkout whose file list cannot be read must not quietly widen to every file on disk.
+        detail = getattr(exc, "stderr", None)
+        text = detail.decode("utf-8", "replace").strip() if isinstance(detail, bytes) else ""
+        raise SystemExit(
+            f"git ls-files failed in {root}: {text or exc}; cannot tell which files are tracked"
+        ) from exc
     return {part.decode("utf-8") for part in listed.split(b"\0") if part}
 
 

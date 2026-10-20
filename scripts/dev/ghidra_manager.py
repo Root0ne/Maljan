@@ -44,7 +44,13 @@ class Versions(NamedTuple):
 
 def _run(cmd: list[str], cwd: Path | None = None, check: bool = True) -> str:
     """Run a shell command and return stdout."""
-    result = subprocess.run(cmd, capture_output=True, text=True, cwd=cwd or REPO_ROOT, check=check)
+    result = subprocess.run(cmd, capture_output=True, text=True, cwd=cwd or REPO_ROOT, check=False)
+    if result.returncode != 0 and check:
+        # Captured output would otherwise vanish with the exception: say why it failed.
+        sys.stderr.write(result.stderr or "")
+        raise subprocess.CalledProcessError(
+            result.returncode, cmd, output=result.stdout, stderr=result.stderr
+        )
     return result.stdout.strip()
 
 

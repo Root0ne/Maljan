@@ -125,6 +125,23 @@ def _stored_answers(stored: Any) -> dict[str, Any]:
     return answers
 
 
+def check_replay_paths(runs: list[Path], out: Path) -> Path:
+    """The resolved ``out``, after refusing what would write over the repository's own files.
+
+    ``--replay`` writes ``<run name>.*`` files into ``out``: ``out`` may not be
+    the repository's committed fixtures or source (``--fixture`` is where a
+    golden goes), and a run's name has to be a real directory name.
+    """
+    resolved = out.expanduser().resolve()
+    for guarded in (ROOT / "tests", ROOT / "src", ROOT / "scripts"):
+        if resolved == guarded or guarded in resolved.parents:
+            raise SystemExit(f"--out {resolved} is inside {guarded}; pick a scratch directory")
+    for run in runs:
+        if run.resolve().name in ("", ".", ".."):
+            raise SystemExit(f"--replay {run} does not name a run directory")
+    return resolved
+
+
 def replay(runs: list[Path], out: Path, concurrent: bool) -> None:
     """Re-render each stored run, and replay its own section values as the answers."""
     from langchain_core.messages import AIMessage
@@ -192,7 +209,7 @@ def main() -> int:
     if args.replay:
         if args.out is None:
             parser.error("--replay needs --out")
-        replay(args.replay, args.out, args.concurrent)
+        replay(args.replay, check_replay_paths(args.replay, args.out), args.concurrent)
         return 0
     found = golden(args.concurrent)
     args.fixture.write_text(json.dumps(found, indent=1, sort_keys=True) + "\n")

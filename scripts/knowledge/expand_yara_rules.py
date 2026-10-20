@@ -1,38 +1,39 @@
-"""expand_yara_rules.py — MITRE ATT&CK verisi kullanarak YARA kural setini genisletir.
+"""expand_yara_rules.py — extend the YARA-TTP rule set from MITRE ATT&CK data.
 
 Problem:
-    data/yara_ttp_rules.yaml elle yazilmis ~40 kuralla geldi.
-    Bu, 691 aktif ATT&CK tekniğinin yalnizca ~%4'unu kapsiyor ve Layer 0'in
-    deterministik gucunu buyuk olcude kisitliyor.
+    data/yara_ttp_rules.yaml shipped with about 40 hand-written rules. That
+    covers only about 4% of the 691 active ATT&CK techniques and limits the
+    deterministic strength of Layer 0.
 
-Cozum:
-    Depoda zaten mevcut olan MITRE verisi:
+Solution:
+    Mine the MITRE data already in the repository:
       - data/attck_labeled_sentences.jsonl  (relationship_description layer)
       - ~/.cache/maljan/enterprise-attack.json (STIX bundle)
-    bu iki kaynaktan pattern cikararak eksik teknikler icin kurallar olusturur.
+    and derive patterns for the techniques that have no rule yet.
 
-Veri kaynaklari (oncelik sirasi):
-    1. attck_labeled_sentences.jsonl — relationship_description layer:
-       MITRE'nin "bu malware bu teknigi SU SEKILDE kullanir" cumlelerinden
-       en sik gecen token'lari pattern olarak cikarir.
-    2. x_mitre_detection alanlari (STIX bundle): API adlari, arac isimleri,
-       event ID'leri icerir.
+Data sources (in priority order):
+    1. attck_labeled_sentences.jsonl, relationship_description layer: the most
+       frequent tokens of MITRE's "this malware uses this technique like so"
+       sentences become patterns.
+    2. x_mitre_detection fields (STIX bundle): API names, tool names, event IDs.
 
-Pattern secim kurallari:
-    - Windows API adi (buyuk harf baslangici, 4+ karakter) -> confidence 0.88
-    - Bilinen arac adi (mimikatz, certutil vb.) -> confidence 0.85
-    - Genel terim -> confidence 0.75
-    - 3 karakterden kisa -> atlanir.
-    - Minimum 2, maksimum 8 pattern/kural.
-    - Mevcut elle yazilmis kurallar KORUNUR (sadece eksik teknikler eklenir).
+Pattern selection rules:
+    - Windows API name (capitalised, 4+ characters) -> confidence 0.88
+    - Known tool name (mimikatz, certutil, ...)     -> confidence 0.85
+    - General term                                  -> confidence 0.75
+    - Tokens shorter than 3 characters are skipped.
+    - At least 2 and at most 8 patterns per rule.
+    - Hand-written rules are KEPT (only missing techniques are added).
 
-Kural ID formati: {tactic_slug}_{technique_normalized}_{seq}
-Ornek: defense_evasion_t1055_001_0
+Rule ID format: {tactic_slug}_{technique_normalized}_{seq}
+Example: defense_evasion_t1055_001_0
 
-Cikti:
-    data/yara_ttp_rules.yaml — genisletilmis kural seti (version 2.0)
+Output:
+    data/yara_ttp_rules.yaml — the extended rule set (version 2.0). The new
+    file is parsed back and checked to keep every earlier rule before it
+    replaces the old one.
 
-Kullanim:
+Usage:
     uv run python scripts/knowledge/expand_yara_rules.py
     uv run python scripts/knowledge/expand_yara_rules.py --dry-run
     uv run python scripts/knowledge/expand_yara_rules.py \
@@ -311,16 +312,21 @@ _TACTIC_SLUGS: dict[str, str] = {
 # ---------------------------------------------------------------------------
 
 
+def _yaml_str(value: str) -> str:
+    """A double-quoted YAML scalar for ``value``, escaping quotes, backslashes and controls."""
+    return json.dumps(str(value), ensure_ascii=True)
+
+
 def _yaml_dump_rules(rules: list[dict], indent: int = 2) -> str:
     """Serialize the rules list to YAML format without PyYAML dependency."""
     lines: list[str] = []
     pad = " " * indent
     for rule in rules:
         lines.append(f"{pad}- id: {rule['id']}")
-        lines.append(f'{pad}  technique_id: "{rule["technique_id"]}"')
+        lines.append(f"{pad}  technique_id: {_yaml_str(rule['technique_id'])}")
         lines.append(f"{pad}  confidence: {rule['confidence']:.2f}")
-        lines.append(f'{pad}  description: "{rule["description"]}"')
-        pattern_list = ", ".join(f'"{p}"' for p in rule["patterns"])
+        lines.append(f"{pad}  description: {_yaml_str(rule['description'])}")
+        pattern_list = ", ".join(_yaml_str(p) for p in rule["patterns"])
         lines.append(f"{pad}  patterns: [{pattern_list}]")
         lines.append("")
     return "\n".join(lines)
@@ -476,16 +482,28 @@ def _load_labeled_sentences(path: Path) -> dict[str, list[str]]:
 # ---------------------------------------------------------------------------
 
 
-def _parse_existing_rules(yaml_path: Path) -> tuple[str, list[str], list[dict]]:
+def _existing_rules(raw: str, source: Path) -> list[dict]:
+    """The rules of the old file, read as YAML; a file that does not parse is not expanded."""
+    import yaml
+
+    try:
+        doc = yaml.safe_load(raw)
+    except yaml.YAMLError as exc:
+        raise SystemExit(f"{source} is not valid YAML, not expanding it ({exc})") from None
+    rules = doc.get("rules") if isinstance(doc, dict) else None
+    return [r for r in (rules or []) if isinstance(r, dict) and r.get("technique_id")]
+
+
+def _parse_existing_rules(yaml_path: Path) -> tuple[str, list[str], str]:
     """Parse existing YAML rules file.
 
     Returns:
-        (header_block, covered_technique_ids, rules_list)
-    The rules_list contains raw dicts only for existing rule blocks.
+        (header_block, covered_technique_ids, rules_block_text)
+    The rules block is the existing rules kept verbatim, as text.
     The header_block is everything before the first '- id:' line.
     """
     if not yaml_path.exists():
-        return "", [], []
+        return "", [], ""
 
     raw = yaml_path.read_text(encoding="utf-8")
     lines = raw.split("\n")
@@ -507,7 +525,7 @@ def _parse_existing_rules(yaml_path: Path) -> tuple[str, list[str], list[dict]]:
     header = "\n".join(header_lines)
 
     # Extract covered technique IDs from raw text
-    covered: list[str] = re.findall(r'technique_id:\s*"([^"]+)"', raw)
+    covered = sorted({str(r["technique_id"]) for r in _existing_rules(raw, yaml_path)})
 
     # Build rules list for reference (we keep the raw block verbatim)
     raw_rules_block = "\n".join(rules_raw)
@@ -672,6 +690,27 @@ def _build_output_yaml(
 # ---------------------------------------------------------------------------
 
 
+def _check_output(yaml_content: str, covered: set[str], added: int, existing: int = 0) -> None:
+    """Parse the new file back; refuse to replace the old one with a broken or smaller set."""
+    import yaml
+
+    try:
+        doc = yaml.safe_load(yaml_content)
+    except yaml.YAMLError as exc:
+        raise SystemExit(f"refusing to write: not valid YAML ({exc})") from None
+    rules = doc.get("rules") if isinstance(doc, dict) else None
+    if not isinstance(rules, list):
+        raise SystemExit("refusing to write: the expanded rule set has no 'rules' list")
+    kept = {str(r.get("technique_id")) for r in rules if isinstance(r, dict)}
+    lost = sorted(covered - kept)
+    if lost:
+        raise SystemExit(f"refusing to write: the expanded rule set drops {lost[:5]}")
+    if len(rules) < existing + added:
+        raise SystemExit(
+            f"refusing to write: {len(rules)} rules parsed, {existing} earlier + {added} new"
+        )
+
+
 def expand(
     sentences_path: Path = DEFAULT_SENTENCES,
     output_path: Path = DEFAULT_OUTPUT,
@@ -757,8 +796,18 @@ def expand(
         new_rules,
         sentences_path,
     )
+    _check_output(
+        yaml_content,
+        covered_set,
+        len(new_rules),
+        len(_existing_rules(output_path.read_text(encoding="utf-8"), output_path))
+        if output_path.exists()
+        else 0,
+    )
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    output_path.write_text(yaml_content, encoding="utf-8")
+    tmp = output_path.with_name(output_path.name + ".tmp")
+    tmp.write_text(yaml_content, encoding="utf-8")
+    tmp.replace(output_path)
 
     total_covered = len(covered_set) + len(new_rules)
     print(
