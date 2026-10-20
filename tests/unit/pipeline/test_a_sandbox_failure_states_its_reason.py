@@ -87,7 +87,7 @@ def test_an_outside_error_is_one_capped_line_without_credentials(tmp_path: Path)
     app = _app(_Hostile())
     asyncio.run(app._submit_to_sandbox(str(_sample(tmp_path))))
     kept = app.container.sandbox_failure or ""
-    assert kept.startswith("CAPEv2 fetch_report refused: report missing")
+    assert kept.startswith("fetching the report: CAPEv2 fetch_report refused: report missing")
     assert not any(ch in kept for ch in "\r\n ")
     assert "hunter2" not in kept
     assert len(kept) <= SANDBOX_FAILURE_CHARS
@@ -99,7 +99,9 @@ def test_the_degradation_reason_quotes_the_outside_text_as_one_value(tmp_path: P
     app = _app(_Hostile())
     asyncio.run(app._submit_to_sandbox(str(_sample(tmp_path))))
     reason = sandbox_degradation_reason(None, app.container.sandbox_failure) or ""
-    assert reason.startswith('no sandbox report (dynamic detonation unavailable: "CAPEv2')
+    assert reason.startswith(
+        'no sandbox report (dynamic detonation unavailable: "fetching the report: CAPEv2'
+    )
     assert reason.endswith('") — static-only evidence')
     assert len(reason.splitlines()) == 1
     # The heading and the instruction stay inside the quoted value.

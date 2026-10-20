@@ -84,15 +84,34 @@ _BOTH_WAYS = (
     "answers from 8.8.8.8 and the HTTP response from 93.184.216.34 were left out, "
     "and are now in their conversation's totals with the part from the host stated"
 )
+_ANY_METHOD = (
+    "; and an HTTP request with a method other than GET, POST, PUT, DELETE or HEAD "
+    "(the OPTIONS request here) is read, where it was skipped"
+)
 
 # Each improved capture: why, and the surfaces whose answer changed. Every
 # other surface of it must still answer exactly as before.
 IMPROVED: dict[str, tuple[str, tuple[str, ...]]] = {
-    "ethernet_mixed.pcap": (_SNI + _IPV6 + _BOTH_WAYS, _FACTS_LIMITED),
-    "ethernet_mixed.pcap.gz": (_SNI + _IPV6 + _BOTH_WAYS, _FACTS_LIMITED),
-    "ethernet_mixed_be_nano.pcap": (_SNI + _IPV6 + _BOTH_WAYS, _FACTS_LIMITED),
-    "truncated_in_header.pcap": (_SNI + _FRAMING + _IPV6 + _BOTH_WAYS, _FRAMING_SURFACES),
-    "truncated_in_record.pcap": (_SNI + _FRAMING + _IPV6 + _BOTH_WAYS, _FRAMING_SURFACES),
+    "ethernet_mixed.pcap": (
+        _SNI + _IPV6 + _BOTH_WAYS + _ANY_METHOD,
+        (*_FACTS_LIMITED, "extract_http"),
+    ),
+    "ethernet_mixed.pcap.gz": (
+        _SNI + _IPV6 + _BOTH_WAYS + _ANY_METHOD,
+        (*_FACTS_LIMITED, "extract_http"),
+    ),
+    "ethernet_mixed_be_nano.pcap": (
+        _SNI + _IPV6 + _BOTH_WAYS + _ANY_METHOD,
+        (*_FACTS_LIMITED, "extract_http"),
+    ),
+    "truncated_in_header.pcap": (
+        _SNI + _FRAMING + _IPV6 + _BOTH_WAYS + _ANY_METHOD,
+        _FRAMING_SURFACES,
+    ),
+    "truncated_in_record.pcap": (
+        _SNI + _FRAMING + _IPV6 + _BOTH_WAYS + _ANY_METHOD,
+        _FRAMING_SURFACES,
+    ),
     "edge_layers.pcap": (_IPV6_ONLY, _FACTS_ALL),
     "linux_sll.pcap": (_IPV6_ONLY, _FACTS_LIMITED),
     "linux_sll2.pcap": (_IPV6_ONLY, _FACTS_LIMITED),

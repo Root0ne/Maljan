@@ -234,24 +234,53 @@ class MaljanApp:
         platform = infer_platform(file_type, mime_type, sandbox_report)
         return file_type, platform
 
-    def _poll_budget(self, provider: Any) -> tuple[int, int]:
-        """How long to wait for this provider, and how often to ask.
+    def _poll_budget(self, provider: Any) -> tuple[int | None, int | None]:
+        """The poll budget this provider's own config block sets, ``None`` where it sets none.
 
-        The provider layer used to thread ``sandbox.cape2.*`` into every provider's poll
-        loop, which was harmless while every provider that polled was CAPE.
-        A provider with its own configured budget reads it; everything else
-        keeps CAPE's values, so the cape2, mock, upload and triage paths are
-        byte-for-byte what they were.
+        Read from the block named by the provider's id (``sandbox.cape2`` for
+        CAPE, ``sandbox.triage`` for Triage). A provider with no such block
+        (a plugin's, the mock) gets ``None`` for each number, and is then
+        handed nothing, so it polls with its own defaults rather than with
+        CAPE's detonation timeout.
         """
         block = getattr(self.config.sandbox, str(provider.id), None)
         timeout = getattr(block, "timeout_seconds", None)
         interval = getattr(block, "poll_interval_seconds", None)
-        if timeout is None or interval is None:
-            return (
-                self.config.sandbox.cape2.timeout_seconds,
-                self.config.sandbox.cape2.poll_interval_seconds,
-            )
-        return int(timeout), int(interval)
+        return (
+            int(timeout) if timeout is not None else None,
+            int(interval) if interval is not None else None,
+        )
+
+    def _poll_arguments(self, provider: Any, task_id: str) -> dict[str, int]:
+        """The poll numbers to hand ``provider.wait_for_completion``.
+
+        The numbers its own block sets (``_poll_budget``). One it sets none
+        for is left out when the provider's method has a default of its own
+        for it, so the provider polls by its own rule; the base contract has
+        no default, and a provider written to it is given CAPE's number, the
+        one thing the call cannot go without.
+        """
+        import inspect
+
+        timeout, interval = self._poll_budget(provider)
+        cape = self.config.sandbox.cape2
+        wanted = {
+            "timeout_seconds": (timeout, cape.timeout_seconds),
+            "poll_interval_seconds": (interval, cape.poll_interval_seconds),
+        }
+        try:
+            params = inspect.signature(provider.wait_for_completion).parameters
+        except (TypeError, ValueError):
+            params = inspect.Signature().parameters
+        out: dict[str, int] = {}
+        for name, (own, fallback) in wanted.items():
+            if own is not None:
+                out[name] = own
+            elif name in params and params[name].default is inspect.Parameter.empty:
+                out[name] = int(fallback)
+            elif name not in params:
+                out[name] = int(fallback)
+        return out
 
     def _note_the_reader(self, provider: Any, run: Any) -> None:
         """Which reader produced this job's report, and the signature scale its provider gives."""
@@ -290,11 +319,16 @@ class MaljanApp:
             self._sandbox_failed("the sample file to submit was not found")
             return None
 
+        # Where the submission was when it failed, so a failure says which step
+        # it was (an unreachable sandbox, a task that never finished, a report
+        # that could not be read) and not only that there was one.
+        stage = "choosing the sandbox"
         try:
             provider = self.container.get_sandbox_provider()
             caps = provider.capabilities
             if not caps.can_submit and caps.accepts_uploaded_report:
                 # No detonation: the evidence is already here.
+                stage = "reading the attached report"
                 try:
                     run = provider.fetch("uploaded")
                 except Exception as exc:  # noqa: BLE001 — same degrade contract as a failed submit
@@ -320,11 +354,13 @@ class MaljanApp:
             # whose submission never leaves the worker records none.
             from maljan.analysis.disclosure import submission_host, upload_record
 
+            stage = "preparing the submission"
             host = submission_host(provider)
             if host is not None:
                 self.container.sample_uploads.append(
                     upload_record(provider.id, submitted=False, host=host)
                 )
+            stage = "submitting the sample"
             task_id = await asyncio.to_thread(provider.submit, str(path))
             if host is not None:
                 self.container.sample_uploads[-1] = upload_record(
@@ -337,14 +373,13 @@ class MaljanApp:
             # configured, and a real CAPE detonation (win10 guest run alone is
             # ~280s + processing) timed out before the report was ready —
             # silently degrading every run to static-only.
-            timeout_seconds, poll_interval_seconds = self._poll_budget(provider)
+            stage = "waiting for the analysis"
+            budget = self._poll_arguments(provider, task_id)
             status = await asyncio.to_thread(
-                provider.wait_for_completion,
-                task_id,
-                timeout_seconds=timeout_seconds,
-                poll_interval_seconds=poll_interval_seconds,
+                lambda: provider.wait_for_completion(task_id, **budget)
             )
             if status == "reported":
+                stage = "fetching the report"
                 run = await asyncio.to_thread(provider.fetch, task_id)
                 self._note_the_reader(provider, run)
                 result = SubmissionResult(
@@ -411,14 +446,16 @@ class MaljanApp:
                 )
                 return result.report  # type: ignore[no-any-return]
             logger.warning("Sandbox task ended with status=%s: %s", result.status, result.error)
-            self._sandbox_failed(
-                f"sandbox task {result.task_id} ended with status {result.status!r}"
-                + ("" if result.status not in ("reported", "partial") else " and no report")
-            )
+            ended = f"sandbox task {result.task_id} ended with status {result.status!r}"
+            if result.status in ("reported", "partial"):
+                ended += " and no report"
+            elif result.error and result.error != f"Sandbox status: {result.status}":
+                ended += f": {result.error}"
+            self._sandbox_failed(ended)
             return None
         except Exception as exc:
             logger.error("Sandbox submission failed: %s", exc)
-            self._sandbox_failed(str(exc) or type(exc).__name__)
+            self._sandbox_failed(f"{stage}: {str(exc) or type(exc).__name__}")
             return None
 
     def _sandbox_failed(self, reason: str) -> None:

@@ -371,6 +371,46 @@ def guard_from_settings(
     return guard
 
 
+def operator_guard(
+    server: str,
+    cfg: Any,
+    *,
+    block: Any = None,
+    on_open: Callable[[dict[str, Any]], None] | None = None,
+    sample_open: Any = None,
+) -> ServerGuard:
+    """A guard that limits only what the operator set; for a server outside the job's registry.
+
+    A deadline only from ``mcp.breaker.call_timeout_seconds`` or the block's
+    own ``call_timeout_seconds``; a concurrency cap, and a breaker (its
+    failure count and cooldown), only when ``mcp.breaker`` was given them.
+    Otherwise the call has no deadline, no cap and a breaker that never opens,
+    which is what such a server had before it had a guard.
+    """
+    breaker: Any = getattr(getattr(cfg, "mcp", None), "breaker", None)
+    given: set[str] = getattr(breaker, "model_fields_set", set())
+    explicit = explicit_call_timeout(cfg)
+    declared = getattr(block, "call_timeout_seconds", None)
+    own = float(declared) if isinstance(declared, int | float) and declared > 0 else 0.0
+    breaker_set = breaker is not None and (
+        "failures_to_open" in given or "cooldown_seconds" in given
+    )
+    guard = ServerGuard(
+        server,
+        failures_to_open=int(breaker.failures_to_open) if breaker_set else 2**31,
+        cooldown_seconds=float(breaker.cooldown_seconds) if breaker_set else 0.0,
+        max_concurrent_calls=int(breaker.max_concurrent_calls)
+        if breaker is not None and "max_concurrent_calls" in given
+        else 0,
+        call_timeout_seconds=explicit or own,
+        on_open=on_open,
+        explicit_call_timeout=explicit > 0,
+    )
+    guard.declare_sample_open(sample_open)
+    guard.declare_tool_facts(getattr(block, "tool_facts", None))
+    return guard
+
+
 def explicit_call_timeout(cfg: Any) -> float:
     """The per-call budget an operator set (``mcp.breaker.call_timeout_seconds``), or ``0``.
 

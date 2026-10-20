@@ -1206,6 +1206,9 @@ class ServiceContainer:
                     cfg.static.provider = wanted  # type: ignore[assignment]
                 cached = build(cfg)
                 logger.info("Static provider: %s.", cached.id)
+                # A provider whose server rests announces it to this job's sink.
+                if hasattr(cached, "event_sink"):
+                    cached.event_sink = self.event_sink
                 if hasattr(cached, "sample_notes"):
                     cached.sample_notes = self.sample_notes
                 # A provider that does work of its own in the job's staging
@@ -1267,7 +1270,10 @@ class ServiceContainer:
         ``server_degradation_reasons`` does.
         """
         registry = self._server_registry_cache
-        return [dict(row) for row in getattr(registry, "rests", None) or []]
+        rests = [dict(row) for row in getattr(registry, "rests", None) or []]
+        for provider in list(self._static_provider_cache.values()):
+            rests.extend(dict(row) for row in getattr(provider, "rests", None) or [])
+        return rests
 
     def _note_the_setup(self, name: str, resolved: Any) -> None:
         """Keep agent ``name``'s resolution and the servers attached by then. Never raises."""

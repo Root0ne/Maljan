@@ -624,8 +624,13 @@ class GhidraStaticProvider(StaticProvider):
         )
         self.withheld_tools = withheld
         out: list[Any] = []
+        # The tool that loads the sample is the one the block declares; the
+        # name every Ghidra build has used is the fallback for no declaration.
+        from maljan.providers.sample_open import declared
+
+        load_name = str(getattr(spec, "open_tool", "")) if declared(spec) else UNDECLARED_LOAD_TOOL
         for tool in tools:
-            if getattr(tool, "name", "") == "load_program":
+            if getattr(tool, "name", "") == load_name:
                 try:
                     tool = self._wrap_load_program(tool)
                 except Exception as e:  # noqa: BLE001
@@ -660,6 +665,10 @@ class GhidraStaticProvider(StaticProvider):
             return tool  # sync/stdio tool variant — leave untouched
 
         provider = self
+        from maljan.providers.sample_open import declared
+
+        spec = getattr(getattr(self, "_cfg", None), "sample_open", None)
+        path_arg = str(getattr(spec, "path_argument", "")) if declared(spec) else "file"
 
         async def pinned_load_program(**kwargs: Any) -> str:
             pinned = provider._held_path()
@@ -668,13 +677,13 @@ class GhidraStaticProvider(StaticProvider):
             known = provider.sample_failure(pinned)
             if known is not None:
                 raise known
-            if kwargs.get("file") != pinned:
+            if kwargs.get(path_arg) != pinned:
                 logger.warning(
                     "load_program: overriding model-supplied path %r with known container path %r.",
-                    kwargs.get("file"),
+                    kwargs.get(path_arg),
                     pinned,
                 )
-                kwargs["file"] = pinned
+                kwargs[path_arg] = pinned
             answer = str(await inner(**kwargs))
             refused = not_made_current(answer)
             if refused is not None:

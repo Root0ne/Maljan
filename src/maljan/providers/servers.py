@@ -95,6 +95,23 @@ REAP_BUDGET = CHILD_TERM_GRACE + 2.0
 SYNC_CLOSE_TIMEOUT = 20.0
 
 
+def _start_time(pid: int) -> str | None:
+    """The start time of ``pid`` (field 22 of ``/proc/<pid>/stat``), ``None`` where unreadable.
+
+    With the pid it names one process for good: a pid the kernel hands out
+    again has a start time of its own.
+    """
+    try:
+        with open(f"/proc/{pid}/stat", "rb") as fh:
+            stat = fh.read().decode("ascii", "replace")
+    except OSError:
+        return None
+    # The command name is in parentheses and may hold spaces; fields from the
+    # third on follow the last parenthesis.
+    rest = stat[stat.rfind(")") + 2 :].split()
+    return rest[19] if len(rest) > 19 else None
+
+
 def _own_child_pids() -> set[int]:
     """The pids of this process's direct children, empty where /proc is absent.
 
@@ -117,6 +134,115 @@ def _own_child_pids() -> set[int]:
         return children
     except OSError:
         return set()
+
+
+# Child pids already attributed to a handle, by the handle that owns each. Two
+# handles of one server share an argv, so the argv check alone would give both
+# the other's child; a pid that is another handle's is never taken twice.
+_CLAIMED_PIDS: dict[tuple[int, str | None], int] = {}
+_CLAIMED_LOCK = threading.Lock()
+# One lock per launch argv, held from the snapshot of our children before an
+# attach until its child is claimed (not across the handshake): two handles
+# that launch the same argv and start together would otherwise each see both
+# children appear.
+_LAUNCH_LOCKS: dict[tuple[str, ...], threading.Lock] = {}
+
+
+def _launch_lock(argv: tuple[str, ...]) -> threading.Lock | None:
+    """The lock serialising attaches that launch ``argv``; ``None`` for no child."""
+    if not argv:
+        return None
+    with _CLAIMED_LOCK:
+        return _LAUNCH_LOCKS.setdefault(argv, threading.Lock())
+
+
+class _LaunchWindow:
+    """The launch lock of one attach, released once, by whoever gets there first."""
+
+    def __init__(self, lock: threading.Lock | None) -> None:
+        self._lock = lock
+        self.held = lock is not None
+        self._mutex = threading.Lock()
+
+    def release(self) -> None:
+        with self._mutex:
+            if self.held and self._lock is not None:
+                self.held = False
+                self._lock.release()
+
+
+def _refuse_on_the_agent_loop(name: str) -> None:
+    """Refuse a blocking attach from the agent loop's own thread, as the attach always has.
+
+    Its handshake runs on the agent loop and is waited for here, so the thread
+    serving that loop can never make it. Another loop's thread may block.
+    """
+    from maljan.agents.base_agent import _get_agent_loop, _on_agent_loop_thread
+
+    if _on_agent_loop_thread(_get_agent_loop()):
+        raise RuntimeError(
+            f"mcp server '{name}' was opened with a blocking call from the agent loop's own "
+            "thread, which cannot serve it: await aopen there, or call open from "
+            "asyncio.to_thread"
+        )
+
+
+async def _acquire_launch(lock: threading.Lock) -> None:
+    """Take ``lock`` off the event loop, leaving it free if the wait is cancelled.
+
+    The executor's ``acquire`` cannot be cancelled: it goes on and takes the
+    lock after the waiter is gone. So the future is shielded and, when the
+    waiter is cancelled, released as soon as it has been taken.
+    """
+    future = asyncio.get_running_loop().run_in_executor(None, lock.acquire)
+    try:
+        await asyncio.shield(future)
+    except asyncio.CancelledError:
+
+        def _give_back(done: Any) -> None:
+            if not done.cancelled() and done.exception() is None and done.result():
+                lock.release()
+
+        future.add_done_callback(_give_back)
+        raise
+
+
+class _Watch:
+    """The thread that watches for an attach's child; ``stop`` it, then join ``thread``."""
+
+    def __init__(self, thread: threading.Thread, halt: threading.Event) -> None:
+        self.thread = thread
+        self._halt = halt
+
+    def stop(self) -> None:
+        self._halt.set()
+
+
+def _watch_for_child(handle: ServerHandle, before: set[int], window: _LaunchWindow) -> _Watch:
+    """Free the launch window as soon as any child appears, claiming it when its argv is ours.
+
+    The child is spawned inside ``initialize``, which may take long; the
+    window closes at the spawn, not at the end of the handshake. A child that
+    appears is in the next attach's ``before``, so the window is released
+    whether or not its argv is this handle's (a launcher such as ``npx`` or
+    ``env`` runs another argv); the final note claims by argv afterwards.
+    Polling backs off from 5 ms, doubling up to 100 ms.
+    """
+    halt = threading.Event()
+
+    def _run() -> None:
+        delay = 0.005
+        while not halt.is_set():
+            handle._note_child_pids(before)
+            if handle._child_pids or (_own_child_pids() - before):
+                window.release()
+                return
+            halt.wait(delay)
+            delay = min(delay * 2, 0.1)
+
+    thread = threading.Thread(target=_run, name="child-watch", daemon=True)
+    thread.start()
+    return _Watch(thread, halt)
 
 
 def _run_async(coro: Any, label: str) -> None:
@@ -272,6 +398,9 @@ class ServerHandle:
         # The child this handle spawned, for the backstop reap when the
         # transport's own SIGTERM -> SIGKILL shutdown never gets to run.
         self._child_pids: tuple[int, ...] = ()
+        # When each of those started, read as it was claimed: with its pid it
+        # is the child's identity, so a reused pid is never the old child.
+        self._child_starts: dict[int, str | None] = {}
         # The argv that child was launched with, which is what makes the pid
         # above this handle's rather than merely contemporaneous.
         self._launch_argv: tuple[str, ...] = ()
@@ -585,7 +714,43 @@ class ServerHandle:
             output_guardrail, max_output_chars, truncation_ledger, context_budget
         )
 
-        before = _own_child_pids()
+        launch = _launch_lock(self._launch_argv)
+        if launch is not None:
+            _refuse_on_the_agent_loop(self.name)
+            launch.acquire()
+        window = _LaunchWindow(launch)
+        try:
+            before = _own_child_pids()
+            watch = _watch_for_child(self, before, window) if launch is not None else None
+            try:
+                self._init_sync(toolkit)
+            finally:
+                if watch is not None:
+                    watch.stop()
+                    watch.thread.join()
+            self._settle_children(before, window)
+        except BaseException:
+            self._release_claims()
+            raise
+        finally:
+            window.release()
+        self._finish_open_sync(toolkit)
+
+    def _settle_children(self, before: set[int], window: _LaunchWindow) -> None:
+        """Claim the child by its argv, if the watch did not."""
+        if not self._child_pids:
+            self._note_child_pids(before)
+
+    def _release_claims(self) -> None:
+        """Give back the pids this handle claimed."""
+        with _CLAIMED_LOCK:
+            for key in [k for k, owner in _CLAIMED_PIDS.items() if owner == id(self)]:
+                del _CLAIMED_PIDS[key]
+        self._child_pids = ()
+        self._child_starts = {}
+
+    def _init_sync(self, toolkit: Any) -> None:
+        """Initialise ``toolkit``, or tear it down and raise."""
         try:
             _run_async(toolkit.initialize(), label=f"{self.name}-mcp-init")
         except Exception:
@@ -613,7 +778,9 @@ class ServerHandle:
         from maljan.agents.base_agent import _get_agent_loop
 
         self._owner_loop = _get_agent_loop()
-        self._note_child_pids(before)
+
+    def _finish_open_sync(self, toolkit: Any) -> None:
+        """What an attach does once its child is noted."""
         self._note_isolation()
         self._all_tools = list(toolkit.get_tools())
         self._read_capabilities()
@@ -666,7 +833,33 @@ class ServerHandle:
         # Recorded *before* ``initialize``, so the failure path below unwinds
         # on the loop that wound the partial attach too.
         self._owner_loop = asyncio.get_running_loop()
-        before = _own_child_pids()
+        launch = _launch_lock(self._launch_argv)
+        if launch is not None:
+            # Taken off the loop: a holder on another loop may be waiting on
+            # this thread's loop for something, and a blocked loop would never
+            # let it finish.
+            await _acquire_launch(launch)
+        window = _LaunchWindow(launch)
+        try:
+            before = _own_child_pids()
+            watch = _watch_for_child(self, before, window) if launch is not None else None
+            try:
+                await self._ainit(toolkit, before, window)
+            finally:
+                if watch is not None:
+                    watch.stop()
+                    # Joined off the loop: the thread may be mid-poll.
+                    await asyncio.get_running_loop().run_in_executor(None, watch.thread.join)
+            self._settle_children(before, window)
+        except BaseException:
+            self._release_claims()
+            raise
+        finally:
+            window.release()
+        await self._afinish_open(toolkit)
+
+    async def _ainit(self, toolkit: Any, before: set[int], window: _LaunchWindow) -> None:
+        """Initialise ``toolkit`` and note the child it started, or tear it down and raise."""
         try:
             await toolkit.initialize()
         except (Exception, asyncio.CancelledError):
@@ -676,7 +869,7 @@ class ServerHandle:
             )
             # The child a half-open transport already spawned is this handle's
             # too, and nothing else knows about it.
-            self._note_child_pids(before)
+            self._settle_children(before, window)
             if not await self._acleanup(toolkit):
                 await self._reap_after_abandon()
             self._child_pids = ()
@@ -686,7 +879,9 @@ class ServerHandle:
         self.attached_once = True
         _ATTACHED_HANDLES.add(self)
         self._opened_async = True
-        self._note_child_pids(before)
+
+    async def _afinish_open(self, toolkit: Any) -> None:
+        """What an async attach does once its child is noted."""
         self._note_isolation()
         self._all_tools = list(toolkit.get_tools())
         await self._aread_capabilities()
@@ -860,6 +1055,8 @@ class ServerHandle:
         """
         if not self._launch_argv:
             return False
+        if pid in self._child_starts and _start_time(pid) != self._child_starts[pid]:
+            return False
         try:
             with open(f"/proc/{pid}/cmdline", "rb") as fh:
                 argv = fh.read().split(b"\0")
@@ -870,8 +1067,27 @@ class ServerHandle:
 
     def _note_child_pids(self, before: set[int]) -> None:
         """Record the children that appeared while ``initialize`` ran."""
-        appeared = _own_child_pids() - before
-        self._child_pids = tuple(sorted(pid for pid in appeared if self._child_matches(pid)))
+        now = _own_child_pids()
+        appeared = now - before
+        with _CLAIMED_LOCK:
+            # A claim on a pid that is no longer our child is stale (the pid
+            # may be reused), so it is dropped before it can exclude anyone.
+            live = {(pid, _start_time(pid)) for pid in now}
+            for key in [k for k in _CLAIMED_PIDS if k not in live]:
+                del _CLAIMED_PIDS[key]
+            starts = {pid: _start_time(pid) for pid in appeared}
+            mine = tuple(
+                sorted(
+                    pid
+                    for pid in appeared
+                    if _CLAIMED_PIDS.get((pid, starts[pid]), id(self)) == id(self)
+                    and self._child_matches(pid)
+                )
+            )
+            for pid in mine:
+                _CLAIMED_PIDS[(pid, starts[pid])] = id(self)
+        self._child_pids = mine
+        self._child_starts = {pid: starts[pid] for pid in mine}
 
     def _note_isolation(self) -> None:
         """Measure each process this attach started, for the run's isolation part.
@@ -1018,7 +1234,7 @@ class ServerHandle:
         """Drop what only an attached handle carries. Call after the reap."""
         _ATTACHED_HANDLES.discard(self)
         self._owner_loop = None
-        self._child_pids = ()
+        self._release_claims()
         self._launch_argv = ()
 
     async def _reap_after_abandon(self) -> None:
@@ -1876,6 +2092,13 @@ class ServerRegistry:
         collision prefixing happens later, in ``merge_tools``, so a manifest
         name reaching here is always raw.
         """
+        if not handle.config.enabled:
+            # A reference to a server the operator switched off is a stale
+            # reference, and says so, whether it named one tool or the set.
+            unavailable = AGENT_TOOL_UNAVAILABLE_REASON.format(
+                server=handle.name, name=ref.name or "*"
+            )
+            return [], [f"{unavailable}: server disabled"]
         available = handle.tools()
         if ref.name is None:
             return list(available), handle.withheld_reasons()

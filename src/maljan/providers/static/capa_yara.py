@@ -597,26 +597,18 @@ class CapaYaraStaticProvider(StaticProvider):
         cannot load is a warning and an empty list.
 
         ``YaraLayer.from_yaml`` loads one YAML file, while the operator setting
-        (``static.yara.rules_dir``) is a directory — the first ``*.yml``/
-        ``*.yaml`` file found there is used, matching how the capa rules
-        directory is a directory of many small rule files but the YARA layer's
-        own corpus format is one file listing every rule.
+        (``static.yara.rules_dir``) is a directory: every ``*.yml``/``*.yaml``
+        file in it is loaded and scanned, in name order, and the hits are
+        joined. A file that cannot be loaded costs that file only.
         """
         rules_dir = Path(resolve_data(self._yara.rules_dir))
         if not rules_dir.is_dir():
             return []
-        rule_file = next(iter([*rules_dir.glob("*.yml"), *rules_dir.glob("*.yaml")]), None)
-        if rule_file is None:
+        rule_files = sorted([*rules_dir.glob("*.yml"), *rules_dir.glob("*.yaml")])
+        if not rule_files:
             return []
         try:
-            from maljan.analysis.yara_layer import YaraLayer
-
-            layer = YaraLayer.from_yaml(rule_file)
             data = Path(sample_path).read_bytes()
-            return [
-                {"rule": m.rule_id, "strings": [m.evidence_ref], "technique": m.technique_id}
-                for m in layer.scan(data)
-            ]
         except Exception as exc:  # noqa: BLE001 - YARA must never fail a run
             logger.warning(
                 "YARA scan of %s failed (%s: %s); continuing without YARA evidence.",
@@ -625,6 +617,25 @@ class CapaYaraStaticProvider(StaticProvider):
                 exc,
             )
             return []
+        from maljan.analysis.yara_layer import YaraLayer
+
+        hits: list[dict[str, Any]] = []
+        for rule_file in rule_files:
+            try:
+                layer = YaraLayer.from_yaml(rule_file)
+                hits.extend(
+                    {"rule": m.rule_id, "strings": [m.evidence_ref], "technique": m.technique_id}
+                    for m in layer.scan(data)
+                )
+            except Exception as exc:  # noqa: BLE001 - YARA must never fail a run
+                logger.warning(
+                    "YARA rules %s failed on %s (%s: %s); continuing without that file.",
+                    rule_file.name,
+                    sample_path,
+                    type(exc).__name__,
+                    exc,
+                )
+        return hits
 
 
 def _render_table(rows: list[dict[str, str]]) -> str:
