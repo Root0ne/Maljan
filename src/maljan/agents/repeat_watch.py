@@ -669,6 +669,26 @@ class _Seen:
     def __len__(self) -> int:
         return len(self._own) + (len(self._base) if self._base is not None else 0)
 
+    def freeze(self) -> _Seen:
+        """This set as one nobody adds to any more, for two readers to share without a copy.
+
+        A layer is merged into the one beneath it while it holds at least half
+        as many hashes, so the chain stays logarithmic in the claims and each
+        hash is copied a bounded number of times, amortised: a copy of the
+        whole set at every fence made a long text quadratic.
+        """
+        top = self
+        while (base := top._base) is not None:
+            if not top._own:
+                top = base
+                continue
+            if len(top._own) * 2 < len(base._own):
+                break
+            merged = _Seen(base._base)
+            merged._own = base._own | top._own
+            top = merged
+        return top
+
 
 class _Claims:
     """``claim_blocks`` over the lines applied so far: claims begun, closed hashes, the open block."""
@@ -689,8 +709,11 @@ class _Claims:
         return view
 
     def fork(self) -> _Claims:
-        twin = _Claims()
-        twin.seen._own = set(self.seen._own)
+        # Both read what is closed so far from one frozen layer and each adds
+        # to a layer of its own: no copy of the set.
+        frozen = self.seen.freeze()
+        self.seen = _Seen(frozen)
+        twin = _Claims(_Seen(frozen))
         twin.begun, twin.fields, twin.disputes = self.begun, self.fields, self.disputes
         twin.open = None if self.open is None else self.open.copy()
         return twin

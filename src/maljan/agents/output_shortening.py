@@ -297,41 +297,43 @@ def _walk(document: dict[str, Any], separators: tuple[str, str] | None) -> list[
     """
     found: list[_Candidate] = []
 
-    def visit(node: Any, path: str) -> None:
-        if isinstance(node, dict):
-            for key, value in node.items():
-                name = str(key)
-                if name == _NEVER_TOUCHED:
-                    continue
-                here = f"{path}/{_escaped(name)}"
-                if isinstance(value, list) and value:
-                    found.append(
-                        _Candidate(
-                            node,
-                            name,
-                            here,
-                            is_list=True,
-                            value=value,
-                            whole=_cost_of(value, separators) - 2,
-                        )
+    # An explicit stack, not recursion: a document nested deeper than the
+    # interpreter's recursion limit is still walked. Each frame is the
+    # iterator over one container's children and the path of that container;
+    # a child is visited, after it is judged, before its next sibling, which
+    # is the depth-first declaration order a recursion gives.
+    stack: list[tuple[Any, str, dict[str, Any] | None]] = [(iter(document.items()), "", document)]
+    while stack:
+        children, path, holder = stack[-1]
+        step = next(children, None)
+        if step is None:
+            stack.pop()
+            continue
+        if holder is not None:
+            key, value = step
+            name = str(key)
+            if name == _NEVER_TOUCHED:
+                continue
+            here = f"{path}/{_escaped(name)}"
+            is_list = isinstance(value, list) and bool(value)
+            if is_list or (isinstance(value, str) and len(value) >= _MIN_SHORTENABLE_STRING):
+                found.append(
+                    _Candidate(
+                        holder,
+                        name,
+                        here,
+                        is_list=is_list,
+                        value=value,
+                        whole=_cost_of(value, separators) - 2,
                     )
-                elif isinstance(value, str) and len(value) >= _MIN_SHORTENABLE_STRING:
-                    found.append(
-                        _Candidate(
-                            node,
-                            name,
-                            here,
-                            is_list=False,
-                            value=value,
-                            whole=_cost_of(value, separators) - 2,
-                        )
-                    )
-                visit(value, here)
-        elif isinstance(node, list):
-            for index, item in enumerate(node):
-                visit(item, f"{path}/{index}")
-
-    visit(document, "")
+                )
+        else:
+            index, value = step
+            here = f"{path}/{index}"
+        if isinstance(value, dict):
+            stack.append((iter(value.items()), here, value))
+        elif isinstance(value, list):
+            stack.append((iter(enumerate(value)), here, None))
     return found
 
 

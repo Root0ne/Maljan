@@ -85,11 +85,11 @@ class TestDynamicSurvivesAnUnreachableSandbox:
         agent = DynamicAnalyst(llm=mock_llm, name="DynamicAnalyst")
         with (
             patch.object(agent, "_initialize_mcp_client", side_effect=_transport_died()),
-            patch.object(agent, "execute_tool_loop", return_value="Found T1055 injection"),
+            patch.object(agent, "execute_tool_loop", return_value=_CLAIM_BLOCK),
         ):
             result = agent.analyze(_SANDBOX_JSON)
 
-        assert "T1055" in result
+        assert "T1547" in result
 
     def test_the_loop_runs_with_no_tools_rather_than_stale_ones(self, mock_llm: MagicMock) -> None:
         """Degrading means *no* toolkit, not a half-initialized one.

@@ -33,7 +33,7 @@ Tests:
     - With cases returns formatted block
     - Block contains expected section headers
     - Block contains technique IDs from stored cases
-    - Retrieval exception returns "" (graceful degradation)
+    - Retrieval exception returns a note that retrieval failed (graceful, said)
 
   ServiceContainer.get_memory_store():
     - Returns InMemoryStore by default
@@ -408,7 +408,8 @@ class TestBuildMemoryContext:
         broken_store = MagicMock()
         broken_store.retrieve.side_effect = RuntimeError("Qdrant unavailable")
         result = JudgeAgent._build_memory_context(self._make_isr_reports(), broken_store)
-        assert result == ""
+        assert "unavailable" in result
+        assert "Qdrant" not in result
 
 
 # ---------------------------------------------------------------------------

@@ -80,7 +80,6 @@ from maljan.agents.judge_agent import (
 from maljan.agents.judge_agent import QUESTION_ROOTS_LABEL as _ROOTS_LABEL
 from maljan.agents.network_analyst import (
     NO_PACKET_TOOL_LINE,
-    OTHER_TOOLS_THEN_ANALYZE,
     UNDECLARED_TOOLS_LINE,
     _flows_label,
     primary_evidence_line,
@@ -2295,9 +2294,7 @@ PROMPTS: dict[str, str] = {
             ),
         ]
     ),
-    "network packet-tool lines": (
-        f"{NO_PACKET_TOOL_LINE} {OTHER_TOOLS_THEN_ANALYZE} {UNDECLARED_TOOLS_LINE}"
-    ),
+    "network packet-tool lines": (f"{NO_PACKET_TOOL_LINE} {UNDECLARED_TOOLS_LINE}"),
     "a server that declares no workflow, in its own quoted words": undeclared_server_text(
         "custom", "Served words.", [_StampedTool("decompile_function", "custom")]
     ),

@@ -1054,6 +1054,16 @@ def _steps_this_loop_spent(ledger: LoopBudget, messages: list) -> int:
     return int(steps_used(messages) if messages else ledger.own_steps)
 
 
+def alignment_threshold_of(cfg_validation: Any, default: float = 0.05) -> float:
+    """The alignment floor the settings give, ``default`` only when they give none.
+
+    ``0.0`` is a setting (no floor), not a missing one: ``value or default``
+    turned it into the default.
+    """
+    configured = getattr(cfg_validation, "alignment_threshold", None)
+    return float(default if configured is None else configured)
+
+
 def hard_cap(timeout: float | None, ceiling: BudgetCeiling | None = None) -> float | None:
     """The wall a loop is aborted at, never later than a caller is waiting for.
 
@@ -3145,6 +3155,52 @@ def repeatable_earlier_entries(agent: Any) -> list[LedgerEntry]:
         return []
     stale = _stale_after(agent, repeatable)
     return [entry for entry in candidates if entry.id not in stale]
+
+
+def settled_chunk_entries(agent: Any, entries: Sequence[Any] | None) -> list[Any]:
+    """The earlier chunks' calls a later chunk may be answered from: settled, and not written over.
+
+    A call that failed is kept (it is seeded as a failure, one retry served).
+    Of the others, an answer that is not settled (a pending sandbox poll, one
+    that carries a reason or an error; ``evidence_recorder.holds_a_settled_answer``)
+    is left out, and so is a read-only call on a server a call that is not
+    read-only ran on after it (a decompile before a rename): what either
+    answered then is not what the tool answers now. Read once, newest first;
+    linear. Never raises: with the tools unreadable, only the unsettled go.
+    """
+    from maljan.agents.evidence_recorder import entry_server, holds_a_settled_answer
+    from maljan.agents.tool_pinning import answers_again, declared_source_of, server_of
+
+    rows = list(entries or ())
+    try:
+        repeatable = {
+            (
+                server_of(tool) or declared_source_of(tool) or "",
+                str(getattr(tool, "name", "") or ""),
+            )
+            for tool in getattr(agent, "tools", None) or ()
+            if answers_again(tool)
+        }
+    except Exception:  # noqa: BLE001 — no tool read judges nothing stale
+        repeatable = set()
+    changed: set[str] = set()
+    kept: list[Any] = []
+    for entry in reversed(rows):
+        server = entry_server(entry)
+        failed = not bool(getattr(entry, "ok", True))
+        if not failed and (
+            not holds_a_settled_answer(entry)
+            or (server in changed and _entry_reads_only(entry, server, repeatable))
+        ):
+            pass
+        else:
+            kept.append(entry)
+        if not getattr(entry, "repeated_of", None) and not _entry_reads_only(
+            entry, server, repeatable
+        ):
+            changed.add(server)
+    kept.reverse()
+    return kept
 
 
 def _entry_reads_only(row: Any, server: str, repeatable: set[tuple[str, str]]) -> bool:
@@ -5620,7 +5676,7 @@ class BaseAnalyst(BudgetMeter, ABC):
         # change nothing and answer an identical call the same
         # (``repeatable_earlier_entries``): any other tool runs again.
         repeats = seeded_repeat_guard(
-            getattr(self, "_prior_chunk_calls", None),
+            settled_chunk_entries(self, getattr(self, "_prior_chunk_calls", None)),
             earlier_rounds=repeatable_earlier_entries(self),
         )
         # The function map reads this loop's calls as they are made.
@@ -7783,6 +7839,20 @@ class BaseAnalyst(BudgetMeter, ABC):
         if isinstance(buffer, list):
             buffer.append(isr)
 
+    def _synthesis_timeout(self) -> float:
+        """What the salvage over answered asks waits for: only what is actually left.
+
+        With a deadline on the loop that just ended, the stage's live
+        remainder (``_last_loop_deadline`` less now, none below zero) plus the
+        grace every loop is given to come back in (``HARD_CAP_GRACE``). With
+        no deadline, one answer at the pace the loop measured
+        (``seconds_an_answer_needs``).
+        """
+        left = self._seconds_the_last_loop_left(None)
+        if left is not None:
+            return max(0.0, left) + HARD_CAP_GRACE
+        return self.seconds_an_answer_needs()
+
     def _synthesise_from_answered_asks(self) -> AgentISR | None:
         """One bounded turn that writes a lead's report from the asks it got back.
 
@@ -7838,7 +7908,7 @@ class BaseAnalyst(BudgetMeter, ABC):
         )
         try:
             text = self._invoke_llm_with_timeout(
-                messages, _SYNTHESIS_MIN_SECONDS, what="forced synthesis"
+                messages, self._synthesis_timeout(), what="forced synthesis"
             )
         except Exception as exc:  # noqa: BLE001 — a salvage that fails leaves the failure
             self.logger.error(
@@ -8382,7 +8452,7 @@ class BaseAnalyst(BudgetMeter, ABC):
         sample = {"file_type": file_type, "platform": platform}
         cfg_validation = getattr(get_settings(), "validation", None)
         gate = alignment_gate(knowledge, cfg_validation, self.logger, self.name)
-        threshold = float(getattr(cfg_validation, "alignment_threshold", 0.05) or 0.05)
+        threshold = alignment_threshold_of(cfg_validation)
         margin = float(getattr(cfg_validation, "alignment_margin", ALIGNMENT_MARGIN))
         challenges = bool(getattr(cfg_validation, "weak_alignment", False))
         # One weak-alignment batch per turn. The ranking is recorded on every

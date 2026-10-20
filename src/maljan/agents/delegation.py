@@ -517,7 +517,9 @@ def _ask(container: Any, caller: Any, callee: Any, task: str, context: str) -> s
             time.monotonic() - started,
         )
 
-    _hand_over_the_structured_channel(caller, callee, isr)
+    _hand_over_the_structured_channel(
+        caller, callee, isr, still_running=getattr(caller, "loop_budget", None) is budget
+    )
     answer = _answer_text(isr, text)
     emit_agent_message(
         sink,
@@ -659,7 +661,9 @@ def _give_the_callee_back_what_it_had(callee: Any, its_own: dict[str, Any]) -> N
         setattr(callee, name, value)
 
 
-def _hand_over_the_structured_channel(caller: Any, callee: Any, isr: AgentISR) -> None:
+def _hand_over_the_structured_channel(
+    caller: Any, callee: Any, isr: AgentISR, *, still_running: bool = True
+) -> None:
     """Move the callee's findings and artifacts onto the caller's own buffers.
 
     ``answer_task`` drains them onto the ISR the delegation holds, and only
@@ -668,7 +672,22 @@ def _hand_over_the_structured_channel(caller: Any, callee: Any, isr: AgentISR) -
     artifact that did not say which agent established it is marked with the
     callee's name, because on the caller's buffer it would otherwise read as
     the caller's.
+
+    ``still_running`` is false when the caller's loop ended while this ask was
+    in flight (:func:`_hand_over_the_record`): its node has drained its
+    buffers, so what is appended now would be lost or re-emitted in a later
+    round, and is logged and dropped instead.
     """
+    if not still_running:
+        logger.warning(
+            "delegation %s -> %s: the caller's loop ended first; %d finding(s) and %d "
+            "artifact(s) are dropped, and so is the answer.",
+            caller.name,
+            callee.name,
+            len(isr.findings or []),
+            len(isr.artifacts or []),
+        )
+        return
     for artifact in list(isr.artifacts or []):
         if not str(getattr(artifact, "source", "") or "").strip():
             artifact.source = str(callee.name)

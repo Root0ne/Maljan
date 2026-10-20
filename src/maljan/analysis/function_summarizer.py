@@ -222,7 +222,7 @@ class FunctionSummarizer:
         ``escaped`` counts the backslashes a fence adds inside the text
         (``agents.tool_fence.escapes``) as part of its length.
         """
-        from maljan.agents.tool_fence import escapes
+        from maljan.agents.tool_fence import escapes, template_tokens_room
         from maljan.utils.marked_cut import marked_cut
 
         try:
@@ -232,10 +232,11 @@ class FunctionSummarizer:
         if not isinstance(room, int) or room <= 0:
             return "", text
         width = room - len(framing) - SHORTENED_NOTE_ROOM
-        grown = escapes(text) if escaped else 0
+        grown = escapes(text) + template_tokens_room(text) if escaped else 0
         if len(text) + grown <= width:
             return "", text
-        kept = width - (escapes(text[: max(0, width)]) if escaped else 0)
+        head = text[: max(0, width)]
+        kept = width - (escapes(head) + template_tokens_room(head) if escaped else 0)
         shown = marked_cut(text, max(1, kept))
         logger.warning(
             "FunctionSummarizer: %d of %d characters fit the window; the rest is left out.",

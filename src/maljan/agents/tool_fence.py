@@ -164,7 +164,10 @@ def fenced_text(entry_id: str, text: str) -> str:
     fences it.
     """
     text = str(text or "")
-    content = escaped(text if needs_fence(text) else json_view(text))
+    # The bar of every chat-template bracket written out as well: the text is
+    # the sample's own, and a tokenizer reads ``<|im_start|>`` in a prompt as
+    # the control token whatever fence it stands in.
+    content = template_tokens_written_out(escaped(text if needs_fence(text) else json_view(text)))
     digest = digest_of(content)
     return (
         f"{FENCE_OPEN.format(entry=entry_id, digest=digest)}\n{content}\n"
@@ -183,28 +186,34 @@ def template_tokens_written_out(text: str) -> str:
     )
 
 
-def excerpt_view(text: str, *, tokens: bool = False) -> str:
+def template_tokens_room(text: str) -> int:
+    """How many characters :func:`template_tokens_written_out` adds to ``text``."""
+    return len(_TEMPLATE_BRACKET.findall(str(text or ""))) * (len(TEMPLATE_BAR_ESCAPE) - 1)
+
+
+def excerpt_view(text: str) -> str:
     """An excerpt of an answer shown inside a line of the platform's: one quoted value.
 
     Quoted and escaped as the pack writes a sample's strings
     (``utils.written_forms.pack_escaped``), so every break is an escape and
-    the excerpt cannot end the line it stands in. ``tokens`` also writes out
-    the bar of every chat-template bracket (:func:`template_tokens_written_out`),
-    for a prompt that says so (:data:`QUOTED_VALUE_STATEMENT`); without it the
-    output is as it always was.
+    the excerpt cannot end the line it stands in, and the bar of every
+    chat-template bracket (``<|``, ``|>``, so ``<|im_start|>`` and the general
+    ``<|...|>`` form) is written out (:func:`template_tokens_written_out`):
+    the excerpt is the sample's or a tool's text, and no tokenizer finds a
+    control token in it. A text with no such bracket comes out as it always
+    did.
     """
     from maljan.utils.written_forms import pack_escaped
 
-    shown = pack_escaped(str(text or ""))
-    return f'"{template_tokens_written_out(shown) if tokens else shown}"'
+    return f'"{template_tokens_written_out(pack_escaped(str(text or "")))}"'
 
 
 def quoted_value(text: str) -> str:
     """A value of the sample's or a tool's text in a prompt that states :data:`QUOTED_VALUE_STATEMENT`.
 
-    :func:`excerpt_view` with the chat-template brackets written out.
+    :func:`excerpt_view`, which writes the chat-template brackets out.
     """
-    return excerpt_view(text, tokens=True)
+    return excerpt_view(text)
 
 
 def fence_lines_room(entry_id: str = WIDEST_ID) -> int:

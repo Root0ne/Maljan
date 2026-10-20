@@ -12,8 +12,6 @@ import re
 from collections.abc import Sequence
 from typing import Any
 
-from langchain_core.prompts import ChatPromptTemplate
-
 from maljan.agents.base_agent import (
     BaseAnalyst,
     prompt_to_messages,
@@ -501,47 +499,8 @@ class StaticAnalyst(BaseAnalyst):
             return ""
 
     def analyze(self, data: str) -> str:
-        """Translates binary file paths or raw disassembly into a focused malware analysis report."""
-        self.logger.info("Executing static evaluation...")
-
-        self._try_initialize_mcp()
-
-        # If data looks like a file path and exists, use PELoader
-        # for structural PE analysis instead of passing raw path to LLM.
-        target_info: str
-        if len(data.strip()) < 512 and os.path.exists(data.strip()):
-            try:
-                from maljan.loaders.pe_loader import PELoader
-
-                loader = PELoader(data.strip())
-                target_info = loader.to_markdown()
-                self.logger.info("PELoader parsed static data for '%s'.", data.strip())
-            except Exception as exc:
-                self.logger.warning(
-                    "PELoader failed for '%s': %s. Falling back to raw path.", data.strip(), exc
-                )
-                target_info = f"Target File: {data}"
-        elif len(data.strip()) < 512:
-            target_info = f"Target File: {data}"
-        else:
-            target_info = f"Static output:\n{data}"
-
-        prompt_messages = [
-            ("system", self._system_prompt(self._fallback_prompt)),
-            (
-                "human",
-                "Analyze the following target for obfuscation, "
-                "suspicious API imports, and hardcoded C2 patterns. "
-                + (
-                    "Use your tools to deeply analyze the binary if it's a file path.\n"
-                    if self.tools
-                    else "\n"
-                )
-                + f"{target_info}",
-            ),
-        ]
-
-        return self.execute_tool_loop(prompt_messages)
+        """The first report as text: the ISR analysis, written out."""
+        return self.analyze_isr(data).to_text_summary()
 
     def revise(
         self,
@@ -550,49 +509,8 @@ class StaticAnalyst(BaseAnalyst):
         peer_reports: dict[str, str],
         mediator_feedback: str,
     ) -> str:
-        """Revise static analysis based on peer findings and mediator feedback."""
-        self.logger.info("Revising static analysis based on peer feedback...")
-
-        peer_section = (
-            "\n\n".join(
-                f"{name.upper()} ANALYST REPORT:\n{report}" for name, report in peer_reports.items()
-            )
-            or "No peer reports available."
-        )
-
-        prompt = ChatPromptTemplate.from_messages(
-            [
-                (
-                    "system",
-                    "You are an expert Static Malware Analyst participating in a collaborative "
-                    "multi-agent malware analysis. The mediator has identified contradictions "
-                    "between your report and other experts. Review the peer reports and mediator "
-                    "feedback, then revise your analysis. Look for corroborating evidence "
-                    "in the original data for any findings raised by peers. "
-                    "Focus on MITRE ATT&CK: T1027, T1106.",
-                ),
-                (
-                    "human",
-                    "YOUR ORIGINAL REPORT:\n{own_report}\n\n"
-                    "PEER ANALYST REPORTS:\n{peer_section}\n\n"
-                    "MEDIATOR CONTRADICTIONS:\n{mediator_feedback}\n\n"
-                    "ORIGINAL RAW DATA:\n{data}\n\n"
-                    "Revise your analysis addressing the contradictions above.",
-                ),
-            ]
-        )
-
-        return self.ask_the_model(
-            prompt.format_messages(
-                own_report=own_report,
-                peer_section=peer_section,
-                mediator_feedback=mediator_feedback,
-                # Don't let the "No static data available" placeholder
-                # talk the model out of its live-Ghidra ORIGINAL REPORT.
-                data=_reframe_static_raw_data(original_data, bool(self.tools)),
-            ),
-            what="revision",
-        )
+        """The revised report as text: the ISR revision's text."""
+        return self.revise_isr(original_data, own_report, peer_reports, mediator_feedback)[0]
 
     # ------------------------------------------------------------------
     # ISR interface (structured claim extraction)
