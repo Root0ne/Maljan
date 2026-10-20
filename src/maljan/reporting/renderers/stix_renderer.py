@@ -34,8 +34,9 @@ from maljan.agents._indicator_denylists import (
     HASH_HEX_LENGTHS,
     IOC_FILE_EXTENSIONS,
     IOC_OS_RESOURCE_PREFIXES,
-    URL_DENY_HOSTS,
+    first_holders,
     malformed_hash_in,
+    on_a_denied_url_host,
     whole_value_in,
 )
 from maljan.analysis.corroboration import support_sentence
@@ -1784,6 +1785,49 @@ STRING_IOC_KINDS: tuple[str, ...] = (
 )
 
 
+# The comparison a file's directory is written under.
+_PARENT_PATH = ("file", "parent_directory_ref.path")
+_SEPARATORS = "\\/"
+
+
+def split_path(value: str) -> tuple[str, str]:
+    """``(directory, name)`` of a path, or ``("", value)`` when it names no directory.
+
+    The directory carries no trailing separator, except a root's own
+    (``C:\\``, ``/``); a run of separators before the name is one.
+    ``%TEMP%\\x.exe`` is ``%TEMP%`` and ``x.exe``.
+    """
+    cut = max(value.rfind("/"), value.rfind("\\"))
+    name = value[cut + 1 :]
+    if cut < 0 or not name.strip():
+        return "", value
+    written = value[: cut + 1]
+    directory = written.rstrip(_SEPARATORS)
+    if not directory or directory.endswith(":"):
+        # A root keeps the one separator that makes it a root.
+        return directory + written[len(directory)], name
+    return directory, name
+
+
+def joined_path(directory: str, name: str) -> str:
+    """The path of ``name`` in ``directory``, joined by the separator the directory is written with.
+
+    A backslash for a Windows directory (a backslash, a drive, an
+    ``%VARIABLE%``), else a forward slash. Two spellings this joins
+    differently (``a//b``, ``C:/a\\x``) are one path by ``value_key``.
+    """
+    if not directory or directory[-1] in _SEPARATORS:
+        return directory + name
+    return directory + _separator_of(directory) + name
+
+
+def _separator_of(directory: str) -> str:
+    """A backslash for a directory written the Windows way, else a forward slash."""
+    from maljan.reporting.dedupe import is_windows_directory
+
+    return "\\" if is_windows_directory(directory) else "/"
+
+
 def indicator_pattern(kind: str, value: str) -> str | None:
     """The STIX pattern for one indicator value, or ``None`` for a kind with none.
 
@@ -1813,7 +1857,16 @@ def indicator_pattern(kind: str, value: str) -> str | None:
     if kind == "registry":
         return f"[windows-registry-key:key = '{quoted}']"
     if kind == "path":
-        return f"[file:name = '{quoted}']"
+        # A file's name is its last component; the directory it was written
+        # in is its parent's path (STIX ``file`` and ``directory``). A
+        # consumer matching ``file:name`` on a whole path matches nothing.
+        directory, name = split_path(value)
+        if not directory:
+            return f"[file:name = '{quoted}']"
+        return (
+            f"[file:name = '{_escape_stix(name)}' AND "
+            f"file:parent_directory_ref.path = '{_escape_stix(directory)}']"
+        )
     if kind != "ip":
         return None
     try:
@@ -2026,7 +2079,7 @@ def indicator_publish_reason(
         admitted = url_corroboration_reason(value, source, reputation)
         if admitted or not host_is_public(host):
             return admitted
-        if any(host.endswith(d) or d in host for d in URL_DENY_HOSTS):
+        if on_a_denied_url_host(value):
             return None
         return _emulation_admits(host, recovered, verdict)
     if kind == "email":
@@ -2388,12 +2441,16 @@ def listed_value_sightings(report: Any, kind: str, value: str) -> tuple[str, str
     search covered the run's whole ledger (the report's ``tool_sightings``,
     built at build time) or only the tool sections a stored report keeps.
     """
-    key = _value_key(kind, value)
+    from maljan.reporting.ledger_projection import searched_spelling, sighting_keys
+
     stored = _field(report, "tool_sightings")
-    if isinstance(stored, dict) and key in stored:
-        seen = [(str(eid), str(tool)) for eid, tool in stored[key]]
-        return "; ".join(f"{eid} ({tool})" for eid, tool in seen), SEARCHED_THE_RUN
-    held = _section_sightings(report, key)
+    if isinstance(stored, dict):
+        # Keyed by ``value_key``, or by the spelling a report stored before it.
+        key = next((k for k in sighting_keys(kind, value) if k in stored), None)
+        if key is not None:
+            seen = [(str(eid), str(tool)) for eid, tool in stored[key]]
+            return "; ".join(f"{eid} ({tool})" for eid, tool in seen), SEARCHED_THE_RUN
+    held = _section_sightings(report, searched_spelling(kind, value))
     words = "; ".join(f"{ids} ({tool})" for ids, tool in held)
     if words:
         words += ", as the tool sections this stored report keeps show it"
@@ -2433,7 +2490,11 @@ def _stored_network_record(report: Any, kind: str, key: str) -> str:
     """
     if _field(report, "tool_sightings") is not None:
         return ""
-    sighted = [{"tool": tool} for _ids, tool in _section_sightings(report, key)]
+    from maljan.reporting.ledger_projection import searched_spelling
+
+    sighted = [
+        {"tool": tool} for _ids, tool in _section_sightings(report, searched_spelling(kind, key))
+    ]
     if kind == "ip" and any(
         tool_kinds.is_of(held, "evidence_bundles._NETWORK_SANDBOX_TOOLS") for held in sighted
     ):
@@ -2463,10 +2524,13 @@ def _listing_kwargs(report: Any, kind: str, key: str, row: Any) -> dict[str, str
 
 def query_answers(report: Any, kind: str, value: str) -> str:
     """The entries whose answer holds a listed value only because a query asked about it."""
+    from maljan.reporting.ledger_projection import sighting_keys
+
     queried = _field(report, "tool_queries")
     if not isinstance(queried, dict):
         return ""
-    return "; ".join(f"{eid} {tool}" for eid, tool in queried.get(_value_key(kind, value)) or [])
+    key = next((k for k in sighting_keys(kind, value) if k in queried), "")
+    return "; ".join(f"{eid} {tool}" for eid, tool in queried.get(key) or [])
 
 
 # What the rule says of a well-known benign name a published URL carries.
@@ -2845,11 +2909,17 @@ def _whole_listing(structured: Any, rows: list[Any]) -> bool:
 def _hold_out_plain(
     values: dict[str, str], plain_texts: list[tuple[str, str]]
 ) -> tuple[dict[str, str], dict[str, str]]:
-    """Split emulated values into those only emulation read and those a plain string holds."""
+    """Split emulated values into those only emulation read and those a plain string holds.
+
+    Each plain text is read once for every value (:func:`first_holders`), so
+    the split costs the texts' length, not the values times the texts.
+    """
     kept: dict[str, str] = {}
     plain: dict[str, str] = {}
+    first = first_holders(values, [text for _eid, text in plain_texts])
     for value, entry in values.items():
-        holder = next((eid for eid, text in plain_texts if whole_value_in(value, text)), "")
+        at = first.get(value.lower())
+        holder = plain_texts[at][0] if at is not None else ""
         if holder:
             plain[value] = holder
         else:
@@ -3431,6 +3501,8 @@ def publish_answer(
         )
     if recovered and is_well_known_benign_host(url_host(text) if kind == "url" else text):
         return f"no: {recovered}, but it is a well-known benign host"
+    if recovered and kind == "url" and on_a_denied_url_host(text):
+        return f"no: {recovered}, but it is on a developer or package-registry host"
     if listed_only_by_an_analyst(kind, source):
         if seen_in:
             return seen_in_reason(seen_in, listed_by)
@@ -3497,24 +3569,26 @@ def judge_value_answer(report: Any, kind: str, value: str, corroborating: str) -
         # the observation alone does not publish waits for.
         kept = [by for by in str(emulated.get("kept_by") or "").split(", ") if by]
         emulated["kept_by"] = ", ".join(dict.fromkeys([*kept, "the judge's indicator"]))
-    if kind == "domain" and network is not None:
-        for row in network.domains:
-            if row.fqdn.strip().lower().rstrip(".") == text.lower().rstrip("."):
-                return publish_answer("domain", text, row.source, row.reputation, **emulated)
-    if kind == "ip" and network is not None:
-        for ip_row in network.ips:
-            if ip_row.address.strip() == text:
-                return publish_answer("ip", text, ip_row.source, ip_row.reputation, **emulated)
-    if kind == "url" and network is not None:
-        for url_row in network.urls:
-            if url_row.url.strip() == text:
-                return publish_answer(
-                    "url",
-                    text,
-                    url_row.source or "strings",
-                    _host_reputation(report, url_host(text)),
-                    **emulated,
-                )
+    # The network block's row for the value, found by the one spelling every
+    # lookup uses (``value_key``): a judge writing an address or a URL's host
+    # in another case is naming the same row, not a value nobody recorded.
+    row = (
+        _network_index(report).get((kind, _value_key(kind, text)))
+        if network is not None and kind in NETWORK_KINDS
+        else None
+    )
+    if kind == "domain" and row is not None:
+        return publish_answer("domain", text, row.source, row.reputation, **emulated)
+    if kind == "ip" and row is not None:
+        return publish_answer("ip", text, row.source, row.reputation, **emulated)
+    if kind == "url" and row is not None:
+        return publish_answer(
+            "url",
+            text,
+            row.source or "strings",
+            _host_reputation(report, url_host(text)),
+            **emulated,
+        )
     if kind == "hash":
         hashes = getattr(getattr(report, "identity", None), "hashes", None)
         own = {
@@ -3577,6 +3651,10 @@ _EXPORTED_KINDS: dict[tuple[str, str], str] = {
     ("url", "value"): "url",
     ("email-addr", "value"): "email",
     ("file", "name"): "path",
+    # A file's directory is a path too: one :func:`indicator_pattern` pairs
+    # with its file's name reads as that file (:func:`_compared_values`), any
+    # other is asked the rule as the path it names.
+    ("file", "parent_directory_ref.path"): "path",
     ("windows-registry-key", "key"): "registry",
     ("mutex", "name"): "mutex",
     ("process", "command_line"): "command",
@@ -3598,15 +3676,7 @@ def pattern_values(pattern: str) -> list[ExportedValue]:
 
     A comparison over a path the table has no kind for is not returned.
     """
-    found: list[ExportedValue] = []
-    for comparison in read_comparisons(str(pattern or "")):
-        if not comparison.readable or comparison.operator != "=":
-            continue
-        value = comparison.literal.strip()
-        kind, algorithm = _exported_kind(comparison)
-        if kind and value:
-            found.append(ExportedValue(kind=kind, value=value, algorithm=algorithm))
-    return found
+    return _compared_values(pattern, lambda operator: operator == "=")
 
 
 def rule_values(pattern: str) -> list[ExportedValue]:
@@ -3620,15 +3690,63 @@ def rule_values(pattern: str) -> list[ExportedValue]:
     An ``IN`` list, a ``<`` or a ``!=`` used to reach the export with nothing
     asked, so a value the rule refused as ``=`` was published inside one.
     """
+    return _compared_values(pattern, _endpoint_is_readable)
+
+
+def _compared_values(pattern: str, asked: Any) -> list[ExportedValue]:
+    """The typed values of the comparisons whose operator ``asked`` keeps.
+
+    A file named with its directory (:func:`indicator_pattern`) is one path:
+    the ``file:name`` of a pattern :func:`_paired_directory` pairs reads as
+    the directory joined to it. A ``file:parent_directory_ref.path`` it does
+    not pair is a path value of its own, asked the rule apart.
+    """
+    comparisons = read_comparisons(str(pattern or ""))
+    directory = _paired_directory(pattern, comparisons)
     found: list[ExportedValue] = []
-    for comparison in read_comparisons(str(pattern or "")):
-        if not comparison.readable or not _endpoint_is_readable(comparison.operator):
+    for comparison in comparisons:
+        if not comparison.readable or not asked(comparison.operator):
             continue
         value = comparison.literal.strip()
         kind, algorithm = _exported_kind(comparison)
+        if (comparison.object_type, comparison.prop) == _PARENT_PATH:
+            kind = "" if directory is not None else kind
+        elif kind == "path" and directory is not None:
+            value = joined_path(directory, comparison.literal).strip()
         if kind and value:
             found.append(ExportedValue(kind=kind, value=value, algorithm=algorithm))
     return found
+
+
+# What makes a pattern more than one conjunction of comparisons: an ``OR``, a
+# ``NOT``, a sequence or a temporal qualifier (read outside the quotes).
+_NOT_ONE_CONJUNCTION_RE = re.compile(
+    r"\b(?:or|not|followedby|within|start|stop|repeats)\b", re.IGNORECASE
+)
+_QUOTED_RE = re.compile(r"'(?:\\.|[^'\\])*'")
+
+
+def _paired_directory(pattern: str, comparisons: list[Any]) -> str | None:
+    """The directory a pattern names its one file in, or ``None`` when it pairs none.
+
+    Paired only as :func:`indicator_pattern` writes them: one ``file:name``
+    and one ``file:parent_directory_ref.path``, both ``=``, both readable, in
+    the same observation expression, in a pattern joined by ``AND`` alone
+    (no ``OR``, ``NOT``, sequence or qualifier). Anything else is two values,
+    each asked the publish rule.
+    """
+    names = [c for c in comparisons if (c.object_type, c.prop) == ("file", "name")]
+    folders = [c for c in comparisons if (c.object_type, c.prop) == _PARENT_PATH]
+    if len(names) != 1 or len(folders) != 1:
+        return None
+    name, folder = names[0], folders[0]
+    if not (name.readable and folder.readable):
+        return None
+    if name.operator != "=" or folder.operator != "=" or name.observation != folder.observation:
+        return None
+    if _NOT_ONE_CONJUNCTION_RE.search(_QUOTED_RE.sub("''", str(pattern or ""))):
+        return None
+    return str(folder.literal)
 
 
 def shape_is_asked_the_rule(comparison: Any) -> bool:
@@ -3667,7 +3785,9 @@ def exported_indicator_values(bundle: Any) -> list[ExportedValue]:
         if not isinstance(obj, dict) or obj.get("type") != "indicator":
             continue
         pattern = str(obj.get("pattern") or "")
-        if len(read_comparisons(pattern)) != 1:
+        comparisons = read_comparisons(pattern)
+        # A file named with its directory is one value (:func:`_compared_values`).
+        if len(comparisons) - (_paired_directory(pattern, comparisons) is not None) != 1:
             continue
         for value in pattern_values(pattern):
             if (value.kind, value.value.lower()) in seen:
@@ -3854,7 +3974,7 @@ def _accept_string_ioc(
         return value.lower().rstrip(".") in publishable_domains
     if ioc.kind == "url":
         host = _extract_url_host(value)
-        if host and any(host.endswith(d) or d in host for d in URL_DENY_HOSTS):
+        if host and on_a_denied_url_host(value):
             return False
 
     # file:name: acceptance-based admission, asked before the publish rule

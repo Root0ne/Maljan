@@ -30,7 +30,7 @@ from __future__ import annotations
 import re
 from typing import Any
 
-from maljan.schemas.stix_pattern import Comparison, canonical_pattern
+from maljan.schemas.stix_pattern import Comparison, canonical_pattern, read_comparisons
 
 # The two ways an analyst writes an address it does not want a reader to open,
 # undone so the defanged spelling and the plain one fingerprint alike. Only
@@ -185,6 +185,7 @@ _STIX_PATH_KINDS = {
     "url:value": "url",
     "file:name": "path",
     "directory:path": "path",
+    "file:parent_directory_ref.path": "path",
     "windows-registry-key:key": "registry",
     "domain-name:value": "domain",
     "ipv4-addr:value": "ipv4",
@@ -248,7 +249,39 @@ def pattern_fingerprint(pattern_type: Any, pattern: Any) -> tuple[str, str]:
     text = str(pattern or "").strip()
     if family != "stix":
         return (family, text)
+    # A file named in a Windows directory is a Windows file: its name folds its
+    # case as the directory does, so ``C:\\Windows`` + ``Evil.exe`` and
+    # ``c:\\windows`` + ``evil.exe`` are one indicator, as the whole path was.
+    # The directory folds with it (``%TEMP%`` is ``%temp%``). Per observation
+    # expression: a name folds only beside its own directory.
+    windows = {
+        comparison.observation
+        for comparison in read_comparisons(text)
+        if comparison.path == _PARENT_DIRECTORY_PATH and is_windows_directory(comparison.literal)
+    }
+    if windows:
+
+        def _value(comparison: Comparison) -> str:
+            value = _comparison_value(comparison)
+            if (
+                comparison.path in ("file:name", _PARENT_DIRECTORY_PATH)
+                and comparison.observation in windows
+                and "matches" not in comparison.operator
+            ):
+                return value.lower()
+            return value
+
+        return (family, canonical_pattern(text, _value))
     return (family, canonical_pattern(text, _comparison_value))
+
+
+_PARENT_DIRECTORY_PATH = "file:parent_directory_ref.path"
+_DRIVE_RE = re.compile(r"^[A-Za-z]:")
+
+
+def is_windows_directory(directory: str) -> bool:
+    """Whether a directory is written the Windows way: a backslash, a drive or a ``%VARIABLE%``."""
+    return "\\" in directory or "%" in directory or bool(_DRIVE_RE.match(directory))
 
 
 def normalised_title(title: Any) -> str:

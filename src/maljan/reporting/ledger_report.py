@@ -33,7 +33,11 @@ from typing import TYPE_CHECKING, Any
 
 from maljan.agents.output_shortening import BOOKKEEPING_KEY, our_key_in
 from maljan.analysis import behaviour_code
-from maljan.analysis.technique_ids import says_no_technique, sigma_technique_ids
+from maljan.analysis.technique_ids import (
+    says_no_technique,
+    sigma_technique_ids,
+    technique_ids_in,
+)
 from maljan.core.reputation import reputation_of
 from maljan.core.tool_declarations import first, select
 from maljan.reporting import tool_kinds
@@ -168,6 +172,15 @@ class _Sections:
             section.source = f"tool:{entry.tool}"
         self.cite(section, entry.id)
         note_if_shortened(section, entry.structured)
+
+    def add_column(self, section: EvidenceSection, name: str, fill: str = "-") -> None:
+        """Give a table one more column, each row it holds already ``fill`` under it."""
+        if name in section.columns:
+            return
+        section.columns.append(name)
+        for row in section.rows:
+            row.append(fill)
+        self._seen[section.key] = {tuple(row) for row in section.rows}
 
     def add_row(self, section: EvidenceSection, row: list[str]) -> None:
         fingerprint = tuple(row)
@@ -779,14 +792,24 @@ def _sandbox_signatures(acc: _Sections, entry: LedgerEntry, data: dict[str, Any]
         "table",
         columns=["Name", "Severity", "Description"],
     )
-    for row in rows:
+    tagged = [
+        technique_ids_in(row.get("technique_ids")) if isinstance(row, dict) else [] for row in rows
+    ]
+    if any(tagged):
+        # The ids the sandbox tags a signature with, in a column of their own
+        # once any signature of the run carries them.
+        acc.add_column(table, SIGNATURE_TECHNIQUES_COLUMN)
+    with_ids = SIGNATURE_TECHNIQUES_COLUMN in table.columns
+    for row, ids in zip(rows, tagged, strict=True):
         if not isinstance(row, dict):
             continue
-        acc.add_row(
-            table,
-            [_text(row.get("name")), _text(row.get("severity")), _text(row.get("description"))],
-        )
+        cells = [_text(row.get("name")), _text(row.get("severity")), _text(row.get("description"))]
+        acc.add_row(table, [*cells, ", ".join(ids) or "-"] if with_ids else cells)
     acc.credit(table, entry)
+
+
+# The column the sandbox signature table names a signature's techniques under.
+SIGNATURE_TECHNIQUES_COLUMN = "Techniques"
 
 
 def _sandbox_dropped(acc: _Sections, entry: LedgerEntry, data: dict[str, Any]) -> None:
@@ -1215,26 +1238,96 @@ def _artifact_sections(acc: _Sections, isrs: dict[str, Any]) -> None:
             by_kind.setdefault(kind, []).append((source, artifact))
     for kind, listed in by_kind.items():
         merged = len(listed) > 1
+        shaped: list[tuple[str, Any, list[Any], list[str]]] = []
         for source, artifact in listed:
             rows = list(getattr(artifact, "rows", None) or [])
-            columns = list(getattr(artifact, "columns", None) or []) or ["Value"]
+            columns = [str(c) for c in getattr(artifact, "columns", None) or []] or ["Value"]
             if not rows:
                 label = getattr(artifact, "label", "") or kind
                 rows = [[label, getattr(artifact, "value", "")]]
                 columns = ["Label", "Value"]
+            shaped.append((source, artifact, rows, columns))
+        # A merged table is headed as its first artifact is (as it always was);
+        # a later artifact headed otherwise has each row read by its own
+        # headings and written in the table's layout (:func:`_placed`).
+        headings = shaped[0][3]
+        for source, artifact, rows, columns in shaped:
             section = acc.get(
                 f"artifact_{kind}",
                 kind.replace("_", " ").capitalize(),
                 "table",
-                columns=[LISTED_BY_COLUMN, EVIDENCE_COLUMN, *columns] if merged else columns,
+                columns=[LISTED_BY_COLUMN, EVIDENCE_COLUMN, *headings] if merged else columns,
             )
             _listed_by(section, source)
             cited = ", ".join(str(i) for i in getattr(artifact, "evidence_ids", None) or [])
             for row in rows:
                 cells = [_text(cell) for cell in row]
+                if merged:
+                    cells = _placed(cells, columns, headings)
                 acc.add_row(section, [_text(source), cited, *cells] if merged else cells)
             for entry_id in getattr(artifact, "evidence_ids", None) or []:
                 acc.cite(section, str(entry_id))
+
+
+def _heading_keys(columns: list[str]) -> list[tuple[str, int]]:
+    """Each heading as one key: its folded spelling, and which of that spelling it is."""
+    counted: dict[str, int] = {}
+    keys: list[tuple[str, int]] = []
+    for column in columns:
+        folded = column.strip().lower()
+        keys.append((folded, counted.get(folded, 0)))
+        counted[folded] = counted.get(folded, 0) + 1
+    return keys
+
+
+def _roles(columns: list[str]) -> tuple[int, int, int | None] | None:
+    """The type, value and payload places of a listing: by its headings, else by position."""
+    from maljan.reporting.ledger_projection import listed_columns
+
+    named = listed_columns(columns)
+    if named is not None:
+        typed, valued, payload = named
+        return typed, valued, payload if payload is not None and payload < len(columns) else None
+    if len(columns) < 2:
+        return None
+    return 0, 1, 2 if len(columns) > 2 else None
+
+
+def _placed(cells: list[str], columns: list[str], headings: list[str]) -> list[str]:
+    """One artifact's row, read by its own ``columns``, in a table headed ``headings``.
+
+    A row of an artifact headed as the table is kept as it is, and so is one
+    where either side names no type and value (read by position, as it was).
+    Otherwise its type, value and payload go where the table's headings put
+    them, any other cell under the heading of its own spelling, and what the
+    table has no place for follows the table's columns, the payload first:
+    the place a reader takes a payload from when the headings name none.
+    """
+    if _heading_keys(columns) == _heading_keys(headings):
+        return cells
+    mine, table = _roles(columns), _roles(headings)
+    if mine is None or table is None:
+        return cells
+    placed: dict[int, int] = {mine[0]: table[0], mine[1]: table[1]}
+    if mine[2] is not None and table[2] is not None:
+        placed[mine[2]] = table[2]
+    taken = set(placed.values())
+    places = {key: at for at, key in enumerate(_heading_keys(headings))}
+    for at, key in enumerate(_heading_keys(columns)):
+        if at not in placed and places.get(key) is not None and places[key] not in taken:
+            placed[at] = places[key]
+            taken.add(places[key])
+    out = [""] * len(headings)
+    rest: list[str] = []
+    for at, cell in enumerate(cells):
+        if at in placed:
+            out[placed[at]] = cell
+        elif at != mine[2]:
+            rest.append(cell)
+    if table[2] is None and (rest or (mine[2] is not None and mine[2] not in placed)):
+        payload = cells[mine[2]] if mine[2] is not None and mine[2] < len(cells) else ""
+        rest = [payload if mine[2] not in placed else "", *rest]
+    return out + rest
 
 
 # The first two columns of an artifact table more than one artifact listed rows in.
@@ -1264,6 +1357,16 @@ def listed_rows(section: Any) -> list[tuple[str, str, list[str]]]:
     return [(one, cited, row) for row in rows]
 
 
+def listed_headings(section: Any) -> list[str]:
+    """The headings of the cells :func:`listed_rows` gives each row of an artifact section."""
+    columns = [str(c) for c in getattr(section, "columns", None) or []]
+    if columns[:2] == [LISTED_BY_COLUMN, EVIDENCE_COLUMN]:
+        return columns[2:]
+    if columns[:1] == [LISTED_BY_COLUMN]:
+        return columns[1:]
+    return columns
+
+
 def artifact_sections(sections: Any) -> list[tuple[str, Any]]:
     """Each Appendix A section an analyst's artifact filled, with the kind it names."""
     return [
@@ -1276,21 +1379,27 @@ def artifact_sections(sections: Any) -> list[tuple[str, Any]]:
 def analyst_persistence(sections: Any) -> list[dict[str, str]]:
     """The persistence the analysts listed, row by row, read from their Appendix A tables.
 
-    ``kind``, ``target`` and ``payload`` by position, as an analyst's
-    persistence table is shaped, with the analyst that listed the row and the
+    ``kind``, ``target`` and ``payload`` under the headings that name them
+    (``ledger_projection.listed_columns``), by position where the headings
+    name none, as an analyst's persistence table is shaped, with the analyst
+    that listed the row and the
     ids that row's artifact cites. Never read from ``MalwareReport.persistence``, which
     is the tools' and which the IOC table, the detection drafts, the
     corroboration corpus and the counts read; a stored report carries the same
     tables, so it reads the same rows.
     """
+    from maljan.reporting.ledger_projection import listed_cells, listed_columns
+
     out: list[dict[str, str]] = []
     for kind, section in artifact_sections(sections):
         if kind.strip().lower() != "persistence":
             continue
+        named = listed_columns(listed_headings(section))
         for analyst, cited, row in listed_rows(section):
             cells = [cell.strip() for cell in row]
             if not any(cells):
                 continue
+            cells = listed_cells(cells, named)
             out.append(
                 {
                     "kind": cells[0] if len(cells) > 1 else "",

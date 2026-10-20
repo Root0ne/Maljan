@@ -223,13 +223,15 @@ def test_the_enrichment_queued_after_the_report_is_named_then_what_it_asked() ->
 # ``(markdown, html with the nonce "fixed")`` as dev 0517a43e renders the stored runs,
 # none of which carries the record. Re-pinned when a sample's, a tool's or a
 # finding's text came to print escaped (F7): every line that changed holds one
-# of Markdown's own characters.
+# of Markdown's own characters. haiku4 re-pinned when an analyst's listing came
+# to be read by its headings (AUD-43): its six persistence rows headed "Type |
+# Value | Offset" no longer print the offset as the payload.
 STORED_RENDERS = {
     "run7": ("10450fac1da78b0d", "c898eb0ef67822cf"),
     "run5": ("5ccad835542f23f0", "a06ab76f09a2cb09"),
     "run4": ("1e0160478a729008", "e32e52a8e99b4a47"),
     "local8": ("9e6cf8ded02592af", "d1dce0f05d49d9d0"),
-    "haiku4": ("2c784244bd9860ae", "97c871866f938c96"),
+    "haiku4": ("230d0d43a8a40244", "269dc8fdf849c364"),
 }
 
 

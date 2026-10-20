@@ -14,6 +14,8 @@ the audit surface (what's deny / what's allow) is easy to read.
 from __future__ import annotations
 
 import re
+from collections.abc import Callable, Iterable, Iterator, Sequence
+from urllib.parse import urlsplit
 
 # Real, persisted file extensions worth treating as IOCs. Driven by what
 # malware analysts actually care about — dropper / payload / staged
@@ -153,6 +155,85 @@ URL_DENY_HOSTS: tuple[str, ...] = (
     "raw.githubusercontent.com/golang/",
     "raw.githubusercontent.com/rust-lang/",
 )
+
+
+# The full stops IDNA reads as ``.`` in a host name (UTS #46): ideographic,
+# fullwidth and halfwidth ideographic.
+_IDNA_FULL_STOPS = str.maketrans({"\u3002": ".", "\uff0e": ".", "\uff61": "."})
+
+
+def _without_dot_segments(path: str) -> str:
+    """``path`` with its ``.`` and ``..`` segments resolved (RFC 3986, 5.2.4)."""
+    out: list[str] = []
+    for segment in path.split("/"):
+        if segment == "..":
+            if len(out) > 1:
+                out.pop()
+        elif segment != ".":
+            out.append(segment)
+    resolved = "/".join(out)
+    if path.endswith(("/.", "/..")):
+        resolved += "/"
+    return resolved if resolved.startswith("/") else "/" + resolved
+
+
+def on_a_denied_url_host(url: str) -> bool:
+    """Whether ``url`` is on a :data:`URL_DENY_HOSTS` host, read at label boundaries.
+
+    A host entry names that host and its subdomains, never a longer label that
+    ends with it (``ergo.dev`` is not ``go.dev``, nor is
+    ``mango.devices-update.com``). An entry with a path names the host and the
+    URL paths under that prefix (``github.com/golang/``), read with its
+    unreserved percent-escapes decoded and its ``.`` and ``..`` segments
+    resolved; a backslash in an http, https, ftp or ws(s) URL is a ``/``, as a
+    browser reads it. A schemeless ``//host`` is a host, and the full stops
+    IDNA reads as ``.`` are read as one. A URL with no host is on none.
+
+    Denying hides an indicator, so a URL two parsers could read differently is
+    never denied: an authority holding ``@``, ``\\``, ``%``, a space or a
+    control character, or a host this reading and the extractor's
+    (``url_host``) disagree on.
+    """
+    from maljan.extractors.network_extractor import url_host
+
+    text = str(url or "").strip().lower().translate(_IDNA_FULL_STOPS)
+    literal = text if "://" in text or text.startswith("//") else "//" + text
+    scheme, _, rest = literal.partition("//")
+    authority = _AUTHORITY_END_RE.split(rest, maxsplit=1)[0]
+    if any(c in _AMBIGUOUS_IN_AN_AUTHORITY or ord(c) <= 0x20 or ord(c) == 0x7F for c in authority):
+        return False
+    if scheme in _SPECIAL_SCHEMES:
+        literal = literal.replace("\\", "/")
+    try:
+        parts = urlsplit(literal)
+        host = (parts.hostname or "").rstrip(".")
+    except ValueError:
+        return False
+    if not host or host != url_host(literal):
+        return False
+    path = _without_dot_segments(_UNRESERVED_ESCAPE_RE.sub(_unescaped, parts.path or "/"))
+    for entry in URL_DENY_HOSTS:
+        name, slash, prefix = entry.partition("/")
+        if host != name and not host.endswith("." + name):
+            continue
+        if not slash or path.startswith("/" + prefix):
+            return True
+    return False
+
+
+# The schemes a browser reads a backslash in as a ``/`` (WHATWG "special").
+_SPECIAL_SCHEMES = frozenset({"http:", "https:", "ftp:", "ws:", "wss:"})
+# Where an authority ends for every reader: a backslash before one of these is
+# the authority's to one reader and the path's to another, so it is held.
+_AUTHORITY_END_RE = re.compile(r"[/?#]")
+# What one parser reads as part of the host and another as something else.
+_AMBIGUOUS_IN_AN_AUTHORITY = frozenset("@\\%")
+# A percent-escape of an unreserved character (RFC 3986, 2.3), ``%2e`` included.
+_UNRESERVED_ESCAPE_RE = re.compile(r"%(2[dDeE]|3[0-9]|[46][1-9a-fA-F]|[57][0-9aA]|5[fF]|7[eE])")
+
+
+def _unescaped(match: re.Match[str]) -> str:
+    return chr(int(match.group(1), 16))
 
 
 # The counts above which the report's linter says how many file:name
@@ -317,6 +398,124 @@ def whole_value_in(literal: str, haystack: str) -> bool:
             return True
         start = haystack.find(lowered, start + 1)
     return False
+
+
+class _Automaton:
+    """Every occurrence of a set of literals in a text, in one left-to-right reading.
+
+    An Aho-Corasick automaton: a trie of the literals with a failure link per
+    node (the longest proper suffix that is also a trie path) and an output
+    link (the nearest terminal along the failure links). Reading a text costs
+    its length plus the occurrences found; ``steps`` counts that work.
+    """
+
+    def __init__(self, literals: Iterable[str]) -> None:
+        self.goto: list[dict[str, int]] = [{}]
+        self.word: list[str] = [""]
+        for literal in literals:
+            node = 0
+            for character in literal:
+                following = self.goto[node].get(character)
+                if following is None:
+                    following = len(self.goto)
+                    self.goto[node][character] = following
+                    self.goto.append({})
+                    self.word.append("")
+                node = following
+            self.word[node] = literal
+        self.fail = [0] * len(self.goto)
+        self.output = [0] * len(self.goto)
+        queue = list(self.goto[0].values())
+        for node in queue:
+            for character, following in self.goto[node].items():
+                queue.append(following)
+                back = self.fail[node]
+                while back and character not in self.goto[back]:
+                    back = self.fail[back]
+                link = self.goto[back].get(character, 0)
+                self.fail[following] = link if link != following else 0
+                self.output[following] = link if self.word[link] else self.output[link]
+        self.steps = 0
+
+    def occurrences(self, text: str) -> Iterator[tuple[int, str]]:
+        """``(start, literal)`` for every occurrence of every literal in ``text``."""
+        node = 0
+        for at, character in enumerate(text):
+            self.steps += 1
+            while node and character not in self.goto[node]:
+                node = self.fail[node]
+                self.steps += 1
+            node = self.goto[node].get(character, 0)
+            hit = node if self.word[node] else self.output[node]
+            while hit:
+                self.steps += 1
+                literal = self.word[hit]
+                yield at + 1 - len(literal), literal
+                hit = self.output[hit]
+
+
+def first_holders(literals: Iterable[str], haystacks: Sequence[str]) -> dict[str, int]:
+    """``{literal: index}`` of the first haystack :func:`whole_value_in` finds each literal in.
+
+    The same answer as asking :func:`whole_value_in` of every literal against
+    every haystack in order, without that product: one automaton over the
+    literals (lowered, as :func:`whole_value_in` lowers its literal) reads each
+    haystack once, and each occurrence it finds is asked the same boundary
+    questions :func:`whole_value_in` asks of it. The cost is the haystacks'
+    length plus the occurrences. A literal no haystack holds is left out.
+    """
+    wanted = {str(literal or "").lower() for literal in literals} - {""}
+    if not wanted:
+        return {}
+    automaton = _Automaton(sorted(wanted))
+    continuation = {literal: _continuation_for(literal) for literal in wanted}
+    found: dict[str, int] = {}
+    for index, haystack in enumerate(haystacks):
+        # Whether an escape stands at a place, asked once per place however
+        # many literals open or close there (``_opens_a_value``,
+        # ``_closes_a_value`` read the same two answers).
+        escapes: dict[int, bool] = {}
+
+        def escape_at(at: int, text: str = haystack, held: dict[int, bool] = escapes) -> bool:
+            if at not in held:
+                held[at] = at >= 0 and _is_an_escape(text, at)
+            return held[at]
+
+        for start, literal in automaton.occurrences(haystack):
+            if literal in found:
+                continue
+            continues = continuation[literal]
+            if _opens_at(haystack, start, continues, escape_at) and _closes_at(
+                haystack, start + len(literal), continues, escape_at
+            ):
+                found[literal] = index
+        if len(found) == len(wanted):
+            break
+    return found
+
+
+def _opens_at(
+    haystack: str, start: int, continues: re.Pattern[str], escape_at: Callable[[int], bool]
+) -> bool:
+    """:func:`_opens_a_value`, its escape question answered by ``escape_at``."""
+    if start == 0 or not continues.match(haystack[start - 1]):
+        return True
+    return start >= 2 and escape_at(start - 2)
+
+
+def _closes_at(
+    haystack: str, end: int, continues: re.Pattern[str], escape_at: Callable[[int], bool]
+) -> bool:
+    """:func:`_closes_a_value`, its escape question answered by ``escape_at``."""
+    after = haystack[end : end + 1]
+    if not after or not continues.match(after):
+        return True
+    if escape_at(end):
+        return True
+    if after != _TERMINAL_DOT:
+        return False
+    following = haystack[end + 1 : end + 2]
+    return not following or not continues.match(following)
 
 
 def _continuation_for(value: str) -> re.Pattern[str]:

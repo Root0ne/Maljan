@@ -380,6 +380,10 @@ def claims_in_force_lines(isr_reports: Any) -> list[str]:
     return lines
 
 
+# Said under a list a sandbox fills when this run has no sandbox observation.
+NO_SANDBOX_OBSERVATION = "not observed: this run has no sandbox observation"
+
+
 def build_prompt_text(report: MalwareReport, isr_reports: Any = None) -> str:
     """Return the human-readable prompt body (used by ``_build_prompt`` and tests).
 
@@ -462,6 +466,9 @@ def build_prompt_text(report: MalwareReport, isr_reports: Any = None) -> str:
         for sig in report.dynamic.sandbox_signatures:
             ttps = ",".join(sig.technique_ids) or "-"
             lines.append(f"  - {quoted_value(sig.name)} (severity {sig.severity}, ATT&CK={ttps})")
+    elif report.dynamic is None:
+        # No sandbox observation: nothing was watched, so nothing is absent.
+        lines.append(f"  ({NO_SANDBOX_OBSERVATION})")
     else:
         lines.append("  (none)")
     lines.append("")
@@ -546,6 +553,10 @@ def build_prompt_text(report: MalwareReport, isr_reports: Any = None) -> str:
                 f"  - {mech.kind}: {quoted_value(str(mech.target or ''))} "
                 f"({mech.technique_id or 'no-ATT&CK-id'})"
             )
+    elif report.dynamic is None:
+        # Persistence is read from what a sandbox recorded; with no sandbox
+        # observation none was looked for, which is not "none detected".
+        lines.append(f"  ({NO_SANDBOX_OBSERVATION})")
     else:
         lines.append("  (none detected)")
     lines.append("")

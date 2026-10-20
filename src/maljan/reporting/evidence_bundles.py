@@ -570,6 +570,12 @@ def bundle_for(
                     if row.id in sandbox_ids
                 ],
                 "exports": list(report.static.exports) if report.static else [],
+                # An Android package's manifest permissions, never its exports.
+                **(
+                    {"declared_permissions": list(report.static.permissions)}
+                    if report.static and report.static.permissions
+                    else {}
+                ),
             },
         }
     if section == "mitigations":
@@ -1088,6 +1094,20 @@ _SANDBOX_CALLED_CATEGORIES: dict[str, tuple[str, ...]] = {
 }
 
 
+def _profile_counts(static: Any, **categories: str) -> dict[str, int]:
+    """``{fact: count}`` of the capability profile's categories, when the profile was measured.
+
+    A count of 0 is a finding only where something counted: with no profile
+    (no catalogue answer read the import table) each fact is left out, as an
+    absent key reads "not measured", rather than stated as 0.
+    """
+    caps = (getattr(static, "api_capabilities", None) or {}) if static is not None else {}
+    measured = bool(caps) or bool(getattr(static, "api_capabilities_evidence_ids", None))
+    if not measured:
+        return {}
+    return {fact: int(caps.get(category, 0)) for fact, category in categories.items()}
+
+
 def _technical_facts(section: str, report: MalwareReport) -> dict[str, Any]:
     """Deterministic measurements for one technical-spine section.
 
@@ -1100,12 +1120,14 @@ def _technical_facts(section: str, report: MalwareReport) -> dict[str, Any]:
     if section == "persistence_detail":
         # The tools' mechanisms and the analysts' listed rows, as two facts:
         # a run whose static block is empty still has both to state.
-        profile = (report.static.api_capabilities or {}) if report.static else {}
         return {
             "persistence_mechanisms": [p.kind for p in report.persistence],
             "persistence_assessed": _assessed_persistence(report),
-            "persistence_api_count": profile.get("persistence", 0),
-            "registry_api_count": profile.get("registry", 0),
+            **_profile_counts(
+                report.static,
+                persistence_api_count="persistence",
+                registry_api_count="registry",
+            ),
         }
     if section == "configuration":
         net = report.network
@@ -1192,17 +1214,18 @@ def _technical_facts(section: str, report: MalwareReport) -> dict[str, Any]:
     # aggregated. The per-import lists that sat beside them were that table
     # read back one import at a time, and they are gone.
     if section == "encryption_scheme":
-        return {"crypto_api_count": caps.get("crypto", 0), **observed[section]}
+        return {**_profile_counts(static, crypto_api_count="crypto"), **observed[section]}
     if section == "discovery":
         return {
-            "discovery_api_count": caps.get("discovery", 0),
+            **_profile_counts(static, discovery_api_count="discovery"),
             "discovery_techniques": [t for t in techniques if t in _DISCOVERY_TECHNIQUES],
             **observed[section],
         }
     if section == "evasion_antiforensics":
         return {
-            "anti_debug_api_count": caps.get("anti_debug", 0),
-            "evasion_api_count": caps.get("evasion", 0),
+            **_profile_counts(
+                static, anti_debug_api_count="anti_debug", evasion_api_count="evasion"
+            ),
             "evasion_techniques": [t for t in techniques if t in _EVASION_TECHNIQUES],
             **observed[section],
         }

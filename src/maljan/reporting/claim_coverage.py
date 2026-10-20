@@ -179,6 +179,15 @@ class _Body:
             addresses=frozenset(_address(m.group(1)) for m in _ADDRESS_RE.finditer(text)),
         )
 
+    def cites(self, label: str) -> bool:
+        """Whether the body names ``label`` whole, never as part of a longer label.
+
+        "static claim 1" is not named by "static claim 12", nor by
+        "nonstatic claim 1".
+        """
+        pattern = r"(?<![0-9A-Za-z_])" + re.escape(label.lower()) + r"(?![0-9])"
+        return re.search(pattern, self.lowered) is not None
+
     def names(self, key: tuple[str, int | str]) -> bool:
         kind, value = key
         if kind == "address" and isinstance(value, int):
@@ -188,7 +197,7 @@ class _Body:
 
 def coverage_of(claim: ClaimInForce, body: _Body) -> ClaimNotDiscussed | None:
     """The row for one claim the body does not name the code of, or ``None`` when it does."""
-    if claim.label.lower() in body.lowered:
+    if body.cites(claim.label):
         return None
     names = code_names(claim.claim)
     if names:
