@@ -139,6 +139,8 @@ class DynamicParser(BaseParser):
         """Filters out noise and keeps sensitive WinAPI calls."""
         sensitive_keywords = [
             "RegSetValue",
+            "NtSetValueKey",
+            "ZwSetValueKey",
             "CreateRemoteThread",
             "WriteProcessMemory",
             "HttpSendRequest",

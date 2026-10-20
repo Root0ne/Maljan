@@ -255,9 +255,8 @@ def host_is_private_use(host: Any) -> bool:
     )
 
 
-# Substrings that strongly suggest C2 / commodity-malware infra.
+# Substrings that strongly suggest C2 / commodity-malware infra (``.bit`` is a TLD, tested apart).
 _SUSPICIOUS_DOMAIN_TOKENS: tuple[str, ...] = (
-    ".bit",
     ".onion",
     "duckdns",
     "no-ip",
@@ -523,7 +522,7 @@ def _scored_domain(fqdn: str, dga_labels: list[str] | None = None) -> _DomainVer
     the only labels the DGA score reads (none: no score, ``dga_score`` None).
     """
     lower = fqdn.lower()
-    parts = lower.split(".")
+    parts = lower.rstrip(".").split(".")
     # Strip subdomains for the benign check.
     if len(parts) >= 2:
         registered = ".".join(parts[-2:])
@@ -548,6 +547,10 @@ def _scored_domain(fqdn: str, dga_labels: list[str] | None = None) -> _DomainVer
                 homograph_target=homograph,
             )
 
+    # ``.bit`` is a TLD (Namecoin), so it is read as the last label: as a
+    # substring it also flagged bitdefender.com and bitbucket.org.
+    if parts[-1] == "bit" and len(parts) >= 2:
+        return _DomainVerdict(suspicious=True, reason="contains '.bit'", is_punycode=is_puny_any)
     for token in _SUSPICIOUS_DOMAIN_TOKENS:
         if token in lower:
             return _DomainVerdict(

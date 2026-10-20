@@ -635,7 +635,11 @@ def sandbox_registry_ops(
         rows.setdefault(key, {"key": key, "operation": "access", "value": None})
     for call in _calls(report):
         api = str(call.get("api") or "")
-        listed = _REGISTRY_OPS.get(api.lower())
+        # Zw* and Nt* are the same native call; the table lists the Nt name.
+        name = api.lower()
+        if name.startswith("zw"):
+            name = "nt" + name[2:]
+        listed = _REGISTRY_OPS.get(name)
         if listed is None:
             continue
         key = _argument(call, _REGISTRY_KEY_ARGS)

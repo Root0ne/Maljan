@@ -30,6 +30,13 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from maljan.memory.long_term_memory import family_key
+from maljan.utils.written_forms import hint_escaped
+
+
+def _in_data_form(text: str) -> str:
+    """A name a sample or a past run chose, in the pack's data form."""
+    return hint_escaped(str(text))
+
 
 # How many example function names to show per family in the hint.
 _EXAMPLES_PER_FAMILY = 3
@@ -56,10 +63,13 @@ class FamilyHashAttribution:
 
         One distinctive shared function is a weak prior; the signal saturates
         as the count grows. A family that holds no shared function's majority
-        stays at the floor. Capped below 1.0 because
+        has no prior at all (0.0). Capped below 1.0 because
         exact-match is strong evidence but still a *prior* that the
         analyst/judge must corroborate behaviorally.
         """
+        if self.distinctive_functions <= 0:
+            # Nothing here is evidence for this family: no prior to state.
+            return 0.0
         return round(min(0.5 + 0.1 * self.distinctive_functions, 0.95), 2)
 
 
@@ -155,7 +165,7 @@ def build_attribution_hint(results: list[FamilyHashAttribution]) -> str:
         "samples — strong CODE-REUSE signal, not proof):",
     ]
     for r in results:
-        examples = ", ".join(r.example_functions)
+        examples = ", ".join(_in_data_form(e) for e in r.example_functions)
         ex = f" [e.g. {examples}]" if examples else ""
         contested = r.shared_functions - r.distinctive_functions
         also = (
@@ -164,7 +174,7 @@ def build_attribution_hint(results: list[FamilyHashAttribution]) -> str:
             else ""
         )
         lines.append(
-            f"- family '{r.family}': {r.shared_functions} shared function(s){also} "
+            f"- family '{_in_data_form(r.family)}': {r.shared_functions} shared function(s){also} "
             f"across {len(r.sample_ids)} prior sample(s){ex} "
             f"(prior confidence ~{r.confidence})"
         )

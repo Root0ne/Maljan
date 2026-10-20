@@ -362,7 +362,7 @@ def test_a_hash_filed_under_several_families_raises_none_of_them() -> None:
     assert rows["FamilyA"].distinctive_functions == 1
     assert rows["FamilyA"].confidence == 0.6
     assert rows["FamilyB"].distinctive_functions == 0
-    assert rows["FamilyB"].confidence == 0.5, "the floor: nothing says it is this family"
+    assert rows["FamilyB"].confidence == 0.0, "no prior: nothing says it is this family"
     assert next(iter(rows)) == "FamilyA", "ranked by what only it shares"
 
 
@@ -472,7 +472,7 @@ def _formbook_and_a_stray_xloader() -> list[FunctionMatch]:
 def test_one_stray_sample_does_not_drop_the_family_seen_in_several() -> None:
     rows = {r.family: r for r in aggregate_matches(_formbook_and_a_stray_xloader())}
     assert (rows["FormBook"].distinctive_functions, rows["FormBook"].confidence) == (10, 0.95)
-    assert (rows["XLoader"].distinctive_functions, rows["XLoader"].confidence) == (0, 0.5)
+    assert (rows["XLoader"].distinctive_functions, rows["XLoader"].confidence) == (0, 0.0)
 
 
 def test_junk_samples_on_other_hashes_do_not_flip_a_family() -> None:

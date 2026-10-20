@@ -106,6 +106,14 @@ SUMMARY_CUT_NOTE = (
 )
 
 
+def _unsummarised_note(exc: BaseException) -> str:
+    """The line that heads text returned in place of a summary that failed."""
+    return (
+        f"[summary unavailable: the summarizer failed ({type(exc).__name__}); "
+        "the text below is the unsummarised input]"
+    )
+
+
 class FunctionSummarizer:
     """Two-stage LLM-based token-cost optimisation.
 
@@ -204,7 +212,8 @@ class FunctionSummarizer:
             )
             # Graceful degradation: on error return the raw chunk, whole; the
             # analyst's input it becomes is sized from the analyst's window.
-            return code_chunk
+            # The text says so, or it would read as a summary nobody wrote.
+            return f"{_unsummarised_note(exc)}\n{code_chunk}"
 
     def _fitted(self, text: str, framing: str) -> str:
         """``text`` whole when the window's room holds it beside ``framing``, else shortened, said.
@@ -410,4 +419,4 @@ class FunctionSummarizer:
             logger.warning(
                 "FunctionSummarizer._merge_summaries failed: %s — returning concatenated.", exc
             )
-            return combined
+            return f"{_unsummarised_note(exc)}\n{combined}"

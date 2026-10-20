@@ -113,7 +113,11 @@ class _PerPairEvaluator:
 
     def _to_regex(self, val: Any, strict: bool) -> re.Pattern[str]:
         if isinstance(val, SigmaRegularExpression):
-            return re.compile(str(val.regexp), re.IGNORECASE)
+            names = {getattr(flag, "name", "") for flag in getattr(val, "flags", ()) or ()}
+            flags = (re.MULTILINE if "MULTILINE" in names else 0) | (
+                re.DOTALL if "DOTALL" in names else 0
+            )
+            return re.compile(str(val.regexp), re.IGNORECASE | flags)
         if isinstance(val, SigmaNumber):
             pat = re.escape(str(val.number))
             return re.compile(f"^{pat}$" if strict else pat, re.IGNORECASE)
@@ -121,9 +125,9 @@ class _PerPairEvaluator:
             pattern = ""
             for part in val.s:
                 if part == SpecialChars.WILDCARD_MULTI:
-                    pattern += ".*"
+                    pattern += "(?s:.*)"
                 elif part == SpecialChars.WILDCARD_SINGLE:
-                    pattern += "."
+                    pattern += "(?s:.)"
                 else:
                     pattern += re.escape(str(part))
             return re.compile(f"^{pattern}$" if strict else pattern, re.IGNORECASE)
