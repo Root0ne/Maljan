@@ -2468,22 +2468,43 @@ def listed_value_sightings(report: Any, kind: str, value: str) -> tuple[str, str
     return words, SEARCHED_THE_REPORT
 
 
+def _tool_section_texts(report: Any) -> list[tuple[str, str, str]]:
+    """The kept tool sections of a stored report as ``(ids, tool, lower-cased text)``.
+
+    Joined and lower-cased once per reading (:func:`one_reading`): a table or an
+    export asks about every listed value in turn, and joining every section
+    again for each cost the report's size per value. Outside a reading nothing
+    is held, so a report edited between two calls is read afresh.
+    """
+
+    def build() -> list[tuple[str, str, str]]:
+        texts: list[tuple[str, str, str]] = []
+        for section in _field(report, "sections") or []:
+            origin = str(_field(section, "source") or "")
+            if not origin.startswith("tool:"):
+                continue
+            text = " ".join(
+                [
+                    str(_field(section, "text") or ""),
+                    *(str(cell) for row in _field(section, "rows") or [] for cell in row),
+                ]
+            ).lower()
+            ids = ", ".join(str(i) for i in _field(section, "evidence_ids") or []) or "an entry"
+            texts.append((ids, origin.removeprefix("tool:"), text))
+        return texts
+
+    held: list[tuple[str, str, str]] = _memo(report, "tool_section_texts", build)
+    return held
+
+
 def _section_sightings(report: Any, key: str) -> list[tuple[str, str]]:
     """The kept tool sections of a stored report that hold ``key`` whole, as ``(ids, tool)``."""
     found: list[tuple[str, str]] = []
-    for section in _field(report, "sections") or []:
-        origin = str(_field(section, "source") or "")
-        if not origin.startswith("tool:") or not key:
-            continue
-        text = " ".join(
-            [
-                str(_field(section, "text") or ""),
-                *(str(cell) for row in _field(section, "rows") or [] for cell in row),
-            ]
-        ).lower()
+    if not key:
+        return found
+    for ids, tool, text in _tool_section_texts(report):
         if whole_value_in(key, text):
-            ids = ", ".join(str(i) for i in _field(section, "evidence_ids") or []) or "an entry"
-            held = (ids, origin.removeprefix("tool:"))
+            held = (ids, tool)
             if held not in found:
                 found.append(held)
     return found
@@ -3688,7 +3709,10 @@ def judge_indicator_rows(report: Any, corpus: Any = None) -> list[tuple[Any, str
     if not rows:
         return []
     corroborating = _corroborating_values(report, corpus)
-    return [(row, judge_value_answer(report, row.kind, row.value, corroborating)) for row in rows]
+    with one_reading(report):
+        return [
+            (row, judge_value_answer(report, row.kind, row.value, corroborating)) for row in rows
+        ]
 
 
 # What one comparison of an exported pattern names, as the IOC table's kind.

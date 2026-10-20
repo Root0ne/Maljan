@@ -603,7 +603,7 @@ def bundle_for(
             "binary": base,
             "facts": {
                 "domains": [d.fqdn for d in (net.domains if net else [])],
-                "ips": [f"{i.address}:{i.port}" for i in (net.ips if net else [])],
+                "ips": [_endpoint(i) for i in (net.ips if net else [])],
                 "urls": [u.url for u in (net.urls if net else [])],
                 "user_agents": (net.user_agents if net else []),
                 VALUE_HOLDERS_FACT: _network_holders(report),
@@ -1049,7 +1049,7 @@ def _network_holders(report: MalwareReport) -> dict[str, list[str]]:
         [
             *(u.url for u in net.urls),
             *(d.fqdn for d in net.domains),
-            *(f"{i.address}:{i.port}" for i in net.ips),
+            *(_endpoint(i) for i in net.ips),
         ],
     )
 
@@ -1287,6 +1287,23 @@ _EVASION_TECHNIQUES = frozenset(
 )
 
 
+def _endpoint(ip: Any) -> str:
+    """An address with its port, or the bare address when the run recorded no port."""
+    port = getattr(ip, "port", None)
+    return f"{ip.address}:{port}" if port is not None else str(ip.address)
+
+
+def _carved_line(res: dict[str, Any]) -> str:
+    """A carved payload as the tool stated it: a size only when the tool gave one."""
+    size = res.get("size")
+    sized = (
+        f", {size} bytes" if isinstance(size, int | float) and not isinstance(size, bool) else ""
+    )
+    return (
+        f"{res.get('id')} ({res.get('type') or '?'}{sized}, sha256 {str(res.get('sha256') or '')})"
+    )
+
+
 def _packer_line(match: dict[str, Any]) -> str:
     """A packer match as the tool stated it: a confidence only when it gave one."""
     confidence = match.get("confidence")
@@ -1298,8 +1315,7 @@ def _packer_line(match: dict[str, Any]) -> str:
 def _payload_facts(report: MalwareReport) -> dict[str, Any]:
     """The carved payloads and the dropped files, as the tools stated them."""
     carved = [
-        f"{res.get('id')} ({res.get('type') or '?'}, {res.get('size', 0)} bytes, "
-        f"sha256 {str(res.get('sha256') or '')})"
+        _carved_line(res)
         for res in (report.static.embedded_resources if report.static else [])
         if res.get("carved")
     ]
