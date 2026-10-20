@@ -80,22 +80,32 @@ def judge_ran(state: dict[str, Any]) -> bool:
     return bool(state.get("final_decision"))
 
 
-def _degraded(summary: dict[str, Any], note: str) -> dict[str, Any]:
+def _degraded(summary: dict[str, Any], *notes: str) -> dict[str, Any]:
     out = dict(summary)
     out["degraded_mode"] = True
     reasons = out.get("degradation_reasons")
-    out["degradation_reasons"] = [
-        *(reasons if isinstance(reasons, list) else []),
-        note,
-    ]
+    held = list(reasons if isinstance(reasons, list) else [])
+    out["degradation_reasons"] = [*held, *(n for n in dict.fromkeys(notes) if n and n not in held)]
     return out
 
 
-def _built_summary(state: dict[str, Any], container: Any) -> dict[str, Any]:
+def _missing_sentence(missing: list[str]) -> str:
+    """The one degradation sentence naming each part of the run summary that is not in it."""
+    return (
+        "the run summary of this stopped run lacks "
+        + ", ".join(dict.fromkeys(missing))
+        + ": they could not be read at the stop"
+    )
+
+
+def _built_summary(
+    state: dict[str, Any], container: Any, missing: list[str] | None = None
+) -> dict[str, Any]:
     """A run summary from the state, for a run stopped before its judge built one.
 
     The judge node's own builder, given what the state holds; a part the state
-    has nothing for is left as the builder leaves it.
+    has nothing for is left as the builder leaves it. A part that could not be
+    recorded is named in ``missing``, for the one sentence that says so.
     """
     from maljan.analysis.run_summary import RunSummaryBuilder, tool_asks_of
     from maljan.pipeline import nodes
@@ -110,9 +120,11 @@ def _built_summary(state: dict[str, Any], container: Any) -> dict[str, Any]:
         try:
             apply()
         except Exception as exc:  # noqa: BLE001 — one part is never worth the summary
-            logger.debug(
+            logger.warning(
                 "stopped run: the run summary's %s was not recorded (%s).", name, type(exc).__name__
             )
+            if missing is not None:
+                missing.append(name)
 
     def _negotiation() -> None:
         max_iters, sycophancy_check = nodes.debate_options(container)
@@ -198,26 +210,29 @@ def stopped_run_summary(state: dict[str, Any], container: Any, *, note: str) -> 
     from maljan.analysis.run_summary import spend_blocks
     from maljan.pipeline import nodes
 
+    missing: list[str] = []
     try:
         existing = state.get("run_summary")
         summary = (
             dict(existing)
             if isinstance(existing, dict) and existing
-            else _built_summary(state, container)
+            else _built_summary(state, container, missing)
         )
     except Exception as exc:  # noqa: BLE001 — a stopped run is recorded whatever happens
         logger.warning("stopped run: the run summary could not be built (%s).", type(exc).__name__)
         summary = {}
+        missing.append("every part")
 
     def _part(name: str, apply: Any) -> None:
         try:
             apply()
         except Exception as exc:  # noqa: BLE001 — one part is never worth the summary
-            logger.debug(
+            logger.warning(
                 "stopped run: the run summary's %s was not read again (%s).",
                 name,
                 type(exc).__name__,
             )
+            missing.append(name)
 
     def _spent() -> None:
         summary.update(spend_blocks(container.get_token_ledger().snapshot()))
@@ -276,7 +291,14 @@ def stopped_run_summary(state: dict[str, Any], container: Any, *, note: str) -> 
         _part("disclosure", _disclosure)
         _part("efficiency", _efficiency)
         _part("coverage", _coverage)
-    return _degraded(summary, note)
+    return _degraded(
+        summary,
+        _missing_sentence(missing) if missing else "",
+        # What the report built here says too: no judge ran, so no verdict.
+        NO_VERDICT_REASON if not judge_ran(state) else "",
+        # The stop note stays last, as on the report: it is why the run ended.
+        note,
+    )
 
 
 def _is_built(record: Any) -> bool:
@@ -375,11 +397,12 @@ def _deterministic_report(state: dict[str, Any], container: Any) -> dict[str, An
             )
     fallback = state.get("verdict_fallback") or None
     ledger: list[Any] = []
+    unreadable_rows = 0
     for row in state.get("evidence_ledger") or []:
         try:
             ledger.append(LedgerEntry.model_validate(row))
         except Exception:  # noqa: BLE001 — one bad row is not a lost report
-            continue
+            unreadable_rows += 1
     ledger.sort(key=lambda entry: entry.seq)
     # The last pass before the report is built from it (``schemas.evidence``).
     from maljan.core.config import get_settings
@@ -389,6 +412,16 @@ def _deterministic_report(state: dict[str, Any], container: Any) -> dict[str, An
         ledger, int(getattr(get_settings().reporting, "evidence_budget_bytes", 0) or 0)
     )
     reasons = corrected_reasons(state.get("degradation_reasons"), ledger)
+    if unreadable_rows:
+        logger.warning(
+            "stopped run: %d evidence ledger row(s) could not be read for the report.",
+            unreadable_rows,
+        )
+        reasons = [
+            *reasons,
+            f"{unreadable_rows} evidence ledger row(s) could not be read and are not in this "
+            "report",
+        ]
     if not judge_ran(state):
         reasons = [*reasons, NO_VERDICT_REASON]
     builder = MalwareReportBuilder(

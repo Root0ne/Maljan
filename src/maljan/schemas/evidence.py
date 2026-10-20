@@ -528,6 +528,8 @@ def build_entry(
     ``output`` is then the statement of the cut (:func:`not_shown_record`),
     the entry is marked ``truncated`` and nothing is parsed out of it.
 
+    ``error`` is held to ``max_chars`` as ``output`` is, and says so the same way.
+
     ``chars_dropped`` is what the tool-output guardrail cut from the answer
     before the model read it: ``output`` is what the model was handed, and
     the entry is marked ``truncated`` because it is not the whole answer.
@@ -567,6 +569,13 @@ def build_entry(
     # it, or the guardrail or a ceiling left a prefix. No reputation record is
     # read from such an output (``_reputation_at_write``).
     cut = bool(not_shown) or len(text) < len(full) or int(chars_dropped) > 0
+    # A failure message is held to the same result budget as the output, and
+    # the cut is stated the same way (the closing "…", the entry ``truncated``):
+    # a server that answers a failure with a traceback would otherwise carry it
+    # whole, with its paths, into every header that lists the failure.
+    if error and int(max_chars) > 0 and len(error) > int(max_chars):
+        error = trim_output(error, max_chars)
+        cut = True
     structured = None if repeated_of or not_shown else parse_structured(full)
     content = (
         _structured_beside(structured_content, full, structured)

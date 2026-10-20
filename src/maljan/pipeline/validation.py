@@ -24,11 +24,12 @@ import bisect
 import ipaddress
 import json
 import re
+import types
 from collections.abc import Awaitable, Callable, Collection, Iterable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from fractions import Fraction
 from functools import cache, cached_property, lru_cache
-from typing import Any, get_args, get_origin
+from typing import Annotated, Any, Union, get_args, get_origin
 
 from pydantic import ValidationError
 
@@ -2740,6 +2741,23 @@ def _claim_index(path: str) -> int | None:
 # ---------------------------------------------------------------------------
 
 
+_SEQUENCE_ORIGINS = (list, set, frozenset, tuple, Sequence)
+
+
+def _shaped_like(annotation: Any, value: Any) -> bool:
+    """Whether ``value`` has the outer shape ``annotation`` declares (a model or mapping: dict)."""
+    origin = get_origin(annotation)
+    if origin is Annotated:
+        return _shaped_like(get_args(annotation)[0], value)
+    if origin in _SEQUENCE_ORIGINS:
+        return isinstance(value, list)
+    if origin in (dict, Mapping):
+        return isinstance(value, dict)
+    if isinstance(annotation, type) and hasattr(annotation, "model_fields"):
+        return isinstance(value, (dict, list))
+    return False
+
+
 def keep_known_keys(model: Any, payload: Any) -> tuple[Any, list[str]]:
     """``payload`` narrowed to the fields ``model`` declares, and what was dropped.
 
@@ -2770,24 +2788,46 @@ def keep_known_keys(model: Any, payload: Any) -> tuple[Any, list[str]]:
         return kept
 
     def _walk_field(field: Any, value: Any, path: str) -> Any:
-        annotation = getattr(field, "annotation", None)
+        return _walk_annotation(getattr(field, "annotation", None), value, path)
+
+    def _walk_annotation(annotation: Any, value: Any, path: str) -> Any:
+        """Walk ``value`` by its declared type, however the models are nested in it.
+
+        ``Model``, ``Model | None``, ``list[Model] | None`` and
+        ``dict[str, list[Model]]`` are all read: a union is resolved by the
+        shape of the value, a container by its item type.
+        """
         origin = get_origin(annotation)
-        nested = [
-            arg
-            for arg in ([annotation, *get_args(annotation)])
-            if isinstance(arg, type) and hasattr(arg, "model_fields")
-        ]
-        if not nested:
+        args = get_args(annotation)
+        if origin is Annotated:
+            return _walk_annotation(args[0], value, path)
+        if origin is Union or origin is types.UnionType:
+            for arm in args:
+                if arm is type(None):
+                    continue
+                if _shaped_like(arm, value):
+                    return _walk_annotation(arm, value, path)
             return value
-        if isinstance(value, list):
-            return [_walk(nested[0], item, f"{path}{index}.") for index, item in enumerate(value)]
-        if origin in (dict, Mapping) and isinstance(value, dict):
+        if isinstance(annotation, type) and hasattr(annotation, "model_fields"):
+            if isinstance(value, list):
+                return [
+                    _walk(annotation, item, f"{path}{index}.") for index, item in enumerate(value)
+                ]
+            return _walk(annotation, value, path)
+        if origin in _SEQUENCE_ORIGINS and isinstance(value, list) and args:
+            return [
+                _walk_annotation(args[0], item, f"{path}{index}.")
+                for index, item in enumerate(value)
+            ]
+        if origin in (dict, Mapping) and isinstance(value, dict) and len(args) == 2:
             # A mapping of models: the keys are the caller's own, not fields,
             # so the sub-model is asked about each *value*. Walked as the
             # dict itself, every key would be reported dropped and the field
             # would come back empty.
-            return {key: _walk(nested[-1], item, f"{path}{key}.") for key, item in value.items()}
-        return _walk(nested[0], value, path)
+            return {
+                key: _walk_annotation(args[1], item, f"{path}{key}.") for key, item in value.items()
+            }
+        return value
 
     return _walk(model, payload, ""), dropped
 
@@ -3151,6 +3191,12 @@ class CapabilityGrounding:
     # sentence whose assertion is that one of them matched states nothing
     # about the sample.
     matchers: tuple[str, ...] = SHIPPED_MATCHER_NAMES
+    # Why the run could not be read, empty for a run that was. A grounding
+    # that could not be read checks nothing (``ungrounded_capabilities``), and
+    # a caller that holds a degradation list says so there: a half-read
+    # grounding would instead report "nothing establishes" over what it
+    # simply never reached.
+    unread: str = ""
 
     def grounds(
         self, techniques: Sequence[str], keys: Sequence[str], pattern: re.Pattern[str]
@@ -3201,9 +3247,10 @@ class CapabilityGrounding:
         name the section records, by the legacy reading.
 
         Never raises: a grounding that cannot be read is an empty one, and an
-        empty one grounds nothing — which would fail every term — so a read
-        that finds nothing at all returns a grounding that checks nothing. A
-        report the validator cannot understand must not become a report full of
+        empty one checks nothing, with the reason in ``unread`` and a warning
+        in the log. What was read before the failure is dropped, not kept: a
+        partial grounding fails every term it never reached. A report the
+        validator cannot understand must not become a report full of
         violations.
         """
         techniques: set[str] = set()
@@ -3306,8 +3353,19 @@ class CapabilityGrounding:
                         techniques.add(base)
                 for finding in getattr(isr, "findings", None) or []:
                     words.append(str(getattr(finding, "title", "") or ""))
-        except Exception as exc:  # noqa: BLE001 — an unreadable run grounds nothing
-            logger.debug("validation: the capability grounding could not be read (%s).", exc)
+            matchers = matcher_names(ledger)
+        except Exception as exc:  # noqa: BLE001 — an unreadable run is checked by nothing
+            reason = f"{type(exc).__name__}: {safe_finding_value(str(exc))}"
+            # The log names the exception's type only; its text, scrubbed,
+            # travels with the record as the unread reason.
+            logger.warning(
+                "validation: the capability grounding could not be read (%s); "
+                "capability claims are not checked.",
+                type(exc).__name__,
+            )
+            # The rows already complete stay: a sentence saying only that a rule
+            # matched is judged by them, not by what was left unread.
+            return cls(unread=reason, rule_only=tuple(rule_rows))
         return cls(
             technique_ids=frozenset(techniques),
             evidence_keys=frozenset(keys),
@@ -3315,7 +3373,7 @@ class CapabilityGrounding:
             # reader, so a cue in one cell never reaches a word in the next.
             evidence_text="\n".join(w for w in words if w).lower(),
             rule_only=tuple(rule_rows),
-            matchers=matcher_names(ledger),
+            matchers=matchers,
         )
 
 
@@ -4373,7 +4431,11 @@ def _sentence_around(text: str, position: int) -> str:
 # "C:\Users\..."). A slash-joined list of words ("injection/hollowing/
 # persistence") has that too, so a run is a value only in a path's shape
 # (:func:`_path_shaped`).
-_PATH_VALUE_RE = re.compile(r"[^\s\"'`“”]*[\\/][^\s\"'`“”]*[\\/][^\s\"'`“”]*")
+#
+# Opened only at the start of a run (the lookbehind), so a long run with fewer
+# than two separators is tried once, not from every character of it: the
+# match starts where a run does either way, and the cost stays linear.
+_PATH_VALUE_RE = re.compile(r"(?<![^\s\"'`“”])[^\s\"'`“”]*[\\/][^\s\"'`“”]*[\\/][^\s\"'`“”]*")
 # A path's shape: opened by a separator, a drive, a hive or a share, or with a
 # component that holds a dot or begins with a capital letter.
 _PATH_OPENING_RE = re.compile(r"^(?:[\\/]|[A-Za-z]:[\\/]|HK[A-Z_]+\\)")
@@ -5972,6 +6034,11 @@ def _held(value: str, known: set[str], items: ItemIndex | None) -> bool:
     return value in known or _item_read(items, value)
 
 
+def _cited_form(value: Any) -> str:
+    """A cited id as it is compared: without brackets or space round it, lower case."""
+    return str(value).strip().strip("[]").strip().lower()
+
+
 def key_finding_citation_violations(
     payload: Any, known_ids: Iterable[str], items: ItemIndex | None = None
 ) -> list[Violation]:
@@ -5982,7 +6049,10 @@ def key_finding_citation_violations(
     id nobody issued is pointing a reader at nothing, and that is the one
     worth one question. With no ledger to compare against, nothing is judged.
     """
-    known = {str(value) for value in known_ids}
+    # Read as a citation in prose is (``citation_violations``): case and the
+    # brackets a model writes round an id do not make it a different id.
+    known = {_cited_form(value) for value in known_ids}
+    known.discard("")
     if not known:
         return []
     out: list[Violation] = []
@@ -5990,7 +6060,9 @@ def key_finding_citation_violations(
         unknown = [
             value
             for value in _cited(row, "evidence_ids")
-            if value not in known and not _item_read(items, value)
+            if _cited_form(value) not in known
+            and not _item_read(items, value)
+            and not _item_read(items, value.strip("[] "))
         ]
         if unknown:
             out.append(
@@ -6887,6 +6959,8 @@ class EntryTexts:
     # Each letter-and-digit run of the texts, and the entries it is a whole run
     # of: built once, on first use, by :meth:`may_hold`.
     _runs: dict[str, frozenset[str]] = field(default_factory=dict, compare=False, repr=False)
+    # Each entry's place in ``texts``, for reading candidates in ledger order.
+    _order: dict[str, int] = field(default_factory=dict, compare=False, repr=False)
 
     @classmethod
     def from_ledger(cls, ledger: Iterable[Any], corpus: Any = None) -> EntryTexts:
@@ -7026,7 +7100,16 @@ class EntryTexts:
         """Every entry whose text holds ``value``, in ledger order; none for an undecidable one."""
         if not decidable(value):
             return []
-        return [entry_id for entry_id in self.texts if self.holds(entry_id, value, fields=fields)]
+        # Only the entries that may hold it are read, in ledger order: the
+        # cost follows the candidates, not every entry per value.
+        candidates = self.may_hold(value, fields=fields)
+        if not self._order:
+            self._order.update({entry_id: at for at, entry_id in enumerate(self.texts)})
+        return [
+            entry_id
+            for entry_id in sorted(candidates, key=lambda i: self._order.get(i, -1))
+            if entry_id in self.texts and self.holds(entry_id, value, fields=fields)
+        ]
 
     def named(self, entry_id: str) -> str:
         """``ev_0012 (floss)``: an id with the tool that answered it."""
@@ -9712,7 +9795,16 @@ _BENIGN_CATEGORY_WORDS: tuple[str, ...] = (
 def _category_says_benign(category: str) -> bool:
     """Whether a free-text category asserts the sample is not malware."""
     words = re.sub(r"[^a-z0-9]+", " ", category.lower()).strip()
-    return any(word in words for word in _BENIGN_CATEGORY_WORDS)
+    # Whole words and phrases, or one of them as the stem of "-ware": "illegitimate"
+    # holds "legitimate" and "fake system cleaner" holds "clean", and neither says
+    # the sample is not malware, while "benignware" and "cleanware" do.
+    return _benign_category_re().search(words) is not None
+
+
+@cache
+def _benign_category_re() -> re.Pattern[str]:
+    stems = "|".join(re.escape(word) for word in _BENIGN_CATEGORY_WORDS)
+    return re.compile(rf"(?<![a-z0-9])(?:{stems})(?:ware)?(?![a-z0-9])")
 
 
 def assessment_conflict_violations(bundle: Any) -> list[Violation]:

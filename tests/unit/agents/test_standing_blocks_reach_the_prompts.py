@@ -313,7 +313,7 @@ class TestTheReportRounds:
 
         composer._author = _author  # type: ignore[method-assign]
         with patch("maljan.reporting.composer.CapabilityGrounding") as grounding:
-            grounding.from_report.return_value = MagicMock()
+            grounding.from_report.return_value = MagicMock(unread="")
             asyncio.run(composer.compose(_report(), None, facts_block=FACTS, run_state=RUN_STATE))
         assert composer._facts_block == FACTS
         assert composer._run_state == RUN_STATE

@@ -187,6 +187,13 @@ def _merge_stage_results(
             **existing,
             **entry,
             "ran": bool(existing.get("ran")) or bool(entry.get("ran")),
+            # A failure stays recorded: a later round of the stage that
+            # succeeded does not undo an earlier one that failed.
+            **(
+                {"failure": bool(existing.get("failure")) or bool(entry.get("failure"))}
+                if "failure" in existing or "failure" in entry
+                else {}
+            ),
             "reason": entry.get("reason") or existing.get("reason") or "",
             "claim_count": int(existing.get("claim_count") or 0)
             + int(entry.get("claim_count") or 0),

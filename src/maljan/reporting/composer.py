@@ -1042,6 +1042,11 @@ class ReportComposer:
         # What this run established, read once and asked of every section, so
         # a conclusion cannot be the first place "command-and-control" appears.
         self._grounding = CapabilityGrounding.from_report(report, isr_reports, ledger=evidence)
+        if self._grounding.unread:
+            self._note_degradation(
+                "the report's capability claims were not checked against the run's evidence: "
+                f"the evidence could not be read ({self._grounding.unread})"
+            )
 
         # The entries this run recorded, and which of them a sandbox wrote: an
         # execution step marked observed has to cite one of the second, and a

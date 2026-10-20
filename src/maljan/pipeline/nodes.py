@@ -181,29 +181,24 @@ if TYPE_CHECKING:
 # Helpers
 # ---------------------------------------------------------------------------
 
-# The narrative round's configured wait, before the model's pace is known.
-# Once the job has measured the reporter's rate, the round waits as long as
-# its output budget takes at that pace, as a composer section does
-# (``NarrativeAgent.round_timeout``); this is the least it is given. Finite,
-# which the round once was not: see the call site for the 30-minute silence it
-# bounds.
-_NARRATIVE_TIMEOUT_SECONDS = 600
 
-
+# The narrative round has no configured wait of its own, so it has no outer
+# cut: ``NarrativeAgent.round_timeout`` answers None however the pace stands
+# (the paced time is recorded as ``narrative:round``), and only each call's own
+# deadline bounds the round. It was a fixed 600 s, a default limit nobody set;
+# a cut at ten minutes sent a slow model's round to the template.
 def _narrative_timeout(
     narrative_agent: Any, report: Any, facts: str, run_state: str, isr_reports: Any = None
-) -> float:
-    """The narrative round's wait: sized from its output cap and the measured pace."""
+) -> float | None:
+    """The narrative round's outer wait: the configured one, and none is configured."""
     try:
-        return float(
-            narrative_agent.round_timeout(
-                _NARRATIVE_TIMEOUT_SECONDS,
-                narrative_agent.prompt_chars(report, facts, run_state, isr_reports),
-            )
+        seconds = narrative_agent.round_timeout(
+            None, narrative_agent.prompt_chars(report, facts, run_state, isr_reports)
         )
-    except Exception as exc:  # noqa: BLE001 — a wait that cannot be sized is the configured one
+        return None if seconds is None else float(seconds)
+    except Exception as exc:  # noqa: BLE001 — a wait that cannot be sized is no wait
         logger.debug("report_node: the narrative wait was not sized (%s).", exc)
-        return float(_NARRATIVE_TIMEOUT_SECONDS)
+        return None
 
 
 def _restart_reporter(llm: Any, seconds: Any, container: Any) -> None:
@@ -1098,10 +1093,6 @@ def _augment_static_chunks_with_path(
 # ---------------------------------------------------------------------------
 
 
-# How long the pack waits for the one reputation call. A lookup by hash is a
-# single round trip; a server that has not answered in this long is one the
-# run goes on without, and the entry says so.
-REPUTATION_TIMEOUT_S = 60.0
 # Why the pack made no reputation lookup: the servers declaring one are all
 # disabled (named, in the order the pack would ask them), or none declares one.
 NO_LOOKUP_ENABLED = "no reputation server is enabled ({servers}); no lookup was made"
@@ -1159,7 +1150,7 @@ def _reputation_lookup(container: ServiceContainer, sha256: str) -> Any:
             started_at=time.time(),
         )
 
-    def lookup(recorder: Any) -> Any:
+    def lookup(recorder: Any, left: float | None = None) -> Any:
         if str(container.config.triage.reputation) == "off":
             return _skip(recorder, "core.triage.reputation is off; no lookup was made")
         if not sha256:
@@ -1193,6 +1184,20 @@ def _reputation_lookup(container: ServiceContainer, sha256: str) -> Any:
         server, tool_name, args = usable[0]
         from maljan.agents.base_agent import run_coro_blocking
 
+        # The wait is the tool's own declared ``timeout_seconds``, else what is
+        # left of the pack's budget, else none (the server step's rule, below).
+        # It was a fixed 60 s whatever the tool declared.
+        declared_wait: float | None = None
+        try:
+            tool_facts = declarations(container.config).declaration_for(
+                (f"mcp:{server}", tool_name)
+            )
+            seconds = getattr(tool_facts, "timeout_seconds", None)
+            declared_wait = float(seconds) if seconds else None
+        except Exception as exc:  # noqa: BLE001 — an unread declaration declares no wait
+            logger.debug("triage pack: %s's declared timeout was not read (%s).", tool_name, exc)
+        wait = declared_wait or left
+
         started, wall_clock = time.monotonic(), time.time()
         registry = container.get_server_registry()
         tools, reasons = registry.tools_for_ref(
@@ -1216,7 +1221,9 @@ def _reputation_lookup(container: ServiceContainer, sha256: str) -> Any:
         try:
             output = str(
                 run_coro_blocking(
-                    tools[0].ainvoke(args), REPUTATION_TIMEOUT_S, label=f"triage:{tool_name}"
+                    tools[0].ainvoke(args),
+                    float(wait) if wait else None,
+                    label=f"triage:{tool_name}",
                 )
             )
         except Exception as exc:  # noqa: BLE001 — a failed lookup is an entry
@@ -1246,6 +1253,7 @@ def _reputation_lookup(container: ServiceContainer, sha256: str) -> Any:
             duration_ms=int((time.monotonic() - started) * 1000),
         )
 
+    lookup.takes_left = True  # type: ignore[attr-defined]
     return lookup
 
 
@@ -1339,12 +1347,29 @@ def _server_step_call(container: ServiceContainer) -> Any:
             return answer(
                 "; ".join(reasons) or f"{server} offered no tool named {tool_name}", ok=False
             )
-        staged, _reasons = _stage(container, tools[:1], container.job_key())
+        staged, staging_reasons = _stage(container, tools[:1], container.job_key())
         staged = _mounted(container, tools[:1], staged)
         target = staged.get(server)
         if target:
             held["sample_path"] = target
             args = _step_arguments(step, facts, held)
+        else:
+            # The sample never reached this server. That fails the step only
+            # when the call uses the sample's path (the declared ``path``
+            # role, or ``{sample_path}`` in its template), and only for the
+            # reasons that name this server: the job-wide list can hold a
+            # concurrent step's failure.
+            roles = dict(getattr(facts, "arguments", None) or {})
+            uses_sample = (
+                any("{sample_path}" in str(v) for v in step.arguments.values())
+                if step.arguments
+                else bool(roles.get("path"))
+            )
+            ours = [r for r in staging_reasons if f"'{server}'" in r]
+            if uses_sample and ours:
+                return answer(
+                    f"the sample could not be staged to {server}: " + "; ".join(ours), ok=False
+                )
         budget = step.budget_seconds or getattr(facts, "timeout_seconds", None) or left
         try:
             output = str(
@@ -1368,19 +1393,23 @@ def _server_step_call(container: ServiceContainer) -> Any:
 _REASON_LOCK = threading.Lock()
 
 
-# How much of a failure's message the header prints. A tool server on another
-# host can answer with a stack trace, and the header is a list of things to
-# fix rather than a log.
-MAX_FAILURE_CHARS = 400
-
-
-def tool_failures(ledger: Sequence[Any], limit: int = 20) -> list[dict[str, Any]]:
+def tool_failures(
+    ledger: Sequence[Any], limit: int | None = None, message_chars: int | None = None
+) -> list[dict[str, Any]]:
     """Each distinct tool failure in the ledger, once, with its remedy.
 
     Keyed by tool and message so a call that failed the same way five times
     is one row with a count of five; the report header and the console read
     this rather than walking the ledger. A step the pack's budget stopped is
     not a failure and is left out, as the run-state block leaves it out.
+
+    Nothing is cut here unless the caller asks: ``limit`` is how many distinct
+    failures are listed (the rest said as "and N more"), ``message_chars`` how
+    much of a message is kept. They were fixed at 20 and 400, defaults nobody
+    set. A message is already held to the ledger's result budget when its
+    entry is written (``schemas.evidence.build_entry`` trims ``error`` as it
+    trims ``output``, and marks the entry truncated), so a traceback never
+    reaches this header whole.
     """
     rows: dict[tuple[str, str], dict[str, Any]] = {}
     for entry in ledger:
@@ -1396,10 +1425,8 @@ def tool_failures(ledger: Sequence[Any], limit: int = 20) -> list[dict[str, Any]
         message = str(getattr(entry, "error", "") or getattr(entry, "output", "") or "").strip()
         if message.startswith(NOT_RUN_PREFIX):
             continue
-        # Trimmed the way the ledger trims a result: an external server that
-        # answers a failure with a stack trace would otherwise print it whole
-        # in the report header.
-        message = trim_output(message, MAX_FAILURE_CHARS)
+        if message_chars is not None:
+            message = trim_output(message, message_chars)
         key = (str(getattr(entry, "tool", "")), message)
         row = rows.get(key)
         if row is None:
@@ -1413,7 +1440,7 @@ def tool_failures(ledger: Sequence[Any], limit: int = 20) -> list[dict[str, Any]
             }
         row["count"] += 1
     kept = list(rows.values())[:limit]
-    if len(rows) > limit:
+    if limit is not None and len(rows) > limit:
         # Said rather than silently dropped: a header that shows twenty of
         # thirty-one failures and does not say so reads as thirty-one fixed.
         kept.append(
@@ -2152,7 +2179,7 @@ def make_triage_node(
                 **stage_record(
                     stage,
                     ran=True,
-                    reason=f"triage pack failed: {type(exc).__name__}: {exc}",
+                    reason=f"triage pack failed: {describe_exception(exc)}",
                     failure=True,
                     duration_ms=_elapsed_ms(),
                 ),
@@ -6739,19 +6766,21 @@ def make_report_node(
                 state.get("isr_reports"),
             )
             if narrative_agent is not None
-            else float(_NARRATIVE_TIMEOUT_SECONDS)
+            else None
         )
         _restart_reporter(getattr(narrative_agent, "llm", None), narrative_seconds, container)
 
         if narrative_agent is not None:
             try:
-                # Bounded, like every ReportComposer section below it. This
-                # await had no deadline of its own, so the only limit was the
-                # provider's ``request_timeout`` (1800s) times the three
-                # attempts in ``retry_on_connection_error``. Measured live
-                # 2026-08-07: the report node went silent at 17:25:54 and did
-                # not speak again until 17:55:54, on attempt 1 of 3 — a job
-                # that looked alive purely because of the worker heartbeat.
+                # No outer cut of its own unless a wait is configured
+                # (``narrative_seconds`` is None otherwise): the round is
+                # bound by its calls' own deadlines, which grow with the
+                # progress a call shows. An unbounded await once left the
+                # report node silent for 30 minutes on attempt 1 of 3
+                # (measured live 2026-08-07, 17:25:54 to 17:55:54), when the
+                # only limit was the provider's ``request_timeout`` times
+                # the attempts in ``retry_on_connection_error``; those
+                # per-call deadlines are the bound that replaced it.
                 narrative_output = await asyncio.wait_for(
                     narrative_agent.generate(
                         report,
@@ -6765,14 +6794,12 @@ def make_report_node(
                     timeout=narrative_seconds,
                 )
             except TimeoutError:
+                waited = int(narrative_seconds or 0)
                 logger.error(
-                    "report_node: NarrativeAgent exceeded %ds; using fallback narrative.",
-                    int(narrative_seconds),
+                    "report_node: NarrativeAgent exceeded %ds; using fallback narrative.", waited
                 )
                 narrative_output = None
-                no_summary_because = (
-                    f"the report model did not answer within {int(narrative_seconds)}s"
-                )
+                no_summary_because = f"the report model did not answer within {waited}s"
             except Exception as exc:  # noqa: BLE001
                 logger.warning(
                     "report_node: NarrativeAgent.generate raised (%s); using fallback.",

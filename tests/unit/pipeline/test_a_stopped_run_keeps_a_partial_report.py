@@ -178,7 +178,7 @@ class TestTheRunSummary:
         assert summary["file_hash"] == "b" * 64
         assert summary["tokens"]["input_tokens"] == 700
         assert summary["degraded_mode"] is True
-        assert summary["degradation_reasons"] == [NOTE]
+        assert summary["degradation_reasons"] == [NO_VERDICT_REASON, NOTE]
         assert summary["elapsed_seconds"] >= 60
         # Every stage of the profile is a row; the ones that did not report say so.
         assert summary["stages"]
