@@ -356,19 +356,22 @@ API_EDITABLE: dict[str, dict[str, Any]] = {
         "needs_current_password": True,
         "type": "int",
         "minimum": 1,
+        "maximum": 100,
         "group": "api",
         "title": "Login attempts before lockout",
         "description": (
-            "Failed logins per e-mail before the account is locked for the lockout period."
+            "Failed logins per e-mail before the account is locked for the lockout period. "
+            "From 1 to 100."
         ),
     },
     "login_lockout_seconds": {
         "needs_current_password": True,
         "type": "int",
-        "minimum": 1,
+        "minimum": 60,
+        "maximum": 86400,
         "group": "api",
         "title": "Login lockout (s)",
-        "description": "How long a locked account stays locked.",
+        "description": "How long a locked account stays locked. From 1 minute to 1 day.",
     },
     "trusted_proxy_ips": {
         "needs_current_password": True,
@@ -384,17 +387,21 @@ API_EDITABLE: dict[str, dict[str, Any]] = {
         "needs_current_password": True,
         "type": "int",
         "minimum": 1,
+        "maximum": 1440,
         "group": "api",
         "title": "Access token lifetime (min)",
-        "description": "How long an issued access token stays valid.",
+        "description": "How long an issued access token stays valid. At most 24 hours (1440).",
     },
     "jwt_refresh_token_expire_days": {
         "needs_current_password": True,
         "type": "int",
         "minimum": 1,
+        "maximum": 90,
         "group": "api",
         "title": "Refresh token lifetime (days)",
-        "description": "How long an issued refresh token, and its cookie, stay valid.",
+        "description": (
+            "How long an issued refresh token, and its cookie, stay valid. At most 90 days."
+        ),
     },
     "refresh_reuse_grace_seconds": {
         "needs_current_password": True,
@@ -523,6 +530,11 @@ def refresh_grace_problem(merged_api: dict[str, Any]) -> str | None:
     minutes = merged_api.get(
         "jwt_access_token_expire_minutes", API_DEFAULTS["jwt_access_token_expire_minutes"]
     )
+    maximum = API_EDITABLE["jwt_access_token_expire_minutes"].get("maximum")
+    if isinstance(minutes, int) and not isinstance(minutes, bool) and maximum is not None:
+        # A stored lifetime above its ceiling is read clamped, so the window
+        # is held against the lifetime a token really gets.
+        minutes = min(minutes, int(maximum))
     if isinstance(grace, bool) or isinstance(minutes, bool):
         return None
     if not isinstance(grace, int) or not isinstance(minutes, int):
@@ -543,7 +555,9 @@ def refresh_grace_problem(merged_api: dict[str, Any]) -> str | None:
     return None
 
 
-def validate_editable_api_value(entry: CatalogEntry, value: Any) -> str | None:
+def validate_editable_api_value(
+    entry: CatalogEntry, value: Any, *, check_bounds: bool = True
+) -> str | None:
     """Return an error message when ``value`` does not fit ``entry``, else ``None``.
 
     ``API_EDITABLE`` fields no longer live on ``APISettings``, so
@@ -565,9 +579,9 @@ def validate_editable_api_value(entry: CatalogEntry, value: Any) -> str | None:
             # integral float (30.0) is what installs already store and send
             # back as shown, so it is not refused.
             return "Input should be a valid integer"
-        if entry.minimum is not None and value < entry.minimum:
+        if check_bounds and entry.minimum is not None and value < entry.minimum:
             return f"Input should be greater than or equal to {entry.minimum}"
-        if entry.maximum is not None and value > entry.maximum:
+        if check_bounds and entry.maximum is not None and value > entry.maximum:
             return f"Input should be less than or equal to {entry.maximum}"
         return None
     if entry.type == "list":

@@ -447,6 +447,14 @@ class QdrantStore:
 
         return repair_once(self._client, self._collection, self._function_hash_collection)
 
+    def adopt_unowned(self, owner: str) -> dict[str, int]:
+        """Give the ownerless cases and function hashes to ``owner`` (``memory_repair``)."""
+        from maljan.memory.memory_repair import adopt_unowned
+
+        return adopt_unowned(
+            self._client, self._collection, self._function_hash_collection, owner_key(owner) or ""
+        )
+
     def close(self) -> None:
         """Close the client (and with it any function-hash store sharing it)."""
         try:

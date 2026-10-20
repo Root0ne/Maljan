@@ -44,7 +44,7 @@ def test_a_list_settings_leaf_rejects_a_non_string_item(name, bad_value):
 # ``API_DEFAULTS`` in ``settings_catalog_api``); their floor is still
 # enforced, just no longer by pydantic's ``Field(ge=...)``.
 _CATALOG_BOUNDED = {
-    "login_lockout_seconds": (1, 0),
+    "login_lockout_seconds": (60, 59),
     "login_max_attempts": (1, 0),
     "rate_limit_requests": (1, 0),
     "rate_limit_window_seconds": (1, 0),
