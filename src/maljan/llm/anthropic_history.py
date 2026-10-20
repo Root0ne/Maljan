@@ -343,8 +343,14 @@ def _keep_run_state_appended(memory: Memory, messages: list[Any], attached: str)
 # ── A tool loop's first user turn ─────────────────────────────────────────
 
 
-def _first_turn_listed(memory: Memory, messages: list[Any], loop: bool) -> list[Any]:
-    """A tool loop's first user turn as a one-block list, on every request of the loop."""
+def _first_turn_listed(
+    memory: Memory, messages: list[Any], loop: bool, attached: str = ""
+) -> list[Any]:
+    """A tool loop's first user turn as a one-block list, on every request of the loop.
+
+    ``attached`` is the exact run-state block the platform put on the newest
+    turn; only that block, and only on that turn, is left out of the key.
+    """
     users = _user_indexes(messages)
     if not users:
         return messages
@@ -355,8 +361,10 @@ def _first_turn_listed(memory: Memory, messages: list[Any], loop: bool) -> list[
     from maljan.pipeline.run_state import without_run_state_tail
 
     # Keyed as the turn reads without a run-state block, which the platform
-    # puts on it on the first request and takes off on the next.
-    key = _digest({**first, "content": without_run_state_tail(content)})
+    # puts on it on the first request and takes off on the next. Markers the
+    # turn's own text ends on are its own and stay in the key.
+    tail = attached if users[0] == len(messages) - 1 else ""
+    key = _digest({**first, "content": without_run_state_tail(content, tail)})
     with memory.lock:
         listed = key in memory.listed_first
         if loop and not listed:
@@ -650,7 +658,7 @@ def prepared(
         messages = _without_empty_text(payload, messages)
         payload["messages"] = messages
         messages = _shared_heads(messages, dict(heads or {}), cache_marker)
-        messages = _first_turn_listed(memory, messages, loop)
+        messages = _first_turn_listed(memory, messages, loop, attached)
         if bound:
             messages = _keep_run_state_appended(memory, messages, attached)
             messages, ask_to_drop, whole = _settle_thinking(memory, payload, messages)

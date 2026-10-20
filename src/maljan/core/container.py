@@ -138,6 +138,23 @@ def _first_pass_room(container: Any, agent_name: str, room: Room | None) -> Room
     return room.over(measured) if isinstance(room, HeadRoom) else measured
 
 
+def _markers_written_out(chunks: list[TextChunk]) -> list[TextChunk]:
+    """``chunks`` with any run-state marker in their text written out; the same list when none."""
+    from maljan.utils.written_forms import markers_written_out
+
+    out: list[TextChunk] = []
+    changed = False
+    for chunk in chunks:
+        content = chunk.content
+        written = markers_written_out(content) if isinstance(content, str) else content
+        if written != content:
+            out.append(replace(chunk, content=written))
+            changed = True
+        else:
+            out.append(chunk)
+    return out if changed else chunks
+
+
 def _note_chunking(
     container: Any, agent_name: str, chunks: list[TextChunk], head: Room | None = None
 ) -> None:
@@ -568,6 +585,11 @@ class ServiceContainer:
         # The function-hash corpus write the judge decided on, as
         # ``(store, sample_id, family, functions)``, held for the same reason.
         self.pending_function_hashes: Any = None
+        # The function hashes the triage pack read for this job's mirrored
+        # sample, as ``(mirror path, hashes)``, kept only when the read was
+        # whole: the judge's attribution reads them here rather than hashing
+        # the same program a second time. ``None`` until the pack has read them.
+        self.function_hashes_read: Any = None
         # Set by ``aclose``: a hold handed over after teardown (a judge thread a
         # timeout abandoned) is let go of at once.
         self._closed = False
@@ -2289,6 +2311,9 @@ class ServiceContainer:
             _OUTERMOST_LOAD.reset(token)
         if outermost:
             _note_chunking(self, agent_name, chunks, head_room)
+            # The sample's text never carries the platform's run-state markers:
+            # written out one character for one, so no size above changes.
+            chunks = _markers_written_out(chunks)
         return chunks
 
     def _sources_data(

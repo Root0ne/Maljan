@@ -46,6 +46,7 @@ import hashlib
 import re
 
 from maljan.schemas.evidence import parse_structured
+from maljan.utils.written_forms import markers_written_out
 
 FENCE_OPEN = "<<tool output [{entry}] {digest}>>"
 FENCE_CLOSE = "<<end of tool output [{entry}] {digest}>>"
@@ -114,7 +115,7 @@ def escaped(text: str) -> str:
     before it, wherever it stands. Idempotent: a text escaped twice is
     escaped once.
     """
-    return _ANGLE_RUN.sub(r"\\\g<0>", _BREAK.sub("\n", str(text or "")))
+    return markers_written_out(_ANGLE_RUN.sub(r"\\\g<0>", _BREAK.sub("\n", str(text or ""))))
 
 
 def escapes(text: str) -> int:
@@ -128,9 +129,10 @@ def json_view(text: str) -> str:
     A CR LF pair or a lone CR, which valid JSON holds only between values,
     becomes a line feed; every other break character, which valid JSON holds
     only inside a string, becomes its ``\\uXXXX`` escape. The parsed value is
-    unchanged.
+    unchanged, but for a run-state marker inside a string, which is written
+    out (``markers_written_out``): the platform's block is its own.
     """
-    return _JSON_CR.sub("\n", str(text or "")).translate(_JSON_ESCAPES)
+    return markers_written_out(_JSON_CR.sub("\n", str(text or "")).translate(_JSON_ESCAPES))
 
 
 def digest_of(content: str) -> str:

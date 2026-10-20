@@ -106,9 +106,36 @@ def ids_written_out(text: str) -> str:
     return ENTRY_ID_JOIN_RE.sub(lambda m: m.group()[:-1] + ENTRY_ID_JOIN_ESCAPE, text)
 
 
+# The platform's run-state markers (``pipeline.run_state.RUN_STATE_BEGIN`` /
+# ``RUN_STATE_END``): a rule of three or more equals signs, the words, and the
+# rule that closes the line, wherever a text carries one, in any case and spacing.
+_RUN_STATE_MARKER_RE = re.compile(
+    r"(?<!=)(={3,}+)(\s*+(?:end\s+)?run\s+state\b[^=\n]*+)(=*+)", re.IGNORECASE
+)
+
+
+def _dashed(match: re.Match[str]) -> str:
+    return "-" * len(match.group(1)) + match.group(2) + "-" * len(match.group(3))
+
+
+def markers_written_out(text: str) -> str:
+    """``text`` with every run-state marker in it written with dashes for its equals signs.
+
+    The platform's block is recognised by its markers; a sample or a tool that
+    writes one would otherwise open a block the model reads as derived from
+    the ledger, or end a text on one the platform takes back off. Each ``=``
+    of the rule becomes ``-``, one character for one, so a text's length and
+    every offset in it are unchanged; text with no marker comes back as it
+    was. Idempotent.
+    """
+    if "=" not in text:
+        return text
+    return _RUN_STATE_MARKER_RE.sub(_dashed, text)
+
+
 def sample_written_out(text: str) -> str:
     """Bare text a sample wrote, as a line holds it: its controls, then its ids, written out."""
-    return ids_written_out(controls_written_out(text))
+    return markers_written_out(ids_written_out(controls_written_out(text)))
 
 
 def pack_escaped(text: str, *, delimiters: bool = False, ids: bool = False) -> str:
@@ -122,7 +149,8 @@ def pack_escaped(text: str, *, delimiters: bool = False, ids: bool = False) -> s
     (``TOKEN_DELIMITERS``) are written out too, for a value that may carry
     one. With ``ids`` every ledger id in it is written out
     (``ids_written_out``), for a value the sample controls. Without either,
-    the output is as it always was.
+    the output is as it always was, except that a run-state marker in it is
+    always written out (``markers_written_out``).
     """
     if text.isprintable():  # the common case, decided in one pass in C
         out = text.replace('"', PACK_ESCAPES['"'])
@@ -133,6 +161,8 @@ def pack_escaped(text: str, *, delimiters: bool = False, ids: bool = False) -> s
     if ids:
         # After every escape is written: an id may stand right after one.
         out = ids_written_out(out)
+    # A run-state marker is the platform's alone, whoever wrote the value.
+    out = markers_written_out(out)
     if out.endswith("\\"):
         out = out[:-1] + "\\x5c"
     return out

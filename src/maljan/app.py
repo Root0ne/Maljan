@@ -616,6 +616,7 @@ class MaljanApp:
             "validation_fed_back": {},
             "revision_replacements": [],
             "revision_rounds": [],
+            "debate_starts": {},
             "dropped_claims": [],
             "validation_not_run": [],
             "validation_unparsed_answers": [],

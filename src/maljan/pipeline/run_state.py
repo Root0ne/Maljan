@@ -183,12 +183,25 @@ def with_run_state_tail(text: str, body: str) -> str:
     return f"{text}{_TAIL_SEPARATOR}{block}" if text else block
 
 
-def without_run_state_tail(text: str) -> str:
+def without_run_state_tail(text: str, attached: str | None = None) -> str:
     """``text`` without the block :func:`with_run_state_tail` put at its end.
 
     Exactly the bytes it had before; a text that does not end on a block, or
     whose block was not put there by that function, is returned unchanged.
+
+    ``attached`` is the exact block the platform noted it attached
+    (``anthropic_history.RUN_STATE_ATTACHED``). Given, only that block comes
+    off, so a text that ends on markers a sample or a tool wrote keeps them:
+    its own tail is never taken for the platform's. ``""`` says nothing was
+    attached, and the text is returned as it is.
     """
+    if attached is not None:
+        if not isinstance(text, str) or not attached or not text.endswith(attached):
+            return text
+        head = text[: -len(attached)]
+        if not head:
+            return ""
+        return head[: -len(_TAIL_SEPARATOR)] if head.endswith(_TAIL_SEPARATOR) else text
     if not isinstance(text, str) or not text.endswith(RUN_STATE_END):
         return text
     start = text.rfind(RUN_STATE_BEGIN)
@@ -202,14 +215,19 @@ def without_run_state_tail(text: str) -> str:
     return text
 
 
-def is_run_state_block(text: object) -> bool:
+def is_run_state_block(text: object, attached: str | None = None) -> bool:
     """Whether ``text`` is a whole run-state block and nothing else.
 
     Whole, not containing: a prompt that leads with the block and goes on to
     its task is a task, and taking it out would take the task with it.
+    ``attached``, given, is the exact block the platform noted it attached:
+    only that text is the block, and a part a sample or a tool wrote in its
+    shape is not.
     """
     if not isinstance(text, str):
         return False
+    if attached is not None:
+        return bool(attached) and text == attached
     stripped = text.strip()
     return (
         stripped.startswith(RUN_STATE_BEGIN)

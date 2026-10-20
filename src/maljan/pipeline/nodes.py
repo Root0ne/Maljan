@@ -123,6 +123,8 @@ from maljan.pipeline.outcome import (
 from maljan.pipeline.routing import (
     revised_in,
     revision_round_before,
+    rounds_held_before,
+    with_debate_start,
 )
 from maljan.pipeline.run_state import render_run_state
 from maljan.pipeline.sandbox_status import NOT_RUN as SANDBOX_NOT_RUN
@@ -1497,6 +1499,31 @@ def with_verdict_fallback(validation: Any, failure: str) -> dict[str, Any]:
 FILED_VERDICT = "Malware"
 
 
+def remember_hashes_read(container: Any, mirror_path: str, functions: Any) -> None:
+    """Keep the pack's read of ``mirror_path``'s function hashes for the judge.
+
+    Only a whole read is kept: one cut short (``cut``), or one that read
+    nothing, would hand the judge fewer functions than its own read finds.
+    Never raises.
+    """
+    cut = str(getattr(functions, "cut", "") or "")
+    unread = str(getattr(functions, "unavailable", "") or "")
+    if not functions or cut or unread:
+        return
+    try:
+        container.function_hashes_read = (str(mirror_path), functions)
+    except Exception as exc:  # noqa: BLE001 — a stand-in container may refuse it
+        logger.debug("function hashes not kept for the judge (%s).", exc)
+
+
+def hashes_read(container: Any, mirror_path: str) -> Any:
+    """The pack's whole read of ``mirror_path``'s function hashes, or ``None``."""
+    held = getattr(container, "function_hashes_read", None)
+    if isinstance(held, tuple) and len(held) == 2 and held[0] == str(mirror_path) and held[1]:
+        return held[1]
+    return None
+
+
 def _function_hash_attribution(
     container: ServiceContainer, state: AnalysisState, bundle: Any, decision: str = ""
 ) -> list[dict[str, Any]]:
@@ -1548,9 +1575,13 @@ def _function_hash_attribution(
             from maljan.providers.base import StaticJobContext
 
             sample_id = state.get("file_hash", "") or ""
-            functions = provider.function_hashes(
-                StaticJobContext(mirror_sample_path=str(static_path))
-            )
+            # The pack's whole read of the same program, when it made one;
+            # hashed here only when it did not.
+            functions = hashes_read(container, str(static_path))
+            if functions is None:
+                functions = provider.function_hashes(
+                    StaticJobContext(mirror_sample_path=str(static_path))
+                )
             if not functions:
                 unread = getattr(functions, "unavailable", "")
                 if unread:
@@ -1589,7 +1620,60 @@ def _function_hash_attribution(
             if not handed_on:
                 release_function_hash_store(store)
     except Exception as exc:
-        logger.warning("Function-hash attribution skipped (%s). Verdict unaffected.", exc)
+        from maljan.core.settings_overrides import redact_url
+
+        # A store's error may carry its URL, and a URL may carry a password.
+        logger.warning(
+            "Function-hash attribution skipped (%s). Verdict unaffected.", redact_url(str(exc))
+        )
+        return []
+
+
+def _family_rag_candidates(state: AnalysisState) -> list[dict[str, Any]]:
+    """The families the family-feature RAG retrieves for the host sample, or ``[]``.
+
+    Parses the host binary, so the judge runs it in a thread. Fail-safe: a
+    read that fails is logged and gives no rows; never affects the verdict.
+    """
+    try:
+        from maljan.core.config import get_settings as _get_settings
+
+        cfg = _get_settings()
+        host = state.get("sample_path")
+        if not (cfg.preprocessing.use_family_feature_rag and host):
+            return []
+        from maljan.analysis.family_feature_rag import (
+            build_sample_profile_text,
+            retrieve_candidates,
+        )
+        from maljan.analysis.family_feature_rag import (
+            to_report_dicts as _rag_to_report_dicts,
+        )
+        from maljan.core.paths import resolve_data
+        from maljan.extractors.pe_extractor import build_static_analysis
+        from maljan.memory.family_fingerprint_index import load_family_index
+
+        static = build_static_analysis(sample_path=str(host))
+        # resolve_data, not the raw config string: the default is the
+        # relative "data/family_fingerprints_v1.json", which otherwise
+        # resolves against the process CWD rather than the repo root.
+        index = load_family_index(
+            str(resolve_data(cfg.preprocessing.family_fingerprint_catalog_path))
+        )
+        if static is None or index is None:
+            return []
+        return list(
+            _rag_to_report_dicts(
+                retrieve_candidates(
+                    build_sample_profile_text(static),
+                    index,
+                    top_k=cfg.preprocessing.family_rag_top_k,
+                    min_score=cfg.preprocessing.family_rag_min_score,
+                )
+            )
+        )
+    except Exception as exc:
+        logger.warning("Family-feature RAG skipped (%s). Verdict unaffected.", exc)
         return []
 
 
@@ -1650,23 +1734,34 @@ def _function_matches_step(container: ServiceContainer, state: AnalysisState) ->
             # A read that failed is the step failing with its reason, never
             # an empty list of hashes that matches nothing.
             raise ProviderError(f"no function hashes could be read: {unread}")
+        remember_hashes_read(container, str(static_path), functions)
         hashes = [h for _name, h in functions]
         args = {
             "func_hashes": hashes,
             "backend": configured_backend(cfg),
             "exclude_sample_id": sha256,
         }
-        if unavailable and hashes:
+        if unavailable:
+            # Whatever was hashed: a store that could not be built is not
+            # asked again, where its error would reach the run unredacted.
             return args, {"matches": [], "reason": unavailable}
         from maljan.memory.long_term_memory import memory_owner_of
         from maljan.memory.store_factory import leased_function_hash_store
 
         # Held for the read: a settings change meanwhile closes this store only
-        # once the read has let go of it.
-        with leased_function_hash_store(cfg) as held:
-            value = knowledge.function_matches(
-                hashes, held, exclude_sample_id=sha256, owner=memory_owner_of(container)
-            )
+        # once the read has let go of it. Its error is said redacted, as the
+        # build's is: a URL in it may carry a password.
+        try:
+            with leased_function_hash_store(cfg) as held:
+                value = knowledge.function_matches(
+                    hashes, held, exclude_sample_id=sha256, owner=memory_owner_of(container)
+                )
+        except Exception as exc:  # noqa: BLE001 — re-raised with its words masked
+            from maljan.providers.errors import ProviderError
+
+            raise ProviderError(
+                redact_url(f"the function-hash store could not be read: {exc}")
+            ) from None
         cut = getattr(functions, "cut", "")
         if cut and isinstance(value, dict):
             # Some of the program's functions, never all: said with the answer.
@@ -2213,6 +2308,19 @@ def ledger_ids(state: AnalysisState) -> list[str]:
         if value and str(value) not in ids:
             ids.append(str(value))
     return ids
+
+
+def citable_ids(state: AnalysisState, entries: Sequence[Any] = ()) -> list[str]:
+    """What a report may cite: the state's ledger ids, then ``entries``' ids it lacks.
+
+    ``entries`` is the ledger the report node built, which also holds the
+    entries it adds itself (the undrained ones and the static provider's);
+    their ids reach the state channel with the report, and a section citing
+    one is citing the run's own evidence.
+    """
+    ids = ledger_ids(state)
+    extra = [str(getattr(entry, "id", "") or "") for entry in entries]
+    return list(dict.fromkeys([*ids, *(value for value in extra if value)]))
 
 
 def with_item_texts(entries: Any, items: Any) -> Any:
@@ -3797,10 +3905,16 @@ def make_stage_agent_node(
                 stage=stage_key_of(stage, "analysis"),
                 display_name=label_of(container, agent_name),
             )
+            # A lead that crashed still has what its specialists answered,
+            # as a lead that failed or ran out of spend does.
+            _promoted = promoted_asks(agent)
             return _closing(
                 {
-                    "reports": {agent_name: crashed_text},
-                    "isr_reports": {agent_name: _empty_isr(agent_name)},
+                    "reports": {
+                        agent_name: crashed_text,
+                        **{key: answer.to_text_summary() for key, answer in _promoted.items()},
+                    },
+                    "isr_reports": {agent_name: _empty_isr(agent_name), **_promoted},
                     **_evidence_update(),
                     **stage_record(
                         stage,
@@ -4211,7 +4325,13 @@ def make_negotiation_node(
 
     async def node_fn(state: AnalysisState) -> dict[str, Any]:
         started = time.monotonic()
-        first_round = not (state.get("discussion_history") or [])
+        # This debate's first round, not the run's: a second debate stage
+        # opens after the first one's mediations are already in the history.
+        first_round = (
+            stage.key not in (state.get("debate_starts") or {})
+            if stage is not None
+            else not (state.get("discussion_history") or [])
+        )
         if first_round:
             announce_finished(container, state, finishes)
         if stage is not None:
@@ -4287,7 +4407,7 @@ def make_negotiation_node(
                 **_debate_record(stage, started),
             }
         if container.is_mock:
-            is_consensus = iteration >= 1
+            is_consensus = rounds_held_before(state, getattr(stage, "key", None)) >= 1
             mean_conf = 0.95 if is_consensus else 0.4
             return {
                 "iteration_count": iteration + 1,
@@ -4328,7 +4448,9 @@ def make_negotiation_node(
         syco = (
             detect_sycophancy(
                 current_isrs,
-                iteration=iteration,
+                # This debate's rounds: a second debate's first mediation is
+                # its first, whatever the run's count.
+                iteration=rounds_held_before(state, getattr(stage, "key", None)),
                 revised=None
                 if revised_names is None
                 else {
@@ -4624,8 +4746,13 @@ def make_negotiation_node(
                 **_debate_record(stage, started, reason=f"mediation {label}"),
             }
 
-    node_fn.__name__ = "negotiation_node"
-    return node_fn
+    async def debate_round(state: AnalysisState) -> dict[str, Any]:
+        # The first mediation this stage holds records where its debate began,
+        # which is what the router counts this debate's rounds from.
+        return with_debate_start(state, getattr(stage, "key", None), await node_fn(state))
+
+    debate_round.__name__ = "negotiation_node"
+    return debate_round
 
 
 # ---------------------------------------------------------------------------
@@ -5139,17 +5266,72 @@ def debate_options(container: Any) -> tuple[int, bool]:
     return max_rounds, True
 
 
-def _verdict_record(stage: Any, started: float, *, ran: bool, reason: str = "") -> dict[str, Any]:
-    """The verdict or report stage's own line in ``stage_results``."""
+def _verdict_record(
+    stage: Any, started: float, *, ran: bool, reason: str = "", failure: bool = False
+) -> dict[str, Any]:
+    """The verdict or report stage's own line in ``stage_results``.
+
+    ``failure`` says the stage ran and went wrong, and keeps ``reason`` as the
+    stage's own: without it a reason beside ``ran: true`` is filed under the
+    stage's agents and the stage reads as having run cleanly.
+    """
     if stage is None:
         return {}
     return stage_record(
         stage,
         ran=ran,
         reason=reason,
+        failure=failure,
         agents=tuple(stage.agents),
         duration_ms=int((time.monotonic() - started) * 1000),
     )
+
+
+def _failed_verdict_summary(
+    container: Any,
+    state: AnalysisState,
+    own_stage: dict[str, Any] | None,
+    reasons: list[str],
+) -> dict[str, Any] | None:
+    """The run summary of a run whose judge failed, or ``None`` when none can be built.
+
+    What the run did is not lost with its verdict: the stages, the spend, the
+    tokens, the bounds hit, the triage facts and the sandbox are read from the
+    same places the judge's own summary reads them, the verdict is the
+    pipeline's Suspicious, and the run is degraded for ``reasons``. Each block
+    is read apart, so one that cannot be read leaves the others. Never raises.
+    """
+    try:
+        start_time = float(state.get("run_started_at") or 0.0) or time.time()
+        builder = (
+            RunSummaryBuilder(start_time=start_time)
+            .set_sample(state.get("file_hash", ""), state.get("file_name"))
+            .set_verdict("Suspicious", 0)
+            .set_degraded_mode(True, list(reasons))
+        )
+        parts: tuple[tuple[str, Callable[[], Any]], ...] = (
+            ("stages", lambda: builder.set_stages(stage_rollup(container, state, own_stage))),
+            ("tokens", lambda: builder.set_token_usage(container.get_token_ledger().snapshot())),
+            ("server rests", lambda: builder.set_server_rests(container.server_rests())),
+            ("generation", lambda: builder.set_generation(_generation_snapshot(container))),
+            ("spend", lambda: builder.set_spend(_spend_snapshot(container))),
+            ("truncation", lambda: builder.set_truncation(_truncation_snapshot(container))),
+            ("triage", lambda: builder.set_triage(dict(state.get("triage_facts") or {}))),
+            ("sandbox", lambda: builder.set_sandbox(state.get("sandbox_report"))),
+            ("budget", lambda: builder.set_budget(state.get("budget_records") or {})),
+            ("latency", lambda: builder.set_tool_latency(state.get("evidence_ledger") or [])),
+        )
+        for name, part in parts:
+            try:
+                part()
+            except Exception as exc:  # noqa: BLE001 — one block unread is not the summary lost
+                logger.debug("failed-verdict summary: %s not read (%s).", name, exc)
+        summary = builder.build().to_dict()
+        summary["verdict_reading"] = VERDICT_READ_FALLBACK
+        return summary
+    except Exception as exc:  # noqa: BLE001 — a summary never fails the fallback verdict
+        logger.warning("RunSummary of the failed verdict not built (%s).", exc)
+        return None
 
 
 def _truncation_snapshot(container: ServiceContainer) -> dict[str, Any]:
@@ -5325,6 +5507,20 @@ def make_judge_node(
                 logger.debug("evidence ledger read skipped for the judges: %s", exc)
                 return []
 
+        # Bound before the try, seeded with what the run recorded before the
+        # verdict: a judge that fails, even before it assembles the run's
+        # reasons, still hands them on with its own failure added. The body
+        # below assembles the full list over this.
+        _degradation_reasons: list[str] = [
+            str(reason)
+            for reason in (dict(state.get("triage_facts") or {}).get("degradation_reasons") or [])
+        ]
+        try:
+            for _server_reason in container.server_degradation_reasons():
+                if str(_server_reason) not in _degradation_reasons:
+                    _degradation_reasons.append(str(_server_reason))
+        except Exception as exc:  # noqa: BLE001 — a reason unread is not a verdict lost
+            logger.debug("judge_node: server degradation reasons not read (%s).", exc)
         try:
             judge = container.get_judge_agent(role="judge")
             judge.pipeline_stage = verdict_stage.key if verdict_stage is not None else "analysis"
@@ -5530,7 +5726,7 @@ def make_judge_node(
             # here, for the run summary; the prompt below gets them as
             # sentences.
             _triage_facts = dict(state.get("triage_facts") or {})
-            _degradation_reasons: list[str] = [
+            _degradation_reasons = [
                 str(reason) for reason in (_triage_facts.get("degradation_reasons") or [])
             ]
             # The previous guard required
@@ -6053,48 +6249,18 @@ def make_judge_node(
             # (threaded into the report). Write side: upsert this sample's
             # function hashes under its inferred family so the corpus grows.
             # Fully gated + fail-safe; never affects the verdict.
-            _func_hash_report = _function_hash_attribution(container, state, bundle, decision)
-            _family_rag_report: list[dict[str, Any]] = []
+            # Both read the sample from disk (and the attribution may ask a
+            # static server to hash its functions), so both run off this loop.
+            _func_hash_report = await asyncio.to_thread(
+                _function_hash_attribution, container, state, bundle, decision
+            )
 
             # Family-feature RAG (read side): record the families retrieved by
             # static-feature similarity as report evidence. Reads the HOST binary
             # (pe_extractor), so it uses ``sample_path`` (not the container path).
             # LLM-centric: these are candidates the analyst weighed, not a verdict.
             # Fail-safe and gated OFF by default (no catalog -> no rows).
-            try:
-                from maljan.core.config import get_settings as _get_settings
-
-                _cfg2 = _get_settings()
-                _host = state.get("sample_path")
-                if _cfg2.preprocessing.use_family_feature_rag and _host:
-                    from maljan.analysis.family_feature_rag import (
-                        build_sample_profile_text,
-                        retrieve_candidates,
-                    )
-                    from maljan.analysis.family_feature_rag import (
-                        to_report_dicts as _rag_to_report_dicts,
-                    )
-                    from maljan.core.paths import resolve_data
-                    from maljan.extractors.pe_extractor import build_static_analysis
-                    from maljan.memory.family_fingerprint_index import load_family_index
-
-                    _static = build_static_analysis(sample_path=str(_host))
-                    # resolve_data, not the raw config string: the default is the
-                    # relative "data/family_fingerprints_v1.json", which otherwise
-                    # resolves against the process CWD rather than the repo root.
-                    _index = load_family_index(
-                        str(resolve_data(_cfg2.preprocessing.family_fingerprint_catalog_path))
-                    )
-                    if _static is not None and _index is not None:
-                        _cands = retrieve_candidates(
-                            build_sample_profile_text(_static),
-                            _index,
-                            top_k=_cfg2.preprocessing.family_rag_top_k,
-                            min_score=_cfg2.preprocessing.family_rag_min_score,
-                        )
-                        _family_rag_report = _rag_to_report_dicts(_cands)
-            except Exception as _e:
-                logger.warning("Family-feature RAG skipped (%s). Verdict unaffected.", _e)
+            _family_rag_report = await asyncio.to_thread(_family_rag_candidates, state)
 
             emit_agent_message(
                 container.event_sink,
@@ -6186,15 +6352,21 @@ def make_judge_node(
             # that no judge answered, which is what stops a confidence being
             # derived from the analysts' own claims and attached to a verdict
             # none of them reached. The run is also flagged degraded, which is
-            # what draws the DEGRADED banner.
+            # what draws the DEGRADED banner. The reasons the run had already
+            # gathered stay, with the judge's failure added to them, and the
+            # run summary is still written: without it the stages, the spend
+            # and the coverage of a run whose judge failed were absent without
+            # notice.
+            _judge_failed = f"judge failed ({type(e).__name__})"
+            _failed_reasons = [*_degradation_reasons]
+            if _judge_failed not in _failed_reasons:
+                _failed_reasons.append(_judge_failed)
+            _failed_record = _verdict_record(
+                verdict_stage, started, ran=True, reason=_judge_failed, failure=True
+            )
             return _closing(
                 {
-                    **_verdict_record(
-                        verdict_stage,
-                        started,
-                        ran=True,
-                        reason=f"judge failed ({type(e).__name__})",
-                    ),
+                    **_failed_record,
                     "final_decision": "Suspicious",
                     "judge_report": f"[ERROR] Judge failed ({describe_exception(e)}).",
                     "stix_output": {},
@@ -6205,7 +6377,10 @@ def make_judge_node(
                         "failure": describe_exception(e),
                     },
                     "degraded_mode": True,
-                    "degradation_reasons": [f"judge failed ({type(e).__name__})"],
+                    "degradation_reasons": _failed_reasons,
+                    "run_summary": _failed_verdict_summary(
+                        container, state, _failed_record.get("stage_results"), _failed_reasons
+                    ),
                     "evidence_ledger": _judge_evidence(),
                     **_judge_budget(container),
                 }
@@ -6401,6 +6576,12 @@ def make_report_node(
                 logger.warning("report_node: static provider evidence not recorded (%s).", exc)
         _ledger.extend(_capa_entries)
         _ledger.sort(key=lambda entry: entry.seq)
+        # What the narrative and the composer may cite: every id the state's
+        # ledger issued, and the ids this node added to it (the undrained
+        # entries and the static provider's), which the report cites and the
+        # state channel receives below. Read from the state alone, a section
+        # citing one of those had its citation refused.
+        _citable_ids = citable_ids(state, _ledger)
         # The last pass before the report is built from it: each agent's kept
         # bytes within its budget, structures dropped first, texts untouched.
         fit_structures_to_budget(
@@ -6569,7 +6750,7 @@ def make_report_node(
                         state.get("isr_reports"),
                         facts_block=_narrative_facts,
                         run_state=_narrative_state,
-                        citable_ids=ledger_ids(state),
+                        citable_ids=_citable_ids,
                         items=_items,
                         evidence=_entry_texts,
                     ),
@@ -6663,7 +6844,7 @@ def make_report_node(
                     state.get("isr_reports"),
                     facts_block=pack_text(state, container, for_reporter=True),
                     run_state=render_run_state(state),
-                    citable_ids=ledger_ids(state),
+                    citable_ids=_citable_ids,
                     items=_items,
                     evidence=_entry_texts,
                     concurrent=_reporter_mode.parallel,
