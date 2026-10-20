@@ -2242,6 +2242,19 @@ def served_index(path: str | Path, address: Any = None) -> dict[str, Any]:
         readings = read
     answers: dict[str, Any] = {}
     absent: dict[str, str] = {}
+    # This server's own emulated strings tool, remembered for the file, read
+    # once: the decoder below compares with these same rows and the index
+    # joins them, so the two never read the memory at different moments.
+    emulated = emulated_strings.TOOL
+    # Rows that could not be read are none, with the reason, handed to the
+    # decoder as a partial comparison: the memory is read once either way.
+    unread = ""
+    try:
+        recovered = emulated_strings.remembered_rows(str(path))
+    except Exception as exc:  # noqa: BLE001 - stated under ``absent``, never lost
+        recovered = []
+        absent[emulated] = FLOSS_UNREADABLE.format(type(exc).__name__)
+        unread = f"FLOSS's rows for this file could not be read ({type(exc).__name__})"
     for name, call in (
         (
             "pe_info",
@@ -2250,7 +2263,12 @@ def served_index(path: str | Path, address: Any = None) -> dict[str, Any]:
             ),
         ),
         ("resolve_api_hashes", lambda: api_hashes.resolve_api_hashes(str(path))),
-        ("decode_string_blobs", lambda: string_blobs.decode_string_blobs(str(path))),
+        (
+            "decode_string_blobs",
+            lambda: string_blobs.decode_string_blobs(
+                str(path), recovered=recovered, recovered_partial=unread
+            ),
+        ),
     ):
         try:
             value = call()
@@ -2264,15 +2282,8 @@ def served_index(path: str | Path, address: Any = None) -> dict[str, Any]:
             if isinstance(said, dict):
                 said = said.get("message") or said
             absent[name] = ERROR_HERE.format(said)
-    # This server's own emulated strings tool, remembered for the file: its
-    # rows are cited by the tool's name, as no ledger entry exists here.
-    emulated = emulated_strings.TOOL
+    # Its rows are cited by the tool's name, as no ledger entry exists here.
     sites: list[SiteSource] = []
-    try:
-        recovered = emulated_strings.remembered_rows(str(path))
-    except Exception as exc:  # noqa: BLE001 - stated under ``absent``, never lost
-        recovered = []
-        absent[emulated] = FLOSS_UNREADABLE.format(exc)
     if recovered:
         answers[emulated] = (emulated, {"strings": recovered})
         sites.append((emulated, emulated, recovered))
