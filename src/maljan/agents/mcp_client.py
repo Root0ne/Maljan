@@ -43,6 +43,93 @@ def tool_error_marker(kind: str, tool: str, **fields: str) -> str:
     return json.dumps({"tool_error": kind, "tool": tool, **fields})
 
 
+def _json_width(text: str) -> int:
+    """How many characters ``text`` takes inside a JSON string, as ``json.dumps`` writes it."""
+    import json
+
+    return len(json.dumps(text)) - 2
+
+
+def _json_fit(text: str, room: int) -> int:
+    """How many of ``text``'s first characters fit ``room`` once JSON writes them. Linear."""
+    import json
+
+    used = 0
+    for count, ch in enumerate(text):
+        width = len(json.dumps(ch)) - 2
+        if used + width > room:
+            return count
+        used += width
+    return len(text)
+
+
+_HEX = frozenset(b"0123456789abcdefABCDEF")
+
+
+def _fully_unquoted(text: str) -> str:
+    """``text`` with percent-encoding decoded until none is left, as repeated ``unquote`` would.
+
+    A double-encoded URL (``%253A``) decodes to the URL it is, not to one more
+    encoding of it. One pass over the bytes, each reduced at most once: an
+    escape is decoded as soon as its three bytes stand at the top, and the byte
+    it gives may complete the escape before it. Linear in ``text``.
+    """
+    if "%" not in text:
+        return text
+    out = bytearray()
+    for byte in text.encode("utf-8", "surrogatepass"):
+        out.append(byte)
+        while len(out) >= 3 and out[-3] == 0x25 and out[-2] in _HEX and out[-1] in _HEX:
+            value = int(out[-2:].decode("ascii"), 16)
+            del out[-3:]
+            out.append(value)
+    return out.decode("utf-8", "replace")
+
+
+# Where a URL quoted in a message ends: a closing quote or bracket.
+_URL_CLOSERS = frozenset("\"'`)]}>")
+
+
+def _quoted_end(text: str, begin: int, end: int) -> int:
+    """``end`` pulled back to the first closing quote or bracket after ``begin``.
+
+    Not one inside the authority's ``[...]``: an IPv6 literal
+    (``http://[::1]:8080/``) is the host, whole.
+    """
+    start = begin
+    authority = text.find("://", begin, end) + 3
+    if 2 < authority < end and text[authority] == "[":
+        closing = text.find("]", authority, end)
+        if closing >= 0:
+            start = closing + 1
+    for index in range(start, end):
+        if text[index] in _URL_CLOSERS:
+            return index
+    return end
+
+
+# The port a URL scheme means when it writes none.
+_DEFAULT_PORTS = {"http": 80, "https": 443, "ws": 80, "wss": 443}
+
+
+def _host_and_port(url: str) -> tuple[str, int | None] | None:
+    """``(host, port)`` of ``url``, the host lowercased and the scheme's default port filled in.
+
+    ``None`` for a text with no host, or one that cannot be read as a URL.
+    """
+    from urllib.parse import urlsplit
+
+    try:
+        parts = urlsplit(url)
+        host = (parts.hostname or "").lower()
+        port = parts.port
+    except ValueError:
+        return None
+    if not host:
+        return None
+    return host, port if port is not None else _DEFAULT_PORTS.get(parts.scheme.lower())
+
+
 class StructuredAnswer(str):
     """A tool's text answer, carrying the structured answer its server returned beside it.
 
@@ -409,7 +496,7 @@ class MCPLangChainToolkit:
             if self.transport in ("http", "streamable-http"):
                 from mcp.client.streamable_http import streamablehttp_client
 
-                logger.info("Connecting to MCP server over streamable-http: %s", self.http_url)
+                logger.info("Connecting to MCP server over streamable-http: %s", self._host_label())
                 streams = await self._exit_stack.enter_async_context(
                     streamablehttp_client(self.http_url, headers=self.http_headers)
                 )
@@ -418,17 +505,19 @@ class MCPLangChainToolkit:
             elif self.transport == "sse":
                 from mcp.client.sse import sse_client
 
-                logger.info("Connecting to MCP server over SSE: %s", self.http_url)
+                logger.info("Connecting to MCP server over SSE: %s", self._host_label())
                 read, write = await self._exit_stack.enter_async_context(
                     sse_client(self.http_url, headers=self.http_headers)
                 )
             else:
                 if self.server_params is None:
                     raise ValueError("stdio transport requires server_params (command/args).")
+                from maljan.core.settings_masking import masked_args
+
                 logger.info(
                     "Connecting to MCP server over stdio: %s %s",
                     self.server_params.command,
-                    self.server_params.args,
+                    masked_args(list(self.server_params.args or [])),
                 )
                 # A line of the server's stdout that is not a protocol message
                 # is stated and left out rather than handed to the session, and
@@ -481,7 +570,11 @@ class MCPLangChainToolkit:
             # cancel (theirs) are indistinguishable; swallowing the former would
             # break the timeout contract in ``_run_coro_blocking``. The
             # conversion belongs at the loop boundary, which can tell them apart.
-            logger.error("Failed to initialize MCP client (%s): %s", type(e).__name__, e or "—")
+            logger.error(
+                "Failed to initialize MCP client (%s): %s",
+                type(e).__name__,
+                self._said(e) or "—",
+            )
             with suppress(BaseException):
                 await self.cleanup()
             raise
@@ -532,6 +625,67 @@ class MCPLangChainToolkit:
         # After the close, whichever way it went. Lines a server writes once
         # the session has stopped reading are neither read nor counted.
         self._state_the_stray_stdout()
+
+    def _host_label(self) -> str:
+        """Where a network server is reached, as a log may name it: scheme, host and port.
+
+        Never the URL whole: its user name and password, its path and its query
+        can each carry a credential. A URL that cannot be read is named by its
+        transport alone.
+        """
+        from urllib.parse import urlsplit
+
+        try:
+            parts = urlsplit(str(self.http_url or ""))
+            host = parts.hostname or ""
+            port = parts.port
+        except ValueError:
+            return self.transport
+        if not host:
+            return self.transport
+        shown = f"[{host}]" if ":" in host else host
+        where = f"{parts.scheme}://{shown}" if parts.scheme else shown
+        return f"{where}:{port}" if port is not None else where
+
+    def _said(self, exc: BaseException) -> str:
+        """What ``exc`` says, with this server's URLs and any credential in a URL masked.
+
+        The message is kept, because it is what tells the model and the operator
+        what went wrong (:meth:`_said_text`).
+        """
+        return self._said_text(str(exc))
+
+    def _said_text(self, text: str) -> str:
+        """``text`` with every URL of this server named by its host label, every other masked.
+
+        Percent-encoding is decoded first, until none is left, so an encoded
+        URL is read as the URL it is, and every control character is then
+        written out (``utils.written_forms.controls_written_out``); a URL quoted
+        in the text ends at its closing quote or bracket. A URL whose host and port are this server's (host case aside, a
+        scheme's default port written or not) is replaced whole, path included,
+        by :meth:`_host_label`: a path can carry a key. Every other URL has its
+        user name and password, query values and fragment masked
+        (``core.settings_masking``). Linear in ``text``.
+        """
+        from maljan.core.settings_masking import masked_text, url_spans
+        from maljan.utils.written_forms import controls_written_out
+
+        # Decoded, then every control character written out: an encoded line
+        # break or escape sequence never reaches the log or the ledger as one.
+        text = controls_written_out(_fully_unquoted(str(text or "")))
+        ours = _host_and_port(str(self.http_url or ""))
+        if ours is None or "://" not in text:
+            return masked_text(text)
+        out: list[str] = []
+        last = 0
+        for begin, whole_end in url_spans(text):
+            end = _quoted_end(text, begin, whole_end)
+            if _host_and_port(text[begin:end]) == ours:
+                out.append(text[last:begin])
+                out.append(self._host_label())
+                last = end
+        out.append(text[last:])
+        return masked_text("".join(out))
 
     def _server_name(self) -> str:
         """The server's name in what this toolkit logs: its label, else its command's name.
@@ -749,22 +903,24 @@ class MCPLangChainToolkit:
             if guard is not None:
                 guard.answered()
                 settled = True
+            from maljan.llm.context_window import output_limit
+
+            # One limit for the whole call: the text's guardrail, the structure
+            # beside it and an error's detail are held to the same number.
+            limit = output_limit(self._max_output_chars, self._context_budget)
             if result.isError:
-                return tool_error_marker(
-                    "tool_returned_error",
-                    tool_name,
-                    detail="\n".join(
-                        str(getattr(c, "text", "") or "") for c in result.content or []
-                    ).strip(),
+                detail = "\n".join(
+                    str(getattr(c, "text", "") or "") for c in result.content or []
+                ).strip()
+                # The server's words, with any credential in a URL masked.
+                return await asyncio.to_thread(
+                    lambda: self._held_error(
+                        "tool_returned_error", tool_name, self._said_text(detail), limit
+                    )
                 )
             output = "\n".join(c.text for c in result.content if hasattr(c, "text"))
             # On a thread: shortening a five-megabyte answer is CPU-bound
             # and synchronous, and this is a coroutine serving an agent.
-            from maljan.llm.context_window import output_limit
-
-            # One limit for the whole call: the text's guardrail and the
-            # structure beside it are held to the same number.
-            limit = output_limit(self._max_output_chars, self._context_budget)
             shown = await asyncio.to_thread(self._apply_output_guardrail, output, narrowing, limit)
             # The server's own structured answer, when it gave one and it is no
             # larger than what the model could be shown, rides on the text to
@@ -789,9 +945,18 @@ class MCPLangChainToolkit:
                 else:
                     guard.failed(reason, trial=trial)
                 settled = True
-            logger.warning("MCP tool '%s' raised %s: %s", tool_name, type(exc).__name__, exc)
-            return tool_error_marker(
-                "exception", tool_name, type=type(exc).__name__, detail=str(exc)
+            said = self._said(exc)
+            logger.warning("MCP tool '%s' raised %s: %s", tool_name, type(exc).__name__, said)
+            from maljan.llm.context_window import output_limit
+
+            # On a thread: writing a long message as JSON is CPU-bound.
+            return await asyncio.to_thread(
+                self._held_error,
+                "exception",
+                tool_name,
+                said,
+                output_limit(self._max_output_chars, self._context_budget),
+                type=type(exc).__name__,
             )
         finally:
             if guard is not None and not settled:
@@ -976,6 +1141,50 @@ class MCPLangChainToolkit:
             limit=limit,
         )
         return result
+
+    def _held_error(self, kind: str, tool: str, detail: str, limit: int, **fields: str) -> str:
+        """The failure marker for ``detail``, held to the call's output limit like any answer.
+
+        An error's text reaches the model as an answer does, so it is held to
+        the same limit (``_apply_output_guardrail``): the detail keeps its head
+        and its tail with :data:`TRUNCATION_MARKER` between them, so the whole
+        marker fits,
+        and the decision goes on the truncation ledger. The marker's kind and
+        tool are the failure itself and are always kept, so a limit too small
+        for any detail keeps them with none. The marker as the server gave it
+        is noted for the call's entry to keep whole (``note_answer_whole``).
+        Linear in ``detail``; CPU-bound on a large one, so a coroutine runs it
+        on a thread.
+        """
+        import json
+
+        from maljan.llm.context_window import note_answer_whole
+
+        whole = tool_error_marker(kind, tool, **fields, detail=detail)
+        if len(whole) <= limit:
+            self._record_guardrail(len(whole), len(whole), over_limit=False, limit=limit)
+            return whole
+        note_answer_whole(whole)
+        bare = tool_error_marker(kind, tool, **fields, detail="")
+        room = max(0, int(limit) - len(bare) - len(json.dumps(TRUNCATION_MARKER)[1:-1]))
+        # Its head and its tail, the marker between them: what a failure says
+        # first and what it says last (a traceback's own error line) are both
+        # kept. Each part is the longest run whose JSON form fits its half of
+        # the room; every character is written in one or more, so no more than
+        # ``room`` of them is ever read, whatever the detail's length.
+        head = _json_fit(detail[: room // 2], room // 2)
+        left = room - _json_width(detail[:head])
+        rest = detail[head:]
+        tail = _json_fit(rest[-left:][::-1], left) if left > 0 else 0
+        kept_tail = rest[len(rest) - tail :] if tail else ""
+        held = tool_error_marker(
+            kind, tool, **fields, detail=detail[:head] + TRUNCATION_MARKER + kept_tail
+        )
+        self._record_guardrail(
+            len(whole), len(held), over_limit=True, hard_truncated=True, limit=limit
+        )
+        self._charge_overage(len(held), limit)
+        return held
 
     def _charge_overage(self, kept: int, limit: int) -> str:
         """Charge what a result is longer than the cap it was measured against.

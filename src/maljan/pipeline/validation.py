@@ -10664,12 +10664,16 @@ def _answered_call(
     from langchain_core.messages import AIMessage, ToolMessage
 
     from maljan.llm.anthropic_history import LAST_REQUEST
+    from maljan.utils.written_forms import markers_written_out
 
     calls = list(answer.tool_calls) if isinstance(answer, AIMessage) else []
     if not calls or not calls[0].get("id"):
         return None
     reply = ToolMessage(
-        content=correction,
+        # The correction quotes what the model wrote; a run-state marker in it
+        # is written out, as a tool's answer's is, so the reply never carries
+        # one the model would read as the platform's block.
+        content=markers_written_out(correction),
         tool_call_id=str(calls[0]["id"]),
         status="error",
         response_metadata={} if sent_again else {LAST_REQUEST: True},

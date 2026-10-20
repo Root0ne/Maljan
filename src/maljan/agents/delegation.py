@@ -375,63 +375,80 @@ def _held(lock: Any, wait: float | None) -> bool:
     return bool(lock.acquire(timeout=max(0.0, float(wait))))
 
 
-# Which agent each waiting agent is waiting for, by object identity: the
-# agents of one job are one set of objects, and two jobs in one process never
-# share one. Read to refuse a wait that would never end — two agents of one
-# parallel stage asking each other, each holding what the other wants.
-_WAITING_FOR: dict[int, Any] = {}
+# Which agents each waiting agent is waiting for, by object identity, one
+# entry per thread it waits on: the agents of one job are one set of objects,
+# and two jobs in one process never share one. An agent may wait on two
+# threads at once (its own stage run and an ask it answers), and the first
+# wait to end must not take the other's entry with it. Read to refuse a wait
+# that would never end -- two agents of one parallel stage asking each other,
+# each holding what the other wants.
+_WAITING_FOR: dict[int, dict[int, Any]] = {}
 _WAITING_LOCK = threading.Lock()
-# How often a caller with no time limit looks again at whom a busy callee is
-# waiting for. A polling interval, not a limit: the wait itself has none.
+# How often a waiting caller looks again at whom a busy callee is waiting
+# for. A polling interval, not a limit: the wait itself has none of its own.
 _WAIT_POLL_SECONDS = 1.0
 
 
 def _waits_on(start: Any, target: Any) -> bool:
-    """Whether ``start`` is waiting, directly or down a chain of waits, on ``target``."""
+    """Whether ``start`` is ``target`` or waits on it, directly or down a chain of waits.
+
+    Every agent is visited once, so the walk is linear in the waits registered.
+    """
     seen: set[int] = set()
-    current = start
     with _WAITING_LOCK:
-        while current is not None and id(current) not in seen:
+        stack = [start]
+        while stack:
+            current = stack.pop()
             if current is target:
                 return True
+            if id(current) in seen:
+                continue
             seen.add(id(current))
-            current = _WAITING_FOR.get(id(current))
+            stack.extend((_WAITING_FOR.get(id(current)) or {}).values())
     return False
 
 
 def _held_unless_waiting_on_each_other(
     lock: Any, wait: float | None, caller: Any, callee: Any
 ) -> bool | None:
-    """Take ``lock`` as ``_held`` does; ``None`` when the callee is waiting on the caller.
+    """Take ``lock`` within ``wait`` seconds; ``None`` when the callee is waiting on the caller.
 
-    A caller with a clock waits what it can spare, as before. A caller with no
-    time limit waits until the callee frees up — unless the callee is itself
-    waiting, directly or through others, on this caller, which no wait ends.
+    ``wait`` is what the caller can spare (``None``: no time limit, it waits
+    until the callee frees up). Whichever it is, the caller is registered as
+    waiting on the callee for as long as it waits, and every poll asks whether
+    the callee is itself waiting, directly or through others, on this caller,
+    which no wait ends: two agents with a clock asking each other used to
+    each wait out the whole of what they could spare before either heard.
     """
-    if wait is not None:
-        return _held(lock, wait)
+    deadline = None if wait is None else time.monotonic() + max(0.0, float(wait))
+    thread = threading.get_ident()
     with _WAITING_LOCK:
-        _WAITING_FOR[id(caller)] = callee
+        _WAITING_FOR.setdefault(id(caller), {})[thread] = callee
     from maljan.core import cancellation
 
     job = cancellation.current()
     try:
-        while not lock.acquire(timeout=_WAIT_POLL_SECONDS):
+        while True:
+            if callee is not caller and _waits_on(callee, caller):
+                return None
+            step = _WAIT_POLL_SECONDS
+            if deadline is not None:
+                step = min(step, max(0.0, deadline - time.monotonic()))
+            if lock.acquire(timeout=step):
+                return True
+            if deadline is not None and time.monotonic() >= deadline:
+                return False
             # A cancelled job's waiter stops here rather than when the callee
             # frees up.
             if job is not None:
                 job.check("while an ask waited for a busy agent")
-            if _waits_on(_waiting_for(callee), caller):
-                return None
-        return True
     finally:
         with _WAITING_LOCK:
-            _WAITING_FOR.pop(id(caller), None)
-
-
-def _waiting_for(agent: Any) -> Any:
-    with _WAITING_LOCK:
-        return _WAITING_FOR.get(id(agent))
+            waits = _WAITING_FOR.get(id(caller))
+            if waits is not None:
+                waits.pop(thread, None)
+                if not waits:
+                    _WAITING_FOR.pop(id(caller), None)
 
 
 def _seconds_to_wait_for(caller: Any) -> float | None:
@@ -680,14 +697,24 @@ def _task_turn(caller_name: str, task: str, context: str, callee: Any) -> str:
         _ISR_FORMAT_INSTRUCTION_WITHOUT_TECHNIQUES,
         _PATH_HEADER,
     )
+    from maljan.utils.written_forms import markers_written_out
 
     parts: list[str] = []
     path = getattr(callee, "_analysis_file_path", None)
     if path:
+        # The declared open tool the callee is offered, named as its
+        # own stage turn names it (``BaseAnalyst.load_line_for``).
+        load_line_for = getattr(callee, "load_line_for", None)
+        load = load_line_for(str(path)) if callable(load_line_for) else ""
+        if isinstance(load, str) and load.strip():
+            parts.append(load.rstrip())
         parts.append(_PATH_HEADER.format(path=path).rstrip())
-    parts.append(f"Task from {caller_name}:\n{task}")
+    # The task and the context are what the caller's model wrote: a run-state
+    # marker in them is written out, so the callee never reads it as the
+    # platform's block.
+    parts.append(f"Task from {caller_name}:\n{markers_written_out(task)}")
     if context:
-        parts.append(f"Context from {caller_name}:\n{context}")
+        parts.append(f"Context from {caller_name}:\n{markers_written_out(context)}")
     # The claim format the callee is asked for everywhere else: a callee whose
     # definition turns the technique line off is not asked for one here either.
     instruction = (

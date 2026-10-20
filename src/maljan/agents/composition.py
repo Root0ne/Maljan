@@ -1035,24 +1035,145 @@ def _stage(container: Any, tools: list[Any], job_key: str) -> tuple[dict[str, st
     first, on this thread: a job with no sample stages nothing, and neither
     does a deployment whose servers are all local.
     """
-    sample_path, _ = _staging_inputs(container)
+    sample_path, digest = _staging_inputs(container)
     if not sample_path:
         return {}, []
     registry = container.get_server_registry()
     if not _has_remote_server(registry, tools):
         return {}, []
-    from maljan.agents.base_agent import run_coro_blocking
+    import threading
 
+    from maljan.agents.base_agent import run_coro_blocking
+    from maljan.agents.sample_staging import (
+        cached_path,
+        mark_unfinished_failed,
+        record_failure,
+        staged_servers,
+    )
+    from maljan.pipeline.events import describe_exception
+
+    bound, servers, unlimited = _staging_bound(registry, tools, sample_path)
+    before = len(registry.degradation_reasons)
+    stagings = getattr(container, "sample_stagings", None)
+    noted = len(stagings) if isinstance(stagings, list) else 0
+    # The calls themselves are bounded, each by its own server's deadline
+    # (``ServerGuard.call_timeout``, sent with the call). Waiting for a
+    # server's slot is not: there is no default limit, so the wait is never
+    # cut. It is stated once it outlasts the calls' deadlines together.
+    logger.info(
+        "sample staging for job %s to %s: its calls' deadlines sum to %s; a wait for a "
+        "server's slot is not limited.",
+        job_key,
+        ", ".join(servers) or "no server",
+        "no time limit" if bound is None else f"{bound:g} s",
+    )
+    if unlimited:
+        logger.warning(
+            "sample staging for job %s has no time limit: these calls have no deadline (%s), "
+            "so staging waits for them as their servers do.",
+            job_key,
+            ", ".join(unlimited),
+        )
+    long_wait = (
+        threading.Timer(
+            bound,
+            lambda: logger.warning(
+                "sample staging for job %s has run past its calls' deadlines (%g s): "
+                "it is waiting for a server's slot, and goes on waiting.",
+                job_key,
+                bound,
+            ),
+        )
+        if bound is not None
+        else None
+    )
+    if long_wait is not None:
+        long_wait.daemon = True
+        long_wait.start()
     try:
         staged, reasons = run_coro_blocking(
             _astage(registry, container, tools, job_key),
-            hard_timeout=120.0,
+            hard_timeout=None,
             label="sample-staging",
         )
     except Exception as exc:  # noqa: BLE001 — staging never fails a run
         logger.warning("sample staging skipped for job %s: %s", job_key, exc)
-        return {}, []
+        # Said, not swallowed: an upload still written down as attempted is
+        # marked failed and its server named; a path already staged is kept,
+        # and one staged whose path cannot be read back is said to be so.
+        stopped = f"the uploads stopped ({describe_exception(exc)})"
+        unfinished = mark_unfinished_failed(stagings, noted)
+        finished = staged_servers(stagings, noted)
+        kept: dict[str, str] = {}
+        for key in servers:
+            path = cached_path(job_key, key, digest)
+            if path:
+                kept[key] = path
+            elif key in finished:
+                record_failure(registry, key, "staged, path not recovered")
+            elif key in unfinished or not isinstance(stagings, list):
+                record_failure(registry, key, stopped)
+        return kept, list(registry.degradation_reasons[before:])
+    finally:
+        if long_wait is not None:
+            long_wait.cancel()
     return dict(staged or {}), list(reasons or [])
+
+
+def _staging_bound(
+    registry: Any, tools: list[Any], sample_path: str
+) -> tuple[float | None, list[str], list[str]]:
+    """How long the uploads' calls to the remote servers behind ``tools`` may take.
+
+    ``(bound, servers, calls with no deadline)``: the servers staged to, and
+    each ``server.tool`` whose call has no deadline, which leaves the bound
+    ``None``.
+
+    Derived, never a default: the sum, over every call each upload makes
+    (``sample_staging.planned_calls``), of the deadline that server's guard
+    gives the call (``ServerGuard.call_timeout``), which each call is held to
+    on its own. ``None``, no limit, when a call has none. A wait for a
+    server's slot is not in it, and no wait is cut by it: past it the
+    resolver says that it is still waiting.
+    """
+    import os
+
+    from maljan.agents.sample_staging import REMOTE_TRANSPORTS, planned_calls
+    from maljan.agents.tool_pinning import server_of
+
+    try:
+        size = os.path.getsize(sample_path)
+    except OSError:
+        size = 0
+    total = 0.0
+    servers: list[str] = []
+    unlimited: list[str] = []
+    for key in dict.fromkeys(server_of(tool) for tool in tools):
+        if not key:
+            continue
+        try:
+            handle = registry.get(key)
+        except Exception:  # noqa: BLE001 — a tool from a server that is gone
+            continue
+        transport = str(getattr(handle.config, "transport", "stdio") or "stdio").lower()
+        if transport not in REMOTE_TRANSPORTS or not getattr(handle, "is_open", False):
+            continue
+        try:
+            calls = planned_calls(size, set(handle.all_tool_names()))
+        except Exception:  # noqa: BLE001 — a manifest that cannot be read stages nothing
+            continue
+        if not calls:
+            continue
+        servers.append(str(key))
+        guard = getattr(handle, "guard", None)
+        timeout_of = getattr(guard, "call_timeout", None)
+        for name, count in calls.items():
+            deadline = timeout_of(name) if callable(timeout_of) else None
+            if deadline is None:
+                unlimited.append(f"{key}.{name}")
+            else:
+                total += float(deadline) * count
+    return (total if servers and not unlimited else None), servers, unlimited
 
 
 def resolve_agent(key: str, container: Any, job_key: str = "job") -> ResolvedAgent:

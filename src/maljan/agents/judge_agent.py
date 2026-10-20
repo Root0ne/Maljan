@@ -763,9 +763,13 @@ def verdict_report_parts(
     degradation note. Nothing here is cut; :func:`fit_prompt_parts` does
     that, and only when the judge's window cannot hold them.
     """
+    from maljan.utils.written_forms import markers_written_out
+
     parts: dict[str, str] = {}
     for name, report in reports.items():
-        parts[f"{name} report"] = f"--- {name.upper()} ANALYST ---\n{report}"
+        # A report is what a model wrote: a run-state marker in it is written
+        # out, so the judge never reads one as the platform's block.
+        parts[f"{name} report"] = f"--- {name.upper()} ANALYST ---\n{markers_written_out(report)}"
     if isr_reports:
         isr_block = "\n".join(
             f"[{name}] domain={isr.domain} | "
@@ -1581,14 +1585,20 @@ def mediation_reports_text(
     analyst's own words and its ISR the claims in force, which differ and are
     both kept. Empty ISRs are left out, as before.
     """
+    from maljan.utils.written_forms import markers_written_out
+
+    # A report and a claim's words are what a model wrote: a run-state marker
+    # in them is written out, so the mediator never reads one as the
+    # platform's block.
     reports_text = "\n\n".join(
-        f"--- {name.upper()} ANALYST ---\n{report}" for name, report in reports.items()
+        f"--- {name.upper()} ANALYST ---\n{markers_written_out(report)}"
+        for name, report in reports.items()
     )
     if not isr_reports:
         return reports_text
     shown = set(reports.values())
     isr_block = "\n\n".join(
-        f"[ISR] {summary}"
+        f"[ISR] {markers_written_out(summary)}"
         for summary in (isr.to_text_summary() for isr in isr_reports.values() if isr.claims)
         if summary not in shown
     )

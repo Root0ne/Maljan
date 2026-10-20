@@ -803,7 +803,11 @@ class StaticAnalyst(BaseAnalyst):
             )
 
         if not claims:
-            return content, self._text_to_isr(content, revision_round=revision_round)
+            # The lenient reading keeps the disputes the answer wrote: a
+            # revision's dissent is what it says, whichever reader read it.
+            lenient = self._text_to_isr(content, revision_round=revision_round)
+            lenient.dissent_items = dissent
+            return content, lenient
 
         isr = AgentISR(
             agent_id=self.name,
@@ -913,15 +917,6 @@ def _extract_sample_hash(data: str) -> str | None:
     return None
 
 
-# DISPUTES section runs until end-of-string OR the next ALL-CAPS markdown-style
-# header (e.g. ``\nSUMMARY:`` or ``\nFINAL VERDICT:``). The previous greedy
-# pattern silently absorbed whatever followed.
-_DISPUTES_RE = re.compile(
-    r"DISPUTES:\s*(.*?)(?=\r?\n[A-Z][A-Z_ ]{2,}:|\Z)",
-    flags=re.DOTALL | re.IGNORECASE,
-)
-
-
 def _parse_claim_blocks(text: str) -> list[ClaimEvidence]:
     """The claims the static, dynamic and network analysts read out of ``text``.
 
@@ -936,17 +931,22 @@ def _parse_claim_blocks(text: str) -> list[ClaimEvidence]:
 def _parse_disputes(text: str) -> list[str]:
     """Extract dispute items from the DISPUTES section of a revision response.
 
-    Stops at the next ALL-CAPS header (e.g. ``SUMMARY:``) so trailing
-    sections do not get absorbed as dispute items.
+    The section is the one the claim reader stops at
+    (``claim_headings.disputes_section``): it opens at its label alone and
+    runs to the next all-capitals section label (e.g. ``SUMMARY:``), so
+    trailing sections do not get absorbed as dispute items and every dispute
+    line, bulleted or not, is one.
     """
+    from maljan.agents.claim_headings import disputes_section
+
     disputes: list[str] = []
-    match = _DISPUTES_RE.search(text)
-    if not match:
+    found = disputes_section(text)
+    if found is None:
         return disputes
     # Stripped over the whole section before it is split: a tool-call block
     # spans several lines, so a per-line check would never see one and every
     # line of it would become its own dispute item.
-    section = strip_tool_call_scaffolding(match.group(1)).strip()
+    section = strip_tool_call_scaffolding(found).strip()
     if section.upper().rstrip(".") in {"", "NONE"}:
         return disputes
     for line in section.splitlines():

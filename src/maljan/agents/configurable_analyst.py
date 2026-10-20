@@ -188,14 +188,26 @@ class ConfigurableAnalyst(BaseAnalyst):
         every other request is unchanged.
         """
         path = _analysis_path_in(data)
-        if path is None or PROVIDER_FAMILY in tool_families(self.tools):
+        if path is None:
+            return ""
+        return self.load_line_for(self._analysis_file_path or path)
+
+    def load_line_for(self, path: str) -> str:
+        """The load line naming the declared open tool this agent is offered, for ``path``.
+
+        ``""`` with no path, for an agent whose provider tools open the sample
+        before the loop (``_priority_hint``), and for one offered no declared
+        open tool. Read by :meth:`_load_hint` and by a delegated task's turn
+        (``delegation._task_turn``), which has the pinned path and no chunk.
+        """
+        if not path or PROVIDER_FAMILY in tool_families(self.tools):
             return ""
         from maljan.providers.sample_open import declared_open, load_line
 
         spec = declared_open(self.tools)
         if spec is None:
             return ""
-        return load_line(spec.open_tool, spec.path_argument, self._analysis_file_path or path)
+        return load_line(spec.open_tool, spec.path_argument, path)
 
     # ------------------------------------------------------------------
     # Text interface
@@ -307,6 +319,7 @@ class ConfigurableAnalyst(BaseAnalyst):
                     "human",
                     self._isr_format_instruction()
                     + self._priority_hint(data)
+                    + self._load_hint(data)
                     + self._with_path_header(data),
                 ),
             ],
@@ -336,4 +349,16 @@ class ConfigurableAnalyst(BaseAnalyst):
             ),
             "ISR revision",
         )
-        return run.text, self._isr_for(run, revision_round=revision_round)
+        isr = self._isr_for(run, revision_round=revision_round)
+        if not run.degraded:
+            # The negotiation round asks for a DISPUTES section; what it says
+            # is this agent's dissent, as the built-in analysts read it.
+            # Read off the prose, as the built-ins read it: a findings block
+            # (its JSON fence) is no part of the disputes. Read only; what it
+            # carries is taken where the answer is.
+            from maljan.agents.findings_block import parse_findings_block
+            from maljan.agents.static_analyst import _parse_disputes
+
+            block = parse_findings_block(run.text)
+            isr.dissent_items = _parse_disputes(block.prose)
+        return run.text, isr

@@ -32,13 +32,17 @@ filesystem and merely happens to offer ``put_sample`` as well.
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import hashlib
+import math
+import threading
 import time
 from pathlib import Path
 from typing import Any
 
 from maljan.core.logger import logger
+from maljan.pipeline.events import describe_exception
 
 # The reason string a failed staging contributes, in the same voice as
 # ``providers.servers.UNAVAILABLE_REASON`` so the run summary reads as one list.
@@ -57,6 +61,26 @@ CACHE_TTL_SECONDS = 30 * 60
 
 SINGLE_SHOT_TOOL = "put_sample"
 CHUNKED_TOOLS = ("put_sample_begin", "put_sample_chunk", "put_sample_finish")
+
+# How a reason quotes the error a server answered a staging call with.
+STAGING_REFUSED_PREFIX = "the server answered: "
+
+
+def planned_calls(size: int, manifest: set[str]) -> dict[str, int]:
+    """How many times each staging tool is called to upload ``size`` bytes, by name.
+
+    The decision :func:`stage_sample` takes: chunked above
+    :data:`CHUNK_THRESHOLD_BYTES` when the server offers all three chunked
+    calls, the single-shot call otherwise; nothing for a server that offers
+    no upload at all.
+    """
+    if not supports_staging(manifest):
+        return {}
+    if size > CHUNK_THRESHOLD_BYTES and all(t in manifest for t in CHUNKED_TOOLS):
+        begin, chunk, finish = CHUNKED_TOOLS
+        return {begin: 1, chunk: max(1, math.ceil(size / CHUNK_BYTES)), finish: 1}
+    return {SINGLE_SHOT_TOOL: 1}
+
 
 # The transports that put a network between the worker and the server. Anything
 # else is a local subprocess reading the local filesystem.
@@ -125,13 +149,71 @@ def _path_from(result: Any) -> str | None:
     return None
 
 
-def _error_of(result: Any) -> str:
-    """The error a tool returned rather than raised, if it returned one."""
-    if isinstance(result, dict) and result.get("error"):
-        return str(result["error"])
-    if isinstance(result, str) and '"error"' in result:
-        return result[:200]
-    return ""
+class StagingRefused(RuntimeError):
+    """A staging call the server answered with an error; ``quoted`` when the words are its own.
+
+    ``quoted`` is true for words the server wrote as its answer (an ``isError``
+    reply, a flat ``error``); a failure the platform reported (a structured
+    error, an exception, no session, a resting server) is named by its kind.
+    """
+
+    def __init__(self, message: str, *, quoted: bool) -> None:
+        super().__init__(message)
+        self.quoted = quoted
+
+
+# The MCP client's marker kind for an answer the server itself marked an error.
+_SERVER_S_OWN_ERROR = "tool_returned_error"
+
+
+def _refusal_of(result: Any) -> StagingRefused | None:
+    """The error a tool returned rather than raised, if it returned one.
+
+    Every shape a tool answer may say one in (``tools.errors.error_parts``):
+    a flat or structured ``error`` and the MCP client's ``tool_error`` marker,
+    as an object or as JSON text. Only a truthy error is one: ``"error":
+    null`` beside a path is an answer. The server's words are quoted only
+    from its own answer fields (a flat ``error``, the text of an ``isError``
+    reply); a structured error, which the platform writes (the guard's
+    resting server included), and the client's markers for an exception or
+    no session give their kind alone.
+    """
+    from maljan.tools.errors import error_parts
+
+    parts = error_parts(result)
+    if parts is None:
+        return None
+    code, message, _remedy = parts
+    parsed = result
+    if isinstance(parsed, str):
+        import json
+
+        try:
+            parsed = json.loads(parsed.strip())
+        except ValueError:
+            parsed = None
+    error = parsed.get("error") if isinstance(parsed, dict) else None
+    if isinstance(error, dict):
+        # The structured shape is the platform's (``tools.errors.tool_error``:
+        # the guard's resting server, a wrapper's refusal): its kind alone.
+        return StagingRefused(str(error.get("code") or code), quoted=False)
+    if error:
+        # A flat ``error`` is the server's own answer field.
+        return StagingRefused(message, quoted=True)
+    marker = str(parsed.get("tool_error") or "") if isinstance(parsed, dict) else ""
+    if marker == _SERVER_S_OWN_ERROR:
+        detail = str(parsed.get("detail") or "").strip() if isinstance(parsed, dict) else ""
+        return StagingRefused(detail or marker, quoted=bool(detail))
+    kind = marker or code
+    raised = str(parsed.get("type") or "") if isinstance(parsed, dict) else ""
+    return StagingRefused(f"{kind} ({raised})" if raised else kind, quoted=False)
+
+
+def _check(result: Any) -> None:
+    """Raise the refusal ``result`` carries, if it carries one."""
+    refusal = _refusal_of(result)
+    if refusal is not None:
+        raise refusal
 
 
 async def _call(handle: Any, name: str, **kwargs: Any) -> Any:
@@ -163,7 +245,7 @@ async def stage_sample(
     try:
         handle = registry.get(server_key)
     except Exception as exc:  # noqa: BLE001 — staging never fails a run
-        _record(registry, server_key, f"unknown server ({exc})")
+        _record(registry, server_key, f"unknown server ({describe_exception(exc)})")
         return None
     if not handle.is_open:
         return None
@@ -173,7 +255,8 @@ async def stage_sample(
 
     source = Path(sample_path)
     if not source.is_file():
-        _record(registry, server_key, f"no sample at {sample_path}")
+        # Never the host path: a reason is published with the run.
+        _record(registry, server_key, "no sample at the staged path")
         return None
 
     sent: dict[str, Any] | None = None
@@ -188,14 +271,19 @@ async def stage_sample(
         if cached is not None:
             return cached
         sent = _note_staging(stagings, server_key, handle)
-        chunked = len(blob) > CHUNK_THRESHOLD_BYTES and all(t in manifest for t in CHUNKED_TOOLS)
-        if chunked:
+        if CHUNKED_TOOLS[0] in planned_calls(len(blob), manifest):
             path = await _stage_chunked(handle, source.name, blob, digest)
         else:
             path = await _stage_single(handle, source.name, blob, digest)
+    except asyncio.CancelledError:
+        # Stopped from outside (the bound the resolver waits within): the
+        # upload did not finish, and the record says so rather than
+        # "attempted". The resolver records the reason with its bound.
+        _mark_staging(sent, done=False)
+        raise
     except Exception as exc:  # noqa: BLE001 — staging never fails a run
         _mark_staging(sent, done=False)
-        _record(registry, server_key, f"{type(exc).__name__}: {exc}")
+        _record(registry, server_key, _reason_of(exc))
         return None
 
     _mark_staging(sent, done=bool(path))
@@ -215,9 +303,7 @@ async def _stage_single(handle: Any, filename: str, blob: bytes, digest: str) ->
         content_b64=base64.b64encode(blob).decode("ascii"),
         sha256=digest,
     )
-    error = _error_of(result)
-    if error:
-        raise RuntimeError(error)
+    _check(result)
     return _path_from(result)
 
 
@@ -231,9 +317,7 @@ async def _stage_chunked(handle: Any, filename: str, blob: bytes, digest: str) -
     begin = await _call(
         handle, "put_sample_begin", filename=filename, sha256=digest, size=len(blob)
     )
-    error = _error_of(begin)
-    if error:
-        raise RuntimeError(error)
+    _check(begin)
     upload_id = begin.get("upload_id") if isinstance(begin, dict) else None
     if not upload_id:
         import json
@@ -252,14 +336,10 @@ async def _stage_chunked(handle: Any, filename: str, blob: bytes, digest: str) -
             seq=seq,
             content_b64=base64.b64encode(chunk).decode("ascii"),
         )
-        error = _error_of(sent)
-        if error:
-            raise RuntimeError(error)
+        _check(sent)
 
     finished = await _call(handle, "put_sample_finish", upload_id=upload_id)
-    error = _error_of(finished)
-    if error:
-        raise RuntimeError(error)
+    _check(finished)
     return _path_from(finished)
 
 
@@ -282,13 +362,82 @@ def _note_staging(
     return record
 
 
+# Held while a staging record's state is written: the resolver marks an
+# unfinished upload failed from its own thread while the upload's coroutine
+# may still be ending on the agent loop.
+_RECORD_LOCK = threading.Lock()
+
+
 def _mark_staging(record: dict[str, Any] | None, *, done: bool) -> None:
-    """Mark a written-down upload done or failed."""
+    """Mark a written-down upload done or failed; one marked failed is never marked done."""
     if record is None:
         return
     from maljan.analysis.disclosure import STAGING_DONE, STAGING_FAILED
 
-    record["state"] = STAGING_DONE if done else STAGING_FAILED
+    with _RECORD_LOCK:
+        if done and record.get("state") == STAGING_FAILED:
+            return
+        record["state"] = STAGING_DONE if done else STAGING_FAILED
+
+
+def mark_unfinished_failed(stagings: Any, start: int) -> set[str]:
+    """Mark every upload written down from ``start`` on and still attempted failed; their servers."""
+    if not isinstance(stagings, list):
+        return set()
+    from maljan.analysis.disclosure import STAGING_ATTEMPTED, STAGING_FAILED
+
+    marked: set[str] = set()
+    with _RECORD_LOCK:
+        for record in stagings[start:]:
+            if isinstance(record, dict) and record.get("state") == STAGING_ATTEMPTED:
+                record["state"] = STAGING_FAILED
+                marked.add(str(record.get("server") or ""))
+    return marked
+
+
+def staged_servers(stagings: Any, start: int) -> set[str]:
+    """The servers whose upload written down from ``start`` on was marked done."""
+    if not isinstance(stagings, list):
+        return set()
+    from maljan.analysis.disclosure import STAGING_DONE
+
+    with _RECORD_LOCK:
+        return {
+            str(record.get("server") or "")
+            for record in stagings[start:]
+            if isinstance(record, dict) and record.get("state") == STAGING_DONE
+        }
+
+
+def cached_path(job_id: str, server_key: str, sha256: str) -> str | None:
+    """The path this job's sample was staged to on ``server_key``, while it is trusted."""
+    if not sha256:
+        return None
+    return _cached(str(job_id), server_key, sha256)
+
+
+def _reason_of(exc: BaseException) -> str:
+    """What a failed upload's degradation reason says of ``exc``.
+
+    A reason is published with the run. A server's own error words are said,
+    with any credential in a URL masked; any other failure is named by its
+    kind and remedy alone (``pipeline.events.describe_exception``), whose
+    message can name a host path or a URL with its credential. The log keeps
+    the message, masked the same way.
+    """
+    from maljan.core.settings_masking import masked_text
+
+    if isinstance(exc, StagingRefused):
+        if exc.quoted:
+            return f"{STAGING_REFUSED_PREFIX}{masked_text(str(exc))}"
+        return f"the upload failed: {exc}"
+    logger.warning("sample staging failed: %s", masked_text(f"{type(exc).__name__}: {exc}"))
+    return describe_exception(exc)
+
+
+def record_failure(registry: Any, server_key: str, reason: str) -> None:
+    """Put a staging failure for ``server_key`` on the registry's degradation list, once."""
+    _record(registry, server_key, reason)
 
 
 def _record(registry: Any, server_key: str, reason: str) -> None:

@@ -23,6 +23,7 @@ reads a value sent back with masks in it against what is stored.
 
 from __future__ import annotations
 
+import re
 import string
 from collections.abc import Mapping
 from typing import Any
@@ -115,11 +116,53 @@ def _flag_name(arg: str) -> str:
     return arg.lstrip("-").split("=", 1)[0]
 
 
-def masked_args(args: list[Any], mask: str = SNAPSHOT_MASK) -> list[Any]:
-    """A command line with every credential a flag names masked, and every URL in it.
+# ``NAME=value`` as a whole argument (``docker -e API_KEY=v``, a bare
+# ``TOKEN=v``), and ``Header: value`` (``-H "Authorization: Bearer v"``).
+# Possessive, so each costs time linear in the argument.
+_ASSIGNMENT_RE = re.compile(r"([A-Za-z_][A-Za-z0-9_.-]*+)=(?=.)")
+_HEADER_RE = re.compile(r"[ \t]*+([A-Za-z0-9_-]++)[ \t]*+:[ \t]*+(?!//)(?=\S)")
 
-    The argument after such a flag is its value unless it is another long flag
-    (``--...``): a credential may itself begin with ``-``.
+
+def _credential_header(name: str) -> bool:
+    """Whether an HTTP header ``name`` carries a credential.
+
+    Authorization, a cookie, a name holding a key or a token, or one the
+    settings read as a credential's (``names_a_credential_value``: ``X-Secret``).
+    """
+    lowered = name.lower()
+    return (
+        lowered.endswith("authorization")
+        or lowered in ("cookie", "set-cookie")
+        or "key" in lowered
+        or "token" in lowered
+        or _credential_name(name)
+    )
+
+
+def _masked_assignment(arg: str, mask: str) -> str | None:
+    """``arg`` with the value of a credential's ``NAME=value`` or ``Header: value`` masked.
+
+    ``None`` when ``arg`` is neither, or names no credential.
+    """
+    assignment = _ASSIGNMENT_RE.match(arg)
+    if assignment is not None and _credential_name(assignment.group(1)):
+        return f"{assignment.group(1)}={mask}"
+    header = _HEADER_RE.match(arg)
+    if header is not None and _credential_header(header.group(1)):
+        return f"{arg[: header.end()]}{mask}"
+    return None
+
+
+def masked_args(args: list[Any], mask: str = SNAPSHOT_MASK) -> list[Any]:
+    """A command line with every credential in it masked, and every URL in it.
+
+    The value after a flag whose name marks a credential (``--api-key T``,
+    ``--token=T``): the argument after such a flag is its value unless it is
+    another long flag (``--...``), since a credential may itself begin with
+    ``-``. And, whatever flag stands before it, the value of a ``NAME=value``
+    whose name marks a credential (``-e API_KEY=T``, ``--env=TOKEN=T``) and of
+    a ``Header: value`` whose header carries one (``-H "Authorization: T"``,
+    ``X-Api-Key: T``).
     """
     out: list[Any] = []
     after_flag = False
@@ -141,6 +184,17 @@ def masked_args(args: list[Any], mask: str = SNAPSHOT_MASK) -> list[Any]:
                 out.append(arg)
                 after_flag = True
             continue
+        if arg.startswith("-") and "=" in arg:
+            flag, value = arg.split("=", 1)
+            inner = _masked_assignment(value, mask)
+            if inner is not None:
+                out.append(f"{flag}={inner}")
+                continue
+        elif not arg.startswith("-"):
+            whole = _masked_assignment(arg, mask)
+            if whole is not None:
+                out.append(whole)
+                continue
         out.append(masked_text(arg, mask))
     return out
 

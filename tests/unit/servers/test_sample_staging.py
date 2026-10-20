@@ -193,7 +193,7 @@ class TestFailure:
 
         assert staged is None
         assert registry.degradation_reasons == [
-            "sample staging failed for 'remote': RuntimeError: disk full"
+            "sample staging failed for 'remote': the server answered: disk full"
         ]
 
     def test_a_sample_that_is_not_on_disk_says_so_and_does_not_raise(self, tmp_path: Path) -> None:

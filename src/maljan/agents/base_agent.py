@@ -3451,24 +3451,33 @@ def _with_run_state_on(message: Any, body: str) -> Any:
 
 
 def _without_run_state_on(message: Any) -> Any:
-    """``message`` as it was before a block was put at its end; itself when none was."""
+    """``message`` as it was before a block was put at its end; itself when none was.
+
+    The block is recognised by the note :func:`_with_run_state_on` left
+    (:data:`RUN_STATE_ATTACHED`), never by its markers.
+    """
     from maljan.pipeline.run_state import is_run_state_block, without_run_state_tail
 
     if not _carries_run_state(message):
         return message
-    if RUN_STATE_ATTACHED in (message.response_metadata or {}):
-        kept = {k: v for k, v in message.response_metadata.items() if k != RUN_STATE_ATTACHED}
+    # Only the block the platform noted it attached comes off: a turn that
+    # ends on markers a sample or a tool wrote keeps them as written.
+    noted = message.response_metadata or {}
+    attached = noted.get(RUN_STATE_ATTACHED)
+    block = attached if isinstance(attached, str) else ""
+    if RUN_STATE_ATTACHED in noted:
+        kept = {k: v for k, v in noted.items() if k != RUN_STATE_ATTACHED}
         message = message.model_copy(update={"response_metadata": kept})
     content = message.content
     if isinstance(content, list):
         last = content[-1] if content else None
         if isinstance(last, dict) and last.get("type") == "text":
-            if is_run_state_block(last.get("text")):
+            if is_run_state_block(last.get("text"), block):
                 return message.model_copy(update={"content": content[:-1]})
         return message
     if not isinstance(content, str):
         return message
-    bare = without_run_state_tail(content)
+    bare = without_run_state_tail(content, block)
     return message if bare == content else message.model_copy(update={"content": bare})
 
 
@@ -7546,6 +7555,32 @@ class BaseAnalyst(BudgetMeter, ABC):
         revised_text = self.revise(original_data, own_report, peer_reports, mediator_feedback)
         isr = self._text_to_isr(revised_text, revision_round=revision_round)
         return revised_text, isr
+
+    def load_line_for(self, path: str) -> str:
+        """The line telling this agent to open the sample at ``path`` with its declared open tool.
+
+        The static role's load line (``static_analyst._extract_load_hint``),
+        for what this agent's provider declares opens a sample, else the
+        declared open tool a server marked on a tool it is offered
+        (``providers.sample_open.declared_open``), and only when that tool is
+        among its tools. ``""`` otherwise: a delegated task's turn
+        (``delegation._task_turn``) states the path on its own.
+        """
+        import json
+
+        from maljan.agents.prompt_fragments import tool_names
+        from maljan.agents.static_analyst import _extract_load_hint
+        from maljan.providers.sample_open import declared_open
+
+        if not path:
+            return ""
+        own = getattr(self, "_sample_open", None)
+        spec = (own() if callable(own) else None) or declared_open(self.tools)
+        offered = tool_names(self.tools)
+        tool = str(getattr(spec, "open_tool", "") or "")
+        if not tool or tool not in offered:
+            return ""
+        return _extract_load_hint(json.dumps({"analysis_file_path": path}), offered, spec)
 
     def answer_task(self, task: str) -> tuple[str, AgentISR]:
         """Work on one task another agent handed over, and answer with claims.
