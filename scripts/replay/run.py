@@ -28,6 +28,8 @@ the replay tool or was stopped at its time limit, or on an error.
 
 ``--job ID`` reads a job from the database, read-only, into a directory in the
 same layout (``--job-dir``, a temporary one by default) and replays that.
+A ``--job-dir/<job id>`` that already holds a stored run is refused, before
+the database is read, unless ``--overwrite`` is given.
 
 The stored runs are read and never written: every file of each run's
 directory is digested before and after, and the replay fails when a digest
@@ -93,6 +95,11 @@ def _parser() -> argparse.ArgumentParser:
         "--job", action="append", default=[], help="a job id to read from the database"
     )
     parser.add_argument("--job-dir", type=Path, help="where --job writes the job it reads")
+    parser.add_argument(
+        "--overwrite",
+        action="store_true",
+        help="let --job replace a stored run already in --job-dir/<job id> (refused otherwise)",
+    )
     parser.add_argument(
         "--database-url",
         help="the database --job reads (DATABASE_URL, else the API's bootstrap setting)",
@@ -198,11 +205,17 @@ def main(argv: list[str] | None = None) -> int:
             if written is not None:
                 _outside(written, runs)
         if args.job:
-            from scripts.replay.database import export_jobs
+            from scripts.replay.database import StoredRunExists, export_jobs
 
             target = args.job_dir or Path(tempfile.mkdtemp(prefix="maljan-replay-jobs-"))
             job_dirs = [] if args.job_dir else [target]
-            for directory, cleared in export_jobs(args.job, target, database_url=args.database_url):
+            try:
+                exported = export_jobs(
+                    args.job, target, database_url=args.database_url, overwrite=args.overwrite
+                )
+            except StoredRunExists as exc:
+                _error(f"refused: {exc}")
+            for directory, cleared in exported:
                 if cleared and not args.quiet:
                     print(
                         f"replay: cleared the earlier export's {', '.join(cleared)} in {directory}",

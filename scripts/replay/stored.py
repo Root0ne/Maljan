@@ -56,6 +56,9 @@ class StoredRun:
     unreadable: dict[str, str] = field(default_factory=dict)
     # The files the run's directory holds of :data:`FILES`.
     present: tuple[str, ...] = ()
+    # Why no ledger row was read from an ``evidence.json`` that parsed; empty
+    # when rows were read, or when the file is absent or unreadable.
+    evidence_unread: str = ""
 
     @property
     def agent_reports(self) -> dict[str, str]:
@@ -119,6 +122,38 @@ def check_unchanged(before: dict[str, str], after: dict[str, str]) -> None:
         raise StoredRunChanged(f"the stored run changed during the replay ({'; '.join(parts)})")
 
 
+def evidence_list(document: Any) -> tuple[list[Any], str]:
+    """The ledger rows an ``evidence.json`` holds, as written, and why none was found.
+
+    The one reader of a stored ledger for every offline reader (the replay,
+    the calibration scorer, the ledger verifier). The rows are under
+    ``items`` (the API's page) or ``entries``, or the document is the list
+    itself. Each row is returned as written, a malformed one included, for a
+    reader that must see it (the verifier); the reason is empty when a row
+    was found.
+    """
+    if isinstance(document, dict):
+        found = document.get("items")
+        if not (isinstance(found, list) and found) and isinstance(document.get("entries"), list):
+            found = document["entries"]
+    else:
+        found = document
+    if not isinstance(found, list):
+        return [], "evidence.json holds no entry list (items or entries): no entry was read"
+    if not found:
+        return [], "evidence.json holds no entries: no claim's citation could be checked"
+    return list(found), ""
+
+
+def evidence_rows(document: Any) -> tuple[list[dict[str, Any]], str]:
+    """The ledger rows of :func:`evidence_list` that are objects, and why none was read."""
+    found, why = evidence_list(document)
+    rows = [row for row in found if isinstance(row, dict)]
+    if found and not rows:
+        why = "evidence.json holds no entries: no claim's citation could be checked"
+    return rows, why
+
+
 def _read_json(path: Path) -> Any:
     return json.loads(path.read_bytes())
 
@@ -147,11 +182,8 @@ def read_run(root: Path, name: str | None = None) -> StoredRun:
             run.unreadable[file_name] = type(exc).__name__
     run.present = tuple(present)
 
-    evidence = loaded.get("evidence.json")
-    items = evidence.get("items") if isinstance(evidence, dict) else evidence
-    run.evidence = (
-        [item for item in items if isinstance(item, dict)] if isinstance(items, list) else []
-    )
+    if "evidence.json" in loaded:
+        run.evidence, run.evidence_unread = evidence_rows(loaded["evidence.json"])
 
     byjob = loaded.get("report-byjob.json")
     run.byjob = byjob if isinstance(byjob, dict) else {}

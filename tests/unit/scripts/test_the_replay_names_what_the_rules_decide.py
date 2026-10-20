@@ -40,7 +40,14 @@ from scripts.replay import compare
 from scripts.replay import rules as replay_rules
 from scripts.replay import run as replay_cli
 from scripts.replay.compare import diff_records, differs, has_errors, is_partial
-from scripts.replay.database import JobRows, jsonable, with_sample, write_run
+from scripts.replay.database import (
+    JobRows,
+    StoredRunExists,
+    export_jobs,
+    jsonable,
+    with_sample,
+    write_run,
+)
 from scripts.replay.guard import ReplayRefused, replay_environment
 from scripts.replay.output import render_diff, render_record
 from scripts.replay.record import REPLAY_SCHEMA, digest, errors, value_free_subject
@@ -970,11 +977,70 @@ def test_a_job_read_from_the_database_is_written_in_the_stored_layout(tmp_path: 
     assert stored.judge == {"bundle": {"objects": []}, "as_written": True}
     assert stored.job is not None and stored.job["sample_sha256"] == "0" * 64
 
-    # A second export of a job with no judge answer clears the first one's,
-    # and leaves a file of the operator's own alone.
+    # A second export into a directory that holds a stored run is refused and
+    # writes nothing; with overwrite, a job with no judge answer clears the
+    # first one's, and leaves a file of the operator's own alone.
     (target / "notes.txt").write_text("mine", encoding="utf-8")
     rows.report = {**(rows.report or {}), "judge_stix_bundle": None}
-    _written, cleared = write_run(rows, target)
+    before = digests(target)
+    with pytest.raises(StoredRunExists, match="overwrite"):
+        write_run(rows, target)
+    assert digests(target) == before
+    _written, cleared = write_run(rows, target, overwrite=True)
     assert "stix-judge.json" in cleared
     assert not (target / "stix-judge.json").exists()
     assert (target / "notes.txt").read_text(encoding="utf-8") == "mine"
+
+
+def test_a_job_export_over_a_stored_run_is_refused_before_the_database_is_read(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from scripts.replay import database
+
+    job_id = "00000000-0000-4000-8000-000000000002"
+    held = tmp_path / job_id
+    held.mkdir()
+    (held / "evidence.json").write_text('{"items": []}', encoding="utf-8")
+    before = digests(held)
+
+    async def never(*_args: Any, **_kwargs: Any) -> Any:
+        raise AssertionError("the database was read")
+
+    monkeypatch.setattr(database, "read_jobs", never)
+    with pytest.raises(StoredRunExists, match="overwrite"):
+        export_jobs([job_id], tmp_path, database_url="postgresql+asyncpg://x/y")
+    with pytest.raises(SystemExit) as ended:
+        replay_cli.main(["--job", job_id, "--job-dir", str(tmp_path), "--quiet"])
+    assert ended.value.code == 2
+    assert "--overwrite" in capsys.readouterr().err
+    assert digests(held) == before
+
+
+def test_a_dangling_link_of_the_layout_counts_as_a_stored_run(tmp_path: Path) -> None:
+    target = tmp_path / "run"
+    target.mkdir()
+    (target / "report.json").symlink_to(tmp_path / "gone.json")
+    rows = JobRows(job={"id": "j"}, report=None, findings=[], transcript=[], evidence=[],
+                   events=[])  # fmt: skip
+    with pytest.raises(StoredRunExists, match="report.json"):
+        write_run(rows, target)
+    assert (target / "report.json").is_symlink()
+
+
+def test_a_job_named_twice_is_exported_once(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from scripts.replay import database
+
+    job_id = "00000000-0000-4000-8000-000000000003"
+    asked: list[list[str]] = []
+
+    async def read(ids: list[str], _url: str) -> list[JobRows]:
+        asked.append(list(ids))
+        return [JobRows(job={"id": i}, report=None, findings=[], transcript=[], evidence=[],
+                        events=[]) for i in ids]  # fmt: skip
+
+    monkeypatch.setattr(database, "read_jobs", read)
+    written = export_jobs([job_id, job_id.upper()], tmp_path, database_url="postgresql://x/y")
+    assert asked == [[job_id]]
+    assert [path for path, _cleared in written] == [tmp_path / job_id]

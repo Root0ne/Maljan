@@ -322,6 +322,33 @@ class TestTheVerdicts:
         }
         assert {f["id"]: f["status"] for f in result["facts"]}["F5"] == "missed"
 
+    def test_an_export_that_writes_its_rows_as_entries_is_read_as_the_verifier_reads_it(
+        self, tmp_path: Path
+    ) -> None:
+        stored = _write_run(tmp_path, TUNING_CASE)
+        items = json.loads((stored / "evidence.json").read_text())["items"]
+        (stored / "evidence.json").write_text(json.dumps({"entries": items}))
+        result = score_run(stored)
+        assert "evidence" not in result["not_read"]
+        assert {f["id"]: f["status"] for f in result["facts"]}["F5"] == "partial"
+
+    @pytest.mark.parametrize(
+        ("document", "said"),
+        [
+            ({"rows": []}, "holds no entry list"),
+            ({"items": []}, "holds no entries"),
+            ("not a ledger", "holds no entry list"),
+        ],
+    )
+    def test_evidence_that_yields_no_entry_is_named(
+        self, tmp_path: Path, document: Any, said: str
+    ) -> None:
+        stored = _write_run(tmp_path, TUNING_CASE)
+        (stored / "evidence.json").write_text(json.dumps(document))
+        result = score_run(stored)
+        assert said in result["not_read"]["evidence"]
+        assert {f["id"]: f["status"] for f in result["facts"]}["F5"] == "missed"
+
     def test_a_run_without_its_report_row_says_no_claim_was_read(self, tmp_path: Path) -> None:
         stored = _write_run(tmp_path, TUNING_CASE)
         (stored / "report-byjob.json").unlink()

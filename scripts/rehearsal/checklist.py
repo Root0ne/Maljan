@@ -1479,6 +1479,8 @@ def as_markdown(record: RunRecord, checks: list[Check]) -> str:
             lines.append(f"- tool server {key}: disabled (its tool definitions were not sent)")
         for key in record.gate.get("servers_with_keys_withheld") or []:
             lines.append(f"- tool server {key}: reputation keys withheld (offline answers)")
+        for key, why in (record.gate.get("servers_kept") or {}).items():
+            lines.append(f"- tool server {key}: {why}")
     lines += ["", "## Observed", ""]
     for key, value in observations(record).items():
         lines.append(f"- {key}: {json.dumps(value, ensure_ascii=False)}")

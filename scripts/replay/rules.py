@@ -308,8 +308,35 @@ def _read_identity(run: _Run) -> None:
         )
 
 
-def _snapshot_value(run: _Run, key: str, default: Any = None) -> Any:
-    return run.stored.settings.get(key, default)
+def _setting(key: str) -> Any:
+    """A setting of the sections the replay builds (``guard.SETTINGS_SECTIONS``), as in force.
+
+    The settings :func:`replay_environment` installed: the run's snapshot
+    value where the tree's model accepts it, else the replayed tree's own
+    default. Never a default the replay writes down, so a default the
+    platform changes shows in ``--compare``.
+    """
+    from maljan.core.config import get_settings
+
+    value: Any = get_settings()
+    for part in key.split("."):
+        value = getattr(value, part)
+    return value
+
+
+def _agent_setting(run: _Run, agent: str, name: str) -> Any:
+    """An agent definition's field: the run's snapshot value, else the tree's model default.
+
+    A definition's dump leaves a field out where it holds the model's default
+    (``AgentDefinition.attck_techniques`` is dumped only when off), so a field
+    the snapshot lacks reads as the replayed tree's ``AgentDefinition`` reads it.
+    """
+    key = f"agents.definitions.{agent}.{name}"
+    if key in run.stored.settings:
+        return run.stored.settings[key]
+    from maljan.core.config import AgentDefinition
+
+    return AgentDefinition.model_fields[name].default
 
 
 # ---------------------------------------------------------------------------
@@ -524,7 +551,7 @@ def _analyst_checks(run: _Run, isr: Any, own: _Own, techniques: bool, *, whole: 
         text = str(getattr(isr, "answer_text", "") or "") or str(
             getattr(isr, "unparsed_answer", "") or ""
         )
-        margin = _snapshot_value(run, "validation.claim_repeat_margin")
+        margin = _setting("validation.claim_repeat_margin")
         whole_answer = v.whole_answer_questions(
             v.claims_repeated(text, None if margin is None else int(margin)),
             [],
@@ -543,7 +570,6 @@ def _analyst_checks(run: _Run, isr: Any, own: _Own, techniques: bool, *, whole: 
             else check_function_claims(isr, own.listed, own.facts, own.image_bases)
         )
         functions = list(check.violations)
-    threshold = _snapshot_value(run, "validation.alignment_threshold")
     inputs = v.AnswerCheckInputs(
         attck=knowledge,
         ledger_ids=own.ledger_ids,
@@ -557,10 +583,8 @@ def _analyst_checks(run: _Run, isr: Any, own: _Own, techniques: bool, *, whole: 
         techniques=techniques,
         # The alignment gate reads the ATT&CK index, which the replay does not load.
         alignment=None,
-        alignment_threshold=float(threshold if threshold is not None else 0.05),
-        alignment_margin=float(
-            _snapshot_value(run, "validation.alignment_margin", v.ALIGNMENT_MARGIN)
-        ),
+        alignment_threshold=float(_setting("validation.alignment_threshold")),
+        alignment_margin=float(_setting("validation.alignment_margin")),
     )
     return v.analyst_answer_checks(
         isr,
@@ -583,7 +607,7 @@ def _answer_record(
     before: datetime | None,
     in_force: bool,
 ) -> dict[str, Any]:
-    techniques = bool(_snapshot_value(run, f"agents.definitions.{agent}.attck_techniques", True))
+    techniques = bool(_agent_setting(run, agent, "attck_techniques"))
     isr = _parse_answer(run, agent, domain, text, revision_round)
     if in_force:
         run.final_isrs[agent] = isr
@@ -863,7 +887,7 @@ def _in_force(run: _Run, agent: str, row: Mapping[str, Any]) -> dict[str, Any]:
         artifacts=artifacts,
     )
     run.isrs[agent] = isr
-    techniques = bool(_snapshot_value(run, f"agents.definitions.{agent}.attck_techniques", True))
+    techniques = bool(_agent_setting(run, agent, "attck_techniques"))
     found = _analyst_checks(run, isr, _own(run, agent, None), techniques, whole=False)
     # What the analyst's validation turn does with what survived its retry.
     shown = {id(v) for v in _shown_to(run, agent, found)}
@@ -2380,13 +2404,13 @@ def _settings_notes(run: _Run) -> None:
         "each answer's parse findings are counted as questions put to it (a nudged answer's "
         "are recorded unasked)",
     )
-    if _snapshot_value(run, "preprocessing.use_claim_consistency_gate"):
+    if _setting("preprocessing.use_claim_consistency_gate"):
         run.name(
             "analysts",
             "the claim consistency gate was on in this run; its input (each analyst's data) "
             "is not stored, so every claim is checked here, the gate's included",
         )
-    if _snapshot_value(run, "validation.weak_alignment"):
+    if _setting("validation.weak_alignment"):
         run.name(
             "analysts",
             "validation.weak_alignment was on in this run: its question (attck.weak_alignment) "
@@ -2400,6 +2424,8 @@ def replay_run(stored: StoredRun, *, show_text: bool = False) -> dict[str, Any]:
     out: dict[str, Any] = {"schema": REPLAY_SCHEMA, "run": stored.name, "show_text": show_text}
     for file_name, why in stored.unreadable.items():
         run.name("stored run", f"{file_name} does not read as JSON ({why})")
+    if stored.evidence_unread:
+        run.name("stored run", stored.evidence_unread)
     with replay_environment(stored.settings) as env:
         out["rules"] = rules_source()
         _read_ledger(run)

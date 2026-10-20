@@ -92,19 +92,26 @@ def report_row(directory: Path) -> dict[str, Any] | None:
 
 def verify_run(directory: Path) -> dict[str, Any]:
     """The verification of a stored-run directory."""
+    from scripts.replay.stored import evidence_list
+
     from app.services.ledger_verify import verify_ledger
 
     evidence = _load(directory / "evidence.json")
-    if isinstance(evidence, dict):
-        rows = evidence.get("items") or evidence.get("entries") or []
-    else:
-        rows = evidence if isinstance(evidence, list) else []
+    rows, why = (
+        evidence_list(evidence)
+        if evidence is not _MISSING
+        else ([], "evidence.json is absent: no entry was read")
+    )
     byjob = _load(directory / "report-byjob.json")
     job = _load(directory / "job.json")
     job_id = (byjob.get("job_id") if isinstance(byjob, dict) else None) or (
         job.get("id") if isinstance(job, dict) else ""
     )
-    return verify_ledger(job_id, list(rows), report=report_row(directory))
+    # The rows as written, a malformed one included: the verification sees it.
+    verdict = dict(verify_ledger(job_id, rows, report=report_row(directory)))
+    if why:
+        verdict["evidence_not_read"] = why
+    return verdict
 
 
 async def _read_only(database_url: str, work: Any) -> Any:

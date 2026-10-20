@@ -253,6 +253,8 @@ def read_surfaces(root: Path) -> Surfaces:
         not_read["evidence"] = f"evidence.json did not parse ({run.unreadable['evidence.json']})"
     elif "evidence.json" not in run.present:
         not_read["evidence"] = "evidence.json is absent: no claim's citation could be checked"
+    elif run.evidence_unread:
+        not_read["evidence"] = run.evidence_unread
     if "report-byjob.json" not in run.present:
         not_read["claims"] = "report-byjob.json is absent: no claims in force were read"
 
