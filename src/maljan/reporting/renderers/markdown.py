@@ -48,7 +48,7 @@ from maljan.analysis.coverage import NOT_ESTABLISHED_INTRO as COVERAGE_MISSING_I
 from maljan.analysis.coverage import coverage_lines
 from maljan.analysis.disclosure import FOOTNOTE_SENTENCE as DISCLOSURE_FOOTNOTE
 from maljan.analysis.disclosure import INTRO_SENTENCE as DISCLOSURE_INTRO
-from maljan.analysis.disclosure import disclosure_lines
+from maljan.analysis.disclosure import disclosure_lines, not_built_line
 from maljan.analysis.efficiency import INTRO_SENTENCE as EFFICIENCY_INTRO
 from maljan.analysis.efficiency import efficiency_lines
 from maljan.analysis.isolation import INTRO_SENTENCE as ISOLATION_INTRO
@@ -2246,6 +2246,8 @@ class MarkdownRenderer:
         if counted:
             lines.extend(["", EFFICIENCY_INTRO, ""])
             lines.extend(_item(line) for line in counted)
+        elif unbuilt := not_built_line("efficiency", run_summary.get("efficiency")):
+            lines.extend(["", unbuilt])
         # What the run could not establish, what each tool looked for and over
         # which input, and the coverage of each negative claim, where the
         # summary records them (``analysis.coverage``); a summary stored
@@ -2260,6 +2262,8 @@ class MarkdownRenderer:
             lambda text: _inline_safe(_one_line(text)),
             (states.failed, states.skipped, states.silent) if states is not None else None,
         )
+        if unbuilt := not_built_line("coverage", recorded):
+            lines.extend(["", unbuilt])
         for intro, block in (
             (COVERAGE_MISSING_INTRO, missing),
             (COVERAGE_LOOKED_INTRO, looked),
@@ -2551,7 +2555,8 @@ class _Context:
         # Where the run recorded what each tool looked for and over which
         # input (``analysis.coverage``), the line says where; a report stored
         # without the record prints the line as before.
-        if isinstance((self.report.run_summary or {}).get("coverage"), dict):
+        held = (self.report.run_summary or {}).get("coverage")
+        if isinstance(held, dict) and "v" in held:
             line += f" {COVERAGE_POINTER}"
         return line
 

@@ -1680,6 +1680,13 @@ def not_built(reason: str) -> dict[str, Any]:
     return {"not_built": str(reason)}
 
 
+def not_built_line(block: str, record: Any) -> str:
+    """One line naming a block whose record was not built and why; ``""`` for any other record."""
+    if isinstance(record, Mapping) and "not_built" in record and "v" not in record:
+        return f"The {block} block was not built: {record['not_built']}."
+    return ""
+
+
 def not_built_reason(*, reporting: bool, summary_written: bool) -> str:
     """Why a run's record is absent: reporting off, no run summary, or a build that failed."""
     if not reporting:

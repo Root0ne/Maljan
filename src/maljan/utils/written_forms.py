@@ -138,13 +138,31 @@ def sample_written_out(text: str) -> str:
     return markers_written_out(ids_written_out(controls_written_out(text)))
 
 
+# A run of backslashes and the quote it ends on.
+_QUOTED_BACKSLASHES = re.compile(r'\\+"')
+
+
+def quoted_backslashes_written_out(text: str) -> str:
+    """``text`` with every backslash that stands right before a quote written ``\\x5c``.
+
+    A backslash before a quote would read as escaping it, and so close the
+    quote the value sits in. Run before the quote itself is written out; a
+    text with no quote, or no backslash, comes back as it was. Linear.
+    """
+    if '"' not in text or "\\" not in text:
+        return text
+    return _QUOTED_BACKSLASHES.sub(lambda m: "\\x5c" * (len(m.group()) - 1) + '"', text)
+
+
 def pack_escaped(text: str, *, delimiters: bool = False, ids: bool = False) -> str:
     """``text`` as the pack writes it between its quotes, without the quotes.
 
     The quote and the control characters are written out and every other
     character is left as it is, backslashes included, so a Windows path reads
     as a path; a backslash that would end the string is written ``\\x5c``,
-    where it would otherwise read as escaping the closing quote. With
+    where it would otherwise read as escaping the closing quote; so is every
+    backslash that stands right before a quote in the value, so no text can
+    close the quote it sits in. A path with no quote in it is unchanged. With
     ``delimiters`` the characters of a chat template's control tokens
     (``TOKEN_DELIMITERS``) are written out too, for a value that may carry
     one. With ``ids`` every ledger id in it is written out
@@ -152,6 +170,7 @@ def pack_escaped(text: str, *, delimiters: bool = False, ids: bool = False) -> s
     the output is as it always was, except that a run-state marker in it is
     always written out (``markers_written_out``).
     """
+    text = quoted_backslashes_written_out(text)
     if text.isprintable():  # the common case, decided in one pass in C
         out = text.replace('"', PACK_ESCAPES['"'])
     else:

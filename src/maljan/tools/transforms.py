@@ -64,7 +64,11 @@ from maljan.llm.context_window import (
 from maljan.tools import pe_image
 from maljan.tools.errors import BAD_ARGUMENT, tool_error
 from maljan.tools.ioc_spans import string_iocs_with_spans
-from maljan.utils.written_forms import PACK_ESCAPES, pack_escaped
+from maljan.utils.written_forms import (
+    PACK_ESCAPES,
+    pack_escaped,
+    quoted_backslashes_written_out,
+)
 
 TOOL = "transform_bytes"
 
@@ -816,7 +820,7 @@ _STEPS: dict[str, Callable[[bytes, _File, Mapping[str, Any]], tuple[bytes, dict[
 
 def _ascii_reading(data: bytes) -> str:
     """The bytes as ASCII, each byte past it written as an escape, in the pack's escaping."""
-    out = data.decode("latin-1").translate(_ASCII_FORMS)
+    out = quoted_backslashes_written_out(data.decode("latin-1")).translate(_ASCII_FORMS)
     # A backslash that would end the string is written as the pack writes it.
     return out[:-1] + "\\x5c" if out.endswith("\\") else out
 
@@ -843,6 +847,7 @@ def _utf16_reading(data: bytes) -> str:
     makes one at a time.
     """
     text = data[: len(data) // 2 * 2].decode("utf-16-le", errors="surrogatepass")
+    text = quoted_backslashes_written_out(text)
     out = _ASTRAL.sub(lambda m: pack_escaped(m.group()), text.translate(_bmp_escapes()))
     return out[:-1] + "\\x5c" if out.endswith("\\") else out
 

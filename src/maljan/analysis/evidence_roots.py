@@ -213,6 +213,21 @@ def _hex(value: Any) -> int | None:
     return int(match.group(1), 16) if match else None
 
 
+def _measure(value: Any) -> int | None:
+    """A size or an offset as a tool writes it: an integer as it is, a string as decimal.
+
+    Hex only with the ``0x`` prefix, so ``"4096"`` is 4096 and ``"0x1000"`` is 4096.
+    """
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value if value >= 0 else None
+    text = str(value or "").strip()
+    if text[:2].lower() == "0x":
+        return _hex(text)
+    return int(text) if text.isascii() and text.isdigit() else None
+
+
 def _fold(text: Any) -> str:
     return str(text or "").strip().casefold()
 
@@ -719,8 +734,8 @@ def _gather(entry: Any, stated: _Stated) -> None:
             if base and base % _BASE_ALIGNMENT == 0:
                 stated.bases.setdefault(base, None)
         for key in ("size_of_image", "image_size"):
-            size = holder.get(key)
-            if isinstance(size, int) and not isinstance(size, bool) and size > 0:
+            size = _measure(holder.get(key))
+            if size:
                 stated.extent = max(stated.extent, size)
     if reader == "pe_header":
         for row in _rows(data, "sections"):
@@ -731,9 +746,9 @@ def _gather(entry: Any, stated: _Stated) -> None:
             stated.sections[name] = _Section(
                 name=name,
                 rva=rva,
-                size=int(row.get("virtual_size") or 0),
-                raw=int(row.get("raw_offset") or 0),
-                raw_size=int(row.get("raw_size") or 0),
+                size=_measure(row.get("virtual_size")) or 0,
+                raw=_measure(row.get("raw_offset")) or 0,
+                raw_size=_measure(row.get("raw_size")) or 0,
             )
         for row in _rows(data, "export_rows"):
             rva = _hex(row.get("rva"))
@@ -1508,7 +1523,7 @@ class RunRoots:
                 self._listings.add(eid)
             if reads_as(entry, _REFERENCE) or reads_as(entry, _FILE_ASSESSMENT):
                 self._reads_nothing_of_the_file.add(eid)
-            self.answers[eid] = answer_facts(_structured(entry))
+            self.answers[eid] = answer_facts(_structured(entry), self.tools[eid])
             file = files.of(entry)
             if file is None:
                 self.entries[eid] = EntryRoots(reason=FILE_UNTOLD)
@@ -1743,6 +1758,19 @@ class StatementValues:
     numbers: frozenset[int]
     addresses: frozenset[int]
     tokens: frozenset[str]
+    # The lower-case letter runs of three or more (``it_loads-3 URLs`` gives
+    # ``loads`` and ``urls``): what a count is read against.
+    words: frozenset[str] = frozenset()
+
+
+_FIELD_WORD = re.compile(r"[a-z]{3,}")
+# The words a count's key may be made of without saying what it counts.
+_GENERIC_COUNT_STEMS = frozenset({"tota", "coun", "matc", "deco", "reco", "cand"})
+
+
+def _stem(word: str) -> str:
+    """A word's first four letters, or all of a three-letter one."""
+    return word[:4]
 
 
 def statement_values(text: str) -> StatementValues:
@@ -1754,6 +1782,7 @@ def statement_values(text: str) -> StatementValues:
         numbers=frozenset(int(n) for n in _STATEMENT_NUMBER.findall(said) if len(n) <= 18),
         addresses=frozenset(_addresses_written(said)),
         tokens=frozenset(t.strip(".-").casefold() for t in _STATEMENT_TOKEN.findall(said)),
+        words=frozenset(_FIELD_WORD.findall(said.casefold())),
     )
 
 
@@ -1769,14 +1798,30 @@ class AnswerFacts:
     numbers: frozenset[int] = frozenset()
     addresses: frozenset[int] = frozenset()
     tokens: frozenset[str] = frozenset()
+    # Each count with the words of the field that stated it (``decoded_strings``
+    # gives ``decoded`` and ``strings``): a number is only a statement of that
+    # count where the statement also names what is counted.
+    counted: frozenset[tuple[int, frozenset[str]]] = frozenset()
 
     def empty(self) -> bool:
         return not (self.numbers or self.addresses or self.tokens)
 
     def written_in(self, said: StatementValues, layout: Layout) -> bool:
-        """Whether the statement writes one of these values."""
-        if self.numbers & said.numbers or self.tokens & said.tokens:
+        """Whether the statement writes one of these values.
+
+        A count places the answer only where the statement writes the number
+        and a word of the field that counted it (by its first four letters), so
+        a number that merely equals a count does not.
+        """
+        if self.tokens & said.tokens:
             return True
+        if self.counted and self.numbers & said.numbers:
+            stems = {_stem(w) for w in said.words} | {w[:3] for w in said.words}
+            if any(
+                number in said.numbers and any(_stem(w) in stems for w in words)
+                for number, words in self.counted
+            ):
+                return True
         if not self.addresses or not said.addresses:
             return False
         mine = {rva for value in self.addresses for rva in layout.rvas_of(value)} | set(
@@ -1795,6 +1840,7 @@ def _answer_value(key: str, value: Any, facts: dict[str, set[Any]]) -> None:
         # A count of zero is an absence: it places nothing.
         if value and _ANSWER_COUNT_KEY.search(str(key)):
             facts["numbers"].add(value)
+            facts["counted"].add((value, frozenset(_FIELD_WORD.findall(str(key).lower()))))
         return
     if not isinstance(value, str):
         return
@@ -1806,11 +1852,42 @@ def _answer_value(key: str, value: Any, facts: dict[str, set[Any]]) -> None:
         facts["tokens"].add(text.casefold())
 
 
-def answer_facts(structured: Any) -> AnswerFacts:
+def _counted_words(
+    counted: set[tuple[int, frozenset[str]]], structured: Mapping[str, Any], tool: str
+) -> frozenset[tuple[int, frozenset[str]]]:
+    """Each count with the words that say what it counts.
+
+    A key made only of generic words (``total``, ``count``, ``matched``,
+    ``decoded``, ``recovered``, ``candidates``) says nothing of what it counts,
+    so the words of the entry's tool name and of every top-level list of the
+    answer whose length is the count are added.
+    """
+    lengths: dict[int, set[str]] = {}
+    for key, value in structured.items():
+        if isinstance(value, list) and value:
+            lengths.setdefault(len(value), set()).update(_FIELD_WORD.findall(str(key).lower()))
+    out: set[tuple[int, frozenset[str]]] = set()
+    for number, words in counted:
+        if all(_stem(w) in _GENERIC_COUNT_STEMS for w in words):
+            words = (
+                words
+                | frozenset(_FIELD_WORD.findall(tool.lower()))
+                | frozenset(lengths.get(number, ()))
+            )
+        out.add((number, frozenset(words)))
+    return frozenset(out)
+
+
+def answer_facts(structured: Any, tool: str = "") -> AnswerFacts:
     """The ``AnswerFacts`` of one entry's structured answer. Linear in the answer."""
     if not isinstance(structured, Mapping):
         return AnswerFacts()
-    facts: dict[str, set[Any]] = {"numbers": set(), "addresses": set(), "tokens": set()}
+    facts: dict[str, set[Any]] = {
+        "numbers": set(),
+        "addresses": set(),
+        "tokens": set(),
+        "counted": set(),
+    }
     rows: list[Any] | None = None
     for key, value in structured.items():
         if isinstance(value, Mapping):
@@ -1838,6 +1915,7 @@ def answer_facts(structured: Any) -> AnswerFacts:
         numbers=frozenset(facts["numbers"]),
         addresses=frozenset(facts["addresses"]),
         tokens=frozenset(facts["tokens"]),
+        counted=_counted_words(facts["counted"], structured, tool),
     )
 
 
