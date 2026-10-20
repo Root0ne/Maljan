@@ -46,7 +46,7 @@ not prove the test makes the platform raise it. The tests are not listed here:
 one nothing raises any more and stored runs still carry; the comment on that
 name says what reads it.
 
-**88 codes in 9 families:** [attck](#attck) 6 · [attribution](#attribution) 1 · [composer](#composer) 3 · [isr](#isr) 13 · [narrative](#narrative) 5 · [report](#report) 12 · [stix](#stix) 32 · [tool](#tool) 1 · [verdict](#verdict) 15. 13 code positions the register could not resolve are [listed at the end](#unresolved-code-positions).
+**89 codes in 10 families:** [attck](#attck) 6 · [attribution](#attribution) 1 · [composer](#composer) 3 · [isr](#isr) 13 · [narrative](#narrative) 5 · [report](#report) 12 · [stix](#stix) 32 · [tool](#tool) 1 · [validation](#validation) 1 · [verdict](#verdict) 15. 13 code positions the register could not resolve are [listed at the end](#unresolved-code-positions).
 
 ## attck
 
@@ -648,6 +648,16 @@ The question a call is answered with when an argument's value is the name of its
 - **Raised at** `maljan.agents.evidence_recorder:_record_tool._names_its_own_parameter`
 - **Constant** `maljan.agents.evidence_recorder:SELF_NAMED_ARGUMENT_CODE`
 - **Docs** [Architecture](/architecture/)
+
+## validation
+
+### `validation.check_failed`
+
+A check that raised on an answer. Its findings are missing from the run, and the run says so: an advisory row naming the check and the exception's class, never shown to the producer (it cannot fix the check), never a reason to drop anything, and the check's name in `run_summary.validation.not_run`.
+
+- **Raised at** `maljan.pipeline.validation:_collect`
+- **Constant** `maljan.pipeline.validation:CHECK_FAILED_CODE`
+- **Docs** none
 
 ## verdict
 

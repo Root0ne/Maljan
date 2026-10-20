@@ -391,6 +391,12 @@ def analyst_feedback_closing(*, whole: bool, techniques: bool = True) -> str:
 
 UNGROUNDED_TECHNIQUE_CODE = "isr.ungrounded_technique"
 
+# A check that raised on an answer. Its findings are missing from the run, and
+# the run says so: an advisory row naming the check and the exception's class,
+# never shown to the producer (it cannot fix the check), never a reason to drop
+# anything, and the check's name in ``run_summary.validation.not_run``.
+CHECK_FAILED_CODE = "validation.check_failed"
+
 # What the parse of an analyst's answer could not read. Neither is corrected:
 # prose is not cut into claims and a block with no confidence is not given
 # one. Each is asked about once in the analyst's own validation turn, and what
@@ -2956,7 +2962,10 @@ CAPABILITY_TERMS: tuple[tuple[str, str, tuple[str, ...], tuple[str, ...]], ...] 
         "encryption",
         r"encrypt\w*|cryptograph\w*",
         ("T1027", "T1022", "T1486", "T1573", "T1140"),
-        ("encryption_scheme", "crypto", "strings"),
+        # Not ``strings``: nearly every executable's run has a strings
+        # section, so it grounded every encryption claim. The sample's own
+        # strings are values it holds, not a finding that it encrypts.
+        ("encryption_scheme", "crypto"),
     ),
     (
         "persistence",
@@ -3188,6 +3197,8 @@ class CapabilityGrounding:
         violations.
         """
         techniques: set[str] = set()
+        # The techniques a matrix row names that this run does not publish.
+        declined: set[str] = set()
         keys: set[str] = set()
         words: list[str] = []
         rule_rows: list[tuple[str, str, str]] = []
@@ -3228,6 +3239,7 @@ class CapabilityGrounding:
                 # lacks, one only a claim of absence named, one a rule matched
                 # and nobody claimed — is not something the run found.
                 if str(getattr(row, "not_published", "") or ""):
+                    declined.add(_base_technique(getattr(row, "technique_id", "")))
                     continue
                 base = _base_technique(getattr(row, "technique_id", ""))
                 if base:
@@ -3270,11 +3282,17 @@ class CapabilityGrounding:
                     words.extend(str(cell) for cell in row)
                 words.append(str(getattr(section, "text", "") or ""))
             values = isr_reports.values() if hasattr(isr_reports, "values") else ()
+            # What the report declined is not grounded back by the claim it
+            # came from: a technique the judge dropped, or an id the catalogue
+            # lacks, grounds no capability word through the analyst's id.
+            published = set(techniques)
             for isr in values:
                 for claim in getattr(isr, "claims", None) or []:
                     words.append(str(getattr(claim, "claim", "") or ""))
                     base = _base_technique(str(getattr(claim, "technique_id", "") or ""))
-                    if base:
+                    if getattr(claim, "technique_id_valid", True) is False:
+                        continue
+                    if base and (base in published or base not in declined):
                         techniques.add(base)
                 for finding in getattr(isr, "findings", None) or []:
                     words.append(str(getattr(finding, "title", "") or ""))
@@ -5912,6 +5930,8 @@ KEPT_WITH_A_FINDING: frozenset[str] = frozenset(
         UNPUBLISHED_RECOMMENDATION_CODE,
         UNPUBLISHED_RECOMMENDATION_TECHNIQUE_CODE,
         PERSISTENCE_NOT_OBSERVED_CODE,
+        # A check that could not run says nothing about the answer.
+        CHECK_FAILED_CODE,
     }
 )
 
@@ -6337,6 +6357,7 @@ def _unstated_values(
 ) -> list[tuple[str, str, str]]:
     """``(kind, value, state)`` for each value of ``sentence`` the table does not publish,
     written without a ``no: <reason>`` between it and the next value the sentence names."""
+    from maljan.agents._indicator_denylists import whole_value_starts
     from maljan.extractors.network_extractor import is_well_known_benign_host
     from maljan.reporting.renderers.stix_renderer import publishes
 
@@ -6352,12 +6373,24 @@ def _unstated_values(
     # that no row of the run's evidence holds is no host.
     named, gated = _values_and_gated(sentence)
     values = [(kind, value) for kind, value in named if value not in gated or _answer(kind, value)]
-    places = sorted((plain.find(value.lower()), kind, value) for kind, value in values if value)
+    # Every place each value is written as a value of its own: a parent domain
+    # inside its subdomain is no such place, and a value written twice is
+    # weighed at each. One never located is weighed with no state beside it.
+    places = sorted(
+        (start, kind, value)
+        for kind, value in dict.fromkeys(values)
+        if value
+        for start in (list(whole_value_starts(value.lower(), plain)) or [-1])
+    )
     out: list[tuple[str, str, str]] = []
+    weighed: set[tuple[str, str]] = set()
     for position, (start, kind, value) in enumerate(places):
         end = places[position + 1][0] if position + 1 < len(places) else len(plain)
         if start >= 0 and _PUBLISH_STATE_RE.search(plain[start + len(value) : max(end, start)]):
             continue
+        if (kind, value) in weighed:
+            continue
+        weighed.add((kind, value))
         answer = _answer(kind, value)
         if publishes(answer):
             continue
@@ -7617,14 +7650,23 @@ _HOLDS_ONE_LINE_RE = re.compile(
 _SUBJECT_WORDS = 6
 
 
-def _held_values(text: str) -> int:
+def _held_values(text: str, echoes: Iterable[str] = ()) -> int:
     """How many values an entry's text holds: its non-empty lines, read through its JSON.
 
     A zero, an empty string and an empty list hold nothing, so an answer that
     records an absence (``{"registry": [], "total": 0}``) holds none.
+
+    Each item of a list that holds something is one value, a count that is
+    not zero is one (a capture that recorded 120 packets and no flows holds
+    one), and a text holds its lines — except a one-line string that only
+    echoes the call: the tool's name, or a value the call was passed
+    (``echoes``; :func:`_call_echoes`). ``{"tool": "yara_scan", "file":
+    "sample.exe", "matches": []}`` from a call given ``sample.exe`` holds
+    nothing; ``{"c2": "http://evil.com/gate.php", "errors": []}`` holds one.
     """
     import json as _json
 
+    echoed = {str(echo).strip().lower() for echo in echoes if str(echo).strip()}
     try:
         parsed: Any = _json.loads(text)
     except (ValueError, TypeError):
@@ -7634,14 +7676,42 @@ def _held_values(text: str) -> int:
         if isinstance(node, dict):
             return sum(_count(value) for value in node.values())
         if isinstance(node, list | tuple):
-            return sum(_count(item) for item in node)
+            return sum(1 for item in node if _count(item))
         if isinstance(node, bool) or node is None:
             return 0
         if isinstance(node, int | float):
             return 1 if node else 0
-        return sum(1 for line in str(node).splitlines() if line.strip())
+        lines = [line for line in str(node).splitlines() if line.strip()]
+        if len(lines) == 1 and lines[0].strip().lower() in echoed:
+            return 0
+        return len(lines)
 
     return _count(parsed)
+
+
+def _call_echoes(entries: EntryTexts, entry_id: str) -> frozenset[str]:
+    """What an entry's answer may echo of its own call: the tool's name and each argument.
+
+    A string argument is echoed as passed and by its last path component,
+    because a tool reports the file it read by its name.
+    """
+    found: set[str] = {str(entries.tools.get(entry_id, "") or "")}
+    entry = entries.entries.get(entry_id)
+
+    def _walk(node: Any) -> None:
+        if isinstance(node, dict):
+            for value in node.values():
+                _walk(value)
+        elif isinstance(node, list | tuple):
+            for item in node:
+                _walk(item)
+        elif isinstance(node, str | int | float) and not isinstance(node, bool):
+            written = str(node)
+            found.add(written)
+            found.add(re.split(r"[\\/]", written)[-1])
+
+    _walk(getattr(entry, "args", None) or {})
+    return frozenset(echo.strip().lower() for echo in found if echo.strip())
 
 
 def _name_words(tool: str) -> set[str]:
@@ -7728,7 +7798,7 @@ def misstated_entry_contents(
                 for entry_id in _statement_subject(entries, sentence, match.start(), known):
                     if entry_id in entries.partial:
                         continue
-                    held = _held_values(entries.texts[entry_id])
+                    held = _held_values(entries.texts[entry_id], _call_echoes(entries, entry_id))
                     if held > most:
                         found.append((entry_id, said, held, sentence.strip()))
                 break
@@ -9015,9 +9085,18 @@ def _same_source(credited: str, named: str) -> bool:
     return len(short) >= 3 and long_.startswith(short)
 
 
-def _related_ids(tid: str) -> set[str]:
-    """The id itself, and its parent when it is a sub-technique."""
-    return {tid, tid.split(".", 1)[0]}
+def _related_ids(tid: str, children: Mapping[str, Sequence[str]]) -> list[str]:
+    """The ids a credit for ``tid`` may stand on, given each parent's named sub-techniques.
+
+    The id itself; its parent's own entry when it is a sub-technique; its
+    sub-techniques when it is a parent. Never a sibling: a source that named
+    T1055.001 named one way of injecting, and a credit for T1055.012 is a
+    different one. Each source is read under the id it named, exactly.
+    """
+    parent, _dot, sub = tid.partition(".")
+    if sub:
+        return [tid, parent]
+    return [tid, *children.get(tid, ())]
 
 
 @dataclass(frozen=True)
@@ -9040,7 +9119,9 @@ def unconfirmed_credits(
     ``None`` answers nothing: with no record of the sources, no credit can be
     weighed against one. A technique counts as named by a source that named it,
     its parent technique or one of its sub-techniques: refining an analyst's
-    T1071 to T1071.004 is the judge's reading, not a misattribution. The same
+    T1071 to T1071.004 is the judge's reading, not a misattribution. A sibling
+    is not one of them: a source that named T1055.001 did not name T1055.012.
+    The same
     answer serves the question the judge is asked and the export's decision
     about a credit the judge kept.
     """
@@ -9049,9 +9130,13 @@ def unconfirmed_credits(
     named_by: dict[str, list[str]] = {}
     for raw_tid, sources in technique_sources.items():
         tid = str(raw_tid or "").strip().upper()
-        for related in _related_ids(tid):
-            bucket = named_by.setdefault(related, [])
-            bucket.extend(str(s) for s in sources if str(s) not in bucket)
+        bucket = named_by.setdefault(tid, [])
+        bucket.extend(str(s) for s in sources if str(s) not in bucket)
+    children: dict[str, list[str]] = {}
+    for tid in named_by:
+        parent, _dot, sub = tid.partition(".")
+        if sub:
+            children.setdefault(parent, []).append(tid)
     objects = list(getattr(bundle, "objects", None) or [])
     technique_of: dict[str, str] = {}
     for obj in objects:
@@ -9078,7 +9163,9 @@ def unconfirmed_credits(
         if not tid:
             continue
         sources = list(
-            dict.fromkeys(s for related in _related_ids(tid) for s in named_by.get(related, []))
+            dict.fromkeys(
+                s for related in _related_ids(tid, children) for s in named_by.get(related, [])
+            )
         )
         keys = [_source_key(s) for s in sources]
         uncredited = tuple(
@@ -9906,7 +9993,15 @@ class Haystack:
     def __init__(self, parts: Iterable[str]) -> None:
         self.parts: tuple[str, ...] = tuple(part for part in parts if part)
 
-    def __contains__(self, needle: str) -> bool:
+    def holds_text(self, needle: str) -> bool:
+        """Whether ``needle`` is written anywhere in the evidence, inside a value or not.
+
+        The question a pattern's fixed text is asked — the run between a
+        ``LIKE``'s wildcards, the text a ``MATCHES`` is only made of — and no
+        other: a value is asked :meth:`holds_value`, because ``ample.com`` is
+        written inside ``example.com`` and is not a host the run saw. Not
+        ``in``, so nothing asks it by accident.
+        """
         # Every spelling the value takes in a tool's answer: the answers are
         # JSON, so a quote in a value is stored ``\"`` and a backslash ``\\``,
         # and the plain value a model writes back is in none of them as
@@ -9919,11 +10014,16 @@ class Haystack:
         return bool(self.parts)
 
     def holds_value(self, value: str) -> bool:
-        """Whether the evidence holds ``value`` as a value of its own, however spelt."""
-        from maljan.agents._indicator_denylists import whole_value_in
+        """Whether the evidence holds ``value`` as a value of its own, however spelt.
+
+        Read by ``agents._indicator_denylists.evidence_holds_value``: whole, at
+        its boundaries, where a host after ``@`` and a name after a lone
+        backslash in plain text are values of their own.
+        """
+        from maljan.agents._indicator_denylists import evidence_holds_value
 
         forms = written_forms(value)
-        return any(whole_value_in(form, part) for part in self.parts for form in forms)
+        return any(evidence_holds_value(form, part) for part in self.parts for form in forms)
 
     def holds_token(self, value: str) -> bool:
         """Whether ``value`` stands between two boundaries rather than inside a run."""
@@ -10103,7 +10203,18 @@ def _indicator_problem(
     own = set(identity)
 
     def _found(literal: str) -> bool:
-        return literal.lower() in haystack or literal.lower() in own
+        # A value is found as a value of its own, between boundaries, never as
+        # a run of characters inside a longer one: ``1.2.3.4`` is written
+        # inside ``11.2.3.45`` and ``ample.com`` inside ``example.com``, and
+        # neither is something this run saw.
+        lowered = literal.lower()
+        return lowered in own or haystack.holds_value(lowered)
+
+    def _written(text: str) -> bool:
+        # A pattern's fixed text is a run of characters by definition — the
+        # part of a shape between its wildcards — and is asked as one.
+        lowered = text.lower()
+        return lowered in own or haystack.holds_text(lowered)
 
     # A hash literal answers to its algorithm before it answers to the corpus.
     # Sixteen of the thirty-two characters of an MD5 are a prefix of one, and a
@@ -10147,7 +10258,7 @@ def _indicator_problem(
             # asked for that text; any other says nothing about which value
             # the evidence holds, and neither grounds nor refuses the pattern.
             fixed = matches_fixed_text(literal)
-            if fixed and not _found(fixed[0]):
+            if fixed and not _written(fixed[0]):
                 return _an_absence(
                     f"the text {safe_finding_value(fixed[0])!r}, which the pattern's MATCHES "
                     f"{safe_finding_value(literal)!r} is written for, appears nowhere in this "
@@ -10157,7 +10268,7 @@ def _indicator_problem(
             continue
         if (path, literal) in shapes:
             fixed = like_fixed_text(literal)
-            missing = next((part for part in fixed if not _found(part)), None)
+            missing = next((part for part in fixed if not _written(part)), None)
             if missing is not None:
                 return _an_absence(
                     f"the text {safe_finding_value(missing)!r}, which the pattern's LIKE "
@@ -10404,14 +10515,50 @@ def _object_path(index: int, origins: Sequence[tuple[int | None, str]] | None) -
 # ---------------------------------------------------------------------------
 
 
+def _validator_name(validator: Any) -> str:
+    """A validator's name for the run's record: its function's, through a partial."""
+    inner = getattr(validator, "func", validator)
+    return str(getattr(inner, "__qualname__", "") or type(inner).__name__)
+
+
 def _collect(parsed: Any, validators: Sequence[Validator]) -> list[Violation]:
+    """Every validator's findings over ``parsed``, and a row for each that raised.
+
+    A broken validator does not fail the run, and it does not pass silently
+    either: its findings are missing, so the answer is not validated by it,
+    and a ``CHECK_FAILED_CODE`` advisory row names it and the exception's
+    class (never its message, which may quote the answer).
+    """
     found: list[Violation] = []
     for validator in validators:
         try:
             found.extend(validator(parsed) or [])
         except Exception as exc:  # noqa: BLE001 — a broken validator must not fail a run
-            logger.warning("validation: a validator raised (%s); its findings are skipped.", exc)
+            name = _validator_name(validator)
+            logger.warning(
+                "validation: the check %s raised (%s); its findings are missing.",
+                name,
+                type(exc).__name__,
+            )
+            found.append(
+                Violation(
+                    code=CHECK_FAILED_CODE,
+                    message=(
+                        f"The check {safe_finding_value(name)} could not run on this answer "
+                        f"({safe_finding_value(type(exc).__name__)}); what it checks was not "
+                        "checked."
+                    ),
+                    advisory=True,
+                    asked=False,
+                    subject=name,
+                )
+            )
     return found
+
+
+def _askable(violations: Sequence[Violation]) -> list[Violation]:
+    """The findings a retry may ask about: every one but a check that could not run."""
+    return [v for v in violations if v.code != CHECK_FAILED_CODE]
 
 
 def _is_tool_call_block(part: Any) -> bool:
@@ -10772,12 +10919,12 @@ async def retry_with_feedback[T](
     violations = _collect(parsed, validators)
     retries = 0
     shown: list[Violation] = []
-    while violations and retries < max_retries:
-        keep_answer = not any(v.code in drop_answer_for for v in violations)
+    while (asking := _askable(violations)) and retries < max_retries:
+        keep_answer = not any(v.code in drop_answer_for for v in asking)
         following = _with_feedback(
             turns,
             answer,
-            violations,
+            asking,
             keep_answer=keep_answer,
             reply_to_calls=reply_to_calls,
             # Another retry of this loop sends the conversation again.
@@ -10785,8 +10932,8 @@ async def retry_with_feedback[T](
         )
         if can_retry is not None and not can_retry(following):
             break
-        _announce_feedback(violations, on_feedback, feed, retries + 1)
-        shown.extend(violations)
+        _announce_feedback(asking, on_feedback, feed, retries + 1)
+        shown.extend(asking)
         turns = following
         retries += 1
         # Counted as a retry by the spend meter, which plans the tail's.
@@ -10850,12 +10997,12 @@ def retry_with_feedback_sync[T](
     violations = _collect(parsed, validators)
     retries = 0
     shown: list[Violation] = []
-    while violations and retries < max_retries:
-        _announce_feedback(violations, on_feedback, feed, retries + 1)
-        shown.extend(violations)
-        keep_answer = not any(v.code in drop_answer_for for v in violations)
+    while (asking := _askable(violations)) and retries < max_retries:
+        _announce_feedback(asking, on_feedback, feed, retries + 1)
+        shown.extend(asking)
+        keep_answer = not any(v.code in drop_answer_for for v in asking)
         turns = _with_feedback(
-            turns, answer, violations, keep_answer=keep_answer, closing=closing, cards=cards
+            turns, answer, asking, keep_answer=keep_answer, closing=closing, cards=cards
         )
         retries += 1
         with validation_retry():
@@ -11445,7 +11592,16 @@ def validation_metrics(
         # Each identical row once, with how many times it was left: ``by_code``
         # still counts every one.
         "unresolved": folded_rows(rows),
-        "not_run": sorted({str(code) for code in (not_run or []) if str(code).strip()}),
+        # A check that raised did not run either (``CHECK_FAILED_CODE``): its
+        # name joins the checks that could not run, whoever passed ``not_run``.
+        "not_run": sorted(
+            {str(code) for code in (not_run or []) if str(code).strip()}
+            | {
+                violation.subject
+                for _agent, violation in unresolved
+                if violation.code == CHECK_FAILED_CODE and violation.subject
+            }
+        ),
     }
     # The answers no claim could be read from, whole, so why can be read
     # later (``unparsed_answer_rows``), and the retry answers a first answer

@@ -386,18 +386,77 @@ def whole_value_in(literal: str, haystack: str) -> bool:
     ``sub.evil.com`` or ``evil.com.br`` — except at the end of a value, where a
     ``.`` that nothing continues is the sentence's full stop.
     """
+    return next(whole_value_starts(literal, haystack), None) is not None
+
+
+_HOST_NAME_RE = re.compile(r"[a-z0-9-]+(?:\.[a-z0-9-]+)+")
+
+
+def evidence_holds_value(literal: str, haystack: str) -> bool:
+    """Whether the evidence holds ``literal`` as a value of its own, for grounding.
+
+    :func:`whole_value_in`, and two places a whole value begins that it does
+    not read as one, because there a value of its own begins after a
+    character that continues a label elsewhere:
+
+    - a host name after ``@``: the host of ``bot@evil.com`` and of
+      ``http://user:pw@evil.com/x`` is ``evil.com``, whole;
+    - any value after a lone backslash in text that is not JSON: the name in
+      ``Global\\abcmutex123`` is ``abcmutex123``, whole. JSON writes a
+      backslash as two, which :func:`whole_value_in` already reads, and a
+      backslash before an escape letter is an escape unless it separates the
+      parts of a path.
+
+    The end of the value is asked exactly as :func:`whole_value_in` asks it,
+    so neither reading grounds a slice (``evil.com_x``, ``cmutex1``), and a
+    ``.`` before a value still continues it: a parent domain seen only inside
+    a subdomain is not held.
+    """
     lowered = str(literal or "").lower()
     if not lowered:
         return False
+    if whole_value_in(lowered, haystack):
+        return True
+    continues = _continuation_for(lowered)
+    host = _HOST_NAME_RE.fullmatch(lowered) is not None
+    start = haystack.find(lowered, 1)
+    while start != -1:
+        before = haystack[start - 1]
+        if (
+            (host and before == "@")
+            or (before == "\\" and _a_lone_separator(haystack, start - 1, lowered))
+        ) and _closes_a_value(haystack, start + len(lowered), continues):
+            return True
+        start = haystack.find(lowered, start + 1)
+    return False
+
+
+def _a_lone_separator(haystack: str, index: int, value: str) -> bool:
+    """Whether the backslash at ``index``, before ``value``, separates rather than escapes."""
+    if index and haystack[index - 1] == "\\":
+        return False
+    return value[:1] not in _ESCAPE_LETTERS or _separates_a_path(haystack, index)
+
+
+def whole_value_starts(literal: str, haystack: str) -> Iterator[int]:
+    """Where ``literal`` starts in ``haystack`` as a value of its own, left to right.
+
+    :func:`whole_value_in`'s boundary rule, asked of every occurrence rather
+    than until the first: a reader that weighs what is written after each
+    place a value is named needs every such place, and a parent domain inside
+    a subdomain is no such place.
+    """
+    lowered = str(literal or "").lower()
+    if not lowered:
+        return
     continues = _continuation_for(lowered)
     start = haystack.find(lowered)
     while start != -1:
         if _opens_a_value(haystack, start, continues) and _closes_a_value(
             haystack, start + len(lowered), continues
         ):
-            return True
+            yield start
         start = haystack.find(lowered, start + 1)
-    return False
 
 
 class _Automaton:

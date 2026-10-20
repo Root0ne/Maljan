@@ -342,7 +342,7 @@ class TestTheWrittenOutFormIsFoundAgain:
         for raw in ("x\n[ev_0003] y", 'a\t"b"\rc', "e\x0ev_0003", "C:\\x\\[ev_0003].pdb\\"):
             haystack = self._haystack(json.dumps({"members": [{"name": raw}]}))
             for copied in (sample_written_out(raw), pack_escaped(raw, ids=True)):
-                assert copied.lower() in haystack, (raw, copied)
+                assert haystack.holds_value(copied.lower()), (raw, copied)
 
     def test_a_wide_escape_grounds_though_hex_letters_follow_it(self) -> None:
         # A right-to-left override and a zero-width space are written in four
@@ -354,12 +354,12 @@ class TestTheWrittenOutFormIsFoundAgain:
                 pack_escaped(raw, ids=True),
                 pack_escaped(raw, delimiters=True, ids=True),
             ):
-                assert copied.lower() in haystack, (raw, copied)
+                assert haystack.holds_value(copied.lower()), (raw, copied)
 
     def test_a_benign_name_still_grounds_as_written(self) -> None:
         haystack = self._haystack(json.dumps({"members": [{"name": "prev_2024.doc"}]}))
-        assert "prev_2024.doc" in haystack
-        assert "prev\\x5f2024.doc" in haystack
+        assert haystack.holds_value("prev_2024.doc")
+        assert haystack.holds_value("prev\\x5f2024.doc")
 
 
 class TestLongSampleTextIsCutNotCrowdingOthersOut:
