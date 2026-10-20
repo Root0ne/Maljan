@@ -1,7 +1,8 @@
-# Dependabot keeps the four dependency surfaces current: the uv workspace, the
-# web console, the GitHub Actions the workflows run, and the base images the
-# compose stack builds from. Security updates are enabled in the repository
-# settings and do not depend on this schedule.
+# Dependabot keeps the dependency surfaces current: the uv workspace, the web
+# console and the docs site, the GitHub Actions the workflows run, the base
+# images the compose stack builds from and the images it pulls. Security
+# updates are enabled in the repository settings and do not depend on this
+# schedule.
 version: 2
 updates:
   - package-ecosystem: "uv"
@@ -95,3 +96,25 @@ updates:
         update-types: ["version-update:semver-major"]
       - dependency-name: "node"
         update-types: ["version-update:semver-major"]
+
+  # The images compose pulls (postgres, redis, qdrant, minio), each pinned by
+  # tag and digest; the entry above reads the Dockerfiles only. A digest bump
+  # here keeps its tag, and a tag bump moves both.
+  - package-ecosystem: "docker-compose"
+    directory: "/docker"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    target-branch: "dev"
+    labels: ["dependencies", "docker"]
+    ignore:
+      # A database or queue major is a data migration, not a weekly bump.
+      - dependency-name: "postgres"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "redis"
+        update-types: ["version-update:semver-major"]
+      # The server moves with the pinned qdrant-client (pyproject.toml): a
+      # server ahead of the client logs a compatibility warning on every run.
+      # Raise both together, by hand; digest bumps of the pinned tag still come.
+      - dependency-name: "qdrant/qdrant"
+        update-types: ["version-update:semver-minor", "version-update:semver-major"]

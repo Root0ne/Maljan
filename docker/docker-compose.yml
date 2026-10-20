@@ -6,11 +6,18 @@ x-backend-image: &backend-image
     context: ..
     dockerfile: docker/Dockerfile.backend
   image: maljan-backend
-  # No process in these containers can gain a privilege it was not started
-  # with (a setuid binary, a file capability). They still run as root: the
-  # bind-mounted data directory and the ATT&CK cache volume are owned by
-  # whoever created them, and a different user would lose write access to
-  # what an existing deployment already holds.
+  # A fixed unprivileged uid/gid (the image's own account, 10001), no Linux
+  # capability, and no way to gain one it was not started with (a setuid
+  # binary, a file capability) (AUD-32-M5). The image's virtual environment
+  # and sources are root-owned, so read-only to this user. MALJAN_UID and
+  # MALJAN_GID run them under another id instead: a host whose login user
+  # also writes data/ sets them to that user's ids (`make docker-up` and
+  # `make dev-up` do, when neither the environment nor docker/.env does). The
+  # volume-init service below hands what root owns in the writable volumes to
+  # whichever id this is, and refuses to start the stack over anyone else's.
+  user: "${MALJAN_UID:-10001}:${MALJAN_GID:-10001}"
+  cap_drop:
+    - ALL
   security_opt:
     - no-new-privileges:true
 
@@ -19,7 +26,7 @@ services:
   # PostgreSQL 16 — Relational data store
   # ─────────────────────────────────────────────
   postgres:
-    image: postgres:16-alpine
+    image: postgres:16-alpine@sha256:721873c34ceb9f8d8fc265984940dc982404c105f19ad51be9fdc5970a6080ea
     container_name: maljan-postgres
     restart: unless-stopped
     environment:
@@ -40,7 +47,7 @@ services:
   # Redis 7 — Task queue, PubSub, cache
   # ─────────────────────────────────────────────
   redis:
-    image: redis:7-alpine
+    image: redis:7-alpine@sha256:858f009f9709ce576febc734aa78b8f6d624b82571f9ddb6bda4377c833b3499
     container_name: maljan-redis
     restart: unless-stopped
     command:
@@ -85,7 +92,7 @@ services:
     # unpinned server drifted to 1.18.x while the pinned qdrant-client is
     # 1.17.1, which logged "Failed to obtain server version. Unable to check
     # client-server compatibility" on every run. Pinning removes that drift.
-    image: qdrant/qdrant:v1.18.2
+    image: qdrant/qdrant:v1.18.2@sha256:75eab8c4ba42096724fdcfde8b4de0b5713d529dde32f285a1f86fdcb2c9e50c
     container_name: maljan-qdrant
     restart: unless-stopped
     environment:
@@ -108,7 +115,7 @@ services:
   # MinIO — S3-compatible object storage
   # ─────────────────────────────────────────────
   minio:
-    image: minio/minio:RELEASE.2025-09-07T16-13-09Z
+    image: minio/minio:RELEASE.2025-09-07T16-13-09Z@sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e
     container_name: maljan-minio
     restart: unless-stopped
     command: server /data --console-address ":9001"
@@ -176,6 +183,10 @@ services:
     volumes:
       # The right-hand side is Ghidra's declared sample_mount
       # (core.static.ghidra.sample_mount): change the two together.
+      # The worker writes its mirrors 0700/0600 as MALJAN_UID. Ghidra reads
+      # them only because its image runs as root; a Ghidra that runs as
+      # another user needs a group it shares with the worker and mirrors
+      # written 0750/0640 for it.
       - ../data/samples:/data/samples:ro
       - ghidra_projects:/projects
     healthcheck:
@@ -184,6 +195,67 @@ services:
       timeout: 10s
       retries: 10
       start_period: 60s
+
+  # -────────────────────────────────────────────
+  # Volume ownership — one-shot, before api and worker
+  # -────────────────────────────────────────────
+  # The backend services used to run as root, so an existing deployment's
+  # sample mirror, upload staging and ATT&CK cache are owned by root, and the
+  # unprivileged services could not write them. This hands the entries of those
+  # three that root owns, and nothing else, to MALJAN_UID:MALJAN_GID. It never
+  # takes a file from anyone else: an entry owned by neither root nor that id
+  # stops it, before it has changed anything, with the id to set, and the stack
+  # does not start. It changes ownership only (chown, never content or mode),
+  # never through a symbolic link and never past the mount, so a second run
+  # changes nothing, and executes nothing it finds. It runs as root with the
+  # one capability chown needs and the one that lets it enter the 0700 work
+  # directories, with no network, and exits.
+  volume-init:
+    <<: *backend-image
+    container_name: maljan-volume-init
+    restart: "no"
+    user: "0:0"
+    cap_add:
+      - CHOWN
+      - DAC_READ_SEARCH
+    network_mode: none
+    environment:
+      MALJAN_UID: ${MALJAN_UID:-10001}
+      MALJAN_GID: ${MALJAN_GID:-10001}
+    # Each target names its source after /own/, which is how a refusal names it.
+    volumes:
+      - ../data/samples:/own/data/samples
+      - ../data/uploads:/own/data/uploads
+      - attck_cache:/own/attck_cache
+    command:
+      - /bin/sh
+      - -euc
+      - |
+        for id in "$$MALJAN_UID" "$$MALJAN_GID"; do
+          case "$$id" in ''|*[!0-9]*) id=0;; esac
+          if [ "$$id" -eq 0 ]; then
+            echo "volume-init: MALJAN_UID and MALJAN_GID must be non-zero numbers" >&2
+            exit 1
+          fi
+        done
+        dirs="/own/data/samples /own/data/uploads /own/attck_cache"
+        for dir in $$dirs; do
+          owner=$$(find "$$dir" -xdev ! -uid 0 ! -uid "$$MALJAN_UID" -printf '%U\n' -quit)
+          if [ -n "$$owner" ]; then
+            echo "volume-init: $${dir#/own/} is owned by uid $$owner;" \
+              "set MALJAN_UID/MALJAN_GID=$$owner in docker/.env" >&2
+            exit 1
+          fi
+          group=$$(find "$$dir" -xdev ! -gid 0 ! -gid "$$MALJAN_GID" -printf '%G\n' -quit)
+          if [ -n "$$group" ]; then
+            echo "volume-init: $${dir#/own/} is owned by gid $$group;" \
+              "set MALJAN_GID=$$group in docker/.env" >&2
+            exit 1
+          fi
+        done
+        for dir in $$dirs; do
+          find "$$dir" -xdev \( -uid 0 -o -gid 0 \) -exec chown -h "$$MALJAN_UID:$$MALJAN_GID" {} +
+        done
 
   # -────────────────────────────────────────────
   # Migrations — one-shot Alembic upgrade, before api and worker
@@ -257,17 +329,23 @@ services:
       - "host.docker.internal:host-gateway"
     # The source trees are read-only: a process in this container that opens
     # hostile bytes cannot plant code the API or a later worker would run, or
-    # change the host's working tree. data/ stays writable for the uploads and
-    # the sample mirrors. The development overlay mounts the sources writable.
+    # change the host's working tree. data/ is read-only as well (its rule sets
+    # and reference tables are only read); only the sample mirrors and the
+    # upload staging under it are writable. The development overlay mounts the
+    # sources writable.
     volumes:
       - ../src:/app/src:ro
       - ../apps:/app/apps:ro
-      - ../data:/app/data
+      - ../data:/app/data:ro
+      - ../data/samples:/app/data/samples
+      - ../data/uploads:/app/data/uploads
       - ../tests:/app/tests:ro
       - ../services:/app/services:ro
     ports:
       - "${BIND_ADDRESS:-127.0.0.1}:${API_PORT:-8000}:8000"
     depends_on:
+      volume-init:
+        condition: service_completed_successfully
       migrate:
         condition: service_completed_successfully
       postgres:
@@ -364,11 +442,13 @@ services:
     # startup orphan sweep repairs the job row it was holding.
     mem_limit: 8g
     memswap_limit: 8g
-    # Read-only sources, as on the API (see there).
+    # Read-only sources and data, as on the API (see there).
     volumes:
       - ../src:/app/src:ro
       - ../apps:/app/apps:ro
-      - ../data:/app/data
+      - ../data:/app/data:ro
+      - ../data/samples:/app/data/samples
+      - ../data/uploads:/app/data/uploads
       - ../tests:/app/tests:ro
       - ../services:/app/services:ro
       # Derived caches, not source data — but expensive enough that losing them
@@ -377,10 +457,13 @@ services:
       # ATT&CK embedding cache, whose absence costs the judge node +1.3 GB of
       # resident memory and 105 s on the first analysis — measured 2026-07-28.
       # Without this volume both are rebuilt on every container recreation,
-      # because /root is in the container's writable layer and a rebuild
-      # discards it.
-      - attck_cache:/root/.cache/maljan
+      # because HOME is in the container's writable layer and a rebuild
+      # discards it. The volume keeps its name from when the worker ran as
+      # root and mounted it at /root/.cache/maljan; volume-init hands it over.
+      - attck_cache:/home/maljan/.cache/maljan
     depends_on:
+      volume-init:
+        condition: service_completed_successfully
       migrate:
         condition: service_completed_successfully
       backend-api:
