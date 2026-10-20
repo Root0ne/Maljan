@@ -97,7 +97,22 @@ def write_golden(directory: Path, stem: str, payload: Any) -> Path:
     return plain
 
 
+def cape_reports() -> list[Path]:
+    """Every CAPE report the globs name; two with one file stem would write one golden twice."""
+    found: dict[str, Path] = {}
+    for pattern in CAPE_GLOBS:
+        for path in sorted(ROOT.glob(pattern)):
+            if path.stem in found:
+                raise SystemExit(
+                    f"{path} and {found[path.stem]} would write the same golden "
+                    f"'{path.stem}'; rename one"
+                )
+            found[path.stem] = path
+    return list(found.values())
+
+
 def main() -> None:
+    reports = cape_reports()  # refused before anything is written
     PROMPTS.mkdir(parents=True, exist_ok=True)
     static_prompt, dynamic_prompt = build_prompts()
     (GOLDEN / "sandbox_tools").mkdir(parents=True, exist_ok=True)
@@ -112,22 +127,21 @@ def main() -> None:
         dynamic_prompt.rstrip("\n") + "\n", encoding="utf-8"
     )
 
-    for pattern in CAPE_GLOBS:
-        for path in sorted(ROOT.glob(pattern)):
-            raw = json.loads(path.read_text(encoding="utf-8"))
-            if not isinstance(raw, dict):
-                continue
-            out = {
-                "sandbox_processes": sandbox_processes(raw),
-                "sandbox_network": sandbox_network(raw),
-                "sandbox_signatures": sandbox_signatures(raw),
-                "sandbox_dropped_files": sandbox_dropped_files(raw),
-                "sandbox_registry_ops": sandbox_registry_ops(raw),
-                "sandbox_api_calls": sandbox_api_calls(raw),
-                "sandbox_mutexes": sandbox_mutexes(raw),
-                "sandbox_services_and_tasks": sandbox_services_and_tasks(raw),
-            }
-            write_golden(GOLDEN / "sandbox_tools", path.stem, out)
+    for path in reports:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+        if not isinstance(raw, dict):
+            continue
+        out = {
+            "sandbox_processes": sandbox_processes(raw),
+            "sandbox_network": sandbox_network(raw),
+            "sandbox_signatures": sandbox_signatures(raw),
+            "sandbox_dropped_files": sandbox_dropped_files(raw),
+            "sandbox_registry_ops": sandbox_registry_ops(raw),
+            "sandbox_api_calls": sandbox_api_calls(raw),
+            "sandbox_mutexes": sandbox_mutexes(raw),
+            "sandbox_services_and_tasks": sandbox_services_and_tasks(raw),
+        }
+        write_golden(GOLDEN / "sandbox_tools", path.stem, out)
     print(f"prompts -> {PROMPTS}")
     print(f"goldens -> {GOLDEN}")
 

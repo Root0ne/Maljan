@@ -63,8 +63,9 @@ async def enumerate_stdio_tools(
     return list(manifest)
 
 
-def main() -> None:
-    GOLDEN.mkdir(parents=True, exist_ok=True)
+def capture_all() -> dict[str, dict[str, list[str]]]:
+    """Every sidecar's manifest, read before any golden is written; an empty one is refused."""
+    manifests: dict[str, dict[str, list[str]]] = {}
     for key, (subdir, allow) in SIDECARS.items():
         manifest = asyncio.run(
             enumerate_stdio_manifest(
@@ -74,6 +75,16 @@ def main() -> None:
                 child_env(allow=allow),
             )
         )
+        if not manifest:
+            raise SystemExit(f"{key} offered no tools: no golden was written")
+        manifests[key] = manifest
+    return manifests
+
+
+def main() -> None:
+    manifests = capture_all()
+    GOLDEN.mkdir(parents=True, exist_ok=True)
+    for key, manifest in manifests.items():
         payload: dict[str, object] = {
             "server": key,
             "source": "live handshake",

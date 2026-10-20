@@ -176,7 +176,10 @@ def _cases_from_mabel(paths: list[str], max_per_family: int) -> list[dict]:
                 continue
             for row in reader:
                 fam = (row.get("family_name") or "").strip()
-                if max_per_family > 0 and per_family.get(fam, 0) >= max_per_family:
+                # A row with no family name is capped like a labelled one, but under
+                # its own category, not one shared "" group the first rows would use up.
+                group = fam or f"(unlabelled {_mabel_category(row)})"
+                if max_per_family > 0 and per_family.get(group, 0) >= max_per_family:
                     continue
                 techs = list(dict.fromkeys(_MABEL_TID.findall(row.get("mitre_attack_id") or "")))
                 if not techs:
@@ -192,7 +195,7 @@ def _cases_from_mabel(paths: list[str], max_per_family: int) -> list[dict]:
                         "malware_category": _mabel_category(row),
                     }
                 )
-                per_family[fam] = per_family.get(fam, 0) + 1
+                per_family[group] = per_family.get(group, 0) + 1
     return rows
 
 

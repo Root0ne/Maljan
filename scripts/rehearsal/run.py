@@ -983,7 +983,12 @@ def run_against_stack(args: argparse.Namespace) -> list[RunRecord]:
             slots=args.slots,
             runtime=args.runtime,
         )
-        server = StubServer(state, args.stub_port, host=args.stub_host).start()
+        server = StubServer(
+            state,
+            args.stub_port,
+            host=args.stub_host,
+            allow_private=getattr(args, "stub_host_private", False),
+        ).start()
     stub_root = args.stub_url.rstrip("/") if args.stub_url else server.root  # type: ignore[union-attr]
     client = StackClient(args.api)
     guard = SettingsGuard(client, Path(args.out) / SNAPSHOT_NAME)
@@ -1282,6 +1287,12 @@ def main(argv: list[str] | None = None) -> int:
         default="127.0.0.1",
         help="the address the stub binds: loopback, or the Docker bridge gateway a containerised "
         "worker reaches the host on (172.17.0.0 to 172.31.255.255)",
+    )
+    parser.add_argument(
+        "--stub-host-private",
+        action="store_true",
+        help="also allow --stub-host to be another private address (podman, a custom bridge, a "
+        "LAN); a wildcard or public address is still refused",
     )
     parser.add_argument(
         "--redis-url",
