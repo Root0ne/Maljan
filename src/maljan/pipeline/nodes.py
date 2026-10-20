@@ -1493,18 +1493,27 @@ def with_verdict_fallback(validation: Any, failure: str) -> dict[str, Any]:
     return block
 
 
+# The one verdict a sample's functions are filed under a family for.
+FILED_VERDICT = "Malware"
+
+
 def _function_hash_attribution(
-    container: ServiceContainer, state: AnalysisState, bundle: Any
+    container: ServiceContainer, state: AnalysisState, bundle: Any, decision: str = ""
 ) -> list[dict[str, Any]]:
     """The judge's function-hash read, and the write it holds for a completed job.
 
     Read side: which known families this sample shares code with (threaded
-    into the report). Write side: this sample's function hashes, held on the
-    container under its assessed family until the job has completed
-    (``remember_the_run``). Runs only where attribution is on, the static
-    provider hashes functions, there is a mirror to read, and the configured
-    memory backend keeps a function-hash store. Fail-safe; never affects the
-    verdict.
+    into the report), among the entries of the job's owner. Write side: this
+    sample's function hashes, held on the container under its assessed family
+    until the job has completed (``remember_the_run``) — only for a run whose
+    verdict ``decision`` is Malware, since a family the judge names beside a
+    Suspicious or Benign verdict is a guess the corpus would teach every later
+    sample as code reuse. A report node that follows drops the write unless
+    the report publishes the same verdict and family
+    (``_file_only_the_published_family``). Runs only where attribution is on,
+    the static provider hashes functions, there is a mirror to read, and the
+    configured memory backend keeps a function-hash store. Fail-safe; never
+    affects the verdict.
     """
     try:
         from maljan.core.config import get_settings
@@ -1535,6 +1544,7 @@ def _function_hash_attribution(
                 aggregate_matches,
                 to_report_dicts,
             )
+            from maljan.memory.long_term_memory import match_functions, memory_owner_of
             from maljan.providers.base import StaticJobContext
 
             sample_id = state.get("file_hash", "") or ""
@@ -1545,17 +1555,26 @@ def _function_hash_attribution(
                 return []
             report = to_report_dicts(
                 aggregate_matches(
-                    store.match([h for _n, h in functions], exclude_sample_id=sample_id or None),
+                    match_functions(
+                        store,
+                        [h for _n, h in functions],
+                        exclude_sample_id=sample_id or None,
+                        owner=memory_owner_of(container),
+                    ),
                     max_families=pre.function_hash_max_matches,
                 ),
                 source=str(getattr(provider, "id", "") or ""),
             )
-            # Only under a grounded family, so an UNKNOWN verdict cannot pollute
-            # the attribution corpus; held, not written, so a job that fails after
-            # its judge files nothing under a family nobody kept. The container
-            # takes over the hold and lets go once it has written, or at teardown.
-            family = _assessed_family(bundle)
-            if family:
+            # Only under a family the judge named beside a Malware verdict, so
+            # neither an UNKNOWN nor a guess beside a softer verdict pollutes
+            # the attribution corpus; held, not written, so a job that fails
+            # after its judge files nothing under a family nobody kept. The
+            # container takes over the hold and lets go once it has written,
+            # or at teardown.
+            from maljan.reporting.models import stated_family
+
+            family = stated_family(_assessed_family(bundle))
+            if family and decision == FILED_VERDICT:
                 container.hold_function_hashes(store, sample_id, family, functions)
                 handed_on = True
             return report
@@ -1617,12 +1636,15 @@ def _function_matches_step(container: ServiceContainer, state: AnalysisState) ->
         }
         if unavailable and hashes:
             return args, {"matches": [], "reason": unavailable}
+        from maljan.memory.long_term_memory import memory_owner_of
         from maljan.memory.store_factory import leased_function_hash_store
 
         # Held for the read: a settings change meanwhile closes this store only
         # once the read has let go of it.
         with leased_function_hash_store(cfg) as held:
-            return args, knowledge.function_matches(hashes, held, exclude_sample_id=sha256)
+            return args, knowledge.function_matches(
+                hashes, held, exclude_sample_id=sha256, owner=memory_owner_of(container)
+            )
 
     return step
 
@@ -2794,6 +2816,34 @@ def _remember_the_published_techniques(
         )
     except Exception as exc:  # noqa: BLE001 — memory never costs a report
         logger.warning("LTM: the case was not given the published techniques (%s).", exc)
+
+
+def _file_only_the_published_family(container: Any, report: Any) -> None:
+    """Drop the held function-hash write unless the report publishes its verdict and family.
+
+    The judge holds the write under the family it named beside a Malware
+    verdict; the report decides what is published, and a family it does not
+    publish as the judge's, beside Malware, is filed under nobody's name.
+    Never raises.
+    """
+    from maljan.memory.long_term_memory import family_key
+
+    held = getattr(container, "pending_function_hashes", None)
+    drop = getattr(container, "drop_function_hashes", None)
+    if not isinstance(held, tuple) or len(held) < 3 or not callable(drop):
+        return
+    try:
+        attribution = getattr(report, "attribution", None)
+        published = str(getattr(attribution, "family", "") or "")
+        if str(getattr(report, "verdict", "") or "") != FILED_VERDICT:
+            drop(f"the report publishes {getattr(report, 'verdict', None)!r}, not Malware")
+        elif getattr(attribution, "family_source", None) not in (None, "judge"):
+            drop("the published family is not the judge's")
+        elif not published or family_key(published) != family_key(held[2]):
+            drop(f"the report publishes the family {published or 'none'!r}")
+    except Exception as exc:  # noqa: BLE001 — the corpus never costs a report
+        logger.warning("Function-hash corpus: the published family was not read (%s).", exc)
+        drop("the published family could not be read")
 
 
 def _amended_validation(validation: Any, tally: ValidationTally) -> dict[str, Any] | None:
@@ -5973,7 +6023,7 @@ def make_judge_node(
             # (threaded into the report). Write side: upsert this sample's
             # function hashes under its inferred family so the corpus grows.
             # Fully gated + fail-safe; never affects the verdict.
-            _func_hash_report = _function_hash_attribution(container, state, bundle)
+            _func_hash_report = _function_hash_attribution(container, state, bundle, decision)
             _family_rag_report: list[dict[str, Any]] = []
 
             # Family-feature RAG (read side): record the families retrieved by
@@ -6824,6 +6874,7 @@ def make_report_node(
         # run whose report printed three enterprise-only ids on an Android
         # sample said nothing about their not being published anywhere.
         _published_summary = _corroboration_with_publication(report, state)
+        _file_only_the_published_family(container, report)
         _remember_the_published_techniques(
             container,
             report,

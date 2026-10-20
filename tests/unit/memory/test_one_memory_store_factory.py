@@ -436,7 +436,10 @@ class TestTheFunctionMatchStepUsesTheConfiguredBackend:
             capabilities=SimpleNamespace(provides_function_hashes=True),
             function_hashes=lambda _job: [("f1", "h1"), ("f3", "h3")],
         )
-        container = SimpleNamespace(config=config, get_static_provider=lambda: provider)
+        # An unscoped job: no container at all reads no memory.
+        container = SimpleNamespace(
+            config=config, get_static_provider=lambda: provider, memory_owner=None
+        )
         state = {"static_sample_path": "/mirror/s.bin", "file_hash": "this"}
         return _function_matches_step(container, state)  # type: ignore[arg-type]
 
@@ -506,6 +509,8 @@ class TestTheStaticAnalystHintUsesTheConfiguredBackend:
         analyst = SimpleNamespace(
             _provider=lambda: provider,
             logger=SimpleNamespace(info=lambda *a: None, warning=lambda *a: None),
+            # An unscoped job: an analyst with no container reads no memory.
+            _container=SimpleNamespace(memory_owner=None),
         )
         settings = SimpleNamespace(
             memory=config.memory,
@@ -523,6 +528,26 @@ class TestTheStaticAnalystHintUsesTheConfiguredBackend:
     def test_a_registered_backend_gives_the_prior(self, third_backend: Any) -> None:
         hint, asked = self._hint(third_backend)
         assert "FamilyA" in hint and asked == ["/m/s.bin"]
+
+    def test_an_analyst_with_no_container_reads_no_memory(self, third_backend: Any) -> None:
+        from maljan.agents.static_analyst import StaticAnalyst
+
+        analyst = SimpleNamespace(
+            _provider=lambda: SimpleNamespace(
+                capabilities=SimpleNamespace(provides_function_hashes=True),
+                function_hashes=lambda _job: [("f1", "h1")],
+            ),
+            logger=SimpleNamespace(info=lambda *a: None, warning=lambda *a: None),
+        )
+        settings = SimpleNamespace(
+            memory=third_backend.memory,
+            preprocessing=SimpleNamespace(
+                use_function_hash_attribution=True, function_hash_max_matches=8
+            ),
+        )
+        with patch("maljan.core.config.get_settings", return_value=settings):
+            hint = StaticAnalyst._compute_function_hash_hint(analyst, "/m/s.bin", "this")  # type: ignore[arg-type]
+        assert hint == ""
 
 
 class TestTheCommandLineUsesTheFactory:
@@ -720,7 +745,7 @@ class TestTheFunctionHashStoreIsBuiltOncePerSettings:
 
 class TestTheJudgeReadsAndHoldsThroughTheConfiguredBackend:
     @staticmethod
-    def _run(config: Any) -> tuple[list[dict[str, Any]], Any, list[str]]:
+    def _run(config: Any, decision: str = "Malware") -> tuple[list[dict[str, Any]], Any, list[str]]:
         from maljan.pipeline import nodes
 
         asked: list[str] = []
@@ -741,7 +766,9 @@ class TestTheJudgeReadsAndHoldsThroughTheConfiguredBackend:
             patch("maljan.core.config.get_settings", return_value=config),
             patch.object(nodes, "_assessed_family", return_value="FamilyB"),
         ):
-            report = nodes._function_hash_attribution(container, state, bundle=None)  # type: ignore[arg-type]
+            report = nodes._function_hash_attribution(  # type: ignore[arg-type]
+                container, state, bundle=None, decision=decision
+            )
         return report, container.pending_function_hashes, asked
 
     def test_a_backend_without_function_hashes_holds_nothing_and_asks_nothing(self) -> None:
@@ -761,6 +788,17 @@ class TestTheJudgeReadsAndHoldsThroughTheConfiguredBackend:
         assert store._collection == "maljan_function_hashes_v1"
         assert (sample_id, family, functions) == ("this", "FamilyB", [("f1", "h1"), ("f2", "h2")])
         assert asked == ["/mirror/s.bin"]
+
+    @pytest.mark.parametrize("decision", ["Suspicious", "Benign", ""])
+    def test_a_family_beside_a_softer_verdict_is_read_but_never_held(self, decision: str) -> None:
+        _FakeQdrant.seed = {
+            "maljan_function_hashes_v1": {
+                1: {"func_hash": "h1", "family": "FamilyA", "sample_id": "older", "func_name": "f1"}
+            }
+        }
+        report, held, _asked = self._run(_settings("qdrant"), decision)
+        assert [row["family"] for row in report] == ["FamilyA"]
+        assert held is None
 
 
 class TestTheContainerStoreIsTheFactorys:
@@ -903,7 +941,9 @@ class TestARunningJobKeepsTheStoreItHolds:
             patch("maljan.core.config.get_settings", return_value=config),
             patch.object(nodes, "_assessed_family", return_value="FamilyB"),
         ):
-            nodes._function_hash_attribution(container, state, bundle=None)  # type: ignore[arg-type]
+            nodes._function_hash_attribution(  # type: ignore[arg-type]
+                container, state, bundle=None, decision="Malware"
+            )
         assert container.pending_function_hashes is not None
         return container
 

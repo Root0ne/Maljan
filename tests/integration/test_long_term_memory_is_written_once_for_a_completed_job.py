@@ -11,7 +11,6 @@ writes it after the job is recorded as completed.
 
 from __future__ import annotations
 
-from types import SimpleNamespace
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -20,6 +19,7 @@ import pytest
 from app.worker.analysis_worker import run_analysis
 from maljan.app import MaljanApp
 from maljan.core.container import ServiceContainer
+from maljan.memory.long_term_memory import StoredCase
 from tests.integration._session_probe import updates_in
 from tests.integration.test_worker_job_lifecycle import (  # noqa: F401 — fixtures
     _answer_reads,
@@ -31,14 +31,22 @@ from tests.integration.test_worker_job_lifecycle import (  # noqa: F401 — fixt
     mock_db_session,
 )
 
-CASE = SimpleNamespace(sample_id="a" * 64, malware_category="loader", technique_ids=["T1105"])
+CASE = StoredCase(
+    sample_id="a" * 64, summary_text="", malware_category="loader", technique_ids=["T1105"]
+)
 
 
-FUNCTIONS = [("h1", "sub_401000"), ("h2", "sub_402000")]
+# As the static provider answers them, ``(func_name, func_hash)``; the index
+# files them ``(func_hash, func_name)``.
+FUNCTIONS = [("sub_401000", "h1"), ("sub_402000", "h2")]
+FILED = [("h1", "sub_401000"), ("h2", "sub_402000")]
 
 
 class _Store:
     """The memory store and the function-hash store, recording what each is given."""
+
+    # The worker's jobs have an owner: a store that keeps none is not written.
+    keeps_owners = True
 
     def __init__(self) -> None:
         self.stored: list[Any] = []
@@ -46,6 +54,7 @@ class _Store:
         # What the console had been told when the write happened.
         self.published_before: list[str] = []
         self.redis: Any = None
+        self.owners: list[Any] = []
 
     def _published(self) -> list[str]:
         if self.redis is None:
@@ -55,8 +64,12 @@ class _Store:
     def store(self, case: Any) -> None:
         self.published_before = self._published()
         self.stored.append(case)
+        self.owners.append(getattr(case, "owner", None))
 
-    def upsert_sample(self, sample_id: str, family: str, functions: Any) -> int:
+    def upsert_sample(
+        self, sample_id: str, family: str, functions: Any, owner: str | None = None
+    ) -> int:
+        self.owners.append(owner)
         self.filed.append((sample_id, family, list(functions)))
         return len(functions)
 
@@ -144,8 +157,12 @@ async def test_a_completed_job_writes_its_case_and_its_corpus_once(
         "running",
         "completed",
     ]
-    assert store.stored == [CASE]
-    assert store.filed == [("a" * 64, "loader", FUNCTIONS)]
+    assert [(c.sample_id, c.technique_ids) for c in store.stored] == [
+        (CASE.sample_id, CASE.technique_ids)
+    ]
+    assert store.filed == [("a" * 64, "loader", FILED)]
+    # Filed under the job's creator, case and corpus alike.
+    assert store.owners == [str(job.created_by)] * 2
     # Announced first: a slow store never holds the completion back.
     assert any('"completed"' in message for message in store.published_before)
 

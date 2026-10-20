@@ -3662,6 +3662,12 @@ sweep is held to the same rule — it removes what its own backend wrote and
 what predates the field, and leaves another backend's file where it is — so a
 fallback run cannot clear the model's cache on its way past.
 
+Long-term memory is off while the embedding model cannot load: a Qdrant store
+stores no case and finds none, rather than mix bag-of-words vectors with the
+model's, and each job's memory is its owner's alone (`long_term_memory.recall`).
+On a server, memory stored before owner scoping is kept but is not read by
+owned jobs: it carries no owner, and no owner is chosen for it automatically.
+
 ## The evidence ledger
 
 Every tool call an analysis makes is written down as it happens. The tool loop

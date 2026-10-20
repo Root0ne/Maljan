@@ -642,6 +642,7 @@ def function_matches(
     func_hashes: list[str],
     store: FunctionHashIndex | None,
     exclude_sample_id: str = "",
+    owner: str | None = None,
 ) -> dict[str, Any]:
     """Stored samples that share a function hash with this one.
 
@@ -650,7 +651,8 @@ def function_matches(
     is the configured memory backend's function-hash store
     (``maljan.memory.store_factory.build_function_hash_store``); ``None`` is a
     backend that keeps none, and the answer says so instead of raising, as it
-    does for a store that cannot be reached.
+    does for a store that cannot be reached. Only ``owner``'s samples are
+    matched, the unscoped ones for ``None`` (``long_term_memory.recall``).
     """
     wanted = [str(h).strip() for h in (func_hashes or []) if str(h).strip()]
     if not wanted:
@@ -658,7 +660,11 @@ def function_matches(
     if store is None:
         return {"matches": [], "reason": NO_FUNCTION_HASH_STORE}
     try:
-        found = store.match(wanted, exclude_sample_id=exclude_sample_id)
+        from maljan.memory.long_term_memory import match_functions
+
+        found = match_functions(
+            store, wanted, exclude_sample_id=exclude_sample_id or None, owner=owner
+        )
     except Exception as exc:  # noqa: BLE001
         return {"matches": [], "reason": f"the function-hash store is unavailable: {exc}"}
     return {

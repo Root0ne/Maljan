@@ -32,6 +32,8 @@ Helper build_stored_case():
 
 from __future__ import annotations
 
+import re
+import unicodedata
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
@@ -69,6 +71,10 @@ class StoredCase:
         has_analyst_errors: Whether any analyst returned an ``[ERROR]`` prefix
                             during this analysis. Strong indicator of a
                             degraded pipeline pass.
+        owner:              Whose job wrote the case (``memory_owner``), or
+                            ``None`` for an unscoped write: a run with no
+                            owner, and every case stored before owners were
+                            recorded. See :func:`recall` for who reads it.
     """
 
     sample_id: str
@@ -80,6 +86,7 @@ class StoredCase:
     corroborated_count: int = 0
     total_techniques: int = 0
     has_analyst_errors: bool = False
+    owner: str | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -116,6 +123,10 @@ class MemoryStore(Protocol):
         exclude_sample_id: str | None = None,
     ) -> list[StoredCase]:
         """Return the top_k most similar stored cases for the given query.
+
+        A backend that keeps owners (``keeps_owners``) also takes ``owner``
+        and answers only that owner's cases; called without it, only the
+        unscoped ones. Callers go through :func:`recall`.
 
         Args:
             query:  Free-text search query (typically the ISR summary text).
@@ -194,10 +205,15 @@ class MemoryStoreDefaults:
     """The interface's optional capabilities, answered as "not offered".
 
     A backend derives from this and implements what it can: a store with no
-    server answers ``readiness`` without I/O, keeps no function hashes and has
-    nothing to close. Every caller then degrades the same way for it as for
-    any backend without the capability.
+    server answers ``readiness`` without I/O, keeps no function hashes, keeps
+    no owners and has nothing to close. Every caller then degrades the same
+    way for it as for any backend without the capability.
     """
+
+    # Whether the backend files a case under its owner and answers an owner's
+    # reads with that owner's cases alone. A backend that does not is never
+    # written to nor read from for an owned job (:func:`recall`).
+    keeps_owners: bool = False
 
     def readiness(self) -> str:
         return "in process"
@@ -219,16 +235,144 @@ class FunctionHashIndex(Protocol):
     """
 
     def upsert_sample(self, sample_id: str, family: str, functions: list[tuple[str, str]]) -> int:
-        """Write ``(func_hash, func_name)`` pairs for ``sample_id``; the number written."""
+        """Write ``(func_hash, func_name)`` pairs for ``sample_id``; the number written.
+
+        An index that keeps owners (``keeps_owners``) also takes ``owner``.
+        """
         ...
 
     def match(self, hashes: list[str], exclude_sample_id: str | None = None) -> list[FunctionMatch]:
-        """Stored functions whose hash is in ``hashes``, other than ``exclude_sample_id``'s."""
+        """Stored functions whose hash is in ``hashes``, other than ``exclude_sample_id``'s.
+
+        An index that keeps owners also takes ``owner``; callers go through
+        :func:`match_functions`.
+        """
         ...
 
     def count(self) -> int:
         """The number of stored function hashes."""
         ...
+
+
+# ---------------------------------------------------------------------------
+# Owners: whose memory a job reads and writes
+# ---------------------------------------------------------------------------
+#
+# The rule, for cases and for function hashes alike:
+#
+# - A job with an owner (``ServiceContainer.memory_owner``) writes under that
+#   owner and reads that owner's entries, nobody else's.
+# - A job with no owner (the command line, a caller that names none) writes
+#   unscoped entries and reads the unscoped ones.
+# - An entry stored before owners were recorded carries none, so it cannot be
+#   attributed to anyone: it stays in the unscoped pool, readable by unscoped
+#   jobs as it always was, and never reaches a job with an owner. A cross-owner
+#   read fails closed.
+# - A backend that cannot keep owners (``keeps_owners`` false) is neither
+#   written to nor read from by a job with an owner.
+# - A read with no job behind it (no container) reads nothing (``NO_MEMORY``).
+
+
+def owner_key(owner: Any) -> str | None:
+    """The owner as entries are filed under it, or ``None`` for unscoped."""
+    text = str(owner).strip() if owner is not None else ""
+    return text or None
+
+
+def keeps_owners(store: Any) -> bool:
+    """Whether ``store`` files entries under their owner and scopes its reads by it."""
+    return getattr(store, "keeps_owners", False) is True
+
+
+class _NoMemory:
+    """The owner of a read that has no job to read for: it reads nothing."""
+
+    def __repr__(self) -> str:
+        return "NO_MEMORY"
+
+
+# What ``memory_owner_of`` answers for no container, or one that states no
+# owner it can be read as: neither an owner's memory nor the unscoped pool.
+NO_MEMORY: Any = _NoMemory()
+
+
+def memory_owner_of(container: Any) -> Any:
+    """The owner whose memory ``container``'s job reads and writes.
+
+    ``None`` for a job that is unscoped (a container whose ``memory_owner``
+    is ``None``), and :data:`NO_MEMORY` for no container at all or one whose
+    owner is not text: :func:`recall` and :func:`match_functions` read nothing
+    for it.
+    """
+    if container is None:
+        return NO_MEMORY
+    value = getattr(container, "memory_owner", NO_MEMORY)
+    if value is None:
+        return None
+    return owner_key(value) if isinstance(value, str) else NO_MEMORY
+
+
+def recall(
+    store: Any,
+    query: str,
+    *,
+    top_k: int = 3,
+    exclude_sample_id: str | None = None,
+    owner: Any = None,
+) -> list[StoredCase]:
+    """``store.retrieve`` for the job's owner, under the rule above."""
+    if owner is NO_MEMORY:
+        return []
+    scoped = owner_key(owner)
+    if scoped is None:
+        try:
+            cases = store.retrieve(query, top_k=top_k, exclude_sample_id=exclude_sample_id)
+        except TypeError:
+            # A backend older than ``exclude_sample_id``.
+            cases = store.retrieve(query, top_k=top_k)
+            if exclude_sample_id:
+                cases = [c for c in cases if c.sample_id != exclude_sample_id]
+        return [c for c in cases if owner_key(getattr(c, "owner", None)) is None]
+    if not keeps_owners(store):
+        return []
+    cases = store.retrieve(query, top_k=top_k, exclude_sample_id=exclude_sample_id, owner=scoped)
+    return [c for c in cases if owner_key(getattr(c, "owner", None)) == scoped]
+
+
+def match_functions(
+    index: Any,
+    hashes: list[str],
+    *,
+    exclude_sample_id: str | None = None,
+    owner: Any = None,
+) -> list[FunctionMatch]:
+    """``index.match`` for the job's owner, under the rule above."""
+    if owner is NO_MEMORY:
+        return []
+    scoped = owner_key(owner)
+    if scoped is None:
+        return list(index.match(hashes, exclude_sample_id=exclude_sample_id))
+    if not keeps_owners(index):
+        return []
+    return list(index.match(hashes, exclude_sample_id=exclude_sample_id, owner=scoped))
+
+
+# ---------------------------------------------------------------------------
+# Family names, as the function-hash corpus files them
+# ---------------------------------------------------------------------------
+
+_FAMILY_SEPARATORS = re.compile(r"[\s_\-.]+")
+
+
+def family_key(name: Any) -> str:
+    """One spelling of a family name, for filing and grouping: ``""`` for none.
+
+    The judge writes the family as free text, so one family arrives as
+    ``AgentTesla``, ``Agent Tesla`` and ``agent-tesla``. Compatibility-folded,
+    case-folded, with spaces, hyphens, underscores and dots taken out.
+    """
+    text = unicodedata.normalize("NFKC", str(name or "")).casefold().strip()
+    return _FAMILY_SEPARATORS.sub("", text)
 
 
 # ---------------------------------------------------------------------------

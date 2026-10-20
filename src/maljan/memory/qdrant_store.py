@@ -23,6 +23,17 @@ Design notes:
   be fully reconstructed without a separate database.
 - **Connection**: a single QdrantClient is created in ``__init__`` and
   reused. The Qdrant Python client is thread-safe for concurrent reads.
+- **One embedding space**: every point carries the backend that made its
+  vector (``embedding_backend``) and a search reads only the model's points.
+  A vector the bag-of-words fallback made is never stored, and a query the
+  fallback embedded finds nothing: the two are not comparable. A point
+  stored before the backend was recorded is read as the model's, the only
+  backend this collection was ever documented for, and the hits among such
+  points are ranked on their text embedded again by the model.
+- **Owners**: a case written by a job with an owner carries it, under a point
+  ID of its own, and is read by that owner's jobs alone; an unscoped case
+  (every case stored before owners were recorded among them) is read only by
+  jobs with no owner (``long_term_memory.recall``).
 
 Configuration (.env):
   MEMORY__BACKEND=qdrant
@@ -41,8 +52,12 @@ from typing import Any
 from maljan.core.exceptions import MemoryStoreError
 from maljan.core.logger import logger
 from maljan.core.settings_overrides import redact_url
-from maljan.memory.embeddings import EMBED_DIM, encode
-from maljan.memory.long_term_memory import StoredCase
+from maljan.memory.embeddings import EMBED_DIM, cosine, encode_with_backend, model_backend_id
+from maljan.memory.long_term_memory import StoredCase, owner_key
+
+# The payload keys the scoping reads.
+OWNER_KEY = "owner"
+BACKEND_KEY = "embedding_backend"
 
 
 class QdrantNotAvailableError(MemoryStoreError, ImportError):
@@ -65,6 +80,38 @@ def _stable_id(sample_id: str) -> int:
     return int.from_bytes(digest[:8], "little")
 
 
+def _case_id(sample_id: str, owner: str | None) -> int:
+    """The point ID of one owner's case of a sample; an unscoped case keeps its old ID."""
+    return _stable_id(sample_id if owner is None else f"{owner}\x1f{sample_id}")
+
+
+def _scope_filter(owner: str | None, *, backend: str | None = None) -> Any:
+    """The filter reading one owner's points (unscoped ones for ``None``), in one space."""
+    from qdrant_client.models import (
+        FieldCondition,
+        Filter,
+        IsEmptyCondition,
+        MatchValue,
+        PayloadField,
+    )
+
+    must: list[Any] = [
+        IsEmptyCondition(is_empty=PayloadField(key=OWNER_KEY))
+        if owner is None
+        else FieldCondition(key=OWNER_KEY, match=MatchValue(value=owner))
+    ]
+    if backend is not None:
+        must.append(
+            Filter(
+                should=[
+                    FieldCondition(key=BACKEND_KEY, match=MatchValue(value=backend)),
+                    IsEmptyCondition(is_empty=PayloadField(key=BACKEND_KEY)),
+                ]
+            )
+        )
+    return Filter(must=must)
+
+
 class QdrantStore:
     """Qdrant-backed MemoryStore for production long-term case retrieval.
 
@@ -81,6 +128,8 @@ class QdrantStore:
         url:        Qdrant server URL (e.g., "http://localhost:6333").
         collection: Qdrant collection name. Auto-created on first store() call.
     """
+
+    keeps_owners = True
 
     def __init__(
         self,
@@ -119,16 +168,23 @@ class QdrantStore:
         """Upsert a StoredCase into the Qdrant collection.
 
         Creates the collection on the first call if it does not exist.
-        Uses upsert semantics: if a point with the same sample_id already
-        exists, it is replaced in place.
+        Uses upsert semantics: if a point with the same sample_id (and owner)
+        already exists, it is replaced in place. Refused, with
+        ``MemoryStoreError``, when the vector is not the model's.
         """
         from qdrant_client.models import Distance, PointStruct, VectorParams
 
+        vector, backend = encode_with_backend(case.summary_text)
+        if backend != model_backend_id():
+            raise MemoryStoreError(
+                f"the case's vector was made by {backend}, not by {model_backend_id()}; "
+                "a durable store keeps one embedding space, so it is not stored"
+            )
         self._ensure_collection(VectorParams, Distance)
 
-        point_id = _stable_id(case.sample_id)
-        vector = encode(case.summary_text)
-        payload = {
+        owner = owner_key(case.owner)
+        point_id = _case_id(case.sample_id, owner)
+        payload: dict[str, Any] = {
             "sample_id": case.sample_id,
             "summary_text": case.summary_text,
             "technique_ids": case.technique_ids,
@@ -141,7 +197,10 @@ class QdrantStore:
             "corroborated_count": case.corroborated_count,
             "total_techniques": case.total_techniques or len(case.technique_ids),
             "has_analyst_errors": case.has_analyst_errors,
+            BACKEND_KEY: backend,
         }
+        if owner is not None:
+            payload[OWNER_KEY] = owner
 
         self._client.upsert(
             collection_name=self._collection,
@@ -159,8 +218,13 @@ class QdrantStore:
         query: str,
         top_k: int = 3,
         exclude_sample_id: str | None = None,
+        owner: str | None = None,
     ) -> list[StoredCase]:
         """Return the top_k most similar cases from Qdrant.
+
+        Only ``owner``'s cases, or the unscoped ones for ``None``, and only
+        points in the model's embedding space; a query the fallback embedded
+        finds nothing.
 
         Args:
             query:  Free-text search query (e.g., concatenated ISR claim text).
@@ -184,7 +248,16 @@ class QdrantStore:
             )
             return []
 
-        vector = encode(query)
+        vector, backend = encode_with_backend(query)
+        if backend != model_backend_id():
+            logger.warning(
+                "QdrantStore.retrieve: the query was embedded by %s, not by %s; the "
+                "stored vectors are not comparable with it, so nothing is retrieved.",
+                backend,
+                model_backend_id(),
+            )
+            return []
+        scope = owner_key(owner)
         # Fetch a few extra rows when we need to filter out the current
         # sample — this keeps us at ``top_k`` results after exclusion.
         fetch_k = top_k + 1 if exclude_sample_id else top_k
@@ -193,35 +266,48 @@ class QdrantStore:
         response = self._client.query_points(
             collection_name=self._collection,
             query=vector,
+            query_filter=_scope_filter(scope, backend=backend),
             limit=fetch_k,
             with_payload=True,
         )
         hits = response.points
 
-        results: list[StoredCase] = []
+        ranked: list[tuple[float, StoredCase]] = []
         skipped_self = 0
         for hit in hits:
             p = hit.payload or {}
             if exclude_sample_id and p.get("sample_id") == exclude_sample_id:
                 skipped_self += 1
                 continue
+            if owner_key(p.get(OWNER_KEY)) != scope:
+                continue
+            score = float(getattr(hit, "score", 0.0) or 0.0)
+            if not p.get(BACKEND_KEY):
+                # Stored before the backend was recorded: ranked on its text
+                # as the model embeds it, whatever made the stored vector.
+                again, again_by = encode_with_backend(str(p.get("summary_text") or ""))
+                score = cosine(vector, again) if again_by == backend else 0.0
             try:
-                results.append(
-                    StoredCase(
-                        sample_id=p["sample_id"],
-                        summary_text=p.get("summary_text", ""),
-                        technique_ids=p.get("technique_ids", []),
-                        malware_category=p.get("malware_category", "UNKNOWN"),
-                        stix_bundle_json=p.get("stix_bundle_json", ""),
-                        corroborated_count=int(p.get("corroborated_count", 0) or 0),
-                        total_techniques=int(p.get("total_techniques", 0) or 0),
-                        has_analyst_errors=bool(p.get("has_analyst_errors", False)),
+                ranked.append(
+                    (
+                        score,
+                        StoredCase(
+                            sample_id=p["sample_id"],
+                            summary_text=p.get("summary_text", ""),
+                            technique_ids=p.get("technique_ids", []),
+                            malware_category=p.get("malware_category", "UNKNOWN"),
+                            stix_bundle_json=p.get("stix_bundle_json", ""),
+                            corroborated_count=int(p.get("corroborated_count", 0) or 0),
+                            total_techniques=int(p.get("total_techniques", 0) or 0),
+                            has_analyst_errors=bool(p.get("has_analyst_errors", False)),
+                            owner=owner_key(p.get(OWNER_KEY)),
+                        ),
                     )
                 )
             except (KeyError, TypeError) as exc:
                 logger.warning("QdrantStore.retrieve: skipping malformed payload: %s", exc)
-            if len(results) >= top_k:
-                break
+        ranked.sort(key=lambda pair: pair[0], reverse=True)
+        results = [case for _score, case in ranked[:top_k]]
         if skipped_self:
             logger.info(
                 "QdrantStore.retrieve: skipped %d self-match(es) for sample_id=%s.",
@@ -354,6 +440,12 @@ class QdrantStore:
         return FunctionHashStore(
             url=self._url, collection=self._function_hash_collection, client=self._client
         )
+
+    def repair_once(self) -> str:
+        """The one-time repair of what this store kept before AUD-65 (``memory_repair``)."""
+        from maljan.memory.memory_repair import repair_once
+
+        return repair_once(self._client, self._collection, self._function_hash_collection)
 
     def close(self) -> None:
         """Close the client (and with it any function-hash store sharing it)."""

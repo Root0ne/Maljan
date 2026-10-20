@@ -193,13 +193,58 @@ class TestQdrantStoreInstantiation:
 # ---------------------------------------------------------------------------
 
 
+class _Vector:
+    def __init__(self, values: list[float]) -> None:
+        self._values = values
+
+    def tolist(self) -> list[float]:
+        return list(self._values)
+
+
+class _StandInModel:
+    """A deterministic stand-in for the embedding model, labelled as the model.
+
+    A durable store refuses a bag-of-words vector, and the CI job that runs
+    these tests has a live Qdrant and no model: the stand-in lets them test
+    the Qdrant integration, which is what they are for.
+    """
+
+    def embed(self, texts: list[str], batch_size: int | None = None) -> Any:
+        from maljan.memory import embeddings
+
+        for text in texts:
+            bow = embeddings._bow_projection(text)
+            yield _Vector(bow[1:] + bow[:1])
+
+
 @requires_qdrant
 class TestQdrantStoreLive:
     """Integration tests against a real Qdrant instance.
 
     Each test uses a unique collection name to avoid cross-test interference.
-    Collections are cleaned up in teardown.
+    Collections are cleaned up in teardown. The embedding model is the
+    stand-in (``_StandInModel``), except where a test says otherwise.
     """
+
+    @pytest.fixture(autouse=True)
+    def _model(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        from maljan.memory import embeddings
+
+        monkeypatch.setattr(embeddings, "_try_load_fastembed", lambda: _StandInModel())
+
+    def test_a_fallback_vector_is_refused_by_a_real_qdrant(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from maljan.core.exceptions import MemoryStoreError
+        from maljan.memory import embeddings
+
+        monkeypatch.setattr(embeddings, "_try_load_fastembed", lambda: False)
+        store = self._unique_store()
+        with pytest.raises(MemoryStoreError, match="bag-of-words"):
+            store.store(_make_case("fallback"))
+        assert store.count() == 0
+        assert store.retrieve("ransomware encryption", top_k=3) == []
+        store.clear()
 
     def _unique_store(self) -> QdrantStore:
         """Return a QdrantStore with a unique test collection."""
