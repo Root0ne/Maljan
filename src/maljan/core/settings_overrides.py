@@ -744,10 +744,39 @@ def trim_declarations(
 _CREDENTIAL_IN_URL = re.compile(r"(://)[^\s/@]*(?:@[^\s/@]*)*@")
 
 
+# The words that make a parameter name a secret's, read as whole tokens: the
+# name is split at ``_``, ``.``, ``-`` and camelCase humps, so ``clientSecret``
+# and ``x-sig`` are caught and ``design``, ``keyword`` and ``author`` are not.
+_SECRET_WORDS = frozenset(
+    {
+        "key", "apikey", "token", "secret", "password", "passwd", "pwd", "auth",
+        "credential", "sig", "signature", "sas", "code",
+    }
+)  # fmt: skip
+_QUERY_PARAM = re.compile(r"([?&#])([\w.-]+)=([^\s&#\"'<>]*)")
+# A URL: from its scheme to the next space or quote.
+_URL_SPAN = re.compile(r"[a-zA-Z][a-zA-Z0-9+.-]*://[^\s\"'<>]*")
+
+
+def _secret_name(name: str) -> bool:
+    spaced = re.sub(r"(?<=[a-z0-9])(?=[A-Z])", "_", name).lower()
+    return any(token in _SECRET_WORDS for token in re.split(r"[_.-]+", spaced))
+
+
+def _mask_param(param: re.Match[str]) -> str:
+    if _secret_name(param.group(2)):
+        return f"{param.group(1)}{param.group(2)}=***"
+    return param.group(0)
+
+
+def _mask_secret_params(url: re.Match[str]) -> str:
+    return _QUERY_PARAM.sub(_mask_param, url.group(0))
+
+
 def redact_url(text: str) -> str:
-    """Mask any ``scheme://user:pass@`` credential in ``text`` before it is shown.
+    """Mask any ``scheme://user:pass@`` credential, and any secret-named query parameter.
 
     Applied to free text (a driver's error message, a config value echoed
     back), not only to values known to be URLs.
     """
-    return _CREDENTIAL_IN_URL.sub(r"\1***@", text)
+    return _URL_SPAN.sub(_mask_secret_params, _CREDENTIAL_IN_URL.sub(r"\1***@", text))

@@ -90,6 +90,11 @@ class GenericMCPStaticProvider(StaticProvider):
         else:
             self._cfg = cfg
             self._handle = self._build_handle(label or "generic", cfg)
+        self.rests: list[dict[str, Any]] = []
+        # The job's event sink, set by the container once it is known.
+        self.event_sink: Any = None
+        self._guard_cfg: Any = None
+        self._attach_guard()
         self._label = label
         self._prompt_fragment_text = prompt_fragment_text
         self._prompt_lead_text = prompt_lead_text
@@ -102,6 +107,35 @@ class GenericMCPStaticProvider(StaticProvider):
         # are recorded under, for the run's isolation part.
         self._handle.declared_source = self.declaration_source
         self._handle.measures_isolation = True
+
+    def _rested(self, record: dict[str, Any]) -> None:
+        """Keep one breaker opening for the run summary and announce it."""
+        from maljan.pipeline.events import emit_tool_server_rested
+
+        self.rests.append(dict(record))
+        emit_tool_server_rested(self.event_sink, record)
+
+    def _regard(self, cfg: Any) -> None:
+        """Rebuild the guard from ``cfg``, the settings this provider was built from."""
+        self._handle.guard = None
+        self._attach_guard(cfg)
+
+    def _attach_guard(self, cfg: Any = None) -> None:
+        """Give a handle the registry did not build a guard limiting only what the operator set."""
+        if getattr(self._handle, "guard", None) is not None:
+            return
+        from maljan.providers.server_guard import operator_guard
+        from maljan.providers.static.ghidra.provider import get_settings_or_none
+
+        cfg = cfg if cfg is not None else get_settings_or_none()
+        block = self._handle.config
+        self._handle.guard = operator_guard(
+            self._handle.name,
+            cfg,
+            block=block,
+            on_open=self._rested,
+            sample_open=getattr(block, "sample_open", None),
+        )
 
     def _mirror_path(self) -> str | None:
         """The path the server can open for the job's sample, ``None`` before a job."""
@@ -154,7 +188,9 @@ class GenericMCPStaticProvider(StaticProvider):
                     name,
                 )
             return cls(ServerHandle(name or "generic", MCPServerConfig()))
-        return cls(ServerHandle(name, entry), label=entry.label or name)
+        provider = cls(ServerHandle(name, entry), label=entry.label or name)
+        provider._regard(cfg)
+        return provider
 
     @property
     def capabilities(self) -> StaticCapabilities:

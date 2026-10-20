@@ -743,9 +743,14 @@ def sandbox_api_calls(
                     callers.setdefault(str(api), set()).add(_label(str(pid)))
 
     first_call: dict[str, dict[str, Any]] = {}
+    left_out = 0
     for pid, call in _calls_by_process(report):
         api = str(call.get("api") or "")
-        if not api or (pid and not _is_wanted(pid)):
+        if api and not pid and wanted_process:
+            left_out += 1
+        # With a process asked for, a call the report gave no pid cannot be
+        # said to be that process's: it is left out rather than listed under it.
+        if not api or (not pid and wanted_process) or (pid and not _is_wanted(pid)):
             continue
         counts.setdefault(api, 0)
         if pid and _label(pid):
@@ -774,7 +779,11 @@ def sandbox_api_calls(
             }
         )
     page, meta = _page(rows, offset, limit)
-    return {"apis": page, "total": len(rows), **meta}
+    answer: dict[str, Any] = {"apis": page, "total": len(rows), **meta}
+    if left_out:
+        # Said, not dropped: these calls may be the asked process's.
+        answer["left_out_without_pid"] = left_out
+    return answer
 
 
 def sandbox_mutexes(

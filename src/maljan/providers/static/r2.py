@@ -438,6 +438,7 @@ class R2StaticProvider(GenericMCPStaticProvider):
         )
         provider = cls(handle, label="radare2 MCP", prompt_lead_text=cls.R2_LEAD)
         provider._mirror_dir = r2.mirror_dir
+        provider._regard(cfg)
         return provider
 
     def open(self, job: Any) -> None:

@@ -1,5 +1,6 @@
 import copy
 import json
+import re
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -252,6 +253,37 @@ def extract_dns(pcap_path: str, packet_limit: int | None = None) -> str:
         return _text_error(code_for_exception(e), f"{type(e).__name__}: {e}", "extract_dns")
 
 
+# A request line as HTTP/1.x writes it: a method token (any, not a fixed
+# list), a target, the version.
+# The target is whatever the sender wrote (it may hold a bare line feed).
+_REQUEST_LINE = re.compile(rb"^[!#$%&'*+\-.^_`|~0-9A-Za-z]+ .* HTTP/1\.[01]$", re.DOTALL)
+
+
+def http_request_of(data: bytes) -> tuple[bytes, bytes] | None:
+    """The request line and Host header of an HTTP/1.x request at the start of ``data``.
+
+    Any method counts (PATCH, OPTIONS, CONNECT and a made-up one as much as
+    GET). The Host header is found by name, case-insensitively, with or
+    without the space after the colon, and only among the headers, never in a
+    body after the blank line. ``None`` when ``data`` does not start with a
+    request line; the host is the header line as sent, or ``b""`` when there is none.
+    """
+    head = data.split(b"\r\n\r\n", 1)[0]
+    lines = head.split(b"\r\n")
+    # The five methods always read are kept as read before, however the segment
+    # ends; any other method needs its whole request line.
+    if not (
+        data.startswith((b"GET ", b"POST ", b"PUT ", b"DELETE ", b"HEAD "))
+        or _REQUEST_LINE.match(lines[0])
+    ):
+        return None
+    for line in lines[1:]:
+        name, colon, value = line.partition(b":")
+        if colon and name.strip().lower() == b"host":
+            return lines[0], line
+    return lines[0], b""
+
+
 @mcp.tool()
 def extract_http(pcap_path: str, packet_limit: int | None = None) -> str:
     """Extract every HTTP request line and Host header; ``packet_limit`` reads fewer packets."""
@@ -269,18 +301,18 @@ def extract_http(pcap_path: str, packet_limit: int | None = None) -> str:
             # The segment's payload as its IP header bounds it; trailing
             # link-layer bytes are not the sender's request.
             data = pkt.tcp.data if pkt.tcp is not None else b""
-            if not data.startswith((b"GET ", b"POST ", b"PUT ", b"DELETE ", b"HEAD ")):
-                return
             # The request line, and the Host header when there is one.
-            lines = data.split(b"\r\n")
-            host = next((x for x in lines[1:] if x.lower().startswith(b"host: ")), b"")
-            seen = requests.get((lines[0], host))
+            found = http_request_of(data)
+            if found is None:
+                return
+            request, host = found
+            seen = requests.get((request, host))
             if seen is not None:
                 seen[1] += 1
                 return
-            line, written_host = _written(lines[0], unwritten), _written(host, unwritten)
+            line, written_host = _written(request, unwritten), _written(host, unwritten)
             if line is not None and written_host is not None:
-                requests[(lines[0], host)] = [f"{line} | {written_host}", 1]
+                requests[(request, host)] = [f"{line} | {written_host}", 1]
 
         read = each_packet(str(capture), _isolated(_visit, unwritten), packet_limit)
         for failure in unwritten:

@@ -48,11 +48,18 @@ def analyze(
     sample_path: str | None = typer.Option(
         None, "--sample", "-s", help="Path to the malware sample file for sandbox submission."
     ),
-    provider: str = typer.Option(
-        "openai", "--provider", "-p", help="A registered LLM provider's name."
+    provider: str | None = typer.Option(
+        None,
+        "--provider",
+        "-p",
+        help="A registered LLM provider's name (default: the configured one).",
     ),
-    max_iterations: int = typer.Option(
-        2, "--max-iterations", "-i", min=1, help="Maximum negotiation rounds."
+    max_iterations: int | None = typer.Option(
+        None,
+        "--max-iterations",
+        "-i",
+        min=1,
+        help="Maximum negotiation rounds (default: the configured number).",
     ),
     mock: bool = typer.Option(
         False, "--mock", "-m", help="Run in mock mode without real LLM calls."
@@ -71,7 +78,9 @@ def analyze(
 
     # Build config at construction time — no post-init mutation
     config = _settings()
-    if not mock:
+    if provider is not None and not mock:
+        # Only an option the operator gave replaces the configured value; a
+        # default of the command's own would silently overwrite their settings.
         # The same judgement a save and a job make: a shipped id, or an
         # installed plugin these settings' allow-list names.
         refused = id_refusal("llm", provider, config.plugins.allowed)
@@ -79,7 +88,8 @@ def analyze(
             known = ", ".join(shipped_ids("llm"))
             raise typer.BadParameter(f"provider must be one of {known}; {refused}")
         config.llm.provider = cast(Any, provider)
-    config.negotiation.max_iterations = max_iterations
+    if max_iterations is not None:
+        config.negotiation.max_iterations = max_iterations
 
     # Create and run. The ``finally`` covers the whole of it — a completed
     # run, a failed one and an interrupted one alike — because what the run
