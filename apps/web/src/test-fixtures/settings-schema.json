@@ -9856,7 +9856,8 @@
       ],
       "knowledge": [
        "MALJAN_INDEX_RETRY_SECONDS",
-       "MALJAN_ATTCK_REFRESH_DAYS"
+       "MALJAN_ATTCK_REFRESH_DAYS",
+       "MALJAN_SAMPLE_SHA256"
       ],
       "network": [
        "MALJAN_STAGING_DIR",

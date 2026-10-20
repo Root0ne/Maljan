@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import ipaddress
+import re
 from typing import Any
 from urllib.parse import urlsplit
 
@@ -188,6 +189,9 @@ async def _try_ipwhois(address: str) -> str | None:
     return await asyncio.to_thread(_blocking)
 
 
+_AUTNUM_HANDLE = re.compile(r"AS(\d+)", re.IGNORECASE)
+
+
 def _find_first_autnum(rdap: dict[str, Any]) -> str | None:
     """RDAP bootstrap can nest the autnum in several places; grab the first."""
     entities = rdap.get("entities") or []
@@ -196,6 +200,7 @@ def _find_first_autnum(rdap: dict[str, Any]) -> str | None:
             if not isinstance(ent, dict):
                 continue
             handle = ent.get("handle")
-            if isinstance(handle, str) and handle.lower().startswith("as"):
-                return handle[2:]
+            match = _AUTNUM_HANDLE.fullmatch(handle) if isinstance(handle, str) else None
+            if match:
+                return match.group(1)
     return None

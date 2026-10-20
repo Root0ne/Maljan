@@ -247,9 +247,32 @@ def _scratch(directory: Path | None = None) -> Path:
     return staging.private_dir(root / _SCRATCH_DIRECTORY)
 
 
-def _limit_address_space() -> None:
-    """Run in the child before FLOSS starts: cap the address space it may map."""
-    resource.setrlimit(resource.RLIMIT_AS, (FLOSS_ADDRESS_SPACE_BYTES, FLOSS_ADDRESS_SPACE_BYTES))
+# What a result says when the child ran without its address-space cap.
+NO_MEMORY_CAP = "the memory cap could not be applied; FLOSS ran without it"
+
+
+def _limit_address_space(pid: int) -> bool:
+    """Cap the address space the child may map, set from here once it exists.
+
+    Not a ``preexec_fn``: that runs Python in the forked child of a threaded
+    server, where a lock another thread held at the fork is never released.
+    ``prlimit`` caps a running process, and the cap binds every mapping made
+    after it, which is all of FLOSS's own. The child runs for the moment
+    between its start and this call without the cap, a window accepted for not
+    running Python in the fork. Whether the cap was set is returned and never
+    raised: the child is tracked and its group killed either way.
+    """
+    prlimit = getattr(resource, "prlimit", None)
+    if prlimit is None:
+        return False
+    limit = (FLOSS_ADDRESS_SPACE_BYTES, FLOSS_ADDRESS_SPACE_BYTES)
+    try:
+        prlimit(pid, resource.RLIMIT_AS, limit)
+    except ProcessLookupError:
+        return True  # already gone: nothing is left to cap
+    except (OSError, ValueError):
+        return False
+    return True
 
 
 class NotThePinnedBuild(OSError):
@@ -349,8 +372,8 @@ def _spawn(
             env=env,
             cwd=workdir,
             start_new_session=True,
-            preexec_fn=_limit_address_space,  # noqa: PLW1509 - one setrlimit call
         )
+        capped = _limit_address_space(process.pid)
     # Its own session, so its group is what the server kills when every caller
     # of this run has gone (``tools.children``).
     from maljan.tools import children
@@ -369,7 +392,12 @@ def _spawn(
         process.wait()
         raise
     stdout = out_path.read_bytes().decode("utf-8", errors="replace")
-    return subprocess.CompletedProcess(command, process.returncode, stdout, _file_tail(err_path))
+    finished = subprocess.CompletedProcess(
+        command, process.returncode, stdout, _file_tail(err_path)
+    )
+    if not capped:
+        finished.memory_cap_applied = False  # type: ignore[attr-defined]
+    return finished
 
 
 def _file_tail(path: Path) -> str:
@@ -465,12 +493,16 @@ def _rows(document: dict[str, Any]) -> list[dict[str, Any]]:
     return rows
 
 
+# The key a run's note that it had no memory cap travels under, in its document.
+_UNCAPPED_KEY = "_memory_cap"
+
+
 def _meta(document: dict[str, Any]) -> dict[str, Any]:
     """What FLOSS says about its own run: version, image base, how much it looked at."""
     meta = document.get("metadata") or {}
     functions = (document.get("analysis") or {}).get("functions") or {}
     runtime = meta.get("runtime") or {}
-    return {
+    answer = {
         "floss_version": str(meta.get("version") or ""),
         "imagebase": _hex(meta.get("imagebase")),
         "language": str(meta.get("language") or ""),
@@ -478,6 +510,9 @@ def _meta(document: dict[str, Any]) -> dict[str, Any]:
         "functions_emulated_for_decoding": functions.get("analyzed_decoded_strings"),
         "runtime_s": runtime.get("total"),
     }
+    if document.get(_UNCAPPED_KEY):
+        answer["memory_cap"] = str(document[_UNCAPPED_KEY])
+    return answer
 
 
 def _error(message: str) -> dict[str, Any]:
@@ -518,18 +553,19 @@ def _emulate(
                 "space) and was stopped"
             )
         return f"FLOSS exited with status {finished.returncode}: {_tail(finished.stderr)}"
+    uncapped = getattr(finished, "memory_cap_applied", True) is False
     output = (finished.stdout or "").strip()
     if not output:
         # FLOSS prints nothing at all for a file with no printable run in it,
         # which is an answer: there was nothing to start from.
-        return {}
+        return {_UNCAPPED_KEY: NO_MEMORY_CAP} if uncapped else {}
     try:
         parsed = json.loads(output)
     except json.JSONDecodeError:
         return f"FLOSS answered with something other than its JSON document: {_tail(output)}"
     if not isinstance(parsed, dict):
         return "FLOSS answered with something other than its JSON document"
-    return parsed
+    return {**parsed, _UNCAPPED_KEY: NO_MEMORY_CAP} if uncapped else parsed
 
 
 def _key(target: Path, min_len: int) -> tuple[str, int, int, int]:

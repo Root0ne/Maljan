@@ -15,6 +15,7 @@ from langchain_core.language_models.chat_models import BaseChatModel
 from maljan.core.config import OpenAIConfig, Settings
 from maljan.core.exceptions import LLMError
 from maljan.core.logger import logger
+from maljan.core.settings_overrides import redact_url
 from maljan.llm.provider_base import (
     COMPLETION_MAX_TOKENS,
     COMPLETION_PROMPT,
@@ -483,10 +484,15 @@ class _Join:
         self.raw_arguments: dict[int, list[str]] = {}
         self.usage: Any = None
         self.last: dict[str, Any] = {}
+        self.finished = False
 
     def add(self, chunk: Any) -> None:
         chunk = _own_copy(chunk)
         message = chunk.message
+        if (chunk.generation_info or {}).get("finish_reason") or (
+            getattr(message, "response_metadata", None) or {}
+        ).get("finish_reason"):
+            self.finished = True
         if getattr(message, "usage_metadata", None):
             self.usage = message.usage_metadata
             message.usage_metadata = None
@@ -583,6 +589,24 @@ class _Join:
             parse_tool_call,
             make_invalid_tool_call,
         )
+
+
+def _complete(join: _Join, ended: list[str]) -> Any:
+    """``join``'s answer, refused when the stream stopped without saying it was done.
+
+    A stream carries its end: the last chunk names the ``finish_reason``. One
+    that stops before it was cut by the connection (a proxy, a restart, a
+    dropped link that closed cleanly) and its text is a prefix, not the answer.
+    It is raised as the dropped connection it is, which the callers that replay
+    a dropped call already read. An answer the caller's own watch ended is
+    complete by that decision and is not refused.
+    """
+    result = join.result()
+    if not join.finished and not ended:
+        import openai
+
+        raise openai.APIConnectionError(request=None)  # type: ignore[arg-type]
+    return result
 
 
 def _joined_answer(chunks: list[Any], *, keep_reasoning: bool = False) -> Any:
@@ -902,7 +926,7 @@ def with_streamed_answers(chat_class: Any, *, keep_reasoning: bool = False) -> A
                     join.add(chunk)
         finally:
             _PIECES.reset(token)
-        return _ended_answer(join.result(), ended, counter, messages, kwargs)
+        return _ended_answer(_complete(join, ended), ended, counter, messages, kwargs)
 
     def _generate(
         self: Any, messages: Any, stop: Any = None, run_manager: Any = None, **kwargs: Any
@@ -916,7 +940,7 @@ def with_streamed_answers(chat_class: Any, *, keep_reasoning: bool = False) -> A
                     join.add(chunk)
         finally:
             _PIECES.reset(token)
-        return _ended_answer(join.result(), ended, counter, messages, kwargs)
+        return _ended_answer(_complete(join, ended), ended, counter, messages, kwargs)
 
     def _ended_answer(
         result: Any, ended: list[str], counter: list[int], messages: Any, kwargs: dict[str, Any]
@@ -1407,7 +1431,7 @@ class OpenAIProvider(LLMProvider):
 
         if extra:
             build_kwargs["extra_body"] = extra
-        logger.debug("openai provider: sending llama.cpp extras to %s.", base_url)
+        logger.debug("openai provider: sending llama.cpp extras to %s.", redact_url(str(base_url)))
 
     def _add_deepseek_fields(self, build_kwargs: dict[str, Any]) -> None:
         """The two request fields DeepSeek reads where OpenAI's API reads others.
@@ -1532,7 +1556,7 @@ def _with_standard_retry(
                     "openai provider: %s rejected %r, which only llama.cpp reads; retrying "
                     "without the llama.cpp extras and sending standard fields to it from "
                     "now on.%s",
-                    base_url,
+                    redact_url(str(base_url)),
                     parameter,
                     declared,
                 )

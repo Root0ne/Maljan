@@ -300,6 +300,13 @@ class _OllamaParts:
                 break
             self.read += 1
             yield {"model": "m", "message": {"role": "assistant", "content": line}, "done": False}
+        # A server's stream ends with the message that says it is finished.
+        yield {
+            "model": "m",
+            "message": {"role": "assistant", "content": ""},
+            "done": True,
+            "done_reason": "stop",
+        }
 
 
 def _ollama(parts: _OllamaParts) -> Any:

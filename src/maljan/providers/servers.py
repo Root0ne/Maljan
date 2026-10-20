@@ -257,6 +257,7 @@ class ServerHandle:
         self._toolkit: Any = None
         self._all_tools: list[Any] = []
         self._job_id: str = ""
+        self._sample_sha256: str = ""
         # True once ``aopen`` has attached this handle: its exit stack was
         # wound on whichever loop called it, so it must be unwound there too
         # (see ``close``).
@@ -456,6 +457,26 @@ class ServerHandle:
         env[staging.STAGING_JOB_ENV] = leaf
         staging.note_job_directory(self._job_id, staging.staging_base(env) / leaf)
 
+    def _name_the_sample(self, env: dict[str, str]) -> None:
+        """Give a server that asks for it the run's sample sha256.
+
+        Only a server that names ``MALJAN_SAMPLE_SHA256`` in its ``env_allow`` (or
+        its own ``env``) is told: a third party's tool server learns nothing of
+        the sample it was not set up to see. Cleared first and unconditionally,
+        as the staging leaf is: a stored ``env`` value is never the run's.
+        """
+        from maljan.core.config import REQUIRED_ENV_ALLOW
+        from maljan.tools.knowledge import SAMPLE_SHA256_ENV
+
+        env.pop(SAMPLE_SHA256_ENV, None)
+        wanted = (
+            SAMPLE_SHA256_ENV in REQUIRED_ENV_ALLOW.get(self.name, ())
+            or SAMPLE_SHA256_ENV in self.config.env_allow
+            or SAMPLE_SHA256_ENV in self.config.env
+        )
+        if wanted and self._sample_sha256:
+            env[SAMPLE_SHA256_ENV] = self._sample_sha256
+
     def _build_toolkit(
         self,
         output_guardrail: Callable[[str], str] | None,
@@ -483,6 +504,7 @@ class ServerHandle:
 
             env = child_env(self.config.env, allow=tuple(self.config.env_allow), server=self.name)
             self._name_the_job_staging(env)
+            self._name_the_sample(env)
             if self.name not in BUILTIN_SERVER_KEYS:
                 # Byte-for-byte with the pre-branch built-ins (spec S3.2): the
                 # in-repo network/threatintel sidecars were launched with a
@@ -542,6 +564,7 @@ class ServerHandle:
         max_output_chars: int = 0,
         truncation_ledger: Any | None = None,
         context_budget: Any | None = None,
+        sample_sha256: str = "",
     ) -> None:
         """Attach for ``job_id``. Same id is a no-op; a different id reattaches."""
         if self._toolkit is not None:
@@ -553,6 +576,7 @@ class ServerHandle:
             )
             self.close()
         self._job_id = job_id
+        self._sample_sha256 = sample_sha256
         if not self.config.enabled:
             logger.info("mcp server '%s' is disabled.", self.name)
             return
@@ -629,6 +653,7 @@ class ServerHandle:
                 return
             await self.aclose()
         self._job_id = job_id
+        self._sample_sha256 = str(context.get("sample_sha256") or "")
         if not self.config.enabled:
             logger.info("mcp server '%s' is disabled.", self.name)
             return
@@ -1405,6 +1430,7 @@ class ServerRegistry:
         context_budget: Any | None = None,
         event_sink: Any | None = None,
         sample_notes: Any | None = None,
+        sample_sha256: Callable[[], str] | None = None,
     ) -> None:
         from maljan.providers.sample_open import SampleNotes
         from maljan.providers.server_guard import guard_from_settings
@@ -1449,6 +1475,9 @@ class ServerRegistry:
         # guardrail on a tool server's answer counted on nothing and cut at the
         # signature's own default rather than at the number the operator set.
         self._truncation_ledger = truncation_ledger
+        # The run's sample, read when a server is attached (it is known only
+        # once the job has started): the platform's fact, never the model's.
+        self._sample_sha256 = sample_sha256
         self._max_output_chars = int(getattr(cfg.preprocessing, "max_tool_output_chars", 0) or 0)
         # What that limit means when it is zero: the window the served model
         # was found to have, spent per call. The budget travels with the attach
@@ -1531,6 +1560,8 @@ class ServerRegistry:
         out["max_output_chars"] = self._max_output_chars
         if self._context_budget is not None:
             out["context_budget"] = self._context_budget
+        # Written unconditionally: a caller's own value is never the job's.
+        out["sample_sha256"] = (self._sample_sha256() if self._sample_sha256 else "") or ""
         return out
 
     def _handle_for(self, handle: ServerHandle, loop: asyncio.AbstractEventLoop) -> ServerHandle:

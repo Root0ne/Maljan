@@ -164,7 +164,7 @@ def spill_part(
         return {"part": part, "error": over}
     try:
         blob = part_bytes(part, value)
-    except (TypeError, ValueError) as exc:
+    except (TypeError, ValueError, RecursionError) as exc:
         return {"part": part, "error": f"not_serialisable ({type(exc).__name__})"}
     digest = hashlib.sha256(blob).hexdigest()
     ref: dict[str, Any] = {"part": part, "bytes": len(blob), "sha256": digest}

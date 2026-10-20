@@ -55,7 +55,12 @@ def _int(value: Any) -> int:
 
 def _rows(value: Any) -> list[dict[str, Any]]:
     """Keep only the dict entries of a possibly-mixed sandbox-report array."""
-    return [row for row in (value or []) if isinstance(row, dict)]
+    return [row for row in _list(value) if isinstance(row, dict)]
+
+
+def _list(value: Any) -> list[Any]:
+    """``value`` when it is a list, else nothing: a block of the wrong shape holds no rows."""
+    return value if isinstance(value, list) else []
 
 
 def _as_str_list(value: Any) -> list[str]:
@@ -641,6 +646,10 @@ def _block(value: Any) -> dict[str, Any]:
     return value if isinstance(value, dict) else {}
 
 
+def _text_or_none(value: Any) -> str | None:
+    return value if isinstance(value, str) and value else None
+
+
 def _extracted(value: Any) -> list[Any] | dict[str, Any]:
     if isinstance(value, dict):
         return value
@@ -691,9 +700,9 @@ def cape_report_to_sandbox_report(
             name=str(p.get("process_name") or p.get("name") or ""),
             command_line=str(p.get("command_line") or p.get("cmd") or ""),
             first_seen=str(p.get("first_seen") or ""),
-            calls=[c for c in (p.get("calls") or []) if isinstance(c, dict)],
+            calls=[c for c in _list(p.get("calls")) if isinstance(c, dict)],
         )
-        for p in (behavior.get("processes") or [])
+        for p in _list(behavior.get("processes"))
         if isinstance(p, dict)
     ]
     signatures = [
@@ -701,10 +710,10 @@ def cape_report_to_sandbox_report(
             name=str(s.get("name") or ""),
             description=str(s.get("description") or s.get("name") or ""),
             severity=_int(s.get("severity") or s.get("score")),
-            marks=list(s.get("marks") or []),
+            marks=list(_list(s.get("marks"))),
             ttp_tags=_as_str_list(s.get("ttp_tags") or s.get("attck_id")),
         )
-        for s in (raw.get("signatures") or [])
+        for s in _list(raw.get("signatures"))
         if isinstance(s, dict)
     ]
     published: dict[str, Any] = {}
@@ -716,7 +725,7 @@ def cape_report_to_sandbox_report(
     return SandboxReport(
         provider=provider,
         source_format=source_format,
-        task_id=str(task_id or (raw.get("info") or {}).get("id") or ""),
+        task_id=str(task_id or _block(raw.get("info")).get("id") or ""),
         target=SandboxTarget(
             # CAPE nests the hashes under target.file.*; a handful of other
             # builds (and the neutral providers upstream of this one) put them
@@ -734,10 +743,10 @@ def cape_report_to_sandbox_report(
         processes=processes,
         apistats={
             str(pid): {str(api): _int(n) for api, n in (stats or {}).items()}
-            for pid, stats in (behavior.get("apistats") or {}).items()
+            for pid, stats in _block(behavior.get("apistats")).items()
             if isinstance(stats, dict)
         },
-        generic_events=[g for g in (behavior.get("generic") or []) if isinstance(g, dict)],
+        generic_events=[g for g in _list(behavior.get("generic")) if isinstance(g, dict)],
         signatures=signatures,
         network=SandboxNetwork(
             dns=_rows(net.get("dns")),
@@ -745,13 +754,13 @@ def cape_report_to_sandbox_report(
             tcp=_rows(net.get("tcp")),
             udp=_rows(net.get("udp")),
             hosts=_rows(net.get("hosts")),
-            domains=list(net.get("domains") or []),
+            domains=[d for d in _list(net.get("domains")) if isinstance(d, str | dict)],
             tls=_rows(net.get("tls")),
             icmp=_rows(net.get("icmp")),
-            pcap_local_path=net.get("pcap_local_path") or None,
+            pcap_local_path=_text_or_none(net.get("pcap_local_path")),
         ),
         dropped_files=_rows(raw.get("dropped")),
-        registry=_as_str_list((behavior.get("summary") or {}).get("keys")),
+        registry=_as_str_list(summary_raw.get("keys")),
         channels=_cape_channels(raw, behavior),
         screenshots=_rows(raw.get("screenshots")),
         cti=cti_field if isinstance(cti_field, dict) else {},
@@ -779,13 +788,26 @@ def _split_host_port(value: str) -> tuple[str, int | None]:
     than separate host/port fields (confirmed against the "Dynamic Report"
     docs page on 2026-09-04). A value with no trailing ``:<digits>`` is kept
     whole as the host, port ``None`` — this also covers a bare IPv6 address,
-    which is never mistaken for a port suffix since the part after the last
-    ``:`` would not be all-digits.
+    which is never mistaken for a port suffix (its last group can be all
+    digits: ``2001:db8::1``). An IPv6 address Triage writes with brackets
+    (``[2001:db8::1]:443``) is returned without them, as every other source
+    states one.
     """
+    if value.count(":") > 1 and not value.startswith("["):
+        # Several colons without brackets: a bare IPv6 address, whose last
+        # group is not a port (``2001:db8::1``), or no host at all.
+        return value, None
     host, sep, port_str = value.rpartition(":")
     if sep and port_str.isdigit():
-        return host, int(port_str)
-    return value, None
+        return _unbracketed(host), int(port_str)
+    return _unbracketed(value), None
+
+
+def _unbracketed(host: str) -> str:
+    """``host`` without the brackets that set an IPv6 address apart from its port."""
+    if len(host) > 2 and host.startswith("[") and host.endswith("]"):
+        return host[1:-1]
+    return host
 
 
 # The key a flow row states its attribution under: ``True`` when the process

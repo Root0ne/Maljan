@@ -29,8 +29,9 @@ def _find_balanced(text: str, start: int) -> int | None:
     """Return the index of the matching closer for ``text[start]`` or ``None``.
 
     Walks the string respecting double-quoted JSON strings, so braces inside
-    a string literal do not affect nesting. This is intentionally a single
-    forward scan — no regex — to guarantee linear time.
+    a string literal do not affect nesting. The quote scan starts at ``start``,
+    so a stray quote in prose before the payload hides nothing. This is
+    intentionally a single forward scan, no regex, to guarantee linear time.
     """
     opener = text[start]
     closer = _OPEN_CLOSE.get(opener)
@@ -62,10 +63,18 @@ def _find_balanced(text: str, start: int) -> int | None:
 
 
 def extract_json(text: str) -> str:
-    """Return the first JSON object/array substring in ``text``.
+    """Return the JSON object/array substring in ``text`` that is the payload.
 
     The function strips Markdown fences first, then locates the first
-    ``{`` or ``[`` and walks forward until the matching closer.
+    ``{`` or ``[`` and walks forward until the matching closer. That span is
+    the payload unless it is the prose's own bracket, which is skipped for the
+    next one: a span that is not JSON and looks like prose (no ``"`` and no
+    ``:``: ``{placeholder}``, ``[see below]``), or one that reads as JSON but
+    is a list of numbers only (``[1]``, ``[0, 1]``) inside a line of prose, in which case a later
+    object or list of structures wins. A payload that begins the answer or a
+    line (or follows a fence), broken or not, is always the answer, so the
+    repair and the decode error read it. Each candidate is scanned from its own
+    opener, and a skipped span is passed whole, so the walk is linear.
     """
     if len(text) > MAX_INPUT_CHARS:
         text = text[:MAX_INPUT_CHARS]
@@ -77,14 +86,78 @@ def extract_json(text: str) -> str:
         if text.endswith("```"):
             text = text[:-3]
 
-    # Find the first opening bracket and walk forward.
-    for start, ch in enumerate(text):
-        if ch in _OPEN_CLOSE:
-            end = _find_balanced(text, start)
-            if end is not None:
-                return text[start : end + 1].strip()
+    first: str | None = None
+    weak: str | None = None
+    at = 0
+    # Whether the current line holds text other than blanks before ``at``, kept
+    # as ``at`` advances rather than read off a slice of the prefix.
+    line_text = False
+    while at < len(text):
+        ch = text[at]
+        if ch not in _OPEN_CLOSE:
+            if ch == "\n":
+                line_text = False
+            elif not ch.isspace():
+                line_text = True
+            at += 1
+            continue
+        end = _find_balanced(text, at)
+        if end is None:
             break
+        span = text[at : end + 1].strip()
+        if first is None:
+            first = span
+        # Inside a line of prose (a citation, a range); a span that begins its
+        # own line is an answer, whatever it holds.
+        after_prose = line_text
+        parsed = _parsed(span)
+        if parsed is _UNREAD:
+            if '"' in span or ":" in span:
+                # A payload that does not read: the repair and the error read it.
+                return span
+            line_text = _line_text_after(text, at, end)
+            at = end + 1
+            continue
+        if not (after_prose and _is_marker(parsed)):
+            return span
+        if weak is None:
+            weak = span
+        line_text = _line_text_after(text, at, end)
+        at = end + 1
+    if weak is not None:
+        return weak
+    if first is not None:
+        return first
     return text.strip()
+
+
+def _line_text_after(text: str, at: int, end: int) -> bool:
+    """Whether the line holds text other than blanks after the span ``text[at:end + 1]``."""
+    newline = text.rfind("\n", at, end + 1)
+    if newline < 0:
+        return True  # the span itself is text on the line
+    return bool(text[newline + 1 : end + 1].strip())
+
+
+_UNREAD = object()
+
+
+def _parsed(span: str) -> Any:
+    for candidate in (span, repair_json(span)):
+        try:
+            return json.loads(candidate)
+        except (json.JSONDecodeError, RecursionError):
+            continue
+    return _UNREAD
+
+
+def _is_marker(value: Any) -> bool:
+    """Whether a parsed span is only numbers in a list, a citation or range: ``[1]``, ``[0, 1]``."""
+    return (
+        isinstance(value, list)
+        and bool(value)
+        and all(isinstance(v, int | float) and not isinstance(v, bool) for v in value)
+    )
 
 
 # Trailing-comma and single-quote repairs use bounded, non-greedy patterns
@@ -124,12 +197,12 @@ def safe_parse_json(text: str) -> Any:
 
     try:
         return json.loads(repaired)
-    except json.JSONDecodeError:
+    except (json.JSONDecodeError, RecursionError):
         pass
 
     try:
         return json.loads(cleaned)
-    except json.JSONDecodeError:
+    except (json.JSONDecodeError, RecursionError):
         return None
 
 
@@ -151,4 +224,6 @@ def json_decode_error(text: str) -> tuple[str, int, str] | None:
         json.loads(cleaned)
     except json.JSONDecodeError as exc:
         return exc.msg, exc.pos, cleaned
+    except RecursionError:
+        return None
     return None

@@ -313,7 +313,8 @@ def _ungrounded_claim_count(report: Any) -> int:
             if not section_is_grounded(section):
                 count += 1
         except Exception:  # noqa: BLE001 — a linter never fails a report
-            continue
+            # A check that could not run has not shown the section grounded.
+            count += 1
     for mapping in getattr(report, "ttp_mappings", None) or []:
         if not getattr(mapping, "contributing_layers", None) and not getattr(
             mapping, "evidence_quotes", None

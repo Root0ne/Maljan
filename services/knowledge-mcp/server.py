@@ -203,6 +203,8 @@ def similar_cases(text: str, k: int = 5) -> dict[str, Any]:
         searched={"query": "text"},
         query=text,
         k=k,
+        # The platform's fact for this run, never an argument the model sets.
+        exclude_sample_id=os.environ.get(knowledge_tools.SAMPLE_SHA256_ENV, "").strip(),
     )
 
 

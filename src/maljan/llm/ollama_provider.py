@@ -39,8 +39,11 @@ class _OllamaJoin:
         self.joined: Any = None
         self.text: list[str] = []
         self.reasoning: list[str] = []
+        self.finished = False
 
     def add(self, chunk: Any) -> None:
+        if (chunk.generation_info or {}).get("done") is True:
+            self.finished = True
         # Its own message, so the chunk the run's callbacks were handed (a
         # LangSmith trace keeps it) stays as the server sent it.
         message = chunk.message
@@ -78,6 +81,21 @@ class _OllamaJoin:
         if update:
             message = message.model_copy(update=update)
         return ChatGenerationChunk(message=message, generation_info=self.joined.generation_info)
+
+
+def _complete(join: _OllamaJoin, ended: list[str]) -> Any:
+    """``join``'s answer, refused when the stream stopped before Ollama said ``done``.
+
+    The last chunk of a stream carries ``done``. A stream that closes without it
+    was cut, and its text is a prefix: raised as the dropped connection it is.
+    An answer the caller's own watch ended is complete by that decision.
+    """
+    result = join.result()
+    if not join.finished and not ended:
+        import openai
+
+        raise openai.APIConnectionError(request=None)  # type: ignore[arg-type]
+    return result
 
 
 def with_watched_streams(chat_class: Any) -> Any:
@@ -150,11 +168,12 @@ def with_watched_streams(chat_class: Any) -> Any:
         **kwargs: Any,
     ) -> Any:
         join = _OllamaJoin()
-        for chunk in self._iterate_over_stream(messages, stop, **kwargs):
-            if run_manager:
-                run_manager.on_llm_new_token(chunk.text, chunk=chunk, verbose=verbose)
-            join.add(chunk)
-        return join.result()
+        with ends_recorded() as ended:
+            for chunk in self._iterate_over_stream(messages, stop, **kwargs):
+                if run_manager:
+                    run_manager.on_llm_new_token(chunk.text, chunk=chunk, verbose=verbose)
+                join.add(chunk)
+        return _complete(join, ended)
 
     async def _achat_stream_with_aggregation(
         self: Any,
@@ -165,11 +184,12 @@ def with_watched_streams(chat_class: Any) -> Any:
         **kwargs: Any,
     ) -> Any:
         join = _OllamaJoin()
-        async for chunk in self._aiterate_over_stream(messages, stop, **kwargs):
-            if run_manager:
-                await run_manager.on_llm_new_token(chunk.text, chunk=chunk, verbose=verbose)
-            join.add(chunk)
-        return join.result()
+        with ends_recorded() as ended:
+            async for chunk in self._aiterate_over_stream(messages, stop, **kwargs):
+                if run_manager:
+                    await run_manager.on_llm_new_token(chunk.text, chunk=chunk, verbose=verbose)
+                join.add(chunk)
+        return _complete(join, ended)
 
     watched_class = type(
         chat_class.__name__,

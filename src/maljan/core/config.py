@@ -1654,7 +1654,11 @@ class MCPServerConfig(BaseModel):
 REQUIRED_ENV_ALLOW: dict[str, tuple[str, ...]] = {
     "analysis": ("MALJAN_STAGING_DIR", "MALJAN_STAGING_TTL_HOURS", "MALJAN_SAMPLE_ROOTS"),
     "network": ("MALJAN_STAGING_DIR", "MALJAN_SAMPLE_ROOTS"),
-    "knowledge": ("MALJAN_INDEX_RETRY_SECONDS", "MALJAN_ATTCK_REFRESH_DAYS"),
+    "knowledge": (
+        "MALJAN_INDEX_RETRY_SECONDS",
+        "MALJAN_ATTCK_REFRESH_DAYS",
+        "MALJAN_SAMPLE_SHA256",
+    ),
 }
 
 

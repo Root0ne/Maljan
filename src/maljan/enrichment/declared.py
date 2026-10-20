@@ -550,7 +550,7 @@ ToolCaller = Callable[[str, str, dict[str, Any]], Awaitable[Any]]
 # (or resolve to) a settle function, called with whether the question was
 # answered once it was or failed (``settle_asked``).
 AskListener = Callable[[str, str, str, str], Any]
-Settle = Callable[[bool], None]
+Settle = Callable[..., None]
 
 
 async def tell_listener(
@@ -574,12 +574,19 @@ async def tell_listener(
         return None
 
 
-def settle_asked(settle: Settle | None, answered: bool) -> None:
-    """Tell a question's settle function how it ended. Never raises."""
+def settle_asked(settle: Settle | None, answered: bool, *, errored: bool = False) -> None:
+    """Tell a question's settle function how it ended. Never raises.
+
+    ``errored`` is a reply with an error status (refused, rate-limited, a
+    fault): the question arrived, though it was not answered.
+    """
     if settle is None:
         return
     try:
-        settle(answered)
+        if errored and not answered:
+            settle(answered, True)
+        else:
+            settle(answered)
     except Exception as exc:  # noqa: BLE001
         logger.debug("enrich: the ask listener failed to settle (%s).", type(exc).__name__)
 
@@ -662,7 +669,11 @@ class SourceAsker:
             settle = await self._told(ready.key, request.host, kind, "")
             try:
                 resp = await self.http.request(**built, timeout=source.timeout_seconds)
-                settle_asked(settle, True)
+                # An error status (refused, rate-limited, a fault) is no answer
+                # about the indicator, but it proves the indicator arrived; a 404
+                # is an answer: the source has no record of it.
+                answered = resp.status_code < 400 or resp.status_code == 404
+                settle_asked(settle, answered, errored=not answered)
             except httpx.HTTPError as exc:
                 settle_asked(settle, False)
                 logger.warning(
