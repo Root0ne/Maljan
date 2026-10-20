@@ -138,7 +138,7 @@ class TestThePackLine:
     def test_the_pack_spelling_is_one_of_the_forms(self, value: str) -> None:
         line = f'routine 0x1000: "{pack_escaped(value)}"@0x1010'.lower()
 
-        assert Haystack([line]).__contains__(value.lower())
+        assert Haystack([line]).holds_text(value.lower())
 
     def test_a_final_backslash_is_written_as_its_code(self) -> None:
         assert pack_escaped("Software\\ExampleVendor\\") == "Software\\ExampleVendor\\x5c"
