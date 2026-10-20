@@ -58,9 +58,9 @@
    "sni": {},
    "beacons": []
   },
-  "summarize_pcap": "#### Packet Capture Analysis (deterministic, whole capture):\n5 of 5 packets in the capture read: 20334 bytes over 4.0s. Protocols: tcp=2, udp=3\n\nExternal conversations (all 2, by volume):\n- 8.8.8.8:53/udp — 3 pkts, 20174 bytes\n- 8.8.8.8:4444/tcp — 2 pkts, 160 bytes\n\nNo regular beaconing interval detected in the packets read.",
+  "summarize_pcap": "#### Packet Capture Analysis (deterministic, whole capture):\n5 of 5 packets in the capture read: 20334 bytes over 4.0s. Protocols: tcp=2, udp=3\n\nExternal conversations (all 2, by volume):\n- 8.8.8.8:53/udp \u2014 3 pkts, 20174 bytes\n- 8.8.8.8:4444/tcp \u2014 2 pkts, 160 bytes\n\nNo regular beaconing interval detected in the packets read.",
   "tool_pcap_summary": {
-   "summary": "#### Packet Capture Analysis (deterministic, whole capture):\n5 of 5 packets in the capture read: 20334 bytes over 4.0s. Protocols: tcp=2, udp=3\n\nExternal conversations (all 2, by volume):\n- 8.8.8.8:53/udp — 3 pkts, 20174 bytes\n- 8.8.8.8:4444/tcp — 2 pkts, 160 bytes\n\nNo regular beaconing interval detected in the packets read.",
+   "summary": "#### Packet Capture Analysis (deterministic, whole capture):\n5 of 5 packets in the capture read: 20334 bytes over 4.0s. Protocols: tcp=2, udp=3\n\nExternal conversations (all 2, by volume):\n- 8.8.8.8:53/udp \u2014 3 pkts, 20174 bytes\n- 8.8.8.8:4444/tcp \u2014 2 pkts, 160 bytes\n\nNo regular beaconing interval detected in the packets read.",
    "empty": false,
    "packets_read": 5,
    "packets_in_capture": 5,
@@ -90,13 +90,13 @@
    "sni": {},
    "beacons": []
   },
-  "read_pcap_summary": "#### Packet Capture Analysis (deterministic, whole capture):\n5 of 5 packets in the capture read: 20334 bytes over 4.0s. Protocols: tcp=2, udp=3\n\nExternal conversations (all 2, by volume):\n- 8.8.8.8:53/udp — 3 pkts, 20174 bytes\n- 8.8.8.8:4444/tcp — 2 pkts, 160 bytes\n\nNo regular beaconing interval detected in the packets read.",
+  "read_pcap_summary": "#### Packet Capture Analysis (deterministic, whole capture):\n5 of 5 packets in the capture read: 20334 bytes over 4.0s. Protocols: tcp=2, udp=3\n\nExternal conversations (all 2, by volume):\n- 8.8.8.8:53/udp \u2014 3 pkts, 20174 bytes\n- 8.8.8.8:4444/tcp \u2014 2 pkts, 160 bytes\n\nNo regular beaconing interval detected in the packets read.",
   "read_pcap_summary_page": "Packets 3 to 4 of the 5 in the capture.\nPacket 3: 10.0.0.2 -> 8.8.8.8 (UDP 5000->53)\nPacket 4: 10.0.0.2 -> 8.8.8.8 (TCP 5001->4444)",
   "extract_dns": "5 of 5 packets in the capture read.\nevil.example.",
   "extract_dns_limit_5": "5 of 5 packets in the capture read.\nevil.example.",
   "extract_http": "5 of 5 packets in the capture read.\n2 times: GET /c2 HTTP/1.1 | Host: evil.example",
   "network_pcap_summary": {
-   "summary": "#### Packet Capture Analysis (deterministic, whole capture):\n5 of 5 packets in the capture read: 20334 bytes over 4.0s. Protocols: tcp=2, udp=3\n\nExternal conversations (all 2, by volume):\n- 8.8.8.8:53/udp — 3 pkts, 20174 bytes\n- 8.8.8.8:4444/tcp — 2 pkts, 160 bytes\n\nNo regular beaconing interval detected in the packets read.",
+   "summary": "#### Packet Capture Analysis (deterministic, whole capture):\n5 of 5 packets in the capture read: 20334 bytes over 4.0s. Protocols: tcp=2, udp=3\n\nExternal conversations (all 2, by volume):\n- 8.8.8.8:53/udp \u2014 3 pkts, 20174 bytes\n- 8.8.8.8:4444/tcp \u2014 2 pkts, 160 bytes\n\nNo regular beaconing interval detected in the packets read.",
    "empty": false,
    "packets_read": 5,
    "packets_in_capture": 5,
@@ -127,6 +127,377 @@
    "beacons": []
   }
  },
+ "edge_layers.pcap": {
+  "capture_facts": {
+   "packets_read": 60,
+   "packets_in_capture": 60,
+   "packet_limit": null,
+   "bytes": 4863,
+   "duration_s": 44.2,
+   "protocols": {
+    "other": 11,
+    "tcp": 16,
+    "udp": 30
+   },
+   "conversations": [
+    {
+     "dst": "8.8.8.8",
+     "dport": 53,
+     "proto": "udp",
+     "packets": 18,
+     "bytes": 1266
+    },
+    {
+     "dst": "8.8.8.8",
+     "dport": 80,
+     "proto": "tcp",
+     "packets": 9,
+     "bytes": 823
+    },
+    {
+     "dst": "8.8.8.8",
+     "dport": 0,
+     "proto": "other",
+     "packets": 8,
+     "bytes": 663
+    },
+    {
+     "dst": "8.8.8.8",
+     "dport": 4789,
+     "proto": "udp",
+     "packets": 2,
+     "bytes": 208
+    },
+    {
+     "dst": "8.8.8.8",
+     "dport": 443,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 117
+    },
+    {
+     "dst": "8.8.8.8",
+     "dport": 53,
+     "proto": "tcp",
+     "packets": 2,
+     "bytes": 116
+    },
+    {
+     "dst": "8.8.8.8",
+     "dport": 4790,
+     "proto": "udp",
+     "packets": 1,
+     "bytes": 107
+    },
+    {
+     "dst": "8.8.8.8",
+     "dport": 8293,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 97
+    },
+    {
+     "dst": "8.8.8.8",
+     "dport": 98,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 90
+    },
+    {
+     "dst": "8.8.8.8",
+     "dport": 99,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 86
+    },
+    {
+     "dst": "8.8.8.8",
+     "dport": 67,
+     "proto": "udp",
+     "packets": 1,
+     "bytes": 82
+    },
+    {
+     "dst": "8.8.8.8",
+     "dport": 5355,
+     "proto": "udp",
+     "packets": 1,
+     "bytes": 73
+    },
+    {
+     "dst": "8.8.8.8",
+     "dport": 50,
+     "proto": "udp",
+     "packets": 1,
+     "bytes": 71
+    },
+    {
+     "dst": "8.8.8.8",
+     "dport": 6000,
+     "proto": "udp",
+     "packets": 1,
+     "bytes": 70
+    },
+    {
+     "dst": "8.8.8.8",
+     "dport": 7,
+     "proto": "udp",
+     "packets": 1,
+     "bytes": 50
+    }
+   ],
+   "sni": {},
+   "beacons": []
+  },
+  "summarize_pcap": "#### Packet Capture Analysis (deterministic, whole capture):\n60 of 60 packets in the capture read: 4863 bytes over 44.2s. Protocols: other=11, tcp=16, udp=30\n\nExternal conversations (all 15, by volume):\n- 8.8.8.8:53/udp \u2014 18 pkts, 1266 bytes\n- 8.8.8.8:80/tcp \u2014 9 pkts, 823 bytes\n- 8.8.8.8:0/other \u2014 8 pkts, 663 bytes\n- 8.8.8.8:4789/udp \u2014 2 pkts, 208 bytes\n- 8.8.8.8:443/tcp \u2014 1 pkts, 117 bytes\n- 8.8.8.8:53/tcp \u2014 2 pkts, 116 bytes\n- 8.8.8.8:4790/udp \u2014 1 pkts, 107 bytes\n- 8.8.8.8:8293/tcp \u2014 1 pkts, 97 bytes\n- 8.8.8.8:98/tcp \u2014 1 pkts, 90 bytes\n- 8.8.8.8:99/tcp \u2014 1 pkts, 86 bytes\n- 8.8.8.8:67/udp \u2014 1 pkts, 82 bytes\n- 8.8.8.8:5355/udp \u2014 1 pkts, 73 bytes\n- 8.8.8.8:50/udp \u2014 1 pkts, 71 bytes\n- 8.8.8.8:6000/udp \u2014 1 pkts, 70 bytes\n- 8.8.8.8:7/udp \u2014 1 pkts, 50 bytes\n\nNo regular beaconing interval detected in the packets read.",
+  "tool_pcap_summary": {
+   "summary": "#### Packet Capture Analysis (deterministic, whole capture):\n60 of 60 packets in the capture read: 4863 bytes over 44.2s. Protocols: other=11, tcp=16, udp=30\n\nExternal conversations (all 15, by volume):\n- 8.8.8.8:53/udp \u2014 18 pkts, 1266 bytes\n- 8.8.8.8:80/tcp \u2014 9 pkts, 823 bytes\n- 8.8.8.8:0/other \u2014 8 pkts, 663 bytes\n- 8.8.8.8:4789/udp \u2014 2 pkts, 208 bytes\n- 8.8.8.8:443/tcp \u2014 1 pkts, 117 bytes\n- 8.8.8.8:53/tcp \u2014 2 pkts, 116 bytes\n- 8.8.8.8:4790/udp \u2014 1 pkts, 107 bytes\n- 8.8.8.8:8293/tcp \u2014 1 pkts, 97 bytes\n- 8.8.8.8:98/tcp \u2014 1 pkts, 90 bytes\n- 8.8.8.8:99/tcp \u2014 1 pkts, 86 bytes\n- 8.8.8.8:67/udp \u2014 1 pkts, 82 bytes\n- 8.8.8.8:5355/udp \u2014 1 pkts, 73 bytes\n- 8.8.8.8:50/udp \u2014 1 pkts, 71 bytes\n- 8.8.8.8:6000/udp \u2014 1 pkts, 70 bytes\n- 8.8.8.8:7/udp \u2014 1 pkts, 50 bytes\n\nNo regular beaconing interval detected in the packets read.",
+   "empty": false,
+   "packets_read": 60,
+   "packets_in_capture": 60,
+   "packet_limit": null,
+   "bytes": 4863,
+   "duration_s": 44.2,
+   "protocols": {
+    "other": 11,
+    "tcp": 16,
+    "udp": 30
+   },
+   "conversations": [
+    {
+     "dst": "8.8.8.8",
+     "dport": 53,
+     "proto": "udp",
+     "packets": 18,
+     "bytes": 1266
+    },
+    {
+     "dst": "8.8.8.8",
+     "dport": 80,
+     "proto": "tcp",
+     "packets": 9,
+     "bytes": 823
+    },
+    {
+     "dst": "8.8.8.8",
+     "dport": 0,
+     "proto": "other",
+     "packets": 8,
+     "bytes": 663
+    },
+    {
+     "dst": "8.8.8.8",
+     "dport": 4789,
+     "proto": "udp",
+     "packets": 2,
+     "bytes": 208
+    },
+    {
+     "dst": "8.8.8.8",
+     "dport": 443,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 117
+    },
+    {
+     "dst": "8.8.8.8",
+     "dport": 53,
+     "proto": "tcp",
+     "packets": 2,
+     "bytes": 116
+    },
+    {
+     "dst": "8.8.8.8",
+     "dport": 4790,
+     "proto": "udp",
+     "packets": 1,
+     "bytes": 107
+    },
+    {
+     "dst": "8.8.8.8",
+     "dport": 8293,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 97
+    },
+    {
+     "dst": "8.8.8.8",
+     "dport": 98,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 90
+    },
+    {
+     "dst": "8.8.8.8",
+     "dport": 99,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 86
+    },
+    {
+     "dst": "8.8.8.8",
+     "dport": 67,
+     "proto": "udp",
+     "packets": 1,
+     "bytes": 82
+    },
+    {
+     "dst": "8.8.8.8",
+     "dport": 5355,
+     "proto": "udp",
+     "packets": 1,
+     "bytes": 73
+    },
+    {
+     "dst": "8.8.8.8",
+     "dport": 50,
+     "proto": "udp",
+     "packets": 1,
+     "bytes": 71
+    },
+    {
+     "dst": "8.8.8.8",
+     "dport": 6000,
+     "proto": "udp",
+     "packets": 1,
+     "bytes": 70
+    },
+    {
+     "dst": "8.8.8.8",
+     "dport": 7,
+     "proto": "udp",
+     "packets": 1,
+     "bytes": 50
+    }
+   ],
+   "sni": {},
+   "beacons": []
+  },
+  "read_pcap_summary": "#### Packet Capture Analysis (deterministic, whole capture):\n60 of 60 packets in the capture read: 4863 bytes over 44.2s. Protocols: other=11, tcp=16, udp=30\n\nExternal conversations (all 15, by volume):\n- 8.8.8.8:53/udp \u2014 18 pkts, 1266 bytes\n- 8.8.8.8:80/tcp \u2014 9 pkts, 823 bytes\n- 8.8.8.8:0/other \u2014 8 pkts, 663 bytes\n- 8.8.8.8:4789/udp \u2014 2 pkts, 208 bytes\n- 8.8.8.8:443/tcp \u2014 1 pkts, 117 bytes\n- 8.8.8.8:53/tcp \u2014 2 pkts, 116 bytes\n- 8.8.8.8:4790/udp \u2014 1 pkts, 107 bytes\n- 8.8.8.8:8293/tcp \u2014 1 pkts, 97 bytes\n- 8.8.8.8:98/tcp \u2014 1 pkts, 90 bytes\n- 8.8.8.8:99/tcp \u2014 1 pkts, 86 bytes\n- 8.8.8.8:67/udp \u2014 1 pkts, 82 bytes\n- 8.8.8.8:5355/udp \u2014 1 pkts, 73 bytes\n- 8.8.8.8:50/udp \u2014 1 pkts, 71 bytes\n- 8.8.8.8:6000/udp \u2014 1 pkts, 70 bytes\n- 8.8.8.8:7/udp \u2014 1 pkts, 50 bytes\n\nNo regular beaconing interval detected in the packets read.",
+  "network_pcap_summary": {
+   "summary": "#### Packet Capture Analysis (deterministic, whole capture):\n60 of 60 packets in the capture read: 4863 bytes over 44.2s. Protocols: other=11, tcp=16, udp=30\n\nExternal conversations (all 15, by volume):\n- 8.8.8.8:53/udp \u2014 18 pkts, 1266 bytes\n- 8.8.8.8:80/tcp \u2014 9 pkts, 823 bytes\n- 8.8.8.8:0/other \u2014 8 pkts, 663 bytes\n- 8.8.8.8:4789/udp \u2014 2 pkts, 208 bytes\n- 8.8.8.8:443/tcp \u2014 1 pkts, 117 bytes\n- 8.8.8.8:53/tcp \u2014 2 pkts, 116 bytes\n- 8.8.8.8:4790/udp \u2014 1 pkts, 107 bytes\n- 8.8.8.8:8293/tcp \u2014 1 pkts, 97 bytes\n- 8.8.8.8:98/tcp \u2014 1 pkts, 90 bytes\n- 8.8.8.8:99/tcp \u2014 1 pkts, 86 bytes\n- 8.8.8.8:67/udp \u2014 1 pkts, 82 bytes\n- 8.8.8.8:5355/udp \u2014 1 pkts, 73 bytes\n- 8.8.8.8:50/udp \u2014 1 pkts, 71 bytes\n- 8.8.8.8:6000/udp \u2014 1 pkts, 70 bytes\n- 8.8.8.8:7/udp \u2014 1 pkts, 50 bytes\n\nNo regular beaconing interval detected in the packets read.",
+   "empty": false,
+   "packets_read": 60,
+   "packets_in_capture": 60,
+   "packet_limit": null,
+   "bytes": 4863,
+   "duration_s": 44.2,
+   "protocols": {
+    "other": 11,
+    "tcp": 16,
+    "udp": 30
+   },
+   "conversations": [
+    {
+     "dst": "8.8.8.8",
+     "dport": 53,
+     "proto": "udp",
+     "packets": 18,
+     "bytes": 1266
+    },
+    {
+     "dst": "8.8.8.8",
+     "dport": 80,
+     "proto": "tcp",
+     "packets": 9,
+     "bytes": 823
+    },
+    {
+     "dst": "8.8.8.8",
+     "dport": 0,
+     "proto": "other",
+     "packets": 8,
+     "bytes": 663
+    },
+    {
+     "dst": "8.8.8.8",
+     "dport": 4789,
+     "proto": "udp",
+     "packets": 2,
+     "bytes": 208
+    },
+    {
+     "dst": "8.8.8.8",
+     "dport": 443,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 117
+    },
+    {
+     "dst": "8.8.8.8",
+     "dport": 53,
+     "proto": "tcp",
+     "packets": 2,
+     "bytes": 116
+    },
+    {
+     "dst": "8.8.8.8",
+     "dport": 4790,
+     "proto": "udp",
+     "packets": 1,
+     "bytes": 107
+    },
+    {
+     "dst": "8.8.8.8",
+     "dport": 8293,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 97
+    },
+    {
+     "dst": "8.8.8.8",
+     "dport": 98,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 90
+    },
+    {
+     "dst": "8.8.8.8",
+     "dport": 99,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 86
+    },
+    {
+     "dst": "8.8.8.8",
+     "dport": 67,
+     "proto": "udp",
+     "packets": 1,
+     "bytes": 82
+    },
+    {
+     "dst": "8.8.8.8",
+     "dport": 5355,
+     "proto": "udp",
+     "packets": 1,
+     "bytes": 73
+    },
+    {
+     "dst": "8.8.8.8",
+     "dport": 50,
+     "proto": "udp",
+     "packets": 1,
+     "bytes": 71
+    },
+    {
+     "dst": "8.8.8.8",
+     "dport": 6000,
+     "proto": "udp",
+     "packets": 1,
+     "bytes": 70
+    },
+    {
+     "dst": "8.8.8.8",
+     "dport": 7,
+     "proto": "udp",
+     "packets": 1,
+     "bytes": 50
+    }
+   ],
+   "sni": {},
+   "beacons": []
+  }
+ },
  "ethernet_mixed.pcap": {
   "capture_facts": {
    "packets_read": 67,
@@ -136,8 +507,8 @@
    "duration_s": 344.8,
    "protocols": {
     "other": 4,
-    "tcp": 31,
-    "udp": 27
+    "tcp": 32,
+    "udp": 28
    },
    "conversations": [
     {
@@ -336,30 +707,9 @@
     }
    ]
   },
-  "capture_facts_limit_3": {
-   "packets_read": 3,
-   "packets_in_capture": 67,
-   "packet_limit": 3,
-   "bytes": 232,
-   "duration_s": 0.5,
-   "protocols": {
-    "udp": 2
-   },
-   "conversations": [
-    {
-     "dst": "8.8.8.8",
-     "dport": 53,
-     "proto": "udp",
-     "packets": 1,
-     "bytes": 78
-    }
-   ],
-   "sni": {},
-   "beacons": []
-  },
-  "summarize_pcap": "#### Packet Capture Analysis (deterministic, whole capture):\n67 of 67 packets in the capture read: 4888 bytes over 344.8s. Protocols: other=4, tcp=31, udp=27\n\nExternal conversations (all 25, by volume):\n- 8.8.8.8:53/udp — 8 pkts, 553 bytes\n- 104.16.0.1:443/tcp — 2 pkts, 348 bytes\n- 185.199.108.1:4444/tcp — 5 pkts, 270 bytes\n- 151.101.1.1:443/tcp — 5 pkts, 270 bytes\n- 45.33.32.156:8080/udp — 6 pkts, 264 bytes\n- 151.101.1.2:443/udp — 6 pkts, 258 bytes\n- 93.184.216.34:80/tcp — 3 pkts, 237 bytes\n- 104.16.0.2:443/tcp — 1 pkts, 150 bytes\n- 8.8.8.8:0/other — 2 pkts, 134 bytes\n- 104.16.0.3:443/tcp — 1 pkts, 120 bytes\n- 93.184.216.35:8080/tcp — 1 pkts, 104 bytes\n- 80.1.1.1:3389/tcp — 1 pkts, 104 bytes\n- 93.184.216.37:80/tcp — 1 pkts, 101 bytes\n- 93.184.216.39:80/tcp — 1 pkts, 101 bytes\n- 93.184.216.40:80/tcp — 1 pkts, 97 bytes\n- 9.9.9.9:123/udp — 1 pkts, 94 bytes\n- 70.1.1.1:22/tcp — 1 pkts, 94 bytes\n- 1.1.1.1:53/tcp — 1 pkts, 89 bytes\n- 104.16.0.4:443/tcp — 1 pkts, 87 bytes\n- 93.184.216.36:80/tcp — 1 pkts, 81 bytes\n- 50.1.1.1:8443/tcp — 1 pkts, 78 bytes\n- 93.184.216.38:80/tcp — 1 pkts, 73 bytes\n- 60.1.1.1:9999/udp — 1 pkts, 62 bytes\n- 8.8.8.8:443/tcp — 1 pkts, 54 bytes\n- 8.8.4.4:0/other — 1 pkts, 46 bytes\n\nTLS SNI (encrypted destinations):\n- cdn.example.net (2 ClientHello)\n\nBeaconing detected (periodic callbacks — strong C2 signal):\n- 45.33.32.156:8080/udp — 6 callbacks, ~30.0s interval (regular; likely C2 beacon)\n- 185.199.108.1:4444/tcp — 5 callbacks, ~60.0s interval (regular; likely C2 beacon)",
+  "summarize_pcap": "#### Packet Capture Analysis (deterministic, whole capture):\n67 of 67 packets in the capture read: 4888 bytes over 344.8s. Protocols: other=4, tcp=32, udp=28\n\nExternal conversations (all 25, by volume):\n- 8.8.8.8:53/udp \u2014 8 pkts, 553 bytes\n- 104.16.0.1:443/tcp \u2014 2 pkts, 348 bytes\n- 185.199.108.1:4444/tcp \u2014 5 pkts, 270 bytes\n- 151.101.1.1:443/tcp \u2014 5 pkts, 270 bytes\n- 45.33.32.156:8080/udp \u2014 6 pkts, 264 bytes\n- 151.101.1.2:443/udp \u2014 6 pkts, 258 bytes\n- 93.184.216.34:80/tcp \u2014 3 pkts, 237 bytes\n- 104.16.0.2:443/tcp \u2014 1 pkts, 150 bytes\n- 8.8.8.8:0/other \u2014 2 pkts, 134 bytes\n- 104.16.0.3:443/tcp \u2014 1 pkts, 120 bytes\n- 93.184.216.35:8080/tcp \u2014 1 pkts, 104 bytes\n- 80.1.1.1:3389/tcp \u2014 1 pkts, 104 bytes\n- 93.184.216.37:80/tcp \u2014 1 pkts, 101 bytes\n- 93.184.216.39:80/tcp \u2014 1 pkts, 101 bytes\n- 93.184.216.40:80/tcp \u2014 1 pkts, 97 bytes\n- 9.9.9.9:123/udp \u2014 1 pkts, 94 bytes\n- 70.1.1.1:22/tcp \u2014 1 pkts, 94 bytes\n- 1.1.1.1:53/tcp \u2014 1 pkts, 89 bytes\n- 104.16.0.4:443/tcp \u2014 1 pkts, 87 bytes\n- 93.184.216.36:80/tcp \u2014 1 pkts, 81 bytes\n- 50.1.1.1:8443/tcp \u2014 1 pkts, 78 bytes\n- 93.184.216.38:80/tcp \u2014 1 pkts, 73 bytes\n- 60.1.1.1:9999/udp \u2014 1 pkts, 62 bytes\n- 8.8.8.8:443/tcp \u2014 1 pkts, 54 bytes\n- 8.8.4.4:0/other \u2014 1 pkts, 46 bytes\n\nTLS SNI (encrypted destinations):\n- cdn.example.net (2 ClientHello)\n\nBeaconing detected (periodic callbacks \u2014 strong C2 signal):\n- 45.33.32.156:8080/udp \u2014 6 callbacks, ~30.0s interval (regular; likely C2 beacon)\n- 185.199.108.1:4444/tcp \u2014 5 callbacks, ~60.0s interval (regular; likely C2 beacon)",
   "tool_pcap_summary": {
-   "summary": "#### Packet Capture Analysis (deterministic, whole capture):\n67 of 67 packets in the capture read: 4888 bytes over 344.8s. Protocols: other=4, tcp=31, udp=27\n\nExternal conversations (all 25, by volume):\n- 8.8.8.8:53/udp — 8 pkts, 553 bytes\n- 104.16.0.1:443/tcp — 2 pkts, 348 bytes\n- 185.199.108.1:4444/tcp — 5 pkts, 270 bytes\n- 151.101.1.1:443/tcp — 5 pkts, 270 bytes\n- 45.33.32.156:8080/udp — 6 pkts, 264 bytes\n- 151.101.1.2:443/udp — 6 pkts, 258 bytes\n- 93.184.216.34:80/tcp — 3 pkts, 237 bytes\n- 104.16.0.2:443/tcp — 1 pkts, 150 bytes\n- 8.8.8.8:0/other — 2 pkts, 134 bytes\n- 104.16.0.3:443/tcp — 1 pkts, 120 bytes\n- 93.184.216.35:8080/tcp — 1 pkts, 104 bytes\n- 80.1.1.1:3389/tcp — 1 pkts, 104 bytes\n- 93.184.216.37:80/tcp — 1 pkts, 101 bytes\n- 93.184.216.39:80/tcp — 1 pkts, 101 bytes\n- 93.184.216.40:80/tcp — 1 pkts, 97 bytes\n- 9.9.9.9:123/udp — 1 pkts, 94 bytes\n- 70.1.1.1:22/tcp — 1 pkts, 94 bytes\n- 1.1.1.1:53/tcp — 1 pkts, 89 bytes\n- 104.16.0.4:443/tcp — 1 pkts, 87 bytes\n- 93.184.216.36:80/tcp — 1 pkts, 81 bytes\n- 50.1.1.1:8443/tcp — 1 pkts, 78 bytes\n- 93.184.216.38:80/tcp — 1 pkts, 73 bytes\n- 60.1.1.1:9999/udp — 1 pkts, 62 bytes\n- 8.8.8.8:443/tcp — 1 pkts, 54 bytes\n- 8.8.4.4:0/other — 1 pkts, 46 bytes\n\nTLS SNI (encrypted destinations):\n- cdn.example.net (2 ClientHello)\n\nBeaconing detected (periodic callbacks — strong C2 signal):\n- 45.33.32.156:8080/udp — 6 callbacks, ~30.0s interval (regular; likely C2 beacon)\n- 185.199.108.1:4444/tcp — 5 callbacks, ~60.0s interval (regular; likely C2 beacon)",
+   "summary": "#### Packet Capture Analysis (deterministic, whole capture):\n67 of 67 packets in the capture read: 4888 bytes over 344.8s. Protocols: other=4, tcp=32, udp=28\n\nExternal conversations (all 25, by volume):\n- 8.8.8.8:53/udp \u2014 8 pkts, 553 bytes\n- 104.16.0.1:443/tcp \u2014 2 pkts, 348 bytes\n- 185.199.108.1:4444/tcp \u2014 5 pkts, 270 bytes\n- 151.101.1.1:443/tcp \u2014 5 pkts, 270 bytes\n- 45.33.32.156:8080/udp \u2014 6 pkts, 264 bytes\n- 151.101.1.2:443/udp \u2014 6 pkts, 258 bytes\n- 93.184.216.34:80/tcp \u2014 3 pkts, 237 bytes\n- 104.16.0.2:443/tcp \u2014 1 pkts, 150 bytes\n- 8.8.8.8:0/other \u2014 2 pkts, 134 bytes\n- 104.16.0.3:443/tcp \u2014 1 pkts, 120 bytes\n- 93.184.216.35:8080/tcp \u2014 1 pkts, 104 bytes\n- 80.1.1.1:3389/tcp \u2014 1 pkts, 104 bytes\n- 93.184.216.37:80/tcp \u2014 1 pkts, 101 bytes\n- 93.184.216.39:80/tcp \u2014 1 pkts, 101 bytes\n- 93.184.216.40:80/tcp \u2014 1 pkts, 97 bytes\n- 9.9.9.9:123/udp \u2014 1 pkts, 94 bytes\n- 70.1.1.1:22/tcp \u2014 1 pkts, 94 bytes\n- 1.1.1.1:53/tcp \u2014 1 pkts, 89 bytes\n- 104.16.0.4:443/tcp \u2014 1 pkts, 87 bytes\n- 93.184.216.36:80/tcp \u2014 1 pkts, 81 bytes\n- 50.1.1.1:8443/tcp \u2014 1 pkts, 78 bytes\n- 93.184.216.38:80/tcp \u2014 1 pkts, 73 bytes\n- 60.1.1.1:9999/udp \u2014 1 pkts, 62 bytes\n- 8.8.8.8:443/tcp \u2014 1 pkts, 54 bytes\n- 8.8.4.4:0/other \u2014 1 pkts, 46 bytes\n\nTLS SNI (encrypted destinations):\n- cdn.example.net (2 ClientHello)\n\nBeaconing detected (periodic callbacks \u2014 strong C2 signal):\n- 45.33.32.156:8080/udp \u2014 6 callbacks, ~30.0s interval (regular; likely C2 beacon)\n- 185.199.108.1:4444/tcp \u2014 5 callbacks, ~60.0s interval (regular; likely C2 beacon)",
    "empty": false,
    "packets_read": 67,
    "packets_in_capture": 67,
@@ -368,8 +718,8 @@
    "duration_s": 344.8,
    "protocols": {
     "other": 4,
-    "tcp": 31,
-    "udp": 27
+    "tcp": 32,
+    "udp": 28
    },
    "conversations": [
     {
@@ -568,13 +918,9 @@
     }
    ]
   },
-  "read_pcap_summary": "#### Packet Capture Analysis (deterministic, whole capture):\n67 of 67 packets in the capture read: 4888 bytes over 344.8s. Protocols: other=4, tcp=31, udp=27\n\nExternal conversations (all 25, by volume):\n- 8.8.8.8:53/udp — 8 pkts, 553 bytes\n- 104.16.0.1:443/tcp — 2 pkts, 348 bytes\n- 185.199.108.1:4444/tcp — 5 pkts, 270 bytes\n- 151.101.1.1:443/tcp — 5 pkts, 270 bytes\n- 45.33.32.156:8080/udp — 6 pkts, 264 bytes\n- 151.101.1.2:443/udp — 6 pkts, 258 bytes\n- 93.184.216.34:80/tcp — 3 pkts, 237 bytes\n- 104.16.0.2:443/tcp — 1 pkts, 150 bytes\n- 8.8.8.8:0/other — 2 pkts, 134 bytes\n- 104.16.0.3:443/tcp — 1 pkts, 120 bytes\n- 93.184.216.35:8080/tcp — 1 pkts, 104 bytes\n- 80.1.1.1:3389/tcp — 1 pkts, 104 bytes\n- 93.184.216.37:80/tcp — 1 pkts, 101 bytes\n- 93.184.216.39:80/tcp — 1 pkts, 101 bytes\n- 93.184.216.40:80/tcp — 1 pkts, 97 bytes\n- 9.9.9.9:123/udp — 1 pkts, 94 bytes\n- 70.1.1.1:22/tcp — 1 pkts, 94 bytes\n- 1.1.1.1:53/tcp — 1 pkts, 89 bytes\n- 104.16.0.4:443/tcp — 1 pkts, 87 bytes\n- 93.184.216.36:80/tcp — 1 pkts, 81 bytes\n- 50.1.1.1:8443/tcp — 1 pkts, 78 bytes\n- 93.184.216.38:80/tcp — 1 pkts, 73 bytes\n- 60.1.1.1:9999/udp — 1 pkts, 62 bytes\n- 8.8.8.8:443/tcp — 1 pkts, 54 bytes\n- 8.8.4.4:0/other — 1 pkts, 46 bytes\n\nTLS SNI (encrypted destinations):\n- cdn.example.net (2 ClientHello)\n\nBeaconing detected (periodic callbacks — strong C2 signal):\n- 45.33.32.156:8080/udp — 6 callbacks, ~30.0s interval (regular; likely C2 beacon)\n- 185.199.108.1:4444/tcp — 5 callbacks, ~60.0s interval (regular; likely C2 beacon)",
-  "read_pcap_summary_page": "Packets 3 to 9 of the 67 in the capture; the next page starts at offset 10.\nPacket 3: 10.0.2.15 -> 10.0.2.3 (UDP 50001->53)\nPacket 4: 10.0.2.15 -> 224.0.0.251 (UDP 5353->5353)\nPacket 5: 10.0.2.15 -> 224.0.0.252 (UDP 50002->5355)\nPacket 6: 10.0.2.15 -> 1.1.1.1 (TCP 50003->53)\nPacket 7: 10.0.2.15 -> 93.184.216.34 (TCP 50004->80)\nPacket 8: 10.0.2.15 -> 93.184.216.34 (TCP 50004->80)\nPacket 9: 10.0.2.15 -> 93.184.216.35 (TCP 50005->8080)",
-  "extract_dns": "67 of 67 packets in the capture read.\nupdate.example.com.\nintranet.local.\nprinter.local.\nwpad.\ntcp.example.org.\nv6.example.com.\n.\ntrunc.example.com.\nfirst.example.com.\ncafé.example.com.",
-  "extract_dns_limit_5": "5 of 67 packets in the capture read (the caller asked for 5).\nupdate.example.com.\nintranet.local.\nprinter.local.",
-  "extract_http": "67 of 67 packets in the capture read.\nGET /index.html HTTP/1.1 | Host: www.example.com\nPOST /gate.php HTTP/1.0 | \nGET /v6 HTTP/1.1 | Host: v6.example.com\nGET /x HTTP/1.1 | Host: tiny\nGET /local HTTP/1.1 | host: 10.0.2.2:8000\nHEAD / HTTP/1.1 | Host: opts.example.com\nPUT /a HTTP/1.1 | \nDELETE /b HTTP/1.1 | HOST: upper.example.com",
+  "read_pcap_summary": "#### Packet Capture Analysis (deterministic, whole capture):\n67 of 67 packets in the capture read: 4888 bytes over 344.8s. Protocols: other=4, tcp=32, udp=28\n\nExternal conversations (all 25, by volume):\n- 8.8.8.8:53/udp \u2014 8 pkts, 553 bytes\n- 104.16.0.1:443/tcp \u2014 2 pkts, 348 bytes\n- 185.199.108.1:4444/tcp \u2014 5 pkts, 270 bytes\n- 151.101.1.1:443/tcp \u2014 5 pkts, 270 bytes\n- 45.33.32.156:8080/udp \u2014 6 pkts, 264 bytes\n- 151.101.1.2:443/udp \u2014 6 pkts, 258 bytes\n- 93.184.216.34:80/tcp \u2014 3 pkts, 237 bytes\n- 104.16.0.2:443/tcp \u2014 1 pkts, 150 bytes\n- 8.8.8.8:0/other \u2014 2 pkts, 134 bytes\n- 104.16.0.3:443/tcp \u2014 1 pkts, 120 bytes\n- 93.184.216.35:8080/tcp \u2014 1 pkts, 104 bytes\n- 80.1.1.1:3389/tcp \u2014 1 pkts, 104 bytes\n- 93.184.216.37:80/tcp \u2014 1 pkts, 101 bytes\n- 93.184.216.39:80/tcp \u2014 1 pkts, 101 bytes\n- 93.184.216.40:80/tcp \u2014 1 pkts, 97 bytes\n- 9.9.9.9:123/udp \u2014 1 pkts, 94 bytes\n- 70.1.1.1:22/tcp \u2014 1 pkts, 94 bytes\n- 1.1.1.1:53/tcp \u2014 1 pkts, 89 bytes\n- 104.16.0.4:443/tcp \u2014 1 pkts, 87 bytes\n- 93.184.216.36:80/tcp \u2014 1 pkts, 81 bytes\n- 50.1.1.1:8443/tcp \u2014 1 pkts, 78 bytes\n- 93.184.216.38:80/tcp \u2014 1 pkts, 73 bytes\n- 60.1.1.1:9999/udp \u2014 1 pkts, 62 bytes\n- 8.8.8.8:443/tcp \u2014 1 pkts, 54 bytes\n- 8.8.4.4:0/other \u2014 1 pkts, 46 bytes\n\nTLS SNI (encrypted destinations):\n- cdn.example.net (2 ClientHello)\n\nBeaconing detected (periodic callbacks \u2014 strong C2 signal):\n- 45.33.32.156:8080/udp \u2014 6 callbacks, ~30.0s interval (regular; likely C2 beacon)\n- 185.199.108.1:4444/tcp \u2014 5 callbacks, ~60.0s interval (regular; likely C2 beacon)",
   "network_pcap_summary": {
-   "summary": "#### Packet Capture Analysis (deterministic, whole capture):\n67 of 67 packets in the capture read: 4888 bytes over 344.8s. Protocols: other=4, tcp=31, udp=27\n\nExternal conversations (all 25, by volume):\n- 8.8.8.8:53/udp — 8 pkts, 553 bytes\n- 104.16.0.1:443/tcp — 2 pkts, 348 bytes\n- 185.199.108.1:4444/tcp — 5 pkts, 270 bytes\n- 151.101.1.1:443/tcp — 5 pkts, 270 bytes\n- 45.33.32.156:8080/udp — 6 pkts, 264 bytes\n- 151.101.1.2:443/udp — 6 pkts, 258 bytes\n- 93.184.216.34:80/tcp — 3 pkts, 237 bytes\n- 104.16.0.2:443/tcp — 1 pkts, 150 bytes\n- 8.8.8.8:0/other — 2 pkts, 134 bytes\n- 104.16.0.3:443/tcp — 1 pkts, 120 bytes\n- 93.184.216.35:8080/tcp — 1 pkts, 104 bytes\n- 80.1.1.1:3389/tcp — 1 pkts, 104 bytes\n- 93.184.216.37:80/tcp — 1 pkts, 101 bytes\n- 93.184.216.39:80/tcp — 1 pkts, 101 bytes\n- 93.184.216.40:80/tcp — 1 pkts, 97 bytes\n- 9.9.9.9:123/udp — 1 pkts, 94 bytes\n- 70.1.1.1:22/tcp — 1 pkts, 94 bytes\n- 1.1.1.1:53/tcp — 1 pkts, 89 bytes\n- 104.16.0.4:443/tcp — 1 pkts, 87 bytes\n- 93.184.216.36:80/tcp — 1 pkts, 81 bytes\n- 50.1.1.1:8443/tcp — 1 pkts, 78 bytes\n- 93.184.216.38:80/tcp — 1 pkts, 73 bytes\n- 60.1.1.1:9999/udp — 1 pkts, 62 bytes\n- 8.8.8.8:443/tcp — 1 pkts, 54 bytes\n- 8.8.4.4:0/other — 1 pkts, 46 bytes\n\nTLS SNI (encrypted destinations):\n- cdn.example.net (2 ClientHello)\n\nBeaconing detected (periodic callbacks — strong C2 signal):\n- 45.33.32.156:8080/udp — 6 callbacks, ~30.0s interval (regular; likely C2 beacon)\n- 185.199.108.1:4444/tcp — 5 callbacks, ~60.0s interval (regular; likely C2 beacon)",
+   "summary": "#### Packet Capture Analysis (deterministic, whole capture):\n67 of 67 packets in the capture read: 4888 bytes over 344.8s. Protocols: other=4, tcp=32, udp=28\n\nExternal conversations (all 25, by volume):\n- 8.8.8.8:53/udp \u2014 8 pkts, 553 bytes\n- 104.16.0.1:443/tcp \u2014 2 pkts, 348 bytes\n- 185.199.108.1:4444/tcp \u2014 5 pkts, 270 bytes\n- 151.101.1.1:443/tcp \u2014 5 pkts, 270 bytes\n- 45.33.32.156:8080/udp \u2014 6 pkts, 264 bytes\n- 151.101.1.2:443/udp \u2014 6 pkts, 258 bytes\n- 93.184.216.34:80/tcp \u2014 3 pkts, 237 bytes\n- 104.16.0.2:443/tcp \u2014 1 pkts, 150 bytes\n- 8.8.8.8:0/other \u2014 2 pkts, 134 bytes\n- 104.16.0.3:443/tcp \u2014 1 pkts, 120 bytes\n- 93.184.216.35:8080/tcp \u2014 1 pkts, 104 bytes\n- 80.1.1.1:3389/tcp \u2014 1 pkts, 104 bytes\n- 93.184.216.37:80/tcp \u2014 1 pkts, 101 bytes\n- 93.184.216.39:80/tcp \u2014 1 pkts, 101 bytes\n- 93.184.216.40:80/tcp \u2014 1 pkts, 97 bytes\n- 9.9.9.9:123/udp \u2014 1 pkts, 94 bytes\n- 70.1.1.1:22/tcp \u2014 1 pkts, 94 bytes\n- 1.1.1.1:53/tcp \u2014 1 pkts, 89 bytes\n- 104.16.0.4:443/tcp \u2014 1 pkts, 87 bytes\n- 93.184.216.36:80/tcp \u2014 1 pkts, 81 bytes\n- 50.1.1.1:8443/tcp \u2014 1 pkts, 78 bytes\n- 93.184.216.38:80/tcp \u2014 1 pkts, 73 bytes\n- 60.1.1.1:9999/udp \u2014 1 pkts, 62 bytes\n- 8.8.8.8:443/tcp \u2014 1 pkts, 54 bytes\n- 8.8.4.4:0/other \u2014 1 pkts, 46 bytes\n\nTLS SNI (encrypted destinations):\n- cdn.example.net (2 ClientHello)\n\nBeaconing detected (periodic callbacks \u2014 strong C2 signal):\n- 45.33.32.156:8080/udp \u2014 6 callbacks, ~30.0s interval (regular; likely C2 beacon)\n- 185.199.108.1:4444/tcp \u2014 5 callbacks, ~60.0s interval (regular; likely C2 beacon)",
    "empty": false,
    "packets_read": 67,
    "packets_in_capture": 67,
@@ -583,8 +929,8 @@
    "duration_s": 344.8,
    "protocols": {
     "other": 4,
-    "tcp": 31,
-    "udp": 27
+    "tcp": 32,
+    "udp": 28
    },
    "conversations": [
     {
@@ -793,8 +1139,8 @@
    "duration_s": 344.8,
    "protocols": {
     "other": 4,
-    "tcp": 31,
-    "udp": 27
+    "tcp": 32,
+    "udp": 28
    },
    "conversations": [
     {
@@ -993,30 +1339,9 @@
     }
    ]
   },
-  "capture_facts_limit_3": {
-   "packets_read": 3,
-   "packets_in_capture": 67,
-   "packet_limit": 3,
-   "bytes": 232,
-   "duration_s": 0.5,
-   "protocols": {
-    "udp": 2
-   },
-   "conversations": [
-    {
-     "dst": "8.8.8.8",
-     "dport": 53,
-     "proto": "udp",
-     "packets": 1,
-     "bytes": 78
-    }
-   ],
-   "sni": {},
-   "beacons": []
-  },
-  "summarize_pcap": "#### Packet Capture Analysis (deterministic, whole capture):\n67 of 67 packets in the capture read: 4888 bytes over 344.8s. Protocols: other=4, tcp=31, udp=27\n\nExternal conversations (all 25, by volume):\n- 8.8.8.8:53/udp — 8 pkts, 553 bytes\n- 104.16.0.1:443/tcp — 2 pkts, 348 bytes\n- 185.199.108.1:4444/tcp — 5 pkts, 270 bytes\n- 151.101.1.1:443/tcp — 5 pkts, 270 bytes\n- 45.33.32.156:8080/udp — 6 pkts, 264 bytes\n- 151.101.1.2:443/udp — 6 pkts, 258 bytes\n- 93.184.216.34:80/tcp — 3 pkts, 237 bytes\n- 104.16.0.2:443/tcp — 1 pkts, 150 bytes\n- 8.8.8.8:0/other — 2 pkts, 134 bytes\n- 104.16.0.3:443/tcp — 1 pkts, 120 bytes\n- 93.184.216.35:8080/tcp — 1 pkts, 104 bytes\n- 80.1.1.1:3389/tcp — 1 pkts, 104 bytes\n- 93.184.216.37:80/tcp — 1 pkts, 101 bytes\n- 93.184.216.39:80/tcp — 1 pkts, 101 bytes\n- 93.184.216.40:80/tcp — 1 pkts, 97 bytes\n- 9.9.9.9:123/udp — 1 pkts, 94 bytes\n- 70.1.1.1:22/tcp — 1 pkts, 94 bytes\n- 1.1.1.1:53/tcp — 1 pkts, 89 bytes\n- 104.16.0.4:443/tcp — 1 pkts, 87 bytes\n- 93.184.216.36:80/tcp — 1 pkts, 81 bytes\n- 50.1.1.1:8443/tcp — 1 pkts, 78 bytes\n- 93.184.216.38:80/tcp — 1 pkts, 73 bytes\n- 60.1.1.1:9999/udp — 1 pkts, 62 bytes\n- 8.8.8.8:443/tcp — 1 pkts, 54 bytes\n- 8.8.4.4:0/other — 1 pkts, 46 bytes\n\nTLS SNI (encrypted destinations):\n- cdn.example.net (2 ClientHello)\n\nBeaconing detected (periodic callbacks — strong C2 signal):\n- 45.33.32.156:8080/udp — 6 callbacks, ~30.0s interval (regular; likely C2 beacon)\n- 185.199.108.1:4444/tcp — 5 callbacks, ~60.0s interval (regular; likely C2 beacon)",
+  "summarize_pcap": "#### Packet Capture Analysis (deterministic, whole capture):\n67 of 67 packets in the capture read: 4888 bytes over 344.8s. Protocols: other=4, tcp=32, udp=28\n\nExternal conversations (all 25, by volume):\n- 8.8.8.8:53/udp \u2014 8 pkts, 553 bytes\n- 104.16.0.1:443/tcp \u2014 2 pkts, 348 bytes\n- 185.199.108.1:4444/tcp \u2014 5 pkts, 270 bytes\n- 151.101.1.1:443/tcp \u2014 5 pkts, 270 bytes\n- 45.33.32.156:8080/udp \u2014 6 pkts, 264 bytes\n- 151.101.1.2:443/udp \u2014 6 pkts, 258 bytes\n- 93.184.216.34:80/tcp \u2014 3 pkts, 237 bytes\n- 104.16.0.2:443/tcp \u2014 1 pkts, 150 bytes\n- 8.8.8.8:0/other \u2014 2 pkts, 134 bytes\n- 104.16.0.3:443/tcp \u2014 1 pkts, 120 bytes\n- 93.184.216.35:8080/tcp \u2014 1 pkts, 104 bytes\n- 80.1.1.1:3389/tcp \u2014 1 pkts, 104 bytes\n- 93.184.216.37:80/tcp \u2014 1 pkts, 101 bytes\n- 93.184.216.39:80/tcp \u2014 1 pkts, 101 bytes\n- 93.184.216.40:80/tcp \u2014 1 pkts, 97 bytes\n- 9.9.9.9:123/udp \u2014 1 pkts, 94 bytes\n- 70.1.1.1:22/tcp \u2014 1 pkts, 94 bytes\n- 1.1.1.1:53/tcp \u2014 1 pkts, 89 bytes\n- 104.16.0.4:443/tcp \u2014 1 pkts, 87 bytes\n- 93.184.216.36:80/tcp \u2014 1 pkts, 81 bytes\n- 50.1.1.1:8443/tcp \u2014 1 pkts, 78 bytes\n- 93.184.216.38:80/tcp \u2014 1 pkts, 73 bytes\n- 60.1.1.1:9999/udp \u2014 1 pkts, 62 bytes\n- 8.8.8.8:443/tcp \u2014 1 pkts, 54 bytes\n- 8.8.4.4:0/other \u2014 1 pkts, 46 bytes\n\nTLS SNI (encrypted destinations):\n- cdn.example.net (2 ClientHello)\n\nBeaconing detected (periodic callbacks \u2014 strong C2 signal):\n- 45.33.32.156:8080/udp \u2014 6 callbacks, ~30.0s interval (regular; likely C2 beacon)\n- 185.199.108.1:4444/tcp \u2014 5 callbacks, ~60.0s interval (regular; likely C2 beacon)",
   "tool_pcap_summary": {
-   "summary": "#### Packet Capture Analysis (deterministic, whole capture):\n67 of 67 packets in the capture read: 4888 bytes over 344.8s. Protocols: other=4, tcp=31, udp=27\n\nExternal conversations (all 25, by volume):\n- 8.8.8.8:53/udp — 8 pkts, 553 bytes\n- 104.16.0.1:443/tcp — 2 pkts, 348 bytes\n- 185.199.108.1:4444/tcp — 5 pkts, 270 bytes\n- 151.101.1.1:443/tcp — 5 pkts, 270 bytes\n- 45.33.32.156:8080/udp — 6 pkts, 264 bytes\n- 151.101.1.2:443/udp — 6 pkts, 258 bytes\n- 93.184.216.34:80/tcp — 3 pkts, 237 bytes\n- 104.16.0.2:443/tcp — 1 pkts, 150 bytes\n- 8.8.8.8:0/other — 2 pkts, 134 bytes\n- 104.16.0.3:443/tcp — 1 pkts, 120 bytes\n- 93.184.216.35:8080/tcp — 1 pkts, 104 bytes\n- 80.1.1.1:3389/tcp — 1 pkts, 104 bytes\n- 93.184.216.37:80/tcp — 1 pkts, 101 bytes\n- 93.184.216.39:80/tcp — 1 pkts, 101 bytes\n- 93.184.216.40:80/tcp — 1 pkts, 97 bytes\n- 9.9.9.9:123/udp — 1 pkts, 94 bytes\n- 70.1.1.1:22/tcp — 1 pkts, 94 bytes\n- 1.1.1.1:53/tcp — 1 pkts, 89 bytes\n- 104.16.0.4:443/tcp — 1 pkts, 87 bytes\n- 93.184.216.36:80/tcp — 1 pkts, 81 bytes\n- 50.1.1.1:8443/tcp — 1 pkts, 78 bytes\n- 93.184.216.38:80/tcp — 1 pkts, 73 bytes\n- 60.1.1.1:9999/udp — 1 pkts, 62 bytes\n- 8.8.8.8:443/tcp — 1 pkts, 54 bytes\n- 8.8.4.4:0/other — 1 pkts, 46 bytes\n\nTLS SNI (encrypted destinations):\n- cdn.example.net (2 ClientHello)\n\nBeaconing detected (periodic callbacks — strong C2 signal):\n- 45.33.32.156:8080/udp — 6 callbacks, ~30.0s interval (regular; likely C2 beacon)\n- 185.199.108.1:4444/tcp — 5 callbacks, ~60.0s interval (regular; likely C2 beacon)",
+   "summary": "#### Packet Capture Analysis (deterministic, whole capture):\n67 of 67 packets in the capture read: 4888 bytes over 344.8s. Protocols: other=4, tcp=32, udp=28\n\nExternal conversations (all 25, by volume):\n- 8.8.8.8:53/udp \u2014 8 pkts, 553 bytes\n- 104.16.0.1:443/tcp \u2014 2 pkts, 348 bytes\n- 185.199.108.1:4444/tcp \u2014 5 pkts, 270 bytes\n- 151.101.1.1:443/tcp \u2014 5 pkts, 270 bytes\n- 45.33.32.156:8080/udp \u2014 6 pkts, 264 bytes\n- 151.101.1.2:443/udp \u2014 6 pkts, 258 bytes\n- 93.184.216.34:80/tcp \u2014 3 pkts, 237 bytes\n- 104.16.0.2:443/tcp \u2014 1 pkts, 150 bytes\n- 8.8.8.8:0/other \u2014 2 pkts, 134 bytes\n- 104.16.0.3:443/tcp \u2014 1 pkts, 120 bytes\n- 93.184.216.35:8080/tcp \u2014 1 pkts, 104 bytes\n- 80.1.1.1:3389/tcp \u2014 1 pkts, 104 bytes\n- 93.184.216.37:80/tcp \u2014 1 pkts, 101 bytes\n- 93.184.216.39:80/tcp \u2014 1 pkts, 101 bytes\n- 93.184.216.40:80/tcp \u2014 1 pkts, 97 bytes\n- 9.9.9.9:123/udp \u2014 1 pkts, 94 bytes\n- 70.1.1.1:22/tcp \u2014 1 pkts, 94 bytes\n- 1.1.1.1:53/tcp \u2014 1 pkts, 89 bytes\n- 104.16.0.4:443/tcp \u2014 1 pkts, 87 bytes\n- 93.184.216.36:80/tcp \u2014 1 pkts, 81 bytes\n- 50.1.1.1:8443/tcp \u2014 1 pkts, 78 bytes\n- 93.184.216.38:80/tcp \u2014 1 pkts, 73 bytes\n- 60.1.1.1:9999/udp \u2014 1 pkts, 62 bytes\n- 8.8.8.8:443/tcp \u2014 1 pkts, 54 bytes\n- 8.8.4.4:0/other \u2014 1 pkts, 46 bytes\n\nTLS SNI (encrypted destinations):\n- cdn.example.net (2 ClientHello)\n\nBeaconing detected (periodic callbacks \u2014 strong C2 signal):\n- 45.33.32.156:8080/udp \u2014 6 callbacks, ~30.0s interval (regular; likely C2 beacon)\n- 185.199.108.1:4444/tcp \u2014 5 callbacks, ~60.0s interval (regular; likely C2 beacon)",
    "empty": false,
    "packets_read": 67,
    "packets_in_capture": 67,
@@ -1025,8 +1350,8 @@
    "duration_s": 344.8,
    "protocols": {
     "other": 4,
-    "tcp": 31,
-    "udp": 27
+    "tcp": 32,
+    "udp": 28
    },
    "conversations": [
     {
@@ -1225,13 +1550,9 @@
     }
    ]
   },
-  "read_pcap_summary": "#### Packet Capture Analysis (deterministic, whole capture):\n67 of 67 packets in the capture read: 4888 bytes over 344.8s. Protocols: other=4, tcp=31, udp=27\n\nExternal conversations (all 25, by volume):\n- 8.8.8.8:53/udp — 8 pkts, 553 bytes\n- 104.16.0.1:443/tcp — 2 pkts, 348 bytes\n- 185.199.108.1:4444/tcp — 5 pkts, 270 bytes\n- 151.101.1.1:443/tcp — 5 pkts, 270 bytes\n- 45.33.32.156:8080/udp — 6 pkts, 264 bytes\n- 151.101.1.2:443/udp — 6 pkts, 258 bytes\n- 93.184.216.34:80/tcp — 3 pkts, 237 bytes\n- 104.16.0.2:443/tcp — 1 pkts, 150 bytes\n- 8.8.8.8:0/other — 2 pkts, 134 bytes\n- 104.16.0.3:443/tcp — 1 pkts, 120 bytes\n- 93.184.216.35:8080/tcp — 1 pkts, 104 bytes\n- 80.1.1.1:3389/tcp — 1 pkts, 104 bytes\n- 93.184.216.37:80/tcp — 1 pkts, 101 bytes\n- 93.184.216.39:80/tcp — 1 pkts, 101 bytes\n- 93.184.216.40:80/tcp — 1 pkts, 97 bytes\n- 9.9.9.9:123/udp — 1 pkts, 94 bytes\n- 70.1.1.1:22/tcp — 1 pkts, 94 bytes\n- 1.1.1.1:53/tcp — 1 pkts, 89 bytes\n- 104.16.0.4:443/tcp — 1 pkts, 87 bytes\n- 93.184.216.36:80/tcp — 1 pkts, 81 bytes\n- 50.1.1.1:8443/tcp — 1 pkts, 78 bytes\n- 93.184.216.38:80/tcp — 1 pkts, 73 bytes\n- 60.1.1.1:9999/udp — 1 pkts, 62 bytes\n- 8.8.8.8:443/tcp — 1 pkts, 54 bytes\n- 8.8.4.4:0/other — 1 pkts, 46 bytes\n\nTLS SNI (encrypted destinations):\n- cdn.example.net (2 ClientHello)\n\nBeaconing detected (periodic callbacks — strong C2 signal):\n- 45.33.32.156:8080/udp — 6 callbacks, ~30.0s interval (regular; likely C2 beacon)\n- 185.199.108.1:4444/tcp — 5 callbacks, ~60.0s interval (regular; likely C2 beacon)",
-  "read_pcap_summary_page": "Packets 3 to 9 of the 67 in the capture; the next page starts at offset 10.\nPacket 3: 10.0.2.15 -> 10.0.2.3 (UDP 50001->53)\nPacket 4: 10.0.2.15 -> 224.0.0.251 (UDP 5353->5353)\nPacket 5: 10.0.2.15 -> 224.0.0.252 (UDP 50002->5355)\nPacket 6: 10.0.2.15 -> 1.1.1.1 (TCP 50003->53)\nPacket 7: 10.0.2.15 -> 93.184.216.34 (TCP 50004->80)\nPacket 8: 10.0.2.15 -> 93.184.216.34 (TCP 50004->80)\nPacket 9: 10.0.2.15 -> 93.184.216.35 (TCP 50005->8080)",
-  "extract_dns": "67 of 67 packets in the capture read.\nupdate.example.com.\nintranet.local.\nprinter.local.\nwpad.\ntcp.example.org.\nv6.example.com.\n.\ntrunc.example.com.\nfirst.example.com.\ncafé.example.com.",
-  "extract_dns_limit_5": "5 of 67 packets in the capture read (the caller asked for 5).\nupdate.example.com.\nintranet.local.\nprinter.local.",
-  "extract_http": "67 of 67 packets in the capture read.\nGET /index.html HTTP/1.1 | Host: www.example.com\nPOST /gate.php HTTP/1.0 | \nGET /v6 HTTP/1.1 | Host: v6.example.com\nGET /x HTTP/1.1 | Host: tiny\nGET /local HTTP/1.1 | host: 10.0.2.2:8000\nHEAD / HTTP/1.1 | Host: opts.example.com\nPUT /a HTTP/1.1 | \nDELETE /b HTTP/1.1 | HOST: upper.example.com",
+  "read_pcap_summary": "#### Packet Capture Analysis (deterministic, whole capture):\n67 of 67 packets in the capture read: 4888 bytes over 344.8s. Protocols: other=4, tcp=32, udp=28\n\nExternal conversations (all 25, by volume):\n- 8.8.8.8:53/udp \u2014 8 pkts, 553 bytes\n- 104.16.0.1:443/tcp \u2014 2 pkts, 348 bytes\n- 185.199.108.1:4444/tcp \u2014 5 pkts, 270 bytes\n- 151.101.1.1:443/tcp \u2014 5 pkts, 270 bytes\n- 45.33.32.156:8080/udp \u2014 6 pkts, 264 bytes\n- 151.101.1.2:443/udp \u2014 6 pkts, 258 bytes\n- 93.184.216.34:80/tcp \u2014 3 pkts, 237 bytes\n- 104.16.0.2:443/tcp \u2014 1 pkts, 150 bytes\n- 8.8.8.8:0/other \u2014 2 pkts, 134 bytes\n- 104.16.0.3:443/tcp \u2014 1 pkts, 120 bytes\n- 93.184.216.35:8080/tcp \u2014 1 pkts, 104 bytes\n- 80.1.1.1:3389/tcp \u2014 1 pkts, 104 bytes\n- 93.184.216.37:80/tcp \u2014 1 pkts, 101 bytes\n- 93.184.216.39:80/tcp \u2014 1 pkts, 101 bytes\n- 93.184.216.40:80/tcp \u2014 1 pkts, 97 bytes\n- 9.9.9.9:123/udp \u2014 1 pkts, 94 bytes\n- 70.1.1.1:22/tcp \u2014 1 pkts, 94 bytes\n- 1.1.1.1:53/tcp \u2014 1 pkts, 89 bytes\n- 104.16.0.4:443/tcp \u2014 1 pkts, 87 bytes\n- 93.184.216.36:80/tcp \u2014 1 pkts, 81 bytes\n- 50.1.1.1:8443/tcp \u2014 1 pkts, 78 bytes\n- 93.184.216.38:80/tcp \u2014 1 pkts, 73 bytes\n- 60.1.1.1:9999/udp \u2014 1 pkts, 62 bytes\n- 8.8.8.8:443/tcp \u2014 1 pkts, 54 bytes\n- 8.8.4.4:0/other \u2014 1 pkts, 46 bytes\n\nTLS SNI (encrypted destinations):\n- cdn.example.net (2 ClientHello)\n\nBeaconing detected (periodic callbacks \u2014 strong C2 signal):\n- 45.33.32.156:8080/udp \u2014 6 callbacks, ~30.0s interval (regular; likely C2 beacon)\n- 185.199.108.1:4444/tcp \u2014 5 callbacks, ~60.0s interval (regular; likely C2 beacon)",
   "network_pcap_summary": {
-   "summary": "#### Packet Capture Analysis (deterministic, whole capture):\n67 of 67 packets in the capture read: 4888 bytes over 344.8s. Protocols: other=4, tcp=31, udp=27\n\nExternal conversations (all 25, by volume):\n- 8.8.8.8:53/udp — 8 pkts, 553 bytes\n- 104.16.0.1:443/tcp — 2 pkts, 348 bytes\n- 185.199.108.1:4444/tcp — 5 pkts, 270 bytes\n- 151.101.1.1:443/tcp — 5 pkts, 270 bytes\n- 45.33.32.156:8080/udp — 6 pkts, 264 bytes\n- 151.101.1.2:443/udp — 6 pkts, 258 bytes\n- 93.184.216.34:80/tcp — 3 pkts, 237 bytes\n- 104.16.0.2:443/tcp — 1 pkts, 150 bytes\n- 8.8.8.8:0/other — 2 pkts, 134 bytes\n- 104.16.0.3:443/tcp — 1 pkts, 120 bytes\n- 93.184.216.35:8080/tcp — 1 pkts, 104 bytes\n- 80.1.1.1:3389/tcp — 1 pkts, 104 bytes\n- 93.184.216.37:80/tcp — 1 pkts, 101 bytes\n- 93.184.216.39:80/tcp — 1 pkts, 101 bytes\n- 93.184.216.40:80/tcp — 1 pkts, 97 bytes\n- 9.9.9.9:123/udp — 1 pkts, 94 bytes\n- 70.1.1.1:22/tcp — 1 pkts, 94 bytes\n- 1.1.1.1:53/tcp — 1 pkts, 89 bytes\n- 104.16.0.4:443/tcp — 1 pkts, 87 bytes\n- 93.184.216.36:80/tcp — 1 pkts, 81 bytes\n- 50.1.1.1:8443/tcp — 1 pkts, 78 bytes\n- 93.184.216.38:80/tcp — 1 pkts, 73 bytes\n- 60.1.1.1:9999/udp — 1 pkts, 62 bytes\n- 8.8.8.8:443/tcp — 1 pkts, 54 bytes\n- 8.8.4.4:0/other — 1 pkts, 46 bytes\n\nTLS SNI (encrypted destinations):\n- cdn.example.net (2 ClientHello)\n\nBeaconing detected (periodic callbacks — strong C2 signal):\n- 45.33.32.156:8080/udp — 6 callbacks, ~30.0s interval (regular; likely C2 beacon)\n- 185.199.108.1:4444/tcp — 5 callbacks, ~60.0s interval (regular; likely C2 beacon)",
+   "summary": "#### Packet Capture Analysis (deterministic, whole capture):\n67 of 67 packets in the capture read: 4888 bytes over 344.8s. Protocols: other=4, tcp=32, udp=28\n\nExternal conversations (all 25, by volume):\n- 8.8.8.8:53/udp \u2014 8 pkts, 553 bytes\n- 104.16.0.1:443/tcp \u2014 2 pkts, 348 bytes\n- 185.199.108.1:4444/tcp \u2014 5 pkts, 270 bytes\n- 151.101.1.1:443/tcp \u2014 5 pkts, 270 bytes\n- 45.33.32.156:8080/udp \u2014 6 pkts, 264 bytes\n- 151.101.1.2:443/udp \u2014 6 pkts, 258 bytes\n- 93.184.216.34:80/tcp \u2014 3 pkts, 237 bytes\n- 104.16.0.2:443/tcp \u2014 1 pkts, 150 bytes\n- 8.8.8.8:0/other \u2014 2 pkts, 134 bytes\n- 104.16.0.3:443/tcp \u2014 1 pkts, 120 bytes\n- 93.184.216.35:8080/tcp \u2014 1 pkts, 104 bytes\n- 80.1.1.1:3389/tcp \u2014 1 pkts, 104 bytes\n- 93.184.216.37:80/tcp \u2014 1 pkts, 101 bytes\n- 93.184.216.39:80/tcp \u2014 1 pkts, 101 bytes\n- 93.184.216.40:80/tcp \u2014 1 pkts, 97 bytes\n- 9.9.9.9:123/udp \u2014 1 pkts, 94 bytes\n- 70.1.1.1:22/tcp \u2014 1 pkts, 94 bytes\n- 1.1.1.1:53/tcp \u2014 1 pkts, 89 bytes\n- 104.16.0.4:443/tcp \u2014 1 pkts, 87 bytes\n- 93.184.216.36:80/tcp \u2014 1 pkts, 81 bytes\n- 50.1.1.1:8443/tcp \u2014 1 pkts, 78 bytes\n- 93.184.216.38:80/tcp \u2014 1 pkts, 73 bytes\n- 60.1.1.1:9999/udp \u2014 1 pkts, 62 bytes\n- 8.8.8.8:443/tcp \u2014 1 pkts, 54 bytes\n- 8.8.4.4:0/other \u2014 1 pkts, 46 bytes\n\nTLS SNI (encrypted destinations):\n- cdn.example.net (2 ClientHello)\n\nBeaconing detected (periodic callbacks \u2014 strong C2 signal):\n- 45.33.32.156:8080/udp \u2014 6 callbacks, ~30.0s interval (regular; likely C2 beacon)\n- 185.199.108.1:4444/tcp \u2014 5 callbacks, ~60.0s interval (regular; likely C2 beacon)",
    "empty": false,
    "packets_read": 67,
    "packets_in_capture": 67,
@@ -1240,8 +1561,8 @@
    "duration_s": 344.8,
    "protocols": {
     "other": 4,
-    "tcp": 31,
-    "udp": 27
+    "tcp": 32,
+    "udp": 28
    },
    "conversations": [
     {
@@ -1450,8 +1771,8 @@
    "duration_s": 344.8,
    "protocols": {
     "other": 4,
-    "tcp": 31,
-    "udp": 27
+    "tcp": 32,
+    "udp": 28
    },
    "conversations": [
     {
@@ -1650,30 +1971,9 @@
     }
    ]
   },
-  "capture_facts_limit_3": {
-   "packets_read": 3,
-   "packets_in_capture": 67,
-   "packet_limit": 3,
-   "bytes": 232,
-   "duration_s": 0.5,
-   "protocols": {
-    "udp": 2
-   },
-   "conversations": [
-    {
-     "dst": "8.8.8.8",
-     "dport": 53,
-     "proto": "udp",
-     "packets": 1,
-     "bytes": 78
-    }
-   ],
-   "sni": {},
-   "beacons": []
-  },
-  "summarize_pcap": "#### Packet Capture Analysis (deterministic, whole capture):\n67 of 67 packets in the capture read: 4888 bytes over 344.8s. Protocols: other=4, tcp=31, udp=27\n\nExternal conversations (all 25, by volume):\n- 8.8.8.8:53/udp — 8 pkts, 553 bytes\n- 104.16.0.1:443/tcp — 2 pkts, 348 bytes\n- 185.199.108.1:4444/tcp — 5 pkts, 270 bytes\n- 151.101.1.1:443/tcp — 5 pkts, 270 bytes\n- 45.33.32.156:8080/udp — 6 pkts, 264 bytes\n- 151.101.1.2:443/udp — 6 pkts, 258 bytes\n- 93.184.216.34:80/tcp — 3 pkts, 237 bytes\n- 104.16.0.2:443/tcp — 1 pkts, 150 bytes\n- 8.8.8.8:0/other — 2 pkts, 134 bytes\n- 104.16.0.3:443/tcp — 1 pkts, 120 bytes\n- 93.184.216.35:8080/tcp — 1 pkts, 104 bytes\n- 80.1.1.1:3389/tcp — 1 pkts, 104 bytes\n- 93.184.216.37:80/tcp — 1 pkts, 101 bytes\n- 93.184.216.39:80/tcp — 1 pkts, 101 bytes\n- 93.184.216.40:80/tcp — 1 pkts, 97 bytes\n- 9.9.9.9:123/udp — 1 pkts, 94 bytes\n- 70.1.1.1:22/tcp — 1 pkts, 94 bytes\n- 1.1.1.1:53/tcp — 1 pkts, 89 bytes\n- 104.16.0.4:443/tcp — 1 pkts, 87 bytes\n- 93.184.216.36:80/tcp — 1 pkts, 81 bytes\n- 50.1.1.1:8443/tcp — 1 pkts, 78 bytes\n- 93.184.216.38:80/tcp — 1 pkts, 73 bytes\n- 60.1.1.1:9999/udp — 1 pkts, 62 bytes\n- 8.8.8.8:443/tcp — 1 pkts, 54 bytes\n- 8.8.4.4:0/other — 1 pkts, 46 bytes\n\nTLS SNI (encrypted destinations):\n- cdn.example.net (2 ClientHello)\n\nBeaconing detected (periodic callbacks — strong C2 signal):\n- 45.33.32.156:8080/udp — 6 callbacks, ~30.0s interval (regular; likely C2 beacon)\n- 185.199.108.1:4444/tcp — 5 callbacks, ~60.0s interval (regular; likely C2 beacon)",
+  "summarize_pcap": "#### Packet Capture Analysis (deterministic, whole capture):\n67 of 67 packets in the capture read: 4888 bytes over 344.8s. Protocols: other=4, tcp=32, udp=28\n\nExternal conversations (all 25, by volume):\n- 8.8.8.8:53/udp \u2014 8 pkts, 553 bytes\n- 104.16.0.1:443/tcp \u2014 2 pkts, 348 bytes\n- 185.199.108.1:4444/tcp \u2014 5 pkts, 270 bytes\n- 151.101.1.1:443/tcp \u2014 5 pkts, 270 bytes\n- 45.33.32.156:8080/udp \u2014 6 pkts, 264 bytes\n- 151.101.1.2:443/udp \u2014 6 pkts, 258 bytes\n- 93.184.216.34:80/tcp \u2014 3 pkts, 237 bytes\n- 104.16.0.2:443/tcp \u2014 1 pkts, 150 bytes\n- 8.8.8.8:0/other \u2014 2 pkts, 134 bytes\n- 104.16.0.3:443/tcp \u2014 1 pkts, 120 bytes\n- 93.184.216.35:8080/tcp \u2014 1 pkts, 104 bytes\n- 80.1.1.1:3389/tcp \u2014 1 pkts, 104 bytes\n- 93.184.216.37:80/tcp \u2014 1 pkts, 101 bytes\n- 93.184.216.39:80/tcp \u2014 1 pkts, 101 bytes\n- 93.184.216.40:80/tcp \u2014 1 pkts, 97 bytes\n- 9.9.9.9:123/udp \u2014 1 pkts, 94 bytes\n- 70.1.1.1:22/tcp \u2014 1 pkts, 94 bytes\n- 1.1.1.1:53/tcp \u2014 1 pkts, 89 bytes\n- 104.16.0.4:443/tcp \u2014 1 pkts, 87 bytes\n- 93.184.216.36:80/tcp \u2014 1 pkts, 81 bytes\n- 50.1.1.1:8443/tcp \u2014 1 pkts, 78 bytes\n- 93.184.216.38:80/tcp \u2014 1 pkts, 73 bytes\n- 60.1.1.1:9999/udp \u2014 1 pkts, 62 bytes\n- 8.8.8.8:443/tcp \u2014 1 pkts, 54 bytes\n- 8.8.4.4:0/other \u2014 1 pkts, 46 bytes\n\nTLS SNI (encrypted destinations):\n- cdn.example.net (2 ClientHello)\n\nBeaconing detected (periodic callbacks \u2014 strong C2 signal):\n- 45.33.32.156:8080/udp \u2014 6 callbacks, ~30.0s interval (regular; likely C2 beacon)\n- 185.199.108.1:4444/tcp \u2014 5 callbacks, ~60.0s interval (regular; likely C2 beacon)",
   "tool_pcap_summary": {
-   "summary": "#### Packet Capture Analysis (deterministic, whole capture):\n67 of 67 packets in the capture read: 4888 bytes over 344.8s. Protocols: other=4, tcp=31, udp=27\n\nExternal conversations (all 25, by volume):\n- 8.8.8.8:53/udp — 8 pkts, 553 bytes\n- 104.16.0.1:443/tcp — 2 pkts, 348 bytes\n- 185.199.108.1:4444/tcp — 5 pkts, 270 bytes\n- 151.101.1.1:443/tcp — 5 pkts, 270 bytes\n- 45.33.32.156:8080/udp — 6 pkts, 264 bytes\n- 151.101.1.2:443/udp — 6 pkts, 258 bytes\n- 93.184.216.34:80/tcp — 3 pkts, 237 bytes\n- 104.16.0.2:443/tcp — 1 pkts, 150 bytes\n- 8.8.8.8:0/other — 2 pkts, 134 bytes\n- 104.16.0.3:443/tcp — 1 pkts, 120 bytes\n- 93.184.216.35:8080/tcp — 1 pkts, 104 bytes\n- 80.1.1.1:3389/tcp — 1 pkts, 104 bytes\n- 93.184.216.37:80/tcp — 1 pkts, 101 bytes\n- 93.184.216.39:80/tcp — 1 pkts, 101 bytes\n- 93.184.216.40:80/tcp — 1 pkts, 97 bytes\n- 9.9.9.9:123/udp — 1 pkts, 94 bytes\n- 70.1.1.1:22/tcp — 1 pkts, 94 bytes\n- 1.1.1.1:53/tcp — 1 pkts, 89 bytes\n- 104.16.0.4:443/tcp — 1 pkts, 87 bytes\n- 93.184.216.36:80/tcp — 1 pkts, 81 bytes\n- 50.1.1.1:8443/tcp — 1 pkts, 78 bytes\n- 93.184.216.38:80/tcp — 1 pkts, 73 bytes\n- 60.1.1.1:9999/udp — 1 pkts, 62 bytes\n- 8.8.8.8:443/tcp — 1 pkts, 54 bytes\n- 8.8.4.4:0/other — 1 pkts, 46 bytes\n\nTLS SNI (encrypted destinations):\n- cdn.example.net (2 ClientHello)\n\nBeaconing detected (periodic callbacks — strong C2 signal):\n- 45.33.32.156:8080/udp — 6 callbacks, ~30.0s interval (regular; likely C2 beacon)\n- 185.199.108.1:4444/tcp — 5 callbacks, ~60.0s interval (regular; likely C2 beacon)",
+   "summary": "#### Packet Capture Analysis (deterministic, whole capture):\n67 of 67 packets in the capture read: 4888 bytes over 344.8s. Protocols: other=4, tcp=32, udp=28\n\nExternal conversations (all 25, by volume):\n- 8.8.8.8:53/udp \u2014 8 pkts, 553 bytes\n- 104.16.0.1:443/tcp \u2014 2 pkts, 348 bytes\n- 185.199.108.1:4444/tcp \u2014 5 pkts, 270 bytes\n- 151.101.1.1:443/tcp \u2014 5 pkts, 270 bytes\n- 45.33.32.156:8080/udp \u2014 6 pkts, 264 bytes\n- 151.101.1.2:443/udp \u2014 6 pkts, 258 bytes\n- 93.184.216.34:80/tcp \u2014 3 pkts, 237 bytes\n- 104.16.0.2:443/tcp \u2014 1 pkts, 150 bytes\n- 8.8.8.8:0/other \u2014 2 pkts, 134 bytes\n- 104.16.0.3:443/tcp \u2014 1 pkts, 120 bytes\n- 93.184.216.35:8080/tcp \u2014 1 pkts, 104 bytes\n- 80.1.1.1:3389/tcp \u2014 1 pkts, 104 bytes\n- 93.184.216.37:80/tcp \u2014 1 pkts, 101 bytes\n- 93.184.216.39:80/tcp \u2014 1 pkts, 101 bytes\n- 93.184.216.40:80/tcp \u2014 1 pkts, 97 bytes\n- 9.9.9.9:123/udp \u2014 1 pkts, 94 bytes\n- 70.1.1.1:22/tcp \u2014 1 pkts, 94 bytes\n- 1.1.1.1:53/tcp \u2014 1 pkts, 89 bytes\n- 104.16.0.4:443/tcp \u2014 1 pkts, 87 bytes\n- 93.184.216.36:80/tcp \u2014 1 pkts, 81 bytes\n- 50.1.1.1:8443/tcp \u2014 1 pkts, 78 bytes\n- 93.184.216.38:80/tcp \u2014 1 pkts, 73 bytes\n- 60.1.1.1:9999/udp \u2014 1 pkts, 62 bytes\n- 8.8.8.8:443/tcp \u2014 1 pkts, 54 bytes\n- 8.8.4.4:0/other \u2014 1 pkts, 46 bytes\n\nTLS SNI (encrypted destinations):\n- cdn.example.net (2 ClientHello)\n\nBeaconing detected (periodic callbacks \u2014 strong C2 signal):\n- 45.33.32.156:8080/udp \u2014 6 callbacks, ~30.0s interval (regular; likely C2 beacon)\n- 185.199.108.1:4444/tcp \u2014 5 callbacks, ~60.0s interval (regular; likely C2 beacon)",
    "empty": false,
    "packets_read": 67,
    "packets_in_capture": 67,
@@ -1682,8 +1982,8 @@
    "duration_s": 344.8,
    "protocols": {
     "other": 4,
-    "tcp": 31,
-    "udp": 27
+    "tcp": 32,
+    "udp": 28
    },
    "conversations": [
     {
@@ -1882,13 +2182,9 @@
     }
    ]
   },
-  "read_pcap_summary": "#### Packet Capture Analysis (deterministic, whole capture):\n67 of 67 packets in the capture read: 4888 bytes over 344.8s. Protocols: other=4, tcp=31, udp=27\n\nExternal conversations (all 25, by volume):\n- 8.8.8.8:53/udp — 8 pkts, 553 bytes\n- 104.16.0.1:443/tcp — 2 pkts, 348 bytes\n- 185.199.108.1:4444/tcp — 5 pkts, 270 bytes\n- 151.101.1.1:443/tcp — 5 pkts, 270 bytes\n- 45.33.32.156:8080/udp — 6 pkts, 264 bytes\n- 151.101.1.2:443/udp — 6 pkts, 258 bytes\n- 93.184.216.34:80/tcp — 3 pkts, 237 bytes\n- 104.16.0.2:443/tcp — 1 pkts, 150 bytes\n- 8.8.8.8:0/other — 2 pkts, 134 bytes\n- 104.16.0.3:443/tcp — 1 pkts, 120 bytes\n- 93.184.216.35:8080/tcp — 1 pkts, 104 bytes\n- 80.1.1.1:3389/tcp — 1 pkts, 104 bytes\n- 93.184.216.37:80/tcp — 1 pkts, 101 bytes\n- 93.184.216.39:80/tcp — 1 pkts, 101 bytes\n- 93.184.216.40:80/tcp — 1 pkts, 97 bytes\n- 9.9.9.9:123/udp — 1 pkts, 94 bytes\n- 70.1.1.1:22/tcp — 1 pkts, 94 bytes\n- 1.1.1.1:53/tcp — 1 pkts, 89 bytes\n- 104.16.0.4:443/tcp — 1 pkts, 87 bytes\n- 93.184.216.36:80/tcp — 1 pkts, 81 bytes\n- 50.1.1.1:8443/tcp — 1 pkts, 78 bytes\n- 93.184.216.38:80/tcp — 1 pkts, 73 bytes\n- 60.1.1.1:9999/udp — 1 pkts, 62 bytes\n- 8.8.8.8:443/tcp — 1 pkts, 54 bytes\n- 8.8.4.4:0/other — 1 pkts, 46 bytes\n\nTLS SNI (encrypted destinations):\n- cdn.example.net (2 ClientHello)\n\nBeaconing detected (periodic callbacks — strong C2 signal):\n- 45.33.32.156:8080/udp — 6 callbacks, ~30.0s interval (regular; likely C2 beacon)\n- 185.199.108.1:4444/tcp — 5 callbacks, ~60.0s interval (regular; likely C2 beacon)",
-  "read_pcap_summary_page": "Packets 3 to 9 of the 67 in the capture; the next page starts at offset 10.\nPacket 3: 10.0.2.15 -> 10.0.2.3 (UDP 50001->53)\nPacket 4: 10.0.2.15 -> 224.0.0.251 (UDP 5353->5353)\nPacket 5: 10.0.2.15 -> 224.0.0.252 (UDP 50002->5355)\nPacket 6: 10.0.2.15 -> 1.1.1.1 (TCP 50003->53)\nPacket 7: 10.0.2.15 -> 93.184.216.34 (TCP 50004->80)\nPacket 8: 10.0.2.15 -> 93.184.216.34 (TCP 50004->80)\nPacket 9: 10.0.2.15 -> 93.184.216.35 (TCP 50005->8080)",
-  "extract_dns": "67 of 67 packets in the capture read.\nupdate.example.com.\nintranet.local.\nprinter.local.\nwpad.\ntcp.example.org.\nv6.example.com.\n.\ntrunc.example.com.\nfirst.example.com.\ncafé.example.com.",
-  "extract_dns_limit_5": "5 of 67 packets in the capture read (the caller asked for 5).\nupdate.example.com.\nintranet.local.\nprinter.local.",
-  "extract_http": "67 of 67 packets in the capture read.\nGET /index.html HTTP/1.1 | Host: www.example.com\nPOST /gate.php HTTP/1.0 | \nGET /v6 HTTP/1.1 | Host: v6.example.com\nGET /x HTTP/1.1 | Host: tiny\nGET /local HTTP/1.1 | host: 10.0.2.2:8000\nHEAD / HTTP/1.1 | Host: opts.example.com\nPUT /a HTTP/1.1 | \nDELETE /b HTTP/1.1 | HOST: upper.example.com",
+  "read_pcap_summary": "#### Packet Capture Analysis (deterministic, whole capture):\n67 of 67 packets in the capture read: 4888 bytes over 344.8s. Protocols: other=4, tcp=32, udp=28\n\nExternal conversations (all 25, by volume):\n- 8.8.8.8:53/udp \u2014 8 pkts, 553 bytes\n- 104.16.0.1:443/tcp \u2014 2 pkts, 348 bytes\n- 185.199.108.1:4444/tcp \u2014 5 pkts, 270 bytes\n- 151.101.1.1:443/tcp \u2014 5 pkts, 270 bytes\n- 45.33.32.156:8080/udp \u2014 6 pkts, 264 bytes\n- 151.101.1.2:443/udp \u2014 6 pkts, 258 bytes\n- 93.184.216.34:80/tcp \u2014 3 pkts, 237 bytes\n- 104.16.0.2:443/tcp \u2014 1 pkts, 150 bytes\n- 8.8.8.8:0/other \u2014 2 pkts, 134 bytes\n- 104.16.0.3:443/tcp \u2014 1 pkts, 120 bytes\n- 93.184.216.35:8080/tcp \u2014 1 pkts, 104 bytes\n- 80.1.1.1:3389/tcp \u2014 1 pkts, 104 bytes\n- 93.184.216.37:80/tcp \u2014 1 pkts, 101 bytes\n- 93.184.216.39:80/tcp \u2014 1 pkts, 101 bytes\n- 93.184.216.40:80/tcp \u2014 1 pkts, 97 bytes\n- 9.9.9.9:123/udp \u2014 1 pkts, 94 bytes\n- 70.1.1.1:22/tcp \u2014 1 pkts, 94 bytes\n- 1.1.1.1:53/tcp \u2014 1 pkts, 89 bytes\n- 104.16.0.4:443/tcp \u2014 1 pkts, 87 bytes\n- 93.184.216.36:80/tcp \u2014 1 pkts, 81 bytes\n- 50.1.1.1:8443/tcp \u2014 1 pkts, 78 bytes\n- 93.184.216.38:80/tcp \u2014 1 pkts, 73 bytes\n- 60.1.1.1:9999/udp \u2014 1 pkts, 62 bytes\n- 8.8.8.8:443/tcp \u2014 1 pkts, 54 bytes\n- 8.8.4.4:0/other \u2014 1 pkts, 46 bytes\n\nTLS SNI (encrypted destinations):\n- cdn.example.net (2 ClientHello)\n\nBeaconing detected (periodic callbacks \u2014 strong C2 signal):\n- 45.33.32.156:8080/udp \u2014 6 callbacks, ~30.0s interval (regular; likely C2 beacon)\n- 185.199.108.1:4444/tcp \u2014 5 callbacks, ~60.0s interval (regular; likely C2 beacon)",
   "network_pcap_summary": {
-   "summary": "#### Packet Capture Analysis (deterministic, whole capture):\n67 of 67 packets in the capture read: 4888 bytes over 344.8s. Protocols: other=4, tcp=31, udp=27\n\nExternal conversations (all 25, by volume):\n- 8.8.8.8:53/udp — 8 pkts, 553 bytes\n- 104.16.0.1:443/tcp — 2 pkts, 348 bytes\n- 185.199.108.1:4444/tcp — 5 pkts, 270 bytes\n- 151.101.1.1:443/tcp — 5 pkts, 270 bytes\n- 45.33.32.156:8080/udp — 6 pkts, 264 bytes\n- 151.101.1.2:443/udp — 6 pkts, 258 bytes\n- 93.184.216.34:80/tcp — 3 pkts, 237 bytes\n- 104.16.0.2:443/tcp — 1 pkts, 150 bytes\n- 8.8.8.8:0/other — 2 pkts, 134 bytes\n- 104.16.0.3:443/tcp — 1 pkts, 120 bytes\n- 93.184.216.35:8080/tcp — 1 pkts, 104 bytes\n- 80.1.1.1:3389/tcp — 1 pkts, 104 bytes\n- 93.184.216.37:80/tcp — 1 pkts, 101 bytes\n- 93.184.216.39:80/tcp — 1 pkts, 101 bytes\n- 93.184.216.40:80/tcp — 1 pkts, 97 bytes\n- 9.9.9.9:123/udp — 1 pkts, 94 bytes\n- 70.1.1.1:22/tcp — 1 pkts, 94 bytes\n- 1.1.1.1:53/tcp — 1 pkts, 89 bytes\n- 104.16.0.4:443/tcp — 1 pkts, 87 bytes\n- 93.184.216.36:80/tcp — 1 pkts, 81 bytes\n- 50.1.1.1:8443/tcp — 1 pkts, 78 bytes\n- 93.184.216.38:80/tcp — 1 pkts, 73 bytes\n- 60.1.1.1:9999/udp — 1 pkts, 62 bytes\n- 8.8.8.8:443/tcp — 1 pkts, 54 bytes\n- 8.8.4.4:0/other — 1 pkts, 46 bytes\n\nTLS SNI (encrypted destinations):\n- cdn.example.net (2 ClientHello)\n\nBeaconing detected (periodic callbacks — strong C2 signal):\n- 45.33.32.156:8080/udp — 6 callbacks, ~30.0s interval (regular; likely C2 beacon)\n- 185.199.108.1:4444/tcp — 5 callbacks, ~60.0s interval (regular; likely C2 beacon)",
+   "summary": "#### Packet Capture Analysis (deterministic, whole capture):\n67 of 67 packets in the capture read: 4888 bytes over 344.8s. Protocols: other=4, tcp=32, udp=28\n\nExternal conversations (all 25, by volume):\n- 8.8.8.8:53/udp \u2014 8 pkts, 553 bytes\n- 104.16.0.1:443/tcp \u2014 2 pkts, 348 bytes\n- 185.199.108.1:4444/tcp \u2014 5 pkts, 270 bytes\n- 151.101.1.1:443/tcp \u2014 5 pkts, 270 bytes\n- 45.33.32.156:8080/udp \u2014 6 pkts, 264 bytes\n- 151.101.1.2:443/udp \u2014 6 pkts, 258 bytes\n- 93.184.216.34:80/tcp \u2014 3 pkts, 237 bytes\n- 104.16.0.2:443/tcp \u2014 1 pkts, 150 bytes\n- 8.8.8.8:0/other \u2014 2 pkts, 134 bytes\n- 104.16.0.3:443/tcp \u2014 1 pkts, 120 bytes\n- 93.184.216.35:8080/tcp \u2014 1 pkts, 104 bytes\n- 80.1.1.1:3389/tcp \u2014 1 pkts, 104 bytes\n- 93.184.216.37:80/tcp \u2014 1 pkts, 101 bytes\n- 93.184.216.39:80/tcp \u2014 1 pkts, 101 bytes\n- 93.184.216.40:80/tcp \u2014 1 pkts, 97 bytes\n- 9.9.9.9:123/udp \u2014 1 pkts, 94 bytes\n- 70.1.1.1:22/tcp \u2014 1 pkts, 94 bytes\n- 1.1.1.1:53/tcp \u2014 1 pkts, 89 bytes\n- 104.16.0.4:443/tcp \u2014 1 pkts, 87 bytes\n- 93.184.216.36:80/tcp \u2014 1 pkts, 81 bytes\n- 50.1.1.1:8443/tcp \u2014 1 pkts, 78 bytes\n- 93.184.216.38:80/tcp \u2014 1 pkts, 73 bytes\n- 60.1.1.1:9999/udp \u2014 1 pkts, 62 bytes\n- 8.8.8.8:443/tcp \u2014 1 pkts, 54 bytes\n- 8.8.4.4:0/other \u2014 1 pkts, 46 bytes\n\nTLS SNI (encrypted destinations):\n- cdn.example.net (2 ClientHello)\n\nBeaconing detected (periodic callbacks \u2014 strong C2 signal):\n- 45.33.32.156:8080/udp \u2014 6 callbacks, ~30.0s interval (regular; likely C2 beacon)\n- 185.199.108.1:4444/tcp \u2014 5 callbacks, ~60.0s interval (regular; likely C2 beacon)",
    "empty": false,
    "packets_read": 67,
    "packets_in_capture": 67,
@@ -1897,8 +2193,8 @@
    "duration_s": 344.8,
    "protocols": {
     "other": 4,
-    "tcp": 31,
-    "udp": 27
+    "tcp": 32,
+    "udp": 28
    },
    "conversations": [
     {
@@ -2157,9 +2453,9 @@
    "sni": {},
    "beacons": []
   },
-  "summarize_pcap": "#### Packet Capture Analysis (deterministic, whole capture):\n5 of 5 packets in the capture read: 20334 bytes over 4.0s. Protocols: tcp=2, udp=3\n\nExternal conversations (all 2, by volume):\n- 8.8.8.8:53/udp — 3 pkts, 20174 bytes\n- 8.8.8.8:4444/tcp — 2 pkts, 160 bytes\n\nNo regular beaconing interval detected in the packets read.",
+  "summarize_pcap": "#### Packet Capture Analysis (deterministic, whole capture):\n5 of 5 packets in the capture read: 20334 bytes over 4.0s. Protocols: tcp=2, udp=3\n\nExternal conversations (all 2, by volume):\n- 8.8.8.8:53/udp \u2014 3 pkts, 20174 bytes\n- 8.8.8.8:4444/tcp \u2014 2 pkts, 160 bytes\n\nNo regular beaconing interval detected in the packets read.",
   "tool_pcap_summary": {
-   "summary": "#### Packet Capture Analysis (deterministic, whole capture):\n5 of 5 packets in the capture read: 20334 bytes over 4.0s. Protocols: tcp=2, udp=3\n\nExternal conversations (all 2, by volume):\n- 8.8.8.8:53/udp — 3 pkts, 20174 bytes\n- 8.8.8.8:4444/tcp — 2 pkts, 160 bytes\n\nNo regular beaconing interval detected in the packets read.",
+   "summary": "#### Packet Capture Analysis (deterministic, whole capture):\n5 of 5 packets in the capture read: 20334 bytes over 4.0s. Protocols: tcp=2, udp=3\n\nExternal conversations (all 2, by volume):\n- 8.8.8.8:53/udp \u2014 3 pkts, 20174 bytes\n- 8.8.8.8:4444/tcp \u2014 2 pkts, 160 bytes\n\nNo regular beaconing interval detected in the packets read.",
    "empty": false,
    "packets_read": 5,
    "packets_in_capture": 5,
@@ -2189,13 +2485,13 @@
    "sni": {},
    "beacons": []
   },
-  "read_pcap_summary": "#### Packet Capture Analysis (deterministic, whole capture):\n5 of 5 packets in the capture read: 20334 bytes over 4.0s. Protocols: tcp=2, udp=3\n\nExternal conversations (all 2, by volume):\n- 8.8.8.8:53/udp — 3 pkts, 20174 bytes\n- 8.8.8.8:4444/tcp — 2 pkts, 160 bytes\n\nNo regular beaconing interval detected in the packets read.",
+  "read_pcap_summary": "#### Packet Capture Analysis (deterministic, whole capture):\n5 of 5 packets in the capture read: 20334 bytes over 4.0s. Protocols: tcp=2, udp=3\n\nExternal conversations (all 2, by volume):\n- 8.8.8.8:53/udp \u2014 3 pkts, 20174 bytes\n- 8.8.8.8:4444/tcp \u2014 2 pkts, 160 bytes\n\nNo regular beaconing interval detected in the packets read.",
   "read_pcap_summary_page": "Packets 3 to 4 of the 5 in the capture.\nPacket 3: 10.0.0.2 -> 8.8.8.8 (UDP 5000->53)\nPacket 4: 10.0.0.2 -> 8.8.8.8 (TCP 5001->4444)",
   "extract_dns": "5 of 5 packets in the capture read.\nevil.example.",
   "extract_dns_limit_5": "5 of 5 packets in the capture read.\nevil.example.",
   "extract_http": "5 of 5 packets in the capture read.\n2 times: GET /c2 HTTP/1.1 | Host: evil.example",
   "network_pcap_summary": {
-   "summary": "#### Packet Capture Analysis (deterministic, whole capture):\n5 of 5 packets in the capture read: 20334 bytes over 4.0s. Protocols: tcp=2, udp=3\n\nExternal conversations (all 2, by volume):\n- 8.8.8.8:53/udp — 3 pkts, 20174 bytes\n- 8.8.8.8:4444/tcp — 2 pkts, 160 bytes\n\nNo regular beaconing interval detected in the packets read.",
+   "summary": "#### Packet Capture Analysis (deterministic, whole capture):\n5 of 5 packets in the capture read: 20334 bytes over 4.0s. Protocols: tcp=2, udp=3\n\nExternal conversations (all 2, by volume):\n- 8.8.8.8:53/udp \u2014 3 pkts, 20174 bytes\n- 8.8.8.8:4444/tcp \u2014 2 pkts, 160 bytes\n\nNo regular beaconing interval detected in the packets read.",
    "empty": false,
    "packets_read": 5,
    "packets_in_capture": 5,
@@ -2285,9 +2581,9 @@
    "sni": {},
    "beacons": []
   },
-  "summarize_pcap": "#### Packet Capture Analysis (deterministic, whole capture):\n5 of 5 packets in the capture read: 2408 bytes over 4.0s. Protocols: tcp=2, udp=3\n\nExternal conversations (all 2, by volume):\n- 8.8.8.8:53/udp — 3 pkts, 2220 bytes\n- 8.8.8.8:4444/tcp — 2 pkts, 188 bytes\n\nNo regular beaconing interval detected in the packets read.",
+  "summarize_pcap": "#### Packet Capture Analysis (deterministic, whole capture):\n5 of 5 packets in the capture read: 2408 bytes over 4.0s. Protocols: tcp=2, udp=3\n\nExternal conversations (all 2, by volume):\n- 8.8.8.8:53/udp \u2014 3 pkts, 2220 bytes\n- 8.8.8.8:4444/tcp \u2014 2 pkts, 188 bytes\n\nNo regular beaconing interval detected in the packets read.",
   "tool_pcap_summary": {
-   "summary": "#### Packet Capture Analysis (deterministic, whole capture):\n5 of 5 packets in the capture read: 2408 bytes over 4.0s. Protocols: tcp=2, udp=3\n\nExternal conversations (all 2, by volume):\n- 8.8.8.8:53/udp — 3 pkts, 2220 bytes\n- 8.8.8.8:4444/tcp — 2 pkts, 188 bytes\n\nNo regular beaconing interval detected in the packets read.",
+   "summary": "#### Packet Capture Analysis (deterministic, whole capture):\n5 of 5 packets in the capture read: 2408 bytes over 4.0s. Protocols: tcp=2, udp=3\n\nExternal conversations (all 2, by volume):\n- 8.8.8.8:53/udp \u2014 3 pkts, 2220 bytes\n- 8.8.8.8:4444/tcp \u2014 2 pkts, 188 bytes\n\nNo regular beaconing interval detected in the packets read.",
    "empty": false,
    "packets_read": 5,
    "packets_in_capture": 5,
@@ -2317,13 +2613,13 @@
    "sni": {},
    "beacons": []
   },
-  "read_pcap_summary": "#### Packet Capture Analysis (deterministic, whole capture):\n5 of 5 packets in the capture read: 2408 bytes over 4.0s. Protocols: tcp=2, udp=3\n\nExternal conversations (all 2, by volume):\n- 8.8.8.8:53/udp — 3 pkts, 2220 bytes\n- 8.8.8.8:4444/tcp — 2 pkts, 188 bytes\n\nNo regular beaconing interval detected in the packets read.",
+  "read_pcap_summary": "#### Packet Capture Analysis (deterministic, whole capture):\n5 of 5 packets in the capture read: 2408 bytes over 4.0s. Protocols: tcp=2, udp=3\n\nExternal conversations (all 2, by volume):\n- 8.8.8.8:53/udp \u2014 3 pkts, 2220 bytes\n- 8.8.8.8:4444/tcp \u2014 2 pkts, 188 bytes\n\nNo regular beaconing interval detected in the packets read.",
   "read_pcap_summary_page": "Packets 3 to 4 of the 5 in the capture.\nPacket 3: 10.0.0.2 -> 8.8.8.8 (UDP 5000->53)\nPacket 4: 10.0.0.2 -> 8.8.8.8 (TCP 5001->4444)",
   "extract_dns": "5 of 5 packets in the capture read.\nevil.example.",
   "extract_dns_limit_5": "5 of 5 packets in the capture read.\nevil.example.",
   "extract_http": "5 of 5 packets in the capture read.\n2 times: GET /c2 HTTP/1.1 | Host: evil.example",
   "network_pcap_summary": {
-   "summary": "#### Packet Capture Analysis (deterministic, whole capture):\n5 of 5 packets in the capture read: 2408 bytes over 4.0s. Protocols: tcp=2, udp=3\n\nExternal conversations (all 2, by volume):\n- 8.8.8.8:53/udp — 3 pkts, 2220 bytes\n- 8.8.8.8:4444/tcp — 2 pkts, 188 bytes\n\nNo regular beaconing interval detected in the packets read.",
+   "summary": "#### Packet Capture Analysis (deterministic, whole capture):\n5 of 5 packets in the capture read: 2408 bytes over 4.0s. Protocols: tcp=2, udp=3\n\nExternal conversations (all 2, by volume):\n- 8.8.8.8:53/udp \u2014 3 pkts, 2220 bytes\n- 8.8.8.8:4444/tcp \u2014 2 pkts, 188 bytes\n\nNo regular beaconing interval detected in the packets read.",
    "empty": false,
    "packets_read": 5,
    "packets_in_capture": 5,
@@ -2348,6 +2644,476 @@
      "proto": "tcp",
      "packets": 2,
      "bytes": 188
+    }
+   ],
+   "sni": {},
+   "beacons": []
+  }
+ },
+ "linux_sll.pcap": {
+  "capture_facts": {
+   "packets_read": 3,
+   "packets_in_capture": 3,
+   "packet_limit": null,
+   "bytes": 271,
+   "duration_s": 3.0,
+   "protocols": {
+    "tcp": 1,
+    "udp": 2
+   },
+   "conversations": [
+    {
+     "dst": "93.184.216.34",
+     "dport": 80,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 102
+    },
+    {
+     "dst": "8.8.8.8",
+     "dport": 53,
+     "proto": "udp",
+     "packets": 1,
+     "bytes": 78
+    }
+   ],
+   "sni": {},
+   "beacons": []
+  },
+  "capture_facts_limit_3": {
+   "packets_read": 3,
+   "packets_in_capture": 3,
+   "packet_limit": 3,
+   "bytes": 271,
+   "duration_s": 3.0,
+   "protocols": {
+    "tcp": 1,
+    "udp": 2
+   },
+   "conversations": [
+    {
+     "dst": "93.184.216.34",
+     "dport": 80,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 102
+    },
+    {
+     "dst": "8.8.8.8",
+     "dport": 53,
+     "proto": "udp",
+     "packets": 1,
+     "bytes": 78
+    }
+   ],
+   "sni": {},
+   "beacons": []
+  },
+  "summarize_pcap": "#### Packet Capture Analysis (deterministic, whole capture):\n3 of 3 packets in the capture read: 271 bytes over 3.0s. Protocols: tcp=1, udp=2\n\nExternal conversations (all 2, by volume):\n- 93.184.216.34:80/tcp \u2014 1 pkts, 102 bytes\n- 8.8.8.8:53/udp \u2014 1 pkts, 78 bytes\n\nNo regular beaconing interval detected in the packets read.",
+  "tool_pcap_summary": {
+   "summary": "#### Packet Capture Analysis (deterministic, whole capture):\n3 of 3 packets in the capture read: 271 bytes over 3.0s. Protocols: tcp=1, udp=2\n\nExternal conversations (all 2, by volume):\n- 93.184.216.34:80/tcp \u2014 1 pkts, 102 bytes\n- 8.8.8.8:53/udp \u2014 1 pkts, 78 bytes\n\nNo regular beaconing interval detected in the packets read.",
+   "empty": false,
+   "packets_read": 3,
+   "packets_in_capture": 3,
+   "packet_limit": null,
+   "bytes": 271,
+   "duration_s": 3.0,
+   "protocols": {
+    "tcp": 1,
+    "udp": 2
+   },
+   "conversations": [
+    {
+     "dst": "93.184.216.34",
+     "dport": 80,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 102
+    },
+    {
+     "dst": "8.8.8.8",
+     "dport": 53,
+     "proto": "udp",
+     "packets": 1,
+     "bytes": 78
+    }
+   ],
+   "sni": {},
+   "beacons": []
+  },
+  "read_pcap_summary": "#### Packet Capture Analysis (deterministic, whole capture):\n3 of 3 packets in the capture read: 271 bytes over 3.0s. Protocols: tcp=1, udp=2\n\nExternal conversations (all 2, by volume):\n- 93.184.216.34:80/tcp \u2014 1 pkts, 102 bytes\n- 8.8.8.8:53/udp \u2014 1 pkts, 78 bytes\n\nNo regular beaconing interval detected in the packets read.",
+  "network_pcap_summary": {
+   "summary": "#### Packet Capture Analysis (deterministic, whole capture):\n3 of 3 packets in the capture read: 271 bytes over 3.0s. Protocols: tcp=1, udp=2\n\nExternal conversations (all 2, by volume):\n- 93.184.216.34:80/tcp \u2014 1 pkts, 102 bytes\n- 8.8.8.8:53/udp \u2014 1 pkts, 78 bytes\n\nNo regular beaconing interval detected in the packets read.",
+   "empty": false,
+   "packets_read": 3,
+   "packets_in_capture": 3,
+   "packet_limit": null,
+   "bytes": 271,
+   "duration_s": 3.0,
+   "protocols": {
+    "tcp": 1,
+    "udp": 2
+   },
+   "conversations": [
+    {
+     "dst": "93.184.216.34",
+     "dport": 80,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 102
+    },
+    {
+     "dst": "8.8.8.8",
+     "dport": 53,
+     "proto": "udp",
+     "packets": 1,
+     "bytes": 78
+    }
+   ],
+   "sni": {},
+   "beacons": []
+  }
+ },
+ "linux_sll2.pcap": {
+  "capture_facts": {
+   "packets_read": 3,
+   "packets_in_capture": 3,
+   "packet_limit": null,
+   "bytes": 283,
+   "duration_s": 3.0,
+   "protocols": {
+    "tcp": 1,
+    "udp": 2
+   },
+   "conversations": [
+    {
+     "dst": "93.184.216.34",
+     "dport": 80,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 106
+    },
+    {
+     "dst": "8.8.8.8",
+     "dport": 53,
+     "proto": "udp",
+     "packets": 1,
+     "bytes": 82
+    }
+   ],
+   "sni": {},
+   "beacons": []
+  },
+  "capture_facts_limit_3": {
+   "packets_read": 3,
+   "packets_in_capture": 3,
+   "packet_limit": 3,
+   "bytes": 283,
+   "duration_s": 3.0,
+   "protocols": {
+    "tcp": 1,
+    "udp": 2
+   },
+   "conversations": [
+    {
+     "dst": "93.184.216.34",
+     "dport": 80,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 106
+    },
+    {
+     "dst": "8.8.8.8",
+     "dport": 53,
+     "proto": "udp",
+     "packets": 1,
+     "bytes": 82
+    }
+   ],
+   "sni": {},
+   "beacons": []
+  },
+  "summarize_pcap": "#### Packet Capture Analysis (deterministic, whole capture):\n3 of 3 packets in the capture read: 283 bytes over 3.0s. Protocols: tcp=1, udp=2\n\nExternal conversations (all 2, by volume):\n- 93.184.216.34:80/tcp \u2014 1 pkts, 106 bytes\n- 8.8.8.8:53/udp \u2014 1 pkts, 82 bytes\n\nNo regular beaconing interval detected in the packets read.",
+  "tool_pcap_summary": {
+   "summary": "#### Packet Capture Analysis (deterministic, whole capture):\n3 of 3 packets in the capture read: 283 bytes over 3.0s. Protocols: tcp=1, udp=2\n\nExternal conversations (all 2, by volume):\n- 93.184.216.34:80/tcp \u2014 1 pkts, 106 bytes\n- 8.8.8.8:53/udp \u2014 1 pkts, 82 bytes\n\nNo regular beaconing interval detected in the packets read.",
+   "empty": false,
+   "packets_read": 3,
+   "packets_in_capture": 3,
+   "packet_limit": null,
+   "bytes": 283,
+   "duration_s": 3.0,
+   "protocols": {
+    "tcp": 1,
+    "udp": 2
+   },
+   "conversations": [
+    {
+     "dst": "93.184.216.34",
+     "dport": 80,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 106
+    },
+    {
+     "dst": "8.8.8.8",
+     "dport": 53,
+     "proto": "udp",
+     "packets": 1,
+     "bytes": 82
+    }
+   ],
+   "sni": {},
+   "beacons": []
+  },
+  "read_pcap_summary": "#### Packet Capture Analysis (deterministic, whole capture):\n3 of 3 packets in the capture read: 283 bytes over 3.0s. Protocols: tcp=1, udp=2\n\nExternal conversations (all 2, by volume):\n- 93.184.216.34:80/tcp \u2014 1 pkts, 106 bytes\n- 8.8.8.8:53/udp \u2014 1 pkts, 82 bytes\n\nNo regular beaconing interval detected in the packets read.",
+  "network_pcap_summary": {
+   "summary": "#### Packet Capture Analysis (deterministic, whole capture):\n3 of 3 packets in the capture read: 283 bytes over 3.0s. Protocols: tcp=1, udp=2\n\nExternal conversations (all 2, by volume):\n- 93.184.216.34:80/tcp \u2014 1 pkts, 106 bytes\n- 8.8.8.8:53/udp \u2014 1 pkts, 82 bytes\n\nNo regular beaconing interval detected in the packets read.",
+   "empty": false,
+   "packets_read": 3,
+   "packets_in_capture": 3,
+   "packet_limit": null,
+   "bytes": 283,
+   "duration_s": 3.0,
+   "protocols": {
+    "tcp": 1,
+    "udp": 2
+   },
+   "conversations": [
+    {
+     "dst": "93.184.216.34",
+     "dport": 80,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 106
+    },
+    {
+     "dst": "8.8.8.8",
+     "dport": 53,
+     "proto": "udp",
+     "packets": 1,
+     "bytes": 82
+    }
+   ],
+   "sni": {},
+   "beacons": []
+  }
+ },
+ "loopback_families.pcap": {
+  "capture_facts": {
+   "packets_read": 12,
+   "packets_in_capture": 12,
+   "packet_limit": null,
+   "bytes": 888,
+   "duration_s": 11.0,
+   "protocols": {
+    "udp": 12
+   },
+   "conversations": [
+    {
+     "dst": "8.8.8.8",
+     "dport": 53,
+     "proto": "udp",
+     "packets": 4,
+     "bytes": 240
+    }
+   ],
+   "sni": {},
+   "beacons": [
+    {
+     "dst": "8.8.8.8",
+     "dport": 53,
+     "proto": "udp",
+     "callbacks": 4,
+     "interval_s": 1.0
+    }
+   ]
+  },
+  "summarize_pcap": "#### Packet Capture Analysis (deterministic, whole capture):\n12 of 12 packets in the capture read: 888 bytes over 11.0s. Protocols: udp=12\n\nExternal conversations (all 1, by volume):\n- 8.8.8.8:53/udp \u2014 4 pkts, 240 bytes\n\nBeaconing detected (periodic callbacks \u2014 strong C2 signal):\n- 8.8.8.8:53/udp \u2014 4 callbacks, ~1.0s interval (regular; likely C2 beacon)",
+  "tool_pcap_summary": {
+   "summary": "#### Packet Capture Analysis (deterministic, whole capture):\n12 of 12 packets in the capture read: 888 bytes over 11.0s. Protocols: udp=12\n\nExternal conversations (all 1, by volume):\n- 8.8.8.8:53/udp \u2014 4 pkts, 240 bytes\n\nBeaconing detected (periodic callbacks \u2014 strong C2 signal):\n- 8.8.8.8:53/udp \u2014 4 callbacks, ~1.0s interval (regular; likely C2 beacon)",
+   "empty": false,
+   "packets_read": 12,
+   "packets_in_capture": 12,
+   "packet_limit": null,
+   "bytes": 888,
+   "duration_s": 11.0,
+   "protocols": {
+    "udp": 12
+   },
+   "conversations": [
+    {
+     "dst": "8.8.8.8",
+     "dport": 53,
+     "proto": "udp",
+     "packets": 4,
+     "bytes": 240
+    }
+   ],
+   "sni": {},
+   "beacons": [
+    {
+     "dst": "8.8.8.8",
+     "dport": 53,
+     "proto": "udp",
+     "callbacks": 4,
+     "interval_s": 1.0
+    }
+   ]
+  },
+  "read_pcap_summary": "#### Packet Capture Analysis (deterministic, whole capture):\n12 of 12 packets in the capture read: 888 bytes over 11.0s. Protocols: udp=12\n\nExternal conversations (all 1, by volume):\n- 8.8.8.8:53/udp \u2014 4 pkts, 240 bytes\n\nBeaconing detected (periodic callbacks \u2014 strong C2 signal):\n- 8.8.8.8:53/udp \u2014 4 callbacks, ~1.0s interval (regular; likely C2 beacon)",
+  "read_pcap_summary_page": "Packets 3 to 9 of the 12 in the capture; the next page starts at offset 10.\nPacket 3: 10.0.0.1 -> 8.8.8.8 (UDP 40010->53)",
+  "network_pcap_summary": {
+   "summary": "#### Packet Capture Analysis (deterministic, whole capture):\n12 of 12 packets in the capture read: 888 bytes over 11.0s. Protocols: udp=12\n\nExternal conversations (all 1, by volume):\n- 8.8.8.8:53/udp \u2014 4 pkts, 240 bytes\n\nBeaconing detected (periodic callbacks \u2014 strong C2 signal):\n- 8.8.8.8:53/udp \u2014 4 callbacks, ~1.0s interval (regular; likely C2 beacon)",
+   "empty": false,
+   "packets_read": 12,
+   "packets_in_capture": 12,
+   "packet_limit": null,
+   "bytes": 888,
+   "duration_s": 11.0,
+   "protocols": {
+    "udp": 12
+   },
+   "conversations": [
+    {
+     "dst": "8.8.8.8",
+     "dport": 53,
+     "proto": "udp",
+     "packets": 4,
+     "bytes": 240
+    }
+   ],
+   "sni": {},
+   "beacons": [
+    {
+     "dst": "8.8.8.8",
+     "dport": 53,
+     "proto": "udp",
+     "callbacks": 4,
+     "interval_s": 1.0
+    }
+   ]
+  }
+ },
+ "null_loopback.pcap": {
+  "capture_facts": {
+   "packets_read": 3,
+   "packets_in_capture": 3,
+   "packet_limit": null,
+   "bytes": 235,
+   "duration_s": 3.0,
+   "protocols": {
+    "tcp": 1,
+    "udp": 2
+   },
+   "conversations": [
+    {
+     "dst": "93.184.216.34",
+     "dport": 80,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 90
+    },
+    {
+     "dst": "8.8.8.8",
+     "dport": 53,
+     "proto": "udp",
+     "packets": 1,
+     "bytes": 66
+    }
+   ],
+   "sni": {},
+   "beacons": []
+  },
+  "capture_facts_limit_3": {
+   "packets_read": 3,
+   "packets_in_capture": 3,
+   "packet_limit": 3,
+   "bytes": 235,
+   "duration_s": 3.0,
+   "protocols": {
+    "tcp": 1,
+    "udp": 2
+   },
+   "conversations": [
+    {
+     "dst": "93.184.216.34",
+     "dport": 80,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 90
+    },
+    {
+     "dst": "8.8.8.8",
+     "dport": 53,
+     "proto": "udp",
+     "packets": 1,
+     "bytes": 66
+    }
+   ],
+   "sni": {},
+   "beacons": []
+  },
+  "summarize_pcap": "#### Packet Capture Analysis (deterministic, whole capture):\n3 of 3 packets in the capture read: 235 bytes over 3.0s. Protocols: tcp=1, udp=2\n\nExternal conversations (all 2, by volume):\n- 93.184.216.34:80/tcp \u2014 1 pkts, 90 bytes\n- 8.8.8.8:53/udp \u2014 1 pkts, 66 bytes\n\nNo regular beaconing interval detected in the packets read.",
+  "tool_pcap_summary": {
+   "summary": "#### Packet Capture Analysis (deterministic, whole capture):\n3 of 3 packets in the capture read: 235 bytes over 3.0s. Protocols: tcp=1, udp=2\n\nExternal conversations (all 2, by volume):\n- 93.184.216.34:80/tcp \u2014 1 pkts, 90 bytes\n- 8.8.8.8:53/udp \u2014 1 pkts, 66 bytes\n\nNo regular beaconing interval detected in the packets read.",
+   "empty": false,
+   "packets_read": 3,
+   "packets_in_capture": 3,
+   "packet_limit": null,
+   "bytes": 235,
+   "duration_s": 3.0,
+   "protocols": {
+    "tcp": 1,
+    "udp": 2
+   },
+   "conversations": [
+    {
+     "dst": "93.184.216.34",
+     "dport": 80,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 90
+    },
+    {
+     "dst": "8.8.8.8",
+     "dport": 53,
+     "proto": "udp",
+     "packets": 1,
+     "bytes": 66
+    }
+   ],
+   "sni": {},
+   "beacons": []
+  },
+  "read_pcap_summary": "#### Packet Capture Analysis (deterministic, whole capture):\n3 of 3 packets in the capture read: 235 bytes over 3.0s. Protocols: tcp=1, udp=2\n\nExternal conversations (all 2, by volume):\n- 93.184.216.34:80/tcp \u2014 1 pkts, 90 bytes\n- 8.8.8.8:53/udp \u2014 1 pkts, 66 bytes\n\nNo regular beaconing interval detected in the packets read.",
+  "extract_dns": "3 of 3 packets in the capture read.\nlink.example.com.\nsix.local.",
+  "extract_dns_limit_5": "3 of 3 packets in the capture read.\nlink.example.com.\nsix.local.",
+  "network_pcap_summary": {
+   "summary": "#### Packet Capture Analysis (deterministic, whole capture):\n3 of 3 packets in the capture read: 235 bytes over 3.0s. Protocols: tcp=1, udp=2\n\nExternal conversations (all 2, by volume):\n- 93.184.216.34:80/tcp \u2014 1 pkts, 90 bytes\n- 8.8.8.8:53/udp \u2014 1 pkts, 66 bytes\n\nNo regular beaconing interval detected in the packets read.",
+   "empty": false,
+   "packets_read": 3,
+   "packets_in_capture": 3,
+   "packet_limit": null,
+   "bytes": 235,
+   "duration_s": 3.0,
+   "protocols": {
+    "tcp": 1,
+    "udp": 2
+   },
+   "conversations": [
+    {
+     "dst": "93.184.216.34",
+     "dport": 80,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 90
+    },
+    {
+     "dst": "8.8.8.8",
+     "dport": 53,
+     "proto": "udp",
+     "packets": 1,
+     "bytes": 66
     }
    ],
    "sni": {},
@@ -2413,9 +3179,9 @@
    "sni": {},
    "beacons": []
   },
-  "summarize_pcap": "#### Packet Capture Analysis (deterministic, whole capture):\n3 of 3 packets in the capture read: 194 bytes over 2.0s. Protocols: other=1, tcp=1\n\nExternal conversations (all 2, by volume):\n- 8.8.8.8:0/other — 1 pkts, 97 bytes\n- 8.8.8.8:80/tcp — 1 pkts, 97 bytes\n\nNo regular beaconing interval detected in the packets read.",
+  "summarize_pcap": "#### Packet Capture Analysis (deterministic, whole capture):\n3 of 3 packets in the capture read: 194 bytes over 2.0s. Protocols: other=1, tcp=1\n\nExternal conversations (all 2, by volume):\n- 8.8.8.8:0/other \u2014 1 pkts, 97 bytes\n- 8.8.8.8:80/tcp \u2014 1 pkts, 97 bytes\n\nNo regular beaconing interval detected in the packets read.",
   "tool_pcap_summary": {
-   "summary": "#### Packet Capture Analysis (deterministic, whole capture):\n3 of 3 packets in the capture read: 194 bytes over 2.0s. Protocols: other=1, tcp=1\n\nExternal conversations (all 2, by volume):\n- 8.8.8.8:0/other — 1 pkts, 97 bytes\n- 8.8.8.8:80/tcp — 1 pkts, 97 bytes\n\nNo regular beaconing interval detected in the packets read.",
+   "summary": "#### Packet Capture Analysis (deterministic, whole capture):\n3 of 3 packets in the capture read: 194 bytes over 2.0s. Protocols: other=1, tcp=1\n\nExternal conversations (all 2, by volume):\n- 8.8.8.8:0/other \u2014 1 pkts, 97 bytes\n- 8.8.8.8:80/tcp \u2014 1 pkts, 97 bytes\n\nNo regular beaconing interval detected in the packets read.",
    "empty": false,
    "packets_read": 3,
    "packets_in_capture": 3,
@@ -2445,13 +3211,13 @@
    "sni": {},
    "beacons": []
   },
-  "read_pcap_summary": "#### Packet Capture Analysis (deterministic, whole capture):\n3 of 3 packets in the capture read: 194 bytes over 2.0s. Protocols: other=1, tcp=1\n\nExternal conversations (all 2, by volume):\n- 8.8.8.8:0/other — 1 pkts, 97 bytes\n- 8.8.8.8:80/tcp — 1 pkts, 97 bytes\n\nNo regular beaconing interval detected in the packets read.",
+  "read_pcap_summary": "#### Packet Capture Analysis (deterministic, whole capture):\n3 of 3 packets in the capture read: 194 bytes over 2.0s. Protocols: other=1, tcp=1\n\nExternal conversations (all 2, by volume):\n- 8.8.8.8:0/other \u2014 1 pkts, 97 bytes\n- 8.8.8.8:80/tcp \u2014 1 pkts, 97 bytes\n\nNo regular beaconing interval detected in the packets read.",
   "read_pcap_summary_page": "Packets 3 to 3 of the 3 in the capture. No IP packets in them.",
   "extract_dns": "3 of 3 packets in the capture read. No DNS queries in them.",
   "extract_dns_limit_5": "3 of 3 packets in the capture read. No DNS queries in them.",
   "extract_http": "3 of 3 packets in the capture read.\nGET /e HTTP/1.1 | Host: edge.example.com",
   "network_pcap_summary": {
-   "summary": "#### Packet Capture Analysis (deterministic, whole capture):\n3 of 3 packets in the capture read: 194 bytes over 2.0s. Protocols: other=1, tcp=1\n\nExternal conversations (all 2, by volume):\n- 8.8.8.8:0/other — 1 pkts, 97 bytes\n- 8.8.8.8:80/tcp — 1 pkts, 97 bytes\n\nNo regular beaconing interval detected in the packets read.",
+   "summary": "#### Packet Capture Analysis (deterministic, whole capture):\n3 of 3 packets in the capture read: 194 bytes over 2.0s. Protocols: other=1, tcp=1\n\nExternal conversations (all 2, by volume):\n- 8.8.8.8:0/other \u2014 1 pkts, 97 bytes\n- 8.8.8.8:80/tcp \u2014 1 pkts, 97 bytes\n\nNo regular beaconing interval detected in the packets read.",
    "empty": false,
    "packets_read": 3,
    "packets_in_capture": 3,
@@ -2480,6 +3246,123 @@
    ],
    "sni": {},
    "beacons": []
+  }
+ },
+ "openbsd_loopback.pcap": {
+  "capture_facts": {
+   "packets_read": 12,
+   "packets_in_capture": 12,
+   "packet_limit": null,
+   "bytes": 888,
+   "duration_s": 11.0,
+   "protocols": {
+    "udp": 12
+   },
+   "conversations": [
+    {
+     "dst": "8.8.8.8",
+     "dport": 53,
+     "proto": "udp",
+     "packets": 4,
+     "bytes": 240
+    }
+   ],
+   "sni": {},
+   "beacons": [
+    {
+     "dst": "8.8.8.8",
+     "dport": 53,
+     "proto": "udp",
+     "callbacks": 4,
+     "interval_s": 1.0
+    }
+   ]
+  },
+  "capture_facts_limit_3": {
+   "packets_read": 3,
+   "packets_in_capture": 12,
+   "packet_limit": 3,
+   "bytes": 180,
+   "duration_s": 2.0,
+   "protocols": {
+    "udp": 3
+   },
+   "conversations": [
+    {
+     "dst": "8.8.8.8",
+     "dport": 53,
+     "proto": "udp",
+     "packets": 3,
+     "bytes": 180
+    }
+   ],
+   "sni": {},
+   "beacons": []
+  },
+  "summarize_pcap": "#### Packet Capture Analysis (deterministic, whole capture):\n12 of 12 packets in the capture read: 888 bytes over 11.0s. Protocols: udp=12\n\nExternal conversations (all 1, by volume):\n- 8.8.8.8:53/udp \u2014 4 pkts, 240 bytes\n\nBeaconing detected (periodic callbacks \u2014 strong C2 signal):\n- 8.8.8.8:53/udp \u2014 4 callbacks, ~1.0s interval (regular; likely C2 beacon)",
+  "tool_pcap_summary": {
+   "summary": "#### Packet Capture Analysis (deterministic, whole capture):\n12 of 12 packets in the capture read: 888 bytes over 11.0s. Protocols: udp=12\n\nExternal conversations (all 1, by volume):\n- 8.8.8.8:53/udp \u2014 4 pkts, 240 bytes\n\nBeaconing detected (periodic callbacks \u2014 strong C2 signal):\n- 8.8.8.8:53/udp \u2014 4 callbacks, ~1.0s interval (regular; likely C2 beacon)",
+   "empty": false,
+   "packets_read": 12,
+   "packets_in_capture": 12,
+   "packet_limit": null,
+   "bytes": 888,
+   "duration_s": 11.0,
+   "protocols": {
+    "udp": 12
+   },
+   "conversations": [
+    {
+     "dst": "8.8.8.8",
+     "dport": 53,
+     "proto": "udp",
+     "packets": 4,
+     "bytes": 240
+    }
+   ],
+   "sni": {},
+   "beacons": [
+    {
+     "dst": "8.8.8.8",
+     "dport": 53,
+     "proto": "udp",
+     "callbacks": 4,
+     "interval_s": 1.0
+    }
+   ]
+  },
+  "read_pcap_summary": "#### Packet Capture Analysis (deterministic, whole capture):\n12 of 12 packets in the capture read: 888 bytes over 11.0s. Protocols: udp=12\n\nExternal conversations (all 1, by volume):\n- 8.8.8.8:53/udp \u2014 4 pkts, 240 bytes\n\nBeaconing detected (periodic callbacks \u2014 strong C2 signal):\n- 8.8.8.8:53/udp \u2014 4 callbacks, ~1.0s interval (regular; likely C2 beacon)",
+  "extract_dns_limit_5": "5 of 12 packets in the capture read (the caller asked for 5).\nlo.example.\nlo6.example.",
+  "network_pcap_summary": {
+   "summary": "#### Packet Capture Analysis (deterministic, whole capture):\n12 of 12 packets in the capture read: 888 bytes over 11.0s. Protocols: udp=12\n\nExternal conversations (all 1, by volume):\n- 8.8.8.8:53/udp \u2014 4 pkts, 240 bytes\n\nBeaconing detected (periodic callbacks \u2014 strong C2 signal):\n- 8.8.8.8:53/udp \u2014 4 callbacks, ~1.0s interval (regular; likely C2 beacon)",
+   "empty": false,
+   "packets_read": 12,
+   "packets_in_capture": 12,
+   "packet_limit": null,
+   "bytes": 888,
+   "duration_s": 11.0,
+   "protocols": {
+    "udp": 12
+   },
+   "conversations": [
+    {
+     "dst": "8.8.8.8",
+     "dport": 53,
+     "proto": "udp",
+     "packets": 4,
+     "bytes": 240
+    }
+   ],
+   "sni": {},
+   "beacons": [
+    {
+     "dst": "8.8.8.8",
+     "dport": 53,
+     "proto": "udp",
+     "callbacks": 4,
+     "interval_s": 1.0
+    }
+   ]
   }
  },
  "pcapng_without_interface.pcapng": {
@@ -2527,7 +3410,7 @@
    "packets_in_capture": 0,
    "packet_limit": null
   },
-  "read_pcap_summary": "#### Packet Capture Analysis (deterministic, part of the capture):\n0 packets read, 1 blocks unreadable: an enhanced packet block names an interface no interface description declared (1, the first at byte 40, interface 0): 0 bytes over 0.0s. Protocols: no IP packets\nNo external (public) endpoints contacted — traffic stayed internal to the sandbox.",
+  "read_pcap_summary": "#### Packet Capture Analysis (deterministic, part of the capture):\n0 packets read, 1 blocks unreadable: an enhanced packet block names an interface no interface description declared (1, the first at byte 40, interface 0): 0 bytes over 0.0s. Protocols: no IP packets\nNo external (public) endpoints contacted \u2014 traffic stayed internal to the sandbox.",
   "read_pcap_summary_page": "Packets 3 to 3 of the 0 in the capture (0 packets read, 1 blocks unreadable: an enhanced packet block names an interface no interface description declared (1, the first at byte 40, interface 0)). No IP packets in them.",
   "extract_dns": "0 packets read, 1 blocks unreadable: an enhanced packet block names an interface no interface description declared (1, the first at byte 40, interface 0). No DNS queries in them.",
   "extract_dns_limit_5": "0 packets read, 1 blocks unreadable: an enhanced packet block names an interface no interface description declared (1, the first at byte 40, interface 0). No DNS queries in them.",
@@ -2538,6 +3421,254 @@
    "packets_read": 0,
    "packets_in_capture": 0,
    "packet_limit": null
+  }
+ },
+ "raw_ip_dlt101.pcap": {
+  "capture_facts": {
+   "packets_read": 3,
+   "packets_in_capture": 3,
+   "packet_limit": null,
+   "bytes": 223,
+   "duration_s": 3.0,
+   "protocols": {
+    "tcp": 1,
+    "udp": 2
+   },
+   "conversations": [
+    {
+     "dst": "93.184.216.34",
+     "dport": 80,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 86
+    },
+    {
+     "dst": "8.8.8.8",
+     "dport": 53,
+     "proto": "udp",
+     "packets": 1,
+     "bytes": 62
+    }
+   ],
+   "sni": {},
+   "beacons": []
+  },
+  "capture_facts_limit_3": {
+   "packets_read": 3,
+   "packets_in_capture": 3,
+   "packet_limit": 3,
+   "bytes": 223,
+   "duration_s": 3.0,
+   "protocols": {
+    "tcp": 1,
+    "udp": 2
+   },
+   "conversations": [
+    {
+     "dst": "93.184.216.34",
+     "dport": 80,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 86
+    },
+    {
+     "dst": "8.8.8.8",
+     "dport": 53,
+     "proto": "udp",
+     "packets": 1,
+     "bytes": 62
+    }
+   ],
+   "sni": {},
+   "beacons": []
+  },
+  "summarize_pcap": "#### Packet Capture Analysis (deterministic, whole capture):\n3 of 3 packets in the capture read: 223 bytes over 3.0s. Protocols: tcp=1, udp=2\n\nExternal conversations (all 2, by volume):\n- 93.184.216.34:80/tcp \u2014 1 pkts, 86 bytes\n- 8.8.8.8:53/udp \u2014 1 pkts, 62 bytes\n\nNo regular beaconing interval detected in the packets read.",
+  "tool_pcap_summary": {
+   "summary": "#### Packet Capture Analysis (deterministic, whole capture):\n3 of 3 packets in the capture read: 223 bytes over 3.0s. Protocols: tcp=1, udp=2\n\nExternal conversations (all 2, by volume):\n- 93.184.216.34:80/tcp \u2014 1 pkts, 86 bytes\n- 8.8.8.8:53/udp \u2014 1 pkts, 62 bytes\n\nNo regular beaconing interval detected in the packets read.",
+   "empty": false,
+   "packets_read": 3,
+   "packets_in_capture": 3,
+   "packet_limit": null,
+   "bytes": 223,
+   "duration_s": 3.0,
+   "protocols": {
+    "tcp": 1,
+    "udp": 2
+   },
+   "conversations": [
+    {
+     "dst": "93.184.216.34",
+     "dport": 80,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 86
+    },
+    {
+     "dst": "8.8.8.8",
+     "dport": 53,
+     "proto": "udp",
+     "packets": 1,
+     "bytes": 62
+    }
+   ],
+   "sni": {},
+   "beacons": []
+  },
+  "read_pcap_summary": "#### Packet Capture Analysis (deterministic, whole capture):\n3 of 3 packets in the capture read: 223 bytes over 3.0s. Protocols: tcp=1, udp=2\n\nExternal conversations (all 2, by volume):\n- 93.184.216.34:80/tcp \u2014 1 pkts, 86 bytes\n- 8.8.8.8:53/udp \u2014 1 pkts, 62 bytes\n\nNo regular beaconing interval detected in the packets read.",
+  "network_pcap_summary": {
+   "summary": "#### Packet Capture Analysis (deterministic, whole capture):\n3 of 3 packets in the capture read: 223 bytes over 3.0s. Protocols: tcp=1, udp=2\n\nExternal conversations (all 2, by volume):\n- 93.184.216.34:80/tcp \u2014 1 pkts, 86 bytes\n- 8.8.8.8:53/udp \u2014 1 pkts, 62 bytes\n\nNo regular beaconing interval detected in the packets read.",
+   "empty": false,
+   "packets_read": 3,
+   "packets_in_capture": 3,
+   "packet_limit": null,
+   "bytes": 223,
+   "duration_s": 3.0,
+   "protocols": {
+    "tcp": 1,
+    "udp": 2
+   },
+   "conversations": [
+    {
+     "dst": "93.184.216.34",
+     "dport": 80,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 86
+    },
+    {
+     "dst": "8.8.8.8",
+     "dport": 53,
+     "proto": "udp",
+     "packets": 1,
+     "bytes": 62
+    }
+   ],
+   "sni": {},
+   "beacons": []
+  }
+ },
+ "raw_ip_dlt12.pcap": {
+  "capture_facts": {
+   "packets_read": 3,
+   "packets_in_capture": 3,
+   "packet_limit": null,
+   "bytes": 223,
+   "duration_s": 3.0,
+   "protocols": {
+    "tcp": 1,
+    "udp": 2
+   },
+   "conversations": [
+    {
+     "dst": "93.184.216.34",
+     "dport": 80,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 86
+    },
+    {
+     "dst": "8.8.8.8",
+     "dport": 53,
+     "proto": "udp",
+     "packets": 1,
+     "bytes": 62
+    }
+   ],
+   "sni": {},
+   "beacons": []
+  },
+  "capture_facts_limit_3": {
+   "packets_read": 3,
+   "packets_in_capture": 3,
+   "packet_limit": 3,
+   "bytes": 223,
+   "duration_s": 3.0,
+   "protocols": {
+    "tcp": 1,
+    "udp": 2
+   },
+   "conversations": [
+    {
+     "dst": "93.184.216.34",
+     "dport": 80,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 86
+    },
+    {
+     "dst": "8.8.8.8",
+     "dport": 53,
+     "proto": "udp",
+     "packets": 1,
+     "bytes": 62
+    }
+   ],
+   "sni": {},
+   "beacons": []
+  },
+  "summarize_pcap": "#### Packet Capture Analysis (deterministic, whole capture):\n3 of 3 packets in the capture read: 223 bytes over 3.0s. Protocols: tcp=1, udp=2\n\nExternal conversations (all 2, by volume):\n- 93.184.216.34:80/tcp \u2014 1 pkts, 86 bytes\n- 8.8.8.8:53/udp \u2014 1 pkts, 62 bytes\n\nNo regular beaconing interval detected in the packets read.",
+  "tool_pcap_summary": {
+   "summary": "#### Packet Capture Analysis (deterministic, whole capture):\n3 of 3 packets in the capture read: 223 bytes over 3.0s. Protocols: tcp=1, udp=2\n\nExternal conversations (all 2, by volume):\n- 93.184.216.34:80/tcp \u2014 1 pkts, 86 bytes\n- 8.8.8.8:53/udp \u2014 1 pkts, 62 bytes\n\nNo regular beaconing interval detected in the packets read.",
+   "empty": false,
+   "packets_read": 3,
+   "packets_in_capture": 3,
+   "packet_limit": null,
+   "bytes": 223,
+   "duration_s": 3.0,
+   "protocols": {
+    "tcp": 1,
+    "udp": 2
+   },
+   "conversations": [
+    {
+     "dst": "93.184.216.34",
+     "dport": 80,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 86
+    },
+    {
+     "dst": "8.8.8.8",
+     "dport": 53,
+     "proto": "udp",
+     "packets": 1,
+     "bytes": 62
+    }
+   ],
+   "sni": {},
+   "beacons": []
+  },
+  "read_pcap_summary": "#### Packet Capture Analysis (deterministic, whole capture):\n3 of 3 packets in the capture read: 223 bytes over 3.0s. Protocols: tcp=1, udp=2\n\nExternal conversations (all 2, by volume):\n- 93.184.216.34:80/tcp \u2014 1 pkts, 86 bytes\n- 8.8.8.8:53/udp \u2014 1 pkts, 62 bytes\n\nNo regular beaconing interval detected in the packets read.",
+  "network_pcap_summary": {
+   "summary": "#### Packet Capture Analysis (deterministic, whole capture):\n3 of 3 packets in the capture read: 223 bytes over 3.0s. Protocols: tcp=1, udp=2\n\nExternal conversations (all 2, by volume):\n- 93.184.216.34:80/tcp \u2014 1 pkts, 86 bytes\n- 8.8.8.8:53/udp \u2014 1 pkts, 62 bytes\n\nNo regular beaconing interval detected in the packets read.",
+   "empty": false,
+   "packets_read": 3,
+   "packets_in_capture": 3,
+   "packet_limit": null,
+   "bytes": 223,
+   "duration_s": 3.0,
+   "protocols": {
+    "tcp": 1,
+    "udp": 2
+   },
+   "conversations": [
+    {
+     "dst": "93.184.216.34",
+     "dport": 80,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 86
+    },
+    {
+     "dst": "8.8.8.8",
+     "dport": 53,
+     "proto": "udp",
+     "packets": 1,
+     "bytes": 62
+    }
+   ],
+   "sni": {},
+   "beacons": []
   }
  },
  "spb_snaplen0.pcapng": {
@@ -2599,9 +3730,9 @@
    "sni": {},
    "beacons": []
   },
-  "summarize_pcap": "#### Packet Capture Analysis (deterministic, whole capture):\n2 of 2 packets in the capture read: 138 bytes over 0.0s. Protocols: tcp=1, udp=1\n\nExternal conversations (all 2, by volume):\n- 8.8.8.8:4444/tcp — 1 pkts, 80 bytes\n- 8.8.8.8:53/udp — 1 pkts, 58 bytes\n\nNo regular beaconing interval detected in the packets read.",
+  "summarize_pcap": "#### Packet Capture Analysis (deterministic, whole capture):\n2 of 2 packets in the capture read: 138 bytes over 0.0s. Protocols: tcp=1, udp=1\n\nExternal conversations (all 2, by volume):\n- 8.8.8.8:4444/tcp \u2014 1 pkts, 80 bytes\n- 8.8.8.8:53/udp \u2014 1 pkts, 58 bytes\n\nNo regular beaconing interval detected in the packets read.",
   "tool_pcap_summary": {
-   "summary": "#### Packet Capture Analysis (deterministic, whole capture):\n2 of 2 packets in the capture read: 138 bytes over 0.0s. Protocols: tcp=1, udp=1\n\nExternal conversations (all 2, by volume):\n- 8.8.8.8:4444/tcp — 1 pkts, 80 bytes\n- 8.8.8.8:53/udp — 1 pkts, 58 bytes\n\nNo regular beaconing interval detected in the packets read.",
+   "summary": "#### Packet Capture Analysis (deterministic, whole capture):\n2 of 2 packets in the capture read: 138 bytes over 0.0s. Protocols: tcp=1, udp=1\n\nExternal conversations (all 2, by volume):\n- 8.8.8.8:4444/tcp \u2014 1 pkts, 80 bytes\n- 8.8.8.8:53/udp \u2014 1 pkts, 58 bytes\n\nNo regular beaconing interval detected in the packets read.",
    "empty": false,
    "packets_read": 2,
    "packets_in_capture": 2,
@@ -2631,13 +3762,13 @@
    "sni": {},
    "beacons": []
   },
-  "read_pcap_summary": "#### Packet Capture Analysis (deterministic, whole capture):\n2 of 2 packets in the capture read: 138 bytes over 0.0s. Protocols: tcp=1, udp=1\n\nExternal conversations (all 2, by volume):\n- 8.8.8.8:4444/tcp — 1 pkts, 80 bytes\n- 8.8.8.8:53/udp — 1 pkts, 58 bytes\n\nNo regular beaconing interval detected in the packets read.",
+  "read_pcap_summary": "#### Packet Capture Analysis (deterministic, whole capture):\n2 of 2 packets in the capture read: 138 bytes over 0.0s. Protocols: tcp=1, udp=1\n\nExternal conversations (all 2, by volume):\n- 8.8.8.8:4444/tcp \u2014 1 pkts, 80 bytes\n- 8.8.8.8:53/udp \u2014 1 pkts, 58 bytes\n\nNo regular beaconing interval detected in the packets read.",
   "read_pcap_summary_page": "Packets 3 to 3 of the 2 in the capture. No IP packets in them.",
   "extract_dns": "2 of 2 packets in the capture read.\nevil.example.",
   "extract_dns_limit_5": "2 of 2 packets in the capture read.\nevil.example.",
   "extract_http": "2 of 2 packets in the capture read.\nGET /c2 HTTP/1.1 | Host: evil.example",
   "network_pcap_summary": {
-   "summary": "#### Packet Capture Analysis (deterministic, whole capture):\n2 of 2 packets in the capture read: 138 bytes over 0.0s. Protocols: tcp=1, udp=1\n\nExternal conversations (all 2, by volume):\n- 8.8.8.8:4444/tcp — 1 pkts, 80 bytes\n- 8.8.8.8:53/udp — 1 pkts, 58 bytes\n\nNo regular beaconing interval detected in the packets read.",
+   "summary": "#### Packet Capture Analysis (deterministic, whole capture):\n2 of 2 packets in the capture read: 138 bytes over 0.0s. Protocols: tcp=1, udp=1\n\nExternal conversations (all 2, by volume):\n- 8.8.8.8:4444/tcp \u2014 1 pkts, 80 bytes\n- 8.8.8.8:53/udp \u2014 1 pkts, 58 bytes\n\nNo regular beaconing interval detected in the packets read.",
    "empty": false,
    "packets_read": 2,
    "packets_in_capture": 2,
@@ -2673,11 +3804,12 @@
    "packets_read": 6,
    "packets_in_capture": 6,
    "packet_limit": null,
+   "framing_end": "the pcapng block at byte 820 is cut short by the end of the file",
    "bytes": 488,
    "duration_s": 5.1,
    "protocols": {
     "tcp": 2,
-    "udp": 2
+    "udp": 4
    },
    "conversations": [
     {
@@ -2702,6 +3834,7 @@
    "packets_read": 3,
    "packets_in_capture": 6,
    "packet_limit": 3,
+   "framing_end": "the pcapng block at byte 820 is cut short by the end of the file",
    "bytes": 238,
    "duration_s": 2.0,
    "protocols": {
@@ -2727,18 +3860,19 @@
    "sni": {},
    "beacons": []
   },
-  "summarize_pcap": "#### Packet Capture Analysis (deterministic, whole capture):\n6 of 6 packets in the capture read: 488 bytes over 5.1s. Protocols: tcp=2, udp=2\n\nExternal conversations (all 2, by volume):\n- 93.184.216.34:80/tcp — 2 pkts, 186 bytes\n- 8.8.8.8:53/udp — 2 pkts, 138 bytes\n\nNo regular beaconing interval detected in the packets read.",
+  "summarize_pcap": "#### Packet Capture Analysis (deterministic, part of the capture):\n6 packets read, reading stopped where the pcapng block at byte 820 is cut short by the end of the file: 488 bytes over 5.1s. Protocols: tcp=2, udp=4\n\nExternal conversations (all 2, by volume):\n- 93.184.216.34:80/tcp \u2014 2 pkts, 186 bytes\n- 8.8.8.8:53/udp \u2014 2 pkts, 138 bytes\n\nNo regular beaconing interval detected in the packets read.",
   "tool_pcap_summary": {
-   "summary": "#### Packet Capture Analysis (deterministic, whole capture):\n6 of 6 packets in the capture read: 488 bytes over 5.1s. Protocols: tcp=2, udp=2\n\nExternal conversations (all 2, by volume):\n- 93.184.216.34:80/tcp — 2 pkts, 186 bytes\n- 8.8.8.8:53/udp — 2 pkts, 138 bytes\n\nNo regular beaconing interval detected in the packets read.",
+   "summary": "#### Packet Capture Analysis (deterministic, part of the capture):\n6 packets read, reading stopped where the pcapng block at byte 820 is cut short by the end of the file: 488 bytes over 5.1s. Protocols: tcp=2, udp=4\n\nExternal conversations (all 2, by volume):\n- 93.184.216.34:80/tcp \u2014 2 pkts, 186 bytes\n- 8.8.8.8:53/udp \u2014 2 pkts, 138 bytes\n\nNo regular beaconing interval detected in the packets read.",
    "empty": false,
    "packets_read": 6,
    "packets_in_capture": 6,
    "packet_limit": null,
+   "framing_end": "the pcapng block at byte 820 is cut short by the end of the file",
    "bytes": 488,
    "duration_s": 5.1,
    "protocols": {
     "tcp": 2,
-    "udp": 2
+    "udp": 4
    },
    "conversations": [
     {
@@ -2759,22 +3893,23 @@
    "sni": {},
    "beacons": []
   },
-  "read_pcap_summary": "#### Packet Capture Analysis (deterministic, whole capture):\n6 of 6 packets in the capture read: 488 bytes over 5.1s. Protocols: tcp=2, udp=2\n\nExternal conversations (all 2, by volume):\n- 93.184.216.34:80/tcp — 2 pkts, 186 bytes\n- 8.8.8.8:53/udp — 2 pkts, 138 bytes\n\nNo regular beaconing interval detected in the packets read.",
+  "read_pcap_summary": "#### Packet Capture Analysis (deterministic, part of the capture):\n6 packets read, reading stopped where the pcapng block at byte 820 is cut short by the end of the file: 488 bytes over 5.1s. Protocols: tcp=2, udp=4\n\nExternal conversations (all 2, by volume):\n- 93.184.216.34:80/tcp \u2014 2 pkts, 186 bytes\n- 8.8.8.8:53/udp \u2014 2 pkts, 138 bytes\n\nNo regular beaconing interval detected in the packets read.",
   "read_pcap_summary_page": "Packets 3 to 5 of the 6 in the capture.\nPacket 3: 10.0.2.15 -> 93.184.216.34 (TCP 52001->80)",
-  "extract_dns": "6 of 6 packets in the capture read.\nlink.example.com.\nsix.local.",
-  "extract_dns_limit_5": "5 of 6 packets in the capture read (the caller asked for 5).\nlink.example.com.\nsix.local.",
-  "extract_http": "6 of 6 packets in the capture read.\n2 times: GET /link HTTP/1.1 | Host: link.example.com",
+  "extract_dns": "6 packets read, reading stopped where the pcapng block at byte 820 is cut short by the end of the file.\nlink.example.com.\nsix.local.",
+  "extract_dns_limit_5": "5 packets read (the caller asked for 5), reading stopped where the pcapng block at byte 820 is cut short by the end of the file.\nlink.example.com.\nsix.local.",
+  "extract_http": "6 packets read, reading stopped where the pcapng block at byte 820 is cut short by the end of the file.\n2 times: GET /link HTTP/1.1 | Host: link.example.com",
   "network_pcap_summary": {
-   "summary": "#### Packet Capture Analysis (deterministic, whole capture):\n6 of 6 packets in the capture read: 488 bytes over 5.1s. Protocols: tcp=2, udp=2\n\nExternal conversations (all 2, by volume):\n- 93.184.216.34:80/tcp — 2 pkts, 186 bytes\n- 8.8.8.8:53/udp — 2 pkts, 138 bytes\n\nNo regular beaconing interval detected in the packets read.",
+   "summary": "#### Packet Capture Analysis (deterministic, part of the capture):\n6 packets read, reading stopped where the pcapng block at byte 820 is cut short by the end of the file: 488 bytes over 5.1s. Protocols: tcp=2, udp=4\n\nExternal conversations (all 2, by volume):\n- 93.184.216.34:80/tcp \u2014 2 pkts, 186 bytes\n- 8.8.8.8:53/udp \u2014 2 pkts, 138 bytes\n\nNo regular beaconing interval detected in the packets read.",
    "empty": false,
    "packets_read": 6,
    "packets_in_capture": 6,
    "packet_limit": null,
+   "framing_end": "the pcapng block at byte 820 is cut short by the end of the file",
    "bytes": 488,
    "duration_s": 5.1,
    "protocols": {
     "tcp": 2,
-    "udp": 2
+    "udp": 4
    },
    "conversations": [
     {
@@ -2801,12 +3936,13 @@
    "packets_read": 66,
    "packets_in_capture": 66,
    "packet_limit": null,
+   "framing_end": "the file ends inside the record header at byte 5914 (7 of its 16 bytes)",
    "bytes": 4834,
    "duration_s": 284.8,
    "protocols": {
     "other": 4,
-    "tcp": 30,
-    "udp": 27
+    "tcp": 31,
+    "udp": 28
    },
    "conversations": [
     {
@@ -3009,6 +4145,7 @@
    "packets_read": 3,
    "packets_in_capture": 66,
    "packet_limit": 3,
+   "framing_end": "the file ends inside the record header at byte 5914 (7 of its 16 bytes)",
    "bytes": 232,
    "duration_s": 0.5,
    "protocols": {
@@ -3026,19 +4163,20 @@
    "sni": {},
    "beacons": []
   },
-  "summarize_pcap": "#### Packet Capture Analysis (deterministic, whole capture):\n66 of 66 packets in the capture read: 4834 bytes over 284.8s. Protocols: other=4, tcp=30, udp=27\n\nExternal conversations (all 25, by volume):\n- 8.8.8.8:53/udp — 8 pkts, 553 bytes\n- 104.16.0.1:443/tcp — 2 pkts, 348 bytes\n- 151.101.1.1:443/tcp — 5 pkts, 270 bytes\n- 45.33.32.156:8080/udp — 6 pkts, 264 bytes\n- 151.101.1.2:443/udp — 6 pkts, 258 bytes\n- 93.184.216.34:80/tcp — 3 pkts, 237 bytes\n- 185.199.108.1:4444/tcp — 4 pkts, 216 bytes\n- 104.16.0.2:443/tcp — 1 pkts, 150 bytes\n- 8.8.8.8:0/other — 2 pkts, 134 bytes\n- 104.16.0.3:443/tcp — 1 pkts, 120 bytes\n- 93.184.216.35:8080/tcp — 1 pkts, 104 bytes\n- 80.1.1.1:3389/tcp — 1 pkts, 104 bytes\n- 93.184.216.37:80/tcp — 1 pkts, 101 bytes\n- 93.184.216.39:80/tcp — 1 pkts, 101 bytes\n- 93.184.216.40:80/tcp — 1 pkts, 97 bytes\n- 9.9.9.9:123/udp — 1 pkts, 94 bytes\n- 70.1.1.1:22/tcp — 1 pkts, 94 bytes\n- 1.1.1.1:53/tcp — 1 pkts, 89 bytes\n- 104.16.0.4:443/tcp — 1 pkts, 87 bytes\n- 93.184.216.36:80/tcp — 1 pkts, 81 bytes\n- 50.1.1.1:8443/tcp — 1 pkts, 78 bytes\n- 93.184.216.38:80/tcp — 1 pkts, 73 bytes\n- 60.1.1.1:9999/udp — 1 pkts, 62 bytes\n- 8.8.8.8:443/tcp — 1 pkts, 54 bytes\n- 8.8.4.4:0/other — 1 pkts, 46 bytes\n\nTLS SNI (encrypted destinations):\n- cdn.example.net (2 ClientHello)\n\nBeaconing detected (periodic callbacks — strong C2 signal):\n- 45.33.32.156:8080/udp — 6 callbacks, ~30.0s interval (regular; likely C2 beacon)\n- 185.199.108.1:4444/tcp — 4 callbacks, ~60.0s interval (regular; likely C2 beacon)",
+  "summarize_pcap": "#### Packet Capture Analysis (deterministic, part of the capture):\n66 packets read, reading stopped where the file ends inside the record header at byte 5914 (7 of its 16 bytes): 4834 bytes over 284.8s. Protocols: other=4, tcp=31, udp=28\n\nExternal conversations (all 25, by volume):\n- 8.8.8.8:53/udp \u2014 8 pkts, 553 bytes\n- 104.16.0.1:443/tcp \u2014 2 pkts, 348 bytes\n- 151.101.1.1:443/tcp \u2014 5 pkts, 270 bytes\n- 45.33.32.156:8080/udp \u2014 6 pkts, 264 bytes\n- 151.101.1.2:443/udp \u2014 6 pkts, 258 bytes\n- 93.184.216.34:80/tcp \u2014 3 pkts, 237 bytes\n- 185.199.108.1:4444/tcp \u2014 4 pkts, 216 bytes\n- 104.16.0.2:443/tcp \u2014 1 pkts, 150 bytes\n- 8.8.8.8:0/other \u2014 2 pkts, 134 bytes\n- 104.16.0.3:443/tcp \u2014 1 pkts, 120 bytes\n- 93.184.216.35:8080/tcp \u2014 1 pkts, 104 bytes\n- 80.1.1.1:3389/tcp \u2014 1 pkts, 104 bytes\n- 93.184.216.37:80/tcp \u2014 1 pkts, 101 bytes\n- 93.184.216.39:80/tcp \u2014 1 pkts, 101 bytes\n- 93.184.216.40:80/tcp \u2014 1 pkts, 97 bytes\n- 9.9.9.9:123/udp \u2014 1 pkts, 94 bytes\n- 70.1.1.1:22/tcp \u2014 1 pkts, 94 bytes\n- 1.1.1.1:53/tcp \u2014 1 pkts, 89 bytes\n- 104.16.0.4:443/tcp \u2014 1 pkts, 87 bytes\n- 93.184.216.36:80/tcp \u2014 1 pkts, 81 bytes\n- 50.1.1.1:8443/tcp \u2014 1 pkts, 78 bytes\n- 93.184.216.38:80/tcp \u2014 1 pkts, 73 bytes\n- 60.1.1.1:9999/udp \u2014 1 pkts, 62 bytes\n- 8.8.8.8:443/tcp \u2014 1 pkts, 54 bytes\n- 8.8.4.4:0/other \u2014 1 pkts, 46 bytes\n\nTLS SNI (encrypted destinations):\n- cdn.example.net (2 ClientHello)\n\nBeaconing detected (periodic callbacks \u2014 strong C2 signal):\n- 45.33.32.156:8080/udp \u2014 6 callbacks, ~30.0s interval (regular; likely C2 beacon)\n- 185.199.108.1:4444/tcp \u2014 4 callbacks, ~60.0s interval (regular; likely C2 beacon)",
   "tool_pcap_summary": {
-   "summary": "#### Packet Capture Analysis (deterministic, whole capture):\n66 of 66 packets in the capture read: 4834 bytes over 284.8s. Protocols: other=4, tcp=30, udp=27\n\nExternal conversations (all 25, by volume):\n- 8.8.8.8:53/udp — 8 pkts, 553 bytes\n- 104.16.0.1:443/tcp — 2 pkts, 348 bytes\n- 151.101.1.1:443/tcp — 5 pkts, 270 bytes\n- 45.33.32.156:8080/udp — 6 pkts, 264 bytes\n- 151.101.1.2:443/udp — 6 pkts, 258 bytes\n- 93.184.216.34:80/tcp — 3 pkts, 237 bytes\n- 185.199.108.1:4444/tcp — 4 pkts, 216 bytes\n- 104.16.0.2:443/tcp — 1 pkts, 150 bytes\n- 8.8.8.8:0/other — 2 pkts, 134 bytes\n- 104.16.0.3:443/tcp — 1 pkts, 120 bytes\n- 93.184.216.35:8080/tcp — 1 pkts, 104 bytes\n- 80.1.1.1:3389/tcp — 1 pkts, 104 bytes\n- 93.184.216.37:80/tcp — 1 pkts, 101 bytes\n- 93.184.216.39:80/tcp — 1 pkts, 101 bytes\n- 93.184.216.40:80/tcp — 1 pkts, 97 bytes\n- 9.9.9.9:123/udp — 1 pkts, 94 bytes\n- 70.1.1.1:22/tcp — 1 pkts, 94 bytes\n- 1.1.1.1:53/tcp — 1 pkts, 89 bytes\n- 104.16.0.4:443/tcp — 1 pkts, 87 bytes\n- 93.184.216.36:80/tcp — 1 pkts, 81 bytes\n- 50.1.1.1:8443/tcp — 1 pkts, 78 bytes\n- 93.184.216.38:80/tcp — 1 pkts, 73 bytes\n- 60.1.1.1:9999/udp — 1 pkts, 62 bytes\n- 8.8.8.8:443/tcp — 1 pkts, 54 bytes\n- 8.8.4.4:0/other — 1 pkts, 46 bytes\n\nTLS SNI (encrypted destinations):\n- cdn.example.net (2 ClientHello)\n\nBeaconing detected (periodic callbacks — strong C2 signal):\n- 45.33.32.156:8080/udp — 6 callbacks, ~30.0s interval (regular; likely C2 beacon)\n- 185.199.108.1:4444/tcp — 4 callbacks, ~60.0s interval (regular; likely C2 beacon)",
+   "summary": "#### Packet Capture Analysis (deterministic, part of the capture):\n66 packets read, reading stopped where the file ends inside the record header at byte 5914 (7 of its 16 bytes): 4834 bytes over 284.8s. Protocols: other=4, tcp=31, udp=28\n\nExternal conversations (all 25, by volume):\n- 8.8.8.8:53/udp \u2014 8 pkts, 553 bytes\n- 104.16.0.1:443/tcp \u2014 2 pkts, 348 bytes\n- 151.101.1.1:443/tcp \u2014 5 pkts, 270 bytes\n- 45.33.32.156:8080/udp \u2014 6 pkts, 264 bytes\n- 151.101.1.2:443/udp \u2014 6 pkts, 258 bytes\n- 93.184.216.34:80/tcp \u2014 3 pkts, 237 bytes\n- 185.199.108.1:4444/tcp \u2014 4 pkts, 216 bytes\n- 104.16.0.2:443/tcp \u2014 1 pkts, 150 bytes\n- 8.8.8.8:0/other \u2014 2 pkts, 134 bytes\n- 104.16.0.3:443/tcp \u2014 1 pkts, 120 bytes\n- 93.184.216.35:8080/tcp \u2014 1 pkts, 104 bytes\n- 80.1.1.1:3389/tcp \u2014 1 pkts, 104 bytes\n- 93.184.216.37:80/tcp \u2014 1 pkts, 101 bytes\n- 93.184.216.39:80/tcp \u2014 1 pkts, 101 bytes\n- 93.184.216.40:80/tcp \u2014 1 pkts, 97 bytes\n- 9.9.9.9:123/udp \u2014 1 pkts, 94 bytes\n- 70.1.1.1:22/tcp \u2014 1 pkts, 94 bytes\n- 1.1.1.1:53/tcp \u2014 1 pkts, 89 bytes\n- 104.16.0.4:443/tcp \u2014 1 pkts, 87 bytes\n- 93.184.216.36:80/tcp \u2014 1 pkts, 81 bytes\n- 50.1.1.1:8443/tcp \u2014 1 pkts, 78 bytes\n- 93.184.216.38:80/tcp \u2014 1 pkts, 73 bytes\n- 60.1.1.1:9999/udp \u2014 1 pkts, 62 bytes\n- 8.8.8.8:443/tcp \u2014 1 pkts, 54 bytes\n- 8.8.4.4:0/other \u2014 1 pkts, 46 bytes\n\nTLS SNI (encrypted destinations):\n- cdn.example.net (2 ClientHello)\n\nBeaconing detected (periodic callbacks \u2014 strong C2 signal):\n- 45.33.32.156:8080/udp \u2014 6 callbacks, ~30.0s interval (regular; likely C2 beacon)\n- 185.199.108.1:4444/tcp \u2014 4 callbacks, ~60.0s interval (regular; likely C2 beacon)",
    "empty": false,
    "packets_read": 66,
    "packets_in_capture": 66,
    "packet_limit": null,
+   "framing_end": "the file ends inside the record header at byte 5914 (7 of its 16 bytes)",
    "bytes": 4834,
    "duration_s": 284.8,
    "protocols": {
     "other": 4,
-    "tcp": 30,
-    "udp": 27
+    "tcp": 31,
+    "udp": 28
    },
    "conversations": [
     {
@@ -3237,23 +4375,23 @@
     }
    ]
   },
-  "read_pcap_summary": "#### Packet Capture Analysis (deterministic, whole capture):\n66 of 66 packets in the capture read: 4834 bytes over 284.8s. Protocols: other=4, tcp=30, udp=27\n\nExternal conversations (all 25, by volume):\n- 8.8.8.8:53/udp — 8 pkts, 553 bytes\n- 104.16.0.1:443/tcp — 2 pkts, 348 bytes\n- 151.101.1.1:443/tcp — 5 pkts, 270 bytes\n- 45.33.32.156:8080/udp — 6 pkts, 264 bytes\n- 151.101.1.2:443/udp — 6 pkts, 258 bytes\n- 93.184.216.34:80/tcp — 3 pkts, 237 bytes\n- 185.199.108.1:4444/tcp — 4 pkts, 216 bytes\n- 104.16.0.2:443/tcp — 1 pkts, 150 bytes\n- 8.8.8.8:0/other — 2 pkts, 134 bytes\n- 104.16.0.3:443/tcp — 1 pkts, 120 bytes\n- 93.184.216.35:8080/tcp — 1 pkts, 104 bytes\n- 80.1.1.1:3389/tcp — 1 pkts, 104 bytes\n- 93.184.216.37:80/tcp — 1 pkts, 101 bytes\n- 93.184.216.39:80/tcp — 1 pkts, 101 bytes\n- 93.184.216.40:80/tcp — 1 pkts, 97 bytes\n- 9.9.9.9:123/udp — 1 pkts, 94 bytes\n- 70.1.1.1:22/tcp — 1 pkts, 94 bytes\n- 1.1.1.1:53/tcp — 1 pkts, 89 bytes\n- 104.16.0.4:443/tcp — 1 pkts, 87 bytes\n- 93.184.216.36:80/tcp — 1 pkts, 81 bytes\n- 50.1.1.1:8443/tcp — 1 pkts, 78 bytes\n- 93.184.216.38:80/tcp — 1 pkts, 73 bytes\n- 60.1.1.1:9999/udp — 1 pkts, 62 bytes\n- 8.8.8.8:443/tcp — 1 pkts, 54 bytes\n- 8.8.4.4:0/other — 1 pkts, 46 bytes\n\nTLS SNI (encrypted destinations):\n- cdn.example.net (2 ClientHello)\n\nBeaconing detected (periodic callbacks — strong C2 signal):\n- 45.33.32.156:8080/udp — 6 callbacks, ~30.0s interval (regular; likely C2 beacon)\n- 185.199.108.1:4444/tcp — 4 callbacks, ~60.0s interval (regular; likely C2 beacon)",
-  "read_pcap_summary_page": "Packets 3 to 9 of the 66 in the capture; the next page starts at offset 10.\nPacket 3: 10.0.2.15 -> 10.0.2.3 (UDP 50001->53)\nPacket 4: 10.0.2.15 -> 224.0.0.251 (UDP 5353->5353)\nPacket 5: 10.0.2.15 -> 224.0.0.252 (UDP 50002->5355)\nPacket 6: 10.0.2.15 -> 1.1.1.1 (TCP 50003->53)\nPacket 7: 10.0.2.15 -> 93.184.216.34 (TCP 50004->80)\nPacket 8: 10.0.2.15 -> 93.184.216.34 (TCP 50004->80)\nPacket 9: 10.0.2.15 -> 93.184.216.35 (TCP 50005->8080)",
-  "extract_dns": "66 of 66 packets in the capture read.\nupdate.example.com.\nintranet.local.\nprinter.local.\nwpad.\ntcp.example.org.\nv6.example.com.\n.\ntrunc.example.com.\nfirst.example.com.\ncafé.example.com.",
-  "extract_dns_limit_5": "5 of 66 packets in the capture read (the caller asked for 5).\nupdate.example.com.\nintranet.local.\nprinter.local.",
-  "extract_http": "66 of 66 packets in the capture read.\nGET /index.html HTTP/1.1 | Host: www.example.com\nPOST /gate.php HTTP/1.0 | \nGET /v6 HTTP/1.1 | Host: v6.example.com\nGET /x HTTP/1.1 | Host: tiny\nGET /local HTTP/1.1 | host: 10.0.2.2:8000\nHEAD / HTTP/1.1 | Host: opts.example.com\nPUT /a HTTP/1.1 | \nDELETE /b HTTP/1.1 | HOST: upper.example.com",
+  "read_pcap_summary": "#### Packet Capture Analysis (deterministic, part of the capture):\n66 packets read, reading stopped where the file ends inside the record header at byte 5914 (7 of its 16 bytes): 4834 bytes over 284.8s. Protocols: other=4, tcp=31, udp=28\n\nExternal conversations (all 25, by volume):\n- 8.8.8.8:53/udp \u2014 8 pkts, 553 bytes\n- 104.16.0.1:443/tcp \u2014 2 pkts, 348 bytes\n- 151.101.1.1:443/tcp \u2014 5 pkts, 270 bytes\n- 45.33.32.156:8080/udp \u2014 6 pkts, 264 bytes\n- 151.101.1.2:443/udp \u2014 6 pkts, 258 bytes\n- 93.184.216.34:80/tcp \u2014 3 pkts, 237 bytes\n- 185.199.108.1:4444/tcp \u2014 4 pkts, 216 bytes\n- 104.16.0.2:443/tcp \u2014 1 pkts, 150 bytes\n- 8.8.8.8:0/other \u2014 2 pkts, 134 bytes\n- 104.16.0.3:443/tcp \u2014 1 pkts, 120 bytes\n- 93.184.216.35:8080/tcp \u2014 1 pkts, 104 bytes\n- 80.1.1.1:3389/tcp \u2014 1 pkts, 104 bytes\n- 93.184.216.37:80/tcp \u2014 1 pkts, 101 bytes\n- 93.184.216.39:80/tcp \u2014 1 pkts, 101 bytes\n- 93.184.216.40:80/tcp \u2014 1 pkts, 97 bytes\n- 9.9.9.9:123/udp \u2014 1 pkts, 94 bytes\n- 70.1.1.1:22/tcp \u2014 1 pkts, 94 bytes\n- 1.1.1.1:53/tcp \u2014 1 pkts, 89 bytes\n- 104.16.0.4:443/tcp \u2014 1 pkts, 87 bytes\n- 93.184.216.36:80/tcp \u2014 1 pkts, 81 bytes\n- 50.1.1.1:8443/tcp \u2014 1 pkts, 78 bytes\n- 93.184.216.38:80/tcp \u2014 1 pkts, 73 bytes\n- 60.1.1.1:9999/udp \u2014 1 pkts, 62 bytes\n- 8.8.8.8:443/tcp \u2014 1 pkts, 54 bytes\n- 8.8.4.4:0/other \u2014 1 pkts, 46 bytes\n\nTLS SNI (encrypted destinations):\n- cdn.example.net (2 ClientHello)\n\nBeaconing detected (periodic callbacks \u2014 strong C2 signal):\n- 45.33.32.156:8080/udp \u2014 6 callbacks, ~30.0s interval (regular; likely C2 beacon)\n- 185.199.108.1:4444/tcp \u2014 4 callbacks, ~60.0s interval (regular; likely C2 beacon)",
+  "extract_dns": "66 packets read, reading stopped where the file ends inside the record header at byte 5914 (7 of its 16 bytes).\nupdate.example.com.\nintranet.local.\nprinter.local.\nwpad.\ntcp.example.org.\nv6.example.com.\n.\ntrunc.example.com.\nfirst.example.com.\ncaf\u00e9.example.com.",
+  "extract_dns_limit_5": "5 packets read (the caller asked for 5), reading stopped where the file ends inside the record header at byte 5914 (7 of its 16 bytes).\nupdate.example.com.\nintranet.local.\nprinter.local.",
+  "extract_http": "66 packets read, reading stopped where the file ends inside the record header at byte 5914 (7 of its 16 bytes).\nGET /index.html HTTP/1.1 | Host: www.example.com\nPOST /gate.php HTTP/1.0 | \nGET /v6 HTTP/1.1 | Host: v6.example.com\nGET /x HTTP/1.1 | Host: tiny\nGET /local HTTP/1.1 | host: 10.0.2.2:8000\nHEAD / HTTP/1.1 | Host: opts.example.com\nPUT /a HTTP/1.1 | \nDELETE /b HTTP/1.1 | HOST: upper.example.com",
   "network_pcap_summary": {
-   "summary": "#### Packet Capture Analysis (deterministic, whole capture):\n66 of 66 packets in the capture read: 4834 bytes over 284.8s. Protocols: other=4, tcp=30, udp=27\n\nExternal conversations (all 25, by volume):\n- 8.8.8.8:53/udp — 8 pkts, 553 bytes\n- 104.16.0.1:443/tcp — 2 pkts, 348 bytes\n- 151.101.1.1:443/tcp — 5 pkts, 270 bytes\n- 45.33.32.156:8080/udp — 6 pkts, 264 bytes\n- 151.101.1.2:443/udp — 6 pkts, 258 bytes\n- 93.184.216.34:80/tcp — 3 pkts, 237 bytes\n- 185.199.108.1:4444/tcp — 4 pkts, 216 bytes\n- 104.16.0.2:443/tcp — 1 pkts, 150 bytes\n- 8.8.8.8:0/other — 2 pkts, 134 bytes\n- 104.16.0.3:443/tcp — 1 pkts, 120 bytes\n- 93.184.216.35:8080/tcp — 1 pkts, 104 bytes\n- 80.1.1.1:3389/tcp — 1 pkts, 104 bytes\n- 93.184.216.37:80/tcp — 1 pkts, 101 bytes\n- 93.184.216.39:80/tcp — 1 pkts, 101 bytes\n- 93.184.216.40:80/tcp — 1 pkts, 97 bytes\n- 9.9.9.9:123/udp — 1 pkts, 94 bytes\n- 70.1.1.1:22/tcp — 1 pkts, 94 bytes\n- 1.1.1.1:53/tcp — 1 pkts, 89 bytes\n- 104.16.0.4:443/tcp — 1 pkts, 87 bytes\n- 93.184.216.36:80/tcp — 1 pkts, 81 bytes\n- 50.1.1.1:8443/tcp — 1 pkts, 78 bytes\n- 93.184.216.38:80/tcp — 1 pkts, 73 bytes\n- 60.1.1.1:9999/udp — 1 pkts, 62 bytes\n- 8.8.8.8:443/tcp — 1 pkts, 54 bytes\n- 8.8.4.4:0/other — 1 pkts, 46 bytes\n\nTLS SNI (encrypted destinations):\n- cdn.example.net (2 ClientHello)\n\nBeaconing detected (periodic callbacks — strong C2 signal):\n- 45.33.32.156:8080/udp — 6 callbacks, ~30.0s interval (regular; likely C2 beacon)\n- 185.199.108.1:4444/tcp — 4 callbacks, ~60.0s interval (regular; likely C2 beacon)",
+   "summary": "#### Packet Capture Analysis (deterministic, part of the capture):\n66 packets read, reading stopped where the file ends inside the record header at byte 5914 (7 of its 16 bytes): 4834 bytes over 284.8s. Protocols: other=4, tcp=31, udp=28\n\nExternal conversations (all 25, by volume):\n- 8.8.8.8:53/udp \u2014 8 pkts, 553 bytes\n- 104.16.0.1:443/tcp \u2014 2 pkts, 348 bytes\n- 151.101.1.1:443/tcp \u2014 5 pkts, 270 bytes\n- 45.33.32.156:8080/udp \u2014 6 pkts, 264 bytes\n- 151.101.1.2:443/udp \u2014 6 pkts, 258 bytes\n- 93.184.216.34:80/tcp \u2014 3 pkts, 237 bytes\n- 185.199.108.1:4444/tcp \u2014 4 pkts, 216 bytes\n- 104.16.0.2:443/tcp \u2014 1 pkts, 150 bytes\n- 8.8.8.8:0/other \u2014 2 pkts, 134 bytes\n- 104.16.0.3:443/tcp \u2014 1 pkts, 120 bytes\n- 93.184.216.35:8080/tcp \u2014 1 pkts, 104 bytes\n- 80.1.1.1:3389/tcp \u2014 1 pkts, 104 bytes\n- 93.184.216.37:80/tcp \u2014 1 pkts, 101 bytes\n- 93.184.216.39:80/tcp \u2014 1 pkts, 101 bytes\n- 93.184.216.40:80/tcp \u2014 1 pkts, 97 bytes\n- 9.9.9.9:123/udp \u2014 1 pkts, 94 bytes\n- 70.1.1.1:22/tcp \u2014 1 pkts, 94 bytes\n- 1.1.1.1:53/tcp \u2014 1 pkts, 89 bytes\n- 104.16.0.4:443/tcp \u2014 1 pkts, 87 bytes\n- 93.184.216.36:80/tcp \u2014 1 pkts, 81 bytes\n- 50.1.1.1:8443/tcp \u2014 1 pkts, 78 bytes\n- 93.184.216.38:80/tcp \u2014 1 pkts, 73 bytes\n- 60.1.1.1:9999/udp \u2014 1 pkts, 62 bytes\n- 8.8.8.8:443/tcp \u2014 1 pkts, 54 bytes\n- 8.8.4.4:0/other \u2014 1 pkts, 46 bytes\n\nTLS SNI (encrypted destinations):\n- cdn.example.net (2 ClientHello)\n\nBeaconing detected (periodic callbacks \u2014 strong C2 signal):\n- 45.33.32.156:8080/udp \u2014 6 callbacks, ~30.0s interval (regular; likely C2 beacon)\n- 185.199.108.1:4444/tcp \u2014 4 callbacks, ~60.0s interval (regular; likely C2 beacon)",
    "empty": false,
    "packets_read": 66,
    "packets_in_capture": 66,
    "packet_limit": null,
+   "framing_end": "the file ends inside the record header at byte 5914 (7 of its 16 bytes)",
    "bytes": 4834,
    "duration_s": 284.8,
    "protocols": {
     "other": 4,
-    "tcp": 30,
-    "udp": 27
+    "tcp": 31,
+    "udp": 28
    },
    "conversations": [
     {
@@ -3458,12 +4596,13 @@
    "packets_read": 67,
    "packets_in_capture": 67,
    "packet_limit": null,
+   "framing_end": "the file ends inside the record at byte 5914 (37 of its 54 bytes; the record is read as far as it goes)",
    "bytes": 4871,
    "duration_s": 344.8,
    "protocols": {
     "other": 5,
-    "tcp": 30,
-    "udp": 27
+    "tcp": 31,
+    "udp": 28
    },
    "conversations": [
     {
@@ -3673,6 +4812,7 @@
    "packets_read": 3,
    "packets_in_capture": 67,
    "packet_limit": 3,
+   "framing_end": "the file ends inside the record at byte 5914 (37 of its 54 bytes; the record is read as far as it goes)",
    "bytes": 232,
    "duration_s": 0.5,
    "protocols": {
@@ -3690,19 +4830,20 @@
    "sni": {},
    "beacons": []
   },
-  "summarize_pcap": "#### Packet Capture Analysis (deterministic, whole capture):\n67 of 67 packets in the capture read: 4871 bytes over 344.8s. Protocols: other=5, tcp=30, udp=27\n\nExternal conversations (all 26, by volume):\n- 8.8.8.8:53/udp — 8 pkts, 553 bytes\n- 104.16.0.1:443/tcp — 2 pkts, 348 bytes\n- 151.101.1.1:443/tcp — 5 pkts, 270 bytes\n- 45.33.32.156:8080/udp — 6 pkts, 264 bytes\n- 151.101.1.2:443/udp — 6 pkts, 258 bytes\n- 93.184.216.34:80/tcp — 3 pkts, 237 bytes\n- 185.199.108.1:4444/tcp — 4 pkts, 216 bytes\n- 104.16.0.2:443/tcp — 1 pkts, 150 bytes\n- 8.8.8.8:0/other — 2 pkts, 134 bytes\n- 104.16.0.3:443/tcp — 1 pkts, 120 bytes\n- 93.184.216.35:8080/tcp — 1 pkts, 104 bytes\n- 80.1.1.1:3389/tcp — 1 pkts, 104 bytes\n- 93.184.216.37:80/tcp — 1 pkts, 101 bytes\n- 93.184.216.39:80/tcp — 1 pkts, 101 bytes\n- 93.184.216.40:80/tcp — 1 pkts, 97 bytes\n- 9.9.9.9:123/udp — 1 pkts, 94 bytes\n- 70.1.1.1:22/tcp — 1 pkts, 94 bytes\n- 1.1.1.1:53/tcp — 1 pkts, 89 bytes\n- 104.16.0.4:443/tcp — 1 pkts, 87 bytes\n- 93.184.216.36:80/tcp — 1 pkts, 81 bytes\n- 50.1.1.1:8443/tcp — 1 pkts, 78 bytes\n- 93.184.216.38:80/tcp — 1 pkts, 73 bytes\n- 60.1.1.1:9999/udp — 1 pkts, 62 bytes\n- 8.8.8.8:443/tcp — 1 pkts, 54 bytes\n- 8.8.4.4:0/other — 1 pkts, 46 bytes\n- 185.199.108.1:0/other — 1 pkts, 37 bytes\n\nTLS SNI (encrypted destinations):\n- cdn.example.net (2 ClientHello)\n\nBeaconing detected (periodic callbacks — strong C2 signal):\n- 45.33.32.156:8080/udp — 6 callbacks, ~30.0s interval (regular; likely C2 beacon)\n- 185.199.108.1:4444/tcp — 4 callbacks, ~60.0s interval (regular; likely C2 beacon)",
+  "summarize_pcap": "#### Packet Capture Analysis (deterministic, part of the capture):\n67 packets read, reading stopped where the file ends inside the record at byte 5914 (37 of its 54 bytes; the record is read as far as it goes): 4871 bytes over 344.8s. Protocols: other=5, tcp=31, udp=28\n\nExternal conversations (all 26, by volume):\n- 8.8.8.8:53/udp \u2014 8 pkts, 553 bytes\n- 104.16.0.1:443/tcp \u2014 2 pkts, 348 bytes\n- 151.101.1.1:443/tcp \u2014 5 pkts, 270 bytes\n- 45.33.32.156:8080/udp \u2014 6 pkts, 264 bytes\n- 151.101.1.2:443/udp \u2014 6 pkts, 258 bytes\n- 93.184.216.34:80/tcp \u2014 3 pkts, 237 bytes\n- 185.199.108.1:4444/tcp \u2014 4 pkts, 216 bytes\n- 104.16.0.2:443/tcp \u2014 1 pkts, 150 bytes\n- 8.8.8.8:0/other \u2014 2 pkts, 134 bytes\n- 104.16.0.3:443/tcp \u2014 1 pkts, 120 bytes\n- 93.184.216.35:8080/tcp \u2014 1 pkts, 104 bytes\n- 80.1.1.1:3389/tcp \u2014 1 pkts, 104 bytes\n- 93.184.216.37:80/tcp \u2014 1 pkts, 101 bytes\n- 93.184.216.39:80/tcp \u2014 1 pkts, 101 bytes\n- 93.184.216.40:80/tcp \u2014 1 pkts, 97 bytes\n- 9.9.9.9:123/udp \u2014 1 pkts, 94 bytes\n- 70.1.1.1:22/tcp \u2014 1 pkts, 94 bytes\n- 1.1.1.1:53/tcp \u2014 1 pkts, 89 bytes\n- 104.16.0.4:443/tcp \u2014 1 pkts, 87 bytes\n- 93.184.216.36:80/tcp \u2014 1 pkts, 81 bytes\n- 50.1.1.1:8443/tcp \u2014 1 pkts, 78 bytes\n- 93.184.216.38:80/tcp \u2014 1 pkts, 73 bytes\n- 60.1.1.1:9999/udp \u2014 1 pkts, 62 bytes\n- 8.8.8.8:443/tcp \u2014 1 pkts, 54 bytes\n- 8.8.4.4:0/other \u2014 1 pkts, 46 bytes\n- 185.199.108.1:0/other \u2014 1 pkts, 37 bytes\n\nTLS SNI (encrypted destinations):\n- cdn.example.net (2 ClientHello)\n\nBeaconing detected (periodic callbacks \u2014 strong C2 signal):\n- 45.33.32.156:8080/udp \u2014 6 callbacks, ~30.0s interval (regular; likely C2 beacon)\n- 185.199.108.1:4444/tcp \u2014 4 callbacks, ~60.0s interval (regular; likely C2 beacon)",
   "tool_pcap_summary": {
-   "summary": "#### Packet Capture Analysis (deterministic, whole capture):\n67 of 67 packets in the capture read: 4871 bytes over 344.8s. Protocols: other=5, tcp=30, udp=27\n\nExternal conversations (all 26, by volume):\n- 8.8.8.8:53/udp — 8 pkts, 553 bytes\n- 104.16.0.1:443/tcp — 2 pkts, 348 bytes\n- 151.101.1.1:443/tcp — 5 pkts, 270 bytes\n- 45.33.32.156:8080/udp — 6 pkts, 264 bytes\n- 151.101.1.2:443/udp — 6 pkts, 258 bytes\n- 93.184.216.34:80/tcp — 3 pkts, 237 bytes\n- 185.199.108.1:4444/tcp — 4 pkts, 216 bytes\n- 104.16.0.2:443/tcp — 1 pkts, 150 bytes\n- 8.8.8.8:0/other — 2 pkts, 134 bytes\n- 104.16.0.3:443/tcp — 1 pkts, 120 bytes\n- 93.184.216.35:8080/tcp — 1 pkts, 104 bytes\n- 80.1.1.1:3389/tcp — 1 pkts, 104 bytes\n- 93.184.216.37:80/tcp — 1 pkts, 101 bytes\n- 93.184.216.39:80/tcp — 1 pkts, 101 bytes\n- 93.184.216.40:80/tcp — 1 pkts, 97 bytes\n- 9.9.9.9:123/udp — 1 pkts, 94 bytes\n- 70.1.1.1:22/tcp — 1 pkts, 94 bytes\n- 1.1.1.1:53/tcp — 1 pkts, 89 bytes\n- 104.16.0.4:443/tcp — 1 pkts, 87 bytes\n- 93.184.216.36:80/tcp — 1 pkts, 81 bytes\n- 50.1.1.1:8443/tcp — 1 pkts, 78 bytes\n- 93.184.216.38:80/tcp — 1 pkts, 73 bytes\n- 60.1.1.1:9999/udp — 1 pkts, 62 bytes\n- 8.8.8.8:443/tcp — 1 pkts, 54 bytes\n- 8.8.4.4:0/other — 1 pkts, 46 bytes\n- 185.199.108.1:0/other — 1 pkts, 37 bytes\n\nTLS SNI (encrypted destinations):\n- cdn.example.net (2 ClientHello)\n\nBeaconing detected (periodic callbacks — strong C2 signal):\n- 45.33.32.156:8080/udp — 6 callbacks, ~30.0s interval (regular; likely C2 beacon)\n- 185.199.108.1:4444/tcp — 4 callbacks, ~60.0s interval (regular; likely C2 beacon)",
+   "summary": "#### Packet Capture Analysis (deterministic, part of the capture):\n67 packets read, reading stopped where the file ends inside the record at byte 5914 (37 of its 54 bytes; the record is read as far as it goes): 4871 bytes over 344.8s. Protocols: other=5, tcp=31, udp=28\n\nExternal conversations (all 26, by volume):\n- 8.8.8.8:53/udp \u2014 8 pkts, 553 bytes\n- 104.16.0.1:443/tcp \u2014 2 pkts, 348 bytes\n- 151.101.1.1:443/tcp \u2014 5 pkts, 270 bytes\n- 45.33.32.156:8080/udp \u2014 6 pkts, 264 bytes\n- 151.101.1.2:443/udp \u2014 6 pkts, 258 bytes\n- 93.184.216.34:80/tcp \u2014 3 pkts, 237 bytes\n- 185.199.108.1:4444/tcp \u2014 4 pkts, 216 bytes\n- 104.16.0.2:443/tcp \u2014 1 pkts, 150 bytes\n- 8.8.8.8:0/other \u2014 2 pkts, 134 bytes\n- 104.16.0.3:443/tcp \u2014 1 pkts, 120 bytes\n- 93.184.216.35:8080/tcp \u2014 1 pkts, 104 bytes\n- 80.1.1.1:3389/tcp \u2014 1 pkts, 104 bytes\n- 93.184.216.37:80/tcp \u2014 1 pkts, 101 bytes\n- 93.184.216.39:80/tcp \u2014 1 pkts, 101 bytes\n- 93.184.216.40:80/tcp \u2014 1 pkts, 97 bytes\n- 9.9.9.9:123/udp \u2014 1 pkts, 94 bytes\n- 70.1.1.1:22/tcp \u2014 1 pkts, 94 bytes\n- 1.1.1.1:53/tcp \u2014 1 pkts, 89 bytes\n- 104.16.0.4:443/tcp \u2014 1 pkts, 87 bytes\n- 93.184.216.36:80/tcp \u2014 1 pkts, 81 bytes\n- 50.1.1.1:8443/tcp \u2014 1 pkts, 78 bytes\n- 93.184.216.38:80/tcp \u2014 1 pkts, 73 bytes\n- 60.1.1.1:9999/udp \u2014 1 pkts, 62 bytes\n- 8.8.8.8:443/tcp \u2014 1 pkts, 54 bytes\n- 8.8.4.4:0/other \u2014 1 pkts, 46 bytes\n- 185.199.108.1:0/other \u2014 1 pkts, 37 bytes\n\nTLS SNI (encrypted destinations):\n- cdn.example.net (2 ClientHello)\n\nBeaconing detected (periodic callbacks \u2014 strong C2 signal):\n- 45.33.32.156:8080/udp \u2014 6 callbacks, ~30.0s interval (regular; likely C2 beacon)\n- 185.199.108.1:4444/tcp \u2014 4 callbacks, ~60.0s interval (regular; likely C2 beacon)",
    "empty": false,
    "packets_read": 67,
    "packets_in_capture": 67,
    "packet_limit": null,
+   "framing_end": "the file ends inside the record at byte 5914 (37 of its 54 bytes; the record is read as far as it goes)",
    "bytes": 4871,
    "duration_s": 344.8,
    "protocols": {
     "other": 5,
-    "tcp": 30,
-    "udp": 27
+    "tcp": 31,
+    "udp": 28
    },
    "conversations": [
     {
@@ -3908,23 +5049,23 @@
     }
    ]
   },
-  "read_pcap_summary": "#### Packet Capture Analysis (deterministic, whole capture):\n67 of 67 packets in the capture read: 4871 bytes over 344.8s. Protocols: other=5, tcp=30, udp=27\n\nExternal conversations (all 26, by volume):\n- 8.8.8.8:53/udp — 8 pkts, 553 bytes\n- 104.16.0.1:443/tcp — 2 pkts, 348 bytes\n- 151.101.1.1:443/tcp — 5 pkts, 270 bytes\n- 45.33.32.156:8080/udp — 6 pkts, 264 bytes\n- 151.101.1.2:443/udp — 6 pkts, 258 bytes\n- 93.184.216.34:80/tcp — 3 pkts, 237 bytes\n- 185.199.108.1:4444/tcp — 4 pkts, 216 bytes\n- 104.16.0.2:443/tcp — 1 pkts, 150 bytes\n- 8.8.8.8:0/other — 2 pkts, 134 bytes\n- 104.16.0.3:443/tcp — 1 pkts, 120 bytes\n- 93.184.216.35:8080/tcp — 1 pkts, 104 bytes\n- 80.1.1.1:3389/tcp — 1 pkts, 104 bytes\n- 93.184.216.37:80/tcp — 1 pkts, 101 bytes\n- 93.184.216.39:80/tcp — 1 pkts, 101 bytes\n- 93.184.216.40:80/tcp — 1 pkts, 97 bytes\n- 9.9.9.9:123/udp — 1 pkts, 94 bytes\n- 70.1.1.1:22/tcp — 1 pkts, 94 bytes\n- 1.1.1.1:53/tcp — 1 pkts, 89 bytes\n- 104.16.0.4:443/tcp — 1 pkts, 87 bytes\n- 93.184.216.36:80/tcp — 1 pkts, 81 bytes\n- 50.1.1.1:8443/tcp — 1 pkts, 78 bytes\n- 93.184.216.38:80/tcp — 1 pkts, 73 bytes\n- 60.1.1.1:9999/udp — 1 pkts, 62 bytes\n- 8.8.8.8:443/tcp — 1 pkts, 54 bytes\n- 8.8.4.4:0/other — 1 pkts, 46 bytes\n- 185.199.108.1:0/other — 1 pkts, 37 bytes\n\nTLS SNI (encrypted destinations):\n- cdn.example.net (2 ClientHello)\n\nBeaconing detected (periodic callbacks — strong C2 signal):\n- 45.33.32.156:8080/udp — 6 callbacks, ~30.0s interval (regular; likely C2 beacon)\n- 185.199.108.1:4444/tcp — 4 callbacks, ~60.0s interval (regular; likely C2 beacon)",
-  "read_pcap_summary_page": "Packets 3 to 9 of the 67 in the capture; the next page starts at offset 10.\nPacket 3: 10.0.2.15 -> 10.0.2.3 (UDP 50001->53)\nPacket 4: 10.0.2.15 -> 224.0.0.251 (UDP 5353->5353)\nPacket 5: 10.0.2.15 -> 224.0.0.252 (UDP 50002->5355)\nPacket 6: 10.0.2.15 -> 1.1.1.1 (TCP 50003->53)\nPacket 7: 10.0.2.15 -> 93.184.216.34 (TCP 50004->80)\nPacket 8: 10.0.2.15 -> 93.184.216.34 (TCP 50004->80)\nPacket 9: 10.0.2.15 -> 93.184.216.35 (TCP 50005->8080)",
-  "extract_dns": "67 of 67 packets in the capture read.\nupdate.example.com.\nintranet.local.\nprinter.local.\nwpad.\ntcp.example.org.\nv6.example.com.\n.\ntrunc.example.com.\nfirst.example.com.\ncafé.example.com.",
-  "extract_dns_limit_5": "5 of 67 packets in the capture read (the caller asked for 5).\nupdate.example.com.\nintranet.local.\nprinter.local.",
-  "extract_http": "67 of 67 packets in the capture read.\nGET /index.html HTTP/1.1 | Host: www.example.com\nPOST /gate.php HTTP/1.0 | \nGET /v6 HTTP/1.1 | Host: v6.example.com\nGET /x HTTP/1.1 | Host: tiny\nGET /local HTTP/1.1 | host: 10.0.2.2:8000\nHEAD / HTTP/1.1 | Host: opts.example.com\nPUT /a HTTP/1.1 | \nDELETE /b HTTP/1.1 | HOST: upper.example.com",
+  "read_pcap_summary": "#### Packet Capture Analysis (deterministic, part of the capture):\n67 packets read, reading stopped where the file ends inside the record at byte 5914 (37 of its 54 bytes; the record is read as far as it goes): 4871 bytes over 344.8s. Protocols: other=5, tcp=31, udp=28\n\nExternal conversations (all 26, by volume):\n- 8.8.8.8:53/udp \u2014 8 pkts, 553 bytes\n- 104.16.0.1:443/tcp \u2014 2 pkts, 348 bytes\n- 151.101.1.1:443/tcp \u2014 5 pkts, 270 bytes\n- 45.33.32.156:8080/udp \u2014 6 pkts, 264 bytes\n- 151.101.1.2:443/udp \u2014 6 pkts, 258 bytes\n- 93.184.216.34:80/tcp \u2014 3 pkts, 237 bytes\n- 185.199.108.1:4444/tcp \u2014 4 pkts, 216 bytes\n- 104.16.0.2:443/tcp \u2014 1 pkts, 150 bytes\n- 8.8.8.8:0/other \u2014 2 pkts, 134 bytes\n- 104.16.0.3:443/tcp \u2014 1 pkts, 120 bytes\n- 93.184.216.35:8080/tcp \u2014 1 pkts, 104 bytes\n- 80.1.1.1:3389/tcp \u2014 1 pkts, 104 bytes\n- 93.184.216.37:80/tcp \u2014 1 pkts, 101 bytes\n- 93.184.216.39:80/tcp \u2014 1 pkts, 101 bytes\n- 93.184.216.40:80/tcp \u2014 1 pkts, 97 bytes\n- 9.9.9.9:123/udp \u2014 1 pkts, 94 bytes\n- 70.1.1.1:22/tcp \u2014 1 pkts, 94 bytes\n- 1.1.1.1:53/tcp \u2014 1 pkts, 89 bytes\n- 104.16.0.4:443/tcp \u2014 1 pkts, 87 bytes\n- 93.184.216.36:80/tcp \u2014 1 pkts, 81 bytes\n- 50.1.1.1:8443/tcp \u2014 1 pkts, 78 bytes\n- 93.184.216.38:80/tcp \u2014 1 pkts, 73 bytes\n- 60.1.1.1:9999/udp \u2014 1 pkts, 62 bytes\n- 8.8.8.8:443/tcp \u2014 1 pkts, 54 bytes\n- 8.8.4.4:0/other \u2014 1 pkts, 46 bytes\n- 185.199.108.1:0/other \u2014 1 pkts, 37 bytes\n\nTLS SNI (encrypted destinations):\n- cdn.example.net (2 ClientHello)\n\nBeaconing detected (periodic callbacks \u2014 strong C2 signal):\n- 45.33.32.156:8080/udp \u2014 6 callbacks, ~30.0s interval (regular; likely C2 beacon)\n- 185.199.108.1:4444/tcp \u2014 4 callbacks, ~60.0s interval (regular; likely C2 beacon)",
+  "extract_dns": "67 packets read, reading stopped where the file ends inside the record at byte 5914 (37 of its 54 bytes; the record is read as far as it goes).\nupdate.example.com.\nintranet.local.\nprinter.local.\nwpad.\ntcp.example.org.\nv6.example.com.\n.\ntrunc.example.com.\nfirst.example.com.\ncaf\u00e9.example.com.",
+  "extract_dns_limit_5": "5 packets read (the caller asked for 5), reading stopped where the file ends inside the record at byte 5914 (37 of its 54 bytes; the record is read as far as it goes).\nupdate.example.com.\nintranet.local.\nprinter.local.",
+  "extract_http": "67 packets read, reading stopped where the file ends inside the record at byte 5914 (37 of its 54 bytes; the record is read as far as it goes).\nGET /index.html HTTP/1.1 | Host: www.example.com\nPOST /gate.php HTTP/1.0 | \nGET /v6 HTTP/1.1 | Host: v6.example.com\nGET /x HTTP/1.1 | Host: tiny\nGET /local HTTP/1.1 | host: 10.0.2.2:8000\nHEAD / HTTP/1.1 | Host: opts.example.com\nPUT /a HTTP/1.1 | \nDELETE /b HTTP/1.1 | HOST: upper.example.com",
   "network_pcap_summary": {
-   "summary": "#### Packet Capture Analysis (deterministic, whole capture):\n67 of 67 packets in the capture read: 4871 bytes over 344.8s. Protocols: other=5, tcp=30, udp=27\n\nExternal conversations (all 26, by volume):\n- 8.8.8.8:53/udp — 8 pkts, 553 bytes\n- 104.16.0.1:443/tcp — 2 pkts, 348 bytes\n- 151.101.1.1:443/tcp — 5 pkts, 270 bytes\n- 45.33.32.156:8080/udp — 6 pkts, 264 bytes\n- 151.101.1.2:443/udp — 6 pkts, 258 bytes\n- 93.184.216.34:80/tcp — 3 pkts, 237 bytes\n- 185.199.108.1:4444/tcp — 4 pkts, 216 bytes\n- 104.16.0.2:443/tcp — 1 pkts, 150 bytes\n- 8.8.8.8:0/other — 2 pkts, 134 bytes\n- 104.16.0.3:443/tcp — 1 pkts, 120 bytes\n- 93.184.216.35:8080/tcp — 1 pkts, 104 bytes\n- 80.1.1.1:3389/tcp — 1 pkts, 104 bytes\n- 93.184.216.37:80/tcp — 1 pkts, 101 bytes\n- 93.184.216.39:80/tcp — 1 pkts, 101 bytes\n- 93.184.216.40:80/tcp — 1 pkts, 97 bytes\n- 9.9.9.9:123/udp — 1 pkts, 94 bytes\n- 70.1.1.1:22/tcp — 1 pkts, 94 bytes\n- 1.1.1.1:53/tcp — 1 pkts, 89 bytes\n- 104.16.0.4:443/tcp — 1 pkts, 87 bytes\n- 93.184.216.36:80/tcp — 1 pkts, 81 bytes\n- 50.1.1.1:8443/tcp — 1 pkts, 78 bytes\n- 93.184.216.38:80/tcp — 1 pkts, 73 bytes\n- 60.1.1.1:9999/udp — 1 pkts, 62 bytes\n- 8.8.8.8:443/tcp — 1 pkts, 54 bytes\n- 8.8.4.4:0/other — 1 pkts, 46 bytes\n- 185.199.108.1:0/other — 1 pkts, 37 bytes\n\nTLS SNI (encrypted destinations):\n- cdn.example.net (2 ClientHello)\n\nBeaconing detected (periodic callbacks — strong C2 signal):\n- 45.33.32.156:8080/udp — 6 callbacks, ~30.0s interval (regular; likely C2 beacon)\n- 185.199.108.1:4444/tcp — 4 callbacks, ~60.0s interval (regular; likely C2 beacon)",
+   "summary": "#### Packet Capture Analysis (deterministic, part of the capture):\n67 packets read, reading stopped where the file ends inside the record at byte 5914 (37 of its 54 bytes; the record is read as far as it goes): 4871 bytes over 344.8s. Protocols: other=5, tcp=31, udp=28\n\nExternal conversations (all 26, by volume):\n- 8.8.8.8:53/udp \u2014 8 pkts, 553 bytes\n- 104.16.0.1:443/tcp \u2014 2 pkts, 348 bytes\n- 151.101.1.1:443/tcp \u2014 5 pkts, 270 bytes\n- 45.33.32.156:8080/udp \u2014 6 pkts, 264 bytes\n- 151.101.1.2:443/udp \u2014 6 pkts, 258 bytes\n- 93.184.216.34:80/tcp \u2014 3 pkts, 237 bytes\n- 185.199.108.1:4444/tcp \u2014 4 pkts, 216 bytes\n- 104.16.0.2:443/tcp \u2014 1 pkts, 150 bytes\n- 8.8.8.8:0/other \u2014 2 pkts, 134 bytes\n- 104.16.0.3:443/tcp \u2014 1 pkts, 120 bytes\n- 93.184.216.35:8080/tcp \u2014 1 pkts, 104 bytes\n- 80.1.1.1:3389/tcp \u2014 1 pkts, 104 bytes\n- 93.184.216.37:80/tcp \u2014 1 pkts, 101 bytes\n- 93.184.216.39:80/tcp \u2014 1 pkts, 101 bytes\n- 93.184.216.40:80/tcp \u2014 1 pkts, 97 bytes\n- 9.9.9.9:123/udp \u2014 1 pkts, 94 bytes\n- 70.1.1.1:22/tcp \u2014 1 pkts, 94 bytes\n- 1.1.1.1:53/tcp \u2014 1 pkts, 89 bytes\n- 104.16.0.4:443/tcp \u2014 1 pkts, 87 bytes\n- 93.184.216.36:80/tcp \u2014 1 pkts, 81 bytes\n- 50.1.1.1:8443/tcp \u2014 1 pkts, 78 bytes\n- 93.184.216.38:80/tcp \u2014 1 pkts, 73 bytes\n- 60.1.1.1:9999/udp \u2014 1 pkts, 62 bytes\n- 8.8.8.8:443/tcp \u2014 1 pkts, 54 bytes\n- 8.8.4.4:0/other \u2014 1 pkts, 46 bytes\n- 185.199.108.1:0/other \u2014 1 pkts, 37 bytes\n\nTLS SNI (encrypted destinations):\n- cdn.example.net (2 ClientHello)\n\nBeaconing detected (periodic callbacks \u2014 strong C2 signal):\n- 45.33.32.156:8080/udp \u2014 6 callbacks, ~30.0s interval (regular; likely C2 beacon)\n- 185.199.108.1:4444/tcp \u2014 4 callbacks, ~60.0s interval (regular; likely C2 beacon)",
    "empty": false,
    "packets_read": 67,
    "packets_in_capture": 67,
    "packet_limit": null,
+   "framing_end": "the file ends inside the record at byte 5914 (37 of its 54 bytes; the record is read as far as it goes)",
    "bytes": 4871,
    "duration_s": 344.8,
    "protocols": {
     "other": 5,
-    "tcp": 30,
-    "udp": 27
+    "tcp": 31,
+    "udp": 28
    },
    "conversations": [
     {
@@ -4140,7 +5281,7 @@
    "duration_s": 40.0,
    "protocols": {
     "tcp": 3,
-    "udp": 2
+    "udp": 4
    },
    "conversations": [
     {
@@ -4170,38 +5311,9 @@
    },
    "beacons": []
   },
-  "capture_facts_limit_3": {
-   "packets_read": 3,
-   "packets_in_capture": 7,
-   "packet_limit": 3,
-   "bytes": 238,
-   "duration_s": 2.0,
-   "protocols": {
-    "tcp": 1,
-    "udp": 2
-   },
-   "conversations": [
-    {
-     "dst": "8.8.8.8",
-     "dport": 53,
-     "proto": "udp",
-     "packets": 2,
-     "bytes": 138
-    },
-    {
-     "dst": "93.184.216.34",
-     "dport": 80,
-     "proto": "tcp",
-     "packets": 1,
-     "bytes": 100
-    }
-   ],
-   "sni": {},
-   "beacons": []
-  },
-  "summarize_pcap": "#### Packet Capture Analysis (deterministic, whole capture):\n7 of 7 packets in the capture read: 661 bytes over 40.0s. Protocols: tcp=3, udp=2\n\nExternal conversations (all 3, by volume):\n- 93.184.216.34:80/tcp — 2 pkts, 186 bytes\n- 104.16.0.1:443/tcp — 1 pkts, 173 bytes\n- 8.8.8.8:53/udp — 2 pkts, 138 bytes\n\nTLS SNI (encrypted destinations):\n- ng.example.net (1 ClientHello)\n\nNo regular beaconing interval detected in the packets read.",
+  "summarize_pcap": "#### Packet Capture Analysis (deterministic, whole capture):\n7 of 7 packets in the capture read: 661 bytes over 40.0s. Protocols: tcp=3, udp=4\n\nExternal conversations (all 3, by volume):\n- 93.184.216.34:80/tcp \u2014 2 pkts, 186 bytes\n- 104.16.0.1:443/tcp \u2014 1 pkts, 173 bytes\n- 8.8.8.8:53/udp \u2014 2 pkts, 138 bytes\n\nTLS SNI (encrypted destinations):\n- ng.example.net (1 ClientHello)\n\nNo regular beaconing interval detected in the packets read.",
   "tool_pcap_summary": {
-   "summary": "#### Packet Capture Analysis (deterministic, whole capture):\n7 of 7 packets in the capture read: 661 bytes over 40.0s. Protocols: tcp=3, udp=2\n\nExternal conversations (all 3, by volume):\n- 93.184.216.34:80/tcp — 2 pkts, 186 bytes\n- 104.16.0.1:443/tcp — 1 pkts, 173 bytes\n- 8.8.8.8:53/udp — 2 pkts, 138 bytes\n\nTLS SNI (encrypted destinations):\n- ng.example.net (1 ClientHello)\n\nNo regular beaconing interval detected in the packets read.",
+   "summary": "#### Packet Capture Analysis (deterministic, whole capture):\n7 of 7 packets in the capture read: 661 bytes over 40.0s. Protocols: tcp=3, udp=4\n\nExternal conversations (all 3, by volume):\n- 93.184.216.34:80/tcp \u2014 2 pkts, 186 bytes\n- 104.16.0.1:443/tcp \u2014 1 pkts, 173 bytes\n- 8.8.8.8:53/udp \u2014 2 pkts, 138 bytes\n\nTLS SNI (encrypted destinations):\n- ng.example.net (1 ClientHello)\n\nNo regular beaconing interval detected in the packets read.",
    "empty": false,
    "packets_read": 7,
    "packets_in_capture": 7,
@@ -4210,7 +5322,7 @@
    "duration_s": 40.0,
    "protocols": {
     "tcp": 3,
-    "udp": 2
+    "udp": 4
    },
    "conversations": [
     {
@@ -4240,13 +5352,9 @@
    },
    "beacons": []
   },
-  "read_pcap_summary": "#### Packet Capture Analysis (deterministic, whole capture):\n7 of 7 packets in the capture read: 661 bytes over 40.0s. Protocols: tcp=3, udp=2\n\nExternal conversations (all 3, by volume):\n- 93.184.216.34:80/tcp — 2 pkts, 186 bytes\n- 104.16.0.1:443/tcp — 1 pkts, 173 bytes\n- 8.8.8.8:53/udp — 2 pkts, 138 bytes\n\nTLS SNI (encrypted destinations):\n- ng.example.net (1 ClientHello)\n\nNo regular beaconing interval detected in the packets read.",
-  "read_pcap_summary_page": "Packets 3 to 6 of the 7 in the capture.\nPacket 3: 10.0.2.15 -> 93.184.216.34 (TCP 52001->80)\nPacket 6: 10.0.2.15 -> 104.16.0.1 (TCP 52003->443)",
-  "extract_dns": "7 of 7 packets in the capture read.\nlink.example.com.\nsix.local.",
-  "extract_dns_limit_5": "5 of 7 packets in the capture read (the caller asked for 5).\nlink.example.com.\nsix.local.",
-  "extract_http": "7 of 7 packets in the capture read.\n2 times: GET /link HTTP/1.1 | Host: link.example.com",
+  "read_pcap_summary": "#### Packet Capture Analysis (deterministic, whole capture):\n7 of 7 packets in the capture read: 661 bytes over 40.0s. Protocols: tcp=3, udp=4\n\nExternal conversations (all 3, by volume):\n- 93.184.216.34:80/tcp \u2014 2 pkts, 186 bytes\n- 104.16.0.1:443/tcp \u2014 1 pkts, 173 bytes\n- 8.8.8.8:53/udp \u2014 2 pkts, 138 bytes\n\nTLS SNI (encrypted destinations):\n- ng.example.net (1 ClientHello)\n\nNo regular beaconing interval detected in the packets read.",
   "network_pcap_summary": {
-   "summary": "#### Packet Capture Analysis (deterministic, whole capture):\n7 of 7 packets in the capture read: 661 bytes over 40.0s. Protocols: tcp=3, udp=2\n\nExternal conversations (all 3, by volume):\n- 93.184.216.34:80/tcp — 2 pkts, 186 bytes\n- 104.16.0.1:443/tcp — 1 pkts, 173 bytes\n- 8.8.8.8:53/udp — 2 pkts, 138 bytes\n\nTLS SNI (encrypted destinations):\n- ng.example.net (1 ClientHello)\n\nNo regular beaconing interval detected in the packets read.",
+   "summary": "#### Packet Capture Analysis (deterministic, whole capture):\n7 of 7 packets in the capture read: 661 bytes over 40.0s. Protocols: tcp=3, udp=4\n\nExternal conversations (all 3, by volume):\n- 93.184.216.34:80/tcp \u2014 2 pkts, 186 bytes\n- 104.16.0.1:443/tcp \u2014 1 pkts, 173 bytes\n- 8.8.8.8:53/udp \u2014 2 pkts, 138 bytes\n\nTLS SNI (encrypted destinations):\n- ng.example.net (1 ClientHello)\n\nNo regular beaconing interval detected in the packets read.",
    "empty": false,
    "packets_read": 7,
    "packets_in_capture": 7,
@@ -4255,7 +5363,7 @@
    "duration_s": 40.0,
    "protocols": {
     "tcp": 3,
-    "udp": 2
+    "udp": 4
    },
    "conversations": [
     {
@@ -4375,9 +5483,9 @@
    "sni": {},
    "beacons": []
   },
-  "summarize_pcap": "#### Packet Capture Analysis (deterministic, part of the capture):\n4 packets read, 3 blocks unreadable: an enhanced packet block names an interface no interface description declared (1, the first at byte 252, interface 7); an enhanced packet block is shorter than its fixed part (1, the first at byte 344); an interface description is shorter than its fixed part (1, the first at byte 364): 276 bytes over 0.0s. Protocols: tcp=2, udp=2\n\nExternal conversations (all 2, by volume):\n- 8.8.8.8:4444/tcp — 2 pkts, 160 bytes\n- 8.8.8.8:53/udp — 2 pkts, 116 bytes\n\nNo regular beaconing interval detected in the packets read.",
+  "summarize_pcap": "#### Packet Capture Analysis (deterministic, part of the capture):\n4 packets read, 3 blocks unreadable: an enhanced packet block names an interface no interface description declared (1, the first at byte 252, interface 7); an enhanced packet block is shorter than its fixed part (1, the first at byte 344); an interface description is shorter than its fixed part (1, the first at byte 364): 276 bytes over 0.0s. Protocols: tcp=2, udp=2\n\nExternal conversations (all 2, by volume):\n- 8.8.8.8:4444/tcp \u2014 2 pkts, 160 bytes\n- 8.8.8.8:53/udp \u2014 2 pkts, 116 bytes\n\nNo regular beaconing interval detected in the packets read.",
   "tool_pcap_summary": {
-   "summary": "#### Packet Capture Analysis (deterministic, part of the capture):\n4 packets read, 3 blocks unreadable: an enhanced packet block names an interface no interface description declared (1, the first at byte 252, interface 7); an enhanced packet block is shorter than its fixed part (1, the first at byte 344); an interface description is shorter than its fixed part (1, the first at byte 364): 276 bytes over 0.0s. Protocols: tcp=2, udp=2\n\nExternal conversations (all 2, by volume):\n- 8.8.8.8:4444/tcp — 2 pkts, 160 bytes\n- 8.8.8.8:53/udp — 2 pkts, 116 bytes\n\nNo regular beaconing interval detected in the packets read.",
+   "summary": "#### Packet Capture Analysis (deterministic, part of the capture):\n4 packets read, 3 blocks unreadable: an enhanced packet block names an interface no interface description declared (1, the first at byte 252, interface 7); an enhanced packet block is shorter than its fixed part (1, the first at byte 344); an interface description is shorter than its fixed part (1, the first at byte 364): 276 bytes over 0.0s. Protocols: tcp=2, udp=2\n\nExternal conversations (all 2, by volume):\n- 8.8.8.8:4444/tcp \u2014 2 pkts, 160 bytes\n- 8.8.8.8:53/udp \u2014 2 pkts, 116 bytes\n\nNo regular beaconing interval detected in the packets read.",
    "empty": false,
    "packets_read": 4,
    "packets_in_capture": 4,
@@ -4422,13 +5530,13 @@
    "sni": {},
    "beacons": []
   },
-  "read_pcap_summary": "#### Packet Capture Analysis (deterministic, part of the capture):\n4 packets read, 3 blocks unreadable: an enhanced packet block names an interface no interface description declared (1, the first at byte 252, interface 7); an enhanced packet block is shorter than its fixed part (1, the first at byte 344); an interface description is shorter than its fixed part (1, the first at byte 364): 276 bytes over 0.0s. Protocols: tcp=2, udp=2\n\nExternal conversations (all 2, by volume):\n- 8.8.8.8:4444/tcp — 2 pkts, 160 bytes\n- 8.8.8.8:53/udp — 2 pkts, 116 bytes\n\nNo regular beaconing interval detected in the packets read.",
+  "read_pcap_summary": "#### Packet Capture Analysis (deterministic, part of the capture):\n4 packets read, 3 blocks unreadable: an enhanced packet block names an interface no interface description declared (1, the first at byte 252, interface 7); an enhanced packet block is shorter than its fixed part (1, the first at byte 344); an interface description is shorter than its fixed part (1, the first at byte 364): 276 bytes over 0.0s. Protocols: tcp=2, udp=2\n\nExternal conversations (all 2, by volume):\n- 8.8.8.8:4444/tcp \u2014 2 pkts, 160 bytes\n- 8.8.8.8:53/udp \u2014 2 pkts, 116 bytes\n\nNo regular beaconing interval detected in the packets read.",
   "read_pcap_summary_page": "Packets 3 to 3 of the 4 in the capture (4 packets read, 3 blocks unreadable: an enhanced packet block names an interface no interface description declared (1, the first at byte 252, interface 7); an enhanced packet block is shorter than its fixed part (1, the first at byte 344); an interface description is shorter than its fixed part (1, the first at byte 364)).\nPacket 3: 10.0.0.2 -> 8.8.8.8 (TCP 5001->4444)",
   "extract_dns": "4 packets read, 3 blocks unreadable: an enhanced packet block names an interface no interface description declared (1, the first at byte 252, interface 7); an enhanced packet block is shorter than its fixed part (1, the first at byte 344); an interface description is shorter than its fixed part (1, the first at byte 364).\nevil.example.",
   "extract_dns_limit_5": "4 packets read, 3 blocks unreadable: an enhanced packet block names an interface no interface description declared (1, the first at byte 252, interface 7); an enhanced packet block is shorter than its fixed part (1, the first at byte 344); an interface description is shorter than its fixed part (1, the first at byte 364).\nevil.example.",
   "extract_http": "4 packets read, 3 blocks unreadable: an enhanced packet block names an interface no interface description declared (1, the first at byte 252, interface 7); an enhanced packet block is shorter than its fixed part (1, the first at byte 344); an interface description is shorter than its fixed part (1, the first at byte 364).\n2 times: GET /c2 HTTP/1.1 | Host: evil.example",
   "network_pcap_summary": {
-   "summary": "#### Packet Capture Analysis (deterministic, part of the capture):\n4 packets read, 3 blocks unreadable: an enhanced packet block names an interface no interface description declared (1, the first at byte 252, interface 7); an enhanced packet block is shorter than its fixed part (1, the first at byte 344); an interface description is shorter than its fixed part (1, the first at byte 364): 276 bytes over 0.0s. Protocols: tcp=2, udp=2\n\nExternal conversations (all 2, by volume):\n- 8.8.8.8:4444/tcp — 2 pkts, 160 bytes\n- 8.8.8.8:53/udp — 2 pkts, 116 bytes\n\nNo regular beaconing interval detected in the packets read.",
+   "summary": "#### Packet Capture Analysis (deterministic, part of the capture):\n4 packets read, 3 blocks unreadable: an enhanced packet block names an interface no interface description declared (1, the first at byte 252, interface 7); an enhanced packet block is shorter than its fixed part (1, the first at byte 344); an interface description is shorter than its fixed part (1, the first at byte 364): 276 bytes over 0.0s. Protocols: tcp=2, udp=2\n\nExternal conversations (all 2, by volume):\n- 8.8.8.8:4444/tcp \u2014 2 pkts, 160 bytes\n- 8.8.8.8:53/udp \u2014 2 pkts, 116 bytes\n\nNo regular beaconing interval detected in the packets read.",
    "empty": false,
    "packets_read": 4,
    "packets_in_capture": 4,

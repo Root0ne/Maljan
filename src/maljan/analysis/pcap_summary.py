@@ -46,7 +46,8 @@ class CaptureRead:
     no limit reads the whole capture. The rest is what the reader had to skip
     or where it stopped (``capture_reader.ReadNotes``): pcapng blocks it could
     not read, by kind of reason; the byte cap a gzip capture reached; where a
-    gzip stream could not be decompressed further; records whose headers could
+    gzip stream could not be decompressed further; where the capture's framing
+    ended before the file did, and why; records whose headers could
     not be walked to the end. A surface adds what it could not extract: DNS
     names longer than DNS allows, and values it could not write. Each appears
     in the fields only when it happened, and the statement grows with the
@@ -60,6 +61,7 @@ class CaptureRead:
     unreadable_reasons: dict[str, dict[str, Any]] = field(default_factory=dict)
     byte_cap: int | None = None
     stream_error: str | None = None
+    framing_end: str | None = None
     packets_undecoded: int = 0
     dns_names_malformed: int = 0
     dns_name_octets_first: int = 0
@@ -71,6 +73,7 @@ class CaptureRead:
         self.unreadable_reasons = {k: dict(v) for k, v in notes.unreadable_reasons.items()}
         self.byte_cap = notes.byte_cap
         self.stream_error = notes.stream_error
+        self.framing_end = notes.framing_end
         self.packets_undecoded = notes.packets_undecoded
 
     def malformed_dns_name(self, octets: int) -> None:
@@ -90,17 +93,24 @@ class CaptureRead:
             and not self.blocks_unreadable
             and self.byte_cap is None
             and self.stream_error is None
+            and self.framing_end is None
         )
 
     def statement(self) -> str:
         """``"14887 of 14887 packets in the capture read"``, and why fewer when fewer.
 
-        When blocks were skipped, a byte cap stopped the read or a gzip stream
-        broke off, the capture's own count is not known, and the statement says
+        When blocks were skipped, a byte cap stopped the read, a gzip stream
+        broke off or the capture's framing ended early, the capture's own count
+        is not known, and the statement says
         what was read and why instead: ``"6 packets read, 1 blocks unreadable:
         <reason> (1, the first at byte 72, interface 7)"``.
         """
-        partial = self.blocks_unreadable or self.byte_cap is not None or self.stream_error
+        partial = (
+            self.blocks_unreadable
+            or self.byte_cap is not None
+            or self.stream_error
+            or self.framing_end
+        )
         if partial:
             said = f"{self.packets_read} packets read"
         else:
@@ -119,6 +129,8 @@ class CaptureRead:
             )
         if self.stream_error:
             said += f", reading stopped where {self.stream_error}"
+        if self.framing_end:
+            said += f", reading stopped where {self.framing_end}"
         if self.packets_undecoded:
             said += (
                 f", {self.packets_undecoded} of them read only to the headers before "
@@ -148,6 +160,8 @@ class CaptureRead:
             fields["byte_cap"] = self.byte_cap
         if self.stream_error:
             fields["stream_error"] = self.stream_error
+        if self.framing_end:
+            fields["framing_end"] = self.framing_end
         if self.packets_undecoded:
             fields["packets_undecoded"] = self.packets_undecoded
         if self.values_unwritable:
@@ -166,6 +180,7 @@ class CaptureRead:
             unreadable_reasons=dict(reasons) if isinstance(reasons, dict) else {},
             byte_cap=facts.get("byte_cap"),
             stream_error=facts.get("stream_error"),
+            framing_end=facts.get("framing_end"),
             packets_undecoded=int(facts.get("packets_undecoded") or 0),
             values_unwritable=int(facts.get("values_unwritable") or 0),
             unwritable_reason=str(facts.get("unwritable_reason") or ""),
@@ -320,7 +335,7 @@ def capture_facts(pcap_path: str, packet_limit: Any = None) -> dict[str, Any] | 
             t = pkt.time
             if t:
                 times.append(t)
-            if pkt.ip_dst is None:
+            if pkt.ip_dst is None and not pkt.ipv6:
                 return
             dst = pkt.ip_dst
             if pkt.tcp is not None:
@@ -340,7 +355,9 @@ def capture_facts(pcap_path: str, packet_limit: Any = None) -> dict[str, Any] | 
                 proto = "other"
                 dport = 0
             proto_counts[proto] += 1
-            if not _is_external(dst):
+            # An IPv6 datagram is counted by its next header; its addresses are
+            # not read, so it names no conversation.
+            if dst is None or not _is_external(dst):
                 return  # the summary is about the external (C2) surface
             c = convs.setdefault((dst, dport, proto), {"pkts": 0, "bytes": 0, "times": []})
             c["pkts"] += 1

@@ -79,7 +79,14 @@ streamed word by word, holding only the words a phrase can span, and every
 repeated group an unbounded run meets is possessive, so no view copies the
 file or keeps state per character. Matches are streamed into
 their groups and never held one by one. A caller's deadline stops the scan
-between matches, and the answer then says how far it read.
+between matches and between windows of every whole-text pass (the fold, the
+searches, the walk that finds whether a text folds to itself), and the answer
+then says how far it read. A window answers for what one pass over the whole
+text gives: its search reads on past the positions it answers for to a
+stretch no phrase can span (``_Windows``, ``_spaced_runs``), so a sample that
+matches nothing is stopped by the clock as one that matches everything is. A
+window stretches across a run a phrase could take whole (a whitespace run, a
+quoted tool-call name), and the clock is read again past it.
 """
 
 from __future__ import annotations
@@ -337,6 +344,577 @@ def _starts_a_word(folded: str, start: int) -> bool:
 
 
 # ---------------------------------------------------------------------------
+# Windows: a whole-text pass read piece by piece, the deadline between pieces
+# ---------------------------------------------------------------------------
+
+# The characters a whole-text pass reads between two checks of the caller's
+# deadline. It bounds no answer: a window's matches are the matches one pass
+# over the whole text gives (``_Windows``), and only how often the clock is
+# read depends on it.
+_WINDOW = 1 << 18
+
+# A run this long of the characters an unbounded repeat consumes makes the
+# overlap behind a window stretch past it (``_Windows``).
+_RUN = 64
+
+# The attempts matched one by one against the whole text (``_Windows``)
+# between two checks of the deadline.
+_WINDOW_ATTEMPTS = 1 << 12
+
+
+def _class_of(op: Any, av: Any) -> str:
+    """One single-character item of a parsed pattern, written as a character class."""
+    constants = importlib.import_module("re._constants")
+    if op is constants.LITERAL:
+        return f"[{re.escape(chr(av))}]"
+    if op is not constants.IN:
+        raise ValueError(f"an unbounded repeat of a {op} item is not read")
+    parts: list[str] = []
+    for kind, value in av:
+        if kind is constants.LITERAL:
+            parts.append(re.escape(chr(value)))
+        elif kind is constants.RANGE:
+            parts.append(f"{re.escape(chr(value[0]))}-{re.escape(chr(value[1]))}")
+        else:
+            raise ValueError(f"a {kind} item in a repeated class is not read")
+    return f"[{''.join(sorted(parts))}]"
+
+
+def _required_literal(before: Sequence[tuple[Any, Any]]) -> tuple[int, int]:
+    """Where the longest run of literal characters among the items ``before`` a
+    repeat stands: ``(first, past)`` item indexes, ``(0, 0)`` when there is none.
+
+    Every item of a sequence before a repeat in it is one every path that
+    reaches the repeat has passed, so the run is text such a path holds.
+    """
+    constants = importlib.import_module("re._constants")
+    best = (0, 0)
+    first = 0
+    for index, (op, _av) in enumerate(before):
+        if op is not constants.LITERAL:
+            first = index + 1
+        elif index + 1 - first >= best[1] - best[0]:
+            best = (first, index + 1)
+    return best
+
+
+def _alphabet(items: Sequence[tuple[Any, Any]]) -> str | None:
+    """The inside of a character class of every character ``items`` can consume
+    (``""`` when they consume none); ``None`` when one of them can consume a
+    character no class here can name. A lookahead consumes nothing.
+    """
+    constants = importlib.import_module("re._constants")
+    parts: list[str] = []
+    for op, av in items:
+        inner: str | None
+        if op in (constants.LITERAL, constants.IN):
+            cls = _class_of(op, av)
+            inner = None if cls.startswith("[^") else cls[1:-1]
+        elif op in (constants.ASSERT, constants.ASSERT_NOT, constants.AT):
+            inner = ""
+        elif op in (constants.MAX_REPEAT, constants.MIN_REPEAT, constants.POSSESSIVE_REPEAT):
+            inner = _alphabet(list(av[2]))
+        elif op is constants.SUBPATTERN:
+            inner = _alphabet(list(av[-1]))
+        elif op is constants.BRANCH:
+            branches = [_alphabet(list(branch)) for branch in av[1]]
+            inner = None if None in branches else "".join(b or "" for b in branches)
+        else:
+            inner = None
+        if inner is None:
+            return None
+        parts.append(inner)
+    return "".join(parts)
+
+
+def _render(items: Sequence[tuple[Any, Any]]) -> str:
+    """Parsed pattern items written back as an expression that matches what they match."""
+    constants = importlib.import_module("re._constants")
+    out: list[str] = []
+    for op, av in items:
+        if op is constants.LITERAL:
+            out.append(re.escape(chr(av)))
+        elif op is constants.NOT_LITERAL:
+            out.append(f"[^{re.escape(chr(av))}]")
+        elif op is constants.IN:
+            out.append(_class_of(op, av))
+        elif op is constants.SUBPATTERN:
+            out.append(f"(?:{_render(list(av[-1]))})")
+        elif op is constants.BRANCH:
+            out.append("(?:" + "|".join(_render(list(b)) for b in av[1]) + ")")
+        elif op in (constants.ASSERT, constants.ASSERT_NOT) and av[0] > 0:
+            out.append(f"(?{'=' if op is constants.ASSERT else '!'}{_render(list(av[1]))})")
+        elif op in (constants.MAX_REPEAT, constants.MIN_REPEAT, constants.POSSESSIVE_REPEAT):
+            low, high, body = av
+            bound = f"{{{low},}}" if high == constants.MAXREPEAT else f"{{{low},{high}}}"
+            lazy = {constants.MIN_REPEAT: "?", constants.POSSESSIVE_REPEAT: "+"}.get(op, "")
+            out.append(f"(?:{_render(list(body))}){bound}{lazy}")
+        else:
+            raise ValueError(f"a {op} item is not written back")
+    return "".join(out)
+
+
+@dataclass(frozen=True)
+class _Way:
+    """What every path to one unbounded repeat passes before it.
+
+    ``literal`` is the longest literal text on it (``_required_literal``),
+    ``before`` the expression of all of it, ending where the repeat begins,
+    and ``reach`` with ``runs`` how far back an attempt that passes it can
+    start (``_reach_of``'s bound over that part alone, and the long runs of
+    its own repeats' classes). ``head`` and ``tail`` are the expressions of
+    the parts before and after the literal, and ``head_alphabet`` and
+    ``tail_alphabet`` the inside of a class of the characters each can
+    consume (``None`` when unknown, ``""`` when it consumes none).
+    """
+
+    literal: str
+    before: str
+    reach: int
+    runs: tuple[str, ...]
+    head: str = ""
+    tail: str = ""
+    head_alphabet: str | None = None
+    tail_alphabet: str | None = None
+
+
+def _way(path: Sequence[tuple[Any, Any]]) -> _Way:
+    inner: list[tuple[str, str, Any]] = []
+    width, runs = _grammar_reach(path, inner)
+    first, past = _required_literal(path)
+    constants = importlib.import_module("re._constants")
+    literal = "".join(chr(av) for op, av in path[first:past] if op is constants.LITERAL)
+    return _Way(
+        literal,
+        _render(path),
+        width + runs * (_RUN - 1) + 1,
+        tuple(sorted({cls for cls, _p, _w in inner})),
+        _render(path[:first]),
+        _render(path[past:]),
+        _alphabet(path[:first]),
+        _alphabet(path[past:]),
+    )
+
+
+def _grammar_reach(
+    items: Any, unbounded: list[tuple[str, str, Any]], before: tuple[Any, ...] = ()
+) -> tuple[int, int]:
+    """The most characters a path through ``items`` reads besides its unbounded
+    repeats, and the most unbounded repeats on one path.
+
+    Each unbounded repeat is added to ``unbounded`` as its character class, the
+    literal right before it (``""`` when it follows no literal) and what every
+    path to it passes (``_Way``, from the pattern's start: ``before`` holds the
+    items before ``items`` on every such path).
+    """
+    constants = importlib.import_module("re._constants")
+    repeats = (constants.MAX_REPEAT, constants.MIN_REPEAT, constants.POSSESSIVE_REPEAT)
+    width = runs = 0
+    previous: tuple[Any, Any] | None = None
+    sequence = list(items)
+    for index, (op, av) in enumerate(sequence):
+        path = (*before, *sequence[:index])
+        if op in (constants.LITERAL, constants.NOT_LITERAL, constants.IN, constants.ANY):
+            width += 1
+        elif op is constants.AT:
+            pass
+        elif op is constants.SUBPATTERN:
+            w, r = _grammar_reach(av[-1], unbounded, path)
+            width, runs = width + w, runs + r
+        elif op is constants.BRANCH:
+            reached = [_grammar_reach(branch, unbounded, path) for branch in av[1]]
+            width += max(w for w, _r in reached)
+            runs += max(r for _w, r in reached)
+        elif op in (constants.ASSERT, constants.ASSERT_NOT):
+            if av[0] < 0:
+                raise ValueError("a lookbehind is not read")
+            width += _grammar_reach(av[1], unbounded, path)[0]  # how far it peeks
+        elif op in repeats:
+            low, high, body = av
+            if high == constants.MAXREPEAT:
+                (inner_op, inner_av), *rest = list(body)
+                if rest:
+                    raise ValueError("an unbounded repeat of more than one character is not read")
+                prefix = ""
+                if previous is not None and previous[0] is constants.LITERAL:
+                    prefix = chr(previous[1])
+                unbounded.append((_class_of(inner_op, inner_av), prefix, path))
+                runs += 1
+            else:
+                w, r = _grammar_reach(body, unbounded, path)
+                width, runs = width + w * high, runs + r * high
+        else:
+            raise ValueError(f"a {op} item is not read")
+        previous = (op, av)
+    return width, runs
+
+
+def _reach_of(pattern: re.Pattern[str]) -> tuple[int, list[tuple[str, str, _Way]]]:
+    """How long a stretch a path of ``pattern`` can cover with no long run in it, and its runs.
+
+    A path covers at most its finite width plus, for each unbounded repeat on
+    it, the run that repeat consumes. Where no run of ``_RUN`` characters of a
+    repeat's class stands, a path covers fewer than the first value.
+    """
+    parser = importlib.import_module("re._parser")
+    unbounded: list[tuple[str, str, Any]] = []
+    width, runs = _grammar_reach(parser.parse(pattern.pattern, pattern.flags), unbounded)
+    ways = list(dict.fromkeys((cls, prefix, _way(path)) for cls, prefix, path in unbounded))
+    return width + runs * (_RUN - 1) + 1, ways
+
+
+_OVERLAP, _UNBOUNDED = _reach_of(_PATTERN)
+
+
+@dataclass(frozen=True)
+class _Gate:
+    """What an attempt must hold to reach a quoted repeat: one ``_Way`` to it, compiled.
+
+    ``ends_here`` is the way's expression anchored where a search stops, so a
+    search that ends at a run's first character finds every attempt start that
+    passes the whole way to it; ``runs`` finds the long runs of the way's own
+    repeats, which are what let such an attempt start further back.
+
+    Where the literal holds a character the part after it cannot consume
+    (``mark``), the literal of any attempt that passes the way stands where
+    the last such character before the run says: ``mark_last`` finds that
+    character, ``mark_offset`` is the place of the last one in the literal,
+    ``tail`` must then fill the rest up to the run, and the part before the
+    literal (``head_ends``) starts after the last character it cannot consume
+    (``head_foreign_last``). ``mark_last`` is ``None`` where the way gives no
+    such character, and ``ends_here`` is searched instead.
+    """
+
+    literal: str
+    ends_here: re.Pattern[str]
+    reach: int
+    runs: tuple[re.Pattern[str], ...]
+    mark_last: re.Pattern[str] | None = None
+    mark_offset: int = 0
+    tail: re.Pattern[str] | None = None
+    head_ends: re.Pattern[str] | None = None
+    head_foreign_last: re.Pattern[str] | None = None
+
+
+@dataclass(frozen=True)
+class _RunFinders:
+    """What finds the long runs an unbounded repeat of ``_PATTERN`` could consume.
+
+    ``loose``: a class some repeat of which follows anything but one literal
+    (the whitespace runs), found as a long run anywhere. ``quoted``: a class
+    every repeat of which follows the same literal (a tool call's name after
+    its quote), each long run found by its opening (that literal and
+    ``_RUN`` characters of the class), with ``extent`` reading the run to its
+    end and ``gates`` the ways to such a repeat (``{ *"name" *: *"``): a run
+    no attempt passes a way to is one no attempt can take. ``any_run``: a long
+    run of any of the classes.
+    """
+
+    loose: tuple[re.Pattern[str], ...]
+    quoted: tuple[tuple[re.Pattern[str], re.Pattern[str], tuple[_Gate, ...]], ...]
+    any_run: tuple[re.Pattern[str], ...]
+
+
+def _gate(way: _Way) -> _Gate:
+    if not way.literal:
+        raise ValueError(f"a quoted repeat follows no text every path holds: {way.before}")
+    ends_here = re.compile(f"(?:{way.before})\\Z")
+    runs = tuple(re.compile(f"{cls}{{{_RUN},}}") for cls in way.runs)
+    marks = [
+        offset
+        for offset, ch in enumerate(way.literal)
+        if way.tail_alphabet is not None
+        and not (way.tail_alphabet and re.fullmatch(f"[{way.tail_alphabet}]", ch))
+    ]
+    if not marks or way.head_alphabet is None:
+        return _Gate(way.literal, ends_here, way.reach, runs)
+    mark = "".join(sorted({re.escape(way.literal[offset]) for offset in marks}))
+    foreign = f"[^{way.head_alphabet}]" if way.head_alphabet else "(?s:.)"
+    return _Gate(
+        way.literal,
+        ends_here,
+        way.reach,
+        runs,
+        re.compile(f"(?s:.*)([{mark}])"),
+        max(marks),
+        re.compile(f"(?:{way.tail})"),
+        re.compile(f"(?:{way.head})\\Z"),
+        re.compile(f"(?s:.*)({foreign})"),
+    )
+
+
+def _run_finders(unbounded: Sequence[tuple[str, str, _Way]]) -> _RunFinders:
+    prefixes: dict[str, set[str]] = {}
+    ways: dict[str, set[_Way]] = {}
+    for cls, prefix, way in unbounded:
+        prefixes.setdefault(cls, set()).add(prefix)
+        ways.setdefault(cls, set()).add(way)
+    loose: list[re.Pattern[str]] = []
+    quoted: list[tuple[re.Pattern[str], re.Pattern[str], tuple[_Gate, ...]]] = []
+    for cls, held in prefixes.items():
+        run = f"{cls}{{{_RUN},}}"
+        if len(held) == 1 and "" not in held:
+            opening = re.compile(re.escape(next(iter(held))) + f"{cls}{{{_RUN}}}")
+            gates = tuple(_gate(w) for w in sorted(ways[cls], key=lambda w: w.before))
+            quoted.append((opening, re.compile(f"{cls}*+"), gates))
+        else:
+            loose.append(re.compile(run))
+    any_run = tuple(re.compile(f"{cls}{{{_RUN},}}") for cls in prefixes)
+    return _RunFinders(tuple(loose), tuple(quoted), any_run)
+
+
+_RUN_FINDERS = _run_finders(_UNBOUNDED)
+
+
+def _beginnings(pattern: re.Pattern[str]) -> re.Pattern[str]:
+    """The characters ``pattern``'s leading lookahead lets a match begin at."""
+    constants = importlib.import_module("re._constants")
+    parser = importlib.import_module("re._parser")
+    (op, av), *_rest = list(parser.parse(pattern.pattern, pattern.flags))
+    if op is not constants.ASSERT or av[0] < 0:
+        raise ValueError("the pattern does not lead with a lookahead")
+    (inner_op, inner_av), *more = list(av[1])
+    if more:
+        raise ValueError("the leading lookahead is not one character")
+    return re.compile(_class_of(inner_op, inner_av))
+
+
+_BEGINS = _beginnings(_PATTERN)
+
+
+class _Windows:
+    """``_PATTERN.search`` over a folded text, window by window, the deadline between windows.
+
+    Each answer is the one search of the whole text from the same position
+    gives. A window answers for the matches starting below ``answers_below``
+    and its search reads on to ``end``, ``_OVERLAP`` past them, over a stretch
+    no path of the pattern can cover: no run of ``_RUN`` characters a repeat
+    could consume stands in it (``_reach_of``). An attempt starting before the
+    stretch never reads past it, so it reads what it reads in the whole text.
+
+    A long whitespace run there stretches the window past it (a run no phrase
+    begins in, searched at the speed of a run with nothing to try), up to a
+    window's length; past that the window is crossed at such a run as below,
+    so the clock is read again however densely the runs stand. A long
+    quoted run (a tool call's name) is crossed instead: only an attempt
+    starting before its quote can take it whole, and only one starting after
+    the nearest stretch before the quote that no attempt can cover
+    (``_lead``); each of those is matched against the whole text, the
+    deadline checked every ``_WINDOW_ATTEMPTS`` of them, every earlier one is
+    searched in the window, and the next window begins at the run, where no
+    attempt can take it. Every character is searched a bounded number of
+    times.
+    """
+
+    def __init__(self, text: str, deadline: float | None, at: Callable[[int], str]) -> None:
+        self.text = text
+        self.deadline = deadline
+        self.at = at
+        self.answers_below = 0  # a match starting below this is the whole text's
+        self.end = 0  # where this window's search stops
+        self.matched_from: int | None = None  # where attempts are matched whole, when crossing
+        # The last walk of each kind (``_lead``): where it began and what it gave.
+        self.walked: dict[tuple[int, int], tuple[int, int]] = {}
+        # Where each ``_last`` finder was last asked, and its answer then.
+        self.lasts: dict[int, tuple[int, int]] = {}
+
+    def _quoted_run(
+        self, position: int, start: int, end: int, beyond: int
+    ) -> tuple[int, int, int] | None:
+        """The start, end and lead (``_lead``) of the first quoted run whose quote
+        stands in ``[max(position, start), end)``, which reaches ``beyond`` by
+        ``_RUN`` characters or more, and which an attempt could take: some
+        attempt start at or after ``position`` passes a whole way to it
+        (``_Gate``). ``None`` when there is none.
+
+        Every quote with a long run in that range is examined, each run read to
+        its own end, and the next quote is looked for past it, so no run is
+        read twice. A run no attempt can take is no reason to cross: it is
+        read in the window like any other text.
+        """
+        found: list[tuple[int, int, int]] = []
+        reach = min(len(self.text), end + _RUN + 1)  # a quote before ``end`` and its long run
+        for finder, extent, gates in _RUN_FINDERS.quoted:
+            at = max(position, start)
+            while (m := finder.search(self.text, at, reach)) is not None and m.start() < end:
+                run_start = m.start() + 1
+                extent_m = extent.match(self.text, run_start)
+                run_end = extent_m.end() if extent_m is not None else run_start
+                if run_end - max(run_start, beyond) >= _RUN and any(
+                    self._passes(position, run_start, gate) for gate in gates
+                ):
+                    found.append((run_start, run_end, self._lead(position, m.start())))
+                    break
+                at = max(run_end, m.start() + 1)
+        return min(found) if found else None
+
+    def _passes(self, position: int, run_start: int, gate: _Gate) -> bool:
+        """Whether an attempt starting at or after ``position`` passes ``gate``'s
+        whole way, ending where the run begins.
+
+        Where the way pins its literal (``_Gate.mark_last``), the literal is
+        checked at its one place, the tail after it and the head before it,
+        each over the characters it can consume. Otherwise such an attempt
+        starts no further back than the way's own bound (``_lead`` over the
+        way's repeats); its literal text is looked for first, and the way's
+        expression only where it stands.
+        """
+        text = self.text
+        if gate.mark_last is None or gate.tail is None or gate.head_ends is None:
+            low = self._lead(position, run_start, gate.reach, gate.runs)
+            if text.find(gate.literal, low, run_start) < 0:
+                return False
+            return gate.ends_here.search(text, low, run_start) is not None
+        assert gate.head_foreign_last is not None
+        # The literal of an attempt that passes the way ends before any
+        # character the tail cannot consume, so its last such character is the
+        # last one before the run: the literal stands at one place.
+        at = self._last(gate.mark_last, run_start) - gate.mark_offset
+        past = at + len(gate.literal)
+        if at < position or past > run_start or not text.startswith(gate.literal, at):
+            return False
+        if gate.tail.fullmatch(text, past, run_start) is None:
+            return False
+        low = max(position, self._last(gate.head_foreign_last, at) + 1)
+        return gate.head_ends.search(text, low, at) is not None
+
+    def _last(self, finder: re.Pattern[str], before: int) -> int:
+        """Where ``finder``'s group last stands before ``before``; ``-1`` when nowhere.
+
+        Asked at places that move forward, each part of the text is read once:
+        the answer for an earlier place is kept, and only what lies after it is
+        read. A place before the last one asked is read from the start.
+        """
+        read, last = self.lasts.get(id(finder), (0, -1))
+        if before < read:
+            read, last = 0, -1
+        m = finder.match(self.text, read, before)
+        if m is not None:
+            last = m.start(1)
+        self.lasts[id(finder)] = (before, last)
+        return last
+
+    def _lead(
+        self,
+        position: int,
+        quote: int,
+        reach: int = 0,
+        runs: tuple[re.Pattern[str], ...] | None = None,
+    ) -> int:
+        """The first position whose attempt could reach past ``quote``.
+
+        Walking back from the quote to the nearest stretch of ``reach``
+        characters (``_OVERLAP`` by default) with no long run (of ``runs``, by
+        default of any class) in it: no attempt before that stretch can cover
+        it, so none reaches the quote. Each step moves back past a long run.
+
+        A walk that comes back to where the last walk of its kind began stops
+        there: an attempt from before that point that reaches ``quote`` passes
+        the point, so it starts no earlier than that walk's answer. So each
+        character is walked once over the whole text, however the walks follow
+        one another.
+        """
+        reach = reach or _OVERLAP
+        finders = _RUN_FINDERS.any_run if runs is None else runs
+        kind = (id(finders), reach)
+        last = self.walked.get(kind)
+        high = quote
+        answer = position
+        while True:
+            if last is not None and last[0] <= quote and high <= last[0]:
+                answer = max(position, min(last[1], high))
+                break
+            low = max(position, high - reach)
+            if low == position:
+                break
+            starts = [m.start() for f in finders if (m := f.search(self.text, low, high))]
+            if not starts:
+                answer = low
+                break
+            high = min(starts)
+        self.walked[kind] = (quote, answer)
+        return answer
+
+    def _open(self, position: int) -> None:
+        text, size = self.text, len(self.text)
+        self.matched_from = None
+        start = position + _WINDOW
+        searched = position  # quoted runs are searched for from here
+        while start + _OVERLAP < size:
+            stop = start + _OVERLAP
+            run = self._quoted_run(position, searched, stop, start)
+            searched = stop
+            if run is not None:
+                run_start, _run_end, lead = run
+                self.answers_below, self.end = run_start, min(size, run_start + _OVERLAP)
+                self.matched_from = lead
+                return
+            loose = [m.start() for f in _RUN_FINDERS.loose if (m := f.search(text, start, stop))]
+            if not loose:
+                self.answers_below, self.end = start, stop
+                return
+            if start - position >= 2 * _WINDOW:
+                # Stretched a window's length past its own: the window is
+                # crossed at the long run instead, as at a quoted one, so the
+                # clock is read again however densely such runs stand.
+                run_start = min(loose)
+                self.answers_below, self.end = run_start, min(size, run_start + _OVERLAP)
+                self.matched_from = self._lead(position, run_start)
+                return
+            start = stop
+        self.answers_below, self.end = size + 1, size
+
+    def search(self, position: int) -> re.Match[str] | None:
+        while True:
+            if position >= self.answers_below:
+                _check(self.deadline, _saying(self.at(position)))
+                self._open(position)
+            lead = self.matched_from
+            if lead is None:
+                m = _PATTERN.search(self.text, position, self.end)
+                if m is not None and m.start() < self.answers_below:
+                    return m
+                if self.end >= len(self.text):
+                    return None
+            else:
+                if position < lead:
+                    m = _PATTERN.search(self.text, position, self.answers_below)
+                    if m is not None and m.start() < lead:
+                        return m
+                attempt = max(position, lead)
+                tried = 0
+                # Only a position a phrase can begin at is tried: the rest
+                # fail the pattern's leading lookahead, and are passed in C.
+                while (
+                    begins := _BEGINS.search(self.text, attempt, self.answers_below)
+                ) is not None:
+                    attempt = begins.start()
+                    tried += 1
+                    if not tried % _WINDOW_ATTEMPTS:
+                        _check(self.deadline, _saying(self.at(attempt)))
+                    m = _PATTERN.match(self.text, attempt)
+                    if m is not None:
+                        return m
+                    attempt += 1
+            position = self.answers_below
+
+
+def _fold_within(text: str, deadline: float | None, at: Callable[[], str] | None = None) -> str:
+    """``fold(text)``, the deadline checked between windows of it.
+
+    A stop says ``at()``, or by default the character the fold had reached.
+    """
+    if deadline is None or len(text) <= _WINDOW:
+        _check(deadline, at or _saying("character 0, folding"))
+        return fold(text)
+    pieces: list[str] = []
+    for start in range(0, len(text), _WINDOW):
+        _check(deadline, at or _saying(f"character {start}, folding"))
+        pieces.append(text[start : start + _WINDOW].translate(_TABLE))
+    return "".join(pieces)
+
+
+# ---------------------------------------------------------------------------
 # Folding
 # ---------------------------------------------------------------------------
 
@@ -507,13 +1085,24 @@ class _RawCursor:
     ones) skipped by doubling slices.
     """
 
-    def __init__(self, raw: str, folded: str | None = None) -> None:
+    def __init__(
+        self,
+        raw: str,
+        folded: str | None = None,
+        deadline: float | None = None,
+    ) -> None:
         self.raw = raw
         self.index = 0
         self.folded = 0
-        self.identity = (
-            folded is not None and len(folded) == len(raw) and len(raw.translate(_ONE)) == len(raw)
-        )
+        self.identity = folded is not None and len(folded) == len(raw)
+        # Window by window, so no copy of the text is made and the deadline
+        # is checked between windows.
+        for start in range(0, len(raw) if self.identity else 0, _WINDOW):
+            _check(deadline, _saying(f"character {start}, mapping folded places"))
+            piece = raw[start : start + _WINDOW]
+            if len(piece.translate(_ONE)) != len(piece):
+                self.identity = False
+                break
 
     def writer(self, position: int) -> int:
         """The raw index of the character that wrote folded ``position``."""
@@ -602,9 +1191,20 @@ def _disguises(raw: str, view: str) -> tuple[str, ...]:
     return tuple(said)
 
 
-def _matches(folded: str, deadline: float | None, at: Callable[[], str]) -> Iterator[re.Match[str]]:
+def _matches(
+    folded: str,
+    deadline: float | None,
+    at: Callable[[], str],
+    window_at: Callable[[int], str] | None = None,
+) -> Iterator[re.Match[str]]:
+    """Every match in ``folded`` that opens a word, searched window by window (``_Windows``).
+
+    ``window_at`` says where a window stood when the deadline stopped it; by
+    default ``at`` does.
+    """
+    windows = _Windows(folded, deadline, window_at or (lambda _position: at()))
     position = 0
-    while (m := _PATTERN.search(folded, position)) is not None:
+    while (m := windows.search(position)) is not None:
         _check(deadline, at)
         if _starts_a_word(folded, m.start()):
             yield m
@@ -653,8 +1253,13 @@ def _named(found: Found) -> Found:
 
 
 def _as_written(raw: str, folded: str, deadline: float | None) -> Iterator[Found]:
-    cursor = _RawCursor(raw, folded)
-    for m in _matches(folded, deadline, lambda: f"character {cursor.index}"):
+    cursor = _RawCursor(raw, folded, deadline)
+    for m in _matches(
+        folded,
+        deadline,
+        lambda: f"character {cursor.index}",
+        lambda position: f"character {position} of the text as folded",
+    ):
         start = cursor.writer(m.start())
         end = cursor.writer(m.end() - 1) + 1
         phrase = _collapsed(m.group())
@@ -668,6 +1273,28 @@ def _as_written(raw: str, folded: str, deadline: float | None) -> Iterator[Found
 _SPACED_RUN = re.compile(r"(?<![a-z0-9])[a-z0-9](?:[ ._]+[a-z0-9](?![a-z0-9]))++")
 # One word of a spaced run: single letters, each one separator from the next.
 _SPACED_WORD = re.compile(r"[a-z0-9](?:[ ._][a-z0-9])*+")
+# Two letters side by side: no spaced run holds either (each of its letters
+# stands beside a separator), so a window of the runs' search ends right after
+# them and the next begins at the second.
+_ALNUM_PAIR = re.compile(r"[a-z0-9]{2}")
+
+
+def _spaced_runs(folded: str, deadline: float | None) -> Iterator[re.Match[str]]:
+    """``_SPACED_RUN.finditer(folded)``, window by window, the deadline between windows.
+
+    A window ends just past two letters side by side, which no run holds and
+    beside which no run ends, so its runs are the whole text's.
+    """
+    size = len(folded)
+    position = 0
+    while position < size:
+        _check(deadline, _saying(f"character {position} of the text as folded, letter-spaced"))
+        pair = None
+        if position + _WINDOW < size:
+            pair = _ALNUM_PAIR.search(folded, position + _WINDOW - 1)
+        end = pair.start() + 2 if pair is not None else size
+        yield from _SPACED_RUN.finditer(folded, position, end)
+        position = end - 1 if pair is not None else size
 
 
 def _widest(families: Sequence[Family]) -> int:
@@ -698,8 +1325,8 @@ def _letter_spaced(raw: str, folded: str, deadline: float | None) -> Iterator[Fo
     letter is mapped back by the run's own stride (one separator between
     letters). The deadline is checked at every word.
     """
-    cursor = _RawCursor(raw, folded)
-    for run in _SPACED_RUN.finditer(folded):
+    cursor = _RawCursor(raw, folded, deadline)
+    for run in _spaced_runs(folded, deadline):
         held: list[tuple[str, int]] = []
         reported = -1
         base = 0
@@ -746,10 +1373,11 @@ _OVERRIDDEN = re.compile("‮([^‬⁦⁧⁨⁩\n\r\x00]+)")
 
 def _reversed_runs(raw: str, deadline: float | None) -> Iterator[Found]:
     """Each run after a right-to-left override, folded and read in its visual, reversed order."""
+    _check(deadline, _saying("character 0, reading right-to-left overrides"))
     for run in _OVERRIDDEN.finditer(raw):
         at = _saying(f"character {run.start()}")
         _check(deadline, at)
-        text = fold(run.group(1)[::-1])
+        text = _fold_within(run.group(1)[::-1], deadline, at)
         for m in _matches(text, deadline, at):
             phrase = _collapsed(m.group())
             found = Found(
@@ -768,27 +1396,31 @@ def scan_text(
     if not text:
         return
     if folded is None:
-        folded = fold(text)
+        folded = _fold_within(text, deadline)
     yield from _as_written(text, folded, deadline)
     yield from _letter_spaced(text, folded, deadline)
     yield from _reversed_runs(text, deadline)
 
 
-def template_extents(text: str, folded: str | None = None) -> list[tuple[int, int]]:
+def template_extents(
+    text: str, folded: str | None = None, deadline: float | None = None
+) -> list[tuple[int, int]]:
     """The raw ``[start, end)`` of every chat template structure in ``text``, in order.
 
     Each structure's own extent, found in one forward pass: a Jinja loop over
     the messages to its first ``endfor``, a ``"chat_template"`` string to its
     closing quote. A structure that never ends is no structure; since no later
     one of its kind can end either, the search for that kind stops there.
+    A ``deadline`` is checked before each kind's search.
     """
     if folded is None:
-        folded = fold(text)
+        folded = _fold_within(text, deadline)
     spans: list[tuple[int, int]] = []
     for start_re, end_re, from_start in (
         (_LOOP_START, _LOOP_END, False),
         (_STRING_START, _STRING_END, True),
     ):
+        _check(deadline, _saying("character 0, finding chat template structures"))
         at = 0
         while (opened := start_re.search(folded, at)) is not None:
             find = end_re.match if from_start else end_re.search
@@ -798,7 +1430,7 @@ def template_extents(text: str, folded: str | None = None) -> list[tuple[int, in
             spans.append((opened.start(), closed.end()))
             at = closed.end()
     spans.sort()
-    cursor = _RawCursor(text, folded)
+    cursor = _RawCursor(text, folded, deadline)
     out: list[tuple[int, int]] = []
     last = -1
     for begin, finish in spans:
@@ -1044,10 +1676,13 @@ def scan_bytes_into(
     """
     named = _defanged(source)
     for encoding, alignment, text in readings(blob):
-        folded = fold(text)
-        # The structures of this reading of this source only: a match is
-        # inside one in the same text, never by a structure found elsewhere.
-        extents = template_extents(text, folded)
+        try:
+            folded = _fold_within(text, deadline)
+            # The structures of this reading of this source only: a match is
+            # inside one in the same text, never by a structure found elsewhere.
+            extents = template_extents(text, folded, deadline)
+        except Spent as spent:
+            raise Spent(f"{named} read as {encoding} (alignment {alignment}), {spent.at}") from None
         # One cursor for each view, each asked in its own view's order; the
         # matches of one reversed run share its span, mapped once.
         cursors: dict[str, _ByteCursor] = {}
@@ -1095,9 +1730,10 @@ def scan_items_into(
     """Every match in recovered texts streamed into ``groups``, each place naming its source."""
     for item in items:
         named = _defanged(item.source)
-        extents = template_extents(item.text)
         try:
-            for match in scan_text(item.text, deadline):
+            folded = _fold_within(item.text, deadline)
+            extents = template_extents(item.text, folded, deadline)
+            for match in scan_text(item.text, deadline, folded):
                 found = _inside(match, extents)
                 where: dict[str, Any] = {"source": named}
                 if item.entry:

@@ -60,21 +60,54 @@ _SNI = (
     "the TLS server name is read: the old code decoded it with a codec that always "
     "raised, so ``sni`` was always empty"
 )
+_FRAMING = (
+    "; and the file ends inside a record header or a record: the answer now says at "
+    "which byte, and no longer calls the packets read the whole capture"
+)
+_IPV6 = (
+    "; and each IPv6 datagram is counted in the protocols by its next header, where "
+    "only IPv4 ones were (its addresses are not read, so it names no conversation)"
+)
+_IPV6_ONLY = (
+    "each IPv6 datagram is counted in the protocols by its next header, where only "
+    "IPv4 ones were (its addresses are not read, so it names no conversation)"
+)
+_FRAMING_SURFACES = tuple(x for x in _EVERY_SURFACE if x != "read_pcap_summary_page")
+_LOOPBACK = (
+    "BSD loopback frames whose IPv6 family is written big-endian were read as IPv4 "
+    "with made-up 0.0.0.0 addresses, and NetBSD, FreeBSD and Darwin IPv6 families "
+    "(24, 28, 30) were dropped; the header is now read by its version nibble, so "
+    "the made-up addresses are gone and each IPv6 datagram's DNS question is read" + _IPV6
+)
 
 # Each improved capture: why, and the surfaces whose answer changed. Every
 # other surface of it must still answer exactly as before.
 IMPROVED: dict[str, tuple[str, tuple[str, ...]]] = {
-    "ethernet_mixed.pcap": (_SNI, _FACTS_ALL),
-    "ethernet_mixed.pcap.gz": (_SNI, _FACTS_ALL),
-    "ethernet_mixed_be_nano.pcap": (_SNI, _FACTS_ALL),
-    "truncated_in_header.pcap": (_SNI, _FACTS_ALL),
-    "truncated_in_record.pcap": (_SNI, _FACTS_ALL),
-    "two_interfaces.pcapng": (_SNI, _FACTS_ALL),
+    "ethernet_mixed.pcap": (_SNI + _IPV6, _FACTS_ALL),
+    "ethernet_mixed.pcap.gz": (_SNI + _IPV6, _FACTS_ALL),
+    "ethernet_mixed_be_nano.pcap": (_SNI + _IPV6, _FACTS_ALL),
+    "truncated_in_header.pcap": (_SNI + _FRAMING + _IPV6, _FRAMING_SURFACES),
+    "truncated_in_record.pcap": (_SNI + _FRAMING + _IPV6, _FRAMING_SURFACES),
+    "edge_layers.pcap": (_IPV6_ONLY, _FACTS_ALL),
+    "linux_sll.pcap": (_IPV6_ONLY, _FACTS_LIMITED),
+    "linux_sll2.pcap": (_IPV6_ONLY, _FACTS_LIMITED),
+    "raw_ip_dlt101.pcap": (_IPV6_ONLY, _FACTS_LIMITED),
+    "raw_ip_dlt12.pcap": (_IPV6_ONLY, _FACTS_LIMITED),
+    "loopback_families.pcap": (
+        _LOOPBACK,
+        (*_FACTS, "read_pcap_summary_page", "network_pcap_summary"),
+    ),
+    "openbsd_loopback.pcap": (
+        _LOOPBACK,
+        (*_FACTS_LIMITED, "extract_dns_limit_5"),
+    ),
+    "null_loopback.pcap": (_LOOPBACK, (*_FACTS_LIMITED, "extract_dns", "extract_dns_limit_5")),
+    "two_interfaces.pcapng": (_SNI + _IPV6, _FACTS_ALL),
     "truncated_block.pcapng": (
         "a pcapng file cut inside a block: the old reader raised and every surface "
         "answered that the capture could not be read; the new one ends the capture "
         "at the cut and reads the six packets before it, as a pcap file cut short "
-        "always was",
+        "always was; the answer says at which byte the block was cut" + _IPV6,
         _EVERY_SURFACE,
     ),
     "odd_records.pcap": (
@@ -262,9 +295,12 @@ def test_the_server_name_comes_out_and_nothing_else_moves(
         ("two_interfaces.pcapng", {"ng.example.net": 1}),
     ):
         facts = answers[name]["capture_facts"]
+        old = before[name]["capture_facts"]
         assert facts["sni"] == sni
-        assert before[name]["capture_facts"]["sni"] == {}
-        assert {**facts, "sni": {}} == before[name]["capture_facts"]
+        assert old["sni"] == {}
+        # The protocols also count the IPv6 datagrams now: each count only grows.
+        assert all(facts["protocols"].get(k, 0) >= n for k, n in old["protocols"].items())
+        assert {**facts, "sni": {}, "protocols": {}} == {**old, "protocols": {}}
         assert "TLS SNI (encrypted destinations):" in answers[name]["summarize_pcap"]
 
 
