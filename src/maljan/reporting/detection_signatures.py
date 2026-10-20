@@ -997,6 +997,10 @@ def _sigma_tags(report: MalwareReport) -> list[str]:
             seen.add(tag)
             tags.append(tag)
     for cell in report.capability_matrix:
+        # A cell the report did not publish (an id the catalogue lacks, or one
+        # the sample cannot host) is no tactic a deployed rule should claim.
+        if cell.not_published:
+            continue
         name = cell.tactic_name.lower().replace(" ", "_").replace("&", "and")
         tag = f"attack.{name}" if name else ""
         if tag and tag not in seen:
@@ -1092,12 +1096,8 @@ def _build_suricata(report: MalwareReport) -> DetectionRule | None:
                 "# " + LEFT_OUT_COMMENT.format(rest=len(rows) - _MAX_SURICATA_RULES, what=what)
             )
 
-    body = "\n".join(lines)
-    if len(body.encode("utf-8")) > _SURICATA_MAX_BODY_BYTES:
-        body = (
-            body[:_SURICATA_MAX_BODY_BYTES]
-            + "\n# (cut at the draft's size; the report's IOC table carries every indicator)"
-        )
+    capped = sum(max(0, len(rows) - _MAX_SURICATA_RULES) for rows in (domains, ips, urls))
+    body = _suricata_body_within(lines, header=3, capped=capped)
 
     compile_error = _validate_suricata(body)
     return DetectionRule(
@@ -1107,6 +1107,37 @@ def _build_suricata(report: MalwareReport) -> DetectionRule | None:
         source_evidence=sources,
         compile_error=compile_error,
     )
+
+
+def _suricata_body_within(lines: list[str], header: int = 0, capped: int = 0) -> str:
+    """The draft's lines, cut at a rule's end when they pass the draft's size.
+
+    A rule is one line, so the cut falls between lines: a rule is kept whole
+    or left out whole, with the comment written above it, and the closing
+    note counts the rules left out, those cut here and the ``capped`` ones the
+    per-kind cap left out before. The first ``header`` lines are the draft's own
+    and are never taken for a rule's comment. Cutting the text itself left half a rule
+    that a sensor would refuse or, worse, read differently.
+    """
+    body = "\n".join(lines)
+    if len(body.encode("utf-8")) <= _SURICATA_MAX_BODY_BYTES:
+        return body
+    kept: list[str] = []
+    used = 0
+    for line in lines:
+        used += len(line.encode("utf-8")) + 1
+        if used > _SURICATA_MAX_BODY_BYTES:
+            break
+        kept.append(line)
+    # The comments above the first rule left out belong to it.
+    while len(kept) > header and kept[-1].startswith("#"):
+        kept.pop()
+    left_out = capped + sum(1 for line in lines[len(kept) :] if line.startswith("alert"))
+    kept.append(
+        f"# (cut at the draft's size: {left_out:,} more indicators are not included; "
+        "the report's IOC table carries every indicator)"
+    )
+    return "\n".join(kept)
 
 
 _SURICATA_CONTENT_RE = re.compile(r"[^A-Za-z0-9._:/\-?=& ]")

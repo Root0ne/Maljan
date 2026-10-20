@@ -228,7 +228,9 @@ class HtmlRenderer:
         figures = list(report.figures or []) if embed_figures else []
         preamble, sections, leftover = self._place_figures(body_html, figures)
         toc = self._toc(sections)
-        appendix = self._figure_appendix(leftover, start_index=len(figures) - len(leftover) + 1)
+        appendix = self._figure_appendix(
+            leftover, start_index=_numbered(figures) - _numbered(leftover) + 1
+        )
         title = self._title(report)
         sha = report.identity.hashes.sha256 or "unknown"
         style_open = f'<style nonce="{escape(nonce)}">' if nonce else "<style>"
@@ -347,8 +349,8 @@ class HtmlRenderer:
             # position is still where it was measured.
             inserts: list[tuple[int, str]] = []
             for position, attached in sorted(points, key=lambda p: p[0]):
-                rendered = "".join(_figure_html(fig, number + i) for i, fig in enumerate(attached))
-                number += len(attached)
+                rendered = "".join(_figure_html(fig, number) for fig in attached)
+                number += _numbered(attached)
                 inserts.append((position, rendered))
             for position, rendered in reversed(inserts):
                 chunk = chunk[:position].rstrip() + "\n" + rendered + chunk[position:]
@@ -362,8 +364,10 @@ class HtmlRenderer:
             '<h2 id="sec-figures">Appendix — Figures</h2>\n',
             "<p>Deterministic figures generated from the report's own data.</p>\n",
         ]
-        for offset, fig in enumerate(figures):
-            parts.append(_figure_html(fig, start_index + offset))
+        number = start_index
+        for fig in figures:
+            parts.append(_figure_html(fig, number))
+            number += _numbered([fig])
         return "".join(parts)
 
     # ------------------------------------------------------------------
@@ -403,8 +407,18 @@ def _slug(heading: str) -> str:
     return slug or "section"
 
 
+def _numbered(figures: list[Figure]) -> int:
+    """How many of ``figures`` take a figure number: a line saying one was not drawn takes none."""
+    return sum(1 for fig in figures if fig.kind != "not_drawn")
+
+
 def _figure_html(fig: Figure, number: int) -> str:
-    """Wrap a figure. ``fig.content`` is trusted — see ``reporting/figures.py``."""
+    """Wrap a figure. ``fig.content`` is trusted — see ``reporting/figures.py``.
+
+    A figure that failed to draw is its one line, said once, with no caption and no number.
+    """
+    if fig.kind == "not_drawn":
+        return fig.content + "\n"
     legend = f'<span class="fig-legend">{escape(fig.legend)}</span>' if fig.legend else ""
     return (
         f'<figure id="{escape(fig.id)}">{fig.content}'

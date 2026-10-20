@@ -1255,6 +1255,7 @@ class Figure(BaseModel):
         "network_graph",
         "infection_chain",
         "code_listing",
+        "not_drawn",
     ]
     content: str  # inline SVG or <pre> HTML
     legend: str | None = None

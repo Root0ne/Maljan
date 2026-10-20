@@ -392,7 +392,10 @@ def _signing(acc: _Sections, entry: LedgerEntry, data: dict[str, Any]) -> None:
 
 def _binary_info(acc: _Sections, entry: LedgerEntry, data: dict[str, Any]) -> None:
     """The structural facts of a PE, ELF, Mach-O or APK, one table per shape."""
-    prefix = entry.tool.split("_")[0]
+    # The section is named for the tool that answered, whole: two tools that
+    # share a first word ("pe_info", "pe_strip_info") are two sections, not
+    # one holding both their rows.
+    prefix = entry.tool.removesuffix("_info") or entry.tool
 
     header = acc.get(f"{prefix}_header", f"{prefix.upper()} header", "kv")
     for key in (

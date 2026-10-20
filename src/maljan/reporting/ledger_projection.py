@@ -25,6 +25,7 @@ when no agent thought to ask for them.
 
 from __future__ import annotations
 
+import bisect
 import hashlib
 import json
 import re
@@ -903,14 +904,51 @@ def _as_tree(nodes: list[ProcessNode]) -> list[ProcessNode]:
     sandbox did not watch the parent, and hiding the child under nothing would
     lose it.
     """
-    by_pid = {node.pid: node for node in nodes}
+    # A pid is reused once its process exits, so the parent of a process is
+    # the latest process of that pid listed before it (a sandbox lists them in
+    # the order they started), else the first one listed after it, never itself.
+    # A row with no pid (read as 0) is never a parent, and a row whose parent
+    # is its own pid is a root: neither names a process that spawned it.
+    positions: dict[int, list[int]] = {}
+    for index, node in enumerate(nodes):
+        if node.pid > 0:
+            positions.setdefault(node.pid, []).append(index)
+    parent_of: list[int | None] = []
+    for index, node in enumerate(nodes):
+        held = positions.get(node.ppid) if node.ppid > 0 and node.ppid != node.pid else None
+        if not held:
+            parent_of.append(None)
+            continue
+        at = bisect.bisect_left(held, index)
+        parent_of.append(held[at - 1] if at else held[0])
+    # A loop of parents (A is B's parent and B is A's) would leave its members
+    # under each other and out of every root: the member listed first is made a
+    # root. One pass over the parent links, each row walked once.
+    state = [0] * len(nodes)  # 0 not walked, 1 on the walk in hand, 2 done
+    for start in range(len(nodes)):
+        path: list[int] = []
+        walk: int | None = start
+        while walk is not None and state[walk] == 0:
+            state[walk] = 1
+            path.append(walk)
+            walk = parent_of[walk]
+        if walk is not None and state[walk] == 1:
+            loop = path[path.index(walk) :]
+            first = min(loop)
+            logger.warning(
+                "The process list holds a parent loop; process %s is shown as a root.",
+                nodes[first].pid,
+            )
+            parent_of[first] = None
+        for held_index in path:
+            state[held_index] = 2
     roots: list[ProcessNode] = []
-    for node in nodes:
-        parent = by_pid.get(node.ppid)
-        if parent is not None and parent is not node:
-            parent.children.append(node)
-        else:
+    for index, node in enumerate(nodes):
+        parent = parent_of[index]
+        if parent is None:
             roots.append(node)
+        else:
+            nodes[parent].children.append(node)
     return roots
 
 
@@ -1339,15 +1377,52 @@ def tool_sightings(
             spellings[key].append(searched)
     seen: dict[str, list[tuple[str, str]]] = {}
     queried: dict[str, list[tuple[str, str]]] = {}
+    holders = _every_holder(
+        [spelled for searched_as in spellings.values() for spelled in searched_as],
+        [text for _eid, _tool, text, _asked in texts],
+    )
     for key, searched_as in spellings.items():
+        at = sorted({i for spelled in searched_as for i in holders.get(spelled.lower(), ())})
         holding = [
-            (eid, tool, any(whole_value_in(spelled, asked) for spelled in searched_as))
-            for eid, tool, text, asked in texts
-            if any(whole_value_in(spelled, text) for spelled in searched_as)
+            (
+                texts[i][0],
+                texts[i][1],
+                any(whole_value_in(spelled, texts[i][3]) for spelled in searched_as),
+            )
+            for i in at
         ]
         seen[key] = [(eid, tool) for eid, tool, was_asked in holding if not was_asked]
         queried[key] = [(eid, tool) for eid, tool, was_asked in holding if was_asked]
     return seen, queried
+
+
+def _every_holder(literals: Iterable[str], haystacks: list[str]) -> dict[str, list[int]]:
+    """``{literal: [index, ...]}``: each haystack that holds the literal as a value of its own.
+
+    The answer of asking ``whole_value_in`` of every literal against every
+    haystack, read without that product: ``first_holders`` reads the haystacks
+    once for all the literals and finds each literal's first holder, and the
+    search for a literal goes on after the holder it found, so a literal costs
+    the haystacks it is held in, not every haystack.
+    """
+    from maljan.agents._indicator_denylists import first_holders
+
+    found: dict[str, list[int]] = {}
+    resume: dict[str, int] = {}
+    for literal in dict.fromkeys(str(held or "").lower() for held in literals):
+        if literal:
+            resume[literal] = 0
+            found[literal] = []
+    while resume:
+        by_offset: dict[int, list[str]] = {}
+        for literal, offset in resume.items():
+            by_offset.setdefault(offset, []).append(literal)
+        resume = {}
+        for offset, group in by_offset.items():
+            for literal, index in first_holders(group, haystacks[offset:]).items():
+                found[literal].append(offset + index)
+                resume[literal] = offset + index + 1
+    return found
 
 
 def searched_spelling(kind: str, value: Any) -> str:

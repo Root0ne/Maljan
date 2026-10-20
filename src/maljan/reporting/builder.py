@@ -69,6 +69,19 @@ if TYPE_CHECKING:
 NO_SUMMARY_REASON = "the report model wrote no summary"
 
 
+# Words a family field holds when no family was resolved, beside the rule-name placeholders.
+_FAMILY_PLACEHOLDERS = frozenset({"generic", "unknown family", "-"})
+
+# The label the report prints for each platform a sample's identity can record.
+_PLATFORM_LABELS = {
+    "windows": "Windows",
+    "linux": "Linux",
+    "macos": "macOS",
+    "android": "Android",
+    "ios": "iOS",
+}
+
+
 class MalwareReportBuilder:
     """Stateful builder — instantiate per analysis run, call ``build_*`` methods.
 
@@ -474,25 +487,28 @@ class MalwareReportBuilder:
     def _guess_platforms(
         self, static: Any | None, dynamic: Any | None, identity: Any | None = None
     ) -> list[str]:
+        # What the sample says it was built for comes first: its recorded
+        # platform, its PE header, an ELF section. A sandbox process tree names
+        # Windows only for a sample that says nothing of its own, so an ELF or
+        # an APK that ran is not reported as a Windows threat.
         platforms: list[str] = []
-        if dynamic is not None and dynamic.process_tree:
-            platforms.append("Windows")  # behavior almost always Windows sandbox
+        recorded = str(getattr(identity, "platform", "") or "").lower()
+        if recorded in _PLATFORM_LABELS:
+            platforms.append(_PLATFORM_LABELS[recorded])
 
-        # Infer Windows from the PE format itself so a
-        # Windows PE with no dynamic run no longer falls through to "Unknown".
         # file_type "PE" or the MS-download MIME is a definitive Windows signal.
-        if identity is not None and "Windows" not in platforms:
+        if identity is not None and not platforms:
             file_type = str(getattr(identity, "file_type", "") or "").upper()
             mime = str(getattr(identity, "mime_type", "") or "").lower()
             if file_type == "PE" or "msdownload" in mime or "x-dosexec" in mime:
                 platforms.append("Windows")
 
-        if static is not None and static.sections:
-            first = static.sections[0]
-            char = first.characteristics or ""
-            if char == "ELF" or any(s.characteristics == "ELF" for s in static.sections):
-                if "Windows" not in platforms:
-                    platforms.append("Linux")
+        if not platforms and static is not None and static.sections:
+            if any(s.characteristics == "ELF" for s in static.sections):
+                platforms.append("Linux")
+
+        if not platforms and dynamic is not None and dynamic.process_tree:
+            platforms.append("Windows")  # the sandbox guest is Windows
         if not platforms:
             platforms.append("Unknown")
         return platforms
@@ -567,9 +583,20 @@ class MalwareReportBuilder:
         if has_live_c2 and tlp == "CLEAR":
             tlp = "AMBER"
 
-        name = report.malware_category or (
-            report.attribution.family if report.attribution else None
+        # The family the run resolved names the malware, when the verdict is not
+        # benign and the family has a source behind it; otherwise the category.
+        # "Unknown", "generic" and the like are no name.
+        from maljan.reporting.detection_signatures import _PLACEHOLDER_NAMES, is_benign
+
+        family = report.attribution.family if report.attribution else None
+        family = family.strip() if isinstance(family, str) else ""
+        family_named = bool(
+            family
+            and family.lower() not in _PLACEHOLDER_NAMES | _FAMILY_PLACEHOLDERS
+            and not is_benign(report)
+            and report.attribution.family_grounded
         )
+        name = family if family_named else report.malware_category
         subtitle = None
         if report.identity.platform and report.malware_category:
             subtitle = f"{report.malware_category} targeting {report.identity.platform.title()}"
@@ -577,7 +604,9 @@ class MalwareReportBuilder:
         return ReportFrontMatter(
             publisher=rc.publisher,
             product_type=rc.product_type,
-            malware_name=(name.title() if isinstance(name, str) and name else None),
+            malware_name=(
+                (name if family_named else name.title()) if isinstance(name, str) and name else None
+            ),
             subtitle=subtitle,
             version="1.0",
             report_date=f"{now:%Y-%m-%d}",
@@ -1149,15 +1178,16 @@ def _domain_context(d: Any) -> str:
 
 
 def _first_report_technique(text: str, valid_tids: set[str]) -> str | None:
-    """Return the first T#### in ``text`` that is mapped in the report, else the
-    first T#### found, else ``None``."""
-    found: list[str] = TECHNIQUE_WORD_RE.findall(text or "")
-    if not found:
-        return None
-    for tid in found:
+    """Return the first T#### in ``text`` that the report publishes, else ``None``.
+
+    An id the prose names and the report's ATT&CK table does not carry is not
+    moved into the technique column: it would print as the technique the
+    action acts on, with nothing behind it.
+    """
+    for tid in TECHNIQUE_WORD_RE.findall(text or ""):
         if tid in valid_tids:
             return str(tid)
-    return str(found[0])
+    return None
 
 
 def _ioc_count(report: MalwareReport) -> int:
