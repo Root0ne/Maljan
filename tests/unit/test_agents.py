@@ -12,6 +12,8 @@ from maljan.core.exceptions import AnalystError
 # Agent Analyze Tests
 # ---------------------------------------------------------------------------
 
+_CLAIM = "CLAIM: it does the thing\nEVIDENCE: x\nCONFIDENCE: 0.8\nTECHNIQUE: T1027\n---\n"
+
 
 class TestStaticAnalystAnalyze:
     """Tests for StaticAnalyst.analyze() with mocked LLM."""
@@ -21,7 +23,11 @@ class TestStaticAnalystAnalyze:
         agent = StaticAnalyst(llm=mock_llm, name="StaticAnalyst")
         with (
             patch.object(agent, "_initialize_mcp_client"),
-            patch.object(agent, "execute_tool_loop", return_value="Found T1027 obfuscation"),
+            patch.object(
+                agent,
+                "execute_tool_loop",
+                return_value=_CLAIM,
+            ),
         ):
             result = agent.analyze("test data")
         assert isinstance(result, str)
@@ -44,11 +50,15 @@ class TestDynamicAnalystAnalyze:
         agent = DynamicAnalyst(llm=mock_llm, name="DynamicAnalyst")
         with (
             patch.object(agent, "_initialize_mcp_client"),
-            patch.object(agent, "execute_tool_loop", return_value="Found T1055 injection"),
+            patch.object(
+                agent,
+                "execute_tool_loop",
+                return_value=_CLAIM,
+            ),
         ):
             result = agent.analyze("test data")
         assert isinstance(result, str)
-        assert "T1055" in result
+        assert "T1027" in result
 
 
 class TestNetworkAnalystAnalyze:
@@ -59,11 +69,15 @@ class TestNetworkAnalystAnalyze:
         agent = NetworkAnalyst(llm=mock_llm, name="NetworkAnalyst")
         with (
             patch.object(agent, "_try_initialize_mcp", return_value=True),
-            patch.object(agent, "execute_tool_loop", return_value="Found T1071 C2 beacon"),
+            patch.object(
+                agent,
+                "execute_tool_loop",
+                return_value=_CLAIM,
+            ),
         ):
             result = agent.analyze("test data")
         assert isinstance(result, str)
-        assert "T1071" in result
+        assert "T1027" in result
 
 
 # ---------------------------------------------------------------------------

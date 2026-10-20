@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import logging
 import re
 import uuid
 from collections.abc import Iterable, Mapping, Sequence
@@ -47,6 +48,7 @@ from maljan.agents.base_agent import (
     _trim_for_synthesis,
     _turn_key,
     counted_window_tokens,
+    describe_exception_for_log,
     is_model_turn,
     is_the_graph_s_step_stop,
     limit_text,
@@ -863,6 +865,15 @@ _HISTORY_PART = "negotiation history"
 # parts are fitted: the notice names the parts it cut, so its length is known
 # only then, and this is more than any notice over a dozen parts needs.
 _NOTICE_ROOM = 600
+
+
+# What the verdict prompt says where retrieving similar past cases failed.
+MEMORY_UNAVAILABLE_NOTE = (
+    "=== LONG-TERM MEMORY: unavailable ===\n"
+    "Retrieving similar past cases failed; no prior case is shown, which says nothing "
+    "about whether one exists.\n"
+    "=== END LONG-TERM MEMORY ==="
+)
 
 
 class JudgeVerdict(NamedTuple):
@@ -2797,26 +2808,47 @@ class JudgeAgent(BudgetMeter):
             _last_ledger_facts(history, "ledger_stated"),
         )
         carried_facts = f"{last_counts}\n\n" if last_counts else ""
+        system_text = mediator_system_prompt(
+            identity_unanswered=identity_unanswered,
+            lookup_attached=lookup_attached,
+            needs_tools=needs_tools,
+            sha256=_sha256_of(sample),
+            tools=self.tools,
+        )
+        history_text = str(history)
+
+        def _mediation_human(reports_shown: str, history_shown: str, notice: str) -> str:
+            note = f"{notice}\n\n" if notice else ""
+            return (
+                f"{_standing_blocks(run_state, facts_block)}"
+                f"{_identity_prefix(sample)}{note}"
+                f"Expert Reports:\n{reports_shown}\n\nPrevious Discussion:\n{history_shown}\n\n"
+                f"{carried_facts}"
+                f"{MEDIATOR_HUMAN_CLOSING}"
+            )
+
+        # Whole when the judge's window holds it with its output cap kept
+        # free; otherwise the largest part shortened first, the prompt saying
+        # so, as the verdict prompt does (``fit_prompt_parts``).
+        mediation_room = self._question_room(
+            len(system_text) + len(_mediation_human("", "", "")) + _NOTICE_ROOM,
+            int(self._built_cap_tokens() or 0),
+        )
+        fitted_parts, fitted_notice = fit_prompt_parts(
+            {"expert reports": reports_text, _HISTORY_PART: history_text}, mediation_room
+        )
+        if fitted_notice:
+            self.logger.warning("JudgeAgent mediation prompt: %s", fitted_notice)
         prompt_messages = [
-            (
-                "system",
-                mediator_system_prompt(
-                    identity_unanswered=identity_unanswered,
-                    lookup_attached=lookup_attached,
-                    needs_tools=needs_tools,
-                    sha256=_sha256_of(sample),
-                    tools=self.tools,
-                ),
-            ),
+            ("system", system_text),
             (
                 "human",
-                f"{_standing_blocks(run_state, facts_block)}"
-                f"{_identity_prefix(sample)}"
-                f"Expert Reports:\n{reports_text}\n\nPrevious Discussion:\n{history}\n\n"
-                f"{carried_facts}"
-                f"{MEDIATOR_HUMAN_CLOSING}",
+                _mediation_human(
+                    fitted_parts["expert reports"], fitted_parts[_HISTORY_PART], fitted_notice
+                ),
             ),
         ]
+        window_full_reason = ""
 
         if needs_tools:
             self.logger.info(
@@ -2885,6 +2917,16 @@ class JudgeAgent(BudgetMeter):
                 answered_cap = getattr(self, "_last_answer_cap", None)
                 loop_ending = getattr(self, "_last_loop_ending", "")
                 looped = True
+            except Exception as exc:  # noqa: BLE001 — only a full window is handled here
+                if not window_full_error(exc):
+                    raise
+                # The server's own word that the prompt did not fit: the
+                # round's reason, not an error out of the debate.
+                self.logger.error("Mediator fast path: the model server reported its window full.")
+                window_full_reason = "the model server reported its context window full"
+                reasoning_text = ""
+                answered_by = None
+                not_asked = True
             else:
                 reasoning_text = "" if response is None else answer_text(response.content)
                 answered_by = response
@@ -2957,8 +2999,10 @@ class JudgeAgent(BudgetMeter):
                 ending = loop_ending or self._no_answer_reason(answered_by, answered_cap)
                 reason = f"{ending}; the tool loop was not run again"
             else:
-                reason = second_ask or self._no_answer_reason(
-                    answered_by, answered_cap, not_asked=not_asked
+                reason = (
+                    second_ask
+                    or window_full_reason
+                    or self._no_answer_reason(answered_by, answered_cap, not_asked=not_asked)
                 )
             self.logger.warning(
                 "Mediator wrote no answer; the round is not mediated (the round's note says why)."
@@ -4643,9 +4687,16 @@ class JudgeAgent(BudgetMeter):
                 exclude_sample_id=current_sample_id,
                 owner=owner,
             )
-        except Exception:  # noqa: BLE001
-            # Never let retrieval failure block verdict generation
-            return ""
+        except Exception as exc:  # noqa: BLE001
+            # Never let retrieval failure block verdict generation, and never
+            # let it pass unsaid: the verdict is then drawn without the prior
+            # cases, and the prompt and the log both say so.
+            logging.getLogger(__name__).warning(
+                "JudgeAgent: long-term memory retrieval failed (%s); the verdict is drawn "
+                "without prior cases.",
+                describe_exception_for_log(exc),
+            )
+            return MEMORY_UNAVAILABLE_NOTE
 
         if not cases:
             return ""

@@ -776,11 +776,38 @@ def function_map_block(found: FunctionMap, room: int | None = None) -> str:
             left = None if room is None else room - sum(len(line) + 1 for line in lines)
             lines.append(_index_line(found, left))
     elif found.unvisited:
-        lines.append(
-            "not visited, reaching artefacts: "
-            + "; ".join(_unvisited_item(found, a, tied) for a, tied in found.unvisited)
-        )
+        left = None if room is None else room - sum(len(line) + 1 for line in lines)
+        lines.append(_unvisited_line(found, left))
     return "\n".join(lines)
+
+
+def _unvisited_line(found: FunctionMap, room: int | None) -> str:
+    """The functions reaching artefacts that were not visited, in ``room`` characters.
+
+    Every one when they fit, or when no room is derived. Otherwise the ones
+    that fit, room being kept for the closing clause at its longest, then how
+    many more there are; when none fits, the count alone, which stands even in
+    a room smaller than itself, as the index line's does.
+    """
+    head = "not visited, reaching artefacts: "
+    items = [_unvisited_item(found, a, tied) for a, tied in found.unvisited]
+    whole = head + "; ".join(items)
+    if room is None or len(whole) <= room:
+        return whole
+    total = len(items)
+    unlisted = "not listed here for want of room"
+    budget = room - len(f"; and {total} more {unlisted}")
+    shown: list[str] = []
+    used = len(head)
+    for item in items:
+        cost = len(item) + (2 if shown else 0)
+        if used + cost > budget:
+            break
+        shown.append(item)
+        used += cost
+    if not shown:
+        return f"{head}{_count(total, 'function', 'functions')}, {unlisted}"
+    return f"{head}{'; '.join(shown)}; and {total - len(shown)} more {unlisted}"
 
 
 # Where the whole index is, said after the rows the room left out.
