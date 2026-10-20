@@ -94,13 +94,38 @@ def _outcome(read: Callable[[], object]) -> object:
         return type(exc)
 
 
+def _as_it_was_or_said(path: Path, whole: Path) -> None:
+    """The listing ``getmembers`` gave where it gave one; where it raised, none or a said stop.
+
+    A stream that breaks is never an exception out of the tool: the members
+    read before the break are listed (the whole archive's first ones), and
+    ``listing_stopped`` says where and why it stopped.
+    """
+    before = _outcome(lambda: _old_listing(path))
+    now = binary._tar_members(path, 500)
+    if not isinstance(before, type):
+        assert now == before
+        return
+    if now is None:
+        return
+    assert "the tar stream broke there" in now["listing_stopped"]
+    assert now["truncated"] is True
+    full = binary._tar_members(whole, 500)
+    assert full is not None
+    assert now["members"] == full["members"][: len(now["members"])]
+    assert now["total"] == len(now["members"])
+
+
 @pytest.mark.parametrize("wrap", sorted(_WRAPS))
 @pytest.mark.parametrize("cut", [0.1, 0.3, 0.5, 0.8, 0.97])
-def test_a_truncated_tar_reads_or_fails_as_it_did(tmp_path: Path, wrap: str, cut: float) -> None:
+def test_a_truncated_tar_lists_what_it_read_and_says_where_it_broke(
+    tmp_path: Path, wrap: str, cut: float
+) -> None:
     whole = _WRAPS[wrap](_tar(random.Random(1), 40))
     path = tmp_path / "archive"
     path.write_bytes(whole[: max(1, int(len(whole) * cut))])
-    assert _outcome(lambda: binary._tar_members(path, 500)) == _outcome(lambda: _old_listing(path))
+    (tmp_path / "whole").write_bytes(whole)
+    _as_it_was_or_said(path, tmp_path / "whole")
 
 
 _DECOMPRESSOR = bz2.BZ2Decompressor
@@ -224,13 +249,13 @@ def test_a_tar_gzip_polyglot_is_listed_as_tarfile_open_reads_it(tmp_path: Path) 
 
 
 @pytest.mark.parametrize("wrap", ["gz", "bz2", "xz"])
-def test_a_stream_cut_inside_its_first_header_fails_or_moves_on_as_it_did(
+def test_a_stream_cut_inside_its_first_header_is_no_tar_or_a_said_stop(
     tmp_path: Path, wrap: str
 ) -> None:
-    """gzip lets an early end of stream through, bzip2 and xz turn it into "not this kind"."""
+    """An early end of stream is "not this kind" or a stop the answer states, never a raise."""
     whole = _WRAPS[wrap](_tar(random.Random(3), 3))
+    (tmp_path / "whole").write_bytes(whole)
     path = tmp_path / "archive"
     for cut in range(1, min(len(whole), 400), 3):
         path.write_bytes(whole[:cut])
-        expected = _outcome(lambda: _old_listing(path))
-        assert _outcome(lambda: binary._tar_members(path, 500)) == expected, cut
+        _as_it_was_or_said(path, tmp_path / "whole")

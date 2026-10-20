@@ -18,11 +18,13 @@ from __future__ import annotations
 import hashlib
 import io
 import json
+import lzma
 import os
 import re
 import stat
 import tarfile
 import zipfile
+import zlib
 from pathlib import Path
 from typing import Any
 
@@ -81,6 +83,13 @@ TAR_LISTING_STOPPED = (
     "bytes for a compressed tar) past byte {bound}, the larger of the file's size and the "
     "platform's sample upload cap, which every decompression a tool does stops at; the member "
     "or header being read there and everything after it are neither listed nor counted in total"
+)
+# What the answer says when the tar stream broke before its end: truncated,
+# a damaged compressed block, a header that does not read.
+TAR_LISTING_BROKEN = (
+    "the listing stopped after {members} members: the tar stream broke there ({error}); the "
+    "member or header being read there and everything after it are neither listed nor counted "
+    "in total"
 )
 # Why a relationship part was not read, as ``relationship_parts_unread`` says it.
 RELATIONSHIP_PART_DOCUMENT_TYPE = (
@@ -990,12 +999,21 @@ def _write_carved(child: Path, blob: bytes) -> str | None:
         return f"{child.name} is already taken by something this run did not write"
     except OSError as exc:
         return f"cannot write {child.name}: {type(exc).__name__}"
+    # ``os.write`` may write fewer bytes than it is given; the rest is written
+    # until none is left. A payload that cannot be written whole is removed,
+    # so a later run never reads a part of it as the payload.
+    view = memoryview(blob)
     try:
-        os.write(fd, blob)
+        while view:
+            written = os.write(fd, view)
+            if written <= 0:
+                raise OSError(f"wrote nothing with {len(view)} bytes left")
+            view = view[written:]
     except OSError as exc:
-        return f"cannot write {child.name}: {type(exc).__name__}"
-    finally:
         os.close(fd)
+        child.unlink(missing_ok=True)
+        return f"cannot write {child.name}: {type(exc).__name__}"
+    os.close(fd)
     return None
 
 
@@ -1099,19 +1117,36 @@ def archive_list(path: str, limit: int = 500) -> dict[str, Any]:
     return {"error": "unsupported archive format", "tool": "archive_list"}
 
 
+# What reading a zip's directory or a member raises when the file is damaged:
+# a truncated or rewritten central directory, a member header that does not
+# match it, a stream that ends early.
+_ZIP_READ_ERRORS: tuple[type[BaseException], ...] = (
+    zipfile.BadZipFile,
+    zipfile.LargeZipFile,
+    OSError,
+    EOFError,
+    ValueError,
+    NotImplementedError,
+)
+
+
 def _zip_members(target: Path, limit: int) -> dict[str, Any]:
-    with zipfile.ZipFile(target) as archive:
-        infos = archive.infolist()
-        members = [
-            {
-                "name": info.filename,
-                "size": int(info.file_size),
-                "compressed": int(info.compress_size),
-                "crc": f"{info.CRC:08x}",
-                "is_dir": info.is_dir(),
-            }
-            for info in infos[:limit]
-        ]
+    try:
+        with zipfile.ZipFile(target) as archive:
+            infos = archive.infolist()
+    except _ZIP_READ_ERRORS as exc:
+        # A central directory that does not read is the answer's to state.
+        return {"error": f"zip read failed: {type(exc).__name__}: {exc}", "tool": "archive_list"}
+    members = [
+        {
+            "name": info.filename,
+            "size": int(info.file_size),
+            "compressed": int(info.compress_size),
+            "crc": f"{info.CRC:08x}",
+            "is_dir": info.is_dir(),
+        }
+        for info in infos[:limit]
+    ]
     return {
         "format": "zip",
         "members": members,
@@ -1171,11 +1206,22 @@ def _tar_openers() -> list[tuple[Any, tuple[type[BaseException], ...]]]:
 
     tar_errors = (tarfile.ReadError, tarfile.CompressionError)
     return [
-        (lambda path: gzip.GzipFile(path, "rb"), (*tar_errors, OSError)),
+        (lambda path: gzip.GzipFile(path, "rb"), (*tar_errors, OSError, EOFError, zlib.error)),
         (lambda path: bz2.BZ2File(path, "rb"), (*tar_errors, OSError, EOFError)),
         (lambda path: lzma.LZMAFile(path, "rb"), (*tar_errors, lzma.LZMAError, EOFError)),
         (lambda path: open(path, "rb"), tar_errors),  # noqa: SIM115 - closed by the caller
     ]
+
+
+# What reading on in a tar stream raises when the stream breaks: a truncated
+# or damaged compressed stream, a header that does not read.
+_TAR_STREAM_ERRORS: tuple[type[BaseException], ...] = (
+    tarfile.TarError,
+    EOFError,
+    OSError,
+    zlib.error,
+    lzma.LZMAError,
+)
 
 
 def _tar_members(target: Path, limit: int) -> dict[str, Any] | None:
@@ -1218,6 +1264,11 @@ def _tar_members(target: Path, limit: int) -> dict[str, Any] | None:
                         members.append(
                             {"name": info.name, "size": int(info.size), "is_dir": info.isdir()}
                         )
+            except _TAR_STREAM_ERRORS as exc:
+                # A stream that breaks after its first header is a listing
+                # cut there, said so, not an exception out of the tool.
+                error = f"{type(exc).__name__}: {exc}"
+                stopped = TAR_LISTING_BROKEN.format(members=total, error=error)
             finally:
                 archive.close()
         except _ArchiveStreamCapReached:
@@ -1265,21 +1316,66 @@ def _sevenzip_members(target: Path, limit: int) -> dict[str, Any]:
 
 
 def _gzip_member(target: Path) -> dict[str, Any]:
-    """A gzip stream carries one member and, usually, its original name."""
+    """A gzip stream carries one member and, usually, its original name.
+
+    The header is read as RFC 1952 lays it out: an extra field (``FEXTRA``),
+    its two-byte length first, stands before the name (``FNAME``) and is
+    skipped. The name ends at its zero byte, found a block at a time; a
+    header that ends before its extra field or its name does is said under
+    ``name_unread``, and the member is then listed with no name rather than
+    with bytes that are not one.
+    """
+    name = ""
+    unread = ""
     with target.open("rb") as fh:
         header = fh.read(10)
-        name = ""
-        if len(header) == 10 and header[3] & 0x08:
-            chunks: list[bytes] = []
-            while (byte := fh.read(1)) not in (b"", b"\x00"):
-                chunks.append(byte)
-            name = b"".join(chunks).decode("utf-8", errors="replace")
-    return {
+        flags = header[3] if len(header) == 10 else 0
+        if len(header) < 10:
+            unread = "the gzip header ends before its tenth byte"
+        elif flags & _GZIP_FEXTRA:
+            size = fh.read(2)
+            if len(size) < 2:
+                unread = "the gzip header ends inside its extra field's length"
+            else:
+                extra = int.from_bytes(size, "little")
+                fh.seek(extra, os.SEEK_CUR)
+                if fh.tell() > target.stat().st_size:
+                    unread = "the gzip header ends inside its extra field"
+        if not unread and flags & _GZIP_FNAME:
+            found, ended = _zero_terminated(fh)
+            if ended:
+                name = found.decode("utf-8", errors="replace")
+            else:
+                unread = "the gzip header ends before its name's zero byte"
+    member: dict[str, Any] = {"name": name or ("" if unread else target.stem)}
+    member["compressed"] = target.stat().st_size
+    answer: dict[str, Any] = {
         "format": "gzip",
-        "members": [{"name": name or target.stem, "compressed": target.stat().st_size}],
+        "members": [member],
         "total": 1,
         "truncated": False,
     }
+    if unread:
+        answer["name_unread"] = unread
+    return answer
+
+
+# The gzip header's flag bits this listing reads (RFC 1952, section 2.3.1).
+_GZIP_FEXTRA = 0x04
+_GZIP_FNAME = 0x08
+_GZIP_NAME_BLOCK = 64 * 1024
+
+
+def _zero_terminated(fh: Any) -> tuple[bytes, bool]:
+    """The bytes up to the next zero byte, read a block at a time, and whether it was found."""
+    parts: list[bytes] = []
+    while block := fh.read(_GZIP_NAME_BLOCK):
+        end = block.find(b"\x00")
+        if end >= 0:
+            parts.append(block[:end])
+            return b"".join(parts), True
+        parts.append(block)
+    return b"".join(parts), False
 
 
 # ---------------------------------------------------------------------------
@@ -1305,7 +1401,14 @@ def document_info(path: str) -> dict[str, Any]:
     if head[:8] == b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1":
         return _ole_info(target)
     if zipfile.is_zipfile(target):
-        return _ooxml_info(target)
+        try:
+            return _ooxml_info(target)
+        except _ZIP_READ_ERRORS as exc:
+            # A package whose directory does not read is stated, not raised.
+            return {
+                "error": f"OOXML read failed: {type(exc).__name__}: {exc}",
+                "tool": "document_info",
+            }
     if head[:5] == b"%PDF-":
         return _pdf_info(target)
     return {"error": "not an OLE2, OOXML or PDF document", "tool": "document_info"}

@@ -53,7 +53,6 @@ from maljan.tools.strings import (  # noqa: F401
     _EMAIL_RE,
     _IP_RE,
     _KNOWN_TLDS,
-    _MAX_STRINGS_SCANNED,
     _MIN_STRING_LENGTH,
     _MUTEX_RE,
     _ONION_RE,

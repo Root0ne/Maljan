@@ -47,7 +47,7 @@ from functools import partial
 from pathlib import Path
 from typing import Any
 
-from maljan.tools import staging
+from maljan.tools import children, staging
 from maljan.tools.errors import MISSING_DEPENDENCY, tool_error
 from maljan.tools.strings import DEFAULT_STRINGS_LIMIT, _matcher
 
@@ -105,9 +105,9 @@ _MIN_REQUESTABLE_LENGTH = 3
 # The largest page one call answers, as ``strings`` bounds its own.
 _MAX_LIMIT = 2000
 
-# How many result documents are remembered at once. One per sample a sidecar
-# sees, and a document for a small sample is a few kilobytes: the bound is
-# against a process that lives for weeks.
+# How many results are remembered at once, each the rows and run facts of one
+# result document (``_recovered``), not the document. One per sample a sidecar
+# sees: the bound is against a process that lives for weeks.
 _MAX_REMEMBERED = 8
 _REMEMBERED: dict[tuple[str, int, int, int], dict[str, Any]] = {}
 _LOCK = threading.Lock()
@@ -126,6 +126,12 @@ _RUN_COPY = "floss"
 
 # The last line of FLOSS's stderr is what an error answer quotes, bounded.
 _ERROR_TAIL_CHARS = 400
+# How much of the end of FLOSS's error stream is read back: what the tail
+# above and the out-of-memory words are looked for in. The rest stays in the
+# run's file and goes with its directory.
+_STDERR_TAIL_BYTES = 64 * 1024
+_STDOUT_NAME = "floss-stdout.json"
+_STDERR_NAME = "floss-stderr.txt"
 
 # The directory under this job's staging directory that holds each run's own
 # directory, the child's home and temporary directory: the standalone build
@@ -328,16 +334,23 @@ def _spawn(
         "TMPDIR": workdir,
         "FLOSS_SAVE_WORKSPACE": "0",
     }
-    process = subprocess.Popen(  # noqa: S603 - a fixed argv naming the verified build
-        command,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True,
-        env=env,
-        cwd=workdir,
-        start_new_session=True,
-        preexec_fn=_limit_address_space,  # noqa: PLW1509 - one setrlimit call
-    )
+    # Both streams go to files in the run's directory, not to pipes: the
+    # result document is read once from its file, and of the error stream only
+    # its tail, which is all an answer quotes. ``communicate`` held each
+    # stream whole as chunks, then joined, then decoded.
+    out_path = Path(workdir) / _STDOUT_NAME
+    err_path = Path(workdir) / _STDERR_NAME
+    with out_path.open("wb") as out_file, err_path.open("wb") as err_file:
+        process = subprocess.Popen(  # noqa: S603 - a fixed argv naming the verified build
+            command,
+            stdin=subprocess.DEVNULL,
+            stdout=out_file,
+            stderr=err_file,
+            env=env,
+            cwd=workdir,
+            start_new_session=True,
+            preexec_fn=_limit_address_space,  # noqa: PLW1509 - one setrlimit call
+        )
     # Its own session, so its group is what the server kills when every caller
     # of this run has gone (``tools.children``).
     from maljan.tools import children
@@ -347,15 +360,25 @@ def _spawn(
         lambda: children.kill_process_group(process.pid) if process.poll() is None else None
     )
     try:
-        stdout, stderr = process.communicate(timeout=timeout)
+        process.wait(timeout=timeout)
     except subprocess.TimeoutExpired:
         # The standalone build is a bootloader and the interpreter it starts;
         # the group is what holds both.
         with contextlib.suppress(ProcessLookupError):
             os.killpg(process.pid, signal.SIGKILL)
-        process.communicate()
+        process.wait()
         raise
-    return subprocess.CompletedProcess(command, process.returncode, stdout, stderr)
+    stdout = out_path.read_bytes().decode("utf-8", errors="replace")
+    return subprocess.CompletedProcess(command, process.returncode, stdout, _file_tail(err_path))
+
+
+def _file_tail(path: Path) -> str:
+    """The last ``_STDERR_TAIL_BYTES`` of a file, decoded."""
+    with path.open("rb") as handle:
+        handle.seek(0, os.SEEK_END)
+        size = handle.tell()
+        handle.seek(max(0, size - _STDERR_TAIL_BYTES))
+        return handle.read().decode("utf-8", errors="replace")
 
 
 def _floss_argv(executable: str, path: Path, min_len: int) -> list[str]:
@@ -509,12 +532,35 @@ def _emulate(
     return parsed
 
 
+def _key(target: Path, min_len: int) -> tuple[str, int, int, int]:
+    info = target.stat()
+    return (str(target), info.st_size, info.st_mtime_ns, min_len)
+
+
+def remembered_key(path: str | Path, min_len: Any) -> tuple[str, int, int, int]:
+    """The key a result for this file and length is remembered and emulated under.
+
+    The file, its size and mtime, and the length as ``floss`` reads it. The
+    sidecar joins its emulations by this same key, so one run serves every
+    caller whose answer would be remembered under it.
+    """
+    return _key(Path(path), max(_MIN_REQUESTABLE_LENGTH, int(min_len)))
+
+
+def _recovered(document: dict[str, Any]) -> dict[str, Any]:
+    """What is kept of a result document: its rows and what FLOSS says of its run.
+
+    The document itself also holds FLOSS's per-function analysis, which no
+    answer reads; only the rows and the run's facts are remembered.
+    """
+    return {"rows": _rows(document), "meta": _meta(document)}
+
+
 def _document(
     executable: str, target: Path, min_len: int, timeout_s: int | None, runner: Runner
 ) -> dict[str, Any] | str:
-    """FLOSS's result document for this file, emulated once however many ask."""
-    info = target.stat()
-    key = (str(target), info.st_size, info.st_mtime_ns, min_len)
+    """FLOSS's rows and run facts for this file, emulated once however many ask."""
+    key = _key(target, min_len)
     with _LOCK:
         remembered = _REMEMBERED.get(key)
         if remembered is not None:
@@ -523,16 +569,34 @@ def _document(
     with in_flight:
         with _LOCK:
             remembered = _REMEMBERED.get(key)
+            closing = children.closing()
         if remembered is not None:
             return remembered
+        if closing:
+            # The server is ending and has killed its children: a caller that
+            # waited on this lock does not start another one.
+            with _LOCK:
+                _IN_FLIGHT.pop(key, None)
+            return SERVER_ENDING
         document = _emulate(executable, target, min_len, timeout_s, runner)
+        found = _recovered(document) if isinstance(document, dict) else document
         with _LOCK:
             _IN_FLIGHT.pop(key, None)
-            if isinstance(document, dict):
+            if isinstance(found, dict):
                 if len(_REMEMBERED) >= _MAX_REMEMBERED:
                     _REMEMBERED.clear()
-                _REMEMBERED[key] = document
-        return document
+                _REMEMBERED[key] = found
+        return found
+
+
+# What a caller is told when the server ended before its emulation started.
+SERVER_ENDING = "the analysis server is ending; FLOSS was not started"
+
+# What a call that may not emulate is told when nothing is remembered.
+NOT_REMEMBERED = (
+    "FLOSS's result for this file is no longer remembered in this server; call floss again "
+    "and it emulates the file once more"
+)
 
 
 def forget_documents() -> None:
@@ -541,6 +605,61 @@ def forget_documents() -> None:
         _REMEMBERED.clear()
         _IN_FLIGHT.clear()
     _VERIFIED.clear()
+
+
+def _refused(target: Path, path: str) -> dict[str, Any] | None:
+    """Why FLOSS is not run on ``target``, or ``None``."""
+    if not target.is_file():
+        return _error(f"no such file: {path}")
+    with target.open("rb") as handle:
+        if handle.read(2) != b"MZ":
+            return _error(
+                "FLOSS emulates Windows PE code only; this file is not a PE (no MZ header)"
+            )
+    # vivisect loads a saved workspace beside the file in place of the file,
+    # and a saved workspace is a pickle: reading one runs whatever it holds.
+    if Path(f"{target}.viv").exists():
+        return _error(
+            "a saved vivisect workspace sits beside this file; FLOSS would load it in place "
+            "of the file, so the call is refused"
+        )
+    return None
+
+
+def recovered(
+    path: str,
+    min_len: int = DEFAULT_MIN_LENGTH,
+    timeout_s: int | None = FLOSS_TIMEOUT_S,
+    runner: Runner | None = None,
+    environ: Mapping[str, str] | None = None,
+    scratch: str | Path | None = None,
+) -> dict[str, Any]:
+    """FLOSS's rows and run facts for this file (``rows``, ``meta``), or an error answer.
+
+    Emulated once however many ask, and remembered (``_document``). The
+    sidecar's joined run hands this to every caller waiting on it, and each
+    pages its own answer from it (``floss(found=...)``): no waiter reads the
+    remembered results again after the run, which another run may have
+    cleared by then.
+    """
+    target = Path(path)
+    refused = _refused(target, path)
+    if refused is not None:
+        return refused
+    minimum = max(_MIN_REQUESTABLE_LENGTH, int(min_len))
+    if runner is None:
+        executable, reason = find_floss(environ)
+        if executable is None:
+            return tool_error(
+                MISSING_DEPENDENCY, reason, tool="floss", remediation=FLOSS_REMEDIATION
+            )
+        pinned = partial(_run, pinned=executable, scratch=Path(scratch) if scratch else None)
+        document = _document(str(executable), target, minimum, _seconds(timeout_s), pinned)
+    else:
+        document = _document("floss", target, minimum, _seconds(timeout_s), runner)
+    if isinstance(document, str):
+        return _error(document)
+    return {"rows": document["rows"], "meta": document["meta"]}
 
 
 def floss(
@@ -554,6 +673,8 @@ def floss(
     runner: Runner | None = None,
     environ: Mapping[str, str] | None = None,
     scratch: str | Path | None = None,
+    emulate: bool = True,
+    found: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """The decoded, stack and tight strings FLOSS recovers from a PE by emulation.
 
@@ -565,7 +686,11 @@ def floss(
     executable is not looked for. ``environ`` is where the executable is
     looked for (``find_floss``) and ``scratch`` the job directory the run's
     own directory is made in; the sidecar passes neither, the triage pack
-    passes both.
+    passes both. ``emulate=False`` pages a result already remembered and
+    never starts FLOSS; ``found`` pages the result ``recovered`` gave. The
+    sidecar emulates under one run per remembered key (``remembered_key``),
+    whatever page each caller asks for, and pages each caller's answer from
+    that run's own result.
     """
     target = Path(path)
     if not target.is_file():
@@ -581,33 +706,26 @@ def floss(
         matches = _matcher(pattern)
     except Exception as exc:  # noqa: BLE001 - re.error, reported as the caller's to fix
         return _error(f"bad pattern {pattern!r}: {exc}")
-    with target.open("rb") as handle:
-        if handle.read(2) != b"MZ":
-            return _error(
-                "FLOSS emulates Windows PE code only; this file is not a PE (no MZ header)"
-            )
-    # vivisect loads a saved workspace beside the file in place of the file,
-    # and a saved workspace is a pickle: reading one runs whatever it holds.
-    if Path(f"{target}.viv").exists():
-        return _error(
-            "a saved vivisect workspace sits beside this file; FLOSS would load it in place "
-            "of the file, so the call is refused"
-        )
+    refused = _refused(target, path)
+    if refused is not None:
+        return refused
 
-    if runner is None:
-        executable, reason = find_floss(environ)
-        if executable is None:
-            return tool_error(
-                MISSING_DEPENDENCY, reason, tool="floss", remediation=FLOSS_REMEDIATION
-            )
-        pinned = partial(_run, pinned=executable, scratch=Path(scratch) if scratch else None)
-        document = _document(str(executable), target, minimum, _seconds(timeout_s), pinned)
+    document: Mapping[str, Any]
+    if found is not None:
+        document = found
+    elif not emulate:
+        with _LOCK:
+            remembered = _REMEMBERED.get(_key(target, minimum))
+        if remembered is None:
+            return _error(NOT_REMEMBERED)
+        document = remembered
     else:
-        document = _document("floss", target, minimum, _seconds(timeout_s), runner)
-    if isinstance(document, str):
-        return _error(document)
+        answer = recovered(path, minimum, timeout_s, runner, environ, scratch)
+        if "error" in answer:
+            return answer
+        document = answer
 
-    rows = _rows(document)
+    rows = document["rows"]
     counts = {kind: sum(1 for row in rows if row["kind"] == kind) for kind in KINDS}
     kept = [row for row in rows if row["kind"] in wanted and matches(row["string"])]
     page = kept[offset : offset + limit]
@@ -623,7 +741,7 @@ def floss(
         "pattern": pattern,
         "next_offset": offset + len(page) if more else None,
         "truncated": more,
-        "meta": _meta(document),
+        "meta": document["meta"],
     }
 
 
@@ -641,9 +759,9 @@ def remembered_rows(path: str | Path) -> list[dict[str, Any]]:
     except OSError:
         return []
     with _LOCK:
-        documents = [
-            document
-            for (name, size, mtime, _min_len), document in _REMEMBERED.items()
+        found = [
+            recovered["rows"]
+            for (name, size, mtime, _min_len), recovered in _REMEMBERED.items()
             if name == str(target) and size == info.st_size and mtime == info.st_mtime_ns
         ]
-    return _rows(documents[0]) if documents else []
+    return list(found[0]) if found else []

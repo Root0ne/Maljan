@@ -21,16 +21,11 @@ from maljan.tools import strings as S
 _Hit = tuple[str, str, str | None, int, int, int]
 
 
-def _runs(blob: bytes, stopped: list[int]) -> Iterator[tuple[str, int, int]]:
+def _runs(blob: bytes) -> Iterator[tuple[str, int, int]]:
     """``strings._iter_strings``'s runs, with each one's offset and character width."""
-    scanned = 0
     for pattern, width in ((S._PRINTABLE_RE, 1), (S._WIDE_RE, 2)):
         for match in pattern.finditer(blob):
             yield match.group()[::width].decode("ascii", errors="ignore"), match.start(), width
-            scanned += 1
-            if scanned >= S._MAX_STRINGS_SCANNED:
-                stopped.append(match.end())
-                return
 
 
 def _email_spans(data: bytes) -> list[tuple[int, int]]:
@@ -64,9 +59,9 @@ def _domain_spans(text: str) -> list[tuple[int, int, str]]:
     return [(s, e, v) for s, e, v in found if not S._inside_a_longer_host(s, e, found)]
 
 
-def _hits(blob: bytes, stopped: list[int]) -> Iterator[_Hit]:
+def _hits(blob: bytes) -> Iterator[_Hit]:
     """Every match ``iter_string_iocs`` makes, in its order, with its span in ``blob``."""
-    for text, base, width in _runs(blob, stopped):
+    for text, base, width in _runs(blob):
         encoded = text.encode("ascii", errors="ignore")
 
         def at(span: tuple[int, int], base: int = base, width: int = width) -> tuple[int, int]:
@@ -119,23 +114,18 @@ def _hits(blob: bytes, stopped: list[int]) -> Iterator[_Hit]:
                 yield ("domain", host, None, S._SHORT_RUN_LENGTH, start, end)
 
 
-def string_iocs_with_spans(
-    blob: bytes, kinds: Iterable[str] | None = None
-) -> tuple[list[dict[str, Any]], int | None]:
+def string_iocs_with_spans(blob: bytes, kinds: Iterable[str] | None = None) -> list[dict[str, Any]]:
     """``iter_string_iocs``'s rows, each with the span its value was matched at.
 
     The same rows in the same order, narrowed to ``kinds`` when given; each
     also carries ``start`` and ``end``, the offsets in ``blob`` of the value as
     kept (its NULs and then its whitespace stripped from both ends), and
     ``width``, 1 for a match in an ASCII run and 2 for one in a UTF-16LE run.
-    The second value is the offset at which the run bound stopped the scan,
-    or ``None`` when it read every run.
     """
     keep = set(kinds) if kinds else None
-    stopped: list[int] = []
     seen: set[tuple[str, str]] = set()
     rows: list[dict[str, Any]] = []
-    for kind, matched, notes, floor, start, end in _hits(blob, stopped):
+    for kind, matched, notes, floor, start, end in _hits(blob):
         decoded = matched.strip("\x00").strip()
         if len(decoded) < (floor or S._MIN_STRING_LENGTH):
             continue
@@ -160,4 +150,4 @@ def string_iocs_with_spans(
                 "width": width,
             }
         )
-    return rows, (stopped[0] if stopped else None)
+    return rows

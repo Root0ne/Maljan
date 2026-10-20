@@ -803,12 +803,17 @@ def _error(message: str) -> dict[str, Any]:
     return {"error": message, "tool": TOOL}
 
 
-def _remembered_rows(path: str) -> list[dict[str, Any]]:
-    """This process's emulated strings for this file, when that tool already ran on it here."""
+def _remembered_rows(path: str) -> tuple[list[dict[str, Any]], str]:
+    """This process's emulated strings for this file, and why they could not be read, or ``""``.
+
+    None remembered is an empty list and no reason: that tool did not run on
+    the file here. A failure to read them is the reason, so the answer says
+    the comparison was not made rather than that it compared nothing.
+    """
     try:
-        return emulated_strings.remembered_rows(path)
-    except Exception:  # noqa: BLE001 - the emulator's absence is not this tool's failure
-        return []
+        return emulated_strings.remembered_rows(path), ""
+    except Exception as exc:  # noqa: BLE001 - stated in the answer, not this tool's failure
+        return [], f"{type(exc).__name__}: {exc}"
 
 
 # The schemes whose header says where the text is. Where two decodings of the
@@ -1364,7 +1369,10 @@ def decode_string_blobs(
 
     row_field, compared_field, also_field = decoder_fields(decoder or decoder_word())
     recovered_by: dict[str, Mapping[str, Any]] = {}
-    for recovered_row in _remembered_rows(path) if recovered is None else recovered:
+    unread = ""
+    if recovered is None:
+        recovered, unread = _remembered_rows(path)
+    for recovered_row in recovered:
         if (
             isinstance(recovered_row, Mapping)
             and recovered_row.get("kind") == "decoded"
@@ -1478,8 +1486,10 @@ def decode_string_blobs(
         "readable_test": READABLE_TEST,
         "min_len": minimum,
         "longest_key": LONGEST_KEY,
-        compared_field: len(recovered_by),
-        also_field: also,
+        # Unknown, not zero, when the decoder's rows could not be read.
+        compared_field: None if unread else len(recovered_by),
+        also_field: None if unread else also,
+        **({f"{row_field}_rows_unread": unread} if unread else {}),
         "results": page,
         "total": len(results),
         "page_offset": start,

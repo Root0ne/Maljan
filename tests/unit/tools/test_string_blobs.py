@@ -464,7 +464,7 @@ class TestFloss:
                 ]
             },
         }
-        emulated_strings._REMEMBERED[key] = document
+        emulated_strings._REMEMBERED[key] = emulated_strings._recovered(document)
         try:
             (row,) = emulated_strings.remembered_rows(str(target))
             assert row["string"] == "x text" and row["function_rva"] == "0x1100"

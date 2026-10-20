@@ -25,11 +25,6 @@ from typing import Any
 # clear the accidental ASCII inside compiled code and short enough to keep a
 # four-letter host with a two-letter TLD.
 _MIN_STRING_LENGTH = 6
-# How many printable runs the scan will look at before giving up. A runaway
-# guard, not an output budget — see ``_iter_strings``. Real PEs routinely carry
-# tens of thousands of runs and the interesting ones are rarely at the front.
-_MAX_STRINGS_SCANNED = 200_000
-
 # What every row this module produces was read out of. One value today, and a
 # field rather than an assumption: downstream a name seen on the wire and a
 # name found in the byte image carry different weight, and the consumers had
@@ -185,26 +180,16 @@ def _iter_strings(blob: bytes) -> Iterator[str]:
     the whole binary a dozen times over, at every one of this module's call
     sites.
 
-    A generator rather than a list, and bounded by ``_MAX_STRINGS_SCANNED``
-    rather than by ``_MAX_STRINGS_KEPT``. Those two are not the same number and
-    conflating them is a real bug: a mid-size PE holds tens of thousands of
-    printable runs, so a scan that stops after the first couple of hundred sees
-    only the beginning of the file. The C2 host is rarely in the first two
-    hundred strings — the import thunks and the CRT banner are. The scan bound
-    exists to stop a pathological input, not to shape the output; the per-kind
-    quotas do that, and the caller stops early once they are all full.
+    A generator rather than a list, and with no bound on the runs it reads:
+    the scan is one pass per encoding, linear in the blob, and every run is
+    read. A bound on the run count used to end the ASCII pass early on a file
+    with many short runs and then skip the UTF-16LE pass outright, so a wide
+    C2 host was never seen and nothing said so.
     """
-    scanned = 0
     for match in _PRINTABLE_RE.finditer(blob):
         yield match.group().decode("ascii", errors="ignore")
-        scanned += 1
-        if scanned >= _MAX_STRINGS_SCANNED:
-            return
     for match in _WIDE_RE.finditer(blob):
         yield match.group()[::2].decode("ascii", errors="ignore")
-        scanned += 1
-        if scanned >= _MAX_STRINGS_SCANNED:
-            return
 
 
 def iter_string_iocs(blob: bytes) -> list[dict[str, Any]]:
@@ -919,8 +904,6 @@ def strings(
             if matched <= offset or len(rows) >= limit:
                 continue
             rows.append({"offset": at, "enc": enc, "text": decoded})
-            if total >= _MAX_STRINGS_SCANNED:
-                break
     # ``more and rows``, not ``more`` alone: ``limit=0`` keeps every match out
     # of the page while leaving matches behind it, and an offset that does not
     # advance is a caller paging on ``next_offset`` forever.

@@ -30,6 +30,22 @@ _local = threading.local()
 _lock = threading.Lock()
 # The kill of each child, by the run it belongs to.
 _children: dict[Hashable, list[Callable[[], None]]] = {}
+# Set by ``kill_all``: the server is ending, and a child registered after it
+# is killed as it registers. Read and written under ``_lock``.
+_closing = False
+
+
+def closing() -> bool:
+    """Whether ``kill_all`` has run: no new child should be started."""
+    with _lock:
+        return _closing
+
+
+def reopen() -> None:
+    """Clear what ``kill_all`` set. For tests, which end no server."""
+    global _closing
+    with _lock:
+        _closing = False
 
 
 def current_run() -> Hashable | None:
@@ -53,10 +69,17 @@ def running_as(run: Hashable) -> Any:
 def register(kill: Callable[[], None]) -> None:
     """Record how to kill a child the calling thread's run just started."""
     run = current_run()
-    if run is None:
-        return
     with _lock:
-        _children.setdefault(run, []).append(kill)
+        late = _closing
+        if not late and run is not None:
+            _children.setdefault(run, []).append(kill)
+    if late:
+        # Started after the server began ending: killed now, so it cannot
+        # outlive the server ``kill_all`` already swept.
+        try:
+            kill()
+        except Exception as exc:  # noqa: BLE001 — a child already gone is not an error
+            logger.debug("a child started while the server ended could not be killed (%s).", exc)
 
 
 def kill(run: Hashable) -> int:
@@ -69,6 +92,47 @@ def kill(run: Hashable) -> int:
         except Exception as exc:  # noqa: BLE001 — a child already gone is not an error
             logger.debug("a child of %r could not be killed (%s).", run, exc)
     return len(kills)
+
+
+def kill_all() -> int:
+    """Kill every child every run started; how many were asked to die.
+
+    For the server's end: a child runs in a session of its own and has no
+    wall clock of its own, so one the server leaves behind outlives it.
+    """
+    # Bounded, so a signal that arrives while this thread holds the lock
+    # still ends the server rather than waiting on itself.
+    global _closing
+    held = _lock.acquire(timeout=1.0)
+    try:
+        _closing = True
+        kills = [each for run in list(_children) for each in _children.pop(run, [])]
+    finally:
+        if held:
+            _lock.release()
+    for each in kills:
+        try:
+            each()
+        except Exception as exc:  # noqa: BLE001 — a child already gone is not an error
+            logger.debug("a child could not be killed at exit (%s).", exc)
+    return len(kills)
+
+
+def kill_all_on_exit() -> None:
+    """Kill every child when this process ends on SIGTERM, SIGHUP or SIGINT.
+
+    The signal's own action follows the kill, so the process still ends the
+    way the signal says. Installed from the main thread, where Python runs
+    signal handlers.
+    """
+
+    def _on_signal(number: int, _frame: Any) -> None:
+        kill_all()
+        signal.signal(number, signal.SIG_DFL)
+        os.kill(os.getpid(), number)
+
+    for number in (signal.SIGTERM, signal.SIGHUP, signal.SIGINT):
+        signal.signal(number, _on_signal)
 
 
 def kill_process_group(pid: int) -> None:
