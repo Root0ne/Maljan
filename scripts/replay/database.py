@@ -27,20 +27,50 @@ from app.services.run_export import (
     write_files,
 )
 
-__all__ = ["JobRows", "export_jobs", "jsonable", "read_jobs", "with_sample", "write_run"]
+__all__ = [
+    "JobRows",
+    "StoredRunExists",
+    "export_jobs",
+    "jsonable",
+    "read_jobs",
+    "with_sample",
+    "write_run",
+]
 
 
-def write_run(rows: JobRows, into: Path) -> tuple[Path, list[str]]:
-    """Write one job's rows into ``into`` in the stored-run layout.
+class StoredRunExists(FileExistsError):
+    """The directory an export would write holds a stored run, and no overwrite was given."""
 
-    Returns ``into`` and the files of the layout an earlier export had left
-    there, which are removed first: a file this job has no rows for must not
-    stay from another export. No other file in ``into`` is touched.
-    """
+
+def _held(into: Path) -> list[str]:
+    """The names of the stored-run layout ``into`` already holds, a dangling link included."""
     from scripts.replay.stored import FILES
 
+    return sorted(name for name in FILES if os.path.lexists(into / name))
+
+
+def _refuse_a_held_run(into: Path) -> None:
+    held = _held(into)
+    if held:
+        raise StoredRunExists(
+            f"{into} already holds a stored run ({', '.join(held)}): it is not overwritten "
+            "without --overwrite"
+        )
+
+
+def write_run(rows: JobRows, into: Path, *, overwrite: bool = False) -> tuple[Path, list[str]]:
+    """Write one job's rows into ``into`` in the stored-run layout.
+
+    A directory that already holds a file of the layout is a stored run, and
+    is refused (:class:`StoredRunExists`) unless ``overwrite`` is given; then
+    those files are removed first, since a file this job has no rows for must
+    not stay from another export. Returns ``into`` and the files removed. No
+    other file in ``into`` is touched.
+    """
+    if not overwrite:
+        _refuse_a_held_run(into)
     into.mkdir(parents=True, exist_ok=True)
-    cleared = sorted(name for name in FILES if (into / name).is_file())
+    cleared = _held(into)
     for name in cleared:
         (into / name).unlink()
     write_files(run_files(rows), into)
@@ -83,13 +113,22 @@ async def read_jobs(job_ids: Sequence[str], database_url: str) -> list[JobRows]:
 
 
 def export_jobs(
-    job_ids: Iterable[str], into: Path, *, database_url: str | None = None
+    job_ids: Iterable[str],
+    into: Path,
+    *,
+    database_url: str | None = None,
+    overwrite: bool = False,
 ) -> list[tuple[Path, list[str]]]:
     """Each job read from the database into ``into/<job id>``.
 
-    Returns each directory written, with the files of an earlier export it
-    removed first.
+    A ``into/<job id>`` that already holds a stored run is refused before the
+    database is read, unless ``overwrite`` is given. Returns each directory
+    written, with the files of an earlier export it removed first.
     """
-    ids = [str(job_id) for job_id in job_ids]
+    # Each job once: a repeated id would write its directory and then meet it.
+    ids = list(dict.fromkeys(str(uuid.UUID(str(job_id))) for job_id in job_ids))
+    if not overwrite:
+        for raw in ids:
+            _refuse_a_held_run(into / raw)
     rows = asyncio.run(read_jobs(ids, _database_url(database_url)))
-    return [write_run(job, into / str(job.job.get("id"))) for job in rows]
+    return [write_run(job, into / str(job.job.get("id")), overwrite=overwrite) for job in rows]

@@ -466,12 +466,16 @@ def third_party_off(values: dict[str, dict[str, Any]]) -> dict[str, Any]:
     """What keeps a rehearsal from reaching any third party beside the model.
 
     The sandbox becomes the mock and the threat-intel enrichment is switched
-    off. The threat-intel sidecar stays, with the reputation keys withheld from
-    its environment (it then answers from its own offline data), so its tool
-    definitions still ride every request; it is disabled only where a token is
-    written into its own environment map. Every tool server that answers from
-    outside this machine (VirusTotal, any HTTP server not on loopback) is
-    disabled, and its tool definitions are then missing from the rehearsed
+    off. Each enabled tool server is judged by what its tool declarations in
+    force say (:func:`server_effects`), never by its key and never by its
+    environment: a server's offline behaviour is not inferred from what keys
+    it is handed. A server that answers from outside this machine (an HTTP
+    server not on loopback) is disabled, and so is every server that declares
+    reaching a third party, whatever its ``env``, ``env_allow``, ``args`` or
+    transport hold (the shipped threat-intel sidecar among them). A server
+    that declares no effects at all is kept at full strength, its environment
+    untouched, and :func:`describe_changes` names it as kept undeclared. A
+    disabled server's tool definitions are missing from the rehearsed
     requests. The server map comes back masked and goes back masked; a masked
     token in a PATCH means "unchanged", so no token is lost.
     """
@@ -490,17 +494,73 @@ def third_party_off(values: dict[str, dict[str, Any]]) -> dict[str, Any]:
         remote = str(server.get("transport") or "stdio") != "stdio" and not is_local_endpoint(
             server.get("url")
         )
-        if key == "threatintel" and not server.get("env"):
-            if server.get("env_allow"):
-                server["env_allow"] = []
-                moved = True
-            continue
-        if key in ("virustotal", "threatintel") or remote:
+        if remote or server_effects(str(key), server) == REACHES:
             server["enabled"] = False
             moved = True
     if moved:
         changes["core.mcp.servers"] = servers
     return changes
+
+
+# What a server's tool declarations in force say about reaching a third party.
+REACHES = "reaches"
+LOCAL = "local"
+UNDECLARED = "undeclared"
+
+
+def server_effects(key: str, server: dict[str, Any]) -> str:
+    """Whether the server's tools declare reaching a third party, staying local, or nothing.
+
+    Read from the tool declarations in force on the block: a built-in's
+    shipped ones with the stored changes over them, an operator's server's as
+    stored. :data:`REACHES` when a tool's ``effects.network`` is ``true``, it
+    sends the sample's hash or bytes to a third party (``effects.third_party``,
+    ``discloses_sample``), or a declaration is refused (it vouches for
+    nothing). A network reached only in a named way (the operator's own
+    sandbox, the case store, a reference-data refresh) is not an outside
+    service the rehearsal must keep from. :data:`UNDECLARED` when no tool
+    declares any effect; :data:`LOCAL` otherwise.
+    """
+    from maljan.analysis.tool_effects import sends_sample_bytes
+    from maljan.core.builtin_declarations import server_declaration
+    from maljan.core.tool_declarations import (
+        THIRD_PARTY_BYTES,
+        THIRD_PARTY_HASH,
+        ToolFacts,
+        stored_in_force,
+    )
+
+    shipped = server_declaration(key).get("tool_facts") or {}
+    stored = server.get("tool_facts")
+    in_force, refused = (
+        stored_in_force(shipped, stored, f"core.mcp.servers.{key}.tool_facts", key)
+        if stored is not None
+        else (dict(shipped), [])
+    )
+    if refused:
+        return REACHES
+    declared = False
+    for raw in in_force.values():
+        if not isinstance(raw, dict):
+            continue
+        try:
+            facts = ToolFacts.model_validate(raw)
+        except ValueError:
+            return REACHES
+        effects = facts.effects
+        if sends_sample_bytes(facts) or (
+            effects is not None
+            and (
+                effects.network is True
+                or effects.third_party in (THIRD_PARTY_HASH, THIRD_PARTY_BYTES)
+            )
+        ):
+            return REACHES
+        if effects is not None and (
+            effects.executes or effects.network is not None or effects.third_party
+        ):
+            declared = True
+    return LOCAL if declared else UNDECLARED
 
 
 def describe_changes(values: dict[str, dict[str, Any]], changes: dict[str, Any]) -> dict[str, Any]:
@@ -514,14 +574,13 @@ def describe_changes(values: dict[str, dict[str, Any]], changes: dict[str, Any])
         and not server.get("enabled", True)
         and (servers_before.get(key) or {}).get("enabled", True)
     )
-    keys_withheld = sorted(
-        key
-        for key, server in servers_during.items()
+    kept = {
+        key: "kept: effects not declared"
+        for key, server in sorted(servers_during.items())
         if isinstance(server, dict)
         and server.get("enabled", True)
-        and (servers_before.get(key) or {}).get("env_allow")
-        and not server.get("env_allow")
-    )
+        and server_effects(str(key), server) == UNDECLARED
+    }
     return {
         "settings": {
             key: {"before": _value(values, key), "rehearsed": value}
@@ -529,7 +588,7 @@ def describe_changes(values: dict[str, dict[str, Any]], changes: dict[str, Any])
             if key != "core.mcp.servers"
         },
         "servers_disabled": disabled,
-        "servers_with_keys_withheld": keys_withheld,
+        "servers_kept": kept,
     }
 
 
