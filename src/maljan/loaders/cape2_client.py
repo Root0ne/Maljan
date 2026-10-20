@@ -26,6 +26,10 @@ Error handling:
   - CAPE's own refusal envelope, ``{"error": true, "error_value": ...}`` sent
     with HTTP 200 (report API disabled, a TLP RED task, no report), raises
     SandboxError with the reason CAPE stated, on every endpoint read.
+  - A report is read whole, whatever its size: streamed to an unnamed
+    owner-only temporary file and parsed from there, never accumulated in
+    memory chunk by chunk. An error answer is read only as far as its message
+    quotes.
   - Timeout raises SandboxTimeoutError.
   - Missing httpx raises SandboxNotAvailableError at instantiation.
 """
@@ -40,6 +44,7 @@ from typing import Any
 
 from maljan.core.logger import logger
 from maljan.loaders.sandbox_client import (
+    PERMANENT_SERVER_STATUSES,
     SandboxError,
     SandboxNotAvailableError,
     SandboxTimeoutError,
@@ -274,13 +279,14 @@ class CAPEv2Client:
             try:
                 response = self._http.get(f"/apiv2/tasks/view/{task_id}/")
                 code = int(response.status_code)
-                if code >= 500 or code == 429:
+                if (code >= 500 and code not in PERMANENT_SERVER_STATUSES) or code == 429:
                     # "Come back later" — a loaded CAPE, not a verdict.
                     transient = f"HTTP {code}: {response.text[:120]}"
                 else:
                     # Other 4xx are verdicts: a bad token or a deleted task
                     # will still be bad in twenty minutes, so abort rather
-                    # than burn the budget. Propagates past this handler.
+                    # than burn the budget; so are 501 and 505, a request the
+                    # server can never serve. Propagates past this handler.
                     self._raise_for_status(response, "poll")
                     # An unparsable or non-object body stays transient, as it
                     # always was; a refusal CAPE states is a verdict.
@@ -354,13 +360,23 @@ class CAPEv2Client:
                 failed fetch with its reason, never a report of nothing.
         """
         logger.info("CAPEv2Client: fetching report for task %s.", task_id)
+        # Read whole, as it always was, but streamed to disk first: the
+        # download is never held in memory, and the parse reads the file.
         try:
-            response = self._http.get(f"/apiv2/tasks/get/report/{task_id}/")
+            with self._http.stream("GET", f"/apiv2/tasks/get/report/{task_id}/") as response:
+                if response.status_code >= 400:
+                    # Only as much of the error body as the error quotes: an
+                    # error body is no more bounded than a report.
+                    said = self._head_of(response)
+                    response.close()
+                    raise SandboxError(
+                        f"CAPEv2 fetch_report failed (HTTP {response.status_code}): {said}"
+                    )
+                report: dict[str, Any] = self._spooled_payload(response, "fetch_report")
+        except SandboxError:
+            raise
         except Exception as exc:
             raise SandboxError(f"Report request failed: {exc}") from exc
-
-        self._raise_for_status(response, "fetch_report")
-        report: dict[str, Any] = self._payload(response, "fetch_report")
 
         # A real CAPEv2 report nests sample identity under target.file.* —
         # target itself carries only "category" and "file" (empirically
@@ -420,7 +436,7 @@ class CAPEv2Client:
                 # 0o600 from the first byte, with ``O_NOFOLLOW``: a capture
                 # is the whole of a detonation's traffic, and writing it at
                 # the process umask leaves it readable for as long as the
-                # download takes.
+                # download takes. Streamed to disk, never held in memory.
                 flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW
                 with os.fdopen(os.open(out, flags, 0o600), "wb") as f:
                     for chunk in resp.iter_bytes(65536):
@@ -472,6 +488,46 @@ class CAPEv2Client:
         """The response's JSON object; SandboxError where CAPE refused or sent no object."""
         try:
             data = response.json()
+        except ValueError as exc:
+            raise SandboxError(f"CAPEv2 {operation} answered no JSON: {exc}") from exc
+        cls.raise_for_envelope(data, operation)
+        return data  # type: ignore[no-any-return]
+
+    @staticmethod
+    def _head_of(response: Any) -> str:
+        """The first ``BODY_SHOWN`` characters of a streamed body, the rest never read."""
+        head = bytearray()
+        for chunk in response.iter_bytes(BODY_SHOWN):
+            head.extend(chunk)
+            if len(head) >= BODY_SHOWN:
+                break
+        return bytes(head[:BODY_SHOWN]).decode("utf-8", errors="replace")
+
+    @classmethod
+    def _spooled_payload(cls, response: Any, operation: str) -> dict[str, Any]:
+        """A streamed JSON body, written to a temporary file and parsed from it.
+
+        The file is unnamed and owner-only (``tempfile.TemporaryFile``: created
+        0o600 with ``O_EXCL`` and ``O_NOFOLLOW``, gone when closed), so no
+        other process reads a report while it downloads and nothing is left
+        behind. No size limit applies: a report is read whole.
+        """
+        import tempfile
+
+        with tempfile.TemporaryFile() as spool:
+            for chunk in response.iter_bytes(65536):
+                spool.write(chunk)
+            spool.seek(0)
+            return cls._body_payload(spool.read(), operation)
+
+    @classmethod
+    def _body_payload(cls, body: bytes, operation: str) -> dict[str, Any]:
+        """``_payload`` for a body already read: its JSON object, else a SandboxError."""
+        from maljan.core.safe_json import loads
+
+        try:
+            # Read at any nesting depth (``core.safe_json``).
+            data = loads(body)
         except ValueError as exc:
             raise SandboxError(f"CAPEv2 {operation} answered no JSON: {exc}") from exc
         cls.raise_for_envelope(data, operation)

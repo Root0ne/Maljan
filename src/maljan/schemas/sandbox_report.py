@@ -146,7 +146,9 @@ class SandboxSignatureRow(BaseModel):
 
     name: str = ""
     description: str = ""
-    severity: int = 0
+    # ``None`` where the sandbox gave a severity no number or declared rung
+    # reads (its word is then kept in ``extra``): unknown, never 0.
+    severity: int | None = 0
     marks: list[Any] = Field(default_factory=list)
     ttp_tags: list[str] = Field(default_factory=list)
     # The signature's other fields, under the sandbox's own names.

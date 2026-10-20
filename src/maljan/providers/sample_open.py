@@ -46,6 +46,7 @@ from urllib.parse import urlsplit
 from maljan.core.logger import logger
 
 __all__ = [
+    "ANALYSIS_REFUSED_AFTER_OPEN",
     "FOREIGN_PROGRAM",
     "NO_JOB_PROGRAM",
     "REMOTE_TRANSPORTS",
@@ -65,6 +66,7 @@ __all__ = [
     "pin_program_argument",
     "program_argument",
     "program_arguments",
+    "refused_after_open",
     "server_note_key",
     "wrap_open_tool",
 ]
@@ -77,6 +79,9 @@ LOCK_POLL_SECONDS = 0.05
 
 # The marker of a select the server refused right after a fresh open.
 SELECT_REFUSED_AFTER_OPEN = "select_refused_after_open"
+
+# The marker of a declared analysis step the server refused right after a fresh open.
+ANALYSIS_REFUSED_AFTER_OPEN = "analysis_refused_after_open"
 
 # The code of a call that named a program this job did not open on the server.
 FOREIGN_PROGRAM = "foreign_program"
@@ -375,6 +380,25 @@ def _opened_name(answer: str, field: str, path: str) -> str:
     return answer_field(answer, field) or path
 
 
+def refused_after_open(
+    marker: str, step_tool: str, open_tool: str, refusal: Any, opened: Any
+) -> str:
+    """The answer for a declared step the server refused right after a fresh open.
+
+    The open is handed on as failed, under ``marker``: the step's refusal
+    with the open's own answer beside it, so the ledger and the model see
+    that the open did not take as declared.
+    """
+    return json.dumps(
+        {
+            "tool_error": marker,
+            "tool": step_tool,
+            "detail": f"{step_tool} refused what {open_tool} opened: "
+            f"{str(refusal)[:SAID_LIMIT]}; {open_tool} answered: {str(opened)[:SAID_LIMIT]}",
+        }
+    )
+
+
 class SampleOpener:
     """Opens one server's sample through its declared tools, once per path per job."""
 
@@ -447,14 +471,8 @@ class SampleOpener:
             name,
             str(selected)[:160],
         )
-        return json.dumps(
-            {
-                "tool_error": SELECT_REFUSED_AFTER_OPEN,
-                "tool": self.spec.select_tool,
-                "detail": f"{self.spec.select_tool} refused what {self.spec.open_tool} opened: "
-                f"{str(selected)[:SAID_LIMIT]}; {self.spec.open_tool} answered: "
-                f"{str(opened)[:SAID_LIMIT]}",
-            }
+        return refused_after_open(
+            SELECT_REFUSED_AFTER_OPEN, self.spec.select_tool, self.spec.open_tool, selected, opened
         )
 
     def _after_analysis(
@@ -466,6 +484,9 @@ class SampleOpener:
         arguments: dict[str, Any] | None,
     ) -> str:
         if analysed is not None and is_refusal(analysed):
+            # The declared analysis did not run on what was opened, so the
+            # open did not take as declared: handed on as failed, never as the
+            # open's own success, and not noted.
             logger.warning(
                 "%s: %s of %s was not confirmed (%s); the open is not noted",
                 self.server,
@@ -473,7 +494,13 @@ class SampleOpener:
                 name,
                 str(analysed)[:160],
             )
-            return opened
+            return refused_after_open(
+                ANALYSIS_REFUSED_AFTER_OPEN,
+                self.spec.analyse_tool,
+                self.spec.open_tool,
+                analysed,
+                opened,
+            )
         self.notes.note(self.server, path, name, opened, arguments)
         return opened
 

@@ -145,6 +145,9 @@ class StaticJobContext:
     truncation_ledger: Any | None = None
     # The job's context budget, which answers what zero above means.
     context_budget: Any | None = None
+    # When the stage or job this work runs in must end, as a ``time.monotonic``
+    # instant, where the pipeline has a deadline for it; ``None`` where none.
+    deadline: float | None = None
 
 
 @dataclass(frozen=True)

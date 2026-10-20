@@ -153,6 +153,12 @@ class SandboxClient(Protocol):
 # in maljan.core.exceptions so callers can catch MaljanError uniformly.
 from maljan.core.exceptions import SandboxError as SandboxError  # noqa: E402
 
+# The server errors that say the request itself can never be served (501 Not
+# Implemented, 505 HTTP Version Not Supported): a verdict like a 4xx, failed
+# at once. Every other 5xx is the server busy or briefly broken, and a status
+# poll waits it out to its deadline.
+PERMANENT_SERVER_STATUSES: frozenset[int] = frozenset({501, 505})
+
 
 class SandboxTimeoutError(SandboxError):
     """Raised when a task does not complete within the configured timeout."""

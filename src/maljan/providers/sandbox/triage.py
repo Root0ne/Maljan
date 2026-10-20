@@ -155,6 +155,50 @@ def _parse_retry_after(value: str, now: float) -> float | None:
     return (when - datetime.now(UTC)).total_seconds()
 
 
+# A status poll that failed in transit (a timeout, a dropped connection, a body
+# that would not decode) says nothing about the task: it is the sandbox busy or
+# briefly unreachable, waited out like a 429 until the poll's own deadline. A
+# running detonation is never thrown away over one of them.
+POLL_TRANSPORT_ERRORS: tuple[type[Exception], ...] = (httpx.TransportError, httpx.DecodingError)
+
+
+def poll_failure(response: httpx.Response) -> str | None:
+    """Why a status answer is the sandbox's trouble rather than a verdict, or ``None``.
+
+    A 5xx is the server failing to answer, not an answer about the task; a 4xx
+    stays a verdict (a refused token or an unknown task will be the same in
+    twenty minutes), and so do 501 and 505, which say the request can never be
+    served (``loaders.sandbox_client.PERMANENT_SERVER_STATUSES``). 429 and 503
+    are not read here: they have their own ``Retry-After`` branch.
+    """
+    from maljan.loaders.sandbox_client import PERMANENT_SERVER_STATUSES
+
+    status = response.status_code
+    if status >= 500 and status not in PERMANENT_SERVER_STATUSES:
+        return f"HTTP {response.status_code}"
+    return None
+
+
+def wait_after_poll_failure(
+    sleep: Any, now: Any, interval: float, deadline: float, what: str, error: str
+) -> float:
+    """Wait the current backoff, clamped to the deadline; the next interval.
+
+    ``error`` is logged, and the caller keeps it for the deadline's message.
+    """
+    logger.warning("%s: status poll failed transiently (%s); retrying.", what, error)
+    clamped = min(interval, _MAX_INTERVAL_SECONDS, deadline - now())
+    if clamped > 0:
+        sleep(clamped)
+    return min(interval * _BACKOFF_FACTOR, _MAX_INTERVAL_SECONDS)
+
+
+def poll_deadline_error(what: str, budget: float, last_error: str) -> ProviderError:
+    """The deadline's failure, naming the last transient poll error when there was one."""
+    suffix = f" Last poll error: {last_error}" if last_error else ""
+    return ProviderError(f"{what} did not complete within {budget:.0f}s.{suffix}")
+
+
 @register_sandbox_provider("triage")
 class TriageSandboxProvider(SandboxProvider):
     """Hatching Triage cloud sandbox: submit, poll, fetch, all over REST.
@@ -419,13 +463,22 @@ class TriageSandboxProvider(SandboxProvider):
         deadline = self._now() + budget
         http = self._get_http()
         url = STATUS_PATH.format(sample_id=task_id)
+        what = f"Triage task {task_id}"
+        last_error = ""
         while True:
             # Checked at the top of every iteration, including the rate-limit
             # branch below: a server that keeps answering 429/503 past the
             # deadline must still raise rather than loop forever.
             if self._now() >= deadline:
-                raise ProviderError(f"Triage task {task_id} did not complete within {budget:.0f}s.")
-            response = http.get(url, headers=headers)
+                raise poll_deadline_error(what, budget, last_error)
+            try:
+                response = http.get(url, headers=headers)
+            except POLL_TRANSPORT_ERRORS as exc:
+                last_error = f"{type(exc).__name__}: {exc}"
+                interval = wait_after_poll_failure(
+                    self._sleep, self._now, interval, deadline, what, last_error
+                )
+                continue
             if response.status_code in (429, 503):
                 # "Come back later" — no documented rate limit was reachable
                 # (see the module docstring), so a Retry-After header is
@@ -451,8 +504,23 @@ class TriageSandboxProvider(SandboxProvider):
                 if not honoured:
                     interval = min(interval * _BACKOFF_FACTOR, _MAX_INTERVAL_SECONDS)
                 continue
-            self._raise_for_status(response, "status check")
-            status = str(response.json().get("status") or "")
+            failure = poll_failure(response)
+            if failure is None:
+                self._raise_for_status(response, "status check")
+                try:
+                    payload = response.json()
+                except ValueError as exc:
+                    failure = f"an unparsable status body ({exc})"
+                else:
+                    if not isinstance(payload, dict):
+                        failure = f"a status body that is a {type(payload).__name__}"
+            if failure is not None:
+                last_error = failure
+                interval = wait_after_poll_failure(
+                    self._sleep, self._now, interval, deadline, what, last_error
+                )
+                continue
+            status = str(payload.get("status") or "")
             if status in TERMINAL_STATUSES:
                 return status
             self._sleep(interval)

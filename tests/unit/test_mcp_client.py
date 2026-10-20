@@ -441,7 +441,10 @@ class TestDynamicAnalystMcpTransportWiring:
                 http_url="",
                 http_headers=None,
                 categories=None,
+                **lifecycle,
             ):
+                # The shared lifecycle's own keywords (the job's guard, the
+                # ledger, the label) ride along and are not this test's.
                 captured["transport"] = transport
                 captured["http_url"] = http_url
                 captured["http_headers"] = http_headers

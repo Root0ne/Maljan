@@ -138,7 +138,9 @@ class _SharedGhidra:
             return httpx.Response(200, text=f"entry_{read} -> CreateProcessA\n")
         if path == "/get_bulk_function_hashes":
             item = {"name": f"f_{read}", "hash": f"h_{read}", "instruction_count": 50}
-            return httpx.Response(200, text=json.dumps({"functions": [item]}))
+            # One function, on the first page; the walk ends on the empty one after it.
+            first = int(request.url.params.get("offset", "0")) == 0
+            return httpx.Response(200, text=json.dumps({"functions": [item] if first else []}))
         return httpx.Response(200, text=json.dumps({"program": read}))
 
     def sent(self, path: str, name: str = "program") -> list[str | None]:
@@ -411,7 +413,7 @@ class TestThePlatformsOwnCalls:
         assert job_b.provider.open_sample(B)
         got = job_a.provider.function_hashes(StaticJobContext(mirror_sample_path=A))
         assert got == [("f_a.exe", "h_a.exe")]
-        assert ghidra.sent("/get_bulk_function_hashes") == ["a.exe"]
+        assert ghidra.sent("/get_bulk_function_hashes") == ["a.exe", "a.exe"]
 
 
 # A declaration that opens a sample but names no argument a program goes in.
@@ -449,7 +451,7 @@ class TestNothingFailsOpen:
         assert ghidra.sent("/get_bulk_function_hashes") == []
         # A server no other job shares holds only this job's programs.
         assert self._hashes(monkeypatch, ghidra, shared=False) != []
-        assert ghidra.sent("/get_bulk_function_hashes") == [None]
+        assert ghidra.sent("/get_bulk_function_hashes") == [None, None]
 
     def test_hashes_with_no_declared_argument_are_absent_on_a_shared_server(
         self, monkeypatch: Any
@@ -467,7 +469,7 @@ class TestNothingFailsOpen:
         _rest(monkeypatch, ghidra)
         got = self._hashes(monkeypatch, ghidra, sample_open=None, shared=False)
         assert got == [("f_a.exe", "h_a.exe")]
-        assert ghidra.sent("/get_bulk_function_hashes") == [None]
+        assert ghidra.sent("/get_bulk_function_hashes") == [None, None]
 
     def test_a_call_graph_with_no_declared_argument_is_absent_on_a_shared_server(
         self, monkeypatch: Any

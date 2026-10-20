@@ -1552,6 +1552,13 @@ def _function_hash_attribution(
                 StaticJobContext(mirror_sample_path=str(static_path))
             )
             if not functions:
+                unread = getattr(functions, "unavailable", "")
+                if unread:
+                    logger.warning(
+                        "Function-hash attribution skipped: no hashes could be read (%s). "
+                        "Verdict unaffected.",
+                        unread,
+                    )
                 return []
             report = to_report_dicts(
                 aggregate_matches(
@@ -1627,8 +1634,23 @@ def _function_matches_step(container: ServiceContainer, state: AnalysisState) ->
         from maljan.providers.base import StaticJobContext
         from maljan.tools import knowledge
 
-        job = StaticJobContext(mirror_sample_path=str(static_path), sha256=sha256)
-        hashes = [h for _name, h in provider.function_hashes(job)]
+        # The pack's own budget is the stage's deadline: the walk a step makes
+        # cannot outlast the stage it runs in.
+        budget = float(getattr(getattr(cfg, "triage", None), "budget_seconds", 0) or 0)
+        job = StaticJobContext(
+            mirror_sample_path=str(static_path),
+            sha256=sha256,
+            deadline=time.monotonic() + budget if budget > 0 else None,
+        )
+        functions = provider.function_hashes(job)
+        unread = getattr(functions, "unavailable", "")
+        if unread and not functions:
+            from maljan.providers.errors import ProviderError
+
+            # A read that failed is the step failing with its reason, never
+            # an empty list of hashes that matches nothing.
+            raise ProviderError(f"no function hashes could be read: {unread}")
+        hashes = [h for _name, h in functions]
         args = {
             "func_hashes": hashes,
             "backend": configured_backend(cfg),
@@ -1642,9 +1664,17 @@ def _function_matches_step(container: ServiceContainer, state: AnalysisState) ->
         # Held for the read: a settings change meanwhile closes this store only
         # once the read has let go of it.
         with leased_function_hash_store(cfg) as held:
-            return args, knowledge.function_matches(
+            value = knowledge.function_matches(
                 hashes, held, exclude_sample_id=sha256, owner=memory_owner_of(container)
             )
+        cut = getattr(functions, "cut", "")
+        if cut and isinstance(value, dict):
+            # Some of the program's functions, never all: said with the answer.
+            value = {**value, "cut": cut}
+        unbounded = getattr(functions, "unbounded", "")
+        if unbounded and isinstance(value, dict):
+            value = {**value, "unbounded": unbounded}
+        return args, value
 
     return step
 

@@ -1151,6 +1151,10 @@ class ServiceContainer:
             fixtures = getattr(provider, "fixtures_dir", None)
             if fixtures is not None:
                 provider.fixtures_dir = self._samples_dir  # type: ignore[attr-defined]
+            # A provider whose server is measured for the run's isolation part
+            # (CAPE's MCP server) is told whose job it serves.
+            if hasattr(provider, "job_key"):
+                provider.job_key = self.job_key()
             logger.info("Sandbox provider: %s.", provider.id)
             self._sandbox_provider_cache = provider
             return provider

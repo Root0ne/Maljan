@@ -517,7 +517,9 @@ class ServerHandle:
         # An http/sse transport has no child of ours to reap.
         self._launch_argv = ()
         self._launch_env_names = ()
-        token = self.config.auth_token.get_secret_value()
+        # A ``SecretStr`` as settings hold it, or a plain string a caller set.
+        raw = self.config.auth_token
+        token = raw.get_secret_value() if hasattr(raw, "get_secret_value") else str(raw or "")
         headers = {"Authorization": f"Bearer {token}"} if token else {}
         return MCPLangChainToolkit(
             transport=self.config.transport,
