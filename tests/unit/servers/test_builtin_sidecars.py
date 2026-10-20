@@ -230,6 +230,7 @@ def test_only_the_analysis_sidecar_is_allowed_to_see_the_staging_directory() -> 
     assert servers["knowledge"].env_allow == [
         "MALJAN_INDEX_RETRY_SECONDS",
         "MALJAN_ATTCK_REFRESH_DAYS",
+        "MALJAN_SAMPLE_SHA256",
     ]
 
 

@@ -32,6 +32,7 @@ from maljan.core.plugins import (
     unavailable_reason,
     usable_list,
 )
+from maljan.core.settings_overrides import redact_url
 
 # The request timeout every provider's HTTP client is built with, unless the
 # caller names one. It has to outlast the longest agent loop budget (the
@@ -357,7 +358,7 @@ class LLMProviderRegistry:
             choice.provider,
             choice.model,
             temp,
-            agent_base_url or "(global)",
+            redact_url(str(agent_base_url)) if agent_base_url else "(global)",
             effort_said,
         )
         from maljan.llm.provider_base import facts_of

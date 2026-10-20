@@ -316,6 +316,26 @@ def _value(raw: Any) -> int | None:
     return value if 0 <= value <= 0xFFFFFFFF else None
 
 
+def _values(raw: Any) -> list[int]:
+    """Every reading of one caller-given hash.
+
+    A bare string of exactly eight digits is how a 32-bit hash is printed in hex
+    when no letter happens to appear, and it is also a valid decimal. Reading it
+    as decimal alone drops those hashes; so both readings are looked up. A
+    zero-padded one is hex only, because nobody pads a decimal.
+    """
+    value = _value(raw)
+    if value is None:
+        return []
+    text = str(raw).strip().strip("\"'")
+    if isinstance(raw, str) and len(text) == 8 and text.isdigit():
+        as_hex = int(text, 16)
+        if text.startswith("0"):
+            return [as_hex]
+        return [value] if as_hex == value else [value, as_hex]
+    return [value]
+
+
 # ---------------------------------------------------------------------------
 # The tool
 # ---------------------------------------------------------------------------
@@ -363,14 +383,19 @@ def resolve_api_hashes(
 
     given = hashes is not None and len(hashes) > 0
     unreadable: list[str] = []
+    # Each given string with its readings, once: a string with two readings is
+    # one input that either reading may resolve.
+    inputs: list[tuple[str, list[int]]] = []
     if given:
         values: list[int] = []
         for raw in hashes or []:
-            value = _value(raw)
-            if value is None:
+            read = _values(raw)
+            if not read:
                 unreadable.append(str(raw))
-            elif value not in values:
-                values.append(value)
+                continue
+            if not any(read == held for _text, held in inputs):
+                inputs.append((str(raw).strip().strip("\"'"), read))
+            values.extend(v for v in read if v not in values)
     else:
         values = candidate_values(image)
 
@@ -427,7 +452,7 @@ def resolve_api_hashes(
             "modules_source": str((names.get("modules") or {}).get("source") or ""),
         },
         "candidates": (
-            {"given": len(values) + len(unreadable)}
+            {"given": len(inputs) + len(unreadable)}
             if given
             else {"scanned": len(values), "how": SCAN_HEURISTIC}
         ),
@@ -437,7 +462,12 @@ def resolve_api_hashes(
         "next_offset": start + len(page) if more else None,
     }
     if given:
-        answer["unresolved"] = [f"{v:#010x}" for v in values if v not in resolved]
+        # One entry per given string, and only when none of its readings resolved.
+        answer["unresolved"] = [
+            f"{read[0]:#010x}" if len(read) == 1 else text
+            for text, read in inputs
+            if not any(v in resolved for v in read)
+        ]
         if unreadable:
             answer["unreadable"] = unreadable
     else:

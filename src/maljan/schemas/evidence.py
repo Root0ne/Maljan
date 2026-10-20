@@ -239,7 +239,8 @@ def parse_structured(output: str) -> dict[str, Any] | list[Any] | None:
         return None
     try:
         parsed = json.loads(text)
-    except (ValueError, TypeError):
+    except (ValueError, TypeError, RecursionError):
+        # Nesting deeper than the interpreter reads is not a structure it can hold.
         return None
     return parsed if isinstance(parsed, dict | list) else None
 

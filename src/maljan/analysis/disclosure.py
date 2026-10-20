@@ -1067,6 +1067,8 @@ def with_enrichment_asked(
         for kind, count in dict(row.get("kinds") or {}).items():
             kept["kinds"][str(kind)] = kept["kinds"].get(str(kind), 0) + int(count or 0)
         kept["failed"] += int(row.get("failed") or 0)
+        if row.get("errored"):
+            kept["errored"] = int(kept.get("errored") or 0) + int(row["errored"])
     rows = [{**row, "kinds": dict(sorted(row["kinds"].items()))} for row in merged.values()]
     kept_withheld: dict[tuple[str, str, str], dict[str, str]] = {}
     for row in [*list(held.get("withheld") or []), *withheld]:
@@ -1111,19 +1113,24 @@ class EnrichmentAsks:
     def __init__(self) -> None:
         self._counts: dict[tuple[str, str, str], dict[str, int]] = {}
         self._answered: dict[tuple[str, str, str], int] = {}
+        self._errored: dict[tuple[str, str, str], int] = {}
 
-    def __call__(self, source: str, host: str, kind: str, server: str) -> Callable[[bool], None]:
+    def __call__(self, source: str, host: str, kind: str, server: str) -> Callable[..., None]:
         key = (str(source), str(host), str(server))
         kinds = self._counts.setdefault(key, {})
         kinds[str(kind)] = kinds.get(str(kind), 0) + 1
         settled: list[bool] = []
 
-        def settle(answered: bool) -> None:
+        def settle(answered: bool, errored: bool = False) -> None:
             if settled:
                 return
             settled.append(True)
             if answered:
                 self._answered[key] = self._answered.get(key, 0) + 1
+            elif errored:
+                # The service replied, with an error status: the question
+                # arrived, which is not a question that may not have.
+                self._errored[key] = self._errored.get(key, 0) + 1
 
         return settle
 
@@ -1152,16 +1159,19 @@ class EnrichmentAsks:
                 )
                 host = place.host if place.where == REMOTE else ""
                 why = "" if host else (place.why or _LOCAL_SERVER)
-            failed = sum(kinds.values()) - self._answered.get((source, key_host, server), 0)
-            out.append(
-                {
-                    "source": source,
-                    "host": host,
-                    "kinds": dict(kinds),
-                    "failed": max(0, failed),
-                    "why": why,
-                }
-            )
+            ask_key = (source, key_host, server)
+            errored = self._errored.get(ask_key, 0)
+            failed = sum(kinds.values()) - self._answered.get(ask_key, 0) - errored
+            row: dict[str, Any] = {
+                "source": source,
+                "host": host,
+                "kinds": dict(kinds),
+                "failed": max(0, failed),
+                "why": why,
+            }
+            if errored:
+                row["errored"] = errored
+            out.append(row)
         return out
 
 
@@ -1542,11 +1552,14 @@ def _asked_parts(asked: list[Mapping[str, Any]], code: Callable[[str], str]) -> 
         else:
             place = f"a tool server{_untold(row, 'the questions')}"
         failed = int(row.get("failed") or 0)
+        errored = int(row.get("errored") or 0)
         tail = (
             f", {failed} of them failed in transport or did not finish and may have arrived"
             if failed
             else ""
         )
+        if errored:
+            tail += f", {errored} of them answered with an error status (it arrived)"
         parts.append(f"{place} about {kinds} ({name}{tail})")
     return "; ".join(parts)
 

@@ -1239,6 +1239,7 @@ class ServiceContainer:
                 self._server_registry_cache = ServerRegistry(
                     self.config,
                     sample_notes=self.sample_notes,
+                    sample_sha256=lambda: self.sample_sha256,
                     truncation_ledger=self._truncation_ledger,
                     context_budget=budget,
                     event_sink=self.event_sink,
