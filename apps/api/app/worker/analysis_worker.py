@@ -2661,10 +2661,24 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
             # the stored rows, say) is no outage to wait out: it reaches the
             # failure path below as itself, named by its class with its
             # traceback in the log, and no pipeline starts either way.
-            from app.services.settings_service import load_core_overrides
+            from app.services.settings_service import (
+                load_core_overrides,
+                refusing_undecryptable_secrets,
+            )
 
             try:
-                overrides = await load_core_overrides(db)
+                with refusing_undecryptable_secrets():
+                    overrides = await load_core_overrides(db)
+            except StoredValueRefused as exc:
+                # A stored secret this worker cannot decrypt is the operator's
+                # setting, unreadable: the run never takes the shipped default
+                # in its place, and the key is named so it can be entered again.
+                raise StatedFailure(
+                    "A stored setting value is refused ("
+                    + "; ".join(f"{key}: {why}" for key, why in sorted(exc.refused.items()))
+                    + "). Fix it or reset it in the console (Settings, Configuration); "
+                    "the job did not run on a default in its place."
+                ) from None
             except (SQLAlchemyError, OSError) as exc:
                 logger.error(
                     "Failed to load the stored settings (%s); job %s fails rather than "
@@ -3078,26 +3092,38 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
             # including the dedup that keeps two providers sharing one
             # host path (e.g. Ghidra and a co-located r2mcp) from copying
             # the sample twice — see test_worker_profile_mirror.py.
-            new_mirrors, new_sample_paths = mirror_static_samples(
-                app.container,
-                temp_path=temp_path,
-                sha256=sample_sha256,
-                extension=_orig_ext,
-                copy_fn=functools.partial(sample_files.held_copy, job_id=canonical_job_id(job_id)),
-                job_id=job_id,
+            # Off the loop: a copy of a large sample onto a slow volume stopped
+            # the heartbeat and every other coroutine of this worker.
+            new_mirrors, new_sample_paths = await asyncio.to_thread(
+                functools.partial(
+                    mirror_static_samples,
+                    app.container,
+                    temp_path=temp_path,
+                    sha256=sample_sha256,
+                    extension=_orig_ext,
+                    copy_fn=functools.partial(
+                        sample_files.held_copy, job_id=canonical_job_id(job_id)
+                    ),
+                    job_id=job_id,
+                )
             )
             host_mirrors.extend(new_mirrors)
             static_sample_paths.update(new_sample_paths)
             # And for each tool server that declares a mount of its own, a
             # copy under it, whichever agent its tools are bound to.
-            server_mirrors, server_sample_paths = mirror_server_samples(
-                app.container,
-                temp_path=temp_path,
-                sha256=sample_sha256,
-                extension=_orig_ext,
-                copy_fn=functools.partial(sample_files.held_copy, job_id=canonical_job_id(job_id)),
-                job_id=job_id,
-                already=host_mirrors,
+            server_mirrors, server_sample_paths = await asyncio.to_thread(
+                functools.partial(
+                    mirror_server_samples,
+                    app.container,
+                    temp_path=temp_path,
+                    sha256=sample_sha256,
+                    extension=_orig_ext,
+                    copy_fn=functools.partial(
+                        sample_files.held_copy, job_id=canonical_job_id(job_id)
+                    ),
+                    job_id=job_id,
+                    already=host_mirrors,
+                )
             )
             host_mirrors.extend(server_mirrors)
             static_sample_path = global_mirror_path(

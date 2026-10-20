@@ -102,6 +102,23 @@ async def _unprobed_models_for(db: AsyncSession, config: dict[str, Any]) -> list
     return await unprobed_models(db, settings, called_assignments(settings, team.stages))
 
 
+async def _undecryptable_secrets(db: AsyncSession) -> list[str]:
+    """The keys of the stored core secrets this API cannot decrypt, as the worker reads them."""
+    from maljan.core.settings_overrides import StoredValueRefused
+
+    from app.services.settings_service import (
+        load_core_overrides,
+        refusing_undecryptable_secrets,
+    )
+
+    try:
+        with refusing_undecryptable_secrets():
+            await load_core_overrides(db)
+    except StoredValueRefused as exc:
+        return sorted(f"{key}: {why}" for key, why in exc.refused.items())
+    return []
+
+
 async def _unready_providers_for(db: AsyncSession, config: dict[str, Any]) -> list[str]:
     """Every agent of this job's team whose non-degrading static provider is not ready.
 
@@ -157,6 +174,17 @@ async def create_job(
         f"Creating analysis job for sample={log_safe(body.sample_id)}",
         extra={"sample_id": log_safe(body.sample_id), "user_id": log_safe(user.id)},
     )
+    undecryptable = await _undecryptable_secrets(db)
+    if undecryptable:
+        # The worker would refuse the run for the same keys; said now, the job
+        # is never accepted only to fail when it starts.
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="A stored secret cannot be decrypted ("
+            + "; ".join(undecryptable)
+            + "). Enter it again in the console (Settings, Configuration); nothing runs on "
+            "a default in its place.",
+        )
     unprobed = await _unprobed_models_for(db, body.config or {})
     if unprobed:
         from app.services.model_probes import refusal_sentence

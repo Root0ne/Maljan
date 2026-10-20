@@ -66,6 +66,10 @@ SEAL_NOT_ANCHORED = (
     "The audit append for this seal did not land: no ledger.seal audit row records it, so the "
     "seal cannot be confirmed against the audit chain."
 )
+SEAL_SUPERSEDED = (
+    "The audit chain holds a seal for this job that the stored report does not carry: the "
+    "report it sealed was superseded and no report.delete audit row records its deletion."
+)
 VERIFIED_REASON = (
     "The ledger, its seal and the stored report row verify. The per-agent findings and the "
     "transcript are not covered by the seal."
@@ -85,6 +89,10 @@ class JobAudit:
     seals: list[dict[str, Any]] = field(default_factory=list)
     amendments: list[dict[str, Any]] = field(default_factory=list)
     deletes: list[dict[str, Any]] = field(default_factory=list)
+    # What is wrong with the audit chain as a whole, when it is not contiguous
+    # up to its head: rows are gone from it, and whether they were this job's
+    # own cannot be told from the rows that are left.
+    chain_gap: str | None = None
 
     @property
     def unverifiable_own(self) -> bool:
@@ -250,6 +258,16 @@ def _seal_of_the_report(
             )
         if audit is not None and audit.unverifiable_own:
             return result.end(UNVERIFIABLE, OWN_ROWS_UNVERIFIABLE)
+        # A verified seal of this job on the audit chain that no report.delete
+        # accounts for belongs to a report that is no longer stored: a re-run
+        # replaced it and its deletion was not recorded (no key then), or the
+        # report row was removed. Neither is a run that predates sealing.
+        if audit is not None:
+            deleted = {d.get("core_digest") for d in audit.deletes if d.get("core_digest")}
+            if [d for d in audit.seals if _digest_of(d.get("seal")) not in deleted]:
+                return result.end(UNVERIFIABLE, SEAL_SUPERSEDED)
+        if audit is not None and audit.chain_gap:
+            return result.end(UNVERIFIABLE, audit.chain_gap)
         return result.end(NOT_SEALED, PREDATES)
     seal = present.get("report row") or next(iter(present.values()))
     if any(copy != seal for copy in present.values()):
@@ -332,6 +350,8 @@ def _seal_without_a_report(
             "Rows of this job carry digests, but no seal is stored for it anywhere.",
             _seq(chained_rows[0]),
         )
+    if audit is not None and audit.chain_gap:
+        return result.end(UNVERIFIABLE, audit.chain_gap)
     if not ordered:
         return result.end(NOT_SEALED, NOTHING_STORED)
     return result.end(NOT_SEALED, PREDATES)
@@ -527,7 +547,7 @@ async def verify_job(
     each and the head record, so the cost follows the job
     (``audit_chain.verify_job_rows``).
     """
-    from sqlalchemy import select
+    from sqlalchemy import func, select
 
     from app.models.audit import AuditChainHead, AuditLog
     from app.models.evidence import EvidenceEntry
@@ -563,6 +583,20 @@ async def verify_job(
         .mappings()
         .first()
     )
+    gap: str | None = None
+    if head is not None:
+        expected = int(head["chain_seq"])
+        present = (
+            await db.execute(
+                select(func.count()).select_from(log).where(log.c.chain_seq <= expected)
+            )
+        ).scalar()
+        if int(present or 0) != expected:
+            gap = (
+                f"The audit chain is not contiguous up to its head: {expected} rows should "
+                f"exist and {int(present or 0)} do, so rows were removed from it; a job with "
+                "no audit rows of its own cannot be told from one whose rows were among them."
+            )
     within = (
         log.c.chain_seq <= int(head["chain_seq"])
         if head is not None
@@ -618,6 +652,7 @@ async def verify_job(
         seals=_details(audit_chain.LEDGER_SEAL),
         amendments=_details(audit_chain.REPORT_AMEND),
         deletes=_details(audit_chain.REPORT_DELETE),
+        chain_gap=gap,
     )
     return verify_ledger(
         job_id,

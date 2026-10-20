@@ -257,6 +257,7 @@ class TestSubmitting:
         )
         with (
             patch("app.api.v1.jobs._unprobed_models_for", AsyncMock(return_value=[])),
+            patch("app.api.v1.jobs._undecryptable_secrets", AsyncMock(return_value=[])),
             patch("app.api.v1.jobs._unready_providers_for", AsyncMock(return_value=[sentence])),
             patch("app.api.v1.jobs.AnalysisService.create_job", AsyncMock()) as create,
         ):

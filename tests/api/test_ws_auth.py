@@ -251,7 +251,7 @@ def test_a_resume_cursor_does_not_bypass_the_ownership_check(
             ws.receive_text()
 
     assert exc.value.code == 1008
-    assert "not your job" in (exc.value.reason or "")
+    assert "job does not exist" in (exc.value.reason or "")
     assert replayed == []
 
 

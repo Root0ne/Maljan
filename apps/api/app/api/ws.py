@@ -44,6 +44,7 @@ ACTIVE_RECHECK_SECONDS = 60.0
 # One reason for a closed account and a revoked token alike: the socket says
 # no more than the HTTP 401 does about which of the two it was.
 _ACCOUNT_CLOSED_REASON = "Unauthorized: account is deactivated or the session was revoked"
+_JOB_NOT_FOUND_REASON = "Not found: job does not exist"
 
 
 async def _account_is_open(db: Any, user_id: str, payload: dict[str, Any] | None = None) -> bool:
@@ -157,8 +158,14 @@ class ConnectionManager:
                     if isinstance(data, bytes):
                         data = data.decode("utf-8")
                     await self.broadcast(job_id, data)
+                    # The next event is asked for at once: a pause after every
+                    # message capped a busy run's live feed near ten events a
+                    # second, and the backlog then grew for as long as it ran.
+                    continue
 
-                await asyncio.sleep(0.1)
+                # ``get_message`` already waited its timeout; this only yields
+                # the loop when the connection answered nothing.
+                await asyncio.sleep(0)
         except asyncio.CancelledError:
             pass
         finally:
@@ -402,9 +409,12 @@ async def ws_analysis(websocket: WebSocket, job_id: str, since: int | None = Non
         await _reject(websocket, 1008, _ACCOUNT_CLOSED_REASON)
         return
 
+    # One answer for a job that is not there and a job that is somebody
+    # else's: two reasons would tell any signed-in caller which job ids exist.
+    # The log keeps the two apart for the operator.
     if not job_exists:
         logger.warning("WebSocket rejected: job not found (%s)", log_safe(job_id))
-        await _reject(websocket, 1008, "Not found: job does not exist")
+        await _reject(websocket, 1008, _JOB_NOT_FOUND_REASON)
         return
 
     if owner != user_id:
@@ -413,7 +423,7 @@ async def ws_analysis(websocket: WebSocket, job_id: str, since: int | None = Non
             log_safe(user_id),
             log_safe(job_id),
         )
-        await _reject(websocket, 1008, "Forbidden: not your job")
+        await _reject(websocket, 1008, _JOB_NOT_FOUND_REASON)
         return
 
     # ── Connection accepted ──────────────────────────────────────────
@@ -481,6 +491,20 @@ async def ws_analysis(websocket: WebSocket, job_id: str, since: int | None = Non
                         log_safe(job_id),
                     )
                     await _close_unauthorized(_ACCOUNT_CLOSED_REASON)
+                    break
+
+                # A token that has run out ends the socket here too: the
+                # expiry used to be read only when the client had been silent
+                # for a whole heartbeat, so a page that pings every few
+                # seconds kept a dead token's socket open for the length of
+                # the run.
+                if _token_exp_ts is not None and _time.time() >= _token_exp_ts:
+                    logger.warning(  # nosemgrep: python.lang.security.audit.logging.logger-credential-leak.python-logger-credential-disclosure — user_id/job_id are opaque identifiers, not the token  # noqa: E501
+                        "WebSocket closed: token expired mid-stream (user=%s job=%s).",
+                        log_safe(user_id),
+                        log_safe(job_id),
+                    )
+                    await _close_unauthorized("Unauthorized: token expired")
                     break
 
                 # Handle client ping

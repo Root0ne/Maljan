@@ -7,10 +7,11 @@ can purge low-signal LTM entries that pre-date the write-time quality gate).
 
 from __future__ import annotations
 
+import asyncio
 from typing import TYPE_CHECKING, Any
 
 import redis.asyncio as aioredis
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from maljan.core.settings_masking import masked_text
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -23,6 +24,7 @@ from app.deps import optional_current_user, require_admin
 from app.logging_config import get_logger
 from app.models.user import User
 from app.runtime_config import runtime_config
+from app.services import audit
 
 if TYPE_CHECKING:
     from maljan.memory.long_term_memory import MemoryStore
@@ -312,6 +314,7 @@ async def _build_memory_store(db: AsyncSession) -> MemoryStore:
 @router.post("/ltm/purge", response_model=LTMPurgeResponse)
 async def ltm_purge(
     body: LTMPurgeRequest,
+    request: Request,
     admin: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ) -> LTMPurgeResponse:
@@ -339,10 +342,58 @@ async def ltm_purge(
     # store that is unavailable.
     await end_read_transaction(db)
 
+    details: dict[str, Any] = {
+        "backend": type(store).__name__,
+        "max_total_techniques": body.max_total_techniques,
+        "require_uncorroborated": body.require_uncorroborated,
+        "include_analyst_errors": body.include_analyst_errors,
+    }
+    before = None if body.dry_run else await _count_of(store)
     try:
-        return _purge(store, body, admin)
+        # The store's client is synchronous and a purge walks the whole store:
+        # on the loop it stopped every other request, WebSocket frame and the
+        # worker's heartbeat for as long as the walk took.
+        answer = await asyncio.to_thread(_purge, store, body, admin)
+    except BaseException as exc:
+        # A purge that fails partway has still deleted some cases: the row
+        # says so, with what the store lost (its count before and after) and
+        # the class of the error, never its text.
+        if not body.dry_run:
+            after = await _count_of(store)
+            await audit.record(
+                "ltm.purge",
+                resource_type="memory",
+                user_id=admin.id,
+                details={
+                    **details,
+                    "outcome": "failed",
+                    "error": type(exc).__name__,
+                    "removed": before - after if before is not None and after is not None else None,
+                },
+                request=request,
+            )
+        raise
     finally:
-        store.close()
+        await asyncio.to_thread(store.close)
+    # A purge deletes the operator's accumulated cases, so it leaves a row
+    # (a dry run deletes nothing and leaves none).
+    if not answer.dry_run:
+        await audit.record(
+            "ltm.purge",
+            resource_type="memory",
+            user_id=admin.id,
+            details={**details, "outcome": "completed", "removed": answer.removed},
+            request=request,
+        )
+    return answer
+
+
+async def _count_of(store: MemoryStore) -> int | None:
+    """How many cases the store holds, or ``None`` when it cannot say."""
+    try:
+        return int(await asyncio.to_thread(store.count))
+    except Exception:  # noqa: BLE001 - a count for the audit row is best effort
+        return None
 
 
 def _purge(store: MemoryStore, body: LTMPurgeRequest, admin: User) -> LTMPurgeResponse:

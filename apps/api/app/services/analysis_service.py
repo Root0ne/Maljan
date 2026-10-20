@@ -83,6 +83,24 @@ class AnalysisService:
         if not sample:
             raise ValueError(f"Sample {sample_id} not found or access denied")
 
+        # A job that names a sandbox report takes the row's lock first, the
+        # lock a delete of that report holds, so the report cannot be removed
+        # between this check and the job row that names it.
+        report_id = (config or {}).get("sandbox_report_id")
+        if report_id:
+            from app.models.sandbox_report import SandboxReportRow
+
+            locked = await self.db.execute(
+                select(SandboxReportRow.id)
+                .where(
+                    SandboxReportRow.id == uuid.UUID(str(report_id)),
+                    SandboxReportRow.sample_id == sample_id,
+                )
+                .with_for_update()
+            )
+            if locked.scalar_one_or_none() is None:
+                raise ValueError("Sandbox report not found for this sample")
+
         # Create job record
         job = AnalysisJob(
             sample_id=sample_id,
@@ -118,7 +136,9 @@ class AnalysisService:
             await _enqueue_analysis(arq, job.id)
         except Exception as exc:
             job.status = "failed"
-            job.error_message = f"Failed to enqueue job: {exc}"
+            # The class, not the text: the message is served back to the owner,
+            # and a Redis error quotes the address it dialled.
+            job.error_message = f"Failed to enqueue job: {type(exc).__name__}"
             job.completed_at = datetime.now(UTC)
             await self.db.commit()
             raise JobEnqueueError(str(exc)) from exc
