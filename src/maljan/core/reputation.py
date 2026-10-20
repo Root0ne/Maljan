@@ -32,6 +32,7 @@ the judge holds.
 from __future__ import annotations
 
 import json
+import math
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -173,6 +174,8 @@ def _moment(value: Any) -> str | None:
         return value.strip() or None
     whole = _whole(value)
     if whole is None and isinstance(value, float) and not isinstance(value, bool):
+        if not math.isfinite(value):
+            return None
         whole = int(value)
     if whole is None or whole <= 0:
         return None

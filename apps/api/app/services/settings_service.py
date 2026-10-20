@@ -41,6 +41,7 @@ from maljan.core.settings_overrides import (
     settings_from_store,
     shipped_tool_facts,
     split_key,
+    unknown_reference_refusals,
 )
 from pydantic import ValidationError
 from sqlalchemy import select
@@ -1023,6 +1024,8 @@ class SettingsService:
             stored_core = {split_key(k)[1]: v for k, v in current.items() if k.startswith("core.")}
             for key, message in pack_step_refusals(core, stored_core).items():
                 errors.setdefault(key, message)
+            for key, message in unknown_reference_refusals(core, stored_core).items():
+                errors.setdefault(key, message)
         except Exception:  # noqa: BLE001 — the refusal stands on its own
             pass
         return SettingsValidationError(errors)
@@ -1253,6 +1256,7 @@ class SettingsService:
         stored_core = {split_key(k)[1]: v for k, v in current.items() if k.startswith("core.")}
         for more in (
             pack_step_refusals(core, stored_core),
+            unknown_reference_refusals(core, stored_core),
             changed_declaration_refusals(changes, current),
             # A plugin this save drops from the allow-list may not stay the
             # provider a setting selects, as a removed agent may not stay bound.

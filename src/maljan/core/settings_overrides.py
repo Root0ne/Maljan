@@ -299,6 +299,82 @@ def pack_steps_left_out(core_overrides: Mapping[str, Any]) -> dict[str, str]:
     return {name: "; ".join(reasons) for name, reasons in out.items()}
 
 
+UNKNOWN_KEY_MAPS: tuple[str, ...] = (
+    "llm.agents",
+    "react_agent_timeout_overrides",
+    "react_agent_max_steps_overrides",
+)
+DEFINITIONS_PATH = "agents.definitions"
+
+
+def unknown_reference_refusals(
+    merged: Mapping[str, Any], current: Mapping[str, Any]
+) -> dict[str, str]:
+    """The refusal of a save that brings a reference to nothing the settings hold.
+
+    ``merged`` and ``current`` are core overrides (no ``core.`` prefix) after
+    and before the save. Refused: a key of ``llm.agents`` or of a
+    ``react_agent_*_overrides`` map that names no agent definition and no
+    model-calling role (nothing would read it), and a ``capability`` tool
+    reference no server declares a tool of (it would resolve to no server).
+    Each is named, with what is available. What is already stored, sent back
+    as stored, is never refused, so stored settings stay readable and no
+    unrelated save is blocked; where the merged values do not build, the model
+    refuses them itself.
+    """
+    from pydantic import ValidationError
+
+    from maljan.agents.composition import servers_of_capability
+    from maljan.core.config import ROLE_ENTRY_KEYS
+
+    try:
+        built = build_settings(merged)
+    except ValidationError:
+        return {}
+    roster = {*built.agents.definitions, *ROLE_ENTRY_KEYS}
+    available = ", ".join(sorted(roster))
+    refused: dict[str, str] = {}
+    for path in UNKNOWN_KEY_MAPS:
+        held = merged.get(path)
+        stored = current.get(path)
+        stored_keys = set(stored) if isinstance(stored, Mapping) else set()
+        unknown = [
+            str(key)
+            for key in (held if isinstance(held, Mapping) else {})
+            if key not in roster and key not in stored_keys
+        ]
+        if unknown:
+            refused[f"{CORE_NS}.{path}"] = (
+                f"{', '.join(unknown)}: names no agent, so nothing would read it. "
+                f"Available: {available}"
+            )
+    stored_defs = current.get(DEFINITIONS_PATH)
+    stored_defs = stored_defs if isinstance(stored_defs, Mapping) else {}
+    problems: list[str] = []
+    for key, definition in built.agents.definitions.items():
+        stored_refs = stored_defs.get(key)
+        stored_refs = stored_refs.get("tools") if isinstance(stored_refs, Mapping) else None
+        stored_caps = {
+            ref.get("capability")
+            for ref in (stored_refs if isinstance(stored_refs, list) else [])
+            if isinstance(ref, Mapping)
+        }
+        for ref in definition.tools:
+            capability = str(ref.capability)
+            if (
+                ref.kind == "capability"
+                and capability not in stored_caps
+                and not servers_of_capability(built.mcp.servers, capability)
+            ):
+                problems.append(
+                    f"{key!r} references capability {capability!r}, which no tool server "
+                    "declares a tool of, so it would resolve to no server"
+                )
+    if problems:
+        refused[f"{CORE_NS}.{DEFINITIONS_PATH}"] = "; ".join(problems)
+    return refused
+
+
 def pack_step_refusals(merged: Mapping[str, Any], current: Mapping[str, Any]) -> dict[str, str]:
     """The strict refusal of a save that brings a pack step item the settings leave out.
 
