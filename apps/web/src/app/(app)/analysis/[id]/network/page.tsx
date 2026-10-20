@@ -7,7 +7,7 @@ import Th from "@/components/ui/Th";
 import { ArtifactSections } from "@/components/analysis/ArtifactTable";
 import { isCoveredBySection, sectionsForTab } from "@/components/analysis/reportSections";
 import { endpointReputation } from "@/components/analysis/reputation";
-import { domainFacts, ipFacts } from "@/components/analysis/networkFacts";
+import { domainFacts, endpointCounts, ipFacts } from "@/components/analysis/networkFacts";
 import type { NetworkDomain, NetworkIP } from "@/types/malware-report";
 
 export default function NetworkTab() {
@@ -40,6 +40,7 @@ export default function NetworkTab() {
   const showsObservedTraffic = !isCoveredBySection(reportSections, ["sandbox_network"]);
   const showsStaticIocs =
     staticIocs.length > 0 && !isCoveredBySection(reportSections, ["iocs"]);
+  const endpoints = endpointCounts(net, staticIocs);
   if (!net && staticIocs.length === 0 && evidenceSections.length === 0) {
     return (
       <div className="p-8 text-center text-sm text-text-secondary">
@@ -54,10 +55,7 @@ export default function NetworkTab() {
       <ArtifactSections sections={evidenceSections} />
 
       <div className="text-xs text-text-muted">
-        {(net?.domains.length ?? 0) + staticIocs.filter((s) => s.kind === "domain").length}{" "}
-        domain(s) · {(net?.ips.length ?? 0) + staticIocs.filter((s) => s.kind === "ip").length}{" "}
-        IP(s) · {(net?.urls.length ?? 0) + staticIocs.filter((s) => s.kind === "url").length}{" "}
-        URL(s)
+        {endpoints.domains} domain(s) · {endpoints.ips} IP(s) · {endpoints.urls} URL(s)
         {staticIocs.length > 0 && (
           <span className="ml-1 text-text-tertiary">
             ({staticIocs.length} from static strings)

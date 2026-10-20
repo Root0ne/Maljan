@@ -310,7 +310,7 @@ export default function AnalysisLayout({
    * behind it, so one the run never filled is absent rather than present and
    * apologetic — and while the job is still running only the three that can
    * answer anything are offered. */
-  const tabs = useMemo(() => tabsFor(report), [report]);
+  const tabs = useMemo(() => tabsFor(report, job?.roster), [report, job?.roster]);
 
   /* The H1 should identify the sample, not restate the verdict (the verdict
    * badge already shows it). Prefer the original filename from the rich

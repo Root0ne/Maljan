@@ -9,6 +9,7 @@ import { ROWS_PER_STEP, visibleRows } from "@/lib/pagedRows";
 import type { ApiKeyDTO, ApiKeyCreateDTO } from "@/lib/api";
 import { getErrorMessage } from "@/lib/errors";
 import { formatDateTime } from "@/lib/report-utils";
+import { apiKeyState, lastUsedText } from "./keyState";
 
 export default function SettingsApiKeysPage() {
   const [apiKeys, setApiKeys] = useState<ApiKeyDTO[]>([]);
@@ -241,13 +242,23 @@ export default function SettingsApiKeysPage() {
                     <span className="text-sm font-medium text-text-primary">{key.name}</span>
                     <span
                       className={`inline-flex items-center gap-1 px-1.5 py-0.5 text-xs rounded ${
-                        key.is_active
+                        apiKeyState(key) === "active"
                           ? "bg-status-green/10 text-status-green"
+                          : apiKeyState(key) === "expired"
+                          ? "bg-status-orange/10 text-status-orange"
                           : "bg-status-red/10 text-status-red"
                       }`}
                     >
-                      <span className={`w-1.5 h-1.5 rounded-full ${key.is_active ? "bg-status-green" : "bg-status-red"}`} />
-                      {key.is_active ? "Active" : "Revoked"}
+                      <span
+                        className={`w-1.5 h-1.5 rounded-full ${
+                          apiKeyState(key) === "active"
+                            ? "bg-status-green"
+                            : apiKeyState(key) === "expired"
+                            ? "bg-status-orange"
+                            : "bg-status-red"
+                        }`}
+                      />
+                      {apiKeyState(key) === "active" ? "Active" : apiKeyState(key) === "expired" ? "Expired" : "Revoked"}
                     </span>
                   </div>
                   <div className="flex items-center gap-2 mt-1">
@@ -256,8 +267,11 @@ export default function SettingsApiKeysPage() {
                     </span>
                     <span className="text-xs text-text-muted">Created {formatDateTime(key.created_at)}</span>
                     {key.expires_at && (
-                      <span className="text-xs text-status-orange">Expires {formatDateTime(key.expires_at)}</span>
+                      <span className="text-xs text-status-orange">
+                        {apiKeyState(key) === "expired" ? "Expired" : "Expires"} {formatDateTime(key.expires_at)}
+                      </span>
                     )}
+                    <span className="text-xs text-text-muted">{lastUsedText(key.last_used_at, formatDateTime)}</span>
                   </div>
                 </div>
                 <div className="flex gap-2 ml-4 shrink-0">

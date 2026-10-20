@@ -305,8 +305,12 @@ describe("a section the API placed", () => {
     expect(unrenderedSections([custom], {})).toEqual([custom]);
   });
 
-  it("never moves a section its key already places", () => {
-    expect(tabOfSection("pe_imports", { pe_imports: "dynamic" })).toBe("static");
+  it("never moves a section its key names outright", () => {
+    expect(tabOfSection("strings", { strings: "dynamic" })).toBe("static");
+  });
+
+  it("moves a section only the shape of its key placed (WB-L2)", () => {
+    expect(tabOfSection("pe_imports", { pe_imports: "dynamic" })).toBe("dynamic");
   });
 
   it("ignores a placement naming a tab that draws no sections", () => {

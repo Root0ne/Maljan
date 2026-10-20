@@ -1,5 +1,6 @@
 "use client";
 
+import { verdictSlices } from "./verdictSlices";
 import { getErrorMessage } from "@/lib/errors";
 import { useEffect, useState } from "react";
 import Link from "next/link";
@@ -30,6 +31,8 @@ interface DisplayStats {
   malicious_count: number;
   suspicious_count: number;
   benign_count: number;
+  /** Every verdict bucket, Unknown included, for the chart. */
+  verdict_slices: ReturnType<typeof verdictSlices>;
   avg_duration_seconds: number;
 }
 
@@ -98,6 +101,7 @@ function mapApiStats(s: DashboardStatsDTO): DisplayStats {
     malicious_count: verdictLookup["malicious"] || 0,
     suspicious_count: verdictLookup["suspicious"] || 0,
     benign_count: verdictLookup["benign"] || 0,
+    verdict_slices: verdictSlices(byVerdict),
     avg_duration_seconds: s.avg_duration_seconds || 0,
   };
 }
@@ -179,13 +183,7 @@ export default function DashboardPage() {
     );
   }
 
-  const verdictData = stats
-    ? [
-        { name: "Malicious", value: stats.malicious_count },
-        { name: "Suspicious", value: stats.suspicious_count },
-        { name: "Benign", value: stats.benign_count },
-      ].filter((d) => d.value > 0)
-    : [];
+  const verdictData = stats ? stats.verdict_slices : [];
 
   const verdictColors = verdictData.map((d) => verdictTone(d.name).fill);
 

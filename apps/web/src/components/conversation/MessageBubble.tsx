@@ -168,7 +168,9 @@ export default function MessageBubble({
                       `bg-bg-elevated`, where tertiary is 4.10:1. */}
                   <span className="text-text-secondary">
                     {claim.technique_id ? `${claim.technique_id} · ` : ""}
-                    {Math.round(claim.confidence * 100)}%
+                    {claim.confidence === null
+                      ? "no confidence stated"
+                      : `${Math.round(claim.confidence * 100)}%`}
                   </span>
                 </li>
               ))}

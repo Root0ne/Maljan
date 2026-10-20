@@ -7,7 +7,7 @@ import type {
   MalwareReport,
   RunSummary,
 } from "@/types/malware-report";
-import { ApiError, getErrorMessage, parseRetryAfter } from "@/lib/errors";
+import { ApiError, detailMessage, getErrorMessage, parseRetryAfter } from "@/lib/errors";
 import type { ProfileUpdateBody, ProfileUpdateResponse } from "@/lib/profileUpdate";
 import { withRefreshLock } from "@/lib/refreshLock";
 import { refreshAccessToken } from "@/lib/refreshRequest";
@@ -31,7 +31,7 @@ import type {
   TeamLintResult,
 } from "@/types/settings";
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000";
+import { API_BASE } from "@/lib/apiBase";
 
 /** Whether the API refused the credential: a 401, or the 403 the backend
  *  answers a missing one with. */
@@ -481,7 +481,7 @@ class ApiClient {
     if (!res.ok) {
       const body = await res.json().catch(() => ({}));
       throw new ApiError(
-        body.detail || `Request failed: ${res.status}`,
+        detailMessage(body, `Request failed: ${res.status}`),
         res.status,
         parseRetryAfter(res.headers.get("Retry-After"))
       );
@@ -526,11 +526,11 @@ class ApiClient {
         detail?: string;
       };
       if (body.errors) throw new SettingsConflictError(body.errors);
-      throw new ApiError(body.detail || `Request failed: ${res.status}`, res.status);
+      throw new ApiError(detailMessage(body, `Request failed: ${res.status}`), res.status);
     }
     if (!res.ok) {
       const body = await res.json().catch(() => ({}));
-      throw new ApiError(body.detail || `Request failed: ${res.status}`, res.status);
+      throw new ApiError(detailMessage(body, `Request failed: ${res.status}`), res.status);
     }
     return res;
   }
@@ -558,7 +558,7 @@ class ApiClient {
 
     if (!res.ok) {
       const body = await res.json().catch(() => ({}));
-      throw new ApiError(body.detail || `Request failed: ${res.status}`, res.status);
+      throw new ApiError(detailMessage(body, `Request failed: ${res.status}`), res.status);
     }
 
     return res.text();
@@ -590,7 +590,7 @@ class ApiClient {
       // The error body is JSON even though the success body is not, so it has
       // to be read as JSON here rather than reusing the blob.
       const body = await res.json().catch(() => ({}));
-      throw new ApiError(body.detail || `Request failed: ${res.status}`, res.status);
+      throw new ApiError(detailMessage(body, `Request failed: ${res.status}`), res.status);
     }
 
     return res.blob();
@@ -615,7 +615,7 @@ class ApiClient {
 
     if (!res.ok) {
       const body = await res.json().catch(() => ({}));
-      throw new ApiError(body.detail || `Upload failed: ${res.status}`, res.status);
+      throw new ApiError(detailMessage(body, `Upload failed: ${res.status}`), res.status);
     }
     return res.json();
   }
@@ -803,7 +803,7 @@ class ApiClient {
   }
 
   testSettingsProbe(probe: string, values: Record<string, unknown>) {
-    return this.request<ProbeResult>(`/api/v1/settings/test/${probe}`, {
+    return this.request<ProbeResult>(`/api/v1/settings/test/${encodeURIComponent(probe)}`, {
       method: "POST",
       body: JSON.stringify({ values }),
     });
@@ -931,7 +931,7 @@ class ApiClient {
   }
 
   getSample(sampleId: string) {
-    return this.request<SampleDTO>(`/api/v1/samples/${sampleId}`);
+    return this.request<SampleDTO>(`/api/v1/samples/${encodeURIComponent(sampleId)}`);
   }
 
   uploadSample(file: File) {
@@ -966,7 +966,7 @@ class ApiClient {
   }
 
   async getJob(jobId: string) {
-    const data = await this.request<JobDTO>(`/api/v1/jobs/${jobId}`);
+    const data = await this.request<JobDTO>(`/api/v1/jobs/${encodeURIComponent(jobId)}`);
     assertShape("getJob", data, _JOB_SCHEMA);
     return data;
   }
@@ -984,7 +984,7 @@ class ApiClient {
 
   cancelJob(jobId: string) {
     return this.request<void>(
-      `/api/v1/jobs/${jobId}`,
+      `/api/v1/jobs/${encodeURIComponent(jobId)}`,
       { method: "DELETE" }
     );
   }
@@ -994,21 +994,21 @@ class ApiClient {
     const fd = new FormData();
     fd.append("file", file);
     return this.uploadRequest<SandboxReportDTO>(
-      `/api/v1/samples/${sampleId}/sandbox-reports`,
+      `/api/v1/samples/${encodeURIComponent(sampleId)}/sandbox-reports`,
       fd
     );
   }
 
   getSandboxReports(sampleId: string) {
     return this.request<{ items: SandboxReportDTO[]; total: number }>(
-      `/api/v1/samples/${sampleId}/sandbox-reports`
+      `/api/v1/samples/${encodeURIComponent(sampleId)}/sandbox-reports`
     );
   }
 
   /** An unread upload with its proposed declaration, read again from the stored report. */
   getSandboxReportProposal(sampleId: string, reportId: string) {
     return this.request<SandboxReportDTO>(
-      `/api/v1/samples/${sampleId}/sandbox-reports/${reportId}/proposal`
+      `/api/v1/samples/${encodeURIComponent(sampleId)}/sandbox-reports/${encodeURIComponent(reportId)}/proposal`
     );
   }
 
@@ -1026,7 +1026,7 @@ class ApiClient {
 
   deleteSandboxReport(sampleId: string, reportId: string) {
     return this.request<void>(
-      `/api/v1/samples/${sampleId}/sandbox-reports/${reportId}`,
+      `/api/v1/samples/${encodeURIComponent(sampleId)}/sandbox-reports/${encodeURIComponent(reportId)}`,
       { method: "DELETE" }
     );
   }
@@ -1054,7 +1054,7 @@ class ApiClient {
         stream_id?: string;
       }>;
       count: number;
-    }>(`/api/v1/jobs/${jobId}/events?${params.toString()}`);
+    }>(`/api/v1/jobs/${encodeURIComponent(jobId)}/events?${params.toString()}`);
   }
 
   /**
@@ -1078,7 +1078,7 @@ class ApiClient {
     }
     if (!res.ok) {
       const body = await res.json().catch(() => ({}));
-      throw new ApiError(body.detail || `Request failed: ${res.status}`, res.status);
+      throw new ApiError(detailMessage(body, `Request failed: ${res.status}`), res.status);
     }
     const length = Number(res.headers.get("Content-Length"));
     return {
@@ -1099,7 +1099,7 @@ class ApiClient {
     if (query.tool) params.set("tool", query.tool);
     if (query.stage) params.set("stage", query.stage);
     return this.request<EvidenceListResponse>(
-      `/api/v1/jobs/${jobId}/evidence?${params}`
+      `/api/v1/jobs/${encodeURIComponent(jobId)}/evidence?${params}`
     );
   }
 
@@ -1108,7 +1108,7 @@ class ApiClient {
    * zero call sites and were removed. The pages reach a report through its
    * job id. */
   getReportByJobId(jobId: string) {
-    return this.request<ReportDetailDTO>(`/api/v1/reports/job/${jobId}`);
+    return this.request<ReportDetailDTO>(`/api/v1/reports/job/${encodeURIComponent(jobId)}`);
   }
 
   /** What changed between two stored runs, both named by their job id.
@@ -1120,13 +1120,13 @@ class ApiClient {
 
   getReportTimeline(reportId: string) {
     return this.request<Record<string, unknown>>(
-      `/api/v1/reports/${reportId}/timeline`
+      `/api/v1/reports/${encodeURIComponent(reportId)}/timeline`
     );
   }
 
   getReportStix(reportId: string) {
     return this.request<Record<string, unknown>>(
-      `/api/v1/reports/${reportId}/stix`
+      `/api/v1/reports/${encodeURIComponent(reportId)}/stix`
     );
   }
 
@@ -1144,7 +1144,7 @@ class ApiClient {
     include: "published" | "unpublished" | "all" = "all"
   ) {
     const data = await this.request<IOCListResponse>(
-      `/api/v1/reports/${reportId}/iocs?include=${include}`
+      `/api/v1/reports/${encodeURIComponent(reportId)}/iocs?include=${include}`
     );
     for (const row of data?.items ?? []) {
       assertShape("getReportIOCs.item", row, _IOC_ROW_SCHEMA);
@@ -1154,7 +1154,7 @@ class ApiClient {
 
   getReportMitre(reportId: string) {
     return this.request<{ techniques: unknown[] }>(
-      `/api/v1/reports/${reportId}/mitre`
+      `/api/v1/reports/${encodeURIComponent(reportId)}/mitre`
     );
   }
 
@@ -1166,26 +1166,26 @@ class ApiClient {
   }
 
   getReportMarkdown(reportId: string) {
-    return this.textRequest(`/api/v1/reports/${reportId}/markdown`);
+    return this.textRequest(`/api/v1/reports/${encodeURIComponent(reportId)}/markdown`);
   }
 
   /** Standalone HTML report — inline CSS and SVG figures, no external requests. */
   getReportHtml(reportId: string) {
-    return this.textRequest(`/api/v1/reports/${reportId}/html`);
+    return this.textRequest(`/api/v1/reports/${encodeURIComponent(reportId)}/html`);
   }
 
   /** Print-ready PDF of the same document. 503 when the host lacks WeasyPrint. */
   getReportPdf(reportId: string) {
-    return this.blobRequest(`/api/v1/reports/${reportId}/pdf`);
+    return this.blobRequest(`/api/v1/reports/${encodeURIComponent(reportId)}/pdf`);
   }
 
   getReportSignature(reportId: string, kind: "yara" | "sigma" | "suricata" | "snort") {
-    return this.textRequest(`/api/v1/reports/${reportId}/signatures/${kind}`);
+    return this.textRequest(`/api/v1/reports/${encodeURIComponent(reportId)}/signatures/${encodeURIComponent(kind)}`);
   }
 
   enrichReport(reportId: string) {
     return this.request<EnrichTriggerResponse>(
-      `/api/v1/reports/${reportId}/enrich`,
+      `/api/v1/reports/${encodeURIComponent(reportId)}/enrich`,
       { method: "POST" }
     );
   }
@@ -1224,7 +1224,7 @@ class ApiClient {
 
   revokeApiKey(keyId: string) {
     return this.request<void>(
-      `/api/v1/audit/api-keys/${keyId}`,
+      `/api/v1/audit/api-keys/${encodeURIComponent(keyId)}`,
       { method: "DELETE" }
     );
   }

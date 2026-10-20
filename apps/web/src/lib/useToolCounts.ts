@@ -30,6 +30,8 @@ export interface ToolCounts {
   counts: Record<string, number>;
   /** True when the count is a floor rather than the whole ledger. */
   partial: boolean;
+  /** The ledger could not be read, so there is no count, which is not zero. */
+  unavailable: boolean;
 }
 
 /** A job that has stopped: only then is a silent feed a finished feed. */
@@ -45,6 +47,7 @@ export function useToolCounts(
   const finished = TERMINAL.has(String(jobStatus ?? ""));
   const [fromLedger, setFromLedger] = useState<Record<string, number>>({});
   const [ledgerTotal, setLedgerTotal] = useState(0);
+  const [ledgerFailed, setLedgerFailed] = useState(false);
 
   useEffect(() => {
     if (!jobId || feedHasCalls || !finished) return;
@@ -55,11 +58,15 @@ export function useToolCounts(
         if (cancelled) return;
         setFromLedger(toolCallsByAgent(response.entries));
         setLedgerTotal(response.total);
+        setLedgerFailed(false);
       })
       .catch(() => {
-        // A ledger the browser could not read leaves the count at zero rather
-        // than the view broken.
-        if (!cancelled) setFromLedger({});
+        // A ledger the browser could not read leaves the view intact and the
+        // count unavailable; it is said as that, never as zero tools.
+        if (!cancelled) {
+          setFromLedger({});
+          setLedgerFailed(true);
+        }
       });
     return () => {
       cancelled = true;
@@ -69,5 +76,6 @@ export function useToolCounts(
   return {
     counts: feedHasCalls ? fromFeed : fromLedger,
     partial: !feedHasCalls && ledgerTotal > LEDGER_SAMPLE,
+    unavailable: !feedHasCalls && ledgerFailed,
   };
 }

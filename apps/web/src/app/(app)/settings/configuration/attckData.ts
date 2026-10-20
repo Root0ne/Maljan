@@ -66,6 +66,15 @@ export function lostContactText(failures: number, error: string): string {
   );
 }
 
+/** Why tracking stopped on an answer asking again cannot change (a 4xx other
+ *  than 408/429, or a 404): the update itself may still be running. */
+export function pollStoppedText(reason: string): string {
+  return (
+    `Tracking stopped: the API refused the status request (${reason}), and asking ` +
+    "again will not change that. The update may still be running on the worker."
+  );
+}
+
 export interface StatusRow {
   domain: string;
   label: string;

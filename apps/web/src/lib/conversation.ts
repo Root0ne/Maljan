@@ -25,7 +25,8 @@ import type { JobRoster } from "@/types";
 export interface TranscriptClaim {
   claim: string;
   evidence_ref: string;
-  confidence: number;
+  /** 0..1, or null when the speaker stated none. */
+  confidence: number | null;
   technique_id: string | null;
 }
 
@@ -193,6 +194,22 @@ export interface Conversation {
   textLength: number;
 }
 
+/** What the conversation says when it has nothing to draw. A feed that failed
+ *  to load is not a feed that passed the retention window. */
+export function emptyConversationText(state: {
+  live: boolean;
+  eventCount: number;
+  feedError: string | null;
+}): string {
+  if (state.live) return "Waiting for the first agent to speak.";
+  if (state.eventCount === 0) {
+    return state.feedError
+      ? "The recorded conversation could not be read; see the message above."
+      : "This run kept no conversation. Its feed has passed the retention window.";
+  }
+  return "No message matches the current filters.";
+}
+
 /* ── Normalising ───────────────────────────────────────── */
 
 export function normalizeClaims(value: unknown): TranscriptClaim[] {
@@ -208,7 +225,11 @@ export function normalizeClaims(value: unknown): TranscriptClaim[] {
         evidence_ref: String(
           Array.isArray(c.evidence_ref) ? c.evidence_ref.join("; ") : (c.evidence_ref ?? ""),
         ),
-        confidence: Number(c.confidence ?? 0),
+        // A claim that states no confidence has none; 0 would read as "0%".
+        confidence:
+          c.confidence === undefined || c.confidence === null || !Number.isFinite(Number(c.confidence))
+            ? null
+            : Number(c.confidence),
         technique_id: typeof c.technique_id === "string" ? c.technique_id : null,
       },
     ];

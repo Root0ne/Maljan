@@ -1,8 +1,10 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import type { CatalogEntry, SettingValue } from "@/types/settings";
 import SecretField, { type SecretStatus } from "./SecretField";
+import { readJsonBox, unreadBoxNote } from "./boxReading";
+import { useOptionalSettingsContext } from "./SettingsContext";
 
 const input =
   "w-full bg-bg-deep border border-border rounded px-2 py-1.5 text-sm text-text-primary focus:outline-none focus:border-accent disabled:opacity-50 disabled:cursor-not-allowed";
@@ -291,6 +293,24 @@ function formatJson(p: WidgetProps): string {
 export function JsonWidget(p: WidgetProps) {
   const [text, setText] = useState(() => formatJson(p));
   const [bad, setBad] = useState<string | null>(null);
+  // Text that does not read holds Apply (`unreadInputs`): the staged map keeps
+  // the last value that read, which is not what the box shows.
+  const ctx = useOptionalSettingsContext();
+  const note = ctx?.noteUnreadInput;
+  const hold = useId();
+  useEffect(() => {
+    if (bad === null) note?.(hold, null);
+  }, [bad, hold, note]);
+  useEffect(() => () => note?.(hold, null), [hold, note]);
+  const generation = ctx?.discardGeneration ?? 0;
+  const [seenGeneration, setSeenGeneration] = useState(generation);
+  if (generation !== seenGeneration) {
+    setSeenGeneration(generation);
+    if (bad !== null) {
+      setText(formatJson(p));
+      setBad(null);
+    }
+  }
   const prevStagedRef = useRef(p.staged);
   const prevCurrentValueRef = useRef(p.current?.value);
 
@@ -331,12 +351,14 @@ export function JsonWidget(p: WidgetProps) {
         value={text}
         onChange={(e) => {
           setText(e.target.value);
-          try {
-            p.onChange(JSON.parse(e.target.value));
-            setBad(null);
-          } catch (err) {
-            setBad((err as Error).message);
+          const read = readJsonBox(e.target.value);
+          if ("error" in read) {
+            setBad(read.error);
+            note?.(hold, unreadBoxNote(p.entry.title, read.error));
+            return;
           }
+          p.onChange(read.value);
+          setBad(null);
         }}
       />
       {bad && (

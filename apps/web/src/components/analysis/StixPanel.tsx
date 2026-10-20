@@ -8,7 +8,7 @@ import { getErrorMessage } from "@/lib/errors";
 import { useReport } from "@/app/(app)/analysis/[id]/layout";
 import JsonNode from "@/components/analysis/JsonTree";
 import StixGraphView from "@/components/analysis/StixGraph";
-import { GRAPH_FIRST_LIMIT, bundleObjects } from "@/components/analysis/stixGraph";
+import { GRAPH_FIRST_LIMIT, bundleObjects, graphViewHint, stixFetchNotice } from "@/components/analysis/stixGraph";
 
 type View = "graph" | "table" | "json";
 
@@ -38,9 +38,7 @@ export default function StixPanel() {
           setFetchError(null);
         })
         .catch((err: unknown) =>
-          setFetchError(
-            `Could not fetch the freshly rendered STIX bundle (${getErrorMessage(err)}). Showing the stored copy.`,
-          ),
+          setFetchError(getErrorMessage(err)),
         );
     }
   }, [report?.id]);
@@ -75,6 +73,7 @@ export default function StixPanel() {
               key={v.key}
               type="button"
               aria-pressed={view === v.key}
+              title={v.key === "graph" ? (graphViewHint(objectCount) ?? undefined) : undefined}
               onClick={() => setChosen(v.key)}
               className={`rounded border px-2.5 py-1 text-xs ${
                 view === v.key
@@ -86,6 +85,9 @@ export default function StixPanel() {
             </button>
           ))}
         </div>
+        {graphViewHint(objectCount) && (
+          <span className="text-[11px] text-text-muted">{graphViewHint(objectCount)}</span>
+        )}
         <span className="flex-1" />
         <button
           onClick={async () => {
@@ -115,7 +117,7 @@ export default function StixPanel() {
           role="alert"
           className="mx-4 mt-3 text-xs text-status-red bg-status-red/10 border border-status-red/20 rounded px-2 py-1.5"
         >
-          {actionError ?? fetchError}
+          {actionError ?? (fetchError !== null ? stixFetchNotice(fetchError, Boolean(report?.stix_bundle)) : null)}
         </div>
       )}
       {view === "json" ? (

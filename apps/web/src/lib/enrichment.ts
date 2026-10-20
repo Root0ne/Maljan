@@ -17,3 +17,13 @@ export const ENRICH_STATUS_MESSAGE: Record<EnrichTriggerResponse["status"], stri
   already_queued: "Enrichment is already running for this report.",
   skipped_no_network_iocs: "No network IOCs to enrich.",
 };
+
+/** What the trigger answered, in words. A status this console does not know is
+ *  said as unknown, never promised as "queued". */
+export function enrichMessage(status: string | null | undefined): string {
+  if (status === undefined || status === null || status === "") {
+    return "The API answered the enrichment request with no status; it is not known whether it was queued.";
+  }
+  const known = (ENRICH_STATUS_MESSAGE as Record<string, string | undefined>)[status];
+  return known ?? `The API answered the enrichment request with the status "${status}", which this console does not know.`;
+}

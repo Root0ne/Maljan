@@ -1,6 +1,8 @@
 "use client";
 
 import { probeDetail } from "@/lib/probeDetail";
+import { manifestOutcome } from "./manifestOutcome";
+import { ProbeGenerations } from "./probeGenerations";
 import { useRef, useState } from "react";
 import { Bot } from "lucide-react";
 import { api } from "@/lib/api";
@@ -11,7 +13,7 @@ import ModelOverrideFields from "./ModelOverrideFields";
 import RoleModelDetail from "./RoleModelDetail";
 import { ROLE_ENTRIES, roleEntryChanged, roleKeyError } from "./roleEntries";
 import {
-  BUILTIN_AGENT_KEYS,
+  builtinAgentKeys as builtinKeySet,
   cloneDefinition,
   displayedDefinitions,
   stagedDefinitions,
@@ -193,6 +195,8 @@ export interface AgentResolveApi {
   details: AgentProbeDetails | null;
   /** Tool names each server reported, once "List tools" asked it. */
   manifests: Record<string, string[]>;
+  /** Why a server's tools could not be listed, by server. */
+  manifestErrors: Record<string, string>;
   resolve: (key: string) => Promise<void>;
   loadManifest: (server: string, servers: Record<string, McpServerEntry>) => Promise<void>;
   clearProbe: (key: string) => void;
@@ -208,14 +212,22 @@ export function useAgentResolve(
 ): AgentResolveApi {
   const [probes, setProbes] = useState<Record<string, ProbeResult | "running">>({});
   const [manifests, setManifests] = useState<Record<string, string[]>>({});
+  const [manifestErrors, setManifestErrors] = useState<Record<string, string>>({});
 
-  const clearProbe = (key: string) =>
+  // A probe that lands after an edit to what it read is discarded: the edit
+  // bumps the key's generation, and an answer is kept only under the one it
+  // was asked in.
+  const probeGens = useRef(new ProbeGenerations());
+
+  const clearProbe = (key: string) => {
+    probeGens.current.bump(key);
     setProbes((p) => {
       if (!(key in p)) return p;
       const n = { ...p };
       delete n[key];
       return n;
     });
+  };
 
   const noteEdit = (key: string, next: Partial<AgentDefinitionEntry>) => {
     if (Object.keys(next).some((k) => RESOLVE_INPUTS.has(k as keyof AgentDefinitionEntry))) {
@@ -224,31 +236,46 @@ export function useAgentResolve(
   };
 
   const resolve = async (key: string) => {
+    const taken = probeGens.current.take(key);
+    const keep = (answer: ProbeResult) => {
+      if (!probeGens.current.isCurrent(key, taken)) return;
+      setProbes((p) => ({ ...p, [key]: answer }));
+    };
     setProbes((p) => ({ ...p, [key]: "running" }));
     try {
-      const result = await api.probeAgent(key, { "core.agents.definitions": definitions });
-      setProbes((p) => ({ ...p, [key]: result }));
+      keep(await api.probeAgent(key, { "core.agents.definitions": definitions }));
     } catch (e) {
-      setProbes((p) => ({
-        ...p,
-        [key]: {
-          ok: false,
-          latency_ms: 0,
-          detail: getErrorMessage(e),
-          models: null,
-          tools: null,
-          details: null,
-        },
-      }));
+      keep({
+        ok: false,
+        latency_ms: 0,
+        detail: getErrorMessage(e),
+        models: null,
+        tools: null,
+        details: null,
+      });
     }
   };
 
   const loadManifest = async (server: string, servers: Record<string, McpServerEntry>) => {
+    const fail = (error: string) => {
+      setManifests((m) => {
+        const next = { ...m };
+        delete next[server];
+        return next;
+      });
+      setManifestErrors((m) => ({ ...m, [server]: error }));
+    };
     try {
-      const result = await api.testMcpServer(server, { "core.mcp.servers": servers });
-      setManifests((m) => ({ ...m, [server]: result.tools ?? [] }));
-    } catch {
-      setManifests((m) => ({ ...m, [server]: [] }));
+      const outcome = manifestOutcome(await api.testMcpServer(server, { "core.mcp.servers": servers }));
+      if ("error" in outcome) return fail(outcome.error);
+      setManifests((m) => ({ ...m, [server]: outcome.tools }));
+      setManifestErrors((m) => {
+        const next = { ...m };
+        delete next[server];
+        return next;
+      });
+    } catch (e) {
+      fail(getErrorMessage(e));
     }
   };
 
@@ -261,6 +288,7 @@ export function useAgentResolve(
         ? ((result.details as AgentProbeDetails | null) ?? null)
         : null,
     manifests,
+    manifestErrors,
     resolve,
     loadManifest,
     clearProbe,
@@ -342,7 +370,7 @@ export function AgentDetail({
   // Every seeded definition is built in: the settings model refuses an edit to
   // any of them but its `enabled` switch, so none is offered. The served list
   // names all of them; an API older than it leaves the five class built-ins.
-  const locked = BUILTIN_AGENT_KEYS.has(agentKey) || (builtinAgentKeys ?? []).includes(agentKey);
+  const locked = builtinKeySet(builtinAgentKeys).has(agentKey);
 
   const put = (key: string, next: Partial<AgentDefinitionEntry>) => {
     resolve.noteEdit(key, next);
@@ -932,6 +960,11 @@ export function AgentDetail({
                       ))}
                     </ul>
                   )}
+                  {resolve.manifestErrors[server] !== undefined && (
+                    <p className="ml-4 text-[11px] text-status-red" role="alert">
+                      List tools failed: {resolve.manifestErrors[server]}
+                    </p>
+                  )}
                   {listed && listed.length === 0 && (
                     <p className="ml-4 text-[11px] text-text-muted">
                       this server reported no tools
@@ -1021,9 +1054,10 @@ export default function AgentDefinitionsEditor({
   /* What the editor draws is the stored map with the staged edits over it, not
    * the staged map itself: a built-in is staged as its role and its switch
    * alone (see `agentStaging`), which is not enough to draw a row with. */
-  const value = displayedDefinitions(staged as StagedDefinitionMap | null, savedDefs);
+  const builtins = builtinKeySet(entry.builtin_agent_keys);
+  const value = displayedDefinitions(staged as StagedDefinitionMap | null, savedDefs, builtins);
   const stage = (next: Record<string, AgentDefinitionEntry>) =>
-    onChange(stagedDefinitions(next, savedDefs));
+    onChange(stagedDefinitions(next, savedDefs, builtins));
   const llmAgents = (llmAgentsStaged ?? llmAgentsCurrent?.value ?? {}) as Record<
     string,
     AgentLLMOverride
@@ -1138,8 +1172,7 @@ export default function AgentDefinitionsEditor({
                     <span className="font-mono">{agentKeySuffix(key, value)}</span>
                   )}
                   {item.role !== key && <span>{item.role}</span>}
-                  {(BUILTIN_AGENT_KEYS.has(key) ||
-                    (entry.builtin_agent_keys ?? []).includes(key)) && <span>built in</span>}
+                  {builtins.has(key) && <span>built in</span>}
                   {verdict && (
                     <span
                       className={verdict === "ok" ? "text-status-green" : "text-status-red"}

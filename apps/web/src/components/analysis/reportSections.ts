@@ -103,12 +103,22 @@ export type SectionPlacements = Record<string, string> | null | undefined;
 
 /** The tab a section is drawn on: by its key, else where the API placed it. */
 export function tabOfSection(key: string, placed?: SectionPlacements): SectionTab {
-  const byKey = tabOfKey(key);
-  if (byKey !== "other" || !placed) return byKey;
-  const tab = placed[(key ?? "").trim()];
-  return typeof tab === "string" && RENDERED_TABS.has(tab as SectionTab)
-    ? (tab as SectionTab)
-    : "other";
+  // A key the console names outright, or one that carries its tab as a prefix,
+  // is placed by that. A key placed only by the shape of its name (a suffix or
+  // `sandbox_`) is a guess, and what the report declares for it wins; the guess
+  // places only what the report left unplaced (or placed on a tab that draws no
+  // sections).
+  const name = (key ?? "").trim();
+  if (isExactlyPlaced(name)) return tabOfKey(key);
+  const tab = placed?.[name];
+  if (typeof tab === "string" && RENDERED_TABS.has(tab as SectionTab)) return tab as SectionTab;
+  return tabOfKey(key);
+}
+
+function isExactlyPlaced(name: string): boolean {
+  const dot = name.indexOf(".");
+  if (dot > 0 && TABS.has(name.slice(0, dot))) return true;
+  return name in BY_KEY;
 }
 
 function tabOfKey(key: string): SectionTab {

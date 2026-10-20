@@ -3,6 +3,7 @@
 import { Suspense, useState, useRef, useCallback, useEffect } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Upload, X } from "lucide-react";
+import { canStartAnalysis } from "./submitGate";
 import { api } from "@/lib/api";
 import { fetchAllPages } from "@/lib/pages";
 import ShowMoreRows from "@/components/ui/ShowMoreRows";
@@ -180,6 +181,7 @@ function SamplesPageContent() {
   }
 
   async function startAnalysis(sampleId: string) {
+    if (!canStartAnalysis({ submitting, reportUploading })) return;
     setSubmitting(true);
     setSubmitError(null);
     try {
@@ -702,7 +704,7 @@ function SamplesPageContent() {
                 </button>
                 <button
                   type="button"
-                  disabled={submitting}
+                  disabled={!canStartAnalysis({ submitting, reportUploading })}
                   onClick={() => startAnalysis(submitFor.id)}
                   className="px-2.5 py-1 text-xs bg-accent-fill text-white rounded hover:bg-accent-fill-hover disabled:opacity-50"
                 >

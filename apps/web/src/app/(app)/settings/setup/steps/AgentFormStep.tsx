@@ -9,7 +9,7 @@ import {
 } from "../../configuration/AgentDefinitionsEditor";
 import {
   AGENT_DEFINITIONS_KEY as DEFINITIONS_KEY,
-  BUILTIN_AGENT_KEYS,
+  builtinAgentKeys,
   cloneDefinition,
   displayedDefinitions,
   stagedDefinitions,
@@ -74,15 +74,17 @@ export default function AgentFormStep({
    * through the same pair the editor uses, or the two halves of the console
    * disagree about the shape of one leaf and a clone of a built-in reads
    * `tools` off an entry that has none. */
+  const builtins = builtinAgentKeys(entry?.builtin_agent_keys);
   const savedDefinitions = (ctx.values[DEFINITIONS_KEY]?.value ??
     entry?.default ??
     {}) as Record<string, AgentDefinitionEntry>;
   const definitions = displayedDefinitions(
     (ctx.pending[DEFINITIONS_KEY] ?? null) as StagedDefinitionMap | null,
     savedDefinitions,
+    builtins,
   );
   const stageDefinitions = (next: Record<string, AgentDefinitionEntry>) =>
-    ctx.stage(DEFINITIONS_KEY, stagedDefinitions(next, savedDefinitions));
+    ctx.stage(DEFINITIONS_KEY, stagedDefinitions(next, savedDefinitions, builtins));
   const llmAgents = (ctx.pending[LLM_AGENTS_KEY] ??
     ctx.values[LLM_AGENTS_KEY]?.value ??
     {}) as Record<string, AgentLLMOverride>;
@@ -131,8 +133,8 @@ export default function AgentFormStep({
   };
 
   if (agentKey === null) {
-    const builtins = CLONEABLE.filter(
-      (key) => key in definitions && BUILTIN_AGENT_KEYS.has(key)
+    const builtinChoices = CLONEABLE.filter(
+      (key) => key in definitions && builtins.has(key)
     );
     return (
       <fieldset className="border-0 p-0 m-0" data-testid="agent-chooser">
@@ -144,20 +146,20 @@ export default function AgentFormStep({
               name="guide-agent-source"
               value="clone"
               checked={from !== BLANK}
-              onChange={() => setFrom(builtins[0] ?? BLANK)}
-              disabled={builtins.length === 0}
+              onChange={() => setFrom(builtinChoices[0] ?? BLANK)}
+              disabled={builtinChoices.length === 0}
             />
             Clone a built-in
           </label>
           <select
             className={input}
             aria-label="built-in to clone"
-            disabled={builtins.length === 0}
+            disabled={builtinChoices.length === 0}
             value={from === BLANK ? "" : from}
             onChange={(e) => setFrom(e.target.value || BLANK)}
           >
             <option value="">choose a built-in</option>
-            {builtins.map((key) => (
+            {builtinChoices.map((key) => (
               <option key={key} value={key}>
                 {key}
               </option>

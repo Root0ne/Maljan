@@ -1,6 +1,6 @@
 "use client";
 
-import { getErrorMessage } from "@/lib/errors";
+import { getErrorMessage, isForbidden } from "@/lib/errors";
 import { useState, useEffect } from "react";
 import { api } from "@/lib/api";
 import type { AuditLogDTO } from "@/lib/api";
@@ -29,7 +29,7 @@ export default function AuditLogsPage() {
         setLogs(res.items);
         setTotal(res.total);
       } catch (err) {
-        if (getErrorMessage(err)?.includes("403") || getErrorMessage(err)?.toLowerCase().includes("forbidden") || getErrorMessage(err)?.toLowerCase().includes("access denied")) {
+        if (isForbidden(err)) {
           setError("Access denied. Audit logs are restricted to administrators.");
         } else {
           setError(getErrorMessage(err) || "Failed to load audit logs.");

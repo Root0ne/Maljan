@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api } from "@/lib/api";
-import { getErrorMessage } from "@/lib/errors";
+import { getErrorMessage, isForbidden } from "@/lib/errors";
 import { SettingsConflictError, SettingsValidationError } from "@/types/settings";
 import { deepEqual } from "./deepEqual";
 import { keysNeedingPassword, passwordRefusal } from "./signInPolicy";
@@ -100,6 +100,22 @@ export function withoutBaseVersions(
   return next;
 }
 
+/**
+ * The action banner after a reset failed. A lone reset says its message as it
+ * is; one of a run of resets (`accumulate`) is added to what the earlier ones
+ * said, named by key, so a failure is not erased by the next key's attempt.
+ */
+export function mergeResetError(
+  previous: string | null,
+  key: string,
+  message: string,
+  accumulate: boolean,
+): string {
+  if (!accumulate) return message;
+  const line = `${key}: ${message}`;
+  return previous ? `${previous}; ${line}` : line;
+}
+
 /** What the page says when a save is refused over keys changed since it loaded them. */
 export function conflictMessage(keys: string[]): string {
   const one = keys.length === 1;
@@ -148,9 +164,8 @@ export function useSettings() {
       setSchema(s);
       setValues(v.values);
     } catch (e) {
-      const msg = getErrorMessage(e);
-      if (/403|admin/i.test(msg)) setForbidden(true);
-      else setLoadError(msg);
+      if (isForbidden(e)) setForbidden(true);
+      else setLoadError(getErrorMessage(e));
     } finally {
       setLoading(false);
     }
@@ -345,24 +360,31 @@ export function useSettings() {
   // "the schema could not be loaded" but was wrong here: a failed DELETE was
   // tearing down the entire form (search box, rail, every row, any other
   // pending edits) over one row's reset failing.
+  /** `accumulate`: one of a run of resets, which keeps the failures of the
+   *  ones before it and leaves clearing the banner to the caller. Resolves
+   *  `"cancelled"` when the password was declined, so a run can stop. */
   const reset = useCallback(
-    async (key: string) => {
-      setActionError(null);
+    async (key: string, opts: { accumulate?: boolean } = {}): Promise<"done" | "failed" | "cancelled"> => {
+      const accumulate = opts.accumulate === true;
+      if (!accumulate) setActionError(null);
       let password: string | undefined;
       const policy = storedPolicyKeys([key]);
       if (policy.length > 0) {
         const answer = await askPassword(policy);
-        if (answer === null) return;
+        if (answer === null) return "cancelled";
         password = answer;
       }
       try {
         await api.resetSetting(key, password);
         unstage(key);
         await reload();
+        return "done";
       } catch (e) {
         const refusal =
           e instanceof SettingsValidationError ? passwordRefusal(e.errors) : null;
-        setActionError(refusal ?? getErrorMessage(e));
+        const message = refusal ?? getErrorMessage(e);
+        setActionError((prev) => mergeResetError(prev, key, message, accumulate));
+        return "failed";
       }
     },
     [reload, unstage, storedPolicyKeys, askPassword]

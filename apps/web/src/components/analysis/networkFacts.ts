@@ -64,3 +64,24 @@ export function ipFacts(ip: NetworkIP): string[] {
   }
   return [...lines, ...listedBy(ip)];
 }
+
+/**
+ * How many distinct domains, addresses and URLs a run names, from the network
+ * block and the sample's own strings together. A value both sources carry is
+ * one endpoint, so it is counted once (names compare without case).
+ */
+export function endpointCounts(
+  net: { domains: { fqdn: string }[]; ips: { address: string }[]; urls: { url: string }[] } | null | undefined,
+  strings: { kind: string; value: string }[] | null | undefined,
+): { domains: number; ips: number; urls: number } {
+  const key = (value: string) => String(value ?? "").trim().toLowerCase();
+  const domains = new Set((net?.domains ?? []).map((d) => key(d.fqdn)));
+  const ips = new Set((net?.ips ?? []).map((i) => key(i.address)));
+  const urls = new Set((net?.urls ?? []).map((u) => String(u.url ?? "").trim()));
+  for (const s of strings ?? []) {
+    if (s.kind === "domain") domains.add(key(s.value));
+    else if (s.kind === "ip") ips.add(key(s.value));
+    else if (s.kind === "url") urls.add(String(s.value ?? "").trim());
+  }
+  return { domains: domains.size, ips: ips.size, urls: urls.size };
+}

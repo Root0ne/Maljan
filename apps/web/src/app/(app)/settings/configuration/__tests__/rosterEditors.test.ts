@@ -37,6 +37,7 @@ const resolve: AgentResolveApi = {
   result: undefined,
   details: null,
   manifests: {},
+  manifestErrors: {},
   resolve: idle,
   loadManifest: idle,
   clearProbe: () => undefined,

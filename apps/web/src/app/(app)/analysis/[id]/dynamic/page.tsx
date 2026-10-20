@@ -73,7 +73,7 @@ export default function DynamicTab() {
   const absent = reportAbsence({ report, job, reportError });
   if (absent) return <ReportAbsent absence={absent} />;
 
-  const analystFindings = dynamicAnalystClaims(report?.agent_findings);
+  const analystFindings = dynamicAnalystClaims(report?.agent_findings, job?.roster);
   const dyn = report?.malware_report?.dynamic;
   // The registry exists on Windows and nowhere else, and an empty "Registry
   // Modifications" panel on a Linux, macOS or Android sample reads as a

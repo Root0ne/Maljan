@@ -2,12 +2,14 @@
 
 import { useCallback, useEffect, useRef, useState, type RefObject } from "react";
 import { api } from "@/lib/api";
+import { pollFailure } from "@/app/(app)/analysis/[id]/polling";
 import type { AttckCheckResult, AttckStatus, AttckUpdateResult } from "@/types/settings";
 import {
   UPDATE_POLL_MS,
   lastCheckLine,
   lastUpdateLine,
   lostContactText,
+  pollStoppedText,
   nextCheckSentence,
   readCheck,
   shouldRefetch,
@@ -317,7 +319,15 @@ export default function AttckDataPanel({ savedInterval }: { savedInterval?: unkn
         try {
           progress = await api.getAttckUpdate(job_id);
         } catch (e) {
-          // A failed poll is not a failed update: keep asking, and say so.
+          // A refusal asking again cannot change ends the tracking, and says
+          // so; any other failed poll is not a failed update: keep asking.
+          const failure = pollFailure(e);
+          if (failure.kind !== "retry") {
+            setUpdateError(
+              pollStoppedText(failure.kind === "stop" ? failure.message : "the update was not found"),
+            );
+            break;
+          }
           failures += 1;
           setPollTrouble(lostContactText(failures, message(e)));
           continue;

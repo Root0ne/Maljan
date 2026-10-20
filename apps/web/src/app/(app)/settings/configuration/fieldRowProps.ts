@@ -2,6 +2,7 @@ import type { CatalogEntry, McpServerEntry } from "@/types/settings";
 import type { AgentLLMOverride } from "./AgentDefinitionsEditor";
 import {
   AGENT_DEFINITIONS_KEY,
+  builtinAgentKeys,
   displayedDefinitions,
   type DefinitionMap,
   type StagedDefinitionMap,
@@ -16,6 +17,7 @@ export function liveDefinitions(ctx: SettingsContextValue): DefinitionMap {
   return displayedDefinitions(
     (ctx.pending[AGENT_DEFINITIONS_KEY] ?? null) as StagedDefinitionMap | null,
     (ctx.values[AGENT_DEFINITIONS_KEY]?.value ?? {}) as DefinitionMap,
+    builtinAgentKeys(ctx.entriesByKey[AGENT_DEFINITIONS_KEY]?.builtin_agent_keys),
   );
 }
 

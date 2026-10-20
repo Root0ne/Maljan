@@ -25,6 +25,7 @@ import { hasMappedTechniques } from "./capabilityHeatmap";
 import { sectionsForTab } from "./reportSections";
 import { hasRuleMatches } from "./ruleMatches";
 import { dynamicAnalystClaims } from "./dynamicClaims";
+import type { JobRoster } from "@/types";
 import type { MalwareReport } from "@/types/malware-report";
 
 export type TabGroup = "overview" | "analysis" | "intel" | "advanced";
@@ -110,7 +111,11 @@ export function attributionSaysSomething(mr: MalwareReport | null | undefined): 
  * rule, and each is a sentence about what the run produced rather than about
  * what the console can render.
  */
-export function tabHasContent(key: string, report: ReportDetailDTO | null): boolean {
+export function tabHasContent(
+  key: string,
+  report: ReportDetailDTO | null,
+  roster?: JobRoster | null,
+): boolean {
   if (ALWAYS.has(key)) return true;
   if (!report) return false;
 
@@ -134,7 +139,7 @@ export function tabHasContent(key: string, report: ReportDetailDTO | null): bool
         sectionsForTab(sections, "dynamic", placed).length > 0 ||
         // The same reading the tab draws from, so the tab and its rule cannot
         // disagree about whether the analyst concluded anything.
-        dynamicAnalystClaims(report.agent_findings).length > 0
+        dynamicAnalystClaims(report.agent_findings, roster).length > 0
       );
     case "/network":
       // A capture or a sandbox network channel, and the endpoints carved out
@@ -188,6 +193,6 @@ export function tabHasContent(key: string, report: ReportDetailDTO | null): bool
 }
 
 /** The tabs this run offers, in the declared order. */
-export function tabsFor(report: ReportDetailDTO | null): TabDef[] {
-  return TABS.filter((tab) => tabHasContent(tab.key, report));
+export function tabsFor(report: ReportDetailDTO | null, roster?: JobRoster | null): TabDef[] {
+  return TABS.filter((tab) => tabHasContent(tab.key, report, roster));
 }
