@@ -398,3 +398,49 @@ class TestASummaryStoredInTheFlatShape:
         row = {"asserted_by": ["capa"], "claimed_by": ["static"]}
         summary = dataclasses.replace(_make_builder().build(), corroboration={"T1055": row})
         assert summary.corroboration == {"T1055": row}
+
+
+# ---------------------------------------------------------------------------
+# Sycophancy events are the platform's flags, never words in a finding
+# ---------------------------------------------------------------------------
+
+
+class TestSycophancyEventsAreThePlatformsFlags:
+    """A round counts when the platform flagged it, never when a finding names the word."""
+
+    @staticmethod
+    def _mediation(finding: str, converged: list[dict] | None = None) -> object:
+        from maljan.core.config import MEDIATOR_AGENT_NAME
+        from maljan.pipeline.state import AgentArgument
+
+        return AgentArgument(
+            agent_name=MEDIATOR_AGENT_NAME,
+            finding=finding,
+            confidence_score=0.8,
+            converged=converged or [],
+        )
+
+    def _events(self, history: list, detected: bool = False) -> int:
+        state = _make_state(sycophancy_detected=detected)
+        state["discussion_history"] = history
+        builder = _make_builder()
+        builder.set_negotiation(state)
+        assert builder._negotiation is not None
+        return builder._negotiation.sycophancy_events
+
+    def test_a_finding_that_says_no_sycophancy_is_no_event(self) -> None:
+        history = [self._mediation("No sycophancy is evident; the analysts agree.")]
+        assert self._events(history) == 0
+
+    def test_each_flagged_round_is_one_event(self) -> None:
+        flag = {"analyst": "static", "towards": "dynamic"}
+        history = [
+            self._mediation("Round one.", [flag]),
+            self._mediation("Round two."),
+            self._mediation("Round three.", [flag, flag]),
+        ]
+        assert self._events(history, detected=True) == 2
+
+    def test_the_last_rounds_flag_counts_when_no_round_recorded_one(self) -> None:
+        history = [self._mediation("Round one."), self._mediation("Round two.")]
+        assert self._events(history, detected=True) == 1

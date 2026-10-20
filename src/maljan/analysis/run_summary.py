@@ -2216,14 +2216,19 @@ class RunSummaryBuilder:
         sycophancy_detected: bool = state.get("sycophancy_detected", False)
         discussion_history = state.get("discussion_history") or []
 
-        sycophancy_events = sum(
-            1
+        # A round counts when the platform flagged it: the convergence flags
+        # its mediation was told (``AgentArgument.converged``), and the latest
+        # round's ``sycophancy_detected`` when its mediation carries none. A
+        # finding's words are the mediator's, never the count: "no sycophancy
+        # is evident" is no event.
+        mediations = [
+            arg
             for arg in discussion_history
             if getattr(arg, "agent_name", "") == MEDIATOR_AGENT_NAME
-            and "sycophancy" in getattr(arg, "finding", "").lower()
-        )
-        if sycophancy_detected and sycophancy_events == 0:
-            sycophancy_events = 1
+        ]
+        sycophancy_events = sum(1 for arg in mediations if getattr(arg, "converged", None))
+        if sycophancy_detected and not (mediations and getattr(mediations[-1], "converged", None)):
+            sycophancy_events += 1
 
         applicable = state.get("consensus_applicable", True) is not False
 

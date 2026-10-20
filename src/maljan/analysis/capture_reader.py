@@ -20,7 +20,8 @@ stopped there.
 A record cut short at the end of the file is read as far as it goes. A cut
 inside a record header or a pcapng block, or a pcapng block whose trailing
 length disagrees with its leading one, ends the capture there, and every
-packet before it is still read. A pcapng block that is correctly framed but
+packet before it is still read; ``ReadNotes.framing_end`` says at which byte
+the framing ended and why. A pcapng block that is correctly framed but
 cannot be read (a packet naming an interface no description declared, a fixed
 part shorter than its type requires) is skipped by its length and counted in
 ``ReadNotes``. A file that is not a capture raises ``CaptureFormatError``.
@@ -29,7 +30,9 @@ Decoding walks the headers from the link layer in, as a loop: each header
 names the next one and where it lies, so a frame of any nesting depth costs
 time linear in its length.
 
-- link types: BSD loopback (``DLT_NULL``, ``DLT_LOOP``), Ethernet, raw IP
+- link types: BSD loopback (``DLT_NULL``, ``DLT_LOOP``: the IPv4 family or the
+  IPv6 one of any BSD or Linux, 24, 28, 30 or 10, in either byte order, the
+  header then read by its version nibble), Ethernet, raw IP
   (``DLT_RAW`` in both numberings, ``LINKTYPE_IPV4``, ``LINKTYPE_IPV6``), Linux
   cooked capture v1 and v2; any other link type carries no IP header here;
 - below Ethernet: 802.1Q and 802.1ad tags and PPPoE sessions;
@@ -40,8 +43,9 @@ time linear in its length.
 - ICMP and ICMPv6 errors: the datagram an error quotes is read for a DNS
   question only, never as a packet of its own.
 
-A non-first IP fragment is not read past its IP header, and a header cut short
-ends the walk at the last header that was whole. A record the walk fails on is
+A non-first IP fragment is not read past its IP header, and a header cut short,
+or an IP header whose version is not the one its reader reads, ends the walk
+at the last header that was whole. A record the walk fails on is
 kept with the headers read before the failure, marked ``undecoded``, and the
 next record is read.
 """
@@ -85,6 +89,13 @@ _DLT_LINUX_SLL = 113
 _DLT_IPV4 = 228
 _DLT_IPV6 = (31, 229)
 _DLT_LINUX_SLL2 = 276
+
+# BSD loopback address families: AF_INET (2), and the numbers AF_INET6 has on
+# Linux (10), NetBSD and OpenBSD (24), FreeBSD and DragonFly (28) and Darwin
+# (30). On a BSD 10 is AF_CCITT, not IPv6: a family only says a header may be
+# IP, and the header's own version nibble decides which.
+_AF_INET = 2
+_AF_INET6 = (10, 24, 28, 30)
 
 _ETH_IPV4 = 0x0800
 _ETH_IPV6 = 0x86DD
@@ -172,7 +183,8 @@ class Packet:
     ``dns_qname`` the first DNS question's name (``b"example.com."``). Each is
     ``None`` when the record holds none. When the first question's name is
     longer than DNS allows, ``dns_name_octets_malformed`` is its length and
-    ``dns_qname`` stays ``None``. ``undecoded`` is set when the walk
+    ``dns_qname`` stays ``None``. ``ipv6`` is set when the first IP header
+    walked is an IPv6 one (its addresses are not read). ``undecoded`` is set when the walk
     failed part of the way in; the fields hold what it read before that.
     """
 
@@ -184,6 +196,7 @@ class Packet:
     udp: Datagram | None = None
     dns_qname: bytes | None = None
     dns_name_octets_malformed: int | None = None
+    ipv6: bool = False
     undecoded: bool = False
 
 
@@ -204,14 +217,17 @@ class ReadNotes:
     so its size is bounded by the kinds, never by the blocks. ``byte_cap`` is
     the cap in bytes when a gzip capture's decompressed bytes reached it and
     the read stopped there; ``stream_error`` says where a gzip stream could not
-    be decompressed further. ``packets_undecoded`` counts the records the
-    header walk failed on.
+    be decompressed further. ``framing_end`` says at which byte the capture's
+    framing ended before the file did, and why: a cut inside a record header,
+    a record or a pcapng block, or a block whose lengths disagree.
+    ``packets_undecoded`` counts the records the header walk failed on.
     """
 
     blocks_unreadable: int = 0
     unreadable_reasons: dict[str, dict[str, int | str]] = field(default_factory=dict)
     byte_cap: int | None = None
     stream_error: str | None = None
+    framing_end: str | None = None
     packets_undecoded: int = 0
 
     def unreadable(self, reason: str, first: str) -> None:
@@ -224,7 +240,11 @@ class ReadNotes:
 
 
 class _CaptureEnds(Exception):
-    """The file ends here, whole or cut."""
+    """The capture's framing ends here; ``reason`` says why."""
+
+    def __init__(self, reason: str = "is cut short by the end of the file") -> None:
+        super().__init__(reason)
+        self.reason = reason
 
 
 class _Unreadable(Exception):
@@ -333,7 +353,7 @@ def _within(caplen: int, snaplen: int) -> int:
     return min(caplen, snaplen) if snaplen else caplen
 
 
-def _pcap_records(source: _Source, endian: str, digits: int) -> Iterator[Record]:
+def _pcap_records(source: _Source, endian: str, digits: int, notes: ReadNotes) -> Iterator[Record]:
     header = source.read(20)
     if len(header) < 20:
         raise CaptureFormatError(_NOT_A_CAPTURE)
@@ -342,18 +362,31 @@ def _pcap_records(source: _Source, endian: str, digits: int) -> Iterator[Record]
 
     def walk() -> Iterator[Record]:
         while True:
+            at = source.taken
             head = source.read(16)
             if len(head) < 16:
+                if head and not source.capped:
+                    notes.framing_end = (
+                        f"the file ends inside the record header at byte {at} "
+                        f"({len(head)} of its 16 bytes)"
+                    )
                 return
             seconds, fraction, caplen, _wirelen = struct.unpack(endian + "IIII", head)
             kept = _within(caplen, snaplen)
             data = source.read(kept)
+            skipped = caplen - kept
             if len(data) == kept and kept < caplen:
-                source.skip(caplen - kept)
+                skipped = source.skip(caplen - kept)
             if source.capped and len(data) < kept:
                 return  # the cap fell inside the bytes this record keeps
+            present = len(data) + (skipped if len(data) == kept else 0)
+            if not source.capped and present < caplen:
+                notes.framing_end = (
+                    f"the file ends inside the record at byte {at} ({present} of its "
+                    f"{caplen} bytes; the record is read as far as it goes)"
+                )
             yield Record(float(seconds + scale * fraction), data, linktype)
-            if source.capped:
+            if source.capped or notes.framing_end is not None:
                 return
 
     return walk()
@@ -438,12 +471,12 @@ class _PcapNg:
         elif order == b"\x4d\x3c\x2b\x1a":
             self.endian = "<"
         else:
-            raise _CaptureEnds
+            raise _CaptureEnds("is a section header whose byte-order magic pcapng does not define")
         length = self._u32(raw_length)
         if length < 28:
-            raise _CaptureEnds
+            raise _CaptureEnds(f"is a section header stating {length} bytes, below its 28")
         if struct.unpack(self.endian + "H", self.source.exact(2))[0] != 1:
-            raise _CaptureEnds  # a major version this reader does not know
+            raise _CaptureEnds("is a section header of a major version this reader does not know")
         self.source.skip_exact(10)  # minor version, section length
         self.source.skip_exact(length - 28)  # options
         self._tail(length)
@@ -453,7 +486,7 @@ class _PcapNg:
         if length % 4:
             self.source.skip(-length % 4)
         if self._u32(self.source.exact(4)) != length:
-            raise _CaptureEnds
+            raise _CaptureEnds("has a trailing length that disagrees with its leading one")
 
     def _on(self, number: int, block: str) -> _Interface:
         if number >= len(self.interfaces):
@@ -469,18 +502,25 @@ class _PcapNg:
 
     def records(self) -> Iterator[Record]:
         while True:
+            at = self.source.taken
             try:
-                block_type = self._u32(self.source.exact(4))
+                head = self.source.read(4)
+                if not head:
+                    return  # the file ends where a block would begin: whole
+                if len(head) < 4:
+                    raise _CaptureEnds
+                block_type = self._u32(head)
                 if block_type == _SECTION_HEADER:
                     self._section()
                     continue
                 length = self._u32(self.source.exact(4))
                 if length < 12:
-                    return
-                at = self.source.taken - 8
+                    raise _CaptureEnds(f"states a length of {length}, below a block's 12 bytes")
                 record, unreadable = self._block(block_type, length - 12)
                 self._tail(length)
-            except _CaptureEnds:
+            except _CaptureEnds as ended:
+                if not self.source.capped:
+                    self.notes.framing_end = f"the pcapng block at byte {at} {ended.reason}"
                 return
             if self.source.capped:
                 return
@@ -583,7 +623,7 @@ class Capture:
             if not magic:
                 raise CaptureFormatError("No data could be read!")
             if magic in _PCAP_MAGICS:
-                return _pcap_records(source, *_PCAP_MAGICS[magic])
+                return _pcap_records(source, *_PCAP_MAGICS[magic], self.notes)
             if magic == _PCAPNG_MAGIC:
                 return _PcapNg(source, self.notes).open().records()
         except _GZIP_ERRORS as exc:
@@ -776,22 +816,36 @@ class _Walk:
             return (self.ipv4, 0, end, False)
         if linktype in _DLT_IPV6:
             return (self.ipv6, 0, end, False)
-        if linktype == _DLT_NULL and end >= 4:
-            # The family is written in the capturing host's byte order and
-            # its first byte read: a big-endian family reads as 0.
-            return self.address_family(frame[0], 4, end)
-        if linktype == _DLT_LOOP and end >= 4:
-            return self.address_family(struct.unpack("!I", frame[:4])[0], 4, end)
+        if linktype in (_DLT_NULL, _DLT_LOOP) and end >= 4:
+            # ``DLT_NULL`` writes the family in the capturing host's byte
+            # order, ``DLT_LOOP`` in network order; either is read both ways.
+            return self.address_family(frame[:4], 4, end)
         if linktype == _DLT_LINUX_SLL and end >= 16:
             return self.cooked(struct.unpack("!H", frame[14:16])[0], 16, end)
         if linktype == _DLT_LINUX_SLL2 and end >= 20:
             return self.cooked(struct.unpack("!H", frame[0:2])[0], 20, end)
         return None
 
-    def address_family(self, family: int, start: int, end: int) -> _Step | None:
-        if family in (0, 2):
+    def address_family(self, family: bytes, start: int, end: int) -> _Step | None:
+        """The IP header after a BSD loopback family, chosen by its own version nibble.
+
+        The family is read in both byte orders and accepted when it is 0, 2 or
+        one of the numbers some system gives AF_INET6 (10, 24, 28, 30). It does
+        not decide the header: 10 is AF_INET6 on Linux and AF_CCITT on a BSD,
+        and the byte order is not known. The version nibble of the header that
+        follows decides, 4 for IPv4 and 6 for IPv6; any other gives no header.
+        """
+        # 0 (unspecified) was always read as an IP family: the version
+        # nibble now decides which header follows it.
+        known = (0, _AF_INET, *_AF_INET6)
+        if not any(struct.unpack(order + "I", family)[0] in known for order in "<>"):
+            return None
+        if start >= end:
+            return None
+        version = self.frame[start] >> 4
+        if version == 4:
             return (self.ipv4, start, end, False)
-        if family == 10:
+        if version == 6:
             return (self.ipv6, start, end, False)
         return None
 
@@ -854,8 +908,8 @@ class _Walk:
 
     def ipv4(self, start: int, end: int, quoted: bool = False) -> _Step | None:
         frame = self.frame
-        if end - start < 20:
-            return None
+        if end - start < 20 or frame[start] >> 4 != 4:
+            return None  # cut short, or not an IPv4 header
         header_length = (frame[start] & 0x0F) * 4
         total_length = struct.unpack("!H", frame[start + 2 : start + 4])[0]
         fragment_offset = struct.unpack("!H", frame[start + 6 : start + 8])[0] & 0x1FFF
@@ -894,8 +948,10 @@ class _Walk:
 
     def ipv6(self, start: int, end: int, quoted: bool = False) -> _Step | None:
         frame = self.frame
-        if end - start < 40:
-            return None
+        if end - start < 40 or frame[start] >> 4 != 6:
+            return None  # cut short, or not an IPv6 header
+        if not quoted and self.packet.ip_dst is None:
+            self.packet.ipv6 = True
         payload_length = struct.unpack("!H", frame[start + 4 : start + 6])[0]
         following = frame[start + 6]
         position = start + 40
