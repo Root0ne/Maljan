@@ -28,6 +28,7 @@ from maljan.pipeline.retry_merge import (
 )
 from maljan.pipeline.validation import Violation, retry_drop_row, retry_drop_sentences
 from maljan.schemas.isr_models import AgentISR, ClaimEvidence, Finding
+from tests.linear_cost import TIME_RATIO_LIMIT, calls, cpu_seconds
 
 _FIELDS: dict[str, Any] = {
     "claim": "Built by hand.",
@@ -599,7 +600,7 @@ def _answers(count: int) -> tuple[AgentISR, AgentISR, str]:
 
 def _seconds(call: Callable[[], Any]) -> float:
     best = float("inf")
-    for _ in range(2):
+    for _ in range(3):
         started = time.perf_counter()
         call()
         best = min(best, time.perf_counter() - started)
@@ -651,10 +652,15 @@ class TestAHostileRetryCostsALinearMerge:
             withdrawn = _isr(answer)
             return lambda: merge_retry(first, withdrawn, answer)
 
-        small, large = run(2_000), run(20_000)
+        small, large = run(5_000), run(20_000)
+        run(200)()  # one-time costs (caches, lazy imports) are not the read's
 
-        assert _seconds(large) <= 10 * _seconds(small) * 1.5 + 0.1
-        assert _peak(large) <= 10 * _peak(small) * 1.5 + 65_536
+        # CPU time, not wall-clock: four times the lines must take under eight
+        # times as long, and a quadratic read takes sixteen times. The calls
+        # made are held to the same ratio too, which a load cannot move.
+        assert cpu_seconds(large) < cpu_seconds(small) * TIME_RATIO_LIMIT
+        assert calls(large) <= calls(small) * 4 * 1.2 + 1_000
+        assert _peak(large) <= 4 * _peak(small) * 1.5 + 65_536
 
     def test_a_long_line_of_withdraw_words_costs_a_linear_read(self) -> None:
         def run(size: int) -> Callable[[], Any]:

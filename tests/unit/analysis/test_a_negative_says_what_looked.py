@@ -9,6 +9,7 @@ tell, the value is ``partial`` or ``unknown``, with the reason.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import Any
 
 import pytest
@@ -718,9 +719,9 @@ def test_no_record_prints_nothing() -> None:
 
 def test_the_reading_and_grouping_are_linear() -> None:
     """Many calls of one tool over distinct inputs and many negatives, each read once."""
-    import time
+    from tests.linear_cost import TIME_RATIO_LIMIT, calls, cpu_seconds
 
-    def build(n: int) -> float:
+    def build(n: int) -> Callable[[], Any]:
         entries = [
             _entry(
                 i + 1,
@@ -735,13 +736,15 @@ def test_the_reading_and_grouping_are_linear() -> None:
             for i in range(n)
         ]
         claims = [_claim(f"No detections were found [ev_{i + 1:04d}].") for i in range(n)]
-        started = time.perf_counter()
-        _record(entries, *claims)
-        return time.perf_counter() - started
+        return lambda: _record(entries, *claims)
 
+    build(50)()  # one-time costs (caches, lazy imports) are not the reading's
     small, large = build(400), build(1600)
-    # Four times the input; a quadratic reading would take sixteen times as long.
-    assert large < small * 10
+    # CPU time, not wall-clock: four times the input must take under eight times
+    # as long, and a quadratic reading takes sixteen times. The calls made are
+    # held to the same ratio too, which a load cannot move.
+    assert cpu_seconds(large) < cpu_seconds(small) * TIME_RATIO_LIMIT
+    assert calls(large) <= calls(small) * 4 * 1.2 + 100
 
 
 def test_the_report_node_reads_the_record_from_the_state_and_the_container() -> None:
