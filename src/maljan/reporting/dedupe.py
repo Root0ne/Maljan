@@ -475,7 +475,7 @@ def signature_identity(signature: Any) -> tuple[Any, ...]:
     return (
         str(getattr(signature, "name", "") or ""),
         str(getattr(signature, "description", "") or ""),
-        int(getattr(signature, "severity", 0) or 0),
+        getattr(signature, "severity", None),
         tuple(getattr(signature, "technique_ids", None) or ()),
         tuple(getattr(signature, "marks", None) or ()),
     )

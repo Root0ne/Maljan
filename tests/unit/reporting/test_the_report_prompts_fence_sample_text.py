@@ -268,7 +268,9 @@ class TestTheNarrativePrompt:
         from maljan.reporting.models import DynamicBehavior
 
         report = MalwareReport(identity=SampleIdentity(hashes=FileHashes(sha256="a" * 64)))
-        report.dynamic = DynamicBehavior(sandbox_signatures=[SandboxSignature(name=HOSTILE)])
+        report.dynamic = DynamicBehavior(
+            sandbox_signatures=[SandboxSignature(name=HOSTILE, severity=0)]
+        )
         text = build_prompt_text(report)
         _no_line_is(text, HEADING)
         assert f"  - {excerpt_view(HOSTILE)} (severity 0, ATT&CK=-)" in text.splitlines()

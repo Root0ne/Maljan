@@ -677,12 +677,57 @@ def enrichment_laid_over(stored: dict[str, Any], enriched: dict[str, Any]) -> di
             network[section] = rows
     if network:
         out["network"] = network
+    # What the cap left unasked is the last enrichment's statement: its rows
+    # replace an earlier one, and none left removes it.
+    # Each row's questions are read again against the laid-over stored row, by
+    # the same tests the orchestrator makes (a successful reputation, an ASN, a
+    # geography): a question the stored row already holds an answer to is not
+    # one that went unasked, and a row left with none is dropped.
+    stated = _questions_still_unasked(enriched.get("enrichment_not_asked"), network)
+    if stated:
+        out["enrichment_not_asked"] = stated
+    else:
+        out.pop("enrichment_not_asked", None)
     attribution = dict(out.get("attribution") or {})
     similar = (enriched.get("attribution") or {}).get("similar_samples")
     if similar and not attribution.get("similar_samples"):
         attribution["similar_samples"] = similar
         out["attribution"] = attribution
     return out
+
+
+_NOT_ASKED_SECTIONS = {"domain": "domains", "ip": "ips"}
+
+
+def _questions_still_unasked(rows: Any, network: dict[str, Any]) -> list[dict[str, Any]]:
+    """The not-asked rows, each with the questions its laid-over stored row still lacks."""
+    from maljan.enrichment.orchestrator import _has_successful_rep
+
+    if not isinstance(rows, list):
+        return []
+    stored: dict[tuple[str, str], dict[str, Any]] = {}
+    for kind, section in _NOT_ASKED_SECTIONS.items():
+        for row in network.get(section) or []:
+            if isinstance(row, dict) and row.get(_NETWORK_KEYS[section]):
+                stored[(kind, str(row[_NETWORK_KEYS[section]]))] = row
+    kept: list[dict[str, Any]] = []
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        mine = stored.get((str(row.get("kind")), str(row.get("value"))))
+        questions = [str(q) for q in row.get("questions") or []]
+        if mine is not None:
+            questions = [
+                q
+                for q in questions
+                if not (
+                    (q == "reputation" and _has_successful_rep(mine))
+                    or (q in ("asn", "geo") and mine.get(q))
+                )
+            ]
+        if questions:
+            kept.append({**row, "questions": questions})
+    return kept
 
 
 def disclosed(

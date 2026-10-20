@@ -672,6 +672,16 @@ def _hex(value: Any) -> str:
         return str(value or "")
 
 
+def _optional_int(value: Any) -> int | None:
+    """A whole number as written, or ``None`` where there is none: unknown is not 0."""
+    if isinstance(value, bool):
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
 def _int(value: Any) -> int:
     try:
         return int(value)
@@ -779,7 +789,7 @@ def dynamic_from_ledger(ledger: list[LedgerEntry]) -> DynamicBehavior | None:
                 SandboxSignature(
                     name=str(row.get("name") or ""),
                     description=str(row.get("description") or ""),
-                    severity=_int(row.get("severity")),
+                    severity=_optional_int(row.get("severity")),
                     # The ids the sandbox tags the signature with, under the
                     # key the tool writes them (``sandbox_signatures``).
                     technique_ids=technique_ids_in(row.get("technique_ids")),

@@ -488,7 +488,11 @@ async def test_a_server_source_asks_the_tool_with_the_argument_its_declaration_n
             )
     assert calls == [("intelsrv", "lookup_address", {"ip_address": "8.8.4.4"})]
     ip = report["network"]["ips"][0]
-    assert ip["reputation"] == {"source": "intel", "abuse_confidence": 70}
+    assert ip["reputation"] == {
+        "source": "intel",
+        "abuse_confidence": 70,
+        "malicious_verdict": True,
+    }
     assert ip["is_suspicious"] is True
 
 

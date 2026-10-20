@@ -1342,11 +1342,18 @@ def _gzip_member(target: Path) -> dict[str, Any]:
                 if fh.tell() > target.stat().st_size:
                     unread = "the gzip header ends inside its extra field"
         if not unread and flags & _GZIP_FNAME:
-            found, ended = _zero_terminated(fh)
-            if ended:
-                name = found.decode("utf-8", errors="replace")
+            start = fh.tell()
+            # The name stands in the member's own bytes, and the member also
+            # holds its compressed data and its eight-byte trailer after it,
+            # so the zero byte is searched for no further than that leaves room
+            # for. A file with no zero byte there is read once, never held.
+            room = target.stat().st_size - start - _GZIP_AFTER_NAME
+            length = _zero_offset(fh, room)
+            if length is None:
+                unread = GZIP_NAME_UNENDED.format(room=max(room, 0))
             else:
-                unread = "the gzip header ends before its name's zero byte"
+                fh.seek(start)
+                name = fh.read(length).decode("utf-8", errors="replace")
     member: dict[str, Any] = {"name": name or ("" if unread else target.stem)}
     member["compressed"] = target.stat().st_size
     answer: dict[str, Any] = {
@@ -1364,18 +1371,32 @@ def _gzip_member(target: Path) -> dict[str, Any]:
 _GZIP_FEXTRA = 0x04
 _GZIP_FNAME = 0x08
 _GZIP_NAME_BLOCK = 64 * 1024
+# What a member holds after its name: at least one byte of compressed data and
+# the eight-byte trailer (CRC-32 and input size).
+_GZIP_AFTER_NAME = 9
+# What the answer says when no zero byte ends the name within the member's own bytes.
+GZIP_NAME_UNENDED = (
+    "the gzip header's name has no zero byte within the {room} bytes the member leaves for it "
+    "(its data and trailer follow the name), so no name is stated"
+)
 
 
-def _zero_terminated(fh: Any) -> tuple[bytes, bool]:
-    """The bytes up to the next zero byte, read a block at a time, and whether it was found."""
-    parts: list[bytes] = []
-    while block := fh.read(_GZIP_NAME_BLOCK):
+def _zero_offset(fh: Any, room: int) -> int | None:
+    """How many bytes lie before the next zero byte within ``room`` bytes, or ``None``.
+
+    Read a block at a time and kept nowhere, so a name that never ends costs
+    its length in time and nothing in memory.
+    """
+    seen = 0
+    while seen < room:
+        block: bytes = fh.read(min(_GZIP_NAME_BLOCK, room - seen))
+        if not block:
+            return None
         end = block.find(b"\x00")
         if end >= 0:
-            parts.append(block[:end])
-            return b"".join(parts), True
-        parts.append(block)
-    return b"".join(parts), False
+            return seen + end
+        seen += len(block)
+    return None
 
 
 # ---------------------------------------------------------------------------
