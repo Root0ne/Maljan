@@ -20,7 +20,7 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, UploadFile, status
-from sqlalchemy import delete, func, select
+from sqlalchemy import delete, func, select, text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -29,6 +29,7 @@ from app.database import get_db
 from app.deps import get_current_user, require_active_user
 from app.logging_config import get_logger
 from app.logsafe import log_safe
+from app.middleware.upload_bound_middleware import too_large_detail, upload_bound
 from app.models.job import AnalysisJob
 from app.models.sample import Sample
 from app.models.sandbox_report import SandboxReportRow
@@ -89,7 +90,7 @@ def _streaming_hashes(file: UploadFile, dest: Path, max_bytes: int) -> tuple[str
             if total > max_bytes:
                 raise HTTPException(
                     status_code=status.HTTP_413_CONTENT_TOO_LARGE,
-                    detail=(f"File too large. Maximum: {max_bytes // (1024 * 1024)} MB"),
+                    detail=too_large_detail(max_bytes),
                 )
             sha256.update(chunk)
             sha1.update(chunk)
@@ -244,7 +245,29 @@ async def _audit_upload(
     )
 
 
+async def _upload_max_bytes() -> int:
+    """The operator's ``upload_max_bytes``, read now: the bound of one sample upload."""
+    return int(await runtime_config.get("upload_max_bytes"))
+
+
+async def lock_sample_bytes(db: AsyncSession, sha256: str) -> None:
+    """Serialise, until this transaction ends, everything that decides one sha's stored object.
+
+    An upload decides whether the object is already stored and a delete
+    decides whether it is still referenced; each reads the other's rows. Run
+    side by side, the upload could see the delete's row, skip the put, and
+    commit a row after the delete removed the object it relies on. A
+    transaction-scoped advisory lock keyed by the sha puts the two in order:
+    whichever comes second sees what the first committed. Different shas never
+    wait on each other.
+    """
+    await db.execute(
+        text("SELECT pg_advisory_xact_lock(hashtextextended(:sha, 0))"), {"sha": sha256}
+    )
+
+
 @router.post("/upload", response_model=SampleResponse, status_code=status.HTTP_201_CREATED)
+@upload_bound(_upload_max_bytes)
 async def upload_sample(
     request: Request,
     file: UploadFile,
@@ -252,7 +275,7 @@ async def upload_sample(
     db: AsyncSession = Depends(get_db),
 ) -> Sample:
     """Upload a malware sample for analysis (streaming)."""
-    upload_max_bytes = await runtime_config.get("upload_max_bytes")
+    upload_max_bytes = await _upload_max_bytes()
     safe_filename = _sanitise_filename(file.filename)
     logger.info(
         "Sample upload started: %s",
@@ -276,11 +299,15 @@ async def upload_sample(
         tmp_path = Path(tmp.name)
 
     try:
-        sha256, sha1, md5, size = _streaming_hashes(file, tmp_path, upload_max_bytes)
+        # Reading, hashing and writing a hundred megabytes is seconds of work:
+        # in a thread, so the loop keeps answering every other request.
+        sha256, sha1, md5, size = await asyncio.to_thread(
+            _streaming_hashes, file, tmp_path, upload_max_bytes
+        )
         if size == 0:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Empty file")
 
-        detected_mime = _detect_mime(tmp_path)
+        detected_mime = await asyncio.to_thread(_detect_mime, tmp_path)
         allowed_mime_types = await runtime_config.get("upload_allowed_mime_types")
         if allowed_mime_types:
             allowed = set(allowed_mime_types)
@@ -299,6 +326,9 @@ async def upload_sample(
         )
 
         storage_path = f"samples/{sha256[:2]}/{sha256}"
+        # Held until this request's transaction ends: a delete of the same sha
+        # waits for this row to be committed, or this waits for its removal.
+        await lock_sample_bytes(db, sha256)
 
         # Check whether the bytes are already in MinIO (any prior uploader's
         # row works — the storage path is sha256-derived). If yes, the new
@@ -484,6 +514,9 @@ async def delete_sample(
 
     storage_path = sample.storage_path
     sha256 = sample.sha256
+    # An upload of the same sha deciding whether the object is stored waits
+    # for this delete, and this delete for that upload (``lock_sample_bytes``).
+    await lock_sample_bytes(db, sha256)
 
     # Every sandbox report's bytes live at a path unique to that one row — unlike
     # the sample's own bytes, no other user's row can point at it — so gather
@@ -548,6 +581,9 @@ async def delete_sample(
                     extra={"user_id": str(user.id), "component": "minio"},
                 )
 
+    # Taken again: the commit above, when there were jobs, ended the
+    # transaction that held it, and the count below must not race an upload.
+    await lock_sample_bytes(db, sha256)
     others = await db.execute(
         select(func.count()).select_from(Sample).where(Sample.sha256 == sha256)
     )

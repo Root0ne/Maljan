@@ -307,21 +307,30 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
     from app.database import async_session_factory
     from app.services.composite_secrets import (
+        mask_audited_settings,
         repair_frontier_arm_keys,
         repair_server_auth_tokens,
+        repair_server_env,
     )
 
     try:
         async with async_session_factory() as _repair_session:
             # A composite leaf must never keep a credential inside its own
-            # row. Both repairs are idempotent and a no-op on a store that
+            # row. Every repair is idempotent and a no-op on a store that
             # already satisfies that invariant.
             _moved_arm_keys = await repair_frontier_arm_keys(_repair_session)
             _moved_server_tokens = await repair_server_auth_tokens(_repair_session)
+            _moved_server_envs = await repair_server_env(_repair_session)
+            # And what older settings audit rows kept of any stored value is
+            # masked the way a new row is, once.
+            _masked_audit_rows = await mask_audited_settings(_repair_session)
         logger.info(
-            "Composite-secret repair: %d arm key(s), %d server token(s) moved",
+            "Composite-secret repair: %d arm key(s), %d server token(s), %d server env map(s) "
+            "moved, %d settings audit row(s) masked",
             _moved_arm_keys,
             _moved_server_tokens,
+            _moved_server_envs,
+            _masked_audit_rows,
         )
     except Exception:
         # Best effort, like the audit trail: a failure here just means the
@@ -432,7 +441,16 @@ def create_app() -> FastAPI:
         lifespan=lifespan,
     )
 
-    # ── Logging Middleware (must be added first) ─────────────
+    # ── Upload bounds ────────────────────────────────────────
+    # Added first, so it is the innermost layer: logging, the rate limiter,
+    # CORS and the security headers all wrap its refusals (a browser reads a
+    # 413 only with its CORS headers), and none of them reads a body, so the
+    # bound is still held before Starlette spools the file to disk.
+    from app.middleware.upload_bound_middleware import UploadBoundMiddleware
+
+    app.add_middleware(UploadBoundMiddleware)
+
+    # ── Logging Middleware ───────────────────────────────────
     from app.middleware.logging_middleware import RequestLoggingMiddleware
 
     app.add_middleware(RequestLoggingMiddleware)

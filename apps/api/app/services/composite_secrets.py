@@ -17,6 +17,7 @@ no-op on a store that already satisfies the invariant.
 
 from __future__ import annotations
 
+import json
 from collections.abc import Callable
 from typing import Any
 
@@ -27,7 +28,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.logging_config import get_logger
 from app.models import RuntimeSetting
 from app.services.frontier_arms import ARMS_KEY, arm_key_key
-from app.services.server_map import SERVER_MAP_KEY, TOKEN_MASK, server_token_key
+from app.services.server_map import SERVER_MAP_KEY, TOKEN_MASK, server_env_key, server_token_key
 
 logger = get_logger("composite_secrets")
 
@@ -165,3 +166,141 @@ async def repair_server_auth_tokens(db: AsyncSession) -> int:
         row_key_of=server_token_key,
         what="MCP server auth tokens",
     )
+
+
+async def repair_server_env(db: AsyncSession) -> int:
+    """Move every MCP server's clear-text ``env`` map into its own encrypted row.
+
+    The ``env`` map is where a server's own credentials live, and a map saved
+    before those rows existed holds it in the composite's clear row. The same
+    rule as the token repair: the field leaves the composite only once an
+    encrypted row for that server exists (written here and flushed first, or
+    one a save already wrote, which wins on load). An ``env`` holding a mask
+    (what an export leaves in a value's place) with no row behind it is left
+    where it is and named, never stored as a value. Idempotent; logs counts
+    and names, never a value.
+    """
+    row = (
+        await db.execute(select(RuntimeSetting).where(RuntimeSetting.key == SERVER_MAP_KEY))
+    ).scalar_one_or_none()
+    if row is None or not isinstance(row.value, dict):
+        return 0
+    stored: dict[str, Any] = row.value
+    present = {
+        name: entry["env"]
+        for name, entry in stored.items()
+        if isinstance(entry, dict) and isinstance(entry.get("env"), dict) and entry["env"]
+    }
+    if not present:
+        return 0
+    existing_keys = {r[0] for r in (await db.execute(select(RuntimeSetting.key))).all()}
+    masked = {name for name, env in present.items() if TOKEN_MASK in env.values()}
+    unrecoverable = sorted(name for name in masked if server_env_key(name) not in existing_keys)
+    if unrecoverable:
+        logger.warning(
+            "MCP server env values for %s are masked in the stored configuration and "
+            "cannot be recovered; set them again from Settings -> Configuration. The "
+            "masked entries are left untouched.",
+            ", ".join(unrecoverable),
+        )
+    to_store = {
+        name: env
+        for name, env in present.items()
+        if name not in masked and server_env_key(name) not in existing_keys
+    }
+    if to_store and not box.is_available():
+        logger.warning(
+            "MCP server env values are stored in clear but SETTINGS_ENCRYPTION_KEY is "
+            "unusable; the repair will run again on the next start."
+        )
+        return 0
+    for name, env in to_store.items():
+        db.add(
+            RuntimeSetting(
+                key=server_env_key(name),
+                value=box.encrypt(json.dumps(env, sort_keys=True)),
+                is_secret=True,
+            )
+        )
+    if to_store:
+        # Every row reaches the transaction before a map leaves the composite.
+        await db.flush()
+    keep = set(unrecoverable)
+    cleaned = {
+        name: (
+            {k: v for k, v in entry.items() if k != "env"}
+            if name in present and name not in keep
+            else entry
+        )
+        for name, entry in stored.items()
+    }
+    if cleaned == stored:
+        return 0
+    row.value = cleaned
+    await db.commit()
+    logger.info("MCP server env maps moved into encrypted rows: %d", len(to_store))
+    return len(to_store)
+
+
+async def mask_audited_settings(db: AsyncSession) -> int:
+    """Mask every value settings audit rows written before the masking still hold.
+
+    A ``settings.update`` row used to copy each changed setting's stored value
+    into its ``before`` and ``after`` as it was: a server's ``env`` values, a
+    credential its arguments name, a URL's user name, password and query
+    values, a mapping entry whose key names a credential. Each side is masked
+    now through the path a new row takes (``settings_service._audited``, the
+    console's ``shown_setting``); the rest of the row is left as written. A row
+    on the audit chain (``chain_seq`` set) is never rewritten: no settings row
+    is chained, and a chained row's digest covers its details.
+
+    Idempotent, and run once: masking a masked value changes nothing, so a row
+    with nothing left to mask is not written, and a pass that leaves nothing
+    to mask records a marker row (``AUDIT_MASKED_MARKER``) that every later
+    start reads in one lookup and stops at. Every row written since is masked
+    when it is written. Returns the number of rows masked.
+    """
+    from app.models import AuditLog
+    from app.services.settings_catalog_api import catalog_index
+    from app.services.settings_service import AUDIT_MASKED_MARKER, _audited
+
+    done = (
+        await db.execute(
+            select(RuntimeSetting.key).where(RuntimeSetting.key == AUDIT_MASKED_MARKER)
+        )
+    ).scalar_one_or_none()
+    if done is not None:
+        return 0
+    index = catalog_index()
+    rows = (
+        (
+            await db.execute(
+                select(AuditLog).where(
+                    AuditLog.action == "settings.update", AuditLog.chain_seq.is_(None)
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    masked = 0
+    for row in rows:
+        details = row.details
+        if not isinstance(details, dict):
+            continue
+        sides = {
+            side: _audited(details[side], index)
+            if isinstance(details[side], dict)
+            else details[side]
+            for side in ("before", "after")
+            if side in details
+        }
+        if all(value == details[side] for side, value in sides.items()):
+            continue
+        row.details = {**details, **sides}
+        masked += 1
+    db.add(RuntimeSetting(key=AUDIT_MASKED_MARKER, value={"done": True}, is_secret=False))
+    await db.commit()
+    if masked:
+        logger.info("Settings audit rows masked: %d", masked)
+    return masked

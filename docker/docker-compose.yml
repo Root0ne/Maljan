@@ -6,6 +6,13 @@ x-backend-image: &backend-image
     context: ..
     dockerfile: docker/Dockerfile.backend
   image: maljan-backend
+  # No process in these containers can gain a privilege it was not started
+  # with (a setuid binary, a file capability). They still run as root: the
+  # bind-mounted data directory and the ATT&CK cache volume are owned by
+  # whoever created them, and a different user would lose write access to
+  # what an existing deployment already holds.
+  security_opt:
+    - no-new-privileges:true
 
 services:
   # ─────────────────────────────────────────────
@@ -459,6 +466,12 @@ services:
         NEXT_PUBLIC_AUTH_DISABLED: "${NEXT_PUBLIC_AUTH_DISABLED:-false}"
     container_name: maljan-frontend
     restart: unless-stopped
+    # The image runs as its unprivileged ``node`` user (Dockerfile.frontend),
+    # which needs no capability and gains none.
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
     ports:
       - "${BIND_ADDRESS:-127.0.0.1}:${FRONTEND_PORT:-3000}:3000"
     depends_on:

@@ -43,6 +43,7 @@ from maljan.core.settings_overrides import (
 from pydantic import ValidationError
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm.attributes import flag_modified
 
 from app.config import settings as api_settings
 from app.models import RuntimeSetting
@@ -50,11 +51,15 @@ from app.services.enrichment_sources import SOURCE_SECRETS
 from app.services.frontier_arms import ARMS
 from app.services.nested_secrets import NestedSecretMap
 from app.services.server_map import (
+    SERVER_ENV_SUFFIX,
     SERVER_MAP_KEY,
     TOKEN_MASK,
     ServerMapError,
+    env_of_row,
     merge_server_secrets,
+    server_env_key,
     server_token_key,
+    split_server_env,
     split_server_secrets,
 )
 from app.services.settings_catalog_api import (
@@ -502,8 +507,15 @@ class SaveResult:
 NESTED_SECRET_MAPS: tuple[NestedSecretMap, ...] = (ARMS, SOURCE_SECRETS)
 _NESTED_BY_KEY = {spec.key: spec for spec in NESTED_SECRET_MAPS}
 NESTED_SECRET_KEYS = frozenset(_NESTED_BY_KEY)
-_COMPOSITE_SECRET_SUFFIX = {
-    SERVER_MAP_KEY: ".auth_token",
+# Rows a start-up repair writes to record that it is done. Their keys sit
+# outside every settings namespace and are never read as a setting.
+MARKER_PREFIX = "maljan.repair."
+# The settings audit rows written before their values were masked are masked
+# (``composite_secrets.mask_audited_settings``).
+AUDIT_MASKED_MARKER = f"{MARKER_PREFIX}settings_audit_masked"
+
+_COMPOSITE_SECRET_SUFFIX: dict[str, str | tuple[str, ...]] = {
+    SERVER_MAP_KEY: (".auth_token", SERVER_ENV_SUFFIX),
     **{spec.key: spec.suffix for spec in NESTED_SECRET_MAPS},
 }
 
@@ -607,6 +619,49 @@ def _merge_nested(overrides: dict[str, Any]) -> dict[str, Any]:
     return overrides
 
 
+def _with_env_names(stored_map: dict[str, Any], rows: dict[str, Any]) -> dict[str, Any]:
+    """The stored map with each server's encrypted ``env`` names folded back in.
+
+    Only the names are needed: the editor shows every env value as the mask
+    (``masked_server``), and a mask sent back keeps the stored value. A row
+    that cannot be decrypted shows nothing rather than failing the read.
+    """
+    out = dict(stored_map)
+    for name, entry in stored_map.items():
+        row = rows.get(server_env_key(name))
+        if row is None or not isinstance(entry, dict):
+            continue
+        try:
+            env = env_of_row(box.decrypt(str(row.value)))
+        except box.SecretsUnavailable:
+            continue
+        if env is not None:
+            out[name] = {**entry, "env": env}
+    return out
+
+
+def _audited(values: dict[str, Any], index: dict[str, Any]) -> dict[str, Any]:
+    """Settings values as the audit trail may keep them: masked as the console shows them.
+
+    A secret is already ``"set"``/``"unset"`` here. Every other value is masked
+    by :func:`shown_setting`, the console's rule: a tool server's ``env``
+    values and the credentials its arguments name, every mapping entry whose
+    key names a credential, every URL's userinfo and query values. A key with
+    no catalogue entry (a plugin block's row) is masked as an open mapping.
+    """
+    out: dict[str, Any] = {}
+    for key, value in values.items():
+        entry = index.get(key)
+        if entry is None:
+            leaf = key.rsplit(".", 1)[-1]
+            out[key] = masked_value({leaf: value}, TOKEN_MASK)[leaf]
+        elif entry.secret:
+            out[key] = value
+        else:
+            out[key] = shown_setting(entry, value)
+    return out
+
+
 def _loc_to_key(ns: str, loc: tuple[Any, ...]) -> str:
     return f"{ns}." + ".".join(str(p) for p in loc if not isinstance(p, int))
 
@@ -632,6 +687,9 @@ class SettingsService:
         """
         out: dict[str, Any] = {}
         for row in await self._rows():
+            if row.key.startswith(MARKER_PREFIX):
+                # A record a start-up repair keeps of itself, never a setting.
+                continue
             if row.is_secret:
                 try:
                     out[row.key] = box.decrypt(str(row.value))
@@ -676,7 +734,7 @@ class SettingsService:
             if entry.key == SERVER_MAP_KEY:
                 stored_map: Any = row.value if row is not None else default_value
                 shown = self._masked_server_map(
-                    dict(stored_map or {}), core_defaults.mcp.servers, rows
+                    _with_env_names(dict(stored_map or {}), rows), core_defaults.mcp.servers, rows
                 )
                 src = "ui" if row is not None else effective_source(overridden=False)
                 out[key] = ValueInfo(
@@ -1035,6 +1093,7 @@ class SettingsService:
         changes = {k: v for k, v in changes.items() if not (index[k].secret and v == TOKEN_MASK)}
         changes = incoming_declaration_leaves(changes, current)
         tokens: dict[str, str | None] = {}
+        server_envs: dict[str, str | None] = {}
         server_map_kept: set[str] | None = None
         if SERVER_MAP_KEY in changes:
             if changes[SERVER_MAP_KEY] is None:
@@ -1059,10 +1118,17 @@ class SettingsService:
                     raise SettingsValidationError(
                         {f"{SERVER_MAP_KEY}.{k}": v for k, v in exc.errors.items()}
                     ) from exc
+                # Each server's ``env`` map is where its own credentials live:
+                # out of the clear row as the token is, one encrypted row each.
+                changes[SERVER_MAP_KEY], server_envs = split_server_env(changes[SERVER_MAP_KEY])
                 unstorable = [
                     server_token_key(name)
                     for name, token in tokens.items()
                     if token and not box.is_available()
+                ] + [
+                    server_env_key(name)
+                    for name, env in server_envs.items()
+                    if env and not box.is_available()
                 ]
                 if unstorable:
                     raise SettingsValidationError(
@@ -1187,6 +1253,12 @@ class SettingsService:
                     existing.value = stored
                     existing.is_secret = entry.secret
                     existing.updated_by = user_id
+                    if key == SERVER_MAP_KEY:
+                        # The map's own row stands for its encrypted parts as
+                        # well: a save that changed only an env value still
+                        # moves its version, so a page loaded before it never
+                        # saves over it unseen (``changed_since``).
+                        flag_modified(existing, "value")
                 after[key] = "set" if entry.secret else value
             result.applied.append(key)
             result.applies[entry.applies] = result.applies.get(entry.applies, 0) + 1
@@ -1204,12 +1276,23 @@ class SettingsService:
             result.applies["next_job"] = result.applies.get("next_job", 0) + 1
         if server_map_kept is not None:
             await self._save_server_tokens(tokens, server_map_kept)
+            await self._save_runtime_secrets(
+                server_envs,
+                server_map_kept,
+                prefix=f"{SERVER_MAP_KEY}.",
+                suffix=SERVER_ENV_SUFFIX,
+                key_of=server_env_key,
+            )
         for spec, secrets, kept in nested_writes:
             await self._save_runtime_secrets(
                 secrets, kept, prefix=f"{spec.key}.", suffix=spec.suffix, key_of=spec.row_key
             )
         await self.db.commit()
-        details = {"changed": [*changes, *removed], "before": before, "after": after}
+        details = {
+            "changed": [*changes, *removed],
+            "before": _audited(before, index),
+            "after": _audited(after, index),
+        }
         await _audit(user_id, "settings.update", details, ip)
         if ALLOW_LIST_KEY in changes:
             _say_the_allow_list_changed(user_id, before.get(ALLOW_LIST_KEY), after[ALLOW_LIST_KEY])

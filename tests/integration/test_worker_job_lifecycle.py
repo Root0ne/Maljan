@@ -1043,7 +1043,7 @@ async def test_worker_removes_private_sample_copies_after_success(
     recorded: list[tuple[Any, str | None]] = []
     monkeypatch.setattr(
         sample_files,
-        "remove_quietly",
+        "release_copy",
         lambda path, *, job_id=None: recorded.append((path, job_id)),
     )
 
@@ -1102,7 +1102,7 @@ async def test_worker_removes_private_sample_copies_after_pipeline_failure(
     recorded: list[tuple[Any, str | None]] = []
     monkeypatch.setattr(
         sample_files,
-        "remove_quietly",
+        "release_copy",
         lambda path, *, job_id=None: recorded.append((path, job_id)),
     )
 

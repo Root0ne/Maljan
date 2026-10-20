@@ -9,6 +9,7 @@ pipeline, streaming progress events via Redis PubSub.
 """
 
 import asyncio
+import functools
 import gc
 import json
 import os
@@ -1827,6 +1828,42 @@ async def live_owners(redis_conn: Any, job_ids: list[str]) -> set[str] | None:
     return {job_id for job_id, value in zip(job_ids, held, strict=False) if value is not None}
 
 
+async def queued_or_owned(redis_conn: Any, job_ids: list[str]) -> set[str] | None:
+    """Which of these pending jobs something will still start.
+
+    A job is held while arq keeps its queue entry (the job key, written under
+    the job's own id by ``analysis_service._enqueue_analysis``) or its claim on
+    that entry, or a worker writes an owner heartbeat for it. ``None`` when
+    Redis cannot answer, as for :func:`live_owners`. One read for all of them,
+    linear in their number.
+    """
+    if not job_ids:
+        return set()
+    from arq.constants import in_progress_key_prefix, job_key_prefix
+
+    global _QUEUE_UNREADABLE_SAID
+    keys = [
+        key
+        for job_id in job_ids
+        for key in (
+            job_owner_key(job_id),
+            job_key_prefix + job_id,
+            in_progress_key_prefix + job_id,
+        )
+    ]
+    try:
+        values = await redis_conn.mget(keys)
+    except Exception as exc:  # noqa: BLE001 — an unreadable queue is not a verdict
+        _log_unreadable_queue(type(exc).__name__)
+        return None
+    _QUEUE_UNREADABLE_SAID = False
+    return {
+        job_id
+        for index, job_id in enumerate(job_ids)
+        if any(value is not None for value in values[3 * index : 3 * index + 3])
+    }
+
+
 # Whether the "Redis cannot be read" line has been logged since the last time
 # it could be. The sweep runs every few minutes for the life of the worker, and
 # an outage that logged on every pass would bury everything else.
@@ -3002,7 +3039,15 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
             # is already 0o700 (owner-only) via ``sample_files.temp_dir()``,
             # so this file is unreachable to anyone but the worker's own user
             # either way.
-            await asyncio.to_thread(object_store.download, minio_client, derived_path, temp_path)
+            # Held for this job (``sample_files.hold_copy``): the name is the
+            # sample's, so a second job on the same sample reaches it too, and
+            # neither job's end may take it from the other.
+            await asyncio.to_thread(
+                sample_files.hold_copy,
+                Path(temp_path),
+                canonical_job_id(job_id),
+                lambda target: object_store.download(minio_client, derived_path, str(target)),
+            )
             logger.info(
                 "Downloaded sample from MinIO: %s -> %s",
                 sample_storage_path,
@@ -3036,7 +3081,7 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
                 temp_path=temp_path,
                 sha256=sample_sha256,
                 extension=_orig_ext,
-                copy_fn=sample_files.private_copy,
+                copy_fn=functools.partial(sample_files.held_copy, job_id=canonical_job_id(job_id)),
                 job_id=job_id,
             )
             host_mirrors.extend(new_mirrors)
@@ -3048,7 +3093,7 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
                 temp_path=temp_path,
                 sha256=sample_sha256,
                 extension=_orig_ext,
-                copy_fn=sample_files.private_copy,
+                copy_fn=functools.partial(sample_files.held_copy, job_id=canonical_job_id(job_id)),
                 job_id=job_id,
                 already=host_mirrors,
             )
@@ -3680,14 +3725,16 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
             await release_job(redis_conn, job_id)
 
             # The worker's own private copies of the sample never outlive the
-            # job that downloaded them, on success, failure or cancellation
-            # alike (H3, security hardening). ``remove_quietly`` is a no-op
-            # on ``None`` (nothing was ever downloaded) and never raises.
+            # jobs that use them, on success, failure or cancellation alike
+            # (H3, security hardening). Each copy goes with the last job
+            # holding it (``sample_files.release_copy``), so a second job on
+            # the same sample keeps its copies until it ends too. A no-op on
+            # ``None`` (nothing was ever downloaded); never raises.
             from app.worker import sample_files
 
-            sample_files.remove_quietly(temp_path, job_id=job_id)
+            sample_files.release_copy(temp_path, job_id=canonical_job_id(job_id))
             for _host_mirror in host_mirrors:
-                sample_files.remove_quietly(_host_mirror, job_id=job_id)
+                sample_files.release_copy(_host_mirror, job_id=canonical_job_id(job_id))
 
             # Release the agents' MCP toolkits, their stdio subprocesses and the
             # per-job caches. A ``finally`` rather than ``async with`` because
@@ -3942,6 +3989,14 @@ _SWEPT_NO_OWNER = (
     "re-submit the sample if needed."
 )
 
+# What a swept ``pending`` row says: nothing is left that would ever start it.
+_SWEPT_NEVER_STARTED = (
+    "This job was never started: its queue entry is gone (expired before a "
+    "worker reached it, or ended when the worker that took it stopped before "
+    "the run began) and no worker is holding it. Marked failed by the orphan "
+    "sweep — re-submit the sample if needed."
+)
+
 # When the sweep runs. Not at the instant of startup: a worker that crashed
 # leaves its last heartbeat behind for up to one TTL, and a sweep that ran
 # inside that window would read the dead worker's own claim as ownership and
@@ -3981,6 +4036,14 @@ async def _sweep_orphan_jobs(db_session: async_sessionmaker, redis_conn: Any = N
     Redis says. When Redis cannot be read at all, nothing is touched and the
     reason is logged once: ownership cannot be established without it, and
     guessing costs somebody else's run.
+
+    A ``pending`` row is repaired the same way, by what would still start it:
+    its arq queue entry (the job key, queued under the job's own id) or arq's
+    claim on it, or an owner heartbeat. A row with none of the three is one no
+    worker will ever reach — the entry expired before a worker got to it, or
+    the worker that took it stopped between taking it and starting the run —
+    and is marked failed with that reason. A row younger than one TTL is left
+    for the next pass, because the API commits it a moment before it queues it.
     """
     from datetime import UTC as _UTC
     from datetime import datetime as _datetime
@@ -3997,9 +4060,12 @@ async def _sweep_orphan_jobs(db_session: async_sessionmaker, redis_conn: Any = N
     async with db_session() as db:
         candidates = (
             await db.execute(
-                select(AnalysisJob.id, AnalysisJob.started_at, AnalysisJob.created_at).where(
-                    AnalysisJob.status == "running"
-                )
+                select(
+                    AnalysisJob.id,
+                    AnalysisJob.started_at,
+                    AnalysisJob.created_at,
+                    AnalysisJob.status,
+                ).where(AnalysisJob.status.in_(("running", "pending")))
             )
         ).all()
         await db.commit()
@@ -4007,32 +4073,55 @@ async def _sweep_orphan_jobs(db_session: async_sessionmaker, redis_conn: Any = N
     def _since(row: Any) -> Any:
         # ``started_at`` is written with the status change; ``created_at`` is
         # the fallback for a row that somehow carries none, so a job cannot
-        # stay ``running`` for ever by having no clock.
+        # stay ``running`` for ever by having no clock. A pending row has not
+        # started: its clock is when it was created.
+        if row[3] == "pending":
+            return row[2]
         return row[1] or row[2]
 
-    aged = [str(row[0]) for row in candidates if _since(row) is None or _since(row) < young_cutoff]
+    aged = [row for row in candidates if _since(row) is None or _since(row) < young_cutoff]
     if not aged:
         logger.debug("Orphan sweep: nothing old enough to judge.")
         return
+    running = [str(row[0]) for row in aged if row[3] == "running"]
+    pending = [str(row[0]) for row in aged if row[3] == "pending"]
 
-    owners = await live_owners(redis_conn, aged)
+    owners = await live_owners(redis_conn, running)
     if owners is None:
         return
-    orphans = [job_id for job_id in aged if job_id not in owners and job_id not in _OWNED_JOBS]
-    if not orphans:
-        logger.debug("Orphan sweep: every running job has an owner.")
+    orphans = [job_id for job_id in running if job_id not in owners and job_id not in _OWNED_JOBS]
+    held = await queued_or_owned(redis_conn, pending)
+    if held is None:
+        return
+    never_started = [
+        job_id for job_id in pending if job_id not in held and job_id not in _OWNED_JOBS
+    ]
+    if not orphans and not never_started:
+        logger.debug("Orphan sweep: every running job has an owner, every pending one a queue.")
         return
 
+    await _fail_swept(db_session, orphans, "running", _SWEPT_NO_OWNER)
+    await _fail_swept(db_session, never_started, "pending", _SWEPT_NEVER_STARTED)
+
+
+async def _fail_swept(
+    db_session: async_sessionmaker, job_ids: list[str], status: str, reason: str
+) -> None:
+    """Mark these jobs failed with ``reason``, each only while it still has ``status``."""
+    from app.models.job import AnalysisJob
+
+    if not job_ids:
+        return
     async with db_session() as db:
         result = await db.execute(
             update(AnalysisJob)
             .where(
-                AnalysisJob.id.in_([uuid.UUID(job_id) for job_id in orphans]),
-                # Re-checked in the statement: a worker may have finished one
-                # of these between the read above and this write.
-                AnalysisJob.status == "running",
+                AnalysisJob.id.in_([uuid.UUID(job_id) for job_id in job_ids]),
+                # Re-checked in the statement: a worker may have started or
+                # finished one of these between the read above and this write.
+                AnalysisJob.status == status,
             )
-            .values(status="failed", completed_at=func.now(), error_message=_SWEPT_NO_OWNER)
+            .values(status="failed", completed_at=func.now(), error_message=reason)
             .returning(AnalysisJob.id)
         )
         affected = [str(row[0]) for row in result.all()]
@@ -4040,8 +4129,9 @@ async def _sweep_orphan_jobs(db_session: async_sessionmaker, redis_conn: Any = N
 
     if affected:
         logger.warning(
-            "Orphan sweep: marked %d unowned 'running' job(s) as 'failed': %s",
+            "Orphan sweep: marked %d unowned '%s' job(s) as 'failed': %s",
             len(affected),
+            status,
             ", ".join(affected[:8]) + (" ..." if len(affected) > 8 else ""),
             extra={"component": "worker.lifecycle", "job_count": len(affected)},
         )

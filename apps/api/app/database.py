@@ -39,6 +39,16 @@ async_session_factory = async_sessionmaker(
 )
 
 
+def config_option_value(value: str) -> str:
+    """``value`` escaped for a configparser option with interpolation (Alembic's config).
+
+    ``%`` starts an interpolation there, so a DSN whose password holds one
+    (a percent-encoded character) is refused with an error that prints the
+    whole option, password included. Doubled, it reads back as written.
+    """
+    return value.replace("%", "%%")
+
+
 class Base(DeclarativeBase):
     """Base class for all SQLAlchemy ORM models."""
 

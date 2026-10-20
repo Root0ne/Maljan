@@ -112,7 +112,7 @@ def test_re_uploading_your_own_sample_is_audited_as_a_duplicate(rows, monkeypatc
     lookup.scalar_one.return_value = existing
 
     db = MagicMock()
-    db.execute = AsyncMock(side_effect=[prior, insert_conflict, lookup])
+    db.execute = AsyncMock(side_effect=[None, prior, insert_conflict, lookup])
     db.flush = AsyncMock()
     db.refresh = AsyncMock()
 
@@ -139,7 +139,7 @@ def test_reusing_another_users_stored_bytes_is_audited_as_shared_storage(rows, m
     inserted.scalar_one_or_none.return_value = fresh
 
     db = MagicMock()
-    db.execute = AsyncMock(side_effect=[prior, inserted])
+    db.execute = AsyncMock(side_effect=[None, prior, inserted])
     db.flush = AsyncMock()
     db.refresh = AsyncMock()
 
@@ -164,7 +164,7 @@ def test_a_first_upload_is_audited_without_either_flag(rows, monkeypatch):
     inserted.scalar_one_or_none.return_value = fresh
 
     db = MagicMock()
-    db.execute = AsyncMock(side_effect=[prior, inserted])
+    db.execute = AsyncMock(side_effect=[None, prior, inserted])
     db.flush = AsyncMock()
     db.refresh = AsyncMock()
 

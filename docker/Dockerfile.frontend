@@ -29,10 +29,13 @@ WORKDIR /app
 
 ENV NODE_ENV=production
 
-# Copy built artifacts
-COPY --from=builder /app/.next/standalone ./
-COPY --from=builder /app/.next/static ./.next/static
-COPY --from=builder /app/public ./public
+# Copy built artifacts, owned by the image's unprivileged ``node`` user so the
+# server can keep its own cache (.next/cache) without running as root.
+COPY --from=builder --chown=node:node /app/.next/standalone ./
+COPY --from=builder --chown=node:node /app/.next/static ./.next/static
+COPY --from=builder --chown=node:node /app/public ./public
+
+USER node
 
 EXPOSE 3000
 
