@@ -32,12 +32,20 @@ class TestWhatCanBeClosedOff:
     @pytest.mark.parametrize(
         ("written", "read_as"),
         [
-            # An array left open inside an object.
-            ('{"path": "/s.bin", "names": ["a", "b"', {"path": "/s.bin", "names": ["a", "b"]}),
+            # An array the model closed, inside an object left open.
+            ('{"path": "/s.bin", "names": ["a", "b"]', {"path": "/s.bin", "names": ["a", "b"]}),
             # The object alone, every value complete.
-            ('{"path": "/s.bin", "start": 0', {"path": "/s.bin", "start": 0}),
+            (
+                '{"path": "/s.bin", "start": 0, "mode": "ascii"',
+                {"path": "/s.bin", "start": 0, "mode": "ascii"},
+            ),
             # A nested object, both levels left open.
-            ('{"opts": {"depth": 2', {"opts": {"depth": 2}}),
+            ('{"opts": {"depth": 2, "kind": "x"', {"opts": {"depth": 2, "kind": "x"}}),
+            # A number the model followed with a line break or a space, it ended.
+            ('{"n": 12\n', {"n": 12}),
+            ('{"n": 12 ', {"n": 12}),
+            # A literal at the end is whole: nothing longer begins with it.
+            ('{"path": "/s.bin", "wide": true', {"path": "/s.bin", "wide": True}),
         ],
     )
     def test_the_missing_closers_are_appended(self, written: str, read_as: dict) -> None:
@@ -60,6 +68,14 @@ class TestWhatCanBeClosedOff:
             # Not an object at the end of it.
             '["a", "b"',
             "",
+            # A number at the very end may be cut short: 4198 of 4198400 is a
+            # valid call at the wrong address.
+            '{"address": 4198',
+            '{"path": "/s.bin", "start": 0',
+            '{"offset": 1.5e',
+            # A list left open may have had more items.
+            '{"path": "/s.bin", "names": ["a", "b"',
+            '{"addresses": [4198400, 4198',
         ],
     )
     def test_anything_else_is_left_to_the_refusal_path(self, written: str) -> None:
@@ -84,12 +100,16 @@ class TestTheTurnTheRepairChanges:
     def test_a_repairable_call_moves_across_and_the_turn_keeps_its_id(self) -> None:
         repairs = ArgumentRepairs()
 
-        repaired = repair_invalid_tool_calls(self._turn('{"path": "/s.bin", "start": 0'), repairs)
+        repaired = repair_invalid_tool_calls(
+            self._turn('{"path": "/s.bin", "start": 0, "pattern": "MZ"'), repairs
+        )
 
         assert repaired is not None
         assert repaired.id == "turn-1" and repaired.content == "Let me look."
         assert repaired.invalid_tool_calls == []
-        assert [call["args"] for call in repaired.tool_calls] == [{"path": "/s.bin", "start": 0}]
+        assert [call["args"] for call in repaired.tool_calls] == [
+            {"path": "/s.bin", "start": 0, "pattern": "MZ"}
+        ]
         assert repaired.tool_calls[0]["id"] == "call_9"
 
     def test_an_unrepairable_call_is_left_exactly_where_it_was(self) -> None:
@@ -117,7 +137,7 @@ class TestTheLedgerSaysTheCallWasRepaired:
 
     def test_the_entry_is_marked_and_keeps_what_the_model_wrote(self) -> None:
         repairs = ArgumentRepairs()
-        written = '{"path": "/s.bin", "start": 0'
+        written = '{"path": "/s.bin", "start": 0, "pattern": "MZ"'
         repair_invalid_tool_calls(
             AIMessage(
                 content="",
@@ -133,7 +153,7 @@ class TestTheLedgerSaysTheCallWasRepaired:
 
         # langchain fills the schema's defaults before the tool runs, so what
         # arrives is a superset of what the repair wrote.
-        answer = tool.invoke({"path": "/s.bin", "start": 0, "pattern": ""})
+        answer = tool.invoke({"path": "/s.bin", "start": 0, "pattern": "MZ"})
 
         entry = recorder.entries[0]
         assert entry.args_repaired is True

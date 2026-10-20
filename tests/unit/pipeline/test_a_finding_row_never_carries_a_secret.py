@@ -1243,6 +1243,9 @@ WRITES_THE_LIST: dict[tuple[str, str], str] = {
     # The one place anything is added to it: the output of ``validate_isr``,
     # which is walked source.
     ("agents/base_agent.py", "_validate_isr"): "what the walked validator returned",
+    # The same validator's output for a turn that gave no answer, each row with
+    # the platform's sentence saying why appended (``_not_asked``).
+    ("agents/base_agent.py", "_settle_an_unanswered_turn"): "the walked validator's rows",
     # A callee's own drained rows, each rebuilt as a Violation naming the
     # callee. Walked source too, and vouched for by name in ``OWNED_IN``.
     ("agents/delegation.py", "_hand_over_the_record"): "a callee's rows, rebuilt",

@@ -119,6 +119,7 @@ from maljan.pipeline.validation import (
     RETRY_DROP_WITHDRAWN,
     RETRY_DROPPED_CODE,
     TECHNIQUE_LINE_UNREAD_CODE,
+    VALIDATION_TURN_NOT_RUN_CODE,
     VALIDITY_CODE,
     AnswerCheckInputs,
     ClaimsRepeated,
@@ -679,6 +680,12 @@ class BudgetCeiling:
         self.seconds = None if seconds is None else float(seconds)
         wall = seconds if wall is None else wall
         self.wall = None if wall is None else float(wall)
+
+
+# The note ``frame_messages`` leaves in a human turn's ``response_metadata``
+# when it put the triage pack at its head, which no client sends: the pack is
+# attached once by this note, never by a heading a sample's text can carry.
+FACTS_ATTACHED = "maljan_facts_attached"
 
 
 # The class-level stand-ins for two pieces of per-agent state, for an analyst
@@ -3201,6 +3208,148 @@ def _row_id(row: Any) -> str:
     return str(value or "")
 
 
+def parts_not_analysed_reason(agent: str, missed: Sequence[str]) -> str:
+    """The sentence an answer merged from parts carries for the parts it does not cover.
+
+    One clause per part (``missed``), each saying which part and why; ``""``
+    when every part answered.
+    """
+    said = [str(m) for m in missed if str(m)]
+    if not said:
+        return ""
+    return (
+        f"{agent}'s answer is merged from the parts that answered: {'; '.join(said)}; "
+        "what those parts held is not in it."
+    )
+
+
+# Where a chunk not started stands among the clauses of the chunks missed,
+# until :func:`_chunks_not_started` writes the runs of them.
+_NOT_STARTED = "\x00not started"
+
+
+def _chunks_not_started(missed: Sequence[str], numbers: Sequence[int]) -> list[str]:
+    """``missed`` with each run of consecutive not-started chunks written as one clause.
+
+    ``numbers`` are the chunks not started, in the order their places
+    (:data:`_NOT_STARTED`) stand in ``missed``. Linear in both.
+    """
+    out: list[str] = []
+    run: list[int] = []
+    taken = iter(numbers)
+
+    def _close() -> None:
+        if not run:
+            return
+        which = f"chunk {run[0]} was" if len(run) == 1 else f"chunks {run[0]}\u2013{run[-1]} were"
+        out.append(f"{which} not started (the spend ceiling is reached)")
+        run.clear()
+
+    for clause in missed:
+        if clause == _NOT_STARTED:
+            number = next(taken)
+            if run and number != run[-1] + 1:
+                _close()
+            run.append(number)
+            continue
+        _close()
+        out.append(clause)
+    _close()
+    return out
+
+
+def _with_parts_not_analysed(isr: AgentISR, agent: str, missed: Sequence[str]) -> AgentISR:
+    """``isr`` with the parts it does not cover stated on it, beside any reason it carries.
+
+    Stated as the answer's unread-claims reason, which the judge node puts
+    with the run's limitations for an answer in force; the reason the merge
+    already carried is kept ahead of it.
+    """
+    sentence = parts_not_analysed_reason(agent, missed)
+    if sentence:
+        held = str(getattr(isr, "claims_unread_reason", "") or "")
+        isr.note_claims_unread(f"{held} {sentence}" if held else sentence)
+    return isr
+
+
+def _not_asked(initial: Sequence[Violation], detail: str) -> list[Violation]:
+    """``initial`` as findings of a validation turn that was never answered.
+
+    An unknown id is a catalogue fact and stays as found, marked whether or
+    not it was asked. An absence reading, a claim whose sentence does not
+    describe its technique and every other question for the analyst notes
+    nothing on the claim when it went unanswered: the finding is recorded
+    saying it was not asked, and why (``detail``).
+    """
+    return [
+        replace(
+            v,
+            message=f"{v.message} {detail[:1].upper()}{detail[1:]}.",
+            sentence="",
+            asked=False,
+        )
+        if v.code
+        in (
+            ABSENCE_CLAIM_CODE,
+            CLAIM_DOES_NOT_DESCRIBE_CODE,
+            ANALYST_CUT_CODE,
+            ANALYST_REPEATED_CODE,
+            CLAIMS_UNDER_DISPUTES_CODE,
+            DECOMPILED_NOT_DESCRIBED_CODE,
+            LIBRARY_ONLY_CLAIMS_CODE,
+            FUNCTION_CLAIM_UNHELD_CODE,
+        )
+        else v
+        for v in initial
+    ]
+
+
+def _settle_an_unanswered_turn(
+    agent: Any,
+    isr: AgentISR,
+    initial: Sequence[Violation],
+    detail: str,
+    *,
+    asked: Sequence[Violation] = (),
+    asked_detail: str = "",
+) -> AgentISR:
+    """Keep ``isr`` as it was when its validation turn gave no answer, and say why.
+
+    One rule for every such turn: not asked for want of time, failed before
+    its round was sent, or failed after. The claims are marked as an unasked
+    turn leaves them (an unknown id is a catalogue fact; nothing the analyst
+    never answered is noted on a claim); each finding is recorded with
+    ``detail``; :data:`VALIDATION_TURN_NOT_RUN_CODE` is listed among the
+    checks that could not run; the loop's record says it. A finding in
+    ``asked`` was put to the analyst in a round that brought back no answer
+    it could keep: it is worded with ``asked_detail``, and recorded as not
+    asked (``asked=False``), since no answer to it stands to be read.
+    """
+    unasked = _not_asked(initial, detail)
+    settle_validation_marks(isr, unasked)
+    put: set[Violation] | list[Violation]
+    try:
+        put = set(asked)
+    except TypeError:  # a finding holding an unhashable value is compared by value
+        put = list(asked)
+    said = asked_detail or detail
+    sentence = f"{said[:1].upper()}{said[1:]}."
+    agent.validation_findings.extend(
+        replace(v, message=f"{v.message} {sentence}", sentence="", asked=False)
+        if v in put
+        else kept
+        for v, kept in zip(initial, unasked, strict=True)
+    )
+    not_run = getattr(agent, "validation_not_run", None)
+    if not isinstance(not_run, list):
+        not_run = []
+        agent.validation_not_run = not_run
+    if VALIDATION_TURN_NOT_RUN_CODE not in not_run:
+        not_run.append(VALIDATION_TURN_NOT_RUN_CODE)
+    BaseAnalyst._note_on_last_loop(agent, "validation", said if put else detail)
+    return isr
+
+
 def frame_messages(
     messages: list[BaseMessage], *, facts_block: str = "", run_state: str = ""
 ) -> list[BaseMessage]:
@@ -3231,19 +3380,42 @@ def frame_messages(
     """
     from langchain_core.messages import HumanMessage
 
-    from maljan.pipeline.triage_pack import PACK_HEADING
-
     out: list[BaseMessage] = without_run_state(list(messages))
     if facts_block:
         for index, message in enumerate(out):
             if isinstance(message, HumanMessage):
-                content = str(message.content)
-                if PACK_HEADING not in content:
-                    out[index] = HumanMessage(content=f"{facts_block}\n\n{content}")
+                # Attached once, known by the platform's own note on the turn
+                # (:data:`FACTS_ATTACHED`), never by its words: a sample whose
+                # strings carry the pack's heading is data in the turn, and
+                # read as the pack it left the analyst without one.
+                if not _carries_facts(message, facts_block):
+                    content = str(message.content)
+                    noted = {**(message.response_metadata or {}), FACTS_ATTACHED: True}
+                    out[index] = HumanMessage(
+                        content=f"{facts_block}\n\n{content}", response_metadata=noted
+                    )
                 break
     if run_state and out and _carries_run_state(out[-1]):
         out[-1] = _with_run_state_on(out[-1], run_state)
     return out
+
+
+def _carries_facts(message: Any, facts_block: str) -> bool:
+    """Whether the platform already put ``facts_block`` at the head of ``message``.
+
+    Its note on the turn says so. A turn without the note — rebuilt without
+    its metadata, or saved by a checkpoint before the note existed — carries
+    it when it begins with the block exactly or with the pack's heading at
+    its very first character, which only the platform writes there: the head
+    of the first human turn is the platform's, and a sample's text stands
+    after the task, so a heading anywhere else is the sample's.
+    """
+    from maljan.pipeline.triage_pack import PACK_HEADING
+
+    if (getattr(message, "response_metadata", None) or {}).get(FACTS_ATTACHED):
+        return True
+    content = str(message.content)
+    return content.startswith(PACK_HEADING) or content.startswith(f"{facts_block}\n\n")
 
 
 def _carries_run_state(message: Any) -> bool:
@@ -7647,22 +7819,36 @@ class BaseAnalyst(BudgetMeter, ABC):
     def safe_analyze_isr_chunked(self, chunks: list) -> AgentISR:
         """Analyze a list of TextChunk objects, merging their ISRs.
 
-        Each chunk's loop runs under this agent's delegation lock, the same one
-        a single-chunk run and an ask of it take, so nothing else drives the
-        agent while one of its chunks is in flight.
+        The whole analysis — every chunk's loop, the merge and its validation
+        turn — runs under this agent's delegation lock, the same one a
+        single-chunk run and an ask of it take. Held per chunk, an ask landing
+        between two chunks drained the findings the earlier chunks had left in
+        the buffers for the merge, and the ledger entries the later chunks are
+        told about, onto the ask's answer.
+
+        A chunk that failed or was never started is stated on the merged
+        answer (:func:`parts_not_analysed_reason`), never only logged: the
+        merged answer does not cover what that chunk held.
 
         Raises:
             AnalystError: If the chunk list is empty or analysis fails on all
                 chunks. An empty chunk list is treated as a hard input error
                 rather than a silent "no findings" success.
         """
-        from maljan.analysis.chunk_merger import merge_chunk_isrs
-
         if not chunks:
             raise AnalystError(f"{self.name} received an empty chunk list — no data to analyse.")
 
         if len(chunks) == 1:
             return self.safe_analyze_isr(chunks[0].content)
+
+        # Through the class's function, so a duck-typed analyst that borrows
+        # this method alone runs the same body.
+        with lock_for(self):
+            return BaseAnalyst._analyze_chunks(self, chunks)  # type: ignore[arg-type]
+
+    def _analyze_chunks(self, chunks: list) -> AgentISR:
+        """The body of :meth:`safe_analyze_isr_chunked`, under the agent's lock."""
+        from maljan.analysis.chunk_merger import merge_chunk_isrs
 
         self.logger.info("Chunked analysis: %d chunks for agent='%s'.", len(chunks), self.name)
         # Each chunk is named by its place in the list this analyst is handed:
@@ -7689,8 +7875,16 @@ class BaseAnalyst(BudgetMeter, ABC):
             _sized_by_room(chunk) for chunk in queue
         )
 
+        from maljan.pipeline.events import describe_exception
+
         chunk_isrs: list[AgentISR] = []
         errors: list[str] = []
+        # What the merged answer says of each chunk it does not cover, in words
+        # a published reason may carry: the failure's type, never its message.
+        missed: list[str] = []
+        # The chunks not started for the spend ceiling, by number; a run of
+        # them is one clause (``_chunks_not_started``).
+        not_started: list[int] = []
         # Where this analysis's own ledger entries begin: a later chunk is told
         # the calls the earlier ones made, and its loop does not make them again.
         entries = getattr(self, "_evidence_entries", None)
@@ -7704,6 +7898,8 @@ class BaseAnalyst(BudgetMeter, ABC):
             # chunks so far gathered is merged, and the degradation says why.
             if spend_reached(self):
                 errors.append(f"chunk {chunk.index + 1}: not started, the spend ceiling is reached")
+                not_started.append(chunk.index + 1)
+                missed.append(_NOT_STARTED)
                 continue
             entries = getattr(self, "_evidence_entries", None)
             earlier = list(entries[first_entry:]) if isinstance(entries, list) else []
@@ -7733,46 +7929,45 @@ class BaseAnalyst(BudgetMeter, ABC):
                 f"{block}\n\n{chunk.content}" if block else chunk.content
             )
             try:
-                # Each chunk's loop under this agent's lock, so an ask of it
-                # cannot run inside one: an ask drives the same buffers, the
-                # same budget and the same call chain this loop is using.
-                with lock_for(self):
-                    self._prior_chunk_calls = earlier
-                    try:
-                        isr = self.analyze_isr(prompt_text)
-                        cut = getattr(self, "_last_answer_cut", None)
-                        ended = bool(getattr(self, "_last_answer_ended", False))
-                    finally:
-                        self._prior_chunk_calls = []
-                        # Taken whether the chunk answered or raised: a cut
-                        # left here would be read as the next chunk's.
-                        self._last_answer_cut = None
-                        self._last_answer_ended = False
-                    repeat_margin = getattr(
-                        getattr(get_settings(), "validation", None), "claim_repeat_margin", None
+                # The whole chunked analysis runs under this agent's lock
+                # (``safe_analyze_isr_chunked``), so no ask runs inside a chunk
+                # or between two.
+                self._prior_chunk_calls = earlier
+                try:
+                    isr = self.analyze_isr(prompt_text)
+                    cut = getattr(self, "_last_answer_cut", None)
+                    ended = bool(getattr(self, "_last_answer_ended", False))
+                finally:
+                    self._prior_chunk_calls = []
+                    # Taken whether the chunk answered or raised: a cut
+                    # left here would be read as the next chunk's.
+                    self._last_answer_cut = None
+                    self._last_answer_ended = False
+                repeat_margin = getattr(
+                    getattr(get_settings(), "validation", None), "claim_repeat_margin", None
+                )
+                repeats = claims_repeated(
+                    isr.answer_text or isr.unparsed_answer or "",
+                    None if repeat_margin is None else int(repeat_margin),
+                )
+                if cut is not None or repeats is not None:
+                    # A cut, or an answer that repeated its claims, is
+                    # answered inside the chunk it happened in:
+                    # this chunk's answer is asked for a whole one over
+                    # this chunk's own input, and what comes back stands
+                    # for this chunk alone in the merge.
+                    self._last_answer_cut = cut
+                    self._last_answer_ended = ended
+                    isr = self._validate_isr(
+                        isr,
+                        prompt_text,
+                        chunk=(
+                            f"chunk {chunk.index + 1}"
+                            if fitting
+                            else f"chunk {chunk.index + 1} of {chunk.total}"
+                        ),
+                        only_cut=True,
                     )
-                    repeats = claims_repeated(
-                        isr.answer_text or isr.unparsed_answer or "",
-                        None if repeat_margin is None else int(repeat_margin),
-                    )
-                    if cut is not None or repeats is not None:
-                        # A cut, or an answer that repeated its claims, is
-                        # answered inside the chunk it happened in:
-                        # this chunk's answer is asked for a whole one over
-                        # this chunk's own input, and what comes back stands
-                        # for this chunk alone in the merge.
-                        self._last_answer_cut = cut
-                        self._last_answer_ended = ended
-                        isr = self._validate_isr(
-                            isr,
-                            prompt_text,
-                            chunk=(
-                                f"chunk {chunk.index + 1}"
-                                if fitting
-                                else f"chunk {chunk.index + 1} of {chunk.total}"
-                            ),
-                            only_cut=True,
-                        )
                 chunk_isrs.append(isr)
                 self.logger.debug(
                     "Chunk %d/%d analyzed: %d claims.",
@@ -7785,6 +7980,7 @@ class BaseAnalyst(BudgetMeter, ABC):
                 raise
             except Exception as exc:
                 errors.append(f"chunk {chunk.index + 1}: {exc}")
+                missed.append(f"chunk {chunk.index + 1} failed ({describe_exception(exc)})")
                 self.logger.warning("Chunk %d/%d failed: %s.", chunk.index + 1, chunk.total, exc)
 
         if not chunk_isrs:
@@ -7807,12 +8003,16 @@ class BaseAnalyst(BudgetMeter, ABC):
         # multi-chunk evidence (a claim from one chunk grounded by another is
         # still grounded in the sample). No-op when the gate is off.
         evidence = "\n".join(c.content for c in chunks)
-        # Under the agent's lock, as the single-chunk path runs it: the
+        # Still under the agent's lock taken for the whole analysis: the
         # validation turn marks and slices the findings buffer in ``_parse``,
         # and a delegated ask of this agent landing between the mark and the
         # slice would move its own findings onto this ISR, or these onto its.
-        with lock_for(self):
-            return self._validate_isr(self._apply_consistency_gate(merged, evidence), evidence)
+        checked = self._validate_isr(self._apply_consistency_gate(merged, evidence), evidence)
+        # Noted on the answer kept, after its validation turn: a retry's answer
+        # is parsed afresh, and the chunks it does not cover are the same.
+        return _with_parts_not_analysed(
+            checked, self.name, _chunks_not_started(missed, not_started)
+        )
 
     # ------------------------------------------------------------------
     # View-decomposition (findings-log §3.6) — text path only
@@ -7868,8 +8068,11 @@ class BaseAnalyst(BudgetMeter, ABC):
         specs = _view_specs(domain, n_views)
         per_view_budget = (total_max_tokens // n_views) if total_max_tokens else None
 
+        from maljan.pipeline.events import describe_exception
+
         view_isrs: list[AgentISR] = []
         errors: list[str] = []
+        missed: list[str] = []
 
         def _run(spec: tuple[str, str]) -> AgentISR:
             text = self._invoke_view(spec[1], data, per_view_budget)
@@ -7883,6 +8086,7 @@ class BaseAnalyst(BudgetMeter, ABC):
                     view_isrs.append(fut.result())
                 except Exception as exc:  # noqa: BLE001 — fault isolation
                     errors.append(f"view '{key}': {exc}")
+                    missed.append(f"view '{key}' failed ({describe_exception(exc)})")
                     self.logger.warning("View '%s' failed: %s.", key, exc)
 
         if not view_isrs:
@@ -7902,7 +8106,7 @@ class BaseAnalyst(BudgetMeter, ABC):
             len(view_isrs),
             self.name,
         )
-        return merge_chunk_isrs(view_isrs)
+        return _with_parts_not_analysed(merge_chunk_isrs(view_isrs), self.name, missed)
 
     def safe_analyze_isr_views(
         self,
@@ -7956,8 +8160,11 @@ class BaseAnalyst(BudgetMeter, ABC):
         specs = _tier_specs(n_tiers, techniques=asks_for_techniques(self))
         per_tier_budget = (total_max_tokens // n_tiers) if total_max_tokens else None
 
+        from maljan.pipeline.events import describe_exception
+
         tier_isrs: list[AgentISR] = []
         errors: list[str] = []
+        missed: list[str] = []
         prior_text = ""
 
         for key, instruction in specs:
@@ -7974,6 +8181,7 @@ class BaseAnalyst(BudgetMeter, ABC):
                 text = self._invoke_view(instruction, tier_input, per_tier_budget)
             except Exception as exc:  # noqa: BLE001 — fault isolation
                 errors.append(f"tier '{key}': {exc}")
+                missed.append(f"reasoning tier '{key}' failed ({describe_exception(exc)})")
                 self.logger.warning("Reasoning tier '%s' failed: %s.", key, exc)
                 continue
             prior_text = text
@@ -7997,7 +8205,7 @@ class BaseAnalyst(BudgetMeter, ABC):
             len(tier_isrs),
             self.name,
         )
-        return merge_chunk_isrs(tier_isrs)
+        return _with_parts_not_analysed(merge_chunk_isrs(tier_isrs), self.name, missed)
 
     def safe_analyze_isr_tiered(
         self,
@@ -8285,31 +8493,7 @@ class BaseAnalyst(BudgetMeter, ABC):
             # describe its technique, are questions for the analyst, and one
             # never sent notes nothing on the claim: the finding is recorded
             # saying it was not asked, and the technique goes through as claimed.
-            unasked = [
-                replace(
-                    v,
-                    message=f"{v.message} {detail[:1].upper()}{detail[1:]}.",
-                    sentence="",
-                    asked=False,
-                )
-                if v.code
-                in (
-                    ABSENCE_CLAIM_CODE,
-                    CLAIM_DOES_NOT_DESCRIBE_CODE,
-                    ANALYST_CUT_CODE,
-                    ANALYST_REPEATED_CODE,
-                    CLAIMS_UNDER_DISPUTES_CODE,
-                    DECOMPILED_NOT_DESCRIBED_CODE,
-                    LIBRARY_ONLY_CLAIMS_CODE,
-                    FUNCTION_CLAIM_UNHELD_CODE,
-                )
-                else v
-                for v in initial
-            ]
-            settle_validation_marks(isr, unasked)
-            self.validation_findings.extend(unasked)
-            BaseAnalyst._note_on_last_loop(self, "validation", detail)  # type: ignore[arg-type]
-            return isr
+            return _settle_an_unanswered_turn(self, isr, initial, detail)
 
         from langchain_core.messages import HumanMessage, SystemMessage
 
@@ -8423,17 +8607,27 @@ class BaseAnalyst(BudgetMeter, ABC):
         # Each retry answer's own text, by the ISR it parsed to: a retry the
         # first answer is kept over is kept in the run record whole.
         raw_answers: dict[int, str] = {}
+        # The findings of the round being asked, from its feedback until its
+        # answer returns, and those of each round that returned an answer.
+        # ``on_feedback`` runs before the round's call, so a round is counted
+        # only once the call has come back: one that raised was put, and never
+        # answered.
+        round_asked: list[list[Violation]] = []
+        rounds_answered: list[list[Violation]] = []
 
         def _run(turns: list[Any]) -> Any:
             if first:
                 return first.pop()
             # The block moves to the retry's own question, the last message,
             # and the turn that carried it before is sent as it was written.
-            return self._invoke_llm_with_timeout(
+            answer = self._invoke_llm_with_timeout(
                 frame_messages(turns, run_state=current_run_state(self)),
                 left,
                 what=VALIDATION_RETRY_CALL,
             )
+            if round_asked:
+                rounds_answered.append(round_asked.pop())
+            return answer
 
         def _parse(answer: Any) -> AgentISR:
             if isinstance(answer, _PriorAnswer):
@@ -8915,6 +9109,7 @@ class BaseAnalyst(BudgetMeter, ABC):
             def _fed_back(violations: Sequence[Violation]) -> None:
                 shown.extend(violations)
                 tally.count(violations)
+                round_asked[:] = [list(violations)]
 
             revised, violations, retries = retry_with_feedback_sync(
                 _run,
@@ -8935,8 +9130,43 @@ class BaseAnalyst(BudgetMeter, ABC):
                 cards=cards,
             )
         except Exception as exc:  # noqa: BLE001 — a retry that fails keeps the first answer
-            self.logger.warning("Validation retry failed (%s); keeping the first answer.", exc)
-            return isr
+            # The first answer is kept: an unknown id is marked, every finding
+            # is recorded saying why it stands, and the run summary says the
+            # turn gave no answer. Only a round whose call came back counts as
+            # a retry and as fed back; the findings of a round put and never
+            # answered say so, and a turn that failed before any round was put
+            # is "not asked".
+            from maljan.pipeline.events import describe_exception
+
+            self.logger.warning(
+                "Validation retry failed (%s); keeping the first answer.",
+                describe_exception_for_log(exc),
+            )
+            failed = describe_exception(exc)
+            self.validation_retries += len(rounds_answered)
+            for returned in rounds_answered:
+                for v in returned:
+                    self.validation_fed_back[v.code] = self.validation_fed_back.get(v.code, 0) + 1
+            if round_asked:
+                return _settle_an_unanswered_turn(
+                    self,
+                    isr,
+                    initial,
+                    f"not asked: the validation turn failed ({failed})",
+                    asked=round_asked[0],
+                    asked_detail=f"asked; no answer came ({failed})",
+                )
+            if rounds_answered:
+                return _settle_an_unanswered_turn(
+                    self,
+                    isr,
+                    initial,
+                    f"not asked: the validation turn failed ({failed})",
+                    asked=rounds_answered[-1],
+                    asked_detail=f"asked; the answer could not be kept ({failed})",
+                )
+            detail = f"not asked: the validation turn failed ({failed})"
+            return _settle_an_unanswered_turn(self, isr, initial, detail)
 
         self.validation_retries += retries
         for code, count in tally.by_code.items():
@@ -9501,14 +9731,16 @@ class BaseAnalyst(BudgetMeter, ABC):
         """True when ``text`` is a placeholder or an intention, not real analysis."""
         if not text:
             return True
-        # Match the placeholder anywhere near the start of the text — analysts
-        # sometimes prepend a one-line header (e.g. "CLAIM:") before parroting
-        # the fallback, so probe both the raw first line and the same line with
-        # a leading ``CLAIM:``/``EVIDENCE:`` label stripped.
+        # The placeholder is meta only when it is the whole of the text: every
+        # line and sentence in it says there was nothing to read. Analysts
+        # sometimes prepend a ``CLAIM:``/``EVIDENCE:`` label before parroting
+        # the fallback, so each is probed with that label stripped too. An
+        # answer that opens on the placeholder and then writes its claims is
+        # those claims: reading the first line alone dropped every one of them.
         stripped = text.strip()
         first = stripped.splitlines()[0] if stripped else ""
         unlabelled = re.sub(r"^\s*(?:claim|evidence)\s*:\s*", "", first, flags=re.IGNORECASE)
-        if self._META_CLAIM_RE.match(first) or self._META_CLAIM_RE.match(unlabelled):
+        if self._is_placeholder_text(stripped):
             return True
         announces = bool(
             self._INTENTION_CLAIM_RE.match(first)
@@ -9522,6 +9754,21 @@ class BaseAnalyst(BudgetMeter, ABC):
         # the opening sentence on its own — zeroing the whole answer for its
         # first line would throw away the findings that followed.
         return announces and len(self._SENTENCE_SPLIT_RE.split(stripped)) == 1
+
+    def _is_placeholder_text(self, text: str) -> bool:
+        """Whether every line and sentence of ``text`` says there was no data to read."""
+        pieces = [
+            piece
+            for line in str(text or "").strip().splitlines()
+            for piece in self._SENTENCE_SPLIT_RE.split(line)
+            if piece.strip()
+        ]
+        return bool(pieces) and all(self._is_placeholder_sentence(piece) for piece in pieces)
+
+    def _is_placeholder_sentence(self, sentence: str) -> bool:
+        """Whether ``sentence``, a ``CLAIM:``/``EVIDENCE:`` label aside, says there was no data."""
+        unlabelled = re.sub(r"^\s*(?:claim|evidence)\s*:\s*", "", sentence, flags=re.IGNORECASE)
+        return bool(self._META_CLAIM_RE.match(sentence) or self._META_CLAIM_RE.match(unlabelled))
 
     def _drop_meta_claims(self, claims: list[ClaimEvidence]) -> list[ClaimEvidence]:
         """Strip parsed claims that are really "I could not analyse" meta-claims.
@@ -9659,7 +9906,7 @@ class BaseAnalyst(BudgetMeter, ABC):
         # ISR rather than one with a meta-sentence. Every consumer already
         # skips an empty-claim ISR, so this is the single tightest place to
         # stop "I had nothing to read" being counted as a finding.
-        if self._is_meta_claim_text(text):
+        def _meta() -> AgentISR:
             self.logger.info(
                 "%s: meta-claim text detected; emitting zero-claim ISR.",
                 self.name,
@@ -9673,6 +9920,9 @@ class BaseAnalyst(BudgetMeter, ABC):
                     revision_round=revision_round,
                 )
             )
+
+        if self._is_meta_claim_text(text):
+            return _meta()
 
         # Structured output first, and only. Several prompts —
         # notably the view/tier decomposition ones — mandate the
@@ -9689,6 +9939,13 @@ class BaseAnalyst(BudgetMeter, ABC):
             unreadable = read.confidence_unreadable
             shortfall = self._claims_shortfall(read, revision_round)
             under_disputes = read.after_disputes if read.claims else 0
+            # A claim block that only parrots the placeholder is no finding,
+            # whatever else the answer holds; an answer of nothing else is the
+            # placeholder answer.
+            if structured:
+                structured = [c for c in structured if not self._is_placeholder_text(c.claim)]
+                if not structured:
+                    return _meta()
         if structured:
             isr = AgentISR(
                 agent_id=self.name,

@@ -2434,9 +2434,19 @@ MISSING_ID_CODE = "attck.missing_id"
 # What the run-quality note says for a check that could not run, per code.
 # A code this table does not know is still named rather than described as
 # something it is not.
+# What ``validation_not_run`` lists for an analyst's validation turn that gave
+# no answer: not asked for want of time, or sent and failed. The answer it was
+# about is kept as first written, and what the turn would have asked stands
+# recorded with why.
+VALIDATION_TURN_NOT_RUN_CODE = "validation_turn"
+
 NOT_RUN_SENTENCES: dict[str, str] = {
     "attck.unknown_id": (
         "the ATT&CK catalogue could not be read; technique ids were not checked (attck.unknown_id)"
+    ),
+    VALIDATION_TURN_NOT_RUN_CODE: (
+        "an analyst's validation turn gave no answer (not asked for want of time, or failed); "
+        "its answer is kept as first written and the findings stand unanswered (validation_turn)"
     ),
 }
 
