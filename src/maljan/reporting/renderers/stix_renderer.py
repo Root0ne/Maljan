@@ -47,8 +47,10 @@ from maljan.extractors.network_extractor import (
     address_is_publishable,
     corroboration_reason,
     host_is_public,
+    host_rides_a_url,
     ip_corroboration_reason,
     is_public_resolver,
+    is_shared_hosting_tenant,
     is_well_known_benign_host,
     url_corroboration_reason,
     url_host,
@@ -1967,6 +1969,7 @@ def indicator_publish_reason(
     asked_in: str = "",
     untold: str = "",
     kept_address: str = "",
+    url_only: str = "",
 ) -> str | None:
     """Why this run may publish one indicator of ``kind``, or ``None``.
 
@@ -2047,8 +2050,16 @@ def indicator_publish_reason(
     if kind == "domain":
         if not host_is_public(value):
             return None
-        if in_published_url and not is_well_known_benign_host(value):
+        if in_published_url and host_rides_a_url(value):
             return f"the host of {in_published_url}, which this run publishes"
+        if in_published_url and is_shared_hosting_tenant(value) and not unattributed:
+            # A tenant's name on shared hosting stands on evidence of its own:
+            # a keep, the sample's own observation, a recovery; never the URL.
+            return (
+                _kept_with_the_fact(kept_by, unattributed, kept_address)
+                or (None if url_only else corroboration_reason(source, reputation, value))
+                or _emulation_admits(value, recovered, verdict)
+            )
         if in_published_url or unattributed:
             return _kept_with_the_fact(kept_by, unattributed, kept_address) or _recovered_and_held(
                 value, recovered, verdict, unattributed
@@ -2535,6 +2546,11 @@ def query_answers(report: Any, kind: str, value: str) -> str:
 
 # What the rule says of a well-known benign name a published URL carries.
 BENIGN_NAME_IN_A_URL = "a well-known benign name carried by a published URL"
+# What it says of a tenant's name on shared hosting a published URL carries,
+# with no evidence of its own.
+TENANT_NAME_IN_A_URL = (
+    "a tenant's name on shared hosting carried by a published URL, with no evidence of its own"
+)
 
 
 # Why a sandbox row is not the sample's own observation, as the rule reports it.
@@ -2543,6 +2559,10 @@ FLOW_OUTSIDE_THE_TREE = (
     "the sandbox report attributes its flows to a process outside the sample's process tree"
 )
 BENIGN_NAME_RESOLVED = "a well-known benign name the sandbox's guest resolved"
+TENANT_NAME_RESOLVED = (
+    "a tenant's name on shared hosting the sandbox's guest resolved, which no flow of the "
+    "sample's process tree reached"
+)
 CAPTURE_TLS_NAME = (
     "a TLS name only the capture recorded, which does not say which process made the connection"
 )
@@ -2584,6 +2604,16 @@ def disputed_flow_reason(
     return "the sandbox report attributes its flows to " + "; and to ".join(parts)
 
 
+def _a_tree_flow_reaches(report: Any, row: Any) -> bool:
+    """Whether a flow of the sample's process tree reached an address ``row`` resolved to."""
+    index = _network_index(report)
+    for address in _field(row, "resolved_ips") or []:
+        flow = index.get(("ip", _value_key("ip", str(address))))
+        if flow is not None and _field(flow, "sample_process_tree") is True:
+            return True
+    return False
+
+
 def sandbox_row_kwargs(report: Any, kind: str, value: str, *, what: str = "it") -> dict[str, str]:
     """``unattributed``, ``kept_by``, ``listed_by`` and ``mentioned_by`` for one value's row.
 
@@ -2593,7 +2623,9 @@ def sandbox_row_kwargs(report: Any, kind: str, value: str, *, what: str = "it") 
     elsewhere, or says nothing about which process made them — is the guest's
     traffic, and so is a well-known benign name a DNS lookup asked for (Windows
     resolves through its DNS service, never through the sample's tree, so a
-    name is judged by what it is). Either is published only when the judge's
+    name is judged by what it is), and so is a tenant's name on shared hosting
+    the guest resolved and no flow of the tree reached through an address it
+    resolved to. Either is published only when the judge's
     indicator kept it; an analyst's artifact listing it is named in the
     reason and publishes nothing. The AS fact is stated in the reason. A row
     only an analyst's artifact created carries who listed it and whether the
@@ -2662,6 +2694,10 @@ def sandbox_row_kwargs(report: Any, kind: str, value: str, *, what: str = "it") 
             why = CAPTURE_TLS_NAME
         elif is_well_known_benign_host(key):
             why = BENIGN_NAME_RESOLVED
+        elif is_shared_hosting_tenant(key) and not _a_tree_flow_reaches(report, row):
+            # The guest's DNS lookup of a tenant's name is no evidence of the
+            # name's own: the sample's tree reaching it is.
+            why = TENANT_NAME_RESOLVED
         else:
             return {}
     return _the_judge_s_keep(
@@ -2696,9 +2732,10 @@ def kept_kwargs(report: Any, kind: str, key: str, row: Any = None) -> dict[str, 
     kept: list[str] = []
     if (kind, key) in _judge_index(report):
         kept.append("the judge's indicator")
-    elif (kind, key) in _judge_url_hosts(report) and not is_well_known_benign_host(key):
+    elif (kind, key) in _judge_url_hosts(report) and host_rides_a_url(key):
         # A well-known host a URL carries is kept only as itself (a CDN's
-        # name is not the sample's C2 because a URL on it was).
+        # name is not the sample's C2 because a URL on it was), and so is a
+        # tenant's name on shared hosting, which needs evidence of its own.
         kept.append("the judge's URL indicator")
     mentioned = [str(by) for by in (_field(row, "mentioned_by") or [])] if row is not None else []
     return {
@@ -3259,6 +3296,13 @@ def emulation_kwargs(
         carried_by = published_url_hosts(report).get(key)
         if carried_by:
             observed["in_published_url"] = carried_by[0]
+            if (
+                is_shared_hosting_tenant(key)
+                and _network_index(report).get(("domain", key)) is None
+            ):
+                # The URL's row is the name's only record: its source is the
+                # URL's, not evidence of the name's own.
+                observed["url_only"] = "the published URL is its only record"
             if "kept_by" not in observed:
                 observed.update(
                     kept_kwargs(report, "domain", key, _network_index(report).get(("domain", key)))
@@ -3414,6 +3458,7 @@ def publish_answer(
     untold: str = "",
     kept_address: str = "",
     judge_only: str = "",
+    url_only: str = "",
 ) -> str:
     """The publish rule's answer for one row, as the report prints it.
 
@@ -3445,6 +3490,7 @@ def publish_answer(
         mentioned_by=mentioned_by,
         in_published_url=in_published_url,
         kept_address=kept_address,
+        url_only=url_only,
     )
     if admitted:
         return yes_because(admitted)
@@ -3461,6 +3507,10 @@ def publish_answer(
     if kind == "domain" and in_published_url and is_well_known_benign_host(text):
         return not_kept_reason(
             f"{BENIGN_NAME_IN_A_URL} ({in_published_url})", mentioned_by, listed_by
+        )
+    if kind == "domain" and in_published_url and is_shared_hosting_tenant(text):
+        return not_kept_reason(
+            f"{TENANT_NAME_IN_A_URL} ({in_published_url})", mentioned_by, listed_by
         )
     if unattributed and kind in ("ip", "domain", "url"):
         refused = _recovery_refusal(recovered, verdict, url_host(text) if kind == "url" else text)

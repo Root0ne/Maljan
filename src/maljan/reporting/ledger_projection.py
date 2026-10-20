@@ -1182,6 +1182,9 @@ def network_from_ledger(
 
     for _entry, data in _payloads(ledger, "pcap"):
         for row in data.get("conversations") or []:
+            # A host that only sent to the sandbox was not contacted by it.
+            if isinstance(row, dict) and row.get("inbound_only"):
+                continue
             _add("ip", address_key(_first_str(row, "dst", "ip", "address")), "sandbox")
         sni = data.get("sni")
         for name in sni if isinstance(sni, dict | list) else []:
@@ -1812,7 +1815,7 @@ def cell_network_values(cell: str, hint: str | None) -> list[tuple[str, str]]:
     """What one cell holds: a URL and its host, an address, or a name; nothing otherwise."""
     from maljan.extractors.network_extractor import (
         host_is_public,
-        is_well_known_benign_host,
+        host_rides_a_url,
         url_host,
     )
 
@@ -1825,8 +1828,9 @@ def cell_network_values(cell: str, hint: str | None) -> list[tuple[str, str]]:
         as_address = _address_of(host) if host else ""
         if as_address:
             out.append(("ip", as_address))
-        elif host and not is_well_known_benign_host(host):
-            # A well-known host is kept only as itself, never through a URL on it.
+        elif host and host_rides_a_url(host):
+            # A well-known host is kept only as itself, never through a URL on
+            # it, and so is a tenant's name on shared hosting.
             out.append(("domain", host))
         return out
     as_address = _address_of(text)

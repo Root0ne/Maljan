@@ -1064,6 +1064,10 @@ class MarkdownRenderer:
                 )
             measured.extend(_left_out(len(carved), 10, "carved payloads"))
             measured.extend(_left_out(len(dropped), 20, "dropped files"))
+        # What the carver's own cap left out, stated beside what it carved.
+        carve_notes = [r for r in (static.embedded_resources if static else []) if is_carve_note(r)]
+        if carve_notes:
+            measured.extend(["", *(_item(_inline_safe(str(r["type"]))) for r in carve_notes)])
         blocks.append(
             _subsection(
                 "5.8",
@@ -1348,7 +1352,11 @@ class MarkdownRenderer:
             lines.append("")
 
         if static.embedded_resources:
-            plain = [r for r in static.embedded_resources if not r.get("carved")]
+            # The carver's note is stated with the carved payloads (5.8), not
+            # here, and does not count toward this list.
+            plain = [
+                r for r in static.embedded_resources if not r.get("carved") and not is_carve_note(r)
+            ]
             if plain:
                 lines.extend([_plain_heading("Resources"), ""])
                 for res in plain[:20]:
@@ -5353,6 +5361,12 @@ CUT_CELL_SENTENCE = (
     "A table value that ends in … is cut to fit the page; the JSON report and the "
     "evidence ledger (Appendix A's ids) carry it whole."
 )
+
+
+def is_carve_note(row: Any) -> bool:
+    """Whether an embedded-resource row is the carver's note of what its cap
+    left out (``pe_extractor._carve_from``): not carved, and counting the rest."""
+    return isinstance(row, dict) and not row.get("carved") and "left_out" in row
 
 
 def _left_out(total: int, shown: int, what: str) -> list[str]:

@@ -79,15 +79,20 @@ _LOOPBACK = (
     "(24, 28, 30) were dropped; the header is now read by its version nibble, so "
     "the made-up addresses are gone and each IPv6 datagram's DNS question is read" + _IPV6
 )
+_BOTH_WAYS = (
+    "; and a conversation counts the packets from the external host too: the DNS "
+    "answers from 8.8.8.8 and the HTTP response from 93.184.216.34 were left out, "
+    "and are now in their conversation's totals with the part from the host stated"
+)
 
 # Each improved capture: why, and the surfaces whose answer changed. Every
 # other surface of it must still answer exactly as before.
 IMPROVED: dict[str, tuple[str, tuple[str, ...]]] = {
-    "ethernet_mixed.pcap": (_SNI + _IPV6, _FACTS_ALL),
-    "ethernet_mixed.pcap.gz": (_SNI + _IPV6, _FACTS_ALL),
-    "ethernet_mixed_be_nano.pcap": (_SNI + _IPV6, _FACTS_ALL),
-    "truncated_in_header.pcap": (_SNI + _FRAMING + _IPV6, _FRAMING_SURFACES),
-    "truncated_in_record.pcap": (_SNI + _FRAMING + _IPV6, _FRAMING_SURFACES),
+    "ethernet_mixed.pcap": (_SNI + _IPV6 + _BOTH_WAYS, _FACTS_LIMITED),
+    "ethernet_mixed.pcap.gz": (_SNI + _IPV6 + _BOTH_WAYS, _FACTS_LIMITED),
+    "ethernet_mixed_be_nano.pcap": (_SNI + _IPV6 + _BOTH_WAYS, _FACTS_LIMITED),
+    "truncated_in_header.pcap": (_SNI + _FRAMING + _IPV6 + _BOTH_WAYS, _FRAMING_SURFACES),
+    "truncated_in_record.pcap": (_SNI + _FRAMING + _IPV6 + _BOTH_WAYS, _FRAMING_SURFACES),
     "edge_layers.pcap": (_IPV6_ONLY, _FACTS_ALL),
     "linux_sll.pcap": (_IPV6_ONLY, _FACTS_LIMITED),
     "linux_sll2.pcap": (_IPV6_ONLY, _FACTS_LIMITED),
@@ -300,7 +305,19 @@ def test_the_server_name_comes_out_and_nothing_else_moves(
         assert old["sni"] == {}
         # The protocols also count the IPv6 datagrams now: each count only grows.
         assert all(facts["protocols"].get(k, 0) >= n for k, n in old["protocols"].items())
-        assert {**facts, "sni": {}, "protocols": {}} == {**old, "protocols": {}}
+        # A conversation also counts the packets from its host now: each old
+        # conversation is still there, and the packets toward the host are its
+        # old count.
+        rows = {(c["dst"], c["dport"], c["proto"]): c for c in facts["conversations"]}
+        for row in old["conversations"]:
+            new = rows[(row["dst"], row["dport"], row["proto"])]
+            assert new["packets"] - new.get("packets_from_host", 0) == row["packets"]
+            assert new["bytes"] - new.get("bytes_from_host", 0) == row["bytes"]
+        assert {**facts, "sni": {}, "protocols": {}, "conversations": []} == {
+            **old,
+            "protocols": {},
+            "conversations": [],
+        }
         assert "TLS SNI (encrypted destinations):" in answers[name]["summarize_pcap"]
 
 
