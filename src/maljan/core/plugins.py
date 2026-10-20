@@ -770,8 +770,8 @@ def selections(core: Mapping[str, Any]) -> list[tuple[str, str, str]]:
     """Every provider id ``core`` (stored core overrides, dotted paths) selects, with its kind.
 
     ``(settings key, kind, id)`` for ``llm.provider``, ``static.provider``,
-    ``sandbox.provider``, ``memory.backend``, each agent definition's
-    ``static_provider`` and each per-agent model entry's provider and its
+    ``sandbox.provider``, ``memory.backend``, each agent definition's and
+    each team's ``static_provider`` and each per-agent model entry's provider and its
     fallbacks' providers. A key not stored selects its shipped default, which
     no plugin is.
     """
@@ -786,14 +786,14 @@ def selections(core: Mapping[str, Any]) -> list[tuple[str, str, str]]:
         if isinstance(value, str) and value:
             name = value.strip().lower() if kind == "memory" else value
             out.append((f"core.{path}", kind, name))
-    definitions = core.get("agents.definitions")
-    if isinstance(definitions, Mapping):
-        for agent, definition in definitions.items():
-            if isinstance(definition, Mapping) and isinstance(
-                definition.get("static_provider"), str
-            ):
-                key = f"core.agents.definitions.{agent}.static_provider"
-                out.append((key, "static", str(definition["static_provider"])))
+    for path in ("agents.definitions", "agents.profiles"):
+        held = core.get(path)
+        if not isinstance(held, Mapping):
+            continue
+        for name, entry in held.items():
+            if isinstance(entry, Mapping) and isinstance(entry.get("static_provider"), str):
+                key = f"core.{path}.{name}.static_provider"
+                out.append((key, "static", str(entry["static_provider"])))
     entries = core.get("llm.agents")
     if isinstance(entries, Mapping):
         for agent, entry in entries.items():

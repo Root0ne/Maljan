@@ -565,15 +565,31 @@ class FunctionFacts:
         )
 
     def offset(self, address: int | None) -> int | None:
-        """The index offset of a function an answer gave by address, or ``None``."""
+        """The index offset of a function an answer gave by address, or ``None``.
+
+        The address read as an offset and read as a virtual address over each
+        base the run read: placed only when every reading the index knows is
+        one function, or, of two or more, when exactly one row shows the
+        address as cited. Otherwise none, since which one the answer meant
+        cannot be told.
+        """
         if address is None:
             return None
-        if address in self.known:
-            return address
+        readings = {address} if address in self.known else set()
         for base in self.bases:
             if address >= base and address - base in self.known:
-                return address - base
-        return None
+                readings.add(address - base)
+        if len(readings) == 1:
+            return readings.pop()
+        # Two functions it could be: the one whose row shows the address as
+        # cited (``artefact_index.row_line``) is the one meant, when only one
+        # does.
+        shown = [
+            start
+            for start in readings
+            if start in self.rows and _hex(self.rows[start].get("function")) == address
+        ]
+        return shown[0] if len(shown) == 1 else None
 
     def va(self, offset: int) -> str:
         return hex(self.base + offset)

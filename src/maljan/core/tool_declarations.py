@@ -1547,13 +1547,44 @@ def sent_names_refusal(sent: Mapping[str, Any], kept: Iterable[str] = (), server
     return ""
 
 
-# The declaration fields no release that stored a tool map whole knew
-# (``ToolFacts.effects``, ``ToolFacts.reads_delay_imports``). Such a map leaves
-# them out because it predates them,
-# never to clear them, so for a tool the block ships each one it leaves out
-# follows the shipped declaration, merged per field as :func:`merge_tool_facts`
-# merges a change: a value the map sets is the operator's and wins.
-FIELDS_AFTER_WHOLE_MAPS: tuple[str, ...] = ("effects", "reads_delay_imports")
+# The declaration fields the last release that stored a tool map whole knew:
+# the frozen record's defaults
+# (``apps/api/alembic/versions/20261012000000_shipped_tool_declarations.json``,
+# held equal by a test). Frozen, because no later release stores a map whole.
+WHOLE_MAP_FIELDS: frozenset[str] = frozenset(
+    {
+        "arguments",
+        "asserts_techniques",
+        "category",
+        "discloses_sample",
+        "display_name",
+        "holds_strings",
+        "kind",
+        "long_running",
+        "memory_peak_mb",
+        "places",
+        "reader",
+        "report_sections",
+        "reputation",
+        "rows",
+        "source",
+        "techniques",
+        "timeout_seconds",
+        "values",
+        "words",
+    }
+)
+
+# The declaration fields no release that stored a tool map whole knew: every
+# ``ToolFacts`` field but those, so a field added later is one at once
+# (``read_only``, ``function_starts``, ``routed_formats``, ``effects``, ...).
+# Such a map leaves them out because it predates them, never to clear them, so
+# for a tool the block ships each one it leaves out follows the shipped
+# declaration, merged per field as :func:`merge_tool_facts` merges a change: a
+# value the map sets is the operator's and wins.
+FIELDS_AFTER_WHOLE_MAPS: tuple[str, ...] = tuple(
+    name for name in ToolFacts.model_fields if name not in WHOLE_MAP_FIELDS
+)
 
 
 def _with_later_fields(held: Any, shipped: Any) -> Any:
@@ -2303,11 +2334,17 @@ class ToolDeclarations:
 
 
 def selected_static_providers(settings: Settings) -> set[str]:
-    """The static providers this deployment selects: the global one and any agent's own."""
+    """The static providers this deployment selects: the global one, any agent's and any team's.
+
+    A team's choice outranks its members' own at run time, so it is selected too.
+    """
     chosen = {str(settings.static.provider)}
     for definition in settings.agents.definitions.values():
         if definition.enabled and definition.static_provider:
             chosen.add(str(definition.static_provider))
+    for team in settings.agents.profiles.values():
+        if team.static_provider:
+            chosen.add(str(team.static_provider))
     return chosen
 
 
