@@ -479,9 +479,17 @@ class ServiceContainer:
         event_sink: EventSink | None = None,
         job_id: str = "",
         resolved_mode: Any = None,
+        memory_owner: str | None = None,
     ) -> None:
         self.config = config
         self.mock = mock
+        # Whose long-term memory this job reads and writes: the owner of the
+        # job, as the caller that queued it knows it. ``None`` reads and
+        # writes the unscoped memory (the command line, a caller naming no
+        # owner); ``long_term_memory.recall`` states the rule.
+        from maljan.memory.long_term_memory import owner_key
+
+        self.memory_owner: str | None = owner_key(memory_owner)
         # The job's analyst mode as the caller resolved it off its event loop
         # (``pipeline.analyst_mode.resolve_for``), or ``None`` to resolve it
         # here on first use.
@@ -1017,8 +1025,22 @@ class ServiceContainer:
         case, self.pending_memory_case = self.pending_memory_case, None
         if case is None:
             return False
+        from dataclasses import replace
+
+        from maljan.memory.long_term_memory import keeps_owners
+
         try:
-            self.get_memory_store().store(case)
+            store = self.get_memory_store()
+            if self.memory_owner is not None and not keeps_owners(store):
+                # Unscoped, it would reach every other owner's jobs.
+                logger.info(
+                    "LTM: case '%s' is not stored: the memory backend keeps no owners.",
+                    case.sample_id,
+                )
+                return False
+            store.store(
+                case if self.memory_owner is None else replace(case, owner=self.memory_owner)
+            )
         except Exception as exc:  # noqa: BLE001 — memory never costs a completed job
             logger.warning("LTM store failed (%s). The completed job is unaffected.", exc)
             return False
@@ -1050,15 +1072,48 @@ class ServiceContainer:
         if replaced is not None:
             release_function_hash_store(replaced[0])
 
+    def drop_function_hashes(self, reason: str) -> None:
+        """Let go of the held corpus write unwritten, saying why. Never raises."""
+        with self._lock:
+            held, self.pending_function_hashes = self.pending_function_hashes, None
+        if held is None:
+            return
+        from maljan.memory.store_factory import release_function_hash_store
+
+        logger.info(
+            "Function-hash corpus: '%s' is not filed under %s (%s).",
+            str(held[1])[:16],
+            held[2],
+            reason,
+        )
+        release_function_hash_store(held[0])
+
     def _remember_the_function_hashes(self) -> bool:
         held, self.pending_function_hashes = self.pending_function_hashes, None
         if held is None:
             return False
         store, sample_id, family, functions = held
+        from maljan.memory.long_term_memory import keeps_owners
         from maljan.memory.store_factory import release_function_hash_store
 
+        # The provider answers ``(func_name, func_hash)``; the index files
+        # ``(func_hash, func_name)``. Filed the provider's way round, every
+        # name was stored as a hash and no later sample's hash could match it.
+        pairs = [(func_hash, name) for name, func_hash in functions]
         try:
-            written = int(store.upsert_sample(sample_id, family, functions) or 0)
+            if self.memory_owner is None:
+                written = int(store.upsert_sample(sample_id, family, pairs) or 0)
+            elif keeps_owners(store):
+                written = int(
+                    store.upsert_sample(sample_id, family, pairs, owner=self.memory_owner) or 0
+                )
+            else:
+                # Unscoped, it would reach every other owner's jobs.
+                logger.info(
+                    "Function-hash corpus: '%s' is not filed: the store keeps no owners.",
+                    str(sample_id)[:16],
+                )
+                return False
         except Exception as exc:  # noqa: BLE001 — the corpus never costs a completed job
             logger.warning(
                 "Function-hash corpus write failed (%s). The completed job is unaffected.", exc

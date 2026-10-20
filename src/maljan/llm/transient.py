@@ -776,6 +776,46 @@ def _what(model: Any) -> str:
     return f"{label} ({name})" if name else label
 
 
+# How an abandoned answer that reported no usage is charged.
+ABANDONED_ANSWER_ESTIMATE = (
+    "estimated: the answer arrived after its turn had given up on it, and reported no usage"
+)
+
+
+def charge_abandoned(model: Any, answer: Any, prompt: Any) -> None:
+    """Charge an answer ``model`` billed that nobody received. Never raises.
+
+    A blocking request cannot be cancelled: one its turn gave up on runs to
+    its end, and the provider bills it. Charged to the spend ceiling as a
+    failed attempt of ``model``: the usage the answer reported, and where it
+    reported none, its prompt and its text at ``CHARS_PER_TOKEN`` characters
+    a token, stated as estimated.
+    """
+    recorder = recorder_of(model)
+    if recorder is None:
+        return
+    with contextlib.suppress(Exception):
+        from maljan.core.token_ledger import turn_usage
+
+        usage = turn_usage(answer)
+        if usage is not None:
+            recorder._charge(usage, None)
+            return
+        from maljan.core.spend import AT_CACHED_SHARE
+        from maljan.llm.context_window import tokens_for_chars
+        from maljan.llm.generation_rate import _content_chars
+
+        recorder._charge(
+            None,
+            {
+                "input_tokens": tokens_for_chars(_prompt_chars(prompt)),
+                "output_tokens": tokens_for_chars(_content_chars([answer])),
+                "source": ABANDONED_ANSWER_ESTIMATE,
+                AT_CACHED_SHARE: True,
+            },
+        )
+
+
 def _failed_once(model: Any, exc: BaseException, prompt: Any) -> None:
     """One failed request of ``model``: charged as billed, and named to a policy around it."""
     recorder = recorder_of(model)
@@ -794,7 +834,9 @@ def with_transient_retries(chat_class: Any) -> Any:
     loop through the bound model, a structured-output chain, a model list
     asking one of its models — so the retry sits there and a whole request is
     made again, never a part of one. A call made inside the policy already is
-    made once. Every failed request is charged as the provider bills it.
+    made once. Every failed request is charged as the provider bills it, one
+    cancelled from outside (a fallback's turn deadline, the spend cap, the
+    operator's cancel) included: the pieces it streamed are on its error.
     Anything that is not a class is returned as it is.
     """
     if not isinstance(chat_class, type):
@@ -808,7 +850,7 @@ def with_transient_retries(chat_class: Any) -> Any:
         async def _once() -> Any:
             try:
                 return await base.ainvoke(self, input, config, **kwargs)
-            except Exception as exc:
+            except BaseException as exc:  # a call cancelled from outside was billed too
                 _failed_once(self, exc, input)
                 raise
 
@@ -820,7 +862,7 @@ def with_transient_retries(chat_class: Any) -> Any:
         def _once() -> Any:
             try:
                 return base.invoke(self, input, config, **kwargs)
-            except Exception as exc:
+            except BaseException as exc:  # an interrupted call was billed too
                 _failed_once(self, exc, input)
                 raise
 

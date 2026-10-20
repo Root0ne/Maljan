@@ -28,6 +28,11 @@ from build_attck_case_kb import (  # noqa: E402
 
 
 class TestRowFromPayload:
+    def test_an_owner_s_case_is_never_copied(self) -> None:
+        owned = {"sample_id": "s", "summary_text": "inject beacon", "owner": "user-alice"}
+        assert _row_from_payload(owned) is None
+        assert _row_from_payload({**owned, "owner": None}) is not None
+
     def test_blank_summary_dropped(self) -> None:
         assert _row_from_payload({"sample_id": "x", "summary_text": "   "}) is None
 

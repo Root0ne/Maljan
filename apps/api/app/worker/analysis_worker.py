@@ -2868,6 +2868,8 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
             analyst_mode=_analyst_mode,
             # The job's secrets are registered above (``remember_configured_secrets``).
             remember_secrets=False,
+            # Long-term memory is the job owner's alone.
+            memory_owner=str(job.created_by),
             event_sink=_make_event_sink(
                 redis_conn,
                 job_id,
@@ -4236,6 +4238,27 @@ def concurrent_analyses_refusal(max_jobs: object) -> str | None:
     )
 
 
+async def repair_long_term_memory() -> str:
+    """The configured memory store's one-time repair, off the event loop; what was done.
+
+    Never raises: memory that could not be repaired is tried again at the next
+    start.
+    """
+    try:
+        from maljan.memory.memory_repair import repair_memory
+        from maljan.memory.store_factory import build_memory_store
+
+        store = await asyncio.to_thread(build_memory_store, await runtime_config.core())
+    except Exception as exc:  # noqa: BLE001 — a repair never costs a start
+        logger.warning("Long-term memory repair skipped: no store (%s).", type(exc).__name__)
+        return "skipped: no store"
+    try:
+        return await asyncio.to_thread(repair_memory, store)
+    finally:
+        with suppress(Exception):
+            store.close()
+
+
 async def startup(ctx: dict) -> None:
     """Called when the ARQ worker starts up."""
     # Initialize logging for the worker process first: the CRITICAL bootstrap
@@ -4329,6 +4352,9 @@ async def startup(ctx: dict) -> None:
     # started for a run and stopped after it (a local stack) never swept, and
     # neither did a deployment whose worker restarted across the night's window.
     ctx["events_sweep_task"] = asyncio.create_task(purge_old_job_events(ctx))
+    # Long-term memory kept before AUD-65, repaired once and beside the slot
+    # (``maljan.memory.memory_repair``).
+    ctx["memory_repair_task"] = asyncio.create_task(repair_long_term_memory())
     # The console's ATT&CK cache jobs, read beside this worker's one analysis
     # slot rather than in it: this is the process that holds the cache.
     from app.worker.attck_worker import start_attck_worker
@@ -4347,7 +4373,7 @@ async def shutdown(ctx: dict) -> None:
     from app.worker.attck_worker import stop_attck_worker
 
     await stop_attck_worker(ctx, EXIT_GRACE)
-    for name in ("sweep_task", "enrichment_watch_task", "events_sweep_task"):
+    for name in ("sweep_task", "enrichment_watch_task", "events_sweep_task", "memory_repair_task"):
         task: asyncio.Task | None = ctx.get(name)
         if task is None:
             continue

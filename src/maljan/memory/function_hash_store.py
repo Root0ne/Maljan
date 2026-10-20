@@ -22,6 +22,14 @@ Design notes:
 - **Tiny-function caveat is the caller's job.** This store matches whatever
   hashes it is given; the caller must filter out low-instruction-count stubs
   (which collide across unrelated binaries) before upserting/matching.
+- **One spelling per family.** Each point keeps the family as the judge wrote
+  it and its ``family_key`` (``long_term_memory.family_key``), so a family
+  written three ways is one family to a match; a point stored before the key
+  was recorded has it computed from its family when it is read.
+- **Owners.** A sample filed by a job with an owner carries it, under point
+  IDs of their own, and is matched by that owner's jobs alone; unscoped points
+  (every point stored before owners were recorded among them) are matched only
+  by jobs with no owner (``long_term_memory.match_functions``).
 """
 
 from __future__ import annotations
@@ -33,6 +41,7 @@ from typing import Any
 from maljan.core.exceptions import MemoryStoreError
 from maljan.core.logger import logger
 from maljan.core.settings_overrides import redact_url
+from maljan.memory.long_term_memory import family_key, owner_key
 
 # 1-dim dummy vector: we only ever filter by payload, never search by vector.
 _DUMMY_VECTOR: list[float] = [1.0]
@@ -56,11 +65,18 @@ class FunctionMatch:
     family: str
     sample_id: str
     func_name: str
+    # ``family`` in one spelling (``long_term_memory.family_key``); "" on a
+    # match built without it, which the aggregation then computes.
+    family_key: str = ""
 
 
-def _point_id(sample_id: str, func_hash: str) -> int:
-    """Return a stable uint64 point ID for a (sample_id, func_hash) pair."""
-    digest = hashlib.sha256(f"{sample_id}|{func_hash}".encode()).digest()
+def _point_id(sample_id: str, func_hash: str, owner: str | None = None) -> int:
+    """Return a stable uint64 point ID for a (sample_id, func_hash) pair, per owner.
+
+    An unscoped point keeps the ID it always had.
+    """
+    key = f"{sample_id}|{func_hash}" if owner is None else f"{owner}\x1f{sample_id}|{func_hash}"
+    digest = hashlib.sha256(key.encode()).digest()
     return int.from_bytes(digest[:8], "little")
 
 
@@ -73,6 +89,8 @@ class FunctionHashStore:
         store.upsert_sample(sample_id, family, [(func_hash, func_name), ...])
         matches = store.match([h1, h2, ...], exclude_sample_id=sample_id)
     """
+
+    keeps_owners = True
 
     def __init__(
         self,
@@ -105,15 +123,30 @@ class FunctionHashStore:
     # Public API
     # ------------------------------------------------------------------
 
-    def upsert_sample(self, sample_id: str, family: str, functions: list[tuple[str, str]]) -> int:
+    def upsert_sample(
+        self,
+        sample_id: str,
+        family: str,
+        functions: list[tuple[str, str]],
+        owner: str | None = None,
+    ) -> int:
         """Upsert one point per function for ``sample_id`` under ``family``.
 
         ``functions`` is a list of ``(func_hash, func_name)`` tuples (already
-        filtered by the caller for meaningful instruction counts). Returns the
-        number of points written; 0 on any failure (fail-safe).
+        filtered by the caller for meaningful instruction counts). ``owner``
+        files them under the job's owner; ``None`` files them unscoped.
+        Returns the number of points written; 0 on any failure (fail-safe),
+        and 0 for a placeholder family (``reporting.models.NO_FAMILY_WORDS``)
+        or one with no spelling left once normalised.
         """
-        if not functions:
+        from maljan.reporting.models import stated_family
+
+        # A placeholder ("Unknown", "none", "n/a") names no family: filed, it
+        # would make every sample sharing a routine "the same family".
+        key = family_key(stated_family(family))
+        if not functions or not key:
             return 0
+        scope = owner_key(owner)
         try:
             from qdrant_client.models import PointStruct
 
@@ -124,16 +157,20 @@ class FunctionHashStore:
                 if not func_hash or func_hash in seen:
                     continue
                 seen.add(func_hash)
+                payload: dict[str, Any] = {
+                    "func_hash": func_hash,
+                    "family": family,
+                    "family_key": key,
+                    "sample_id": sample_id,
+                    "func_name": func_name,
+                }
+                if scope is not None:
+                    payload["owner"] = scope
                 points.append(
                     PointStruct(
-                        id=_point_id(sample_id, func_hash),
+                        id=_point_id(sample_id, func_hash, scope),
                         vector=_DUMMY_VECTOR,
-                        payload={
-                            "func_hash": func_hash,
-                            "family": family,
-                            "sample_id": sample_id,
-                            "func_name": func_name,
-                        },
+                        payload=payload,
                     )
                 )
             if not points:
@@ -154,22 +191,39 @@ class FunctionHashStore:
         self,
         hashes: list[str],
         exclude_sample_id: str | None = None,
+        owner: str | None = None,
     ) -> list[FunctionMatch]:
         """Return stored functions whose hash is in ``hashes``.
 
         Filters out points belonging to ``exclude_sample_id`` so a re-analysis
-        cannot match its own previous run. Empty list on any failure.
+        cannot match its own previous run, and reads only ``owner``'s points
+        (the unscoped ones for ``None``). Empty list on any failure.
         """
         candidates = [h for h in dict.fromkeys(hashes) if h]
         if not candidates or not self._collection_exists():
             return []
+        scope = owner_key(owner)
         try:
-            from qdrant_client.models import FieldCondition, Filter, MatchAny
+            from qdrant_client.models import (
+                FieldCondition,
+                Filter,
+                IsEmptyCondition,
+                MatchAny,
+                MatchValue,
+                PayloadField,
+            )
 
+            owned = (
+                IsEmptyCondition(is_empty=PayloadField(key="owner"))
+                if scope is None
+                else FieldCondition(key="owner", match=MatchValue(value=scope))
+            )
             results: list[FunctionMatch] = []
             for start in range(0, len(candidates), _MATCH_BATCH):
                 batch = candidates[start : start + _MATCH_BATCH]
-                flt = Filter(must=[FieldCondition(key="func_hash", match=MatchAny(any=batch))])
+                flt = Filter(
+                    must=[FieldCondition(key="func_hash", match=MatchAny(any=batch)), owned]
+                )
                 offset: Any = None
                 while True:
                     points, offset = self._client.scroll(
@@ -185,12 +239,16 @@ class FunctionHashStore:
                         sid = p.get("sample_id", "")
                         if exclude_sample_id and sid == exclude_sample_id:
                             continue
+                        if owner_key(p.get("owner")) != scope:
+                            continue
+                        family = p.get("family", "UNKNOWN")
                         results.append(
                             FunctionMatch(
                                 func_hash=p.get("func_hash", ""),
-                                family=p.get("family", "UNKNOWN"),
+                                family=family,
                                 sample_id=sid,
                                 func_name=p.get("func_name", ""),
+                                family_key=str(p.get("family_key") or family_key(family)),
                             )
                         )
                     if offset is None:

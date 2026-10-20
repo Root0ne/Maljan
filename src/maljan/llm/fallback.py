@@ -456,20 +456,42 @@ class FallbackChatModel(BaseChatModel):
         # daemon it does not hold up the process's exit while it does — a
         # pool's worker is joined at interpreter exit, which let one stalled
         # model delay a worker's graceful shutdown by up to that timeout.
+        #
+        # The request it leaves behind is still billed: an answer that arrives
+        # once the turn has given up on it is charged to the job's spend
+        # ceiling as its provider reported it (``transient.charge_abandoned``);
+        # one that fails is charged as any failed attempt is.
         outcome: dict[str, Any] = {}
         done = threading.Event()
+        settled = threading.Lock()
+        given_up: list[bool] = []
+        model = self.models[index]
 
         def _run() -> None:
             try:
-                outcome["answer"] = runnable.invoke(messages, stop=stop, **call)
+                answer = runnable.invoke(messages, stop=stop, **call)
             except BaseException as exc:  # noqa: BLE001 — handed back to the caller
-                outcome["error"] = exc
+                with settled:
+                    outcome["error"] = exc
+            else:
+                with settled:
+                    outcome["answer"] = answer
+                    abandoned = bool(given_up)
+                if abandoned:
+                    from maljan.llm.transient import charge_abandoned
+
+                    charge_abandoned(model, answer, messages)
             finally:
                 done.set()
 
         threading.Thread(target=_run, name=f"model-turn:{self._label(index)}", daemon=True).start()
         if not done.wait(timeout=deadline):
-            raise self._stalled(index, deadline)
+            with settled:
+                # An outcome that landed as the wait ended is the turn's own.
+                if not outcome:
+                    given_up.append(True)
+            if given_up:
+                raise self._stalled(index, deadline)
         if "error" in outcome:
             raise outcome["error"]
         return outcome["answer"]

@@ -403,9 +403,13 @@ class StaticAnalyst(BaseAnalyst):
                 if not functions:
                     return ""
 
-                matches = store.match(
+                from maljan.memory.long_term_memory import match_functions, memory_owner_of
+
+                matches = match_functions(
+                    store,
                     [fh for _name, fh in functions],
                     exclude_sample_id=sample_hash or None,
+                    owner=memory_owner_of(getattr(self, "_container", None)),
                 )
             results = aggregate_matches(matches, max_families=pre.function_hash_max_matches)
             hint = build_attribution_hint(results)

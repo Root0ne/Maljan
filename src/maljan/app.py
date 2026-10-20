@@ -77,6 +77,7 @@ class MaljanApp:
         job_id: str = "",
         analyst_mode: Any = None,
         remember_secrets: bool = True,
+        memory_owner: str | None = None,
     ) -> None:
         self.config = config or Settings()
         # The secrets these settings hold are masked by value wherever the
@@ -95,6 +96,9 @@ class MaljanApp:
             # (``pipeline.analyst_mode.resolve_for``): resolving it names
             # hosts and asks a server for its slot count.
             resolved_mode=analyst_mode,
+            # Whose long-term memory the job reads and writes; ``None`` is the
+            # unscoped memory (``long_term_memory.recall``).
+            memory_owner=memory_owner,
         )
         self.graph = build_graph(self.container)
         # What the report node built, with the state it built it from, as soon

@@ -155,6 +155,7 @@ async def enrich_malware_report(
     memory_store: MemoryStore | None = None,
     similar_top_k: int = 5,
     on_ask: AskListener | None = None,
+    memory_owner: str | None = None,
 ) -> dict[str, Any]:
     """Populate reputation/asn/geo + attribution.similar_samples in place.
 
@@ -165,9 +166,11 @@ async def enrich_malware_report(
     the argument a server's tool declares for a kind. When ``memory_store``
     is provided, the report's ``attribution.similar_samples`` is also
     populated from the LTM nearest-neighbour search (idempotent — skipped
-    when already filled). ``on_ask`` is told of each question just before it
-    is sent, a source's and RDAP's alike. The caller is expected to persist
-    the returned dict back to ``AnalysisReport.malware_report``.
+    when already filled), among ``memory_owner``'s cases, or the unscoped
+    ones for ``None`` (``long_term_memory.recall``). ``on_ask`` is told of
+    each question just before it is sent, a source's and RDAP's alike. The
+    caller is expected to persist the returned dict back to
+    ``AnalysisReport.malware_report``.
     """
     network = malware_report.get("network") or {}
     domains = network.get(SLOTS["domain"][0]) or []
@@ -177,7 +180,9 @@ async def enrich_malware_report(
     # touched nothing on the wire still get a "you have seen this before"
     # panel from the LTM.
     if memory_store is not None:
-        populate_similar_samples(malware_report, memory_store, top_k=similar_top_k)
+        populate_similar_samples(
+            malware_report, memory_store, top_k=similar_top_k, owner=memory_owner
+        )
 
     if not (domains or ips):
         logger.info("enrich: no network IOCs in report, skipping reputation lookups.")

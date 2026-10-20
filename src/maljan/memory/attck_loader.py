@@ -237,7 +237,17 @@ def _load_raw_bundle(
         else:
             age_days = (time.time() - cache_file.stat().st_mtime) / 86400.0
             cache_fresh = age_days <= max_age
-            if not cache_fresh:
+            if not cache_fresh and _refused_within(cache_file, max_age):
+                # A refresh refused within the interval is not asked again
+                # before the interval has passed since it.
+                logger.info(
+                    "ATT&CK cache is %.1f days old; a refresh was refused within the last "
+                    "%d days, so the cache is used until that interval has passed.",
+                    age_days,
+                    max_age,
+                )
+                cache_fresh = True
+            elif not cache_fresh:
                 logger.info("ATT&CK cache is %.1f days old (> %d) — refreshing.", age_days, max_age)
 
     if cache_fresh:
@@ -254,8 +264,54 @@ def _load_raw_bundle(
             logger.warning("ATT&CK refresh failed (%s); using stale cache: %s", exc, cache_file)
             return _read_cache(cache_file)
         raise
+    from maljan.memory import attck_update
+
+    # A forced refresh is the operator's own decision to replace the cache: it
+    # is still refused when it is no bundle, but it is not held to the cached
+    # one, and a refusal does not hold back the next automatic refresh.
+    compared = None if force_refresh or not cache_file.exists() else _read_cache(cache_file)
+    refused = attck_update.refresh_refusal(raw, compared)
+    if refused is not None:
+        if not force_refresh:
+            _note_refusal(cache_file, refused)
+        # Not written: a good cache is never replaced by a download that is
+        # no bundle, nor its age reset by one. The stale copy stays in use,
+        # as it does when the download fails outright.
+        if cache_file.exists():
+            logger.warning(
+                "ATT&CK refresh refused (the download %s); using stale cache: %s",
+                refused,
+                cache_file,
+            )
+            return _read_cache(cache_file)
+        raise RuntimeError(f"The ATT&CK bundle from {url} is refused: the download {refused}")
     _save_cache(raw, cache_file)
     return raw
+
+
+def refusal_path(bundle: Path) -> Path:
+    """Where the last refused refresh of a cached bundle is recorded, beside it."""
+    return bundle.with_name(f"{bundle.stem}.refused.json")
+
+
+def _note_refusal(bundle: Path, reason: str) -> None:
+    """Record that a refresh of ``bundle`` was refused, and why. Never raises."""
+    try:
+        refusal_path(bundle).write_text(
+            json.dumps({"refused_at": time.time(), "reason": reason}), encoding="utf-8"
+        )
+    except OSError as exc:
+        logger.warning("Could not record the refused ATT&CK refresh: %s", exc)
+
+
+def _refused_within(bundle: Path, max_age_days: int) -> bool:
+    """Whether a refresh of ``bundle`` was refused less than ``max_age_days`` ago."""
+    try:
+        record = json.loads(refusal_path(bundle).read_text(encoding="utf-8"))
+        at = float(record["refused_at"])
+    except (OSError, ValueError, KeyError, TypeError):
+        return False
+    return (time.time() - at) / 86400.0 < max_age_days
 
 
 def meta_path(bundle: Path) -> Path:

@@ -1170,14 +1170,72 @@ def scheduled_update(refresh_days: int) -> dict[str, Any] | None:
 # ── the loader's own refresh ─────────────────────────────────────────────
 
 
+def _technique_objects(bundle: Mapping[str, Any]) -> list[Mapping[str, Any]]:
+    """Every attack-pattern object of a bundle, revoked and deprecated ones included."""
+    return [
+        obj
+        for obj in bundle.get("objects") or []
+        if isinstance(obj, Mapping) and obj.get("type") == "attack-pattern"
+    ]
+
+
+def _domains(objects: list[Mapping[str, Any]]) -> set[str]:
+    """The ATT&CK domains a bundle's techniques name (``x_mitre_domains``)."""
+    found: set[str] = set()
+    for obj in objects:
+        named = obj.get("x_mitre_domains")
+        if isinstance(named, list):
+            found.update(str(d) for d in named if d)
+    return found
+
+
+def refresh_refusal(bundle: Any, cached: Any = None) -> str | None:
+    """Why a bundle the loader downloaded may not replace the cache, or ``None``.
+
+    The checks the console's update makes of its download
+    (``validate_bundle_file``), made on the bundle already in memory: it is a
+    STIX bundle, and it carries at least one technique. There is no index
+    naming the release the loader expects, so the release is not compared.
+    Against the ``cached`` bundle it would replace: it names the same ATT&CK
+    domain, and it carries no fewer technique objects, revoked and deprecated
+    ones counted (a release retires techniques by marking them, never by
+    leaving them out).
+    """
+    if not isinstance(bundle, Mapping) or not isinstance(bundle.get("objects"), list):
+        return "is not a STIX bundle (no object list)"
+    try:
+        techniques = int(bundle_facts(bundle)["techniques"])
+    except Exception as exc:  # noqa: BLE001 — a bundle that cannot be read is refused
+        return f"cannot be read ({type(exc).__name__})"
+    if techniques <= 0:
+        return "carries no techniques"
+    if not isinstance(cached, Mapping) or not isinstance(cached.get("objects"), list):
+        return None
+    fresh, kept = _technique_objects(bundle), _technique_objects(cached)
+    fresh_domains, kept_domains = _domains(fresh), _domains(kept)
+    if kept_domains and fresh_domains != kept_domains:
+        return (
+            f"names the domain {', '.join(sorted(fresh_domains)) or 'none'}, not the cached "
+            f"{', '.join(sorted(kept_domains))}"
+        )
+    if len(fresh) < len(kept):
+        return f"carries {len(fresh)} technique objects, fewer than the cached {len(kept)}"
+    return None
+
+
 def save_refreshed_bundle(bundle: Mapping[str, Any], target: Path) -> bool:
     """Write a bundle the loader just downloaded, in one rename, under the lock.
 
     Returns whether it was written. While an update holds the lock it is not:
-    that update is replacing the same files with a checked copy. The facts the
-    console shows are written beside it from the bundle already in memory, so
-    no later status read has to parse the file again.
+    that update is replacing the same files with a checked copy. A bundle
+    ``refresh_refusal`` refuses is never written. The facts the console shows
+    are written beside it from the bundle already in memory, so no later
+    status read has to parse the file again.
     """
+    refused = refresh_refusal(bundle)
+    if refused is not None:
+        logger.warning("The refreshed %s is not written: the download %s.", target.name, refused)
+        return False
     with _locked(
         target.parent / LOCK_NAME, blocking=False, holder={"holder": "loader refresh"}
     ) as held:

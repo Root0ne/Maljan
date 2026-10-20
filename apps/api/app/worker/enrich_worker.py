@@ -304,6 +304,20 @@ async def _get_memory_store() -> MemoryStore | None:
     return _memory_store
 
 
+async def _job_owner(db: Any, job_id: Any) -> str | None:
+    """Who queued the analysis job, as its long-term memory is filed; ``None`` when unread."""
+    try:
+        from sqlalchemy import select
+
+        from app.models.job import AnalysisJob
+
+        owner = await db.scalar(select(AnalysisJob.created_by).where(AnalysisJob.id == job_id))
+    except Exception as exc:  # noqa: BLE001 — no owner, no memory
+        logger.warning("enrich: the job's owner could not be read (%s).", type(exc).__name__)
+        return None
+    return str(owner) if isinstance(owner, (uuid.UUID, str)) and str(owner) else None
+
+
 async def enrich_threat_intel(
     ctx: dict, report_id: str, deferred_for: float = 0.0
 ) -> dict[str, Any]:
@@ -354,6 +368,7 @@ async def enrich_threat_intel(
             return {"status": "skipped"}
         payload = dict(report.malware_report)
         parent_job_id = str(report.job_id)
+        memory_owner = await _job_owner(db, report.job_id)
         await db.commit()
 
     # Lazy import keeps the API/worker startup graph free of optional
@@ -382,7 +397,9 @@ async def enrich_threat_intel(
     before_domain_reps = _count_reputations(payload, "domains")
     before_ip_reps = _count_reputations(payload, "ips")
 
-    memory_store = await _get_memory_store()
+    # Similar past cases are the job owner's alone; a job whose owner cannot
+    # be read gets none rather than the unscoped pool.
+    memory_store = await _get_memory_store() if memory_owner is not None else None
     # Every question the enrichment sends, for the run's disclosure block:
     # counted as attempted before it goes out, and before the first one the
     # stored record is marked, so a job that dies after it never leaves
@@ -427,6 +444,7 @@ async def enrich_threat_intel(
             tool_arguments=tools.arguments if tools is not None else None,
             memory_store=memory_store,
             on_ask=_asking,
+            memory_owner=memory_owner,
         )
         state = ENRICHMENT_DONE
     except Exception as exc:  # noqa: BLE001

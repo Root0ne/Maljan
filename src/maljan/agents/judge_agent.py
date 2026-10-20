@@ -3249,8 +3249,13 @@ class JudgeAgent(BudgetMeter):
         # Long-term memory — inject top-K similar past cases as weighted
         # priors, each case's summary whole. Degrades gracefully to an empty
         # string when the store is empty or retrieval fails.
+        from maljan.memory.long_term_memory import memory_owner_of
+
         memory_block = self._build_memory_context(
-            isr_reports, memory_store, current_sample_id=current_sample_id
+            isr_reports,
+            memory_store,
+            current_sample_id=current_sample_id,
+            owner=memory_owner_of(self._container),
         )
         if memory_block:
             parts["long-term memory"] = memory_block
@@ -4571,6 +4576,7 @@ class JudgeAgent(BudgetMeter):
         isr_reports: dict | None,
         memory_store: MemoryStore | None,
         current_sample_id: str | None = None,
+        owner: str | None = None,
     ) -> str:
         """Retrieve similar past cases and format them as a few-shot prompt block.
 
@@ -4586,6 +4592,8 @@ class JudgeAgent(BudgetMeter):
         Args:
             isr_reports: Current ISR reports (used to build the search query).
             memory_store: MemoryStore-protocol object, or None to skip.
+            owner: Whose cases may be read: the job's owner, or ``None`` for
+                the unscoped ones (``long_term_memory.recall``).
 
         Returns:
             Formatted prompt block string, or "" when store is None/empty or
@@ -4611,21 +4619,18 @@ class JudgeAgent(BudgetMeter):
             return ""
 
         try:
-            # Never retrieve the current
-            # sample's own past run as a "weighted prior". Newer
-            # QdrantStore.retrieve accepts ``exclude_sample_id``; older
-            # MemoryStore implementations (InMemoryStore in tests) may
-            # not — fall back to the unfiltered call in that case.
-            try:
-                cases = memory_store.retrieve(
-                    query,
-                    top_k=3,
-                    exclude_sample_id=current_sample_id,
-                )
-            except TypeError:
-                cases = memory_store.retrieve(query, top_k=3)
-                if current_sample_id:
-                    cases = [c for c in cases if c.sample_id != current_sample_id]
+            # Never retrieve the current sample's own past run as a "weighted
+            # prior", and only the job's owner's cases (``recall``, which also
+            # serves a backend older than ``exclude_sample_id``).
+            from maljan.memory.long_term_memory import recall
+
+            cases = recall(
+                memory_store,
+                query,
+                top_k=3,
+                exclude_sample_id=current_sample_id,
+                owner=owner,
+            )
         except Exception:  # noqa: BLE001
             # Never let retrieval failure block verdict generation
             return ""
