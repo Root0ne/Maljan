@@ -68,12 +68,14 @@ from maljan.agents.judge_postprocess import (
 from maljan.agents.prompt_fragments import tools_statement
 from maljan.agents.tool_fence import (
     FENCE_STATEMENT,
+    QUOTED_VALUE_STATEMENT,
     escaped,
     escapes,
     fence_lines_room,
     fenced,
     json_view,
     needs_fence,
+    quoted_value,
 )
 from maljan.core.config import MEDIATOR_AGENT_KEY, MEDIATOR_AGENT_NAME, get_settings
 from maljan.core.logger import logger
@@ -4643,6 +4645,7 @@ class JudgeAgent(BudgetMeter):
             "=== LONG-TERM MEMORY: Similar Past Case(s) ===",
             "Use these historical analyses as WEIGHTED PRIORS for TTP selection.",
             "Do NOT copy technique IDs blindly — corroborate with current evidence.",
+            QUOTED_VALUE_STATEMENT,
             "",
         ]
 
@@ -4650,10 +4653,13 @@ class JudgeAgent(BudgetMeter):
             ttps = ", ".join(case.technique_ids) if case.technique_ids else "none"
             # Whole: the verdict prompt is fitted to the judge's window as a
             # whole, and a case's summary is shortened there only when it must be.
-            summary = case.summary_text
-            lines.append(
-                f"[{idx}/{total}] sample_id: {case.sample_id} (category: {case.malware_category})"
-            )
+            # A past run's summary is built from that run's claims, which carry
+            # its sample's strings: one quoted value on its line, so no line of
+            # it can read as a line of this prompt (``tool_fence.quoted_value``).
+            # The category is stored text of the same run, written the same way.
+            summary = quoted_value(str(case.summary_text or ""))
+            category = quoted_value(str(case.malware_category or ""))
+            lines.append(f"[{idx}/{total}] sample_id: {case.sample_id} (category: {category})")
             lines.append(f"  Past techniques: {ttps}")
             lines.append(f"  Behavioral summary: {summary}")
 

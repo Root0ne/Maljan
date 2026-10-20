@@ -81,6 +81,26 @@ def _platforms_own_resolution(entry: Any) -> bool:
 # character, changed one or inserted one anywhere but the end would be this
 # code deciding what the model meant.
 _CLOSERS = {"{": "}", "[": "]"}
+# A JSON number the text ends on, nothing after it, not even a line break
+# (``\Z``, never ``$``): a run of its characters not following a letter
+# (``true`` and ``false`` end on ``e``).
+_OPEN_NUMBER = re.compile(r"[0-9+\-.eE]+\Z")
+
+
+def platform_refusal(exc: BaseException) -> bool:
+    """Whether ``exc`` is a refusal the platform composed, in words of its own.
+
+    An ask the delegation layer would not make (``DelegationRefused``), an
+    attached report the platform will not read (``AttachedReportRefused``)
+    and a call stopped at the job's spend ceiling (``SpendCeilingStop``) are
+    sentences the platform wrote from its own state; every other failure a
+    tool call raises carries a third party's message.
+    """
+    from maljan.agents.delegation import DelegationRefused
+    from maljan.core.spend import SpendCeilingStop
+    from maljan.providers.errors import AttachedReportRefused
+
+    return isinstance(exc, DelegationRefused | AttachedReportRefused | SpendCeilingStop)
 
 
 def repair_arguments(text: str) -> dict[str, Any] | None:
@@ -96,6 +116,11 @@ def repair_arguments(text: str) -> dict[str, Any] | None:
     whether the cursor is inside a string and which brackets are open, and
     append the closers that are missing. Nothing is removed, nothing is
     substituted and nothing is inserted anywhere but the end.
+
+    A number at the very end (nothing after it, not even whitespace) and a
+    list left open are not repaired either: a number may have been cut short (``4198`` of ``4198400``) and a list may
+    have had more items, and closing either hands the tool a value the model
+    did not write.
 
     A value cut in the middle of a string is *not* repaired, and that is the
     rule this exists under: closing the quote would hand the tool an argument
@@ -130,6 +155,16 @@ def repair_arguments(text: str) -> dict[str, Any] | None:
     if in_string:
         # The model was still writing a value. Whatever it meant to type next
         # is not something this may guess.
+        return None
+    if "[" in stack:
+        # A list left open was cut somewhere in its items: closing it would
+        # hand the tool the items written so far as if they were all of them.
+        return None
+    cut_number = _OPEN_NUMBER.search(raw)
+    if cut_number is not None and not raw[: cut_number.start()][-1:].isalpha():
+        # A number at the very end may be one cut short: ``4198`` of
+        # ``4198400`` closes into a valid call at the wrong address. One the
+        # model followed with whitespace or a line break, it ended.
         return None
     tail = "".join(_CLOSERS[open_] for open_ in reversed(stack))
     if not tail:
@@ -1766,7 +1801,19 @@ def _record_tool(
             args_raw=raw,
         )
         _note(kwargs, entry.id)
-        return f"[{entry.id}] tool call failed: {message}{_steering(kwargs, repeated, failed=True)}"
+        # The failure's type is the platform's word; a third party's message
+        # may repeat what the call was given or what the sample holds, so it
+        # is shown as a tool answer is (``agents.tool_fence``), never as a line
+        # of the platform's own. A refusal the platform composed is its own
+        # sentence and stays as written (``platform_refusal``).
+        if platform_refusal(exc):
+            return f"[{entry.id}] tool call failed: {message}{_steering(kwargs, repeated, failed=True)}"
+        said = str(exc)
+        shown = f"\n{fenced(entry.id, said)}" if said.strip() else ""
+        return (
+            f"[{entry.id}] tool call failed: {type(exc).__name__}{shown}"
+            f"{_steering(kwargs, repeated, failed=True)}"
+        )
 
     def _stopped(
         kwargs: dict[str, Any],

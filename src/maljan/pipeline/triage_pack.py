@@ -1986,8 +1986,18 @@ def _absence(entry: LedgerEntry) -> str:
         return INDEX_SOURCE_UNREADABLE.format(entry=entry.id)
     if _was_not_made(entry):
         said = str(entry.error or entry.output or "")[len(NOT_RUN_PREFIX) :].strip()
-        return f"no: [{entry.id}] {_one_line(said)}"
-    return f"no: [{entry.id}] failed: {_one_line(entry.error or entry.output)}"
+        return f"no: [{entry.id}] {_failure_words(said)}"
+    return f"no: [{entry.id}] failed: {_failure_words(entry.error or entry.output)}"
+
+
+def _failure_words(text: str | None) -> str:
+    """A tool's failure as an index ``no:`` line holds it, written as the directed pass's are.
+
+    The words are the tool's and may repeat what the sample holds: on one
+    line, with every ledger id and chat-template delimiter written out
+    (``pack_escaped``), so none reads as a citation, a new line or a token.
+    """
+    return pack_escaped(_one_line(text), delimiters=True, ids=True)
 
 
 def index_inputs(
