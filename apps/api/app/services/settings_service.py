@@ -7,7 +7,9 @@ import logging
 import re
 import time
 import uuid
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Iterator
+from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
@@ -666,6 +668,23 @@ def _loc_to_key(ns: str, loc: tuple[Any, ...]) -> str:
     return f"{ns}." + ".".join(str(p) for p in loc if not isinstance(p, int))
 
 
+# Whether the read in progress is the one that runs a job. A context variable
+# rather than a parameter: the read is reached through ``load_core_overrides``,
+# which the API's own readers call too, and they keep dropping a secret the
+# console cannot show.
+_refuse_undecryptable: ContextVar[bool] = ContextVar("refuse_undecryptable", default=False)
+
+
+@contextmanager
+def refusing_undecryptable_secrets() -> Iterator[None]:
+    """Within it, a core secret that cannot be decrypted refuses the read."""
+    token = _refuse_undecryptable.set(True)
+    try:
+        yield
+    finally:
+        _refuse_undecryptable.reset(token)
+
+
 class SettingsService:
     def __init__(self, db: AsyncSession) -> None:
         self.db = db
@@ -678,6 +697,11 @@ class SettingsService:
     async def load_overrides(self) -> dict[str, Any]:
         """Full keys -> plain values; secrets decrypted, or dropped if they cannot be.
 
+        Inside :func:`refusing_undecryptable_secrets` (the read that runs a
+        job) a core secret that cannot be decrypted raises
+        ``StoredValueRefused`` naming its key, instead of being dropped so the
+        run goes on under the default the operator replaced.
+
         The per-server MCP tokens are stored as their own ``is_secret`` rows
         (see ``server_map``); they are merged back into the ``core.mcp.servers``
         map here, so every caller downstream — the worker's ``Settings``, the
@@ -686,6 +710,7 @@ class SettingsService:
         (see ``frontier_arms``) are stored and merged the same way.
         """
         out: dict[str, Any] = {}
+        undecryptable: dict[str, str] = {}
         for row in await self._rows():
             if row.key.startswith(MARKER_PREFIX):
                 # A record a start-up repair keeps of itself, never a setting.
@@ -694,6 +719,12 @@ class SettingsService:
                 try:
                     out[row.key] = box.decrypt(str(row.value))
                 except box.SecretsUnavailable:
+                    if _refuse_undecryptable.get() and row.key.startswith("core."):
+                        undecryptable[row.key.removeprefix("core.")] = (
+                            "the stored secret cannot be decrypted (the encryption key "
+                            "changed?); enter it again"
+                        )
+                        continue
                     logger.warning(
                         "Stored override for %s cannot be decrypted (encryption key "
                         "changed?); the environment value stays in effect.",
@@ -702,6 +733,10 @@ class SettingsService:
                     continue
             else:
                 out[row.key] = row.value
+        if undecryptable:
+            from maljan.core.settings_overrides import StoredValueRefused
+
+            raise StoredValueRefused(undecryptable)
         merged = _merge_nested(merge_server_secrets(out))
         # The stored plugin allow-list is the one this process judges a
         # provider id by when a check is handed none; it loads and withdraws
@@ -1178,7 +1213,12 @@ class SettingsService:
             validate_agent_map,
         )
 
-        if {AGENT_DEFINITIONS_KEY, AGENT_PROFILES_KEY, AGENT_PROFILE_KEY} & set(changes):
+        # A save of the server map is checked here too: withdrawing a tool a
+        # stored definition names is refused at that definition's key, not
+        # discovered when the agent starts.
+        if {AGENT_DEFINITIONS_KEY, AGENT_PROFILES_KEY, AGENT_PROFILE_KEY, SERVER_MAP_KEY} & set(
+            changes
+        ):
             # Per-key messages, so the two composite editors can put each error
             # on the card that caused it — the same reason the server map has
             # its own validation module.

@@ -398,8 +398,10 @@ def test_deleting_a_report_removes_it_and_the_stored_object(monkeypatch):
     row = MagicMock(id=report_id, storage_path=f"sandbox-reports/{SHA[:2]}/{SHA}/{report_id}.json")
     result = MagicMock()
     result.scalar_one_or_none.return_value = row
+    result.scalar.return_value = 0  # no queued or running job names the report
     db = MagicMock()
     db.execute = AsyncMock(return_value=result)
+    db.commit = AsyncMock()
     minio = MagicMock()
     monkeypatch.setattr(module, "_minio_client", lambda: minio)
     from app.config import settings

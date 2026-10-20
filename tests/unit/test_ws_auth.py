@@ -162,9 +162,11 @@ async def test_ws_rejects_wrong_owner(mock_ws: MagicMock, valid_token_payload: d
         mock_factory.return_value.__aexit__ = AsyncMock(return_value=False)
         await ws_analysis(mock_ws, job_id)
 
+    # The same answer as a job that is not there: two reasons would tell any
+    # signed-in caller which job ids exist.
     assert mock_ws.method_calls == [
         call.accept(),
-        call.close(code=1008, reason="Forbidden: not your job"),
+        call.close(code=1008, reason="Not found: job does not exist"),
     ]
 
 

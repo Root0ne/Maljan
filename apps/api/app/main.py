@@ -14,6 +14,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import get_settings, settings
 from app.logging_config import get_logger, setup_logging
+from app.logsafe import log_safe
 
 # Initialize logging before anything else
 setup_logging()
@@ -141,8 +142,19 @@ async def _probe_components() -> dict[str, dict[str, Any]]:
         except TimeoutError:
             return name, {"ok": False, "error": f"timeout after {_PROBE_TIMEOUT_SECONDS:g}s"}
         except Exception as exc:  # noqa: BLE001 — a probe failure is a result
-            detail = str(exc).strip() or type(exc).__name__
-            return name, {"ok": False, "error": detail[:200]}
+            # Unauthenticated: a driver's own text names the host, the port,
+            # the database and the role it was refused for. The class says
+            # what kind of failure it was; the text goes to the log, where an
+            # operator reads it.
+            from maljan.core.settings_overrides import redact_url
+
+            logger.warning(
+                "health probe %s failed: %s: %s",
+                log_safe(name),
+                type(exc).__name__,
+                log_safe(redact_url(str(exc))),
+            )
+            return name, {"ok": False, "error": type(exc).__name__}
 
     results = await asyncio.gather(*(_run(n, f) for n, f in probes.items()))
     return dict(results)

@@ -31,6 +31,7 @@ import asyncio
 from typing import Any
 
 from maljan.core.logger import logger
+from maljan.core.settings_masking import masked_text
 
 from app.logsafe import log_safe
 
@@ -130,8 +131,10 @@ async def unready_static_providers(
         elif answer.ok:
             continue
         else:
-            detail = str(answer.detail or "no answer")
-        where = provider.address()
+            # The refusal is the 422 body: a provider's own answer can quote
+            # the URL it was refused at, with the userinfo and query it carried.
+            detail = masked_text(str(answer.detail or "no answer"))
+        where = masked_text(str(provider.address() or ""))
         at = f" at {where}" if where else ""
         refusals.extend(
             f"agent {key!r} needs static provider {provider_id!r}{at}, which is not ready: {detail}"

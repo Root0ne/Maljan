@@ -218,5 +218,5 @@ class TestDeepHealthProbe:
         components = await main_mod._probe_components()
 
         assert components["database"]["ok"] is False
-        assert "connection refused" in components["database"]["error"]
+        assert components["database"]["error"] == "RuntimeError"
         assert components["redis"]["ok"] is True

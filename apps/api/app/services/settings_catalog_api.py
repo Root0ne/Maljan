@@ -559,6 +559,12 @@ def validate_editable_api_value(entry: CatalogEntry, value: Any) -> str | None:
     if entry.type in ("int", "float"):
         if isinstance(value, bool) or not isinstance(value, int | float):
             return "Input should be a valid number"
+        if entry.type == "int" and isinstance(value, float) and not value.is_integer():
+            # 1.5 for a count was stored as 1.5, and whatever read it then took
+            # the integer it needed from a number nobody had entered. An
+            # integral float (30.0) is what installs already store and send
+            # back as shown, so it is not refused.
+            return "Input should be a valid integer"
         if entry.minimum is not None and value < entry.minimum:
             return f"Input should be greater than or equal to {entry.minimum}"
         if entry.maximum is not None and value > entry.maximum:

@@ -493,6 +493,62 @@ async def test_unreadable_stored_settings_fail_the_job_and_run_nothing(
 
 
 @pytest.mark.asyncio
+async def test_a_stored_secret_the_worker_cannot_decrypt_fails_the_job_naming_its_key(
+    mock_ctx: dict[str, Any],
+    mock_db_session: AsyncMock,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The row used to be dropped and the job ran on the default in its place."""
+    from app.services import settings_service
+    from maljan.core.settings_overrides import StoredValueRefused
+
+    async def _undecryptable(_db: Any) -> dict[str, Any]:
+        raise StoredValueRefused({"llm.api_key": "the stored secret cannot be decrypted"})
+
+    monkeypatch.setattr(settings_service, "load_core_overrides", _undecryptable)
+    job = _make_job()
+    _answer_reads(mock_db_session, _job_rows(job, _make_sample()))
+    pipeline = AsyncMock(return_value={"final_decision": "Malware"})
+
+    with patch("maljan.app.MaljanApp.arun", new=pipeline):
+        result = await run_analysis(mock_ctx, str(job.id))
+
+    assert result["status"] == "failed", result
+    assert "core.llm.api_key" in result["error"]
+    assert "did not run on a default" in result["error"]
+    pipeline.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_the_workers_real_settings_read_refuses_an_undecryptable_secret_row(
+    mock_ctx: dict[str, Any],
+    mock_db_session: AsyncMock,
+) -> None:
+    """Through the real ``load_core_overrides`` and its context variable: no fake."""
+    from types import SimpleNamespace
+
+    from maljan.core import settings_secrets as box
+
+    job = _make_job()
+    rows = MagicMock()
+    rows.scalars.return_value.all.return_value = [
+        SimpleNamespace(key="core.llm.api_key", value="gAAAA-unreadable", is_secret=True)
+    ]
+    _answer_reads(mock_db_session, [*_job_rows(job, _make_sample()), MagicMock(), rows])
+    pipeline = AsyncMock(return_value={"final_decision": "Malware"})
+
+    with (
+        patch.object(box, "decrypt", side_effect=box.SecretsUnavailable("rotated")),
+        patch("maljan.app.MaljanApp.arun", new=pipeline),
+    ):
+        result = await run_analysis(mock_ctx, str(job.id))
+
+    assert result["status"] == "failed", result
+    assert "core.llm.api_key" in result["error"]
+    pipeline.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_a_refused_job_option_fails_the_job_by_field_without_its_value(
     mock_ctx: dict[str, Any],
     mock_db_session: AsyncMock,

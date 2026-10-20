@@ -101,6 +101,21 @@ def _server_allow_lists(overrides: dict[str, Any]) -> dict[str, list[str] | None
     return out
 
 
+def _staged_over_stored(changes: dict[str, Any], stored: dict[str, Any]) -> dict[str, Any]:
+    """The settings this save leaves in force: the staged values over the stored ones.
+
+    A ``null`` drops the override, as it does everywhere in the settings
+    system, so the key falls back to the built-ins.
+    """
+    merged = dict(stored)
+    for key, value in changes.items():
+        if value is None:
+            merged.pop(key, None)
+        else:
+            merged[key] = value
+    return merged
+
+
 def validate_definitions(
     value: Any,
     *,
@@ -552,7 +567,7 @@ def validate_agent_map(changes: dict[str, Any], stored: dict[str, Any]) -> dict[
 
     definitions = validate_definitions(
         definitions_raw,
-        servers=_server_allow_lists(stored),
+        servers=_server_allow_lists(_staged_over_stored(changes, stored)),
         plugins_allowed=merged_allow_list(changes, stored),
     )
     if AGENT_DEFINITIONS_KEY in changes and changes[AGENT_DEFINITIONS_KEY] is not None:

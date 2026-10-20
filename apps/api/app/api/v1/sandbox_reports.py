@@ -49,13 +49,15 @@ from maljan.core.report_formats import (
 from maljan.core.safe_json import loads
 from maljan.providers.sandbox.readers import mapping_refusal, report_reader, sandbox_formats
 from pydantic import ValidationError
-from sqlalchemy import delete, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
 from app.deps import get_current_user, require_active_user, require_admin_session
 from app.logging_config import get_logger
+from app.logsafe import log_safe
 from app.middleware.upload_bound_middleware import too_large_detail, upload_bound
+from app.models.job import AnalysisJob
 from app.models.sample import Sample
 from app.models.sandbox_report import SandboxReportRow
 from app.models.user import User
@@ -464,18 +466,51 @@ async def delete_sandbox_report(
     sample = await _maybe_await(_load_sample(db, sample_id, user))
     row = (
         await db.execute(
-            select(SandboxReportRow).where(
-                SandboxReportRow.id == report_id, SandboxReportRow.sample_id == sample.id
-            )
+            select(SandboxReportRow)
+            .where(SandboxReportRow.id == report_id, SandboxReportRow.sample_id == sample.id)
+            # Held until the commit below: a job submitted against this report
+            # takes the same lock before it is created, so it either exists
+            # when the in-flight count is read or finds the report gone.
+            .with_for_update()
         )
     ).scalar_one_or_none()
     if row is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Sandbox report not found")
-    try:
-        await asyncio.to_thread(object_store.remove, _minio_client(), row.storage_path)
-    except Exception as exc:  # noqa: BLE001 — an orphaned object is not a failed delete
-        logger.warning("Could not remove %s from storage: %s", row.storage_path, exc)
+    # A run that names this report reads it from the store when it starts and
+    # again as it goes; taking the bytes from under it fails the run on a file
+    # that was there when it was submitted. Refused while one is queued or
+    # running, as the sample's own delete is.
+    in_flight = (
+        await db.execute(
+            select(func.count())
+            .select_from(AnalysisJob)
+            .where(
+                AnalysisJob.sample_id == sample.id,
+                AnalysisJob.status.in_(("pending", "running")),
+                AnalysisJob.config["sandbox_report_id"].astext == str(row.id),
+            )
+        )
+    ).scalar() or 0
+    if in_flight:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            "A pending or running analysis uses this sandbox report; cancel it before deleting.",
+        )
+    storage_path = row.storage_path
+    # The row goes first and is committed, then the object: the other order
+    # left a row that lists a report whose bytes are gone (a download of it a
+    # 500) whenever the removal succeeded and the row delete did not. An
+    # object that outlives its row is only unreachable bytes, and is said.
     await db.execute(delete(SandboxReportRow).where(SandboxReportRow.id == row.id))
+    await db.commit()
+    try:
+        await asyncio.to_thread(object_store.remove, _minio_client(), storage_path)
+    except Exception as exc:  # noqa: BLE001 — an orphaned object is not a failed delete
+        logger.warning(
+            "Could not remove %s from storage: %s",
+            log_safe(storage_path),
+            log_safe(f"{type(exc).__name__}: {exc}"),
+        )
     await audit.record(
         "sandbox_report.delete",
         resource_type="sandbox_report",

@@ -6,7 +6,7 @@ both need lives here rather than in either of them.
 
 from __future__ import annotations
 
-from urllib.parse import urlparse
+from urllib.parse import unquote, urlparse
 
 from arq.connections import RedisSettings
 from arq.constants import default_queue_name
@@ -40,6 +40,12 @@ def build_redis_settings(redis_url: str) -> RedisSettings:
         host=parsed.hostname or "localhost",
         port=parsed.port or 6379,
         database=int((parsed.path or "/0").strip("/") or 0),
-        username=parsed.username or None,
-        password=parsed.password or None,
+        # The userinfo is percent-encoded in a URL (a password with ``@``,
+        # ``:`` or ``/`` has to be): ``urlparse`` leaves it so, and the server
+        # then received the encoded text as the password.
+        username=unquote(parsed.username) if parsed.username else None,
+        password=unquote(parsed.password) if parsed.password else None,
+        # ``rediss://`` is Redis over TLS; connecting in the clear to a
+        # TLS-only endpoint fails every queue command.
+        ssl=parsed.scheme == "rediss",
     )
