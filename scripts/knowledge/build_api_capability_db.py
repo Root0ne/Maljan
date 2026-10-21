@@ -11,10 +11,8 @@ a reader can see *why* ``NtUnmapViewOfSection`` is process-injection and
 hand-editing a 600-entry JSON literal and getting the commas wrong.
 
 **Provenance.** Every name below is a public Win32/NT API symbol and every
-technique ID is from the public MITRE ATT&CK catalog. Nothing here is copied
-from another tool's data files; the *architecture* (one resolved-import set
-projected onto two taxonomies, behind a reverse index) is the idea worth
-borrowing, the bytes are not.
+technique ID is from the public MITRE ATT&CK catalog. The design is one
+resolved-import set projected onto two taxonomies, behind a reverse index.
 
 Usage::
 
@@ -25,6 +23,7 @@ Usage::
 from __future__ import annotations
 
 import json
+import os
 import sys
 from pathlib import Path
 from typing import Any
@@ -49,8 +48,9 @@ _TECHNIQUES = _ROOT / "data" / "attck_techniques.json"
 # The rule of thumb is now a measurement, on both platforms. A category is
 # labelled only when its own measured rate separates software that is a sample
 # from software that is not, and only behind the combination its ``flags_with``
-# names. Measured over the two Windows corpora described in ``MEASURED``, the
-# nine Windows categories that carried a bare ``high`` or ``medium`` appeared on
+# names. Measured over the two Windows corpora described in
+# ``MEASURED_CATEGORIES`` and ``BENIGN_CORPORA``, the nine Windows categories that
+# carried a bare ``high`` or ``medium`` appeared on
 # 97.73% of ordinary Windows software against 93.50% of malware — the label was
 # very slightly more common on the benign side, which is no signal at all. Every
 # one of them is informational here and says what would give it weight;
@@ -2816,8 +2816,10 @@ def main() -> int:
         "techniques": [_emitted(t) for t in techniques],
     }
 
-    _BEHAVIOUR_OUT.write_text(json.dumps(behaviour, indent=2) + "\n", encoding="utf-8")
-    _ATTCK_OUT.write_text(json.dumps(attck, indent=2) + "\n", encoding="utf-8")
+    _write_pair(
+        (_BEHAVIOUR_OUT, json.dumps(behaviour, indent=2) + "\n"),
+        (_ATTCK_OUT, json.dumps(attck, indent=2) + "\n"),
+    )
 
     for platform, categories in CATEGORIES_BY_PLATFORM.items():
         total_apis = sum(len(set(apis)) for _tier, apis in categories.values())
@@ -2827,6 +2829,21 @@ def main() -> int:
         )
     print(f"wrote {_ATTCK_OUT.relative_to(_ROOT)}: {len(techniques)} techniques")
     return 0
+
+
+def _write_pair(*outputs: tuple[Path, str]) -> None:
+    """Write each output to a temporary file, then rename: a failed write leaves no odd pair."""
+    staged: list[tuple[Path, Path]] = []
+    try:
+        for path, text in outputs:
+            temp = path.with_name(path.name + ".tmp")
+            temp.write_text(text, encoding="utf-8")
+            staged.append((temp, path))
+        for temp, path in staged:
+            os.replace(temp, path)
+    finally:
+        for temp, _path in staged:
+            temp.unlink(missing_ok=True)
 
 
 if __name__ == "__main__":

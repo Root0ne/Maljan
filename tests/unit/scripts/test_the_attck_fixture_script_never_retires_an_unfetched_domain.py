@@ -41,6 +41,20 @@ def _bundle(*ids: str) -> dict[str, Any]:
     return {"objects": objects}
 
 
+def _deprecated(bundle: dict[str, Any], *ids: str) -> dict[str, Any]:
+    """``bundle`` with each id kept as a deprecated attack-pattern, as ATT&CK does."""
+    for i, tid in enumerate(ids):
+        bundle["objects"].append(
+            {
+                "type": "attack-pattern",
+                "id": f"attack-pattern--{tid}-dep{i}",
+                "x_mitre_deprecated": True,
+                "external_references": [{"source_name": "mitre-attack", "external_id": tid}],
+            }
+        )
+    return bundle
+
+
 class _Fetcher:
     def __init__(self, bundles: dict[str, dict[str, Any] | None]) -> None:
         self.bundles = bundles
@@ -95,18 +109,25 @@ def test_every_domain_fetched_retires_only_what_left_a_fetched_domain(tmp_path: 
     paths = _paths(tmp_path)
     _previous(paths["valid_ids_out"])
     fetcher = _Fetcher(
-        {"enterprise": _bundle("T1001"), "mobile": _bundle("T1400"), "ics": _bundle()}
+        {
+            "enterprise": _bundle("T1001"),
+            "mobile": _bundle("T1400"),
+            "ics": _deprecated(_bundle("T0801"), "T0800"),
+        }
     )
     mod.prepare(fetcher=fetcher, **paths)
     retired = json.loads(paths["retired_out"].read_text(encoding="utf-8"))
     assert set(retired) - {"_meta"} == {"T0800"}
+    assert retired["T0800"]["status"] == "deprecated"
 
 
 def test_the_ref_is_in_every_url_and_a_moving_ref_is_said(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     mod = _script()
-    fetcher = _Fetcher({"enterprise": _bundle("T1001"), "mobile": _bundle(), "ics": _bundle()})
+    fetcher = _Fetcher(
+        {"enterprise": _bundle("T1001"), "mobile": _bundle("T1400"), "ics": _bundle("T0800")}
+    )
     mod.prepare(
         fetcher=fetcher, ref=_SHA, url=mod.bundle_url("enterprise", _SHA), **_paths(tmp_path)
     )

@@ -24,7 +24,7 @@ from typing import Any
 from maljan.agents.dynamic_analyst import assemble_dynamic_prompt
 from maljan.agents.prompt_fragments import format_fragment
 from maljan.agents.static_analyst import assemble_static_prompt
-from maljan.core.config import Settings
+from maljan.core.settings_overrides import build_settings
 from maljan.providers.sandbox.cape2 import CAPE2SandboxProvider
 from maljan.providers.sandbox_tools import (
     sandbox_api_calls,
@@ -60,7 +60,7 @@ def build_prompts() -> tuple[str, str]:
     """
     neutral = format_fragment("unknown", "unknown")
     static = assemble_static_prompt(
-        GhidraStaticProvider.from_settings(Settings(_env_file=None)),
+        GhidraStaticProvider.from_settings(build_settings({})),
         neutral,
         (),
         provider_expected=True,

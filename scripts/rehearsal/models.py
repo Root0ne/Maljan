@@ -22,6 +22,7 @@ reads them wrongly is a request the stub refuses.
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass, field
 from functools import lru_cache
 from pathlib import Path
@@ -97,7 +98,12 @@ def _longest_prefix(model: str, keys: Any) -> str:
     return max(matches, key=len) if matches else ""
 
 
+_SAFE_ID = re.compile(r"[a-z0-9._-]+")
+
+
 def _description(model: str) -> dict[str, Any] | None:
+    if not _SAFE_ID.fullmatch(model) or ".." in model:
+        return None
     path = _DESCRIPTIONS / f"{model}.json"
     if not path.is_file():
         return None

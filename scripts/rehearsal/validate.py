@@ -68,6 +68,13 @@ def _canonical(value: Any) -> bytes:
     return text.encode("utf-8")
 
 
+def _same(sent: str, expected: str) -> bool:
+    """Constant-time equality on bytes: ``compare_digest`` raises on a non-ASCII ``str``."""
+    return hmac.compare_digest(
+        sent.encode(errors="surrogatepass"), expected.encode(errors="surrogatepass")
+    )
+
+
 class Signer:
     """Signs a thinking block to what it was written after, and checks one sent back."""
 
@@ -86,8 +93,8 @@ class Signer:
 
     def valid(self, prefix: Any, block: dict[str, Any]) -> bool:
         if block.get("type") == "redacted_thinking":
-            return hmac.compare_digest(str(block.get("data") or ""), self.redacted(prefix))
-        return hmac.compare_digest(
+            return _same(str(block.get("data") or ""), self.redacted(prefix))
+        return _same(
             str(block.get("signature") or ""), self.sign(prefix, str(block.get("thinking") or ""))
         )
 

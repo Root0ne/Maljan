@@ -286,17 +286,21 @@ class _ProcessState:
 
     def __init__(self) -> None:
         from maljan.core import config
+        from maljan.core.plugins import allow_list
         from maljan.tools.roots import SAMPLE_ROOTS_ENV
 
         self._config = config
+        self._allowed = allow_list()
         self._settings = config._settings_instance
         self._roots_env = SAMPLE_ROOTS_ENV
         self._roots = os.environ.get(SAMPLE_ROOTS_ENV)
 
     def restore(self) -> None:
+        from maljan.core.plugins import install_allow_list
         from maljan.llm import context_window, model_capabilities, model_output_limits
 
         self._config._settings_instance = self._settings
+        install_allow_list(sorted(self._allowed))
         if self._roots is None:
             os.environ.pop(self._roots_env, None)
         else:
@@ -304,6 +308,15 @@ class _ProcessState:
         context_window.forget_learned_windows()
         model_output_limits.forget_learned()
         model_capabilities.forget_capabilities()
+
+
+def timeout_message(deadline_s: float | None, elapsed_s: float, exc: BaseException) -> str:
+    """What a ``TimeoutError`` out of the run was: the deadline, or a timeout of its own."""
+    if isinstance(exc.__cause__, asyncio.CancelledError) or (
+        exc.__cause__ is None and deadline_s is not None and elapsed_s >= deadline_s
+    ):
+        return f"the run passed its {deadline_s}s deadline"
+    return f"{type(exc).__name__}: {exc}"
 
 
 async def _probe(overrides: dict[str, Any]) -> tuple[bool, str]:
@@ -376,9 +389,9 @@ async def rehearse(rehearsal: Rehearsal) -> RunRecord:
                 status = "completed" if app.failed_step is None else "failed"
                 if rehearsal.remember and status == "completed":
                     await asyncio.to_thread(app.remember_the_run)
-            except TimeoutError:
+            except TimeoutError as exc:
                 status = "failed"
-                error = f"the run passed its {rehearsal.deadline_s}s deadline"
+                error = timeout_message(rehearsal.deadline_s, time.monotonic() - started, exc)
                 result = dict(app.built_report or {})
                 # Stop the run's own work the way the worker stops a job, and
                 # let what is still in flight see it while the stub answers,

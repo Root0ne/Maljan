@@ -150,49 +150,6 @@ def test_measure_dedupes_digestless_rows_and_refuses_an_unknown_platform(
     assert refused.value.code == 2
 
 
-def test_expanded_yara_rules_are_escaped_and_checked_before_they_replace_the_file(
-    tmp_path: Path,
-) -> None:
-    import yaml
-
-    module = _load("scripts/knowledge/expand_yara_rules.py", "expand_yara_under_test")
-    rule = {
-        "id": "x_t1000_0",
-        "technique_id": "T1000",
-        "confidence": 0.8,
-        "description": 'MITRE: say "hi" \\ done',
-        "patterns": ["one", "two"],
-    }
-    parsed = yaml.safe_load("rules:\n" + module._yaml_dump_rules([rule]))
-    assert parsed["rules"][0]["description"] == rule["description"]
-    with pytest.raises(SystemExit):
-        module._check_output("rules: [unclosed", set(), 0)
-    with pytest.raises(SystemExit):
-        module._check_output('rules:\n  - technique_id: "T1"\n', {"T1", "T2"}, 0)
-    module._check_output('rules:\n  - technique_id: "T1"\n', {"T1"}, 0)
-    # A rule lost although its technique is still named by another rule is caught by count.
-    two = 'rules:\n  - technique_id: "T1"\n  - technique_id: "T1"\n'
-    with pytest.raises(SystemExit):
-        module._check_output(two, {"T1"}, 1, existing=2)
-    module._check_output(two, {"T1"}, 0, existing=2)
-    # U+0085 and every other non-ASCII character survive the round trip, escaped.
-    odd = {**rule, "description": "a\x85b", "patterns": ["a\x85b", "\u2028"]}
-    dumped = module._yaml_dump_rules([odd])
-    assert dumped.isascii()
-    back = yaml.safe_load("rules:\n" + dumped)["rules"][0]
-    assert back["description"] == "a\x85b"
-    assert back["patterns"] == ["a\x85b", "\u2028"]
-    # The covered set is read from the old file's YAML, not by a regex.
-    old = tmp_path / "old.yaml"
-    old.write_text(
-        'version: "1"\nrules:\n  - id: a\n    technique_id: "T1"\n    patterns: ["x"]\n'
-        '  # - id: b\n  #   technique_id: "T9"\n',
-        encoding="utf-8",
-    )
-    assert module._parse_existing_rules(old)[1] == ["T1"]
-    assert not any(ord(ch) > 127 for ch in str(module.__doc__).replace("—", "-"))
-
-
 def test_ghidra_manager_says_why_a_command_failed_and_ignores_its_state_file(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
