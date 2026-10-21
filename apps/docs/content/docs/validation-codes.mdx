@@ -46,7 +46,7 @@ not prove the test makes the platform raise it. The tests are not listed here:
 one nothing raises any more and stored runs still carry; the comment on that
 name says what reads it.
 
-**89 codes in 10 families:** [attck](#attck) 6 · [attribution](#attribution) 1 · [composer](#composer) 3 · [isr](#isr) 13 · [narrative](#narrative) 5 · [report](#report) 12 · [stix](#stix) 32 · [tool](#tool) 1 · [validation](#validation) 1 · [verdict](#verdict) 15. 13 code positions the register could not resolve are [listed at the end](#unresolved-code-positions).
+**90 codes in 10 families:** [attck](#attck) 6 · [attribution](#attribution) 1 · [composer](#composer) 3 · [isr](#isr) 13 · [narrative](#narrative) 5 · [report](#report) 12 · [stix](#stix) 32 · [tool](#tool) 1 · [validation](#validation) 1 · [verdict](#verdict) 16. 13 code positions the register could not resolve are [listed at the end](#unresolved-code-positions).
 
 ## attck
 
@@ -660,6 +660,15 @@ A check that raised on an answer. Its findings are missing from the run, and the
 - **Docs** none
 
 ## verdict
+
+### `verdict.agent_ceiling`
+
+What is recorded when the judge's own ceiling (`llm.agents.judge`) refused the verdict call: no answer, as with a timeout, so nothing is asked again and the verdict is this pipeline's own fallback bundle. The row's message is the ceiling's sentence; the degradation reason naming the agent and its ceiling comes from the spend meter (`SpendMeter.agent_reasons`).
+
+- **Raised at** `maljan.agents.judge_agent:JudgeAgent.give_verdict`
+- **Passes on** `maljan.pipeline.nodes:make_judge_node.node_fn`
+- **Constant** `maljan.agents.judge_agent:VERDICT_AGENT_CEILING_CODE`
+- **Docs** [Configuration](/configuration/)
 
 ### `verdict.assessment_conflict`
 

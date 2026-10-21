@@ -185,6 +185,24 @@ class SpendCeilingStop(Exception):
     """A model call the operator's spend ceiling does not admit, in the words the run records."""
 
 
+class AgentCeilingStop(SpendCeilingStop):
+    """A model call one agent's own ceiling does not admit (``llm.agents.<key>.max_spend_usd``).
+
+    A :class:`SpendCeilingStop`, so every caller takes the salvage path it takes
+    for the job's ceiling; the job's spend is not exhausted by it, and no other
+    agent's call is refused.
+    """
+
+    def __init__(self, said: str, agent: str) -> None:
+        super().__init__(said)
+        self.agent = agent
+
+
+# What the call feed names the record of an agent stopped at its own ceiling
+# (``token_ledger.TokenLedger.on_call``): not a call, and no count moves.
+AGENT_CEILING_RECORD = "agent ceiling"
+
+
 # Set while a validation loop sends its correction turn: the call admitted
 # then is a retry of the call before it, counted apart from first calls.
 _RETRYING: ContextVar[bool] = ContextVar("maljan_spend_retrying", default=False)
@@ -265,6 +283,18 @@ def spend_ceiling_set(ledger: Any) -> bool:
     """Whether the job ``ledger`` records has a spend ceiling. Never raises."""
     meter = _meter_of(ledger)
     return meter is not None and meter.ceiling_usd is not None
+
+
+def usd_said(amount: float) -> str:
+    """A US-dollar amount as written to a reader: to six places, trailing zeros dropped."""
+    text = f"{float(amount):.6f}".rstrip("0").rstrip(".")
+    return text or "0"
+
+
+def agent_ceiling_set(ledger: Any, agent: str) -> bool:
+    """Whether ``agent`` (its ``llm.agents`` key) sets a ceiling of its own. Never raises."""
+    meter = _meter_of(ledger)
+    return meter is not None and meter.agent_ceiling(agent) is not None
 
 
 def call_deadline_of(llm: Any, messages: Any = None) -> float | None:
@@ -933,15 +963,177 @@ class SpendMeter:
         self._calls_made: dict[str, list[int]] = {}
         # Set when the job is cancelled (:meth:`close`): no call waits any more.
         self._closed = False
+        # Each agent's own ceilings, by its ``llm.agents`` key: (USD, tokens of
+        # unpriced calls), either ``None``. Only the agents that set one.
+        self._agent_ceilings: dict[str, tuple[float | None, int | None]] = {}
+        # What each of those agents' calls cost and used so far: [priced USD,
+        # tokens of calls with no price, calls counted at a stated estimate],
+        # and the sentence of each one stopped.
+        self._agent_spent: dict[str, list[float]] = {}
+        self._agent_stops: dict[str, str] = {}
 
     @classmethod
     def from_settings(cls, cfg: Any) -> SpendMeter:
         llm = getattr(cfg, "llm", None)
-        return cls(
+        meter = cls(
             getattr(llm, "max_spend_usd_per_job", None),
             getattr(llm, "model_prices", None) or {},
             hour_writes=hour_cache_models(cfg),
         )
+        for key, entry in (getattr(llm, "agents", None) or {}).items():
+            meter.set_agent_ceiling(
+                str(key),
+                getattr(entry, "max_spend_usd", None),
+                getattr(entry, "max_unpriced_tokens", None),
+            )
+        return meter
+
+    # ── One agent's own ceiling ───────────────────────────────────────────
+
+    def set_agent_ceiling(
+        self, agent: str, usd: float | None = None, unpriced_tokens: int | None = None
+    ) -> None:
+        """Give ``agent`` (its ``llm.agents`` key) a ceiling of its own; both ``None`` is none."""
+        key = str(agent).lower()
+        with self._lock:
+            if usd is None and unpriced_tokens is None:
+                self._agent_ceilings.pop(key, None)
+                return
+            self._agent_ceilings[key] = (
+                None if usd is None else float(usd),
+                None if unpriced_tokens is None else int(unpriced_tokens),
+            )
+
+    def agent_ceiling(self, agent: str) -> tuple[float | None, int | None] | None:
+        """``agent``'s own ceilings (USD, unpriced tokens), or ``None`` when it sets none."""
+        with self._lock:
+            return self._agent_ceilings.get(str(agent).lower())
+
+    def note_agent_call(
+        self,
+        agent: str,
+        usage: Mapping[str, Any] | None,
+        model: str,
+        *,
+        estimated: Mapping[str, Any] | None = None,
+    ) -> None:
+        """One call of ``agent`` its provider billed, toward its own ceiling. Never raises.
+
+        Priced the way :meth:`settle` prices a call (the provider's reported
+        cost, else the model's rates in force when it was sent); a call whose
+        model has no price counts its input and output tokens instead.
+        ``estimated`` is the stated estimate a call that reported no usage
+        carried (an answer ended while it streamed, a failed attempt the
+        provider bills): its tokens are counted, the prompt as uncached input,
+        and the call is counted as one that reported no usage. With neither,
+        nothing is counted, as nothing is toward the job's ceiling.
+        """
+        key = str(agent).lower()
+        if self.agent_ceiling(key) is None:
+            return
+        try:
+            figures: dict[str, Any] | None = dict(usage) if usage is not None else None
+            by_estimate = False
+            if estimated:
+                guessed = {
+                    "input_tokens": int(estimated.get("input_tokens") or 0),
+                    "output_tokens": int(estimated.get("output_tokens") or 0),
+                }
+                if figures is None:
+                    figures, by_estimate = guessed, True
+                elif estimated.get(OUTPUT_ESTIMATED):
+                    figures["output_tokens"] = guessed["output_tokens"]
+                    by_estimate = True
+            if figures is None:
+                return
+            charged = self._charged(figures, model)
+            tokens = int(figures.get("input_tokens") or 0) + int(figures.get("output_tokens") or 0)
+            with self._lock:
+                spent = self._agent_spent.setdefault(key, [0.0, 0.0, 0.0])
+                if charged is None:
+                    spent[1] += tokens
+                else:
+                    spent[0] += charged[0]
+                if by_estimate:
+                    spent[2] += 1
+        except Exception as exc:  # noqa: BLE001 — telemetry never costs a run
+            logger.debug("agent spend not noted (%s).", exc)
+
+    def agent_refusal(self, agent: str) -> tuple[str, bool]:
+        """Why ``agent`` makes no further model call, and whether this is the first time said.
+
+        ``("", False)`` while it is under its own ceilings. Once its priced
+        calls have cost its ``max_spend_usd`` or its unpriced calls used its
+        ``max_unpriced_tokens``, every further call of it is refused, the job's
+        spend and every other agent untouched. Checked before each call, so the
+        call that crosses a ceiling is the agent's last and its answer is kept.
+        """
+        key = str(agent).lower()
+        with self._lock:
+            limits = self._agent_ceilings.get(key)
+            if limits is None:
+                return "", False
+            said = self._agent_stops.get(key)
+            if said is not None:
+                return said, False
+            usd, tokens = limits
+            spent_usd, spent_tokens, guessed = self._agent_spent.get(key, [0.0, 0.0, 0.0])
+            if usd is not None and spent_usd >= usd:
+                said = (
+                    f"agent {key} reached its spend ceiling of {usd_said(usd)} USD "
+                    f"(llm.agents.{key}.max_spend_usd) at {usd_said(spent_usd)} USD spent"
+                )
+            elif tokens is not None and spent_tokens >= tokens:
+                said = (
+                    f"agent {key} reached its unpriced-token ceiling of {tokens:,} tokens "
+                    f"(llm.agents.{key}.max_unpriced_tokens) at {int(spent_tokens):,} tokens "
+                    "used by calls of a model with no price"
+                )
+            else:
+                return "", False
+            if guessed:
+                said += (
+                    f"; {int(guessed)} call(s) reported no usage and are counted at a stated "
+                    "estimate"
+                )
+            self._agent_stops[key] = said
+        logger.warning("%s; it makes no further model call.", said)
+        return said, True
+
+    def agents_stopped(self) -> frozenset[str]:
+        """The ``llm.agents`` keys of the agents stopped at their own ceiling."""
+        with self._lock:
+            return frozenset(self._agent_stops)
+
+    def agent_reasons(self) -> list[str]:
+        """One degradation reason per agent stopped at its own ceiling, in key order."""
+        with self._lock:
+            stops = dict(self._agent_stops)
+        return [
+            f"The {stops[key]}: it made no further model call, what it had produced was kept, "
+            "and no other agent was affected."
+            for key in sorted(stops)
+        ]
+
+    def _agent_block_locked(self) -> dict[str, Any]:
+        """The ``agent_ceilings`` block: each agent's ceilings, what it used, whether it stopped."""
+        out: dict[str, Any] = {}
+        for key in sorted(self._agent_ceilings):
+            usd, tokens = self._agent_ceilings[key]
+            spent_usd, spent_tokens, guessed = self._agent_spent.get(key, [0.0, 0.0, 0.0])
+            row: dict[str, Any] = {"spent_usd": round(spent_usd, 6)}
+            if usd is not None:
+                row["max_spend_usd"] = usd
+            if tokens is not None:
+                row["max_unpriced_tokens"] = tokens
+            row["unpriced_tokens"] = int(spent_tokens)
+            if guessed:
+                row["estimated_calls"] = int(guessed)
+            row["stopped"] = key in self._agent_stops
+            if key in self._agent_stops:
+                row["stopped_because"] = self._agent_stops[key]
+            out[key] = row
+        return out
 
     def writes_hour_caches(self, model: str) -> bool:
         """Whether ``model``'s requests may write the prompt cache for an hour."""
@@ -2107,9 +2299,16 @@ class SpendMeter:
         )
 
     def snapshot(self) -> dict[str, Any] | None:
-        """The run summary's ``spend`` block, or ``None`` with no ceiling set."""
+        """The run summary's ``spend`` block, or ``None`` with no ceiling set.
+
+        ``agent_ceilings`` is there only when an agent sets a ceiling of its
+        own, and is then the whole block where the job sets none.
+        """
         if self.ceiling_usd is None:
-            return None
+            with self._lock:
+                if not self._agent_ceilings:
+                    return None
+                return {"agent_ceilings": self._agent_block_locked()}
         now = self._clock()
         with self._lock:
             reserve, rows = self._reserve_locked(now)
@@ -2151,6 +2350,8 @@ class SpendMeter:
                 if table_failure:
                     out["note"] += f"; price table could not be read: {table_failure}"
                     out["price_table_error"] = table_failure
+            if self._agent_ceilings:
+                out["agent_ceilings"] = self._agent_block_locked()
             return out
 
 

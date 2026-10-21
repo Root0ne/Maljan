@@ -412,6 +412,9 @@ class RetryRecorder(BaseCallbackHandler):
         self.ledger = ledger
         self.agent = agent
         self.model = model
+        # The agent's own ceiling on the same model (``llm.agent_ceiling``),
+        # where it sets one: a billed failed attempt counts toward it too.
+        self.ceiling: Any = None
 
     def retried(self, reason: str) -> None:
         """One retry, as a row of the run summary's Provider Retries."""
@@ -523,6 +526,9 @@ class RetryRecorder(BaseCallbackHandler):
 
     def _charge(self, usage: dict[str, int] | None, estimated: dict[str, Any] | None) -> None:
         """Settle one failed attempt, through the ledger so its record is kept with the calls."""
+        if self.ceiling is not None:
+            with contextlib.suppress(Exception):
+                self.ceiling.note(usage, estimated)
         charge = getattr(self.ledger, "charge_failed_attempt", None)
         if callable(charge):
             charge(

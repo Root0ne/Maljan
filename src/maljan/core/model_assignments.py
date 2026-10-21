@@ -255,7 +255,9 @@ def assignment_chain_for(
     role's global model, so the gate asks about the model the entry names.
     """
     llm = settings.llm  # type: ignore[attr-defined]
-    override = llm.agents.get(agent)
+    from maljan.core.config import model_entry
+
+    override = model_entry(llm.agents, agent)
     if override is not None:
         chain = override.chain() if hasattr(override, "chain") else [override]
         return [

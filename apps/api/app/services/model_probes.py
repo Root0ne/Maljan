@@ -176,21 +176,24 @@ def _points_somewhere_new(now: Any, was: Any) -> bool:
     """Whether an agent's entry names a model or an endpoint it did not before.
 
     Its fallbacks included: a model added to the list, or one of the list
-    moved to another endpoint, is a model the agent may now call.
+    moved to another endpoint, is a model the agent may now call. An entry
+    holding only its ceilings names none, so adding one moves nothing, and
+    turning a model entry into one moves the agent back to its usual model.
     """
     if not isinstance(now, dict):
         return False
-    if not isinstance(was, dict):
-        return True
-    return _calls(now) != _calls(was)
+    return _calls(now) != _calls(was if isinstance(was, dict) else {})
 
 
 def _calls(entry: dict[str, Any]) -> list[tuple[Any, Any, Any, Any]]:
     """``(provider, model, base_url, effort)`` for each model of an entry's list, in order.
 
     An effort that is absent, ``None`` or blank reads the same, so an entry
-    stored before the field existed is not a change.
+    stored before the field existed is not a change. An entry with neither a
+    provider nor a model (one holding only its ceilings, or none) calls none.
     """
+    if not entry.get("provider") and not entry.get("model"):
+        return []
     rows = [entry, *[row for row in (entry.get("fallbacks") or []) if isinstance(row, dict)]]
     return [
         (

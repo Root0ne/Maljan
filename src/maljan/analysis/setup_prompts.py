@@ -84,7 +84,7 @@ PROMPT_SITES: dict[str, str | None] = {
     "maljan.agents.static_analyst:StaticAnalyst.analyze_isr": ANALYSTS,
     "maljan.agents.static_analyst:StaticAnalyst.revise_isr": ANALYSTS,
     # The mediator's own prompt, and the structured extraction it sends after it.
-    "maljan.agents.judge_agent:JudgeAgent.mediate": "mediator",
+    "maljan.agents.judge_agent:JudgeAgent._mediate_round": "mediator",
     "maljan.agents.judge_agent:JudgeAgent.execute_tool_loop": "mediator",
     "maljan.agents.judge_agent:JudgeAgent._ask_for_contradictions_block": "mediator",
     "maljan.agents.judge_agent:JudgeAgent.give_verdict": "judge verdict",

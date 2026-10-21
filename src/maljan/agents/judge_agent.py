@@ -81,7 +81,7 @@ from maljan.agents.tool_fence import (
 )
 from maljan.core.config import MEDIATOR_AGENT_KEY, MEDIATOR_AGENT_NAME, get_settings
 from maljan.core.logger import logger
-from maljan.core.spend import SpendCeilingStop, call_deadline_of
+from maljan.core.spend import AgentCeilingStop, SpendCeilingStop, call_deadline_of
 from maljan.core.token_ledger import TokenLedger, read_structured_reply, say_structured_reply
 from maljan.core.truncation_ledger import TruncationLedger, record_judge_response
 from maljan.llm.answer_text import answer_text, structured_answer_text, tool_call_arguments
@@ -433,6 +433,15 @@ def _indicator_findings(bundle: Any, found: Iterable[Violation]) -> list[Violati
 # summary says so rather than showing a clean validation block.
 VERDICT_TIMEOUT_CODE = "verdict.timeout"
 VERDICT_TIMEOUT_REASON = "the judge did not answer within its budget"
+
+# What is recorded when the judge's own ceiling (``llm.agents.judge``) refused
+# the verdict call: no answer, as with a timeout, so nothing is asked again and
+# the verdict is this pipeline's own fallback bundle. The row's message is the
+# ceiling's sentence; the degradation reason naming the agent and its ceiling
+# comes from the spend meter (``SpendMeter.agent_reasons``).
+VERDICT_AGENT_CEILING_CODE = "verdict.agent_ceiling"
+# What stands in for the answer of a verdict call the judge's own ceiling refused.
+AGENT_CEILING_ANSWER = "[AGENT CEILING]"
 
 # What is recorded when the judge's one retry failed — it timed out, answered
 # prose, or answered JSON that was not a bundle — after a first answer that was
@@ -2772,6 +2781,48 @@ class JudgeAgent(BudgetMeter):
         facts_block: str = "",
         run_state: str = "",
     ) -> tuple[AgentArgument, bool | None]:
+        """One mediation round (:meth:`_mediate_round`), or the round the mediator's ceiling ends.
+
+        A call the mediator's own ceiling refuses (``llm.agents.mediator``)
+        ends the round as a call the job's ceiling does not admit ends it: the
+        mediator wrote no answer, the note says why in the ceiling's words,
+        and consensus is neither reached nor refused.
+        """
+        try:
+            return await self._mediate_round(
+                reports,
+                history,
+                isr_reports=isr_reports,
+                consensus_threshold=consensus_threshold,
+                reputation_asked=reputation_asked,
+                sample=sample,
+                facts_block=facts_block,
+                run_state=run_state,
+            )
+        except AgentCeilingStop as stop:
+            self.logger.warning("Mediator: %s; the round is not mediated.", stop)
+            return (
+                AgentArgument(
+                    agent_name=MEDIATOR_AGENT_NAME,
+                    finding="",
+                    confidence_score=None,
+                    status=MEDIATOR_NO_ANSWER,
+                    note=mediator_no_answer_note(str(stop)),
+                ),
+                None,
+            )
+
+    async def _mediate_round(
+        self,
+        reports: dict[str, str],
+        history: list[AgentArgument],
+        isr_reports: dict[str, AgentISR] | None = None,
+        consensus_threshold: float | None = None,
+        reputation_asked: bool = False,
+        sample: Any = None,
+        facts_block: str = "",
+        run_state: str = "",
+    ) -> tuple[AgentArgument, bool | None]:
         """Find contradictions between expert reports and determine consensus.
 
         Accepts a generic dict of agent reports so any number of agents can
@@ -3198,6 +3249,9 @@ class JudgeAgent(BudgetMeter):
             )
             self._record_usage(response, call="mediation")
             return response, (bound if held else None), ""
+        except AgentCeilingStop as stop:
+            self.logger.warning("Mediator not asked once more: %s.", stop)
+            return None, None, f"asking once more was not made: {stop}"
         except Exception as exc:  # noqa: BLE001 — a second ask that fails leaves no answer
             self.logger.warning("Mediator asked once more failed (%s).", type(exc).__name__)
             return None, None, f"asking once more failed ({type(exc).__name__})"
@@ -3426,6 +3480,9 @@ class JudgeAgent(BudgetMeter):
         # that happened to validate dirty would then spend a second full judge
         # timeout and throw the answer away.
         timed_out = False
+        # The sentence of the judge's own ceiling, when it refused a verdict
+        # call: no answer, read the way a timeout is.
+        ceiling_said = ""
 
         async def _ask(turns: list[Any]) -> Any:
             # The verdict is always made; past the spend ceiling its output cap
@@ -3454,7 +3511,7 @@ class JudgeAgent(BudgetMeter):
         calls = 0
 
         async def _run(turns: list[Any]) -> Any:
-            nonlocal timed_out, calls
+            nonlocal timed_out, calls, ceiling_said
             timed_out = False
             calls += 1
             wait = timeout
@@ -3483,6 +3540,13 @@ class JudgeAgent(BudgetMeter):
                 self.logger.error("JudgeAgent verdict timed out after %s.", limit_text(wait, "s"))
                 timed_out = True
                 return "[TIMEOUT]"
+            except AgentCeilingStop as stop:
+                # Not made: no answer, as a timeout leaves none, so nothing is
+                # asked again and the fallback bundle is the verdict.
+                self.logger.error("JudgeAgent verdict not made: %s.", stop)
+                timed_out = True
+                ceiling_said = str(stop)
+                return AGENT_CEILING_ANSWER
 
         # Whether the answer being validated was a JSON bundle at all, and how
         # many turns have been spent. A model that answered with prose or with
@@ -3554,7 +3618,11 @@ class JudgeAgent(BudgetMeter):
                 # correction, read as written.
                 return last
             if timed_out:
-                failure = "it did not answer within its budget"
+                failure = (
+                    f"it was not made: {ceiling_said}"
+                    if ceiling_said
+                    else "it did not answer within its budget"
+                )
             elif not_json:
                 failure = "it answered with text that is not a JSON bundle"
             elif last.x_maljan_fallback_verdict is not None:
@@ -3589,7 +3657,10 @@ class JudgeAgent(BudgetMeter):
             if timed_out:
                 not_json = False
                 return self._fallback_bundle_from_text(
-                    "[TIMEOUT]", reports, isr_reports, extracted=False
+                    AGENT_CEILING_ANSWER if ceiling_said else "[TIMEOUT]",
+                    reports,
+                    isr_reports,
+                    extracted=False,
                 )
             not_json = _is_not_json(answer)
             if not_json and _was_cut(answer, cap):
@@ -3719,7 +3790,14 @@ class JudgeAgent(BudgetMeter):
                     message=f"{VERDICT_RETRY_FAILED_REASON}: {retry_failure}",
                 ),
             ]
-        if timed_out:
+        if timed_out and ceiling_said:
+            # The judge's own ceiling refused the call: no answer, as below,
+            # and the row says why in the ceiling's words.
+            violations = [
+                *violations,
+                Violation(code=VERDICT_AGENT_CEILING_CODE, message=ceiling_said),
+            ]
+        elif timed_out:
             # No answer at all, so there is nothing to feed back and nothing
             # was: the bundle is this pipeline's own conservative verdict.
             # Cheap to record and invisible without it.

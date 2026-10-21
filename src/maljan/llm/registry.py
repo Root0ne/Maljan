@@ -267,7 +267,11 @@ class LLMProviderRegistry:
         Returns:
             A configured LangChain BaseChatModel instance.
         """
-        agent_cfg = self._config.llm.agents.get(agent_name.lower())
+        from maljan.core.config import model_entry
+
+        # An entry holding only ceilings chooses no model: the agent's model is
+        # built as it is with no entry, and the job holds it to the ceiling.
+        agent_cfg = model_entry(self._config.llm.agents, agent_name.lower())
 
         if agent_cfg is None:
             # No per-agent override — fall back to global expert LLM

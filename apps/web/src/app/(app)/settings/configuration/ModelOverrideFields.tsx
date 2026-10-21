@@ -4,9 +4,11 @@ import { useState } from "react";
 import type { AgentLLMOverride, LlmGlobalFallback } from "./AgentDefinitionsEditor";
 import EffortField from "./EffortField";
 import {
+  ceilingValue,
   hasEndpoint,
   mergeEntry,
   moveChoice,
+  storedCeilings,
   storedChoice,
   withProvider,
   type ModelChoice,
@@ -201,10 +203,20 @@ export default function ModelOverrideFields({
     // An effort belongs to the provider it was chosen for, which for an
     // entry with a blank provider is the global one.
     const merged: AgentLLMOverride = mergeEntry(base, next, llmGlobal.providerValue);
+    // The agent's own ceilings, only where one is set: an entry with none
+    // is staged exactly as it was before they existed.
+    const ceilings = storedCeilings(merged);
     if (!merged.provider && !merged.model) {
       setLlmError(null);
       const map = { ...llmAgents };
-      delete map[key];
+      // An entry holding only its ceilings keeps the agent on the model it
+      // runs on without an entry; with no ceiling either it is nothing.
+      if (Object.keys(ceilings).length) {
+        onEdited(key);
+        map[key] = { provider: "", model: "", ...ceilings };
+      } else {
+        delete map[key];
+      }
       onChangeLlmAgents(map);
       return;
     }
@@ -235,6 +247,7 @@ export default function ModelOverrideFields({
       .map((choice) => storedChoice(choice, endpointProviders))
       .filter((c): c is ModelChoice => c !== null);
     if (fallbacks.length) stored.fallbacks = fallbacks;
+    Object.assign(stored, ceilings);
     onChangeLlmAgents({ ...llmAgents, [key]: stored });
   };
 
@@ -251,6 +264,40 @@ export default function ModelOverrideFields({
   const putFallbacks = (key: string, rows: ModelChoice[]) => {
     setDraftFallbacks((all) => ({ ...all, [key]: rows }));
     putLlm(key, { fallbacks: rows });
+  };
+
+  /** A ceiling field as typed: a value still being typed that is not yet a
+   *  positive number ("0.") stays on screen and is not staged; a blank field
+   *  stages no ceiling. */
+  type CeilingKey = "max_spend_usd" | "max_unpriced_tokens";
+  const [ceilingDraft, setCeilingDraft] = useState<Partial<Record<CeilingKey, string>>>({});
+  const ceilingText = (field: CeilingKey): string => {
+    const stored = llmAgents[agentKey]?.[field] ?? null;
+    const draft = ceilingDraft[field];
+    // The draft while it is unfinished or says what is staged; once the
+    // staged value moves (a discard), the staged value shows.
+    if (draft !== undefined) {
+      const typed = ceilingValue(draft, field === "max_unpriced_tokens");
+      if (typed === undefined || typed === stored) return draft;
+    }
+    return stored === null ? "" : String(stored);
+  };
+  /** Whether a ceiling field holds text that is not staged (zero, a fraction of a token). */
+  const ceilingUnstaged = (): boolean =>
+    (["max_spend_usd", "max_unpriced_tokens"] as const).some((field) => {
+      const draft = ceilingDraft[field];
+      return (
+        draft !== undefined && ceilingValue(draft, field === "max_unpriced_tokens") === undefined
+      );
+    });
+  const putCeiling = (field: CeilingKey, raw: string) => {
+    setCeilingDraft((all) => ({ ...all, [field]: raw }));
+    const value = ceilingValue(raw, field === "max_unpriced_tokens");
+    if (value === undefined) return;
+    putLlm(
+      agentKey,
+      field === "max_spend_usd" ? { max_spend_usd: value } : { max_unpriced_tokens: value },
+    );
   };
 
 
@@ -373,7 +420,42 @@ export default function ModelOverrideFields({
             </label>
           );
         })()}
+        {/* The agent's own ceilings live on its entry and count every model
+            of its list, fallbacks included; an entry may hold them alone,
+            leaving the agent on the model it runs on. Blank is no ceiling. */}
+        <label className="block">
+          <span className="text-text-muted">Spend ceiling (USD)</span>
+          <input
+            type="number"
+            min="0.01"
+            step="0.01"
+            className={input}
+            aria-label={`${agentKey} llm spend ceiling`}
+            placeholder="no ceiling"
+            value={ceilingText("max_spend_usd")}
+            onChange={(e) => putCeiling("max_spend_usd", e.target.value)}
+          />
+        </label>
+        <label className="block">
+          <span className="text-text-muted">Token ceiling (unpriced models)</span>
+          <input
+            type="number"
+            min="1"
+            step="1"
+            className={input}
+            aria-label={`${agentKey} llm unpriced token ceiling`}
+            placeholder="no ceiling"
+            value={ceilingText("max_unpriced_tokens")}
+            onChange={(e) => putCeiling("max_unpriced_tokens", e.target.value)}
+          />
+        </label>
       </div>
+      {ceilingUnstaged() && (
+        <p className="text-[11px] text-status-red mt-1" role="alert">
+          A ceiling is a number above zero (whole tokens for the token ceiling); blank is none.
+          This value is not staged.
+        </p>
+      )}
       {llmError && (
         <p className="text-[11px] text-status-red mt-1" role="alert">
           {llmError}

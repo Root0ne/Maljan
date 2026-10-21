@@ -15,7 +15,7 @@ import os
 import re
 import threading
 import time
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from contextlib import suppress
 from dataclasses import replace
 from pathlib import Path
@@ -29,6 +29,7 @@ from maljan.agents.base_agent import (
 from maljan.agents.delegation import REFUSAL_PREFIX
 from maljan.agents.evidence_recorder import EvidenceRecorder
 from maljan.agents.judge_agent import (
+    VERDICT_AGENT_CEILING_CODE,
     VERDICT_FALLBACK_CODE,
     VERDICT_FALLBACK_REASON,
     VERDICT_RETRY_FAILED_CODE,
@@ -5404,6 +5405,42 @@ def _spend_ceiling_reason(container: Any) -> str:
         return ""
 
 
+def _agents_stopped(container: Any) -> frozenset[str]:
+    """The agents stopped at their own ceiling, by ``llm.agents`` key."""
+    meter = _spend_meter(container)
+    try:
+        return frozenset(meter.agents_stopped()) if meter is not None else frozenset()
+    except Exception:  # noqa: BLE001 — telemetry never breaks a verdict
+        return frozenset()
+
+
+def stopped_before_answer_reason(name: str, ledger: Iterable[Any]) -> str:
+    """The reason an analyst its own ceiling stopped before it wrote an answer gives."""
+    entries = sum(
+        1
+        for entry in ledger
+        if str(
+            (entry.get("agent") if isinstance(entry, Mapping) else getattr(entry, "agent", ""))
+            or ""
+        ).lower()
+        == name.lower()
+    )
+    noun = "entry is" if entries == 1 else "entries are"
+    return (
+        f"{name} stopped at its own ceiling before writing an answer; "
+        f"its {entries} evidence {noun} kept"
+    )
+
+
+def _agent_ceiling_reasons(container: Any) -> list[str]:
+    """One degradation reason per agent stopped at its own ceiling, or none."""
+    meter = _spend_meter(container)
+    try:
+        return [str(reason) for reason in meter.agent_reasons()] if meter is not None else []
+    except Exception:  # noqa: BLE001 — telemetry never breaks a verdict
+        return []
+
+
 def run_coverage(
     state: Mapping[str, Any],
     container: Any,
@@ -5666,6 +5703,12 @@ def make_judge_node(
                 for name in _analyst_keys
                 if name in isr_reports and not getattr(isr_reports.get(name), "claims", None)
             ]
+            # An analyst its own ceiling stopped before it wrote an answer did
+            # not fail and was not short of input: it is said as what it is,
+            # with the evidence it gathered, which is kept.
+            _ceiling_stopped = _agents_stopped(container)
+            _stopped_empty = [name for name in _empty_analysts if name.lower() in _ceiling_stopped]
+            _empty_analysts = [name for name in _empty_analysts if name not in _stopped_empty]
             # BUG 12: two different findings, reported as one sentence. An
             # analyst that had nothing to read says the run was thin; one that
             # read everything and claimed nothing says the analyst failed.
@@ -5787,6 +5830,12 @@ def make_judge_node(
             _spend_reason = _spend_ceiling_reason(container)
             if _spend_reason:
                 _degradation_reasons.append(_spend_reason)
+            # An agent stopped at its own ceiling, by name and ceiling.
+            _degradation_reasons.extend(_agent_ceiling_reasons(container))
+            for _name in _stopped_empty:
+                _degradation_reasons.append(
+                    stopped_before_answer_reason(_name, state.get("evidence_ledger") or [])
+                )
             # An analyst whose input was shortened to fit its prompt was told
             # so; the reader is told here.
             with suppress(Exception):
@@ -5951,6 +6000,16 @@ def make_judge_node(
             if VERDICT_TIMEOUT_CODE in _verdict_codes:
                 _degradation_reasons.append(VERDICT_TIMEOUT_REASON)
                 _degraded_mode = True
+            # The judge's own ceiling refused the verdict call: its reason,
+            # naming the agent and the ceiling, is the meter's, reached after
+            # the reasons above were gathered.
+            if VERDICT_AGENT_CEILING_CODE in _verdict_codes:
+                _degradation_reasons.extend(
+                    reason
+                    for reason in _agent_ceiling_reasons(container)
+                    if reason not in _degradation_reasons
+                )
+                _degraded_mode = True
             # The verdict is the judge's first bundle, with what its failed
             # retry was asked to correct still standing; the reader is told.
             if VERDICT_RETRY_FAILED_CODE in _verdict_codes:
@@ -6007,7 +6066,9 @@ def make_judge_node(
                             },
                             facts_block=pack_text(state, container),
                             run_state=render_run_state(state),
-                            verdict_timed_out=VERDICT_TIMEOUT_CODE in _verdict_codes,
+                            verdict_timed_out=bool(
+                                _verdict_codes & {VERDICT_TIMEOUT_CODE, VERDICT_AGENT_CEILING_CODE}
+                            ),
                             # The run's calls, for each technique's evidence roots.
                             ledger=_ledger,
                         )
@@ -6052,13 +6113,18 @@ def make_judge_node(
             # the leftovers below, so the summary is not told twice.
             _verdict_fallback: dict[str, Any] | None = None
             _stated = bundle.x_maljan_fallback_verdict if isinstance(bundle, Bundle) else None
-            _recorded = bool(_verdict_codes & {VERDICT_FALLBACK_CODE, VERDICT_TIMEOUT_CODE})
+            _recorded = bool(
+                _verdict_codes
+                & {VERDICT_FALLBACK_CODE, VERDICT_TIMEOUT_CODE, VERDICT_AGENT_CEILING_CODE}
+            )
             if _stated is not None or _recorded:
                 _verdict_fallback = {
                     "decision": decision,
                     "failure": (
                         VERDICT_TIMEOUT_CODE
                         if VERDICT_TIMEOUT_CODE in _verdict_codes
+                        else VERDICT_AGENT_CEILING_CODE
+                        if VERDICT_AGENT_CEILING_CODE in _verdict_codes
                         else VERDICT_FALLBACK_CODE
                     ),
                     # Whether the judge's own row is already among the

@@ -25,7 +25,7 @@ Design:
 from __future__ import annotations
 
 import time
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -483,6 +483,7 @@ def usage_totals(calls: Iterable[Any], meter: Callable[[], Any]) -> dict[str, An
     the run is going and after a worker that died before its summary: the
     records are committed call by call.
     """
+    from maljan.core.spend import AGENT_CEILING_RECORD
     from maljan.core.token_ledger import RETRY_RECORD, TokenLedger
     from maljan.llm.transient import FAILED_ATTEMPT_CALL
 
@@ -499,6 +500,9 @@ def usage_totals(calls: Iterable[Any], meter: Callable[[], Any]) -> dict[str, An
         if call == RETRY_RECORD:
             retries += 1
             ledger.add_retry(agent=agent, model=model, reason=str(record.get("reason") or ""))
+            continue
+        if call == AGENT_CEILING_RECORD:
+            # An agent stopped at its own ceiling: a statement, not a call.
             continue
         usage: dict[str, Any] | None = None
         if record.get("reported"):
@@ -936,9 +940,44 @@ def generation_lines(generation: Any, model_name: Callable[[str], str] | None = 
 
 
 def spend_lines(spend: Any) -> list[str]:
-    """The spend ceiling, what the run spent against it, and every model it could not price."""
-    if not isinstance(spend, dict) or spend.get("ceiling_usd") is None:
+    """The spend ceiling, what the run spent against it, and every model it could not price.
+
+    One line more per agent that sets a ceiling of its own (``agent_ceilings``).
+    """
+    if not isinstance(spend, dict):
         return []
+    if spend.get("ceiling_usd") is None:
+        return agent_ceiling_lines(spend)
+    return _job_spend_lines(spend) + agent_ceiling_lines(spend)
+
+
+def agent_ceiling_lines(spend: Mapping[str, Any]) -> list[str]:
+    """One line per agent's own ceiling: the ceiling, what it used, and whether it stopped."""
+    from maljan.core.spend import usd_said
+
+    lines: list[str] = []
+    rows = spend.get("agent_ceilings")
+    for agent, row in sorted((rows if isinstance(rows, dict) else {}).items()):
+        if not isinstance(row, dict):
+            continue
+        limits = []
+        if row.get("max_spend_usd") is not None:
+            limits.append(f"{usd_said(row['max_spend_usd'])} USD")
+        if row.get("max_unpriced_tokens") is not None:
+            limits.append(f"{int(row['max_unpriced_tokens']):,} unpriced tokens")
+        used = (
+            f"{usd_said(row.get('spent_usd') or 0.0)} USD and "
+            f"{int(row.get('unpriced_tokens') or 0):,} unpriced tokens used"
+        )
+        lines.append(
+            f"Agent {agent}'s own ceiling of {' and '.join(limits)}: {used}"
+            + (f" — stopped: {row.get('stopped_because')}" if row.get("stopped") else "")
+        )
+    return lines
+
+
+def _job_spend_lines(spend: dict[str, Any]) -> list[str]:
+    """The job's ceiling lines of :func:`spend_lines`."""
     ceiling = float(spend.get("ceiling_usd") or 0.0)
     spent = float(spend.get("spent_usd") or 0.0)
     unreported = int(spend.get("unreported_calls") or 0)

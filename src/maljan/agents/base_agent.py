@@ -59,6 +59,7 @@ from maljan.core.logger import logger
 from maljan.core.spend import (
     LOOP_TURN_CALL,
     SPEND_CAP,
+    AgentCeilingStop,
     SpendCeilingStop,
     call_deadline_of,
     carrying,
@@ -73,6 +74,7 @@ from maljan.core.token_ledger import (
     record_response_usage,
     turn_usage,
 )
+from maljan.llm.agent_ceiling import stopped_at_own_ceiling
 from maljan.llm.answer_text import answer_text
 from maljan.llm.anthropic_history import (
     RUN_STATE_ATTACHED,
@@ -276,9 +278,10 @@ def _model_context_tokens(cfg: Any, agent_name: str) -> int:
     Zero means nothing declared it, and the caller falls back to the floor.
     """
     try:
+        from maljan.core.config import model_entry
         from maljan.llm.provider_base import facts_of
 
-        entry = (getattr(cfg.llm, "agents", None) or {}).get(agent_name)
+        entry = model_entry(getattr(cfg.llm, "agents", None), agent_name)
         chain: list[Any] = entry.chain() if entry is not None else [None]
         windows: list[int] = []
         for choice in chain:
@@ -6165,9 +6168,12 @@ class BaseAnalyst(BudgetMeter, ABC):
                         spend_capped = True
                         spend_refusal = str(stop)
                         self.logger.warning(
-                            "%s ReAct loop ended: the next turn does not fit the job's spend "
-                            "ceiling; synthesising from what it gathered.",
+                            "%s ReAct loop ended: the next turn does not fit %s; "
+                            "synthesising from what it gathered.",
                             self.name,
+                            "its own ceiling"
+                            if isinstance(stop, AgentCeilingStop)
+                            else "the job's spend ceiling",
                         )
                     except GraphRecursionError:
                         # The step cap, reached without langgraph's own
@@ -6568,7 +6574,26 @@ class BaseAnalyst(BudgetMeter, ABC):
         # would read the graph's sentence as its own last turn.
         msgs = [message for message in msgs if not is_the_graph_s_step_stop(message)]
         answered = False
-        if tool_call_count > 0 and (not content.strip() or hit_step_cap or ended_early):
+        # Stopped at the agent's own ceiling: no model call is made after it,
+        # neither the salvage nor the nudge. The answer is the latest of its
+        # own turns that is a report, read as written, or none.
+        own_ceiling = spend_capped and stopped_at_own_ceiling(getattr(self, "llm", None))
+        if own_ceiling:
+            content = next(
+                (
+                    text
+                    for text in (answer_text(m.content) for m in reversed(msgs) if is_model_turn(m))
+                    if answer_is_isr(text)
+                ),
+                "",
+            )
+            answered = bool(content)
+            self.logger.warning(
+                "%s stopped at its own ceiling; %s.",
+                self.name,
+                "its latest report stands as written" if answered else "it wrote no report",
+            )
+        elif tool_call_count > 0 and (not content.strip() or hit_step_cap or ended_early):
             self.logger.warning(
                 "%s ReAct loop ended without a final answer after %d tool calls "
                 "(messages=%d); forcing synthesis from gathered tool output.",
@@ -6613,7 +6638,8 @@ class BaseAnalyst(BudgetMeter, ABC):
         # of "Let me search for more specific strings related to malware
         # indicators:" at 0.5. Say so once, in the same conversation, and give
         # it the step to answer in.
-        if window_full:
+        if window_full or own_ceiling:
+            # Past the agent's own ceiling no nudge is sent.
             # The nudge re-sends the conversation the server has just refused,
             # so it cannot fit and would only occupy the model's one slot for a
             # full prefill to learn that again. After the platform's own budget
