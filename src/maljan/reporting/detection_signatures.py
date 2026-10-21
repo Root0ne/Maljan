@@ -821,7 +821,9 @@ def sigma_admits(report: MalwareReport) -> frozenset[str]:
 
 # The spellings of a registry hive a run writes: a sandbox's short name, the
 # long name, the kernel path (a user hive with its SID), and the placeholder
-# of an unread hive.
+# of an unread hive (``UNKNOWN``, written by ``_registry_full_path``; a text
+# cannot tell it from a key whose first step is literally ``Unknown``, a
+# stated and theoretical residual, since a real key opens with a hive).
 _USER_SID = r"(?:\\(?:s-1-[0-9-]+(?:_classes)?|\.default))?"
 _HIVE_PREFIX_RE = re.compile(
     r"^\\*(?:registry\\machine"

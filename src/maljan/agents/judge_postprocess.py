@@ -43,6 +43,7 @@ from maljan.analysis.technique_ids import attack_reference_id, is_technique_id
 from maljan.core.logger import logger
 from maljan.core.truncation_ledger import EXPORT_PASS, JUDGE_PASS
 from maljan.reporting.dedupe import pattern_fingerprint
+from maljan.schemas.stix_models import PROPERTY_NOT_CARRIED_CODE as _PROPERTY_NOT_CARRIED_CODE
 
 if TYPE_CHECKING:
     from maljan.pipeline.validation import Violation
@@ -71,7 +72,7 @@ UNKNOWN_OBJECT_CODE = "stix.unknown_object"
 # A property of a judge object that the platform's model for its type does not
 # declare, so the export does not carry it. Recorded, not asked about: nothing
 # is wrong with the judge's answer, and the retry is not spent on it.
-PROPERTY_NOT_CARRIED_CODE = "stix.property_not_carried"
+PROPERTY_NOT_CARRIED_CODE = _PROPERTY_NOT_CARRIED_CODE
 
 # Properties the platform's models declare because the export writes them from
 # the run's record, and which a judge object therefore never carries: the
@@ -173,6 +174,96 @@ def _object_problem(obj: dict[str, Any]) -> str:
     return ""
 
 
+# The standard properties the platform's models declare for a judge object, by
+# type. One of them written in a form the standard does not allow is dropped
+# from the object — the object is kept — and recorded.
+_STANDARD_PROPERTIES: dict[str, frozenset[str]] = {
+    "indicator": frozenset({"valid_until", "kill_chain_phases"}),
+    "malware": frozenset({"aliases", "kill_chain_phases", "first_seen", "last_seen"}),
+    "attack-pattern": frozenset({"aliases", "kill_chain_phases"}),
+    "relationship": frozenset({"description", "start_time", "stop_time"}),
+}
+# The later property of each ordered pair, which an order the standard refuses
+# drops; the earlier one stands.
+_LATER_OF_PAIR: dict[str, str] = {
+    "indicator": "valid_until",
+    "malware": "last_seen",
+    "relationship": "stop_time",
+}
+
+
+def _refuse_unholdable_standard_properties(obj: dict[str, Any]) -> list[str]:
+    """Drop the standard properties of ``obj`` the standard does not allow as written.
+
+    A judge's ``valid_until`` equal to its ``valid_from``, or a kill-chain phase
+    with no chain name, would fail the object's validation and set the whole
+    object aside. The object is the judge's answer and the property is the part
+    that cannot be held, so the property is taken out of the object (in place;
+    the answer as written was copied before this runs) and the object is read
+    without it. A property of the type that is not one of these, or an error
+    about anything else, is left for the validation that follows. Returns one
+    ``"<key> (<reason>)"`` for each property taken out.
+    """
+    from pydantic import ValidationError
+
+    from maljan.pipeline.events import safe_finding_value
+    from maljan.schemas.stix_models import bundle_model_for
+
+    kind = str(obj.get("type") or "")
+    model = bundle_model_for(kind)
+    standard = _STANDARD_PROPERTIES.get(kind)
+    if model is None or standard is None:
+        return []
+    refused: list[str] = []
+    # Each pass takes out at least one key or ends, so the loop is bounded by
+    # the object's own keys.
+    while True:
+        try:
+            model.model_validate(obj)
+        except ValidationError as exc:
+            dropped = False
+            bad_phases: dict[int, str] = {}
+            for error in exc.errors():
+                loc = tuple(error.get("loc", ()))
+                where = ".".join(map(str, loc))
+                reason = f"{where}: " if where else ""
+                reason += str(error.get("msg", "")).removeprefix("Value error, ")
+                phases = obj.get("kill_chain_phases")
+                if (
+                    loc[:1] == ("kill_chain_phases",)
+                    and len(loc) > 1
+                    and isinstance(loc[1], int)
+                    and isinstance(phases, list)
+                    and loc[1] < len(phases)
+                ):
+                    # Only the failing phase goes; the valid ones stay.
+                    bad_phases.setdefault(loc[1], reason)
+                    continue
+                if loc and loc[0] in standard and loc[0] in obj:
+                    key = str(loc[0])
+                elif not loc and _LATER_OF_PAIR.get(kind) in obj:
+                    key = _LATER_OF_PAIR[kind]
+                else:
+                    continue
+                obj.pop(key)
+                refused.append(f"{key} ({safe_finding_value(reason)})")
+                dropped = True
+            if bad_phases and isinstance(obj.get("kill_chain_phases"), list):
+                kept = [p for i, p in enumerate(obj["kill_chain_phases"]) if i not in bad_phases]
+                if kept:
+                    obj["kill_chain_phases"] = kept
+                else:
+                    obj.pop("kill_chain_phases")
+                refused.extend(
+                    f"kill_chain_phases[{i}] ({safe_finding_value(why)})"
+                    for i, why in sorted(bad_phases.items())
+                )
+                dropped = True
+            if dropped:
+                continue
+        return refused
+
+
 def lift_misplaced_extensions(bundle_dict: dict[str, Any]) -> list[Violation]:
     """Move the assessment out of ``objects``, set aside what cannot be held.
 
@@ -200,8 +291,22 @@ def lift_misplaced_extensions(bundle_dict: dict[str, Any]) -> list[Violation]:
     for index, obj in enumerate(objects):
         kind = _object_type(obj)
         if kind in BUNDLE_OBJECT_TYPES:
+            refused = _refuse_unholdable_standard_properties(obj)
             problem = _object_problem(obj)
             if not problem:
+                if refused:
+                    found.append(
+                        Violation(
+                            code=PROPERTY_NOT_CARRIED_CODE,
+                            message=(
+                                f"objects[{index}] {safe_finding_value(obj.get('id') or kind)!r} "
+                                f"carries {safe_finding_value('; '.join(refused))}: a value the standard does not "
+                                "allow, so the export does not carry it; the judge's own bundle "
+                                "keeps it as written."
+                            ),
+                            path=f"objects[{index}]",
+                        )
+                    )
                 not_carried = _not_carried(obj)
                 # Dropped in place: callers key the judge's objects by identity
                 # (``JudgeAgent`` maps each back to its position), and the

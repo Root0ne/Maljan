@@ -43,7 +43,7 @@ import uuid
 from datetime import UTC, datetime
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from maljan.schemas.judgement import JudgeAssessment
 
@@ -179,6 +179,50 @@ class STIXObject(_SpecConformantModel):
     created_by_ref: str | None = None
 
 
+# A property of a judge object that the platform's model for its type does not
+# declare, or declares and cannot hold as written, or declares and the export
+# does not carry: recorded, never asked about, and the judge's own bundle keeps
+# it as written.
+PROPERTY_NOT_CARRIED_CODE = "stix.property_not_carried"
+
+# The kill chains the export names a phase of: the ones the standard's own
+# examples and the ATT&CK catalogue use. A phase of any other chain is the
+# judge's invention of a vocabulary, and is not carried.
+KNOWN_KILL_CHAINS = frozenset({"mitre-attack", "lockheed-martin-cyber-kill-chain"})
+
+
+class KillChainPhase(BaseModel):
+    """STIX 2.1 kill-chain-phase: a phase of a named kill chain, both parts required."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    kill_chain_name: str
+    phase_name: str
+
+
+def _as_utc(moment: datetime) -> datetime:
+    """``moment`` as an aware time: a timestamp with no zone is read as UTC, as STIX says."""
+    return moment if moment.tzinfo is not None else moment.replace(tzinfo=UTC)
+
+
+def _utc(moment: datetime | None) -> datetime | None:
+    """``moment`` in UTC, so it is written with ``Z``: a timestamp with no zone is read as UTC."""
+    if moment is None:
+        return None
+    return _as_utc(moment).astimezone(UTC)
+
+
+def _ordered(earlier: datetime | None, later: datetime | None, *, strict: bool) -> bool:
+    """Whether ``later`` follows ``earlier`` (or equals it, unless ``strict``).
+
+    True when either is absent: nothing was stated to order.
+    """
+    if earlier is None or later is None:
+        return True
+    first, last = _as_utc(earlier), _as_utc(later)
+    return last > first if strict else last >= first
+
+
 class Indicator(STIXObject):
     """STIX 2.1 Indicator representing a pattern that denotes malicious behavior."""
 
@@ -193,6 +237,26 @@ class Indicator(STIXObject):
     pattern: str
     pattern_type: str = "stix"
     valid_from: datetime = Field(default_factory=get_utcnow)
+    # Absent when nobody wrote one: an indicator with no end is valid until it
+    # is revoked, and no end is invented for it. STIX 2.1 requires it to be
+    # later than ``valid_from``.
+    valid_until: datetime | None = None
+    kill_chain_phases: list[KillChainPhase] = Field(default_factory=list)
+
+    @field_validator("valid_from", "valid_until", mode="after")
+    @classmethod
+    def _in_utc(cls, value: datetime | None) -> datetime | None:
+        return _utc(value)
+
+    @model_validator(mode="after")
+    def _valid_until_follows_valid_from(self) -> Indicator:
+        # ``valid_from`` defaults to the clock, and an order checked against a
+        # time nobody wrote would depend on when the object was read.
+        if "valid_from" in self.model_fields_set and not _ordered(
+            self.valid_from, self.valid_until, strict=True
+        ):
+            raise ValueError("valid_until must be later than valid_from")
+        return self
 
 
 class Malware(STIXObject):
@@ -220,6 +284,12 @@ class Malware(STIXObject):
     # defaulted to was a statement nobody made.
     is_family: bool | None = None
     malware_types: list[str] = Field(default_factory=list)
+    aliases: list[str] = Field(default_factory=list)
+    kill_chain_phases: list[KillChainPhase] = Field(default_factory=list)
+    # When the malware was first and last seen, as the judge wrote them; STIX
+    # 2.1 requires ``last_seen`` not to precede ``first_seen``.
+    first_seen: datetime | None = None
+    last_seen: datetime | None = None
     # The sample files this malware object stands for, as the judge related
     # them: the ids of ``file`` objects in the same bundle.
     sample_refs: list[str] = Field(default_factory=list)
@@ -228,6 +298,17 @@ class Malware(STIXObject):
     x_maljan_model_only_technique_ids: list[str] | None = None
     # See ``EVIDENCE_REFS_PROPERTY``.
     x_maljan_evidence_refs: list[str] | None = None
+
+    @field_validator("first_seen", "last_seen", mode="after")
+    @classmethod
+    def _in_utc(cls, value: datetime | None) -> datetime | None:
+        return _utc(value)
+
+    @model_validator(mode="after")
+    def _last_seen_follows_first_seen(self) -> Malware:
+        if not _ordered(self.first_seen, self.last_seen, strict=False):
+            raise ValueError("last_seen must not be earlier than first_seen")
+        return self
 
 
 # The ledger entries the run's record ties to an exported object: ``ev_``
@@ -245,11 +326,25 @@ class Relationship(STIXObject):
     relationship_type: str
     source_ref: str
     target_ref: str
+    description: str | None = None
+    start_time: datetime | None = None
+    stop_time: datetime | None = None
     # See ``EVIDENCE_REFS_PROPERTY``.
     x_maljan_evidence_refs: list[str] | None = None
     # See ``SUPPORT_PROPERTY``.
     x_maljan_support: str | None = None
     x_maljan_support_note: str | None = None
+
+    @field_validator("start_time", "stop_time", mode="after")
+    @classmethod
+    def _in_utc(cls, value: datetime | None) -> datetime | None:
+        return _utc(value)
+
+    @model_validator(mode="after")
+    def _stop_time_follows_start_time(self) -> Relationship:
+        if not _ordered(self.start_time, self.stop_time, strict=True):
+            raise ValueError("stop_time must be later than start_time")
+        return self
 
 
 class ConfidenceAnnotatedRelationship(STIXObject):
@@ -280,6 +375,9 @@ class ConfidenceAnnotatedRelationship(STIXObject):
     relationship_type: str
     source_ref: str
     target_ref: str
+    description: str | None = None
+    start_time: datetime | None = None
+    stop_time: datetime | None = None
 
     # Custom extension fields (STIX 2.1 custom property convention: x_ prefix).
     # ``None`` where nobody wrote one, which keeps the property out of the
@@ -303,6 +401,17 @@ class ConfidenceAnnotatedRelationship(STIXObject):
     # See ``SUPPORT_PROPERTY``.
     x_maljan_support: str | None = None
     x_maljan_support_note: str | None = None
+
+    @field_validator("start_time", "stop_time", mode="after")
+    @classmethod
+    def _in_utc(cls, value: datetime | None) -> datetime | None:
+        return _utc(value)
+
+    @model_validator(mode="after")
+    def _stop_time_follows_start_time(self) -> ConfidenceAnnotatedRelationship:
+        if not _ordered(self.start_time, self.stop_time, strict=True):
+            raise ValueError("stop_time must be later than start_time")
+        return self
 
     @property
     def is_high_confidence(self) -> bool:
@@ -374,6 +483,8 @@ class AttackPattern(STIXObject):
     name: str
     description: str | None = None
     external_references: list[dict] = Field(default_factory=list)
+    aliases: list[str] = Field(default_factory=list)
+    kill_chain_phases: list[KillChainPhase] = Field(default_factory=list)
 
 
 # How the run's sources stand behind a published technique no source of which

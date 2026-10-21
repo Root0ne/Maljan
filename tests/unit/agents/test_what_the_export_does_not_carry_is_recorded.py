@@ -1,11 +1,11 @@
 """A property the platform does not carry is recorded, and the judge's record holds it.
 
 The domain-object models ignore properties they do not declare, so an
-indicator's ``valid_until`` and ``kill_chain_phases``, a relationship's
-``description`` and a malware object's ``aliases`` left the judge's bundle with
-no row and no log — and the stored judge bundle, a model dump, lost them too,
-although every decline sentence points at it as the record of what the judge
-wrote. Now each object's undeclared keys are a recorded
+indicator's ``labels``, a relationship's ``revoked`` and a malware object's
+``operating_system_refs`` left the judge's bundle with no row and no log — and
+the stored judge bundle, a model dump, lost them too, although every
+decline sentence points at it as the record of what the judge wrote. Now each
+object's undeclared keys are a recorded
 ``stix.property_not_carried`` row that does not spend the judge's retry, the
 stored record is the judge's own JSON as written, and ``sample_refs`` — how a
 judge ties a sample file to its malware object — is carried.
@@ -32,6 +32,7 @@ ANSWER: dict[str, Any] = {
             "name": "loader",
             "is_family": False,
             "aliases": ["LDR"],
+            "operating_system_refs": ["software--1"],
             "sample_refs": ["file--1"],
         },
         {"type": "file", "id": "file--1", "name": "loader.exe", "hashes": {"MD5": "a" * 32}},
@@ -43,6 +44,7 @@ ANSWER: dict[str, Any] = {
             "indicator_types": ["malicious-activity"],
             "valid_until": "2027-01-01T00:00:00Z",
             "kill_chain_phases": [{"kill_chain_name": "mitre-attack", "phase_name": "c2"}],
+            "labels": ["c2"],
         },
         {
             "type": "relationship",
@@ -51,6 +53,7 @@ ANSWER: dict[str, Any] = {
             "source_ref": "indicator--1",
             "target_ref": "malware--1",
             "description": "the address the shell connects to",
+            "revoked": False,
         },
     ],
     "x_maljan_assessment": {
@@ -97,8 +100,11 @@ class TestTheRow:
         messages = " | ".join(v.message for v in rows)
 
         assert len(rows) == 3
-        for key in ("'aliases'", "'valid_until'", "'kill_chain_phases'", "'description'"):
+        for key in ("'operating_system_refs'", "'labels'", "'revoked'"):
             assert key in messages, key
+        # Declared since: carried, so not recorded as lost.
+        for key in ("'aliases'", "'valid_until'", "'kill_chain_phases'", "'description'"):
+            assert key not in messages, key
         assert "'sample_refs'" not in messages
 
     def test_it_does_not_spend_the_judges_retry(self) -> None:
