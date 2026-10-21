@@ -529,7 +529,8 @@ def unparsed_container_reason(
         if not path.is_file():
             return None
         with path.open("rb") as fh:
-            header = fh.read(16)
+            # Far enough to hold the ISO 9660 identifier, which sits past 32 KiB.
+            header = fh.read(_ISO_MAGIC_OFFSET + len(_ISO_MAGIC))
     except OSError:
         return None
 
@@ -734,6 +735,24 @@ def _pe_compiler_fingerprint(blob: bytes) -> str | None:
     return None
 
 
+def _is_certificate_table(blob: bytes, at: int, size: int) -> bool:
+    """True when the security directory points at a well-formed WIN_CERTIFICATE.
+
+    A non-zero directory entry is only a claim; a packer or a corrupt header
+    can leave any number there. The table counts when it lies inside the file
+    and its header is coherent: a length that covers the header and fits the
+    directory, a known revision and a known certificate type.
+    """
+    if not size or not at or at + 8 > len(blob):
+        return False
+    declared = int.from_bytes(blob[at : at + 4], "little")
+    revision = int.from_bytes(blob[at + 4 : at + 6], "little")
+    kind = int.from_bytes(blob[at + 6 : at + 8], "little")
+    return (
+        8 < declared <= size and revision in (0x0100, 0x0200) and kind in (0x0001, 0x0002, 0x0004)
+    )
+
+
 def _extract_signing(blob: bytes | None) -> SignatureInfo:
     """Best-effort PE Authenticode probe — no verification, just metadata."""
     info = SignatureInfo()
@@ -749,7 +768,7 @@ def _extract_signing(blob: bytes | None) -> SignatureInfo:
         security_dir = pe.OPTIONAL_HEADER.DATA_DIRECTORY[
             pefile.DIRECTORY_ENTRY["IMAGE_DIRECTORY_ENTRY_SECURITY"]
         ]
-        if security_dir.Size and security_dir.VirtualAddress:
+        if _is_certificate_table(blob, security_dir.VirtualAddress, security_dir.Size):
             info.is_signed = True
             _name_the_signer(info, blob, security_dir.VirtualAddress, security_dir.Size)
     except Exception:  # noqa: BLE001

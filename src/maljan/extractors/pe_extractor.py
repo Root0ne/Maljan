@@ -32,7 +32,7 @@ from collections import Counter
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from maljan.core.delivery_limits import SAMPLE_UPLOAD_MAX_BYTES
 from maljan.core.logger import logger
@@ -805,6 +805,62 @@ def _inflated_entropy(section: Any, inflation: _Inflation) -> float:
     return counter_entropy(list(counts.values()))
 
 
+def _elf_symbol_versions(elf: Any) -> tuple[dict[int, str], bytes]:
+    """``(version index -> needed library, raw .gnu.version table)`` of an ELF.
+
+    ``.gnu.version_r`` is walked by hand with every bound taken from the
+    section itself: at most ``min(sh_info, size // 16)`` need entries and
+    ``min(vn_cnt, size // 16)`` auxiliary entries each, and a walk stops at an
+    offset it has already visited or one outside the section. A hostile table
+    therefore costs time proportional to its own size, and a malformed one
+    gives what was read before the break.
+    """
+    verneed = elf.get_section_by_name(".gnu.version_r")
+    versym = elf.get_section_by_name(".gnu.version")
+    if verneed is None or versym is None:
+        return {}, b""
+    data = verneed.data()
+    size = len(data)
+    order: Literal["little", "big"] = "little" if elf.little_endian else "big"
+    strings = bytes(elf.get_section(verneed["sh_link"]).data())
+    names: dict[int, str] = {}
+    mapping: dict[int, str] = {}
+    need_cap = min(int(verneed["sh_info"]), size // 16)
+    seen: set[int] = set()
+    at = 0
+    for _ in range(need_cap):
+        if at in seen or at < 0 or at + 16 > size:
+            break
+        seen.add(at)
+        count = int.from_bytes(data[at + 2 : at + 4], order)
+        file_off = int.from_bytes(data[at + 4 : at + 8], order)
+        aux_at = at + int.from_bytes(data[at + 8 : at + 12], order)
+        next_at = int.from_bytes(data[at + 12 : at + 16], order)
+        library = names.get(file_off)
+        if library is None:
+            # The name ends at the first NUL within the string section; a
+            # section read once, so the cost is the sections' size, not
+            # entries times string length.
+            end = strings.find(b"\0", file_off) if file_off < len(strings) else -1
+            library = strings[file_off:end].decode("utf-8", "replace") if end >= 0 else ""
+            names[file_off] = library
+        aux_seen: set[int] = set()
+        for _aux in range(min(count, size // 16)):
+            if aux_at in aux_seen or aux_at < 0 or aux_at + 16 > size:
+                break
+            aux_seen.add(aux_at)
+            other = int.from_bytes(data[aux_at + 6 : aux_at + 8], order)
+            mapping.setdefault(other, library)
+            step = int.from_bytes(data[aux_at + 12 : aux_at + 16], order)
+            if step == 0:
+                break
+            aux_at += step
+        if next_at == 0:
+            break
+        at += next_at
+    return mapping, bytes(versym.data())
+
+
 def _parse_elf_imports(blob: bytes) -> list[ImportRow]:
     """Return DT_NEEDED libraries paired with undefined .dynsym symbols.
 
@@ -832,27 +888,41 @@ def _parse_elf_imports(blob: bytes) -> list[ImportRow]:
                     if tag.entry.d_tag == "DT_NEEDED":
                         libraries.append(str(getattr(tag, "needed", "")))
 
+        # Symbol version index -> the library that version was needed from. A
+        # table that cannot be read leaves the library names empty and costs
+        # no import row.
+        try:
+            version_library, versions = _elf_symbol_versions(elf)
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("pe_extractor: ELF symbol versions not read (%s)", exc)
+            version_library, versions = {}, b""
+        little = bool(elf.little_endian)
+
         # Imported (undefined) symbols
         dynsym = elf.get_section_by_name(".dynsym")
         if not isinstance(dynsym, SymbolTableSection):
             return []
-        functions: list[str] = []
-        for symbol in dynsym.iter_symbols():
+        used: set[str] = set()
+        for index, symbol in enumerate(dynsym.iter_symbols()):
             if not symbol.name:
                 continue
             info = symbol.entry.st_info
             if info.type != "STT_FUNC" and info.type != "STT_NOTYPE":
                 continue
-            # Undefined section index → imported by the dynamic linker.
-            if symbol.entry.st_shndx == "SHN_UNDEF":
-                functions.append(symbol.name)
-
-        # Combine: emit each function once with its library hint, or "" if
-        # we cannot map it to a specific DT_NEEDED entry.
-        lib_label = libraries[0] if libraries else ""
-        for fn in functions:
-            out.append(ImportRow(dll=lib_label, function=fn))
-            lib_label = ""  # compact: only the first row shows the lib
+            # Undefined section index -> imported by the dynamic linker.
+            if symbol.entry.st_shndx != "SHN_UNDEF":
+                continue
+            library = ""
+            if 2 * index + 2 <= len(versions):
+                ndx = int.from_bytes(
+                    versions[2 * index : 2 * index + 2], "little" if little else "big"
+                )
+                library = version_library.get(ndx & 0x7FFF, "")
+            used.add(library)
+            out.append(ImportRow(dll=library, function=symbol.name))
+        for library in libraries:
+            if library not in used:
+                out.append(ImportRow(dll=library, function=""))
     except Exception as exc:  # noqa: BLE001
         logger.warning("pe_extractor: ELF imports parse failed (%s)", exc)
     return out

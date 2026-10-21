@@ -219,6 +219,15 @@ def build_capability_matrix(
         else:
             not_published = ""
         notes: list[str] = []
+        if ledger and info.get("claimed") and "sources" not in row:
+            # No corroboration record speaks for a technique an analyst claimed:
+            # the count above is the analysts' independent statements alone, and
+            # the row says that is what it rests on, told apart: a record that
+            # could not be read, or one with no row. Without a ledger nothing
+            # was read, and a technique no analyst claimed rests on no count.
+            notes.append(
+                CORROBORATION_NOT_READ_NOTE if ledger and not rows else NO_CORROBORATION_ROW_NOTE
+            )
         if info.get("noted") and all(info["noted"]):
             # Every analyst claim naming it reads as absence and was kept
             # when asked. Published all the same: the analyst decided.
@@ -323,9 +332,21 @@ def _corroboration_rows(
 
         return corroboration(isr_reports, ledger)
     except Exception as exc:  # noqa: BLE001 — a fact not read is no fact stated
-        logger.debug("capability_matrix: the corroboration rows were not read (%s)", exc)
+        logger.warning("capability_matrix: the corroboration rows were not read (%s)", exc)
         return {}
 
+
+# Written on a row whose corroboration is counted from the analysts' statements
+# because the run's corroboration record held nothing for it.
+CORROBORATION_NOT_READ_NOTE = (
+    "corroboration record unavailable for this technique; counted from the "
+    "analysts' independent statements only"
+)
+
+NO_CORROBORATION_ROW_NOTE = (
+    "no corroboration row for this technique; counted from the analysts' independent "
+    "statements only"
+)
 
 # What the judge is called in ``contributing_layers``. It is listed, because a
 # technique the judge named and no analyst claimed should say where it came

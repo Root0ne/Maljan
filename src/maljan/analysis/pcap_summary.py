@@ -21,6 +21,7 @@ that cannot be read as a capture returns ``None``. The capture is read by
 from __future__ import annotations
 
 import ipaddress
+import math
 from collections import defaultdict
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -244,21 +245,6 @@ def _is_external(ip: str) -> bool:
     )
 
 
-def _mean(xs: list[float]) -> float:
-    return sum(xs) / len(xs) if xs else 0.0
-
-
-def _cv(xs: list[float]) -> float:
-    """Coefficient of variation (std/mean) — low = regular/periodic."""
-    if len(xs) < 2:
-        return 1.0
-    m = _mean(xs)
-    if m <= 0:
-        return 1.0
-    var = sum((x - m) ** 2 for x in xs) / len(xs)
-    return float((var**0.5) / m)
-
-
 def _extract_sni(pkt: Packet) -> bytes | None:
     """Best-effort TLS SNI from a ClientHello, parsed from the raw TCP payload.
 
@@ -309,6 +295,72 @@ def _server_name(name: bytes) -> str:
     return pack_escaped(name.decode("ascii", "backslashreplace"))
 
 
+def _is_capture_time(value: Any) -> bool:
+    """True for a packet time that can be placed: a finite, positive number.
+
+    A corrupt record header can carry NaN, infinity or a negative time; one of
+    them would stretch the duration to nonsense and put a gap into every
+    beacon interval, so such a packet is counted but never timed.
+    """
+    return isinstance(value, (int, float)) and math.isfinite(value) and value > 0
+
+
+class _Span:
+    """The capture's earliest and latest packet time: two numbers however long it is."""
+
+    def __init__(self) -> None:
+        self.low = 0.0
+        self.high = 0.0
+        self.timed = 0
+
+    def add(self, t: float) -> None:
+        if self.timed == 0:
+            self.low = self.high = t
+        else:
+            self.low = min(self.low, t)
+            self.high = max(self.high, t)
+        self.timed += 1
+
+    def duration(self) -> float:
+        return self.high - self.low if self.timed >= 2 else 0.0
+
+
+class _Intervals:
+    """One conversation's times, read sorted: a capture need not be in time order.
+
+    Linear in the input, as it always was. A multi-interface capture
+    interleaves its interfaces, so the times are sorted before the gaps are
+    taken; a gap of zero (equal times) is not an interval.
+    """
+
+    def __init__(self) -> None:
+        self.times: list[float] = []
+
+    def add(self, t: float) -> None:
+        self.times.append(t)
+
+    def beacon(self) -> tuple[int, float] | None:
+        """``(callbacks, mean interval)`` when the times are a regular callback, else ``None``.
+
+        Regular: at least ``_BEACON_MIN_HITS`` times whose gaps average at least
+        ``_BEACON_MIN_INTERVAL_S`` with a coefficient of variation at most
+        ``_BEACON_MAX_CV``.
+        """
+        ts = sorted(self.times)
+        if len(ts) < _BEACON_MIN_HITS:
+            return None
+        deltas = [b - a for a, b in zip(ts, ts[1:], strict=False) if (b - a) > 0]
+        if len(deltas) < _BEACON_MIN_HITS - 1:
+            return None
+        mean = sum(deltas) / len(deltas)
+        if mean < _BEACON_MIN_INTERVAL_S:
+            return None
+        variance = sum((x - mean) ** 2 for x in deltas) / len(deltas)
+        if (variance**0.5) / mean <= _BEACON_MAX_CV:
+            return len(ts), mean
+        return None
+
+
 def capture_facts(pcap_path: str, packet_limit: Any = None) -> dict[str, Any] | None:
     """The capture's facts as data, or ``None`` when it could not be read.
 
@@ -325,7 +377,7 @@ def capture_facts(pcap_path: str, packet_limit: Any = None) -> dict[str, Any] | 
     toward it, one per SYN source address and port, and then marked ``unit:
     "connection"``).
     """
-    times: list[float] = []
+    span = _Span()
     proto_counts: dict[str, int] = defaultdict(int)
     # (dst, dport, proto) -> {pkts, bytes, times}
     convs: dict[tuple[str, int, str], dict[str, Any]] = {}
@@ -338,9 +390,9 @@ def capture_facts(pcap_path: str, packet_limit: Any = None) -> dict[str, Any] | 
         try:
             plen = pkt.length
             total_bytes += plen
-            t = pkt.time
+            t = pkt.time if _is_capture_time(pkt.time) else 0.0
             if t:
-                times.append(t)
+                span.add(t)
             if pkt.ip_dst is None and not pkt.ipv6:
                 return
             dst = pkt.ip_dst
@@ -348,13 +400,14 @@ def capture_facts(pcap_path: str, packet_limit: Any = None) -> dict[str, Any] | 
             if pkt.tcp is not None:
                 proto = "tcp"
                 sport, dport = pkt.tcp.sport, pkt.tcp.dport
-                if dport == 443:
-                    name = _extract_sni(pkt)
-                    if name:
-                        try:
-                            snis[_server_name(name)] += 1
-                        except Exception as exc:  # noqa: BLE001 - one value, counted
-                            unwritten.append(exc)
+                # A ClientHello is recognised by its bytes, not its port: TLS
+                # on 8443, 993 or a C2 port names its server the same way.
+                name = _extract_sni(pkt)
+                if name:
+                    try:
+                        snis[_server_name(name)] += 1
+                    except Exception as exc:  # noqa: BLE001 - one value, counted
+                        unwritten.append(exc)
             elif pkt.udp is not None:
                 proto = "udp"
                 sport, dport = pkt.udp.sport, pkt.udp.dport
@@ -387,12 +440,12 @@ def capture_facts(pcap_path: str, packet_limit: Any = None) -> dict[str, Any] | 
             # and on the connections the sandbox's side opened toward it: one
             # per source address and port, so a retransmitted SYN is one.
             if t:
-                c["times"].append(t)
+                c["times"].add(t)
                 if pkt.tcp is not None and pkt.tcp.opens:
                     opener = (pkt.ip_src, sport)
                     if opener not in c["openers"]:
                         c["openers"].add(opener)
-                        c["opens"].append(t)
+                        c["opens"].add(t)
         except Exception:  # noqa: BLE001 — one malformed packet is not a lost capture
             return
 
@@ -408,10 +461,10 @@ def capture_facts(pcap_path: str, packet_limit: Any = None) -> dict[str, Any] | 
 
     beacons: list[dict[str, Any]] = []
     for (dst, dport, proto), c in convs.items():
-        beacon = _beacon(c["times"])
+        beacon = c["times"].beacon()
         unit: dict[str, str] = {}
         if beacon is None:
-            beacon = _beacon(c["opens"])
+            beacon = c["opens"].beacon()
             unit = {"unit": "connection"}
         if beacon is not None:
             callbacks, interval = beacon
@@ -430,7 +483,7 @@ def capture_facts(pcap_path: str, packet_limit: Any = None) -> dict[str, Any] | 
     return {
         **read.as_fields(),
         "bytes": total_bytes,
-        "duration_s": round(max(times) - min(times), 1) if len(times) >= 2 else 0.0,
+        "duration_s": round(span.duration(), 1),
         "protocols": dict(sorted(proto_counts.items())),
         "conversations": [_conversation_row(key, c) for key, c in ranked],
         "sni": dict(sorted(snis.items())),
@@ -444,8 +497,8 @@ def _conversation() -> dict[str, Any]:
         "bytes": 0,
         "pkts_from": 0,
         "bytes_from": 0,
-        "times": [],
-        "opens": [],
+        "times": _Intervals(),
+        "opens": _Intervals(),
         "openers": set(),
     }
 
@@ -469,25 +522,6 @@ def _conversation_row(key: tuple[str, int, str], c: dict[str, Any]) -> dict[str,
         # it, so it is no host the sample contacted.
         row["inbound_only"] = True
     return row
-
-
-def _beacon(times: list[float]) -> tuple[int, float] | None:
-    """``(callbacks, mean interval)`` when ``times`` are a regular callback, else ``None``.
-
-    Regular: at least ``_BEACON_MIN_HITS`` times whose gaps (equal times
-    dropped) average at least ``_BEACON_MIN_INTERVAL_S`` with a coefficient of
-    variation at most ``_BEACON_MAX_CV``.
-    """
-    ts = sorted(times)
-    if len(ts) < _BEACON_MIN_HITS:
-        return None
-    deltas = [b - a for a, b in zip(ts, ts[1:], strict=False) if (b - a) > 0]
-    if len(deltas) < _BEACON_MIN_HITS - 1:
-        return None
-    interval = _mean(deltas)
-    if interval >= _BEACON_MIN_INTERVAL_S and _cv(deltas) <= _BEACON_MAX_CV:
-        return len(ts), interval
-    return None
 
 
 def conversation_line(row: dict[str, Any]) -> str:

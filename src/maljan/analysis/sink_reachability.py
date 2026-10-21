@@ -26,6 +26,8 @@ from collections import deque
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 
+from maljan.utils.written_forms import hint_escaped
+
 # ---------------------------------------------------------------------------
 # Sensitive sink catalogue: normalized-API-name -> capability category.
 # Names are stored lowercase and WITHOUT the trailing A/W charset suffix; the
@@ -104,6 +106,8 @@ SENSITIVE_SINKS: dict[str, str] = {
     "regsetvalueex": "persistence",
     "regcreatekey": "persistence",
     "regcreatekeyex": "persistence",
+    "ntsetvaluekey": "persistence",  # Zw* is folded onto Nt* by _normalize_api
+    "ntcreatekey": "persistence",
     "createservice": "persistence",
     "openscmanager": "persistence",
     "startservice": "persistence",
@@ -282,6 +286,11 @@ FOLLOW_UP = (
 )
 
 
+def _in_data_form(name: str) -> str:
+    """A sample-controlled name in the pack's data form: control characters escaped."""
+    return hint_escaped(str(name))
+
+
 def priority_hint(ranked: list[SuspiciousFunction], follow_up: str = FOLLOW_UP) -> str:
     """Render a prompt hint listing the ranked functions, then ``follow_up``.
 
@@ -295,11 +304,13 @@ def priority_hint(ranked: list[SuspiciousFunction], follow_up: str = FOLLOW_UP) 
         "graph; decompile and analyse them FIRST (they form the malicious core):",
     ]
     for f in ranked:
-        where = f.address or f.name
+        # Names come from the sample's symbol table; each is quoted in the
+        # pack's data form so none can end its line or pose as an instruction.
+        where = _in_data_form(f.address or f.name)
         cats = ", ".join(sorted(f.categories))
-        sinks = ", ".join(sorted(f.sinks)[:4])
+        sinks = ", ".join(_in_data_form(s) for s in sorted(f.sinks)[:4])
         lines.append(
-            f"- {f.name} (@ {where}) [{cats}] -> reaches: {sinks} "
+            f"- {_in_data_form(f.name)} (@ {where}) [{cats}] -> reaches: {sinks} "
             f"({f.distance} hop{'s' if f.distance != 1 else ''})"
         )
     lines.append(follow_up)

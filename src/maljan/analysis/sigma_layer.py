@@ -150,25 +150,31 @@ def _rule_level(rule: SigmaRule) -> str:
     return str(name).lower() if name else ""
 
 
-def _regex_source(val: Any, strict: bool) -> str:
-    """The regular expression (compiled case-insensitive) a Sigma value is matched with."""
+def _regex_source(val: Any, strict: bool) -> tuple[str, int]:
+    """``(expression, flags)`` a Sigma value is matched with (compiled case-insensitive too)."""
     if isinstance(val, SigmaRegularExpression):
-        return str(val.regexp)
+        # The rule's own flags travel with its expression; a rule that asked
+        # for none gets none (``.`` stops at a line break, as it wrote it).
+        names = {getattr(flag, "name", "") for flag in getattr(val, "flags", ()) or ()}
+        flags = (re.MULTILINE if "MULTILINE" in names else 0) | (
+            re.DOTALL if "DOTALL" in names else 0
+        )
+        return str(val.regexp), flags
     if isinstance(val, SigmaNumber):
         pat = re.escape(str(val.number))
-        return f"^{pat}$" if strict else pat
+        return (f"^{pat}$" if strict else pat), 0
     if isinstance(val, SigmaString):
         pattern = ""
         for part in val.s:
             if part == SpecialChars.WILDCARD_MULTI:
-                pattern += ".*"
+                pattern += "(?s:.*)"  # a wildcard reads across a line break
             elif part == SpecialChars.WILDCARD_SINGLE:
-                pattern += "."
+                pattern += "(?s:.)"
             else:
                 pattern += re.escape(str(part))
-        return f"^{pattern}$" if strict else pattern
+        return (f"^{pattern}$" if strict else pattern), 0
     pat = re.escape(str(val))
-    return f"^{pat}$" if strict else pat
+    return (f"^{pat}$" if strict else pat), 0
 
 
 def _is_path_anchored(val: Any) -> bool:
@@ -306,13 +312,13 @@ def _compile_leaf(node: ConditionFieldEqualsValueExpression, strict: bool) -> _S
     path_fields = frozenset({field.lower()}) if field and anchored else frozenset()
     tested = frozenset({field or "keywords"})
     try:
-        source = _regex_source(node.value, strict)
-        search = re.compile(source, re.IGNORECASE).search
+        source, flags = _regex_source(node.value, strict)
+        search = re.compile(source, re.IGNORECASE | flags).search
     except Exception as exc:  # noqa: BLE001 — raised where the evaluation reaches it
         return _Shape(
             _raiser(exc), _tri_raiser(exc), ("error", id(node)), None, True, path_fields, tested
         )
-    key = ("leaf", field, source)
+    key = ("leaf", field, source, flags)
     if not strict:
         label = field or "raw"
 

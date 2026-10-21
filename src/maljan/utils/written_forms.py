@@ -118,6 +118,17 @@ def _dashed(match: re.Match[str]) -> str:
     return "-" * len(match.group(1)) + match.group(2) + "-" * len(match.group(3))
 
 
+def hint_escaped(text: str) -> str:
+    """A name in a prompt hint: control characters, quotes and chat-template tokens written out.
+
+    Only what could end the line, close a quote or pose as a control token
+    (``<|...|>``) is written out; ``<``, ``>``, ``|`` and brackets stay as
+    they are, so ``std::vector<int>::push_back`` and ``operator<<`` read and
+    copy as the names they are.
+    """
+    return pack_escaped(text).replace("<|", "\\x3c|").replace("|>", "|\\x3e")
+
+
 def markers_written_out(text: str) -> str:
     """``text`` with every run-state marker in it written with dashes for its equals signs.
 

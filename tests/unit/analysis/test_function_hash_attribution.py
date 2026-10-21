@@ -119,7 +119,7 @@ class TestConfidence:
     def test_functions_other_families_share_add_nothing(self) -> None:
         assert (
             FamilyHashAttribution("X", shared_functions=5, distinctive_functions=0).confidence
-            == 0.5
+            == 0.0
         )
 
 

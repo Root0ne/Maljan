@@ -205,6 +205,23 @@ class YaraMatch:
 # ---------------------------------------------------------------------------
 
 
+def _pattern_of(rule: Any, identifier: str) -> str | None:
+    """The rule's own text for a compiled string identifier, or ``None``.
+
+    ``$N`` names ``rule.patterns[N]`` and ``$aN`` names ``rule.all_of[N]``.
+    """
+    if rule is None or not identifier.startswith("$"):
+        return None
+    body = identifier[1:]
+    pool = rule.patterns
+    if body.startswith("a"):
+        pool, body = rule.all_of, body[1:]
+    if not body.isdigit():
+        return None
+    index = int(body)
+    return str(pool[index]) if index < len(pool) else None
+
+
 class YaraLayer:
     """The compiled YARA corpus, behind ``tools.rules.yara_scan``.
 
@@ -474,34 +491,29 @@ class YaraLayer:
             # yara-python >=4.5 uses StringMatch / StringMatchInstance objects.
             matched_patterns: list[str] = []
             seen: set[str] = set()
+            source_rule = next((r for r in self._rules if r.id == rule_id), None)
             for string_match in match.strings:
                 identifier = string_match.identifier
-                # Identifier format is "$pN" where N is the pattern index
-                if identifier.startswith("$p"):
+                # The compiled strings are ``$N`` (the rule's N-th pattern) and
+                # ``$aN`` (the N-th of its together-group); each is reported as
+                # the pattern the rule was written with, not the bytes the
+                # case-insensitive engine happened to see.
+                pat = _pattern_of(source_rule, identifier)
+                if pat is not None:
+                    if pat not in seen:
+                        matched_patterns.append(pat)
+                        seen.add(pat)
+                    continue
+                # An identifier this layer did not write: the matched bytes.
+                for instance in string_match.instances:
+                    data = instance.matched_data
                     try:
-                        idx = int(identifier[2:])
-                        if 0 <= idx < len(self._rules):
-                            # Find the rule to get the original pattern text
-                            for r in self._rules:
-                                if r.id == rule_id and idx < len(r.patterns):
-                                    pat = r.patterns[idx]
-                                    if pat not in seen:
-                                        matched_patterns.append(pat)
-                                        seen.add(pat)
-                                    break
-                    except ValueError:
-                        pass
-                else:
-                    # Fallback: use matched_data bytes
-                    for instance in string_match.instances:
-                        data = instance.matched_data
-                        try:
-                            decoded = data.decode("utf-8", errors="replace")
-                        except (AttributeError, UnicodeDecodeError):
-                            decoded = str(data)
-                        if decoded not in seen:
-                            matched_patterns.append(decoded)
-                            seen.add(decoded)
+                        decoded = data.decode("utf-8", errors="replace")
+                    except (AttributeError, UnicodeDecodeError):
+                        decoded = str(data)
+                    if decoded not in seen:
+                        matched_patterns.append(decoded)
+                        seen.add(decoded)
 
             # The engine reports every string it matched, including one from
             # a together-group that did not complete. The rule may have fired
