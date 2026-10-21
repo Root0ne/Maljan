@@ -546,19 +546,35 @@ def _tools_that_were_shortened(ledger: Any) -> set[str]:
     its own map into the answer under a reserved key, and that is the one thing
     that says *this* answer is partial. A ledger entry with no parsed document
     cannot have been shortened — shortening is what keeps an answer parseable.
+
+    Three more readings say the same of an answer the shortener did not touch,
+    each as the entry or the tool stated it: the tool set its own top-level
+    ``truncated`` flag, the guardrail cut characters off the end of the text
+    (``chars_dropped``), or the conversation had no room and the model read a
+    statement of the cut instead (``answer_not_shown``). A value absent from
+    such an answer may sit in the part the model never read. An answer the
+    byte budget blanked after the model read it is not one: the run's corpus
+    holds what was read.
     """
     from maljan.agents.output_shortening import our_key_in
+    from maljan.schemas.evidence import answer_not_shown
 
     found: set[str] = set()
     for entry in ledger or ():
         structured = getattr(entry, "structured", None)
-        if not isinstance(structured, dict):
-            continue
         try:
-            if our_key_in(structured):
-                found.add(str(getattr(entry, "tool", "") or "").strip())
+            partial = (
+                int(getattr(entry, "chars_dropped", 0) or 0) > 0
+                or answer_not_shown(entry)
+                or (
+                    isinstance(structured, dict)
+                    and (bool(our_key_in(structured)) or structured.get("truncated") is True)
+                )
+            )
         except Exception:  # noqa: BLE001 — a feedback sentence is never worth a run
             continue
+        if partial:
+            found.add(str(getattr(entry, "tool", "") or "").strip())
     found.discard("")
     return found
 

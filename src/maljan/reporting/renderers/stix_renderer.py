@@ -39,6 +39,7 @@ from maljan.agents._indicator_denylists import (
     on_a_denied_url_host,
     whole_value_in,
 )
+from maljan.agents.run_evidence_corpus import read_of_entry as _read_of_entry
 from maljan.analysis.corroboration import support_sentence
 from maljan.analysis.technique_ids import written_technique_id
 from maljan.core.logger import logger
@@ -4050,7 +4051,7 @@ def _corroborating_values(report: Any, corpus: Any = None) -> str:
                 named = str(corpus.tool_of(entry_id) or "")
                 if _sweeps_the_strings(index.get(str(entry_id)), named):
                     continue
-                parts.append(str(corpus.text_for(entry_id) or ""))
+                parts.append(_read_of_entry(corpus, entry_id))
             except Exception:  # noqa: BLE001 — a weaker haystack, never a failed render
                 continue
     return " ".join(part for part in parts if part).lower()

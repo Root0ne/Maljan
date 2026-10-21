@@ -709,7 +709,7 @@ class TestAnAbsenceOverEvidenceTheRunKnowsIsPartial:
         message = self._message(self.URL, {"unrelated"}, ("strings", "list_imports"))
 
         assert "appears nowhere" in message
-        assert "shortened answers from" in message
+        assert "answers from" in message
         assert "list_imports, strings" in message
         assert "Narrow one of them and ask again" in message
 

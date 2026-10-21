@@ -77,16 +77,18 @@ class FileDataLoader:
     # Public chunker access
     # ------------------------------------------------------------------
 
-    def chunk_text(self, data_type: str, text: str, room: Room | None = None) -> list[TextChunk]:
+    def chunk_text(
+        self, data_type: str, text: str, room: Room | None = None, boundary: str | None = None
+    ) -> list[TextChunk]:
         """Public entry point for chunking arbitrary already-parsed text.
 
         Exposes the internal :class:`BinaryChunker` without leaking the
         attribute. Callers (e.g. :class:`ServiceContainer`) should use this
         instead of touching ``loader._chunker`` directly. ``room`` is the
         analyst's input room, which sizes a chunk where no operator figure is
-        set.
+        set. ``boundary`` is the source's declared unit start, where it has one.
         """
-        return self._chunker.chunk(data_type, text, room=room)
+        return self._chunker.chunk(data_type, text, room=room, boundary=boundary)
 
     # ------------------------------------------------------------------
     # File-based loading
@@ -124,11 +126,15 @@ class FileDataLoader:
             return json.dumps(raw, indent=2)
 
     def load_chunked(
-        self, sample_id: str, data_type: str, room: Room | None = None
+        self,
+        sample_id: str,
+        data_type: str,
+        room: Room | None = None,
+        boundary: str | None = None,
     ) -> list[TextChunk]:
         """Load, parse, and split data into LLM-safe chunks."""
         text = self.load(sample_id, data_type)
-        chunks = self._chunker.chunk(data_type, text, room=room)
+        chunks = self._chunker.chunk(data_type, text, room=room, boundary=boundary)
         if len(chunks) > 1:
             logger.info(
                 "load_chunked: sample='%s' domain='%s' produced %d chunks.",

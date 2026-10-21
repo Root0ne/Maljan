@@ -358,6 +358,10 @@ export interface AgentDefinitionEntry {
    *  (`AgentDefinition.data_sources`); empty or absent is the role's own
    *  default. Optional because an API older than the field sends none. */
   data_sources?: string[];
+  /** Where a source in `data_sources` is cut into chunks: a pattern for the
+   *  start of a unit, by source name (`AgentDefinition.chunk_boundary`).
+   *  Absent is the built-in boundary of the source's domain. */
+  chunk_boundary?: Record<string, string>;
   /** Whether the agent is asked for an ATT&CK technique line on each claim
    *  (`AgentDefinition.attck_techniques`). Absent is on: the API leaves the
    *  field out of a definition that keeps it on. Only a generic or lead

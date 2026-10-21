@@ -6994,7 +6994,9 @@ class EntryTexts:
             text = ""
             if corpus is not None:
                 try:
-                    text = str(corpus.text_for(written) or "")
+                    from maljan.agents.run_evidence_corpus import read_of_entry
+
+                    text = read_of_entry(corpus, written)
                 except Exception:  # noqa: BLE001 — a missing copy falls back to the stored one
                     text = ""
             text = text or str(getattr(entry, "output", "") or "").lower()
@@ -10232,9 +10234,9 @@ def shortened_evidence_note(tools: Iterable[str]) -> str:
     if not named:
         return ""
     return (
-        " The evidence searched includes shortened answers from "
+        " The evidence searched includes answers from "
         f"{safe_finding_value(', '.join(named))}: those calls did not fit and were "
-        "handed over with rows missing. Narrow one of them and ask again before "
+        "handed over in part. Narrow one of them and ask again before "
         "withdrawing a value on this."
     )
 

@@ -3100,6 +3100,16 @@ A slice handed over as JSON (`sandbox.target`, `sandbox.full`, and the network
 or behaviour block where no parser reads it) is compact JSON — the same
 document without indentation; the report the run stores is unchanged.
 
+Where a source is cut when it does not fit one chunk is declared per source in
+`agents.definitions.<key>.chunk_boundary`, a map from a source in `data_sources`
+to a regular expression for the start of a unit (a function's header, a
+process's banner). The source is cut before each match and whole units are
+packed into a chunk, as the built-in boundaries of the static, dynamic and
+network domains do; a unit larger than a chunk is cut by a window. A pattern
+that RE2 cannot compile (a lookaround, a back-reference), that matches the empty
+text, or that names a source the agent does not list is refused. A source with no entry is cut as before, and a
+definition with none stores and dumps as it always did.
+
 A source with nothing behind it contributes nothing — an agent that asked for
 the network block on a sample nobody detonated has no network block, and the
 analyst node reports that once as a no-data stage rather than once per source.
@@ -4109,7 +4119,8 @@ kept only where it adds something and costs nothing:
 Last, before the run's ledger is saved and the report is built from it, one
 pass over the whole ledger drops kept structures, largest first, per agent
 (the agent whose call it was, a callee's for the callee), until each agent's
-texts and structures together are within its `reporting.evidence_budget_bytes`.
+structures fit in what its `reporting.evidence_budget_bytes` leaves after its
+texts (none, when its texts alone fill it).
 That covers an agent whose first record was already collected and that ran
 again later (a revision or debate round, a judge round, a teammate asking it
 again), whose earlier structures it could no longer drop itself. The pass

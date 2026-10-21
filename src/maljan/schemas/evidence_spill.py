@@ -101,6 +101,15 @@ class EvidenceSpill:
         """
         return {}
 
+    def read(self, sha256: str, offset: int = 0, length: int | None = None) -> bytes | None:
+        """The bytes of a part this store kept, by SHA-256: from ``offset``, ``length`` of them.
+
+        ``None`` for a part the store cannot hand back now (this plain store
+        keeps none, a write that failed, a store out of reach). A store that
+        writes in the background waits for the write of these bytes first.
+        """
+        return None
+
     def close(self) -> None:
         """Let go of what the store holds; writes already handed over still finish."""
         return None
