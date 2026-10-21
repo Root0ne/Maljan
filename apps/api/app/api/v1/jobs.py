@@ -102,12 +102,19 @@ async def _unprobed_models_for(db: AsyncSession, config: dict[str, Any]) -> list
     return await unprobed_models(db, settings, called_assignments(settings, team.stages))
 
 
-async def _undecryptable_secrets(db: AsyncSession) -> list[str]:
-    """The keys of the stored core secrets this API cannot decrypt, as the worker reads them."""
+async def _undecryptable_secrets(
+    db: AsyncSession, config: dict[str, Any] | None = None
+) -> dict[str, str]:
+    """The stored core secrets this job would read that this API cannot decrypt.
+
+    Keyed by setting key. A secret the job never uses (a server its team does not
+    bind, an evaluation arm's key) is not named: it is no reason to refuse.
+    """
     from maljan.core.settings_overrides import StoredValueRefused
 
     from app.services.settings_service import (
         load_core_overrides,
+        refused_secrets_a_job_uses,
         refusing_undecryptable_secrets,
     )
 
@@ -115,8 +122,8 @@ async def _undecryptable_secrets(db: AsyncSession) -> list[str]:
         with refusing_undecryptable_secrets():
             await load_core_overrides(db)
     except StoredValueRefused as exc:
-        return sorted(f"{key}: {why}" for key, why in exc.refused.items())
-    return []
+        return await refused_secrets_a_job_uses(db, exc.refused, config)
+    return {}
 
 
 async def _unready_providers_for(db: AsyncSession, config: dict[str, Any]) -> list[str]:
@@ -174,15 +181,24 @@ async def create_job(
         f"Creating analysis job for sample={log_safe(body.sample_id)}",
         extra={"sample_id": log_safe(body.sample_id), "user_id": log_safe(user.id)},
     )
-    undecryptable = await _undecryptable_secrets(db)
+    undecryptable = await _undecryptable_secrets(db, body.config)
     if undecryptable:
         # The worker would refuse the run for the same keys; said now, the job
-        # is never accepted only to fail when it starts.
+        # is never accepted only to fail when it starts. The setting keys are
+        # an operator's detail: a non-admin is told only that one needs entering.
+        named = (
+            " (" + "; ".join(f"{k}: {why}" for k, why in sorted(undecryptable.items())) + ")"
+            if user.role == "admin"
+            else ""
+        )
+        remedy = (
+            "Enter it again in the console (Settings, Configuration)"
+            if user.role == "admin"
+            else "Ask an administrator to enter it again"
+        )
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="A stored secret cannot be decrypted ("
-            + "; ".join(undecryptable)
-            + "). Enter it again in the console (Settings, Configuration); nothing runs on "
+            detail=f"A stored secret cannot be decrypted{named}. {remedy}; nothing runs on "
             "a default in its place.",
         )
     unprobed = await _unprobed_models_for(db, body.config or {})

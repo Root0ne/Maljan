@@ -491,8 +491,14 @@ async def delete_sample(
     The MinIO object is only removed when no OTHER user still references the same
     sha256 (uploads are deduplicated per user but share one object path).
     """
+    # The sample row is the first lock, held to the commit: a job create takes
+    # the same row (FOR SHARE) before the sandbox report's, so the two paths
+    # lock in one order and cannot deadlock, and a job being created either is
+    # counted below or waits until this delete is done.
     result = await db.execute(
-        select(Sample).where(Sample.id == sample_id, Sample.uploaded_by == user.id)
+        select(Sample)
+        .where(Sample.id == sample_id, Sample.uploaded_by == user.id)
+        .with_for_update()
     )
     sample = result.scalar_one_or_none()
     if not sample:

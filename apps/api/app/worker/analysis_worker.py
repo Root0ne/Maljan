@@ -376,31 +376,19 @@ def mirror_target_for(provider: Any, *, sha256: str, extension: str) -> tuple[Pa
 
 
 def servers_this_job_binds(container: Any) -> set[str] | None:
-    """The tool servers some agent of this job can reach, or ``None`` when the job cannot say.
+    """The tool servers this job can call, or ``None`` when the job cannot say.
 
-    Every agent the profile's analysts can reach (``composition.reachable_agents``)
-    and every enabled agent that judges or writes the report, each with the
-    servers bound to it by ``agents`` or by a tool reference
-    (``composition.servers_bound_to``). A container with no profile to read
-    answers ``None``.
+    One answer, ``composition.servers_a_job_calls``: the servers of every agent
+    the team runs or can ask, the judge and report agents, the triage pack's
+    reputation lookups and the generic static provider's server. A container
+    with no profile to read answers ``None``.
     """
     keys = getattr(container, "analyst_keys", None)
     if not callable(keys):
         return None
-    from maljan.agents.composition import reachable_agents, servers_bound_to
+    from maljan.agents.composition import servers_a_job_calls
 
-    settings = container.config
-    named = list(keys())
-    named += [
-        key
-        for key, definition in settings.agents.definitions.items()
-        if definition.enabled and definition.role in ("judge", "report") and key not in named
-    ]
-    return {
-        server
-        for key in reachable_agents(settings, named)
-        for server in servers_bound_to(settings, key)
-    }
+    return servers_a_job_calls(container.config)
 
 
 def mirror_server_samples(
@@ -2663,16 +2651,38 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
             # traceback in the log, and no pipeline starts either way.
             from app.services.settings_service import (
                 load_core_overrides,
+                refused_secrets_a_job_uses,
                 refusing_undecryptable_secrets,
             )
 
             try:
-                with refusing_undecryptable_secrets():
+                try:
+                    with refusing_undecryptable_secrets():
+                        overrides = await load_core_overrides(db)
+                except StoredValueRefused as exc:
+                    # Only a secret this job reads refuses it: a server's token
+                    # the team never binds is dropped, as at submission.
+                    still = await refused_secrets_a_job_uses(db, exc.refused, job_config)
+                    if still:
+                        # A stored secret this worker cannot decrypt is the
+                        # operator's setting, unreadable: the run never takes the
+                        # shipped default in its place. Neither the log nor the
+                        # job's own message, which the owner reads, names the
+                        # setting: an administrator's submission names it.
+                        logger.error(
+                            "Job %s refused: %d stored setting(s) it uses could not be read.",
+                            job_id,
+                            len(still),
+                            extra={"job_id": job_id},
+                        )
+                        raise StatedFailure(
+                            "A stored secret this job reads cannot be decrypted, so the job "
+                            "did not run on a default in its place. An administrator can "
+                            "enter it again in the console (Settings, Configuration); an "
+                            "administrator's submission of the same job names the setting."
+                        ) from None
                     overrides = await load_core_overrides(db)
             except StoredValueRefused as exc:
-                # A stored secret this worker cannot decrypt is the operator's
-                # setting, unreadable: the run never takes the shipped default
-                # in its place, and the key is named so it can be entered again.
                 raise StatedFailure(
                     "A stored setting value is refused ("
                     + "; ".join(f"{key}: {why}" for key, why in sorted(exc.refused.items()))

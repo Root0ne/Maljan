@@ -275,3 +275,25 @@ def test_deleting_a_sample_removes_every_job_s_evidence_objects(monkeypatch):
 
     assert r.status_code == 204, "a store that fails does not fail the delete"
     assert asked == [f"evidence/{first}/", f"evidence/{second}/"]
+
+
+def test_the_delete_locks_the_sample_row_before_anything_else(monkeypatch):
+    """Create takes the sample (FOR SHARE) before the report; delete takes it first too."""
+    from sqlalchemy.dialects import postgresql
+
+    user = MagicMock(id=uuid.uuid4())
+    statements: list[str] = []
+
+    async def _execute(statement):
+        statements.append(str(statement.compile(dialect=postgresql.dialect())))
+        missing = MagicMock()
+        missing.scalar_one_or_none.return_value = None
+        return missing
+
+    db = MagicMock()
+    db.execute = _execute
+    r = _client(db, user).delete(f"/api/v1/samples/{uuid.uuid4()}")
+
+    assert r.status_code == 404
+    assert statements[0].startswith("SELECT") and "FROM samples" in statements[0]
+    assert "FOR UPDATE" in statements[0]

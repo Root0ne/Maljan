@@ -514,9 +514,40 @@ async def test_a_stored_secret_the_worker_cannot_decrypt_fails_the_job_naming_it
         result = await run_analysis(mock_ctx, str(job.id))
 
     assert result["status"] == "failed", result
-    assert "core.llm.api_key" in result["error"]
+    # The owner reads the job, so its message names no setting key.
+    assert "api_key" not in result["error"]
     assert "did not run on a default" in result["error"]
     pipeline.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_a_secret_of_a_server_the_job_never_calls_does_not_stop_the_worker(
+    mock_ctx: dict[str, Any],
+    mock_db_session: AsyncMock,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An orphan server's token that cannot be read is no reason to fail a job."""
+    from app.services import settings_service
+    from maljan.core.settings_overrides import StoredValueRefused
+
+    calls: list[int] = []
+
+    async def _read(_db: Any) -> dict[str, Any]:
+        calls.append(1)
+        if len(calls) == 1:
+            raise StoredValueRefused({"mcp.servers.orphan.auth_token": "cannot be decrypted"})
+        return {}
+
+    monkeypatch.setattr(settings_service, "load_core_overrides", _read)
+    job = _make_job()
+    _answer_reads(mock_db_session, _job_rows(job, _make_sample()))
+    pipeline = AsyncMock(return_value={"final_decision": "Malware"})
+
+    with patch("maljan.app.MaljanApp.arun", new=pipeline):
+        result = await run_analysis(mock_ctx, str(job.id))
+
+    assert "cannot be decrypted" not in str(result.get("error", "")), result
+    assert len(calls) >= 2
 
 
 @pytest.mark.asyncio
@@ -544,7 +575,8 @@ async def test_the_workers_real_settings_read_refuses_an_undecryptable_secret_ro
         result = await run_analysis(mock_ctx, str(job.id))
 
     assert result["status"] == "failed", result
-    assert "core.llm.api_key" in result["error"]
+    # The owner reads the job, so its message names no setting key.
+    assert "api_key" not in result["error"]
     pipeline.assert_not_awaited()
 
 

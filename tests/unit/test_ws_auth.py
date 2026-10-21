@@ -17,10 +17,10 @@ downgraded by the ASGI server to an HTTP 403 that discards the close code.
 These tests assert that accept-then-close order directly, the same way
 ``tests/api/test_ws_auth.py`` does at the ASGI/TestClient level.
 
-The "missing credential" (4401) and "invalid token" (1008) scenarios are
+The "missing credential" (4401) and "invalid token" (4401) scenarios are
 covered at that more realistic layer by ``tests/api/test_ws_auth.py``
 (``test_missing_credential_accepts_before_closing_with_4401`` and the
-``invalid-token`` case of ``test_rejection_branches_accept_before_closing_with_1008``)
+``invalid-token`` case of ``test_rejection_branches_accept_before_closing_with_their_own_code``)
 and were removed from here as exact duplicates.
 """
 
@@ -72,7 +72,7 @@ async def test_ws_rejects_refresh_token(mock_ws: MagicMock) -> None:
 
     assert mock_ws.method_calls == [
         call.accept(),
-        call.close(code=1008, reason="Unauthorized: access token required"),
+        call.close(code=4401, reason="Unauthorized: access token required"),
     ]
 
 
@@ -85,7 +85,7 @@ async def test_ws_rejects_token_without_subject(mock_ws: MagicMock) -> None:
 
     assert mock_ws.method_calls == [
         call.accept(),
-        call.close(code=1008, reason="Unauthorized: token missing subject"),
+        call.close(code=4401, reason="Unauthorized: token missing subject"),
     ]
 
 
@@ -103,7 +103,7 @@ async def test_ws_rejects_invalid_job_id(mock_ws: MagicMock) -> None:
 
     assert mock_ws.method_calls == [
         call.accept(),
-        call.close(code=1008, reason="Bad request: invalid job ID"),
+        call.close(code=4400, reason="Bad request: invalid job ID"),
     ]
 
 
@@ -135,7 +135,7 @@ async def test_ws_rejects_nonexistent_job(mock_ws: MagicMock, valid_token_payloa
 
     assert mock_ws.method_calls == [
         call.accept(),
-        call.close(code=1008, reason="Not found: job does not exist"),
+        call.close(code=4404, reason="Not found: job does not exist"),
     ]
 
 
@@ -166,7 +166,7 @@ async def test_ws_rejects_wrong_owner(mock_ws: MagicMock, valid_token_payload: d
     # signed-in caller which job ids exist.
     assert mock_ws.method_calls == [
         call.accept(),
-        call.close(code=1008, reason="Not found: job does not exist"),
+        call.close(code=4404, reason="Not found: job does not exist"),
     ]
 
 

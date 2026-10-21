@@ -120,14 +120,16 @@ const MAX_DELAY_MS = 30_000;
 
 /** Close codes that mean the server refused the socket rather than the
  *  connection dropped. Redialling would resend the same request. */
-const NO_RETRY_CLOSE_CODES = new Set([1008, 4401]);
+const NO_RETRY_CLOSE_CODES = new Set([1008, 4400, 4401, 4404]);
 
 /**
  * Why the server refused a socket: over the credential, or over the request.
  *
- * The server closes with 1008 for both — an expired or revoked token, and a
- * job that does not exist or is not the reader's — and says which in the
- * close frame's reason (`Unauthorized: …`, `Not found: …`, `Forbidden: …`).
+ * The server says which in the close code itself: 4401 is the credential (an
+ * expired, revoked or missing token), 4404 a job that does not exist or is not
+ * the reader's, 4400 a request that names no job. A bare 1008, which an older
+ * server closes with for all of them, is told apart by the close frame's
+ * reason (`Unauthorized: …`, `Not found: …`, `Forbidden: …`) as before.
  * Every 1008 used to read as a refused credential, so a token that expired
  * an hour into a run ended the feed with "sign in again" for a reader who was
  * still signed in. A credential refusal is now renewed and redialled; a
@@ -138,6 +140,7 @@ const NO_RETRY_CLOSE_CODES = new Set([1008, 4401]);
 export function refusalKind(code: number, reason = ""): "credential" | "request" | null {
   if (!NO_RETRY_CLOSE_CODES.has(code)) return null;
   if (code === 4401) return "credential";
+  if (code === 4400 || code === 4404) return "request";
   const said = reason.trim();
   if (!said || /^unauthori[sz]ed\b/i.test(said)) return "credential";
   return "request";

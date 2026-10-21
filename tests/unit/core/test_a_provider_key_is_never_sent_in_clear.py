@@ -237,3 +237,16 @@ def test_an_address_that_cannot_be_read_is_refused(url: str) -> None:
 def test_a_plain_http_address_clients_read_differently_is_refused(url: str) -> None:
     """urlsplit reads 10.0.0.1 here; an HTTP client may send to evil.example."""
     assert "read differently" in credential_in_clear_refusal(url, "x")
+
+
+def test_a_frontier_arm_refusal_names_no_switch_the_arm_lacks() -> None:
+    key = password(variant=7)
+    with pytest.raises(ValidationError) as caught:
+        Settings(
+            _env_file=None,
+            llm={"frontier": {"base_url": "http://api.example.org/v1", "api_key": key}},
+        )
+    assert "allow_plain_http" not in str(caught.value)
+    assert "use https" in str(caught.value)
+    # A provider has the switch, and its refusal keeps naming it.
+    assert "allow_plain_http" in credential_in_clear_refusal("http://example.org", "x")

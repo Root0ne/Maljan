@@ -133,7 +133,23 @@ def test_with_no_mounted_server_nothing_changes() -> None:
 
 
 def test_a_server_no_agent_of_the_job_binds_is_not_copied(samples: Path, tmp_path: Path) -> None:
-    settings = build_settings({"mcp.servers": {"bound": _server(mount="/srv/in")}})
+    # A team whose only analyst is ``dynamic``: nothing it runs binds the server.
+    settings = build_settings(
+        {
+            "mcp.servers": {"bound": _server(mount="/srv/in")},
+            "agents.profiles": {
+                "dyn": {
+                    "label": "Dyn",
+                    "stages": [
+                        {"key": "a", "kind": "analysis", "agents": ["dynamic"]},
+                        {"key": "verdict", "kind": "verdict", "agents": ["judge"]},
+                        {"key": "report", "kind": "report", "agents": ["reporter"]},
+                    ],
+                }
+            },
+            "agents.profile": "dyn",
+        }
+    )
     hosts, paths = _mirror(settings, tmp_path, analysts=("dynamic",))
     assert (hosts, paths) == ([], {})
 

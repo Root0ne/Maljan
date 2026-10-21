@@ -76,7 +76,7 @@ async def test_a_client_that_keeps_pinging_loses_its_socket_when_the_token_expir
         await ws_analysis(ws, str(uuid.uuid4()))
 
     ws.close.assert_awaited_once()
-    assert ws.close.await_args.kwargs["code"] == 1008
+    assert ws.close.await_args.kwargs["code"] == 4401
     assert "token expired" in ws.close.await_args.kwargs["reason"]
     assert ws.receive_text.await_count == 1, "the expired token was served once more"
 
@@ -554,6 +554,30 @@ def test_a_tool_the_staged_server_map_withdraws_is_refused() -> None:
     assert "'rm' is not allowed" in exc.value.errors[f"{AGENT_DEFINITIONS_KEY}.strings.tools"]
 
 
+def test_a_server_map_save_ignores_a_stale_agent_the_change_does_not_touch() -> None:
+    from app.services.agent_map import AGENT_DEFINITIONS_KEY, AgentMapError, validate_agent_map
+
+    stale = {
+        "old": {
+            "role": "generic",
+            "prompt": "p",
+            "static_provider": "a-plugin-since-dropped",
+            "tools": [],
+        },
+        **_mcp_agent("rm"),
+    }
+    stored = {AGENT_DEFINITIONS_KEY: stale, "core.mcp.servers": _server("grep", "rm")}
+
+    # The stale entry is not this save's doing: a harmless server edit goes through.
+    out = validate_agent_map({"core.mcp.servers": _server("grep", "rm", "cat")}, stored)
+    assert "core.mcp.servers" in out
+
+    # Withdrawing a tool a stored agent names is still refused, at that agent.
+    with pytest.raises(AgentMapError) as exc:
+        validate_agent_map({"core.mcp.servers": _server("grep")}, stored)
+    assert list(exc.value.errors) == [f"{AGENT_DEFINITIONS_KEY}.strings.tools"]
+
+
 # ── SW-L9 ────────────────────────────────────────────────────────────
 
 
@@ -630,7 +654,7 @@ async def test_a_job_is_refused_at_submit_when_a_core_secret_cannot_be_decrypted
     with patch.object(box, "decrypt", side_effect=box.SecretsUnavailable("rotated")):
         named = await _undecryptable_secrets(db)
 
-    assert len(named) == 1 and named[0].startswith("core.llm.api_key:")
+    assert list(named) == ["core.llm.api_key"]
 
 
 # ── API-L5: a purge that fails partway is still recorded ─────────────
@@ -732,3 +756,223 @@ async def test_a_job_naming_a_sandbox_report_takes_the_rows_lock_first() -> None
         )
 
     assert "FOR UPDATE" in statements[1]
+    # One global order: the sample row (a delete's first lock), then the report.
+    assert "FOR SHARE" in statements[0]
+
+
+# ── AUD-37-L1: refuse only the secrets the job will use ──────────────
+
+
+def _db_with(rows: list[Any]) -> Any:
+    scalars = MagicMock()
+    scalars.all.return_value = rows
+    result = MagicMock()
+    result.scalars.return_value = scalars
+    db = MagicMock()
+    db.execute = AsyncMock(return_value=result)
+    return db
+
+
+def _server_rows(bound_to: list[str]) -> list[Any]:
+    servers = {
+        "bound": {
+            "enabled": True,
+            "transport": "stdio",
+            "command": "x",
+            "agents": bound_to,
+        },
+        "orphan": {"enabled": True, "transport": "stdio", "command": "y", "agents": []},
+    }
+    return [
+        SimpleNamespace(key="core.mcp.servers", value=servers, is_secret=False),
+        _secret_row("core.mcp.servers.bound.auth_token"),
+        _secret_row("core.mcp.servers.orphan.auth_token"),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_a_server_token_the_job_never_uses_does_not_refuse_it() -> None:
+    from app.api.v1.jobs import _undecryptable_secrets
+    from maljan.core import settings_secrets as box
+
+    db = _db_with(_server_rows(["judge"]))
+    with patch.object(box, "decrypt", side_effect=box.SecretsUnavailable("rotated")):
+        named = await _undecryptable_secrets(db, {})
+
+    assert list(named) == ["core.mcp.servers.bound.auth_token"]
+
+
+@pytest.mark.asyncio
+async def test_an_orphan_token_alone_lets_the_job_through() -> None:
+    from app.api.v1.jobs import _undecryptable_secrets
+    from maljan.core import settings_secrets as box
+
+    rows = _server_rows([])
+    db = _db_with([rows[0], rows[2]])
+    with patch.object(box, "decrypt", side_effect=box.SecretsUnavailable("rotated")):
+        assert await _undecryptable_secrets(db, {}) == {}
+
+
+@pytest.mark.asyncio
+async def test_a_non_admin_is_not_told_the_setting_key() -> None:
+    from fastapi import HTTPException
+
+    from app.api.v1 import jobs as module
+
+    refused = {"core.llm.api_key": "the stored secret cannot be decrypted"}
+    body = MagicMock(sample_id=uuid.uuid4(), config=None)
+    for role, names_key in (("analyst", False), ("admin", True)):
+        user = MagicMock(id=uuid.uuid4(), role=role)
+        with (
+            patch.object(module, "_undecryptable_secrets", AsyncMock(return_value=refused)),
+            pytest.raises(HTTPException) as caught,
+        ):
+            await module.create_job(MagicMock(), body, user, MagicMock(), MagicMock())
+        assert caught.value.status_code == 422
+        assert ("core.llm.api_key" in caught.value.detail) is names_key
+
+
+# ── AUD-37-L1: every server the job calls is "used" ─────────────────
+
+
+def test_the_reputation_servers_of_the_triage_pack_are_called_unless_it_is_off() -> None:
+    from maljan.agents.composition import servers_a_job_calls
+    from maljan.core.settings_overrides import build_settings
+
+    lookups = [
+        SimpleNamespace(server="rep", enabled=True),
+        SimpleNamespace(server="x", enabled=False),
+    ]
+    with patch("maljan.core.reputation.pack_lookups", return_value=lookups):
+        assert "rep" in servers_a_job_calls(build_settings({}))
+        assert "x" not in servers_a_job_calls(build_settings({}))
+        assert "rep" not in servers_a_job_calls(build_settings({"triage.reputation": "off"}))
+
+
+def test_the_generic_static_provider_server_is_called_when_any_agent_reads_it() -> None:
+    from maljan.agents.composition import servers_a_job_calls
+    from maljan.core.settings_overrides import build_settings
+
+    plain = build_settings({"static.generic.server": "gen"})
+    assert "gen" not in servers_a_job_calls(plain)
+    assert "gen" in servers_a_job_calls(plain, global_provider="generic_mcp")
+    assert "gen" in servers_a_job_calls(
+        build_settings({"static.generic.server": "gen", "static.provider": "generic_mcp"})
+    )
+
+
+def test_the_worker_mirrors_for_the_same_servers_the_check_counts() -> None:
+    from app.worker.analysis_worker import servers_this_job_binds
+    from maljan.core.settings_overrides import build_settings
+
+    config = build_settings({"static.generic.server": "gen", "static.provider": "generic_mcp"})
+    container = SimpleNamespace(analyst_keys=lambda: [], config=config)
+    assert "gen" in (servers_this_job_binds(container) or set())
+    assert servers_this_job_binds(SimpleNamespace(config=config)) is None
+
+
+@pytest.mark.asyncio
+async def test_a_profile_the_job_names_decides_which_servers_it_calls() -> None:
+    from app.services import settings_service
+    from maljan.core.settings_overrides import build_settings
+
+    seen: list[dict[str, Any]] = []
+
+    def _settings(overrides: dict[str, Any]) -> Any:
+        seen.append(dict(overrides))
+        return build_settings({})
+
+    refused = {"core.mcp.servers.orphan.auth_token": "cannot be decrypted"}
+    with (
+        patch.object(settings_service, "load_core_overrides", AsyncMock(return_value={})),
+        patch.object(settings_service, "settings_from_store", _settings),
+    ):
+        out = await settings_service.refused_secrets_a_job_uses(
+            MagicMock(), refused, {"profile": "other"}
+        )
+
+    assert out == {}
+    assert seen[0]["agents.profile"] == "other"
+
+
+@pytest.mark.asyncio
+async def test_an_unreadable_team_keeps_every_refusal() -> None:
+    from app.services import settings_service
+
+    refused = {"core.mcp.servers.orphan.auth_token": "cannot be decrypted"}
+    with (
+        patch.object(settings_service, "load_core_overrides", AsyncMock(return_value={})),
+        patch.object(settings_service, "settings_from_store", side_effect=ValueError("bad")),
+    ):
+        out = await settings_service.refused_secrets_a_job_uses(MagicMock(), refused, None)
+
+    assert out == refused
+
+
+# ── AUD-37-L3: a server-map save is held to what it withdraws ───────
+
+
+def test_an_agent_with_a_bad_reference_that_loses_another_server_is_refused_for_the_loss() -> None:
+    from app.services.agent_map import AGENT_DEFINITIONS_KEY, AgentMapError, validate_agent_map
+
+    def _ref(server: str) -> dict[str, Any]:
+        return {"kind": "mcp", "server": server}
+
+    stored = {
+        AGENT_DEFINITIONS_KEY: {
+            "multi": {
+                "role": "generic",
+                "prompt": "p",
+                "tools": [_ref("s1-already-gone"), _ref("s2")],
+            }
+        },
+        "core.mcp.servers": {
+            "s2": {"enabled": True, "transport": "stdio", "command": "x"},
+            "s3": {"enabled": True, "transport": "stdio", "command": "x"},
+        },
+    }
+    # S1 was already bad: a save that keeps S2 is not refused for it.
+    kept = {
+        "core.mcp.servers": stored["core.mcp.servers"] | {"s4": stored["core.mcp.servers"]["s3"]}
+    }
+    assert validate_agent_map(kept, stored) == kept
+
+    # Losing S2 is refused at the agent that names it.
+    lost = {"core.mcp.servers": {"s3": stored["core.mcp.servers"]["s3"]}}
+    with pytest.raises(AgentMapError) as exc:
+        validate_agent_map(lost, stored)
+    assert "s2" in exc.value.errors[f"{AGENT_DEFINITIONS_KEY}.multi.tools"]
+
+
+# ── AUD-37-L1: what the triage pack calls is called ──────────────────
+
+
+@pytest.mark.asyncio
+async def test_an_operator_pack_step_s_unbound_server_still_refuses_its_unreadable_token() -> None:
+    from app.api.v1.jobs import _undecryptable_secrets
+    from maljan.core import settings_secrets as box
+
+    servers = {"opsrv": {"enabled": True, "transport": "stdio", "command": "x", "agents": []}}
+    steps = [{"id": "mine", "tool": "mytool", "server": "opsrv"}]
+    rows = [
+        SimpleNamespace(key="core.mcp.servers", value=servers, is_secret=False),
+        SimpleNamespace(key="core.triage.steps", value=steps, is_secret=False),
+        _secret_row("core.mcp.servers.opsrv.auth_token"),
+    ]
+    with patch.object(box, "decrypt", side_effect=box.SecretsUnavailable("rotated")):
+        named = await _undecryptable_secrets(_db_with(rows), {})
+
+    assert list(named) == ["core.mcp.servers.opsrv.auth_token"]
+
+
+@pytest.mark.asyncio
+async def test_the_capa_server_s_unreadable_env_refuses_though_no_agent_binds_it() -> None:
+    from app.api.v1.jobs import _undecryptable_secrets
+    from maljan.core import settings_secrets as box
+
+    # ``analysis`` ships bound to no agent; the pack's capa step runs on its env.
+    rows = [_secret_row("core.mcp.servers.analysis.env")]
+    with patch.object(box, "decrypt", side_effect=box.SecretsUnavailable("rotated")):
+        named = await _undecryptable_secrets(_db_with(rows), {})
+
+    assert list(named) == ["core.mcp.servers.analysis.env"]

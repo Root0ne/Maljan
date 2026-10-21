@@ -541,7 +541,68 @@ def lint_team_map(
     return findings, graphs
 
 
+_SERVER_MAP_KEY = "core.mcp.servers"
+
+
 def validate_agent_map(changes: dict[str, Any], stored: dict[str, Any]) -> dict[str, Any]:
+    """Validate the agent keys a PATCH touches; a server-map-only save is held to what it withdraws.
+
+    A save that touches only the server map leaves the stored agent map as it
+    was, so a stale entry in it (a plugin since dropped, a reference to a server
+    long gone) is not this save's doing and must not block it. Only the
+    references this save takes away are checked: a stored definition's mcp
+    reference to a server the save removes, or to a tool the save no longer
+    allows on a server that had allowed it. Any hit refuses the save at that
+    definition.
+    """
+    agent_keys = {AGENT_DEFINITIONS_KEY, AGENT_PROFILES_KEY, AGENT_PROFILE_KEY}
+    if _SERVER_MAP_KEY not in changes or agent_keys & set(changes):
+        return _validate_agent_map(changes, stored)
+    before = _server_allow_lists(stored)
+    after = _server_allow_lists(_staged_over_stored(changes, stored))
+    errors: dict[str, str] = {}
+    for name, refs in _stored_mcp_refs(stored).items():
+        for server, tool in refs:
+            if server in before and server not in after:
+                errors[f"{AGENT_DEFINITIONS_KEY}.{name}.tools"] = f"unknown mcp server {server!r}"
+                break
+            allowed_before, allowed_after = before.get(server), after.get(server)
+            if (
+                server in after
+                and tool is not None
+                and allowed_after is not None
+                and tool not in allowed_after
+                and (allowed_before is None or tool in allowed_before)
+            ):
+                errors[f"{AGENT_DEFINITIONS_KEY}.{name}.tools"] = (
+                    f"{tool!r} is not allowed on server {server!r}; tick it there first"
+                )
+                break
+    if errors:
+        raise AgentMapError(errors)
+    return {key: changes[key] for key in changes}
+
+
+def _stored_mcp_refs(stored: dict[str, Any]) -> dict[str, list[tuple[str, str | None]]]:
+    """Each stored definition's mcp references as ``(server, tool or None)``, seeds included."""
+    refs: dict[str, list[tuple[str, str | None]]] = {
+        name: [(str(ref.server), ref.name) for ref in definition.tools if ref.kind == "mcp"]
+        for name, definition in _builtin_definitions().items()
+    }
+    raw = stored.get(AGENT_DEFINITIONS_KEY)
+    for name, entry in raw.items() if isinstance(raw, dict) else ():
+        tools = entry.get("tools") if isinstance(entry, dict) else None
+        if not isinstance(tools, list):
+            continue
+        refs[str(name)] = [
+            (str(ref["server"]), ref.get("name"))
+            for ref in tools
+            if isinstance(ref, dict) and ref.get("kind") == "mcp" and ref.get("server")
+        ]
+    return refs
+
+
+def _validate_agent_map(changes: dict[str, Any], stored: dict[str, Any]) -> dict[str, Any]:
     """Validate whichever of the three agent keys this PATCH touches, together.
 
     Together, because they are three views of one decision: a PATCH that adds a

@@ -570,6 +570,16 @@ class StaticProvider(ABC):
         """
         return None
 
+    @classmethod
+    def registry_servers(cls, cfg: Any) -> frozenset[str]:
+        """The ``mcp.servers`` keys this provider calls for a job, read from ``cfg``.
+
+        Asked without building the provider, so a submission can tell which
+        stored server settings a job will read. None by default: a provider
+        that drives an operator's registry server names it.
+        """
+        return frozenset()
+
     def server_block(self) -> Any:
         """The settings block of the server this provider drives, or ``None`` for none."""
         return getattr(self, "_cfg", None)

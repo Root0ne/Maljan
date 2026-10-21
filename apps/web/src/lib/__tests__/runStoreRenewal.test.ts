@@ -85,6 +85,15 @@ describe("why the server refused a socket", () => {
     expect(refusalKind(1008, "Bad request: invalid job ID")).toBe("request");
   });
 
+  it("reads the close code without the reason text", () => {
+    expect(refusalKind(4401, "")).toBe("credential");
+    expect(refusalKind(4404, "")).toBe("request");
+    expect(refusalKind(4400, "")).toBe("request");
+    // The code decides: a reason that sounds like the other kind does not.
+    expect(refusalKind(4404, "Unauthorized: invalid token")).toBe("request");
+    expect(refusalKind(4401, "Not found: job does not exist")).toBe("credential");
+  });
+
   it("is no refusal at all for a dropped connection", () => {
     expect(refusalKind(1006, "")).toBeNull();
     expect(refusalKind(1000, "bye")).toBeNull();
