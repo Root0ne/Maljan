@@ -5864,14 +5864,15 @@ def section_cut_violation(
     ``distinct`` is the most different values any one string field of those
     items holds. Items can still differ in combination or in a list field, so
     it says nothing certain about how many items repeat; what it does say is
-    that every string field repeats a value an earlier item carried in at least
-    ``begun - distinct`` of them, and the question says that.
+    that the string field written most often (the one ``begun`` counts)
+    repeats a value an earlier item carried in at least ``begun - distinct`` of
+    them, and the question says that.
     """
     repeated = int(begun) - int(distinct) if 0 < int(distinct) < int(begun) else 0
     size = (
         f" It ran to {int(chars):,} characters with {int(begun)} item(s) begun"
         + (
-            f"; in each of its text fields, at least {repeated} of them repeat a value an "
+            f"; in the field written most often, at least {repeated} of them repeat a value an "
             "earlier item already carried"
             if repeated
             else ""
@@ -7195,6 +7196,15 @@ def field_value_spellings(value: str) -> tuple[str, ...]:
     )
 
 
+# A comma that goes on through a number: a group of exactly three digits that
+# no digit or letter follows (``7,000x`` is not a grouped number).
+_DIGIT_GROUP_RE = re.compile(r",\d{3}(?![0-9A-Za-z])")
+# What a grouped number's front looks like at the end of a pair: one to three
+# digits that begin where a value begins, not the tail of a longer digit run, a
+# hex literal or a decimal (``8080``, ``0x5a17c0d0``, ``1.5`` are not grouped).
+_GROUPED_NUMBER_TAIL_RE = re.compile(r"(?:^|[\s:=\"'(\[])\d{1,3}(?:,\d{3})*$")
+
+
 def field_pair_in(pair: str, text: str) -> bool:
     """Whether ``text`` writes ``pair`` (a spelling of :func:`field_value_spellings`) whole.
 
@@ -7204,7 +7214,12 @@ def field_pair_in(pair: str, text: str) -> bool:
     not write ``key``), and the value ends where the field's value ends
     (``time: 12:30:00`` does not pair ``time`` with ``12``, nor ``url:
     http://…`` ``url`` with ``http``). An escape bounds a part as it bounds a
-    value (:func:`whole_value_in`).
+    value (:func:`whole_value_in`). A comma bounds a value too, except where a
+    number goes on through it in groups of three digits: ``size: 1,024`` does
+    not pair ``size`` with ``1``. Only a number of one to three digits that
+    begins where a value begins is read so; ``port=8080,443`` and hex or
+    decimal values keep the comma as a bound. Decided residual: ``ports: 80``
+    in ``80,443`` reads as ``80,443``, one number.
     """
     from maljan.agents._indicator_denylists import (
         _CONTINUES_A_COMPONENT_RE,
@@ -7214,8 +7229,11 @@ def field_pair_in(pair: str, text: str) -> bool:
 
     start = text.find(pair)
     while start != -1:
-        if _opens_a_value(text, start, _CONTINUES_A_COMPONENT_RE) and _closes_a_value(
-            text, start + len(pair), _CONTINUES_A_COMPONENT_RE
+        end = start + len(pair)
+        if (
+            _opens_a_value(text, start, _CONTINUES_A_COMPONENT_RE)
+            and _closes_a_value(text, end, _CONTINUES_A_COMPONENT_RE)
+            and not (_GROUPED_NUMBER_TAIL_RE.search(pair) and _DIGIT_GROUP_RE.match(text, end))
         ):
             return True
         start = text.find(pair, start + 1)

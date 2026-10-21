@@ -1891,6 +1891,9 @@ def evidence_ref_width() -> int:
     be a fixed 200 characters, which cut an analyst's own citation mid-sentence
     on every window. Where the cut still lands, it is marked where the kept
     text ends.
+
+    The width bounds one claim's line, not a prompt: a prompt carrying many
+    claims holds that many lines, each up to this width.
     """
     from maljan.llm.context_window import (
         FALLBACK,
@@ -2495,11 +2498,6 @@ def _claim_grounded_in_evidence(
         return False
     hits = sum(1 for t in claim_tokens if t in ev_lower)
     return hits / len(claim_tokens) >= _GROUNDING_MIN_OVERLAP
-
-
-# Strip control characters except whitespace (\t \n \r) before sending
-# untrusted data into a prompt. This neutralises common prompt-injection
-# tricks such as embedded ANSI escape sequences or rogue BOMs.
 
 
 # ---------------------------------------------------------------------------
@@ -8520,8 +8518,13 @@ class BaseAnalyst(BudgetMeter, ABC):
         # One weak-alignment batch per turn. The ranking is recorded on every
         # claim every time; what is bounded is the asking, because a second
         # batch would spend another full model turn on a check whose first
-        # batch the analyst has already answered.
-        asked: list[bool] = []
+        # batch the analyst has already answered. The batch belongs to the
+        # answer the turn began with: on dev the loop's own first collection of
+        # that answer ran as the second call and dropped the challenge, so it
+        # never reached the model; with ``validation.weak_alignment`` on (off by
+        # default) it is asked now, one model turn. The first answer kept over a
+        # retry and checked again (``keep``) reads the same challenge. A retry's
+        # answer, and a merged one (a new object), is never challenged.
 
         # An answer the loop already asked once for a report — the nudge — is
         # not asked again for the claim format: that was the question. What it
@@ -8590,8 +8593,6 @@ class BaseAnalyst(BudgetMeter, ABC):
         )
 
         def _validator(candidate: AgentISR) -> list[Violation]:
-            first = not asked
-            asked.append(True)
             if only_cut:
                 return _whole_answer_questions(candidate)
             unread = [] if nudged else parse_violations(candidate, techniques=techniques)
@@ -8604,7 +8605,7 @@ class BaseAnalyst(BudgetMeter, ABC):
                 whole_answer=_whole_answer_questions(candidate),
                 unread=unread,
                 functions=_function_check(candidate).violations,
-                weak_alignment_challenges=challenges and first,
+                weak_alignment_challenges=challenges and candidate is isr,
             )
 
         if nudged and not only_cut:
