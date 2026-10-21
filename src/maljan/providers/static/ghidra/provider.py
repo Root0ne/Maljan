@@ -31,7 +31,7 @@ from maljan.providers.base import (
 )
 from maljan.providers.registry import register_static_provider
 from maljan.providers.sample_open import long_running_tools, server_note_key
-from maljan.providers.server_guard import explicit_call_timeout
+from maljan.providers.server_guard import explicit_call_timeout, guard_from_settings
 from maljan.providers.static.ghidra.call_graph import PRIORITY_FOLLOW_UP, call_graph_from_text
 from maljan.providers.static.ghidra.passes import SCAN_CHECKS_SHORT
 from maljan.tools.errors import SERVER_WORDS_LIMIT, TRANSPORT_MARKERS
@@ -448,6 +448,7 @@ class GhidraStaticProvider(StaticProvider):
         if self._cfg.transport == "http":
             from maljan.providers.static.ghidra.http_client import GhidraHTTPClient
 
+            settings = get_settings_or_none()
             client = GhidraHTTPClient(
                 base_url=self._cfg.url,
                 auth_token=self._cfg.auth_token.get_secret_value(),
@@ -456,8 +457,19 @@ class GhidraStaticProvider(StaticProvider):
                 truncation_ledger=job.truncation_ledger,
                 context_budget=job.context_budget,
                 long_running_tools=long_running_tools(getattr(self._cfg, "sample_open", None)),
-                explicit_call_timeout=explicit_call_timeout(get_settings_or_none()),
+                explicit_call_timeout=explicit_call_timeout(settings),
                 categories=categories_of(getattr(self._cfg, "tool_facts", None)),
+                # The breaker and call cap every other tool server's calls go
+                # through; none where no settings can be read (a probe, a test).
+                guard=guard_from_settings(
+                    self.id,
+                    settings,
+                    on_open=job.on_server_rest,
+                    sample_open=getattr(self._cfg, "sample_open", None),
+                    block=self._cfg,
+                )
+                if settings is not None
+                else None,
             )
 
             self._run_async(client.initialize())

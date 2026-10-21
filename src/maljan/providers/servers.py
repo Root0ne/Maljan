@@ -1756,6 +1756,21 @@ class ServerRegistry:
             context_budget=self._context_budget,
         )
 
+    def rest_hook(self) -> Callable[[dict[str, Any]], None]:
+        """What a provider that guards its own server calls when its breaker opens.
+
+        Weak, like the registry's own guards: a context outliving the registry
+        must not keep it alive.
+        """
+        rested = weakref.WeakMethod(self._rested)
+
+        def hook(record: dict[str, Any]) -> None:
+            method = rested()
+            if method is not None:
+                method(record)
+
+        return hook
+
     def _rested(self, record: dict[str, Any]) -> None:
         """Keep one breaker opening for the run summary and announce it."""
         from maljan.pipeline.events import emit_tool_server_rested

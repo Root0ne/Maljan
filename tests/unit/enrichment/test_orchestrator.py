@@ -206,6 +206,13 @@ class TestReputationHelpers:
         assert _is_public_ip("169.254.1.1") is False
         assert _is_public_ip("not-an-ip") is False
 
+    def test_the_whois_lookup_refuses_what_the_orchestrator_refuses(self) -> None:
+        from maljan.enrichment import whois_client
+
+        assert whois_client._is_public_ip is _is_public_ip
+        for address in ("240.0.0.1", "0.0.0.0", "::", "224.0.0.1", "192.168.1.1"):
+            assert whois_client._is_public_ip(address) is False
+
     def test_a_record_is_malicious_by_its_source_s_thresholds(self) -> None:
         vt = effective_sources({})["virustotal"]
         abuse = effective_sources({})["abuseipdb"]

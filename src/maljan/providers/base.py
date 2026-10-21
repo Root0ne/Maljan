@@ -148,6 +148,10 @@ class StaticJobContext:
     # When the stage or job this work runs in must end, as a ``time.monotonic``
     # instant, where the pipeline has a deadline for it; ``None`` where none.
     deadline: float | None = None
+    # Told of each rest a server this provider guards itself gives, so it
+    # reaches the job's run summary with the registry's own (``ServerRegistry``).
+    # Not part of what makes two contexts the same job.
+    on_server_rest: Callable[[dict[str, Any]], None] | None = field(default=None, compare=False)
 
 
 @dataclass(frozen=True)
