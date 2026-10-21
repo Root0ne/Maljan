@@ -30,7 +30,7 @@ from maljan.agents.tool_fence import fenced
 from maljan.core.exceptions import SampleNotOpened
 from maljan.core.logger import logger
 from maljan.core.undeclared_tools import entry_decompiles
-from maljan.llm.context_window import answering_for
+from maljan.llm.context_window import CallAnswer, answering_for
 from maljan.llm.stream_watch import watching
 from maljan.pipeline.events import (
     EventSink,
@@ -406,6 +406,7 @@ class EvidenceRecorder:
         error: str | None = None,
         started_at: float = 0.0,
         duration_ms: int = 0,
+        waited_ms: int = 0,
         repeated_of: str | None = None,
         remediation: str | None = None,
         args_repaired: bool = False,
@@ -469,6 +470,7 @@ class EvidenceRecorder:
             error=error,
             started_at=started_at,
             duration_ms=duration_ms,
+            waited_ms=waited_ms,
             stage=self.stage,
             repeated_of=repeated_of,
             remediation=remediation,
@@ -1700,6 +1702,7 @@ def _record_tool(
         whole: str | None = None,
         whole_structure: dict[str, Any] | None = None,
         line_room: bool = False,
+        waited_ms: int = 0,
     ) -> str:
         text = result_text(value)
         raw = _was_repaired(kwargs)
@@ -1741,6 +1744,7 @@ def _record_tool(
             output=same or text,
             started_at=wall_clock,
             duration_ms=int((time.monotonic() - started) * 1000),
+            waited_ms=waited_ms,
             repeated_of=holder,
             args_repaired=raw is not None,
             args_raw=raw,
@@ -1824,6 +1828,7 @@ def _record_tool(
         exc: Exception,
         repeated: str | None,
         sent: dict[str, Any] | None = None,
+        waited_ms: int = 0,
     ) -> str:
         message = f"{type(exc).__name__}: {exc}"
         raw = _was_repaired(kwargs)
@@ -1839,6 +1844,7 @@ def _record_tool(
             error=message,
             started_at=wall_clock,
             duration_ms=int((time.monotonic() - started) * 1000),
+            waited_ms=waited_ms,
             args_repaired=raw is not None,
             args_raw=raw,
         )
@@ -1863,6 +1869,7 @@ def _record_tool(
         wall_clock: float,
         exc: SampleNotOpened,
         repeated: str | None,
+        waited_ms: int = 0,
     ) -> str:
         """File a call that met an unopenable sample, and end this loop if it is this agent's.
 
@@ -1873,11 +1880,27 @@ def _record_tool(
         The entry records the arguments the call was actually sent with when
         the platform held them to its own path, not the ones the model wrote.
         """
-        stamped = _stamp_error(kwargs, started, wall_clock, exc, repeated, sent=exc.sent_args)
+        stamped = _stamp_error(
+            kwargs, started, wall_clock, exc, repeated, sent=exc.sent_args, waited_ms=waited_ms
+        )
         if exc.stopped_agent in (None, recorder.agent):
             exc.stopped_agent = recorder.agent
             raise exc
         return stamped
+
+    def _began(issued: float, answer: CallAnswer | None) -> tuple[float, int]:
+        """The moment the call started running, and how long it waited for it.
+
+        ``issued`` is when the wrapper was entered; a call queued behind a
+        server's slot began later, and the transport says when
+        (``CallAnswer.began``). The call's duration runs from that moment, so
+        a tool that waited is not charged for the tool it waited behind; the
+        wait is its own figure. A call nothing queued began when it was issued.
+        """
+        began = getattr(answer, "began", None)
+        if began is None or began < issued:
+            return issued, 0
+        return began, int((began - issued) * 1000)
 
     wrapped_func = None
     wrapped_coroutine = None
@@ -1905,15 +1928,17 @@ def _record_tool(
             # it took and cannot go backwards.
             started, wall_clock = time.monotonic(), time.time()
             repeated = _served_again(kwargs)
+            call_answer: CallAnswer | None = None
             try:
                 # Outside the analyst's repeated-claims watch: a model a tool
                 # calls (a summariser, another agent asked) is not the
                 # analyst's answer (``BaseAnalyst._claims_watched``).
                 with answering_for(recorder.agent) as call_answer, watching(None):
                     value = func(**kwargs)
+                ran, waited = _began(started, call_answer)
                 return _stamp(
                     kwargs,
-                    started,
+                    ran,
                     wall_clock,
                     value,
                     repeated,
@@ -1922,11 +1947,14 @@ def _record_tool(
                     call_answer.whole,
                     call_answer.structure,
                     call_answer.line_room,
+                    waited_ms=waited,
                 )
             except SampleNotOpened as exc:
-                return _stopped(kwargs, started, wall_clock, exc, repeated)
+                ran, waited = _began(started, call_answer)
+                return _stopped(kwargs, ran, wall_clock, exc, repeated, waited)
             except Exception as exc:  # noqa: BLE001 — a failed call is evidence
-                return _stamp_error(kwargs, started, wall_clock, exc, repeated)
+                ran, waited = _began(started, call_answer)
+                return _stamp_error(kwargs, ran, wall_clock, exc, repeated, waited_ms=waited)
 
     if coroutine is not None:
 
@@ -1943,6 +1971,7 @@ def _record_tool(
             recorder.call_started(tool=name, args=kwargs, server=server)
             started, wall_clock = time.monotonic(), time.time()
             repeated = _served_again(kwargs)
+            call_answer: CallAnswer | None = None
             try:
                 # Named for the length of the call so the guardrail — two
                 # layers down, behind a toolkit every agent of the job shares —
@@ -1951,9 +1980,10 @@ def _record_tool(
                 # the guardrail to, because that copies the context.
                 with answering_for(recorder.agent) as call_answer, watching(None):
                     value = await coroutine(**kwargs)
+                ran, waited = _began(started, call_answer)
                 return _stamp(
                     kwargs,
-                    started,
+                    ran,
                     wall_clock,
                     value,
                     repeated,
@@ -1962,11 +1992,14 @@ def _record_tool(
                     call_answer.whole,
                     call_answer.structure,
                     call_answer.line_room,
+                    waited_ms=waited,
                 )
             except SampleNotOpened as exc:
-                return _stopped(kwargs, started, wall_clock, exc, repeated)
+                ran, waited = _began(started, call_answer)
+                return _stopped(kwargs, ran, wall_clock, exc, repeated, waited)
             except Exception as exc:  # noqa: BLE001 — a failed call is evidence
-                return _stamp_error(kwargs, started, wall_clock, exc, repeated)
+                ran, waited = _began(started, call_answer)
+                return _stamp_error(kwargs, ran, wall_clock, exc, repeated, waited_ms=waited)
 
     try:
         # The tool's own class where it opts in (``keeps_named_args``): a tool

@@ -129,6 +129,7 @@ __all__ = [
     "note_answer_not_shown",
     "note_answer_structure",
     "note_answer_whole",
+    "note_call_began",
     "CallAnswer",
     "output_limit",
     "probe_plan",
@@ -1901,6 +1902,8 @@ class CallAnswer:
     ``line_room`` says the guardrail kept back, or charged, the room of the
     completeness line the recorder appends to a cut answer
     (:func:`note_answer_line_room`); the recorder charges the line otherwise.
+    ``began`` is the monotonic time the call left for its server, after any wait
+    for a slot (:func:`note_call_began`); ``None`` where nothing noted it.
     """
 
     not_shown: int | None = None
@@ -1908,6 +1911,7 @@ class CallAnswer:
     whole: str | None = None
     structure: dict[str, Any] | None = None
     line_room: bool = False
+    began: float | None = None
 
 
 _CALL_ANSWER: ContextVar[CallAnswer | None] = ContextVar("maljan_call_answer", default=None)
@@ -1957,6 +1961,13 @@ def note_answer_line_room() -> None:
     answer = _CALL_ANSWER.get()
     if answer is not None:
         answer.line_room = True
+
+
+def note_call_began() -> None:
+    """Say, for the call being answered, that it is now being sent, past any queue."""
+    answer = _CALL_ANSWER.get()
+    if answer is not None and answer.began is None:
+        answer.began = time.monotonic()
 
 
 def note_answer_cut(chars: int) -> None:

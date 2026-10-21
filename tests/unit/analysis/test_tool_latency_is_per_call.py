@@ -38,11 +38,17 @@ class TestWhatTheSummaryCarries:
                 "calls": 2,
                 "total_ms": 4_250,
                 "slowest": {"tool": "decompile", "ms": 4_000, "id": "ev_0001"},
+                "over_10s": 0,
+                "p50_ms": 250,
+                "p95_ms": 4_000,
             },
             "network": {
                 "calls": 1,
                 "total_ms": 900,
                 "slowest": {"tool": "read_pcap", "ms": 900, "id": "ev_0003"},
+                "over_10s": 0,
+                "p50_ms": 900,
+                "p95_ms": 900,
             },
         }
 
@@ -75,11 +81,66 @@ class TestWhatTheSummaryCarries:
         assert summary.to_dict()["tool_latency"]["static"]["slowest"]["tool"] == "decompile"
 
 
+class TestTheSpreadOfAnAgentsCalls:
+    def test_percentiles_are_nearest_rank_over_a_known_list(self) -> None:
+        ms = [5, 1, 9, 3, 7, 2, 8, 4, 6, 10, 20, 15, 12, 11, 13, 14, 16, 17, 18, 19]
+        latency = _latency([_entry("static", f"t{v}", v * 1_000) for v in ms])["static"]
+
+        # n=20: rank ceil(0.50*20)=10 -> 10 s, rank ceil(0.95*20)=19 -> 19 s.
+        assert latency["p50_ms"] == 10_000
+        assert latency["p95_ms"] == 19_000
+        assert latency["over_10s"] == 10
+        assert latency["slowest"]["ms"] == 20_000
+
+    def test_equal_durations_and_a_single_call_select_correctly(self) -> None:
+        same = _latency([_entry("a", "t", 77) for _ in range(50)])["a"]
+        assert (same["p50_ms"], same["p95_ms"]) == (77, 77)
+        one = _latency([_entry("a", "t", 12_000)])["a"]
+        assert (one["p50_ms"], one["p95_ms"], one["over_10s"]) == (12_000, 12_000, 1)
+
+    def test_selection_agrees_with_a_sort_on_many_lists(self) -> None:
+        import random
+
+        from maljan.analysis.run_summary import nearest_rank
+
+        rng = random.Random(7)
+        for _ in range(200):
+            values = [rng.randint(1, 30) for _ in range(rng.randint(1, 60))]
+            ordered = sorted(values)
+            for percent in (50, 95):
+                rank = max(1, -(-percent * len(values) // 100))
+                assert nearest_rank(list(values), percent) == ordered[rank - 1]
+
+    def test_the_line_shows_the_spread_only_when_the_row_has_it(self) -> None:
+        new = tool_latency_lines(
+            _latency([_entry("static", "decompile", 4_000), _entry("static", "peek", 12_000)])
+        )
+        assert new == [
+            "**Tool calls**: static 2 calls in 16.0s, slowest `peek` 12.0s, "
+            "p50 4.0s, p95 12.0s, 1 over 10s  "
+        ]
+
+    def test_a_stored_row_without_the_fields_reads_as_it_always_did(self) -> None:
+        stored = {
+            "static": {
+                "calls": 1,
+                "total_ms": 4_000,
+                "slowest": {"tool": "decompile", "ms": 4_000, "id": "ev_0001"},
+            }
+        }
+        assert tool_latency_lines(stored) == [
+            "**Tool calls**: static 1 calls in 4.0s, slowest `decompile` 4.0s  "
+        ]
+
+
 class TestTheLineAReaderSees:
     def test_it_names_the_agent_its_calls_and_the_slowest_tool(self) -> None:
         lines = tool_latency_lines(_latency([_entry("static", "decompile", 4_000)]))
 
-        assert lines == ["**Tool calls**: static 1 calls in 4.0s, slowest `decompile` 4.0s  "]
+        assert lines == [
+            "**Tool calls**: static 1 calls in 4.0s, slowest `decompile` 4.0s, "
+            "p50 4.0s, p95 4.0s, 0 over 10s  "
+        ]
 
     def test_an_agent_whose_calls_were_never_timed_draws_no_row(self) -> None:
         assert tool_latency_lines(_latency([_entry("static", "peek", 0)])) == []

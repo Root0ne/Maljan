@@ -319,6 +319,16 @@ class LedgerEntry(BaseModel):
     )
     started_at: float = Field(default=0.0, description="Unix timestamp the call started at.")
     duration_ms: int = Field(default=0, description="Wall-clock duration of the call.")
+    waited_ms: int = Field(
+        default=0,
+        # Absent when zero, so an entry written before the field existed (or a
+        # call nothing queued) dumps exactly as it did.
+        exclude_if=lambda value: not value,
+        description=(
+            "How long the call waited for a free slot at its server before it was sent; "
+            "``duration_ms`` runs from the moment it was sent."
+        ),
+    )
     seq: int = Field(default=0, description="Call order within the job, 1-based.")
     source: str | None = Field(
         default=None,
@@ -476,6 +486,7 @@ def build_entry(
     error: str | None = None,
     started_at: float = 0.0,
     duration_ms: int = 0,
+    waited_ms: int = 0,
     stage: str = "analysis",
     max_chars: int = 0,
     repeated_of: str | None = None,
@@ -611,6 +622,7 @@ def build_entry(
         model=model or None,
         started_at=started_at,
         duration_ms=max(0, int(duration_ms)),
+        waited_ms=max(0, int(waited_ms)),
         seq=seq,
         source=source or None,
         facts=facts,

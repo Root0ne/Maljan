@@ -26,6 +26,8 @@ class EvidenceEntryResponse(BaseModel):
     error: str | None = None
     remediation: str | None = None
     duration_ms: int
+    # 0 where the call never queued and on a row written before the column.
+    waited_ms: int = 0
     seq: int
     args: dict[str, Any] | None = None
     args_repaired: bool = False
@@ -91,10 +93,10 @@ class EvidenceEntryResponse(BaseModel):
         """A row written before the column existed made an ordinary call."""
         return bool(value)
 
-    @field_validator("chars_dropped", mode="before")
+    @field_validator("chars_dropped", "waited_ms", mode="before")
     @classmethod
     def _absent_is_zero(cls, value: Any) -> int:
-        """A row written before the column existed recorded no cut."""
+        """A row written before the column existed recorded no cut and no wait."""
         return int(value or 0)
 
 

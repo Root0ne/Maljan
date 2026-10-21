@@ -1051,6 +1051,34 @@ def _sandbox_name(provider: str) -> str:
     return (declared.display_name or provider) if declared is not None else provider
 
 
+def nearest_rank(values: list[int], percent: int) -> int:
+    """The nearest-rank ``percent`` percentile of ``values``: an element of the list.
+
+    The element at 1-based rank ``ceil(percent / 100 * n)`` of the sorted list,
+    found by selection in linear time instead of a sort. ``values`` is
+    reordered; it must not be empty.
+    """
+    rank = max(1, -(-percent * len(values) // 100)) - 1
+    low, high = 0, len(values) - 1
+    while low < high:
+        # Median of three, and a three-way split so equal durations (a tool
+        # that answers in the same millisecond every time) cannot make a pass
+        # useless.
+        a, b, c = values[low], values[(low + high) // 2], values[high]
+        pivot = max(min(a, b), min(max(a, b), c))
+        below = [v for v in values[low : high + 1] if v < pivot]
+        equal = sum(1 for v in values[low : high + 1] if v == pivot)
+        above = [v for v in values[low : high + 1] if v > pivot]
+        values[low : high + 1] = below + [pivot] * equal + above
+        if rank < low + len(below):
+            high = low + len(below) - 1
+        elif rank < low + len(below) + equal:
+            return pivot
+        else:
+            low = low + len(below) + equal
+    return values[rank]
+
+
 def tool_latency_lines(latency: Any) -> list[str]:
     """What each agent's tool calls cost, and which single call cost the most.
 
@@ -1067,9 +1095,16 @@ def tool_latency_lines(latency: Any) -> list[str]:
         if not isinstance(slowest, dict):
             continue
         total = float(row.get("total_ms") or 0) / 1000.0
+        spread = ""
+        if "p50_ms" in row and "p95_ms" in row:
+            # Only a run that measured them draws them; a stored run's row
+            # has neither and reads exactly as it did.
+            p50, p95 = float(row["p50_ms"]) / 1000.0, float(row["p95_ms"]) / 1000.0
+            spread = f", p50 {p50:.1f}s, p95 {p95:.1f}s, {int(row.get('over_10s') or 0)} over 10s"
         rows.append(
             f"{agent} {int(row.get('calls') or 0)} calls in {total:.1f}s, "
             f"slowest `{slowest.get('tool')}` {float(slowest.get('ms') or 0) / 1000.0:.1f}s"
+            f"{spread}"
         )
     return [f"**Tool calls**: {'; '.join(rows)}  "] if rows else []
 
@@ -1195,10 +1230,11 @@ class RunSummary:
     # recorded no loop.
     budget: dict[str, Any] | None = None
     # What each agent's tool calls cost, from the ledger's own per-call clock:
-    # ``{calls, total_ms, slowest: {tool, ms, id}}`` per agent. A run that
-    # overran used to leave a reader deriving latency from raw timestamps, and
-    # a slow tool could not be told from a slow model. ``None`` on a run whose
-    # ledger holds no timed call.
+    # ``{calls, total_ms, slowest: {tool, ms, id}, p50_ms, p95_ms, over_10s}``
+    # per agent (the last three absent from a run stored before they existed).
+    # A run that overran used to leave a reader deriving latency from raw
+    # timestamps, and a slow tool could not be told from a slow model. ``None``
+    # on a run whose ledger holds no timed call.
     tool_latency: dict[str, Any] | None = None
     # Which model answered each agent's turns: ``{agent: {turns: {model:
     # count}, fallbacks: [{model, reason}]}}``. A fallback row is a turn
@@ -1917,10 +1953,16 @@ class RunSummaryBuilder:
         what an operator looks for first when a run overran and a list of
         every call is the ledger, which is already there.
 
+        Beside the slowest, the median and the 95th percentile of the agent's
+        timed calls (nearest rank, so each is a duration that happened) and how
+        many ran longer than ten seconds: one stalled call is the slowest, and
+        these say whether it was one call or the agent's usual.
+
         A call with no measured duration contributes to the count and to
         nothing else: a zero is not a measurement.
         """
         rows: dict[str, dict[str, Any]] = {}
+        timed: dict[str, list[int]] = {}
         for entry in entries or []:
             row = entry if isinstance(entry, dict) else getattr(entry, "__dict__", None)
             if not isinstance(row, dict):
@@ -1938,9 +1980,14 @@ class RunSummaryBuilder:
             if ms <= 0:
                 continue
             seen["total_ms"] += ms
+            timed.setdefault(agent, []).append(ms)
             slowest = seen["slowest"]
             if slowest is None or ms > int(slowest["ms"]):
                 seen["slowest"] = {"tool": tool, "ms": ms, "id": str(row.get("id") or "")}
+        for agent, durations in timed.items():
+            rows[agent]["over_10s"] = sum(1 for ms in durations if ms > 10_000)
+            rows[agent]["p50_ms"] = nearest_rank(durations, 50)
+            rows[agent]["p95_ms"] = nearest_rank(durations, 95)
         self._tool_latency = rows or None
         return self
 

@@ -1192,7 +1192,8 @@ def _returned_at(entry: dict[str, Any]) -> datetime | None:
     """The moment this tool call came back, or ``None`` when it is not known.
 
     ``started_at`` is a Unix timestamp the recorder stamped when the call went
-    out, and ``duration_ms`` is what it measured; their sum is the only moment
+    out, ``waited_ms`` is how long it queued before it was sent and
+    ``duration_ms`` is what it measured from then; their sum is the only moment
     in the entry a reader can sort a ledger by. Absent, zero or nonsensical
     values give ``None``, because a 1970 timestamp on a tool call is not a fact
     about anything and the column's own default at least says "written then".
@@ -1205,8 +1206,9 @@ def _returned_at(entry: dict[str, Any]) -> datetime | None:
     if seconds <= 0:
         return None
     try:
+        waited = max(0.0, float(entry.get("waited_ms", 0) or 0) / 1000.0)
         duration = max(0.0, float(entry.get("duration_ms", 0) or 0) / 1000.0)
-        return datetime.fromtimestamp(seconds + duration, tz=UTC)
+        return datetime.fromtimestamp(seconds + waited + duration, tz=UTC)
     except (OverflowError, OSError, ValueError):
         return None
 
@@ -1222,7 +1224,7 @@ def _evidence_row(
 ) -> Any:
     """One ledger entry as the row that keeps it.
 
-    Every one of the 30 fields ``maljan.schemas.evidence.LedgerEntry`` carries
+    Every one of the 31 fields ``maljan.schemas.evidence.LedgerEntry`` carries
     has a column here, which is what lets a reader of the stored ledger say why an output
     is empty instead of guessing. An absent value stays absent rather than
     becoming a default, for the same reason. ``written_at`` is the moment the
@@ -1252,6 +1254,7 @@ def _evidence_row(
         error=(str(entry["error"]) if entry.get("error") else None),
         remediation=(str(entry["remediation"]) if entry.get("remediation") else None),
         duration_ms=int(entry.get("duration_ms", 0) or 0),
+        waited_ms=int(entry.get("waited_ms", 0) or 0),
         seq=int(entry.get("seq", 0) or 0),
         args=entry.get("args") or {},
         args_repaired=bool(entry.get("args_repaired", False)),

@@ -24,6 +24,9 @@ export interface EvidenceEntry {
   error?: string | null;
   remediation?: string | null;
   duration_ms: number;
+  /** Time the call waited for a free slot at its server before it was sent;
+   *  absent when it did not wait and on rows written before the field. */
+  waited_ms?: number;
   seq: number;
   args: Record<string, unknown> | null;
   /** True when the model's arguments were truncated and were closed off

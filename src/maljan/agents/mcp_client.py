@@ -27,6 +27,7 @@ from mcp.client.stdio import stdio_client
 from pydantic import ValidationError, create_model
 
 from maljan.core.logger import logger
+from maljan.llm.context_window import note_call_began
 
 
 def tool_error_marker(kind: str, tool: str, **fields: str) -> str:
@@ -876,6 +877,7 @@ class MCPLangChainToolkit:
             )
             long_running = guard is not None and guard.long_running(tool_name)
             request_id = next_request_id(session)
+            note_call_began()
             try:
                 result = await session.call_tool(tool_name, arguments=args, **timing)
             except asyncio.CancelledError:
