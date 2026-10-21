@@ -86,7 +86,7 @@ SHIPPED_IDS = [
     "decode_string_blobs",
     "resolved_api_capability",
     "find_crypto_constants",
-    "find_anti_analysis_techniques",
+    "anti_analysis_scan",
     "function_index",
     "unpack_upx",
     "sandbox_sections",

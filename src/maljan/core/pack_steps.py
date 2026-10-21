@@ -149,6 +149,17 @@ PACK_RENDERERS: dict[str, str] = {
 # only there may it say it takes a wall clock (``PackStep.wall_clock``).
 _SHIPPED_CONTEXT = {"shipped": True}
 
+# Shipped steps that were renamed, by their old name. The pack's scan was
+# recorded under Ghidra's own tool name, though any static provider's scan
+# answers it; it is ``anti_analysis_scan`` now, like its renderer and the kind
+# of its answer. The old name is still read: a stored run's entry keeps the
+# tool it was recorded under, and an operator's ``triage.steps`` may name the
+# step by its old id (and place another after it). Nothing is written under it.
+LEGACY_STEP_NAMES: Mapping[str, str] = {"find_anti_analysis_techniques": "anti_analysis_scan"}
+
+# The fields of a declared step that name another step.
+_STEP_REFERENCES = ("id", "after", "starts_after")
+
 # The renderers that read an answer through its tool's declared facts (its
 # rows, their values and places, its techniques) as well as in the shape of
 # the tool they were written for, so any tool of the kind is shown with the
@@ -156,6 +167,30 @@ _SHIPPED_CONTEXT = {"shipped": True}
 # shipped step calls, and is refused on any other step: on another tool's
 # answer it would state what that answer does not say.
 DECLARED_FACT_RENDERERS = frozenset({"capability_rules"})
+
+
+def _under_current_names(data: Any) -> Any:
+    """A declared step with the shipped steps it names by an old name read by the new one.
+
+    The step's own ``id``, the step it comes ``after``, the one it
+    ``starts_after`` and the ones it runs ``beside``; its ``tool`` too, but only
+    for a step of the platform's own (no ``server``): on a server's step the
+    tool is that server's own, whose name is not ours to change.
+    """
+    if not isinstance(data, Mapping) or not LEGACY_STEP_NAMES:
+        return data
+    changed: dict[str, Any] = {}
+    for name in _STEP_REFERENCES:
+        value = data.get(name)
+        if isinstance(value, str) and value in LEGACY_STEP_NAMES:
+            changed[name] = LEGACY_STEP_NAMES[value]
+    beside = data.get("beside")
+    if isinstance(beside, (list, tuple)) and any(v in LEGACY_STEP_NAMES for v in beside):
+        changed["beside"] = type(beside)(LEGACY_STEP_NAMES.get(v, v) for v in beside)
+    tool = data.get("tool")
+    if isinstance(tool, str) and tool in LEGACY_STEP_NAMES and not data.get("server"):
+        changed["tool"] = LEGACY_STEP_NAMES[tool]
+    return {**data, **changed} if changed else data
 
 
 class PackStep(BaseModel):
@@ -198,7 +233,7 @@ class PackStep(BaseModel):
                 "wall_clock is what a step of the platform's own does, not something a "
                 "declaration sets; give the step budget_seconds instead"
             )
-        return data
+        return _under_current_names(data)
 
     @field_validator("id")
     @classmethod
@@ -392,7 +427,7 @@ def _shipped() -> tuple[PackStep, ...]:
             display_name="crypto constants",
         ),
         _o(
-            id="find_anti_analysis_techniques",
+            id="anti_analysis_scan",
             renderer="anti_analysis_scan",
             display_name="anti-analysis",
         ),
@@ -470,6 +505,11 @@ def _indexes() -> tuple[dict[str, PackStep], dict[str, PackStep], dict[str, froz
                 {renderer: frozenset(names) for renderer, names in tools.items()},
             )
         )
+        by_tool = _INDEXES[0][1]
+        # A stored entry recorded under a renamed step's old name reads as the step it became.
+        for old, new in LEGACY_STEP_NAMES.items():
+            if new in by_tool:
+                by_tool.setdefault(old, by_tool[new])
     return _INDEXES[0]
 
 
@@ -483,7 +523,9 @@ def written_for(renderer: str, tool: Any) -> bool:
 
     The reading of an entry the pack's own step wrote, as :func:`shipped_renderer` is.
     """
-    return str(tool or "") in shipped_tools_of(renderer)
+    name = str(tool or "")
+    held = shipped_tools_of(renderer)
+    return name in held or LEGACY_STEP_NAMES.get(name, "") in held
 
 
 def runs_shipped(renderer: str, steps: Iterable[PackStep] | None = None) -> bool:
@@ -540,7 +582,7 @@ def read_answer_field(
 
 def shipped_step(step_id: str) -> PackStep | None:
     """The shipped step of ``step_id``, or ``None``."""
-    return _indexes()[0].get(step_id)
+    return _indexes()[0].get(LEGACY_STEP_NAMES.get(step_id, step_id))
 
 
 def _by_tool() -> dict[str, PackStep]:

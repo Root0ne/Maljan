@@ -1260,7 +1260,9 @@ def loop_limits(
     """``(timeout, max_steps)`` for one loop of ``agent_name``; ``None`` is no limit.
 
     The agent's own definition first, then the deprecated per-agent override
-    maps — each held to what a budget can be — then the deployment's own
+    maps (kept until a release is named for their removal; see
+    ``Settings.react_agent_timeout_overrides``) — each held to what a budget
+    can be — then the deployment's own
     ``react_agent_timeout`` / ``react_agent_max_steps``. All of them are
     ``None`` unless an operator set one, and a dimension nobody set has no
     limit.
@@ -4477,6 +4479,184 @@ class BudgetMeter:
             self._budget_records = []
         return records
 
+    def _clearing_per_token(self) -> int:
+        """The characters a token is counted at by this job's budget."""
+        budget = self._context_budget()
+        try:
+            return max(
+                1, int(getattr(budget, "chars_per_token", CHARS_PER_TOKEN) or CHARS_PER_TOKEN)
+            )
+        except (TypeError, ValueError):
+            return CHARS_PER_TOKEN
+
+    def _own_window_tokens(self) -> int | None:
+        """The window this agent's own model serves, in tokens, or ``None`` where none is known.
+
+        The window recorded on the built model (``context_window.built_window``,
+        a declared or probed fact), else the smallest window of the models the
+        agent's assignment may call, as ``context_window`` learns it without a
+        request; never the job's smallest window, which another agent's model
+        may set, and never the fallback for a window nobody reported.
+        """
+        from maljan.llm.context_window import FALLBACK, built_window, window_for_assignment
+
+        fact = built_window(getattr(self, "llm", None))
+        if fact is not None:
+            return int(fact.tokens)
+        try:
+            from maljan.core.model_assignments import assignment_chain_for
+
+            cfg = get_settings()
+            windows = [
+                window_for_assignment(cfg, assignment, probe=False)
+                for assignment in assignment_chain_for(cfg, self.name)
+            ]
+        except Exception as exc:  # noqa: BLE001 — no window is no point, never a lost loop
+            self.logger.debug("%s: its own window is not known (%s).", self.name, exc)
+            return None
+        known = [int(w.tokens) for w in windows if w.source != FALLBACK and int(w.tokens) > 0]
+        return min(known) if known else None
+
+    def _tool_answer_clearing(self) -> ToolAnswerClearing:
+        """This loop's clearing: after a refusal, and before a prompt past the agent's own window.
+
+        A provider's refusal of a request as over its window clears whatever
+        else is known. The window point is the window the agent's own model
+        serves (:meth:`_own_window_tokens`), in the budget's characters: a
+        prompt past it is refused by every server.
+        """
+        window = self._own_window_tokens()
+        return ToolAnswerClearing(
+            window_chars=chars_for_tokens(window, self._clearing_per_token()) if window else None
+        )
+
+    def _cleared_request(
+        self,
+        clearing: ToolAnswerClearing,
+        sent: list[Any],
+        on_clear: Callable[[Clearing], None] | None,
+        offered: Callable[[], bool] | None = None,
+    ) -> tuple[list[Any], int]:
+        """``sent`` with the loop's clears in place, and the characters newly cleared.
+
+        Where a clear is due and the loop does not offer ``read_evidence`` yet
+        (``offered``), raises :class:`OfferReadAgainFirst` instead: the loop
+        builds its graph again with the tool and sends the turn again. Never
+        raises otherwise.
+        """
+        per_token = self._clearing_per_token()
+
+        def reported(messages: list[Any]) -> tuple[int, int]:
+            return _reported_request(messages, per_token)
+
+        extra = self._definitions_sent() + self._replayed_run_state_chars()
+        try:
+            if offered is not None and not offered():
+                due = clearing.due(
+                    sent, extra_chars=extra, measure=_message_chars, reported=reported
+                )
+            else:
+                due = False
+        except Exception as exc:  # noqa: BLE001 — a clear never costs a turn
+            self.logger.debug("%s: tool answers not cleared (%s).", self.name, exc)
+            return sent, 0
+        if due:
+            raise OfferReadAgainFirst()
+        try:
+            fitted = clearing.fit(
+                sent,
+                extra_chars=extra,
+                measure=_message_chars,
+                reported=reported,
+                turn=sum(1 for m in sent if is_model_turn(m)) + 1,
+            )
+        except Exception as exc:  # noqa: BLE001 — a clear never costs a turn
+            self.logger.debug("%s: tool answers not cleared (%s).", self.name, exc)
+            return sent, 0
+        if fitted.clearing is not None and on_clear is not None:
+            try:
+                on_clear(fitted.clearing)
+            except Exception as exc:  # noqa: BLE001 — a record never costs a turn
+                self.logger.debug("%s: a clear was not recorded (%s).", self.name, exc)
+        return fitted.messages, fitted.freed_before_report
+
+    def _note_clearing(self, clearing: Clearing) -> None:
+        """Say one clear in the agent's log and as a ``tool_answers_cleared`` event."""
+        why = (
+            "the model server refused the request as over its window"
+            if clearing.why == CLEARED_FOR_REFUSAL
+            else "the request's prompt is past the model's own window"
+        )
+        self.logger.info(
+            "%s: cleared %d old tool answer(s) to ledger references at turn %d, because %s: "
+            "the request went from %d to %d characters of context (clearing starts past %d and "
+            "clears to %d).",
+            self.name,
+            clearing.answers,
+            clearing.turn,
+            why,
+            clearing.chars_before,
+            clearing.chars_after,
+            clearing.point_chars,
+            clearing.target_chars,
+        )
+        from maljan.pipeline.events import emit_tool_answers_cleared
+
+        emit_tool_answers_cleared(
+            self._event_sink(),
+            agent=str(self.name),
+            stage=str(getattr(self, "pipeline_stage", "") or "analysis"),
+            turn=clearing.turn,
+            answers=clearing.answers,
+            chars_before=clearing.chars_before,
+            chars_after=clearing.chars_after,
+            why=clearing.why,
+        )
+
+    def _replayed_run_state_chars(self) -> int:
+        """Characters of earlier run-state blocks the next request sends again, or ``0``.
+
+        Only where the model's provider keeps its history append-only
+        (``anthropic_history.replays_earlier_blocks``); every other provider
+        sends one block, the current one, which the messages already hold.
+        """
+        blocks = getattr(self, "_replayed_blocks", None) or {}
+        if not blocks or not replays_earlier_blocks(getattr(self, "llm", None)):
+            return 0
+        upto = getattr(self, "_replay_upto", None)
+        return sum(size for at, size in blocks.items() if upto is None or at < upto)
+
+    def _answer_sizer(self) -> Any | None:
+        """The job's tool-answer guardrail (``ServerRegistry.answer_sizer``), or ``None`` without a job."""
+        try:
+            registry = self._server_registry()
+            return None if registry is None else registry.answer_sizer()
+        except Exception as exc:  # noqa: BLE001 — an answer read again unsized is still an answer
+            self.logger.debug("%s: no answer guardrail for read_evidence (%s).", self.name, exc)
+            return None
+
+    def _server_registry(self) -> Any | None:
+        """The job's tool-server registry, or None when this agent runs bare."""
+        container = getattr(self, "_container", None)
+        if container is None:
+            return None
+        return container.get_server_registry()
+
+    def _context_budget(self) -> Any | None:
+        """The job's context budget, or None when this agent runs bare.
+
+        What the tool paths ask how many characters of an answer this model may
+        read now, and what this loop reports its own conversation size to.
+        """
+        container = getattr(self, "_container", None)
+        if container is None:
+            return None
+        try:
+            return container.get_context_budget()
+        except Exception as exc:  # noqa: BLE001 — a budget is never worth a lost loop
+            self.logger.debug("%s: the context budget is unavailable (%s).", self.name, exc)
+            return None
+
 
 class BaseAnalyst(BudgetMeter, ABC):
     """Abstract base class for expert agents."""
@@ -4866,28 +5046,6 @@ class BaseAnalyst(BudgetMeter, ABC):
         self.logger.error("%s: %s; its loop is not started.", self.name, failure)
         raise failure
 
-    def _server_registry(self) -> Any | None:
-        """The job's tool-server registry, or None when this agent runs bare."""
-        container = getattr(self, "_container", None)
-        if container is None:
-            return None
-        return container.get_server_registry()
-
-    def _context_budget(self) -> Any | None:
-        """The job's context budget, or None when this agent runs bare.
-
-        What the tool paths ask how many characters of an answer this model may
-        read now, and what this loop reports its own conversation size to.
-        """
-        container = getattr(self, "_container", None)
-        if container is None:
-            return None
-        try:
-            return container.get_context_budget()
-        except Exception as exc:  # noqa: BLE001 — a budget is never worth a lost loop
-            self.logger.debug("%s: the context budget is unavailable (%s).", self.name, exc)
-            return None
-
     def _note_conversation(self, messages: list, cleared_chars: int = 0) -> None:
         """Tell the job's budget what this loop's next request will weigh.
 
@@ -4944,19 +5102,6 @@ class BaseAnalyst(BudgetMeter, ABC):
                 blocks[len(messages)] = len(block) + 2
         except Exception as exc:  # noqa: BLE001 — a measure never costs a turn
             self.logger.debug("%s: earlier run-state blocks not counted (%s).", self.name, exc)
-
-    def _replayed_run_state_chars(self) -> int:
-        """Characters of earlier run-state blocks the next request sends again, or ``0``.
-
-        Only where the model's provider keeps its history append-only
-        (``anthropic_history.replays_earlier_blocks``); every other provider
-        sends one block, the current one, which the messages already hold.
-        """
-        blocks = getattr(self, "_replayed_blocks", None) or {}
-        if not blocks or not replays_earlier_blocks(getattr(self, "llm", None)):
-            return 0
-        upto = getattr(self, "_replay_upto", None)
-        return sum(size for at, size in blocks.items() if upto is None or at < upto)
 
     def _forget_conversation(self) -> None:
         """Let go of this loop's size, so a finished loop stops binding the cap."""
@@ -5060,15 +5205,6 @@ class BaseAnalyst(BudgetMeter, ABC):
             return []
         tool = items_tool(report, _answer_sizer(container), normalised_by_of(container))
         return stamp_source([tool], SANDBOX_FAMILY, declared="sandbox")
-
-    def _answer_sizer(self) -> Any | None:
-        """The job's tool-answer guardrail (``ServerRegistry.answer_sizer``), or ``None`` without a job."""
-        try:
-            registry = self._server_registry()
-            return None if registry is None else registry.answer_sizer()
-        except Exception as exc:  # noqa: BLE001 — an answer read again unsized is still an answer
-            self.logger.debug("%s: no answer guardrail for read_evidence (%s).", self.name, exc)
-            return None
 
     def _profile_excluded_servers(self) -> str:
         """The servers the active profile withholds, as ``for_agent``'s argument."""
@@ -5452,140 +5588,6 @@ class BaseAnalyst(BudgetMeter, ABC):
             return sent
 
         return refresh
-
-    def _clearing_per_token(self) -> int:
-        """The characters a token is counted at by this job's budget."""
-        budget = self._context_budget()
-        try:
-            return max(
-                1, int(getattr(budget, "chars_per_token", CHARS_PER_TOKEN) or CHARS_PER_TOKEN)
-            )
-        except (TypeError, ValueError):
-            return CHARS_PER_TOKEN
-
-    def _own_window_tokens(self) -> int | None:
-        """The window this agent's own model serves, in tokens, or ``None`` where none is known.
-
-        The window recorded on the built model (``context_window.built_window``,
-        a declared or probed fact), else the smallest window of the models the
-        agent's assignment may call, as ``context_window`` learns it without a
-        request; never the job's smallest window, which another agent's model
-        may set, and never the fallback for a window nobody reported.
-        """
-        from maljan.llm.context_window import FALLBACK, built_window, window_for_assignment
-
-        fact = built_window(getattr(self, "llm", None))
-        if fact is not None:
-            return int(fact.tokens)
-        try:
-            from maljan.core.model_assignments import assignment_chain_for
-
-            cfg = get_settings()
-            windows = [
-                window_for_assignment(cfg, assignment, probe=False)
-                for assignment in assignment_chain_for(cfg, self.name)
-            ]
-        except Exception as exc:  # noqa: BLE001 — no window is no point, never a lost loop
-            self.logger.debug("%s: its own window is not known (%s).", self.name, exc)
-            return None
-        known = [int(w.tokens) for w in windows if w.source != FALLBACK and int(w.tokens) > 0]
-        return min(known) if known else None
-
-    def _tool_answer_clearing(self) -> ToolAnswerClearing:
-        """This loop's clearing: after a refusal, and before a prompt past the agent's own window.
-
-        A provider's refusal of a request as over its window clears whatever
-        else is known. The window point is the window the agent's own model
-        serves (:meth:`_own_window_tokens`), in the budget's characters: a
-        prompt past it is refused by every server.
-        """
-        window = self._own_window_tokens()
-        return ToolAnswerClearing(
-            window_chars=chars_for_tokens(window, self._clearing_per_token()) if window else None
-        )
-
-    def _cleared_request(
-        self,
-        clearing: ToolAnswerClearing,
-        sent: list[Any],
-        on_clear: Callable[[Clearing], None] | None,
-        offered: Callable[[], bool] | None = None,
-    ) -> tuple[list[Any], int]:
-        """``sent`` with the loop's clears in place, and the characters newly cleared.
-
-        Where a clear is due and the loop does not offer ``read_evidence`` yet
-        (``offered``), raises :class:`OfferReadAgainFirst` instead: the loop
-        builds its graph again with the tool and sends the turn again. Never
-        raises otherwise.
-        """
-        per_token = self._clearing_per_token()
-
-        def reported(messages: list[Any]) -> tuple[int, int]:
-            return _reported_request(messages, per_token)
-
-        extra = self._definitions_sent() + self._replayed_run_state_chars()
-        try:
-            if offered is not None and not offered():
-                due = clearing.due(
-                    sent, extra_chars=extra, measure=_message_chars, reported=reported
-                )
-            else:
-                due = False
-        except Exception as exc:  # noqa: BLE001 — a clear never costs a turn
-            self.logger.debug("%s: tool answers not cleared (%s).", self.name, exc)
-            return sent, 0
-        if due:
-            raise OfferReadAgainFirst()
-        try:
-            fitted = clearing.fit(
-                sent,
-                extra_chars=extra,
-                measure=_message_chars,
-                reported=reported,
-                turn=sum(1 for m in sent if is_model_turn(m)) + 1,
-            )
-        except Exception as exc:  # noqa: BLE001 — a clear never costs a turn
-            self.logger.debug("%s: tool answers not cleared (%s).", self.name, exc)
-            return sent, 0
-        if fitted.clearing is not None and on_clear is not None:
-            try:
-                on_clear(fitted.clearing)
-            except Exception as exc:  # noqa: BLE001 — a record never costs a turn
-                self.logger.debug("%s: a clear was not recorded (%s).", self.name, exc)
-        return fitted.messages, fitted.freed_before_report
-
-    def _note_clearing(self, clearing: Clearing) -> None:
-        """Say one clear in the agent's log and as a ``tool_answers_cleared`` event."""
-        why = (
-            "the model server refused the request as over its window"
-            if clearing.why == CLEARED_FOR_REFUSAL
-            else "the request's prompt is past the model's own window"
-        )
-        self.logger.info(
-            "%s: cleared %d old tool answer(s) to ledger references at turn %d, because %s: "
-            "the request went from %d to %d characters of context (clearing starts past %d and "
-            "clears to %d).",
-            self.name,
-            clearing.answers,
-            clearing.turn,
-            why,
-            clearing.chars_before,
-            clearing.chars_after,
-            clearing.point_chars,
-            clearing.target_chars,
-        )
-        from maljan.pipeline.events import emit_tool_answers_cleared
-
-        emit_tool_answers_cleared(
-            self._event_sink(),
-            agent=str(self.name),
-            stage=str(getattr(self, "pipeline_stage", "") or "analysis"),
-            turn=clearing.turn,
-            answers=clearing.answers,
-            chars_before=clearing.chars_before,
-            chars_after=clearing.chars_after,
-            why=clearing.why,
-        )
 
     def execute_tool_loop(self, prompt_messages: list) -> str:
         """Run the tool loop (``_run_tool_loop``) and let go of its run-state copies.

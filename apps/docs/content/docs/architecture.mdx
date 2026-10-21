@@ -518,7 +518,10 @@ Then the static provider's anti-analysis scan (`analysis.anti_analysis`),
 asked through `StaticProvider.anti_analysis_scan` of the run's configured
 static provider first and then of each other static provider of the run's
 profile; the first that can scan makes it, a provider's sentence saying why it cannot is recorded only when none can, and with none offering a scan there is no entry.
-Ghidra's is its `find_anti_analysis_techniques`
+The pack records the scan under the step name `anti_analysis_scan`; entries
+stored under its old name, `find_anti_analysis_techniques`, and a
+`triage.steps` declaration naming the step by that id, are still read as the
+same step. Ghidra's is its `find_anti_analysis_techniques`
 (`providers.static.ghidra.passes`), the sample opened the way the sink
 pre-pass opens it (load, switch, auto-analysis). Ghidra's answer is kept whole, each address also as an offset
 from the image base Ghidra reports, and only its exact part is stated: an
@@ -3861,7 +3864,8 @@ the provider's recovery drops them. The nudge and the salvage after the loop
 send the cleared answers as the loop last sent them and bind the tools the loop
 last offered. Each clear is in the agent's log and is published as
 `tool_answers_cleared` (agent, turn, answers, characters before and after, and
-`refused` or `window`). The judge's tool loop does not clear. The code is
+`refused` or `window`). The judge's tool loop clears the same way, with the
+same `read_evidence` tool offered from its first clear. The code is
 `maljan.agents.tool_answer_clearing`.
 
 **An answer wider than the prompt allows.** Before any of that, a tool result

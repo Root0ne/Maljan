@@ -112,7 +112,12 @@ STRING_TOOLS = frozenset({"strings", "floss", "iocs_from_file", "list_strings"})
 # ``evidence_bundles._SECTION_TOOL_HINTS``: which captured outputs each
 # composer section was shown, by a part of the tool's name.
 SECTION_TOOL_HINTS: dict[str, tuple[str, ...]] = {
-    "packing_obfuscation": ("list_segments", "find_anti_analysis", "detect_malware_behaviors"),
+    "packing_obfuscation": (
+        "list_segments",
+        "find_anti_analysis",
+        "anti_analysis_scan",
+        "detect_malware_behaviors",
+    ),
     "cli_flags": ("decompile_function", "analyze_function_complete", "list_strings"),
     "encryption_scheme": (
         "detect_crypto_constants",
@@ -124,6 +129,7 @@ SECTION_TOOL_HINTS: dict[str, tuple[str, ...]] = {
     "persistence_detail": ("list_strings", "decompile_function", "analyze_api_call_chains"),
     "evasion_antiforensics": (
         "find_anti_analysis_techniques",
+        "anti_analysis_scan",
         "detect_malware_behaviors",
         "decompile_function",
     ),

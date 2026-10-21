@@ -554,6 +554,13 @@ _PACK_TOOLS: dict[str, dict[str, Any]] = {
     "yara_scan": _SIGNATURE_RULES,
     "api_capability": _API_CATALOGUE,
     "lolbin_lookup": _COMMAND_MATCH,
+    "anti_analysis_scan": {
+        "kind": "anti_analysis_scan",
+        "report_sections": ["packing_obfuscation", "evasion_antiforensics"],
+    },
+    # The pack's scan step was recorded under this name (Ghidra's own tool's)
+    # before it was renamed (``pack_steps.LEGACY_STEP_NAMES``): a stored run's
+    # entries still read as the kind they were.
     "find_anti_analysis_techniques": {
         "kind": "anti_analysis_scan",
         "report_sections": ["packing_obfuscation", "evasion_antiforensics"],
