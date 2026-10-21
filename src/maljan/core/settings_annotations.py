@@ -16,7 +16,9 @@ into the group's closed "Advanced" disclosure.
 
 from __future__ import annotations
 
-from typing import Literal, NotRequired, TypedDict
+from collections.abc import Callable
+from pathlib import PurePosixPath
+from typing import Any, Literal, NotRequired, TypedDict
 
 
 class Annotation(TypedDict):
@@ -62,6 +64,19 @@ RENAMED_SETTINGS: dict[str, str] = {
     "core.memory.qdrant_collection": "core.memory.qdrant.collection",
     "core.memory.qdrant_function_hash_collection": "core.memory.qdrant.function_hash_collection",
     "core.memory.qdrant_api_key": "core.memory.qdrant.api_key",
+    "core.static.r2.mirror_dir": "core.static.r2.work_dir",
+}
+
+
+def last_segment(value: Any) -> Any:
+    """A path's last segment; a value that is not text as it is."""
+    return PurePosixPath(value.replace("\\", "/")).name if isinstance(value, str) else value
+
+
+# The moved settings whose value changed form with the move, each with how the
+# old key's value is read as the new key's. The others keep their values.
+RENAMED_SETTING_VALUES: dict[str, Callable[[Any], Any]] = {
+    "core.static.r2.mirror_dir": last_segment,
 }
 
 
@@ -908,40 +923,6 @@ ANNOTATIONS: dict[str, Annotation] = {
         ),
         "order": -1,
         "choices_from": "memory_backends",
-    },
-    "memory.qdrant.collection": {
-        "title": "Qdrant case collection",
-        "description": (
-            "Qdrant collection name storing semantic case embeddings for few-shot "
-            "retrieval into the judge prompt. Bump this when migrating to a new "
-            "embedding scheme (e.g. a dimension change) rather than reusing an "
-            "incompatible old collection."
-        ),
-        "probe": "qdrant",
-        "applies_when": {"core.memory.backend": ["qdrant"]},
-    },
-    "memory.qdrant.function_hash_collection": {
-        "title": "Qdrant function-hash collection",
-        "description": (
-            "Separate Qdrant collection storing per-function normalized-opcode hashes "
-            "for the exact-match function-hash attribution tier, independent of the "
-            "fuzzy semantic case collection above."
-        ),
-        "applies_when": {"core.memory.backend": ["qdrant"]},
-    },
-    "memory.qdrant.url": {
-        "title": "Qdrant URL",
-        "description": ("URL of the Qdrant server backing long-term memory."),
-        "probe": "qdrant",
-        "applies_when": {"core.memory.backend": ["qdrant"]},
-    },
-    "memory.qdrant.api_key": {
-        "title": "Qdrant API key",
-        "description": (
-            "API key sent with every Qdrant request when the server enforces one (compose "
-            "does); empty means no authentication, which is fine for a loopback-only server."
-        ),
-        "applies_when": {"core.memory.backend": ["qdrant"]},
     },
     "memory.top_k": {
         "title": "Memory top-K",
@@ -2002,18 +1983,6 @@ ANNOTATIONS.update(
             "probe": "r2",
             "subgroup": "Connection",
         },
-        "static.r2.mirror_dir": {
-            "title": "radare2 sample directory",
-            "description": (
-                "Host directory the sample is copied into so radare2 can open it by "
-                "path, hardened the way every mirror is: owner-only, and removed when "
-                "the job ends. It may not be hidden. radare2 rejects any path with a "
-                "'/.' segment, so a sample under one makes every r2 tool call answer "
-                "'Failed to open file.'"
-            ),
-            "applies_when": _STATIC_R2,
-            "subgroup": "Connection",
-        },
         "static.capa.rules_dir": {
             "title": "capa rules directory",
             "description": (
@@ -2259,6 +2228,16 @@ ANNOTATIONS.update(
         "static.r2", "radare2 MCP", probe="r2", applies_when=_STATIC_R2, provider_owned=True
     )
 )
+ANNOTATIONS["static.r2.work_dir"] = {
+    **ANNOTATIONS["static.r2.work_dir"],
+    "description": (
+        "Directory under the worker's samples directory the sample is copied into so "
+        "radare2 can open it by path, hardened the way every mirror is: owner-only, and "
+        "removed when the job ends. It may not be hidden. radare2 rejects any path with a "
+        "'/.' segment, so a sample under one makes every r2 tool call answer 'Failed to "
+        "open file.'"
+    ),
+}
 ANNOTATIONS.update(
     mcp_server_annotations(
         "sandbox.cape2.mcp", "CAPE MCP", applies_when=_SANDBOX_CAPE2, provider_owned=True

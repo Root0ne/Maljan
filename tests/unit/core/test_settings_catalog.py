@@ -3,8 +3,16 @@ from maljan.core.settings_annotations import ANNOTATIONS, GROUP_ORDER
 
 
 def test_every_leaf_is_annotated_and_no_annotation_is_orphaned():
+    from maljan.memory.store_factory import registered_backends
+
     leaves = {leaf.path for leaf in cat.core_leaves()}
-    annotated = set(ANNOTATIONS)
+    # A memory backend annotates its own leaves where it registers (Qdrant included).
+    own = {
+        f"memory.{backend_id}.{leaf}"
+        for backend_id, backend in registered_backends().items()
+        for leaf in backend.annotations
+    }
+    annotated = set(ANNOTATIONS) | own
     assert leaves - annotated == set(), f"unannotated settings: {sorted(leaves - annotated)}"
     missing = sorted(annotated - leaves)
     assert annotated - leaves == set(), f"annotations for missing settings: {missing}"

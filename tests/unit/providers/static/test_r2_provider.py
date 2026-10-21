@@ -43,9 +43,9 @@ def test_the_prompt_fragment_names_r2_tools_and_no_ghidra_tool():
 
 def test_the_mirror_spec_uses_the_configured_directory():
     cfg = _cfg()
-    cfg.static.r2.mirror_dir = "data/samples/.work"
+    cfg.static.r2.work_dir = "r2-elsewhere"
     spec = R2StaticProvider.from_settings(cfg).mirror_spec()
-    assert spec is not None and spec.work_subdir == ".work"
+    assert spec is not None and spec.work_subdir == "r2-elsewhere"
 
 
 def test_the_mirror_spec_has_no_container_prefix():
@@ -112,8 +112,8 @@ def _hidden_segments(path: str) -> list[str]:
 def test_the_r2_mirror_directory_is_not_hidden() -> None:
     """The default the operator inherits must be one r2 can actually open."""
     cfg = _cfg()
-    assert _hidden_segments(cfg.static.r2.mirror_dir) == [], (
-        f"r2 cannot open a sample under a hidden directory: {cfg.static.r2.mirror_dir!r}"
+    assert _hidden_segments(cfg.static.r2.work_dir) == [], (
+        f"r2 cannot open a sample under a hidden directory: {cfg.static.r2.work_dir!r}"
     )
 
 
@@ -123,7 +123,7 @@ def test_the_mirror_spec_carries_no_hidden_segment() -> None:
     assert not subdir.startswith("."), f"r2 mirror subdirectory is hidden: {subdir!r}"
 
 
-def test_a_hidden_mirror_directory_is_rejected_at_settings_validation() -> None:
+def test_a_hidden_work_directory_is_rejected_at_settings_validation() -> None:
     """An operator who points it back at `.work` is told why, not left with a
     provider that silently analyses nothing."""
     import pytest
@@ -132,53 +132,81 @@ def test_a_hidden_mirror_directory_is_rejected_at_settings_validation() -> None:
     from maljan.core.config import StaticR2Config
 
     with pytest.raises(ValidationError) as excinfo:
-        StaticR2Config(mirror_dir="data/samples/.hidden")
+        StaticR2Config(work_dir=".hidden")
     message = str(excinfo.value)
     assert "hidden" in message.lower()
     assert "radare2" in message.lower() or "r2" in message.lower()
 
 
-def test_a_hidden_segment_anywhere_in_the_path_is_rejected() -> None:
+def test_an_ordinary_work_directory_is_accepted() -> None:
+    from maljan.core.config import StaticR2Config
+
+    assert StaticR2Config(work_dir="r2-work").work_dir == "r2-work"
+
+
+def test_a_work_directory_that_is_a_path_is_rejected() -> None:
+    """One name under the samples directory, as for every server: `..` and a
+    path resolve outside it."""
     import pytest
     from pydantic import ValidationError
 
     from maljan.core.config import StaticR2Config
 
-    with pytest.raises(ValidationError):
-        StaticR2Config(mirror_dir="data/.private/samples/r2-work")
+    for bad in ("data/samples/..", "..", ".", "data/samples/r2-work"):
+        with pytest.raises(ValidationError):
+            StaticR2Config(work_dir=bad)
 
 
-def test_an_ordinary_directory_is_accepted() -> None:
+def test_a_block_naming_no_directory_is_still_mirrored_somewhere_r2_can_open() -> None:
+    """The shipped name, never the shared hidden default (BUG 10)."""
+    cfg = _cfg()
+    cfg.static.r2.work_dir = ""
+    spec = R2StaticProvider.from_settings(cfg).mirror_spec()
+    assert spec.work_subdir == "r2-work"
+
+
+# ---------------------------------------------------------------------------
+# The earlier release's `mirror_dir` is read as `work_dir`.
+# ---------------------------------------------------------------------------
+
+
+def test_a_stored_mirror_dir_is_read_as_the_work_dir() -> None:
     from maljan.core.config import StaticR2Config
 
-    assert StaticR2Config(mirror_dir="data/samples/r2-work").mirror_dir == "data/samples/r2-work"
-    assert StaticR2Config(mirror_dir="./data/samples/r2-work").mirror_dir == (
-        "./data/samples/r2-work"
+    block = StaticR2Config(mirror_dir="data/samples/r2-elsewhere")
+    assert block.work_dir == "r2-elsewhere"
+    assert not hasattr(block, "mirror_dir")
+    assert StaticR2Config(mirror_dir="./data/samples/r2-work/").work_dir == "r2-work"
+    assert StaticR2Config(mirror_dir="data/samples/.").work_dir == "samples"
+
+
+def test_a_stored_work_dir_wins_over_a_stored_mirror_dir() -> None:
+    from maljan.core.config import StaticR2Config
+
+    block = StaticR2Config(mirror_dir="data/samples/old", work_dir="new")
+    assert block.work_dir == "new"
+
+
+def test_a_stored_mirror_dir_reaches_the_mirror_spec_through_the_settings() -> None:
+    from maljan.core.settings_overrides import build_settings
+
+    cfg = build_settings(
+        {
+            "static.provider": "r2",
+            "static.r2.enabled": True,
+            "static.r2.mirror_dir": "data/samples/r2-elsewhere",
+        }
     )
+    assert cfg.static.r2.work_dir == "r2-elsewhere"
+    assert R2StaticProvider.from_settings(cfg).mirror_spec().work_subdir == "r2-elsewhere"
 
 
-def test_a_traversal_mirror_directory_is_rejected() -> None:
-    """Wave-4 review F1: `data/samples/..` passed the hidden check — `..` was
-    explicitly excluded from it — and resolved outside samples_dir."""
+def test_a_stored_mirror_dir_that_was_never_valid_is_still_refused() -> None:
     import pytest
     from pydantic import ValidationError
 
     from maljan.core.config import StaticR2Config
 
-    for bad in ("data/samples/..", "..", "", ".", "data/samples/subdir/.."):
+    for bad in ("data/samples/..", "..", "", ".", "data/samples/.hidden"):
         with pytest.raises(ValidationError):
             StaticR2Config(mirror_dir=bad)
-
-
-def test_a_trailing_dot_is_normalised_rather_than_refused() -> None:
-    """`data/samples/.` is not one of the refused segments: path normalisation
-    drops the `.` first, so the last segment is `samples` and the value names
-    an ordinary subdirectory. Pinned because it is the surprising case — it is
-    accepted, and it means `<samples_dir>/samples`, not the samples directory
-    itself."""
-    from pathlib import Path as _Path
-
-    from maljan.core.config import StaticR2Config
-
-    cfg = StaticR2Config(mirror_dir="data/samples/.")
-    assert _Path(cfg.mirror_dir).name == "samples"

@@ -223,8 +223,8 @@ def _undeclared_memory_backends() -> dict[str, Any]:
 
 
 def _annotation(path: str, undeclared: Mapping[str, Any] | None = None) -> Any:
-    """``path``'s annotation: the shared table's, else the one its memory backend or LLM
-    provider declares for the leaves of its own settings."""
+    """``path``'s annotation: the shared table's, else the one its memory backend (the
+    shipped Qdrant one included) or LLM provider declares for its own settings' leaves."""
     found = ANNOTATIONS.get(path)
     if found is not None:
         return found
@@ -239,7 +239,9 @@ def _annotation(path: str, undeclared: Mapping[str, Any] | None = None) -> Any:
     if not path.startswith("memory."):
         return found
     backend_id, _, leaf = path[len("memory.") :].partition(".")
-    backend = _undeclared_memory_backends().get(backend_id)
+    from maljan.memory.store_factory import registered_backends
+
+    backend = registered_backends().get(backend_id)
     return backend.annotations.get(leaf) if backend is not None and leaf else None
 
 

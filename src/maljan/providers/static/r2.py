@@ -17,7 +17,6 @@ import re
 import shutil
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass
-from pathlib import Path
 from typing import TYPE_CHECKING, Any, ClassVar
 
 from maljan.core import builtin_declarations
@@ -419,13 +418,6 @@ class R2StaticProvider(GenericMCPStaticProvider):
         R2_LEAD, builtin_declarations.R2_WORKFLOW
     )
 
-    # ``StaticR2Config.mirror_dir``'s own default, kept here too: a provider
-    # built any way other than ``from_settings`` (there is none today, but the
-    # base class's constructor allows it) still gets a sane mirror spec — and,
-    # since BUG 10, one radare2 will actually open. It rejects any path with a
-    # ``/.`` segment, so this must never become a hidden directory again.
-    _mirror_dir: str = "data/samples/r2-work"
-
     @classmethod
     def from_settings(cls, cfg: Settings) -> R2StaticProvider:
         from maljan.core.config import MCPServerConfig
@@ -437,7 +429,6 @@ class R2StaticProvider(GenericMCPStaticProvider):
             MCPServerConfig.model_validate({**r2.model_dump(), "command": r2.binary_path}),
         )
         provider = cls(handle, label="radare2 MCP", prompt_lead_text=cls.R2_LEAD)
-        provider._mirror_dir = r2.mirror_dir
         provider._regard(cfg)
         return provider
 
@@ -568,12 +559,16 @@ class R2StaticProvider(GenericMCPStaticProvider):
         return True
 
     def mirror_spec(self) -> MirrorSpec:
-        """r2's own mirror directory (``mirror_dir``), seen at its block's ``sample_mount``.
+        """r2's own mirror directory (its block's ``work_dir``), seen at its ``sample_mount``.
 
         A stdio r2mcp shares the worker's filesystem, which the shipped empty
         mount says; a block that declares a mount is handed the path under it.
+        A block that names no directory gets the shipped one, never the shared
+        hidden ``DEFAULT_WORK_DIR``: radare2 rejects any path with a ``/.``
+        segment (BUG 10).
         """
         return MirrorSpec(
-            work_subdir=Path(self._mirror_dir).name,
+            work_subdir=str(self._cfg.work_dir or "")
+            or str(builtin_declarations.provider_declaration("r2")["work_dir"]),
             container_prefix=str(self._cfg.sample_mount or ""),
         )

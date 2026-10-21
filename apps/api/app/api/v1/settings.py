@@ -16,6 +16,7 @@ from maljan.core.plugins import ALLOW_LIST_KEY
 from maljan.core.settings_annotations import (
     GROUP_DESCRIPTIONS,
     GROUP_ORDER,
+    RENAMED_SETTING_VALUES,
     RENAMED_SETTINGS,
     RETIRED_SETTINGS,
 )
@@ -908,13 +909,14 @@ def _current_keys(values: dict[str, Any]) -> dict[str, Any]:
     """``values`` with each moved key read as the key that now holds it.
 
     An export written before a setting moved carries the old key; it is
-    imported as the new one, and a file carrying both keeps the new one's
+    imported as the new one (its value read as the new key holds it, where the
+    form changed with the move), and a file carrying both keeps the new one's
     value.
     """
     out = {key: value for key, value in values.items() if key not in RENAMED_SETTINGS}
     for old, new in RENAMED_SETTINGS.items():
         if old in values and new not in out:
-            out[new] = values[old]
+            out[new] = RENAMED_SETTING_VALUES.get(old, lambda value: value)(values[old])
     return out
 
 
