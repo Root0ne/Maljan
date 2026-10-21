@@ -158,11 +158,25 @@ class WhoisClient:
 
 
 def _is_public_ip(address: str) -> bool:
+    """Whether an address is one a registry or a GeoIP database can say something about.
+
+    Private, loopback, link-local, multicast, reserved and unspecified
+    addresses are refused: a lookup of one answers nothing true and sends an
+    internal address to a third party. The sample's own observed flows to such
+    addresses (lateral movement) are kept as network facts, not enriched.
+    """
     try:
         ip = ipaddress.ip_address(address)
     except ValueError:
         return False
-    return not (ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_multicast)
+    return not (
+        ip.is_private
+        or ip.is_loopback
+        or ip.is_link_local
+        or ip.is_multicast
+        or ip.is_reserved
+        or ip.is_unspecified
+    )
 
 
 async def _try_ipwhois(address: str) -> str | None:

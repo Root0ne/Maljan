@@ -136,8 +136,10 @@ class APISettings(BaseSettings, PlatformSecrets):
     #
     # The grace period has an end, and the end is written down rather than
     # remembered: ``jwt_previous_secret_not_after`` is the moment after which a
-    # token signed with the old secret is refused, and a previous secret
-    # configured without one is a bootstrap refusal. An old signing secret that
+    # token signed with the old secret is refused. A previous secret configured
+    # without one is accepted with no end and warned about at every start (an
+    # upgrade may not log out a rotation already under way); a value that does
+    # not read as a moment is the bootstrap refusal. An old signing secret that
     # nobody remembers to clear is a key that stays accepted for the life of
     # the deployment, which is the whole risk rotating was meant to remove.
     # ``/system/status`` and the startup log say that a grace secret is

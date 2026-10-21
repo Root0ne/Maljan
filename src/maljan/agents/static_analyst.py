@@ -312,7 +312,15 @@ class StaticAnalyst(BaseAnalyst):
                 summarizer = container.get_function_summarizer()
                 if summarizer is not None:
                     guardrail = summarizer.summarize_chunk
+        rest_hook = None
+        owner = getattr(self, "_container", None)
+        if owner is not None:
+            try:
+                rest_hook = owner.get_server_registry().rest_hook()
+            except Exception:  # noqa: BLE001 - a rest is then logged, not recorded
+                rest_hook = None
         return StaticJobContext(
+            on_server_rest=rest_hook,
             job_key=str(getattr(self, "_job_id", "") or ""),
             host_sample_path=getattr(self, "_host_sample_path", None),
             mirror_sample_path=getattr(self, "_analysis_file_path", None),

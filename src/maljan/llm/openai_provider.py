@@ -415,6 +415,67 @@ def with_per_request_llama_cap(chat_class: Any) -> Any:
     return capped
 
 
+# One subclass per chat class, server root and key, as for ``_TIMED_CLASSES``.
+_SPECIAL_TOKEN_CLASSES: dict[tuple[type, str, str], type] = {}
+
+
+def with_special_tokens_written_out(
+    chat_class: Any, base_url: str | None, api_key: str, model: str = ""
+) -> Any:
+    """``chat_class`` sending no control token of the local server in a message's text.
+
+    A llama.cpp-style server parses special tokens in every message with no
+    per-request switch, so a tool answer carrying ``<|im_start|>system`` is a
+    new turn to it. Each request's message contents and tool-call arguments
+    have every control token written out (``maljan.llm.special_tokens``); a
+    span the server has not yet said is plain text is written out too, and a
+    server that cannot be read leaves every span shaped like a token written
+    out. Applied only where the llama.cpp extras are sent, so a hosted API's
+    request is sent as langchain built it.
+    """
+    root = _server_root(base_url)
+    headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
+    if root:
+        # Read now, off the request path, so the first request finds the verdicts.
+        from maljan.llm.special_tokens import prefetch
+
+        prefetch(root, headers, model)
+    if (
+        not root
+        or not isinstance(chat_class, type)
+        or not hasattr(chat_class, "_get_request_payload")
+    ):
+        return chat_class
+    key = (chat_class, root, api_key)
+    cached = _SPECIAL_TOKEN_CLASSES.get(key)
+    if cached is not None:
+        return cached
+    base: Any = chat_class
+
+    def _get_request_payload(self: Any, input_: Any, *, stop: Any = None, **kwargs: Any) -> Any:
+        from maljan.llm.special_tokens import written_out_of_payload
+
+        payload = base._get_request_payload(self, input_, stop=stop, **kwargs)
+        if isinstance(payload, dict):
+            written_out_of_payload(payload, root)
+        return payload
+
+    written = type(
+        chat_class.__name__, (chat_class,), {"_get_request_payload": _get_request_payload}
+    )
+    written.__module__ = __name__
+    written.__qualname__ = chat_class.__qualname__
+    _SPECIAL_TOKEN_CLASSES[key] = written
+    return written
+
+
+def _server_root(base_url: str | None) -> str:
+    """The server's root, with an OpenAI-compatible ``/v1`` suffix removed."""
+    from maljan.llm.context_window import _root_of
+
+    return _root_of(base_url)
+
+
 # One subclass per chat class seen and reasoning rule, as for ``_TIMED_CLASSES``.
 _STREAMED_LLAMA_CLASSES: dict[tuple[type, bool], type] = {}
 
@@ -1360,7 +1421,20 @@ class OpenAIProvider(LLMProvider):
             # llama.cpp reads its cap from the extras; a cap bound for one call
             # reaches them the way the model's own does. Its answer is read
             # as a stream and joined into the one it would have sent whole.
-            chat_class = with_streamed_llama_answers(with_per_request_llama_cap(chat_class))
+            chat_class = with_streamed_llama_answers(
+                with_special_tokens_written_out(
+                    with_per_request_llama_cap(chat_class),
+                    base_url,
+                    api_key.get_secret_value(),
+                    model,
+                )
+            )
+        elif compat == "llama_cpp" or (compat != "standard" and is_local_endpoint(base_url)):
+            # A local server the self-heal found refusing the llama.cpp extras
+            # still parses special tokens in its messages.
+            chat_class = with_special_tokens_written_out(
+                chat_class, base_url, api_key.get_secret_value(), model
+            )
         # A provider saying "not now" is asked again, a whole request at a
         # time, as the Anthropic provider's model is (``maljan.llm.transient``).
         chat_class = with_transient_retries(chat_class)

@@ -112,12 +112,13 @@ SHORTENING_BUDGET_SECONDS = 1.0
 # under eight megabytes — and far enough below the shapes that cost a second
 # that the two together are a real bound rather than a stated one.
 #
-# Nothing about the limit an answer is shortened *to* moves this. That limit is
-# now derived from the served model's context window and can be far larger than
-# the 6,000 characters it replaced, but this bounds what *arrives* — what the
-# tool server sent — and a tool sends what it sends whatever the model can
-# read. The parse-cost measurement above is therefore the whole argument, and
-# it is unchanged.
+# Measured at 8, 10 and 12 MB, by shape (T-112), with the wall off: a list of
+# rows shortens in 0.30 s at 8 MB and 0.37 s at 10 MB, a list of integers in
+# 0.29 s and 0.35 s, and a wide object of small objects, the costliest shape
+# and one that cannot be shortened, is read in 0.58 s, 0.76 s and 0.91 s at 8,
+# 10 and 12 MB. Linear in the size, about 0.04 to 0.08 s per megabyte, so the
+# whole range up to the constant stays inside ``SHORTENING_BUDGET_SECONDS``
+# and the constant stands as stated.
 MAX_SHORTENABLE_CHARS = 12_000_000
 
 # A subtree under this key is never touched. A returned error is the one answer

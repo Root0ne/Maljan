@@ -607,12 +607,17 @@ def _provider_tools(container: Any, definition: AgentDefinition, provider_id: st
     # as they do for a built-in role's own provider: a toolkit opened without
     # them records nowhere and cuts at the signature's default rather than at
     # the number the operator set.
+    try:
+        rest_hook = container.get_server_registry().rest_hook()
+    except Exception:  # noqa: BLE001 - a rest is then logged, not recorded
+        rest_hook = None
     provider.open(
         StaticJobContext(
             job_key=container.job_key(),
             max_output_chars=int(container.config.preprocessing.max_tool_output_chars),
             truncation_ledger=container.get_truncation_ledger(),
             context_budget=container.get_context_budget(),
+            on_server_rest=rest_hook,
         )
     )
     from maljan.agents.prompt_fragments import PROVIDER_FAMILY, provider_source, stamp_source

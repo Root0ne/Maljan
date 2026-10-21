@@ -31,7 +31,7 @@ from maljan.enrichment.declared import (
     annotate_age,
     declared_verdict,
 )
-from maljan.enrichment.whois_client import WhoisClient
+from maljan.enrichment.whois_client import WhoisClient, _is_public_ip
 from maljan.extractors.attribution import populate_similar_samples
 from maljan.extractors.network_extractor import (
     domain_is_corroborated,
@@ -100,21 +100,6 @@ def _carry_seeded_context(prev: Any, rep: dict[str, Any]) -> None:
         return
     rep[LINK_FIELD] = link
     rep[LINK_SOURCE_FIELD] = given_by
-
-
-def _is_public_ip(address: str) -> bool:
-    try:
-        addr = ipaddress.ip_address(address)
-    except ValueError:
-        return False
-    return not (
-        addr.is_private
-        or addr.is_loopback
-        or addr.is_multicast
-        or addr.is_reserved
-        or addr.is_link_local
-        or addr.is_unspecified
-    )
 
 
 # A hidden service is the one name this refuses that the export does not. The
