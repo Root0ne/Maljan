@@ -600,3 +600,183 @@ class TestRetryAfter:
         when = format_datetime(datetime.now(UTC) + timedelta(minutes=5), usegmt=True)
         response = httpx.Response(503, request=_request(), headers={"retry-after": when})
         assert retry_after_seconds(APIStatusError("busy", response=response, body=None)) is None
+
+
+class TestAFallbackAttemptIsAdmittedAtItsOwnPrice:
+    @staticmethod
+    def _list(ceiling: float, prices: dict[str, Any]) -> tuple[FallbackChatModel, Any, list[Any]]:
+        from maljan.core.spend import SpendMeter
+        from maljan.core.token_ledger import TokenLedger
+        from maljan.llm.context_window import OutputCap, record_built_cap
+
+        ledger = TokenLedger(spend=SpendMeter(ceiling, prices, table={}))
+        down = APIConnectionError(request=_request())
+        chain, models = _chain([down], ["answer"])
+        object.__setattr__(models[0], "model_name", "first")
+        object.__setattr__(models[1], "model_name", "second")
+        seen: list[Any] = []
+        original = models[1]._next
+
+        def _recording() -> ChatResult:
+            seen.append(True)
+            return original()
+
+        object.__setattr__(models[1], "_next", _recording)
+        record_built_cap(chain, OutputCap(tokens=1_000, sentence="test"))
+        return chain, ledger, seen
+
+    # 1,000 output tokens cost 0.1 USD at one model and 0.001 at the other.
+    FIRST_DEAR = {
+        "first": {"input_usd_per_mtok": 0.0, "output_usd_per_mtok": 100.0},
+        "second": {"input_usd_per_mtok": 0.0, "output_usd_per_mtok": 1.0},
+    }
+    SECOND_DEAR = {
+        "first": {"input_usd_per_mtok": 0.0, "output_usd_per_mtok": 1.0},
+        "second": {"input_usd_per_mtok": 0.0, "output_usd_per_mtok": 100.0},
+    }
+
+    @staticmethod
+    def _admit(ledger: Any, slot: Any, kind: str = "static") -> None:
+        ledger.spend.admit(
+            kind=kind,
+            model="first",
+            prompt_chars=100,
+            cap_tokens=1_000,
+            slot=slot,
+            holdable=True,
+        )
+
+    def test_a_dead_primary_s_reservation_does_not_refuse_a_cheaper_fallback(self) -> None:
+        chain, ledger, seen = self._list(0.1005, self.FIRST_DEAR)
+        slot = object()
+        self._admit(ledger, slot)
+        assert chain.invoke([HumanMessage(content="x")]).content == "answer"
+        assert seen == [True]
+        # The attempt replaced the failed model's reservation under the same slot.
+        assert list(ledger.spend._reserved) == [slot]
+        assert ledger.spend._reserved[slot] < 0.01
+        ledger.spend.release(slot)
+        assert not ledger.spend._reserved
+
+    def test_a_fallback_the_ceiling_cannot_pay_for_is_not_called_and_says_what_is_left(
+        self,
+    ) -> None:
+        from maljan.core.spend import SpendCeilingStop
+
+        chain, ledger, seen = self._list(0.011, self.SECOND_DEAR)
+        slot = object()
+        self._admit(ledger, slot)
+        with pytest.raises(SpendCeilingStop) as stopped:
+            chain.invoke([HumanMessage(content="x")])
+        assert seen == []
+        # What the ceiling leaves with the failed model's own reservation
+        # taken off: all 0.0110 USD, not the 0.0100 it held.
+        assert "0.0110 USD it may spend" in str(stopped.value)
+        ledger.spend.release(slot)
+
+    def test_a_fallback_the_ceiling_pays_for_answers_under_the_callers_slot(self) -> None:
+        chain, ledger, seen = self._list(1.0, self.SECOND_DEAR)
+        slot = object()
+        self._admit(ledger, slot)
+        assert chain.invoke([HumanMessage(content="x")]).content == "answer"
+        assert seen == [True]
+        assert list(ledger.spend._reserved) == [slot], "the attempt holds nothing of its own"
+
+    def test_an_unpriced_primary_does_not_let_a_paid_fallback_ignore_the_ceiling(self) -> None:
+        from maljan.core.spend import SpendCeilingStop
+
+        # Only the second model has a price: the first reserves nothing.
+        prices = {"second": self.SECOND_DEAR["second"]}
+        chain, ledger, seen = self._list(0.0005, prices)
+        slot = object()
+        self._admit(ledger, slot)
+        assert not ledger.spend._reserved
+        with pytest.raises(SpendCeilingStop) as stopped:
+            chain.invoke([HumanMessage(content="x")])
+        assert seen == []
+        assert "0.0005 USD it may spend" in str(stopped.value)
+        ledger.spend.release(slot)
+        assert not ledger.spend._active
+
+    def test_a_call_nobody_admitted_is_made_as_it_is(self) -> None:
+        chain, _ledger, seen = self._list(0.01, self.SECOND_DEAR)
+        assert chain.invoke([HumanMessage(content="x")]).content == "answer"
+        assert seen == [True]
+
+    def test_a_released_admission_is_not_borrowed_by_a_later_call(self) -> None:
+        chain, ledger, seen = self._list(0.011, self.SECOND_DEAR)
+        slot = object()
+        self._admit(ledger, slot)
+        ledger.spend.release(slot)
+        assert chain.invoke([HumanMessage(content="x")]).content == "answer"
+        assert seen == [True]
+        assert not ledger.spend._reserved
+
+    def test_the_async_path_admits_too(self) -> None:
+        from maljan.core.spend import SpendCeilingStop
+
+        chain, ledger, seen = self._list(0.011, self.SECOND_DEAR)
+        self._admit(ledger, object())
+        with pytest.raises(SpendCeilingStop):
+            asyncio.run(chain.ainvoke([HumanMessage(content="x")]))
+        assert seen == []
+
+    def test_a_loop_s_binding_carries_its_turn_s_admission(self) -> None:
+        import contextvars
+
+        from maljan.core.spend import SpendCeilingStop, current_admission
+        from maljan.llm.fallback import ADMISSION_KEY
+
+        chain, ledger, seen = self._list(0.011, self.SECOND_DEAR)
+        self._admit(ledger, object())
+        admission = current_admission()
+        assert admission is not None
+
+        def _turn() -> Any:
+            # A task that never admitted anything, as the loop's model node is.
+            return chain.invoke([HumanMessage(content="x")], **{ADMISSION_KEY: admission})
+
+        with pytest.raises(SpendCeilingStop):
+            contextvars.Context().run(_turn)
+        assert seen == []
+
+    def test_concurrent_calls_on_one_list_are_each_admitted_by_their_own(self) -> None:
+        import threading
+
+        from maljan.core.spend import SpendCeilingStop
+
+        chain, ledger, _seen = self._list(0.011, self.SECOND_DEAR)
+        outcomes: dict[str, str] = {}
+        barrier = threading.Barrier(2)
+
+        def _call(name: str, admitted: bool) -> None:
+            if admitted:
+                self._admit(ledger, object())
+            barrier.wait()
+            try:
+                chain.invoke([HumanMessage(content="x")])
+                outcomes[name] = "answered"
+            except SpendCeilingStop:
+                outcomes[name] = "refused"
+
+        threads = [
+            threading.Thread(target=_call, args=("admitted", True)),
+            threading.Thread(target=_call, args=("plain", False)),
+        ]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+        assert outcomes == {"admitted": "refused", "plain": "answered"}
+
+    def test_a_fallback_is_not_a_second_call_of_its_kind(self) -> None:
+        chain, ledger, _seen = self._list(1.0, self.SECOND_DEAR)
+        self._admit(ledger, object(), kind="verdict")
+        meter = ledger.spend
+        made = {k: list(v) for k, v in meter._calls_made.items()}
+        tail = {k: list(v) for k, v in meter._tail.items()}
+        largest = dict(meter._largest_prompt)
+        chain.invoke([HumanMessage(content="x")])
+        assert {k: list(v) for k, v in meter._calls_made.items()} == made
+        assert {k: list(v) for k, v in meter._tail.items()} == tail
+        assert meter._largest_prompt == largest

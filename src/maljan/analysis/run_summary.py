@@ -2226,8 +2226,15 @@ class RunSummaryBuilder:
             for arg in discussion_history
             if getattr(arg, "agent_name", "") == MEDIATOR_AGENT_NAME
         ]
-        sycophancy_events = sum(1 for arg in mediations if getattr(arg, "converged", None))
-        if sycophancy_detected and not (mediations and getattr(mediations[-1], "converged", None)):
+
+        def _flagged(arg: Any) -> bool:
+            # The flag the round kept, whatever flagged it; state written
+            # before it was kept says only through the convergence flags.
+            kept = getattr(arg, "sycophancy_flagged", None)
+            return bool(kept) if kept is not None else bool(getattr(arg, "converged", None))
+
+        sycophancy_events = sum(1 for arg in mediations if _flagged(arg))
+        if sycophancy_detected and not (mediations and _flagged(mediations[-1])):
             sycophancy_events += 1
 
         applicable = state.get("consensus_applicable", True) is not False

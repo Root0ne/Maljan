@@ -56,7 +56,14 @@ from maljan.core.config import get_settings
 from maljan.core.exceptions import AgentLoopCancelled, AnalystError, SampleNotOpened
 from maljan.core.input_meter import TOOL_LOOP, request_parts
 from maljan.core.logger import logger
-from maljan.core.spend import LOOP_TURN_CALL, SPEND_CAP, SpendCeilingStop, call_deadline_of
+from maljan.core.spend import (
+    LOOP_TURN_CALL,
+    SPEND_CAP,
+    SpendCeilingStop,
+    call_deadline_of,
+    carrying,
+    current_admission,
+)
 from maljan.core.token_ledger import (
     RETRY_DROPS_QUESTION_CALL,
     VALIDATION_RETRY_CALL,
@@ -987,7 +994,16 @@ def _hold_the_turn(binding: Any, llm: Any, held: int | None) -> None:
     if binding is None:
         return
     from maljan.llm.context_window import output_bound_kwargs
+    from maljan.llm.fallback import ADMISSION_KEY, FallbackChatModel
 
+    # The turn's own admission, for the model list that falls back in its
+    # place: a turn is called from another task than the one that admitted it.
+    if isinstance(llm, FallbackChatModel):
+        admission = current_admission()
+        if admission is None:
+            binding.kwargs.pop(ADMISSION_KEY, None)
+        else:
+            binding.kwargs[ADMISSION_KEY] = admission
     field = next(iter(output_bound_kwargs(llm, 1)), None)
     if field is None:
         return
@@ -2701,12 +2717,15 @@ def _submit_to_agent_loop(
     # (``llm.stream_watch``), carried to the loop's task: the task runs in the
     # loop thread's context, not the caller's.
     rule = current_rule()
+    # And the spend admission of the call the caller just made, which a model
+    # list's fallback attempts are admitted under (``core.spend.Admission``).
+    admission = current_admission()
 
     async def _tracked() -> Any:
         task = asyncio.current_task()
         if task is not None:
             running.append(task)
-        with watching(rule):
+        with watching(rule), carrying(admission):
             return await coro
 
     return asyncio.run_coroutine_threadsafe(_tracked(), loop), running
@@ -3368,6 +3387,8 @@ def _settle_an_unanswered_turn(
     *,
     asked: Sequence[Violation] = (),
     asked_detail: str = "",
+    answered_earlier: Sequence[Violation] = (),
+    answered_earlier_detail: str = "",
 ) -> AgentISR:
     """Keep ``isr`` as it was when its validation turn gave no answer, and say why.
 
@@ -3390,11 +3411,25 @@ def _settle_an_unanswered_turn(
         put = list(asked)
     said = asked_detail or detail
     sentence = f"{said[:1].upper()}{said[1:]}."
+    # Put in an earlier round that did answer, whose answer the later failure
+    # kept nobody from reading but the run: asked, and not kept.
+    earlier: set[Violation] | list[Violation]
+    try:
+        earlier = set(answered_earlier)
+    except TypeError:
+        earlier = list(answered_earlier)
+    earlier_said = answered_earlier_detail or said
+    earlier_sentence = f"{earlier_said[:1].upper()}{earlier_said[1:]}."
+
+    def _worded(v: Violation, kept: Violation) -> Violation:
+        if v in put:
+            return replace(v, message=f"{v.message} {sentence}", sentence="", asked=False)
+        if v in earlier:
+            return replace(v, message=f"{v.message} {earlier_sentence}", sentence="", asked=False)
+        return kept
+
     agent.validation_findings.extend(
-        replace(v, message=f"{v.message} {sentence}", sentence="", asked=False)
-        if v in put
-        else kept
-        for v, kept in zip(initial, unasked, strict=True)
+        _worded(v, kept) for v, kept in zip(initial, unasked, strict=True)
     )
     not_run = getattr(agent, "validation_not_run", None)
     if not isinstance(not_run, list):
@@ -6635,14 +6670,15 @@ class BaseAnalyst(BudgetMeter, ABC):
         from maljan.llm.context_window import accepts_output_bound
 
         target = self.llm if model is None else model
+        prompt_chars = (
+            _chars_of(messages) + self._definitions_sent() + self._replayed_run_state_chars()
+        )
         return cast(
             "int | None",
             meter.admit(
                 kind=kind,
                 model=self._model_label() or _model_label(self.llm),
-                prompt_chars=_chars_of(messages)
-                + self._definitions_sent()
-                + self._replayed_run_state_chars(),
+                prompt_chars=prompt_chars,
                 cap_tokens=self.output_cap_tokens(),
                 slot=slot,
                 holdable=accepts_output_bound(target) if holdable is None else holdable,
@@ -8754,6 +8790,11 @@ class BaseAnalyst(BudgetMeter, ABC):
             a_mark = len(artifacts) if isinstance(artifacts, list) else 0
             prose = self._capture_findings(text)
             parsed = self._text_to_isr(prose, isr.revision_round)
+            # The retry fixes the answer it was shown; it does not read the
+            # disputes section, so the dissent the answer stated stands. A
+            # fresh ISR without it would read as a convergence signal.
+            if not parsed.dissent_items and isr.dissent_items:
+                parsed.dissent_items = list(isr.dissent_items)
             if isinstance(findings, list):
                 parsed.findings = findings[f_mark:]
                 del findings[f_mark:]
@@ -9249,9 +9290,12 @@ class BaseAnalyst(BudgetMeter, ABC):
             )
             failed = describe_exception(exc)
             self.validation_retries += len(rounds_answered)
+            answered_tally = ValidationTally()
             for returned in rounds_answered:
-                for v in returned:
-                    self.validation_fed_back[v.code] = self.validation_fed_back.get(v.code, 0) + 1
+                answered_tally.count(returned)
+            for code, count in answered_tally.by_code.items():
+                self.validation_fed_back[code] = self.validation_fed_back.get(code, 0) + count
+            earlier_rounds = [v for returned in rounds_answered for v in returned]
             if round_asked:
                 return _settle_an_unanswered_turn(
                     self,
@@ -9260,6 +9304,8 @@ class BaseAnalyst(BudgetMeter, ABC):
                     f"not asked: the validation turn failed ({failed})",
                     asked=round_asked[0],
                     asked_detail=f"asked; no answer came ({failed})",
+                    answered_earlier=earlier_rounds,
+                    answered_earlier_detail=f"asked; the answer could not be kept ({failed})",
                 )
             if rounds_answered:
                 return _settle_an_unanswered_turn(
@@ -9267,7 +9313,7 @@ class BaseAnalyst(BudgetMeter, ABC):
                     isr,
                     initial,
                     f"not asked: the validation turn failed ({failed})",
-                    asked=rounds_answered[-1],
+                    asked=earlier_rounds,
                     asked_detail=f"asked; the answer could not be kept ({failed})",
                 )
             detail = f"not asked: the validation turn failed ({failed})"

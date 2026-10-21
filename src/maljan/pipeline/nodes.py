@@ -1551,6 +1551,47 @@ def hashes_read(container: Any, mirror_path: str) -> Any:
     return None
 
 
+def _reads_the_case_store(row: Any) -> bool:
+    """Whether the ledger entry's tool is declared as reading the case store.
+
+    The function-hash prior is such a tool, and so is any plug-in's own: read
+    from the declaration the entry recorded, never from a tool's name.
+    """
+    from maljan.analysis.tool_effects import entry_effects
+    from maljan.core.tool_declarations import NETWORK_CASE_STORE
+
+    try:
+        return bool(entry_effects(row).network == NETWORK_CASE_STORE)
+    except Exception:  # noqa: BLE001 — an entry that cannot be read is not the prior's
+        return False
+
+
+def _adopted_from_the_hint_alone(
+    family: str, bundle: Any, matches: list[dict[str, Any]], state: Any
+) -> bool:
+    """Whether ``family`` is a family the hash match hinted that the judge cites nothing else for.
+
+    Filed under such a family, a sample's hashes would feed the match that
+    hinted it: the next sample would be told the family by evidence the
+    corpus made itself. The judge's evidence ids count only when they resolve
+    in the run's ledger (compared without case) and are not entries of a tool
+    declared as reading the case store, the prior's own; a family backed by
+    one of those, or one no match named, is filed.
+    """
+    from maljan.memory.long_term_memory import family_key
+
+    key = family_key(family)
+    if not key or not any(family_key(str(row.get("family") or "")) == key for row in matches):
+        return False
+    cited = getattr(getattr(_assessment(bundle), "family", None), "evidence_ids", None) or []
+    own: dict[str, bool] = {}
+    for row in state.get("evidence_ledger") or []:
+        found = row.get("id") if isinstance(row, dict) else getattr(row, "id", None)
+        if found:
+            own[str(found).casefold()] = _reads_the_case_store(row)
+    return not any(own.get(str(eid).casefold()) is False for eid in cited)
+
+
 def _function_hash_attribution(
     container: ServiceContainer, state: AnalysisState, bundle: Any, decision: str = ""
 ) -> list[dict[str, Any]]:
@@ -1639,6 +1680,18 @@ def _function_hash_attribution(
             from maljan.reporting.models import stated_family
 
             family = stated_family(_assessed_family(bundle))
+            if (
+                family
+                and decision == FILED_VERDICT
+                and _adopted_from_the_hint_alone(family, bundle, report, state)
+            ):
+                logger.info(
+                    "Function-hash corpus: '%s' is not filed under %s: the judge named the "
+                    "family its own hash match hinted, citing no evidence of its own.",
+                    str(sample_id)[:16],
+                    family,
+                )
+                family = ""
             if family and decision == FILED_VERDICT:
                 container.hold_function_hashes(store, sample_id, family, functions)
                 handed_on = True
@@ -4668,6 +4721,7 @@ def make_negotiation_node(
                     stage=stage_key_of(stage, "debate"),
                     kind="system",
                 )
+            argument.sycophancy_flagged = bool(syco)
             if syco:
                 argument.converged = list(converged or [])
                 emit_agent_message(
@@ -4765,6 +4819,8 @@ def make_negotiation_node(
                         # above stays for old stored state, but nothing new
                         # should have to parse prose to learn this.
                         status=status,
+                        sycophancy_flagged=bool(syco),
+                        converged=list(converged or []) if syco else [],
                     )
                 ],
                 # A mediation that timed out still made the calls it made.

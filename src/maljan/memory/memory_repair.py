@@ -106,6 +106,12 @@ def _relabel_cases(client: Any, collection: str) -> int | None:
         texts = [str((pt.payload or {}).get("summary_text") or "") for pt in unlabelled]
         vectors, backend = encode_batch_with_backend(texts)
         if backend != model:
+            logger.warning(
+                "Memory repair: the embedding backend is %r, not %r; the case vectors "
+                "are left as they are.",
+                backend,
+                model,
+            )
             return None
         still = set(_still_unlabelled(client, collection, [pt.id for pt in unlabelled]))
         if not still:
@@ -131,7 +137,63 @@ def _relabel_cases(client: Any, collection: str) -> int | None:
             wait=True,
         )
         repaired += len(still)
+        _re_embed_changed_text(
+            client,
+            collection,
+            {pt.id: text for pt, text in zip(unlabelled, texts, strict=True) if pt.id in still},
+            model,
+        )
     return repaired
+
+
+def _re_embed_changed_text(
+    client: Any, collection: str, embedded: dict[Any, str], model: str
+) -> None:
+    """Give a point stored again during the repair the vector of its new text.
+
+    ``update_vectors`` cannot be made conditional on the text it embedded, so a
+    case stored again between the unlabelled check and the write keeps its new
+    text with the old vector. Read back once: a point whose text changed and
+    that carries the current backend's label (a case stored again is written
+    with its own label) is embedded again. A point stored yet again after this
+    read was written with a fresh vector of its own, so nothing is looped on.
+    """
+    from qdrant_client.models import PointVectors
+
+    from maljan.memory.embeddings import encode_batch_with_backend
+    from maljan.memory.qdrant_store import BACKEND_KEY
+
+    found = client.retrieve(
+        collection_name=collection,
+        ids=list(embedded),
+        with_payload=True,
+        with_vectors=False,
+    )
+    changed: dict[Any, str] = {}
+    for pt in found:
+        payload = pt.payload or {}
+        text = str(payload.get("summary_text") or "")
+        if text != embedded[pt.id] and payload.get(BACKEND_KEY) == model:
+            changed[pt.id] = text
+    if not changed:
+        return
+    vectors, backend = encode_batch_with_backend(list(changed.values()))
+    if backend != model:
+        logger.warning(
+            "Memory repair: %d case(s) stored again meanwhile were not embedded again: "
+            "the embedding backend is %r, not %r.",
+            len(changed),
+            backend,
+            model,
+        )
+        return
+    client.update_vectors(
+        collection_name=collection,
+        points=[
+            PointVectors(id=pid, vector=vec) for pid, vec in zip(changed, vectors, strict=True)
+        ],
+        wait=True,
+    )
 
 
 def _drop_ungated_function_hashes(client: Any, collection: str) -> int:

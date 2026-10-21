@@ -212,6 +212,75 @@ class TestAValidationTurnThatGaveNoAnswer:
         (record,) = analyst.drain_budget_records()
         assert record["validation"] == "asked; no answer came (TimeoutError)"
 
+    ROUND = (
+        "CLAIM: runs from memory\nEVIDENCE: fexecve [ev_0004]\nCONFIDENCE: 0.8\nTECHNIQUE: T9999\n"
+    )
+
+    def test_an_answer_that_could_not_be_kept_is_worded_so(self) -> None:
+        analyst = _timed_analyst(1.0, 400.0)
+        analyst._invoke_llm_with_timeout = lambda *a, **k: self.ROUND  # type: ignore[method-assign]
+        first = _with_unknown_id(analyst)
+
+        def _unreadable(*_a: Any, **_k: Any) -> Any:
+            raise ValueError("unreadable")
+
+        analyst._text_to_isr = _unreadable  # type: ignore[method-assign]
+        with patch("maljan.agents.base_agent.validity_check_available", return_value=True):
+            kept = analyst._validate_isr(first, "evidence fexecve")
+
+        assert kept is first
+        (validity,) = [v for v in analyst.validation_findings if v.code == VALIDITY_CODE]
+        assert validity.asked is False
+        assert "Asked; the answer could not be kept (ValueError)." in validity.message
+        assert analyst.validation_retries == 1
+        assert analyst.validation_fed_back.get(VALIDITY_CODE) == 1
+
+    def test_a_finding_put_in_an_earlier_round_is_not_called_not_asked(self) -> None:
+        from maljan.agents import base_agent
+
+        analyst = _timed_analyst(1.0, 400.0)
+        calls: list[int] = []
+
+        def _answers_once(*_a: Any, **_k: Any) -> str:
+            calls.append(1)
+            if len(calls) == 1:
+                return self.ROUND
+            raise TimeoutError("slow")
+
+        analyst._invoke_llm_with_timeout = _answers_once  # type: ignore[method-assign]
+        real = base_agent.retry_with_feedback_sync
+
+        def _two_rounds(*args: Any, **kwargs: Any) -> Any:
+            return real(*args, **{**kwargs, "max_retries": 2})
+
+        first = _with_unknown_id(analyst)
+        with (
+            patch("maljan.agents.base_agent.validity_check_available", return_value=True),
+            patch("maljan.agents.base_agent.retry_with_feedback_sync", _two_rounds),
+        ):
+            analyst._validate_isr(first, "evidence fexecve")
+
+        (validity,) = [v for v in analyst.validation_findings if v.code == VALIDITY_CODE]
+        assert validity.asked is False
+        assert "Asked; no answer came (TimeoutError)." in validity.message
+
+    def test_a_retry_keeps_the_dissent_the_answer_stated(self) -> None:
+        analyst = _timed_analyst(1.0, 400.0)
+        analyst._invoke_llm_with_timeout = lambda *a, **k: (  # type: ignore[method-assign]
+            "CLAIM: runs from memory\nEVIDENCE: fexecve [ev_0004]\nCONFIDENCE: 0.8\n"
+            "TECHNIQUE: NONE\n"
+        )
+        first = _with_unknown_id(analyst)
+        first.dissent_items = ["static: the sample is packed"]
+        with patch("maljan.agents.base_agent.validity_check_available", return_value=True):
+            kept = analyst._validate_isr(first, "evidence fexecve")
+
+        assert kept is not first, "the retry's answer is the one kept"
+        assert kept.dissent_items == ["static: the sample is packed"]
+        # A copy, and plain peer-claim text: no finding or claim number of the
+        # first answer is in it, so the retry's renumbering cannot reach it.
+        assert kept.dissent_items is not first.dissent_items
+
     def test_a_turn_that_failed_before_any_round_is_not_asked(self) -> None:
         analyst = _timed_analyst(1.0, 400.0)
         first = _with_unknown_id(analyst)

@@ -180,3 +180,83 @@ class TestAStoreErrorIsMasked:
 
         assert SECRET not in str(raised.value)
         assert "could not be read" in str(raised.value)
+
+
+class TestAFamilyAdoptedFromTheHintAloneIsNotFiledBack:
+    @staticmethod
+    def _run(evidence_ids: list[str], matched: str, ledger: list[Any] | None = None) -> list[Any]:
+        kept = _Hashes([("f1", "h1")])
+        provider = _provider(_Hashes())
+        filed: list[Any] = []
+        container = SimpleNamespace(
+            function_hashes_read=("/mirror/s.bin", kept),
+            get_static_provider=lambda: provider,
+            hold_function_hashes=lambda *args: filed.append(args),
+        )
+        bundle = SimpleNamespace(
+            x_maljan_assessment=SimpleNamespace(
+                family=SimpleNamespace(name="Emotet", evidence_ids=evidence_ids)
+            )
+        )
+        rows = [SimpleNamespace(func_hash="h1", family=matched, sample_id="old", func_name="f")]
+        with (
+            patch("maljan.memory.store_factory.acquire_function_hash_store", return_value=object()),
+            patch("maljan.memory.store_factory.release_function_hash_store"),
+            patch("maljan.memory.long_term_memory.match_functions", return_value=rows),
+            patch("maljan.memory.long_term_memory.memory_owner_of", return_value=""),
+        ):
+            nodes._function_hash_attribution(  # type: ignore[arg-type]
+                container,
+                {
+                    "static_sample_path": "/mirror/s.bin",
+                    "file_hash": "x",
+                    "evidence_ledger": ledger or [],
+                },
+                bundle,
+                nodes.FILED_VERDICT,
+            )
+        return filed
+
+    def test_the_hinted_family_with_no_evidence_of_its_own_is_not_filed(self) -> None:
+        assert self._run([], "emotet") == []
+
+    def test_the_hinted_family_with_evidence_of_its_own_is_filed(self) -> None:
+        ledger = [{"id": "e1", "tool": "strings"}]
+        assert len(self._run(["e1"], "Emotet", ledger)) == 1
+
+    def test_an_id_the_ledger_never_issued_is_no_evidence(self) -> None:
+        ledger = [{"id": "e1", "tool": "strings"}]
+        assert self._run(["e99"], "Emotet", ledger) == []
+
+    def test_the_shipped_priors_own_entry_is_no_evidence(self) -> None:
+        from maljan.core.config import Settings
+        from maljan.core.declared_reading import facts_record
+        from maljan.core.tool_declarations import ToolDeclarations
+
+        shipped = ToolDeclarations.from_settings(Settings(_env_file=None))
+        facts = facts_record("pack", "function_matches", declared=shipped)
+        ledger = [{"id": "e1", "tool": "function_matches", "source": "pack", "facts": facts}]
+        assert self._run(["e1"], "Emotet", ledger) == []
+
+    def test_a_plugin_prior_under_another_name_is_known_by_its_declaration(self) -> None:
+        reads_the_store = {"v": 1, "effects": {"network": "case_store"}}
+        ledger = [
+            {
+                "id": "e1",
+                "tool": "lookup_known_code",
+                "source": "mcp:plug",
+                "server": "plug",
+                "facts": reads_the_store,
+            },
+            {"id": "e2", "tool": "function_matches"},  # no record of its declaration
+        ]
+        assert self._run(["e1"], "Emotet", ledger) == []
+        # A tool that declares nothing about the case store is evidence.
+        assert len(self._run(["E2"], "Emotet", ledger)) == 1
+
+    def test_ids_are_compared_without_case(self) -> None:
+        ledger = [{"id": "EV_0001", "tool": "strings"}]
+        assert len(self._run(["ev_0001"], "Emotet", ledger)) == 1
+
+    def test_a_family_no_match_named_is_filed(self) -> None:
+        assert len(self._run([], "Qakbot")) == 1
