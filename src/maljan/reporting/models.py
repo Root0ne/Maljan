@@ -742,6 +742,36 @@ class TTPMapping(BaseModel):
     support: str = ""
 
 
+class AttckLink(BaseModel):
+    """One ATT&CK object a published technique links to, as the cached bundle states it."""
+
+    model_config = _STRICT_CONFIG
+
+    attck_id: str = ""
+    name: str = ""
+    # The relationship's own sentence on how it applies to the technique
+    # (mitigations); empty for a detection strategy or a data component.
+    text: str = ""
+
+
+class AttckDefenseRow(BaseModel):
+    """What ATT&CK itself lists against one published technique.
+
+    Read from the cached ATT&CK bundles with no model call
+    (``memory.attck_defense``); ``evidence_ids`` are the technique's own
+    sources, so the row cites what the technique rests on.
+    """
+
+    model_config = _STRICT_CONFIG
+
+    technique_id: str
+    technique_name: str = ""
+    mitigations: list[AttckLink] = Field(default_factory=list)
+    detection_strategies: list[AttckLink] = Field(default_factory=list)
+    data_components: list[AttckLink] = Field(default_factory=list)
+    evidence_ids: list[str] = Field(default_factory=list)
+
+
 # ---------------------------------------------------------------------------
 # Attribution
 # ---------------------------------------------------------------------------
@@ -1500,6 +1530,12 @@ class MalwareReport(BaseModel):
     # after being asked for one. A behaviour, reported as a behaviour: it is
     # never published as an ATT&CK technique, and it is not dropped either.
     unmapped_behaviours: list[str] = Field(default_factory=list)
+    # ATT&CK's own mitigations, detection strategies and data components for
+    # each published technique, from the cached bundles. Empty when no bundle
+    # is cached or ATT&CK lists nothing for the technique.
+    attck_defense: list[AttckDefenseRow] = Field(default_factory=list)
+    # The ATT&CK release those rows were read from; empty when there are none.
+    attck_defense_version: str = ""
 
     # --- Attribution ---
     attribution: FamilyAttribution = Field(default_factory=FamilyAttribution)

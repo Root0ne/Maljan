@@ -1716,6 +1716,9 @@ class MarkdownRenderer:
                     "Not written in this run: the report model gave no hunting note.",
                 )
             )
+        reference = _attck_detection_block(report)
+        if reference:
+            blocks.append(reference)
         return "\n\n".join([_heading(10, "Detection", PER_SUBSECTION), *blocks])
 
     # ------------------------------------------------------------------
@@ -1724,14 +1727,16 @@ class MarkdownRenderer:
 
     def _section_recommendations(self, report: MalwareReport, ctx: _Context) -> str:
         recs = report.defensive_recommendations
+        mitigations = _attck_mitigation_block(report)
         if not recs:
-            return "\n".join(
-                [
-                    _heading(11, "Recommendations", MEASURED),
-                    "",
-                    "Not written in this run: the report model gave no recommendation.",
-                ]
-            )
+            lines = [
+                _heading(11, "Recommendations", MEASURED),
+                "",
+                "Not written in this run: the report model gave no recommendation.",
+            ]
+            if mitigations:
+                lines.extend(["", mitigations])
+            return "\n".join(lines)
         lines = [_heading(11, "Recommendations", REPORT_MODEL), ""]
         lines.append(_row("Priority", "Category", "Action", "Rationale", "Technique"))
         lines.append(_divider(5))
@@ -1746,6 +1751,8 @@ class MarkdownRenderer:
                     rec.technique_id or "-",
                 )
             )
+        if mitigations:
+            lines.extend(["", mitigations])
         return "\n".join(lines)
 
     # ------------------------------------------------------------------
@@ -4044,6 +4051,77 @@ def _claims_not_discussed_lines(report: MalwareReport, ctx: _Context) -> list[st
 
 # The heading of the list of claims in force the body does not discuss.
 CLAIMS_NOT_DISCUSSED_TITLE = "Claims whose code locations or API names the body does not name"
+
+
+def _attck_detection_block(report: MalwareReport) -> str:
+    """ATT&CK's own detection strategies and data components for the published techniques."""
+    rows = [r for r in report.attck_defense if r.detection_strategies or r.data_components]
+    if not rows:
+        return ""
+    lines = [
+        _subheading("10.4", "ATT&CK detection data", REFERENCE),
+        "",
+        f"_ATT&CK's own detection strategies and the data components they read{_release(report)}, "
+        "for each technique this report publishes; the evidence is what the technique rests "
+        "on in this run._",
+        "",
+        _row("Technique", "Detection strategies", "Data components", "Evidence"),
+        _divider(4),
+    ]
+    for row in rows:
+        lines.append(
+            _row(
+                _technique_cell(row),
+                _links_cell(row.detection_strategies),
+                _links_cell(row.data_components),
+                _ids(row.evidence_ids) or "-",
+            )
+        )
+    return "\n".join(lines)
+
+
+def _attck_mitigation_block(report: MalwareReport) -> str:
+    """ATT&CK's own mitigations for the published techniques."""
+    rows = [r for r in report.attck_defense if r.mitigations]
+    if not rows:
+        return ""
+    lines = [
+        "**ATT&CK mitigations** · _" + REFERENCE + "_",
+        "",
+        f"_ATT&CK's own mitigations{_release(report)} for each technique this report publishes; "
+        "the evidence is what the technique rests on in this run._",
+        "",
+        _row("Technique", "Mitigation", "How it applies", "Evidence"),
+        _divider(4),
+    ]
+    for row in rows:
+        for link in row.mitigations:
+            lines.append(
+                _row(
+                    _technique_cell(row),
+                    _link_label(link),
+                    link.text or "-",
+                    _ids(row.evidence_ids) or "-",
+                )
+            )
+    return "\n".join(lines)
+
+
+def _release(report: MalwareReport) -> str:
+    version = _one_line(report.attck_defense_version)
+    return f" (ATT&CK {version})" if version else ""
+
+
+def _technique_cell(row: Any) -> str:
+    return f"{row.technique_id} {row.technique_name}".strip()
+
+
+def _link_label(link: Any) -> str:
+    return f"{link.attck_id} {link.name}".strip()
+
+
+def _links_cell(links: Iterable[Any]) -> str:
+    return "; ".join(_link_label(link) for link in links) or "-"
 
 
 def _heading(number: int, title: str, voice: str) -> str:

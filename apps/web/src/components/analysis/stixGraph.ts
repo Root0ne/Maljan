@@ -589,6 +589,8 @@ export function graphViewHint(objectCount: number): string | null {
 /** The file name a bundle downloads under: a draft never carries the export's. */
 export const STIX_EXPORT_FILE = "maljan-stix-bundle.json";
 export const STIX_DRAFT_FILE = "maljan-stix-bundle-draft.json";
+/** The ATT&CK Navigator layer of the techniques the report publishes. */
+export const NAVIGATOR_LAYER_FILE = "maljan-attack-layer.json";
 
 export interface StixAnswer {
   bundle: Record<string, unknown>;
