@@ -85,6 +85,7 @@ from maljan.core.tool_declarations import (
     check_roles,
     check_tool_facts_keys,
     check_work_dir,
+    compile_pattern,
     fill_declaration,
 )
 
@@ -2368,6 +2369,13 @@ class AgentDefinition(BaseModel):
     # pointed at the sandbox behaviour log without also becoming a dynamic
     # analyst. Naming the sources makes that a two-word edit.
     data_sources: list[str] = Field(default_factory=list)
+    # Where a source named in ``data_sources`` is cut into chunks when it does
+    # not fit one: a regular expression for the start of a unit (a function's
+    # header, a process's banner), as a source name's value. The source is
+    # split before each match, whole units packed into a chunk, as the
+    # built-in domains' own boundaries do. A source named nowhere here is cut
+    # as before: by the built-in boundary of its domain, else by a window.
+    chunk_boundary: dict[str, str] = Field(default_factory=dict)
     # How long one loop of this agent may run and how many steps it may take.
     # ``None`` means the deployment-wide ``react_agent_timeout`` /
     # ``react_agent_max_steps``, by way of the deprecated per-agent override
@@ -2401,6 +2409,9 @@ class AgentDefinition(BaseModel):
         dumped = handler(self)
         if isinstance(dumped, dict) and self.attck_techniques:
             dumped.pop("attck_techniques", None)
+        # Likewise ``chunk_boundary``: written only by a definition that names one.
+        if isinstance(dumped, dict) and not self.chunk_boundary:
+            dumped.pop("chunk_boundary", None)
         return dumped
 
     @model_validator(mode="before")
@@ -2427,6 +2438,24 @@ class AgentDefinition(BaseModel):
             if source in seen:
                 raise ValueError(f"data source {source!r} is listed twice")
             seen.add(source)
+        return self
+
+    @model_validator(mode="after")
+    def _chunk_boundaries_are_patterns_of_a_listed_source(self) -> "AgentDefinition":
+        for source, pattern in self.chunk_boundary.items():
+            if source not in self.data_sources:
+                raise ValueError(
+                    f"chunk_boundary names {source!r}, which is not in this agent's data_sources"
+                )
+            try:
+                compiled = compile_pattern(f"(?m){pattern}")
+            except ValueError as exc:
+                raise ValueError(f"chunk_boundary for {source!r}: {exc}") from exc
+            if compiled.search(""):
+                raise ValueError(
+                    f"chunk_boundary for {source!r} matches the empty text, so it would "
+                    "mark a unit start everywhere; name what a unit starts with"
+                )
         return self
 
     @field_validator("attck_techniques")

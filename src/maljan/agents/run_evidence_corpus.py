@@ -175,6 +175,22 @@ class RunEvidenceCorpus:
         with self._lock:
             return self._texts.get(str(entry_id or "").strip(), "")
 
+    def pages_of(self, entry_id: str) -> str:
+        """The pages of this entry the model read past what the ledger stored, lower-cased, joined.
+
+        A paged ``read_evidence`` call is kept under ``<id>@<offset>+<limit>``
+        (``evidence_recorder``); the pages belong to the entry they read.
+        """
+        prefix = f"{str(entry_id or '').strip()}@"
+        with self._lock:
+            return "\n".join(text for key, text in self._texts.items() if key.startswith(prefix))
+
+    def text_of_entry(self, entry_id: str) -> str:
+        """What the model read of one entry: its answer and every page of it, lower-cased."""
+        whole = self.text_for(entry_id)
+        pages = self.pages_of(entry_id)
+        return f"{whole}\n{pages}" if whole and pages else whole or pages
+
     def tool_of(self, entry_id: str) -> str:
         """Which tool answered this entry, or ``""``.
 
@@ -225,6 +241,15 @@ class RunEvidenceCorpus:
     def __len__(self) -> int:
         with self._lock:
             return len(self._texts)
+
+
+def read_of_entry(corpus: object, entry_id: str) -> str:
+    """What the model read of one entry per ``corpus``: its answer and the pages read of it.
+
+    A corpus that keeps no pages (a stored run's, a test's) gives its answer alone.
+    """
+    reader = getattr(corpus, "text_of_entry", None) or getattr(corpus, "text_for")  # noqa: B009
+    return str(reader(entry_id) or "")
 
 
 def state_of(corpus: object | None) -> CorpusState:

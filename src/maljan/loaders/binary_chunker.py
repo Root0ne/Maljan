@@ -107,6 +107,10 @@ CHUNK_CHARS = "chunk_chars"
 # How many characters a piece opens with that repeat the end of the piece
 # before it in its source (the overlap), so a carry never holds them twice.
 OVERLAP_IN = "overlap_in"
+# The unit-start pattern the source's declaration names (``AgentDefinition.
+# chunk_boundary``), on each chunk cut by it, so a later cut of the chunk
+# (:func:`within_the_room`) is made at the same boundary.
+BOUNDARY = "boundary"
 SIZED_BY_OPERATOR = "operator"
 SIZED_BY_ROOM = "room"
 SIZED_BY_UNKNOWN_WINDOW = "unknown_window"
@@ -366,7 +370,13 @@ def within_the_room(chunks: list, config: ChunkingConfig | None) -> list:
             out.append(chunk)
             continue
         chunker = chunker or BinaryChunker(config or ChunkingConfig())
-        pieces = chunker._split(str(chunk.domain), content, limit - reserve)
+        declared = facts.get(BOUNDARY)
+        pieces = chunker._split(
+            str(chunk.domain),
+            content,
+            limit - reserve,
+            str(declared) if isinstance(declared, str) else None,
+        )
         for piece in pieces:
             piece.metadata.update({k: v for k, v in facts.items() if k != OVERLAP_IN})
         if facts.get(OVERLAP_IN):
@@ -437,6 +447,7 @@ class ChunkStrategy(Enum):
     API_SEQUENCE = auto()  # Dynamic: splits at PID/process boundaries
     FLOW_SESSION = auto()  # Network: splits at flow delimiters
     SLIDING_WINDOW = auto()  # Fallback: fixed-size overlapping windows
+    DECLARED_BOUNDARY = auto()  # A source's own declared unit start (chunk_boundary)
 
 
 @dataclass
@@ -533,8 +544,14 @@ class BinaryChunker:
         self._config = config
         self._overlap_chars = chars_for_tokens(config.overlap_tokens, _CHARS_PER_TOKEN)
 
-    def chunk(self, domain: str, text: str, room: Room | None = None) -> list[TextChunk]:
+    def chunk(
+        self, domain: str, text: str, room: Room | None = None, boundary: str | None = None
+    ) -> list[TextChunk]:
         """Split `text` into LLM-safe chunks for the given domain.
+
+        ``boundary`` is the source's declared unit start (a regular expression,
+        ``AgentDefinition.chunk_boundary``): the text is cut before each match
+        instead of at the domain's built-in boundary. ``None`` cuts as before.
 
         A chunk holds what :func:`sized_chunk_chars` allows: the operator's
         ``max_tokens_per_chunk``, else the ``room`` the analyst's prompt has
@@ -580,12 +597,16 @@ class BinaryChunker:
             if reserve < max_chars:
                 size = max_chars - reserve
                 head = first - reserve if reserve < first else min(first, size)
-        chunks = self._sized(domain, text, size, head)
+        chunks = self._sized(domain, text, size, head, boundary)
         for chunk in chunks:
             chunk.metadata.update({SIZED_BY: sized_by, CHUNK_CHARS: max_chars})
+            if boundary:
+                chunk.metadata[BOUNDARY] = boundary
         return chunks
 
-    def _sized(self, domain: str, text: str, max_chars: int, first: int) -> list[TextChunk]:
+    def _sized(
+        self, domain: str, text: str, max_chars: int, first: int, boundary: str | None = None
+    ) -> list[TextChunk]:
         """``text`` as chunks of ``max_chars``, the first of ``first`` (at most ``max_chars``)."""
         if self._config.skip_if_fits and len(text) <= first:
             logger.debug(
@@ -596,14 +617,14 @@ class BinaryChunker:
             )
             return [self._make_single_chunk(domain, text, ChunkStrategy.SLIDING_WINDOW)]
         if first >= max_chars or len(text) <= first:
-            return self._split(domain, text, max_chars)
+            return self._split(domain, text, max_chars, boundary)
         # Only the head piece is smaller: what the node adds goes into it alone.
         # A rest of nothing but whitespace is no chunk of its own.
         if not text[first:].strip():
             return [self._make_single_chunk(domain, text[:first], ChunkStrategy.SLIDING_WINDOW)]
         overlap = self._overlap_within(first)
         start = first - overlap if first > overlap else first
-        rest = self._split(domain, text[start:], max_chars)
+        rest = self._split(domain, text[start:], max_chars, boundary)
         overlaps = [0, first - start] + [
             int(str(chunk.metadata.get(OVERLAP_IN, 0))) for chunk in rest[1:]
         ]
@@ -611,9 +632,17 @@ class BinaryChunker:
             domain, [text[:first], *(chunk.content for chunk in rest)], rest[0].strategy, overlaps
         )
 
-    def _split(self, domain: str, text: str, max_chars: int) -> list[TextChunk]:
-        """``text`` split at ``max_chars``: at the domain's boundaries, else by a sliding window."""
-        if domain in self._DOMAIN_STRATEGIES:
+    def _split(
+        self, domain: str, text: str, max_chars: int, boundary: str | None = None
+    ) -> list[TextChunk]:
+        """``text`` split at ``max_chars``: at the declared or domain boundaries, else a window."""
+        if boundary:
+            segments = self._split_at_declared(text, boundary)
+            if len(segments) > 1:
+                return self._pack_segments(
+                    domain, segments, ChunkStrategy.DECLARED_BOUNDARY, max_chars
+                )
+        elif domain in self._DOMAIN_STRATEGIES:
             pattern, strategy = self._DOMAIN_STRATEGIES[domain]
             segments = self._split_by_boundary(text, pattern)
             if len(segments) > 1:
@@ -662,6 +691,24 @@ class BinaryChunker:
     # ------------------------------------------------------------------
     # Private helpers
     # ------------------------------------------------------------------
+
+    @staticmethod
+    def _split_at_declared(text: str, boundary: str) -> list[str]:
+        """``text`` cut before each match of the declared pattern, nothing added or lost.
+
+        The pattern runs under RE2 (linear in the text, as every pattern an
+        operator declares) and the cut is at where each match starts, so a
+        group in the pattern never puts text of its own into a segment.
+        """
+        from maljan.core.tool_declarations import compile_pattern
+
+        starts = [m.start() for m in compile_pattern(f"(?m){boundary}").finditer(text)]
+        cuts = [0, *(at for at in starts if at > 0), len(text)]
+        return [
+            part
+            for part in (text[a:b] for a, b in zip(cuts, cuts[1:], strict=False))
+            if part.strip()
+        ]
 
     def _split_by_boundary(self, text: str, pattern: re.Pattern[str]) -> list[str]:
         """Split `text` at regex boundary positions, filtering empty segments."""

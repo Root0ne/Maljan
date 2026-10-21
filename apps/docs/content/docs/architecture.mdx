@@ -3847,7 +3847,12 @@ and the provider reads that whole request again uncached.
 `read_evidence` answers an id with the output the ledger keeps for it, sized by
 the job's guardrail. It is filed as a repeat of that entry and shown under its
 id, so the ledger, the byte budget and the run's corpus hold the answer once and
-no second citable id exists. Before the request that carries a loop's first
+no second citable id exists. With an optional `offset` (a byte position) or
+`limit` (bytes) it reads the answer page by page instead: from the full copy of
+a cut answer the job's store holds, else from the stored answer, each page
+opening with a line naming its bytes, its copy and where the next page starts.
+A call with neither is the read above, and a page's text reaches the run's
+corpus under its own key. Before the request that carries a loop's first
 clear the tool is nowhere — not in the loop's graph, the request or the
 no-tool-call question — so a loop that never clears sends what it always sent;
 the graph is built again with it before that request. On a prefix-bound Claude

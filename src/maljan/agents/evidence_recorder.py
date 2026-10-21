@@ -1628,6 +1628,12 @@ def _record_tool(
             cut=cut,
         )
         _note(kwargs, holder)
+        # A page read past what the entry stored is read by the model and by no
+        # corpus entry yet: kept under its own key, so a value on it is found.
+        if recorder.corpus is not None and (kwargs.get("offset") or kwargs.get("limit")):
+            recorder.corpus.remember(
+                f"{holder}@{kwargs.get('offset') or 0}+{kwargs.get('limit') or ''}", name, text
+            )
         shortened = shortened_notice(text, narrowing=narrowing)
         # How complete the held answer is: the cut its first showing stated or
         # the cut this read made, whichever is more, and the paging arguments
@@ -1635,12 +1641,15 @@ def _record_tool(
         # guardrail kept was for a line naming no argument.
         held = recorder.entry_of(holder)
         held_args = getattr(held, "args", None)
+        paged = bool(kwargs.get("offset") or kwargs.get("limit"))
         complete = _charged(
             completeness_notice(
                 text,
-                narrowing=recorder.narrowing_of(holder),
-                args=held_args if isinstance(held_args, Mapping) else None,
-                cut=max(recorder.cut_of(holder), int(cut or 0)),
+                # A page states its own cut only: the held answer's cut and its
+                # tool's paging arguments are not what the page is.
+                narrowing=() if paged else recorder.narrowing_of(holder),
+                args=None if paged or not isinstance(held_args, Mapping) else held_args,
+                cut=int(cut or 0) if paged else max(recorder.cut_of(holder), int(cut or 0)),
                 shortened=bool(shortened),
             )
         )
@@ -1927,7 +1936,14 @@ def _record_tool(
                 return _stamp_error(kwargs, started, wall_clock, exc, repeated)
 
     try:
-        return StructuredTool.from_function(
+        # The tool's own class where it opts in (``keeps_named_args``): a tool
+        # that keeps to the arguments a call named keeps doing so in the recorder.
+        builder = (
+            type(tool)
+            if isinstance(tool, StructuredTool) and getattr(tool, "keeps_named_args", False)
+            else StructuredTool
+        )
+        return builder.from_function(
             func=wrapped_func,
             coroutine=wrapped_coroutine,
             name=name,

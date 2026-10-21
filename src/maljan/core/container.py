@@ -2279,15 +2279,22 @@ class ServiceContainer:
             return cached
 
     def load_chunked(
-        self, sample_id: str, data_type: str, room: Room | None = None
+        self,
+        sample_id: str,
+        data_type: str,
+        room: Room | None = None,
+        boundary: str | None = None,
     ) -> list[TextChunk]:
         """Return a list of TextChunk objects for a sample and data type.
 
         Re-uses the parsed-text cache when available; chunking itself is cheap
         and stateless so the chunk list is not cached. ``room`` is the
         analyst's input room (``BaseAnalyst._input_room_chars``), which sizes
-        a chunk where ``chunking.max_tokens_per_chunk`` is unset.
+        a chunk where ``chunking.max_tokens_per_chunk`` is unset. ``boundary``
+        is the source's declared unit start (``AgentDefinition.chunk_boundary``),
+        passed on only where there is one.
         """
+        declared: dict[str, str] = {"boundary": boundary} if boundary else {}
         outermost = _OUTERMOST_LOAD.get()
         token = _OUTERMOST_LOAD.set(False)
         try:
@@ -2296,9 +2303,9 @@ class ServiceContainer:
             with self._lock:
                 cached_text = self._data_cache.get(key)
             if cached_text is not None:
-                chunks = self.loader.chunk_text(data_type, cached_text, room=room)
+                chunks = self.loader.chunk_text(data_type, cached_text, room=room, **declared)
             else:
-                chunks = self.loader.load_chunked(sample_id, data_type, room=room)
+                chunks = self.loader.load_chunked(sample_id, data_type, room=room, **declared)
         finally:
             _OUTERMOST_LOAD.reset(token)
         if outermost:
@@ -2416,10 +2423,18 @@ class ServiceContainer:
             if not path:
                 return []
             return self.loader.chunk_text(agent_name, f"analysis_file_path: {path}", room=room)
+        definition = self.config.agents.definitions.get(agent_name)
+        named = getattr(definition, "chunk_boundary", None)
+        named = named.get(source) if isinstance(named, dict) else None
+        boundary = named if isinstance(named, str) and named else None
         if source == "sample.chunks":
+            if boundary:
+                return self.load_chunked(file_hash, agent_name, room=room, boundary=boundary)
             return self.load_chunked(file_hash, agent_name, room=room)
         if not sandbox_report:
             return []
+        if boundary:
+            return self._sandbox_slice(agent_name, source, sandbox_report, room, boundary)
         return self._sandbox_slice(agent_name, source, sandbox_report, room)
 
     def _sandbox_slice(
@@ -2428,6 +2443,7 @@ class ServiceContainer:
         source: str,
         sandbox_report: dict[str, Any],
         room: Room | None = None,
+        boundary: str | None = None,
     ) -> list[TextChunk]:
         """One slice of the sandbox report as the agent reads it, chunked at ``room``.
 
@@ -2441,6 +2457,9 @@ class ServiceContainer:
         from maljan.core.safe_json import dumps
         from maljan.schemas.sandbox_document import place
 
+        # Passed on only where the source declares a boundary.
+        declared: dict[str, str] = {"boundary": boundary} if boundary else {}
+
         def compact(document: Any) -> str:
             # Depth-safe: a report nested past the guard is written with a
             # marked placeholder there, never a raise (``core.safe_json``).
@@ -2448,7 +2467,7 @@ class ServiceContainer:
 
         if source == "sandbox.target":
             return self.loader.chunk_text(
-                agent_name, compact(place(sandbox_report, "target", {})), room=room
+                agent_name, compact(place(sandbox_report, "target", {})), room=room, **declared
             )
         if source == "sandbox.network":
             network = sandbox_report.get("network", {})
@@ -2456,14 +2475,14 @@ class ServiceContainer:
                 text = self.parser_registry.create("network").parse(network)
             except KeyError:
                 text = compact(network)
-            return self.loader.chunk_text(agent_name, text, room=room)
+            return self.loader.chunk_text(agent_name, text, room=room, **declared)
         if source == "sandbox.behavior":
             try:
                 text = self.parser_registry.create("dynamic").parse(sandbox_report)
             except KeyError:
                 text = compact(sandbox_report)
-            return self.loader.chunk_text(agent_name, text, room=room)
-        return self.loader.chunk_text(agent_name, compact(sandbox_report), room=room)
+            return self.loader.chunk_text(agent_name, text, room=room, **declared)
+        return self.loader.chunk_text(agent_name, compact(sandbox_report), room=room, **declared)
 
     def _legacy_role_data(
         self,

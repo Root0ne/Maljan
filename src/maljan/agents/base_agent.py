@@ -973,6 +973,43 @@ def _stored_answer_of(recorder: Any) -> Callable[[str], str | None]:
     return stored
 
 
+def _stored_copy_of(recorder: Any) -> Callable[[str], Any]:
+    """What the read-again tool pages through: the full copy of an entry's answer in the job's store.
+
+    The copy the entry references for its ``answer`` part, read by its
+    digest from the store the recorder spills into. ``None`` for an id this
+    loop did not file, an entry that kept its answer whole, a run with no
+    store, and a copy that was not kept.
+    """
+    from maljan.agents.tool_answer_clearing import StoredCopy
+    from maljan.schemas.evidence_spill import ANSWER
+
+    def _reader_of(reader: Callable[..., Any], digest: str) -> Callable[[int, int | None], Any]:
+        def read(offset: int, length: int | None) -> Any:
+            return reader(digest, offset, length)
+
+        return read
+
+    def copy(entry_id: str) -> StoredCopy | None:
+        spill = getattr(recorder, "spill", None)
+        reader = getattr(spill, "read", None)
+        if not callable(reader):
+            return None
+        holder = str(recorder.holder_of(entry_id)).lower()
+        for entry in reversed(list(recorder.entries)):
+            if str(entry.id).lower() != holder:
+                continue
+            for ref in entry.spilled or ():
+                digest = str(ref.get("sha256") or "")
+                if ref.get("part") == ANSWER and ref.get("key") and digest:
+                    return StoredCopy(
+                        total=int(ref.get("bytes") or 0), read=_reader_of(reader, digest)
+                    )
+        return None
+
+    return copy
+
+
 def _loop_binding(loop_model: Any, llm: Any) -> Any | None:
     """The model binding a loop's turns are sent through, where a turn's cap can be set on it.
 
@@ -5804,7 +5841,13 @@ class BaseAnalyst(BudgetMeter, ABC):
         self._offered_after_clear = []
         clearing: ToolAnswerClearing | None = self._tool_answer_clearing()
         read_tool = record_tools(
-            [read_evidence_tool(_stored_answer_of(recorder), self._answer_sizer())],
+            [
+                read_evidence_tool(
+                    _stored_answer_of(recorder),
+                    self._answer_sizer(),
+                    _stored_copy_of(recorder),
+                )
+            ],
             recorder,
             repeats,
             repairs,

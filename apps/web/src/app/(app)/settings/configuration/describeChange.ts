@@ -288,6 +288,7 @@ export const DEFINITION_FIELDS: [keyof AgentDefinitionEntry, string][] = [
   ["timeout_seconds", "seconds per loop"],
   ["tab", "console tab"],
   ["data_sources", "input data"],
+  ["chunk_boundary", "chunk boundaries"],
   ["attck_techniques", "ATT&CK technique line"],
 ];
 

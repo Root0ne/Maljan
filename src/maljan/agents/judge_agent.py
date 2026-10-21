@@ -68,6 +68,7 @@ from maljan.agents.judge_postprocess import (
     PROPERTY_NOT_CARRIED_CODE,
 )
 from maljan.agents.prompt_fragments import tools_statement
+from maljan.agents.run_evidence_corpus import read_of_entry as _read_of_entry
 from maljan.agents.tool_fence import (
     FENCE_STATEMENT,
     QUOTED_VALUE_STATEMENT,
@@ -1119,10 +1120,18 @@ def question_evidence(ledger: Iterable[Any], corpus: Any = None) -> dict[str, Qu
         lowered = False
         if not text and corpus is not None:
             try:
-                text = str(corpus.text_for(written) or "")
+                text = _read_of_entry(corpus, written)
             except Exception:  # noqa: BLE001 — no copy is no text
                 text = ""
             lowered = bool(text)
+        elif text and corpus is not None:
+            # Pages of this entry the model read past what the ledger stored.
+            try:
+                pages = str(getattr(corpus, "pages_of", lambda _id: "")(written) or "")
+            except Exception:  # noqa: BLE001 — no page is no text
+                pages = ""
+            if pages:
+                text, lowered = f"{text.lower()}\n{pages}", True
         shown[written.lower()] = QuestionEvidence(
             text=text,
             tool=str(getattr(entry, "tool", "") or ""),

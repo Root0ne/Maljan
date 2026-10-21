@@ -281,6 +281,44 @@ class JobEvidenceSpill(EvidenceSpill):
         future.add_done_callback(lambda _done: self._release(size))
         return key
 
+    def read(self, sha256: str, offset: int = 0, length: int | None = None) -> bytes | None:
+        """The bytes written under ``sha256``: from ``offset``, ``length`` of them, else to the end.
+
+        Waits for the job's own write of these bytes to end, then reads the
+        object through the job's client. ``None`` for bytes this job never
+        handed over, a write that failed, or a store that does not answer; the
+        reader states which copy it paged.
+        """
+        key = evidence_key(self.job_id, sha256)
+        with self._lock:
+            future = self._pending.get(sha256)
+            known = key in self._written and sha256 not in self._failed
+        if not known or self.down:
+            return None
+        if future is not None:
+            try:
+                future.result(timeout=EVIDENCE_CONNECT_SECONDS + EVIDENCE_READ_SECONDS)
+            except Exception:  # noqa: BLE001 — a write that did not end is a copy not kept
+                return None
+            if sha256 in self._failed:
+                return None
+        try:
+            response = self._client().get_object(
+                settings.minio_bucket, key, offset=max(0, int(offset)), length=int(length or 0)
+            )
+            try:
+                return bytes(response.read())
+            finally:
+                response.close()
+                response.release_conn()
+        except Exception as exc:  # noqa: BLE001 — logged; the reader falls back and says so
+            logger.warning(
+                "Evidence object %s could not be read: %s",
+                log_safe(key),
+                log_safe(f"{type(exc).__name__}: {exc}"),
+            )
+            return None
+
     def _release(self, size: int) -> None:
         with self._lock:
             self._queued -= size
