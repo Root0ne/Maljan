@@ -382,13 +382,12 @@ def test_the_non_secret_variable_names_are_the_events_ones(declared: ToolDeclara
 
 
 def test_the_work_directories_are_the_providers(declared: ToolDeclarations) -> None:
-    from pathlib import Path
-
-    from maljan.core.config import StaticR2Config
+    from maljan.core.config import Settings
     from maljan.providers.base import DEFAULT_WORK_DIR
+    from maljan.providers.static.r2 import R2StaticProvider
 
     assert declared.source("provider:ghidra").work_dir == DEFAULT_WORK_DIR  # type: ignore[union-attr]
-    r2_dir = Path(StaticR2Config().mirror_dir).name
+    r2_dir = R2StaticProvider.from_settings(Settings(_env_file=None)).mirror_spec().work_subdir
     assert declared.source("provider:r2").work_dir == r2_dir  # type: ignore[union-attr]
 
 

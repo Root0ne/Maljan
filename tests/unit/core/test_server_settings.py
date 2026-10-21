@@ -50,6 +50,8 @@ def test_builtin_keys_are_reserved_and_the_key_pattern_is_a_slug():
         "virustotal",
         "ghidra",
         "cape",
+        "pipeline",
+        "sandbox",
     }
     pattern = re.compile(SERVER_KEY_PATTERN)
     assert pattern.match("r2custom") and pattern.match("a")

@@ -4833,47 +4833,6 @@
      "type": "str"
     },
     {
-     "advanced": false,
-     "agent_keys": null,
-     "always_enabled_agent_keys": null,
-     "applies": "next_job",
-     "applies_when": {
-      "core.static.provider": [
-       "r2"
-      ]
-     },
-     "builtin_agent_keys": null,
-     "builtin_servers": null,
-     "capability_servers": null,
-     "choice_descriptions": null,
-     "choice_facts": null,
-     "choice_labels": null,
-     "choice_titles": null,
-     "choices": null,
-     "choices_from": null,
-     "data_source_choices": null,
-     "editable": true,
-     "editor": null,
-     "group": "static",
-     "key": "core.static.r2.mirror_dir",
-     "maximum": null,
-     "minimum": null,
-     "namespace": "core",
-     "needs_current_password": false,
-     "nullable": false,
-     "order": 0,
-     "pack_step_vocabulary": null,
-     "path": "static.r2.mirror_dir",
-     "probe": null,
-     "reason": null,
-     "required_env": null,
-     "reserved_servers": null,
-     "secret": false,
-     "subgroup": "Connection",
-     "title": "radare2 sample directory",
-     "type": "str"
-    },
-    {
      "advanced": true,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
@@ -10119,7 +10078,9 @@
       "threatintel",
       "virustotal",
       "ghidra",
-      "cape"
+      "cape",
+      "pipeline",
+      "sandbox"
      ],
      "secret": false,
      "subgroup": null,

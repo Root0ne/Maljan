@@ -80,7 +80,8 @@ def test_every_moved_key_is_one_the_catalogue_holds() -> None:
     from maljan.core.settings_catalog import core_catalog
 
     keys = {e.key for e in core_catalog()}
-    assert _module().MOVES == RENAMED_SETTINGS
+    memory = {o: n for o, n in RENAMED_SETTINGS.items() if o.startswith("core.memory.")}
+    assert _module().MOVES == memory
     assert set(RENAMED_SETTINGS.values()) <= keys
     assert not set(RENAMED_SETTINGS) & keys
 

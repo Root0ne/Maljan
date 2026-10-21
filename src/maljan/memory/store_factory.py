@@ -428,11 +428,53 @@ def _build_qdrant(memory: Any) -> MemoryStore:
     )
 
 
+# Qdrant's leaves, described the way a package backend describes its own
+# (``annotations`` of ``register_memory_backend``), each a
+# ``settings_annotations.Annotation``.
+_QDRANT_ANNOTATIONS: dict[str, dict[str, Any]] = {
+    "collection": {
+        "title": "Qdrant case collection",
+        "description": (
+            "Qdrant collection name storing semantic case embeddings for few-shot "
+            "retrieval into the judge prompt. Bump this when migrating to a new "
+            "embedding scheme (e.g. a dimension change) rather than reusing an "
+            "incompatible old collection."
+        ),
+        "probe": "qdrant",
+        "applies_when": {"core.memory.backend": ["qdrant"]},
+    },
+    "function_hash_collection": {
+        "title": "Qdrant function-hash collection",
+        "description": (
+            "Separate Qdrant collection storing per-function normalized-opcode hashes "
+            "for the exact-match function-hash attribution tier, independent of the "
+            "fuzzy semantic case collection above."
+        ),
+        "applies_when": {"core.memory.backend": ["qdrant"]},
+    },
+    "url": {
+        "title": "Qdrant URL",
+        "description": ("URL of the Qdrant server backing long-term memory."),
+        "probe": "qdrant",
+        "applies_when": {"core.memory.backend": ["qdrant"]},
+    },
+    "api_key": {
+        "title": "Qdrant API key",
+        "description": (
+            "API key sent with every Qdrant request when the server enforces one (compose "
+            "does); empty means no authentication, which is fine for a loopback-only server."
+        ),
+        "applies_when": {"core.memory.backend": ["qdrant"]},
+    },
+}
+
+
 register_memory_backend("memory", _build_in_process, label="in-process", in_process=True)
 register_memory_backend(
     "qdrant",
     _build_qdrant,
     settings_model=QdrantMemoryConfig,
+    annotations=_QDRANT_ANNOTATIONS,
     probe_label="Test Qdrant",
     address_leaf="url",
 )

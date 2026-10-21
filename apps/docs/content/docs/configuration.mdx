@@ -3528,7 +3528,7 @@ run summary's rule layers (see **Who reads a tool's kind** below).
 
 **Where a server sees the sample.** The worker copies the job's sample into
 `work_dir` under `SAMPLES_DIR` (the shared `.work` when a block names none;
-radare2's block keeps its own `mirror_dir`) and hands the server the copy under
+radare2's block ships `r2-work`, as it may not be hidden) and hands the server the copy under
 its `sample_mount`: `<sample_mount>/<work_dir>/<sha256><suffix>`, or the copy's
 host path when `sample_mount` is empty. Each server has its own, so two
 containerised servers mounted at different paths are each handed their own

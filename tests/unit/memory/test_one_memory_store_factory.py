@@ -1100,3 +1100,26 @@ class TestAnUnchangedStoredChoiceIsNotCheckedAgain:
             SettingsService(db=None).check_keys(  # type: ignore[arg-type]
                 {"core.memory.backend": "otherhub"}, {"core.memory.backend": "vectorhub"}
             )
+
+
+class TestQdrantDescribesItsOwnSettings:
+    """Qdrant's leaves are annotated by its registration, as a package backend's are."""
+
+    LEAVES = {"url", "collection", "function_hash_collection", "api_key"}
+
+    def test_the_registration_carries_the_annotations_and_the_shared_table_none(self) -> None:
+        from maljan.core.settings_annotations import ANNOTATIONS
+        from maljan.memory.store_factory import registered_backends
+
+        assert set(registered_backends()["qdrant"].annotations) == self.LEAVES
+        assert not [key for key in ANNOTATIONS if key.startswith("memory.qdrant.")]
+
+    def test_the_catalogue_still_shows_each_leaf_as_described(self) -> None:
+        from maljan.core.settings_catalog import core_catalog
+
+        entries = {e.path: e for e in core_catalog() if e.path.startswith("memory.qdrant.")}
+        assert set(entries) == {f"memory.qdrant.{leaf}" for leaf in self.LEAVES}
+        assert entries["memory.qdrant.url"].title == "Qdrant URL"
+        assert entries["memory.qdrant.url"].probe == "qdrant"
+        assert entries["memory.qdrant.url"].applies_when == {"core.memory.backend": ["qdrant"]}
+        assert all(e.description for e in entries.values())

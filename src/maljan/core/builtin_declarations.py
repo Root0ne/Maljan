@@ -1018,7 +1018,7 @@ _SERVER_BLOCKS: dict[str, dict[str, Any]] = {
 # provider's ``mirror_spec`` reads; its ``sample_open`` is
 # ``config.GHIDRA_SAMPLE_OPEN``, set where it has always been set; its work
 # directory is the shared default (``providers.base.DEFAULT_WORK_DIR``) and
-# radare2's is its ``mirror_dir``'s own default; its non-secret variable, which
+# radare2's is ``r2-work``, which may not be hidden; its non-secret variable, which
 # texts written before the variable was retired still name, is kept whole by
 # the redaction of published text (``shipped_variable_names``). The
 # auto-name prefixes together are ``pipeline.validation._GENERIC_FUNCTION_NAME``'s.

@@ -26,7 +26,6 @@ import sys
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from datetime import date as _date
-from pathlib import PurePosixPath
 from typing import Annotated, Any, Literal, NoReturn
 
 from pydantic import (
@@ -1425,6 +1424,10 @@ BUILTIN_SERVER_KEYS: tuple[str, ...] = (
     "threatintel",
     virustotal.SERVER_KEY,
 )
+# Names a server may not take: the built-ins', the providers' own, and the two
+# in-process sources the evidence ledger files calls under (``pipeline`` for the
+# triage pack, ``sandbox`` for the job's sandbox) — a server of either name
+# would be read as that source. A key already in the stored map is kept.
 RESERVED_SERVER_KEYS: tuple[str, ...] = (
     "analysis",
     "knowledge",
@@ -1433,6 +1436,8 @@ RESERVED_SERVER_KEYS: tuple[str, ...] = (
     virustotal.SERVER_KEY,
     "ghidra",
     "cape",
+    "pipeline",
+    "sandbox",
 )
 
 
@@ -3870,11 +3875,12 @@ def builtin_profile_changed(name: str, profile: ProfileDefinition) -> bool:
 class StaticR2Config(MCPServerConfig):
     """radare2 MCP server, plus where the sample has to be for r2 to read it.
 
-    ``mirror_dir`` names the ``samples_dir`` subdirectory the worker copies the
-    sample into for r2 to open; only its last segment is used, and the copy
-    keeps the same hardening every mirror gets (0o700 directory, 0o600 file,
-    removed when the job ends) — see
-    ``apps/api/app/worker/sample_files.work_dir()``.
+    The sample is copied into the block's declared ``work_dir`` (one name under
+    ``samples_dir``, as for every server), with the same hardening every mirror
+    gets (0o700 directory, 0o600 file, removed when the job ends) — see
+    ``apps/api/app/worker/sample_files.work_dir()``. An earlier release kept a
+    second setting, ``mirror_dir`` (a path whose last segment was used); a
+    stored one is read as ``work_dir`` where that is not stored.
 
     **It may not be hidden.** radare2 rejects a path carrying a ``/.`` segment,
     so an r2mcp handed a sample under ``.work`` answers "Failed to open file."
@@ -3882,46 +3888,44 @@ class StaticR2Config(MCPServerConfig):
     2026-09-07, where the default *was* ``.work``. Reproduced against a live
     r2mcp with one PE: it opens from ``data/samples/<sha>.exe`` and from
     ``data/samples/r2work/<sha>.exe``, and fails from
-    ``data/samples/.work/<sha>.exe``, with ``-g none`` too. Hence the default
-    below and the validator: an operator who points this back at a hidden
+    ``data/samples/.work/<sha>.exe``, with ``-g none`` too. Hence the shipped
+    ``r2-work`` and the validator: an operator who points this back at a hidden
     directory is told why, rather than getting a provider that silently reads
     nothing.
     """
 
     binary_path: str = "r2mcp"
-    mirror_dir: str = "data/samples/r2-work"
 
-    @field_validator("mirror_dir")
+    @model_validator(mode="before")
     @classmethod
-    def _no_hidden_segment(cls, value: str) -> str:
-        hidden = [
-            part
-            for part in PurePosixPath(value.replace("\\", "/")).parts
-            if part.startswith(".") and part not in (".", "..")
-        ]
-        if hidden:
+    def _stored_mirror_dir(cls, data: Any) -> Any:
+        """Read a stored ``mirror_dir`` as ``work_dir``; a stored ``work_dir`` wins."""
+        if not isinstance(data, Mapping) or "mirror_dir" not in data:
+            return data
+        out = dict(data)
+        legacy = out.pop("mirror_dir")
+        if "work_dir" not in out:
+            from maljan.core.settings_annotations import last_segment
+
+            name = last_segment(legacy)
+            if name == "":
+                raise ValueError(
+                    f"mirror_dir {legacy!r} does not name a directory: only its last "
+                    f"segment is used, and that segment is empty. Use a directory name "
+                    f"such as 'r2-work' as work_dir."
+                )
+            out["work_dir"] = name
+        return out
+
+    @field_validator("work_dir")
+    @classmethod
+    def _no_hidden_work_dir(cls, value: str) -> str:
+        if value.startswith("."):
             raise ValueError(
                 f"radare2 cannot open a sample under a hidden directory, and "
-                f"{value!r} contains {', '.join(repr(h) for h in hidden)}: r2 rejects any "
-                f"path with a '/.' segment, so every tool call would answer "
-                f"'Failed to open file.'. Use an unhidden directory such as "
-                f"'data/samples/r2-work'."
-            )
-        # Only the last segment is honoured — the mirror is always a
-        # subdirectory of the worker's ``samples_dir`` — so a value whose last
-        # segment names a directory itself or its parent is not a mirror
-        # location at all. ``..`` is the one that matters: it slipped through
-        # the check above (which excludes it as "not hidden") and resolved
-        # *outside* ``samples_dir``, into a directory the worker would then
-        # chmod 0o700 and sweep stale files from. ``''`` and ``'.'`` used to
-        # fall back to the hidden default, which is BUG 10 again.
-        last = PurePosixPath(value.replace("\\", "/")).name
-        if last in ("", ".", ".."):
-            raise ValueError(
-                f"{value!r} does not name a mirror directory: only its last segment is "
-                f"used, and that segment is {last!r}, which means the samples directory "
-                f"itself or its parent. Use a subdirectory name such as "
-                f"'data/samples/r2-work'."
+                f"{value!r} is one: r2 rejects any path with a '/.' segment, so every "
+                f"tool call would answer 'Failed to open file.'. Use an unhidden "
+                f"directory name such as 'r2-work'."
             )
         return value
 
