@@ -58,6 +58,7 @@ from maljan.reporting.models import (
     SeverityAssessment,
     VersionHistoryEntry,
 )
+from maljan.reporting.section_servers import index_of, source_server
 from maljan.schemas.judgement import SEVERITY_RATINGS
 
 if TYPE_CHECKING:
@@ -303,6 +304,9 @@ class MalwareReportBuilder:
             )
             for entry in self.evidence_ledger
         ]
+        index = index_of(report.evidence_index)
+        for section in report.sections:
+            section.source_server = source_server(section, index)
         report.reputation = _reputation_answers(self.evidence_ledger)
 
         # Deterministic front-matter, version history,

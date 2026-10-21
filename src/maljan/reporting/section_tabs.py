@@ -19,8 +19,10 @@ reading process's settings:
   never read, and settings are never read while a report renders.
 
 Only sections built from the answers of tools whose source the platform ships
-no declaration for are placed: every built-in section keeps the key map's
-placement, so nothing a stored run of built-in tools shows moves. A section
+no declaration for are placed by kind, and a ``tool_<name>`` section from a
+platform server's answers by its declared tab (a built-in role declares its own): every other
+built-in section keeps the key map's placement, so nothing a stored run of
+built-in tools shows moves. A section
 neither reading places is left out, and the console keeps drawing it in the
 footer.
 """
@@ -31,6 +33,10 @@ from collections.abc import Mapping
 from typing import Any
 
 from maljan.reporting import tool_kinds
+
+# The key endings the console places a section by (``BY_SUFFIX`` in
+# ``reportSections.ts``): a ``tool_*`` key ending so keeps that placement.
+CONSOLE_SUFFIXES: tuple[str, ...] = ("_header", "_sections", "_imports", "_exports")
 
 # The tabs the console draws sections on that this module may name.
 TABS: tuple[str, ...] = ("identity", "static", "dynamic", "network", "persistence")
@@ -101,11 +107,32 @@ def section_tabs(report: Any) -> dict[str, str]:
         if not rows or len(rows) != len(ids):
             continue
         if not all(tool_kinds.from_an_operator_source(row) for row in rows):
+            # A ``tool_<name>`` section the key map never places, built from
+            # a platform server's answers: the tab its agents
+            # declared gives it, so it is never drawn as a server's own.
+            by_agent = key.startswith("tool_") and not key.endswith(CONSOLE_SUFFIXES)
+            tab = _tab_of_agents(rows) if by_agent else ""
+            if tab:
+                placed[key] = tab
             continue
         tab = _tab_of_rows(rows)
         if tab:
             placed[key] = tab
     return placed
+
+
+def _tab_of_agents(rows: list[Any]) -> str:
+    """The one tab every cited entry's agent declared (a built-in role has its own), or ``""``.
+
+    An entry written before sources were recorded declares nothing here.
+    """
+    if any(tool_kinds.source_of(row) is None for row in rows):
+        return ""
+    tabs = {str(_field(row, "agent_tab") or "") for row in rows}
+    if len(tabs) == 1:
+        tab = tabs.pop()
+        return tab if tab in TABS else ""
+    return ""
 
 
 def _tab_of_rows(rows: list[Any]) -> str:

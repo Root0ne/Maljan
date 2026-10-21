@@ -7,6 +7,7 @@ import {
   Activity,
   Anchor,
   Binary,
+  Bot,
   CircleAlert,
   CircleCheck,
   CircleHelp,
@@ -18,6 +19,7 @@ import {
   LayoutGrid,
   MessagesSquare,
   ScrollText,
+  Server,
   Shield,
   ShieldCheck,
   Tags,
@@ -102,6 +104,8 @@ const TAB_ICON: Record<TabIcon, LucideIcon> = {
   detection: ShieldCheck,
   defense: Shield,
   evidence: ScrollText,
+  agent: Bot,
+  server: Server,
 };
 
 export default function AnalysisLayout({
@@ -491,7 +495,7 @@ export default function AnalysisLayout({
               tabs.some((t) => t.group === g),
             );
             return (
-              <div key={group} className="flex items-end">
+              <div key={group} className="flex flex-wrap items-end">
                 {earlier && (
                   <span
                     aria-hidden="true"
@@ -503,13 +507,14 @@ export default function AnalysisLayout({
                   const active =
                     tab.key === ""
                       ? pathname === basePath
-                      : pathname.startsWith(href);
+                      : pathname === href || pathname.startsWith(`${href}/`);
                   const Icon = TAB_ICON[tab.icon];
                   return (
                     <Link
                       key={tab.key}
                       href={href}
                       aria-current={active ? "page" : undefined}
+                      title={tab.label}
                       className={`flex items-center gap-1.5 px-3 py-2.5 text-xs font-medium uppercase tracking-wider border-b-2 ${
                         active
                           ? "border-accent text-accent"
@@ -517,7 +522,7 @@ export default function AnalysisLayout({
                       }`}
                     >
                       <Icon size={16} aria-hidden="true" />
-                      {tab.label}
+                      <span className="max-w-[14rem] truncate">{tab.label}</span>
                     </Link>
                   );
                 })}

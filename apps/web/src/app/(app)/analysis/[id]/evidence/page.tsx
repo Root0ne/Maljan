@@ -5,7 +5,7 @@ import { useParams } from "next/navigation";
 import { useReport } from "../layout";
 import EvidencePanel from "@/components/analysis/EvidencePanel";
 import { ArtifactSections } from "@/components/analysis/ArtifactTable";
-import { unrenderedSections } from "@/components/analysis/reportSections";
+import { unroutedSections } from "@/components/analysis/extraTabs";
 
 /**
  * The EVIDENCE tab: the ledger the whole report is standing on.
@@ -17,14 +17,20 @@ import { unrenderedSections } from "@/components/analysis/reportSections";
  */
 export default function EvidencePage() {
   const params = useParams();
-  const { report } = useReport();
+  const { report, job } = useReport();
   const id = typeof params?.id === "string" ? params.id : "";
   // A section from a tool server nobody wrote this console against belongs to
   // no tab, and dropping it would undo the whole point of an open report. It
   // lands here, next to the calls it was built from — and so does a section
   // routed to a tab that does not draw sections, which is the failure this net
   // exists to catch rather than a case anyone will remember to check for.
-  const unclaimed = unrenderedSections(report?.malware_report?.sections, report?.section_tabs);
+  // What an agent's or a server's own tab draws is no longer unclaimed.
+  const unclaimed = unroutedSections(
+    report?.malware_report?.sections,
+    report?.section_tabs,
+    report?.agent_findings,
+    job?.roster,
+  );
 
   return (
     <div className="p-4 space-y-4">
