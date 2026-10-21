@@ -46,6 +46,7 @@ from maljan.analysis.technique_ids import (
     TECHNIQUE_ID_EXACT_RE,
     TECHNIQUE_WORD_RE,
     declared_technique_id,
+    is_technique_id,
     written_technique_id,
 )
 from maljan.core.declared_reading import (
@@ -2489,9 +2490,14 @@ def unknown_technique_ids(ids: Sequence[str], attck: Any) -> set[str]:
     already failed — and every id is asked in one call, so a report with forty
     techniques costs one lookup rather than forty.
     """
-    wanted = [str(i).strip().upper() for i in ids if str(i).strip()]
+    asked = [str(i).strip().upper() for i in ids if str(i).strip()]
+    # An id that is not shaped like a technique (a tactic's ``TA0005``, a
+    # truncated ``T1055.1``) is unknown whatever the catalogue says, and with no
+    # catalogue at all: the check is deterministic and needs no lookup.
+    malformed = {tid for tid in asked if not is_technique_id(tid)}
+    wanted = [tid for tid in asked if tid not in malformed]
     if not wanted or attck is None:
-        return set()
+        return malformed
 
     check = getattr(attck, "attck_validate", None)
     if check is not None:
@@ -2499,8 +2505,8 @@ def unknown_technique_ids(ids: Sequence[str], attck: Any) -> set[str]:
             answer = check(wanted)
         except Exception as exc:  # noqa: BLE001 — a knowledge failure is not a violation
             logger.debug("validation: the ATT&CK check failed (%s).", exc)
-            return set()
-        return {
+            return malformed
+        return malformed | {
             str(row.get("id") or "").strip().upper()
             for row in (answer or {}).get("invalid") or []
             if row.get("id")
@@ -2508,8 +2514,8 @@ def unknown_technique_ids(ids: Sequence[str], attck: Any) -> set[str]:
 
     lookup = getattr(attck, "attck_lookup", None)
     if lookup is None:
-        return set()
-    unknown: set[str] = set()
+        return malformed
+    unknown: set[str] = set(malformed)
     for tid in wanted:
         try:
             answer = lookup(tid)

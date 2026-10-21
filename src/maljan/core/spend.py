@@ -110,6 +110,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
+from maljan.core.context_reset import reset_in_own_context
 from maljan.core.logger import logger
 
 MILLION = 1_000_000
@@ -252,7 +253,7 @@ def carrying(admission: Admission | None) -> Iterator[None]:
     try:
         yield
     finally:
-        _ADMISSION.reset(token)
+        reset_in_own_context(_ADMISSION, token)
 
 
 def _meter_of(ledger: Any) -> SpendMeter | None:

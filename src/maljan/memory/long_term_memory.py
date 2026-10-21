@@ -39,6 +39,8 @@ from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
+from maljan.analysis.technique_ids import TECHNIQUE_ID_EXACT_RE
+
 if TYPE_CHECKING:
     from maljan.memory.function_hash_store import FunctionMatch
     from maljan.schemas.isr_models import AgentISR
@@ -506,7 +508,11 @@ def with_published_techniques(
     kept: list[str] = []
     for raw in published:
         tid = str(raw or "").strip().upper()
-        if tid and tid not in kept and not (tid in withheld and tid not in remembered):
+        if not TECHNIQUE_ID_EXACT_RE.fullmatch(tid):
+            # A tactic id (``TA0005``) or a malformed one is no technique, and
+            # a later run must not be shown it as one this case found.
+            continue
+        if tid not in kept and not (tid in withheld and tid not in remembered):
             kept.append(tid)
     agreed = {str(tid or "").strip().upper() for tid in corroborated}
     return replace(

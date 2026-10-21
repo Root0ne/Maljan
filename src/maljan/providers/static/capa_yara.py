@@ -440,6 +440,8 @@ class CapaYaraStaticProvider(StaticProvider):
             degrade_on_failure=True,
         )
 
+    _native_yara_ran = False
+
     def collect_evidence(self, sample_path: str) -> StaticEvidenceBundle | None:
         """capa and YARA over the sample, for a run whose triage pack did not run them.
 
@@ -449,7 +451,14 @@ class CapaYaraStaticProvider(StaticProvider):
         """
         capa_result = self._run_capa(sample_path)
         yara_hits = self._run_yara(sample_path)
-        if capa_result is None and not yara_hits:
+        # The operator's rules are scanned in this process, by the engine whose
+        # case folding follows the process locale. When a native scan ran, a
+        # broken engine is stated, on a scan with no hit as on one with hits:
+        # an empty answer from it is not "no rule matched".
+        from maljan.core.ctype_locale import yara_case_folding_problem
+
+        folding_problem = yara_case_folding_problem() if self._native_yara_ran else None
+        if capa_result is None and not yara_hits and not folding_problem:
             return None
 
         hits: list[dict[str, Any]] = []
@@ -488,16 +497,25 @@ class CapaYaraStaticProvider(StaticProvider):
         evidence: dict[str, str] = {}
         if rows:
             evidence["capa"] = _render_table(rows)
-        if yara_hits:
-            evidence["yara"] = _render_yara(yara_hits)
+        if yara_hits or folding_problem:
+            evidence["yara"] = (
+                _render_yara(yara_hits) if yara_hits else "No operator YARA rule matched."
+            )
+            if folding_problem:
+                evidence["yara"] += f"\n\nNote: {folding_problem}."
 
         answers: list[EvidenceAnswer] = []
         for kind, payload in (
             ("capability_rules", {"capabilities": capa_rows} if capa_rows else None),
             (
                 "signature_rules",
-                {"matches": list(yara_hits), "rule_count": len(yara_hits), "filtered": 0}
-                if yara_hits
+                {
+                    "matches": list(yara_hits),
+                    "rule_count": len(yara_hits),
+                    "filtered": 0,
+                    **({"engine_note": folding_problem} if folding_problem else {}),
+                }
+                if yara_hits or folding_problem
                 else None,
             ),
         ):
@@ -600,7 +618,16 @@ class CapaYaraStaticProvider(StaticProvider):
         (``static.yara.rules_dir``) is a directory: every ``*.yml``/``*.yaml``
         file in it is loaded and scanned, in name order, and the hits are
         joined. A file that cannot be loaded costs that file only.
+
+        No budget is applied to the scan, by measurement and by construction:
+        an operator rule is a list of literal strings (``YaraTTPRule``), which
+        the engine matches in time linear in the sample, 0.03 s for 16 MB and
+        1.1 s for 512 MB against the 31 shipped rules. A ``timeout`` would cut
+        a real scan of a large sample short for a risk this rule form does not
+        carry; ``core.static.yara.timeout_seconds`` bounds the drafted rule's
+        check (a full YARA condition language), which this is not.
         """
+        self._native_yara_ran = False
         rules_dir = Path(resolve_data(self._yara.rules_dir))
         if not rules_dir.is_dir():
             return []
@@ -623,6 +650,10 @@ class CapaYaraStaticProvider(StaticProvider):
         for rule_file in rule_files:
             try:
                 layer = YaraLayer.from_yaml(rule_file)
+                # Only the compiled engine folds case by the locale; the
+                # regex fallback folds in Python and needs no note.
+                if getattr(layer, "_yara_rules", None) is not None:
+                    self._native_yara_ran = True
                 hits.extend(
                     {"rule": m.rule_id, "strings": [m.evidence_ref], "technique": m.technique_id}
                     for m in layer.scan(data)

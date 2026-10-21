@@ -149,7 +149,19 @@ def yara_scan(
             logger.warning("yara_scan: native scan failed (%s); literal fallback used.", exc)
             answer["native_error"] = f"{type(exc).__name__}: {exc}"
         else:
-            return {"matches": _yara_native_matches(layer, hits), "engine": "yara", **answer}
+            native: dict[str, Any] = {
+                "matches": _yara_native_matches(layer, hits),
+                "engine": "yara",
+                **answer,
+            }
+            # A nocase string or an import hash the engine folds by a broken
+            # locale was not checked as written: say so beside the answer.
+            from maljan.core.ctype_locale import yara_case_folding_problem
+
+            problem = yara_case_folding_problem()
+            if problem:
+                native["engine_note"] = problem
+            return native
     # The literal fallback reads each rule's strings, not its condition: a
     # rule it does not list was not checked by the YARA engine, and an
     # engine failure (a timeout among them) is named in ``native_error``

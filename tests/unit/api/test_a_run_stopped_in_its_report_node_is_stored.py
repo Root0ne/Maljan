@@ -207,6 +207,9 @@ class TestTheStoredBundle:
         )
         record = judge_bundle_record(_judged_state())
         assert record is not None
+        # The judge's draft, labelled as unpublished and otherwise as recorded.
+        assert stix_bundle.pop("x_maljan_published") is False
+        assert "unpublished draft" in stix_bundle.pop("x_maljan_notice")
         assert stix_bundle == record["bundle"]
         (malware,) = stix_bundle["objects"]
         assert malware["created"].startswith("2026-09-22T23:30:00")
@@ -221,3 +224,4 @@ class TestTheStoredBundle:
             hash_mismatch_reason=None,
         )
         assert stix_bundle == {**export, "spec_version": "2.1"}
+        assert "x_maljan_published" not in stix_bundle
