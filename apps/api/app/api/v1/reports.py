@@ -14,6 +14,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from fastapi.responses import HTMLResponse, PlainTextResponse
 from maljan.core.logger import logger
 from maljan.core.settings_overrides import redact_url
+from maljan.reporting.section_servers import with_source_servers
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
@@ -109,6 +110,9 @@ async def _detail(svc: ReportService, report: Any) -> ReportDetailResponse:
     reading = (report.run_summary or {}).get("verdict_reading")
     if isinstance(reading, str) and reading:
         detail = detail.model_copy(update={"verdict_reading": reading})
+    served = with_source_servers(report.malware_report)
+    if served is not report.malware_report:
+        detail = detail.model_copy(update={"malware_report": served})
     placed = _section_tabs(report.malware_report)
     if placed:
         detail = detail.model_copy(update={"section_tabs": placed})
@@ -319,7 +323,10 @@ async def get_full_malware_report(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Report not found or no MalwareReport persisted",
         )
-    return mr
+    # Read-time only, as in the detail: a stored run's sections say their
+    # server here too, and nothing stored changes.
+    served: dict = with_source_servers(mr)
+    return served
 
 
 @router.get("/{report_id}/markdown", response_class=PlainTextResponse)

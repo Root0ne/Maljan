@@ -104,7 +104,7 @@ export function reputationFromReport(
  */
 export function endpointReputation(
   record: Record<string, unknown> | null | undefined,
-): { source: string; figure: string | null } | null {
+): { source: string; figure: string | null; verdict: boolean | null } | null {
   if (!record || typeof record !== "object") return null;
   const source = text(record.source) ?? "intel";
   const malicious = count(record.malicious);
@@ -114,7 +114,28 @@ export function endpointReputation(
   if (malicious !== null) parts.push(`malicious ${malicious}`);
   if (suspicious !== null && suspicious > 0) parts.push(`suspicious ${suspicious}`);
   if (abuse !== null) parts.push(`abuse ${abuse}`);
-  return { source, figure: parts.length > 0 ? parts.join(" · ") : null };
+  // The verdict the source's own rule gave the record (`malicious_verdict`):
+  // true is malicious by that rule, false is not. A record written before the
+  // field, or one the rule could not judge, carries none and the badge draws
+  // exactly as it did.
+  const verdict = typeof record.malicious_verdict === "boolean" ? record.malicious_verdict : null;
+  return { source, figure: parts.length > 0 ? parts.join(" · ") : null, verdict };
+}
+
+/**
+ * The words the badge adds for a source's declared verdict, with the tone they
+ * are drawn in, or `null` when the record carries none.
+ *
+ * `false` is not "clean": it says every count the source's `malicious_when`
+ * rule reads is below its threshold, which is all the source established, so
+ * it is worded that way and drawn without a colour.
+ */
+export function verdictWords(
+  verdict: boolean | null | undefined,
+): { text: string; tone: "red" | "muted" } | null {
+  if (verdict === true) return { text: "malicious by source rule", tone: "red" };
+  if (verdict === false) return { text: "below source threshold", tone: "muted" };
+  return null;
 }
 
 /**

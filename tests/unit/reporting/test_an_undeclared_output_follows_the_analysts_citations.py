@@ -31,7 +31,7 @@ from maljan.reporting.models import (
     MalwareReport,
     SampleIdentity,
 )
-from maljan.reporting.section_tabs import section_tabs
+from maljan.reporting.section_tabs import CONSOLE_SUFFIXES, section_tabs
 
 OPERATOR = "mcp:invented"
 UNDECLARED = {"v": 1}
@@ -281,8 +281,13 @@ def test_a_kind_no_tab_reads_falls_back_to_the_agent_s_tab(facts: Any) -> None:
         ),
         # A cited entry the index does not hold.
         ([_section("tool_x", ["ev_0001", "ev_0009"])], [_row("ev_0001", "x")]),
-        # A built-in source keeps the key map's placement.
-        ([_section("tool_x", ["ev_0001"])], [_row("ev_0001", "x", source="mcp:analysis")]),
+        # A built-in source and no tab declared by its agent.
+        (
+            [_section("tool_x", ["ev_0001"])],
+            [_row("ev_0001", "x", source="mcp:analysis", role="generic", tab=None)],
+        ),
+        # A built-in source on a key that is not a tool's keeps the key map's placement.
+        ([_section("pe_x", ["ev_0001"])], [_row("ev_0001", "x", source="mcp:analysis")]),
         # An entry written before sources.
         ([_section("tool_x", ["ev_0001"])], [_row("ev_0001", "x", source=None, facts=None)]),
         # A section an analyst wrote, not one built from tool answers.
@@ -292,6 +297,17 @@ def test_a_kind_no_tab_reads_falls_back_to_the_agent_s_tab(facts: Any) -> None:
 def test_what_neither_reading_places_is_left_to_the_key_map(
     sections: list[EvidenceSection], rows: list[EvidenceIndexRow]
 ) -> None:
+    assert _placed(sections, rows) == {}
+
+
+def test_a_platform_server_section_follows_its_agents_declared_tab() -> None:
+    rows = [_row("ev_0001", "x", source="mcp:analysis", role="network", tab="network")]
+    assert _placed([_section("tool_x", ["ev_0001"])], rows) == {"tool_x": "network"}
+
+
+def test_a_key_the_console_places_by_suffix_is_not_moved_by_its_agents_tab() -> None:
+    rows = [_row("ev_0001", "x", source="mcp:analysis", role="judge", tab="identity")]
+    sections = [_section(f"tool_x{suffix}", ["ev_0001"]) for suffix in CONSOLE_SUFFIXES]
     assert _placed(sections, rows) == {}
 
 
@@ -404,7 +420,10 @@ def test_the_served_report_carries_the_placements() -> None:
 
     placed = asyncio.run(_detail(MagicMock(), _row_of(json.loads(report.model_dump_json()))))
     assert placed.section_tabs == {"tool_x": "dynamic"}
-    assert placed.malware_report == json.loads(report.model_dump_json())
+    # Served, a section also says its server, derived from the index.
+    expected = json.loads(report.model_dump_json())
+    expected["sections"][0]["source_server"] = "invented"
+    assert placed.malware_report == expected
     plain = asyncio.run(_detail(MagicMock(), _row_of(None)))
     assert plain.section_tabs is None
 

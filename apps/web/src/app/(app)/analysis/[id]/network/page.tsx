@@ -6,7 +6,7 @@ import { reportAbsence } from "@/components/analysis/reportAbsence";
 import Th from "@/components/ui/Th";
 import { ArtifactSections } from "@/components/analysis/ArtifactTable";
 import { isCoveredBySection, sectionsForTab } from "@/components/analysis/reportSections";
-import { endpointReputation } from "@/components/analysis/reputation";
+import { endpointReputation, verdictWords } from "@/components/analysis/reputation";
 import { domainFacts, endpointCounts, ipFacts } from "@/components/analysis/networkFacts";
 import type { NetworkDomain, NetworkIP } from "@/types/malware-report";
 
@@ -348,6 +348,7 @@ function SourceBadge({ source }: { source?: string | null }) {
 function ReputationBadge({ rep }: { rep: Record<string, unknown> }) {
   const badge = endpointReputation(rep);
   if (!badge) return null;
+  const verdict = verdictWords(badge.verdict);
   return (
     <span
       className="shrink-0 text-[11px] uppercase tracking-wider px-2 py-0.5 rounded font-mono text-text-secondary bg-bg-active"
@@ -355,6 +356,14 @@ function ReputationBadge({ rep }: { rep: Record<string, unknown> }) {
     >
       {badge.source}
       {badge.figure ? ` · ${badge.figure}` : ""}
+      {verdict && (
+        <span
+          className={verdict.tone === "red" ? "text-status-red" : "text-text-muted"}
+          title={`${badge.source}'s declared malicious_when thresholds`}
+        >
+          {` · ${verdict.text}`}
+        </span>
+      )}
     </span>
   );
 }

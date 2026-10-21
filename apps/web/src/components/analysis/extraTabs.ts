@@ -1,0 +1,236 @@
+/**
+ * The tabs a run adds for what an operator connected: one per agent of its
+ * own and one per tool server whose output no other tab draws.
+ *
+ * The twelve fixed tabs were written against the agents and servers the
+ * platform ships. An agent an operator defines (a generic one, a lead) and a
+ * server nobody here knows reached the console in two places only: a row on
+ * CONVERSATION and the EVIDENCE tab's footer of sections no tab draws. So a
+ * run now offers a tab named after each of them, when it has something to put
+ * there (the same promise `analysisTabs` makes for every tab).
+ *
+ * Everything is read from what the run recorded: the roster (role, stages),
+ * the agents' findings, and each section's `source` and `source_server`. No
+ * agent's or server's name is ever tested for.
+ *
+ * What goes where, in this order, for a section no fixed tab draws:
+ *  1. it names (`agent:<name>`, `artifact:<a>, <b>`) an agent of the run that
+ *     has a tab: that agent's tab;
+ *  2. it carries a `source_server`: that server's tab;
+ *  3. otherwise it stays in the EVIDENCE footer.
+ * A section the report placed on a fixed tab (`section_tabs`, which carries
+ * `AgentDefinition.tab`) is never moved. An agent whose role has a tab of its
+ * own (static, dynamic, network, judge) or whose stage is triage, verdict or
+ * report is a built-in's and gets none.
+ */
+
+import type { AgentFindingDTO } from "@/lib/api";
+import type { JobRoster } from "@/types";
+import type { EvidenceSection } from "@/types/malware-report";
+import {
+  dynamicAnalystClaims,
+  type AnalystClaim,
+  type AnalystClaims,
+} from "./dynamicClaims";
+import {
+  RENDERED_TABS,
+  sectionHasContent,
+  tabOfSection,
+  type SectionPlacements,
+} from "./reportSections";
+
+export type ExtraTabKind = "agent" | "server";
+
+export interface ExtraTab {
+  kind: ExtraTabKind;
+  /** The agent key or the server name. */
+  id: string;
+  /** The path suffix under `/analysis/{id}`. */
+  key: string;
+  label: string;
+  /** What the agent concluded, in full; `null` on a server's tab. */
+  claims: AnalystClaims | null;
+  sections: EvidenceSection[];
+}
+
+/** The roles an operator's own agent has; every other role has a home elsewhere. */
+const OPERATOR_ROLES: ReadonlySet<string> = new Set(["generic", "lead"]);
+/** The stage kinds the platform's own steps run in. */
+const BUILTIN_STAGE_KINDS: ReadonlySet<string> = new Set([
+  "triage",
+  "verdict",
+  "report",
+]);
+
+/** One path segment for an id; an id of dots alone is encoded, as a URL would resolve it away. */
+function segment(id: string): string {
+  const encoded = encodeURIComponent(id);
+  return /^\.+$/.test(encoded) ? encoded.replace(/\./g, "%2E") : encoded;
+}
+
+export function agentTabKey(agent: string): string {
+  return `/agent/${segment(agent)}`;
+}
+
+export function serverTabKey(server: string): string {
+  return `/server/${segment(server)}`;
+}
+
+/**
+ * The tab a route's `key` param names. The param is matched as handed over
+ * first and decoded only when that finds nothing, so an id holding a `%` is
+ * never decoded twice whichever form the framework gives.
+ */
+export function tabByParam(
+  tabs: readonly ExtraTab[],
+  kind: ExtraTabKind,
+  param: string,
+): ExtraTab | undefined {
+  const ofKind = tabs.filter((t) => t.kind === kind);
+  const exact = ofKind.find((t) => t.id === param);
+  if (exact) return exact;
+  try {
+    const decoded = decodeURIComponent(param);
+    return ofKind.find((t) => t.id === decoded);
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Labels that say apart what they name: a label equal, ignoring case, to a
+ * fixed tab's or to another extra tab's gets its kind added
+ * (`network (server)`).
+ */
+export function disambiguate(
+  tabs: readonly ExtraTab[],
+  taken: readonly string[],
+): ExtraTab[] {
+  const count = new Map<string, number>();
+  for (const tab of tabs) {
+    const key = tab.label.toLowerCase();
+    count.set(key, (count.get(key) ?? 0) + 1);
+  }
+  const fixed = new Set(taken.map((l) => l.toLowerCase()));
+  return tabs.map((tab) => {
+    const key = tab.label.toLowerCase();
+    const clash = fixed.has(key) || (count.get(key) ?? 0) > 1;
+    return clash ? { ...tab, label: `${tab.label} (${tab.kind})` } : tab;
+  });
+}
+
+/** The roster agents that get a tab of their own, in roster order. */
+function operatorAgents(roster: JobRoster | null | undefined) {
+  const builtinStage = new Set<string>();
+  for (const stage of roster?.stages ?? []) {
+    if (BUILTIN_STAGE_KINDS.has(stage.kind))
+      for (const key of stage.agents) builtinStage.add(key);
+  }
+  return (roster?.agents ?? []).filter(
+    (agent) =>
+      OPERATOR_ROLES.has((agent.role ?? "").toLowerCase()) &&
+      !builtinStage.has(agent.key),
+  );
+}
+
+/** The agents a section names as its authors, in the order it names them. */
+export function agentsOfSource(source: string | null | undefined): string[] {
+  const text = (source ?? "").trim();
+  for (const prefix of ["agent:", "artifact:"]) {
+    if (text.startsWith(prefix)) {
+      return text
+        .slice(prefix.length)
+        .split(",")
+        .map((name) => name.trim())
+        .filter(Boolean);
+    }
+  }
+  return [];
+}
+
+/** The sections no fixed tab draws, with content, in the order the run gathered them. */
+function unplaced(
+  sections: EvidenceSection[] | null | undefined,
+  placed?: SectionPlacements,
+): EvidenceSection[] {
+  return (sections ?? []).filter(
+    (section) =>
+      sectionHasContent(section) &&
+      !RENDERED_TABS.has(tabOfSection(section.key, placed)),
+  );
+}
+
+/**
+ * Every extra tab this run offers: agents first, in roster order, then
+ * servers, in the order their first section appears. A tab with nothing to
+ * draw is not offered.
+ */
+export function extraTabs(
+  sections: EvidenceSection[] | null | undefined,
+  placed: SectionPlacements,
+  findings: readonly AgentFindingDTO[] | null | undefined,
+  roster?: JobRoster | null,
+): ExtraTab[] {
+  const agents = operatorAgents(roster);
+  const owners = new Set(agents.map((agent) => agent.key));
+  // What DYNAMIC already draws is not drawn twice.
+  const onDynamic = new Set(
+    dynamicAnalystClaims(findings, roster).map((f) => f.agent),
+  );
+
+  const agentSections = new Map<string, EvidenceSection[]>();
+  const serverSections = new Map<string, EvidenceSection[]>();
+  for (const section of unplaced(sections, placed)) {
+    const author = agentsOfSource(section.source).find((name) =>
+      owners.has(name),
+    );
+    const server = (section.source_server ?? "").trim();
+    const into = author ? agentSections : server ? serverSections : null;
+    const id = author ?? server;
+    if (!into || !id) continue;
+    into.set(id, [...(into.get(id) ?? []), section]);
+  }
+
+  const tabs: ExtraTab[] = [];
+  for (const agent of agents) {
+    const found = (findings ?? []).filter(
+      (f) => f.agent_name === agent.key && !onDynamic.has(f.agent_name),
+    );
+    // Every claim of the agent, across all of its findings, not the first.
+    const claims = found.flatMap((f) => (f.claims ?? []) as AnalystClaim[]);
+    const own = agentSections.get(agent.key) ?? [];
+    if (claims.length === 0 && own.length === 0) continue;
+    tabs.push({
+      kind: "agent",
+      id: agent.key,
+      key: agentTabKey(agent.key),
+      label: agent.label || agent.key,
+      claims: claims.length > 0 ? { agent: agent.key, claims } : null,
+      sections: own,
+    });
+  }
+  for (const [server, own] of serverSections) {
+    tabs.push({
+      kind: "server",
+      id: server,
+      key: serverTabKey(server),
+      label: server,
+      claims: null,
+      sections: own,
+    });
+  }
+  return tabs;
+}
+
+/** The sections no tab draws at all: what the EVIDENCE footer keeps. */
+export function unroutedSections(
+  sections: EvidenceSection[] | null | undefined,
+  placed: SectionPlacements,
+  findings: readonly AgentFindingDTO[] | null | undefined,
+  roster?: JobRoster | null,
+): EvidenceSection[] {
+  const drawn = new Set(
+    extraTabs(sections, placed, findings, roster).flatMap((t) => t.sections),
+  );
+  return unplaced(sections, placed).filter((section) => !drawn.has(section));
+}

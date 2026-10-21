@@ -25,10 +25,11 @@ import { hasMappedTechniques } from "./capabilityHeatmap";
 import { sectionsForTab } from "./reportSections";
 import { hasRuleMatches } from "./ruleMatches";
 import { dynamicAnalystClaims } from "./dynamicClaims";
+import { disambiguate, extraTabs } from "./extraTabs";
 import type { JobRoster } from "@/types";
 import type { MalwareReport } from "@/types/malware-report";
 
-export type TabGroup = "overview" | "analysis" | "intel" | "advanced";
+export type TabGroup = "overview" | "analysis" | "intel" | "extra" | "advanced";
 
 export interface TabDef {
   /** Path suffix under `/analysis/{id}`; the empty string is SUMMARY. */
@@ -51,7 +52,9 @@ export type TabIcon =
   | "attribution"
   | "detection"
   | "defense"
-  | "evidence";
+  | "evidence"
+  | "agent"
+  | "server";
 
 export const TABS: TabDef[] = [
   { key: "", label: "SUMMARY", group: "overview", icon: "summary" },
@@ -74,7 +77,9 @@ export const TABS: TabDef[] = [
   { key: "/evidence", label: "EVIDENCE", group: "advanced", icon: "evidence" },
 ];
 
-export const TAB_GROUP_ORDER: TabGroup[] = ["overview", "analysis", "intel", "advanced"];
+// "extra" holds the tabs a run adds for its own agents and servers, after the
+// fixed ones and before the ledger.
+export const TAB_GROUP_ORDER: TabGroup[] = ["overview", "analysis", "intel", "extra", "advanced"];
 
 /** The three tabs a run offers before it has produced anything. */
 const ALWAYS: ReadonlySet<string> = new Set(["", "/conversation", "/evidence"]);
@@ -192,7 +197,16 @@ export function tabHasContent(
   }
 }
 
-/** The tabs this run offers, in the declared order. */
+/**
+ * The tabs this run offers, in the declared order, then one per agent and
+ * server of the run's own that has something to draw (`extraTabs`).
+ */
 export function tabsFor(report: ReportDetailDTO | null, roster?: JobRoster | null): TabDef[] {
-  return TABS.filter((tab) => tabHasContent(tab.key, report, roster));
+  const fixed = TABS.filter((tab) => tabHasContent(tab.key, report, roster));
+  if (!report) return fixed;
+  const extra = disambiguate(
+    extraTabs(report.malware_report?.sections, report.section_tabs, report.agent_findings, roster),
+    TABS.map((tab) => tab.label),
+  ).map((tab): TabDef => ({ key: tab.key, label: tab.label, group: "extra", icon: tab.kind }));
+  return [...fixed, ...extra];
 }

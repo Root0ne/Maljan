@@ -1368,6 +1368,11 @@ class EvidenceSection(BaseModel):
     # ``agent:<name>``. Read by the grounding check, which accepts a finding
     # source in place of an evidence id.
     source: str = ""
+    # The one tool server every cited entry came from
+    # (``reporting.section_servers``), when they agree on one. Derived where
+    # the report is built and where a stored one is served; ``None`` is left
+    # out of the dump, so a section without one dumps as it always did.
+    source_server: str | None = Field(default=None, exclude_if=lambda value: value is None)
 
 
 class EvidenceIndexRow(BaseModel):
