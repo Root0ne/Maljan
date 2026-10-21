@@ -54,6 +54,7 @@ from maljan.core.exceptions import ConfigurationError
 from maljan.core.logger import logger
 from maljan.core.token_ledger import TokenLedger
 from maljan.core.truncation_ledger import TruncationLedger
+from maljan.llm.agent_ceiling import attach_agent_ceiling
 from maljan.llm.context_window import record_built_cap
 from maljan.llm.generation_rate import GenerationRates, attach_rate_meter
 from maljan.llm.registry import LLMProviderRegistry
@@ -914,6 +915,10 @@ class ServiceContainer:
                 attach_rate_meter(cached, getattr(self, "_generation_rates", None))
                 # Its calls are recorded under the judge agent that runs on it.
                 attach_retry_recorder(cached, getattr(self, "_token_ledger", None), "judge")
+                # Its own ceiling is the mediator entry's, not the judge's.
+                attach_agent_ceiling(
+                    cached, getattr(self, "_token_ledger", None), MEDIATOR_AGENT_KEY
+                )
                 self._mediator_llm_cache.put(loop, "", cached)
             return cached
 
@@ -942,6 +947,7 @@ class ServiceContainer:
                 record_built_cap(cached, cap)
                 attach_rate_meter(cached, getattr(self, "_generation_rates", None))
                 attach_retry_recorder(cached, getattr(self, "_token_ledger", None), "judge")
+                attach_agent_ceiling(cached, getattr(self, "_token_ledger", None), "judge")
                 self._judge_llm_cache.put(loop, "", cached)
             return cached
 
@@ -967,6 +973,9 @@ class ServiceContainer:
                 attach_retry_recorder(
                     cached, getattr(self, "_token_ledger", None), REPORTER_AGENT_KEY
                 )
+                attach_agent_ceiling(
+                    cached, getattr(self, "_token_ledger", None), REPORTER_AGENT_KEY
+                )
                 self._reporter_llm_cache.put(loop, "", cached)
             return cached
 
@@ -990,6 +999,9 @@ class ServiceContainer:
                 )
                 attach_rate_meter(cached, getattr(self, "_generation_rates", None))
                 attach_retry_recorder(cached, getattr(self, "_token_ledger", None), "summarizer")
+                attach_agent_ceiling(
+                    cached, getattr(self, "_token_ledger", None), SUMMARIZER_AGENT_KEY
+                )
                 self._summarizer_llm_cache.put(loop, "", cached)
             return cached
 
@@ -1008,6 +1020,7 @@ class ServiceContainer:
                 record_built_cap(cached, cap)
                 attach_rate_meter(cached, getattr(self, "_generation_rates", None))
                 attach_retry_recorder(cached, getattr(self, "_token_ledger", None), agent_name)
+                attach_agent_ceiling(cached, getattr(self, "_token_ledger", None), agent_name)
                 self._agent_llm_cache.put(loop, agent_name, cached)
             return cached
 
@@ -2228,6 +2241,9 @@ class ServiceContainer:
                 )
                 attach_rate_meter(composer_llm, getattr(self, "_generation_rates", None))
                 attach_retry_recorder(
+                    composer_llm, getattr(self, "_token_ledger", None), REPORTER_AGENT_KEY
+                )
+                attach_agent_ceiling(
                     composer_llm, getattr(self, "_token_ledger", None), REPORTER_AGENT_KEY
                 )
                 self._report_composer_cache = ReportComposer(

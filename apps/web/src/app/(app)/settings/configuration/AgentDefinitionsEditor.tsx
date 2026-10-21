@@ -111,6 +111,12 @@ export interface AgentLLMOverride {
    *  a 5xx, a model the server does not have) — never on what a model said.
    *  Absent or empty is the single-model form. */
   fallbacks?: ModelChoice[];
+  /** This agent's own spend ceiling (USD), counted over every model of its
+   *  list; once reached it makes no further model call. Absent is none. */
+  max_spend_usd?: number | null;
+  /** The tokens its calls of a model with no known price may use. Absent is
+   *  none. */
+  max_unpriced_tokens?: number | null;
 }
 
 /** What the detail's LLM section needs to know about the two *global* leaves

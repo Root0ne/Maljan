@@ -967,7 +967,10 @@ async def _ask_each_model(
     by an agent definition's probe and a role's (``mediator``, ``summarizer``),
     whose entry is read the same way.
     """
-    agent_llm = settings.llm.agents.get(name)
+    from maljan.core.config import model_entry
+
+    # An entry holding only its ceilings is asked as no entry: it chooses no model.
+    agent_llm = model_entry(settings.llm.agents, name)
     llm_provider = agent_llm.provider if agent_llm else settings.llm.provider
     # No per-agent override means the agent inherits the global expert
     # model; reporting "" left the operator to work out which provider

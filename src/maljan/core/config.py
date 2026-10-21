@@ -567,9 +567,62 @@ class AgentLLMConfig(ModelChoice):
     that wrote it, because asking another model instead would be the platform
     choosing a different answer. Empty keeps the single-model form, which is
     every entry written before the list existed.
+
+    ``max_spend_usd`` and ``max_unpriced_tokens`` are the agent's own ceilings
+    (``core.spend.SpendMeter.agent_refusal``): what its priced calls may cost,
+    and how many tokens its calls of a model with no known price (a local or
+    unpriced one) may use. Every model of the list counts toward the same
+    agent, fallbacks included. Once either is reached the agent makes no
+    further model call; what it already produced is kept, and no other agent
+    is affected. ``None``, the default, is no ceiling.
     """
 
+    # Blank only on an entry that holds nothing but its ceilings: the agent
+    # then runs on the model it runs on with no entry, and the entry only
+    # bounds it (:meth:`names_a_model`).
+    provider: str = ""
+    model: str = ""
     fallbacks: list[ModelChoice] = Field(default_factory=list)
+    # Left out of every dump while unset, so an entry with no ceiling dumps
+    # exactly as it did before ceilings existed.
+    max_spend_usd: Annotated[float, Field(gt=0)] | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
+    max_unpriced_tokens: Annotated[int, Field(gt=0)] | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
+
+    def names_a_model(self) -> bool:
+        """Whether the entry chooses the agent's model, rather than only holding its ceilings."""
+        return bool(self.provider or self.model)
+
+    @model_validator(mode="after")
+    def _a_model_or_only_ceilings(self) -> "AgentLLMConfig":
+        """An entry names its provider and model, or holds nothing but a ceiling.
+
+        A ceiling-only entry leaves the agent on the model it runs on without
+        an entry; a model setting beside it (a temperature, an endpoint, an
+        effort, a fallback) would have no model to apply to.
+        """
+        if self.names_a_model():
+            if not (self.provider and self.model):
+                raise ValueError("an agent entry names both its provider and its model.")
+            return self
+        if self.max_spend_usd is None and self.max_unpriced_tokens is None:
+            raise ValueError(
+                "an agent entry names its provider and model, or sets a ceiling "
+                "(max_spend_usd, max_unpriced_tokens)."
+            )
+        stray = [
+            name
+            for name in ("temperature", "base_url", "effort")
+            if getattr(self, name) is not None
+        ] + (["fallbacks"] if self.fallbacks else [])
+        if stray:
+            raise ValueError(
+                f"an entry with only a ceiling names no model for {', '.join(stray)} to apply to."
+            )
+        return self
 
     @model_validator(mode="after")
     def _each_model_once(self) -> "AgentLLMConfig":
@@ -585,8 +638,26 @@ class AgentLLMConfig(ModelChoice):
         return self
 
     def chain(self) -> list[ModelChoice]:
-        """The agent's models in the order they are tried, first model first."""
+        """The agent's models in the order they are tried, first model first.
+
+        Empty for an entry that holds only ceilings: it chooses no model.
+        """
+        if not self.names_a_model():
+            return []
         return [self, *self.fallbacks]
+
+
+def model_entry(agents: Any, key: str) -> Any:
+    """The ``llm.agents`` entry of ``key`` when it chooses the agent's model, else ``None``.
+
+    An entry holding only ceilings chooses none: the agent runs on the model it
+    runs on with no entry.
+    """
+    entry = (agents or {}).get(key)
+    if entry is None:
+        return None
+    names = getattr(entry, "names_a_model", None)
+    return entry if not callable(names) or names() else None
 
 
 class FrontierArm(BaseModel):

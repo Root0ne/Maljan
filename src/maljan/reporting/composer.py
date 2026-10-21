@@ -47,6 +47,7 @@ from maljan.core.logger import logger
 from maljan.core.spend import (
     SpendCeilingStop,
     admitted,
+    agent_ceiling_set,
     spend_bound,
     spend_ceiling_set,
     spend_left_said,
@@ -1229,6 +1230,17 @@ class ReportComposer:
             logger.info(
                 "ReportComposer: the sections are written one after another: a spend ceiling "
                 "is set, and each call is held at what the sections before it left."
+            )
+            concurrent = False
+        if concurrent and agent_ceiling_set(
+            getattr(self, "token_ledger", None), REPORTER_AGENT_KEY
+        ):
+            # The reporter's own ceiling is checked before each call, not
+            # reserved: written one after another, the section that crosses it
+            # is the last one written, and none is in flight beside it.
+            logger.info(
+                "ReportComposer: the sections are written one after another: the reporter "
+                "sets a ceiling of its own, checked before each call."
             )
             concurrent = False
         if at_once is not None and at_once <= 1:

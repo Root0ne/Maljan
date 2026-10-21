@@ -1639,6 +1639,38 @@ analyst's answer in force standing. A report section whose call is refused is
 recorded as not written, with the refusal's numbers. The run summary's
 degradation reasons say the ceiling ended the tool phases.
 
+**An agent's own ceiling.** An `llm.agents.<key>` entry may set
+`max_spend_usd`, what that agent's priced calls may cost in US dollars, and
+`max_unpriced_tokens`, the input and output tokens its calls of a model with
+no known price (a local or unpriced one) may use. Neither has a default: an
+entry that sets none has none, and its models are built exactly as before. An
+entry may hold only its ceilings, with no provider or model: the agent then
+runs on the model it runs on with no entry, built exactly as before, and the
+entry only bounds it. Calls are priced as the job's ceiling prices them, and
+every model of the entry's list counts toward the same agent, fallbacks
+included, as does a failed attempt its provider bills; a call that reported no
+usage counts at the stated estimate it carried, and the reason says how many
+did. The mediator's ceiling is its own, apart from the judge's, although the
+token block and the call feed file the mediator's calls under `judge`.
+
+The ceiling is checked before each call, not reserved: the call that crosses it
+runs and its answer is kept, and so does any call of the agent already in
+flight beside it (the reporter's sections are written one after another while
+the reporter sets a ceiling, so none is). From then on the agent makes no
+further model call — not a tool-loop turn, a nudge, a salvage or a closing
+answer; the verdict is not exempt. An analyst stopped mid-loop keeps the latest
+of its own turns that is a report, as written, or has no answer and is named as
+stopped before writing one, with the evidence it gathered kept. A judge stopped
+before its verdict gets this pipeline's fallback verdict, as a timed-out one
+does (`verdict.agent_ceiling`); a mediator stopped mid-round leaves the round
+unmediated with the ceiling's sentence as its note. The job's spend is not
+exhausted by any of it, and no other agent is affected. The call feed records
+the stop once (`call: "agent ceiling"`, with the agent and the ceiling),
+`run_summary.spend.agent_ceilings` gives each agent's ceilings, what it used
+and whether it stopped (one line each in the summary's spend section), and a
+degradation reason names the agent, the ceiling and what it had spent. The
+agent editor offers both fields on every entry.
+
 A report section's call is held to the smallest of three limits, and the log
 line for the call names the one that applied: the section's output budget
 (and how it was derived), what the model's window leaves after the prompt, or

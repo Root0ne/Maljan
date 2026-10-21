@@ -799,7 +799,8 @@ def selections(core: Mapping[str, Any]) -> list[tuple[str, str, str]]:
         for agent, entry in entries.items():
             if not isinstance(entry, Mapping):
                 continue
-            if isinstance(entry.get("provider"), str):
+            # An entry holding only its ceilings selects no provider.
+            if isinstance(entry.get("provider"), str) and entry["provider"]:
                 out.append((f"core.llm.agents.{agent}.provider", "llm", str(entry["provider"])))
             for position, fallback in enumerate(entry.get("fallbacks") or []):
                 if isinstance(fallback, Mapping) and isinstance(fallback.get("provider"), str):

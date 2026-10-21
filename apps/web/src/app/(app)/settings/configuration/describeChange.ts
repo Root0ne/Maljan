@@ -478,7 +478,8 @@ function describeProfilesMap(before: unknown, after: unknown): {
 // ---------------------------------------------------------------------------
 
 function formatOverride(o: AgentLLMOverride): string {
-  let base = `${o.provider}/${o.model}`;
+  // An entry holding only its ceilings names no model of its own.
+  let base = o.provider || o.model ? `${o.provider}/${o.model}` : "its usual model";
   if (o.base_url) base = `${base} @ ${o.base_url}`;
   if (o.effort) base = `${base} (effort ${o.effort})`;
   if (o.temperature !== null && o.temperature !== undefined) {
@@ -487,7 +488,12 @@ function formatOverride(o: AgentLLMOverride): string {
   const fallbacks = (o.fallbacks ?? []).map(
     (f) => `${f.provider}/${f.model}${f.effort ? ` (effort ${f.effort})` : ""}`,
   );
-  return fallbacks.length ? `${base}, then ${fallbacks.join(", then ")}` : base;
+  const listed = fallbacks.length ? `${base}, then ${fallbacks.join(", then ")}` : base;
+  const ceilings = [
+    o.max_spend_usd != null ? `${o.max_spend_usd} USD` : "",
+    o.max_unpriced_tokens != null ? `${o.max_unpriced_tokens} unpriced tokens` : "",
+  ].filter(Boolean);
+  return ceilings.length ? `${listed} (ceiling ${ceilings.join(", ")})` : listed;
 }
 
 function describeLlmAgentsMap(before: unknown, after: unknown): {
