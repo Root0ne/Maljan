@@ -353,7 +353,7 @@ class TestTheAnthropicModel:
         model = _anthropic(server)
         answers: list[str] = []
         errors: list[BaseException] = []
-        start = threading.Barrier(8)
+        start = threading.Barrier(8, timeout=120)
 
         def worker() -> None:
             async def calls() -> None:
@@ -361,7 +361,7 @@ class TestTheAnthropicModel:
                     answers.append(str((await model.ainvoke("hello")).content))
 
             try:
-                start.wait(10)
+                start.wait()
                 asyncio.run(calls())
             except BaseException as exc:  # noqa: BLE001 — reported below
                 errors.append(exc)
@@ -369,8 +369,14 @@ class TestTheAnthropicModel:
         threads = [threading.Thread(target=worker) for _ in range(8)]
         for thread in threads:
             thread.start()
+        # Every thread is joined, with a deadline (ten minutes) no loaded
+        # machine passes before a thread has finished, and a thread still alive
+        # fails below: ``asyncio.run`` closes its loop, and with it the client
+        # built there, before its thread ends. Only then is the record of
+        # loop-bound clients read.
         for thread in threads:
-            thread.join(30)
+            thread.join(timeout=600)
+        assert not any(thread.is_alive() for thread in threads)
         assert errors == []
         assert answers == ["answered"] * 24
         assert len(model._async_client._client._loop_bound_clients) == 0

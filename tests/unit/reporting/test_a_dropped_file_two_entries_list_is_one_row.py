@@ -8,11 +8,12 @@ are its own and stay, and a row that differs in any field is another row.
 
 from __future__ import annotations
 
-import time
+from collections.abc import Callable
 from typing import Any
 
 from maljan.reporting.ledger_projection import dynamic_from_ledger
 from maljan.schemas.evidence import build_entry
+from tests.linear_cost import TIME_RATIO_LIMIT, calls, cpu_seconds
 
 DROPPED = [
     {"name": "files/a.dat", "path": "", "size": 607, "type": None, "sha256": "aa" * 32},
@@ -68,18 +69,19 @@ class TestOneRowPerItem:
 
 
 class TestLinearTime:
-    def test_ten_times_the_rows_cost_at_most_ten_times(self) -> None:
-        def cost(rows: int) -> float:
+    def test_four_times_the_rows_cost_under_eight_times(self) -> None:
+        def read(rows: int) -> Callable[[], Any]:
             dropped = [{"name": f"f{n}", "size": n} for n in range(rows)]
             entries = [
                 _entry(15, "sandbox_dropped_files", {"dropped": dropped}),
                 _entry(116, "sandbox_dropped_files", {"dropped": dropped}),
             ]
-            start = time.perf_counter()
-            _operations(*entries)
-            return time.perf_counter() - start
+            return lambda: _operations(*entries)
 
-        cost(50)
-        small = cost(500)
-        large = cost(5_000)
-        assert large <= max(small, 1e-3) * 30
+        # CPU time, not wall-clock: four times the rows must take under eight
+        # times as long, and a quadratic read takes sixteen times. The calls
+        # made are held to the same ratio too, which a load cannot move.
+        read(50)()  # one-time costs (caches, lazy imports) are not the read's
+        small, large = read(4_000), read(16_000)
+        assert cpu_seconds(large) < cpu_seconds(small) * TIME_RATIO_LIMIT
+        assert calls(large) <= calls(small) * 4 * 1.2 + 100
