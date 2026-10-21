@@ -1122,12 +1122,20 @@ class ServiceContainer:
         # ``(func_hash, func_name)``. Filed the provider's way round, every
         # name was stored as a hash and no later sample's hash could match it.
         pairs = [(func_hash, name) for name, func_hash in functions]
+        # The verdict that files them, where the store records it, so an edit
+        # of that verdict can take them back (``FunctionHashStore.unfile``).
+        filer = (
+            {"filed_by": self.job_id}
+            if self.job_id and getattr(store, "keeps_filer", False)
+            else {}
+        )
         try:
             if self.memory_owner is None:
-                written = int(store.upsert_sample(sample_id, family, pairs) or 0)
+                written = int(store.upsert_sample(sample_id, family, pairs, **filer) or 0)
             elif keeps_owners(store):
                 written = int(
-                    store.upsert_sample(sample_id, family, pairs, owner=self.memory_owner) or 0
+                    store.upsert_sample(sample_id, family, pairs, owner=self.memory_owner, **filer)
+                    or 0
                 )
             else:
                 # Unscoped, it would reach every other owner's jobs.
@@ -1872,6 +1880,11 @@ class ServiceContainer:
             from maljan.memory.store_factory import release_function_hash_store
 
             release_function_hash_store(unwritten[0])
+        # What the model calls still running here are charged from now on
+        # landed after the job ended: the ledger marks and keeps it.
+        ledger = getattr(self, "_token_ledger", None)
+        if ledger is not None and hasattr(ledger, "end"):
+            ledger.end()
         with self._lock:
             analysts = list(self._agent_cache.values())
             judges = list(self._judge_agent_cache.values())

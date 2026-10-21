@@ -179,3 +179,58 @@ def test_an_answer_within_the_deadline_is_not_charged_as_abandoned() -> None:
 
     assert models.invoke("hi").content.startswith("late answer")
     assert spend.failed_attempts() == []
+
+
+def test_a_charge_landing_after_the_summary_is_sealed_is_marked_and_kept() -> None:
+    from maljan.core.token_ledger import LANDED_AFTER_END
+
+    ledger = TokenLedger(spend=_Spend())
+    rows: list[dict[str, Any]] = []
+    ledger.on_call = rows.append
+    ledger.charge_failed_attempt(dict(USAGE), agent="x", model="m", call="c")
+    assert LANDED_AFTER_END not in rows[0] and ledger.late_charges() == []
+    before = ledger.snapshot()
+
+    ledger.end()  # the summary's token block is taken; the container is not closed yet
+    ledger.end()  # idempotent
+    ledger.charge_failed_attempt(dict(USAGE), agent="x", model="m", call="c")
+
+    assert rows[1][LANDED_AFTER_END] is True
+    assert ledger.late_charges() == [rows[1]]
+    assert ledger.snapshot() == before, "the sealed figures are never rewritten"
+
+
+def test_a_call_added_after_the_seal_is_late_and_in_no_total() -> None:
+    from maljan.core.token_ledger import LANDED_AFTER_END
+
+    spend = _Spend()
+    ledger = TokenLedger(spend=spend)
+    rows: list[dict[str, Any]] = []
+    ledger.on_call = rows.append
+    ledger.add(dict(USAGE), agent="x", model="m", call="c")
+    before = (ledger.snapshot(), ledger.calls, ledger.total_tokens, ledger.by_call())
+
+    ledger.end()
+    ledger.add(dict(USAGE), agent="x", model="m", call="c", fallback="f", retries=["r"])
+
+    assert (ledger.snapshot(), ledger.calls, ledger.total_tokens, ledger.by_call()) == before
+    assert rows[1][LANDED_AFTER_END] is True and ledger.late_charges() == [rows[1]]
+    assert len(spend.settled) == 2, "a late answer is still billed on the spend meter"
+
+
+def test_closing_the_container_ends_the_ledger() -> None:
+    from maljan.core.config import Settings
+    from maljan.core.container import ServiceContainer
+    from maljan.core.token_ledger import LANDED_AFTER_END
+
+    container = ServiceContainer(Settings(_env_file=None), mock=True)
+    ledger = container.get_token_ledger()
+    rows: list[dict[str, Any]] = []
+    ledger.on_call = rows.append
+    ledger.charge_failed_attempt(dict(USAGE), agent="x", model="m", call="c")
+    assert LANDED_AFTER_END not in rows[0]
+
+    asyncio.run(container.aclose())
+    ledger.charge_failed_attempt(dict(USAGE), agent="x", model="m", call="c")
+
+    assert rows[1][LANDED_AFTER_END] is True

@@ -298,6 +298,10 @@ def call_record(
     return row
 
 
+# The mark on a record whose charge landed after the job ended, so after the
+# run summary's figures were sealed.
+LANDED_AFTER_END = "landed_after_job_ended"
+
 # The ``call`` of a record that is a retry of a model request, not a call.
 RETRY_RECORD = "retry"
 
@@ -380,6 +384,44 @@ class TokenLedger:
         # built (all but a call recorded in the last moments before the kill).
         # ``None`` where nothing listens.
         self.on_call: Callable[[dict[str, Any]], None] | None = None
+        # Set when the job has ended (``end``): a charge that lands later
+        # (an abandoned call's answer, billed in full) is in no run summary,
+        # whose figures are sealed. It is kept here, marked, and handed to the
+        # listener marked, so the spend is stated and the summary never
+        # rewritten.
+        self._ended = False
+        self._late: list[dict[str, Any]] = []
+
+    def end(self) -> None:
+        """The run summary's figures are final: what is charged from now on landed after it.
+
+        Called once the summary's token block is taken (the worker, right after
+        the stored report's inputs are built) and again when the job's
+        container closes, as the backstop. Idempotent.
+        """
+        with self._lock:
+            self._ended = True
+
+    def _record_late(self, row: dict[str, Any]) -> bool:
+        """Mark ``row`` and keep it where the job has ended; whether it was late."""
+        with self._lock:
+            if not self._ended:
+                return False
+            row[LANDED_AFTER_END] = True
+            self._late.append(dict(row))
+            return True
+
+    def late_charges(self) -> list[dict[str, Any]]:
+        """The charges that landed after the job ended, one record each, as a plain copy.
+
+        Not in :meth:`snapshot`: a stored run's token block reads as it was
+        sealed. The durable record of a late charge is the call feed: each is
+        handed to ``on_call`` marked :data:`LANDED_AFTER_END`, as the worker
+        commits every call record to the job's events; this list is the
+        in-process view, gone with the process.
+        """
+        with self._lock:
+            return [dict(row) for row in self._late]
 
     def add(
         self,
@@ -400,7 +442,21 @@ class TokenLedger:
         answer ended while it streamed): it is handed to the spend meter only,
         and the call stays one that reported no usage here. ``retries`` are
         the failed attempts made before this call answered, one line each.
+
+        A call recorded after :meth:`end` is a late one: it is settled on the
+        spend meter and handed to the listener marked
+        :data:`LANDED_AFTER_END`, kept in :meth:`late_charges`, and counted in
+        none of the totals, so the sealed summary and the ledger's own figures
+        stay what the summary said.
         """
+        if self._ended:
+            charged = self._settle(usage, model, call, estimated)
+            row = _with_charge(
+                call_record(usage, agent=agent, model=model, call=call), usage, estimated, charged
+            )
+            if self._record_late(row):
+                self._tell(row)
+                return
         with self._lock:
             if usage is None:
                 self._unreported.append({"agent": agent, "call": call, "model": model})
@@ -509,8 +565,11 @@ class TokenLedger:
         afterwards keeps what the attempt cost.
         """
         charged = self._settle(usage, model, call, estimated)
-        row = call_record(usage, agent=agent, model=model, call=call)
-        self._tell(_with_charge(row, usage, estimated, charged))
+        row = _with_charge(
+            call_record(usage, agent=agent, model=model, call=call), usage, estimated, charged
+        )
+        self._record_late(row)
+        self._tell(row)
 
     @property
     def input_tokens(self) -> int:

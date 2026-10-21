@@ -1342,12 +1342,23 @@ def _deadline_members(base: Any) -> dict[str, Any]:
                     yield chunk
                 return
             deadline = _CallDeadline(self, messages, kwargs, time.monotonic)
-            arrived: queue.Queue[tuple[str, Any]] = queue.Queue()
+            # Flow control, not a limit on the answer: the reader waits for the
+            # caller when this many pieces are unread, so a runaway stream is
+            # not read in the background while nobody consumes it.
+            arrived: queue.Queue[tuple[str, Any]] = queue.Queue(maxsize=_STREAM_READ_AHEAD)
             # Set when the caller is done with the stream: at its deadline, on
             # an error, or when it stops reading. The reader stops at the next
             # chunk and closes the client's iterator, which ends the request,
             # rather than reading the rest of the answer into the queue.
             finished = threading.Event()
+
+            def _hand(entry: tuple[str, Any]) -> None:
+                while not finished.is_set():
+                    try:
+                        arrived.put(entry, timeout=_STREAM_HAND_WAIT_SECONDS)
+                        return
+                    except queue.Full:
+                        continue
 
             def _pump() -> None:
                 source = base._stream(self, messages, stop=stop, run_manager=run_manager, **kwargs)
@@ -1355,11 +1366,11 @@ def _deadline_members(base: Any) -> dict[str, Any]:
                     for chunk in source:
                         if finished.is_set():
                             return
-                        arrived.put(("chunk", chunk))
+                        _hand(("chunk", chunk))
                 except BaseException as exc:  # noqa: BLE001 — handed back to the caller
-                    arrived.put(("error", exc))
+                    _hand(("error", exc))
                 else:
-                    arrived.put(("end", None))
+                    _hand(("end", None))
                 finally:
                     close = getattr(source, "close", None)
                     if callable(close):
@@ -1406,6 +1417,11 @@ def _deadline_members(base: Any) -> dict[str, Any]:
         members["_stream"] = _stream
     return members
 
+
+# Pieces the stream reader holds ahead of the caller (flow control only).
+_STREAM_READ_AHEAD = 8
+# How often a reader waiting for room checks that the caller is still there.
+_STREAM_HAND_WAIT_SECONDS = 0.05
 
 # One subclass per chat class seen, so pydantic builds each schema once.
 _SIZED_CLASSES: dict[type, type] = {}

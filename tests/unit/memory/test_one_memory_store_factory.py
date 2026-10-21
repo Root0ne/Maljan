@@ -71,6 +71,16 @@ class _FakeQdrant:
         for point in points:
             self.collections[collection_name][point.id] = dict(point.payload)
 
+    def retrieve(
+        self,
+        collection_name: str,
+        ids: list[int],
+        with_payload: bool = True,
+        with_vectors: bool = False,
+    ) -> list[Any]:
+        held = self.collections[collection_name]
+        return [SimpleNamespace(id=i, payload=held[i]) for i in ids if i in held]
+
     def scroll(
         self,
         collection_name: str,

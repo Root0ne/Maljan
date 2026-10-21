@@ -884,7 +884,10 @@ class ToolEffects(BaseModel):
     "no"; ``why_undeclared`` says why one is left unset, where the platform
     cannot vouch for it (a tool that runs whatever script it is given), and
     ``when`` the condition under which a declared effect happens, where it
-    happens only under one (an analysis level). The
+    happens only under one (an analysis level). ``offline_without_credentials``
+    says the tool answers from this machine when it is handed no credentials,
+    reaching its third party only where it is given them (left unset, it is
+    not declared); an offline rehearsal keeps such a server and names it. The
     sample's bytes going out are ``ToolFacts.discloses_sample`` as well:
     either one declares it, and the run's disclosure block reads the same
     rule (``analysis.tool_effects.sends_sample_bytes``); a tool whose network
@@ -898,6 +901,7 @@ class ToolEffects(BaseModel):
     third_party: str = ""
     why_undeclared: str = ""
     when: str = ""
+    offline_without_credentials: bool | None = None
 
     def with_bytes_sent(self) -> ToolEffects:
         """These effects with the sample's bytes sent out: ``third_party`` ``bytes``, and a

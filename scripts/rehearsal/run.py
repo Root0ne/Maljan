@@ -494,12 +494,56 @@ def third_party_off(values: dict[str, dict[str, Any]]) -> dict[str, Any]:
         remote = str(server.get("transport") or "stdio") != "stdio" and not is_local_endpoint(
             server.get("url")
         )
-        if remote or server_effects(str(key), server) == REACHES:
+        effects = server_effects(str(key), server)
+        if remote or effects == REACHES:
             server["enabled"] = False
+            moved = True
+        elif effects == OFFLINE_WITHOUT_CREDENTIALS and withhold_credentials(server):
             moved = True
     if moved:
         changes["core.mcp.servers"] = servers
     return changes
+
+
+_SECRET_WORDS = ("key", "token", "secret", "password", "passwd", "auth", "credential", "bearer")
+
+
+def _names_a_secret(text: str) -> bool:
+    lowered = text.lower()
+    return any(word in lowered for word in _SECRET_WORDS)
+
+
+def withhold_credentials(server: dict[str, Any]) -> bool:
+    """Take every credential out of ``server`` (in place); whether anything was taken.
+
+    Its ``env`` and ``env_allow`` are emptied, its ``auth_token`` cleared, and
+    an argument that names a secret (``--api-key VALUE``, ``--token=VALUE``,
+    ``NAME_KEY=VALUE``) is dropped with its value, so the server answers as it
+    does with none.
+    """
+    changed = False
+    for field, empty in (("env", {}), ("env_allow", []), ("auth_token", ""), ("headers", {})):
+        if server.get(field):
+            server[field] = empty
+            changed = True
+    args = server.get("args")
+    if isinstance(args, list):
+        kept: list[Any] = []
+        skip_value = False
+        for arg in args:
+            text = str(arg)
+            if skip_value:
+                skip_value = False
+                if not text.startswith("-"):
+                    continue
+            if _names_a_secret(text.split("=", 1)[0]) and (text.startswith("-") or "=" in text):
+                skip_value = text.startswith("-") and "=" not in text
+                continue
+            kept.append(arg)
+        if kept != args:
+            server["args"] = kept
+            changed = True
+    return changed
 
 
 # What a server's tool declarations in force say about reaching a third party.
@@ -510,6 +554,9 @@ UNDECLARED = "undeclared"
 # undeclared server, since the tools without a declaration are used at full
 # strength.
 PARTLY_DECLARED = "partly declared"
+# Every tool that would reach a third party declares that it answers offline
+# without credentials (``effects.offline_without_credentials``).
+OFFLINE_WITHOUT_CREDENTIALS = "offline without credentials"
 
 
 def server_effects(key: str, server: dict[str, Any]) -> str:
@@ -529,7 +576,12 @@ def server_effects(key: str, server: dict[str, Any]) -> str:
     an entry in the declarations in force; a server with no allow-list advertises
     tools the rehearsal cannot list without starting it, so a tool with no entry
     at all is unknown there and only an entry that declares nothing counts as
-    undeclared.
+    undeclared. A tool that reaches a third party but declares
+    ``effects.offline_without_credentials`` does not make its server
+    :data:`REACHES`; a server whose reaching tools all declare it is
+    :data:`OFFLINE_WITHOUT_CREDENTIALS`, kept running with its credentials
+    withheld (:func:`withhold_credentials`) and named. A tool that sends the
+    sample's bytes keeps its server :data:`REACHES` whatever it declares.
     """
     from maljan.analysis.tool_effects import sends_sample_bytes
     from maljan.core.builtin_declarations import server_declaration
@@ -551,6 +603,7 @@ def server_effects(key: str, server: dict[str, Any]) -> str:
         return REACHES
     declared = 0
     tools = 0
+    offline = False
     for raw in in_force.values():
         if not isinstance(raw, dict):
             continue
@@ -561,13 +614,17 @@ def server_effects(key: str, server: dict[str, Any]) -> str:
             return REACHES
         effects = facts.effects
         if sends_sample_bytes(facts) or (
-            effects is not None
-            and (
-                effects.network is True
-                or effects.third_party in (THIRD_PARTY_HASH, THIRD_PARTY_BYTES)
-            )
+            effects is not None and effects.third_party == THIRD_PARTY_BYTES
         ):
+            # The sample's bytes going out are never made offline by a
+            # declaration about credentials.
             return REACHES
+        if effects is not None and (
+            effects.network is True or effects.third_party in (THIRD_PARTY_HASH, THIRD_PARTY_BYTES)
+        ):
+            if effects.offline_without_credentials is not True:
+                return REACHES
+            offline = True
         if effects is not None and (
             effects.executes or effects.network is not None or effects.third_party
         ):
@@ -577,6 +634,8 @@ def server_effects(key: str, server: dict[str, Any]) -> str:
     allowed = server.get("tools")
     if isinstance(allowed, list):
         tools += sum(1 for name in allowed if name not in in_force)
+    if offline:
+        return OFFLINE_WITHOUT_CREDENTIALS
     if not declared:
         return UNDECLARED
     return LOCAL if declared == tools else PARTLY_DECLARED
@@ -593,14 +652,19 @@ def describe_changes(values: dict[str, dict[str, Any]], changes: dict[str, Any])
         and not server.get("enabled", True)
         and (servers_before.get(key) or {}).get("enabled", True)
     )
+    named = {
+        UNDECLARED: "kept: effects not declared",
+        PARTLY_DECLARED: "kept: effects not declared for some tools",
+        OFFLINE_WITHOUT_CREDENTIALS: (
+            "kept: declares it answers offline without credentials; credentials withheld"
+        ),
+    }
     kept = {
-        key: "kept: effects not declared"
-        if effects == UNDECLARED
-        else "kept: effects not declared for some tools"
+        key: named[effects]
         for key, server in sorted(servers_during.items())
         if isinstance(server, dict)
         and server.get("enabled", True)
-        and (effects := server_effects(str(key), server)) in (UNDECLARED, PARTLY_DECLARED)
+        and (effects := server_effects(str(key), server)) in named
     }
     return {
         "settings": {

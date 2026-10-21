@@ -2081,6 +2081,30 @@ async def job_status_now(db_session: async_sessionmaker, job_uuid: uuid.UUID) ->
         return None
 
 
+async def report_row_exists(db_session: async_sessionmaker, report_id: uuid.UUID) -> bool:
+    """Whether the report row with ``report_id`` is stored.
+
+    Read on a session of its own, by the id of the report this run stored.
+    Never raises; a read that fails decides nothing (``False``).
+    """
+    try:
+        from app.models.report import AnalysisReport
+
+        async with db_session() as db:
+            result = await db.execute(
+                select(AnalysisReport.id).where(AnalysisReport.id == report_id)
+            )
+            return bool(result.scalar_one_or_none() == report_id)
+    except Exception as exc:  # noqa: BLE001 — a read that fails decides nothing
+        logger.warning(
+            "Could not read the stored report %s (%s).",
+            report_id,
+            type(exc).__name__,
+            extra={"report_id": str(report_id)},
+        )
+        return False
+
+
 def completion_missed(result: Any) -> bool:
     """Whether a status update matched no row, as its driver result says.
 
@@ -2135,6 +2159,7 @@ async def keep_the_built_report(
             hash_mismatch_reason=hash_mismatch_reason,
             scale_record=scale_record,
         )
+        _end_the_token_ledger(container)
         run_summary["degraded_mode"] = True
         run_summary["degradation_reasons"] = [
             *(run_summary.get("degradation_reasons") or []),
@@ -2272,6 +2297,7 @@ async def keep_the_stopped_run(
             hash_mismatch_reason=hash_mismatch_reason,
             scale_record=recorded_signature_scale(container),
         )
+        _end_the_token_ledger(container)
         async with db_session() as db:
             report = await _store_the_report(
                 db,
@@ -2517,6 +2543,11 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
     # Set once the completion is committed: from then on nothing may record
     # this job as failed.
     completion_recorded = False
+    # The id of a report being stored under a job that was no longer running
+    # (``stored_after_note``): set before that store's commit, so a commit
+    # whose acknowledgement is lost can be told from one that never landed,
+    # by that report's own row and never by what a report of the job says.
+    stored_report_id: uuid.UUID | None = None
     # Registered here rather than above the session: this is the statement
     # before the ``try`` whose ``finally`` unregisters it, so there is no
     # window in which a raise leaves a buffer in the module-global map for
@@ -3433,6 +3464,7 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
                 else None
             ),
         )
+        _end_the_token_ledger(getattr(app, "container", None))
 
         # A pipeline that produced no report is a failed run, not a
         # completed one with nothing in it (L15, security hardening):
@@ -3544,6 +3576,8 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
                 core_settings=core_settings,
                 spill=_job_spill(app.container),
             )
+            if stored_note is not None:
+                stored_report_id = report.id
             await db.commit()
             # Read off the report while its session is still open, so nothing
             # below can send this function back to the database for a value.
@@ -3668,6 +3702,31 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
             # the complete report is stored, and an incomplete copy kept now
             # would supersede it.
             completion_recorded = True
+        if (
+            not completion_recorded
+            and stored_report_id is not None
+            and job_uuid is not None
+            and await report_row_exists(db_session, stored_report_id)
+        ):
+            # The job was no longer running and its report was stored under
+            # that note; only the commit's acknowledgement was lost. The report
+            # stands: an incomplete copy kept now would supersede it, and the
+            # row's own status (the operator's cancel) is not a failure to mark.
+            row_now = await job_status_now(db_session, job_uuid)
+            logger.error(
+                "Job %s: the report stored under its %s row is committed and only the "
+                "acknowledgement was lost (error_id=%s); it is kept as it is.",
+                job_id,
+                row_now,
+                error_id,
+                extra={"job_id": job_id, "error_id": error_id},
+            )
+            return {
+                "status": "not_running_at_completion",
+                "row_status": row_now,
+                "job_id": job_id,
+                "error_after_store": reason,
+            }
         if completion_recorded:
             # The report is stored and the row says ``completed``; a step after
             # that (remembering the run, say) failed. The completion stands.
@@ -4641,6 +4700,20 @@ async def _supersede_previous_report(db: Any, job_id: Any) -> None:
         await db.flush()
     except Exception as exc:  # noqa: BLE001
         logger.warning("Could not check for a previous report on job %s (%s).", job_id, exc)
+
+
+def _end_the_token_ledger(container: Any) -> None:
+    """The run summary's token figures are final: a charge landing from now on is marked late.
+
+    Idempotent, and never raises; the container's close is the backstop
+    (``TokenLedger.end``).
+    """
+    try:
+        ledger = container.get_token_ledger() if container is not None else None
+        if ledger is not None:
+            ledger.end()
+    except Exception as exc:  # noqa: BLE001 — marking never fails a stored report
+        logger.debug("The usage ledger was not marked ended (%s).", type(exc).__name__)
 
 
 def _report_inputs(
