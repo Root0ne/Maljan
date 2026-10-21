@@ -92,3 +92,21 @@ def test_the_guard_lets_kinds_and_tool_to_tool_be() -> None:
         "    return 'intro' not in lines\n"
     )
     assert findings(clean) == []
+
+
+def test_the_guard_lets_a_writer_and_a_tool_to_tool_helper_be() -> None:
+    clean = (
+        "def find(es, tool):\n"
+        "    return [e for e in es if e.tool == tool]\n"
+        "def record(tool, args):\n"
+        "    return (tool, args)\n"
+        "find(es, other)\n"
+        'record("capa", {})\n'
+        'record(tool="capa", args={})\n'
+        "tool, ok = entry.tool, entry.ok\n"
+        "same = tool == other.tool\n"
+        "tools = [e.tool for e in es]\n"
+        "ok = len(tools) == 2\n"
+        'words = re.findall("[a-z]+", entry.tool)\n'
+    )
+    assert findings(clean) == []

@@ -414,6 +414,7 @@ class EvidenceRecorder:
         cut: int | None = None,
         guard_answer: bool = False,
         source: str | None = None,
+        declared_name: str | None = None,
         structured_content: dict[str, Any] | None = None,
         whole: str | None = None,
         whole_structure: dict[str, Any] | None = None,
@@ -433,7 +434,10 @@ class EvidenceRecorder:
         read and is marked ``truncated`` with ``chars_dropped``. ``source`` is
         where the tool's declaration lives (``mcp:<key>``, ``provider:<id>``,
         ``sandbox``, ``pack``), as the caller knows it; it is never guessed
-        later from the tool's name. ``structured_content`` is the structured
+        later from the tool's name. ``declared_name`` is the name that source
+        declares the tool under, given for a tool the request
+        offered, the original name where it was renamed: the entry's facts are
+        resolved by it, exactly. ``structured_content`` is the structured
         answer the tool's server returned beside its text (MCP
         ``structuredContent``), filed on the entry as returned.
 
@@ -474,6 +478,7 @@ class EvidenceRecorder:
             not_shown=not_shown is not None,
             chars_dropped=int(cut or 0) if not_shown is None else 0,
             source=source,
+            declared_name=declared_name,
             structured_content=structured_content,
             agent_role=self.agent_role,
             agent_tab=self.agent_tab,
@@ -561,6 +566,7 @@ class EvidenceRecorder:
         said: str,
         ok: bool = True,
         source: str | None = None,
+        declared_name: str | None = None,
     ) -> LedgerEntry:
         """File a call the repeat guard answered without running, as a repeat of ``first``.
 
@@ -585,6 +591,7 @@ class EvidenceRecorder:
             duration_ms=0,
             repeated_of=str(first),
             source=source,
+            declared_name=declared_name,
         )
 
     def record_guard_answer(
@@ -595,6 +602,7 @@ class EvidenceRecorder:
         server: str | None,
         said: str,
         source: str | None = None,
+        declared_name: str | None = None,
     ) -> LedgerEntry:
         """File a call a guard answered without running any tool, as the guard's answer.
 
@@ -620,6 +628,7 @@ class EvidenceRecorder:
             duration_ms=0,
             guard_answer=True,
             source=source,
+            declared_name=declared_name,
         )
 
 
@@ -1356,7 +1365,12 @@ def _record_tool(
     from langchain_core.tools import StructuredTool
 
     from maljan.agents.output_shortening import bounding_arguments, narrowing_arguments
-    from maljan.agents.tool_pinning import declared_facts_of, declared_source_of, server_of
+    from maljan.agents.tool_pinning import (
+        declared_facts_of,
+        declared_name_of,
+        declared_source_of,
+        server_of,
+    )
 
     func = getattr(tool, "func", None)
     coroutine = getattr(tool, "coroutine", None)
@@ -1369,6 +1383,10 @@ def _record_tool(
     # Where the tool's declaration lives (``core.tool_declarations``), read
     # from the tool itself as it was built and written on every entry.
     source = declared_source_of(tool)
+    # The name its server declares it under (the original, where the request
+    # offers it renamed): the declaration is read by that name, never by taking
+    # a prefix off the offered one.
+    declared_name = declared_name_of(tool)
     # What the tool declares about itself, read once for every call it makes.
     facts = declared_facts_of(tool)
     # What its own MCP server said of it when it was attached, kept on each
@@ -1442,7 +1460,12 @@ def _record_tool(
             context_budget.charge(len(TOOL_PHASE_ENDED_NOTICE), recorder.agent)
             said = TOOL_PHASE_ENDED_NOTICE
         recorder.record_guard_answer(
-            tool=name, args=kwargs, server=server, source=source, said=said
+            tool=name,
+            args=kwargs,
+            server=server,
+            source=source,
+            declared_name=declared_name,
+            said=said,
         )
         return said
 
@@ -1479,7 +1502,12 @@ def _record_tool(
                 logger.debug("the question was not counted (%s).", exc)
         notice = self_named_notice(name, found)
         recorder.record_guard_answer(
-            tool=name, args=kwargs, server=server, source=source, said=notice
+            tool=name,
+            args=kwargs,
+            server=server,
+            source=source,
+            declared_name=declared_name,
+            said=notice,
         )
         return notice
 
@@ -1501,6 +1529,7 @@ def _record_tool(
                 args=kwargs,
                 server=server,
                 source=source,
+                declared_name=declared_name,
                 first=earlier,
                 said=earlier_chunk_sentence(name, earlier, origin=repeats.origin_of(earlier)),
             )
@@ -1532,6 +1561,7 @@ def _record_tool(
             args=kwargs,
             server=server,
             source=source,
+            declared_name=declared_name,
             first=first,
             said=notice,
             ok=not failed,
@@ -1619,6 +1649,7 @@ def _record_tool(
             args=kwargs,
             server=server,
             source=source,
+            declared_name=declared_name,
             hints=hints,
             output=read_again_note(holder),
             ok=not recorder.entry_failed(holder),
@@ -1694,6 +1725,7 @@ def _record_tool(
             args=kwargs,
             server=server,
             source=source,
+            declared_name=declared_name,
             hints=hints,
             # A repeat keeps the note, not a second copy of the listing the
             # entry it names already holds.
@@ -1791,6 +1823,7 @@ def _record_tool(
             args=sent if sent is not None else kwargs,
             server=server,
             source=source,
+            declared_name=declared_name,
             hints=hints,
             output=message,
             ok=False,

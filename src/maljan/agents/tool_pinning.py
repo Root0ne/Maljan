@@ -50,6 +50,10 @@ SERVER_FRAGMENT_METADATA_KEY = "maljan_server_fragment"
 # only while the server's tools are in the request, and never read as a
 # template, being the server's words and not a declaration.
 SERVER_OWN_WORDS_METADATA_KEY = "maljan_server_own_words"
+# The name a server declares a tool under, set on a tool the request offers
+# renamed (``<server>__<tool>``): the declaration is read by it, never by
+# taking a prefix off the offered name.
+DECLARED_NAME_METADATA_KEY = "maljan_declared_name"
 # Set on a tool its own server marks read-only (MCP ``readOnlyHint`` true).
 READ_ONLY_METADATA_KEY = "maljan_read_only"
 # The MCP hints its own server gave a tool when it was attached
@@ -173,11 +177,17 @@ def reads_staged_sample(tool: Any) -> bool:
     return bool(held is not None and held.reads_staged_sample)
 
 
+def declared_name_of(tool: Any) -> str:
+    """The name a tool's source declares it under: its original when it was renamed, else its own."""
+    metadata = getattr(tool, "metadata", None) or {}
+    return str(metadata.get(DECLARED_NAME_METADATA_KEY) or getattr(tool, "name", "") or "")
+
+
 def declared_facts_of(tool: Any) -> Any:
     """What a tool declares about itself (``core.tool_declarations.ToolFacts``), or ``None``.
 
     Read by the source the tool was built under (:func:`declared_source_of`)
-    and the name it is offered under, from the live declarations: what the
+    and the name it is declared under (:func:`declared_name_of`), from the live declarations: what the
     request is about to offer, never a persisted record. A tool nothing
     stamped, or whose source declares nothing for it, has none; it is never
     guessed from the tool's name.
@@ -188,7 +198,7 @@ def declared_facts_of(tool: Any) -> Any:
     try:
         from maljan.core.declared_reading import declarations
 
-        return declarations().declaration_for((source, str(getattr(tool, "name", "") or "")))
+        return declarations().declaration_for((source, declared_name_of(tool)), exact=True)
     except Exception as exc:  # noqa: BLE001 — an unreadable declaration declares nothing
         logger.debug("declared facts of a tool not read (%s).", type(exc).__name__)
         return None

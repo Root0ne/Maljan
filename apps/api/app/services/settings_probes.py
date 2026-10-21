@@ -1093,7 +1093,7 @@ async def probe_agent(v: dict[str, Any]) -> ProbeResult:
         available = ", ".join(sorted([*settings.agents.definitions, *ROLE_ENTRY_KEYS]))
         return ProbeResult(False, _ms(t0), f"unknown agent: {name!r}. Available: {available}")
 
-    from maljan.agents.composition import aresolve_agent, mcp_refs_for
+    from maljan.agents.composition import aresolve_agent, mcp_refs_for, servers_bound_to
     from maljan.core.config import ToolRef
     from maljan.core.container import ServiceContainer
 
@@ -1107,7 +1107,10 @@ async def probe_agent(v: dict[str, Any]) -> ProbeResult:
     bound += [
         str(ref.server) for ref in mcp_refs_for(settings, name) if str(ref.server) not in bound
     ]
-    bound = list(dict.fromkeys(bound))
+    # Only the servers resolution opens: the ones the team withholds from this
+    # agent are neither listed nor budgeted for.
+    reachable = servers_bound_to(settings, name)
+    bound = [key for key in dict.fromkeys(bound) if key in reachable]
 
     # One server's own open, at B's budget; the whole resolution gets that
     # budget once per server bound to the agent, never a fixed multiple —

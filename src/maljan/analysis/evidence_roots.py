@@ -1136,11 +1136,13 @@ def _command_root(
 # The declared places a row's root is read from, by the coordinate each states
 # (``ToolFacts.places``): a file offset; an offset from the image base (a
 # place, a call site, the start of the function a row is in); an address as a
-# tool writes it, one or a list; a sandbox process id.
+# tool writes it, one or a list; a sandbox process id; a command line, joined
+# to the process that ran it.
 _OFFSET_PLACES = frozenset({"offset", "instance_offset"})
 _RVA_PLACES = frozenset({"rva", "call_site", "function"})
 _ADDRESS_PLACES = frozenset({"address", "addresses"})
 _PROCESS_PLACES = frozenset({"pid"})
+_COMMAND_PLACES = frozenset({"command_line"})
 
 
 def _flat(values: Iterable[Any]) -> list[Any]:
@@ -1151,7 +1153,7 @@ def _flat(values: Iterable[Any]) -> list[Any]:
     return out
 
 
-def _read_declared_rows(found: EntryRoots, facts: Any, data: Any, tool: str) -> None:
+def _read_declared_rows(found: EntryRoots, facts: Any, data: Any, tool: str, joins: _Joins) -> None:
     """The roots of an answer whose kind has no reader of its own, read by its declared paths.
 
     Each row (``rows``) gives a root per place its declared ``places`` name,
@@ -1184,6 +1186,9 @@ def _read_declared_rows(found: EntryRoots, facts: Any, data: Any, tool: str) -> 
                     placed = _address_root(found, value, values=values, techniques=tids) or placed
                 elif name in _PROCESS_PLACES and value not in (None, ""):
                     found.add(_process(value), values=values, techniques=tids)
+                    placed = True
+                elif name in _COMMAND_PLACES and isinstance(value, str) and value.strip():
+                    _command_root(found, value.strip(), joins, tids)
                     placed = True
         if not placed:
             found.unplace(NOTHING_TO_PLACE.format(tool=tool), values=values, techniques=tids)
@@ -1446,7 +1451,7 @@ def _read_entry(entry: Any, found: EntryRoots, joins: _Joins) -> EntryRoots:
             found.add(WHOLE_FILE)
     else:
         if facts is not None and facts.rows and facts.places:
-            _read_declared_rows(found, facts, data, tool)
+            _read_declared_rows(found, facts, data, tool, joins)
         placed = bool(found.roots)
         for key in () if placed else entry_address_arguments(entry):
             if args.get(key) not in (None, "") and _address_root(found, args[key]):
