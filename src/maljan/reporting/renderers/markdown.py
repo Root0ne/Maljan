@@ -1987,9 +1987,17 @@ class MarkdownRenderer:
         others = [row for row in others if row not in answered]
         if validation:
             not_run = validation.get("not_run") or []
+            # The advisory rows as one number, so a reader does not count the
+            # marks: the platform dropped nothing over any of them.
+            advisory_total = unresolved_total([row for row in others if row.get("advisory")])
             lines.append(
                 f"**Validation:** {validation.get('retries', 0)} feedback retries, "
                 f"{unresolved_total(others)} finding(s) left unresolved"
+                + (
+                    f", {advisory_total} of them advisory (nothing was dropped over them)"
+                    if advisory_total
+                    else ""
+                )
                 + (f"; checks that could not run: {', '.join(not_run)}" if not_run else "")
                 + "."
             )

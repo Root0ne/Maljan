@@ -388,3 +388,26 @@ class TestGroundingContract:
         ]
         for section in build_sections(entries, {}, "PE", "windows"):
             assert section.evidence_ids or section.source, section.key
+
+
+class TestFunctionsExaminedNamesTheFunction:
+    def test_a_decompiler_with_its_own_address_argument_names_the_address(self) -> None:
+        entry = _entry("decompile_function", "void f() { }", args={"name_or_address": "0x401000"})
+        items = _by_key(build_sections([entry]))["functions_examined"].items
+        assert items == ["0x401000 (decompile_function)"]
+
+    def test_an_integer_address_is_printed_in_hex(self) -> None:
+        entry = _entry("decompile_function", "void f() { }", args={"address": 4198400})
+        items = _by_key(build_sections([entry]))["functions_examined"].items
+        assert items == ["0x401000 (decompile_function)"]
+
+    def test_a_call_naming_nothing_never_repeats_the_tool_name(self) -> None:
+        entries = [
+            _entry("decompile_function", "void f() { }", args={}),
+            _entry("list_functions", "- 0x401000 main", args={}, seq=2),
+        ]
+        items = _by_key(build_sections(entries))["functions_examined"].items
+        assert items == [
+            "no address in the call (decompile_function)",
+            "function listing (list_functions)",
+        ]

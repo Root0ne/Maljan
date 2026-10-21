@@ -40,6 +40,7 @@ from maljan.analysis.technique_ids import (
 )
 from maljan.core.reputation import reputation_of
 from maljan.core.tool_declarations import first, select
+from maljan.core.undeclared_tools import address_arguments
 from maljan.reporting import tool_kinds
 from maljan.reporting.dedupe import (
     MergeTally,
@@ -1058,9 +1059,35 @@ _FUNCTION_CONSUMERS = ("ledger_report._FUNCTION_TOOLS", "ledger_report._FUNCTION
 FUNCTION_NOT_SHOWN = "answer not shown: no room left in the conversation"
 
 
+def _called_address(entry: LedgerEntry) -> str:
+    """The address a call gave in the argument its tool declares for one, or ``""``.
+
+    ``arguments`` is read without a kind (``kind_free_facts``); an entry read
+    by the legacy tables gives the shared address names only, as it always did.
+    """
+    facts = None if tool_kinds.read_by_name(entry) else tool_kinds.kind_free_facts(entry)
+    for name in address_arguments(facts, tuple(entry.args)):
+        value = entry.args.get(name)
+        if isinstance(value, bool):
+            continue
+        if isinstance(value, int):
+            return f"0x{value:x}"
+        if isinstance(value, str) and value.strip():
+            return value.strip()[:120]
+    return ""
+
+
 def _functions_examined(acc: _Sections, entry: LedgerEntry, _data: Any) -> None:
     section = acc.get("functions_examined", "Functions examined", "list")
-    label = entry.symbol or entry.tool
+    label = entry.symbol or _called_address(entry)
+    if not label:
+        # No argument of the call holds an address: the item says only that,
+        # never the tool's own name twice.
+        label = (
+            "function listing"
+            if tool_kinds.is_of(entry, "ledger_report._FUNCTION_LIST_TOOLS")
+            else "no address in the call"
+        )
     if answer_not_shown(entry):
         acc.add_item(section, f"{label} ({entry.tool}; {FUNCTION_NOT_SHOWN})")
     else:
