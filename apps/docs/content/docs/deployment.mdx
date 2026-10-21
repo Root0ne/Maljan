@@ -22,6 +22,7 @@ applies both.
 | `qdrant` | `qdrant/qdrant:v1.18.2` | Vector store, pinned to match the client version. Runs under the `qdrant` profile, which the shipped `docker/.env` turns on; without `QDRANT_API_KEY` it restarts, logging the variable to set. |
 | `minio` | `minio/minio:RELEASE.2025-09-07T16-13-09Z` | Sample storage, with its own console. |
 | `ghidra-mcp` | built from `external/ghidra-mcp` | A static analyser. Runs (and is built) under the `ghidra` profile, which the shipped `docker/.env` turns on; without `GHIDRA_MCP_AUTH_TOKEN` it refuses to bind and restarts. Capped at 6 GB memory and swap, because the JVM's own limit does not bound the container. `GHIDRA_JAVA_OPTS`, `GHIDRA_MEM_LIMIT` and `GHIDRA_RESTART` in `docker/.env` change the JVM options, the cap and the restart policy; see *Running Ghidra lighter* in [configuration.md](/configuration/). |
+| `ghidra-port` | `alpine/socat` (pinned by digest) | Publishes Ghidra's port on `BIND_ADDRESS` for a worker run on the host, under the `ghidra` profile; `ghidra-mcp` itself is on an internal network only. See *The container that opens the sample* below. |
 | `migrate` | `maljan-backend` | One-shot `alembic upgrade head`. Runs to completion before the API and the worker start; on an upgrade, migrate before restarting either, since a stored built-in team written before a seeding revision loads under a renamed key until the revision has run. |
 | `backend-api` | `maljan-backend` | The FastAPI service. |
 | `backend-worker` | `maljan-backend` | The arq worker. Capped at 8 GB memory and swap; `WORKER_RSS_RESTART_MB` makes it exit between jobs before it gets there, and `restart: unless-stopped` brings it back. It runs one analysis at a time (`WorkerSettings.max_jobs = 1`): a job's settings, the values the event scrub masks and the API names its hash resolution read are held per process, so any other `max_jobs` is refused at startup with that reason. More analyses at once take more worker processes. |
@@ -133,9 +134,36 @@ cache now mounts at `/home/maljan/.cache/maljan` (the volume keeps its name),
 so its contents carry over.
 
 The worker writes its sample mirrors 0700 and 0600 as `MALJAN_UID`. The
-`ghidra-mcp` container reads them through its read-only mount only because its
-image runs as root. A Ghidra image that runs as another user needs a group it
-shares with the worker, and mirrors written 0750 and 0640 for that group.
+`ghidra-mcp` container runs as that same uid and gid, so it reads them through
+its read-only mount; it shares nothing else with the worker. A Ghidra that runs
+as another user needs a group it shares with the worker, and mirrors written
+0750 and 0640 for that group.
+
+### The container that opens the sample
+
+`ghidra-mcp` opens the sample, so it is kept from the platform: it runs as
+`MALJAN_UID:MALJAN_GID` (volume-init hands the `ghidra_projects` volume over
+first), with no Linux capability, no way to gain one and a process limit
+(`GHIDRA_PIDS_LIMIT`, 2048 by default). Its only secret is its own
+`GHIDRA_MCP_AUTH_TOKEN`. Its one network is `ghidra`, internal (no gateway),
+shared only with `backend-api` and `backend-worker`, which reach it at
+`http://ghidra-mcp:8089`, and with `ghidra-port`. It publishes no port and has
+no route to the internet, the host, Postgres, Redis, MinIO or Qdrant. A
+deployment that points it at a shared Ghidra server elsewhere needs a network
+with a route to that server. The JVM's home is `/tmp` (`JAVA_TOOL_OPTIONS`),
+since the uid has none in the image.
+
+`ghidra-port` (same `ghidra` profile) publishes Ghidra's port on `BIND_ADDRESS`
+for a worker run on the host (`http://localhost:8089`): a relay that forwards
+bytes to `ghidra-mcp:8089` and nothing else. It mounts nothing, holds no
+variable, runs as `65534:65534` with no capability, no way to gain one and a
+read-only root, and its other network, `ghidra-publish`, carries nothing else.
+
+`GHIDRA_USER` is empty by default: the platform imports each sample without a
+Ghidra project, so the name Ghidra runs as owns nothing it opens. A project in
+`ghidra_projects` created while the image ran as root is owned by `root`, and
+Ghidra refuses a project owned by another name; an operator who opens such
+projects sets `GHIDRA_USER=root` in `docker/.env`.
 
 ## Where a tool server sees the sample
 

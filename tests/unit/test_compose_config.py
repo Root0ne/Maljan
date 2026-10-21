@@ -318,8 +318,10 @@ def test_no_service_waits_for_an_optional_one(tmp_path):
 def test_each_optional_service_runs_under_its_own_profile(tmp_path):
     config = _render(tmp_path, "ghidra", "qdrant", env={**REQUIRED_ENV, **OPTIONAL_ENV})
     assert config["services"]["ghidra-mcp"]["profiles"] == ["ghidra"]
+    assert config["services"]["ghidra-port"]["profiles"] == ["ghidra"]
     assert config["services"]["qdrant"]["profiles"] == ["qdrant"]
-    for name in ("ghidra-mcp", "qdrant"):
+    # Ghidra's port is published by its relay; ghidra-mcp publishes none.
+    for name in ("ghidra-port", "qdrant"):
         ports = config["services"][name]["ports"]
         assert ports and all(p["host_ip"] == "127.0.0.1" for p in ports), (name, ports)
 
@@ -383,3 +385,210 @@ def test_the_migration_sees_the_retired_attck_variable() -> None:
     config = yaml.safe_load((ROOT / "docker" / "docker-compose.yml").read_text())
     environment = config["services"]["migrate"]["environment"]
     assert environment["MALJAN_ATTCK_MAX_AGE_DAYS"] == "${MALJAN_ATTCK_MAX_AGE_DAYS:-}"
+
+
+# ---------------------------------------------------------------------------
+# The containers that open the sample (X2)
+# ---------------------------------------------------------------------------
+
+# The platform's own image: the API, the workers and their one-shots, which
+# hold the platform's credentials by design. Every other container that
+# mounts the sample directory opens the sample, and is found from its mounts,
+# not by its name.
+BACKEND_IMAGE = "maljan-backend"
+# The project network every service is on unless it names others.
+DEFAULT_NETWORK = "default"
+
+
+def _render_with(
+    tmp_path: Path,
+    *files: str,
+    profiles: tuple[str, ...] = (),
+    env: dict[str, str] | None = None,
+) -> dict:
+    """The rendered stack from copies of ``files`` (under docker/), with ``profiles`` on."""
+    compose_dir = tmp_path / "docker"
+    compose_dir.mkdir(exist_ok=True)
+    flags: list[str] = []
+    for name in files:
+        shutil.copy(ROOT / "docker" / name, compose_dir / name)
+        flags += ["-f", str(compose_dir / name)]
+    empty_env = tmp_path / ".env"
+    empty_env.write_text("")
+    out = subprocess.run(
+        [
+            "docker",
+            "compose",
+            "--env-file",
+            str(empty_env),
+            *flags,
+            *[arg for profile in profiles for arg in ("--profile", profile)],
+            "config",
+        ],
+        env={**REQUIRED_ENV, **OPTIONAL_ENV, **(env or {}), "PATH": "/usr/bin:/bin"},
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout
+    return yaml.safe_load(out)
+
+
+def _mounts_samples(service: dict) -> bool:
+    return any(
+        volume.get("type") == "bind"
+        and Path(str(volume.get("source"))).parts[-2:] == ("data", "samples")
+        for volume in service.get("volumes") or []
+    )
+
+
+def _sample_openers(config: dict) -> dict[str, dict]:
+    return {
+        name: service
+        for name, service in config["services"].items()
+        if service.get("image") != BACKEND_IMAGE and _mounts_samples(service)
+    }
+
+
+def _networks_of(service: dict) -> set[str]:
+    return set(service.get("networks") or {DEFAULT_NETWORK: None})
+
+
+STACKS = [
+    pytest.param(("docker-compose.yml",), id="production"),
+    pytest.param(("docker-compose.yml", "docker-compose.dev.yml"), id="development"),
+]
+
+
+@pytest.mark.skipif(shutil.which("docker") is None, reason="docker not installed")
+@pytest.mark.parametrize("files", STACKS)
+def test_every_container_that_opens_the_sample_is_kept_from_the_platform(
+    tmp_path: Path, files: tuple[str, ...]
+) -> None:
+    from maljan.core.platform_secrets import is_platform_secret
+
+    # A value no service could hold by chance, so finding one is finding the secret.
+    secrets = {var: f"x2-{var.lower()}-value" for var in REQUIRED_ENV}
+    config = _render_with(tmp_path, *files, profiles=("ghidra", "qdrant"), env=secrets)
+    openers = _sample_openers(config)
+    # The worker does hold them, so their absence below is not a render that dropped them.
+    assert secrets["JWT_SECRET_KEY"] in yaml.safe_dump(config["services"]["backend-worker"])
+    # Found from the mounts, so the checks below never pass on an empty set.
+    assert set(openers) == {"ghidra-mcp"}
+    for name, service in openers.items():
+        # Not root, no capability, no way to gain one.
+        uid = str(service.get("user") or "0").split(":", 1)[0]
+        assert uid.isdigit() and int(uid) != 0, (name, service.get("user"))
+        assert service.get("cap_drop") == ["ALL"], name
+        assert "no-new-privileges:true" in (service.get("security_opt") or []), name
+        assert not service.get("cap_add"), name
+        assert service.get("privileged") is not True, name
+        assert int(service["pids_limit"]) > 0, name
+        # The sample read-only.
+        samples = [v for v in service["volumes"] if _mounts_samples({"volumes": [v]})]
+        assert samples and all(v.get("read_only") for v in samples), name
+        # None of the platform's credentials, by name or by value.
+        environment = service.get("environment") or {}
+        assert not [key for key in environment if is_platform_secret(key)], name
+        assert not service.get("env_file"), name
+        rendered = yaml.safe_dump(service)
+        for var, value in secrets.items():
+            assert value not in rendered, (name, var)
+        # No route out: never the project network, every network of its own
+        # internal (no gateway), and no port published, which an internal
+        # network cannot carry and a non-internal one would need.
+        assert service.get("network_mode") is None, name
+        networks = _networks_of(service)
+        assert DEFAULT_NETWORK not in networks, name
+        for network in networks:
+            assert config["networks"][network].get("internal") is True, (name, network)
+        assert not service.get("ports"), name
+
+
+@pytest.mark.skipif(shutil.which("docker") is None, reason="docker not installed")
+@pytest.mark.parametrize("files", STACKS)
+def test_only_the_platforms_callers_share_a_network_with_a_sample_opener(
+    tmp_path: Path, files: tuple[str, ...]
+) -> None:
+    config = _render_with(tmp_path, *files, profiles=("ghidra", "qdrant"))
+    services = config["services"]
+    for name, opener in _sample_openers(config).items():
+        for network in _networks_of(opener):
+            members = {other for other, s in services.items() if network in _networks_of(s)}
+            # The stores (postgres, redis, minio, qdrant) and the frontend are
+            # never on it: only the platform's own services that call it, and
+            # relays that mount nothing and hold nothing.
+            for other in members - {name}:
+                service = services[other]
+                if service.get("image") == BACKEND_IMAGE:
+                    continue
+                assert _is_bare_relay(service), (name, network, other)
+    # The API and the worker keep the project network and reach Ghidra on its own.
+    for caller in ("backend-api", "backend-worker"):
+        assert _networks_of(services[caller]) == {DEFAULT_NETWORK, "ghidra"}, caller
+    assert config["networks"]["ghidra"]["internal"] is True
+
+
+def _is_bare_relay(service: dict) -> bool:
+    """Mounts nothing, holds no environment, runs as nobody-like with no capability."""
+    uid = str(service.get("user") or "0").split(":", 1)[0]
+    return (
+        not service.get("volumes")
+        and not service.get("environment")
+        and not service.get("env_file")
+        and uid.isdigit()
+        and int(uid) != 0
+        and service.get("cap_drop") == ["ALL"]
+        and "no-new-privileges:true" in (service.get("security_opt") or [])
+        and service.get("read_only") is True
+        and not service.get("cap_add")
+    )
+
+
+@pytest.mark.skipif(shutil.which("docker") is None, reason="docker not installed")
+@pytest.mark.parametrize("files", STACKS)
+def test_ghidras_port_is_published_by_a_relay_that_opens_nothing(
+    tmp_path: Path, files: tuple[str, ...]
+) -> None:
+    config = _render_with(tmp_path, *files, profiles=("ghidra",))
+    relay = config["services"]["ghidra-port"]
+    assert _is_bare_relay(relay)
+    assert not _mounts_samples(relay)
+    assert relay["user"] == "65534:65534"
+    assert DEFAULT_NETWORK not in _networks_of(relay)
+    assert _networks_of(relay) == {"ghidra", "ghidra-publish"}
+    # The publishing network is the relay's alone.
+    others = {
+        name
+        for name, service in config["services"].items()
+        if "ghidra-publish" in _networks_of(service)
+    }
+    assert others == {"ghidra-port"}
+    assert config["networks"]["ghidra-publish"].get("internal") is not True
+    (port,) = relay["ports"]
+    assert (port["host_ip"], str(port["published"]), port["target"]) == (
+        "127.0.0.1",
+        "8089",
+        8089,
+    )
+    assert relay["command"] == ["tcp-listen:8089,fork,reuseaddr", "tcp-connect:ghidra-mcp:8089"]
+    assert DIGEST.search(relay["image"])
+
+
+@pytest.mark.skipif(shutil.which("docker") is None, reason="docker not installed")
+def test_ghidra_starts_as_its_user_only_after_its_projects_changed_hands(tmp_path: Path) -> None:
+    services = _render_with(tmp_path, "docker-compose.yml", profiles=("ghidra",))["services"]
+    ghidra, init = services["ghidra-mcp"], services["volume-init"]
+    assert ghidra["depends_on"]["volume-init"]["condition"] == "service_completed_successfully"
+    assert ghidra["user"] == services["backend-worker"]["user"] == "10001:10001"
+    targets = {v["target"]: v["source"] for v in init["volumes"]}
+    assert targets["/own/ghidra_projects"] == "ghidra_projects"
+    (projects,) = [v for v in ghidra["volumes"] if v["target"] == "/projects"]
+    assert projects["source"] == "ghidra_projects"
+    assert projects["volume"]["nocopy"] is True
+    # Unset, the JVM's own name; an operator with root-owned projects sets it.
+    assert ghidra["environment"]["GHIDRA_USER"] == ""
+    assert "/own/ghidra_projects" in " ".join(init["command"])
+    assert init["network_mode"] == "none"
+    # A writable home for the JVM whatever JAVA_OPTS an operator sets.
+    assert ghidra["environment"]["JAVA_TOOL_OPTIONS"] == "-Duser.home=/tmp"
+    assert ghidra["environment"]["JAVA_OPTS"] == "-Xmx4g -XX:+UseG1GC"

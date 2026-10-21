@@ -204,6 +204,7 @@
     },
     "isolation": {
       "isolated": null,
+      "isolated_by": null,
       "rows": [
         {
           "attaches": null,
@@ -217,7 +218,9 @@
           "descendants_why": null,
           "host": null,
           "isolated": null,
+          "isolated_by": null,
           "label": null,
+          "launcher_depth": null,
           "measured_by": null,
           "needs_network": null,
           "no_new_privs": null,
@@ -232,6 +235,7 @@
           "source": null,
           "transport": null,
           "uid": null,
+          "under_launcher": null,
           "where": null,
           "why_not_measured": null
         }

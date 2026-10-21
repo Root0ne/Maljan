@@ -257,6 +257,10 @@ export interface McpServerEntry {
   /** How the server's credential is obtained by one request, or null when its
    *  token is typed in (`core.tool_declarations.CredentialBootstrap`). */
   credential_bootstrap?: CredentialBootstrapEntry | null;
+  /** How many levels at the top of the process tree the worker starts for
+   *  the server are a launcher that does not read the sample, or null when
+   *  none is declared (`MCPServerConfig.launcher_depth`). */
+  launcher_depth?: number | null;
 }
 
 /** A server's declared credential bootstrap, as the API stores it. */

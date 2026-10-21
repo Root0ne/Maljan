@@ -113,6 +113,52 @@ def test_the_emulator_is_told_with_where_its_source_read_the_sample(
     assert "Declared to do none of these: 1 tool, on tool server `analysis`." in lines
 
 
+def test_an_emulator_kept_by_a_declared_launcher_is_told_as_the_declaration(
+    shipped: ToolDeclarations,
+) -> None:
+    floss = _entry(
+        "mcp:analysis",
+        "floss",
+        facts_record("mcp:analysis", "floss", declared=shipped),
+        args={"path": "/samples/x.exe"},
+    )
+    kept = {
+        "uid": 10003,
+        "same_uid_as_worker": False,
+        "shares_group_with_worker": False,
+        "own_pid_namespace": True,
+        "own_net_namespace": True,
+        "own_mount_namespace": True,
+        "cap_eff_zero": True,
+        "cap_prm_zero": True,
+        "cap_amb_zero": True,
+        "no_new_privs": True,
+        "platform_names_in_env": [],
+        "depth": 1,
+    }
+    launcher = {
+        **kept,
+        "uid": 1000,
+        "same_uid_as_worker": True,
+        "own_pid_namespace": False,
+        "descendants": [kept],
+        "descendants_judged": True,
+        "descendants_why": "",
+    }
+    record = disclosure_record(
+        {**LOCAL_LLM, **STDIO, "mcp.servers.analysis.launcher_depth": 1},
+        entries=[floss],
+        opened={"mcp:analysis": [{"where": "child", **launcher}]},
+        worker={"uid": 1000, "platform_names_in_env": []},
+    )
+    row = _row(record["effects"], "floss")
+    assert (row["read_isolated"], row["read_isolated_by"]) == (True, "declaration")
+    assert effects_lines(record["effects"])[0].endswith(
+        "read in a process the worker started, kept from the worker as its block's "
+        "declaration of a launcher says."
+    )
+
+
 def test_a_threat_intel_lookup_is_declared_to_reach_the_network_and_send_the_hash(
     shipped: ToolDeclarations,
 ) -> None:

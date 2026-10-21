@@ -244,7 +244,13 @@ says where the sample's bytes were read: in the worker process, in a tool
 server's process the worker started and measured, or in a server reached at an
 address that this run does not measure. A reader counts as isolated only when
 it was measured and passed every check, and today's shipped stack has no such
-reader; see [Where the sample was
+reader. The `ghidra-mcp` container is kept from the platform by Compose (an
+unprivileged uid, no capability, an internal network only, so no route out, to
+the host or to the stores, and none of the platform's secrets; its port is
+published by a separate relay; see [Deployment](/deployment/)). What it can
+still reach is `backend-api` and the worker over that network, both of which
+answer only authenticated requests, as before. It is reached at an address, so
+a report says it is "not verified"; see [Where the sample was
 read](/usage/reports-and-exports/#where-the-sample-was-read).
 
 A sample can carry phrases written for the model or the analyst reading it

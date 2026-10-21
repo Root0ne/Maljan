@@ -243,6 +243,7 @@ const SERVER_FIELDS = [
   "reference_urls",
   "tool_facts",
   "credential_bootstrap",
+  "launcher_depth",
 ] as const;
 
 function hasToken(v: unknown): boolean {

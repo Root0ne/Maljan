@@ -80,6 +80,16 @@ export function readWorkDir(text: string): Read<string> {
   return ok(value);
 }
 
+/** The launcher's levels: a whole number from 0, or empty for none declared. */
+export function readLauncherDepth(text: string): Read<number | null> {
+  const value = text.trim();
+  if (value === "") return ok(null);
+  if (!/^\d+$/.test(value)) {
+    return bad("a whole number of levels (1: the started process alone), or empty");
+  }
+  return ok(Number(value));
+}
+
 /** Auto-name prefixes: letters and digits ending in `_` or `.` (FUN_, fcn.). */
 export function readPrefixes(text: string): Read<string[]> {
   const prefixes = splitWords(text);

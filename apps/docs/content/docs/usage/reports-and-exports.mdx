@@ -250,6 +250,18 @@ never from a tool's name:
   measured too, up to 64 processes. Which of them reads the sample cannot be
   told, so every one is held to the checks. A tree that could not be read
   whole, or is wider than that, is said not to be judged, and is not isolated.
+  A launcher that separates its child runs as the worker's user, so its row
+  stays "not isolated" unless its block declares it: `launcher_depth` names
+  how many levels at the top of the tree are the launcher's (1: the started
+  process alone). Those levels are then held only to carrying none of the
+  platform's own variables, every process under them to every check, and the
+  row is isolated only when at least one process under them was measured; a
+  container client, whose server runs where the run cannot see it, stays not
+  isolated. The line says the launcher is the block's word, not measured, and
+  ends "So: isolated by its block's declaration."; the row records
+  `isolated_by` (`declaration` or `measurement`), and the block's first line
+  and the tool-effects line name the declaration whenever a verdict rests on
+  one.
 - **A server reached at an address.** One at a local address is "not verified
   by this run". A remote one is a host whose isolation this run cannot tell.
 

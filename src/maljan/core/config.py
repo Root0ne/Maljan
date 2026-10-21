@@ -1630,6 +1630,14 @@ class MCPServerConfig(BaseModel):
     # How the server's credential is obtained by one request, when it can be
     # (``CredentialBootstrap``); ``None`` for a server whose token is typed in.
     credential_bootstrap: CredentialBootstrap | None = None
+    # How many levels at the top of the process tree the worker starts for
+    # this server belong to a launcher that does not itself read the sample
+    # (a sandbox's monitor, a namespace or user switch): ``1`` is the started
+    # process alone. The run's isolation part holds those levels only to
+    # carrying no platform variable and every process under them to every
+    # check (``analysis.isolation.isolation_part``). ``None`` (every built-in)
+    # declares no launcher.
+    launcher_depth: Annotated[int, Field(ge=0)] | None = None
 
     @field_validator("roles")
     @classmethod

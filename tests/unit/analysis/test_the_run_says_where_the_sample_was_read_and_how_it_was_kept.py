@@ -405,6 +405,143 @@ def test_a_start_whose_tree_was_not_walked_or_not_judged_is_never_isolated() -> 
     assert "Its descendant processes were not judged (its tree was cut)" in isolation_lines(part)[2]
 
 
+# ---------------------------------------------------------------------------
+# A declared launcher (FU-F)
+# ---------------------------------------------------------------------------
+
+# A block that declares the process the worker starts for it a launcher.
+LAUNCHED = {**STDIO, "mcp.servers.analysis.launcher_depth": 1}
+# A server under a launcher, measured as kept from the worker.
+UNDER = {**KEPT, "uid": 10003, "depth": 1}
+LAUNCHER_SAID = (
+    "Its block declares the process the worker started a launcher that does not read the "
+    "sample (the block's word, not measured)"
+)
+
+
+def test_the_walk_records_how_deep_each_descendant_sits(monkeypatch: pytest.MonkeyPatch) -> None:
+    tree = {4242: [4243], 4243: [4244]}
+    monkeypatch.setattr(isolation, "_children", lambda pid: tree.get(pid, []))
+    monkeypatch.setattr(isolation, "_status", lambda pid: _status_of())
+    monkeypatch.setattr(isolation, "environ_names", lambda pid: ["PATH"])
+    walked = isolation.measure_tree(4242, ["PATH"])
+    assert [process["depth"] for process in walked["descendants"]] == [1, 2]
+
+
+def test_a_declared_launcher_is_held_to_its_environment_and_its_server_to_every_check() -> None:
+    note = {"where": CHILD, **SHARED, "descendants": [UNDER]}
+    part = _part(LAUNCHED, [_reads()], {"mcp:analysis": [note]})
+    row = part["rows"][0]
+    assert (row["launcher_depth"], row["under_launcher"], row["isolated"]) == (1, 1, True)
+    assert (row["isolated_by"], part["isolated"], part["isolated_by"]) == (
+        "declaration",
+        True,
+        "declaration",
+    )
+    # The headline names the declaration too, not only the row.
+    assert isolation_lines(part)[0] == (
+        "Every source that read the sample's bytes was kept from the worker as measured, but "
+        "for tool server `analysis` that rests on its block's declaration of a launcher."
+    )
+    line = isolation_lines(part)[2]
+    # What the launcher was measured as is still said, beside the block's word.
+    assert "it ran as user 1000 (one of its real" in line
+    assert LAUNCHER_SAID in line
+    passed = "1 process under the launcher was measured, and every process of the tree passed."
+    assert passed in line
+    assert line.endswith("So: isolated by its block's declaration.")
+    # The same tree without the declaration is judged as it always was.
+    part = _part(STDIO, [_reads()], {"mcp:analysis": [note]})
+    assert part["rows"][0]["launcher_depth"] == 0
+    assert part["isolated"] is False
+    assert LAUNCHER_SAID not in isolation_lines(part)[2]
+
+
+def test_a_launcher_that_holds_a_platform_variable_keeps_the_row_from_isolated() -> None:
+    leaky = {**SHARED, "platform_names_in_env": ["DATABASE_URL"], "descendants": [UNDER]}
+    part = _part(LAUNCHED, [_reads()], {"mcp:analysis": [{"where": CHILD, **leaky}]})
+    assert part["isolated"] is False
+    unread = {**SHARED, "platform_names_in_env": None, "descendants": [UNDER]}
+    part = _part(LAUNCHED, [_reads()], {"mcp:analysis": [{"where": CHILD, **unread}]})
+    assert part["isolated"] is False
+
+
+def test_a_launcher_with_no_measured_process_under_it_proves_nothing() -> None:
+    # A container client: the server runs where this run cannot see it.
+    part = _part(LAUNCHED, [_reads()], {"mcp:analysis": [{"where": CHILD, **SHARED}]})
+    row = part["rows"][0]
+    assert (row["under_launcher"], row["isolated"]) == (0, False)
+    assert row["isolated_by"] == part["isolated_by"] == ""
+    assert "No process under the launcher was measured" in isolation_lines(part)[2]
+
+
+def test_every_process_under_a_launcher_is_held_to_every_check() -> None:
+    note = {"where": CHILD, **SHARED, "descendants": [UNDER, {**SHARED, "depth": 2}]}
+    part = _part(LAUNCHED, [_reads()], {"mcp:analysis": [note]})
+    row = part["rows"][0]
+    assert (row["under_launcher"], row["descendants_failing"], row["isolated"]) == (2, 1, False)
+    assert (
+        "2 processes under the launcher were measured, and 1 of the tree did not pass."
+        in isolation_lines(part)[2]
+    )
+
+
+def test_a_launcher_of_two_levels_covers_its_own_child_and_no_further() -> None:
+    helper = {**SHARED, "depth": 1}
+    server = {**KEPT, "uid": 10003, "depth": 2}
+    note = {"where": CHILD, **SHARED, "descendants": [helper, server]}
+    two = {**STDIO, "mcp.servers.analysis.launcher_depth": 2}
+    part = _part(two, [_reads()], {"mcp:analysis": [note]})
+    assert (part["rows"][0]["under_launcher"], part["isolated"]) == (1, True)
+    assert "the top 2 levels of its tree a launcher" in isolation_lines(part)[2]
+    # Declared one level, the helper is a reader like any other, and fails.
+    part = _part(LAUNCHED, [_reads()], {"mcp:analysis": [note]})
+    assert part["isolated"] is False
+
+
+def test_under_a_launcher_a_walk_without_depths_is_not_judged() -> None:
+    note = {"where": CHILD, **SHARED, "descendants": [{**KEPT, "uid": 10003}]}
+    part = _part(LAUNCHED, [_reads()], {"mcp:analysis": [note]})
+    row = part["rows"][0]
+    assert (row["descendants_judged"], row["isolated"]) == (False, False)
+    assert isolation.DEPTH_UNRECORDED in isolation_lines(part)[2]
+
+
+def test_a_launcher_declared_on_a_server_reached_at_an_address_changes_nothing() -> None:
+    snapshot = {
+        "mcp.servers.analysis.transport": "http",
+        "mcp.servers.analysis.url": "http://127.0.0.1:9000",
+        "mcp.servers.analysis.launcher_depth": 1,
+    }
+    part = _part(snapshot, [_reads()])
+    row = part["rows"][0]
+    assert (row["where"], row["launcher_depth"], row["isolated"]) == (LOCAL_SERVICE, 0, False)
+
+
+def test_the_launcher_is_a_declaration_field_recorded_only_where_an_operator_set_it() -> None:
+    from pydantic import ValidationError
+
+    from maljan.core.config import MCPServerConfig, Settings
+    from maljan.core.settings_overrides import trim_declarations
+    from maljan.core.tool_declarations import DECLARATION_FIELDS, strip_declaration_defaults
+
+    assert "launcher_depth" in DECLARATION_FIELDS
+    assert MCPServerConfig().launcher_depth is None
+    with pytest.raises(ValidationError):
+        MCPServerConfig(launcher_depth=-1)
+    # Unset, it moves no stored row; set, it is the operator's and is stored.
+    default = Settings().mcp.servers["analysis"]
+    dumped = default.model_dump(mode="json")
+    assert "launcher_depth" not in strip_declaration_defaults(dumped, default)
+    assert (
+        strip_declaration_defaults({**dumped, "launcher_depth": 1}, default)["launcher_depth"] == 1
+    )
+    key = "mcp.servers.analysis.launcher_depth"
+    stored = {"mcp.servers": {"analysis": {"launcher_depth": 1}}}
+    assert trim_declarations({key: 1}, Settings(), stored)[key] == 1
+    assert key not in trim_declarations({key: None}, Settings(), {})
+
+
 def test_a_permitted_or_ambient_capability_is_said_and_keeps_the_reader_from_isolated() -> None:
     part = _part(
         STDIO, [_reads()], {"mcp:analysis": [{"where": CHILD, **KEPT, "cap_prm_zero": False}]}
@@ -486,6 +623,7 @@ def test_a_child_kept_from_the_worker_on_every_count_is_isolated() -> None:
     part = _part(STDIO, [_reads()], {"mcp:analysis": [{"where": CHILD, **KEPT}]})
     assert part["rows"][0]["isolated"] is True
     assert part["isolated"] is True
+    assert part["rows"][0]["isolated_by"] == part["isolated_by"] == "measurement"
     lines = isolation_lines(part)
     assert lines[0] == (
         "Every source that read the sample's bytes was measured as kept from the worker."
