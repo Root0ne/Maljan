@@ -22,6 +22,7 @@ import {
   acceptTool,
   alsoStaged,
   isAccepted,
+  stillIncomplete,
   readProposals,
   withRequired,
   type Proposals,
@@ -252,6 +253,25 @@ describe("accepting", () => {
     const kept = acceptServerField(declared, "sample_open", proposed);
     expect(kept.sample_open?.open_tool).toBe("load_it");
     expect(kept.sample_open?.path_argument).toBe("binary_path");
+  });
+
+  it("stages an incomplete sample_open only once its missing fields are declared", () => {
+    const proposed = {
+      value: { open_tool: "import_it", path_argument: "binary_path" },
+      evidence: [],
+      confidence: "low" as const,
+      incomplete: ["program_arguments", "job_safe_tools"],
+    };
+    expect(readProposals({ details: { proposals: { tools: {}, server: { sample_open: proposed } } } } as never)
+      ?.server.sample_open.incomplete).toEqual(["program_arguments", "job_safe_tools"]);
+    const bare = {} as McpServerEntry;
+    expect(stillIncomplete(bare, "sample_open", proposed)).toEqual(["program_arguments", "job_safe_tools"]);
+    expect(acceptServerField(bare, "sample_open", proposed)).toEqual({});
+    const filled = {
+      sample_open: { program_arguments: ["program"], job_safe_tools: ["convert"] },
+    } as unknown as McpServerEntry;
+    expect(stillIncomplete(filled, "sample_open", proposed)).toEqual([]);
+    expect(acceptServerField(filled, "sample_open", proposed).sample_open?.open_tool).toBe("import_it");
   });
 });
 

@@ -1156,7 +1156,9 @@ async def test_worker_removes_private_sample_copies_after_success(
 
     assert result["status"] == "completed"
     expected_temp = (tmp_path / "tmp" / f"{sample.sha256}.exe").resolve()
-    expected_mirror = (tmp_path / "samples" / ".work" / f"{sample.sha256}.exe").resolve()
+    # The mirror is the job's own copy (``sample_files.copy_name``).
+    mirror_name = sample_files.copy_name(sample.sha256, ".exe", str(job.id))
+    expected_mirror = (tmp_path / "samples" / ".work" / mirror_name).resolve()
     called_paths = {Path(p).resolve() for p, _ in recorded if p is not None}
     assert expected_temp in called_paths
     assert expected_mirror in called_paths
@@ -1223,7 +1225,9 @@ async def test_worker_removes_private_sample_copies_after_pipeline_failure(
 
     assert result["status"] == "failed"
     expected_temp = (tmp_path / "tmp" / f"{sample.sha256}.exe").resolve()
-    expected_mirror = (tmp_path / "samples" / ".work" / f"{sample.sha256}.exe").resolve()
+    # The mirror is the job's own copy (``sample_files.copy_name``).
+    mirror_name = sample_files.copy_name(sample.sha256, ".exe", str(job.id))
+    expected_mirror = (tmp_path / "samples" / ".work" / mirror_name).resolve()
     called_paths = {Path(p).resolve() for p, _ in recorded if p is not None}
     assert expected_temp in called_paths
     assert expected_mirror in called_paths

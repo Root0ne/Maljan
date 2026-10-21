@@ -644,6 +644,7 @@ def _proposals(
     *,
     withheld: list[str] | None,
     sandbox_source: bool = False,
+    remote: bool = False,
 ) -> dict[str, Any] | None:
     """The declaration proposals for the tools ``found`` lists and nothing declares.
 
@@ -654,7 +655,8 @@ def _proposals(
     is made without (:func:`_withheld`); ``None`` when the server's
     declaration needs its credential and it is sent. ``sandbox_source`` says
     the server's declaration names it a sandbox source (its ``roles``), the
-    only server whose tools may be proposed sandbox kinds.
+    only server whose tools may be proposed sandbox kinds. ``remote`` says it is
+    reached at an address other jobs share (:func:`maljan.core.declaration_proposals.propose`).
     """
     from maljan.core.declaration_proposals import propose
     from maljan.tools.capabilities import CAPABILITIES_TOOL
@@ -668,6 +670,7 @@ def _proposals(
             answers=found.answers,
             skip=declared | {CAPABILITIES_TOOL},
             sandbox_source=sandbox_source,
+            remote=remote,
         )
     except Exception as exc:  # noqa: BLE001 — a proposal is never worth the probe
         logger.warning("declaration proposals could not be built (%s).", type(exc).__name__)
@@ -869,8 +872,14 @@ async def probe_mcp(v: dict[str, Any]) -> ProbeResult:
         if unavailable:
             detail += f"; {len(unavailable)} unavailable on this host"
         details = {"capabilities": capabilities}
+    from maljan.providers.sample_open import is_shared_address
+
     proposals = _proposals(
-        found, declared, withheld=withheld, sandbox_source=SANDBOX_ROLE in config.roles
+        found,
+        declared,
+        withheld=withheld,
+        sandbox_source=SANDBOX_ROLE in config.roles,
+        remote=is_shared_address(config),
     )
     if proposals is not None:
         details = {**(details or {}), "proposals": proposals}

@@ -347,7 +347,9 @@ async def state_the_mirrors(session_factory: Any) -> None:
         )
 
 
-def mirror_target_for(provider: Any, *, sha256: str, extension: str) -> tuple[Path, str] | None:
+def mirror_target_for(
+    provider: Any, *, sha256: str, extension: str, job_id: str = ""
+) -> tuple[Path, str] | None:
     """Where this sample has to be copied for the static provider to read it.
 
     Returns (host path, container-visible path), or None when the provider does
@@ -368,7 +370,11 @@ def mirror_target_for(provider: Any, *, sha256: str, extension: str) -> tuple[Pa
     # unconditionally, which put r2's copy in the hidden ``.work`` that radare2
     # refuses to open — BUG 10, every live r2 tool call answering "Failed to
     # open file."
-    host = sample_files.work_dir(spec.work_subdir) / f"{sha256}{extension}"
+    # Named by the job as well, so a server that names a program by its file
+    # holds one program per job, not one per sample.
+    host = sample_files.work_dir(spec.work_subdir) / sample_files.copy_name(
+        sha256, extension, job_id
+    )
     # The path the server opens is its own: under the mount its block
     # declares, or the host path for a server on this filesystem. One mount
     # for every server handed a second containerised server another one's.
@@ -433,7 +439,9 @@ def mirror_server_samples(
             continue
         try:
             spec = MirrorSpec.of(cfg)
-            host = sample_files.work_dir(spec.work_subdir) / f"{sha256}{extension}"
+            host = sample_files.work_dir(spec.work_subdir) / sample_files.copy_name(
+                sha256, extension, canonical_job_id(job_id)
+            )
             # A directory the sidecars may read a path in, named before any
             # server starts (see ``mirror_static_samples``).
             add_sample_root(host.parent)
@@ -538,6 +546,7 @@ def mirror_static_samples(
                 container.get_static_provider(provider_id),
                 sha256=sha256,
                 extension=extension,
+                job_id=canonical_job_id(job_id),
             )
             if target is None:
                 logger.info(

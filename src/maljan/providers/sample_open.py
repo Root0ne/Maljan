@@ -50,12 +50,15 @@ __all__ = [
     "FOREIGN_PROGRAM",
     "NO_JOB_PROGRAM",
     "REMOTE_TRANSPORTS",
+    "is_shared_address",
     "SELECT_REFUSED_AFTER_OPEN",
     "OpenedSample",
     "SampleNotes",
     "SampleOpener",
     "answer_field",
+    "aclose_job_programs",
     "answer_object",
+    "close_job_programs",
     "declared",
     "is_refusal",
     "long_running_tools",
@@ -134,6 +137,14 @@ class SampleNotes:
             self._owned.setdefault(server, set()).add(name)
             self._current[server] = name
 
+    def take_owned(self, server: str) -> list[str]:
+        """Every program name this job opened on ``server``, sorted, forgotten as they are taken."""
+        with self._guard:
+            names = sorted(self._owned.pop(server, set()))
+            self._current.pop(server, None)
+        self.drop_named(server, None)
+        return names
+
     def current(self, server: str) -> str | None:
         """The program this job opened or selected last on ``server``, or ``None``."""
         with self._guard:
@@ -210,6 +221,16 @@ class SampleNotes:
 REMOTE_TRANSPORTS = frozenset({"http", "streamable-http", "sse"})
 
 _DEFAULT_PORTS = {"http": 80, "https": 443}
+
+
+def is_shared_address(config: Any) -> bool:
+    """Whether a server's block reaches it at an address, where other jobs share its programs.
+
+    The one reading of that fact, used by the runtime pins (``pin_program_argument``'s
+    ``shared``) and by the declaration proposals alike.
+    """
+    return str(getattr(config, "transport", "") or "") in REMOTE_TRANSPORTS
+
 
 # Each handle or provider that starts a local server process gets one of these:
 # a process holds only what it opened, and a number never reused names it.
@@ -667,6 +688,62 @@ def wrap_open_tool(
         logger.warning("%s: %s offered as it is (%s).", server, spec.open_tool, exc)
         return list(tools)
     return [wrapped if getattr(t, "name", "") == spec.open_tool else t for t in tools]
+
+
+def _names_to_close(server: str, spec: Any, notes: SampleNotes | None) -> list[str]:
+    """The programs this job opened on ``server``, when its block declares how to close one."""
+    if not declared(spec) or not spec.close_tool or not spec.close_argument or notes is None:
+        return []
+    return notes.take_owned(server)
+
+
+def _close_answered(server: str, spec: Any, name: str, answer: Any) -> bool:
+    if is_refusal(answer):
+        logger.warning("%s: %s of %r was refused", server, spec.close_tool, name)
+        return False
+    return True
+
+
+def close_job_programs(
+    server: str, spec: Any, notes: SampleNotes | None, call: Callable[[str, dict[str, Any]], Any]
+) -> list[str]:
+    """Close each program this job opened on ``server``, through the tool its block declares.
+
+    ``call(tool, arguments)`` makes one call in the caller's own way. Only a
+    block that declares ``close_tool`` and ``close_argument`` is closed through;
+    with none, nothing is called and the programs stay where they are. A close
+    the server refuses or that raises is logged and the rest go on. Returns the
+    names whose close was answered without a refusal.
+    """
+    closed: list[str] = []
+    for name in _names_to_close(server, spec, notes):
+        try:
+            answer = call(spec.close_tool, {spec.close_argument: name})
+        except Exception as exc:  # noqa: BLE001 - a close never fails the job
+            logger.warning("%s: closing %r failed (%s)", server, name, type(exc).__name__)
+            continue
+        if _close_answered(server, spec, name, answer):
+            closed.append(name)
+    return closed
+
+
+async def aclose_job_programs(
+    server: str,
+    spec: Any,
+    notes: SampleNotes | None,
+    call: Callable[[str, dict[str, Any]], Awaitable[Any]],
+) -> list[str]:
+    """:func:`close_job_programs` with a ``call`` that is awaited."""
+    closed: list[str] = []
+    for name in _names_to_close(server, spec, notes):
+        try:
+            answer = await call(spec.close_tool, {spec.close_argument: name})
+        except Exception as exc:  # noqa: BLE001 - a close never fails the job
+            logger.warning("%s: closing %r failed (%s)", server, name, type(exc).__name__)
+            continue
+        if _close_answered(server, spec, name, answer):
+            closed.append(name)
+    return closed
 
 
 def program_argument(spec: Any) -> str:

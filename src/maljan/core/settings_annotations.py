@@ -1868,6 +1868,18 @@ def mcp_server_annotations(
             "Tools withheld on a server other jobs share whatever arguments they take: "
             "ones that run code or change the whole project, past the job's own program.",
         ),
+        (
+            "close_tool",
+            "close tool",
+            "The tool that closes or deletes an opened program. Declared, each program a "
+            "job opened on this server is closed when the job ends; empty, the programs "
+            "stay on the server.",
+        ),
+        (
+            "close_argument",
+            "close tool's argument",
+            "The argument the opened program's name goes in (required with close tool).",
+        ),
     ):
         entries[f"{sample_open}.{leaf}"] = ann(
             f"{label} {title}", description, subgroup="Opening the sample", advanced=True

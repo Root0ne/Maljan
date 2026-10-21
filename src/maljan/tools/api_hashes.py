@@ -285,12 +285,68 @@ def _code_immediates(code: bytes, is64: bool) -> set[int]:
     return values
 
 
-def candidate_values(image: pe_image.Image) -> list[int]:
-    """The values the scan looks up, in ascending order (see the module docstring)."""
-    values: set[int] = set()
+def _code_ranges(image: pe_image.Image) -> list[pe_image.Section]:
+    """The code sections to scan: for each file offset, only the one that reaches furthest.
+
+    A section is a window over the file's bytes, and every value a window gives
+    is read from bytes at or after its opcode, so a longer window from the same
+    start gives every value a shorter one does. Reading the longest of each
+    start once costs one pass per start, however many sections name it.
+    """
+    longest: dict[int, pe_image.Section] = {}
     for section in image.code_sections():
-        values |= _code_immediates(image.section_bytes(section), image.is64)
+        held = longest.get(section.raw_offset)
+        if held is None or section.mapped_size > held.mapped_size:
+            longest[section.raw_offset] = section
+    return list(longest.values())
+
+
+def _data_ranges(image: pe_image.Image) -> list[pe_image.Section]:
+    """The data sections to scan, merged into one range per run of the same alignment.
+
+    A data section is read as 32-bit words from its own start, so what a word
+    is depends on its file offset modulo four. Within each such class the
+    sections' word ranges are merged, and each merged range is a section of its
+    own to read once: a word is in a merged range exactly when it is in one of
+    the sections it was merged from, and the bytes under it are the file's.
+    """
+    classes: dict[int, list[tuple[int, int]]] = {}
     for section in image.data_sections():
+        length = len(image.section_view(section)) // 4 * 4
+        if length:
+            classes.setdefault(section.raw_offset % 4, []).append(
+                (section.raw_offset, section.raw_offset + length)
+            )
+    merged: list[pe_image.Section] = []
+    for ranges in classes.values():
+        low, high = None, None
+        for start, end in sorted(ranges):
+            if high is not None and start <= high:
+                high = max(high, end)
+                continue
+            if low is not None and high is not None:
+                merged.append(_whole(low, high))
+            low, high = start, end
+        if low is not None and high is not None:
+            merged.append(_whole(low, high))
+    return merged
+
+
+def _whole(low: int, high: int) -> pe_image.Section:
+    """The range ``[low, high)`` of the file as a section that maps all of it."""
+    return pe_image.Section("", 0, high - low, low, high - low, 0)
+
+
+def candidate_values(image: pe_image.Image) -> list[int]:
+    """The values the scan looks up, in ascending order (see the module docstring).
+
+    Each byte of the file is read once for the code and once for the data,
+    however many sections cover it (:func:`_code_ranges`, :func:`_data_ranges`).
+    """
+    values: set[int] = set()
+    for section in _code_ranges(image):
+        values |= _code_immediates(image.section_bytes(section), image.is64)
+    for section in _data_ranges(image):
         raw = image.data_bytes(section)
         usable = len(raw) // 4 * 4
         if usable:

@@ -1255,6 +1255,8 @@ class ServerHandle:
 
     async def aclose(self) -> None:
         """Close on the loop that opened this handle. Bounded, and never raises."""
+        if self._toolkit is not None:
+            await self._aclose_job_programs()
         toolkit, self._toolkit = self._toolkit, None
         self._all_tools = []
         self._opened_async = False
@@ -1268,6 +1270,26 @@ class ServerHandle:
             if not closed:
                 await self._reap_after_abandon()
             self._forget_attachment()
+
+    async def _aclose_job_programs(self) -> None:
+        """Close the programs this job opened on a server other jobs share, where declared.
+
+        Through the close tool the block's ``sample_open`` names, on the
+        server's own tool list. Without that declaration nothing is called.
+        """
+        from maljan.providers.sample_open import aclose_job_programs, is_shared_address
+
+        spec = getattr(self.config, "sample_open", None)
+        if spec is None or not is_shared_address(self.config) or not spec.close_tool:
+            return
+        tool = self.advertised_tool(spec.close_tool)
+        if tool is None:
+            return
+
+        async def call(_tool: str, arguments: dict[str, Any]) -> Any:
+            return await tool.ainvoke(arguments)
+
+        await aclose_job_programs(self.note_key, spec, self.sample_notes, call)
 
     def all_tool_names(self) -> list[str]:
         """Every tool the server advertises, allow-list ignored."""
@@ -1390,7 +1412,7 @@ class ServerHandle:
         block. A server that answered no manifest is offered whole, as before.
         """
         from maljan.providers.sample_open import (
-            REMOTE_TRANSPORTS,
+            is_shared_address,
             mark_open_tool,
             pin_program_argument,
             wrap_open_tool,
@@ -1426,7 +1448,7 @@ class ServerHandle:
         # A server that declares its open tool has that tool answered through
         # the job's note: a path opened once is not opened again.
         spec = getattr(self.config, "sample_open", None)
-        shared = self.config.transport in REMOTE_TRANSPORTS
+        shared = is_shared_address(self.config)
         marked = mark_open_tool(
             wrap_open_tool(
                 offered,
