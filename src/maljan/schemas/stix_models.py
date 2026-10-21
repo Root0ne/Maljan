@@ -65,6 +65,18 @@ def get_utcnow() -> datetime:
 ATTACK_PATTERN_NAMESPACE = uuid.UUID("2f0b4c10-6f7e-5b6a-9d3b-1f6a5c7e8d90")
 
 
+# The judge's own bundle is a draft: the export is the bundle that went through
+# the publish rule (grounded indicators, technique ids the catalogue holds, one
+# producer). Wherever the API serves the judge's bundle, it says so in this
+# property and sentence, so a scanner or a reader never takes it for the export.
+UNPUBLISHED_PROPERTY = "x_maljan_published"
+UNPUBLISHED_NOTICE = (
+    "This is the judge's own bundle, an unpublished draft: it did not pass the publish rule "
+    "(grounded indicators, technique ids of the ATT&CK catalogue, one producer), so an "
+    "object in it may be one the report does not publish. The export is the published bundle."
+)
+
+
 def attack_pattern_id(technique_id: str) -> str:
     """The object id of one ATT&CK technique. The same id every time."""
     return f"attack-pattern--{uuid.uuid5(ATTACK_PATTERN_NAMESPACE, technique_id)}"

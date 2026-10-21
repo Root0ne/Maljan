@@ -104,7 +104,7 @@ control and the item-by-item score files are in
 | | |
 |---|---|
 | <img src="apps/docs/public/assets/dashboard.png" alt="Dashboard"> | <img src="apps/docs/public/assets/analysis-summary.png" alt="Analysis summary"> |
-| **Dashboard.** Totals, failure rate, recent analyses and verdict distribution. | **Analysis.** One run, its stages, its evidence ledger and the report built from it, with Markdown, PDF, HTML, STIX 2.1 and MISP export. |
+| **Dashboard.** Totals, failure rate, recent analyses and verdict distribution. | **Analysis.** One run, its stages, its evidence ledger and the report built from it, with Markdown, PDF, HTML and STIX 2.1 export. |
 | <img src="apps/docs/public/assets/settings-configuration.png" alt="Settings configuration"> | <img src="apps/docs/public/assets/settings-guide.png" alt="Setup guide"> |
 | **Configuration.** Every application setting, grouped, searchable, with its origin and when a change takes effect. | **Setup guides.** Short walkthroughs that configure one subsystem at a time and test the connection before saving. |
 

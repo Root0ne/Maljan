@@ -172,4 +172,13 @@ class TestTheEndpointSaysWhatIsTrue:
 
         answer = await get_stix_bundle(uuid.uuid4(), "judge", MagicMock(), svc)
 
-        assert answer == {"kept": True, "bundle": {"id": "judge"}, "labels": {"a": "b"}}
+        from maljan.schemas.stix_models import UNPUBLISHED_NOTICE
+
+        # Whole, and labelled as the unpublished draft it is.
+        assert answer == {
+            "kept": True,
+            "bundle": {"id": "judge"},
+            "labels": {"a": "b"},
+            "published": False,
+            "notice": UNPUBLISHED_NOTICE,
+        }

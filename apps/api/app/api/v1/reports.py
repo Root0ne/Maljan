@@ -192,6 +192,14 @@ async def get_stix_bundle(
     produced no bundle — answers 200 with ``"kept": false`` and the reason: the
     report exists and says it has none, which is not the 404 of a report that
     does not.
+
+    The judge's bundle is labelled ``"published": false`` with a notice: it is
+    an unpublished draft that did not pass the publish rule. A run that made no
+    export stores that bundle as the report's bundle, and the stored bundle
+    then carries ``x_maljan_published: false`` and the same notice, and the
+    default source answers it in the same envelope: ``published: false``, the
+    notice and the bundle under ``bundle``. ``published`` is the envelope's
+    name for the flag, ``x_maljan_published`` only the stored bundle's.
     """
     if source == "judge":
         report = await svc.get_report(report_id, user)
@@ -208,13 +216,26 @@ async def get_stix_bundle(
                 "bundle": None,
                 "labels": {},
             }
-        return {"kept": True, **report.judge_stix_bundle}
+        from maljan.schemas.stix_models import UNPUBLISHED_NOTICE
+
+        # Served as the run's record and labelled: it is a draft that did not
+        # pass the publish rule, never the export.
+        return {
+            "kept": True,
+            **report.judge_stix_bundle,
+            "published": False,
+            "notice": UNPUBLISHED_NOTICE,
+        }
     bundle = await svc.get_stix_bundle(report_id, user, source=source)
     if bundle is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Report not found or STIX bundle not available",
         )
+    if isinstance(bundle, dict) and bundle.get("x_maljan_published") is False:
+        from maljan.schemas.stix_models import UNPUBLISHED_NOTICE
+
+        return {"published": False, "notice": UNPUBLISHED_NOTICE, "bundle": bundle}
     return bundle
 
 

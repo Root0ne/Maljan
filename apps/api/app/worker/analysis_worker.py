@@ -4674,6 +4674,16 @@ def _report_inputs(
             if isinstance(judge_bundle, dict) and judge_bundle
             else judge_bundle
         )
+        if isinstance(stix_bundle_for_persist, dict):
+            # The judge's draft, not the export: it did not pass the publish
+            # rule, and whoever reads the stored bundle is told.
+            from maljan.schemas.stix_models import UNPUBLISHED_NOTICE, UNPUBLISHED_PROPERTY
+
+            stix_bundle_for_persist = {
+                **stix_bundle_for_persist,
+                UNPUBLISHED_PROPERTY: False,
+                "x_maljan_notice": UNPUBLISHED_NOTICE,
+            }
     # Ensure STIX 2.1 ``spec_version`` is present on every bundle —
     # the OASIS spec requires it on top-level bundle objects, and
     # downstream tooling (OpenCTI / MISP / TAXII clients) silently

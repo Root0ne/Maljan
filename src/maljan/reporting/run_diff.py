@@ -859,10 +859,22 @@ def _stix_label(obj: Mapping[str, Any]) -> str:
     return kind
 
 
-def _stix_items(run: RunRecord) -> tuple[list[_Item], list[_Item], bool]:
-    """Keyed objects, objects with no stable key, and whether a bundle was recorded."""
+def _stix_is_draft(run: RunRecord) -> bool:
+    """Whether the run's stored bundle is the judge's unpublished draft, not the export."""
     bundle = run.stix_bundle
-    if not isinstance(bundle, Mapping):
+    return isinstance(bundle, Mapping) and bundle.get("x_maljan_published") is False
+
+
+def _stix_items(run: RunRecord) -> tuple[list[_Item], list[_Item], bool]:
+    """Keyed objects, objects with no stable key, and whether a bundle was recorded.
+
+    A bundle that is the judge's draft (``x_maljan_published`` false) is not
+    the published export: it is "draft, not compared", its items kept out, so
+    a draft is never set against another run's export as if both were
+    published.
+    """
+    bundle = run.stix_bundle
+    if not isinstance(bundle, Mapping) or _stix_is_draft(run):
         return [], [], False
     objects = [_map(o) for o in _list(bundle.get("objects"))]
     keys: dict[str, str | None] = {}
@@ -1120,7 +1132,22 @@ def diff_runs(a: RunRecord, b: RunRecord) -> dict[str, Any]:
     keyed_b, unkeyed_b, stix_b = _stix_items(b)
     stix_rows = _pair(keyed_a, keyed_b)
     stix_rows.extend(_pair(unkeyed_a, unkeyed_b, unmatched_a=ONLY_IN_A, unmatched_b=ONLY_IN_B))
-    sections.append(_section("stix", "STIX", "STIX objects", stix_rows, recorded=(stix_a, stix_b)))
+    draft_notes = [
+        f"Run {side}'s STIX bundle is the judge's unpublished draft, not the export: "
+        "draft, not compared."
+        for side, run in (("A", a), ("B", b))
+        if _stix_is_draft(run)
+    ]
+    sections.append(
+        _section(
+            "stix",
+            "STIX",
+            "STIX objects",
+            stix_rows,
+            recorded=(stix_a, stix_b),
+            notes=draft_notes,
+        )
+    )
 
     sections.append(_diff("run", "Run", "Run facts", _run_fact_items, a, b))
     tools_a, tools_rec_a = _tool_items(a)

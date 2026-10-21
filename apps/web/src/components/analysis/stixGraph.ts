@@ -585,3 +585,37 @@ export function graphViewHint(objectCount: number): string | null {
     ? `Large bundles lay out slowly: this one holds ${objectCount} objects, so drawing the graph may take a while.`
     : null;
 }
+
+/** The file name a bundle downloads under: a draft never carries the export's. */
+export const STIX_EXPORT_FILE = "maljan-stix-bundle.json";
+export const STIX_DRAFT_FILE = "maljan-stix-bundle-draft.json";
+
+export interface StixAnswer {
+  bundle: Record<string, unknown>;
+  /** True when the bundle is the judge's unpublished draft, not the export. */
+  draft: boolean;
+  notice: string | null;
+}
+
+/**
+ * What `/stix` (or the stored report's bundle) holds, read for its label.
+ * The API names the flag `published` in its envelope (`{published: false,
+ * notice, bundle}`); only a stored bundle names it `x_maljan_published`.
+ */
+export function readStixAnswer(data: unknown): StixAnswer {
+  const record: Record<string, unknown> =
+    data && typeof data === "object" ? (data as Record<string, unknown>) : {};
+  const inner = record.bundle;
+  if (record.published === false && inner && typeof inner === "object") {
+    return {
+      bundle: inner as Record<string, unknown>,
+      draft: true,
+      notice: typeof record.notice === "string" ? record.notice : null,
+    };
+  }
+  if (record.x_maljan_published === false) {
+    const note = record.x_maljan_notice;
+    return { bundle: record, draft: true, notice: typeof note === "string" ? note : null };
+  }
+  return { bundle: record, draft: false, notice: null };
+}

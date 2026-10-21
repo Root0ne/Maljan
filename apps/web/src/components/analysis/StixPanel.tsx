@@ -8,7 +8,15 @@ import { getErrorMessage } from "@/lib/errors";
 import { useReport } from "@/app/(app)/analysis/[id]/layout";
 import JsonNode from "@/components/analysis/JsonTree";
 import StixGraphView from "@/components/analysis/StixGraph";
-import { GRAPH_FIRST_LIMIT, bundleObjects, graphViewHint, stixFetchNotice } from "@/components/analysis/stixGraph";
+import {
+  GRAPH_FIRST_LIMIT,
+  STIX_DRAFT_FILE,
+  STIX_EXPORT_FILE,
+  bundleObjects,
+  graphViewHint,
+  readStixAnswer,
+  stixFetchNotice,
+} from "@/components/analysis/stixGraph";
 
 type View = "graph" | "table" | "json";
 
@@ -56,7 +64,7 @@ export default function StixPanel() {
     );
   }
 
-  const bundle = stixData ?? report?.stix_bundle ?? {};
+  const { bundle, draft, notice } = readStixAnswer(stixData ?? report?.stix_bundle ?? {});
   const raw = JSON.stringify(bundle, null, 2);
   const objectCount = bundleObjects(bundle).length;
   const large = objectCount > GRAPH_FIRST_LIMIT;
@@ -105,13 +113,21 @@ export default function StixPanel() {
         </button>
         <button
           onClick={() =>
-            downloadBlob(raw, "maljan-stix-bundle.json", "application/json")
+            downloadBlob(raw, draft ? STIX_DRAFT_FILE : STIX_EXPORT_FILE, "application/json")
           }
           className="px-3 py-1 text-xs text-text-secondary border border-border rounded hover:text-text-primary hover:border-text-muted"
         >
           Download
         </button>
       </div>
+      {draft && (
+        <div
+          role="status"
+          className="mx-4 mt-3 text-xs text-status-orange bg-status-orange/10 border border-status-orange/20 rounded px-2 py-1.5"
+        >
+          {notice ?? "This is the judge's unpublished draft, not the export."}
+        </div>
+      )}
       {(fetchError || actionError) && (
         <div
           role="alert"
