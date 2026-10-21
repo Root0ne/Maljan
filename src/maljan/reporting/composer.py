@@ -61,6 +61,7 @@ from maljan.llm.registry import structured_output_supported_for_llm
 from maljan.pipeline.validation import (
     KEPT_WITH_A_FINDING,
     SECTION_CUT_CODE,
+    UNPUBLISHED_VALUE_CODE,
     CapabilityGrounding,
     EntryTexts,
     ValidationTally,
@@ -365,6 +366,15 @@ _PLACEHOLDER_BY_TYPE: dict[Any, str] = {
     int: "0",
     float: "0.0",
 }
+
+
+def _raw_with_object(raw: Any) -> Any:
+    """The raw answer of a structured request when it holds an object, else ``None``."""
+    if raw is None:
+        return None
+    text = structured_answer_text(raw)
+    payload = safe_parse_json(text) if text.strip() else None
+    return raw if isinstance(payload, dict | list) and payload else None
 
 
 def _field_placeholder(annotation: Any, depth: int = 0) -> str:
@@ -1875,12 +1885,17 @@ class ReportComposer:
         entries = getattr(self, "_entries", None)
         answers = getattr(self, "_answers", None)
         # The structured attempt's answer when it carries no object the schema
-        # reads but does carry text or a tool call's arguments: the model was
+        # reads but does carry text or a tool call's arguments (or a parsed one
+        # with an unpublished-value finding, ``parsed_kept``): the model was
         # asked for the object in the prompt as well, so that answer is the
         # validation loop's first answer and the section is not asked again.
         # ``structured`` then sends the loop's retry, so the retry's request
         # is the kept answer's own plus its new turns.
         kept: Any = None
+        # Whether ``kept`` is an answer the schema parsed and that was kept only
+        # to be asked about an unpublished value: the retry may not replace it
+        # with something worse.
+        parsed_kept = False
         structured: Any = None
         try:
             # A call that has to be held under its budget goes by the manual
@@ -1922,10 +1937,13 @@ class ReportComposer:
                 )
                 result = read.parsed
             if isinstance(result, schema):
-                # No retry on this path — ``with_structured_output`` owns the
-                # conversation and there is no turn to add one to — but the
-                # answer is still checked: a section that over-claims is no
-                # better for having come from the path that usually works.
+                # ``with_structured_output`` owns the conversation, so a
+                # finding is asked on this path only as the one question the
+                # report asks once (``report.unpublished_value``): the raw
+                # answer then stands for the validation loop's first answer
+                # below and its retry turn is sent. Every other finding is
+                # only checked: a section that over-claims is no better for
+                # having come from the path that usually works.
                 answer = result.model_dump()
                 found = [
                     *section_capability_violations(answer, self._grounding),
@@ -1939,11 +1957,19 @@ class ReportComposer:
                 ]
                 for extra in validators or []:
                     found.extend(extra(answer))
-                self._tally().count(found)
-                self._record_ungrounded(section or schema.__name__, found, asked=False)
-                return result
-            kept = read.kept
-            say_structured_reply(f"ReportComposer: section '{section or schema.__name__}'", read)
+                held = _raw_with_object(read.raw)
+                if held is not None and any(v.code == UNPUBLISHED_VALUE_CODE for v in found):
+                    kept = held
+                    parsed_kept = True
+                else:
+                    self._tally().count(found)
+                    self._record_ungrounded(section or schema.__name__, found, asked=False)
+                    return result
+            else:
+                kept = read.kept
+                say_structured_reply(
+                    f"ReportComposer: section '{section or schema.__name__}'", read
+                )
         except _StructuredOutputUnavailable:
             pass
         except Exception as exc:  # noqa: BLE001
@@ -2155,6 +2181,33 @@ class ReportComposer:
             shown.extend(found)
             self._tally().count(found)
 
+        def _keep_first_unless_better(first: Any, last: Any) -> Any:
+            # The first answer was published on this path before the question
+            # was asked, with its mark: a retry that is declined, cut, broken
+            # or empty never replaces it.
+            nonlocal declined, cut, cut_at, cut_text, answer_read
+            if not parsed_kept or first is None:
+                return last
+            worse = declined or cut or last is None
+            if not worse:
+                worse = any(v.code not in KEPT_WITH_A_FINDING for v in _validate(last))
+            if not worse:
+                try:
+                    worse = _has_content(schema.model_validate(first)) and not _has_content(
+                        schema.model_validate(last)
+                    )
+                except ValueError:
+                    worse = True
+            if not worse:
+                return last
+            declined = False
+            cut = False
+            cut_at = 0
+            cut_text = ""
+            answer_read = structured_answer_text(kept_raw)
+            return first
+
+        kept_raw = kept
         payload, violations, retries = await retry_with_feedback(
             _run,
             list(messages),
@@ -2165,6 +2218,7 @@ class ReportComposer:
             can_retry=_fits,
             # Only a kept structured answer's retry offers the schema's tool again.
             reply_to_calls=kept is not None,
+            keep=_keep_first_unless_better,
         )
         self._tally().retries += retries
         self._tally().count(violations)

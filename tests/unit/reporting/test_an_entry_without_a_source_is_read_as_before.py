@@ -281,13 +281,14 @@ def test_a_stored_flow_marked_orig_is_read_as_marked() -> None:
 ROOT = Path(__file__).resolve().parents[3]
 GOLDEN = ROOT / "tests" / "fixtures" / "golden" / "reporting"
 BENCHMARK = Path(".superpowers") / "sdd" / "mandate-2026-09-17" / "benchmark" / "deepseek"
-# ``build_sections`` over each stored run's whole ledger as dev f96cb89f drew it:
+# ``build_sections`` over each stored run's whole ledger as dev f96cb89f drew it, but for the
+# one "Functions examined" item that named the tool twice (``list_functions (list_functions)``):
 # the section count and the digest of the sections' JSON (sorted keys).
 STORED_REBUILDS = {
     "run7": (89, "5622126326362a4b"),
-    "run5": (102, "329861e13d99f920"),
-    "run4": (92, "5b820703de8ef174"),
-    "local8": (40, "03a831e737a44641"),
+    "run5": (102, "4668dbef55b4a0c6"),
+    "run4": (92, "25b1a5f928e3585b"),
+    "local8": (40, "38eef84aca43089b"),
 }
 
 
