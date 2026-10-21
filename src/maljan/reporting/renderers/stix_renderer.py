@@ -75,6 +75,8 @@ from maljan.schemas.sandbox_report import LINEAGE_STORED_MARKED_BY
 from maljan.schemas.stix_models import (
     ATTACK_PATTERN_NAMESPACE,
     EVIDENCE_REFS_PROPERTY,
+    KNOWN_KILL_CHAINS,
+    PROPERTY_NOT_CARRIED_CODE,
     AttackPattern,
     Bundle,
     File,
@@ -289,6 +291,10 @@ def _record_indicator_cap(ledger: Any | None, *, removed: int) -> None:
         ledger.record_indicator_cap(removed=removed)
     except Exception:  # noqa: BLE001 — telemetry must never break an export
         return
+
+
+# The times a judge writes about the run, which the export does not carry.
+_JUDGE_RUN_TIMES = ("valid_until", "first_seen", "last_seen", "start_time", "stop_time")
 
 
 class Declined(tuple[str, str]):
@@ -928,7 +934,7 @@ class ExtendedSTIXRenderer:
         # and for the string rows below: one rule, asked of both.
         judge_corroborating = _corroborating_values(report, corpus)
         if base_bundle is not None:
-            self._normalize_judge_timestamps(base_bundle.objects)
+            self.declined.extend(self._normalize_judge_timestamps(base_bundle.objects))
             remap = _technique_remap(report, base_bundle)
             gone = _rejected_pattern_ids(base_bundle, remap)
             # A credit the judge was asked about and kept, naming an agent no
@@ -1412,7 +1418,7 @@ class ExtendedSTIXRenderer:
         return _evidence_refs(report.attribution.family_evidence_ids, ledger_order)
 
     @staticmethod
-    def _normalize_judge_timestamps(objects: list[Any]) -> None:
+    def _normalize_judge_timestamps(objects: list[Any]) -> list[Declined]:
         """Stamp the judge's SDOs with the time the platform published them.
 
         ``created`` and ``modified`` are the platform's bookkeeping — when this
@@ -1428,13 +1434,52 @@ class ExtendedSTIXRenderer:
 
         Object ids are left untouched so intra-bundle relationship refs stay
         valid.
+
+        The times the judge writes about the run — ``valid_until``,
+        ``first_seen``, ``last_seen``, ``start_time``, ``stop_time`` — are not
+        carried: nothing in the run's record dates them, and a time the platform
+        cannot ground is not published. A kill-chain phase of a chain the
+        platform does not know is not carried either. Each is recorded, and the
+        judge's own bundle keeps it as written. Returns those records.
         """
         now = get_utcnow()
-        for obj in objects:
+        declined: list[Declined] = []
+        for position, obj in enumerate(objects):
             if hasattr(obj, "created"):
                 obj.created = now
             if hasattr(obj, "modified"):
                 obj.modified = now
+            named = safe_finding_value(getattr(obj, "id", "") or getattr(obj, "type", "object"))
+            # The object is replaced by a copy without them, so the judge's own
+            # model of it is not edited.
+            without: dict[str, Any] = {}
+            for attribute in _JUDGE_RUN_TIMES:
+                if getattr(obj, attribute, None) is not None:
+                    without[attribute] = None
+                    declined.append(
+                        Declined(
+                            PROPERTY_NOT_CARRIED_CODE,
+                            f"{named!r} carries {attribute}, a time the run's record does not "
+                            "ground, so the export does not carry it; the judge's own bundle "
+                            "keeps it as written.",
+                        )
+                    )
+            phases = getattr(obj, "kill_chain_phases", None) or []
+            unknown = [p for p in phases if p.kill_chain_name not in KNOWN_KILL_CHAINS]
+            if unknown:
+                without["kill_chain_phases"] = [p for p in phases if p not in unknown]
+                names = ", ".join(sorted({safe_finding_value(p.kill_chain_name) for p in unknown}))
+                declined.append(
+                    Declined(
+                        PROPERTY_NOT_CARRIED_CODE,
+                        f"{named!r} names a phase of the kill chain {names}, which is not one "
+                        "the platform knows, so the export does not carry that phase; the "
+                        "judge's own bundle keeps it as written.",
+                    )
+                )
+            if without:
+                objects[position] = obj.model_copy(update=without)
+        return declined
 
     @staticmethod
     def _find_malware_id(objects: list[Any]) -> str | None:
@@ -2971,6 +3016,11 @@ def _hold_out_plain(
 
     Each plain text is read once for every value (:func:`first_holders`), so
     the split costs the texts' length, not the values times the texts.
+
+    A text holds a value as a whole value only: a certificate string with
+    bytes after the host (``http://ocsp.<host>0``) is not read as the plain
+    copy of the decoded host. Stated residual: the benign-host list and the
+    verdict gates still apply to such a value.
     """
     kept: dict[str, str] = {}
     plain: dict[str, str] = {}
