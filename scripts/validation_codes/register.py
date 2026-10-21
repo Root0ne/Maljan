@@ -414,6 +414,8 @@ def _position_name(statement: ast.stmt) -> str | None:
         target: ast.expr = statement.targets[0]
     elif isinstance(statement, ast.AnnAssign) and statement.value is not None:
         target = statement.target
+    elif isinstance(statement, ast.AugAssign):
+        target = statement.target
     else:
         return None
     if isinstance(target, ast.Name) and target.id.endswith(("_CODE", "_CODES")):
@@ -573,6 +575,17 @@ class _ScopeBuilder(ast.NodeVisitor):
     def visit_AugAssign(self, node: ast.AugAssign) -> None:
         self.visit(node.value)
         self._bind_target(node.target, "opaque", None, node)
+        # ``X_CODES += (...)`` adds codes to a position: read them like an assignment.
+        if isinstance(node.op, (ast.Add, ast.BitOr)):
+            self._position(node.target, node.value, node)
+        elif isinstance(node.target, ast.Name) and node.target.id.endswith(("_CODE", "_CODES")):
+            self.reader.unresolved.add(
+                Unresolved(
+                    self.reader.label(self.scope, node.target.id),
+                    ast.unparse(node),
+                    "an augmented assignment that is not += or |=",
+                )
+            )
         self.visit(node.target)
 
     def visit_NamedExpr(self, node: ast.NamedExpr) -> None:

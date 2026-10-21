@@ -374,8 +374,8 @@ def build_app(state: StubState) -> Any:
         )
 
     async def log(http: HttpRequest) -> Any:
-        with state.lock:
-            return JSONResponse(state.calls())
+        # ``calls`` takes the (non-reentrant) lock itself.
+        return JSONResponse(state.calls())
 
     async def reset(http: HttpRequest) -> Any:
         with state.lock:

@@ -327,7 +327,7 @@ def _efficiency(tokens: dict[str, Any] | None = None) -> dict[str, Any]:
         call="validation retry",
     )
     from maljan.agents.composition import ResolvedAgent
-    from maljan.core.config import Settings
+    from maljan.core.settings_overrides import build_settings
 
     container = SimpleNamespace(
         input_meter=meter,
@@ -347,7 +347,7 @@ def _efficiency(tokens: dict[str, Any] | None = None) -> dict[str, Any]:
             key: [] for key in ("static", "dynamic", "network", "judge", "mediator")
         },
         setup_server_versions=lambda: {"analysis": {"name": "analysis-mcp", "version": "1.2.0"}},
-        config=Settings(),
+        config=build_settings({}),
     )
     from maljan.agents.tool_answer_clearing import READ_EVIDENCE_TOOL
     from maljan.schemas.evidence import LedgerEntry

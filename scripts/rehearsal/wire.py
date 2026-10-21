@@ -512,6 +512,10 @@ def anthropic_events(request: Request, reply: Reply, usage: Usage) -> Iterator[t
             if reply.stream_error and "content_block_delta" in event:
                 yield _OVERLOADED, 0
                 return
+    if reply.stream_error:
+        # A reply with no text, thinking or call has no delta: fail after the start.
+        yield _OVERLOADED, 0
+        return
     final = anthropic_usage(usage)
     yield (
         _sse(
@@ -683,6 +687,10 @@ def openai_events(request: Request, reply: Reply, usage: Usage) -> Iterator[tupl
             error = openai_error(503, "The server is overloaded, please try again later.")
             yield f"data: {json.dumps(error)}\n\n", 0
             return
+    if reply.stream_error:
+        error = openai_error(503, "The server is overloaded, please try again later.")
+        yield f"data: {json.dumps(error)}\n\n", 0
+        return
     yield chunk({}, _OPENAI_STOP[reply.stop_reason()]), 0
     options = request.raw.get("stream_options") or {}
     if isinstance(options, dict) and options.get("include_usage"):

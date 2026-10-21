@@ -137,9 +137,10 @@ def asset_path(name: str) -> Path:
 
 def render_all() -> list[Path]:
     """Write one SVG per seeded team and return what was written."""
-    from maljan.core.config import Settings
+    from maljan.core.settings_overrides import build_settings
 
-    profiles = Settings(_env_file=None).agents.profiles
+    # Store-only: an operator's environment never reaches a committed asset.
+    profiles = build_settings({}).agents.profiles
     ASSETS.mkdir(parents=True, exist_ok=True)
     written: list[Path] = []
     for name in TEAMS:
