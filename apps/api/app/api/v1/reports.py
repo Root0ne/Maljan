@@ -239,6 +239,38 @@ async def get_stix_bundle(
     return bundle
 
 
+@router.get("/{report_id}/attack-layer")
+async def get_attack_navigator_layer(
+    report_id: uuid.UUID,
+    domain: Literal["enterprise", "mobile", "ics"] | None = None,
+    user: User = Depends(get_current_user),
+    svc: ReportService = Depends(_get_service),
+) -> dict:
+    """The ATT&CK Navigator layer of the techniques the report publishes.
+
+    Read from the stored report's published technique list, never a draft:
+    each technique is scored and coloured by the report's own support for it,
+    and its comment is its evidence ids. A layer holds one ATT&CK domain, the
+    one most published techniques belong to unless ``domain`` names another;
+    the layer's description names the techniques of the others. A report with
+    no published technique answers 200 with an empty layer; only an unknown or
+    unauthorized report, or one with no stored report document, is 404.
+    """
+    from maljan.reporting.navigator_layer import build_layer
+
+    mr = await svc.get_malware_report(report_id, user)
+    if mr is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Report not found or no MalwareReport persisted",
+        )
+    # The bundle-free build runs off the event loop all the same: it walks the
+    # stored mappings and the vendored tables.
+    return await asyncio.to_thread(
+        build_layer, mr, name=f"Maljan report {report_id}", domain=domain
+    )
+
+
 @router.get("/{report_id}/mitre")
 async def get_mitre_techniques(
     report_id: uuid.UUID,

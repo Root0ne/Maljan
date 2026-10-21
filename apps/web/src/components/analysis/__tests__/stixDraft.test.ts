@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  NAVIGATOR_LAYER_FILE,
   STIX_DRAFT_FILE,
   STIX_EXPORT_FILE,
   readStixAnswer,
@@ -30,5 +31,10 @@ describe("readStixAnswer", () => {
   it("names a draft's download apart from the export's", () => {
     expect(STIX_DRAFT_FILE).toBe("maljan-stix-bundle-draft.json");
     expect(STIX_EXPORT_FILE).not.toBe(STIX_DRAFT_FILE);
+  });
+
+  it("names the Navigator layer's download apart from both bundles", () => {
+    expect(NAVIGATOR_LAYER_FILE).toBe("maljan-attack-layer.json");
+    expect([STIX_EXPORT_FILE, STIX_DRAFT_FILE]).not.toContain(NAVIGATOR_LAYER_FILE);
   });
 });

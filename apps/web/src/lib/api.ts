@@ -1130,6 +1130,13 @@ class ApiClient {
     );
   }
 
+  /** The ATT&CK Navigator layer of the techniques the report publishes. */
+  getReportAttackLayer(reportId: string) {
+    return this.request<Record<string, unknown>>(
+      `/api/v1/reports/${encodeURIComponent(reportId)}/attack-layer`
+    );
+  }
+
   /** Every IOC the report holds, flat. The endpoint existed long before
    *  anything in the UI reached it.
    *

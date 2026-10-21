@@ -532,7 +532,11 @@ class TestAgainstTheSequentialBase:
             return hashlib.sha256(text.encode()).hexdigest()
 
         assert sorted(llm.requests) == base["requests"]
-        assert digest(report.model_dump_json()) == base["report_sha256"]
+        assert report.attck_defense == []
+        assert (
+            digest(report.model_dump_json(exclude={"attck_defense", "attck_defense_version"}))
+            == base["report_sha256"]
+        )
         assert digest(MarkdownRenderer().render(report)) == base["markdown_sha256"]
         assert digest(HtmlRenderer().render(report)) == base["html_sha256"]
         assert composer.degradations == base["degradations"]

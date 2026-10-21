@@ -29,6 +29,7 @@ from maljan.core.logger import logger
 from maljan.core.reputation import reputation_of
 from maljan.extractors.attribution import build_family_attribution
 from maljan.extractors.capability_matrix import build_capability_matrix, unmapped_behaviours
+from maljan.memory.attck_defense import defense_for, release_for
 from maljan.pipeline.outcome import (
     INCONCLUSIVE_VERDICT,
     normalise_verdict,
@@ -46,6 +47,8 @@ from maljan.reporting.ledger_projection import (
 )
 from maljan.reporting.ledger_report import build_sections
 from maljan.reporting.models import (
+    AttckDefenseRow,
+    AttckLink,
     ConsolidatedIOC,
     DefensiveRecommendation,
     EvidenceIndexRow,
@@ -226,6 +229,7 @@ class MalwareReportBuilder:
 
         references = self._build_references(mappings, identity.hashes)
 
+        defense = attck_defense_rows(mappings)
         report = MalwareReport(
             verdict=verdict,
             overall_confidence=self.overall_confidence,
@@ -242,6 +246,8 @@ class MalwareReportBuilder:
             capability_matrix=cells,
             ttp_mappings=mappings,
             unmapped_behaviours=unmapped_behaviours(self.stix_output),
+            attck_defense=defense,
+            attck_defense_version=release_for(r.technique_id for r in defense),
             attribution=attribution,
             executive_summary="",  # filled by NarrativeAgent
             defensive_recommendations=[],  # filled by NarrativeAgent
@@ -1175,6 +1181,33 @@ def _domain_context(d: Any) -> str:
         # than the parent, this is the whole story.
         notes.append("queried by pid " + ", ".join(str(p) for p in d.queried_pids[:6]))
     return "; ".join(notes)
+
+
+def attck_defense_rows(mappings: list[Any]) -> list[AttckDefenseRow]:
+    """ATT&CK's own defence for each published technique, in the report's technique order.
+
+    Deterministic and offline: read from the cached bundles
+    (``memory.attck_defense``). A technique ATT&CK lists nothing for, and a
+    run with no cached bundle, add no row.
+    """
+    published = [m for m in mappings if str(m.technique_id or "").strip()]
+    found = defense_for(m.technique_id for m in published)
+    rows: list[AttckDefenseRow] = []
+    for mapping in published:
+        defense = found.get(str(mapping.technique_id).strip().upper())
+        if defense is None:
+            continue
+        rows.append(
+            AttckDefenseRow(
+                technique_id=mapping.technique_id,
+                technique_name=mapping.technique_name,
+                mitigations=[AttckLink(**vars(o)) for o in defense.mitigations],
+                detection_strategies=[AttckLink(**vars(o)) for o in defense.detection_strategies],
+                data_components=[AttckLink(**vars(o)) for o in defense.data_components],
+                evidence_ids=list(mapping.sources),
+            )
+        )
+    return rows
 
 
 def _first_report_technique(text: str, valid_tids: set[str]) -> str | None:

@@ -10,6 +10,7 @@ import JsonNode from "@/components/analysis/JsonTree";
 import StixGraphView from "@/components/analysis/StixGraph";
 import {
   GRAPH_FIRST_LIMIT,
+  NAVIGATOR_LAYER_FILE,
   STIX_DRAFT_FILE,
   STIX_EXPORT_FILE,
   bundleObjects,
@@ -118,6 +119,26 @@ export default function StixPanel() {
           className="px-3 py-1 text-xs text-text-secondary border border-border rounded hover:text-text-primary hover:border-text-muted"
         >
           Download
+        </button>
+        <button
+          onClick={async () => {
+            if (!report?.id) return;
+            try {
+              const layer = await api.getReportAttackLayer(report.id);
+              setActionError(null);
+              downloadBlob(
+                JSON.stringify(layer, null, 2),
+                NAVIGATOR_LAYER_FILE,
+                "application/json",
+              );
+            } catch (err: unknown) {
+              setActionError(`Could not fetch the ATT&CK Navigator layer: ${getErrorMessage(err)}`);
+            }
+          }}
+          title="ATT&CK Navigator layer of the techniques this report publishes"
+          className="px-3 py-1 text-xs text-text-secondary border border-border rounded hover:text-text-primary hover:border-text-muted"
+        >
+          Navigator layer
         </button>
       </div>
       {draft && (
