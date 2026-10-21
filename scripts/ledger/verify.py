@@ -16,6 +16,9 @@ present) with no database; the audit log is not in such a directory, and the
 answer says it was not checked. ``--audit-chain`` walks the whole audit chain
 from its first row to its head, for the operator: it is the walk that finds
 rows cut off the end of the chain, which a job's own verification cannot see.
+It also compares the chain with the head anchored outside the database
+(``AUDIT_ANCHOR``, ``app.services.audit_anchor``), names both seqs and says
+what protects the anchor, or that none is configured.
 ``--repair-head`` is the operator's repair after an append refused the head:
 it walks the whole chain under the rules a verification uses (rows before the
 rotation boundary under a key the platform cannot derive are reported as an
@@ -135,7 +138,9 @@ async def verify_database(job_id: uuid.UUID, database_url: str) -> dict[str, Any
     """The verification of one job, read in a read-only transaction that is rolled back."""
     from app.services.ledger_verify import verify_job
 
-    return dict(await _read_only(database_url, lambda conn: verify_job(conn, job_id)))
+    return dict(
+        await _read_only(database_url, lambda conn: verify_job(conn, job_id, operator=True))
+    )
 
 
 async def walk_audit_chain(conn: Any) -> dict[str, Any]:
@@ -143,8 +148,12 @@ async def walk_audit_chain(conn: Any) -> dict[str, Any]:
     from sqlalchemy import select
 
     from app.models.audit import AuditChainHead, AuditLog
-    from app.services import audit_chain, ledger_chain
+    from app.services import audit_anchor, audit_chain, ledger_chain
 
+    # The anchor before the database: a head anchored while the walk reads the
+    # rows is then never ahead of what was read.
+    configured = audit_anchor.configured()
+    reading = await audit_anchor.read(configured) if configured is not None else None
     log = AuditLog.__table__
     rows = (
         (
@@ -165,21 +174,31 @@ async def walk_audit_chain(conn: Any) -> dict[str, Any]:
     check = audit_chain.verify_audit_chain(
         rows, ledger_chain.known_keys(), head, current.key_id if current is not None else None
     )
+    anchor = await audit_anchor.verification(conn, head, configured, reading=reading, operator=True)
+    reason = check.reason
     if check.broken_at is not None:
         status = "broken"
+    elif anchor.broken is not None:
+        status = "broken"
+        reason = f"the audit chain does not match its anchor outside the database: {anchor.broken}"
     elif check.head_unverifiable:
         status = "unverifiable"
+    elif anchor.unverifiable is not None:
+        status = "unverifiable"
+        reason = anchor.unverifiable
     else:
         status = "verified"
     return {
         "status": status,
-        "reason": check.reason,
+        "reason": reason,
         "broken_at": check.broken_at,
         "rows": check.rows,
         "head_seq": check.head_seq,
         "rotated_at_seq": check.rotated_at_seq,
         "verified_rows": len(check.verified),
         "unverifiable": list(check.unverifiable_span or ()),
+        "anchor": anchor.as_dict(full=True, positions=True),
+        "notes": anchor.operator_notes(),
     }
 
 

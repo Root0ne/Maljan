@@ -115,6 +115,19 @@ class APISettings(BaseSettings, PlatformSecrets):
     minio_bucket: str = "maljan-samples"
     minio_secure: bool = False
 
+    # ── Audit chain anchor ───────────────────────────────────────
+    # Where the audit chain's head is kept outside the database
+    # (``app.services.audit_anchor``): ``database`` (a separate role that may
+    # only INSERT and SELECT ``audit_chain_anchor``, reached through
+    # ``audit_anchor_database_url``), ``object_store`` (one object per head in
+    # ``minio_bucket``, under object lock when the bucket has it) or ``none``.
+    # Empty means ``database`` when that URL is set, else ``none``. Read from
+    # the environment only, never from the settings store: a database writer
+    # must not be able to switch the anchor off. ``app.bootstrap`` refuses an
+    # unknown value.
+    audit_anchor: str = ""
+    audit_anchor_database_url: str = ""
+
     # ── Settings-store encryption ──────────────────────────────
     # Fernet key that encrypts secret values in the runtime settings store.
     # Read directly from the environment by ``maljan.core.settings_secrets``

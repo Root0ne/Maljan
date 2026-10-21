@@ -37,6 +37,8 @@ same contract in short form.
 | `RUN_MIGRATIONS_ON_STARTUP` | no | `false` | Leave off in production; migrate as a deploy step. |
 | `MINIO_BUCKET` | no | `maljan-samples` | |
 | `MINIO_SECURE` | no | `false` | |
+| `AUDIT_ANCHOR` | no | — | `database`, `object_store` or `none`: where the audit chain's head is kept outside the database (see Operations). Unset means `database` when `AUDIT_ANCHOR_DATABASE_URL` is set, else `none`; any other value is refused at startup. Read from the environment only. |
+| `AUDIT_ANCHOR_DATABASE_URL` | with `AUDIT_ANCHOR=database` | — | A role that may only INSERT and SELECT `audit_chain_anchor`; startup warns when it is the application's own role. A platform secret. |
 | `JWT_ALGORITHM` | no | `HS256` | |
 | `JWT_ISSUER` | no | `maljan-api` | |
 | `JWT_AUDIENCE` | no | `maljan-clients` | |

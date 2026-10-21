@@ -4,7 +4,7 @@ Every reader and writer of the store — the sample upload and delete, the
 sandbox-report upload, read and delete, the health probe, the analysis
 worker's sample download and the evidence objects a job's ledger references
 (written by the worker, read by the evidence download, removed with the
-job) — builds its client here and creates the bucket
+job) and the audit chain's heads (``audit_anchor``) — builds its client here and creates the bucket
 here, so none of them can drift from the others. The bucket is
 ``settings.minio_bucket``, created lazily by the first write that finds it
 missing, and every creation path gives a fresh bucket the explicit
@@ -174,19 +174,30 @@ EVIDENCE_DRAIN_SECONDS = 5.0
 EVIDENCE_WRITERS = 2
 
 
-def _evidence_client() -> Any:
-    """A client with the evidence writers' timeouts and one retry."""
+def bounded_client(
+    *, read_seconds: float = EVIDENCE_READ_SECONDS, retries: int = EVIDENCE_RETRIES
+) -> Any:
+    """A client with the evidence writers' timeouts and one retry, or the ones given.
+
+    The evidence writers use it, and so does the audit chain's object-store
+    anchor (``audit_anchor``, with a shorter read and no retry, so its threads
+    end within its own bound): neither may be held for minutes by a store that
+    does not answer.
+    """
     import urllib3
 
     pool = urllib3.PoolManager(
-        timeout=urllib3.Timeout(connect=EVIDENCE_CONNECT_SECONDS, read=EVIDENCE_READ_SECONDS),
+        timeout=urllib3.Timeout(connect=EVIDENCE_CONNECT_SECONDS, read=read_seconds),
         retries=urllib3.Retry(
-            total=EVIDENCE_RETRIES,
+            total=retries,
             backoff_factor=0.2,
             status_forcelist=[500, 502, 503, 504],
         ),
     )
     return client(pool)
+
+
+_evidence_client = bounded_client
 
 
 def _unreachable(exc: BaseException) -> bool:

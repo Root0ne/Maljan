@@ -28,6 +28,8 @@ class ThrottleState:
 @dataclass
 class Counters:
     audit_write_failures: int = 0
+    # Committed audit heads not anchored outside the database (``audit_anchor``).
+    audit_anchor_failures: int = 0
 
 
 throttle = ThrottleState()

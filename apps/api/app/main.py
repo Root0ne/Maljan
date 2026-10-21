@@ -411,6 +411,12 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # the middle of it is not a wait nobody is reminded of.
     log_jwt_rotation()
 
+    # An empty audit anchor is given the current head, beside the start
+    # rather than in it (``audit_anchor.start_anchoring``).
+    from app.services import audit_anchor
+
+    audit_anchor.start_anchoring(async_engine)
+
     logger.info(
         f"Maljan API v{settings.app_version} started successfully",
         extra={"component": "lifecycle"},
@@ -420,6 +426,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
     # ── Shutdown ─────────────────────────────────────────────
     logger.info("Shutting down Maljan API...")
+    # Anchor writes already scheduled finish (bounded) before their engine goes.
+    await audit_anchor.drain()
     await async_engine.dispose()
     logger.info("Database connections closed")
 

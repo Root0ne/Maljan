@@ -13,7 +13,8 @@ always says why:
   ones the audit chain records for this seal, and the job's own audit rows
   verify. The per-agent findings and the transcript are not covered.
 - ``broken``: the first thing that failed, with the first broken ``seq`` when
-  a ledger row is to blame.
+  a ledger row is to blame; the audit chain contradicting the head anchored
+  outside the database (``audit_anchor``) is one.
 - ``deleted``: the report row is gone and a verified ``report.delete`` audit
   row records its deletion by its owner; the ledger still verifies against the
   seal.
@@ -27,6 +28,15 @@ always says why:
   since a rotation).
 - ``not_sealed``: no seal exists anywhere and no row carries a digest: the run
   predates sealing, or nothing was stored for it.
+
+Every answer read from the database carries ``anchor``: which anchor outside
+the database the audit chain was compared with and its state (the operator's
+command adds what protects it, read from its store); its notes say when none is
+configured (the chain is then checked against the database head only, as
+before), and when the job's rows lie past the last anchored head. Once an
+anchor is configured, one that could not be read, is empty beside a head, or
+holds a head under a key the platform cannot derive makes a verdict that would
+be ``verified`` or ``deleted`` read ``unverifiable``.
 
 A job is sealed when any copy of its seal exists (the report row, the report
 payload, the run summary, a verified ``ledger.seal`` audit row) or any of its
@@ -93,6 +103,9 @@ class JobAudit:
     # up to its head: rows are gone from it, and whether they were this job's
     # own cannot be told from the rows that are left.
     chain_gap: str | None = None
+    # What comparing the chain with the head anchored outside the database
+    # found (``audit_anchor.AnchorVerdict``); ``None`` when it was not read.
+    anchor: Any = None
 
     @property
     def unverifiable_own(self) -> bool:
@@ -120,6 +133,7 @@ class _Result:
             "amendments": 0,
             "checks": [],
             "notes": [],
+            "anchor": None,
         }
         self.pending: str | None = None
 
@@ -159,8 +173,23 @@ def verify_ledger(
     result.body["entries"] = len(ordered)
     chained_rows = [r for r in ordered if _read(r, "digest") or _read(r, "chain")]
 
+    anchor = audit.anchor if audit is not None else None
+    if anchor is not None:
+        # Said on every answer, whatever ends it: what the chain was checked
+        # against, and what protects that.
+        result.body["anchor"] = anchor.as_dict()
+        for note in anchor.notes:
+            result.note(note)
     if audit is not None and audit.check.broken_at is not None:
         return result.end(BROKEN, f"The audit chain is broken: {audit.check.reason}.")
+    if anchor is not None and anchor.broken:
+        return result.end(
+            BROKEN,
+            f"The audit chain does not match its anchor outside the database: {anchor.broken}.",
+        )
+    if anchor is not None:
+        for line in anchor.checks:
+            result.check(line)
     if audit is None:
         result.note("The audit log was not read: the seal and amendments were not checked there.")
 
@@ -213,6 +242,12 @@ def verify_ledger(
     return _final(result, audit)
 
 
+def _anchor_unverifiable(audit: JobAudit | None) -> str | None:
+    """Why the configured anchor leaves a positive verdict unverifiable, or ``None``."""
+    anchor = audit.anchor if audit is not None else None
+    return anchor.unverifiable if anchor is not None else None
+
+
 def _final(result: _Result, audit: JobAudit | None) -> dict[str, Any]:
     if audit is not None:
         if audit.check.head_unverifiable:
@@ -222,6 +257,8 @@ def _final(result: _Result, audit: JobAudit | None) -> dict[str, Any]:
         result.check(f"this job's {len(audit.check.verified)} audit row(s) verify")
     if result.pending is not None:
         return result.end(UNVERIFIABLE, result.pending)
+    if (unanchored := _anchor_unverifiable(audit)) is not None:
+        return result.end(UNVERIFIABLE, unanchored)
     return result.end(VERIFIED, VERIFIED_REASON)
 
 
@@ -422,6 +459,8 @@ def _check_the_deletion(
         )
     if audit is not None and audit.check.head_unverifiable:
         return result.end(UNVERIFIABLE, HEAD_UNVERIFIABLE)
+    if (unanchored := _anchor_unverifiable(audit)) is not None:
+        return result.end(UNVERIFIABLE, unanchored)
     return result.end(
         DELETED,
         "The report was deleted by its owner (a verified report.delete audit row records it); "
@@ -534,26 +573,35 @@ async def verify_job(
     job_id: Any,
     *,
     preloaded: tuple[Sequence[Mapping[str, Any]], Mapping[str, Any] | None] | None = None,
+    operator: bool = False,
 ) -> dict[str, Any]:
     """Read one job's ledger, report and own chained audit rows through ``db`` and verify them.
 
     ``preloaded`` is the job's ledger rows and report row when the caller has
     already read them in the same transaction (the job package): they are
-    used as they are rather than read and held a second time.
+    used as they are rather than read and held a second time. ``operator``
+    (the developer command) adds what protects the anchor to ``anchor`` and
+    the notes; a job's owner is told its kind and state only.
 
     ``db`` is an ``AsyncSession`` or an ``AsyncConnection``: only Core
     ``SELECT``\\s are issued, so a read-only transaction serves it. Only this
     job's chained audit rows are read, with the chain value of the row before
     each and the head record, so the cost follows the job
-    (``audit_chain.verify_job_rows``).
+    (``audit_chain.verify_job_rows``). The configured anchor is read through
+    its own store and compared with the chain at the anchored head's seq
+    (``audit_anchor.verification``): one row more. The anchor is read before
+    the database, so a head anchored while this runs is not taken for a cut
+    chain.
     """
     from sqlalchemy import func, select
 
     from app.models.audit import AuditChainHead, AuditLog
     from app.models.evidence import EvidenceEntry
     from app.models.report import AnalysisReport
-    from app.services import audit_chain
+    from app.services import audit_anchor, audit_chain
 
+    configured = audit_anchor.configured()
+    reading = await audit_anchor.read(configured) if configured is not None else None
     rows: Sequence[Mapping[str, Any]]
     report: Mapping[str, Any] | None
     if preloaded is not None:
@@ -628,6 +676,20 @@ async def verify_job(
         for neighbour in found:
             predecessors[int(neighbour["chain_seq"])] = str(neighbour["chain"])
             successors[int(neighbour["chain_seq"])] = dict(neighbour)
+    anchor = await audit_anchor.verification(
+        db, head, configured, reading=reading, operator=operator
+    )
+    if (
+        anchor.anchored_seq is not None
+        and anchor.broken is None
+        and seqs
+        and max(seqs) > anchor.anchored_seq
+    ):
+        anchor.notes.append(
+            "This job's last chained audit row lies past the last head anchored outside the "
+            "database (its anchor write has not landed): it is checked against the database "
+            "head only."
+        )
     keys = ledger_chain.known_keys()
     current = ledger_chain.platform_key()
     check = audit_chain.verify_job_rows(
@@ -653,11 +715,17 @@ async def verify_job(
         amendments=_details(audit_chain.REPORT_AMEND),
         deletes=_details(audit_chain.REPORT_DELETE),
         chain_gap=gap,
+        anchor=anchor,
     )
-    return verify_ledger(
+    verdict = verify_ledger(
         job_id,
         rows if preloaded is not None else [dict(r) for r in rows],
         report=dict(report) if report is not None else None,
         audit=audit,
         keys=keys,
     )
+    if operator:
+        verdict["anchor"] = anchor.as_dict(full=True)
+        if anchor.protection:
+            verdict["notes"].insert(0, f"Audit chain anchor ({anchor.kind}): {anchor.protection}")
+    return verdict

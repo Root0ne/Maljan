@@ -3,7 +3,8 @@
 The API and the worker are started with a small environment, the bootstrap
 contract (``app.config.APISettings``; ``bootstrap.env.example`` lists all of
 it). Part of it opens the platform's own stores: the database and Redis URLs
-carry their passwords, the object store's keys are its root user, the settings
+and the audit anchor's database URL carry their passwords, the object store's
+keys are its root user, the settings
 key decrypts every value stored encrypted, and the JWT signing keys sign a
 session for any user. Those variables are marked here, on
 ``PlatformSecrets``, which ``APISettings`` inherits, declaring each again with
@@ -68,6 +69,9 @@ class PlatformSecrets(BaseModel):
     minio_secret_key: Annotated[
         SecretStr,
         PlatformSecret("opens the platform's object store", ("MINIO_ROOT_PASSWORD",)),
+    ]
+    audit_anchor_database_url: Annotated[
+        str, PlatformSecret("opens the table the audit chain's head is anchored in")
     ]
     settings_encryption_key: Annotated[
         SecretStr, PlatformSecret("decrypts every value the settings store keeps encrypted")

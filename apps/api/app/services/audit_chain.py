@@ -20,8 +20,11 @@ transaction it sits in, and is logged at ERROR and counted in
 The limit, stated: the chain proves integrity against a database writer who
 does not hold the settings encryption key. Someone who holds it can rewrite the
 chain and its head, and a writer who kept an earlier head record can put it
-back after cutting the rows that followed it; an anchor outside the database
-is what rules those out.
+back after cutting the rows that followed it. The anchor outside the database
+(``audit_anchor``, chosen by ``AUDIT_ANCHOR``) rules those out up to the last
+anchored head: each committed head is kept there after the commit, and
+verification compares the chain with it. Without one configured, verification
+says the chain is checked against the database head only.
 """
 
 from __future__ import annotations
@@ -36,7 +39,7 @@ from typing import Any
 
 from app import observability
 from app.logging_config import get_logger
-from app.services import ledger_chain
+from app.services import audit_anchor, ledger_chain
 
 logger = get_logger("api.audit_chain")
 
@@ -264,6 +267,18 @@ async def append(
             head.rotated_at_seq = rotated_at
             head.mac = head_mac(seq, row.chain, rotated_at, key)
             await db.flush()
+        # The head is anchored outside the database once this transaction
+        # commits, never before: a head rolled back is never anchored.
+        audit_anchor.anchor_after_commit(
+            db,
+            {
+                "chain_seq": seq,
+                "chain": row.chain,
+                "key_id": key.key_id or None,
+                "rotated_at_seq": rotated_at,
+                "mac": head.mac,
+            },
+        )
         return row
     except HeadRefused as exc:
         observability.counters.audit_write_failures += 1

@@ -222,7 +222,9 @@ anyone who can write the database but does not hold `SETTINGS_ENCRYPTION_KEY`.
 Someone who holds that secret can rewrite the rows, the chain, the seal and
 the audit chain consistently, and a writer who kept an earlier audit head
 record can put it back after cutting the rows that followed it (the full
-`--audit-chain` walk then still ends at that head). A writer without the key
+`--audit-chain` walk then still ends at that head). The audit chain's anchor
+(below) rules both out up to the last anchored head; without one, every
+verification says the chain was checked against the database head only. A writer without the key
 who relabels every key id can push history to `unverifiable` or `other_key`,
 never to `verified`; in particular a forged rotation (a job's rows and the head
 relabelled to an invented key) cannot be told apart from a real one and reads
@@ -239,14 +241,58 @@ deleted row next to one of the job's rows leaves a gap that reads `broken`; a
 deleted amendment row with no row of the job beside it is found only by the
 full `--audit-chain` walk.
 
-**Anchoring (not built).** The seal's `digest` is the value an external anchor
-would take. An anchor would publish it, once per stored run or batched under a
-Merkle root, to a place the platform's database role cannot rewrite: an
-RFC 3161 timestamping service, an object-locked (WORM) bucket written with
-credentials of its own, or a table owned by a separate database role the
-application only inserts into. Its receipt would be kept beside the seal (a
-`ledger_seal.anchor` entry, or a row keyed by the seal digest) and checked by
-the same verification step; nothing in the seal or the chain would change.
+**The audit chain's anchor.** `AUDIT_ANCHOR` keeps each committed head of the
+audit chain outside the database, and every verification compares the chain
+with the latest anchored head:
+
+| `AUDIT_ANCHOR` | Where a head is kept | What protects it |
+|---|---|---|
+| `database` (the default when `AUDIT_ANCHOR_DATABASE_URL` is set) | a row of `audit_chain_anchor`, written through `AUDIT_ANCHOR_DATABASE_URL` | a role that may only INSERT and SELECT the table, which is owned by a role the application does not hold; on PostgreSQL a trigger refuses UPDATE, DELETE and TRUNCATE (its owner can drop it) |
+| `object_store` | one object per head under `audit-chain/head/` in `MINIO_BUCKET` | the bucket's object lock when it has one (a COMPLIANCE default retention holds against the root user too; a lock without a default retention puts each head under a legal hold); a bucket without a lock holds against a database-only writer alone |
+| `none`, or unset with no URL | nowhere | nothing beyond the database head, as before |
+
+A database anchor takes this, run once as a database owner:
+`CREATE ROLE maljan_anchor LOGIN PASSWORD '...'`,
+`GRANT SELECT, INSERT ON audit_chain_anchor TO maljan_anchor` and
+`ALTER TABLE audit_chain_anchor OWNER TO <a role the application is not>`. An
+object lock can only be set when a bucket is created. What protects the anchor
+is read from its store (the roles' privileges, the table's owner and trigger,
+and whether the application's role may INSERT, UPDATE, DELETE or TRUNCATE it;
+the bucket's lock mode and period) and stated by the operator's commands
+(`--job` and `--audit-chain`, in `anchor.protection` and the notes), so a weak
+setup says so; a job's owner is told the anchor's kind and state only. With
+object lock every version is listed and a head is read from the first version
+written under its name; a head hidden behind a delete marker, or one this
+process saw that is gone, reads `broken`.
+
+A head is anchored after the transaction that wrote it commits, in a task of
+its own: the value is the head the append computed, written once the committed
+database agrees with it (its MAC verifies under a key the platform holds, the
+chain holds its value at its seq, and the database is neither behind the
+latest anchored head nor different at its seq). The anchor is read before the
+database. A store that is down or slower than 10 s is logged at ERROR and
+counted (`audit_anchor_failures`): the append and the job go on, and later
+appends catch the anchor up. The API and the analysis worker give an empty
+anchor the current head at startup, and the API and both workers wait (bounded)
+for scheduled anchor writes at shutdown.
+
+A chain rewritten under the key, or cut back to an earlier head record, reads
+`broken` ("does not match its anchor outside the database") in a job's
+verification and in the `--audit-chain` walk, which also names both seqs. The
+anchor is read before the database; a database head that still reads behind
+the anchor, or the anchored row missing, is read again on a connection of its
+own before it is called a break. Once an anchor is configured, a verification
+that could not read it, found it empty beside a head, or found the anchored
+head under a key the settings cannot derive reads `unverifiable`, never
+`verified` or `deleted`. Rows past the last anchored head (a write that has
+not landed) are checked against the database head only, and a job whose rows
+lie there is told so. After a truncation acknowledged with
+`--repair-head --accept-truncation-at`, the anchor goes on reporting it and
+nothing further is anchored.
+
+The seal's `digest` is the value a per-run external anchor would take (an
+RFC 3161 timestamping service, or a receipt kept beside the seal); that is not
+built.
 
 ## Job package
 
