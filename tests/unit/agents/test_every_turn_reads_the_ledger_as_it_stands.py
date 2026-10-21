@@ -13,7 +13,7 @@ validation retry, a drops question).
 
 from __future__ import annotations
 
-import time
+from collections.abc import Callable
 from types import SimpleNamespace
 from typing import Any
 from unittest.mock import MagicMock
@@ -26,6 +26,7 @@ from maljan.pipeline.nodes import brief_agent
 from maljan.pipeline.run_state import RUN_STATE_BEGIN, RUN_STATE_END, render_run_state
 from maljan.pipeline.triage_pack import PIPELINE
 from maljan.schemas.evidence import build_entry, format_entry_id
+from tests.linear_cost import TIME_RATIO_LIMIT, calls, cpu_seconds
 
 REPORT = "CLAIM: it decodes\nEVIDENCE: ev_0004\nCONFIDENCE: 0.6\nTECHNIQUE: T1140\n"
 
@@ -179,8 +180,8 @@ class TestATurnAfterTheLoop:
 
 class TestLinearTime:
     @pytest.mark.parametrize("own", [50, 500])
-    def test_ten_times_the_ledger_costs_at_most_ten_times_the_time(self, own: int) -> None:
-        def cost(rows: int) -> float:
+    def test_four_times_the_ledger_costs_under_eight_times_the_time(self, own: int) -> None:
+        def reader(rows: int) -> Callable[[], Any]:
             state = _state(rows)
             agent = SimpleNamespace(
                 run_state_block=render_run_state(state),
@@ -188,10 +189,11 @@ class TestLinearTime:
                 _evidence_entries=[_entry(rows + n, "reverser") for n in range(1, own + 1)],
                 _live_map_entries=None,
             )
-            start = time.perf_counter()
-            current_run_state(agent)
-            return time.perf_counter() - start
+            return lambda: current_run_state(agent)
 
-        small = cost(100)
-        large = cost(1_000)
-        assert large <= max(small, 1e-3) * 30
+        small, large = reader(2_000), reader(8_000)
+        # CPU time, best of five, over inputs that take milliseconds: a
+        # millisecond wall-clock sample was swamped by one cyclic-GC pass over
+        # the heap a long suite builds, and by a busy machine.
+        assert cpu_seconds(large) < cpu_seconds(small) * TIME_RATIO_LIMIT
+        assert calls(large) < calls(small) * 5
