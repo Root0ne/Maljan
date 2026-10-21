@@ -214,7 +214,7 @@ class TestTheCutAnswer:
 
         question = str(llm.seen[1][-1].content)
         assert SECTION_CUT_CODE in question
-        assert "in each of its text fields, at least" in question
+        assert "in the field written most often, at least" in question
         assert "repeat a value an earlier item already carried" in question
 
     def test_a_cut_answer_of_distinct_items_says_nothing_of_repeats(self) -> None:
