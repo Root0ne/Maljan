@@ -379,6 +379,64 @@ class TestTheGateChangesOnlyTheEndpoints:
         described = describe_changes(values, third_party_off(values))
         assert described["servers_kept"] == {"listed": "kept: effects not declared for some tools"}
 
+    def test_a_server_declaring_it_answers_offline_without_credentials_is_kept_and_named(
+        self,
+    ) -> None:
+        offline = {
+            "effects": {
+                "network": True,
+                "third_party": "hash",
+                "offline_without_credentials": True,
+            }
+        }
+        reaching = {"effects": {"network": True, "third_party": "hash"}}
+        servers = {
+            "offline": {
+                "enabled": True,
+                "transport": "stdio",
+                "env": {"MY_KEY": "x"},
+                "env_allow": ["OTHER_KEY"],
+                "auth_token": "secret-token",
+                "args": ["--serve", "--api-key", "abc", "--mode=fast", "TOKEN_X=1"],
+                "tool_facts": {"lookup": offline},
+            },
+            "bytes": {
+                "enabled": True,
+                "transport": "stdio",
+                "tool_facts": {
+                    "put": {
+                        "discloses_sample": True,
+                        "effects": {"network": True, "offline_without_credentials": True},
+                    },
+                    "put2": {
+                        "effects": {
+                            "network": True,
+                            "third_party": "bytes",
+                            "offline_without_credentials": True,
+                        }
+                    },
+                },
+            },
+            "mixed": {
+                "enabled": True,
+                "transport": "stdio",
+                "tool_facts": {"lookup": offline, "other": reaching},
+            },
+        }
+        values = _values(**{"core.mcp.servers": {"value": servers, "source": "ui"}})
+        changes = third_party_off(values)
+        assert changes["core.mcp.servers"]["offline"]["enabled"]
+        kept = changes["core.mcp.servers"]["offline"]
+        assert kept["env"] == {} and kept["env_allow"] == [] and kept["auth_token"] == ""
+        assert kept["args"] == ["--serve", "--mode=fast"]
+        assert not changes["core.mcp.servers"]["bytes"]["enabled"]
+        assert not changes["core.mcp.servers"]["mixed"]["enabled"]
+        described = describe_changes(values, changes)
+        assert described["servers_disabled"] == ["bytes", "mixed"]
+        assert described["servers_kept"] == {
+            "offline": "kept: declares it answers offline without credentials; credentials withheld"
+        }
+
     def test_the_harness_mode_touches_no_key_and_keeps_the_stack_s_tools(self) -> None:
         changes = harness_changes("openai", STUB)
         assert changes["core.sandbox.provider"] == "mock"

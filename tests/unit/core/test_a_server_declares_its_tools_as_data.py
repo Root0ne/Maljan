@@ -57,6 +57,20 @@ def test_a_declaration_may_name_no_kind_and_state_kind_free_fields(kind: str) ->
     assert ToolFacts(timeout_seconds=30, arguments={"path": "path"}).kind == ""
 
 
+def test_effects_may_declare_a_tool_answers_offline_without_credentials() -> None:
+    from maljan.core.tool_declarations import ToolEffects
+
+    assert ToolEffects().offline_without_credentials is None
+    facts = ToolFacts.model_validate(
+        {"kind": "pseudo_code", "effects": {"network": True, "offline_without_credentials": True}}
+    )
+    assert facts.effects is not None and facts.effects.offline_without_credentials is True
+    with pytest.raises(ValidationError):
+        ToolEffects.model_validate({"offline_without_credentials": "sometimes"})
+    with pytest.raises(ValidationError):
+        ToolEffects.model_validate({"offline_witout_credentials": True})
+
+
 @pytest.mark.parametrize(
     ("declared", "message"),
     [
@@ -851,6 +865,7 @@ KIND_FREE_SAMPLES: dict[str, Any] = {
         "third_party": "no",
         "why_undeclared": "",
         "when": "",
+        "offline_without_credentials": None,
     },
 }
 

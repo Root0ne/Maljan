@@ -116,6 +116,9 @@ class FunctionHashStore:
     """
 
     keeps_owners = True
+    # Each point records every verdict (job) that filed it, so one verdict
+    # edited later takes back its own filing and no other's (:meth:`unfile`).
+    keeps_filer = True
 
     def __init__(
         self,
@@ -154,8 +157,14 @@ class FunctionHashStore:
         family: str,
         functions: list[tuple[str, str]],
         owner: str | None = None,
+        filed_by: str = "",
     ) -> int:
         """Upsert one point per function for ``sample_id`` under ``family``.
+
+        ``filed_by`` names the verdict that filed them (its job id). It joins
+        the ``filers`` the point already has, so two verdicts filing the same
+        sample's function keep one point that both vouch for and
+        :meth:`unfile` takes back one filer at a time; empty files none.
 
         ``functions`` is a list of ``(func_hash, func_name)`` tuples (already
         filtered by the caller for meaningful instruction counts). ``owner``
@@ -180,6 +189,13 @@ class FunctionHashStore:
             self._ensure_collection()
             seen: set[str] = set()
             points = []
+            earlier = self._filers_of(
+                [
+                    _point_id(sample_id, func_hash, scope)
+                    for func_hash in dict.fromkeys(h for h, _ in functions)
+                    if func_hash
+                ]
+            )
             for func_hash, func_name in functions:
                 if not func_hash or func_hash in seen:
                     continue
@@ -193,9 +209,17 @@ class FunctionHashStore:
                 }
                 if scope is not None:
                     payload["owner"] = scope
+                point_id = _point_id(sample_id, func_hash, scope)
+                if filed_by:
+                    payload["filers"] = [
+                        *(f for f in earlier.get(point_id, []) if f != str(filed_by)),
+                        str(filed_by),
+                    ]
+                elif point_id in earlier:
+                    payload["filers"] = earlier[point_id]
                 points.append(
                     PointStruct(
-                        id=_point_id(sample_id, func_hash, scope),
+                        id=point_id,
                         vector=_DUMMY_VECTOR,
                         payload=payload,
                     )
@@ -212,6 +236,102 @@ class FunctionHashStore:
             return len(points)
         except Exception as exc:  # fail-safe: never break the caller
             logger.warning("FunctionHashStore.upsert_sample failed (%s); skipped.", exc)
+            return 0
+
+    def _filers_of(self, ids: list[int]) -> dict[int, list[str]]:
+        """The filers each stored point of ``ids`` already has (absent for a new one)."""
+        found: dict[int, list[str]] = {}
+        if not ids or not self._collection_exists():
+            return found
+        for start in range(0, len(ids), _MATCH_BATCH):
+            for point in self._client.retrieve(
+                collection_name=self._collection,
+                ids=ids[start : start + _MATCH_BATCH],
+                with_payload=True,
+                with_vectors=False,
+            ):
+                filers = (point.payload or {}).get("filers")
+                found[int(point.id)] = [str(f) for f in filers] if isinstance(filers, list) else []
+        return found
+
+    def unfile(self, filed_by: str, owner: str | None = None) -> int:
+        """Take back the filing of the verdict ``filed_by``; the number of points it was taken from.
+
+        For a verdict edited later (no longer Malware, or another family): its
+        filing no longer vouches for a family. It is removed from each point's
+        ``filers``, and the point is deleted only when no filer is left, so a
+        function another verdict also filed stays. Only ``owner``'s points
+        (the unscoped ones for ``None``) are touched, and a point filed before
+        filers were recorded names none, so it is never matched here. 0 on any
+        failure (fail-safe), and for an empty ``filed_by``.
+        """
+        if not filed_by or not self._collection_exists():
+            return 0
+        scope = owner_key(owner)
+        try:
+            from qdrant_client.models import (
+                FieldCondition,
+                Filter,
+                IsEmptyCondition,
+                MatchValue,
+                PayloadField,
+                PointIdsList,
+            )
+
+            owned = (
+                IsEmptyCondition(is_empty=PayloadField(key="owner"))
+                if scope is None
+                else FieldCondition(key="owner", match=MatchValue(value=scope))
+            )
+            flt = Filter(
+                must=[FieldCondition(key="filers", match=MatchValue(value=str(filed_by))), owned]
+            )
+            doomed: list[Any] = []
+            trimmed: dict[Any, list[str]] = {}
+            offset: Any = None
+            while True:
+                points, offset = self._client.scroll(
+                    collection_name=self._collection,
+                    scroll_filter=flt,
+                    limit=256,
+                    offset=offset,
+                    with_payload=True,
+                    with_vectors=False,
+                )
+                for point in points:
+                    rest = [
+                        str(f)
+                        for f in (point.payload or {}).get("filers") or []
+                        if str(f) != str(filed_by)
+                    ]
+                    if rest:
+                        trimmed[point.id] = rest
+                    else:
+                        doomed.append(point.id)
+                if offset is None:
+                    break
+            for point_id, rest in trimmed.items():
+                self._client.set_payload(
+                    collection_name=self._collection,
+                    payload={"filers": rest},
+                    points=[point_id],
+                    wait=True,
+                )
+            if doomed:
+                self._client.delete(
+                    collection_name=self._collection,
+                    points_selector=PointIdsList(points=doomed),
+                    wait=True,
+                )
+            logger.info(
+                "FunctionHashStore: unfiled verdict %s from %d function hashes (%d deleted).",
+                str(filed_by)[:16],
+                len(doomed) + len(trimmed),
+                len(doomed),
+            )
+            return len(doomed) + len(trimmed)
+        except Exception as exc:  # fail-safe: never break the caller
+            logger.warning("FunctionHashStore.unfile failed (%s); nothing removed.", exc)
             return 0
 
     def match(
@@ -319,7 +439,7 @@ class FunctionHashStore:
             return False
 
     def _ensure_collection(self) -> None:
-        """Create the collection + ``func_hash`` keyword index if needed."""
+        """Create the collection if needed, and the ``func_hash`` and ``filers`` keyword indexes."""
         if self._collection_ready:
             return
         from qdrant_client.models import Distance, PayloadSchemaType, VectorParams
@@ -331,16 +451,19 @@ class FunctionHashStore:
                 # never searched, so COSINE zero-norm issues do not apply.
                 vectors_config=VectorParams(size=1, distance=Distance.DOT),
             )
-            try:
-                self._client.create_payload_index(
-                    collection_name=self._collection,
-                    field_name="func_hash",
-                    field_schema=PayloadSchemaType.KEYWORD,
-                )
-            except Exception as exc:  # index is an optimization, not required
-                logger.debug("FunctionHashStore: func_hash index skipped (%s).", exc)
             logger.info(
                 "FunctionHashStore: created collection '%s' (1-dim DOT, func_hash index).",
                 self._collection,
             )
+        # Both indexes are optimisations, not requirements; asked for on an
+        # existing collection too, so one made before ``filers`` gains it.
+        for field in ("func_hash", "filers"):
+            try:
+                self._client.create_payload_index(
+                    collection_name=self._collection,
+                    field_name=field,
+                    field_schema=PayloadSchemaType.KEYWORD,
+                )
+            except Exception as exc:  # index is an optimization, not required
+                logger.debug("FunctionHashStore: %s index skipped (%s).", field, exc)
         self._collection_ready = True

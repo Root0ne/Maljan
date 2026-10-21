@@ -454,6 +454,113 @@ async def test_a_lost_completion_acknowledgement_keeps_the_complete_report(
     assert "error" not in _published_types(redis_stub)
 
 
+async def _lost_commit_under_a_cancelled_row(
+    redis_stub: MagicMock,
+    monkeypatch: Any,
+    *,
+    landed: bool,
+    readback: str = "answers",
+) -> tuple[dict[str, Any], SessionFactory, _CountedRow, list[uuid.UUID]]:
+    """The not-running store's commit raises; ``landed`` says whether it reached the table.
+
+    ``readback`` is how the read of the report's row by id goes: ``answers``
+    (the table says what it holds) or ``raises``.
+    """
+    from tests.integration import _session_probe
+
+    job = fake_job()
+    factory, row = _factory(job)
+    answer = factory._rows
+    table: list[uuid.UUID] = []
+    # A report of an earlier attempt of the job, stored under the same note.
+    earlier = uuid.uuid4()
+    table.append(earlier)
+
+    def _rows(statement: Any) -> Any:
+        result = answer(statement)
+        descriptions = getattr(statement, "column_descriptions", None) or []
+        if descriptions and descriptions[0].get("entity") is AnalysisReport:
+            if readback == "raises":
+                raise ConnectionError("the read failed")
+            wanted = statement.whereclause.right.value
+            result.scalar_one_or_none.return_value = wanted if wanted in table else None
+        return result
+
+    factory._rows = _rows
+    flush = _session_probe.TrackedSession.flush
+    commit = _session_probe.TrackedSession.commit
+    lost: list[bool] = []
+
+    async def _flush(self: Any) -> None:
+        await flush(self)
+        for obj in self._record.added:
+            if isinstance(obj, AnalysisReport) and obj.id is None:
+                obj.id = uuid.uuid4()
+
+    async def _commit(self: Any) -> None:
+        mine = [o for o in self._record.added if isinstance(o, AnalysisReport)]
+        if mine and row.row.status == "cancelled" and not lost:
+            lost.append(True)
+            if landed:
+                table.append(mine[0].id)
+            await commit(self)
+            raise ConnectionError("connection lost at COMMIT")
+        await commit(self)
+
+    monkeypatch.setattr(_session_probe.TrackedSession, "flush", _flush)
+    monkeypatch.setattr(_session_probe.TrackedSession, "commit", _commit)
+    with (
+        patch("maljan.app.MaljanApp.arun", new=AsyncMock(return_value=_pipeline_result())),
+        _row_moves_while_building(row, "cancelled", "Cancelled by the operator."),
+    ):
+        result = await _run(factory, redis_stub, job)
+    assert lost == [True]
+    return result, factory, row, table
+
+
+@pytest.mark.asyncio
+async def test_a_lost_acknowledgement_under_a_cancelled_row_keeps_the_stored_report(
+    redis_stub: MagicMock, monkeypatch: Any
+) -> None:
+    """F4-L2: the not-running store committed and only its answer was lost.
+
+    The keep path must not supersede the report stored under the cancel's
+    note with an incomplete copy, nor announce the cancelled job as failed.
+    """
+    result, factory, row, _table = await _lost_commit_under_a_cancelled_row(
+        redis_stub, monkeypatch, landed=True
+    )
+    assert result["status"] == "not_running_at_completion"
+    assert result["row_status"] == "cancelled" and row.row.status == "cancelled"
+    [report] = _stored(factory, AnalysisReport)
+    assert report.incomplete_reason == worker_module.stored_after_note("cancelled")
+    assert "error" not in _published_types(redis_stub)
+
+
+@pytest.mark.asyncio
+async def test_an_earlier_report_with_the_same_note_does_not_stand_for_this_run(
+    redis_stub: MagicMock, monkeypatch: Any
+) -> None:
+    """The store did not land (a report of the job with the same note exists already)."""
+    result, factory, _row, _table = await _lost_commit_under_a_cancelled_row(
+        redis_stub, monkeypatch, landed=False
+    )
+    assert result["status"] == "failed"
+    assert len(_stored(factory, AnalysisReport)) == 2, "the keep path stored its copy"
+    assert "error" in _published_types(redis_stub)
+
+
+@pytest.mark.asyncio
+async def test_a_readback_that_raises_takes_the_keep_path(
+    redis_stub: MagicMock, monkeypatch: Any
+) -> None:
+    result, factory, _row, _table = await _lost_commit_under_a_cancelled_row(
+        redis_stub, monkeypatch, landed=True, readback="raises"
+    )
+    assert result["status"] == "failed"
+    assert len(_stored(factory, AnalysisReport)) == 2
+
+
 @pytest.mark.asyncio
 async def test_the_api_refuses_to_cancel_a_job_that_completed_meanwhile() -> None:
     """``cancel_job`` read ``running``; the worker completed the row before the write."""
@@ -782,3 +889,85 @@ async def test_postgres_refuses_the_raw_values_and_stores_the_written_out_ones()
         assert json.loads(back["structured"]) == row.structured
     finally:
         await conn.close()
+
+
+@pytest.mark.asyncio
+async def test_postgres_stores_the_written_out_values_through_the_orm_serialiser() -> None:
+    """F4-L2: the same values, written by SQLAlchemy's own column types and JSON serialiser."""
+    import asyncio
+
+    pytest.importorskip("asyncpg")
+    from sqlalchemy import Column, MetaData, Table, select
+    from sqlalchemy.ext.asyncio import create_async_engine
+
+    from app.config import get_settings
+
+    engine = create_async_engine(get_settings().database_url)
+    try:
+        try:
+            conn = await asyncio.wait_for(engine.connect(), timeout=PG_CONNECT_SECONDS)
+        except Exception as exc:  # noqa: BLE001 — any failure to reach it is a skip
+            pytest.skip(
+                f"no PostgreSQL reachable at the configured DATABASE_URL ({type(exc).__name__})"
+            )
+        try:
+            columns = EvidenceEntry.__table__.c
+            probe = Table(
+                "f4_orm_probe",
+                MetaData(),
+                Column("agent", columns.agent.type),
+                Column("output", columns.output.type),
+                Column("structured", columns.structured.type),
+                prefixes=["TEMPORARY"],
+            )
+            await conn.run_sync(probe.metadata.create_all)
+            entry = LedgerEntry(id="ev_0002", tool="pe_info", seq=1, output="o").model_dump(
+                mode="json"
+            )
+            entry |= {
+                "agent": "a" * 99 + NUL,
+                "output": f"Acme{NUL}Corp {LONE}",
+                "structured": {f"Company{NUL}": f"x{LONE}", "Company\\x00": 1},
+            }
+            row = worker_module._evidence_row(entry, job_id=uuid.uuid4())
+            store_text.sanitise_row(row)
+            await conn.execute(
+                probe.insert().values(agent=row.agent, output=row.output, structured=row.structured)
+            )
+            back = (await conn.execute(select(probe))).one()
+            assert back.agent == row.agent and len(back.agent) == 100
+            assert back.output == row.output
+            assert back.structured == row.structured
+        finally:
+            await conn.close()
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_the_worker_ends_the_token_ledger_when_the_stored_inputs_are_built(
+    redis_stub: MagicMock,
+) -> None:
+    """A charge landing between the stored summary and the container's close is marked late."""
+    from maljan.core.token_ledger import TokenLedger
+
+    job = fake_job()
+    factory, _row = _factory(job)
+    ledgers: list[TokenLedger] = []
+    real = worker_module._end_the_token_ledger
+
+    def _spy(container: Any) -> None:
+        ledgers.append(container.get_token_ledger())
+        real(container)
+
+    with (
+        patch("maljan.app.MaljanApp.arun", new=AsyncMock(return_value=_pipeline_result())),
+        patch.object(worker_module, "_end_the_token_ledger", new=_spy),
+    ):
+        await _run(factory, redis_stub, job)
+
+    [ledger] = ledgers
+    rows: list[dict[str, Any]] = []
+    ledger.on_call = rows.append
+    ledger.charge_failed_attempt({"input_tokens": 1, "output_tokens": 1}, agent="x", model="m")
+    assert rows and rows[0]["landed_after_job_ended"] is True
