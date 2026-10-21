@@ -23,7 +23,12 @@ import { useRun } from "@/lib/useRun";
 import { rosterNames } from "@/lib/rosterNames";
 import { formatStageDuration, stageTiming } from "@/components/analysis/stageTimeline";
 import { getErrorMessage } from "@/lib/errors";
-import { ENRICH_BUTTON_LABEL, enrichMessage } from "@/lib/enrichment";
+import {
+  ENRICH_BUTTON_LABEL,
+  enrichMessage,
+  enrichmentAskSentence,
+  enrichmentAsks,
+} from "@/lib/enrichment";
 import { degradedBannerText } from "@/lib/degradedBanner";
 import { validationRowClass, validationRowText } from "@/lib/validationRows";
 import EvidenceChips from "@/components/analysis/EvidenceChips";
@@ -599,6 +604,7 @@ function RunRecord({
     (block?.fallbacks ?? []).map((row) => ({ agent, reason: row.reason })),
   );
   const rests = runSummary.server_rests ?? [];
+  const enrichmentAsked = enrichmentAsks(runSummary);
   const configRows = Object.entries(config ?? {}).filter(
     ([key]) => !SHOWN_IN_THE_HEADER.has(key),
   );
@@ -649,6 +655,15 @@ function RunRecord({
             {rests.map((row, i) => (
               <li key={`rest-${i}`} className="text-status-orange">
                 {serverRestSentence(row)}
+              </li>
+            ))}
+            {enrichmentAsked.map((row, i) => (
+              <li
+                key={`enrichment-asked-${i}`}
+                className={row.errored || row.failed ? "text-status-orange" : "text-text-muted"}
+                data-testid="enrichment-asked"
+              >
+                Enrichment asked {enrichmentAskSentence(row)}.
               </li>
             ))}
             {bundleLoss && <li className="text-text-muted">{bundleLoss}</li>}

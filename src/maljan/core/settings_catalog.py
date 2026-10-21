@@ -41,6 +41,8 @@ Editor = Literal[
     "tool_facts",
     "pack_steps",
     "plugin_allow_list",
+    "enrichment_sources",
+    "report_formats",
 ]
 
 # Field names that are secrets although typed as plain str.

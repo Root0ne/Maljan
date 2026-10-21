@@ -17,6 +17,8 @@ import PluginAllowListEditor from "./PluginAllowListEditor";
 import ServerMapEditor from "./ServerMapEditor";
 import ToolFactsLeafEditor from "./ToolFactsLeafEditor";
 import PackStepsEditor from "./PackStepsEditor";
+import RecordRowsEditor from "./RecordRowsEditor";
+import { ENRICHMENT_SOURCES_SPEC, REPORT_FORMATS_SPEC } from "./recordRows";
 import PackStepsLeftOutNote from "./PackStepsLeftOutNote";
 import StoredValueRefusedNote from "./StoredValueRefusedNote";
 import { PACK_STEPS_KEY } from "./packStepsLeftOut";
@@ -230,6 +232,29 @@ export default function FieldRow({
             current={current}
             staged={staged}
             onChange={onChange}
+          />
+        ) : entry.editor === "enrichment_sources" || entry.editor === "report_formats" ? (
+          <RecordRowsEditor
+            entry={entry}
+            current={current}
+            staged={staged}
+            spec={
+              entry.editor === "enrichment_sources"
+                ? ENRICHMENT_SOURCES_SPEC
+                : REPORT_FORMATS_SPEC
+            }
+            onChange={onChange}
+            jsonView={
+              <Widget
+                entry={entry}
+                current={current}
+                staged={staged}
+                onChange={onChange}
+                onUnstage={onUnstage}
+                models={models}
+                inputId={inputId}
+              />
+            }
           />
         ) : entry.editor === "stages" ? (
           <StagesEditor
