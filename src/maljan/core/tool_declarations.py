@@ -2271,14 +2271,16 @@ class ToolDeclarations:
         except ValueError:
             return None
 
-    def declaration_for(self, entry: Any) -> ToolFacts | None:
+    def declaration_for(self, entry: Any, *, exact: bool = False) -> ToolFacts | None:
         """The declaration of one tool, by its source and its name together.
 
         ``entry`` is a ledger entry (or a mapping with ``source`` and ``tool``),
         or a ``(source, tool)`` pair whose source is a :class:`SourceRef` or its
         text (``mcp:analysis``). A tool server's tool renamed with its own
         server's prefix (``knowledge__capabilities``) is read without that
-        prefix; no other prefix is taken off.
+        prefix; no other prefix is taken off. With ``exact`` the name is the
+        declared one already (a tool recorded with the name its server
+        declares it under) and nothing is taken off it.
         """
         if isinstance(entry, tuple):
             raw, tool = entry
@@ -2293,7 +2295,7 @@ class ToolDeclarations:
             return None
         if tool in held.tools:
             return held.tools[tool]
-        if ref.kind == "mcp":
+        if ref.kind == "mcp" and not exact:
             return held.tools.get(renamed_tool(ref.key, tool))
         return None
 

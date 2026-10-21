@@ -2749,17 +2749,10 @@ class JudgeAgent(BudgetMeter):
         Unlike ``_holds_a_lookup_tool``, a reference that did not attach does
         not count: this answers what the mediator's prompt may say it has.
         """
-        from maljan.agents.tool_pinning import declared_source_of
-        from maljan.core.declared_reading import declarations
+        from maljan.agents.tool_pinning import declared_facts_of
         from maljan.core.reputation import is_lookup
 
-        held = declarations()
-        for attached in getattr(self, "tools", None) or []:
-            source = declared_source_of(attached)
-            name = str(getattr(attached, "name", "") or "")
-            if source and is_lookup(held.declaration_for((source, name))):
-                return True
-        return False
+        return any(is_lookup(declared_facts_of(t)) for t in getattr(self, "tools", None) or [])
 
     def _can_ask_an_identity_question(self, reputation_asked: bool) -> bool:
         """Whether the judge should open its tool loop to ask who this sample is.

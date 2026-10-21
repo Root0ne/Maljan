@@ -89,6 +89,18 @@ def test_an_ordinary_word_ending_with_a_keyword_picks_nothing(text: str) -> None
     assert not mentions(text, ENCRYPTION + _SECTION_CLAIM_KEYWORDS["ransom_note"])
 
 
+@pytest.mark.parametrize("text", ["toc2", "the epic2 file", "abc2 and a1c2", "keyc2"])
+def test_a_two_character_keyword_does_not_end_a_word(text: str) -> None:
+    assert not mentions(text, C2)
+
+
+@pytest.mark.parametrize(
+    "text", ["the C2 server", "C2Server answers", "c2-domain.example", "ratC2 beacons", "c2s"]
+)
+def test_a_two_character_keyword_still_starts_a_word(text: str) -> None:
+    assert mentions(text, C2)
+
+
 def test_no_keyword_starts_or_ends_inside_a_hex_number() -> None:
     for text in ("0xC2C4", "0xc2c4", "at 0C2C4h", "digest 1360bc03c2c2"):
         assert not mentions(text, C2), text

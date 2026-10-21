@@ -367,6 +367,35 @@ async def test_each_bound_server_reports_only_its_own_tools(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_a_server_the_team_withholds_is_neither_listed_nor_budgeted(monkeypatch):
+    """Both halves of the binding agree: a role-bound server the profile withholds is not opened."""
+    staged = {
+        "mcp.servers": {
+            "serverA": {"enabled": True, "agents": ["multi"]},
+            "serverB": {"enabled": True, "agents": ["multi"]},
+        },
+        "agents.definitions": {"multi": {"role": "generic", "prompt": "multi", "tools": []}},
+        "agents.profiles": {
+            "multi_profile": {"analysts": ["multi"], "exclude_servers": ["serverB"]}
+        },
+        "agents.profile": "multi_profile",
+    }
+    budgets: list[float] = []
+    real_wait = asyncio.wait
+
+    async def _wait(tasks, *, timeout=None, **kw):
+        budgets.append(timeout)
+        return await real_wait(tasks, timeout=timeout, **kw)
+
+    monkeypatch.setattr(settings_probes.asyncio, "wait", _wait)
+    result = await probe_agent({"name": "multi", "settings": staged})
+
+    assert result.ok is True
+    assert [s["key"] for s in result.details["servers"]] == ["serverA"]
+    assert budgets[0] == settings_probes.PROBE_BUDGET_SECONDS
+
+
+@pytest.mark.asyncio
 async def test_a_server_that_blows_up_while_listed_degrades_only_its_own_entry(monkeypatch):
     """A per-server listing failure is that server's problem, not the probe's.
 

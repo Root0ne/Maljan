@@ -243,6 +243,11 @@ def _word_starts(text: str) -> Iterator[int]:
 # ``rehearsal``, ``c2`` in ``0xc2c4``) and matches only where a word begins or
 # ends.
 _STEM_LENGTH = 6
+# A keyword shorter than this names nothing at a word's end: ``c2`` ends
+# ``toc2`` and ``epic2`` by chance, while ``rc4`` in ``ARC4`` and ``key`` in
+# ``pubkey`` carry enough letters to be a compound's last part. A shorter
+# keyword still matches where a word begins and as a whole word.
+_END_LENGTH = 3
 
 # A run of letters and digits (no underscore): the unit a word end is read in.
 _RUN = re.compile(r"[^\W_]+")
@@ -295,8 +300,10 @@ def mentions(text: str, keywords: tuple[str, ...]) -> bool:
     ``KeyBlob``), or where a word ends, a plural, verb, agent or API suffix
     allowed after it (``rc4`` in ``ARC4``, ``key`` in ``pubkey``, ``http`` in
     ``winhttp``, ``task`` in ``schtasks``, ``hash`` in ``apihashing``,
-    ``mutex`` in ``createmutexw``); never inside a word (``rsa`` in
-    ``rehearsal``, ``aes`` in ``caesar``), never in an ordinary word that
+    ``mutex`` in ``createmutexw``); a keyword of one or two characters
+    matches only where a word begins (``c2`` in ``C2Server``, not in
+    ``toc2``); never inside a word (``rsa`` in ``rehearsal``, ``aes`` in
+    ``caesar``), never in an ordinary word that
     ends with it by chance (``key`` in ``monkey``), and never starting or
     ending inside a number written in hex (``c2`` in ``0xC2C4``). A longer
     one matches anywhere, as it always did. Case is ignored. Linear in the
@@ -314,7 +321,7 @@ def mentions(text: str, keywords: tuple[str, ...]) -> bool:
     if not short:
         return False
     # A keyword written with a space or a dash spans runs: read where a word starts.
-    words = tuple(k for k in short if k.isalnum())
+    words = tuple(k for k in short if k.isalnum() and len(k) >= _END_LENGTH)
     for found in _RUN.finditer(text):
         run = found.group(0)
         if _HEX_RUN.fullmatch(run):

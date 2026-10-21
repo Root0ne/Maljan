@@ -490,6 +490,7 @@ def build_entry(
     agent_role: str | None = None,
     agent_tab: str | None = None,
     hints: Any = None,
+    declared_name: str | None = None,
 ) -> LedgerEntry:
     """One entry, with the output trimmed and parsed the same way every time.
 
@@ -544,6 +545,11 @@ def build_entry(
     ``hints`` are the MCP hints the tool's own server gave it when it was
     attached: kept on the facts record, beside what its source declares
     (``core.declared_reading.with_hints``).
+
+    ``declared_name`` is the name the tool's source declares it under (the original,
+    where the request offered it renamed): the facts stored with the entry are
+    the declaration of that name, found exactly, so a tool a server natively
+    spells ``<its key>__x`` is never read as its tool ``x``.
     """
     safe_args = dict(args) if isinstance(args, dict) else {}
     full = str(output or "")
@@ -556,7 +562,7 @@ def build_entry(
             _code, message, hint = returned
             ok, error = False, message
             remediation = remediation or hint
-    facts = _facts_at_write(source, tool, hints)
+    facts = _facts_at_write(source, tool, hints, declared_name)
     if ok and error is None and not repeated_of and _declares_no_kind(facts):
         # A tool its source declares nothing for has no declared way to say
         # it failed: an answer that is only an error line is filed as failed.
@@ -621,7 +627,9 @@ def build_entry(
     )
 
 
-def _facts_at_write(source: str | None, tool: str, hints: Any = None) -> dict[str, Any] | None:
+def _facts_at_write(
+    source: str | None, tool: str, hints: Any = None, declared_name: str | None = None
+) -> dict[str, Any] | None:
     """The tool's declared facts under ``source``, resolved now, to be stored with the entry.
 
     With the hints its own server gave it, where it gave any.
@@ -630,7 +638,7 @@ def _facts_at_write(source: str | None, tool: str, hints: Any = None) -> dict[st
         return None
     from maljan.core.declared_reading import facts_record, with_hints
 
-    return with_hints(facts_record(source, tool), hints)
+    return with_hints(facts_record(source, tool, declared_name=declared_name), hints)
 
 
 def _declares_no_kind(facts: dict[str, Any] | None) -> bool:

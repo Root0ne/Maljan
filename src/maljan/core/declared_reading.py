@@ -212,19 +212,30 @@ def _in_process_facts(source: str, tool: str) -> dict[str, Any] | None:
 
 
 def facts_record(
-    source: str, tool: str, *, declared: ToolDeclarations | None = None
+    source: str,
+    tool: str,
+    *,
+    declared: ToolDeclarations | None = None,
+    declared_name: str | None = None,
 ) -> dict[str, Any] | None:
     """What ``tool`` declares under ``source`` now, in its stored form; ``None`` when unreadable.
+
+    With ``declared_name``, the name the source declares the tool under as
+    the request offered it (a renamed tool's own name): that name is looked
+    up exactly, no prefix taken off it. Without it, ``tool`` is read as an
+    entry's stored name is, a renamed tool's prefix off.
 
     Called once, when the entry is written. Settings that cannot be read store
     nothing, and the entry is then read by the legacy reading.
     """
     try:
         if declared is None:
-            shipped = _in_process_facts(source, tool)
+            shipped = _in_process_facts(source, declared_name or tool)
             if shipped is not None:
                 return shipped
         held = declared or declarations()
+        if declared_name:
+            return stored_record(held.declaration_for((source, declared_name), exact=True))
         return stored_record(held.declaration_for((source, tool)))
     except Exception as exc:  # noqa: BLE001 — a record is never worth a lost entry
         from maljan.core.logger import logger

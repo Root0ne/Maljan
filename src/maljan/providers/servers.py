@@ -1994,10 +1994,14 @@ class ServerRegistry:
                 metadata["maljan_server_own_words"] = own_words
             update: dict[str, Any] = {"metadata": metadata}
             if offered != name:
-                name = offered
-                if seen.get(name) == server:
+                if seen.get(offered) == server:
                     continue
-                update["name"] = name
+                update["name"] = offered
+                # The server declares the tool under the name it gave it.
+                from maljan.agents.tool_pinning import DECLARED_NAME_METADATA_KEY
+
+                metadata[DECLARED_NAME_METADATA_KEY] = name
+                name = offered
                 renamed += 1
             tool = tool.model_copy(update=update)
             seen[name] = server
