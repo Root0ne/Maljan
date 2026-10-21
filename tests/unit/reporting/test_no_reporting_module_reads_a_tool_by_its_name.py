@@ -31,11 +31,13 @@ from pathlib import Path
 
 import pytest
 
-from tests.tool_name_reads import NAME_READ_SNIPPETS, findings, violations
+from tests.tool_name_reads import NAME_READ_SNIPPETS, findings, tool_parameters_under, violations
 
 REPORTING = Path(__file__).resolve().parents[3] / "src" / "maljan" / "reporting"
 EXEMPT = REPORTING / "legacy_tool_names.py"
 GATEWAY = REPORTING / "tool_kinds.py"
+# Helpers any module of the product defines, for a literal handed to one imported.
+SHARED = tool_parameters_under(REPORTING.parent)
 
 
 def _modules() -> list[Path]:
@@ -45,7 +47,7 @@ def _modules() -> list[Path]:
 @pytest.mark.parametrize("path", _modules(), ids=lambda p: str(p.relative_to(REPORTING)))
 def test_no_reporting_module_reads_a_tool_by_its_name(path: Path) -> None:
     source = path.read_text(encoding="utf-8")
-    assert violations(source, path.name, gateway=path == GATEWAY) == []
+    assert violations(source, path.name, gateway=path == GATEWAY, shared=SHARED) == []
 
 
 def test_the_exemption_is_the_one_module_by_its_path() -> None:
