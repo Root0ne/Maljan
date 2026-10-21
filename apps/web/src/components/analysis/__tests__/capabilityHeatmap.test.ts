@@ -317,3 +317,20 @@ describe("the source count", () => {
     expect(sourceWords(tech)).toBe("4 cited, 2 independent");
   });
 });
+
+describe("a technique's note", () => {
+  it("is carried as the matrix wrote it", () => {
+    const tech = only([row({ note: "the analyst kept it when asked" })]);
+    expect(tech.note).toBe("the analyst kept it when asked");
+  });
+
+  it("is empty on a row without one, and a non-text note is not read", () => {
+    expect(only([row()]).note).toBe("");
+    expect(only([row({ note: 3 })]).note).toBe("");
+  });
+
+  it("keeps the note when the same id arrives twice", () => {
+    const tech = only([row(), row({ note: "kept when asked" })]);
+    expect(tech.note).toBe("kept when asked");
+  });
+});

@@ -33,7 +33,9 @@ export type Editor =
   | "stages"
   | "tool_facts"
   | "pack_steps"
-  | "plugin_allow_list";
+  | "plugin_allow_list"
+  | "enrichment_sources"
+  | "report_formats";
 
 export interface CatalogEntry {
   key: string;

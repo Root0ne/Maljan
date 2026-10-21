@@ -270,6 +270,7 @@ API_EDITABLE: dict[str, dict[str, Any]] = {
     },
     "enrichment_sources": {
         "type": "dict",
+        "editor": "enrichment_sources",
         "group": "enrichment",
         "title": "Enrichment sources",
         "description": (
@@ -654,7 +655,7 @@ def api_catalog() -> list[CatalogEntry]:
                 applies_when=None,
                 order=0,
                 choices_from=None,
-                editor=None,
+                editor=ann.get("editor"),
                 needs_current_password=bool(ann.get("needs_current_password")),
             )
         )

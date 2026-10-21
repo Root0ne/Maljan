@@ -187,6 +187,14 @@ export default function AttackTab() {
                             </p>
                           </div>
                         )}
+                        {tech.note && (
+                          <p
+                            className="mb-1 text-[11px] text-text-muted leading-snug"
+                            data-testid="capability-note"
+                          >
+                            {tech.note}
+                          </p>
+                        )}
                         <div className="flex items-center justify-between">
                           <div className="flex items-center gap-1">
                             <span className="text-[11px] text-text-muted font-mono">{tech.id}</span>

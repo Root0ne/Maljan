@@ -286,7 +286,18 @@ def _disclosure(summary: dict[str, Any]) -> dict[str, Any]:
     )
     record = with_enrichment(record, [rdap_row()])
     return with_enrichment_asked(
-        record, [{"source": "rdap", "host": "rdap.arin.net", "kinds": {"ip": 1}, "why": ""}]
+        record,
+        [
+            {
+                "source": "rdap",
+                "host": "rdap.arin.net",
+                "kinds": {"ip": 1},
+                "failed": 0,
+                # The additive key: present only when a question was answered with an error status.
+                "errored": 1,
+                "why": "",
+            }
+        ],
     )
 
 

@@ -50,6 +50,8 @@ class Annotation(TypedDict):
             "tool_facts",
             "pack_steps",
             "plugin_allow_list",
+            "enrichment_sources",
+            "report_formats",
         ]
     ]
     subgroup: NotRequired[str]  # heading inside the group; absent = top of the group
@@ -2198,6 +2200,7 @@ ANNOTATIONS.update(
             "applies_when": _SANDBOX_UPLOAD,
         },
         "sandbox.report_formats": {
+            "editor": "report_formats",
             "title": "Declared report formats",
             "description": (
                 "Your own sandbox report formats, as JSON, read by every sandbox "
@@ -2207,7 +2210,8 @@ ANNOTATIONS.update(
                 "reads it (cape2, cuckoo, triage, generic, or empty), its own "
                 "JSONPath mapping for the generic reader (mapping, as "
                 "sandbox.rest.mapping; absent, that one is read), and its signature "
-                "severity scale. A new name is tried before the built-ins; a "
+                "severity scale, and the display_name published text gives the sandbox "
+                "(empty, the format's name). A new name is tried before the built-ins; a "
                 "built-in's name is merged over that built-in, field by field."
             ),
         },

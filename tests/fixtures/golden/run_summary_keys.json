@@ -176,6 +176,7 @@
     "enrichment": {
       "asked": [
         {
+          "errored": null,
           "failed": null,
           "host": null,
           "kinds": "<data-keyed map>",
