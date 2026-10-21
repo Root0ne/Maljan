@@ -44,6 +44,7 @@ from __future__ import annotations
 import json
 import re
 from collections import Counter
+from collections.abc import Callable
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
 from typing import Any
@@ -474,7 +475,7 @@ def _check_narrative(record: RunRecord) -> Check:
 def _price_rows() -> dict[str, Any]:
     from maljan.core.spend import table_prices
 
-    return table_prices()
+    return dict(table_prices())
 
 
 def _billed(record: RunRecord) -> list[dict[str, Any]]:
@@ -1193,7 +1194,9 @@ def _check_settings(record: RunRecord) -> Check:
         elif key == "effort":
             efforts = {e.get("effort") for e in log}
             if efforts != {want}:
-                problems.append(f"effort: expected {want!r}, requests carried {sorted(efforts)}")
+                problems.append(
+                    f"effort: expected {want!r}, requests carried {sorted(efforts, key=str)}"
+                )
             else:
                 seen.append(key)
         elif key in ("max_steps", "timeout_s"):
@@ -1334,7 +1337,7 @@ def _check_deadline_in(record: RunRecord, name: str, stage: str) -> Check:
     return Check(name, not problems, detail)
 
 
-CHECKS = (
+CHECKS: tuple[Callable[[RunRecord], Check], ...] = (
     _check_job,
     _check_refusals,
     _check_recognised,

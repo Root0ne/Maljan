@@ -1108,3 +1108,25 @@ class TestTheWindowInForce:
         record = _record()
         record.run_summary["generation"] = {}
         assert self._detail(record) == "the run summary records no output caps"
+
+
+class TestTheMarkdownNamesWhatTheGateChanged:
+    def test_kept_and_disabled_servers_and_the_older_withheld_key_are_named(self) -> None:
+        from scripts.rehearsal.checklist import as_markdown
+
+        record = _record()
+        record.gate = {
+            "settings": {},
+            "servers_disabled": ["lookup"],
+            "servers_kept": {
+                "mine": "kept: effects not declared",
+                "mixed": "kept: effects not declared for some tools",
+            },
+            # Written by an older runner: still read from a stored record.
+            "servers_with_keys_withheld": ["intel"],
+        }
+        text = as_markdown(record, check_run(record))
+        assert "- tool server lookup: disabled" in text
+        assert "- tool server mine: kept: effects not declared\n" in text
+        assert "- tool server mixed: kept: effects not declared for some tools" in text
+        assert "- tool server intel: reputation keys withheld (offline answers)" in text

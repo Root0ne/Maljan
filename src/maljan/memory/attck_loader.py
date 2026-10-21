@@ -6,19 +6,21 @@ extracts:
   - ``attack-pattern`` objects -> techniques / sub-techniques, and
   - ``x-mitre-tactic`` objects -> the tactic catalogue, in matrix column order.
 
-The raw STIX bundle is cached locally. The cache AUTO-REFRESHES once it is older
-than ``validation.attck_refresh_days`` days (default 7), so new ATT&CK releases
-(e.g. the v19 "Defense Evasion" -> "Stealth" + "Defense Impairment" split) flow
-through with no code changes. The setting reaches this module, and the
-knowledge tool server that builds the index, as ``MALJAN_ATTCK_REFRESH_DAYS``,
-which the service container writes from the settings store. If a refresh
-download fails, the existing (stale) cache is reused rather than breaking the
+The raw STIX bundle is cached locally. An EMPTY cache is filled from the
+version-less bundles at one pinned release commit (``_PINNED_COMMIT``). Once a
+cache exists this module never replaces it with that pinned bundle, however old
+the cache is or whether a refresh is forced: new ATT&CK releases (e.g. the v19
+"Defense Evasion" -> "Stealth" + "Defense Impairment" split) arrive through
+``attck_update``, which reads MITRE's release index and the versioned files
+(its schedule is ``validation.attck_refresh_days``, default 7, reaching this
+module and the knowledge tool server as ``MALJAN_ATTCK_REFRESH_DAYS``). A bundle
+at another URL is still refreshed here when older than that setting, and a
+failed download reuses the existing (stale) cache rather than breaking the
 analysis run. A refreshed bundle is written beside the old one and moved over
 it in one rename (``attck_update``), so a reader never sees half a file.
 
 Cache location: ~/.cache/maljan/attck/ (or MALJAN_ATTCK_CACHE env var).
-Force a refresh: ``python -m maljan.memory.attck_loader`` (or load with
-force_refresh=True).
+Update the cache: ``python -m maljan.memory.attck_loader`` (runs ``attck_update``).
 
 MITRE ATT&CK data is CC BY 4.0 licensed.
 Source: https://github.com/mitre-attack/attack-stix-data
@@ -37,9 +39,20 @@ from typing import Any
 from maljan.analysis.technique_ids import TECHNIQUE_ID_EXACT_RE
 from maljan.core.logger import logger
 
-# Official, maintained MITRE ATT&CK STIX 2.1 source. The version-less
-# ``<domain>-attack.json`` always points at the latest release.
+# Official, maintained MITRE ATT&CK STIX 2.1 source. This base is the moving
+# one: ``attck_update`` reads the release index and the immutable, versioned
+# ``<domain>-attack-<version>.json`` files through it, so it must follow the
+# upstream branch to see a new release.
 _BUNDLE_BASE_URL = "https://raw.githubusercontent.com/mitre-attack/attack-stix-data/master"
+
+# The version-less ``<domain>-attack.json`` that ``load_attck_data`` fetches
+# when no cache exists is read at one commit, so the first catalogue of an
+# install is the release the vendored data was built from, not whatever the
+# branch holds that day. A newer release arrives through ``attck_update``.
+_PINNED_COMMIT = "20664a889568dce884a1dac0ec7b12ae3a199f51"  # attack-stix-data v20.0
+_PINNED_BASE_URL = (
+    f"https://raw.githubusercontent.com/mitre-attack/attack-stix-data/{_PINNED_COMMIT}"
+)
 
 # The three ATT&CK domains, in the order a technique id is looked up in them.
 # Enterprise is the one this project cannot run without; Mobile and ICS are
@@ -48,7 +61,7 @@ _BUNDLE_BASE_URL = "https://raw.githubusercontent.com/mitre-attack/attack-stix-d
 DOMAINS: tuple[str, ...] = ("enterprise", "mobile", "ics")
 
 ATTCK_BUNDLE_URLS: dict[str, str] = {
-    domain: f"{_BUNDLE_BASE_URL}/{domain}-attack/{domain}-attack.json" for domain in DOMAINS
+    domain: f"{_PINNED_BASE_URL}/{domain}-attack/{domain}-attack.json" for domain in DOMAINS
 }
 ATTCK_BUNDLE_URL = ATTCK_BUNDLE_URLS["enterprise"]
 
@@ -229,6 +242,18 @@ def _load_raw_bundle(
 ) -> dict:
     """Return the raw STIX bundle dict, honouring cache freshness + fallback."""
     max_age = _default_max_age_days() if max_age_days is None else max_age_days
+
+    if cache_file.exists() and url in ATTCK_BUNDLE_URLS.values():
+        # The pinned bundle is the first download of an install, never a
+        # refresh: it would put the release the vendored data was built from
+        # over a newer cached one. A stale or forced refresh is the index-based
+        # update, ``attck_update``.
+        logger.info(
+            "ATT&CK cache %s is kept: the pinned download is only for an empty cache; "
+            "attck_update is the update path.",
+            cache_file,
+        )
+        return _read_cache(cache_file)
 
     cache_fresh = False
     if cache_file.exists() and not force_refresh:
@@ -1005,10 +1030,14 @@ def _main() -> None:
 
     Run as: ``python -m maljan.memory.attck_loader``
     """
-    loaded = load_all_domains(force_refresh=True)
+    from maljan.memory import attck_update
+
+    outcome = attck_update.update(trigger="cli")
+    print(f"ATT&CK update: {outcome.get('outcome')} {outcome.get('reason') or ''}".rstrip())
+    loaded = load_all_domains()
     for domain, data in loaded.items():
         print(
-            f"ATT&CK {domain} refreshed: version={data.version or 'unknown'}, "
+            f"ATT&CK {domain}: version={data.version or 'unknown'}, "
             f"{len(data.techniques)} techniques, {len(data.tactics)} tactics"
         )
     missing = [d for d in DOMAINS if d not in loaded]
