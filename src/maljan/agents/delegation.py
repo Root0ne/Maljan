@@ -664,14 +664,15 @@ def _give_the_callee_back_what_it_had(callee: Any, its_own: dict[str, Any]) -> N
 def _hand_over_the_structured_channel(
     caller: Any, callee: Any, isr: AgentISR, *, still_running: bool = True
 ) -> None:
-    """Move the callee's findings and artifacts onto the caller's own buffers.
+    """Move the callee's findings, artifacts and open questions onto the caller's buffers.
 
     ``answer_task`` drains them onto the ISR the delegation holds, and only
     the text of that ISR crosses back to the model — so without this a
     specialist's artifacts would reach no report. They travel unedited; an
-    artifact that did not say which agent established it is marked with the
-    callee's name, because on the caller's buffer it would otherwise read as
-    the caller's.
+    artifact that did not say which agent established it, and an open question
+    that did not say which agent left it open, is marked with the callee's
+    name, because on the caller's buffer it would otherwise read as the
+    caller's.
 
     ``still_running`` is false when the caller's loop ended while this ask was
     in flight (:func:`_hand_over_the_record`): its node has drained its
@@ -680,12 +681,13 @@ def _hand_over_the_structured_channel(
     """
     if not still_running:
         logger.warning(
-            "delegation %s -> %s: the caller's loop ended first; %d finding(s) and %d "
-            "artifact(s) are dropped, and so is the answer.",
+            "delegation %s -> %s: the caller's loop ended first; %d finding(s), %d "
+            "artifact(s) and %d open question(s) are dropped, and so is the answer.",
             caller.name,
             callee.name,
             len(isr.findings or []),
             len(isr.artifacts or []),
+            len(getattr(isr, "open_questions", None) or []),
         )
         return
     for artifact in list(isr.artifacts or []):
@@ -694,6 +696,12 @@ def _hand_over_the_structured_channel(
         caller._artifacts_buffer.append(artifact)
     for finding in list(isr.findings or []):
         caller._findings_buffer.append(finding)
+    questions = list(getattr(isr, "open_questions", None) or [])
+    for question in questions:
+        if not str(question.source or "").strip():
+            question.source = str(callee.name)
+    if questions:
+        vars(caller).setdefault("_open_questions_buffer", []).extend(questions)
     # And the answer itself, whole, under the callee's own agent id. The text
     # of it goes back to the model as a tool result and lives only in the
     # caller's conversation, so a caller whose loop died — the wall-clock cap

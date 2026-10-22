@@ -19,6 +19,7 @@ from collections.abc import Mapping, Sequence
 from typing import Any
 
 from maljan.agents.tool_fence import FENCE_STATEMENT
+from maljan.schemas.isr_models import OPEN_QUESTION_REASONS
 
 # Keyed by platform, since the artefacts follow the operating system rather
 # than the container the code arrived in: a DEX and an APK look for the same
@@ -162,23 +163,31 @@ ENDPOINTS_ROW_SHAPE = (
 
 FINDINGS_BLOCK_FRAGMENT = (
     "\n\nAfter your findings, you may append one fenced block labelled "
-    "maljan-findings containing JSON with two optional keys.\n"
+    "maljan-findings containing JSON with three optional keys.\n"
     '"artifacts" is a list of the concrete things you established — hashes, '
     "imports, permissions, IOCs, processes, persistence entries, network "
     "endpoints. Each has a kind, a label, either a value or columns plus rows, "
     "and evidence_ids naming the tool results you read them from. " + ENDPOINTS_ROW_SHAPE + "\n"
     '"findings" is a list of your conclusions: a title, a detail, optional '
     "technique_ids, a confidence between 0 and 1, and evidence_ids.\n"
+    '"open_questions" is a list of what you could not establish: a question, why_open '
+    "(one of " + ", ".join(OPEN_QUESTION_REASONS) + "), an optional detail, would_answer "
+    "naming what would answer it (a kind of tool, another agent, a sandbox run), optional "
+    "tool_kind and agent, and evidence_ids. An open question is an unknown, not an "
+    "absence: list it rather than claiming the thing is not there.\n"
     "Every tool result you were shown starts with its id in brackets, for "
     "example [ev_0007]; cite those ids and no others. Emit the block only for "
-    "what you actually observed, and omit it entirely when you have nothing "
-    "structured to add.\n"
+    "what you actually observed or could not establish, and omit it entirely when you "
+    "have nothing structured to add.\n"
     "```maljan-findings\n"
     '{"artifacts": [{"kind": "imports", "label": "Suspicious imports", '
     '"columns": ["Library", "Function"], "rows": [["KERNEL32.dll", '
     '"VirtualAllocEx"]], "evidence_ids": ["ev_0002"]}], '
     '"findings": [{"title": "Allocates memory in a remote process", '
     '"technique_ids": ["T1055"], "confidence": 0.8, '
+    '"evidence_ids": ["ev_0002"]}], '
+    '"open_questions": [{"question": "Which process receives the injected code", '
+    '"why_open": "needs_sandbox_run", "would_answer": "a sandbox run", '
     '"evidence_ids": ["ev_0002"]}]}\n'
     "```"
 )

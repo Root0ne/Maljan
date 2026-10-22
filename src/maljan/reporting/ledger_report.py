@@ -48,8 +48,9 @@ from maljan.reporting.dedupe import (
     indicator_fingerprint,
     merge_cell,
 )
-from maljan.reporting.models import EvidenceSection
+from maljan.reporting.models import OPEN_QUESTION_SOURCE, EvidenceSection
 from maljan.schemas.evidence import answer_not_shown
+from maljan.schemas.isr_models import would_answer_text
 from maljan.schemas.sandbox_document import DNS_NAME_KEYS, dns_name_key
 from maljan.utils.marked_cut import marked_cut
 
@@ -249,8 +250,11 @@ class _Sections:
 # What a section's ``source`` may say and still count as grounded on its own.
 # A tool section is grounded by the entry ids it cites, never by naming a tool:
 # a builder that produced rows without recording which call they came from is
-# the defect ``sections_without_evidence`` exists to surface.
-_GROUNDED_SOURCES = frozenset({"routing", "finding"})
+# the defect ``sections_without_evidence`` exists to surface. The "Open
+# questions" section is grounded on its own, as an answer the analysts wrote,
+# and is no analyst section source (``ANALYST_SECTION_SOURCES``): the ids it
+# cites corroborate no value.
+_GROUNDED_SOURCES = frozenset({"routing", "finding", OPEN_QUESTION_SOURCE})
 
 
 def section_is_grounded(section: EvidenceSection) -> bool:
@@ -258,7 +262,7 @@ def section_is_grounded(section: EvidenceSection) -> bool:
 
     Either it cites ledger entries, or it came from something that is itself an
     answer rather than a derivation: the routing minimum, an agent's finding,
-    or an artifact an agent established.
+    an artifact an agent established, or a question an agent left open.
     """
     if section.evidence_ids:
         return True
@@ -1532,6 +1536,66 @@ def _findings_section(
                 acc.cite(section, str(entry_id))
 
 
+def _agents_by_kind(ledger: list[LedgerEntry]) -> dict[str, list[str]]:
+    """Each declared tool kind, with the agents whose calls of that kind answered, in order."""
+    found: dict[str, dict[str, None]] = {}
+    for entry in ledger:
+        if not entry.ok or not entry.agent:
+            continue
+        kind = tool_kinds.kind_of(entry)
+        if kind:
+            found.setdefault(kind, {})[str(entry.agent)] = None
+    return {kind: list(agents) for kind, agents in found.items()}
+
+
+def _open_questions_section(
+    acc: _Sections, isrs: dict[str, Any], ledger: list[LedgerEntry]
+) -> None:
+    """Every question an analyst left open, why, what would answer it and who could.
+
+    "Who could answer" is read from the ledger, never guessed: the agents
+    whose calls of the tool kind the question names answered in this run. A
+    question that names no kind leaves the cell empty. Absent when no analyst
+    left a question open, so a run without one renders as it did.
+    """
+    section: EvidenceSection | None = None
+    by_kind: dict[str, list[str]] | None = None
+    for agent, isr in (isrs or {}).items():
+        for question in list(getattr(isr, "open_questions", None) or []):
+            if section is None:
+                section = acc.get(
+                    "open_questions",
+                    "Open questions",
+                    "table",
+                    columns=[
+                        "Agent",
+                        "Question",
+                        "Why open",
+                        "What would answer it",
+                        "Who could answer",
+                        "Evidence",
+                    ],
+                    source=OPEN_QUESTION_SOURCE,
+                )
+            kind = question.tool_kind.strip()
+            if kind and by_kind is None:
+                by_kind = _agents_by_kind(ledger)
+            why = question.why_open
+            acc.add_row(
+                section,
+                [
+                    _text(question.source or agent),
+                    _text(question.question),
+                    _text(f"{why}: {question.detail}" if question.detail else why),
+                    _text(would_answer_text(question)),
+                    _text((by_kind or {}).get(kind, []) if kind else []),
+                    _text(question.evidence_ids),
+                ],
+            )
+            for entry_id in question.evidence_ids:
+                acc.cite(section, str(entry_id))
+
+
 # ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
@@ -1594,6 +1658,7 @@ def build_sections(
     _function_map_coverage(acc, ledger or [])
     _artifact_sections(acc, isrs or {})
     _findings_section(acc, isrs or {}, published_techniques)
+    _open_questions_section(acc, isrs or {}, ledger or [])
     return acc.result()
 
 
