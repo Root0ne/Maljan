@@ -491,5 +491,10 @@ def lookup_servers(declared: ToolDeclarations) -> set[str]:
 
 
 def is_lookup_tool(declared: ToolDeclarations, server: str, tool: str) -> bool:
-    """Whether ``server``'s tool ``tool`` (a renamed tool's prefix off) is a reputation lookup."""
-    return bool(server) and is_lookup(declared.declaration_for((f"mcp:{server}", tool)))
+    """Whether ``server``'s tool ``tool`` is a reputation lookup.
+
+    ``tool`` is the name the server declares it under (for a tool the request
+    holds, ``agents.tool_pinning.declared_name_of``), looked up exactly: a
+    ``<server>__`` prefix is never taken off by the name alone.
+    """
+    return bool(server) and is_lookup(declared.declaration_for((f"mcp:{server}", tool), exact=True))

@@ -3264,8 +3264,9 @@ def settled_chunk_entries(agent: Any, entries: Sequence[Any] | None) -> list[Any
 
 def _entry_reads_only(row: Any, server: str, repeatable: set[tuple[str, str]]) -> bool:
     """Whether a ledger row's call changed nothing: a read-only tool the agent holds on that
-    server, or one its stored source declares ``read_only``. Anything unknown may have changed
-    state; a tool is never judged by its name alone."""
+    server, or one its stored source declares ``read_only`` under the name its call recorded
+    (``declared_reading.declared_name``: a ``<server>__`` prefix is never taken off by the name
+    alone). Anything unknown may have changed state; a tool is never judged by its name alone."""
     tool = str(row.get("tool") if isinstance(row, Mapping) else getattr(row, "tool", "") or "")
     if (server, tool) in repeatable:
         return True
@@ -3273,9 +3274,9 @@ def _entry_reads_only(row: Any, server: str, repeatable: set[tuple[str, str]]) -
     if not source:
         return False
     try:
-        from maljan.core.declared_reading import declarations
+        from maljan.core.declared_reading import declarations, declared_name
 
-        facts = declarations().declaration_for((str(source), tool))
+        facts = declarations().declaration_for((str(source), declared_name(row)), exact=True)
     except Exception:  # noqa: BLE001 — an unreadable declaration declares nothing
         return False
     return bool(facts is not None and getattr(facts, "read_only", False) is True)
