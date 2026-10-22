@@ -4434,6 +4434,10 @@ async def startup(ctx: dict) -> None:
         max_overflow=10,
     )
     ctx["db_session"] = async_sessionmaker(engine, expire_on_commit=False)
+    # An empty audit anchor is given the current head, beside the start.
+    from app.services import audit_anchor
+
+    audit_anchor.start_anchoring(engine)
     await load_the_allowed_plugins(ctx["db_session"])
     await state_the_mirrors(ctx["db_session"])
 
@@ -4506,6 +4510,11 @@ async def shutdown(ctx: dict) -> None:
     if redis_conn:
         with suppress(TimeoutError):
             await asyncio.wait_for(redis_conn.aclose(), timeout=EXIT_GRACE)
+
+    # Anchor writes already scheduled finish, bounded, before their engine goes.
+    from app.services import audit_anchor
+
+    await audit_anchor.drain(EXIT_GRACE)
 
     db_session = ctx.get("db_session")
     if db_session:

@@ -120,6 +120,9 @@ class LedgerVerificationResponse(BaseModel):
     amendments: int = 0
     checks: list[str] = Field(default_factory=list)
     notes: list[str] = Field(default_factory=list)
+    # The anchor outside the database the audit chain was compared with:
+    # ``kind`` and ``state`` (``services.audit_anchor``); what protects it is the operator's.
+    anchor: dict[str, Any] | None = None
 
 
 class EvidenceListResponse(BaseModel):

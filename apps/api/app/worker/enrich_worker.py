@@ -909,6 +909,11 @@ async def enrich_shutdown(ctx: dict) -> None:
     if redis_conn:
         await redis_conn.aclose()
 
+    # An amendment's anchor write finishes, bounded, before its engine goes.
+    from app.services import audit_anchor
+
+    await audit_anchor.drain()
+
     db_session = ctx.get("db_session")
     if db_session:
         engine = db_session.kw.get("bind")

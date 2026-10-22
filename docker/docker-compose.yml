@@ -302,6 +302,10 @@ services:
       MINIO_ENDPOINT: minio:9000
       MINIO_ACCESS_KEY: ${MINIO_ROOT_USER:?set MINIO_ROOT_USER in docker/.env}
       MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD:?set MINIO_ROOT_PASSWORD in docker/.env}
+      # The audit chain's anchor outside the database (bootstrap.env.example):
+      # unset keeps the chain checked against its database head only.
+      AUDIT_ANCHOR: ${AUDIT_ANCHOR:-}
+      AUDIT_ANCHOR_DATABASE_URL: ${AUDIT_ANCHOR_DATABASE_URL:-}
       JWT_SECRET_KEY: ${JWT_SECRET_KEY:?set JWT_SECRET_KEY in docker/.env}
       SETTINGS_ENCRYPTION_KEY: ${SETTINGS_ENCRYPTION_KEY:?set SETTINGS_ENCRYPTION_KEY in docker/.env}
       SAMPLES_DIR: data/samples
@@ -395,6 +399,10 @@ services:
       MINIO_ENDPOINT: minio:9000
       MINIO_ACCESS_KEY: ${MINIO_ROOT_USER:?set MINIO_ROOT_USER in docker/.env}
       MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD:?set MINIO_ROOT_PASSWORD in docker/.env}
+      # The audit chain's anchor outside the database (bootstrap.env.example):
+      # unset keeps the chain checked against its database head only.
+      AUDIT_ANCHOR: ${AUDIT_ANCHOR:-}
+      AUDIT_ANCHOR_DATABASE_URL: ${AUDIT_ANCHOR_DATABASE_URL:-}
       JWT_SECRET_KEY: ${JWT_SECRET_KEY:?set JWT_SECRET_KEY in docker/.env}
       SETTINGS_ENCRYPTION_KEY: ${SETTINGS_ENCRYPTION_KEY:?set SETTINGS_ENCRYPTION_KEY in docker/.env}
       SAMPLES_DIR: data/samples
@@ -514,6 +522,10 @@ services:
       MINIO_ENDPOINT: minio:9000
       MINIO_ACCESS_KEY: ${MINIO_ROOT_USER:?set MINIO_ROOT_USER in docker/.env}
       MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD:?set MINIO_ROOT_PASSWORD in docker/.env}
+      # The audit chain's anchor outside the database (bootstrap.env.example):
+      # unset keeps the chain checked against its database head only.
+      AUDIT_ANCHOR: ${AUDIT_ANCHOR:-}
+      AUDIT_ANCHOR_DATABASE_URL: ${AUDIT_ANCHOR_DATABASE_URL:-}
     extra_hosts:
       - "host.docker.internal:host-gateway"
     mem_limit: 2g
