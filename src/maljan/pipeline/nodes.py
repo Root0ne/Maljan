@@ -1218,7 +1218,7 @@ def _reputation_lookup(container: ServiceContainer, sha256: str) -> Any:
         declared_wait: float | None = None
         try:
             tool_facts = declarations(container.config).declaration_for(
-                (f"mcp:{server}", tool_name)
+                (f"mcp:{server}", tool_name), exact=True
             )
             seconds = getattr(tool_facts, "timeout_seconds", None)
             declared_wait = float(seconds) if seconds else None
@@ -1240,6 +1240,7 @@ def _reputation_lookup(container: ServiceContainer, sha256: str) -> Any:
                 args=args,
                 server=server,
                 source=f"mcp:{server}",
+                declared_name=tool_name,
                 output=why,
                 ok=False,
                 error=why,
@@ -1261,6 +1262,7 @@ def _reputation_lookup(container: ServiceContainer, sha256: str) -> Any:
                 args=args,
                 server=server,
                 source=f"mcp:{server}",
+                declared_name=tool_name,
                 output=message,
                 ok=False,
                 error=message,
@@ -1276,6 +1278,7 @@ def _reputation_lookup(container: ServiceContainer, sha256: str) -> Any:
             args=args,
             server=server,
             source=f"mcp:{server}",
+            declared_name=tool_name,
             output=output,
             started_at=wall_clock,
             duration_ms=int((time.monotonic() - started) * 1000),
@@ -1337,7 +1340,9 @@ def _server_step_call(container: ServiceContainer) -> Any:
         held = {str(k): str(v) for k, v in dict(values or {}).items()}
         facts: Any = None
         try:
-            facts = declarations(container.config).declaration_for((f"mcp:{server}", tool_name))
+            facts = declarations(container.config).declaration_for(
+                (f"mcp:{server}", tool_name), exact=True
+            )
         except Exception as exc:  # noqa: BLE001 — an unread declaration declares nothing
             logger.debug("triage pack: %s's declaration was not read (%s).", tool_name, exc)
         args = _step_arguments(step, facts, held)
