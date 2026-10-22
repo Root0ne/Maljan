@@ -17,7 +17,7 @@ from typing import TYPE_CHECKING, Any
 
 from langchain_core.tools import BaseTool
 
-from maljan.core import builtin_declarations
+from maljan.core import builtin_declarations, cancellation
 from maljan.core.exceptions import SampleNotOpened
 from maljan.core.logger import logger
 from maljan.core.settings_overrides import redact_url
@@ -128,6 +128,34 @@ def not_made_current(answer: str) -> SampleNotOpened | None:
         return None
     words = _one_line(str(payload.get("detail") or ""))
     return SampleNotOpened(sentence.format(words=words), provider="ghidra")
+
+
+# And when Ghidra answered the load but the job's guard for Ghidra did not send
+# the step after it (the select or the analysis): Ghidra rests again after
+# calls it did not answer. The guard's own sentence goes first; nothing about
+# the file, so not remembered. What becomes of the opened program is said.
+GHIDRA_RESTING: str = (
+    "{words}; Ghidra opened the job's sample{name} but the step after the load was not "
+    "sent, so it is neither current nor analysed; {kept}, and this loop stops"
+)
+
+
+def ghidra_resting(words: str, name: str | None) -> SampleNotOpened:
+    """The failure for a step after the load that the job's guard did not send.
+
+    ``name`` is the program the load opened when it is noted for the job's
+    teardown to close, else ``None``, and the sentence says it is not.
+    """
+    return SampleNotOpened(
+        GHIDRA_RESTING.format(
+            words=_one_line(words),
+            name=f" as {_one_line(name)}" if name else "",
+            kept="it is noted for the job's teardown to close"
+            if name
+            else "it could not be noted, so the job's teardown does not close it",
+        ),
+        provider="ghidra",
+    )
 
 
 def ghidra_not_answering(address: str, what: str) -> SampleNotOpened:
@@ -295,6 +323,47 @@ def _load(
             log.error("%s", failure)
             raise failure from exc
     raise AssertionError("unreachable")  # pragma: no cover
+
+
+class _Unanswered:
+    """An HTTP client that notes each request its server did not answer, then raises it.
+
+    Read as the job's guard reads a transport failure (``transport_failure``).
+    """
+
+    def __init__(self, client: Any, unanswered: list[str]) -> None:
+        self._client = client
+        self._unanswered = unanswered
+
+    def _noted(self, call: Any, url: Any, **kwargs: Any) -> Any:
+        from maljan.providers.server_guard import transport_failure
+
+        try:
+            return call(url, **kwargs)
+        except Exception as exc:
+            if transport_failure(exc) is not None:
+                self._unanswered.append(type(exc).__name__)
+            raise
+
+    def get(self, url: Any, **kwargs: Any) -> Any:
+        return self._noted(self._client.get, url, **kwargs)
+
+    def post(self, url: Any, **kwargs: Any) -> Any:
+        return self._noted(self._client.post, url, **kwargs)
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._client, name)
+
+
+def _wait_admissible(guard: Any, rests_begun: int, job: Any) -> bool:
+    """``guard.wait_admissible``, woken and ended by ``job``'s cancel where there is a job."""
+    if job is None:
+        return bool(guard.wait_admissible(rests_begun))
+    forget = job.track(guard.wake)
+    try:
+        return bool(guard.wait_admissible(rests_begun, stopped=lambda: job.is_cancelled))
+    finally:
+        forget()
 
 
 def _known_failure(provider: Any, path: str) -> SampleNotOpened | None:
@@ -829,16 +898,27 @@ class GhidraStaticProvider(StaticProvider):
         that path. A load Ghidra gave no answer to — a connection that failed
         twice, a 5xx, a refused token — raises too, with a sentence naming
         Ghidra's address and token rather than the samples path, and is not
-        remembered. A load that opens the program makes it the current one,
-        and Ghidra's auto-analysis runs on it, waited for without a limit: an
-        import holds no call or code reference for the agent's callers,
-        callees and cross-references to read. The open goes through the
-        general opener (``providers.sample_open``) with the tools the Ghidra
-        block declares, so a path the job already opened (here, in the triage
-        pass or by a model) is a switch answered from the job's note.
+        remembered. Every request is one call held by the job's guard for
+        Ghidra (``server_guard``), the one the agents' calls and this
+        provider's walks go through. A load the resting server is not sent
+        waits for the guard to admit a call again (``wait_admissible``: the
+        rest's cooldown, then the one trial let through) and is made then, so
+        opens made together after a rest all open once the trial answers; a
+        trial that fails stops the open as a Ghidra that did not answer, with
+        the guard's sentence. A step after a load Ghidra answered that the
+        guard did not send stops the loop with the guard's sentence; the
+        program the load opened is noted for the job's teardown to close. A
+        load that opens the program makes it the current one, and Ghidra's
+        auto-analysis runs on it, waited for without a limit: an import holds
+        no call or code reference for the agent's callers, callees and
+        cross-references to read. The open goes through the general opener
+        (``providers.sample_open``) with the tools the Ghidra block declares,
+        so a path the job already opened (here, in the triage pass or by a
+        model) is a switch answered from the job's note.
 
         Only over ``http``: anything else returns ``False`` and calls nothing.
         """
+        from maljan.providers.server_guard import ServerResting
         from maljan.providers.static.ghidra.program import program_name_from_load
 
         target = path or self._held_path()
@@ -848,19 +928,39 @@ class GhidraStaticProvider(StaticProvider):
         if known is not None:
             raise known
         base = self._cfg.url.rstrip("/")
-        with self._rest_client() as http:
-            address = ghidra_address(self._cfg.url)
-            answer = open_ghidra_sample(
-                http,
-                base,
-                target,
-                getattr(self._cfg, "sample_open", None),
-                sample_notes_of(self),
-                key=server_note_key(self._cfg, str(getattr(self, "note_instance", "") or "")),
-                open_call=lambda tool, arguments: (
-                    _load(http, base, tool, arguments, address, logger).text
-                ),
-            )
+        address = ghidra_address(self._cfg.url)
+        key = server_note_key(self._cfg, str(getattr(self, "note_instance", "") or ""))
+        guard = self.server_guard()
+        job = cancellation.current()
+        while True:
+            # The loads Ghidra answered in this attempt (a step after one that
+            # the guard does not send leaves a program open on Ghidra), and its
+            # requests Ghidra did not answer.
+            loaded: list[str] = []
+            unanswered: list[str] = []
+            try:
+                answer = self._open_once(target, base, address, key, guard, loaded, unanswered)
+                break
+            except ServerResting as exc:
+                if loaded:
+                    failure = ghidra_resting(str(exc), self._own_opened(key, loaded[-1]))
+                    logger.error("%s", failure)
+                    raise failure from exc
+                admissible = (
+                    guard is not None
+                    and not unanswered
+                    and _wait_admissible(guard, exc.rests_begun, job)
+                )
+                if job is not None:
+                    # A job cancelled meanwhile sends no load: its teardown may
+                    # already have closed its programs.
+                    job.check("before Ghidra's load of the job's sample, after its rest")
+                if not admissible:
+                    # This open's own request was not answered, or a rest began
+                    # while it waited: the trial was not answered.
+                    failure = ghidra_not_answering(address, str(exc))
+                    logger.error("%s", failure)
+                    raise failure from exc
         refused = not_made_current(answer)
         if refused is not None:
             logger.error("%s", refused)
@@ -878,6 +978,58 @@ class GhidraStaticProvider(StaticProvider):
             raise failure
         return True
 
+    def _open_once(
+        self,
+        target: str,
+        base: str,
+        address: str,
+        key: str,
+        guard: Any,
+        loaded: list[str],
+        unanswered: list[str],
+    ) -> str:
+        """One attempt at :meth:`open_sample`'s open, each request held by ``guard``.
+
+        Each load Ghidra answered is appended to ``loaded``, and each request
+        it did not answer, as the guard reads that, to ``unanswered``. A
+        request the guard does not send raises :class:`ServerResting`.
+        """
+        from maljan.providers.server_guard import guarded_http
+
+        with self._rest_client() as raw:
+            http = guarded_http(_Unanswered(raw, unanswered), guard, base)
+
+            def load(tool: str, arguments: dict[str, Any]) -> str:
+                text = str(_load(http, base, tool, arguments, address, logger).text)
+                loaded.append(text)
+                return text
+
+            return open_ghidra_sample(
+                http,
+                base,
+                target,
+                getattr(self._cfg, "sample_open", None),
+                sample_notes_of(self),
+                key=key,
+                open_call=load,
+            )
+
+    def _own_opened(self, key: str, load_answer: str) -> str | None:
+        """Note the program a load opened as the job's, for its teardown to close; its name.
+
+        ``None`` when the load named no program or the provider holds no note
+        of the job's to keep it in.
+        """
+        from maljan.providers.sample_open import SampleNotes
+        from maljan.providers.static.ghidra.program import program_name_from_load
+
+        name = program_name_from_load(load_answer)
+        notes = getattr(self, "sample_notes", None)
+        if not name or not isinstance(notes, SampleNotes):
+            return None
+        notes.own(key, name)
+        return name
+
     def call_graph(self, path: str) -> CallGraph | None:
         """The job's program's whole call graph, read from Ghidra's REST API.
 
@@ -893,8 +1045,13 @@ class GhidraStaticProvider(StaticProvider):
         endpoint has no pages. The server answers ``edges`` (as any format it
         does not name, ``json`` among them) with one ``CALLER -> CALLEE`` line
         per call, the text ``call_graph_from_text`` reads.
+
+        The request is one call held by the job's guard for Ghidra; one the
+        resting server is not sent is ``None`` too, with the guard's sentence
+        in a warning saying the pre-pass is skipped.
         """
         from maljan.providers.sample_open import SampleOpener, is_shared_address, program_argument
+        from maljan.providers.server_guard import ServerResting, guarded_http
 
         if not self._over_http():
             return None
@@ -917,9 +1074,19 @@ class GhidraStaticProvider(StaticProvider):
                 key,
             )
             return None
-        with self._rest_client() as http:
-            resp = http.get(f"{self._cfg.url.rstrip('/')}/get_full_call_graph", params=params)
-            resp.raise_for_status()
+        base = self._cfg.url.rstrip("/")
+        try:
+            with self._rest_client() as raw:
+                http = guarded_http(raw, self.server_guard(), base)
+                resp = http.get(f"{base}/get_full_call_graph", params=params)
+                resp.raise_for_status()
+        except ServerResting as exc:
+            logger.warning(
+                "Ghidra call graph: %s; the request was not sent, so the sink-reachability "
+                "pre-pass is skipped.",
+                exc,
+            )
+            return None
         return call_graph_from_text(resp.text)
 
     def anti_analysis_scan(
@@ -1111,6 +1278,11 @@ class GhidraStaticProvider(StaticProvider):
 
         Through the close tool the block's ``sample_open`` names; with none
         declared, nothing is called. Never raises.
+
+        Not held by the job's guard for Ghidra: a close the resting server was
+        not sent would leave the job's programs open on a Ghidra other jobs
+        share, so the close is always sent, and a Ghidra that does not answer
+        it is a warning.
         """
         from maljan.providers.sample_open import close_job_programs, is_shared_address
         from maljan.providers.static.ghidra.program import rest_tool_call
