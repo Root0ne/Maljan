@@ -64,6 +64,8 @@ from maljan.parsers.registry import ParserRegistry
 from maljan.schemas.evidence import EvidenceCounter
 
 if TYPE_CHECKING:
+    from pathlib import Path
+
     from maljan.agents.base_agent import BaseAnalyst
     from maljan.analysis.function_summarizer import FunctionSummarizer
     from maljan.loaders.binary_chunker import Room, TextChunk
@@ -665,6 +667,17 @@ class ServiceContainer:
         # The path each tool server that declares a ``sample_mount`` opens the
         # worker's copy of the sample at, by server key; empty outside a job.
         self.server_sample_paths: dict[str, str] = {}
+        # Where the worker places a file of the job's artefact store for a
+        # server that declares a ``sample_mount``, as it places the sample:
+        # ``(server key, the file, its sha256, its name)`` to the path that
+        # server opens the copy at, or ``None``. Set by the worker for a job;
+        # ``None`` outside one, and such a server is then handed no file
+        # (``pipeline.artefacts``).
+        self.place_for_server: Callable[[str, Path, str, str], str | None] | None = None
+        # Every path a file of the job's artefact store was handed to a server
+        # at (``pipeline.artefacts.hand_over``): read by the run's isolation
+        # part as a path of what came out of the sample. Empty outside a job.
+        self.artefact_paths: list[str] = []
         # The path each static provider's mirror of the sample is handed to
         # its server under, by provider; empty outside a job. Read by the run's
         # isolation part, which counts a call handed one as a read of the sample.

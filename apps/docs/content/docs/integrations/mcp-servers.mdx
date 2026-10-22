@@ -85,6 +85,40 @@ degradation reason, and the server is called with the local path. These
 primitives are never shown to the model. See [Tool servers on another
 host](/configuration/#tool-servers-on-another-host).
 
+## Files a server wrote
+
+A tool that writes a file (a carved payload, an unpacked member, a decoded
+script) names it in its answer, and a triage pack step that declares
+`outputs` has the platform take each such file into the job's artefact store,
+from which a later step's tool on any other server is handed it (see *Files
+passed between servers* in [the pack's steps](/configuration/#the-packs-steps)).
+A server on the worker's filesystem (stdio, no `sample_mount`) is read inside
+its own job staging directory and needs nothing more. Any other server, or one
+that would rather serve its files itself, offers one tool:
+
+| Tool | Arguments | Returns |
+| :-- | :-- | :-- |
+| `get_artefact` | `path` (the name its answer gave the file), `offset`, `length` (bytes) | `{"content_b64": ..., "size": <the whole file's bytes>, "sha256": <the whole file's, where known>}` |
+
+The platform asks for 4 MiB at a time until `size` is read, checks the
+`sha256` it was told against the bytes it got, and refuses a file whose digest
+disagrees. There is no size limit of the platform's own: the read ends where
+the server said the file ends, and the server is held to it. Every answer
+states `size`; the first fixes it, and an answer with none, an answer that
+states another, a chunk that would pass it, an empty chunk before it and a
+`sha256` that changes are each refused. A file handed to a server over
+`put_sample` is streamed from disk over the three chunked calls wherever the
+server offers them, its digest checked as it is read before the upload is
+finished; a server offering only `put_sample` is sent the file in that one
+call, whatever its size, as the sample is, and refuses it itself if it will.
+Each such upload is listed in the run's disclosure block with what it sent
+(a file a tool wrote, the capture or the sandbox report). A file the server
+will not serve is answered `{"error": "..."}`,
+and the step's entry names the file as not taken with those words. Serve only
+files the server wrote for the job it was started for, as `put_sample` stores
+only into that job's directory. Like `put_sample`, the tool is never shown to
+the model.
+
 ## The capability manifest
 
 A tool named `capabilities`, taking no argument, answers what the server can do

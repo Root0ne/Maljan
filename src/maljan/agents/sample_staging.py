@@ -343,8 +343,110 @@ async def _stage_chunked(handle: Any, filename: str, blob: bytes, digest: str) -
     return _path_from(finished)
 
 
+async def put_file(
+    handle: Any,
+    server_key: str,
+    filename: str,
+    source: Path,
+    digest: str,
+    *,
+    stagings: list[dict[str, Any]] | None = None,
+    what: str = "artefact",
+) -> str:
+    """Upload the file at ``source`` over the handle's ``put_sample`` tools; the path it lives at.
+
+    For a file other than the job's sample that a server across a network is
+    to read: one the job's artefact store holds (``pipeline.artefacts``). The
+    file is streamed from disk, never held whole: over the three chunked calls
+    wherever the server offers them, :data:`CHUNK_BYTES` at a time, its
+    SHA-256 computed as it is read and checked against ``digest`` before the
+    upload is finished; a server offering only the single-shot call is sent the
+    file in one call, whatever its size, as :func:`stage_sample` sends the
+    sample, and refuses it itself if it will. The upload is written to
+    ``stagings`` as :func:`stage_sample` writes one, naming ``what`` it sent
+    (``artefact``, ``capture``, ``sandbox_report``), since the bytes are the
+    sample's or came out of it. Raises with
+    what went wrong (:func:`reason_of` words it); nothing is cached, as the
+    store keeps what it delivered.
+    """
+    manifest = set(handle.all_tool_names())
+    size = Path(source).stat().st_size
+    chunked = all(name in manifest for name in CHUNKED_TOOLS)
+    sent = _note_staging(stagings, server_key, handle, what=what)
+    try:
+        if chunked:
+            path = await _stream_chunked(handle, filename, Path(source), size, digest)
+        else:
+            blob = _read_checked(Path(source), digest)
+            path = await _stage_single(handle, filename, blob, digest)
+    except BaseException:
+        _mark_staging(sent, done=False)
+        raise
+    _mark_staging(sent, done=bool(path))
+    if not path:
+        raise ValueError("the server returned no path")
+    return path
+
+
+def _open_regular(source: Path) -> Any:
+    """``source`` opened for reading, refusing a link at its last part or anything but a file."""
+    import os
+    import stat
+
+    fd = os.open(str(source), os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+    handle = os.fdopen(fd, "rb")
+    if not stat.S_ISREG(os.fstat(handle.fileno()).st_mode):
+        handle.close()
+        raise ValueError("the file to upload is not a regular file")
+    return handle
+
+
+def _read_checked(source: Path, digest: str) -> bytes:
+    """A file's bytes, for a server that takes them only in one call, checked against ``digest``."""
+    with _open_regular(source) as handle:
+        blob: bytes = handle.read()
+    if hashlib.sha256(blob).hexdigest() != digest:
+        raise ValueError("the file's bytes no longer hash to its sha256")
+    return blob
+
+
+async def _stream_chunked(
+    handle: Any, filename: str, source: Path, size: int, digest: str
+) -> str | None:
+    """Begin, send the file from disk chunk by chunk with its digest checked, finish."""
+    begin = await _call(handle, "put_sample_begin", filename=filename, sha256=digest, size=size)
+    _check(begin)
+    upload_id = begin.get("upload_id") if isinstance(begin, dict) else None
+    if not upload_id:
+        import json
+
+        parsed = json.loads(begin) if isinstance(begin, str) else {}
+        upload_id = parsed.get("upload_id")
+    if not upload_id:
+        raise ValueError("put_sample_begin returned no upload_id")
+    hasher = hashlib.sha256()
+    with _open_regular(source) as reader:
+        for seq, chunk in enumerate(iter(lambda: reader.read(CHUNK_BYTES), b"")):
+            hasher.update(chunk)
+            sent = await _call(
+                handle,
+                "put_sample_chunk",
+                upload_id=upload_id,
+                seq=seq,
+                content_b64=base64.b64encode(chunk).decode("ascii"),
+            )
+            _check(sent)
+    if hasher.hexdigest() != digest:
+        raise ValueError(
+            "the file's bytes no longer hash to its sha256; the upload is not finished"
+        )
+    finished = await _call(handle, "put_sample_finish", upload_id=upload_id)
+    _check(finished)
+    return _path_from(finished)
+
+
 def _note_staging(
-    stagings: list[dict[str, Any]] | None, server_key: str, handle: Any
+    stagings: list[dict[str, Any]] | None, server_key: str, handle: Any, *, what: str = ""
 ) -> dict[str, Any] | None:
     """Write an upload down as attempted, before its first byte is sent; the record, or ``None``."""
     if stagings is None:
@@ -357,6 +459,7 @@ def _note_staging(
         transport=str(getattr(config, "transport", "") or ""),
         url=str(getattr(config, "url", "") or ""),
         state=STAGING_ATTEMPTED,
+        what=what,
     )
     stagings.append(record)
     return record
@@ -433,6 +536,11 @@ def _reason_of(exc: BaseException) -> str:
         return f"the upload failed: {exc}"
     logger.warning("sample staging failed: %s", masked_text(f"{type(exc).__name__}: {exc}"))
     return describe_exception(exc)
+
+
+def reason_of(exc: BaseException) -> str:
+    """What a published reason says of a failed upload (:func:`put_file`), as staging says it."""
+    return _reason_of(exc)
 
 
 def record_failure(registry: Any, server_key: str, reason: str) -> None:

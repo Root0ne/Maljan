@@ -4,7 +4,7 @@ The pack (``pipeline.triage_pack``) runs a list of steps over every sample
 before any analyst starts. Each step is declared here as a :class:`PackStep`:
 
 * ``id``: the step's name, unique in the list. A later step names an earlier
-  one by it (``after``, ``starts_after``, ``beside``).
+  one by it (``after``, ``starts_after``, ``beside``, ``when``, ``reads``).
 * ``tool`` and ``server``: what the step calls. With no ``server`` the step is
   one of the platform's own, run in-process, named by its shipped id; with
   a ``server`` it is that tool server's tool, called through the tool server
@@ -13,11 +13,29 @@ before any analyst starts. Each step is declared here as a :class:`PackStep`:
   to a model.
 * ``arguments``: a server step's argument template. A string value may hold
   ``{sample_path}`` (the path that server opens the sample at), ``{sha256}``
-  and ``{file_type}`` (the routed format). With no template, the arguments
-  are read from the tool's declaration: the argument it declares for the
-  ``path`` role takes the sample's path, the one for ``hash`` the sample's
-  sha256. The platform's own steps compute their own arguments.
+  and ``{file_type}`` (the routed format), and files of the job's artefact
+  store (``pipeline.artefacts``), each at the path that server opens it at:
+  ``{capture_path}`` (the sandbox's packet capture) and
+  ``{sandbox_report_path}`` (the sandbox report as JSON), which a step names
+  only to run where the job has them, and, on a step that ``reads``,
+  ``{artefact_path}`` with ``{artefact_sha256}``. With no template, the
+  arguments are read from the tool's declaration: the argument it declares
+  for the ``path`` role takes the sample's path (on a step that ``reads``,
+  the file's), the one for ``hash`` the sample's sha256 (the file's). The
+  platform's own steps compute their own arguments.
 * ``formats``: the routed formats the step runs for; empty is every format.
+* ``when``: the values earlier steps' answers must hold for the step to run,
+  each a :class:`StepCondition`: the ``step``, a ``value`` its tool declares
+  (``ToolFacts.values``) and the texts any one of which that value must be
+  (``equals``). Read by code from the answer's declared rows, whatever the
+  tool; a step whose condition does not hold is recorded as not run, with
+  why, and is no failure.
+* ``outputs``: the path of a server step's answer that names each file its
+  tool wrote, as that server names it; each is taken into the job's artefact
+  store, and the step's entry names what was taken in and what was not.
+* ``reads``: an earlier step with ``outputs``; this server step runs once for
+  each file that step wrote, in the order it named them, ``{artefact_path}``
+  naming it. With none written the step is recorded as not run, with why.
 * ``budget_seconds``: the step's wall clock; ``None`` takes the tool's
   declared ``timeout_seconds``, else, for a long step, what is left of the
   pack's budget. A step of the platform's own takes one only where its
@@ -72,12 +90,15 @@ from maljan.core.tool_declarations import check_tool_name
 
 __all__ = [
     "ARGUMENT_PLACEHOLDERS",
+    "ARTEFACT_PLACEHOLDERS",
     "DECLARED_FACT_RENDERERS",
+    "FILE_PLACEHOLDERS",
     "answer_field",
     "answer_fields",
     "default_steps",
     "PACK_RENDERERS",
     "PackStep",
+    "StepCondition",
     "check_steps",
     "effective_steps",
     "lenient_steps",
@@ -89,6 +110,7 @@ __all__ = [
     "shipped_step",
     "shipped_tools_of",
     "step_vocabulary",
+    "template_placeholders",
     "written_for",
 ]
 
@@ -100,7 +122,29 @@ ARGUMENT_PLACEHOLDERS: dict[str, str] = {
     "sample_path": "the path the step's server opens the sample at",
     "sha256": "the sample's sha256",
     "file_type": "the format the run routed the sample as",
+    "capture_path": (
+        "the sandbox's packet capture, at the path the step's server opens it; a step "
+        "naming it runs only where the job has one"
+    ),
+    "sandbox_report_path": (
+        "the run's sandbox report as JSON, at the path the step's server opens it; a step "
+        "naming it runs only where the job has one"
+    ),
+    "artefact_path": (
+        "a file the step named in reads wrote, at the path the step's server opens it; the "
+        "step runs once for each"
+    ),
+    "artefact_sha256": "the sha256 of the file the step named in reads wrote",
 }
+
+# The placeholders that stand for a file of the job's artefact store
+# (``pipeline.artefacts``). The pack hands the step's call each one's artefact
+# id, and the call hands the server the path it opens that file at.
+FILE_PLACEHOLDERS: tuple[str, ...] = ("capture_path", "sandbox_report_path", "artefact_path")
+
+# The placeholders that stand for a file an earlier step wrote: named only on a
+# step that ``reads`` that step.
+ARTEFACT_PLACEHOLDERS: frozenset[str] = frozenset({"artefact_path", "artefact_sha256"})
 
 # The kind of the catalogue's answer about the APIs a sandbox recorded the
 # sample calling (the pack's ``sandbox_api_capability`` step): an
@@ -158,7 +202,7 @@ _SHIPPED_CONTEXT = {"shipped": True}
 LEGACY_STEP_NAMES: Mapping[str, str] = {"find_anti_analysis_techniques": "anti_analysis_scan"}
 
 # The fields of a declared step that name another step.
-_STEP_REFERENCES = ("id", "after", "starts_after")
+_STEP_REFERENCES = ("id", "after", "starts_after", "reads")
 
 # The renderers that read an answer through its tool's declared facts (its
 # rows, their values and places, its techniques) as well as in the shape of
@@ -193,6 +237,42 @@ def _under_current_names(data: Any) -> Any:
     return {**data, **changed} if changed else data
 
 
+class StepCondition(BaseModel):
+    """One value an earlier step's answer must hold for a step to run (``PackStep.when``).
+
+    ``step`` is the earlier step's id, ``value`` the name of a value its tool
+    declares in its answer's rows (``ToolFacts.values``), and ``equals`` the
+    texts any one of which a row's value must be, compared whole: a text value
+    as it stands, any other as JSON writes it (``true``, ``3``, ``null``).
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    step: str
+    value: str
+    equals: tuple[str, ...] = Field(min_length=1)
+
+    @field_validator("step")
+    @classmethod
+    def _step_is_a_step_name(cls, value: str) -> str:
+        if not _ID_RE.fullmatch(value or ""):
+            raise ValueError(f"condition step {value!r} is not a step name")
+        # A shipped step named by its old name is read by the new one.
+        return LEGACY_STEP_NAMES.get(value, value)
+
+    @field_validator("value")
+    @classmethod
+    def _value_is_a_declared_name(cls, value: str) -> str:
+        # A declared value's name is a vocabulary word (``ToolFacts.values``),
+        # which reads as a step name does.
+        if not _ID_RE.fullmatch(value or ""):
+            raise ValueError(
+                f"condition value {value!r} is not the name of a declared value: lowercase "
+                "letters, digits and underscores, starting with a letter"
+            )
+        return value
+
+
 class PackStep(BaseModel):
     """One step of the triage pack (see the module docstring).
 
@@ -210,6 +290,9 @@ class PackStep(BaseModel):
     server: str = ""
     arguments: dict[str, Any] = Field(default_factory=dict)
     formats: tuple[str, ...] = ()
+    when: tuple[StepCondition, ...] = ()
+    outputs: str = ""
+    reads: str = ""
     budget_seconds: float | None = Field(default=None, gt=0)
     peak_mb: int | None = Field(default=None, gt=0)
     starts_after: str = ""
@@ -294,10 +377,33 @@ class PackStep(BaseModel):
                     )
         return value
 
+    @field_validator("outputs")
+    @classmethod
+    def _outputs_is_a_path(cls, value: str) -> str:
+        if value:
+            from maljan.core.tool_declarations import parse_path
+
+            parse_path(value)
+        return value
+
+    @field_validator("reads")
+    @classmethod
+    def _reads_names_a_step(cls, value: str) -> str:
+        if value and not _ID_RE.fullmatch(value):
+            raise ValueError(f"reads {value!r} is not a step name")
+        return value
+
     @model_validator(mode="after")
     def _a_step_names_what_it_calls(self) -> PackStep:
         if self.server and not self.tool:
             raise ValueError(f"step {self.id!r} names a server and no tool to call on it")
+        named = template_placeholders(self.arguments) & ARTEFACT_PLACEHOLDERS
+        if named and not self.reads:
+            raise ValueError(
+                f"step {self.id!r} names "
+                + ", ".join(f"{{{p}}}" for p in sorted(named))
+                + ", which only a step that reads an earlier step's files can name; set reads"
+            )
         return self
 
     @model_serializer(mode="wrap")
@@ -333,6 +439,12 @@ def _builtin_problems(step: PackStep) -> list[str]:
             f"step {step.id!r} is one of the platform's own and computes its own arguments; "
             "to call the tool with arguments of your own, name the server that serves it"
         )
+    for name in ("outputs", "reads"):
+        if getattr(step, name):
+            problems.append(
+                f"step {step.id!r} is one of the platform's own and passes no file between "
+                f"servers; {name} applies to a server's tool"
+            )
     if step.budget_seconds is not None and not (shipped is not None and shipped.wall_clock):
         problems.append(
             f"step {step.id!r} runs in-process with no wall clock of its own to set; "
@@ -815,6 +927,7 @@ def _effective(
         cursor = after.get(cursor, "")
     problems: list[str] = []
     ids = {step.id for step in steps}
+    placed_at = {step.id: at for at, step in enumerate(steps)}
     named_beside = {other for step in steps for other in step.beside}
     set_by = {step.id: step.model_fields_set for step in declared}
     for step in steps:
@@ -822,6 +935,7 @@ def _effective(
             *_builtin_problems(step),
             *_renderer_problems(step),
             *_schedule_problems(step, set_by.get(step.id, frozenset()), named_beside),
+            *_reading_problems(step, steps, placed_at),
         ]
         if step.starts_after and step.starts_after not in ids:
             own.append(f"step {step.id!r} starts after {step.starts_after!r}, which no step is")
@@ -930,7 +1044,7 @@ def steps_left_out(
             return [], left
         naming: dict[str, list[str]] = {}
         for step in steps:
-            for other in {step.after, step.starts_after, *step.beside} - {""}:
+            for other in {step.after, *steps_named_at_run(step)} - {""}:
                 naming.setdefault(other, []).append(step.id)
         gone = [step_id for step_id in out if step_id not in shipped]
         while gone:
@@ -1003,6 +1117,61 @@ def _schedule_problems(
             "pack (starts_after) or one another step runs beside, and this step is neither"
         )
     return problems
+
+
+def steps_named_at_run(step: PackStep) -> set[str]:
+    """The steps ``step`` names for its run: whom it starts after, runs beside, reads or asks."""
+    return {step.starts_after, *step.beside, step.reads, *(c.step for c in step.when)} - {""}
+
+
+def _reading_problems(
+    step: PackStep, steps: list[PackStep], position: Mapping[str, int]
+) -> list[str]:
+    """What ``step`` reads of other steps that no earlier step can give it.
+
+    A condition's step and the step it ``reads`` come before it, or there is
+    nothing to read when it starts; the step it reads declares ``outputs``,
+    or it names no file. A step that reads runs once per file, in turn, so it
+    starts after no step beside the pack.
+    """
+    problems: list[str] = []
+    at = position[step.id]
+    for condition in step.when:
+        if condition.step not in position:
+            problems.append(f"step {step.id!r} runs when {condition.step!r}, which no step is")
+        elif position[condition.step] >= at:
+            problems.append(
+                f"step {step.id!r} runs on what {condition.step!r} answers, which does not come "
+                "before it"
+            )
+    if step.reads:
+        if step.reads not in position:
+            problems.append(f"step {step.id!r} reads {step.reads!r}, which no step is")
+        elif position[step.reads] >= at:
+            problems.append(
+                f"step {step.id!r} reads the files {step.reads!r} writes, which does not come "
+                "before it"
+            )
+        elif not steps[position[step.reads]].outputs:
+            problems.append(
+                f"step {step.id!r} reads the files {step.reads!r} writes, and {step.reads!r} "
+                "declares no outputs"
+            )
+        if step.starts_after:
+            problems.append(
+                f"step {step.id!r} reads the files {step.reads!r} writes, once per file in turn, "
+                "so starts_after would be ignored"
+            )
+    return problems
+
+
+def template_placeholders(template: Mapping[str, Any]) -> frozenset[str]:
+    """Every placeholder a string of ``template`` names, at any depth."""
+    return frozenset(
+        found
+        for _name, text in _template_strings(template)
+        for found in _PLACEHOLDER_RE.findall(text)
+    )
 
 
 def _renderer_problems(step: PackStep) -> list[str]:

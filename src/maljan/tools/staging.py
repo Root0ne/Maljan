@@ -85,6 +85,13 @@ CARVED_DIRECTORY = "carved"
 # analysis server started for the job joins it to its own job directory.
 CAPA_DIRECTORY = "capa"
 
+# The child of a job directory the job's artefact store keeps its files in
+# (``pipeline.artefacts``), each under its SHA-256: a file one tool server
+# wrote, the sandbox capture and the sandbox report, for another server's tool
+# to read. A server on this host is handed its file under its own job
+# directory's child of this name.
+ARTEFACTS_DIRECTORY = "artefacts"
+
 # Where the release before this fetched captures. Written by nothing now; the
 # sweep still reaches it, because it is this project's directory and what is
 # in it is somebody's traffic.

@@ -110,6 +110,7 @@ the pack record, and the run-state block names it and the analysis server's
 from __future__ import annotations
 
 import hashlib
+import json
 import re
 import time
 from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
@@ -145,7 +146,9 @@ from maljan.core.declared_reading import (
 )
 from maljan.core.logger import logger
 from maljan.core.pack_steps import (
+    FILE_PLACEHOLDERS,
     PackStep,
+    StepCondition,
     answer_field,
     effective_steps,
     placeholder_values,
@@ -154,6 +157,7 @@ from maljan.core.pack_steps import (
     shipped_label,
     shipped_renderer,
     shipped_step,
+    template_placeholders,
     written_for,
 )
 from maljan.core.reputation import ReputationRecord, is_lookup_entry, reputation_of
@@ -547,6 +551,11 @@ class PackInputs:
     # declaring the unpack tool's kind, kept apart from the decoder's server.
     # ``None`` reads ``floss.environ``.
     carve_environ: Mapping[str, str] | None = None
+    # The job's artefact store (``pipeline.artefacts.ArtefactStore``): where a
+    # file a step wrote, the sandbox capture and the sandbox report are held
+    # for another step's server. ``None``: a step naming one is not run, and
+    # says why.
+    artefacts: Any = None
 
 
 # The one reputation call, made by the node through the tool server. It takes
@@ -611,16 +620,34 @@ class ServerAnswer:
     started_at: float = 0.0
     duration_ms: int = 0
     structured_content: dict[str, Any] | None = None
+    # The files the call's answer named as written (the step's ``outputs``)
+    # that the job's artefact store took in, each as an entry names it
+    # (``Artefact.record``), and each it did not, with why.
+    wrote: tuple[dict[str, Any], ...] = ()
+    not_taken: tuple[dict[str, str], ...] = ()
 
 
 # The node's call of one server step (``nodes._server_step_call``): the step, the
 # values its argument template names, and what is left of the pack's budget
-# (``None``: no budget). It never raises: a call that could not be made answers
+# (``None``: no budget). A file placeholder's value (``FILE_PLACEHOLDERS``) is
+# the artefact's id in the job's store, and the call hands the server the path
+# it opens that file at. It never raises: a call that could not be made answers
 # ``ok=False``, its error starting ``not run:`` when no call was made at all.
 ServerStepCall = Callable[[PackStep, Mapping[str, str], float | None], ServerAnswer]
 
 # Why a server step of a pack run with no tool server registry was not called.
 NO_SERVER_CALLS = "this run calls no tool server, so {server}'s {tool} was not asked"
+
+# Why a step was not run, by case: what it names that the job does not have.
+NO_ARTEFACT_STORE = "it names a file of the job's artefact store, and this run keeps none"
+NO_CAPTURE = "it names the sandbox capture (capture_path), and this job has none"
+NO_SANDBOX_REPORT = "it names the sandbox report (sandbox_report_path), and this job has none"
+FILE_NOT_TAKEN_IN = "the job's {what} could not be taken into the artefact store: {why}"
+NOTHING_TO_READ = "it reads the files {step} writes, and {step} {why}"
+CONDITION_UNMET = "it runs when {step}'s {value} is {wanted}, and {why}"
+
+# The name the sandbox report is kept under in the artefact store.
+SANDBOX_REPORT_NAME = "sandbox_report.json"
 
 
 class _Pack:
@@ -667,6 +694,20 @@ class _Pack:
         # pack's readers come to compare with it.
         self._floss_rows: dict[str, list[dict[str, Any]]] = {}
         self._clocks: dict[str, int | None] = {}
+        # The entries each step that ran wrote, by step id, read by a later
+        # step's condition (``PackStep.when``).
+        self._entries_of: dict[str, list[LedgerEntry]] = {}
+        # The files each step's calls wrote that the artefact store took in,
+        # by step id and then by artefact id, each once in the order first
+        # written, read by a later step that ``reads`` it.
+        self._wrote: dict[str, dict[str, dict[str, Any]]] = {}
+        # The steps left out for the routed format: they made no call.
+        self._format_skipped: set[str] = set()
+        # What an entry's ``pack_step`` adds of the files it read and wrote, by
+        # entry id, laid on once its step is stamped.
+        self._marks: dict[str, dict[str, Any]] = {}
+        # The job's capture and report as the store holds them: id and why not.
+        self._job_files: dict[str, tuple[str, str]] = {}
 
     # -- recording --------------------------------------------------------
 
@@ -839,15 +880,149 @@ class _Pack:
         return self.result
 
     def _run_step(self, step: PackStep) -> None:
-        """One step at its place: the platform's own, or a server's tool."""
+        """One step at its place: the platform's own, or a server's tool.
+
+        A step whose condition does not hold, or that names what the job does
+        not have, is recorded as not run, with why (:meth:`_unmet`).
+        """
         held = len(self.recorder.entries)
         if not step.formats or self.routed in step.formats:
-            if step.builtin:
+            unmet = self._unmet(step)
+            if unmet:
+                self._early.pop(step.id, None)
+                self._record_absent(step.called, self._shown(step), unmet)
+            elif step.builtin:
                 _BUILTIN_STEPS[step.id](self, step)
             else:
                 self._server(step)
+        else:
+            self._format_skipped.add(step.id)
         self._done.add(step.id)
-        _annotate(step, self.recorder.entries[held:])
+        written = self.recorder.entries[held:]
+        self._entries_of[step.id] = list(written)
+        _annotate(step, written)
+        for entry in written:
+            extra = self._marks.pop(entry.id, None)
+            if extra:
+                entry.pack_step = {**(entry.pack_step or {"v": 1, "id": step.id}), **extra}
+
+    # -- what a step needs before it runs -----------------------------------
+
+    def _shown(self, step: PackStep) -> dict[str, Any]:
+        """The arguments an entry of ``step`` that made no call shows: its template, filled.
+
+        A file placeholder is left as written: no file was handed over.
+        """
+        return placeholder_values(step.arguments, self._template_values())
+
+    def _unmet(self, step: PackStep) -> str:
+        """Why ``step`` cannot run here, or ``""``.
+
+        Each condition (``when``) must hold; a server step's file placeholders
+        must name files the job has, and the step it ``reads`` must have
+        written one the artefact store took in.
+        """
+        for condition in step.when:
+            said = self._condition_unmet(condition)
+            if said:
+                return said
+        if step.builtin:
+            return ""
+        named = template_placeholders(step.arguments)
+        files = [name for name in FILE_PLACEHOLDERS if name in named]
+        if (files or step.reads) and self.inputs.artefacts is None:
+            return NO_ARTEFACT_STORE
+        for name in files:
+            if name != "artefact_path":
+                why = self._job_file(name)[1]
+                if why:
+                    return why
+        if step.reads and not self._wrote.get(step.reads):
+            if step.reads not in self._entries_of:
+                why = "did not run"
+            elif step.reads in self._format_skipped:
+                why = f"does not run for a sample routed as {self.routed or 'unknown'}"
+            else:
+                why = "wrote none the artefact store took in"
+            return NOTHING_TO_READ.format(step=step.reads, why=why)
+        return ""
+
+    def _condition_unmet(self, condition: StepCondition) -> str:
+        """Why ``condition`` does not hold, or ``""``: a row of the step's answer holds the value.
+
+        Read through the declaration the step's entries recorded
+        (``ToolFacts.values``), whatever the tool: the named value of each of
+        the answer's rows, any one equal to one of the texts. The reason never
+        quotes what the answer holds, which the sample may have written.
+        """
+        wanted = " or ".join(repr(text) for text in condition.equals)
+
+        def unmet(why: str) -> str:
+            return CONDITION_UNMET.format(
+                step=condition.step, value=condition.value, wanted=wanted, why=why
+            )
+
+        entries = self._entries_of.get(condition.step)
+        if entries is None:
+            return unmet(f"{condition.step} did not run")
+        answered = [entry for entry in entries if entry.ok and entry.structured is not None]
+        if not answered:
+            return unmet(f"{condition.step} gave no answer to read")
+        declared = False
+        for entry in answered:
+            facts = facts_of(entry)
+            if facts is None or condition.value not in facts.values:
+                continue
+            declared = True
+            for row in facts.row_values(entry.structured):
+                if any(_fact_text(v) in condition.equals for v in row.get(condition.value, ())):
+                    return ""
+        if not declared:
+            return unmet(f"{condition.step}'s tool declares no value {condition.value!r}")
+        return unmet(f"{condition.step}'s answer holds no such value")
+
+    def _job_file(self, name: str) -> tuple[str, str]:
+        """The artefact id of the job's capture or report, taken in once; else ``""`` and why."""
+        held = self._job_files.get(name)
+        if held is not None:
+            return held
+        report = observed_report(self.inputs.sandbox_report)
+        store = self.inputs.artefacts
+        what = "sandbox capture" if name == "capture_path" else "sandbox report"
+        try:
+            if name == "capture_path":
+                # The report's own words name the capture, so it is taken in
+                # only from this job's capture directory (``take_in_capture``).
+                capture = _capture_named(report) if report else ""
+                held = (store.take_in_capture(capture).id, "") if capture else ("", NO_CAPTURE)
+            elif report:
+                blob = _report_bytes(report)
+                held = (
+                    store.take_in_bytes(blob, SANDBOX_REPORT_NAME, kind="sandbox_report").id,
+                    "",
+                )
+            else:
+                held = ("", NO_SANDBOX_REPORT)
+        except Exception as exc:  # noqa: BLE001 — a file not taken in is a step not run
+            from maljan.pipeline.artefacts import reason_for
+
+            held = ("", FILE_NOT_TAKEN_IN.format(what=what, why=reason_for(exc)))
+        self._job_files[name] = held
+        return held
+
+    def _call_values(self, step: PackStep) -> list[dict[str, str]]:
+        """The values of each call ``step`` makes: one, or one per file the step it reads wrote."""
+        values = self._template_values()
+        named = template_placeholders(step.arguments)
+        for name in ("capture_path", "sandbox_report_path"):
+            if name in named:
+                values[name] = self._job_file(name)[0]
+        if not step.reads:
+            return [values]
+        return [
+            {**values, "artefact_path": str(row["id"]), "artefact_sha256": str(row["sha256"])}
+            for row in self._wrote.get(step.reads, {}).values()
+        ]
 
     def _routed_format(self, identity: dict[str, Any] | None) -> str:
         """What this run routed the sample as, falling back to what identity saw."""
@@ -873,6 +1048,16 @@ class _Pack:
         if step.formats and self.routed not in step.formats:
             return
         if self._over_budget() is not None:
+            return
+        waiting = [c.step for c in step.when if c.step not in self._done]
+        if waiting:
+            # What the step runs on has not answered yet: it waits for it.
+            self.result.schedules[step.id] = (
+                f"in turn: it runs on what {_joined(dict.fromkeys(waiting))} answers, which "
+                "has not run yet"
+            )
+            return
+        if self._unmet(step):
             return
         work = self._early_work(step)
         if work is None:
@@ -913,7 +1098,7 @@ class _Pack:
             return starter(self, step) if starter is not None else None
         if self.server_step is None:
             return None
-        call, values, left = self.server_step, self._template_values(), self._budget_left()
+        call, values, left = self.server_step, self._call_values(step)[0], self._budget_left()
         return lambda: call(step, values, left)
 
     def _beside(self, step: PackStep) -> list[PackStep]:
@@ -977,7 +1162,7 @@ class _Pack:
                 said = f"{type(error).__name__}: {error}" if error is not None else "no answer"
                 value = ServerAnswer(
                     tool=step.called,
-                    args=placeholder_values(step.arguments, self._template_values()),
+                    args=self._shown(step),
                     server=step.server,
                     output=said,
                     ok=False,
@@ -985,10 +1170,9 @@ class _Pack:
                     started_at=time.time() - took,
                     duration_ms=int(took * 1000),
                 )
-            self._record_answer(value, step.called)
+            self._record_answer(value, step.called, step, self._call_values(step)[0])
             return
-        values = self._template_values()
-        shown = placeholder_values(step.arguments, values)
+        shown = self._shown(step)
         spent = self._over_budget()
         if spent is not None:
             self._record_not_run(step.called, shown, spent)
@@ -1000,10 +1184,25 @@ class _Pack:
             return
         if step.starts_after and step.id not in self.result.schedules:
             self.result.schedules[step.id] = "in turn"
-        self.steps_run += 1
-        self._record_answer(self.server_step(step, values, self._budget_left()), step.called)
+        for at, values in enumerate(self._call_values(step)):
+            # Each file a step reads is a call of its own, started within the budget.
+            spent = self._over_budget() if at else None
+            if spent is not None:
+                self._record_not_run(step.called, shown, spent)
+                return
+            self.steps_run += 1
+            self._record_answer(
+                self.server_step(step, values, self._budget_left()), step.called, step, values
+            )
 
-    def _record_answer(self, answer: ServerAnswer, called: str) -> None:
+    def _record_answer(
+        self,
+        answer: ServerAnswer,
+        called: str,
+        step: PackStep | None = None,
+        values: Mapping[str, str] | None = None,
+    ) -> None:
+        """One server call's entry, with the files it read and wrote kept for its stamp."""
         entry = self.recorder.record(
             tool=answer.tool,
             args=answer.args,
@@ -1021,6 +1220,20 @@ class _Pack:
         # server to ask is; one that was made and failed is a failure.
         if not entry.ok and not _was_not_made(entry):
             self._failed(answer.tool, entry)
+        mark: dict[str, Any] = {}
+        read = {name: values[name] for name in FILE_PLACEHOLDERS if values and values.get(name)}
+        if read:
+            mark["read"] = read
+        if answer.wrote:
+            mark["wrote"] = [dict(row) for row in answer.wrote]
+            if step is not None:
+                held = self._wrote.setdefault(step.id, {})
+                for row in mark["wrote"]:
+                    held.setdefault(str(row.get("id")), row)
+        if answer.not_taken:
+            mark["not_taken"] = [dict(row) for row in answer.not_taken]
+        if mark:
+            self._marks[entry.id] = mark
 
     # -- the platform's own steps -------------------------------------------
 
@@ -2695,6 +2908,39 @@ def _command_lines(report: dict[str, Any]) -> list[str]:
             seen.add(command)
             out.append(command)
     return out
+
+
+def _fact_text(value: Any) -> str:
+    """A declared value as a condition compares it: a text as it stands, any other as JSON."""
+    if isinstance(value, str):
+        return value
+    return json.dumps(value, sort_keys=True, ensure_ascii=False, default=str)
+
+
+# The fields of a sandbox report that hold this worker's own paths, not
+# anything the sandbox observed: left out of the report handed to a server.
+_WORKER_LOCAL_FIELDS: tuple[tuple[str, str], ...] = (("network", "pcap_local_path"),)
+
+
+def _report_bytes(report: Mapping[str, Any]) -> bytes:
+    """The sandbox report as the artefact store keeps it: JSON with its keys sorted.
+
+    Without the worker's own paths (:data:`_WORKER_LOCAL_FIELDS`), read from a
+    copy: the report the run stores is never changed.
+    """
+    held = dict(report)
+    for section, name in _WORKER_LOCAL_FIELDS:
+        part = held.get(section)
+        if isinstance(part, Mapping) and name in part:
+            held[section] = {key: value for key, value in part.items() if key != name}
+    return json.dumps(held, sort_keys=True, ensure_ascii=False, default=str).encode("utf-8")
+
+
+def _capture_named(report: Mapping[str, Any]) -> str:
+    """The capture the report names, as written: no file is looked at here."""
+    network = report.get("network")
+    path = network.get("pcap_local_path") if isinstance(network, dict) else None
+    return path if isinstance(path, str) else ""
 
 
 def _capture_path(report: dict[str, Any]) -> str:

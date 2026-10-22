@@ -379,7 +379,10 @@ class LedgerEntry(BaseModel):
         description=(
             "The triage pack step that wrote the entry, where an operator declared it "
             "(core.pack_steps): {'v': 1, 'id', and where set 'label' (what the pack's line "
-            "calls it) and 'renderer' (how the pack's line shows its answer)}. None on an "
+            "calls it), 'renderer' (how the pack's line shows its answer), 'wrote' (each file "
+            "the call wrote that the job's artefact store took in: 'id', 'sha256', 'size', "
+            "'name'), 'not_taken' (each it did not: 'name', 'reason') and 'read' (the artefact "
+            "id of each file placeholder the call was handed, pipeline.artefacts)}. None on an "
             "entry of a step as shipped, and on every other entry, which the pack reads by "
             "its shipped steps. Read later from here, never from the reading process's "
             "settings."

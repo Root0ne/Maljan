@@ -650,14 +650,34 @@ STAGING_DONE = "done"
 STAGING_FAILED = "failed"
 
 
-def staging_record(server: str, *, transport: str, url: str, state: str) -> dict[str, Any]:
-    """One staging of the sample to a tool server, as the run records it: never the URL whole."""
-    return {
+# What a staging other than the sample's own sent, by the word its record
+# names it with (``what``), as the upload line says it. A record that names
+# nothing staged the sample.
+STAGED_FILES: dict[str, str] = {
+    "artefact": "a file a tool wrote out of the sample",
+    "capture": "the sandbox's packet capture",
+    "sandbox_report": "the sandbox report",
+}
+
+
+def staging_record(
+    server: str, *, transport: str, url: str, state: str, what: str = ""
+) -> dict[str, Any]:
+    """One staging to a tool server, as the run records it: never the URL whole.
+
+    ``what`` names a file other than the sample (one of :data:`STAGED_FILES`,
+    from the job's artefact store); a staging of the sample names nothing, so
+    its record reads as it always did.
+    """
+    record = {
         "server": str(server),
         "transport": str(transport),
         "host": host_of(url),
         "state": state,
     }
+    if what and what != "sample":
+        record["what"] = str(what)
+    return record
 
 
 def _upload_row(by: str, source: str, transport: str, host: str, why: str) -> dict[str, Any]:
@@ -697,14 +717,15 @@ def _sandbox_uploads(uploads: Iterable[Mapping[str, Any]]) -> list[dict[str, Any
 
 
 def _staging_uploads(stagings: Iterable[Mapping[str, Any]]) -> list[dict[str, Any]]:
-    """One row per tool server the sample was staged to, with the host of its block's address."""
-    rows: dict[tuple[str, str], dict[str, Any]] = {}
+    """One row per tool server and what was staged to it, with the host of its block's address."""
+    rows: dict[tuple[str, str, str], dict[str, Any]] = {}
     for staging in stagings:
         server = str(staging.get("server") or "")
         if not server:
             continue
         host = str(staging.get("host") or "")
-        key = (server, host)
+        what = str(staging.get("what") or "")
+        key = (server, host, what)
         if key not in rows:
             rows[key] = _upload_row(
                 BY_STAGING,
@@ -713,6 +734,8 @@ def _staging_uploads(stagings: Iterable[Mapping[str, Any]]) -> list[dict[str, An
                 host,
                 f"the address of tool server {server} names no host",
             )
+            if what:
+                rows[key]["what"] = what
         rows[key]["calls"] += 1
         rows[key]["failed"] += 0 if staging.get("state") == STAGING_DONE else 1
     return list(rows.values())
@@ -1228,7 +1251,9 @@ def stage_agents(stages: Any) -> list[str]:
 
 def job_sample_paths(container: Any) -> list[str]:
     """Every path the job's sample was given under: the worker's copy, the path each
-    server that declares a mount sees it at, and each static provider's mirror."""
+    server that declares a mount sees it at, and each static provider's mirror; and
+    every path a file of the job's artefact store was handed to a server at
+    (``artefact_paths``), since a file carved out of the sample is as hostile as it."""
     paths: list[str] = []
     held = getattr(container, "sample_path", None)
     if isinstance(held, str):
@@ -1237,6 +1262,9 @@ def job_sample_paths(container: Any) -> list[str]:
         mapping = getattr(container, name, None)
         if isinstance(mapping, Mapping):
             paths.extend(str(value) for value in mapping.values() if isinstance(value, str))
+    handed = getattr(container, "artefact_paths", None)
+    if isinstance(handed, list):
+        paths.extend(str(value) for value in handed if isinstance(value, str))
     return paths
 
 
@@ -1457,8 +1485,10 @@ def _upload_line(row: Mapping[str, Any], code: Callable[[str], str]) -> str:
         )
     server = _server(str(row.get("source") or ""), code)
     if by == BY_STAGING:
+        what = str(row.get("what") or "")
+        sent = STAGED_FILES.get(what, f"a file of the job ({code(what)})") if what else "the sample"
         return (
-            f"Sample upload: the sample was staged {times} to {server} ({_how(row)}){at} through "
+            f"Sample upload: {sent} was staged {times} to {server} ({_how(row)}){at} through "
             f"its put_sample tools, for its tools to read{failure}{untold}."
         )
     return (

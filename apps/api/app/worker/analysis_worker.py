@@ -478,6 +478,51 @@ def mirror_server_samples(
     return written, paths
 
 
+def place_server_file(
+    container: Any,
+    server_key: str,
+    source: Path,
+    sha256: str,
+    name: str,
+    *,
+    job_id: str,
+    held: list[Path],
+) -> str | None:
+    """Copy a file of the job's artefact store for ``server_key``'s mount; the path it opens it at.
+
+    The file reaches a server that declares a ``sample_mount`` as the sample
+    does (:func:`mirror_server_samples`): a private copy under the server's
+    ``work_dir`` of the samples directory, named by its digest, this job and
+    its name's suffix, held by this job and released with the job's other
+    mirrors (``held``). The server's mount stays as the deployment made it
+    (read-only where it is). ``None`` for a server that declares no mount, or
+    a copy that failed, which is logged.
+    """
+    from maljan.providers.base import MirrorSpec, path_in_server
+
+    from app.worker import sample_files
+
+    servers = getattr(getattr(container.config, "mcp", None), "servers", None) or {}
+    cfg = servers.get(server_key)
+    if cfg is None or not str(getattr(cfg, "sample_mount", "") or ""):
+        return None
+    try:
+        spec = MirrorSpec.of(cfg)
+        host = sample_files.work_dir(spec.work_subdir) / sample_files.copy_name(
+            sha256, sample_files.safe_suffix(name), canonical_job_id(job_id)
+        )
+        sample_files.held_copy(Path(source), host, job_id=canonical_job_id(job_id))
+        held.append(host)
+    except Exception as exc:  # noqa: BLE001 - a file not placed is said by the step
+        logger.warning(
+            "Failed to place an artefact for a tool server's declared mount (%s).",
+            type(exc).__name__,
+            extra={"job_id": job_id, "component": "sample-mirror"},
+        )
+        return None
+    return path_in_server(spec, host)
+
+
 def global_mirror_path(paths: dict[str, str], static_settings: Any) -> str | None:
     """``state["static_sample_path"]``: the globally configured provider's mirror.
 
@@ -3292,6 +3337,12 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
         # working". Mid-pipeline phases would require LangGraph
         # callback wiring.
         await _publish_event(redis_conn, job_id, "phase_change", {"phase": "analyzing"})
+        # A file of the job's artefact store reaches a server that declares a
+        # mount as the sample does: the worker's copy under that mount, held by
+        # this job and released with its mirrors when it ends.
+        app.container.place_for_server = functools.partial(
+            place_server_file, app.container, job_id=job_id, held=host_mirrors
+        )
         try:
             # Run the pipeline as a task so the heartbeat poller can cancel
             # it when the user cancels the job.

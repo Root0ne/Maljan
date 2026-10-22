@@ -42,6 +42,10 @@ DEV_FORMAT_TOOLS: dict[str, frozenset[str]] = {
     "apk_info": frozenset({"apk", "dex"}),
     "document_info": frozenset({"ole2", "ooxml", "pdf", "doc", "docx", "xls", "xlsx", "rtf"}),
 }
+# ``rtf`` stood in the table though the router never gave it; it is routed now
+# (by its header), and no shipped parser reads it: ``document_info`` reads OLE2,
+# OOXML and PDF. The table is read as it reads today's formats, without it.
+NEWLY_ROUTED_UNREAD = frozenset({"rtf"})
 # Every format the router gives a sample, an unknown one, none, and spellings
 # the reading lowercases and trims into a routed one.
 FORMATS = sorted({*routed_formats(), "", "unknown", "PE", " Mach-O ", "  pe  ", "OLE2"})
@@ -52,6 +56,8 @@ def _dev_needed_for(tool: str, file_type: str, server: str) -> bool:
     if not declared_reading.ships_tool(f"mcp:{server}", tool):
         return True
     formats = DEV_FORMAT_TOOLS.get(tool)
+    if formats is not None:
+        formats = formats - NEWLY_ROUTED_UNREAD
     routed = str(file_type or "").strip().lower()
     if formats is None or not routed or routed == "unknown":
         return True
@@ -99,10 +105,14 @@ def test_every_built_in_tool_and_routed_format_reads_as_the_table_did(in_force: 
 
 
 def test_the_table_s_other_names_are_ones_the_router_never_gives() -> None:
-    """``macho``, ``doc``, ``docx``, ``xls``, ``xlsx`` and ``rtf`` were never a sample's format."""
+    """``macho``, ``doc``, ``docx``, ``xls`` and ``xlsx`` were never a sample's format.
+
+    ``rtf`` was not either, and is routed now (``NEWLY_ROUTED_UNREAD``).
+    """
     named = {name for formats in DEV_FORMAT_TOOLS.values() for name in formats}
     never_routed = named - set(routed_formats())
-    assert never_routed == {"macho", "doc", "docx", "xls", "xlsx", "rtf"}
+    assert never_routed == {"macho", "doc", "docx", "xls", "xlsx"}
+    assert NEWLY_ROUTED_UNREAD <= set(routed_formats())
 
 
 def test_the_shipped_declarations_carry_the_table_s_routed_names_and_nothing_else() -> None:
@@ -114,7 +124,10 @@ def test_the_shipped_declarations_carry_the_table_s_routed_names_and_nothing_els
             if facts.routed_formats:
                 found.setdefault(str(source.source), {})[tool] = frozenset(facts.routed_formats)
     assert found == {
-        "mcp:analysis": {tool: formats & routed for tool, formats in DEV_FORMAT_TOOLS.items()}
+        "mcp:analysis": {
+            tool: (formats & routed) - NEWLY_ROUTED_UNREAD
+            for tool, formats in DEV_FORMAT_TOOLS.items()
+        }
     }
 
 
