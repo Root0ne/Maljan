@@ -112,6 +112,7 @@ def fetch_bulk_function_hashes(
     shared: bool = True,
     walk_budget: float = 0.0,
     deadline: float | None = None,
+    guard: Any = None,
 ) -> FunctionHashes:
     """Return ``(func_name, func_hash)`` for the binary's meaningful functions.
 
@@ -135,9 +136,16 @@ def fetch_bulk_function_hashes(
     instant, where the pipeline has one), or a page count a caller sets
     (``max_pages``). With neither budget nor deadline the result says the walk
     was unbounded (``unbounded``); a page that names nothing new still ends it.
+    Every request is one call held by the job's guard for this server
+    (``guard``, a :class:`~maljan.providers.server_guard.ServerGuard`; none,
+    sent as it is), so the walk counts toward its breaker and waits for its
+    call cap as the agents' calls do; a request the resting server is not
+    sent ends the walk, and the result says so.
     Fail-safe: any error yields no hashes, with ``unavailable`` saying why
     (:class:`FunctionHashes`), never an empty read that looks like no matches.
     """
+    from maljan.providers.server_guard import ServerResting, guarded_http
+
     try:
         import httpx
     except Exception as exc:  # pragma: no cover - httpx is a hard dep in practice
@@ -155,7 +163,8 @@ def fetch_bulk_function_hashes(
             program_name_from_load,
         )
 
-        with httpx.Client(timeout=timeout, headers=headers) as http:
+        with httpx.Client(timeout=timeout, headers=headers) as raw:
+            http = guarded_http(raw, guard, base)
             # Best-effort load + activate + analyse; another pre-pass may have
             # done this. The activate step is not optional cleanup: a load only
             # becomes Ghidra's *current* program when nothing is current yet, so
@@ -199,6 +208,8 @@ def fetch_bulk_function_hashes(
                 try:
                     loaded = http.post(f"{base}/load_program", json={"file": file_path})
                     name = program_name_from_load(loaded.text)
+                except ServerResting:
+                    raise
                 except Exception:  # noqa: BLE001 - a transport failure is the same as no load
                     name = None
                 if not name:
@@ -219,6 +230,8 @@ def fetch_bulk_function_hashes(
                         analysed = http.post(f"{base}/run_analysis", json={})
                         refused = _step_refusal(analysed)
                         step = "run_analysis"
+                except ServerResting:
+                    raise
                 except Exception as exc:  # noqa: BLE001 - the current program is now unknown
                     return unavailable_hashes(
                         f"could not switch Ghidra to {name} ({type(exc).__name__}); skipping "
@@ -288,7 +301,10 @@ def fetch_bulk_function_hashes(
                     # What the pages before it gave is kept: a later page that
                     # failed cuts the read there, it does not undo it.
                     out.cut = (
-                        f"the page at offset {offset} failed ({type(exc).__name__}: "
+                        f"the page at offset {offset} was not sent: {exc}; the functions "
+                        "past it were not read"
+                        if isinstance(exc, ServerResting)
+                        else f"the page at offset {offset} failed ({type(exc).__name__}: "
                         f"{str(exc)[:160]}); the functions past it were not read"
                     )
                     break
@@ -353,6 +369,9 @@ def fetch_bulk_function_hashes(
             file_path,
         )
         return out
+    except ServerResting as exc:
+        # Not "no hashes": a walk the guard stopped says so, in the guard's words.
+        return unavailable_hashes(f"{exc}; the walk was not sent, so no hashes were read.")
     except Exception as exc:  # fail-safe
         return unavailable_hashes(
             f"the read failed ({type(exc).__name__}: {exc}); continuing without hashes."
@@ -369,15 +388,19 @@ def _opened_for_hashes(
     ``get_bulk_function_hashes`` returns the hashes of whichever binary the
     container looked at first. The opener notes a path only once its declared
     select and analysis answered, so a path it did not note is not known to be
-    current, and attribution is skipped with a warning.
+    current, and attribution is skipped with a warning. A request the job's
+    guard did not send raises :class:`ServerResting` for the walk to state.
     """
     from maljan.providers.sample_open import SampleOpener
+    from maljan.providers.server_guard import ServerResting
     from maljan.providers.static.ghidra.program import rest_tool_call
     from maljan.providers.static.ghidra.provider import sample_notes_of
 
     opener = SampleOpener(key, spec, sample_notes_of(notes))
     try:
         answer = opener.open(file_path, rest_tool_call(http, base), held=file_path)
+    except ServerResting:
+        raise
     except Exception as exc:  # noqa: BLE001 - a transport failure is the same as no load
         answer = f"{type(exc).__name__}: {exc}"
     if opener.name_of(file_path) is not None:
