@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   readEnvNames,
   readErrorPatterns,
+  readCallTimeout,
   readLauncherDepth,
   readMount,
   readPrefixes,
@@ -185,6 +186,16 @@ describe("the server editor's declaration readers", () => {
     expect(readLauncherDepth(" ")).toEqual({ value: null, error: null });
     expect(readLauncherDepth("-1").error).toMatch(/whole number of levels/);
     expect(readLauncherDepth("1.5").error).toMatch(/whole number of levels/);
+  });
+
+  it("reads the call timeout as seconds from 0, or unset when empty", () => {
+    expect(readCallTimeout("45")).toEqual({ value: 45, error: null });
+    expect(readCallTimeout("2.5")).toEqual({ value: 2.5, error: null });
+    expect(readCallTimeout("0")).toEqual({ value: 0, error: null });
+    expect(readCallTimeout("  ")).toEqual({ value: null, error: null });
+    for (const held of ["-", "-1", "1.", "abc", "1e3"]) {
+      expect(readCallTimeout(held).error).toMatch(/number of seconds/);
+    }
   });
 
   it("reads auto-name prefixes ending in _ or .", () => {

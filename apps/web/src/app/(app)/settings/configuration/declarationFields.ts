@@ -90,6 +90,17 @@ export function readLauncherDepth(text: string): Read<number | null> {
   return ok(Number(value));
 }
 
+/** A call's deadline in seconds: a number from 0 (0: no deadline of its own),
+ *  or empty to leave it unset so the deployment's floor applies. */
+export function readCallTimeout(text: string): Read<number | null> {
+  const value = text.trim();
+  if (value === "") return ok(null);
+  if (!/^\d+(\.\d+)?$/.test(value)) {
+    return bad("a number of seconds from 0 (0: no deadline of its own), or empty");
+  }
+  return ok(Number(value));
+}
+
 /** Auto-name prefixes: letters and digits ending in `_` or `.` (FUN_, fcn.). */
 export function readPrefixes(text: string): Read<string[]> {
   const prefixes = splitWords(text);
