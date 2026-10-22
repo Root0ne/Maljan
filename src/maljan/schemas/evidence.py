@@ -560,7 +560,9 @@ def build_entry(
     ``declared_name`` is the name the tool's source declares it under (the original,
     where the request offered it renamed): the facts stored with the entry are
     the declaration of that name, found exactly, so a tool a server natively
-    spells ``<its key>__x`` is never read as its tool ``x``.
+    spells ``<its key>__x`` is never read as its tool ``x``. Where it differs
+    from ``tool`` it is kept on that record (``core.declared_reading.
+    with_declared_name``), the one place a later reader takes it from.
     """
     safe_args = dict(args) if isinstance(args, dict) else {}
     full = str(output or "")
@@ -644,13 +646,25 @@ def _facts_at_write(
 ) -> dict[str, Any] | None:
     """The tool's declared facts under ``source``, resolved now, to be stored with the entry.
 
-    With the hints its own server gave it, where it gave any.
+    With the hints its own server gave it, where it gave any, and the name
+    the source declares the tool under, where the request offered it renamed.
     """
     if not source:
         return None
-    from maljan.core.declared_reading import facts_record, with_hints
+    from maljan.core.declared_reading import (
+        FACTS_VERSION,
+        facts_record,
+        with_declared_name,
+        with_hints,
+    )
 
-    return with_hints(facts_record(source, tool, declared_name=declared_name), hints)
+    record = facts_record(source, tool, declared_name=declared_name)
+    if record is None and declared_name and declared_name != tool:
+        # Settings that could not be read still leave the call's original
+        # name, which only its handle knew: kept on a record that declares
+        # nothing, so the entry reads as an undeclared tool by that name.
+        record = {"v": FACTS_VERSION}
+    return with_hints(with_declared_name(record, tool, declared_name), hints)
 
 
 def _declares_no_kind(facts: dict[str, Any] | None) -> bool:

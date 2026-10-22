@@ -108,6 +108,11 @@ STORED_FACT_FIELDS: tuple[str, ...] = (
 # :data:`SERVER_HINTS`), beside what its source declares. Not a declaration:
 # read only by the tool-effects part, for what no declaration says.
 HINTS_KEY = "hints"
+# The key of the stored record that keeps the name the tool's source declares
+# it under, where the request offered it under another (a registry's
+# ``<server>__<tool>``). Written only for a call made through that server's own
+# handle, which knew the original name; never inferred from the offered name.
+DECLARED_NAME_KEY = "declared_name"
 # The MCP tool annotations a server may give, each a yes or no.
 SERVER_HINTS: tuple[str, ...] = (
     "readOnlyHint",
@@ -275,6 +280,36 @@ def with_hints(record: dict[str, Any] | None, hints: Any) -> dict[str, Any] | No
     if record is None or not given:
         return record
     return {**record, HINTS_KEY: given}
+
+
+def with_declared_name(
+    record: dict[str, Any] | None, tool: str, declared_name: str | None
+) -> dict[str, Any] | None:
+    """``record`` with the name its source declares ``tool`` under, where that is another one.
+
+    Kept under :data:`DECLARED_NAME_KEY` only for a tool the request offered
+    renamed; a record of a tool offered under its own name, and one that could
+    not be written (``None``), are as they were.
+    """
+    if record is None or not declared_name or declared_name == tool:
+        return record
+    return {**record, DECLARED_NAME_KEY: declared_name}
+
+
+def declared_name(entry: Any) -> str:
+    """The name an entry's tool is declared under by the source it recorded.
+
+    The name its call recorded as the original (:func:`with_declared_name`),
+    else the name it was called by. No ``<server>__`` prefix is ever taken off
+    the called name: a tool a server natively spells ``<its key>__x``, or one
+    nothing declared, is read as itself.
+    """
+    held = _field(entry, "facts")
+    if isinstance(held, Mapping):
+        original = held.get(DECLARED_NAME_KEY)
+        if isinstance(original, str) and original:
+            return original
+    return str(_field(entry, "tool") or _field(entry, "tool_name") or "")
 
 
 def server_hints(entry: Any) -> dict[str, bool]:
