@@ -1516,6 +1516,37 @@ class SampleOpenConfig(BaseModel):
         return self
 
 
+class PrepassToolsConfig(BaseModel):
+    """Which of a server's tools the platform calls itself, once per job, before a model turn.
+
+    Read when the server is the one the generic static provider drives
+    (``static.generic.server``, and radare2's own block): ``call_graph`` names
+    the tool that answers the opened program's whole call graph, read for the
+    priority-functions pre-pass (``StaticProvider.call_graph``);
+    ``function_hashes`` the tool that answers a hash per function, read for
+    function-hash attribution (``StaticProvider.function_hashes``); and
+    ``anti_analysis`` the tool that scans the program for anti-analysis code,
+    read for the triage pack's scan (``StaticProvider.anti_analysis_scan``).
+    Each answer is read by the tool's own declaration (``tool_facts``: its
+    ``rows``, ``values``, ``places`` and ``arguments``;
+    ``providers.static.declared_prepass``). An empty name declares nothing,
+    and the provider answers ``None`` for that pass as it does undeclared.
+    """
+
+    call_graph: str = ""
+    function_hashes: str = ""
+    anti_analysis: str = ""
+
+    @field_validator("call_graph", "function_hashes", "anti_analysis")
+    @classmethod
+    def _names_a_tool(cls, value: str, info: ValidationInfo) -> str:
+        if not value:
+            return value
+        from maljan.core.tool_declarations import check_tool_name
+
+        return check_tool_name(value, f"prepass_tools.{info.field_name}")
+
+
 # Ghidra's own declaration: ``load_program`` imports the file afresh in the
 # place of an analysed program of the same name, ``switch_program`` makes an
 # open program current, and ``run_analysis`` runs its auto-analysis. Data like
@@ -1638,11 +1669,26 @@ class MCPServerConfig(BaseModel):
     # check (``analysis.isolation.isolation_part``). ``None`` (every built-in)
     # declares no launcher.
     launcher_depth: Annotated[int, Field(ge=0)] | None = None
+    # Which of the server's tools the platform calls itself before a model turn
+    # (``PrepassToolsConfig``). ``None`` (every built-in) declares none.
+    prepass_tools: PrepassToolsConfig | None = None
 
     @field_validator("roles")
     @classmethod
     def _roles_are_words(cls, value: list[str]) -> list[str]:
         return check_roles(value)
+
+    @field_validator("prepass_tools")
+    @classmethod
+    def _no_tool_is_none_declared(
+        cls, value: PrepassToolsConfig | None
+    ) -> PrepassToolsConfig | None:
+        # Three empty names declare nothing: held as unset, so no digest moves.
+        if value is not None and not (
+            value.call_graph or value.function_hashes or value.anti_analysis
+        ):
+            return None
+        return value
 
     @field_validator("required_env_allow", "variable_names")
     @classmethod

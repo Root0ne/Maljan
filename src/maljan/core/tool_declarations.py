@@ -1265,6 +1265,7 @@ DECLARATION_FIELDS: tuple[str, ...] = (
     "tool_facts",
     "credential_bootstrap",
     "launcher_depth",
+    "prepass_tools",
 )
 # The declaration fields a settings snapshot records only where an operator
 # set them (the shipped values are named by a digest instead).

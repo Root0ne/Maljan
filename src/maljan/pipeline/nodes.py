@@ -1832,6 +1832,7 @@ def _function_matches_step(container: ServiceContainer, state: AnalysisState) ->
         job = StaticJobContext(
             mirror_sample_path=str(static_path),
             sha256=sha256,
+            job_key=container.job_key() if hasattr(container, "job_key") else "",
             deadline=time.monotonic() + budget if budget > 0 else None,
         )
         functions = provider.function_hashes(job)
@@ -1907,7 +1908,10 @@ def _anti_analysis_step(container: ServiceContainer, state: AnalysisState) -> An
         try:
             provider = container.get_static_provider(provider_id)
             scan = provider.anti_analysis_scan(
-                StaticJobContext(mirror_sample_path=str(path) if path else None),
+                StaticJobContext(
+                    mirror_sample_path=str(path) if path else None,
+                    job_key=container.job_key() if hasattr(container, "job_key") else "",
+                ),
                 notes=getattr(container, "sample_notes", None),
                 call_budget=provider.call_budget(cfg),
             )

@@ -15,6 +15,7 @@
 import type {
   CredentialBootstrapEntry,
   ErrorPatternEntry,
+  PrepassToolsEntry,
   ToolDeclarationFields,
   ToolFactsEntry,
 } from "@/types/settings";
@@ -314,3 +315,14 @@ export const DECLARATION_PANEL_COPY =
   "each tool gives, what it needs, what it does, and how a sample is opened. A " +
   "built-in ships its own; a server you add needs none to work. See the " +
   "configuration guide for every field.";
+
+/** The staged `prepass_tools` after one name changes: null once every name is
+ *  empty, so nothing is declared (as the API holds three empty names). */
+export function withPrepass(
+  held: PrepassToolsEntry,
+  key: keyof PrepassToolsEntry,
+  value: string,
+): PrepassToolsEntry | null {
+  const next = { ...held, [key]: value };
+  return Object.values(next).some((name) => name !== "") ? next : null;
+}

@@ -261,6 +261,17 @@ export interface McpServerEntry {
    *  the server are a launcher that does not read the sample, or null when
    *  none is declared (`MCPServerConfig.launcher_depth`). */
   launcher_depth?: number | null;
+  /** Which of the server's tools the platform calls itself before a model
+   *  turn, or null when none is declared (`MCPServerConfig.prepass_tools`). */
+  prepass_tools?: PrepassToolsEntry | null;
+}
+
+/** The tools a server declares for the passes the platform makes itself; an
+ *  empty name declares nothing for that pass. */
+export interface PrepassToolsEntry {
+  call_graph: string;
+  function_hashes: string;
+  anti_analysis: string;
 }
 
 /** A server's declared credential bootstrap, as the API stores it. */
