@@ -54,6 +54,10 @@ class EvidenceEntry(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
     remediation: Mapped[str | None] = mapped_column(Text, nullable=True)
     duration_ms: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    # How long the call waited for a free slot at its server before it was
+    # sent; ``duration_ms`` runs from the moment it was sent. The chain digest
+    # seals it when non-zero.
+    waited_ms: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
     seq: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
 
     args: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
