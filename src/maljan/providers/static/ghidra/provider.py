@@ -12,6 +12,7 @@ analyst's loop (``open_sample``), the call graph the sink pre-pass ranks
 
 from __future__ import annotations
 
+import threading
 from typing import TYPE_CHECKING, Any
 
 from langchain_core.tools import BaseTool
@@ -366,6 +367,15 @@ class GhidraStaticProvider(StaticProvider):
         # The tools withheld because they could not be made to carry the job's
         # program on a shared Ghidra, each with its reason.
         self.withheld_tools: dict[str, str] = {}
+        # The job's breaker and call cap for Ghidra (``server_guard``), built on
+        # first use and shared by the agents' calls and this provider's own
+        # walks; the rests it gives go to the job's hook once an attach names
+        # one, and are kept here (and announced on the job's sink) before.
+        self._guard: Any = None
+        self._guard_lock = threading.Lock()
+        self._rest_hook: Any = None
+        self.rests: list[dict[str, Any]] = []
+        self.event_sink: Any = None
 
     @classmethod
     def from_settings(cls, cfg: Settings) -> GhidraStaticProvider:
@@ -426,6 +436,8 @@ class GhidraStaticProvider(StaticProvider):
         and attaches fresh for the new job, rather than leaking the old one
         silently or refusing the new attach outright.
         """
+        if job.on_server_rest is not None:
+            self._rest_hook = job.on_server_rest
         if self._toolkit is not None:
             if job == self._job:
                 return
@@ -434,6 +446,9 @@ class GhidraStaticProvider(StaticProvider):
                 "already attached; closing the stale toolkit before re-attaching."
             )
             self._close_toolkit()
+            # Another job's rests are not this one's.
+            with self._guard_lock:
+                self._guard = None
         self._job = job
         if not self._cfg.enabled:
             logger.info("Ghidra MCP is disabled in config.")
@@ -460,16 +475,9 @@ class GhidraStaticProvider(StaticProvider):
                 explicit_call_timeout=explicit_call_timeout(settings),
                 categories=categories_of(getattr(self._cfg, "tool_facts", None)),
                 # The breaker and call cap every other tool server's calls go
-                # through; none where no settings can be read (a probe, a test).
-                guard=guard_from_settings(
-                    self.id,
-                    settings,
-                    on_open=job.on_server_rest,
-                    sample_open=getattr(self._cfg, "sample_open", None),
-                    block=self._cfg,
-                )
-                if settings is not None
-                else None,
+                # through, the one this provider's walks are held by too; none
+                # where no settings can be read (a probe, a test).
+                guard=self.server_guard(),
             )
 
             self._run_async(client.initialize())
@@ -511,6 +519,40 @@ class GhidraStaticProvider(StaticProvider):
         self._all_tools = self._pin_load_program_path(self._reading_errors(toolkit.get_tools()))
         self.tools = list(self._all_tools)
         logger.info("Initialized Ghidra MCP tools: %d.", len(self.tools))
+
+    def server_guard(self) -> Any:
+        """This job's breaker and call cap for Ghidra, or ``None`` where no settings can be read.
+
+        One per provider, and the provider is the job's: the agents' calls
+        (its HTTP client) and its own walks over the REST API (the triage
+        pass, the function-hash read) are held by the same breaker, so a rest
+        either side earned holds the other. The cap counts each apart: the
+        agents' calls take their loop's slots, and the walks, made in a worker
+        thread, take the guard's own thread slots (``ServerGuard.held``).
+        """
+        with self._guard_lock:
+            if self._guard is None:
+                settings = get_settings_or_none()
+                if settings is not None:
+                    self._guard = guard_from_settings(
+                        self.id,
+                        settings,
+                        on_open=self._rested,
+                        sample_open=getattr(self._cfg, "sample_open", None),
+                        block=self._cfg,
+                    )
+            return self._guard
+
+    def _rested(self, record: dict[str, Any]) -> None:
+        """One rest the guard gave: to the job's hook once an attach named one, else kept here."""
+        hook = self._rest_hook
+        if hook is not None:
+            hook(record)
+            return
+        from maljan.pipeline.events import emit_tool_server_rested
+
+        self.rests.append(dict(record))
+        emit_tool_server_rested(self.event_sink, record)
 
     def _reading_errors(self, tools: Any) -> list[Any]:
         """The tools, each answer held against this block's declared error patterns.
@@ -887,7 +929,10 @@ class GhidraStaticProvider(StaticProvider):
         elif not path:
             reason = GHIDRA_HAS_NO_COPY
         else:
+            if job.on_server_rest is not None:
+                self._rest_hook = job.on_server_rest
             return GhidraPasses(
+                guard=self.server_guard(),
                 base_url=str(self._cfg.url),
                 token=self._cfg.auth_token.get_secret_value(),
                 sample_path=str(path),
@@ -910,6 +955,8 @@ class GhidraStaticProvider(StaticProvider):
 
         if not self.capabilities.provides_function_hashes or not job.mirror_sample_path:
             return []
+        if job.on_server_rest is not None:
+            self._rest_hook = job.on_server_rest
         return fetch_bulk_function_hashes(
             base_url=self._cfg.url,
             auth_token=self._cfg.auth_token.get_secret_value(),
@@ -924,6 +971,8 @@ class GhidraStaticProvider(StaticProvider):
             walk_budget=self.call_budget(get_settings_or_none()),
             # And the deadline of the stage or job it runs in, where there is one.
             deadline=job.deadline,
+            # Each page held by the guard the agents' calls go through.
+            guard=self.server_guard(),
         )
 
     async def probe(self) -> ProviderProbe:

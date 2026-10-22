@@ -42,7 +42,9 @@ code.
 
 A pass that cannot run says why: the pack records that sentence rather than
 leaving the pass out. A request Ghidra did not answer, or answered with an
-error, stops the pass, and the entry states Ghidra's own words.
+error, stops the pass, and the entry states Ghidra's own words. Every request
+is held by the job's guard for Ghidra, the agents' own; one it does not send
+while Ghidra rests stops the pass too, and the entry states the guard's.
 """
 
 from __future__ import annotations
@@ -227,6 +229,9 @@ class GhidraPasses:
     # answer names as its server, and the formats the scan reads.
     provider: str = field(default="ghidra", kw_only=True)
     formats: frozenset[str] = field(default=GHIDRA_FORMATS, kw_only=True)
+    # The job's breaker and call cap for this server (``providers.server_guard``),
+    # the one the agents' calls go through; ``None`` sends every request as it is.
+    guard: Any = field(default=None, repr=False, kw_only=True)
     _http: Any = field(default=None, init=False, repr=False)
     _program: str = field(default="", init=False)
     _image_base: int | None = field(default=None, init=False)
@@ -255,12 +260,20 @@ class GhidraPasses:
                 self._http = None
 
     def _request(self, method: str, path: str, what: str, **kwargs: Any) -> Any:
-        """One request, answered as parsed JSON; a Ghidra that did not answer raises."""
+        """One request, answered as parsed JSON; a Ghidra that did not answer raises.
+
+        Held by the job's guard for this server: a request the resting server
+        is not sent fails the pass with the guard's sentence.
+        """
         import httpx
 
+        from maljan.providers.server_guard import ServerResting, guarded_http
+
         try:
-            response = self._client().request(method, path, **kwargs)
+            response = guarded_http(self._client(), self.guard).request(method, path, **kwargs)
             response.raise_for_status()
+        except ServerResting as exc:
+            raise GhidraPassFailed(f"{exc}; {what} was not sent") from exc
         except httpx.HTTPStatusError as exc:
             raise GhidraPassFailed(
                 f"Ghidra answered HTTP {exc.response.status_code} to {what}"
@@ -298,6 +311,7 @@ class GhidraPasses:
         this pass always did.
         """
         from maljan.providers.sample_open import SampleNotes, SampleOpener, declared
+        from maljan.providers.server_guard import ServerResting
         from maljan.providers.static.ghidra.program import (
             SWITCH_PARAM,
             SWITCH_PATH,
@@ -315,6 +329,9 @@ class GhidraPasses:
                     timeout=None,
                 )
             except GhidraPassFailed as failure:
+                if isinstance(failure.__cause__, ServerResting):
+                    # Not a refusal of the open: the guard's sentence ends the pass.
+                    raise
                 return json.dumps({"tool_error": "request_failed", "detail": str(failure)})
             return json.dumps(answer) if isinstance(answer, (dict, list)) else str(answer)
 

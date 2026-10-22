@@ -22,7 +22,10 @@ fails at the transport the server rests again.
 once for this job; the rest wait. A semaphore belongs to the loop that awaits
 it, so there is one per event loop — a handle is also per loop, and for a
 stdio server that is one child process per loop, which is the thing being
-protected.
+protected. Calls made outside any loop — a provider's own walk over the
+server's API in a worker thread (:meth:`ServerGuard.held`) — take the
+guard's own thread slots, ``max_concurrent_calls`` of them apart from each
+loop's, and the same breaker: a rest either side earned holds the other.
 
 Every opening is recorded for the run summary and announced as an event.
 """
@@ -34,7 +37,7 @@ import contextlib
 import json
 import threading
 import time
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncIterator, Callable, Iterator
 from typing import Any
 
 from maljan.core.logger import logger
@@ -90,6 +93,19 @@ def transport_failure(exc: BaseException) -> str | None:
     return None
 
 
+class ServerResting(Exception):
+    """A call outside an event loop that a resting server's guard did not send.
+
+    The exception's text is the sentence a call through :meth:`ServerGuard.admit`
+    is answered with, for a walk to state; ``answer`` is that authored tool error.
+    """
+
+    def __init__(self, tool: str, message: str) -> None:
+        super().__init__(message)
+        self.tool = tool
+        self.answer = _resting_answer(tool, message)
+
+
 class ServerGuard:
     """The breaker and the concurrency cap for one server, for one job."""
 
@@ -135,6 +151,12 @@ class ServerGuard:
         self._reopen_at: float | None = None
         self._trial_in_flight = False
         self._semaphores: dict[int, tuple[asyncio.AbstractEventLoop, asyncio.Semaphore]] = {}
+        # The slots of the calls made outside any loop (``held``).
+        self._thread_slots = (
+            threading.BoundedSemaphore(self.max_concurrent_calls)
+            if self.max_concurrent_calls > 0
+            else None
+        )
 
     # -- the call deadline ---------------------------------------------------
 
@@ -222,6 +244,11 @@ class ServerGuard:
         own outcome decides whether the server rests again. Every other call
         is refused until the trial has answered.
         """
+        message, trial = self._admission()
+        return (_resting_answer(tool, message) if message is not None else None), trial
+
+    def _admission(self) -> tuple[str | None, bool]:
+        """:meth:`admit`'s decision, with a refusal as its sentence."""
         with self._lock:
             if self._reopen_at is None:
                 return None, False
@@ -237,11 +264,8 @@ class ServerGuard:
             "until that call is answered"
         )
         return (
-            _resting_answer(
-                tool,
-                f"tool server '{self.server}' is resting after {failures} call"
-                f"{'' if failures == 1 else 's'} in a row it did not answer; {when}",
-            ),
+            f"tool server '{self.server}' is resting after {failures} call"
+            f"{'' if failures == 1 else 's'} in a row it did not answer; {when}",
             False,
         )
 
@@ -329,6 +353,87 @@ class ServerGuard:
             return
         async with semaphore:
             yield
+
+    @contextlib.contextmanager
+    def held(self, tool: str) -> Iterator[None]:
+        """One call made outside an event loop, held to this server's breaker and cap.
+
+        For a walk a provider makes over the server's own API in a worker
+        thread: counted and rested as a call through :meth:`slot` is. One of
+        the guard's thread slots is taken first, then the call is admitted
+        once; a resting server raises :class:`ServerResting` and nothing is
+        sent. A transport failure (:func:`transport_failure`) counts toward
+        the rest; any other HTTP error (``httpx.HTTPError``) is the server
+        having answered; anything else, an error of the caller's own or a
+        call its caller ended, says nothing about the server and is nothing.
+        """
+        import httpx
+
+        slots = self._thread_slots
+        if slots is not None:
+            slots.acquire()
+        try:
+            message, trial = self._admission()
+            if message is not None:
+                raise ServerResting(tool, message)
+            try:
+                yield
+            except Exception as exc:
+                reason = transport_failure(exc)
+                if reason is not None:
+                    self.failed(reason, trial=trial)
+                elif isinstance(exc, httpx.HTTPError):
+                    self.answered()
+                else:
+                    self.abandoned(trial=trial)
+                raise
+            except BaseException:
+                self.abandoned(trial=trial)
+                raise
+            self.answered()
+        finally:
+            if slots is not None:
+                slots.release()
+
+
+class GuardedHTTP:
+    """A synchronous HTTP client whose every request is one call held by ``guard``.
+
+    Each request goes through :meth:`ServerGuard.held`, named by its path past
+    ``base`` as a tool is (``/a/b`` is ``a_b``). A response with an error
+    status is an answer. Everything else is the wrapped client's own.
+    """
+
+    def __init__(self, client: Any, guard: ServerGuard, base: str = "") -> None:
+        self._client = client
+        self._guard = guard
+        self._base = base.rstrip("/")
+
+    def _tool(self, url: Any) -> str:
+        path = str(url)
+        if self._base and path.startswith(self._base):
+            path = path[len(self._base) :]
+        elif "://" in path:
+            path = "/" + path.split("://", 1)[1].partition("/")[2]
+        return path.split("?", 1)[0].strip("/").replace("/", "_") or "request"
+
+    def request(self, method: str, url: Any, **kwargs: Any) -> Any:
+        with self._guard.held(self._tool(url)):
+            return self._client.request(method, url, **kwargs)
+
+    def get(self, url: Any, **kwargs: Any) -> Any:
+        return self.request("GET", url, **kwargs)
+
+    def post(self, url: Any, **kwargs: Any) -> Any:
+        return self.request("POST", url, **kwargs)
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._client, name)
+
+
+def guarded_http(client: Any, guard: ServerGuard | None, base: str = "") -> Any:
+    """``client`` with each request held by ``guard``; ``client`` itself with no guard."""
+    return client if guard is None else GuardedHTTP(client, guard, base)
 
 
 def _resting_answer(tool: str, message: str) -> str:
