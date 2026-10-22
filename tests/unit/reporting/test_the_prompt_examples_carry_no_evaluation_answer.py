@@ -240,6 +240,7 @@ from maljan.providers.static.ghidra import (
     GHIDRA_GUIDANCE,
     GHIDRA_WORKFLOW,
     ghidra_not_answering,
+    ghidra_resting,
     sample_not_opened,
 )
 from maljan.providers.static.ghidra.http_client import no_program_as_error
@@ -2274,6 +2275,12 @@ PROMPTS: dict[str, str] = {
     ),
     "a Ghidra that gave no answer to the load, as an ask's caller reads it": str(
         ghidra_not_answering("http://localhost:8089", "HTTP 401")
+    ),
+    "a Ghidra the guard rested after the load, noted, as an ask's caller reads it": str(
+        ghidra_resting("tool server 'ghidra' is resting", "a.bin")
+    ),
+    "a Ghidra the guard rested after the load, not noted, as an ask's caller reads it": str(
+        ghidra_resting("tool server 'ghidra' is resting", None)
     ),
     "a Ghidra answer with no program current": no_program_as_error(
         "No program loaded.", "get_function_count"

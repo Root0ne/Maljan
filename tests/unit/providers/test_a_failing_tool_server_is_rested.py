@@ -113,8 +113,10 @@ class TestTheBreaker:
         for _ in range(3):
             guard.failed("x")
         clock.now += 61
-        assert guard.refusal("first") is None
-        second = guard.refusal("second")
+        # A look claims nothing; the first call sent is the trial.
+        assert guard.refusal("look") is None
+        assert guard.admit("first") == (None, True)
+        second = guard.admit("second")[0]
         assert second is not None and "one call has been let through" in second
         guard.answered()
         assert guard.refusal("third") is None

@@ -137,6 +137,17 @@ class SampleNotes:
             self._owned.setdefault(server, set()).add(name)
             self._current[server] = name
 
+    def own(self, server: str, name: str | None) -> None:
+        """Note ``name`` as a program this job opened on ``server``, not as its current one.
+
+        For an open whose select or analysis did not follow: the program is
+        open on the server all the same, and the job's teardown closes it.
+        """
+        if not name:
+            return
+        with self._guard:
+            self._owned.setdefault(server, set()).add(name)
+
     def take_owned(self, server: str) -> list[str]:
         """Every program name this job opened on ``server``, sorted, forgotten as they are taken."""
         with self._guard:

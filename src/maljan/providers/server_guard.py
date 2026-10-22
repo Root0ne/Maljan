@@ -98,12 +98,15 @@ class ServerResting(Exception):
 
     The exception's text is the sentence a call through :meth:`ServerGuard.admit`
     is answered with, for a walk to state; ``answer`` is that authored tool error.
+    ``rests_begun`` is the guard's count of rests when it refused, the number a
+    caller waits on (:meth:`ServerGuard.wait_admissible`).
     """
 
-    def __init__(self, tool: str, message: str) -> None:
+    def __init__(self, tool: str, message: str, rests_begun: int = 0) -> None:
         super().__init__(message)
         self.tool = tool
         self.answer = _resting_answer(tool, message)
+        self.rests_begun = rests_begun
 
 
 class ServerGuard:
@@ -147,9 +150,13 @@ class ServerGuard:
         self._on_open = on_open
         self._clock = clock
         self._lock = threading.Lock()
+        # Told each time the breaker's state changes (``wait_admissible``).
+        self._changed = threading.Condition(self._lock)
         self._failures = 0
         self._reopen_at: float | None = None
         self._trial_in_flight = False
+        # How many rests have begun, a failed trial's renewal among them.
+        self._rests_begun = 0
         self._semaphores: dict[int, tuple[asyncio.AbstractEventLoop, asyncio.Semaphore]] = {}
         # The slots of the calls made outside any loop (``held``).
         self._thread_slots = (
@@ -244,18 +251,24 @@ class ServerGuard:
         own outcome decides whether the server rests again. Every other call
         is refused until the trial has answered.
         """
-        message, trial = self._admission()
+        message, trial, _ = self._admission()
         return (_resting_answer(tool, message) if message is not None else None), trial
 
-    def _admission(self) -> tuple[str | None, bool]:
-        """:meth:`admit`'s decision, with a refusal as its sentence."""
+    def _admission(self, *, claim: bool = True) -> tuple[str | None, bool, int]:
+        """:meth:`admit`'s decision, with a refusal as its sentence, and the count of rests.
+
+        With ``claim`` false nothing changes: a call that would be the trial
+        is only reported as admitted, and the trial stays unclaimed.
+        """
         with self._lock:
+            rests = self._rests_begun
             if self._reopen_at is None:
-                return None, False
+                return None, False, rests
             left = self._reopen_at - self._clock()
             if left <= 0 and not self._trial_in_flight:
-                self._trial_in_flight = True
-                return None, True
+                if claim:
+                    self._trial_in_flight = True
+                return None, claim, rests
             failures = self._failures
         when = (
             f"it will be tried again in {max(1, round(left))} s"
@@ -267,11 +280,55 @@ class ServerGuard:
             f"tool server '{self.server}' is resting after {failures} call"
             f"{'' if failures == 1 else 's'} in a row it did not answer; {when}",
             False,
+            rests,
         )
 
     def refusal(self, tool: str) -> str | None:
-        """:meth:`admit` for a caller that only needs the answer."""
-        return self.admit(tool)[0]
+        """The answer :meth:`admit` would give ``tool`` now, without claiming the trial.
+
+        A look, not a call: after the cooldown it answers ``None`` and leaves
+        the trial to the next call actually sent.
+        """
+        message, _, _ = self._admission(claim=False)
+        return _resting_answer(tool, message) if message is not None else None
+
+    def wake(self) -> None:
+        """Wake every :meth:`wait_admissible`, to look again at what it waits for."""
+        with self._changed:
+            self._changed.notify_all()
+
+    @property
+    def rests_begun(self) -> int:
+        """How many rests this guard has begun; a failed trial's new rest counts as one."""
+        with self._lock:
+            return self._rests_begun
+
+    def wait_admissible(
+        self, rests_begun: int, *, stopped: Callable[[], bool] | None = None
+    ) -> bool:
+        """Block a thread until a call would be admitted; whether no new rest began meanwhile.
+
+        Returns ``True`` once the server is not resting, or its cooldown has
+        passed with no trial in flight; the trial is not claimed here, the
+        caller's next call is admitted (or refused) as any other. Returns
+        ``False`` as soon as a rest begins after ``rests_begun`` (the count
+        the refusal carried, :attr:`ServerResting.rests_begun`): the trial
+        failed, and the server rests again. Also ``False`` once ``stopped()``
+        is true, looked at whenever :meth:`wake` is called (a job's cancel).
+        No limit of its own: the wait ends when the guard's state changes,
+        its cooldown ends or its caller is stopped.
+        """
+        with self._changed:
+            while self._rests_begun == rests_begun:
+                if stopped is not None and stopped():
+                    return False
+                if self._reopen_at is None:
+                    return True
+                left = self._reopen_at - self._clock()
+                if left <= 0 and not self._trial_in_flight:
+                    return True
+                self._changed.wait(timeout=left if left > 0 else None)
+            return False
 
     def answered(self) -> None:
         """The server answered — with its result or with its own error — so it is up."""
@@ -280,6 +337,7 @@ class ServerGuard:
             self._failures = 0
             self._reopen_at = None
             self._trial_in_flight = False
+            self._changed.notify_all()
         if closing:
             logger.info("tool server '%s' answered again; its rest is over.", self.server)
 
@@ -294,6 +352,7 @@ class ServerGuard:
             return
         with self._lock:
             self._trial_in_flight = False
+            self._changed.notify_all()
 
     def failed(self, reason: str, *, trial: bool = False) -> None:
         """One transport failure; opens the breaker when it fills the run, or fails the trial.
@@ -312,6 +371,8 @@ class ServerGuard:
             elif self._reopen_at is not None or self._failures < self.failures_to_open:
                 return
             self._reopen_at = self._clock() + self.cooldown_seconds
+            self._rests_begun += 1
+            self._changed.notify_all()
             record = {
                 "server": self.server,
                 "failures": self._failures,
@@ -373,9 +434,9 @@ class ServerGuard:
         if slots is not None:
             slots.acquire()
         try:
-            message, trial = self._admission()
+            message, trial, rests = self._admission()
             if message is not None:
-                raise ServerResting(tool, message)
+                raise ServerResting(tool, message, rests)
             try:
                 yield
             except Exception as exc:
@@ -400,8 +461,10 @@ class GuardedHTTP:
     """A synchronous HTTP client whose every request is one call held by ``guard``.
 
     Each request goes through :meth:`ServerGuard.held`, named by its path past
-    ``base`` as a tool is (``/a/b`` is ``a_b``). A response with an error
-    status is an answer. Everything else is the wrapped client's own.
+    ``base`` as a tool is (``/a/b`` is ``a_b``), and is made by the wrapped
+    client's own method of that name (``get`` by its ``get``). A response
+    with an error status is an answer. Everything else is the wrapped
+    client's own.
     """
 
     def __init__(self, client: Any, guard: ServerGuard, base: str = "") -> None:
@@ -422,10 +485,12 @@ class GuardedHTTP:
             return self._client.request(method, url, **kwargs)
 
     def get(self, url: Any, **kwargs: Any) -> Any:
-        return self.request("GET", url, **kwargs)
+        with self._guard.held(self._tool(url)):
+            return self._client.get(url, **kwargs)
 
     def post(self, url: Any, **kwargs: Any) -> Any:
-        return self.request("POST", url, **kwargs)
+        with self._guard.held(self._tool(url)):
+            return self._client.post(url, **kwargs)
 
     def __getattr__(self, name: str) -> Any:
         return getattr(self._client, name)
