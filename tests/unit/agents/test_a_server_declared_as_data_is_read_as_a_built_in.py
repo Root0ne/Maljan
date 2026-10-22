@@ -356,7 +356,8 @@ class TestTheGhidraPrompt:
     def test_with_the_analysis_server_attached_it_is_devs_byte_for_byte(self) -> None:
         body = self._body("analysis", "knowledge")
         assert "`find_crypto_constants` on the\n  analysis server gives" in body
-        assert hashlib.sha256(body.encode()).hexdigest()[:16] == "9be4fea6d9b8c95f"
+        # Moved once by X11: the workflow leaves the number of functions to decompile to the model.
+        assert hashlib.sha256(body.encode()).hexdigest()[:16] == "cbf33f0d21478ffe"
 
     def test_without_it_the_line_names_no_other_servers_tool(self) -> None:
         body = self._body("knowledge")

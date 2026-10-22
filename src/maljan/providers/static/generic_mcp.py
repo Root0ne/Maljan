@@ -253,7 +253,9 @@ class GenericMCPStaticProvider(StaticProvider):
         declared = str(getattr(self._cfg, "prompt_fragment", "") or "")
         if declared.strip():
             return declared
-        tools = self.get_tools()
+        # The server's own descriptions, without the notes the platform adds
+        # (``_with_aggregate_notes``): quoted below as the server's words.
+        tools = self._handle.tools()
         served = str(getattr(self._handle, "server_instructions", "") or "")
         if served.strip():
             from maljan.agents.prompt_fragments import undeclared_server_text
@@ -266,7 +268,7 @@ class GenericMCPStaticProvider(StaticProvider):
             "=== TOOL USAGE WORKFLOW ===\n"
             f"Available tools: {listed}.\n"
             "Load or open the sample first, enumerate what the binary imports and "
-            "contains, then examine the few most suspicious functions in depth. "
+            "contains, then examine in depth the functions that matter for the question. "
             "Prefer one summarising call over many narrow ones.\n"
         )
 
@@ -328,10 +330,25 @@ class GenericMCPStaticProvider(StaticProvider):
             truncation_ledger=job.truncation_ledger,
             context_budget=job.context_budget,
         )
-        self.tools = self._handle.tools()
+        self.tools = self.get_tools()
 
     def get_tools(self) -> list[BaseTool]:
-        return self._handle.tools()
+        return self._with_aggregate_notes(self._handle.tools())
+
+    def _with_aggregate_notes(self, tools: list[BaseTool]) -> list[BaseTool]:
+        """``tools`` with the note each declared aggregate tool carries (``aggregate_of``).
+
+        A provider's tools are offered under their own names, so each note
+        names the aggregated tools the provider offers as they are named.
+        """
+        from maljan.core.undeclared_tools import aggregates_of, with_aggregate_notes
+
+        aggregates = aggregates_of(
+            getattr(getattr(self._handle, "config", None), "tool_facts", None)
+        )
+        if not aggregates:
+            return tools
+        return with_aggregate_notes(tools, aggregates, {t.name: t.name for t in tools})
 
     # -- the passes the server declares tools for (``prepass_tools``) --------
 

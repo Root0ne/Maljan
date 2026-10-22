@@ -7,7 +7,11 @@ knowledge and VirusTotal tools it also holds, and
 which r2mcp offers when started with ``-r``), and edited as data since.
 ``category`` is the tag the MCP client shows a description with
 (``agents.mcp_client._tag_description``); ``report_sections`` the sections
-``reporting.evidence_bundles`` shows the tool's answers to, beside the ones its kind reaches.
+``reporting.evidence_bundles`` shows the tool's answers to, beside the ones its kind reaches;
+``aggregate_of`` the tools a batch or whole-program tool answers many calls of in one
+(Ghidra's ``get_bulk_xrefs`` declares none: its definition, "Batch cross-reference
+retrieval" over ``addresses``, does not say whether it answers the references to each
+address or those from it, so which one tool it batches is not known).
 """
 
 from __future__ import annotations
@@ -97,21 +101,25 @@ GHIDRA_TOOLS: dict[str, dict[str, Any]] = {
         "kind": "program_edit",
     },
     "batch_analyze_completeness": {
+        "aggregate_of": ["analyze_function_completeness"],
         "arguments": {"program": "program"},
         "category": "batch",
         "kind": "batch_analysis",
     },
     "batch_create_labels": {
+        "aggregate_of": ["create_label"],
         "arguments": {"program": "program"},
         "category": "batch",
         "kind": "batch_analysis",
     },
     "batch_decompile": {
+        "aggregate_of": ["decompile_function"],
         "arguments": {"program": "program"},
         "category": "batch",
         "kind": "decompile_batch",
     },
     "batch_delete_labels": {
+        "aggregate_of": ["delete_label"],
         "arguments": {"program": "program"},
         "category": "batch",
         "kind": "batch_analysis",
@@ -122,6 +130,7 @@ GHIDRA_TOOLS: dict[str, dict[str, Any]] = {
         "kind": "batch_analysis",
     },
     "batch_set_comments": {
+        "aggregate_of": ["set_decompiler_comment", "set_disassembly_comment", "set_plate_comment"],
         "arguments": {"address": "address", "program": "program"},
         "category": "batch",
         "kind": "batch_analysis",
@@ -132,7 +141,11 @@ GHIDRA_TOOLS: dict[str, dict[str, Any]] = {
         "holds_strings": True,
         "kind": "batch_analysis",
     },
-    "bulk_fuzzy_match": {"category": "batch", "kind": "batch_analysis"},
+    "bulk_fuzzy_match": {
+        "aggregate_of": ["find_similar_functions_fuzzy"],
+        "category": "batch",
+        "kind": "batch_analysis",
+    },
     "can_rename_at_address": {
         "arguments": {"address": "address", "program": "program"},
         "category": "check",
@@ -368,6 +381,7 @@ GHIDRA_TOOLS: dict[str, dict[str, Any]] = {
         "kind": "listing",
     },
     "get_bulk_function_hashes": {
+        "aggregate_of": ["get_function_hash"],
         "arguments": {"program": "program"},
         "category": "list",
         "kind": "function_hashes",
@@ -395,6 +409,7 @@ GHIDRA_TOOLS: dict[str, dict[str, Any]] = {
         "kind": "listing",
     },
     "get_full_call_graph": {
+        "aggregate_of": ["get_function_call_graph"],
         "arguments": {"program": "program"},
         "category": "list",
         "kind": "call_graph",
@@ -661,6 +676,7 @@ GHIDRA_TOOLS: dict[str, dict[str, Any]] = {
         "kind": "program_edit",
     },
     "rename_variables": {
+        "aggregate_of": ["rename_variable"],
         "arguments": {"address": "function_address", "program": "program"},
         "category": "modify",
         "kind": "program_edit",

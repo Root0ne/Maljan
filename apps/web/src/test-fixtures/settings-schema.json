@@ -15467,6 +15467,7 @@
    "values": {}
   },
   "kind_free": {
+   "aggregate_of": [],
    "arguments": {},
    "category": "",
    "discloses_sample": false,

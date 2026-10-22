@@ -525,6 +525,21 @@ def shipped_tool_facts(block: str) -> dict[str, Any]:
     return copy.deepcopy(dict(held)) if isinstance(held, Mapping) else {}
 
 
+def shipped_tools(block: str) -> list[str] | None:
+    """The tool allow-list the block at dotted path ``block`` ships; ``None`` for every tool.
+
+    Read as :func:`shipped_tool_facts` reads its block; a block that is not in
+    the shipped settings ships no allow-list.
+    """
+    node: Any = _shipped_dump()
+    for part in block.split("."):
+        if not isinstance(node, Mapping) or part not in node:
+            return None
+        node = node[part]
+    held = node.get("tools") if isinstance(node, Mapping) else None
+    return [str(name) for name in held] if isinstance(held, list) else None
+
+
 _SERVER_PREFIX = f"{SERVER_MAP_PATH}."
 
 

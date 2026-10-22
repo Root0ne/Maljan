@@ -42,6 +42,7 @@ _GOOD: dict[str, Any] = {
     "arguments": {"path": "file_path"},
     "routed_formats": ["pe"],
     "effects": {"executes": "emulation", "network": False},
+    "aggregate_of": ["t"],
     "asserts_techniques": True,
     "source": "sigma",
     "holds_strings": True,

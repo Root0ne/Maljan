@@ -18,7 +18,7 @@ undeclared tool only.
 from __future__ import annotations
 
 import re
-from collections.abc import Iterable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from functools import lru_cache
 from typing import Any
 
@@ -231,6 +231,62 @@ def categories_of(tool_facts: Mapping[str, Any] | None) -> dict[str, str]:
         for name, facts in (tool_facts or {}).items()
         if getattr(facts, "category", "")
     }
+
+
+# What a tool's description says after its own text when the tool declares
+# itself the aggregate form of other tools of its server
+# (``ToolFacts.aggregate_of``), so a model can choose the one call over many.
+# Declared tools only; an undeclared tool's description is the server's alone.
+# Written once the names a request offers are settled (:func:`with_aggregate_notes`),
+# so each tool it names is one the request offers, under the name it offers it.
+AGGREGATE_NOTE = "Aggregate form of {tools}: one call answers what many calls of {them} would."
+
+
+def aggregates_of(tool_facts: Mapping[str, Any] | None) -> dict[str, tuple[str, ...]]:
+    """``{tool: the tools it is the aggregate form of}`` for each tool that declares some."""
+    return {
+        str(name): tuple(getattr(facts, "aggregate_of", ()) or ())
+        for name, facts in (tool_facts or {}).items()
+        if getattr(facts, "aggregate_of", ())
+    }
+
+
+def aggregate_note(names: Iterable[str]) -> str:
+    """The note a description carries for a tool that aggregates ``names``; "" for none."""
+    held = [str(name) for name in names if name]
+    if not held:
+        return ""
+    return AGGREGATE_NOTE.format(
+        tools=", ".join(f"`{name}`" for name in held), them="it" if len(held) == 1 else "those"
+    )
+
+
+def with_aggregate_notes(
+    tools: Iterable[Any],
+    aggregates: Mapping[str, Iterable[str]],
+    offered: Mapping[str, str],
+    *,
+    declared: Callable[[Any], str] | None = None,
+) -> list[Any]:
+    """``tools``, each that declares itself an aggregate with the note after its description.
+
+    ``aggregates`` is the server's :func:`aggregates_of`, by the names the
+    server gave its tools; ``offered`` maps each of the server's tools the
+    request offers, by that name, to the name it is offered under (a name
+    another server took is offered as ``<server>__<name>``). A tool the request
+    does not offer is left out of the note, and a tool none of whose
+    aggregated tools is offered carries none; ``declared`` reads a tool's own
+    name (default: its ``name``). Every other tool is the same object.
+    """
+    read = declared or (lambda tool: str(getattr(tool, "name", "") or ""))
+    out: list[Any] = []
+    for tool in tools:
+        note = aggregate_note(offered[n] for n in aggregates.get(read(tool), ()) if n in offered)
+        if note:
+            own = " ".join(str(getattr(tool, "description", "") or "").split())
+            tool = tool.model_copy(update={"description": f"{own} {note}" if own else note})
+        out.append(tool)
+    return out
 
 
 # ---------------------------------------------------------------------------
