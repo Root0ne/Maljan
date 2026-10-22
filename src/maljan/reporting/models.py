@@ -1375,6 +1375,19 @@ class EvidenceSection(BaseModel):
     source_server: str | None = Field(default=None, exclude_if=lambda value: value is None)
 
 
+# The ``source`` of the "Open questions" section (``ledger_report``): what the
+# analysts said they could not establish. An open question names an unknown,
+# so a reader that looks for what the run saw, holds or grounds — the
+# capability grounding, the value holders, the corroboration corpus — skips
+# the section, and the ids it cites stand for nothing it found.
+OPEN_QUESTION_SOURCE = "open_question"
+
+
+def is_open_question_section(section: Any) -> bool:
+    """Whether ``section`` is the "Open questions" section, read by its source."""
+    return str(getattr(section, "source", "") or "").strip().lower() == OPEN_QUESTION_SOURCE
+
+
 class EvidenceIndexRow(BaseModel):
     """One line of the report's index of the calls behind it.
 

@@ -170,7 +170,7 @@ from maljan.schemas.evidence import (
     beside_bytes,
     is_guard_answer,
 )
-from maljan.schemas.isr_models import AgentISR, Artifact, ClaimEvidence, Finding
+from maljan.schemas.isr_models import AgentISR, Artifact, ClaimEvidence, Finding, OpenQuestion
 from maljan.schemas.tool_evidence import CapturedToolOutput
 from maljan.utils.marked_cut import CUT_MARK
 
@@ -4749,6 +4749,7 @@ class BaseAnalyst(BudgetMeter, ABC):
         # chunked run it arrives once per chunk.
         self._findings_buffer: list[Finding] = []
         self._artifacts_buffer: list[Artifact] = []
+        self._open_questions_buffer: list[OpenQuestion] = []
         # The answers of the asks this agent made, as the specialists' own
         # ISRs. A lead's report is the only channel its chunk has out of a
         # stage, so a lead whose loop died with six answered asks behind it
@@ -7222,11 +7223,13 @@ class BaseAnalyst(BudgetMeter, ABC):
             self._last_written_answer: tuple[str, str] | None = (block.prose, content)
             self._findings_buffer.extend(block.findings)
             self._artifacts_buffer.extend(block.artifacts)
+            vars(self).setdefault("_open_questions_buffer", []).extend(block.open_questions)
             self.logger.info(
-                "%s: findings block carried %d finding(s) and %d artifact(s).",
+                "%s: findings block carried %d finding(s), %d artifact(s) and %d open question(s).",
                 self.name,
                 len(block.findings),
                 len(block.artifacts),
+                len(block.open_questions),
             )
             return block.prose
         except Exception as exc:  # noqa: BLE001
@@ -7239,8 +7242,11 @@ class BaseAnalyst(BudgetMeter, ABC):
             isr.findings = list(self._findings_buffer)
         if self._artifacts_buffer:
             isr.artifacts = list(self._artifacts_buffer)
+        if getattr(self, "_open_questions_buffer", None):
+            isr.open_questions = list(self._open_questions_buffer)
         self._findings_buffer = []
         self._artifacts_buffer = []
+        self._open_questions_buffer = []
         return isr
 
     def drain_evidence_entries(self) -> list[LedgerEntry]:
@@ -8658,10 +8664,11 @@ class BaseAnalyst(BudgetMeter, ABC):
             self.validation_findings.extend(unasked)
             self._keep_unparsed_answers(unasked, isr.revision_round)
 
-        # The findings and artifacts the answer being checked carried are its
-        # own from here on: a retry's are kept apart (``_parse``) and go with
-        # the retry only if the retry is the answer kept. A chunk's are left in
-        # the buffers for the merged answer, which is where they are drained.
+        # The findings, artifacts and open questions the answer being checked
+        # carried are its own from here on: a retry's are kept apart
+        # (``_parse``) and go with the retry only if the retry is the answer
+        # kept. A chunk's are left in the buffers for the merged answer, which
+        # is where they are drained.
         if (
             not only_cut
             and isinstance(getattr(self, "_findings_buffer", None), list)
@@ -8858,8 +8865,10 @@ class BaseAnalyst(BudgetMeter, ABC):
             # an answer ``_keep`` discards takes its findings with it.
             findings = getattr(self, "_findings_buffer", None)
             artifacts = getattr(self, "_artifacts_buffer", None)
+            questions = getattr(self, "_open_questions_buffer", None)
             f_mark = len(findings) if isinstance(findings, list) else 0
             a_mark = len(artifacts) if isinstance(artifacts, list) else 0
+            q_mark = len(questions) if isinstance(questions, list) else 0
             prose = self._capture_findings(text)
             parsed = self._text_to_isr(prose, isr.revision_round)
             # The retry fixes the answer it was shown; it does not read the
@@ -8873,6 +8882,16 @@ class BaseAnalyst(BudgetMeter, ABC):
             if isinstance(artifacts, list):
                 parsed.artifacts = artifacts[a_mark:]
                 del artifacts[a_mark:]
+            questions = getattr(self, "_open_questions_buffer", None)
+            if isinstance(questions, list):
+                # The retry's own, then each of the answer's it did not repeat:
+                # a question is never lost because a retry left it unwritten.
+                asked = questions[q_mark:]
+                del questions[q_mark:]
+                parsed.open_questions = [
+                    *asked,
+                    *(q for q in isr.open_questions if q not in asked),
+                ]
             retry_cut = getattr(self, "_last_answer_cut", None)
             cuts[id(parsed)] = [(*retry_cut, chunk)] if retry_cut is not None else []
             self._last_answer_cut = None
@@ -9422,6 +9441,10 @@ class BaseAnalyst(BudgetMeter, ABC):
                 if isinstance(artifacts, list) and revised.artifacts:
                     artifacts.extend(revised.artifacts)
                     revised.artifacts = []
+                questions = getattr(self, "_open_questions_buffer", None)
+                if isinstance(questions, list) and revised.open_questions:
+                    questions.extend(revised.open_questions)
+                    revised.open_questions = []
             # Still cut after the question: the chunk's answer is kept as it
             # was cut, and what it did not reach is unread.
             violations = [

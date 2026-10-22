@@ -4199,6 +4199,17 @@ cannot carry: the import list, the permission set, the endpoints.
 Anything that fails validation is dropped and counted rather than repaired, and
 the block is stripped before the prose reaches the transcript or the report.
 
+A third key, `open_questions`, holds what the analyst could not establish: the
+question, why it stayed open (`no_capable_tool`, `tool_failed`, `obfuscated`,
+`out_of_turns`, `needs_sandbox_run` or `other`), what would answer it (a tool
+kind, an agent, a run) and the ids it rests on. The questions travel on the
+ISR (`AgentISR.open_questions`) into the analyst's summary, where its peers,
+the mediator, the judge and a lead that asked it read them, and into the
+report's "Open questions" table, which names the agents of the run that called
+a tool of the kind each question names. An open question names an unknown. It
+is never read as an absence: no grounding, value holder or corroboration
+reads the table.
+
 A repeated tool call is a message to the model and nothing else. The third
 identical `(tool, arguments)` call in one loop is not run; the model is told
 which entry already holds the answer, and whether that entry was an answer or a

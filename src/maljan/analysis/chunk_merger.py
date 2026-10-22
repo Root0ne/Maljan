@@ -165,6 +165,7 @@ def merge_chunk_isrs(chunk_isrs: list[AgentISR]) -> AgentISR:
         revision_round=max_round,
         findings=_once(f for isr in chunk_isrs for f in isr.findings),
         artifacts=_once(a for isr in chunk_isrs for a in isr.artifacts),
+        open_questions=_once(q for isr in chunk_isrs for q in isr.open_questions),
     )
     # Each chunk's answer is part of the merged one: claims a chunk began and
     # did not have read are not in the merged findings either.

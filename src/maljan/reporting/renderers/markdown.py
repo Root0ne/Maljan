@@ -96,6 +96,7 @@ from maljan.reporting.models import (
     RegistryMod,
     SandboxSignature,
     TechnicalSubsection,
+    is_open_question_section,
     stated_family,
 )
 from maljan.schemas.evidence import is_guard_answer
@@ -2092,6 +2093,8 @@ class MarkdownRenderer:
                 # was measured, and no count, match or profile reads it.
                 kind = str(section.key or "").removeprefix("artifact_")
                 lines.extend([analyst_list_note(analysts, kind), ""])
+            elif is_open_question_section(section):
+                lines.extend([OPEN_QUESTIONS_NOTE, ""])
             lines.extend(_evidence_body(section, ctx.plain))
             if section.evidence_ids:
                 lines.extend(["", f"_Evidence: {_ids(section.evidence_ids)}_"])
@@ -4178,10 +4181,18 @@ def _subheading(number: str, title: str, voice: str) -> str:
     return f"### {_one_line(label)} · _{voice}_"
 
 
+# The line the "Open questions" section is printed under in Appendix A.
+OPEN_QUESTIONS_NOTE = (
+    "_What the analysts said they could not establish, why, and what would answer it: "
+    "unknowns, not absences. No measured table, count or published value reads them._"
+)
+
+
 def _evidence_heading(section: Any) -> str:
     """An Appendix A section's H3 with its voice: a tool's is Measured, an analyst's Assessed."""
     source = str(getattr(section, "source", "") or "").strip().lower()
-    voice = ASSESSED if source.startswith(ANALYST_SECTION_SOURCES) else MEASURED
+    assessed = source.startswith(ANALYST_SECTION_SOURCES) or is_open_question_section(section)
+    voice = ASSESSED if assessed else MEASURED
     return f"{_plain_heading(section.title)} · _{voice}_"
 
 

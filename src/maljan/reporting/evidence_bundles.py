@@ -26,7 +26,7 @@ from urllib.parse import urlsplit
 from maljan.analysis.sandbox_sections import ItemIndex
 from maljan.reporting import tool_kinds
 from maljan.reporting.dedupe import distinct_processes
-from maljan.reporting.models import MalwareReport
+from maljan.reporting.models import MalwareReport, is_open_question_section
 from maljan.schemas.sandbox_report import SAMPLE_TREE_KEY, section_id
 
 # Section keys the Composer authors. Kept as plain strings (not an enum) so the
@@ -703,6 +703,9 @@ def sandbox_entry_ids(report: MalwareReport) -> list[str]:
     }
     holding: set[str] = set()
     for section in report.sections:
+        # A question an analyst left open is not behaviour any entry held.
+        if is_open_question_section(section):
+            continue
         cited = set(rows).intersection(section.evidence_ids)
         if not cited or not section_holds_something(section):
             continue
@@ -936,6 +939,9 @@ def _value_holders(report: MalwareReport, wanted: frozenset[str]) -> dict[str, l
             if row is not None and str(getattr(row, "tool", "")) == tool:
                 add(str(output.get("output") or ""), (entry_id,))
     for section in report.sections:
+        # A question an analyst left open holds no value its entry answered.
+        if is_open_question_section(section):
+            continue
         if len(section.evidence_ids) == 1:
             for row in section.rows:
                 for cell in row:

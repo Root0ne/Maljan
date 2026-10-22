@@ -3277,6 +3277,7 @@ class CapabilityGrounding:
             # very match in question. Neither its id, its name nor its rule's
             # row in the evidence counts.
             from maljan.analysis.corroboration import rule_match_only
+            from maljan.reporting.models import is_open_question_section
 
             rule_notes = rule_match_only(report)
             rule_only = set(rule_notes)
@@ -3321,6 +3322,10 @@ class CapabilityGrounding:
             if list(getattr(report, "persistence", None) or []):
                 keys.add("persistence")
             for section in getattr(report, "sections", None) or []:
+                # A question an analyst left open is an unknown: "does it
+                # persist through a Run key" grounds no persistence.
+                if is_open_question_section(section):
+                    continue
                 # A reference table's rows say what a catalogue lists an API
                 # under, not what the sample does: "CreateMutexA | persistence"
                 # grounded a report's "likely uses these registry APIs to

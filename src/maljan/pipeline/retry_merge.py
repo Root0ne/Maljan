@@ -544,6 +544,12 @@ def merge_retry(
 
     artifacts = list(getattr(first, "artifacts", None) or [])
     artifacts.extend(a for a in getattr(retried, "artifacts", None) or [] if a not in artifacts)
+    # An open question is kept the way an artifact is: the answer's, then
+    # each the retry wrote that the answer had not.
+    questions = list(getattr(first, "open_questions", None) or [])
+    questions.extend(
+        q for q in getattr(retried, "open_questions", None) or [] if q not in questions
+    )
 
     unplaced: list[tuple[str, Any, tuple[str, ...]]] = [
         ("claim", claim, missing)
@@ -554,7 +560,12 @@ def merge_retry(
         unplaced += [("finding", finding, ()) for finding in unwritten]
 
     merged = first.model_copy(
-        update={"claims": claims, "findings": findings, "artifacts": artifacts}
+        update={
+            "claims": claims,
+            "findings": findings,
+            "artifacts": artifacts,
+            "open_questions": questions,
+        }
     )
     # Claim headings the answer wrote under its DISPUTES section that the
     # retry writes as claims of its own come in under new numbers: then where
