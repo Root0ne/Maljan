@@ -6877,6 +6877,35 @@ def make_report_node(
             if isinstance(_reason, str) and _reason not in report.degradation_reasons:
                 report.degradation_reasons.append(_reason)
 
+        # The questions the analyst asked of the job, answered in a fixed
+        # vocabulary by the reporter's model and checked by code
+        # (``reporting.question_round``). A job asked none runs no round and
+        # its report carries no answers.
+        from maljan.reporting.question_round import answer_questions, asked_questions
+
+        _questions = asked_questions(state.get("analyst_questions"))
+        if _questions:
+            # The reporter's next loop: its model list starts over.
+            _restart_reporter(getattr(narrative_agent, "llm", None), None, container)
+            _round = await answer_questions(
+                narrative_agent,
+                report,
+                _questions,
+                ledger=_ledger,
+                citable_ids=_citable_ids,
+                items=_items,
+                isr_reports=state.get("isr_reports"),
+                facts_block=_narrative_facts,
+                run_state=_narrative_state,
+                evidence_texts=_entry_texts,
+            )
+            report.question_answers = _round.answers
+            _report_tally.merge(_round.tally)
+            for _reason in _round.degradations:
+                if _reason not in report.degradation_reasons:
+                    report.degradation_reasons.append(_reason)
+            hold_the_report_in_progress(container, report)
+
         # Section-wise Composer authors the professional
         # spine (background, execution flow, technical-analysis subsections by
         # capability, configuration, commands, C2 channels),

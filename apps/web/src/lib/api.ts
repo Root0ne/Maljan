@@ -973,8 +973,9 @@ class ApiClient {
 
   /** Start a job. `config` accepts the known keys the API validates at submit
    *  time — `llm_provider`, `max_iterations`, `static_provider`,
-   *  `sandbox_provider`, `sandbox_report_id` and `profile` — plus anything
-   *  else, which passes through untouched. */
+   *  `sandbox_provider`, `sandbox_report_id`, `profile` and `questions` (the
+   *  questions the report answers, each with some text) — plus anything else,
+   *  which passes through untouched. */
   createJob(sampleId: string, config?: Record<string, unknown>) {
     return this.request<JobDTO>(
       "/api/v1/jobs",

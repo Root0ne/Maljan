@@ -201,6 +201,16 @@ def build_job_settings(
     return settings
 
 
+def job_questions(job_config: Mapping[str, Any] | None) -> list[str]:
+    """The questions a job was submitted with (``config.questions``), blanks left out.
+
+    Read by the report's question round; a job with none asks nothing.
+    """
+    from maljan.reporting.question_round import asked_questions
+
+    return asked_questions((job_config or {}).get("questions"))
+
+
 class JobSettingsRefused(ValueError):
     """Settings a job would run with, refused here: each by its setting, with why.
 
@@ -3281,6 +3291,9 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
                     # from, so the report's elapsed time and the job row
                     # cannot disagree.
                     started_at=start_time,
+                    # What the analyst asked of the run, answered in the
+                    # report (``reporting.question_round``); none asks nothing.
+                    questions=job_questions(job_config),
                 )
             )
             pipeline_result = await await_the_pipeline(pipeline_task, app.container.cancellation)

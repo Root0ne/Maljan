@@ -46,7 +46,7 @@ not prove the test makes the platform raise it. The tests are not listed here:
 one nothing raises any more and stored runs still carry; the comment on that
 name says what reads it.
 
-**90 codes in 10 families:** [attck](#attck) 6 · [attribution](#attribution) 1 · [composer](#composer) 3 · [isr](#isr) 13 · [narrative](#narrative) 5 · [report](#report) 12 · [stix](#stix) 32 · [tool](#tool) 1 · [validation](#validation) 1 · [verdict](#verdict) 16. 13 code positions the register could not resolve are [listed at the end](#unresolved-code-positions).
+**99 codes in 11 families:** [attck](#attck) 6 · [attribution](#attribution) 1 · [composer](#composer) 3 · [isr](#isr) 13 · [narrative](#narrative) 5 · [question](#question) 9 · [report](#report) 12 · [stix](#stix) 32 · [tool](#tool) 1 · [validation](#validation) 1 · [verdict](#verdict) 16. 13 code positions the register could not resolve are [listed at the end](#unresolved-code-positions).
 
 ## attck
 
@@ -282,6 +282,80 @@ No comment names its meaning; the message at `maljan.pipeline.validation:recomme
 - **Raised at** `maljan.pipeline.validation:recommendation_technique_violations`
 - **Constant** `maljan.pipeline.validation:UNPUBLISHED_RECOMMENDATION_TECHNIQUE_CODE`
 - **Docs** [Architecture](/architecture/)
+
+## question
+
+### `question.answered_twice`
+
+A question got more than one reply; the first is kept.
+
+- **Raised at** `maljan.reporting.question_round:question_violations`
+- **Constant** `maljan.reporting.question_round:ANSWERED_TWICE_CODE`
+- **Docs** none
+
+### `question.established_ungrounded`
+
+"established" with no entry of a call that answered among the ids cited; printed as not determinable if it stands.
+
+- **Raised at** `maljan.reporting.question_round:_judge`
+- **Constant** `maljan.reporting.question_round:ESTABLISHED_UNGROUNDED_CODE`
+- **Docs** none
+
+### `question.negative_on_open_question`
+
+"limited negative" resting on an open question, which is an unknown, not an absence; printed as not determinable if it stands.
+
+- **Raised at** `maljan.reporting.question_round:_judge`
+- **Constant** `maljan.reporting.question_round:NEGATIVE_ON_OPEN_QUESTION_CODE`
+- **Docs** none
+
+### `question.negative_without_coverage`
+
+"limited negative" with no coverage record (no call that answered in looked_at); printed as not determinable if it stands.
+
+- **Raised at** `maljan.reporting.question_round:_judge`
+- **Constant** `maljan.reporting.question_round:NEGATIVE_WITHOUT_COVERAGE_CODE`
+- **Docs** none
+
+### `question.schema`
+
+The round's answer, or one reply of it, does not fit the object asked for.
+
+- **Raised at** `maljan.pipeline.validation:schema_violations`, `maljan.reporting.question_round:answer_questions`
+- **Constant** `maljan.reporting.question_round:SCHEMA_CODE`
+- **Docs** none
+
+### `question.unanswered`
+
+No comment names its meaning; the message at `maljan.reporting.question_round:question_violations` reads: "question(s) \<missing> got no answer. Answer every question, not_determinable where this run cannot settle it."
+
+- **Raised at** `maljan.reporting.question_round:question_violations`
+- **Constant** `maljan.reporting.question_round:UNANSWERED_CODE`
+- **Docs** none
+
+### `question.unissued_id`
+
+A reply cites an id the run did not issue; it counts for nothing.
+
+- **Raised at** `maljan.reporting.question_round:_judge`
+- **Constant** `maljan.reporting.question_round:UNISSUED_ID_CODE`
+- **Docs** none
+
+### `question.unknown_number`
+
+A reply is for a question number that was not asked.
+
+- **Raised at** `maljan.reporting.question_round:question_violations`
+- **Constant** `maljan.reporting.question_round:UNKNOWN_NUMBER_CODE`
+- **Docs** none
+
+### `question.unknown_open_question`
+
+A reply names an open question the analysts did not leave.
+
+- **Raised at** `maljan.reporting.question_round:_judge`
+- **Constant** `maljan.reporting.question_round:UNKNOWN_OPEN_QUESTION_CODE`
+- **Docs** none
 
 ## report
 

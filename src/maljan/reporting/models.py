@@ -20,7 +20,7 @@ Design notes:
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Annotated, Any, Literal
+from typing import Annotated, Any, Literal, get_args
 
 from pydantic import (
     BaseModel,
@@ -1246,6 +1246,59 @@ class FlaggedStatement(BaseModel):
     asked: bool = True
 
 
+# What the report says of a question the analyst asked of the run, in a fixed
+# vocabulary, so a reader can tell an answer the evidence stands behind from a
+# partial one, a negative bounded by what was looked at, a question this run
+# could not settle, and one no run of this kind can. The report model picks the
+# word (``reporting.question_round``); code refuses "established" with no
+# answered entry behind it and "limited negative" with no record of what was
+# looked at, and never turns an open question into an absence.
+QuestionOutcome = Literal[
+    "established",
+    "partial",
+    "limited_negative",
+    "not_determinable",
+    "out_of_scope",
+]
+QUESTION_OUTCOMES: tuple[str, ...] = get_args(QuestionOutcome)
+# Each outcome as every surface prints it.
+QUESTION_OUTCOME_WORDS: dict[str, str] = {
+    "established": "established",
+    "partial": "partial",
+    "limited_negative": "limited negative",
+    "not_determinable": "not determinable from this run",
+    "out_of_scope": "out of scope",
+}
+
+
+class QuestionAnswer(BaseModel):
+    """One question the analyst asked of the run, and what the report answers.
+
+    ``outcome`` is the word the report stands by. Where the checks refused the
+    report model's own word, ``answered`` keeps it and ``outcome`` is "not
+    determinable from this run"; ``checks`` says, in the platform's words,
+    what the checks found. ``looked_at`` is the coverage record a limited
+    negative rests on: the entries of the calls that looked. ``open_questions``
+    are the analysts' open questions the answer names, as "agent: question".
+    """
+
+    model_config = _STRICT_CONFIG
+
+    question: str
+    outcome: QuestionOutcome
+    answer: str = ""
+    evidence_ids: list[str] = Field(default_factory=list)
+    looked_at: list[str] = Field(default_factory=list)
+    open_questions: list[str] = Field(default_factory=list)
+    answered: QuestionOutcome | None = Field(default=None, exclude_if=lambda value: value is None)
+    checks: list[str] = Field(default_factory=list)
+
+
+def outcome_words(outcome: Any) -> str:
+    """An outcome as the report prints it; an unknown word as written."""
+    return QUESTION_OUTCOME_WORDS.get(str(outcome or ""), str(outcome or ""))
+
+
 class JudgeIndicator(BaseModel):
     """One value a judge indicator names: its IOC kind, the value, a hash's algorithm."""
 
@@ -1591,6 +1644,13 @@ class MalwareReport(BaseModel):
     # after the body is composed (``reporting.claim_coverage``) and printed in
     # a section of their own; empty on a report stored before the field existed.
     claims_not_discussed: list[ClaimNotDiscussed] = Field(default_factory=list)
+    # The questions the analyst asked of the run when submitting it, each with
+    # the report's answer (``QuestionAnswer``). Left out of the dump when none
+    # was asked, so a report stored before the field, or of a job asked
+    # nothing, reads and dumps as it did.
+    question_answers: list[QuestionAnswer] = Field(
+        default_factory=list, exclude_if=lambda value: not value
+    )
     # For each technique a signature rule of this run asserted, the rules, how
     # many of each rule's own strings matched and the asserting layer that
     # matched it (``{"rule", "strings", "source"}``; a row stored before

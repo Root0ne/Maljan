@@ -3,6 +3,7 @@
 import { Suspense, useState, useRef, useCallback, useEffect } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Upload, X } from "lucide-react";
+import { questionsFromText } from "./jobQuestions";
 import { canStartAnalysis } from "./submitGate";
 import { api } from "@/lib/api";
 import { fetchAllPages } from "@/lib/pages";
@@ -71,6 +72,7 @@ function SamplesPageContent() {
   const [staticProvider, setStaticProvider] = useState("");
   const [sandboxProvider, setSandboxProvider] = useState("");
   const [profile, setProfile] = useState("");
+  const [questionsText, setQuestionsText] = useState("");
   const [attachedReport, setAttachedReport] = useState<SandboxReportDTO | null>(null);
   const [reportUploading, setReportUploading] = useState(false);
   const [reportError, setReportError] = useState<string | null>(null);
@@ -93,6 +95,7 @@ function SamplesPageContent() {
     setStaticProvider("");
     setSandboxProvider("");
     setProfile("");
+    setQuestionsText("");
     setAttachedReport(null);
     setReportError(null);
     setAcceptError(null);
@@ -190,6 +193,9 @@ function SamplesPageContent() {
       const config: Record<string, unknown> = {};
       if (staticProvider) config.static_provider = staticProvider;
       if (profile) config.profile = profile;
+      // What the analyst asks of the run, answered in the report; none sends nothing.
+      const questions = questionsFromText(questionsText);
+      if (questions.length > 0) config.questions = questions;
       if (attachedReport) {
         config.sandbox_report_id = attachedReport.id;
         config.sandbox_provider = "upload";
@@ -625,6 +631,24 @@ function SamplesPageContent() {
                     <option key={p} value={p}>{profileLabel(p)}</option>
                   ))}
                 </select>
+              </div>
+
+              <div>
+                <label htmlFor="job-questions" className="block text-text-muted uppercase tracking-wider mb-1">
+                  Questions for this run
+                </label>
+                <textarea
+                  id="job-questions"
+                  value={questionsText}
+                  onChange={(e) => setQuestionsText(e.target.value)}
+                  rows={3}
+                  placeholder="One question per line, e.g. What is the C2 address?"
+                  className="w-full border border-border rounded px-2 py-1.5 bg-bg-surface text-text-primary"
+                />
+                <p className="text-text-muted mt-1">
+                  The report answers each: established, partial, limited negative, not
+                  determinable from this run, or out of scope.
+                </p>
               </div>
 
               <div>

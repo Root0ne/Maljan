@@ -54,6 +54,17 @@ class _KnownJobConfig(BaseModel):
     # the code owns; the route checks it against the effective profile map at
     # submit time, which is where "known" can actually be answered.
     profile: str | None = None
+    # The questions the analyst asks of this run, each answered by the report
+    # in a fixed vocabulary (``maljan.reporting.question_round``). Each must
+    # hold some text; none asks nothing.
+    questions: list[str] | None = None
+
+    @field_validator("questions")
+    @classmethod
+    def _each_question_says_something(cls, value: list[str] | None) -> list[str] | None:
+        if value is not None and any(not question.strip() for question in value):
+            raise ValueError("questions: each question must hold some text")
+        return value
 
     @field_validator("llm_provider")
     @classmethod

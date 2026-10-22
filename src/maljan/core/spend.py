@@ -159,7 +159,13 @@ STAGE_CALL_KINDS: dict[str, tuple[str, ...]] = {
 
 # What the token ledger names a verdict or report call, and the planned kind
 # each one is.
-TAIL_CALLS = {"verdict": "verdict", "report section": "report", "narrative": "report"}
+TAIL_CALLS = {
+    "verdict": "verdict",
+    "report section": "report",
+    "narrative": "report",
+    # The report's question round (``reporting.question_round.QUESTION_CALL``).
+    "questions": "report",
+}
 
 # Set on a stated estimate whose prompt is to be priced at the share of the
 # model's input this job measured read from the provider's cache.

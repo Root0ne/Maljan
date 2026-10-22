@@ -41,6 +41,8 @@ import {
   flaggedStatements,
   keyFindings,
   noSummaryReason,
+  outcomeLine,
+  questionAnswers,
 } from "@/components/analysis/reportProse";
 import { endpointCounts } from "@/components/analysis/networkFacts";
 import { severityTone } from "@/lib/severity";
@@ -396,6 +398,8 @@ function MalwareReportSummary({ mr }: { mr: MalwareReport }) {
       )}
 
       <StageTimingCard jobId={jobId} elapsedSeconds={job?.duration_seconds ?? null} />
+
+      <QuestionAnswers mr={mr} />
 
       {/* Key findings and the summary, as the report model wrote them, or the
           reason none was written. The exported report's §1; the paragraphs a
@@ -937,6 +941,66 @@ function EnrichButton({ reportId }: { reportId: string }) {
         </p>
       )}
     </>
+  );
+}
+
+/* ── The questions the job was asked ─────────────────────────────────
+ *
+ * Each question the analyst asked when submitting the run, the outcome the
+ * report stands by, the report model's answer, what it cites and what the
+ * platform's checks said. The exported report leads with the same section.
+ * Nothing is drawn for a job asked nothing.
+ */
+function QuestionAnswers({ mr }: { mr: MalwareReport }) {
+  const answers = questionAnswers(mr);
+  if (answers.length === 0) return null;
+  return (
+    <div className="bg-bg-reading border border-border rounded">
+      <div className="px-4 py-3 border-b border-border flex items-baseline gap-3">
+        <h2 className="text-xs font-medium text-text-primary uppercase tracking-wider">
+          Questions asked of this run
+        </h2>
+        <span className="text-[11px] italic text-text-muted">{REPORT_MODEL_VOICE}</span>
+      </div>
+      <ol className="p-4 space-y-4">
+        {answers.map((answer, i) => (
+          <li key={i} className="space-y-1.5">
+            <p className="text-sm text-text-primary font-medium">
+              Q{i + 1}. {answer.question}
+            </p>
+            <p className="text-xs">
+              <span className="uppercase tracking-wider text-text-muted mr-2">Outcome</span>
+              <span className={answer.answered ? "text-status-orange" : "text-text-secondary"}>
+                {outcomeLine(answer)}
+              </span>
+            </p>
+            {answer.answer.trim() && (
+              <p className="text-sm text-text-secondary leading-relaxed">{answer.answer}</p>
+            )}
+            {answer.evidence_ids.length > 0 && (
+              <p className="text-xs text-text-muted">
+                Evidence <EvidenceChips ids={answer.evidence_ids} className="ml-1" />
+              </p>
+            )}
+            {answer.looked_at.length > 0 && (
+              <p className="text-xs text-text-muted">
+                Looked at <EvidenceChips ids={answer.looked_at} className="ml-1" />
+              </p>
+            )}
+            {answer.open_questions.length > 0 && (
+              <p className="text-xs text-text-muted">
+                Open questions it rests on: {answer.open_questions.join("; ")}
+              </p>
+            )}
+            {answer.checks.map((check, j) => (
+              <p key={j} className="text-[11px] italic text-text-muted">
+                Platform check: {check}
+              </p>
+            ))}
+          </li>
+        ))}
+      </ol>
+    </div>
   );
 }
 
