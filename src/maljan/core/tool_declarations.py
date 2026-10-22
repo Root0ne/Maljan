@@ -438,7 +438,8 @@ NO_KIND = "unclassified"
 # kind. A kind-free field is read from the live declaration whatever the kind
 # (the guard's budget, a call's argument roles, the tag a description is shown
 # with, the words and name a tool is given, whether it discloses the sample,
-# the routed formats it serves, what a call does beyond answering).
+# the routed formats it serves, what a call does beyond answering, the tools
+# of its server it is the aggregate form of).
 # A kind-dependent field is read only through the kind (an answer's rows and
 # the paths inside them, its techniques and reputation, a reader of its shape,
 # the report sections it is shown to): a declaration that names no kind may
@@ -457,6 +458,7 @@ KIND_FREE_FIELDS: tuple[str, ...] = (
     "arguments",
     "routed_formats",
     "effects",
+    "aggregate_of",
 )
 KIND_DEPENDENT_FIELDS: tuple[str, ...] = (
     "asserts_techniques",
@@ -677,8 +679,120 @@ def _normal(raw: Any) -> str | None:
     return json.dumps(_set_fields(raw), sort_keys=True, default=str)
 
 
+def _aggregated(raw: Any) -> tuple[str, ...]:
+    """The names a declaration's ``aggregate_of`` holds, read or as written; () for none."""
+    if isinstance(raw, ToolFacts):
+        return raw.aggregate_of
+    value = raw.get("aggregate_of") if isinstance(raw, Mapping) else None
+    if not isinstance(value, list | tuple):
+        return ()
+    return tuple(name for name in value if isinstance(name, str))
+
+
+def aggregate_reference_errors(
+    tool_facts: Mapping[str, Any],
+    tools: Iterable[str] | None = None,
+    *,
+    only: Iterable[str] | None = None,
+) -> dict[str, str]:
+    """The refusals of each ``aggregate_of`` in ``tool_facts`` naming no tool of its server.
+
+    A name is a tool of the server when the server declares it (a key of
+    ``tool_facts``) or its allow-list names it (``tools``; ``None``, every
+    tool the server serves, names none here: a served list is known only
+    from a live handshake). A tool is not the aggregate form of itself, nor
+    of a tool that declares itself the aggregate form of it. ``only`` limits
+    the check to those tools' declarations. Keys are ``<tool>.aggregate_of``.
+    """
+    known = {str(name) for name in tool_facts} | {str(name) for name in tools or ()}
+    wanted = None if only is None else {str(name) for name in only}
+    errors: dict[str, str] = {}
+    for tool, raw in tool_facts.items():
+        if wanted is not None and str(tool) not in wanted:
+            continue
+        names = _aggregated(raw)
+        if str(tool) in names:
+            errors[f"{tool}.aggregate_of"] = "a tool is not the aggregate form of itself"
+            continue
+        unknown = [name for name in names if name not in known]
+        if unknown:
+            errors[f"{tool}.aggregate_of"] = (
+                f"aggregate_of names {', '.join(repr(n) for n in unknown)}, which "
+                f"{'is' if len(unknown) == 1 else 'are'} not a tool of this server; declare "
+                "each in tool_facts (e.g. its category)"
+            )
+            continue
+        mutual = _mutual(tool_facts, str(tool), names)
+        if mutual:
+            errors[f"{tool}.aggregate_of"] = (
+                f"aggregate_of names {', '.join(repr(n) for n in mutual)}, which "
+                f"{'declares' if len(mutual) == 1 else 'declare'} itself the aggregate form of "
+                f"{str(tool)!r}; of two tools, only one is the aggregate form of the other"
+            )
+    return errors
+
+
+def _mutual(tool_facts: Mapping[str, Any], tool: str, names: Iterable[str]) -> list[str]:
+    """The tools among ``names`` that declare themselves the aggregate form of ``tool``."""
+    return [name for name in names if tool in _aggregated(tool_facts.get(name))]
+
+
+def known_aggregates(
+    tool_facts: dict[str, ToolFacts], tools: Iterable[str] | None = None, where: str = ""
+) -> dict[str, ToolFacts]:
+    """``tool_facts`` with each ``aggregate_of`` holding only tools of its server.
+
+    Read leniently, as everything already accepted is: a name that is no tool
+    of the server (:func:`aggregate_reference_errors`), such as a tool an
+    operator later removed, or one that declares itself the aggregate form of
+    this tool in turn, is left out with one warning, and the rest of the
+    declaration is kept. In an operator's edit (``STRICT_DECLARATIONS``) the
+    reference is refused instead.
+    """
+    errors = aggregate_reference_errors(tool_facts, tools)
+    if not errors:
+        return tool_facts
+    if STRICT_DECLARATIONS.get():
+        raise ValueError("; ".join(f"tool_facts.{key}: {msg}" for key, msg in errors.items()))
+    known = {str(name) for name in tool_facts} | {str(name) for name in tools or ()}
+    out = dict(tool_facts)
+    for key in errors:
+        tool = key.removesuffix(".aggregate_of")
+        facts = out[tool]
+        mutual = set(_mutual(tool_facts, tool, facts.aggregate_of))
+        kept = tuple(
+            name
+            for name in facts.aggregate_of
+            if name in known and name != tool and name not in mutual
+        )
+        out[tool] = facts.model_copy(update={"aggregate_of": kept})
+        _warn_unknown_aggregates(f"{where}{tool}", [n for n in facts.aggregate_of if n not in kept])
+    return out
+
+
+def _warn_unknown_aggregates(where: str, names: Iterable[str]) -> None:
+    held = tuple(sorted(str(name) for name in names))
+    marker = (f"aggregate_of {where}", held)
+    if marker in _WARNED:
+        return
+    if len(_WARNED) >= _WARNED_MAX:
+        _WARNED.clear()
+    _WARNED.add(marker)
+    from maljan.core.logger import logger
+
+    logger.warning(
+        "A tool declaration (%s) names, as tools it is the aggregate form of, names that are "
+        "no tool of its server or that name it back; they are left out and the rest is kept: %s",
+        loggable_names([where]),
+        loggable_names(held),
+    )
+
+
 def changed_declaration_errors(
-    incoming: Mapping[str, Any], before: Iterable[Mapping[str, Any] | None] = ()
+    incoming: Mapping[str, Any],
+    before: Iterable[Mapping[str, Any] | None] = (),
+    *,
+    tools: Iterable[str] | None = None,
 ) -> dict[str, str]:
     """The strict refusals of the tool declarations in ``incoming`` that a save adds or changes.
 
@@ -686,11 +800,14 @@ def changed_declaration_errors(
     (the stored map, the shipped one) says for that tool, as written or as
     it is read leniently (what the console showed); an unchanged one is
     never refused, so a save that leaves a stored entry alone is never
-    blocked by it. Each other one is validated strictly. Keys are
+    blocked by it. Each other one is validated strictly, its ``aggregate_of``
+    against the tools of the server: the map's own and ``tools``, the
+    server's allow-list (:func:`aggregate_reference_errors`). Keys are
     ``<tool>`` or ``<tool>.<field>``.
     """
     held = [b for b in before if isinstance(b, Mapping)]
     errors: dict[str, str] = {}
+    changed: list[str] = []
     for tool, raw in incoming.items():
         said = _normal(raw)
         if said is not None:
@@ -715,6 +832,10 @@ def changed_declaration_errors(
                 for err in exc.errors():
                     loc = ".".join(str(part) for part in err["loc"])
                     errors[f"{tool}.{loc}" if loc else str(tool)] = err["msg"]
+                continue
+        changed.append(str(tool))
+    if changed:
+        errors.update(aggregate_reference_errors(incoming, tools, only=changed))
     return errors
 
 
@@ -988,7 +1109,13 @@ class ToolFacts(BaseModel):
     nothing by it, and its unavailability is not recorded for that sample.
     ``effects`` says what a call does beyond answering (:class:`ToolEffects`):
     whether it runs the sample's code, reaches the network, or sends the
-    sample's hash or bytes to a third party.
+    sample's hash or bytes to a third party. ``aggregate_of`` names the tools
+    of the same server this tool is the aggregate (combined) form of: one call
+    answers what many calls of those would (a decompilation of many functions
+    at once, a whole-program graph that combines per-function ones). The tool
+    is shown to the model as such (``undeclared_tools.with_aggregate_notes``),
+    so it can choose the one call over the many; each name is a tool of the
+    same server (:func:`aggregate_reference_errors`).
     """
 
     # A key this model does not know is refused in an operator's edit
@@ -1021,6 +1148,7 @@ class ToolFacts(BaseModel):
     category: str = ""
     routed_formats: tuple[str, ...] = ()
     effects: ToolEffects | None = None
+    aggregate_of: tuple[str, ...] = ()
 
     @model_validator(mode="before")
     @classmethod
@@ -1113,6 +1241,15 @@ class ToolFacts(BaseModel):
                     + ", ".join(known)
                 )
         return value
+
+    @field_validator("aggregate_of")
+    @classmethod
+    def _aggregated_tools_are_names(cls, value: tuple[str, ...]) -> tuple[str, ...]:
+        names = tuple(check_tool_name(v, "aggregate_of tool") for v in value)
+        repeated = sorted({name for name in names if names.count(name) > 1})
+        if repeated:
+            raise ValueError(f"aggregate_of names {', '.join(repeated)} more than once")
+        return names
 
     @model_validator(mode="after")
     def _a_source_is_an_asserting_tool_s(self) -> ToolFacts:
@@ -1912,12 +2049,35 @@ def strip_declaration_defaults(dumped: dict[str, Any], default: MCPServerConfig)
     return out
 
 
+# The fields of a tool's declaration added after digests were first recorded,
+# left out of a block's digest where a tool leaves them at their default, so
+# adding one moves no digest of a block whose tools do not set it.
+DIGEST_OMITS_AT_DEFAULT: tuple[str, ...] = ("aggregate_of",)
+
+
+def _digested_tools(tool_facts: Any) -> Any:
+    if not isinstance(tool_facts, Mapping):
+        return tool_facts
+    return {
+        tool: {
+            key: value
+            for key, value in facts.items()
+            if not (key in DIGEST_OMITS_AT_DEFAULT and not is_set(key, value))
+        }
+        if isinstance(facts, Mapping)
+        else facts
+        for tool, facts in tool_facts.items()
+    }
+
+
 def declaration_digest(cfg: Any) -> str:
     """A short digest of one block's whole declaration, as it is in force."""
     dumped = cfg.model_dump(mode="json") if isinstance(cfg, BaseModel) else dict(cfg)
     # A field a block leaves unset (``None``) is left out, so a field added to
     # the declaration later moves no digest of a block that does not set it.
     body = {name: dumped.get(name) for name in DECLARATION_FIELDS if dumped.get(name) is not None}
+    if "tool_facts" in body:
+        body["tool_facts"] = _digested_tools(body["tool_facts"])
     text = json.dumps(body, sort_keys=True, separators=(",", ":"), default=str)
     return hashlib.sha256(text.encode("utf-8")).hexdigest()[:16]
 

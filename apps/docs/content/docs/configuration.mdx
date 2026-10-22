@@ -3676,6 +3676,7 @@ it:
 | `words` | words a statement may use to name this tool's entry |
 | `display_name` | the name published text gives the tool: a rule table's title, the tool a recovered value names, the decoder a decoded value names; empty uses the tool's name |
 | `category` | the tag its description is shown with (`analyze`, `list`, `modify` …); an undeclared tool is tagged by its name's first word |
+| `aggregate_of` | the tools of the same server this tool is the aggregate (combined) form of: one call answers what many calls of those would (a decompilation of many functions at once, a whole-program graph that combines per-function ones). Its description, as the model is shown it, ends with "Aggregate form of `<tool>`: one call answers what many calls of it would.", written once the names a request offers are settled: each aggregated tool is named as the request offers it (`<server>__<tool>` where another server took the name), and a tool the request does not offer (withheld, or not picked by a reference) is left out of the note. The model can then choose the one call over the many; nothing else reads it, a server's own words quoted for it never carry the note, and a tool that declares none is shown and called as before. Each name is a tool the server declares in `tool_facts` (an aggregated tool declared with only its `category` is enough) or that its `tools` allow-list names; it is not the tool itself, nor a tool that declares itself the aggregate form of this one. A save that adds or changes such a declaration is refused naming the field (`<tool>.aggregate_of`, "declare each in tool_facts (e.g. its category)"), checked against the allow-list in force (sent, else stored, else shipped), and a stored one that names a tool the server no longer has is read without that name, with a warning. The shipped Ghidra block declares its batch and whole-program tools (`batch_decompile` of `decompile_function`, `batch_analyze_completeness`, `get_bulk_function_hashes`, `get_full_call_graph`, `bulk_fuzzy_match`, `batch_create_labels`, `batch_delete_labels`, `batch_set_comments`, `rename_variables`; `builtin_reverser_tools.GHIDRA_TOOLS`); `get_bulk_xrefs` declares none: its definition ("Batch cross-reference retrieval" over `addresses`) does not say whether it answers the references to each address or those from it, so which one tool it batches is not known |
 
 **Paths** are JSON-pointer-like: `/strings/*/offset` is the `offset` of every
 item of `strings`; `*` is every item of a list or every value of an object at
@@ -4001,7 +4002,7 @@ the kind and is offered only with one, accepting it stages both or neither,
 and a row field also needs `rows`. A tool declaration names a kind or states
 only the fields read without one (`display_name`, `category`, `words`,
 `timeout_seconds`, `long_running`, `memory_peak_mb`, `discloses_sample`,
-`read_only`, `arguments`, `routed_formats`, `effects`;
+`read_only`, `arguments`, `routed_formats`, `effects`, `aggregate_of`;
 `core.tool_declarations.KIND_FREE_FIELDS`): a declaration with an
 unknown key (`{"knd": …}`), an empty one, or one of no kind that sets a field
 read only through a kind is refused on save, by the API and the console's box

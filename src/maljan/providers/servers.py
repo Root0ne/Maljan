@@ -23,7 +23,7 @@ import asyncio
 import sys
 import threading
 import weakref
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -1610,6 +1610,34 @@ def _declared_fragment(handle: Any) -> str:
     return str(getattr(getattr(handle, "config", None), "prompt_fragment", "") or "")
 
 
+def _declared_aggregates(handle: Any) -> dict[str, tuple[str, ...]]:
+    """What a handle's server's tools declare themselves the aggregate form of; {} for none."""
+    from maljan.core.undeclared_tools import aggregates_of
+
+    return aggregates_of(getattr(getattr(handle, "config", None), "tool_facts", None))
+
+
+def _offered_names(server: str, incoming: Sequence[Any], seen: dict[str, str]) -> dict[str, str]:
+    """Each tool of ``server`` a request offers, by its own name, to the name it is offered under.
+
+    The tools arriving now, named by :func:`offered_name` over ``seen`` before
+    the merge claims anything, and the ones the server claimed earlier in the
+    same tool set.
+    """
+    prefix = f"{server}__"
+    out = {
+        name.removeprefix(prefix) if name.startswith(prefix) else name: name
+        for name, owner in seen.items()
+        if owner == server
+    }
+    claimed = dict(seen)
+    for tool in incoming:
+        name = str(getattr(tool, "name", "") or "")
+        if name:
+            out.setdefault(name, offered_name(server, name, claimed))
+    return out
+
+
 def offered_name(server: str, name: str, seen: dict[str, str]) -> str:
     """The name ``server``'s tool ``name`` is offered under, given the names ``seen`` claimed.
 
@@ -1952,6 +1980,7 @@ class ServerRegistry:
         *,
         fragment: str = "",
         own_words: str = "",
+        aggregates: Mapping[str, Sequence[str]] | None = None,
     ) -> int:
         """Append ``incoming`` to ``tools`` under the collision rule.
 
@@ -1975,11 +2004,21 @@ class ServerRegistry:
         list shows it only while the server's tools are there. ``own_words``
         is what a server that declares none says about itself
         (:func:`_own_words`), carried the same way
-        (``metadata["maljan_server_own_words"]``).
+        (``metadata["maljan_server_own_words"]``). ``aggregates`` is what the
+        server's tools declare themselves the aggregate form of
+        (``ToolFacts.aggregate_of``): such a tool's description gains a note
+        naming each aggregated tool this request offers, under the name it is
+        offered (``core.undeclared_tools.with_aggregate_notes``), the names
+        settled before anything is claimed, as :func:`_own_words` settles them.
 
         Returns how many tools were renamed, so the caller can log it once
         per server instead of per tool.
         """
+        if aggregates:
+            from maljan.core.undeclared_tools import with_aggregate_notes
+
+            offered_as = _offered_names(server, incoming, seen)
+            incoming = with_aggregate_notes(incoming, aggregates, offered_as)
         renamed = 0
         for tool in incoming:
             name = str(getattr(tool, "name", ""))
@@ -2022,6 +2061,7 @@ class ServerRegistry:
             seen,
             fragment=_declared_fragment(handle),
             own_words=_own_words(handle, offered, seen),
+            aggregates=_declared_aggregates(handle),
         )
 
     def tools_for(
@@ -2194,6 +2234,7 @@ class ServerRegistry:
             claimed,
             fragment=_declared_fragment(handle),
             own_words=_own_words(handle, picked, claimed),
+            aggregates=_declared_aggregates(handle),
         )
         if renamed:
             logger.info(
@@ -2236,6 +2277,7 @@ class ServerRegistry:
             claimed,
             fragment=_declared_fragment(handle),
             own_words=_own_words(handle, picked, claimed),
+            aggregates=_declared_aggregates(handle),
         )
         if renamed:
             logger.info(

@@ -41,8 +41,9 @@ which is far cheaper than walking every function manually:
 7. Call `list_imports` to confirm suspicious API imports raised above.
 8. Call `list_strings` for any encoded/hardcoded artefacts the IOC pass
    missed.
-9. For the 3–5 most suspicious functions: `decompile_function(address=<addr>)`
-   then `get_xrefs_to(address=<addr>)` to confirm call-sites.
+9. Decompile the functions that matter for the question: `batch_decompile`
+   for several at once, `decompile_function(address=<addr>)` for one; then
+   `get_xrefs_to(address=<addr>)` to confirm call-sites.
 
 === ADVANCED TOOLS (reach for these when the triage signals call for them) ===
 - API names resolved by hash (a hashing loop, sparse imports): call
@@ -63,7 +64,8 @@ IMPORTANT:
 - Step 1 (load_program) MUST happen before any analysis tool call.
 - Always prefer the high-level malware analyzers (steps 3–6) before
   decompiling individual functions — they are much cheaper.
-- Focus decompilation on 3-5 most suspicious functions, not every function.
+- Choose the functions to decompile by what the question needs; where a tool
+  is the aggregate form of another, one call of it answers many of the other.
 - Large binaries may have 1000+ functions. Prioritize entry point, main,
   and functions referencing crypto/network/process APIs.
 - Summarize assembly patterns instead of dumping raw hex.

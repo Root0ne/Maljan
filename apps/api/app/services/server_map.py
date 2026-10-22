@@ -36,6 +36,7 @@ from maljan.core.settings_overrides import (
     SERVER_MAP_PATH,
     server_entry_in_force,
     shipped_tool_facts,
+    shipped_tools,
 )
 from maljan.core.tool_declarations import (
     changed_declaration_errors,
@@ -219,7 +220,17 @@ def validate_server_map(
             )
             entry = {**entry, "tool_facts": in_force}
             before: list[Any] = [stored_in_force, shipped]
-            refused = changed_declaration_errors(in_force, before)
+            # An ``aggregate_of`` names a tool the map declares or the entry's
+            # allow-list in force names: sent, else stored, else shipped, as a load reads it.
+            if "tools" in entry:
+                listed = entry.get("tools")
+            elif isinstance(stored_entry, dict) and "tools" in stored_entry:
+                listed = stored_entry.get("tools")
+            else:
+                listed = shipped_tools(f"{SERVER_MAP_PATH}.{key}")
+            refused = changed_declaration_errors(
+                in_force, before, tools=listed if isinstance(listed, list) else None
+            )
             if refused:
                 for path, message in refused.items():
                     errors[f"{key}.tool_facts.{path}"] = message

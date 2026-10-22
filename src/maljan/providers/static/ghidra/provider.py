@@ -482,7 +482,9 @@ class GhidraStaticProvider(StaticProvider):
 
             self._run_async(client.initialize())
             self._toolkit = client
-            self._all_tools = self._pin_load_program_path(self._reading_errors(client.get_tools()))
+            self._all_tools = self._with_aggregate_notes(
+                self._pin_load_program_path(self._reading_errors(client.get_tools()))
+            )
             self.tools = list(self._all_tools)
             logger.info("Initialized Ghidra HTTP tools: %d.", len(self.tools))
             return
@@ -516,7 +518,9 @@ class GhidraStaticProvider(StaticProvider):
 
         self._run_async(toolkit.initialize())
         self._toolkit = toolkit  # type: ignore[assignment]
-        self._all_tools = self._pin_load_program_path(self._reading_errors(toolkit.get_tools()))
+        self._all_tools = self._with_aggregate_notes(
+            self._pin_load_program_path(self._reading_errors(toolkit.get_tools()))
+        )
         self.tools = list(self._all_tools)
         logger.info("Initialized Ghidra MCP tools: %d.", len(self.tools))
 
@@ -553,6 +557,21 @@ class GhidraStaticProvider(StaticProvider):
 
         self.rests.append(dict(record))
         emit_tool_server_rested(self.event_sink, record)
+
+    def _with_aggregate_notes(self, tools: list[Any]) -> list[Any]:
+        """``tools`` with the note each declared aggregate tool carries (``aggregate_of``).
+
+        Ghidra's tools are offered under their own names, so each note names
+        the aggregated tools this attach offers as they are named
+        (``core.undeclared_tools.with_aggregate_notes``).
+        """
+        from maljan.core.undeclared_tools import aggregates_of, with_aggregate_notes
+
+        aggregates = aggregates_of(getattr(self._cfg, "tool_facts", None))
+        if not aggregates:
+            return tools
+        offered = {str(t.name): str(t.name) for t in tools}
+        return with_aggregate_notes(tools, aggregates, offered)
 
     def _reading_errors(self, tools: Any) -> list[Any]:
         """The tools, each answer held against this block's declared error patterns.

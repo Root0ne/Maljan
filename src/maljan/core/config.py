@@ -87,6 +87,7 @@ from maljan.core.tool_declarations import (
     check_work_dir,
     compile_pattern,
     fill_declaration,
+    known_aggregates,
 )
 
 # The stdlib logger rather than ``maljan.core.logger``: this module is imported
@@ -1767,6 +1768,20 @@ class MCPServerConfig(BaseModel):
     @classmethod
     def _tool_names_are_names(cls, value: dict[str, ToolFacts]) -> dict[str, ToolFacts]:
         return check_tool_facts_keys(value)
+
+    @model_validator(mode="after")
+    def _aggregates_name_tools_of_this_server(self) -> "MCPServerConfig":
+        """Each ``aggregate_of`` names tools this server declares or lists in ``tools``.
+
+        A name that is not one is left out with a warning
+        (``tool_declarations.known_aggregates``); a save refuses it where the
+        operator's edit is checked (``changed_declaration_errors``).
+        """
+        kept = known_aggregates(self.tool_facts, self.tools, where="tool ")
+        # In place: an assignment would count the field as one the block set.
+        if kept is not self.tool_facts:
+            self.tool_facts.update(kept)
+        return self
 
     @model_validator(mode="after")
     def _refuse_the_composed_names(self) -> "MCPServerConfig":

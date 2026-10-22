@@ -40,6 +40,7 @@ from maljan.core.settings_overrides import (
     pack_step_refusals,
     settings_from_store,
     shipped_tool_facts,
+    shipped_tools,
     split_key,
     unknown_reference_refusals,
 )
@@ -272,8 +273,19 @@ def changed_declaration_refusals(
             errors[key] = refusal
             continue
         before = stored_in_force(shipped, held)[0] if isinstance(held, dict) else None
+        # An ``aggregate_of`` names a tool the block declares or its allow-list in
+        # force names: sent in this save, else stored, else shipped, as a load reads it.
+        tools_key = key.removesuffix(TOOL_FACTS_LEAF_SUFFIX) + ".tools"
+        if tools_key in changes:
+            listed = changes[tools_key]
+        elif tools_key in current:
+            listed = current[tools_key]
+        else:
+            listed = shipped_tools(split_key(key)[1].removesuffix(TOOL_FACTS_LEAF_SUFFIX))
         for where, message in changed_declaration_errors(
-            merge_tool_facts(shipped, edited), [before, shipped]
+            merge_tool_facts(shipped, edited),
+            [before, shipped],
+            tools=listed if isinstance(listed, list) else None,
         ).items():
             errors[f"{key}.{where}"] = message
     return errors
