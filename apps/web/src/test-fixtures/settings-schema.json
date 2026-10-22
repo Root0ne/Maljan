@@ -12142,7 +12142,7 @@
        },
        {
         "display_name": "anti-analysis",
-        "id": "find_anti_analysis_techniques",
+        "id": "anti_analysis_scan",
         "renderer": "anti_analysis_scan"
        },
        {
@@ -12185,6 +12185,10 @@
        }
       ],
       "shipped_compared": {
+       "anti_analysis_scan": {
+        "called": "anti_analysis_scan",
+        "server": ""
+       },
        "api_capability": {
         "called": "api_capability",
         "server": ""
@@ -12215,10 +12219,6 @@
        },
        "elf_info": {
         "called": "elf_info",
-        "server": ""
-       },
-       "find_anti_analysis_techniques": {
-        "called": "find_anti_analysis_techniques",
         "server": ""
        },
        "find_crypto_constants": {

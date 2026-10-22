@@ -643,7 +643,7 @@ class TestTheNode:
             "resolve_api_hashes",
             "decode_string_blobs",
             "find_crypto_constants",
-            "find_anti_analysis_techniques",
+            "anti_analysis_scan",
             "function_index",
             "find_directed_text",
         ]

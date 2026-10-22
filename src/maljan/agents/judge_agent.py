@@ -43,8 +43,11 @@ from maljan.agents.base_agent import (
     TOOL_LOOP_TURN_CALL,
     BudgetMeter,
     LoopBudget,
+    OfferReadAgainFirst,
     _hold_the_turn,
     _message_chars,
+    _stored_answer_of,
+    _stored_copy_of,
     _trim_for_synthesis,
     _turn_key,
     counted_window_tokens,
@@ -59,6 +62,7 @@ from maljan.agents.base_agent import (
     recursion_limit,
     request_chars,
     run_on_agent_loop,
+    steps_used,
     synthesis_budget_chars,
 )
 from maljan.agents.judge_postprocess import (
@@ -69,6 +73,7 @@ from maljan.agents.judge_postprocess import (
 )
 from maljan.agents.prompt_fragments import tools_statement
 from maljan.agents.run_evidence_corpus import read_of_entry as _read_of_entry
+from maljan.agents.tool_answer_clearing import read_evidence_tool
 from maljan.agents.tool_fence import (
     FENCE_STATEMENT,
     QUOTED_VALUE_STATEMENT,
@@ -2339,13 +2344,32 @@ class JudgeAgent(BudgetMeter):
         # On the budget record and the ticks, as the analysts' loop puts it.
         self._tool_definition_chars = definitions
 
-        def _note_the_conversation(conversation: list[Any]) -> None:
+        # Old tool answers cleared to references where the request is past the
+        # point in force or the server refuses it (``tool_answer_clearing``),
+        # as an analyst's loop does; ``read_evidence`` is offered only from
+        # the request that carries the first clear.
+        self._offered_after_clear: list[Any] = []
+        clearing = self._tool_answer_clearing()
+        read_tool = record_tools(
+            [
+                read_evidence_tool(
+                    _stored_answer_of(recorder),
+                    self._answer_sizer(),
+                    _stored_copy_of(recorder),
+                )
+            ],
+            recorder,
+            repeats,
+            context_budget=room,
+        )[0]
+
+        def _note_the_conversation(conversation: list[Any], cleared_chars: int = 0) -> None:
             if not isinstance(room, ContextBudget):
                 return
             try:
                 room.note_conversation(
                     recorder.agent,
-                    request_chars(conversation, definitions, room.chars_per_token),
+                    request_chars(conversation, definitions, room.chars_per_token, cleared_chars),
                 )
             except Exception as exc:  # noqa: BLE001 — a budget is never worth a lost loop
                 self.logger.debug("judge: the conversation size was not recorded (%s).", exc)
@@ -2381,7 +2405,13 @@ class JudgeAgent(BudgetMeter):
             # exactly that, one verdict call that ran past its wall clock.
             budget.note_turns(conversation)
             budget.own_steps += 1
-            _note_the_conversation(conversation)
+            conversation, cleared_chars = self._cleared_request(
+                clearing,
+                conversation,
+                self._note_clearing,
+                lambda: bool(self._offered_after_clear),
+            )
+            _note_the_conversation(conversation, cleared_chars)
             # The spend ceiling's word on the turn about to be sent, reserved
             # under the loop's key until the step is counted, and held as an
             # analyst's turn is: the model is bound to its tools here, so the
@@ -2391,10 +2421,10 @@ class JudgeAgent(BudgetMeter):
                 "mediation turn",
                 conversation,
                 slot=spend_key,
-                holdable=held_binding is not None,
+                holdable=binding_now["held"] is not None,
                 wait_s=budget.seconds_left(),
             )
-            _hold_the_turn(held_binding, self.llm, held)
+            _hold_the_turn(binding_now["held"], self.llm, held)
             self._publish_questions(conversation, asked)
             # What the request is made of, measured as it is sent
             # (``core.input_meter``); nothing in it changes.
@@ -2421,8 +2451,41 @@ class JudgeAgent(BudgetMeter):
 
         # The key this loop's turns are counted and reserved under.
         spend_key = object()
+        binding_now: dict[str, Any] = {"held": None}
         loop_model, held_binding = model_held_per_turn(self.llm, recorded)
-        agent_executor = create_react_agent(loop_model, recorded, prompt=_count_the_turns)
+        # The binding a turn's held cap is set on: replaced when the graph is
+        # built again with ``read_evidence``.
+        binding_now["held"] = held_binding
+        graph: dict[str, Any] = {
+            "executor": create_react_agent(loop_model, recorded, prompt=_count_the_turns)
+        }
+
+        def _offer_read_again() -> bool:
+            """Build the loop's graph again with ``read_evidence``; whether it now has it."""
+            nonlocal definitions
+            if self._offered_after_clear:
+                return True
+            try:
+                model, binding = model_held_per_turn(self.llm, [*recorded, read_tool])
+                recorded.append(read_tool)
+                binding_now["held"] = binding
+                graph["executor"] = create_react_agent(model, recorded, prompt=_count_the_turns)
+            except Exception as exc:  # noqa: BLE001 — said, and today's ending follows
+                if recorded and recorded[-1] is read_tool:
+                    recorded.pop()
+                binding_now["held"] = held_binding
+                clearing.enabled = False
+                self.logger.warning(
+                    "JudgeAgent: read_evidence could not be offered (%s: %s); old tool answers "
+                    "are not cleared in this loop.",
+                    type(exc).__name__,
+                    exc,
+                )
+                return False
+            definitions = self._tool_definition_chars = tool_definition_chars(recorded)
+            self._offered_after_clear = [read_tool]
+            return True
+
         self.logger.info(
             "JudgeAgent invoking ReAct (timeout=%s, steps=%s, tools=%d)...",
             limit_text(timeout, "s"),
@@ -2446,10 +2509,15 @@ class JudgeAgent(BudgetMeter):
         # The refusal that ended it, when the spend ceiling refused its next turn.
         spend_said: dict[str, str] = {"why": ""}
 
-        async def _until_it_answers_or_runs_out() -> None:
-            stream: Any = agent_executor.astream(
-                {"messages": messages},
-                {"recursion_limit": recursion_limit(max_steps)},
+        async def _until_it_answers_or_runs_out(start: list[Any] | None = None) -> None:
+            resend = False
+            begun = messages if start is None else start
+            # A pass sent again goes on from the steps the conversation has
+            # spent: the step limit is the loop's, not each pass's.
+            left = None if max_steps is None else max(1, max_steps - steps_used(begun))
+            stream: Any = graph["executor"].astream(
+                {"messages": begun},
+                {"recursion_limit": recursion_limit(left)},
                 stream_mode="values",
             )
             async with contextlib.aclosing(stream) as snapshots:
@@ -2486,13 +2554,35 @@ class JudgeAgent(BudgetMeter):
                         raise
                     ended["call_deadline"] = True
                 except Exception as exc:
-                    # Only a provider's own full-window answer, and only once
-                    # something was gathered; anything else fails the judge's
-                    # loop as it always did.
-                    if not (window_full_error(exc) and answers_held(recorder.entries)):
+                    if isinstance(exc, OfferReadAgainFirst) or isinstance(
+                        exc.__cause__, OfferReadAgainFirst
+                    ):
+                        # The request about to be sent carries the loop's first
+                        # clear: the graph is built again with the tool that
+                        # reads a cleared answer and the turn is sent again.
+                        _offer_read_again()
+                        resend = True
+                    elif (
+                        window_full_error(exc)
+                        and clearing.enabled
+                        and clearing.refused(list(latest.get("messages") or []), _message_chars)
+                        and _offer_read_again()
+                    ):
+                        # A refusal as over the window: one batch of the oldest
+                        # answers is cleared and the turn is sent again, again
+                        # only while each resend is refused and something is
+                        # left to clear.
+                        resend = True
+                    elif not (window_full_error(exc) and answers_held(recorder.entries)):
+                        # Only a provider's own full-window answer, and only once
+                        # something was gathered; anything else fails the judge's
+                        # loop as it always did.
                         raise
-                    ended["window_full"] = True
-                    note_a_window_that_moved(exc)
+                    else:
+                        ended["window_full"] = True
+                        note_a_window_that_moved(exc)
+            if resend:
+                await _until_it_answers_or_runs_out(list(latest.get("messages") or []))
 
         turns_recorded = False
 
@@ -2556,7 +2646,7 @@ class JudgeAgent(BudgetMeter):
                 # What is left of the loop's own time, as the analysts'
                 # salvage gets: loop and salvage together stay inside it.
                 return await self._reasoning_from_what_was_gathered(
-                    _msgs,
+                    clearing.apply(_msgs),
                     budget.seconds_left(),
                     settings,
                     counted_window_tokens(room),
@@ -2602,6 +2692,7 @@ class JudgeAgent(BudgetMeter):
             # In a ``finally`` for the reason the analysts' loop uses one: a
             # mediation that timed out still made the calls it made.
             self._evidence_entries.extend(recorder.entries)
+            self._offered_after_clear = []
             details = {
                 "time": deadline_said["why"]
                 or f"the loop did not answer within {limit_text(timeout, 's')}",
@@ -2627,7 +2718,12 @@ class JudgeAgent(BudgetMeter):
         if not keeps_turns or not tools or bind is None:
             return self.llm
         try:
-            return bind(tools, tool_choice="none")
+            # ``read_evidence`` too once the loop offered it: the turns it
+            # kept name it.
+            return bind(
+                [*tools, *(getattr(self, "_offered_after_clear", None) or [])],
+                tool_choice="none",
+            )
         except Exception as exc:  # noqa: BLE001 — the unbound model is the salvage's fallback
             self.logger.debug("JudgeAgent: tools not bound for the salvage (%s).", exc)
             return self.llm

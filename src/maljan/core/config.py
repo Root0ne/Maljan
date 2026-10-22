@@ -4692,6 +4692,11 @@ class Settings(BaseSettings):
     # are where one is set now, and a definition's own value wins. These maps
     # ship empty; an entry an operator writes is still read, after the
     # definition and before the deployment-wide value above.
+    # Removal: no release is named for it, so the maps stay (``loop_limits``
+    # reads them, each value held to a whole number of at least one by the
+    # validator below). When a release is named, delete both fields, their
+    # validator, the two reads in ``loop_limits``, the settings annotations
+    # and ``agent_key_migration``'s rename of their keys.
     react_agent_timeout_overrides: dict[str, int] = Field(default_factory=dict)
     react_agent_max_steps_overrides: dict[str, int] = Field(default_factory=dict)
 
