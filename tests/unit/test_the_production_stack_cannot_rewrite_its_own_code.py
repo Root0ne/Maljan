@@ -185,6 +185,7 @@ def test_volume_init_is_root_with_chown_alone_over_the_writable_volumes() -> Non
         "../data/samples:/own/data/samples",
         "../data/uploads:/own/data/uploads",
         "attck_cache:/own/attck_cache",
+        "ghidra_projects:/own/ghidra_projects",
     ]
     for name in ("backend-api", "backend-worker"):
         waits = services[name]["depends_on"]["volume-init"]

@@ -151,10 +151,28 @@ services:
     # `no` keeps a stopped container stopped across a reboot or a daemon
     # restart, for a host that starts Ghidra only for the runs that need it.
     restart: ${GHIDRA_RESTART:-unless-stopped}
+    # It opens the sample, so it is held as the backend services are: the
+    # worker's unprivileged ids, no Linux capability and no way to gain one
+    # (X2). The ids are the worker's because the worker writes its sample
+    # mirrors 0700/0600 and this container must read them; it shares nothing
+    # else with the worker (its own process table, mounts and network, and
+    # the mirror read-only), so the shared id opens no file of the worker's
+    # beyond the sample. The image ran as root before; volume-init hands
+    # ghidra_projects to these ids, and HOME and the JVM's user.home point at
+    # /tmp, since the ids have no home in the image.
+    user: "${MALJAN_UID:-10001}:${MALJAN_GID:-10001}"
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    # Bounds a fork or thread storm from a hostile binary. The JVM runs a
+    # thread per core in its analysis pools, so the bound is far above that.
+    pids_limit: ${GHIDRA_PIDS_LIMIT:-2048}
     environment:
       # Not a `:?` guard, for the reason given on Qdrant above. The server
       # refuses to bind 0.0.0.0 without a token, so an unset one stops this
-      # container and no other.
+      # container and no other. It is the only secret this container holds,
+      # and its own: no platform credential is passed here.
       GHIDRA_MCP_AUTH_TOKEN: ${GHIDRA_MCP_AUTH_TOKEN:-}
       GHIDRA_MCP_BIND_ADDRESS: 0.0.0.0
       GHIDRA_MCP_PORT: 8089
@@ -162,8 +180,30 @@ services:
       # here and the container limit below move together: see the comment
       # on mem_limit for how much room off-heap memory needs.
       JAVA_OPTS: ${GHIDRA_JAVA_OPTS:--Xmx4g -XX:+UseG1GC}
-    ports:
-      - "${BIND_ADDRESS:-127.0.0.1}:${GHIDRA_MCP_PORT:-8089}:8089"
+      # Read by every JVM whatever JAVA_OPTS holds, so an operator's own
+      # options keep a writable home for Ghidra's user settings.
+      JAVA_TOOL_OPTIONS: -Duser.home=/tmp
+      HOME: /tmp
+      # The name Ghidra opens projects as. Empty (the default) is the JVM's
+      # own, which no project relies on: the platform imports each sample
+      # without one. A project created while the image ran as root is owned
+      # by "root", and Ghidra refuses a project owned by another name, so an
+      # operator who opens such projects sets GHIDRA_USER=root.
+      GHIDRA_USER: ${GHIDRA_USER:-}
+    # No route out and none to the platform's stores (X2). `ghidra` is
+    # internal (no gateway at all) and shared only with the API and the
+    # worker, which reach it at http://ghidra-mcp:8089, and with ghidra-port
+    # below, which publishes its port for a worker run on the host; postgres,
+    # redis, minio and qdrant are not on it. An internal network cannot
+    # publish a port, which is why this service publishes none. A deployment
+    # that points Ghidra at a shared Ghidra server elsewhere needs a network
+    # with a route to it.
+    networks:
+      - ghidra
+    # ghidra_projects changes hands before the first start as a non-root user.
+    depends_on:
+      volume-init:
+        condition: service_completed_successfully
     # A ceiling the kernel enforces, because the JVM's own does not bound the
     # container. `-Xmx4g` caps the *heap*; Ghidra's database is memory-mapped and
     # its direct buffers live outside it, so RSS was measured at 5.15 GB while
@@ -183,12 +223,18 @@ services:
     volumes:
       # The right-hand side is Ghidra's declared sample_mount
       # (core.static.ghidra.sample_mount): change the two together.
-      # The worker writes its mirrors 0700/0600 as MALJAN_UID. Ghidra reads
-      # them only because its image runs as root; a Ghidra that runs as
+      # The worker writes its mirrors 0700/0600 as MALJAN_UID, which is why
+      # Ghidra runs as that id (see `user:` above); a Ghidra that runs as
       # another user needs a group it shares with the worker and mirrors
       # written 0750/0640 for it.
       - ../data/samples:/data/samples:ro
-      - ghidra_projects:/projects
+      # nocopy: the image's /projects is not copied into the volume, so the
+      # volume holds only what Ghidra wrote and volume-init handed over.
+      - type: volume
+        source: ghidra_projects
+        target: /projects
+        volume:
+          nocopy: true
     healthcheck:
       test: ["CMD-SHELL", "curl -fsS http://localhost:8089/check_connection || exit 1"]
       interval: 15s
@@ -197,12 +243,46 @@ services:
       start_period: 60s
 
   # -────────────────────────────────────────────
-  # Volume ownership — one-shot, before api and worker
+  # Ghidra's published port — a relay, under the `ghidra` profile
   # -────────────────────────────────────────────
-  # The backend services used to run as root, so an existing deployment's
-  # sample mirror, upload staging and ATT&CK cache are owned by root, and the
-  # unprivileged services could not write them. This hands the entries of those
-  # three that root owns, and nothing else, to MALJAN_UID:MALJAN_GID. It never
+  # ghidra-mcp is on an internal network only, which cannot publish a port.
+  # A worker run on the host reaches Ghidra at http://localhost:8089 through
+  # this relay instead: it forwards bytes to ghidra-mcp:8089 and nothing
+  # else. It opens no sample and mounts nothing; it runs as nobody, with no
+  # capability, no way to gain one and a read-only root. `ghidra-publish` is
+  # a network of its own that nothing else is on, so the published port
+  # gives ghidra-mcp no route to the host, and ghidra-mcp's only network
+  # stays internal.
+  ghidra-port:
+    profiles: [ghidra]
+    image: alpine/socat:1.8.1.1@sha256:7f9a06753033f2b7de18edc2353f2c15153413d95a039163c6db270fc7a6c3b0
+    container_name: maljan-ghidra-port
+    restart: ${GHIDRA_RESTART:-unless-stopped}
+    user: "65534:65534"
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    pids_limit: 64
+    mem_limit: 64m
+    command:
+      - tcp-listen:8089,fork,reuseaddr
+      - tcp-connect:ghidra-mcp:8089
+    networks:
+      - ghidra
+      - ghidra-publish
+    ports:
+      - "${BIND_ADDRESS:-127.0.0.1}:${GHIDRA_MCP_PORT:-8089}:8089"
+
+  # -────────────────────────────────────────────
+  # Volume ownership — one-shot, before api, worker and Ghidra
+  # -────────────────────────────────────────────
+  # The backend services and Ghidra used to run as root, so an existing
+  # deployment's sample mirror, upload staging, ATT&CK cache and Ghidra
+  # projects are owned by root, and the unprivileged services could not write
+  # them. This hands the entries of those four that root owns, and nothing
+  # else, to MALJAN_UID:MALJAN_GID. It never
   # takes a file from anyone else: an entry owned by neither root nor that id
   # stops it, before it has changed anything, with the id to set, and the stack
   # does not start. It changes ownership only (chown, never content or mode),
@@ -227,6 +307,7 @@ services:
       - ../data/samples:/own/data/samples
       - ../data/uploads:/own/data/uploads
       - attck_cache:/own/attck_cache
+      - ghidra_projects:/own/ghidra_projects
     command:
       - /bin/sh
       - -euc
@@ -238,7 +319,7 @@ services:
             exit 1
           fi
         done
-        dirs="/own/data/samples /own/data/uploads /own/attck_cache"
+        dirs="/own/data/samples /own/data/uploads /own/attck_cache /own/ghidra_projects"
         for dir in $$dirs; do
           owner=$$(find "$$dir" -xdev ! -uid 0 ! -uid "$$MALJAN_UID" -printf '%U\n' -quit)
           if [ -n "$$owner" ]; then
@@ -331,6 +412,11 @@ services:
     # settings store's LLM/sandbox URLs point there.
     extra_hosts:
       - "host.docker.internal:host-gateway"
+    # `default` as before; `ghidra` to reach Ghidra, which is on no other
+    # network these services share (see ghidra-mcp).
+    networks:
+      - default
+      - ghidra
     # The source trees are read-only: a process in this container that opens
     # hostile bytes cannot plant code the API or a later worker would run, or
     # change the host's working tree. data/ is read-only as well (its rule sets
@@ -441,6 +527,10 @@ services:
     # F8 (2026-07-05): resolve host.docker.internal on Linux (see backend-api).
     extra_hosts:
       - "host.docker.internal:host-gateway"
+    # As on the API: `ghidra` is how the worker reaches Ghidra.
+    networks:
+      - default
+      - ghidra
     # Hard ceiling (2026-07-26). One analysis took this process from 3.4 GB to
     # 8.5 GB and never gave it back; two in a row exhausted a 30 GB host that
     # also runs a ~15 GB llama-server, and the machine locked up. The graceful
@@ -571,6 +661,16 @@ services:
       - "${BIND_ADDRESS:-127.0.0.1}:${FRONTEND_PORT:-3000}:3000"
     depends_on:
       - backend-api
+
+# The networks of a container that opens the sample (X2). `default` is the
+# project's own network, which every other service is on.
+networks:
+  # No gateway: what is on it reaches only what else is on it.
+  ghidra:
+    internal: true
+  # The relay's side for Ghidra's published port; nothing else is on it.
+  ghidra-publish:
+    driver: bridge
 
 volumes:
   pgdata:

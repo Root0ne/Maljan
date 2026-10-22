@@ -220,15 +220,16 @@ def outcome(entry: Any) -> str | None:
     return NOT_RUN if was_not_made(entry) else FAILED
 
 
-def _read_where(isolation: Mapping[str, Any] | None) -> dict[str, tuple[str, bool]]:
-    """Each source the isolation part placed: where it read the sample, and whether isolated."""
+def _read_where(isolation: Mapping[str, Any] | None) -> dict[str, tuple[str, bool, str]]:
+    """Each source the isolation part placed: where it read, whether isolated, and on what."""
     rows = isolation.get("rows") if isinstance(isolation, Mapping) else None
-    out: dict[str, tuple[str, bool]] = {}
+    out: dict[str, tuple[str, bool, str]] = {}
     for row in rows or []:
         if isinstance(row, Mapping):
             out[str(row.get("source") or "")] = (
                 str(row.get("where") or ""),
                 row.get("isolated") is True,
+                str(row.get("isolated_by") or ""),
             )
     return out
 
@@ -280,6 +281,7 @@ def effects_part(
                 where = placed.get(source) if source else None
                 row["read_where"] = where[0] if where is not None else None
                 row["read_isolated"] = where[1] if where is not None else False
+                row["read_isolated_by"] = where[2] if where is not None else ""
             if effects.network == NETWORK_OPERATOR_SANDBOX:
                 held = (places or {}).get((source, tool)) or {}
                 row["placed_where"] = str(held.get("where") or "")
@@ -340,7 +342,13 @@ def _label(row: Mapping[str, Any], code: Callable[[str], str]) -> str:
 
 def _read_note(row: Mapping[str, Any]) -> str:
     """Where a tool that ran the sample's code read it, as the isolation part placed its source."""
-    from maljan.analysis.isolation import CHILD, IN_PROCESS, LOCAL_SERVICE, REMOTE_SERVICE
+    from maljan.analysis.isolation import (
+        BY_DECLARATION,
+        CHILD,
+        IN_PROCESS,
+        LOCAL_SERVICE,
+        REMOTE_SERVICE,
+    )
 
     where = row.get("read_where")
     if where is None:
@@ -353,6 +361,8 @@ def _read_note(row: Mapping[str, Any]) -> str:
             if row.get("read_isolated")
             else "not shown to be kept from the worker"
         )
+        if row.get("read_isolated") and row.get("read_isolated_by") == BY_DECLARATION:
+            kept = "kept from the worker as its block's declaration of a launcher says"
         return f"read in a process the worker started, {kept}"
     if where == LOCAL_SERVICE:
         return "read at a local server this run does not measure"

@@ -15,6 +15,7 @@ import {
   readCredentialBootstrap,
   readEnvNames,
   readErrorPatterns,
+  readLauncherDepth,
   readMount,
   readPrefixes,
   readReferenceUrls,
@@ -311,6 +312,7 @@ export function ToolFactsBox({
 const joinComma = (v: string[]) => v.join(", ");
 const joinLines = (v: string[]) => v.join("\n");
 const asIs = (v: string) => v;
+const showDepth = (v: number | null) => (v === null ? "" : String(v));
 
 /**
  * The server's declaration: the facts the platform will read about this
@@ -434,6 +436,16 @@ export default function DeclarationFields({
           />
           the platform&apos;s own server
         </label>
+        <ReadField
+          id={box("launcher_depth")}
+          label="Launcher levels (top levels of the started process tree that are a launcher, not a reader; empty: none)"
+          ariaLabel={`${serverKey} launcher_depth`}
+          value={server.launcher_depth ?? null}
+          show={showDepth}
+          rows={1}
+          read={readLauncherDepth}
+          onValue={(launcher_depth) => put({ launcher_depth })}
+        />
         <div className="sm:col-span-2">
           <ReadField
             id={box("reference_urls")}

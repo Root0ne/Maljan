@@ -275,13 +275,17 @@ def measure_tree(pid: int, env_names: Iterable[str]) -> dict[str, Any]:
     ``/proc/<pid>/environ``, names only (:func:`environ_names`): a launcher
     can add variables to what it hands the server. Where that file cannot be
     read they are ``None``, unknown, which fails like any unread fact.
+
+    Each descendant records its ``depth`` below the started process (its
+    children are depth 1), which a block's declared launcher is read against
+    (``launcher_depth``, :func:`isolation_part`).
     """
     started = measure_process(pid, env_names)
     descendants: list[dict[str, Any]] = []
     judged, why = True, ""
-    seen, queue = {pid}, [pid]
+    seen, queue = {pid}, [(pid, 0)]
     while queue and judged:
-        current = queue.pop(0)
+        current, depth = queue.pop(0)
         children = _children(current)
         if children is None:
             if not _gone(current):
@@ -301,8 +305,9 @@ def measure_tree(pid: int, env_names: Iterable[str]) -> dict[str, Any]:
                 continue
             names = environ_names(child)
             measured["platform_names_in_env"] = None if names is None else platform_names(names)
+            measured["depth"] = depth + 1
             descendants.append(measured)
-            queue.append(child)
+            queue.append((child, depth + 1))
     return {
         **started,
         "descendants": descendants,
@@ -485,16 +490,36 @@ def _passes(row: Mapping[str, Any]) -> bool:
     return all(checks)
 
 
+def _launcher_passes(process: Mapping[str, Any]) -> bool:
+    """Whether a process of a declared launcher passes: its environment held no platform variable.
+
+    A launcher its block declares (``launcher_depth``) starts the server and
+    reads no sample, so the checks that keep a reader from the worker are not
+    its to pass: a launcher that separates its child runs as the worker's user,
+    in the worker's namespaces, by its nature. What it still hands down is its
+    environment, so that is held to the check every process is.
+    """
+    return process.get("platform_names_in_env") == []
+
+
 # Why a start's descendants were not judged when its note says nothing of them.
 DESCENDANTS_UNRECORDED = "the run recorded no walk of the processes under it"
+# Why, under a declared launcher, they were not: the walk recorded no depth, so
+# which process is the launcher's cannot be told.
+DEPTH_UNRECORDED = "the run recorded no depth of the processes under it"
 
 
-def _descendant_fields(notes: Sequence[Mapping[str, Any]], needs_network: bool) -> dict[str, Any]:
+def _descendant_fields(
+    notes: Sequence[Mapping[str, Any]], needs_network: bool, launcher_depth: int = 0
+) -> dict[str, Any]:
     """Every start's descendants together: how many, how many failed, and whether all were judged.
 
     A note that records no walk judged nothing: never isolated by default.
+    Under a declared launcher of ``launcher_depth`` levels, a descendant above
+    that depth is the launcher's (:func:`_launcher_passes`) and one at or below
+    it is held to every check; ``under_launcher`` counts the latter.
     """
-    count = failing = 0
+    count = failing = under = 0
     judged, why = True, ""
     for note in notes:
         if "descendants_judged" not in note:
@@ -505,12 +530,22 @@ def _descendant_fields(notes: Sequence[Mapping[str, Any]], needs_network: bool) 
             why = why or str(note.get("descendants_why") or DESCENDANTS_UNRECORDED)
         for process in note.get("descendants") or []:
             count += 1
+            depth = process.get("depth")
+            if launcher_depth and not isinstance(depth, int):
+                judged, why = False, why or DEPTH_UNRECORDED
+                failing += 1
+                continue
+            if launcher_depth and depth < launcher_depth:
+                failing += 0 if _launcher_passes(process) else 1
+                continue
+            under += 1
             failing += 0 if _passes({**process, "needs_network": needs_network}) else 1
     return {
         "descendants": count,
         "descendants_failing": failing,
         "descendants_judged": judged,
         "descendants_why": why,
+        "under_launcher": under if launcher_depth else 0,
     }
 
 
@@ -530,12 +565,21 @@ def _row(source: str, where: str, calls: int, **over: Any) -> dict[str, Any]:
         "descendants_judged": False,
         "descendants_why": "",
         "needs_network": False,
+        "launcher_depth": 0,
+        "under_launcher": 0,
         "isolated": False,
+        "isolated_by": "",
         "why_not_measured": "",
     }
     row.update(over)
     return row
 
+
+# What an isolated row, or the whole part, rests on: every check measured, or
+# a check that rests on a block's declared launcher (``launcher_depth``). The
+# whole part rests on a declaration when any of its rows does.
+BY_MEASUREMENT = "measurement"
+BY_DECLARATION = "declaration"
 
 # Why a row's isolation cannot be told.
 NOT_MEASURED_CHILD = "the run holds no measurement of the process it was started as"
@@ -553,6 +597,7 @@ def isolation_part(
     in_process: Mapping[str, str],
     route: Callable[[str], tuple[str, str, str, str]],
     needs_network: Callable[[str], bool],
+    launcher_depth: Callable[[str], int] = lambda _source: 0,
 ) -> dict[str, Any]:
     """The isolation part of the disclosure record.
 
@@ -562,7 +607,19 @@ def isolation_part(
     ``worker`` the worker's own facts (:func:`worker_facts`); ``in_process``
     the platform's declared in-process sources with their labels; ``route``
     answers a source's ``(transport, host, locality, why)`` from its settings
-    block, and ``needs_network`` whether that block declares it needs one.
+    block, and ``needs_network`` whether that block declares it needs one;
+    ``launcher_depth`` how many levels at the top of the process tree the
+    worker starts for a source its block declares a launcher's (``0``: none).
+
+    **A declared launcher.** A launcher that separates the real server from the
+    worker (a sandbox's monitor, a namespace or user switch) runs as the
+    worker's user and would keep the row "not isolated" however well its child
+    is kept. A block that declares one has its top ``launcher_depth`` levels
+    held only to carrying no platform variable, every process under them to
+    every check, and is isolated only when at least one process under them was
+    measured: a launcher whose server runs where this run cannot see it (a
+    container client) proves nothing and stays "not isolated". The declaration
+    is the block's word, and the report says so.
     """
     from maljan.core.host_locality import LOCAL, REMOTE
 
@@ -600,6 +657,7 @@ def isolation_part(
         transport, host, locality, why = route(source)
         network = bool(needs_network(source))
         if transport == "stdio":
+            levels = max(0, int(launcher_depth(source) or 0))
             measured = [note for note in held if note.get("where") == CHILD]
             if not measured:
                 rows.append(
@@ -609,6 +667,7 @@ def isolation_part(
                         calls,
                         transport=transport,
                         needs_network=network,
+                        launcher_depth=levels,
                         why_not_measured=NOT_MEASURED_CHILD,
                     )
                 )
@@ -622,13 +681,19 @@ def isolation_part(
                 measured_by="worker",
                 attaches=len(measured),
                 needs_network=network,
+                launcher_depth=levels,
                 why_not_measured=NOT_MEASURED_DISAGREE if disagreed else "",
                 **fields,
-                **_descendant_fields(measured, network),
+                **_descendant_fields(measured, network, levels),
             )
             row["isolated"] = (
-                _passes(row) and row["descendants_judged"] and not row["descendants_failing"]
+                (_launcher_passes(row) if levels else _passes(row))
+                and row["descendants_judged"]
+                and not row["descendants_failing"]
+                and (not levels or row["under_launcher"] > 0)
             )
+            if row["isolated"]:
+                row["isolated_by"] = BY_DECLARATION if levels else BY_MEASUREMENT
             rows.append(row)
             continue
         if transport and locality == LOCAL:
@@ -668,11 +733,14 @@ def isolation_part(
                 )
             )
     rows.sort(key=lambda r: (_ORDER[r["where"]], r["source"]))
+    isolated = bool(rows) and not unsourced and all(row["isolated"] for row in rows)
+    declared = any(row["isolated_by"] == BY_DECLARATION for row in rows)
     return {
         "worker": dict(worker),
         "rows": rows,
         "unsourced_reads": max(0, int(unsourced or 0)),
-        "isolated": bool(rows) and not unsourced and all(row["isolated"] for row in rows),
+        "isolated": isolated,
+        "isolated_by": (BY_DECLARATION if declared else BY_MEASUREMENT) if isolated else "",
     }
 
 
@@ -828,13 +896,44 @@ def _child_line(row: Mapping[str, Any], code: Callable[[str], str]) -> str:
         "measured at its start" if starts == 1 else f"measured at each of its {starts} starts"
     )
     verdict = "isolated" if row.get("isolated") else "not isolated"
+    if row.get("isolated") and row.get("isolated_by") == BY_DECLARATION:
+        verdict = "isolated by its block's declaration"
     need = " Its block declares that it needs the network." if row.get("needs_network") else ""
     tail = f" {_cap(why)}." if why else ""
+    levels = int(row.get("launcher_depth") or 0)
+    tree = _launcher_sentence(row, levels) if levels else _tree_sentence(row)
     return (
         f"{who} (stdio, run on this machine) read the sample. The process the worker started "
-        f"for it was {measured}: " + "; ".join(parts) + f". {_tree_sentence(row)} "
+        f"for it was {measured}: " + "; ".join(parts) + f". {tree} "
         f"So: {verdict}.{need}{tail}"
     )
+
+
+def _launcher_sentence(row: Mapping[str, Any], levels: int) -> str:
+    """What was judged of a tree whose top ``levels`` its block declares a launcher's."""
+    top = f"the top {levels} levels of its tree"
+    if levels == 1:
+        top = "the process the worker started"
+    declared = (
+        f"Its block declares {top} a launcher that does not read the sample (the block's word, "
+        "not measured), so the launcher is held only to carrying none of the platform's own "
+        "variables, and every process under it to every check."
+    )
+    if not row.get("descendants_judged"):
+        return (
+            f"{declared} Its descendant processes were not judged "
+            f"({row.get('descendants_why')}), so they cannot be shown to be kept from the worker."
+        )
+    under, failing = int(row.get("under_launcher") or 0), int(row.get("descendants_failing") or 0)
+    if not under:
+        return (
+            f"{declared} No process under the launcher was measured, so what read the sample "
+            "cannot be shown to be kept from the worker."
+        )
+    noun = "process under the launcher was" if under == 1 else "processes under the launcher were"
+    if not failing:
+        return f"{declared} {under} {noun} measured, and every process of the tree passed."
+    return f"{declared} {under} {noun} measured, and {failing} of the tree did not pass."
 
 
 def _tree_sentence(row: Mapping[str, Any]) -> str:
@@ -882,6 +981,13 @@ def isolation_lines(part: Any, code: Callable[[str], str] = _code) -> list[str]:
     lines: list[str] = []
     if not rows and not unsourced:
         lines.append("This run recorded no read of the sample's bytes, so nothing is said of it.")
+    elif part.get("isolated") and part.get("isolated_by") == BY_DECLARATION:
+        declared = [row for row in rows if row.get("isolated_by") == BY_DECLARATION]
+        names = ", ".join(_who(row, code) for row in declared)
+        lines.append(
+            "Every source that read the sample's bytes was kept from the worker as measured, "
+            f"but for {names} that rests on its block's declaration of a launcher."
+        )
     elif part.get("isolated"):
         lines.append(
             "Every source that read the sample's bytes was measured as kept from the worker."

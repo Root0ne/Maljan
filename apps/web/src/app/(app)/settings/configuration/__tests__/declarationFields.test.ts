@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   readEnvNames,
   readErrorPatterns,
+  readLauncherDepth,
   readMount,
   readPrefixes,
   readReferenceUrls,
@@ -177,6 +178,13 @@ describe("the server editor's declaration readers", () => {
     expect(readWorkDir("r2-work").value).toBe("r2-work");
     expect(readWorkDir("a/b").error).toMatch(/one directory name/);
     expect(readWorkDir("..").error).toMatch(/one directory name/);
+  });
+
+  it("reads the launcher's levels as a whole number, or none when empty", () => {
+    expect(readLauncherDepth("1")).toEqual({ value: 1, error: null });
+    expect(readLauncherDepth(" ")).toEqual({ value: null, error: null });
+    expect(readLauncherDepth("-1").error).toMatch(/whole number of levels/);
+    expect(readLauncherDepth("1.5").error).toMatch(/whole number of levels/);
   });
 
   it("reads auto-name prefixes ending in _ or .", () => {

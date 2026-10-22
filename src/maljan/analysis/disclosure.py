@@ -878,6 +878,13 @@ def _isolation(
         route = _held(source)
         return (route.transport, route.place.host, route.place.where, route.place.why)
 
+    def _launcher(source: str) -> int:
+        # The block's declared launcher (``launcher_depth``); recorded in the
+        # snapshot only where an operator set it, so absent is none.
+        path = _block_path(source)
+        value = snapshot.get(f"{path}.launcher_depth") if path else None
+        return value if isinstance(value, int) and not isinstance(value, bool) else 0
+
     readers, unsourced = sample_readers(snapshot, entries, _block_path, sample_paths)
     return isolation_part(
         readers,
@@ -887,6 +894,7 @@ def _isolation(
         in_process={str(ref): cfg.label for ref, cfg in in_process_declarations().items()},
         route=_placed,
         needs_network=lambda source: _held(source).gateway,
+        launcher_depth=_launcher,
     )
 
 

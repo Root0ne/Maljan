@@ -1665,6 +1665,15 @@ DECLARATION_LEAVES: tuple[tuple[str, str, str], ...] = (
         "the token sits in the answer), token_prefix, facts (the answer's other values "
         "shown to the operator, by path) and note. Empty when the token is typed in.",
     ),
+    (
+        "launcher_depth",
+        "launcher levels",
+        "How many levels at the top of the process tree the worker starts for this server "
+        "belong to a launcher that does not read the sample (1: the started process alone). "
+        "The report's isolation part holds them only to carrying none of the platform's own "
+        "variables and every process under them to every check, and says the launcher is "
+        "this block's word. Empty declares no launcher.",
+    ),
 )
 
 
@@ -1677,12 +1686,12 @@ def mcp_server_annotations(
     order: int = 0,
     provider_owned: bool = False,
 ) -> dict[str, Annotation]:
-    """The thirty-five leaves of an ``MCPServerConfig`` block, described for ``label``.
+    """The thirty-six leaves of an ``MCPServerConfig`` block, described for ``label``.
 
     Every MCP server in the settings has the same nine transport/tool-selection
     knobs, plus six tool-server fields (``cwd``, ``env_allow``, ``tools``,
     ``agents``, ``label``, ``call_timeout_seconds``), the seven of
-    ``sample_open`` and the thirteen other declaration fields
+    ``sample_open`` and the fourteen other declaration fields
     (``DECLARATION_LEAVES``); writing them out six times invites drift between
     blocks that must behave identically. The per-field wording is fixed, the
     server's name is the only variable.

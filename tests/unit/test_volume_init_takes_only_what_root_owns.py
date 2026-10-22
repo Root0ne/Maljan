@@ -29,7 +29,7 @@ import yaml
 ROOT = Path(__file__).resolve().parents[2]
 COMPOSE = ROOT / "docker" / "docker-compose.yml"
 DOCKERFILE = ROOT / "docker" / "Dockerfile.backend"
-MOUNTS = ("data/samples", "data/uploads", "attck_cache")
+MOUNTS = ("data/samples", "data/uploads", "attck_cache", "ghidra_projects")
 
 
 def _script() -> str:
@@ -103,7 +103,8 @@ def test_volumes_already_the_target_s_are_left_alone(tmp_path: Path) -> None:
 # service has, and print what it left.
 CONTAINER_CHECK = r"""
 set -u
-mkdir -p /own/data/samples/.work/abc /own/data/uploads /own/attck_cache /outside
+mkdir -p /own/data/samples/.work/abc /own/data/uploads /own/attck_cache
+mkdir -p /own/ghidra_projects /outside
 chmod 700 /own/data/samples/.work /own/data/samples/.work/abc
 printf 'sample' > /own/data/samples/.work/abc/f
 chmod 600 /own/data/samples/.work/abc/f

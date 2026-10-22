@@ -3582,6 +3582,7 @@ are ever removed.
 | `reference_urls` | sample lookup URL templates, `https://` and naming `{sha256}`, `{md5}` or `{sha1}`; a report links them, under the name its lookup's record gives (else the server's label), only when the run recorded an entry from this server. `reporting.reference_urls` holds the lookups linked on every report (shipped with VirusTotal's and MalwareBazaar's) |
 | `tool_facts` | per tool name, what its answer is and where its facts sit (below) |
 | `credential_bootstrap` | how the server's credential is obtained by one request (below); empty when its token is typed in |
+| `launcher_depth` | how many levels at the top of the process tree the worker starts for the server are a launcher that does not read the sample (1: the started process alone); the report's isolation part holds them only to carrying none of the platform's own variables and every process under them to every check ([Where the sample was read](/usage/reports-and-exports/#where-the-sample-was-read)). Empty declares no launcher |
 
 #### Obtaining a server's credential
 
