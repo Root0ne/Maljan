@@ -12,6 +12,7 @@ import { deepEqual } from "./mapEditorHelpers";
 import { useOptionalSettingsContext } from "./SettingsContext";
 import {
   DECLARATION_PANEL_COPY,
+  readCallTimeout,
   readCredentialBootstrap,
   readEnvNames,
   readErrorPatterns,
@@ -312,6 +313,7 @@ export function ToolFactsBox({
 const joinComma = (v: string[]) => v.join(", ");
 const joinLines = (v: string[]) => v.join("\n");
 const asIs = (v: string) => v;
+const showSeconds = (v: number | null) => (v === null ? "" : String(v));
 const showDepth = (v: number | null) => (v === null ? "" : String(v));
 
 /**
@@ -445,6 +447,16 @@ export default function DeclarationFields({
           rows={1}
           read={readLauncherDepth}
           onValue={(launcher_depth) => put({ launcher_depth })}
+        />
+        <ReadField
+          id={box("call_timeout_seconds")}
+          label="Call timeout in seconds (from 0; 0: no deadline of its own; empty: the deployment's floor)"
+          ariaLabel={`${serverKey} call_timeout_seconds`}
+          value={server.call_timeout_seconds ?? null}
+          show={showSeconds}
+          rows={1}
+          read={readCallTimeout}
+          onValue={(call_timeout_seconds) => put({ call_timeout_seconds })}
         />
         <div className="sm:col-span-2">
           <ReadField
