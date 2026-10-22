@@ -27,10 +27,17 @@ from pathlib import Path
 
 import pytest
 
-from tests.tool_name_reads import NAME_READ_SNIPPETS, findings
+from tests.tool_name_reads import (
+    NAME_READ_SNIPPETS,
+    findings,
+    tool_parameters,
+    tool_parameters_under,
+)
 
 ROOT = Path(__file__).resolve().parents[2]
 PACKAGES = ("pipeline", "analysis", "agents")
+# Helpers any module of the product defines, for a literal handed to one imported.
+SHARED = tool_parameters_under(ROOT / "src" / "maljan")
 
 _PACK_STEP = (
     "the triage pack reading the answer its own in-process step just produced, by that "
@@ -52,7 +59,7 @@ def _found() -> Counter[tuple[str, str, str]]:
     for package in PACKAGES:
         for path in sorted((ROOT / "src" / "maljan" / package).rglob("*.py")):
             module = path.relative_to(ROOT / "src" / "maljan").as_posix()
-            for finding in findings(path.read_text(encoding="utf-8"), module):
+            for finding in findings(path.read_text(encoding="utf-8"), module, shared=SHARED):
                 held[(module, finding.what.split()[0], finding.text)] += 1
     return held
 
@@ -110,3 +117,62 @@ def test_the_guard_lets_a_writer_and_a_tool_to_tool_helper_be() -> None:
         'words = re.findall("[a-z]+", entry.tool)\n'
     )
     assert findings(clean) == []
+
+
+def test_the_guard_sees_a_source_held_against_a_registry_key_that_is_built() -> None:
+    for built in (
+        'ok = entry.source == f"mcp:{key}"\n',
+        'ok = entry.source in (f"mcp:{k}", other)\n',
+        'ok = entry.source == "mcp:" + key\n',
+    ):
+        assert findings(built), built
+    for near in (
+        "ok = entry.source == f'{key}'\n",
+        'ok = entry.source == f"x{key}:mcp:"\n',
+        'ok = entry.source == "native"\n',
+        "ok = entry.source == key\n",
+    ):
+        assert findings(near) == [], near
+
+
+def test_the_guard_follows_a_tool_helper_imported_from_another_module() -> None:
+    helper = "def find(es, tool):\n    return [e for e in es if e.tool == tool]\n"
+    shared = tool_parameters(helper)
+    for caller in (
+        'from maljan.core.helpers import find\nfind(es, "capa")\n',
+        'from maljan.core.helpers import find as look\nlook(es, tool="capa")\n',
+        'from maljan.core import helpers\nhelpers.find(es, "capa")\n',
+        'import maljan.core.helpers as h\nh.find(es, "capa")\n',
+    ):
+        assert findings(caller, shared=shared), caller
+        assert findings(caller) == [], caller
+    for near in (
+        "from maljan.core.helpers import find\nfind(es, other)\n",
+        'from elsewhere import find\nfind(es, "capa")\n',
+        'import re\nre.find(es, "capa")\n',
+        'def find(es, label):\n    return label\nfind(es, "capa")\n',
+    ):
+        assert findings(near, shared=shared) == [], near
+
+
+def test_the_guard_reads_every_module_under_a_root_for_tool_helpers(tmp_path: Path) -> None:
+    (tmp_path / "a.py").write_text("def find(es, tool):\n    return tool == es.tool\n")
+    (tmp_path / "b.py").write_text("def record(tool):\n    return {tool: 1}\n")
+    assert tool_parameters_under(tmp_path) == {"find": ([1], {"tool"})}
+
+
+def test_the_guard_flags_an_entry_s_server_held_against_a_name_only() -> None:
+    for read in (
+        'ok = entry.server == "radare2"\n',
+        'ok = row.server in ("radare2", "ghidra")\n',
+        'ok = "radare2" == entry.server_name\n',
+    ):
+        assert findings(read), read
+    for near in (
+        'ok = entry.server == ""\n',
+        'ok = entry.server in (None, "", PIPELINE)\n',
+        'ok = self.server == "radare2"\n',
+        "ok = entry.server == other.server\n",
+        "ok = entry.server == PIPELINE\n",
+    ):
+        assert findings(near) == [], near
