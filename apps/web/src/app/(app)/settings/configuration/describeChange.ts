@@ -17,6 +17,7 @@ import type {
 } from "@/types/settings";
 import type { AgentLLMOverride } from "./AgentDefinitionsEditor";
 import { deepEqual } from "./deepEqual";
+import { ENRICHMENT_SOURCES_SPEC, REPORT_FORMATS_SPEC, type RowsSpec } from "./recordRows";
 import { shippedToolFactsOf } from "@/lib/providerFacts";
 import { toolFactsDiff, type ToolFactsDiff } from "./toolFactsChanges";
 
@@ -82,15 +83,82 @@ function asRecord(v: unknown): Record<string, unknown> {
 // Generic list / dict / json leaves (no special key handling below applies)
 // ---------------------------------------------------------------------------
 
-function describeListChange(before: unknown[], after: unknown[]): {
+const MAX_RECORD_LENGTH = 80;
+
+/** Field names that hold a secret in a record of a collection: the ones the
+ *  record editors mark, plus any name that reads as a credential, so a record
+ *  the editors do not know never prints one. */
+const SECRET_NAME = /(api_?key|token|secret|password|passwd)/i;
+
+function secretFieldsOf(entry: CatalogEntry): Set<string> {
+  const spec: RowsSpec | null =
+    entry.editor === "enrichment_sources"
+      ? ENRICHMENT_SOURCES_SPEC
+      : entry.editor === "report_formats"
+        ? REPORT_FORMATS_SPEC
+        : null;
+  return new Set((spec?.fields ?? []).filter((f) => f.secret).map((f) => f.name));
+}
+
+const isPlainRecord = (v: unknown): v is Record<string, unknown> =>
+  v !== null && typeof v === "object" && !Array.isArray(v);
+
+const isSecretField = (name: string, secrets: Set<string>) =>
+  secrets.has(name) || SECRET_NAME.test(name);
+
+/** The value with every secret field's value left out. */
+function redacted(v: unknown, secrets: Set<string>): unknown {
+  if (Array.isArray(v)) return v.map((x) => redacted(x, secrets));
+  if (!isPlainRecord(v)) return v;
+  const out: Record<string, unknown> = {};
+  for (const [k, x] of Object.entries(v)) {
+    out[k] = isSecretField(k, secrets) ? (hasToken(x) ? "(secret)" : x) : redacted(x, secrets);
+  }
+  return out;
+}
+
+/** A list or dict entry as one short piece of text: a scalar as `formatScalar`
+ *  has it, a record or list as compact JSON cut at 80 characters. */
+function formatEntryValue(v: unknown, secrets: Set<string>): string {
+  if (v === null || typeof v !== "object") return formatScalar(v);
+  const text = JSON.stringify(redacted(v, secrets));
+  return text.length > MAX_RECORD_LENGTH ? `${text.slice(0, MAX_RECORD_LENGTH)}…` : text;
+}
+
+/** What changed in one secret field, never its value. */
+function secretChange(name: string, before: unknown, after: unknown): string {
+  if (after === null || after === undefined || after === "") return `${name} cleared`;
+  return hasToken(before) ? `${name} new value` : `${name} set`;
+}
+
+/** The fields that differ between two records, `field old → new`; a changed
+ *  value that is itself a record or list reads as compact JSON. */
+function describeRecordFields(
+  before: Record<string, unknown>,
+  after: Record<string, unknown>,
+  secrets: Set<string>
+): string {
+  const parts: string[] = [];
+  for (const name of collectKeys(before, after)) {
+    if (deepEqual(before[name], after[name])) continue;
+    parts.push(
+      isSecretField(name, secrets)
+        ? secretChange(name, before[name], after[name])
+        : `${name} ${formatEntryValue(before[name], secrets)} → ${formatEntryValue(after[name], secrets)}`
+    );
+  }
+  return parts.join("; ");
+}
+
+function describeListChange(before: unknown[], after: unknown[], secrets: Set<string>): {
   summary: string;
   detail?: string[];
 } {
   const added = after.filter((v) => !before.some((b) => deepEqual(b, v)));
   const removed = before.filter((v) => !after.some((a) => deepEqual(a, v)));
   const detail = [
-    ...added.map((v) => `+ ${formatScalar(v)}`),
-    ...removed.map((v) => `− ${formatScalar(v)}`),
+    ...added.map((v) => `+ ${formatEntryValue(v, secrets)}`),
+    ...removed.map((v) => `− ${formatEntryValue(v, secrets)}`),
   ];
   return {
     summary: `+${added.length} −${removed.length} entries`,
@@ -100,7 +168,8 @@ function describeListChange(before: unknown[], after: unknown[]): {
 
 function describeDictChange(
   before: Record<string, unknown>,
-  after: Record<string, unknown>
+  after: Record<string, unknown>,
+  secrets: Set<string>
 ): { summary: string; detail?: string[] } {
   const keys = collectKeys(before, after);
   const detail: string[] = [];
@@ -111,12 +180,16 @@ function describeDictChange(
     const inAfter = Object.prototype.hasOwnProperty.call(after, key);
     if (!inBefore && inAfter) {
       added++;
-      detail.push(`+ ${key}: ${formatScalar(after[key])}`);
+      detail.push(`+ ${key}: ${formatEntryValue(after[key], secrets)}`);
     } else if (inBefore && !inAfter) {
       removed++;
-      detail.push(`− ${key}: ${formatScalar(before[key])}`);
+      detail.push(`− ${key}: ${formatEntryValue(before[key], secrets)}`);
     } else if (!deepEqual(before[key], after[key])) {
-      detail.push(`~ ${key}: ${formatScalar(before[key])} → ${formatScalar(after[key])}`);
+      detail.push(
+        isPlainRecord(before[key]) && isPlainRecord(after[key])
+          ? `~ ${key}: ${describeRecordFields(before[key], after[key], secrets)}`
+          : `~ ${key}: ${formatEntryValue(before[key], secrets)} → ${formatEntryValue(after[key], secrets)}`
+      );
     }
   }
   return {
@@ -125,17 +198,19 @@ function describeDictChange(
   };
 }
 
-function describeCollection(before: unknown, after: unknown): {
+function describeCollection(entry: CatalogEntry, before: unknown, after: unknown): {
   summary: string;
   detail?: string[];
 } {
+  const secrets = secretFieldsOf(entry);
   if (Array.isArray(before) || Array.isArray(after)) {
     return describeListChange(
       Array.isArray(before) ? before : [],
-      Array.isArray(after) ? after : []
+      Array.isArray(after) ? after : [],
+      secrets
     );
   }
-  return describeDictChange(asRecord(before), asRecord(after));
+  return describeDictChange(asRecord(before), asRecord(after), secrets);
 }
 
 // ---------------------------------------------------------------------------
@@ -635,7 +710,7 @@ export function describeChange(
   }
 
   if (entry.type === "list" || entry.type === "dict" || entry.type === "json") {
-    return { ...base, ...describeCollection(before, after) };
+    return { ...base, ...describeCollection(entry, before, after) };
   }
 
   return { ...base, summary: `${formatScalar(before)} → ${formatScalar(after)}` };

@@ -569,3 +569,57 @@ describe("describeChange: core.sandbox.rest.mapping.*", () => {
     expect(line.summary).toBe("channel artifacts: $.old → $.new");
   });
 });
+
+describe("record settings in the review", () => {
+  const sources = entry({
+    key: "api.enrichment_sources",
+    type: "dict",
+    editor: "enrichment_sources",
+    title: "Enrichment sources",
+  });
+  const formats = entry({
+    key: "sandbox.report_formats",
+    type: "list",
+    editor: "report_formats",
+    title: "Report formats",
+  });
+
+  it("names the fields of a changed record, old to new", () => {
+    const line = describeChange(
+      sources,
+      { alpha: { label: "A", order: 1, enabled: true } },
+      { alpha: { label: "A", order: 2, enabled: false } }
+    );
+    expect(line.detail).toEqual(["~ alpha: order 1 → 2; enabled true → false"]);
+  });
+
+  it("prints an added or removed record as compact JSON, cut when long", () => {
+    const added = describeChange(sources, {}, { beta: { label: "B", kinds: ["ip"] } });
+    expect(added.detail).toEqual(['+ beta: {"label":"B","kinds":["ip"]}']);
+    const long = describeChange(sources, { gamma: { label: "x".repeat(200) } }, {});
+    expect(long.detail?.[0].startsWith("− gamma: {")).toBe(true);
+    expect(long.detail?.[0].endsWith("…")).toBe(true);
+  });
+
+  it("prints a list entry as JSON, never [object Object]", () => {
+    const line = describeChange(formats, [{ name: "old" }], [{ name: "new", reader: "cape2" }]);
+    expect(line.detail).toEqual(['+ {"name":"new","reader":"cape2"}', '− {"name":"old"}']);
+    expect(JSON.stringify(line)).not.toContain("[object Object]");
+  });
+
+  it("never prints a secret field of a record, only its state", () => {
+    const changed = describeChange(
+      sources,
+      { a: { label: "A", api_key: "**********" }, b: { api_key: null }, c: { api_key: "**********" } },
+      { a: { label: "A", api_key: "hunter2-real" }, b: { api_key: "fresh-secret" }, c: { api_key: null } }
+    );
+    expect(changed.detail).toEqual([
+      "~ a: api_key new value",
+      "~ b: api_key set",
+      "~ c: api_key cleared",
+    ]);
+    const added = describeChange(sources, {}, { d: { label: "D", api_key: "topsecret" } });
+    expect(added.detail).toEqual(['+ d: {"label":"D","api_key":"(secret)"}']);
+    expect(JSON.stringify([changed, added])).not.toMatch(/hunter2|fresh-secret|topsecret/);
+  });
+});
