@@ -6,14 +6,21 @@
                                     --candidate SCORED [SCORED ...]
                                     [--baseline-m M] [--candidate-m M]
                                     [--sheet CSV --map JSON] [--json OUT]
+    python scripts/benchmark/run.py intel-off [--settings JSON] [--profile NAME] [--json OUT]
 
 A ``SCORED`` is a key score (``score.md``), a calibration score or gate result
 (``.json``), or ``blind:ARM``, one arm of the blind score sheet that ``--sheet``
 and ``--map`` name. ``score`` prints each run's totals, then, for more than one
 run, the runs as one arm (each item found in ``m`` of ``n``). ``gate`` exits 0
 when nothing the baseline found dropped, 1 when something did, and 2 when the
-scored runs cannot be read or compared. Nothing here starts a run or asks a
-model: it reads scores already written.
+scored runs cannot be read or compared. Both also say, for each credited item
+of a key score with its stored run beside it, whether the run found it by its
+own analysis or by a lookup (``scripts.benchmark.provenance``), and count each
+arm's items both ways. ``intel-off`` writes the arm that withholds every lookup
+server from a profile (``scripts.benchmark.intel_off``), from the stored
+settings in ``--settings`` (dotted keys) or the defaults; it exits 2 when the
+arm cannot be derived. Nothing here starts a run or asks a model: it reads
+scores already written.
 """
 
 from __future__ import annotations
@@ -29,6 +36,7 @@ if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 
 from scripts.benchmark import gate as gating  # noqa: E402
+from scripts.benchmark import intel_off as arms  # noqa: E402
 from scripts.benchmark.scores import (  # noqa: E402
     ScoredRun,
     ScoreFileError,
@@ -85,12 +93,27 @@ def _parser() -> argparse.ArgumentParser:
     g.add_argument("--baseline-m", type=int, default=None)
     g.add_argument("--candidate-m", type=int, default=None)
     with_blind(g)
+    i = sub.add_parser("intel-off", help="the arm that withholds every lookup server")
+    i.add_argument("--settings", type=Path, default=None, help="stored settings, dotted keys")
+    i.add_argument("--profile", default=None, help="the base profile (default: the active one)")
+    i.add_argument("--json", type=Path, default=None, help="also write the arm here")
     return parser
 
 
 def main(argv: list[str] | None = None) -> int:
     args = _parser().parse_args(argv)
     try:
+        if args.command == "intel-off":
+            overrides: Any = {}
+            if args.settings is not None:
+                overrides = json.loads(Path(args.settings).read_text(encoding="utf-8"))
+                if not isinstance(overrides, dict):
+                    raise ValueError(f"{args.settings}: not an object of settings by dotted key")
+            derived = arms.intel_off(overrides, args.profile)
+            print(arms.render(derived))
+            if args.json:
+                _write(args.json, derived)
+            return 0
         if args.command == "score":
             runs = resolve(args.scored, args.sheet, args.map)
             singles = [gating.score_arm(gating.arm([run])) for run in runs]
@@ -114,7 +137,7 @@ def main(argv: list[str] | None = None) -> int:
         if args.json:
             _write(args.json, result)
         return 0 if result["passed"] else 1
-    except (ScoreFileError, gating.GateError, OSError, ValueError) as exc:
+    except (ScoreFileError, gating.GateError, arms.ArmError, OSError, ValueError) as exc:
         print(f"benchmark: {exc}", file=sys.stderr)
         return 2
 
