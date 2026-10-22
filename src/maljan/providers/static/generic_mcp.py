@@ -26,10 +26,13 @@ flag should be.
 
 from __future__ import annotations
 
+from collections.abc import Iterator
+from contextlib import contextmanager
 from typing import TYPE_CHECKING, Any
 
 from langchain_core.tools import BaseTool
 
+from maljan.analysis.anti_analysis import PassFailed
 from maljan.core.logger import logger
 from maljan.providers.base import (
     MirrorSpec,
@@ -40,8 +43,21 @@ from maljan.providers.base import (
 )
 from maljan.providers.registry import register_static_provider
 from maljan.providers.servers import ServerHandle
+from maljan.providers.static.declared_prepass import (
+    PROGRAM_ROLE,
+    DeclaredPassFailed,
+    DeclaredScan,
+    answer_value,
+    block_declaration,
+    call_arguments,
+    call_graph_of,
+    declared_tool,
+    function_hashes_of,
+)
+from maljan.tools.errors import error_parts
 
 if TYPE_CHECKING:
+    from maljan.analysis.sink_reachability import CallGraph
     from maljan.core.config import MCPServerConfig, Settings
 
 # The samples directory's mount inside a server reached over the network that
@@ -58,7 +74,9 @@ class GenericMCPStaticProvider(StaticProvider):
     The fragment is the opening sentence (``prompt_lead_text``, else one naming
     the label), the claim guidance every static analyst is given, then the
     workflow the server declares (its ``prompt_fragment``), or, where it
-    declares none, a generated paragraph listing its tools.
+    declares none, what the server served about itself (its MCP
+    ``instructions``, quoted), or, where it served none either, a generated
+    paragraph listing its tools.
     ``prompt_fragment_text`` lets a caller supply the whole fragment instead.
 
     The constructor accepts either a ready ``ServerHandle`` (the normal path,
@@ -203,7 +221,8 @@ class GenericMCPStaticProvider(StaticProvider):
         return StaticCapabilities(
             provides_tools=True,
             provides_evidence=False,
-            provides_function_hashes=False,
+            # Only where the block names its function-hash tool (``prepass_tools``).
+            provides_function_hashes=bool(declared_tool(self._cfg, "function_hashes")),
             needs_sample_mirror=True,
             degrade_on_failure=True,
         )
@@ -222,11 +241,25 @@ class GenericMCPStaticProvider(StaticProvider):
         return self._prompt_lead_text or named
 
     def workflow_fragment(self) -> str:
-        """The server's declared workflow text, else a paragraph listing its tools."""
+        """The server's declared workflow text, else its own words, else a paragraph of its tools.
+
+        With no ``prompt_fragment`` declared, a server that served MCP
+        ``instructions`` when this attach initialised it is described by
+        them and by its offered tools' own descriptions, each quoted as the
+        server's data under the lead every undeclared registry server gets
+        (``prompt_fragments.undeclared_server_text``). Only a server that
+        served none gets the generated paragraph naming its tools.
+        """
         declared = str(getattr(self._cfg, "prompt_fragment", "") or "")
         if declared.strip():
             return declared
-        names = [t.name for t in self.get_tools()]
+        tools = self.get_tools()
+        served = str(getattr(self._handle, "server_instructions", "") or "")
+        if served.strip():
+            from maljan.agents.prompt_fragments import undeclared_server_text
+
+            return undeclared_server_text(self.server_name, served, tools)
+        names = [t.name for t in tools]
         # Every tool name: the list is the model's map of what it can call.
         listed = ", ".join(f"`{n}`" for n in names) if names else "the tools you are given"
         return (
@@ -300,6 +333,204 @@ class GenericMCPStaticProvider(StaticProvider):
     def get_tools(self) -> list[BaseTool]:
         return self._handle.tools()
 
+    # -- the passes the server declares tools for (``prepass_tools``) --------
+
+    @contextmanager
+    def _attached_for_pass(self, key: str) -> Iterator[tuple[bool, bool]]:
+        """``(attached, attached here)`` for a pass: the server is attached here, and let go
+        after, when it was not (the triage pack runs before any analyst attaches it)."""
+        if self._handle.is_open:
+            yield True, False
+            return
+        if not bool(getattr(self._cfg, "enabled", True)):
+            yield False, False
+            return
+        self._handle.open(key or "static")
+        try:
+            yield self._handle.is_open, True
+        finally:
+            self._handle.close()
+
+    def _pass_notes(self, attached_here: bool) -> Any:
+        """The note a pass's open of the sample is kept in.
+
+        The handle's own (the job's) while the server stays attached, or is one
+        other jobs share at an address, whose opens outlive this attach. A pass
+        that attached a server of its own and lets it go after keeps a note of
+        its own: what that attach opened goes with it, and a later attach must
+        open the sample afresh rather than be answered from a stale note.
+        """
+        from maljan.providers.sample_open import SampleNotes, is_shared_address
+
+        notes = self._handle.sample_notes
+        if attached_here and not is_shared_address(self._cfg):
+            return SampleNotes()
+        return notes if isinstance(notes, SampleNotes) else SampleNotes()
+
+    def _call_raw(self, tool: str, arguments: dict[str, Any], budget: float) -> Any:
+        """One call of the server's ``tool`` as it advertises it, within ``budget`` seconds."""
+        from maljan.agents.base_agent import run_coro_blocking
+
+        found = self._handle.advertised_tool(tool)
+        if found is None:
+            raise DeclaredPassFailed(f"the {self.label} server offers no tool {tool}")
+        return run_coro_blocking(
+            found.ainvoke(arguments),
+            hard_timeout=budget if budget > 0 else None,
+            label=f"{self.server_name}-{tool}",
+        )
+
+    def _program_of(self, path: str, budget: float, notes: Any) -> tuple[str | None, str]:
+        """``(name, refusal)``: the name the server gave its open of ``path``, opened through
+        the block's declared ``sample_open`` once per note, and the server's answer when it
+        refused the open (``""`` otherwise). ``(None, "")`` with no ``sample_open``."""
+        from maljan.providers.sample_open import SampleOpener, declared, is_refusal
+
+        spec = getattr(self._cfg, "sample_open", None)
+        if not declared(spec):
+            return None, ""
+        opener = SampleOpener(self._handle.note_key, spec, notes)
+        answer = opener.open(path, lambda tool, args: self._call_raw(tool, args, budget), held=path)
+        if is_refusal(answer):
+            return None, str(answer)
+        return opener.name_of(path), ""
+
+    def _declared_call(
+        self, which: str, path: str | None, budget: float, *, attached_here: bool = False
+    ) -> Any:
+        """The raw answer of the tool the block declares for the pass ``which``, made on ``path``.
+
+        The sample is opened first only for a tool that names it by its program
+        (role ``program``) or names it by no argument at all (a server that
+        keeps the opened sample as its session). ``None`` when the tool declares
+        an argument role the job has no value for (no call is made); a refused
+        open of a tool that needs the program, or a failed call, raises.
+        """
+        tool = declared_tool(self._cfg, which)
+        facts = block_declaration(self._cfg, tool)
+        roles = facts.arguments if facts is not None else {}
+        program = None
+        if path and (PROGRAM_ROLE in roles or not roles):
+            program, refusal = self._program_of(path, budget, self._pass_notes(attached_here))
+            if refusal and PROGRAM_ROLE in roles:
+                raise DeclaredPassFailed(
+                    f"the {self.label} server refused to open {path}: {refusal[:300]}"
+                )
+        arguments = call_arguments(facts, path=path, program=program)
+        if arguments is None:
+            return None
+        return self._call_raw(tool, arguments, budget)
+
+    def call_graph(self, path: str) -> CallGraph | None:
+        """The program's call graph from the tool the block declares for it, else ``None``."""
+        if not declared_tool(self._cfg, "call_graph"):
+            return None
+        budget = self.call_budget(_settings_or_none())
+        with self._attached_for_pass(self._job.job_key or self._job.sha256) as (attached, here):
+            raw = (
+                self._declared_call("call_graph", path, budget, attached_here=here)
+                if attached
+                else None
+            )
+        if raw is None:
+            return None
+        parts = error_parts(raw)
+        if parts is not None:
+            raise DeclaredPassFailed(f"the {self.label} server refused its call graph: {parts[1]}")
+        tool = declared_tool(self._cfg, "call_graph")
+        return call_graph_of(
+            answer_value(raw),
+            block_declaration(self._cfg, tool),
+            getattr(self._cfg, "auto_name_prefixes", None) or (),
+        )
+
+    def function_hashes(self, job: StaticJobContext) -> list[tuple[str, str]]:
+        """The functions' hashes from the tool the block declares for them, else none.
+
+        A read that could not be made says why (``FunctionHashes.unavailable``),
+        never an empty list that passes for a program with no function.
+        """
+        from maljan.providers.static.ghidra.function_hashes import FunctionHashes
+
+        tool = declared_tool(self._cfg, "function_hashes")
+        if not tool or not job.mirror_sample_path:
+            return []
+        budget = self.call_budget(_settings_or_none())
+        try:
+            with self._attached_for_pass(job.job_key or job.sha256) as (attached, here):
+                raw = (
+                    self._declared_call(
+                        "function_hashes", job.mirror_sample_path, budget, attached_here=here
+                    )
+                    if attached
+                    else None
+                )
+        except PassFailed as failure:
+            return FunctionHashes(unavailable=str(failure)[:300])
+        except Exception as exc:  # noqa: BLE001 - said as the reason, never raised
+            return FunctionHashes(
+                unavailable=f"the {self.label} server did not answer {tool} ({type(exc).__name__})"
+            )
+        if raw is None:
+            return FunctionHashes(
+                unavailable=f"the {self.label} server was not attached, or {tool} takes an "
+                "argument this job has no value for"
+            )
+        parts = error_parts(raw)
+        if parts is not None:
+            return FunctionHashes(unavailable=f"{tool} refused: {parts[1][:300]}")
+        return FunctionHashes(
+            function_hashes_of(answer_value(raw), block_declaration(self._cfg, tool))
+        )
+
+    def anti_analysis_scan(
+        self, job: StaticJobContext, *, notes: Any = None, call_budget: float = 0.0
+    ) -> DeclaredScan | None:
+        """The scan by the tool the block declares for it, or ``None`` with none declared.
+
+        It reads the formats the tool's declaration names (``routed_formats``),
+        every routed format where it names none. ``notes`` is not read: the
+        server's opens are noted on its own handle.
+        """
+        from maljan.extractors.sample_identity import routed_formats
+
+        tool = declared_tool(self._cfg, "anti_analysis")
+        if not tool:
+            return None
+        facts = block_declaration(self._cfg, tool)
+        formats = frozenset(
+            facts.routed_formats if facts and facts.routed_formats else routed_formats()
+        )
+        path = job.mirror_sample_path
+        scan = DeclaredScan(
+            provider=self.id, formats=formats, sample_path=path or "", tool=tool, facts=facts
+        )
+        if not bool(getattr(self._cfg, "enabled", True)):
+            scan.unavailable = f"the {self.label} server is switched off"
+        elif not path:
+            scan.unavailable = (
+                f"no copy of the sample stands where the {self.label} server reads, so its "
+                "declared scan was not made"
+            )
+        else:
+
+            def call() -> Any:
+                with self._attached_for_pass(job.job_key or job.sha256) as (attached, here):
+                    raw = (
+                        self._declared_call("anti_analysis", path, call_budget, attached_here=here)
+                        if attached
+                        else None
+                    )
+                if raw is None:
+                    raise DeclaredPassFailed(
+                        f"the {self.label} server was not attached, or {tool} takes an argument "
+                        "this job has no value for"
+                    )
+                return raw
+
+            scan.call = call
+        return scan
+
     def mirror_spec(self) -> MirrorSpec:
         """Where the sample is mirrored, and under which path the server sees it.
 
@@ -317,3 +548,10 @@ class GenericMCPStaticProvider(StaticProvider):
     def close(self) -> None:
         self.tools = []
         self._handle.close()
+
+
+def _settings_or_none() -> Any:
+    """The deployment's settings, or ``None`` where none can be read (a probe, a test)."""
+    from maljan.providers.static.ghidra.provider import get_settings_or_none
+
+    return get_settings_or_none()

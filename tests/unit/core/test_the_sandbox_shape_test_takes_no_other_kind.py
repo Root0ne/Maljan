@@ -515,3 +515,38 @@ class TestAServerWithoutTheSandboxRoleIsToldOfIt:
 
         out = propose([_tool("list_functions", "items", ["name", "address", "type"])])
         assert "notes" not in out
+
+
+@pytest.mark.parametrize(
+    ("names", "keys"),
+    [
+        (("whois",), ["query", "registrar"]),
+        (("log", "proxy.log"), ["request", "bytes", "action"]),
+        (("http", "network"), ["host", "request"]),
+    ],
+)
+def test_a_name_saying_another_protocol_counts_against_a_dns_reading(
+    names: tuple[str, ...], keys: list[str]
+) -> None:
+    # Host-shaped values under a generic spelling were one DNS signal; a list
+    # or block that names another protocol takes it away.
+    hosts = {key: True for key in keys}
+    assert row_shape(names, keys, host_names=hosts) is None
+    unnamed = row_shape(("items",), keys, host_names=hosts)
+    assert unnamed is not None and unnamed.kind == "dns"
+
+
+def test_a_reading_by_name_alone_is_taken_by_a_protocol_name() -> None:
+    assert row_shape(("queries",), ["domain"]) is not None
+    assert row_shape(("http_queries",), ["domain"]) is None
+
+
+def test_dns_evidence_of_its_own_outweighs_a_protocol_name() -> None:
+    typed = row_shape(
+        ("whois",), ["query", "type", "answers"], record_types=True, host_names={"query": True}
+    )
+    assert typed is not None and typed.kind == "dns"
+    # A name saying DNS on its own keeps a generic spelling read beside it.
+    said = row_shape(("dns", "http"), ["request"], host_names={"request": True})
+    assert said is not None and said.kind == "dns"
+    assert row_shape(("whois",), ["qname"]) is not None

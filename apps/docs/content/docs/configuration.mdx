@@ -3583,6 +3583,43 @@ are ever removed.
 | `tool_facts` | per tool name, what its answer is and where its facts sit (below) |
 | `credential_bootstrap` | how the server's credential is obtained by one request (below); empty when its token is typed in |
 | `launcher_depth` | how many levels at the top of the process tree the worker starts for the server are a launcher that does not read the sample (1: the started process alone); the report's isolation part holds them only to carrying none of the platform's own variables and every process under them to every check ([Where the sample was read](/usage/reports-and-exports/#where-the-sample-was-read)). Empty declares no launcher |
+| `prepass_tools` | which of the server's tools the platform calls itself, once per job, when it is the server the `generic_mcp` provider drives (`static.generic.server`, or radare2's own block): `call_graph` (the program's whole call graph, read for the priority-functions pre-pass), `function_hashes` (a hash per function, read for function-hash attribution and the triage pack's function-hash step) and `anti_analysis` (the triage pack's anti-analysis scan). Empty, or a name left empty, declares nothing, and that pass is not made, as before (below) |
+
+#### Tools the platform calls itself
+
+A Ghidra block's call graph, function hashes and anti-analysis scan are made
+through Ghidra's REST API. Any other static server gets the same passes by
+naming its tools in `prepass_tools`; each answer is read by that tool's own
+declaration in `tool_facts`, never by its name:
+
+- `arguments`: role `path` is given the path the server sees the job's copy
+  under, role `program` the name the block's `sample_open` gave its open of it
+  (the sample is opened through `sample_open` first when it is declared, and
+  an open the server refuses fails the pass with the server's words). A tool
+  that declares neither is called with no argument, after the same open, for a
+  server that keeps the opened sample as its session; a tool that declares
+  only `path` opens nothing first. A role declared with no value to give (no
+  `sample_open`, so no program name) makes no call. A pass that attached the
+  server itself keeps its open in a note of its own, which goes when it lets
+  the server go, so a later attach opens the sample afresh.
+- `rows` is where the answer's rows sit (the answer itself when it is a list
+  and `rows` is empty), and `values` and `places` the path inside a row of each
+  part a pass reads; a part named in neither is read from the row's key of the
+  same name. A call graph reads `caller`, `callee` and the caller's `address`
+  (a row may also be a two-item list), or, answered as text, one
+  `CALLER -> CALLEE` line per call; a function named with one of the block's
+  `auto_name_prefixes` before a hexadecimal address gives that address.
+  Function hashes read `hash` and the function as `name`, else `function`,
+  else `address`. The scan reads `category`, `technique`, `instruction`,
+  `offset` and `function`, in the rows' vocabulary of the scan the pack states
+  (`suspicious_instruction`, `peb_teb_access`), and only its exact part is
+  stated, by the same rule as Ghidra's; it reads the formats the tool's
+  `routed_formats` names, every routed format where it names none.
+
+A pass made before an analyst attached the server (the triage pack's steps)
+attaches it for the call and lets it go after; one made while it is attached
+uses that attach. A refused or failed call is said: no priority hint, a hash
+step that says why no hash was read, a scan entry with the server's words.
 
 #### Obtaining a server's credential
 
@@ -3930,7 +3967,12 @@ The text is kept whole, as a description is, and is sent with every request
 of every agent bound to the server: a server with long `instructions` costs
 that much of each agent's context on every turn, and declaring a
 `prompt_fragment` replaces it. A server whose every offered tool is declared
-(every built-in) carries what its declaration says and nothing more.
+(every built-in) carries what its declaration says and nothing more. The
+server the `generic_mcp` static provider drives, with no `prompt_fragment`, is
+introduced in the provider's workflow the same way, by its served
+`instructions` and its offered tools' descriptions, quoted under the same
+sentence; only a server that served no `instructions` gets the generated
+paragraph naming its tools.
 
 **A proposed declaration.** The connection test (`POST
 /api/v1/settings/test/mcp`, admin only) proposes a declaration for each tool

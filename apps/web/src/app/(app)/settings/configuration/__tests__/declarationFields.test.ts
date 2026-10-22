@@ -14,6 +14,7 @@ import {
   setFields,
   showJson,
   splitWords,
+  withPrepass,
 } from "../declarationFields";
 import served from "@/test-fixtures/settings-schema.json";
 import shared from "@/test-fixtures/tool-declaration-cases.json";
@@ -212,5 +213,17 @@ describe("the server editor's declaration readers", () => {
 
   it("splits words without keeping empty entries", () => {
     expect(splitWords(" a ,\n\n b ")).toEqual(["a", "b"]);
+  });
+});
+
+describe("withPrepass", () => {
+  const empty = { call_graph: "", function_hashes: "", anti_analysis: "" };
+
+  it("stages the names while one is set", () => {
+    expect(withPrepass(empty, "call_graph", "graph")).toEqual({ ...empty, call_graph: "graph" });
+  });
+
+  it("stages null once every name is cleared", () => {
+    expect(withPrepass({ ...empty, anti_analysis: "scan" }, "anti_analysis", "")).toBeNull();
   });
 });

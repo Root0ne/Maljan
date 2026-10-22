@@ -109,6 +109,31 @@ _DNS_WORDS = frozenset({"dns", "lookups", "resolutions", "queries"})
 # database, a WMI or an LDAP log holds.
 _DNS_ONLY_WORDS = frozenset({"dns", "lookups", "resolutions"})
 _DNS_KEYS = frozenset({"qname", "qtype", "query_type", "record_type", "rrtype", "rrname", "rdata"})
+# The words of a name that says another protocol, or a log of one: a list that
+# sits under one (its own name, the block holding it, the tool answering it)
+# holds that protocol's requests or lookups, so the name counts against a DNS
+# reading that rests on a generic spelling or on a name, unless a name it sits
+# under says DNS on its own. Protocol words, never tool names.
+_OTHER_PROTOCOL_WORDS = frozenset(
+    {
+        "http",
+        "https",
+        "tls",
+        "ssl",
+        "smb",
+        "whois",
+        "proxy",
+        "ftp",
+        "smtp",
+        "imap",
+        "pop3",
+        "irc",
+        "ldap",
+        "rdp",
+        "ssh",
+        "telnet",
+    }
+)
 # The question's generic spellings: a request or a query is also what an HTTP
 # log, a WMI, LDAP, registry or database log writes. A list whose question is
 # spelled so reads as DNS only beside a second DNS signal: one of the above,
@@ -272,7 +297,10 @@ def row_shape(
     list whose evidence fits another kind better reads as none: a name and a
     type, or a name and its addresses, are not a DNS question, a digest, a
     name and a size not a dropped file, without evidence of their own (see
-    :data:`_DNS_WORDS`).
+    :data:`_DNS_WORDS`). A name the list sits under that says another protocol
+    (``http``, ``whois``, ``proxy`` ...: :data:`_OTHER_PROTOCOL_WORDS`) counts
+    as one signal against a generic spelling and takes away a reading by name
+    alone, unless a name it sits under says DNS on its own.
     """
     names = (list_name,) if isinstance(list_name, str) else tuple(list_name)
     by_lower: dict[str, str] = {}
@@ -307,17 +335,19 @@ def row_shape(
             # only for a question spelled as a request or a query.
             said = any("dns" in _words(k) for k in by_lower)
             named = _named(names, _DNS_WORDS)
+            # A name saying another protocol is one signal against.
+            other = _named(names, _OTHER_PROTOCOL_WORDS) and not dns_named
             specific = (dns_only, typed, structure)
             evidence = sum(specific) + bool(hosts) + said + named
             if parts["request"].lower() in _GENERIC_QUESTION_KEYS:
                 second = (*specific, bool(hosts), said, dns_named)
-                if not any(second):
+                if sum(second) - other < 1:
                     continue
                 if sum((*specific, bool(hosts))) < 2:
                     confidence = "medium"
             elif any(specific):
                 pass
-            elif named and record_types is not False:
+            elif named and not other and record_types is not False:
                 confidence = "low"
             else:
                 continue
