@@ -1,6 +1,6 @@
 ---
 title: "Known-answer gate"
-description: "Hold a change to what the benchmark already found: an item found in m of n baseline runs may not drop."
+description: "Hold a change to what the benchmark already found: an item found in m of n baseline runs may not drop, and each found item says whether the run's own analysis or a lookup found it."
 ---
 
 A change that makes a run cheaper or faster can still lose facts the benchmark
@@ -52,6 +52,87 @@ fewer than `m` baseline runs scored is **not gated**, and the output names it.
 The beyond-human count is gated the same way: each arm's count is the largest
 count that `m` of its runs reach. Every number is an exact count and is printed
 with its `n`.
+
+## Own analysis or lookup
+
+A reputation service can hand a run a family name or a C2 list that public
+reports already hold. Counted the same as a key the run decompiled, it would
+make the score say the run worked out something it looked up. So every credited
+item of a key score also says which kind of evidence credited it. This is
+reported only: no verdict and no gate outcome changes.
+
+The pass reads the stored run in the score file's own directory
+(`evidence.json`, `report.md` and `mitre.json`). The entries that credited an
+item are:
+
+- the evidence ids its row names (`ev_0014`);
+- the ids cited where a quoted fragment of the row stands in `report.md`. A
+  fragment is text between double quotes, split at an ellipsis, of at least 12
+  characters. On a table row every id of the row counts. In prose, the ids
+  inside the fragment count, and so does the citation that closes its sentence;
+- for an item whose code is an ATT&CK technique (`K10 T1027`), the ids that the
+  run's published technique of that id cites in `mitre.json`.
+
+Each entry is classed by the kind its tool declares, never by the tool's name.
+A kind that asks a service outside the deployment what it knows (a reputation
+lookup, an indicator report, a submission to such a service) is a **lookup**.
+Any other declared kind is **analysis**. A tool that declares no kind is
+**undeclared**, and is never taken as either. An entry that did not answer, or
+an id the ledger does not hold, credits nothing.
+
+| Tag | When |
+| :-- | :-- |
+| own analysis | only analysis entries credited the item |
+| own analysis + lookup | analysis and lookup entries both credited it, stated as both |
+| lookup only | only lookups credited it |
+| undeclared tool | no analysis entry did, and an undeclared tool did |
+| no cited entry | no entry that answered credited it (an uncited header line, for example) |
+| not read | no ledger beside the score, a blind sheet, or a calibration score |
+
+"Found by analysis" counts the first two tags, and "found only by lookup" counts
+the third. `score` prints each run's count with both columns, then each tag's
+items. For an arm of several runs, an item's tag is the one tag that `m` of the
+runs reaching its verdict share. When none is shared but `m` of those runs found
+it by analysis, some beside a lookup, the tag is own analysis + lookup; otherwise
+it is `mixed`. `gate` prints both
+arms' counts and names every item both arms credit whose tag changed. `--json`
+carries each item's tag, each run's tag and the entries with their classes.
+
+On the stored runs, haiku4 reads 38 own analysis, 2 own analysis + lookup,
+0 lookup only and 11 no cited entry of its 51 credited items. Run 7 reads 36,
+1, 1 and 18 of 56. In both, the family item is credited by a sandbox signature
+and the reputation report together. In run 7 the IcedID link rests on the
+reputation report's labels alone.
+
+## The intel-off arm
+
+The intel-off arm runs a profile with every lookup server withheld, which
+measures what the run finds without them. `intel-off` derives it and runs
+nothing:
+
+```bash
+python scripts/benchmark/run.py intel-off --profile all_tools --settings stored-settings.json \
+                                          --json all_tools_intel_off.json
+```
+
+The servers withheld are those that declare a tool of a lookup kind, read from
+the settings' declarations. With the built-in servers, that means `threatintel`
+and `virustotal`. They are added to the base profile's `exclude_servers`. That
+one field keeps a server from the team's agents and from the triage pack, whose
+reputation step never asks a server the team withholds, so no global setting
+changes. A server is withheld whole, so each of its other tools goes with it, and
+the output names them. A lookup that a provider block declares cannot be
+withheld by a profile, so the output names it instead.
+
+`--settings` takes the stored settings by dotted key (`agents.profiles`,
+`mcp.servers` and so on). Without it, the defaults are used, and `--profile`
+defaults to the active one. The arm is checked by building the settings with
+it. The output gives the profile to add under `agents.profiles.<base>_intel_off`
+and the job config that selects it. The command exits with status 2 when the arm
+cannot be derived. Running the arm is a paid run, so each run needs the same
+approval as any other paid run. Score it blind, then gate it against the base
+profile. The gate reports which items dropped, and the provenance counts show
+whether the base profile's lookup-only items were among them.
 
 ## Running it
 

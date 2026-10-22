@@ -10,7 +10,9 @@ Three sources are read, never written:
   read in its place), and the numbered list of the section headed "Beyond the human reports". The
   file's own sentences are checked against what was counted: the ``**Totals:**``
   line and the "N facts more than the human analyst" line, when it has them. A
-  file that disagrees with itself is refused, naming both numbers;
+  file that disagrees with itself is refused, naming both numbers. Each item's
+  row, as written, is followed back to the ledger entries that credited it,
+  where the stored run lies beside the file (``scripts.benchmark.provenance``);
 - **a blind score sheet** with its sealed map (``scripts/blind``): one scored
   run per arm, named by the map;
 - **a calibration score** (``scripts/calibration/run.py score --json`` or
@@ -38,6 +40,8 @@ import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
+
+from scripts.benchmark.provenance import ItemProvenance, attribute_all
 
 KEY, FACT, CLAIM = "key", "fact", "claim"
 # Each scale's words, worst first: a verdict's rank is its index.
@@ -101,6 +105,10 @@ class ScoredRun:
     column: str | None = None
     # Whether the file's own totals were checked against its table, and how.
     totals_note: str = ""
+    # item key -> which entries credited it, own analysis or lookup
+    # (``scripts.benchmark.provenance``); empty, with the reason, where none was read.
+    provenance: dict[str, ItemProvenance] = field(default_factory=dict)
+    provenance_note: str = ""
 
 
 def rank(scale: str, word: str | None) -> int | None:
@@ -193,6 +201,7 @@ def read_key_score(path: Path) -> ScoredRun:
             )
     verdicts: dict[str, tuple[str, str | None]] = {}
     labels: dict[str, str] = {}
+    written: dict[str, str] = {}
     for row in rows:
         key = item_key(row[0])
         if key in verdicts:
@@ -201,12 +210,16 @@ def read_key_score(path: Path) -> ScoredRun:
             )
         verdicts[key] = (KEY, key_verdict(row[column]))
         labels[key] = _plain(row[0])
+        written[key] = " | ".join(row)
+    provenance, provenance_note = attribute_all(path, written)
     run = ScoredRun(
         name=_name(path),
         source=str(path),
         verdicts=verdicts,
         labels=labels,
         column=_plain(header[column]),
+        provenance=provenance,
+        provenance_note=provenance_note,
     )
     _check_totals(path, lines, run)
     _read_beyond(path, lines, run)
@@ -290,6 +303,7 @@ def read_blind(sheet: Path, sealed: Path) -> list[ScoredRun]:
                 labels=labels,
                 beyond=revealed.beyond[arm],
                 beyond_note="the sheet's beyond_human row",
+                provenance_note="not read: a blind score sheet cites no evidence",
             )
         )
     return runs
@@ -342,6 +356,7 @@ def read_calibration(path: Path) -> ScoredRun:
             "not read: the calibration scorer's beyond counts publications no manifest "
             "names, not proven facts"
         ),
+        provenance_note="not read: a calibration score cites no evidence",
     )
 
 
