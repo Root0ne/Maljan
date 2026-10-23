@@ -143,6 +143,15 @@ When a run is stored, the worker seals its evidence ledger
   that row does not land, the owner's delete is refused with 503 and nothing
   is deleted; a re-run still stores its result and logs that the superseded
   report went without its record.
+- a follow-up question asked of a finished job (`POST /jobs/{id}/follow-ups`)
+  never changes the report: it is a row of its own (`job_follow_ups`) holding
+  a keyed record of the report digest it was answered from, the digests of the
+  seal and of the last amendment and the SHA-256 of the question and answer,
+  and a `report.follow_up` row on the audit chain carries the same record, in
+  the same transaction. Verifying the job checks each follow-up too: its
+  question, answer and model are digested again and compared with the record,
+  the record must verify under its key, and the chained row must hold the same
+  record; a follow-up edited afterwards reads `broken`.
 
 The key is derived with HKDF from `SETTINGS_ENCRYPTION_KEY` (label
 `maljan-ledger-chain-v1`); no new secret exists, and the key is never logged or
@@ -152,18 +161,18 @@ as before, and the worker's warning names why (the variable is not set, or
 the bootstrap settings could not be read).
 
 The audit chain covers the chained rows only (`ledger.seal`, `report.amend`,
-`report.delete`): each takes the next `chain_seq` (unique), a digest of its
-columns and a keyed chain value linking it to the one before. The head record
-(`audit_chain_head`: last `chain_seq`, chain value, `rotated_at_seq` and a MAC
-over them) is rewritten by the same append. Appends are serialised by a
-PostgreSQL advisory lock inside a savepoint. An append carries the head forward
-only when the head's MAC verifies under the current key and it points at the
-last row; it accepts a rotation (a head under another key) only when no row yet
-carries the current key, the head points at the last row by seq and chain, the
-last row was chained under the head's key, and the head verifies under that key
-when the platform can derive it. Anything else refuses the append: it is logged
-and counted like a failed audit write, the stored report is kept, and nothing
-is re-signed.
+`report.delete`, `report.follow_up`): each takes the next `chain_seq` (unique),
+a digest of its columns and a keyed chain value linking it to the one before.
+The head record (`audit_chain_head`: last `chain_seq`, chain value,
+`rotated_at_seq` and a MAC over them) is rewritten by the same append. Appends
+are serialised by a PostgreSQL advisory lock inside a savepoint. An append
+carries the head forward only when the head's MAC verifies under the current
+key and it points at the last row; it accepts a rotation (a head under another
+key) only when no row yet carries the current key, the head points at the last
+row by seq and chain, the last row was chained under the head's key, and the
+head verifies under that key when the platform can derive it. Anything else
+refuses the append: it is logged and counted like a failed audit write, the
+stored report is kept, and nothing is re-signed.
 
 Verify a job with `GET /api/v1/jobs/{job_id}/evidence/verify` (owner only) or
 `python -m scripts.ledger.verify --job <id>` (read-only transaction; `--run

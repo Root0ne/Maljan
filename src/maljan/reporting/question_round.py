@@ -647,11 +647,16 @@ async def answer_questions(
     facts_block: str = "",
     run_state: str = "",
     evidence_texts: EntryTexts | None = None,
+    call: str = QUESTION_CALL,
+    what: str = "question round's",
 ) -> QuestionRound:
     """Ask the reporter's model the job's questions once, check the answers, settle them.
 
     ``reporter`` is the narrative round's agent, whose model, ledger and
-    limits the round's calls use (``NarrativeAgent.ask``). No reporter (a
+    limits the round's calls use (``NarrativeAgent.ask``), recorded on its
+    token ledger under ``call`` and its prompt named ``what`` where the
+    window cannot hold it: a follow-up question asked of a finished run
+    (``reporting.follow_up``) passes its own. No reporter (a
     mock run, one whose report model was unavailable) and a round that fails
     leave every question "not determinable from this run", with the reason.
     Never raises.
@@ -692,7 +697,7 @@ async def answer_questions(
 
     try:
         payload, violations, retries = await retry_with_feedback(
-            lambda turns: reporter.ask(turns, call=QUESTION_CALL, what="question round's"),
+            lambda turns: reporter.ask(turns, call=call, what=what),
             list(messages),
             [
                 lambda p: schema_violations(

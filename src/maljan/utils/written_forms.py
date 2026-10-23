@@ -149,10 +149,6 @@ def sample_written_out(text: str) -> str:
     return markers_written_out(ids_written_out(controls_written_out(text)))
 
 
-# A run of backslashes and the quote it ends on.
-_QUOTED_BACKSLASHES = re.compile(r'\\+"')
-
-
 def quoted_backslashes_written_out(text: str) -> str:
     """``text`` with every backslash that stands right before a quote written ``\\x5c``.
 
@@ -162,7 +158,13 @@ def quoted_backslashes_written_out(text: str) -> str:
     """
     if '"' not in text or "\\" not in text:
         return text
-    return _QUOTED_BACKSLASHES.sub(lambda m: "\\x5c" * (len(m.group()) - 1) + '"', text)
+    pieces = text.split('"')
+    # Every piece but the last ends where a quote stood; its trailing run of
+    # backslashes is the one before that quote. No pattern: one pass.
+    for at, piece in enumerate(pieces[:-1]):
+        kept = piece.rstrip("\\")
+        pieces[at] = kept + "\\x5c" * (len(piece) - len(kept))
+    return '"'.join(pieces)
 
 
 def pack_escaped(text: str, *, delimiters: bool = False, ids: bool = False) -> str:

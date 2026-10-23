@@ -21,7 +21,15 @@ from app.schemas.evidence import (
     EvidenceListResponse,
     LedgerVerificationResponse,
 )
-from app.schemas.job import JobCreateRequest, JobListResponse, JobResponse, JobRoster
+from app.schemas.job import (
+    FollowUpListResponse,
+    FollowUpRequest,
+    FollowUpResponse,
+    JobCreateRequest,
+    JobListResponse,
+    JobResponse,
+    JobRoster,
+)
 from app.services import audit
 from app.services.analysis_service import AnalysisService
 from app.services.settings_service import SettingsService
@@ -841,6 +849,88 @@ def verified_chunks(response: Any, expected: str, key: str) -> Any:
         raise EvidenceDigestMismatch(key)
     if held is not None:
         yield held
+
+
+@router.post(
+    "/{job_id}/follow-ups",
+    response_model=FollowUpResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def ask_follow_up(
+    job_id: uuid.UUID,
+    body: FollowUpRequest,
+    user: User = Depends(get_current_user),
+    svc: AnalysisService = Depends(_get_service),
+    db: AsyncSession = Depends(get_db),
+) -> Any:
+    """Ask a finished job a new question, answered from what the run stored.
+
+    The report's question round answers it from the job's stored report,
+    ledger and run state (``services.follow_up``): no tool is called and
+    nothing is analysed again, so a question the stored evidence cannot
+    settle is "not determinable from this run" with the reason. The answer is
+    kept as a record of its own beside the report, which is never changed, and
+    goes onto the audit chain naming the report digest it was answered from.
+    Ownership is the job's, checked exactly the way the evidence page checks
+    it: 404 for anyone else. 409 for a job still pending or running, or one
+    that stored no report; 422 for a report that cannot be read. No database
+    transaction is held while the model answers.
+    """
+    from app.services import follow_up
+
+    job = await svc.get_job(job_id, user)
+    if not job:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Job not found")
+    try:
+        prepared = await follow_up.prepare(db, job)
+    except follow_up.FollowUpRefused as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from None
+    # The reads end here: the model's answer can take minutes.
+    await db.commit()
+    answered = await follow_up.answer(prepared, body.question)
+    # The usage numbers are taken from the job's event counter before the job
+    # row is locked: no Redis call waits under the lock.
+    first = (
+        await follow_up.reserve_seqs(prepared.job_id, len(answered.usage))
+        if answered.usage
+        else None
+    )
+    try:
+        row = await follow_up.store(
+            db, prepared, answered, body.question, user_id=user.id, first=first
+        )
+    except follow_up.FollowUpRefused as exc:
+        await db.rollback()
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from None
+    await db.commit()
+    logger.info(
+        f"Follow-up {log_safe(row.id)} on job {log_safe(job_id)} answered: {log_safe(row.outcome)}",
+        extra={"job_id": log_safe(job_id), "user_id": log_safe(user.id)},
+    )
+    return FollowUpResponse.model_validate(follow_up.as_mapping(row))
+
+
+@router.get("/{job_id}/follow-ups", response_model=FollowUpListResponse)
+async def list_follow_ups(
+    job_id: uuid.UUID,
+    user: User = Depends(get_current_user),
+    svc: AnalysisService = Depends(_get_service),
+    db: AsyncSession = Depends(get_db),
+) -> Any:
+    """The follow-up questions asked of the job and their answers, oldest first.
+
+    Ownership is the job's, checked exactly the way the evidence page checks it.
+    """
+    from app.services import follow_up
+
+    job = await svc.get_job(job_id, user)
+    if not job:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Job not found")
+    rows = await follow_up.list_for(db, job_id)
+    return FollowUpListResponse(
+        job_id=job_id,
+        follow_ups=[FollowUpResponse.model_validate(follow_up.as_mapping(r)) for r in rows],
+    )
 
 
 @router.delete("/{job_id}", status_code=status.HTTP_204_NO_CONTENT)

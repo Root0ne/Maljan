@@ -37,6 +37,7 @@ from app.bootstrap import validate_bootstrap
 from app.config import APISettings
 from app.models.audit import AuditChainAnchor, AuditChainHead, AuditLog
 from app.models.evidence import EvidenceEntry
+from app.models.follow_up import JobFollowUp
 from app.models.report import AnalysisReport
 from app.services import audit_anchor, audit_chain, ledger_chain, ledger_verify
 from app.services.audit_anchor import AnchoredHead, BucketLock
@@ -193,7 +194,7 @@ def _write_chain(conn: Any, rows: list[dict[str, Any]], head: dict[str, Any]) ->
 def _database(rows: list[dict[str, Any]]) -> Any:
     engine = _sqlite()
     with engine.begin() as conn:
-        for model in (EvidenceEntry, AnalysisReport, AuditLog, AuditChainHead):
+        for model in (EvidenceEntry, AnalysisReport, AuditLog, AuditChainHead, JobFollowUp):
             model.__table__.create(conn)
         _write_chain(conn, rows, _head(rows))
     return engine
@@ -373,7 +374,7 @@ def _sealed_job(engine: Any) -> tuple[uuid.UUID, list[dict[str, Any]]]:
         [other, job_id, other],
     )
     with engine.begin() as conn:
-        for model in (EvidenceEntry, AnalysisReport, AuditLog, AuditChainHead):
+        for model in (EvidenceEntry, AnalysisReport, AuditLog, AuditChainHead, JobFollowUp):
             model.__table__.create(conn)
         values = {c.name: getattr(entry, c.name) for c in EvidenceEntry.__table__.columns}
         conn.execute(

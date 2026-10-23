@@ -437,6 +437,7 @@ async def test_a_job_whose_own_audit_rows_were_removed_with_its_ledger_is_not_un
 
     from app.models.audit import AuditChainHead, AuditLog
     from app.models.evidence import EvidenceEntry
+    from app.models.follow_up import JobFollowUp
     from app.models.report import AnalysisReport
     from app.services import audit_chain, ledger_chain, ledger_verify
     from tests.unit.api.test_a_ledger_is_verified_against_its_seal import (
@@ -461,7 +462,7 @@ async def test_a_job_whose_own_audit_rows_were_removed_with_its_ledger_is_not_un
     last = _audit_row(3, "x" * 8, other, audit_chain.REPORT_AMEND, {})
     engine = sa.create_engine("sqlite://")
     with engine.begin() as conn:
-        for model in (EvidenceEntry, AnalysisReport, AuditLog, AuditChainHead):
+        for model in (EvidenceEntry, AnalysisReport, AuditLog, AuditChainHead, JobFollowUp):
             model.__table__.create(conn)
         for audit_row in (first, last):
             conn.execute(AuditLog.__table__.insert().values(**audit_row))

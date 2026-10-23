@@ -185,6 +185,50 @@ class JobListResponse(BaseModel):
     page_size: int
 
 
+class FollowUpRequest(BaseModel):
+    """A question asked of a finished job, answered from what the run stored."""
+
+    question: str
+
+    @field_validator("question")
+    @classmethod
+    def _the_question_says_something(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("question: the question must hold some text")
+        return value
+
+
+class FollowUpResponse(BaseModel):
+    """One follow-up question and its answer (``app.models.follow_up.JobFollowUp``).
+
+    ``answer`` is the answer as ``reporting.models.QuestionAnswer`` dumps it:
+    the outcome, the report model's words, the ids cited, the platform's
+    checks. ``report_sha256`` is the digest of the stored report it was
+    answered from; ``record`` the keyed record the audit chain holds, ``None``
+    when the platform held no chain key (``notes`` says so).
+    """
+
+    id: uuid.UUID
+    job_id: uuid.UUID
+    report_id: uuid.UUID
+    question: str
+    outcome: str
+    answer: dict[str, Any]
+    model: str
+    model_source: str
+    report_sha256: str
+    record: dict[str, Any] | None = None
+    notes: list[str] = []
+    answered_at: datetime
+
+
+class FollowUpListResponse(BaseModel):
+    """A job's follow-up questions, oldest first."""
+
+    job_id: uuid.UUID
+    follow_ups: list[FollowUpResponse]
+
+
 # ── Sample Schemas ───────────────────────────────────────────────
 
 

@@ -32,6 +32,7 @@ import {
 import { degradedBannerText } from "@/lib/degradedBanner";
 import { validationRowClass, validationRowText } from "@/lib/validationRows";
 import EvidenceChips from "@/components/analysis/EvidenceChips";
+import FollowUpQuestions from "@/components/analysis/FollowUpQuestions";
 import TechnicalAnalysisPanel from "@/components/analysis/TechnicalAnalysisPanel";
 import {
   MEASURED_VOICE,
@@ -400,6 +401,8 @@ function MalwareReportSummary({ mr }: { mr: MalwareReport }) {
       <StageTimingCard jobId={jobId} elapsedSeconds={job?.duration_seconds ?? null} />
 
       <QuestionAnswers mr={mr} />
+
+      <FollowUpQuestions jobId={jobId} status={job?.status} />
 
       {/* Key findings and the summary, as the report model wrote them, or the
           reason none was written. The exported report's §1; the paragraphs a

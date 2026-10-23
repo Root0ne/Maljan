@@ -165,6 +165,8 @@ TAIL_CALLS = {
     "narrative": "report",
     # The report's question round (``reporting.question_round.QUESTION_CALL``).
     "questions": "report",
+    # A follow-up question asked of a finished run (``reporting.follow_up.FOLLOW_UP_CALL``).
+    "follow-up": "report",
 }
 
 # Set on a stated estimate whose prompt is to be priced at the share of the

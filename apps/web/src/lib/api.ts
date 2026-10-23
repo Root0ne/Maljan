@@ -4,6 +4,8 @@ import type { EvidenceListResponse, EvidenceQuery } from "@/types/evidence";
 import type { RunDiff } from "@/types/runDiff";
 import type {
   EnrichTriggerResponse,
+  FollowUp,
+  FollowUpList,
   MalwareReport,
   RunSummary,
 } from "@/types/malware-report";
@@ -1189,6 +1191,20 @@ class ApiClient {
 
   getReportSignature(reportId: string, kind: "yara" | "sigma" | "suricata" | "snort") {
     return this.textRequest(`/api/v1/reports/${encodeURIComponent(reportId)}/signatures/${encodeURIComponent(kind)}`);
+  }
+
+  /** The follow-up questions asked of a finished job, oldest first. */
+  getFollowUps(jobId: string) {
+    return this.request<FollowUpList>(`/api/v1/jobs/${encodeURIComponent(jobId)}/follow-ups`);
+  }
+
+  /** Ask a finished job a new question; answered from its stored run once the
+   *  model has answered. 409 while the job runs or when it stored no report. */
+  askFollowUp(jobId: string, question: string) {
+    return this.request<FollowUp>(`/api/v1/jobs/${encodeURIComponent(jobId)}/follow-ups`, {
+      method: "POST",
+      body: JSON.stringify({ question }),
+    });
   }
 
   enrichReport(reportId: string) {
