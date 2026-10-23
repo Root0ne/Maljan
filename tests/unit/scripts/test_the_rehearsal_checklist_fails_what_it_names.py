@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import copy
 import time
+from datetime import UTC, datetime
 from typing import Any
 
 import pytest
@@ -883,6 +884,55 @@ class TestABrokenStreamIsChargedItsReportedPrompt:
         record.events.pop()
         record.run_summary["spend"] = {"spent_usd": round(priced_usage(record)[0], 6)}
         assert "tokens and spend as the provider reported them" not in _failed(record)
+
+
+# The end of DeepSeek's 06:00-10:00 UTC weekday peak window, on a Friday.
+PEAK_ENDS = datetime(2026, 10, 23, 10, 0, tzinfo=UTC).timestamp()
+
+
+class TestACallIsPricedWhenItWasSent:
+    """The spend meter prices a call at the rates in force when it was sent, and so does the check.
+
+    A call sent a moment before a rate window's edge reaches the stub a moment
+    after it: priced at the stub's clock, a correct charge read as a wrong one.
+    """
+
+    @staticmethod
+    def _sent(record: RunRecord, received: float, sent: float) -> None:
+        """Every call sent at ``sent`` and received at ``received``, charged as the meter does."""
+        for entry in record.stub_log:
+            entry["at"] = received
+        usage = [e for e in record.events if e.get("type") == "model_usage"]
+        for entry, event in zip(_billed_in_order(record), usage, strict=True):
+            event["data"]["sent_at"] = sent
+            event["data"]["priced_usd"] = stub_cost(entry, price_rows(), sent=sent)
+        record.run_summary["spend"]["spent_usd"] = round(priced_usage(record)[0], 6)
+
+    def test_a_call_sent_before_a_window_s_edge_and_received_after_it_passes(self) -> None:
+        record = _record()
+        self._sent(record, received=PEAK_ENDS + 0.004, sent=PEAK_ENDS - 0.004)
+        entry = record.stub_log[0]
+        # The peak rate it was charged is not the one in force when it was received.
+        assert stub_cost(entry, price_rows(), sent=PEAK_ENDS - 0.004) > stub_cost(
+            entry, price_rows()
+        )
+        assert _failed(record) == []
+
+    def test_a_charge_at_the_rate_in_force_when_it_was_received_fails(self) -> None:
+        record = _record()
+        self._sent(record, received=PEAK_ENDS + 0.004, sent=PEAK_ENDS - 0.004)
+        usage = next(e for e in record.events if e.get("type") == "model_usage")
+        usage["data"]["priced_usd"] = stub_cost(record.stub_log[0], price_rows())
+        assert _failed(record) == ["tokens and spend as the provider reported them"]
+
+    def test_a_record_sent_after_the_stub_received_its_call_fails(self) -> None:
+        record = _record()
+        self._sent(record, received=PEAK_ENDS - 60, sent=PEAK_ENDS - 60.01)
+        usage = next(e for e in record.events if e.get("type") == "model_usage")
+        usage["data"]["sent_at"] = PEAK_ENDS - 59
+        (check,) = [c for c in check_run(record) if c.name.startswith("tokens and spend")]
+        assert not check.ok
+        assert "its record was sent 1.000s after the stub received it" in check.detail
 
 
 class TestTheWindowInForce:
