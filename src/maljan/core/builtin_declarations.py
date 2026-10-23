@@ -687,6 +687,136 @@ _GORESYM_TOOLS: dict[str, dict[str, Any]] = {
     },
 }
 
+# The rule and document servers, shipped switched off as the identification
+# servers are (``services/yarax-mcp``, ``services/oletools-mcp``,
+# ``services/webcrack-mcp``). YARA-X matches the operator's own rule files and
+# answers in the row shape of ``yara_scan``: its rule matches are signature
+# rules, and corroborate as the one YARA layer (``source``), never as a second
+# independent one beside ``yara_scan``'s. oletools parses Office and RTF
+# documents and runs no macro; webcrack rewrites a script's syntax tree and is
+# handed no sandbox to evaluate any of it in.
+_YARAX_TOOLS: dict[str, dict[str, Any]] = {
+    "capabilities": _CAPABILITIES,
+    "yarax_scan": {
+        # Its rows and places are yara_scan's, so a claim citing a match is
+        # read as one citing yara_scan's is.
+        **_SIGNATURE_RULES,
+        "arguments": _SAMPLE_PATH,
+        "display_name": "YARA-X",
+        "shows": (
+            "the operator's own YARA rules (the rule files mounted on the server) that match "
+            "the file, with each matching string's offset and the rule's metadata"
+        ),
+        "does_not_show": (
+            "rules that are not in the mounted rule files, or that YARA-X could not compile "
+            "(named in rules_not_compiled); a match is the rule author's claim, not a verdict"
+        ),
+    },
+}
+_OFFICE_FORMATS = ["ole2", "ooxml"]
+_OFFICE_AND_RTF_FORMATS = ["ole2", "ooxml", "rtf"]
+_OLETOOLS_TOOLS: dict[str, dict[str, Any]] = {
+    "capabilities": _CAPABILITIES,
+    "ole_vba": {
+        "kind": "vba_macros",
+        "rows": "/indicators/*",
+        "values": {"type": "/type", "keyword": "/keyword"},
+        "arguments": _SAMPLE_PATH,
+        "routed_formats": _OFFICE_FORMATS,
+        "display_name": "olevba",
+        "shows": (
+            "the VBA source of each macro module and olevba's keyword analysis of it (auto-run "
+            "triggers, suspicious calls, IOCs, encoded strings), Excel 4 macro sheets and VBA "
+            "stomping"
+        ),
+        "does_not_show": (
+            "what a macro does when it runs: no macro is run, so code it builds or downloads "
+            "at run time is not seen"
+        ),
+    },
+    "ole_macro_risk": {
+        "kind": "macro_risk",
+        "rows": "/matches/*",
+        "values": {"flag": "/flag", "keyword": "/keyword"},
+        "arguments": _SAMPLE_PATH,
+        "routed_formats": _OFFICE_FORMATS,
+        "display_name": "MacroRaptor",
+        "shows": "whether the macros run on their own and write or execute, by keyword rules",
+        "does_not_show": (
+            "whether a macro is malicious or what it does: a keyword match on the source, with "
+            "no macro run"
+        ),
+    },
+    "ole_indicators": {
+        "kind": "document_indicators",
+        "rows": "/indicators/*",
+        "values": {"indicator": "/id", "value": "/value", "risk": "/risk"},
+        "arguments": _SAMPLE_PATH,
+        "routed_formats": _OFFICE_AND_RTF_FORMATS,
+        "display_name": "oleid",
+        "shows": (
+            "the document's format, encryption, VBA and XLM macros, external relationships, "
+            "Flash and object pools, each with oleid's risk rating"
+        ),
+        "does_not_show": "the content behind an indicator, or anything oleid has no check for",
+    },
+    "rtf_objects": {
+        "kind": "embedded_objects",
+        "rows": "/objects/*",
+        "places": {"offset": "/start"},
+        "values": {
+            "class_name": "/class_name",
+            "filename": "/filename",
+            "payload_sha256": "/payload_sha256",
+        },
+        "arguments": _SAMPLE_PATH,
+        "routed_formats": ["rtf"],
+        "display_name": "rtfobj",
+        "shows": (
+            "the objects embedded in the RTF: each one's OLE class (Package, Equation.3, "
+            "OLE2Link and others), the file name and paths a Package names, and its payload's "
+            "sha256"
+        ),
+        "does_not_show": (
+            "what an object does when it is opened, or an object the parser cannot find; "
+            "nothing is extracted or run"
+        ),
+    },
+    "office_dde": {
+        "kind": "dde_links",
+        "rows": "/links/*",
+        "values": {"instruction": "/text"},
+        "arguments": _SAMPLE_PATH,
+        "routed_formats": _OFFICE_AND_RTF_FORMATS,
+        "display_name": "msodde",
+        "shows": "the DDE links and field instructions in the document, DDEAUTO commands too",
+        "does_not_show": "whether a link would run, or the links of an encrypted document",
+    },
+}
+_WEBCRACK_TOOLS: dict[str, dict[str, Any]] = {
+    "capabilities": _CAPABILITIES,
+    "js_deobfuscate": {
+        "kind": "deobfuscated_script",
+        "long_running": True,
+        "rows": "/scripts/*",
+        "places": {"offset": "/start"},
+        "values": {"language": "/language"},
+        "arguments": _SAMPLE_PATH,
+        "routed_formats": ["js", "hta", "wsf"],
+        "display_name": "webcrack",
+        "shows": (
+            "the script (or each script block of an HTA or WSF) unminified, unpacked from its "
+            "bundle and cleared of self-defending and debugger traps, as readable JavaScript"
+        ),
+        "does_not_show": (
+            "strings an obfuscator's decoder functions compute (decoding them would run the "
+            "script, so those calls stay as written); with no sandbox, the control-flow "
+            "flattening and dead code of a script guarded by an obfuscator-style string array, "
+            "which stay as they are; VBScript, or JScript.Encode scripts"
+        ),
+    },
+}
+
 # The triage pack's steps (``pipeline.triage_pack``), each recorded under the
 # pack's own source. The in-process implementations answer as the sidecar's
 # tools of the same name do, so they declare the same facts.
@@ -1094,8 +1224,8 @@ def _with_effects(
     return out
 
 
-def _identification_block(role: str, tools: dict[str, dict[str, Any]]) -> dict[str, Any]:
-    """An identification server's declaration: its role, its mount and its tools, read-only."""
+def _one_program_block(role: str, tools: dict[str, dict[str, Any]]) -> dict[str, Any]:
+    """A one-program sidecar's declaration: its role, its mount and its tools, read-only."""
     return {
         "roles": [role],
         "sample_mount": "/data/samples",
@@ -1193,12 +1323,16 @@ _SERVER_BLOCKS: dict[str, dict[str, Any]] = {
         ),
         "credential_bootstrap": _VIRUSTOTAL_BOOTSTRAP,
     },
-    # The identification servers: each reads the sample the worker mirrors
-    # under the samples directory its container mounts read-only at
-    # /data/samples (``docker/docker-compose.yml``), and none runs it.
-    "die": _identification_block("identifier", _DIE_TOOLS),
-    "ilspy": _identification_block("decompiler", _ILSPY_TOOLS),
-    "goresym": _identification_block("symbol_recovery", _GORESYM_TOOLS),
+    # The identification servers and the rule and document servers: each
+    # reads the sample the worker mirrors under the samples directory its
+    # container mounts read-only at /data/samples
+    # (``docker/docker-compose.yml``), and none runs it.
+    "die": _one_program_block("identifier", _DIE_TOOLS),
+    "ilspy": _one_program_block("decompiler", _ILSPY_TOOLS),
+    "goresym": _one_program_block("symbol_recovery", _GORESYM_TOOLS),
+    "yarax": _one_program_block("rule_matcher", _YARAX_TOOLS),
+    "oletools": _one_program_block("document_reader", _OLETOOLS_TOOLS),
+    "webcrack": _one_program_block("deobfuscator", _WEBCRACK_TOOLS),
 }
 
 # The static providers' own blocks (``static.ghidra``, ``static.r2``) and the

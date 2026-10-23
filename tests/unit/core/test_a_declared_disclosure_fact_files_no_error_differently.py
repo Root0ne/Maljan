@@ -33,7 +33,9 @@ UNDECLARED = "zz_not_declared"
 # The built-in sources shipped after the golden was captured (the
 # identification servers): each tool of theirs declares a kind and files as a
 # declared tool of dev's did, and their undeclared tool as dev's undeclared one.
-SHIPPED_SINCE = frozenset({"mcp:die", "mcp:ilspy", "mcp:goresym"})
+SHIPPED_SINCE = frozenset(
+    {"mcp:die", "mcp:ilspy", "mcp:goresym", "mcp:yarax", "mcp:oletools", "mcp:webcrack"}
+)
 
 
 @pytest.fixture

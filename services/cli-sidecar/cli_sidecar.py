@@ -1,9 +1,10 @@
 """One command-line analysis program, served over MCP from a container of its own.
 
 Shared by the sidecars that each wrap one program (``die-mcp``, ``ilspy-mcp``,
-``goresym-mcp``). It imports nothing of the platform: each image holds this
-module, its server and the program, and nothing else, so a sidecar holds no
-platform code, credential or setting beyond its own token.
+``goresym-mcp``, ``yarax-mcp``, ``oletools-mcp``, ``webcrack-mcp``). It imports
+nothing of the platform: each image holds this module, its server and the
+program, and nothing else, so a sidecar holds no platform code, credential or
+setting beyond its own token.
 
 What every such server does the same way:
 

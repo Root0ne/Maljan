@@ -28,6 +28,8 @@ GOLDEN = ROOT / "tests" / "fixtures" / "golden" / "mcp_tools"
 TOOLS = ROOT / "tests" / "fixtures" / "tools"
 LEDGER = ROOT / "tests" / "fixtures" / "ledger"
 BUILT_IN_SERVERS = ("analysis", "knowledge", "network", "threatintel", "virustotal")
+# The built-in sidecars of one analysis program each, shipped switched off.
+ONE_PROGRAM_SERVERS = ("die", "ilspy", "goresym", "yarax", "oletools", "webcrack")
 
 
 @pytest.fixture(scope="module")
@@ -356,7 +358,17 @@ def test_the_pinned_servers_are_the_servers_that_read_the_staged_sample(
     # The servers the name list held before the declaration was read, and the
     # identification servers shipped since, which declare it.
     reading = {d.source.key for d in declared.sources() if d.reads_staged_sample}
-    assert reading == {"analysis", "knowledge", "network", "die", "ilspy", "goresym"}
+    assert reading == {
+        "analysis",
+        "knowledge",
+        "network",
+        "die",
+        "ilspy",
+        "goresym",
+        "yarax",
+        "oletools",
+        "webcrack",
+    }
 
 
 def test_the_platforms_own_sources_are_the_resolving_servers(declared: ToolDeclarations) -> None:
@@ -478,14 +490,21 @@ def test_the_categories_are_the_mcp_clients_tags(declared: ToolDeclarations) -> 
 def test_the_rule_match_display_names_are_the_assertion_words(declared: ToolDeclarations) -> None:
     from maljan.pipeline.validation import _RULE_MATCH_ASSERTION_RE
 
+    # YARA-X, a rule matcher shipped switched off, is among them.
+    one_program = [
+        (f"mcp:{key}", tool, facts)
+        for key in ONE_PROGRAM_SERVERS
+        for tool, facts in _tools(declared, f"mcp:{key}").items()
+    ]
     names = {
         facts.display_name.lower()
-        for _s, _n, facts in _built_in_tools(declared)
+        for _s, _n, facts in [*_built_in_tools(declared), *one_program]
         if facts.kind in _kinds("validation._RULE_MATCH_SECTION_SOURCES")  # type: ignore[attr-defined]
     }
-    alternation = re.search(r"\\b\(\?:([a-z|]+)\)\\b", _RULE_MATCH_ASSERTION_RE.pattern)
+    # A name with a hyphen (YARA-X) stands escaped in the pattern.
+    alternation = re.search(r"\\b\(\?:([a-z|\\-]+)\)\\b", _RULE_MATCH_ASSERTION_RE.pattern)
     assert alternation is not None
-    assert names == set(alternation.group(1).split("|"))
+    assert names == set(alternation.group(1).replace("\\-", "-").split("|"))
 
 
 def test_ghidra_and_radare2_carry_their_workflows_and_radare2_its_errors(

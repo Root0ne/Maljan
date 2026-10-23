@@ -21,14 +21,15 @@ x-backend-image: &backend-image
   security_opt:
     - no-new-privileges:true
 
-# What every identification sidecar (die-mcp, ilspy-mcp, goresym-mcp below)
-# is held to. Each opens the sample, so each is held as ghidra-mcp is (X2):
-# the worker's unprivileged ids (the worker writes its sample mirrors
+# What every sidecar that serves one analysis program (services/cli-sidecar:
+# die-mcp, ilspy-mcp, goresym-mcp, yarax-mcp, oletools-mcp and webcrack-mcp
+# below) is held to. Each opens the sample, so each is held as ghidra-mcp is
+# (X2): the worker's unprivileged ids (the worker writes its sample mirrors
 # 0700/0600 and these must read them), no Linux capability and no way to gain
 # one, a pids limit against a fork storm, and a read-only root whose only
 # writable place is a tmpfs for each run's scratch directory. Each holds no
 # platform credential: its only secret is its own token.
-x-identification-sidecar: &identification-sidecar
+x-cli-sidecar: &cli-sidecar
   restart: unless-stopped
   user: "${MALJAN_UID:-10001}:${MALJAN_GID:-10001}"
   cap_drop:
@@ -323,7 +324,7 @@ services:
   # runs and agents are offered its tools; nothing waits for it, and a block
   # switched on with no container behind it is a step that says it failed.
   #
-  # Held as x-identification-sidecar says, with the sample directory mounted
+  # Held as x-cli-sidecar says, with the sample directory mounted
   # read-only at the blocks' declared sample_mount (/data/samples), and on an
   # internal network of its own (no gateway) shared only with the API and the
   # worker, which reach it at http://<service>:<port>/mcp. It publishes no
@@ -338,7 +339,7 @@ services:
   # records the failure. Swap is pinned to the same value. DIE_MEM_LIMIT,
   # ILSPY_MEM_LIMIT and GORESYM_MEM_LIMIT set each (2g, 4g, 2g by default).
   die-mcp:
-    <<: *identification-sidecar
+    <<: *cli-sidecar
     profiles: [die]
     build:
       context: ../services
@@ -374,7 +375,7 @@ services:
       - "${BIND_ADDRESS:-127.0.0.1}:${DIE_MCP_PORT:-8090}:8090"
 
   ilspy-mcp:
-    <<: *identification-sidecar
+    <<: *cli-sidecar
     profiles: [ilspy]
     build:
       context: ../services
@@ -405,7 +406,7 @@ services:
       - "${BIND_ADDRESS:-127.0.0.1}:${ILSPY_MCP_PORT:-8091}:8091"
 
   goresym-mcp:
-    <<: *identification-sidecar
+    <<: *cli-sidecar
     profiles: [goresym]
     build:
       context: ../services
@@ -434,6 +435,120 @@ services:
       - goresym-publish
     ports:
       - "${BIND_ADDRESS:-127.0.0.1}:${GORESYM_MCP_PORT:-8092}:8092"
+
+  # -────────────────────────────────────────────
+  # Rule and document sidecars — YARA-X, oletools, webcrack, each optional
+  # -────────────────────────────────────────────
+  # One analysis program each, served over MCP as the identification sidecars
+  # above are (services/yarax-mcp, services/oletools-mcp,
+  # services/webcrack-mcp): YARA-X matching the operator's own YARA rule
+  # files against any file, oletools reading an Office or RTF document's
+  # macros, indicators, embedded objects and DDE links, webcrack rewriting a
+  # JavaScript dropper into readable code. Each is off until its profile is in
+  # COMPOSE_PROFILES, its token set here and its built-in block (yarax,
+  # oletools, webcrack) switched on in the console with that token; held as
+  # x-cli-sidecar says, with the samples read-only at /data/samples and an
+  # internal network of its own, published by a bare relay. None runs what it
+  # reads: YARA-X matches rules, oletools parses (no macro runs), webcrack
+  # rewrites a syntax tree and is handed no sandbox to evaluate anything in.
+  #
+  # yarax-mcp also mounts the operator's rule directory read-only at
+  # /data/rules: data/yara-x-rules, or YARA_X_RULES_DIR. YARAX_MEM_LIMIT,
+  # OLETOOLS_MEM_LIMIT and WEBCRACK_MEM_LIMIT set each memory-and-swap
+  # ceiling (2g each by default), a machine-safety limit as the others are.
+  yarax-mcp:
+    <<: *cli-sidecar
+    profiles: [yarax]
+    build:
+      context: ../services
+      dockerfile: yarax-mcp/Dockerfile
+    image: maljan-yarax-mcp:1.21.0
+    container_name: maljan-yarax-mcp
+    environment:
+      MCP_AUTH_TOKEN: ${YARAX_MCP_AUTH_TOKEN:-}
+    mem_limit: ${YARAX_MEM_LIMIT:-2g}
+    memswap_limit: ${YARAX_MEM_LIMIT:-2g}
+    networks:
+      - yarax
+    volumes:
+      - ../data/samples:/data/samples:ro
+      - ${YARA_X_RULES_DIR:-../data/yara-x-rules}:/data/rules:ro
+    healthcheck: *sidecar-health
+
+  yarax-port:
+    <<: *sidecar-relay
+    profiles: [yarax]
+    container_name: maljan-yarax-port
+    command:
+      - tcp-listen:8093,fork,reuseaddr
+      - tcp-connect:yarax-mcp:8093
+    networks:
+      - yarax
+      - yarax-publish
+    ports:
+      - "${BIND_ADDRESS:-127.0.0.1}:${YARAX_MCP_PORT:-8093}:8093"
+
+  oletools-mcp:
+    <<: *cli-sidecar
+    profiles: [oletools]
+    build:
+      context: ../services
+      dockerfile: oletools-mcp/Dockerfile
+    image: maljan-oletools-mcp:0.60.2
+    container_name: maljan-oletools-mcp
+    environment:
+      MCP_AUTH_TOKEN: ${OLETOOLS_MCP_AUTH_TOKEN:-}
+    mem_limit: ${OLETOOLS_MEM_LIMIT:-2g}
+    memswap_limit: ${OLETOOLS_MEM_LIMIT:-2g}
+    networks:
+      - oletools
+    volumes:
+      - ../data/samples:/data/samples:ro
+    healthcheck: *sidecar-health
+
+  oletools-port:
+    <<: *sidecar-relay
+    profiles: [oletools]
+    container_name: maljan-oletools-port
+    command:
+      - tcp-listen:8094,fork,reuseaddr
+      - tcp-connect:oletools-mcp:8094
+    networks:
+      - oletools
+      - oletools-publish
+    ports:
+      - "${BIND_ADDRESS:-127.0.0.1}:${OLETOOLS_MCP_PORT:-8094}:8094"
+
+  webcrack-mcp:
+    <<: *cli-sidecar
+    profiles: [webcrack]
+    build:
+      context: ../services
+      dockerfile: webcrack-mcp/Dockerfile
+    image: maljan-webcrack-mcp:2.16.0
+    container_name: maljan-webcrack-mcp
+    environment:
+      MCP_AUTH_TOKEN: ${WEBCRACK_MCP_AUTH_TOKEN:-}
+    mem_limit: ${WEBCRACK_MEM_LIMIT:-2g}
+    memswap_limit: ${WEBCRACK_MEM_LIMIT:-2g}
+    networks:
+      - webcrack
+    volumes:
+      - ../data/samples:/data/samples:ro
+    healthcheck: *sidecar-health
+
+  webcrack-port:
+    <<: *sidecar-relay
+    profiles: [webcrack]
+    container_name: maljan-webcrack-port
+    command:
+      - tcp-listen:8095,fork,reuseaddr
+      - tcp-connect:webcrack-mcp:8095
+    networks:
+      - webcrack
+      - webcrack-publish
+    ports:
+      - "${BIND_ADDRESS:-127.0.0.1}:${WEBCRACK_MCP_PORT:-8095}:8095"
 
   # -────────────────────────────────────────────
   # Volume ownership — one-shot, before api, worker and Ghidra
@@ -573,14 +688,18 @@ services:
     extra_hosts:
       - "host.docker.internal:host-gateway"
     # `default` as before; `ghidra` to reach Ghidra, which is on no other
-    # network these services share (see ghidra-mcp), and `die`, `ilspy` and
-    # `goresym` to reach the identification sidecars the same way.
+    # network these services share (see ghidra-mcp), and `die`, `ilspy`,
+    # `goresym`, `yarax`, `oletools` and `webcrack` to reach the sidecars of
+    # one analysis program each the same way.
     networks:
       - default
       - ghidra
       - die
       - ilspy
       - goresym
+      - yarax
+      - oletools
+      - webcrack
     # The source trees are read-only: a process in this container that opens
     # hostile bytes cannot plant code the API or a later worker would run, or
     # change the host's working tree. data/ is read-only as well (its rule sets
@@ -692,13 +811,17 @@ services:
     extra_hosts:
       - "host.docker.internal:host-gateway"
     # As on the API: `ghidra` is how the worker reaches Ghidra, and `die`,
-    # `ilspy` and `goresym` the identification sidecars.
+    # `ilspy`, `goresym`, `yarax`, `oletools` and `webcrack` the sidecars of
+    # one analysis program each.
     networks:
       - default
       - ghidra
       - die
       - ilspy
       - goresym
+      - yarax
+      - oletools
+      - webcrack
     # Hard ceiling (2026-07-26). One analysis took this process from 3.4 GB to
     # 8.5 GB and never gave it back; two in a row exhausted a 30 GB host that
     # also runs a ~15 GB llama-server, and the machine locked up. The graceful
@@ -851,6 +974,19 @@ networks:
   goresym:
     internal: true
   goresym-publish:
+    driver: bridge
+  # The rule and document sidecars' own, the same way.
+  yarax:
+    internal: true
+  yarax-publish:
+    driver: bridge
+  oletools:
+    internal: true
+  oletools-publish:
+    driver: bridge
+  webcrack:
+    internal: true
+  webcrack-publish:
     driver: bridge
 
 volumes:

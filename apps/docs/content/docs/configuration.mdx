@@ -2151,6 +2151,22 @@ declared read-only and running nothing. Switching one on takes its container
 block's `auth_token`; then its tools are offered and its pack step runs. See
 [Identification servers](/tools/identification/).
 
+### The rule and document servers
+
+`yarax`, `oletools` and `webcrack` are built-in blocks for three more
+containers of this deployment, held and switched on the same way: YARA-X
+(`yarax_scan`, over the operator's own rule files under `data/yara-x-rules`
+or `YARA_X_RULES_DIR`), oletools (`ole_vba`, `ole_macro_risk`,
+`ole_indicators`, `rtf_objects`, `office_dde`) and webcrack
+(`js_deobfuscate`). Each ships **disabled**, over streamable-HTTP at
+`http://yarax-mcp:8093/mcp`, `http://oletools-mcp:8094/mcp` and
+`http://webcrack-mcp:8095/mcp`, bound to the `static` and `reverser` agents,
+with `sample_mount` `/data/samples` and `reads_staged_sample`, every tool
+declared read-only and running nothing. `yarax_scan` is declared as
+`yara_scan` is (kind `signature_rules`, source `yara`): its matches count as
+signature rule hits and corroborate as the one YARA layer. See
+[Rule and document servers](/tools/rules-and-documents/).
+
 ## Teams and stages
 
 A team (`core.agents.profiles.<key>`, edited under Settings → Agents and
@@ -2486,6 +2502,14 @@ without the server stay valid. Its conditions read `die_scan`'s declared
 values, so a server of your own under the same key, or a step of yours laid
 over the shipped one, runs the same way. Switched on, a step whose condition
 does not hold is a `not run:` entry, as any condition is.
+
+Five more shipped steps call the rule and document servers and are off the
+same way: `ole_vba` (on `ole2` and `ooxml`), `office_dde` (on `ole2`, `ooxml`
+and `rtf`) and `rtf_objects` (on `rtf`), oletools' tools, and
+`js_deobfuscate` (webcrack's, on `js`, `hta` and `wsf`), after the
+identification steps; and `yarax_scan` (YARA-X's, on every sample), right
+after `yara_scan`. Each runs on the routed format alone, the formats its
+tool declares.
 
 **Files passed between servers.** A file one server's tool writes (a payload
 carved out of the sample, an archive member, a decoded script) reaches

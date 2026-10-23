@@ -1954,9 +1954,11 @@ def _builtin_servers() -> dict[str, MCPServerConfig]:
             agents=[],
             label=virustotal.SERVER_LABEL,
         ),
-        # The identification sidecars, one analysis program each in an image
-        # of its own (``services/die-mcp``, ``services/ilspy-mcp``,
-        # ``services/goresym-mcp``), each reached over streamable HTTP at the
+        # The sidecars of one analysis program each, in an image of its own:
+        # the identification servers (``services/die-mcp``,
+        # ``services/ilspy-mcp``, ``services/goresym-mcp``) and the rule and
+        # document servers (``services/yarax-mcp``, ``services/oletools-mcp``,
+        # ``services/webcrack-mcp``), each reached over streamable HTTP at the
         # address the shipped compose file gives it under its profile. Off
         # until an operator starts the container and switches the block on with
         # the container's token as ``auth_token``: a block on with nothing
@@ -1976,6 +1978,9 @@ def _builtin_servers() -> dict[str, MCPServerConfig]:
                 ("die", "http://die-mcp:8090/mcp", "Detect It Easy MCP"),
                 ("ilspy", "http://ilspy-mcp:8091/mcp", "ILSpy MCP"),
                 ("goresym", "http://goresym-mcp:8092/mcp", "GoReSym MCP"),
+                ("yarax", "http://yarax-mcp:8093/mcp", "YARA-X MCP"),
+                ("oletools", "http://oletools-mcp:8094/mcp", "oletools MCP"),
+                ("webcrack", "http://webcrack-mcp:8095/mcp", "webcrack MCP"),
             )
         },
     }

@@ -1,10 +1,11 @@
 # cli-sidecar
 
 The plumbing shared by the sidecars that serve one command-line analysis
-program each over MCP (`die-mcp`, `ilspy-mcp`, `goresym-mcp`). One module,
-`cli_sidecar.py`, which imports nothing of the platform: each image holds this
-module, its own `server.py`, the program and the packages of
-`requirements.txt` (installed with `--require-hashes`), and nothing else.
+program each over MCP (`die-mcp`, `ilspy-mcp`, `goresym-mcp`, `yarax-mcp`,
+`oletools-mcp`, `webcrack-mcp`). One module, `cli_sidecar.py`, which imports
+nothing of the platform: each image holds this module, its own `server.py`,
+the program and the packages of `requirements.txt` (installed with
+`--require-hashes`), and nothing else.
 
 What every such server does the same way:
 
