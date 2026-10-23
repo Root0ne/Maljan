@@ -139,6 +139,9 @@ class TestOffWithoutTheirServer:
         held = _settings("die", "ilspy", ilspy={"tools": ["dotnet_resources"]})
         servers = {k: v for k, v in held.mcp.servers.items() if k != "goresym"}
         kept, off = steps_on_servers(steps, servers)
+        # The identification steps' own; the other servers' steps are held in
+        # test_the_rule_and_document_steps_run_on_declared_formats.py.
+        off = {step: why for step, why in off.items() if step in STEPS.values()}
         assert off == {
             "dotnet_types": "dotnet_types is not among the tools ilspy offers",
             "go_symbols": "no tool server is configured as goresym",
@@ -155,7 +158,8 @@ class TestOffWithoutTheirServer:
         for step_id in STEPS.values():
             step = shipped_step(step_id)
             assert step is not None and held.pack_step_problem(step) == ""
-        assert set(steps_on_servers(effective_steps(), held.mcp.servers)[1]) == set(STEPS.values())
+        off = steps_on_servers(effective_steps(), held.mcp.servers)[1]
+        assert set(STEPS.values()) <= set(off)
         assert not set(IDENTIFIERS) & servers_a_job_calls(Settings(_env_file=None))
 
     def test_an_operators_step_on_an_absent_server_is_still_refused(self) -> None:

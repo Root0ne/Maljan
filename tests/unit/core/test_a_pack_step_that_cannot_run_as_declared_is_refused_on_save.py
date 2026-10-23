@@ -227,6 +227,10 @@ def test_every_shipped_format_is_a_name_the_router_gives() -> None:
         *sample_identity.ARCHIVE_FILE_TYPES,
         *sample_identity.DOCUMENT_FILE_TYPES,
         *sample_identity.SCRIPT_FILE_TYPES,
+        # Routed by name with no shipped reader: RTF (oletools' steps read it)
+        # and the carriers.
+        *sample_identity.UNREAD_DOCUMENT_FILE_TYPES,
+        *sample_identity.CARRIER_FILE_TYPES,
     }
     for step in default_steps():
         assert set(step.formats) <= routed, (step.id, set(step.formats) - routed)

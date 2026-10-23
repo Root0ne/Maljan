@@ -2645,8 +2645,11 @@
       "ilspy",
       "knowledge",
       "network",
+      "oletools",
       "threatintel",
-      "virustotal"
+      "virustotal",
+      "webcrack",
+      "yarax"
      ],
      "choices_from": "mcp_servers",
      "data_source_choices": null,
@@ -12270,6 +12273,47 @@
         ]
        },
        {
+        "display_name": "VBA macros",
+        "formats": [
+         "ole2",
+         "ooxml"
+        ],
+        "id": "ole_vba",
+        "server": "oletools",
+        "tool": "ole_vba"
+       },
+       {
+        "display_name": "DDE links",
+        "formats": [
+         "ole2",
+         "ooxml",
+         "rtf"
+        ],
+        "id": "office_dde",
+        "server": "oletools",
+        "tool": "office_dde"
+       },
+       {
+        "display_name": "RTF objects",
+        "formats": [
+         "rtf"
+        ],
+        "id": "rtf_objects",
+        "server": "oletools",
+        "tool": "rtf_objects"
+       },
+       {
+        "display_name": "deobfuscated script",
+        "formats": [
+         "js",
+         "hta",
+         "wsf"
+        ],
+        "id": "js_deobfuscate",
+        "server": "webcrack",
+        "tool": "js_deobfuscate"
+       },
+       {
         "display_name": "strings",
         "id": "strings",
         "renderer": "string_runs"
@@ -12283,6 +12327,12 @@
         "display_name": "yara",
         "id": "yara_scan",
         "renderer": "signature_rules"
+       },
+       {
+        "display_name": "YARA-X",
+        "id": "yarax_scan",
+        "server": "yarax",
+        "tool": "yarax_scan"
        },
        {
         "display_name": "capa",
@@ -12521,6 +12571,10 @@
         "called": "iocs_from_file",
         "server": ""
        },
+       "js_deobfuscate": {
+        "called": "js_deobfuscate",
+        "server": "webcrack"
+       },
        "lolbin_lookup": {
         "called": "lolbin_lookup",
         "server": ""
@@ -12528,6 +12582,14 @@
        "macho_info": {
         "called": "macho_info",
         "server": ""
+       },
+       "office_dde": {
+        "called": "office_dde",
+        "server": "oletools"
+       },
+       "ole_vba": {
+        "called": "ole_vba",
+        "server": "oletools"
        },
        "pcap_summary": {
         "called": "pcap_summary",
@@ -12548,6 +12610,10 @@
        "resolved_api_capability": {
         "called": "api_capability",
         "server": ""
+       },
+       "rtf_objects": {
+        "called": "rtf_objects",
+        "server": "oletools"
        },
        "sandbox_api_capability": {
         "called": "api_capability",
@@ -12600,6 +12666,10 @@
        "yara_scan": {
         "called": "yara_scan",
         "server": ""
+       },
+       "yarax_scan": {
+        "called": "yarax_scan",
+        "server": "yarax"
        }
       },
       "state_keys": [

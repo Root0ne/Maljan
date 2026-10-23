@@ -17,9 +17,11 @@ sidecar.
 | `threatintel` | `judge` | role binding | VirusTotal and AbuseIPDB reputation lookups over their REST APIs. |
 
 A fifth built-in, [VirusTotal](/tools/virustotal/), is VirusTotal's own server over
-HTTP, and three more, the [identification servers](/tools/identification/),
-are containers of their own, each shipped switched off, with a memory ceiling
-of its own (`DIE_MEM_LIMIT`, `ILSPY_MEM_LIMIT`, `GORESYM_MEM_LIMIT`).
+HTTP, and six more, the [identification servers](/tools/identification/)
+and the [rule and document servers](/tools/rules-and-documents/), are
+containers of their own, each shipped switched off, with a memory ceiling of
+its own (`DIE_MEM_LIMIT`, `ILSPY_MEM_LIMIT`, `GORESYM_MEM_LIMIT`,
+`YARAX_MEM_LIMIT`, `OLETOOLS_MEM_LIMIT`, `WEBCRACK_MEM_LIMIT`).
 
 ## Two rules every tool keeps
 

@@ -84,7 +84,17 @@ def test_the_built_ins_that_read_the_staged_sample_are_the_three_and_the_identif
     held = ToolDeclarations.from_settings(Settings())
     reading = {d.source.key for d in held.sources() if d.reads_staged_sample}
     # The three they were, and the identification servers shipped since.
-    assert reading == {"analysis", "knowledge", "network", "die", "ilspy", "goresym"}
+    assert reading == {
+        "analysis",
+        "knowledge",
+        "network",
+        "die",
+        "ilspy",
+        "goresym",
+        "yarax",
+        "oletools",
+        "webcrack",
+    }
 
 
 # ---------------------------------------------------------------------------

@@ -1,0 +1,142 @@
+---
+title: "Rule and document servers"
+description: "YARA-X over your own rule files, oletools over Office and RTF documents, webcrack over JavaScript droppers: one container each, shipped switched off, with their own pack steps."
+---
+
+Three built-in tool servers match the operator's own YARA rules, read an
+Office or RTF document's macros, objects and links, and turn an obfuscated
+JavaScript dropper back into readable code. Each wraps one program in an image
+of its own under `services/`, over the same plumbing as the
+[identification servers](/tools/identification/); each ships **switched
+off**, and each is used at full strength once it is on: agents are offered
+every tool it advertises, and its triage pack steps run.
+
+| Server | Program | Offers | Pack step |
+| :-- | :-- | :-- | :-- |
+| `yarax` | YARA-X 1.21.0 (`yr`) | `yarax_scan`: the operator's YARA rule files that match the file, each with its metadata, tags and every matching string's offset | `yarax_scan`, on every sample, right after `yara_scan` |
+| `oletools` | oletools 0.60.2 | `ole_vba` (olevba: VBA source and its keyword analysis, XLM macro sheets, VBA stomping), `ole_macro_risk` (MacroRaptor's auto-run, write and execute flags), `ole_indicators` (oleid), `rtf_objects` (rtfobj), `office_dde` (msodde) | `ole_vba` on `ole2` and `ooxml`; `office_dde` on `ole2`, `ooxml` and `rtf`; `rtf_objects` on `rtf` |
+| `webcrack` | webcrack 2.16.0 on Node.js 22 | `js_deobfuscate`: the script, or each script block of an HTA or WSF, unminified, unpacked from its bundle and cleared of self-defending and debugger traps | `js_deobfuscate` on `js`, `hta` and `wsf` |
+
+Each step runs on the format the router gave the sample, never on a tool's
+name. None of the programs runs what it reads:
+
+- YARA-X compiles the rule files and matches them against the file's bytes.
+- oletools parses the document. olevba decompresses and scans the VBA source
+  as text and MacroRaptor matches keywords in it; no macro runs. The XLM
+  emulator olevba would call where it is installed is neither installed nor
+  allowed, so Excel 4 macro sheets are read by olevba's own BIFF parser. A
+  document encrypted with one of Office's default passwords is decrypted in
+  memory for `ole_vba` and `ole_macro_risk`, and nothing is written to disk.
+- webcrack parses the script and rewrites its syntax tree. It would evaluate
+  an obfuscator's string-decoder functions in a sandbox it is handed; none is
+  handed, and the sandbox's module is removed from the image, so those decoder
+  calls stay in the code as written; webcrack unflattens control flow and
+  removes dead code only within that step, so a script guarded by an
+  obfuscator-style string array keeps both as they are. A VBScript block is
+  listed as it is, and a JScript.Encode script (`#@~^`) or one webcrack cannot
+  parse is left unread on its row; the call answers `unsupported_format` only
+  when no script was read.
+
+## YARA-X and the shipped YARA scan
+
+The platform's own rule corpus (`data/yara_ttp_rules.yaml`) stays with the
+analysis sidecar's `yara_scan` and its pack step, unchanged. YARA-X adds the
+operator's native rule sets beside it: every `*.yar` and `*.yara` file under
+`data/yara-x-rules` (or the directory `YARA_X_RULES_DIR` names), mounted
+read-only at `/data/rules` and compiled on each call, so a rule file changed
+on the host is read by the next call. The two never scan the same rules, so a
+run with both switched on has no duplicate entries.
+
+`yarax_scan` answers in `yara_scan`'s row shape and is declared as it is: kind
+`signature_rules`, rows `/matches/*` with the value `rule`, each string's
+`offset`, and the technique ids a rule's metadata names (`attck`,
+`technique_id`, `technique_ids`). Its matches count as signature rule hits,
+and corroborate as the one YARA layer: a technique both scans assert is one
+YARA source, never two independent ones. With no rule file under the
+directory, every call answers `missing_dependency` and says where the rules
+go. `ignore_invalid_rules` (on by default) skips a rule YARA-X cannot compile
+and names it in `rules_not_compiled`.
+
+## Turning one on
+
+<Steps>
+
+<Step>
+
+Add its profile to `COMPOSE_PROFILES` in `docker/.env` (`yarax`, `oletools`,
+`webcrack`) and set its token there (`YARAX_MCP_AUTH_TOKEN`,
+`OLETOOLS_MCP_AUTH_TOKEN`, `WEBCRACK_MCP_AUTH_TOKEN`). The container refuses
+to start without it. For YARA-X, put your rule files under
+`data/yara-x-rules`, or point `YARA_X_RULES_DIR` at their directory.
+
+</Step>
+
+<Step>
+
+Start it: `docker compose -f docker/docker-compose.yml up -d yarax-mcp
+yarax-port` (or the `oletools-` or `webcrack-` pair). The first start builds
+the image.
+
+</Step>
+
+<Step>
+
+In **Settings → Configuration**, open the server block of the same name, set
+its `auth_token` to the same token, switch it on and test it. The block
+already points at the container (`http://yarax-mcp:8093/mcp`,
+`http://oletools-mcp:8094/mcp`, `http://webcrack-mcp:8095/mcp`); a worker run
+on the host uses the relay's port instead (`http://localhost:8093/mcp` and so
+on).
+
+</Step>
+
+</Steps>
+
+A server that is switched off, not configured, or does not offer its step's
+tool leaves the step off: no call, no entry, and the reason in the worker's
+log and on the pack's result. A deployment without these servers runs the
+pack exactly as before.
+
+## What each container is held to
+
+Each is held as the identification servers are (see
+[Identification servers](/tools/identification/#what-each-container-is-held-to)):
+the worker's unprivileged ids, no Linux capability, a pids limit, a read-only
+root with a tmpfs for each run's scratch directory, the samples directory
+read-only at `/data/samples`, its own token as its only secret, a memory
+ceiling with swap pinned to it (`YARAX_MEM_LIMIT`, `OLETOOLS_MEM_LIMIT`,
+`WEBCRACK_MEM_LIMIT`, 2g each), and an internal network of its own shared
+only with the API and the worker, published by a bare relay. `yarax-mcp`
+mounts the rule directory read-only besides. Each report runs as a program of
+its own, in a process group of its own, so `TOOL_TIMEOUT_SECONDS` and a call
+the platform gave up on kill it with every process it started.
+
+## What their tools declare
+
+| Tool | Kind | Rows and values | Routed formats |
+| :-- | :-- | :-- | :-- |
+| `yarax_scan` | `signature_rules` (asserts techniques, source `yara`) | `/matches/*`: `rule`, at `offset` (`/strings/*/offset`) | every format |
+| `ole_vba` | `vba_macros` | `/indicators/*`: `type`, `keyword` | `ole2`, `ooxml` |
+| `ole_macro_risk` | `macro_risk` | `/matches/*`: `flag`, `keyword` | `ole2`, `ooxml` |
+| `ole_indicators` | `document_indicators` | `/indicators/*`: `indicator`, `value`, `risk` | `ole2`, `ooxml`, `rtf` |
+| `rtf_objects` | `embedded_objects` | `/objects/*`: `class_name`, `filename`, `payload_sha256`, at `offset` (`/start`) | `rtf` |
+| `office_dde` | `dde_links` | `/links/*`: `instruction` | `ole2`, `ooxml`, `rtf` |
+| `js_deobfuscate` | `deobfuscated_script` | `/scripts/*`: `language`, at `offset` (`/start`) | `js`, `hta`, `wsf` |
+
+Every tool is read-only, runs nothing, reaches no network and sends nothing to
+a third party, and says what it does not show: `ole_vba` and `ole_macro_risk`
+that no macro is run, `js_deobfuscate` that an obfuscator's decoded strings
+are not computed, since computing them would run the script, and that a script
+guarded by an obfuscator-style string array keeps its control-flow flattening
+and dead code.
+
+## On the worker's host instead
+
+Each `server.py` also serves over stdio (`python3 services/oletools-mcp/server.py
+--stdio`) for an operator who installs the program on the worker's host: YARA-X's
+`yr` on `PATH` with `YARA_X_RULES` naming the rule directories, oletools for the
+server's Python (`pip install --require-hashes -r
+services/oletools-mcp/requirements.txt`), or Node.js with `npm ci
+--ignore-scripts` in `services/webcrack-mcp`. Point the block's `transport` at
+`stdio` and its `command` and `args` at the script, clear its `sample_mount`,
+and add `MALJAN_SAMPLE_ROOTS` (and `YARA_X_RULES`) to its `env_allow`.

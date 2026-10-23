@@ -1,8 +1,8 @@
 # Dependabot keeps the dependency surfaces current: the uv workspace, the web
-# console and the docs site, the GitHub Actions the workflows run, the base
-# images the compose stack builds from and the images it pulls. Security
-# updates are enabled in the repository settings and do not depend on this
-# schedule.
+# console and the docs site, the sidecars' pinned packages, the GitHub Actions
+# the workflows run, the base images the compose stack builds from and the
+# images it pulls. Security updates are enabled in the repository settings and
+# do not depend on this schedule.
 version: 2
 updates:
   - package-ecosystem: "uv"
@@ -64,6 +64,51 @@ updates:
         update-types: ["version-update:semver-major"]
       - dependency-name: "typescript"
         update-types: ["version-update:semver-major"]
+    open-pull-requests-limit: 5
+
+  # The sidecars of one analysis program each pin their own packages by hash:
+  # the shared plumbing's (every such image installs it), oletools' and
+  # webcrack's. The MCP SDK major is held as in the workspace above.
+  - package-ecosystem: "pip"
+    directory: "/services/cli-sidecar"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    target-branch: "dev"
+    labels: ["dependencies", "python"]
+    groups:
+      cli-sidecar-minor-and-patch:
+        update-types: ["minor", "patch"]
+    ignore:
+      - dependency-name: "mcp"
+        update-types: ["version-update:semver-major"]
+    open-pull-requests-limit: 5
+
+  - package-ecosystem: "pip"
+    directory: "/services/oletools-mcp"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    target-branch: "dev"
+    labels: ["dependencies", "python"]
+    groups:
+      oletools-minor-and-patch:
+        update-types: ["minor", "patch"]
+    ignore:
+      - dependency-name: "mcp"
+        update-types: ["version-update:semver-major"]
+    open-pull-requests-limit: 5
+
+  - package-ecosystem: "npm"
+    directory: "/services/webcrack-mcp"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    target-branch: "dev"
+    labels: ["dependencies"]
+    groups:
+      webcrack-minor-and-patch:
+        update-types: ["minor", "patch"]
     open-pull-requests-limit: 5
 
   - package-ecosystem: "github-actions"

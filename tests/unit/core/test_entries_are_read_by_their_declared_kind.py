@@ -214,6 +214,12 @@ NAMED_BRANCH: dict[str, str] = {
     # Shipped since: GoReSym's function rows declare where each function
     # starts, so a claim citing them is read through them.
     "go_symbols": "declared_rows",
+    # Shipped since: YARA-X's matches are declared as yara_scan's are, rows and
+    # places alike, so a claim citing them is read as one citing yara_scan's;
+    # rtfobj's objects and webcrack's scripts declare where each starts.
+    "yarax_scan": "signature_rules",
+    "rtf_objects": "declared_rows",
+    "js_deobfuscate": "declared_rows",
 }
 
 
