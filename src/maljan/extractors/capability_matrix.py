@@ -63,6 +63,7 @@ from maljan.schemas.isr_models import (
 )
 from maljan.schemas.stix_models import (
     EARLIER_RUN_PROPERTY,
+    SIMILAR_CASES_PROPERTY,
     TECHNIQUE_REVIEW_PROPERTY,
     TechniqueReview,
     stated_confidence,
@@ -137,6 +138,7 @@ def build_capability_matrix(
     out_of_scope = _out_of_scope(list(techniques), sample)
     review = technique_review(stix_output)
     earlier = earlier_run_techniques(stix_output)
+    similar = similar_case_techniques(stix_output)
 
     cells: list[CapabilityCell] = []
     mappings: list[TTPMapping] = []
@@ -253,6 +255,11 @@ def build_capability_matrix(
             # technique: the earlier run is a fact beside the row, never a
             # reason to publish or to withhold.
             notes.append(EARLIER_RUN_UNSUPPORTED_NOTE)
+        if tid.upper() in similar and _no_source_of_this_run(row, bool(rows)):
+            # A similar case of another sample the judge was shown carried it,
+            # and nothing of this run stands behind it. The same rule as the
+            # earlier run: a fact beside the row, never a reason either way.
+            notes.append(SIMILAR_CASE_UNSUPPORTED_NOTE)
         if undescribed and not not_published:
             notes.append(undescribed)
         if decided is not None and decided.decision == "keep":
@@ -474,6 +481,36 @@ def earlier_run_techniques(stix_output: dict[str, Any] | None) -> set[str]:
     if not isinstance(techniques, list):
         return set()
     return {str(tid or "").strip().upper() for tid in techniques if str(tid or "").strip()}
+
+
+# The note on a technique a similar case of another sample also carried when
+# no source of this run stands behind it. A note, not a reason: the judge was
+# shown the case as a weighted prior (``judge_agent.JudgeAgent._memory_block``),
+# and the publish rules read this run alone, so the published set is the one a
+# run without the similar cases would publish.
+SIMILAR_CASE_UNSUPPORTED_NOTE = (
+    "a similar case from another sample also reported it; no source of this run stands behind it"
+)
+
+
+def similar_case_techniques(stix_output: dict[str, Any] | None) -> set[str]:
+    """The techniques of the similar cases the judge was shown, from the bundle's record.
+
+    Empty for a bundle with no record (no similar case, memory off, a stored
+    run from before the record) and for one that cannot be read.
+    """
+    raw = (stix_output or {}).get(SIMILAR_CASES_PROPERTY)
+    cases = raw.get("cases") if isinstance(raw, dict) else getattr(raw, "cases", None)
+    if not isinstance(cases, list):
+        return set()
+    out: set[str] = set()
+    for case in cases:
+        techniques = (
+            case.get("techniques") if isinstance(case, dict) else getattr(case, "techniques", None)
+        )
+        if isinstance(techniques, list):
+            out |= {str(tid or "").strip().upper() for tid in techniques if str(tid or "").strip()}
+    return out
 
 
 def _no_source_of_this_run(row: dict[str, Any], read: bool) -> bool:

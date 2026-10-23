@@ -182,7 +182,7 @@ from maljan.schemas.evidence import (
     is_guard_answer,
 )
 from maljan.schemas.isr_models import ABSENCE_TECHNIQUE_MARKER, FAILED_CALLS_MARKER, AgentISR
-from maljan.schemas.stix_models import Bundle
+from maljan.schemas.stix_models import Bundle, SimilarCases
 from maljan.schemas.tool_evidence import trim_output
 
 if TYPE_CHECKING:
@@ -6144,6 +6144,13 @@ def make_judge_node(
                 # matrix notes its techniques no source of this run stands behind.
                 verdict.bundle.x_maljan_earlier_run = earlier_run_of(
                     container, str(state.get("file_hash") or "")
+                )
+                # Which similar cases of other samples the judge's prompt
+                # showed, the same kind of fact: the matrix notes their
+                # techniques no source of this run stands behind.
+                _similar = getattr(judge, "similar_cases_shown", None)
+                verdict.bundle.x_maljan_similar_cases = (
+                    _similar if isinstance(_similar, SimilarCases) else None
                 )
 
             bundle = verdict.bundle

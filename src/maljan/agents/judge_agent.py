@@ -100,9 +100,12 @@ from maljan.llm.generation_rate import GenerationRates, ModelCallDeadline, model
 from maljan.llm.transient import as_call
 from maljan.memory.attck_loader import technique_label
 from maljan.memory.long_term_memory import (
+    StoredCase,
     a_past_case_technique,
     foreign_ids_written_out,
     foreign_quoted_value,
+    similar_case_head,
+    similar_cases_shown,
 )
 from maljan.memory.technique_cards import technique_card_lines
 from maljan.pipeline.debate_facts import read_marks, with_ledger_facts, with_ledger_stated
@@ -1902,6 +1905,10 @@ class JudgeAgent(BudgetMeter):
         # fit the judge's window whole, or ``""``; the judge node records it
         # as a degradation reason.
         self.verdict_prompt_notice: str = ""
+        # The similar cases of other samples whose techniques the last verdict
+        # prompt showed (``stix_models.SimilarCases``), or ``None``; the judge
+        # node records it on the bundle.
+        self.similar_cases_shown: Any = None
         # The judge calls tools too — threat intel on a disputed indicator, an
         # ATT&CK or family lookup — and a verdict that cites one has to be
         # checkable the same way an analyst's claim is. Same counter as the
@@ -3503,12 +3510,15 @@ class JudgeAgent(BudgetMeter):
         # string when the store is empty or retrieval fails.
         from maljan.memory.long_term_memory import memory_owner_of
 
-        memory_block = self._build_memory_context(
+        self.similar_cases_shown = None
+        cases = self._similar_cases(
             isr_reports,
             memory_store,
             current_sample_id=current_sample_id,
             owner=memory_owner_of(self._container),
+            container=self._container,
         )
+        memory_block = MEMORY_UNAVAILABLE_NOTE if cases is None else self._memory_block(cases)
         if memory_block:
             parts["long-term memory"] = memory_block
         # The negotiation history whole, as its own part: a fixed cut at 800
@@ -3553,6 +3563,10 @@ class JudgeAgent(BudgetMeter):
             fitted["long-term memory"] = closed_memory_cut(
                 fitted["long-term memory"], whole["long-term memory"]
             )
+            # Which similar cases' techniques the prompt carries, as the
+            # judge is shown them: the node records it on the bundle, where
+            # it decides nothing (``long_term_memory.similar_cases_shown``).
+            self.similar_cases_shown = similar_cases_shown(cases or [], fitted["long-term memory"])
         self.verdict_prompt_notice = notice
         if notice:
             self.logger.warning("JudgeAgent verdict prompt: %s", notice)
@@ -4857,6 +4871,7 @@ class JudgeAgent(BudgetMeter):
         memory_store: MemoryStore | None,
         current_sample_id: str | None = None,
         owner: str | None = None,
+        container: Any = None,
     ) -> str:
         """Retrieve similar past cases and format them as a few-shot prompt block.
 
@@ -4874,13 +4889,36 @@ class JudgeAgent(BudgetMeter):
             memory_store: MemoryStore-protocol object, or None to skip.
             owner: Whose cases may be read: the job's owner, or ``None`` for
                 the unscoped ones (``long_term_memory.recall``).
+            container: The job's container, which keeps the cases read for
+                it (``long_term_memory.similar_cases``); ``None`` reads anew.
 
         Returns:
             Formatted prompt block string, or "" when store is None/empty or
             no similar cases are found.
         """
+        cases = JudgeAgent._similar_cases(
+            isr_reports,
+            memory_store,
+            current_sample_id=current_sample_id,
+            owner=owner,
+            container=container,
+        )
+        return MEMORY_UNAVAILABLE_NOTE if cases is None else JudgeAgent._memory_block(cases)
+
+    @staticmethod
+    def _similar_cases(
+        isr_reports: dict | None,
+        memory_store: MemoryStore | None,
+        current_sample_id: str | None = None,
+        owner: str | None = None,
+        container: Any = None,
+    ) -> list[StoredCase] | None:
+        """The similar past cases of other samples for this verdict; ``None`` when the read failed.
+
+        Empty when there is no store, nothing to search with, or no case.
+        """
         if memory_store is None or not isr_reports:
-            return ""
+            return []
 
         # Build search query from all current ISR claims
         query_parts: list[str] = []
@@ -4896,20 +4934,21 @@ class JudgeAgent(BudgetMeter):
         query = " ".join(query_parts)
 
         if not query.strip():
-            return ""
+            return []
 
         try:
             # Never retrieve the current sample's own past run as a "weighted
             # prior", and only the job's owner's cases (``recall``, which also
-            # serves a backend older than ``exclude_sample_id``).
-            from maljan.memory.long_term_memory import recall
+            # serves a backend older than ``exclude_sample_id``). Read once
+            # per job, so every verdict prompt of it shows the same cases.
+            from maljan.memory.long_term_memory import similar_cases
 
-            cases = recall(
+            return similar_cases(
                 memory_store,
                 query,
-                top_k=3,
                 exclude_sample_id=current_sample_id,
                 owner=owner,
+                container=container,
             )
         except Exception as exc:  # noqa: BLE001
             # Never let retrieval failure block verdict generation, and never
@@ -4920,8 +4959,11 @@ class JudgeAgent(BudgetMeter):
                 "without prior cases.",
                 describe_exception_for_log(exc),
             )
-            return MEMORY_UNAVAILABLE_NOTE
+            return None
 
+    @staticmethod
+    def _memory_block(cases: Sequence[StoredCase]) -> str:
+        """The similar past cases as the judge's prompt block, or ``""`` for none."""
         if not cases:
             return ""
 
@@ -4935,7 +4977,6 @@ class JudgeAgent(BudgetMeter):
         ]
 
         for idx, case in enumerate(cases, 1):
-            ttps = ", ".join(case.technique_ids) if case.technique_ids else "none"
             # Whole: the verdict prompt is fitted to the judge's window as a
             # whole, and a case's summary is shortened there only when it must be.
             # A past run's summary is built from that run's claims, which carry
@@ -4946,9 +4987,7 @@ class JudgeAgent(BudgetMeter):
             # issues too: each is renamed so none can be cited as this run's
             # (``long_term_memory.foreign_ids_written_out``).
             summary = foreign_quoted_value(case.summary_text)
-            category = foreign_quoted_value(case.malware_category)
-            lines.append(f"[{idx}/{total}] sample_id: {case.sample_id} (category: {category})")
-            lines.append(f"  Past techniques: {foreign_ids_written_out(ttps)}")
+            lines.append(similar_case_head(idx, total, case))
             lines.append(f"  Behavioral summary: {summary}")
 
         lines.append(_MEMORY_END)

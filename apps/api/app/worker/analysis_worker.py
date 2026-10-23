@@ -4857,10 +4857,20 @@ def _report_inputs(
         if isinstance(stix_bundle_for_persist, dict):
             # The judge's draft, not the export: it did not pass the publish
             # rule, and whoever reads the stored bundle is told.
-            from maljan.schemas.stix_models import UNPUBLISHED_NOTICE, UNPUBLISHED_PROPERTY
+            # Without the run facts that name other runs' samples (the earlier
+            # run, the similar cases): the judge's own stored bundle keeps them.
+            from maljan.schemas.stix_models import (
+                JUDGE_ONLY_PROPERTIES,
+                UNPUBLISHED_NOTICE,
+                UNPUBLISHED_PROPERTY,
+            )
 
             stix_bundle_for_persist = {
-                **stix_bundle_for_persist,
+                **{
+                    key: value
+                    for key, value in stix_bundle_for_persist.items()
+                    if key not in JUDGE_ONLY_PROPERTIES
+                },
                 UNPUBLISHED_PROPERTY: False,
                 "x_maljan_notice": UNPUBLISHED_NOTICE,
             }

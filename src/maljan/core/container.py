@@ -588,6 +588,9 @@ class ServiceContainer:
         # The case an earlier run stored for this job's sample, by sha256,
         # read once (``long_term_memory.earlier_case_of``); ``None`` for none.
         self.earlier_cases: dict[str, Any] = {}
+        # The similar cases of other samples the judge is shown, by the job's
+        # sha256, read once (``long_term_memory.similar_cases``).
+        self.similar_cases: dict[str, Any] = {}
         # The function-hash corpus write the judge decided on, as
         # ``(store, sample_id, family, functions)``, held for the same reason.
         self.pending_function_hashes: Any = None
