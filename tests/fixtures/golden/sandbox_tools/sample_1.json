@@ -93,36 +93,50 @@
     "total": 8
   },
   "sandbox_dropped_files": {
-    "dropped": [],
-    "total": 0
+    "absent": [
+      "dropped_files"
+    ],
+    "statement": "The report does not hold this part, so whether there was any is not known. This is not the same as none."
   },
   "sandbox_mutexes": {
-    "mutexes": [],
-    "total": 0
+    "absent": [
+      "summary.mutexes",
+      "calls"
+    ],
+    "statement": "The report does not hold this part, so whether there was any is not known. This is not the same as none."
   },
   "sandbox_network": {
-    "dns": [],
-    "hosts": [],
-    "http": [],
-    "tcp": [],
-    "udp": []
+    "absent": [
+      "network"
+    ],
+    "statement": "The report does not hold this part, so whether there was any is not known. This is not the same as none."
   },
   "sandbox_processes": {
-    "processes": [],
-    "total": 0
+    "absent": [
+      "processes"
+    ],
+    "statement": "The report does not hold this part, so whether there was any is not known. This is not the same as none."
   },
   "sandbox_registry_ops": {
-    "registry": [],
-    "total": 0
+    "absent": [
+      "registry",
+      "calls"
+    ],
+    "statement": "The report does not hold this part, so whether there was any is not known. This is not the same as none."
   },
   "sandbox_services_and_tasks": {
-    "commands": [],
-    "services": [],
-    "tasks": [],
-    "total": 0
+    "absent": [
+      "summary.created_services",
+      "summary.started_services",
+      "summary.executed_commands",
+      "calls"
+    ],
+    "statement": "The report does not hold this part, so whether there was any is not known. This is not the same as none."
   },
   "sandbox_signatures": {
-    "signatures": [],
-    "total": 0
+    "absent": [
+      "signatures"
+    ],
+    "statement": "The report does not hold this part, so whether there was any is not known. This is not the same as none."
   }
 }

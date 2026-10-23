@@ -83,6 +83,17 @@ class TestArunAsync:
         # Sandbox report should be None in mock mode
         assert result.get("sandbox_report") is None
 
+    @pytest.mark.asyncio
+    async def test_arun_keeps_the_questions_on_the_state_and_the_app(
+        self, mock_maljan_app: MaljanApp
+    ):
+        """The questions reach the report and outlive a run stopped before its first step."""
+        result = await mock_maljan_app.arun("jkl012", questions=["What is the C2 address?"])
+        assert result["analyst_questions"] == ["What is the C2 address?"]
+        assert mock_maljan_app.questions == ["What is the C2 address?"]
+        answers = (result.get("malware_report") or {}).get("question_answers") or []
+        assert [a["outcome"] for a in answers] == ["not_determinable"]
+
 
 class TestContainerReuse:
     """Tests verifying that the same MaljanApp instance can be reused."""

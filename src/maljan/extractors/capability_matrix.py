@@ -48,7 +48,7 @@ from typing import Any
 from maljan.analysis.corroboration import corroborated as stands_on_two
 from maljan.analysis.corroboration import corroboration_row
 from maljan.analysis.evidence_roots import RootCount, layers_and_roots, run_roots
-from maljan.analysis.technique_ids import attack_reference_id, says_no_technique
+from maljan.analysis.technique_ids import says_no_technique, written_technique_id
 from maljan.core.logger import logger
 from maljan.reporting.models import CapabilityCell, TTPMapping
 from maljan.schemas.evidence import ENTRY_ID_RE, entry_ids_in
@@ -62,15 +62,19 @@ from maljan.schemas.isr_models import (
     judge_kept_note,
 )
 from maljan.schemas.stix_models import (
+    EARLIER_RUN_PROPERTY,
     TECHNIQUE_REVIEW_PROPERTY,
     TechniqueReview,
     stated_confidence,
 )
 
-# Fallback MITRE ATT&CK Enterprise tactic catalogue (pre-v19 names). Used only
-# when the live bundle's tactic catalogue is unavailable. ``kill_chain_phases``
-# in the STIX bundle uses the slug form ("defense-evasion"); we map each slug
-# to the canonical TA-id and the human-readable name.
+# Fallback MITRE ATT&CK Enterprise tactic catalogue. Used only when the
+# vendored tactic catalogue is unavailable. ``kill_chain_phases`` in the STIX
+# bundle uses the slug form ("stealth"); we map each slug to the canonical TA-id
+# and the human-readable name. Since v19 the bundle files TA0005 under
+# ``stealth`` and the new TA0112 under ``defense-impairment``; the pre-v19
+# ``defense-evasion`` slug stays for ids a stored run carries from an older
+# release, and every TA0005 slug keeps the one pinned display name.
 _TACTIC_TABLE: tuple[tuple[str, str, str], ...] = (
     ("TA0043", "reconnaissance", "Reconnaissance"),
     ("TA0042", "resource-development", "Resource Development"),
@@ -79,6 +83,8 @@ _TACTIC_TABLE: tuple[tuple[str, str, str], ...] = (
     ("TA0003", "persistence", "Persistence"),
     ("TA0004", "privilege-escalation", "Privilege Escalation"),
     ("TA0005", "defense-evasion", "Defense Evasion"),
+    ("TA0005", "stealth", "Defense Evasion"),
+    ("TA0112", "defense-impairment", "Defense Impairment"),
     ("TA0006", "credential-access", "Credential Access"),
     ("TA0007", "discovery", "Discovery"),
     ("TA0008", "lateral-movement", "Lateral Movement"),
@@ -130,6 +136,7 @@ def build_capability_matrix(
 
     out_of_scope = _out_of_scope(list(techniques), sample)
     review = technique_review(stix_output)
+    earlier = earlier_run_techniques(stix_output)
 
     cells: list[CapabilityCell] = []
     mappings: list[TTPMapping] = []
@@ -214,6 +221,15 @@ def build_capability_matrix(
         else:
             not_published = ""
         notes: list[str] = []
+        if ledger and info.get("claimed") and "sources" not in row:
+            # No corroboration record speaks for a technique an analyst claimed:
+            # the count above is the analysts' independent statements alone, and
+            # the row says that is what it rests on, told apart: a record that
+            # could not be read, or one with no row. Without a ledger nothing
+            # was read, and a technique no analyst claimed rests on no count.
+            notes.append(
+                CORROBORATION_NOT_READ_NOTE if ledger and not rows else NO_CORROBORATION_ROW_NOTE
+            )
         if info.get("noted") and all(info["noted"]):
             # Every analyst claim naming it reads as absence and was kept
             # when asked. Published all the same: the analyst decided.
@@ -231,6 +247,12 @@ def build_capability_matrix(
             # Every analyst claim naming it cites only calls that failed.
             # Published all the same: the analyst decided; the row says so.
             notes.append(FAILED_CALLS_MARKER)
+        if tid.upper() in earlier and _no_source_of_this_run(row, bool(rows)):
+            # An earlier run on this sample also reported it, and nothing of
+            # this run stands behind it. Published by the same rules as any
+            # technique: the earlier run is a fact beside the row, never a
+            # reason to publish or to withhold.
+            notes.append(EARLIER_RUN_UNSUPPORTED_NOTE)
         if undescribed and not not_published:
             notes.append(undescribed)
         if decided is not None and decided.decision == "keep":
@@ -318,9 +340,21 @@ def _corroboration_rows(
 
         return corroboration(isr_reports, ledger)
     except Exception as exc:  # noqa: BLE001 — a fact not read is no fact stated
-        logger.debug("capability_matrix: the corroboration rows were not read (%s)", exc)
+        logger.warning("capability_matrix: the corroboration rows were not read (%s)", exc)
         return {}
 
+
+# Written on a row whose corroboration is counted from the analysts' statements
+# because the run's corroboration record held nothing for it.
+CORROBORATION_NOT_READ_NOTE = (
+    "corroboration record unavailable for this technique; counted from the "
+    "analysts' independent statements only"
+)
+
+NO_CORROBORATION_ROW_NOTE = (
+    "no corroboration row for this technique; counted from the analysts' independent "
+    "statements only"
+)
 
 # What the judge is called in ``contributing_layers``. It is listed, because a
 # technique the judge named and no analyst claimed should say where it came
@@ -415,6 +449,45 @@ def independent_statements(statements: Sequence[tuple[str, str]]) -> tuple[list[
 FINDING_ONLY_REASON = (
     "it was named on a finding rather than on a claim, so no check asked what evidence holds it up"
 )
+
+
+# The note on a technique an earlier run on this sample also reported when no
+# source of this run stands behind it. A note, not a reason: the earlier run
+# was shown as a hypothesis (``long_term_memory.earlier_run_block``), and the
+# publish rules read this run alone, so the published set is the one a run
+# without the earlier run would publish.
+EARLIER_RUN_UNSUPPORTED_NOTE = (
+    "an earlier run on this sample also reported it; no source of this run stands behind it"
+)
+
+
+def earlier_run_techniques(stix_output: dict[str, Any] | None) -> set[str]:
+    """The techniques the earlier run on this sample reported, from the bundle's record.
+
+    Empty for a bundle with no record (no earlier run, memory off, a stored
+    run from before the record) and for one that cannot be read.
+    """
+    raw = (stix_output or {}).get(EARLIER_RUN_PROPERTY)
+    techniques = (
+        raw.get("techniques") if isinstance(raw, dict) else getattr(raw, "techniques", None)
+    )
+    if not isinstance(techniques, list):
+        return set()
+    return {str(tid or "").strip().upper() for tid in techniques if str(tid or "").strip()}
+
+
+def _no_source_of_this_run(row: dict[str, Any], read: bool) -> bool:
+    """Whether the run's corroboration record says no independent source stands behind it.
+
+    ``independent_sources`` 0 on a row read with its sources: a citation
+    placed nowhere, a reference lookup and an external assessment of the whole
+    file stand behind no fact about it (``evidence_roots.summary_of_sources``).
+    A record that was read and holds no row for it says the same. Without the
+    record nothing is said.
+    """
+    if "sources" in row:
+        return int(row.get("independent_sources") or 0) == 0
+    return read
 
 
 def _out_of_scope(ids: list[str], sample: dict[str, Any] | None) -> dict[str, str]:
@@ -741,8 +814,11 @@ def _judge_technique_ids(stix_output: dict[str, Any] | None) -> list[str]:
         if obj.get("type") != "attack-pattern":
             continue
         # Only a reference filed under ATT&CK names a technique: a CAPEC
-        # reference listed first was read as technique ``CAPEC-…``.
-        tid = attack_reference_id(obj)
+        # reference listed first was read as technique ``CAPEC-…``. The id is
+        # read as written, so a misshapen one is a row marked invalid. A name
+        # that opens with an id declares it too, as it does to the validator
+        # and the export; a name that merely begins with a ``T`` declares none.
+        tid = written_technique_id(obj)
         if tid and tid not in found:
             found.append(tid)
     return found
@@ -762,13 +838,13 @@ def unmapped_behaviours(stix_output: dict[str, Any] | None) -> list[str]:
     for obj in _judge_objects(stix_output):
         if obj.get("type") != "attack-pattern":
             continue
-        if attack_reference_id(obj):
+        if written_technique_id(obj):
+            # A technique the matrix reads (``_judge_technique_ids``), from its
+            # reference or from an id its name opens with. "Token
+            # Impersonation" opens with no id: it is a behaviour, listed here,
+            # and not lost from both lists.
             continue
         name = str(obj.get("name") or "").strip()
-        if name and name.upper().split()[0].rstrip(":").startswith("T"):
-            # The id is in the name, which ``_attack_pattern_technique_id``
-            # reads; it is a mapped technique and belongs to the matrix.
-            continue
         if name and name not in names:
             names.append(name)
     return names
@@ -791,7 +867,7 @@ def _judge_relationship_rows(
     for obj in objects:
         if obj.get("type") != "attack-pattern":
             continue
-        declared = attack_reference_id(obj)
+        declared = written_technique_id(obj)
         if declared:
             technique_of[str(obj.get("id") or "")] = declared
     rows: list[tuple[str, float | None]] = []

@@ -5,14 +5,31 @@ one discovery import. The id functions are the project's single provider
 vocabulary — the settings ``Literal`` choices, the API enum, the job override
 and the profile references all read them, and a test refuses
 any drift between them.
+
+Beside the built-in adapters, an installed package adds a provider through
+the ``maljan.static_providers`` or ``maljan.sandbox_providers`` entry-point
+group; it is loaded only while the plugin allow-list names it
+(``maljan.core.plugins``).
 """
 
 from __future__ import annotations
 
+import inspect
 import threading
+from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
 from maljan.core.logger import logger
+from maljan.core.plugins import (
+    InstalledPlugin,
+    PluginRefused,
+    PluginRegistry,
+    describe,
+    reconcile,
+    registration_refusal,
+    unavailable_reason,
+    usable_list,
+)
 from maljan.providers.errors import ProviderConfigurationError
 
 if TYPE_CHECKING:
@@ -26,6 +43,8 @@ _DISCOVERY_DONE = False
 # Bumped by every registration, so a reading of the registry can be kept until it changes.
 _VERSION = [0]
 _NAMES_HELD: list[object] = [None, frozenset()]
+# The ids the built-in adapters registered, by kind, once they are imported.
+_BUILT_IN: dict[str, frozenset[str]] = {}
 
 
 def _declare(name: str, cls: type) -> None:
@@ -53,9 +72,19 @@ def _declare(name: str, cls: type) -> None:
         register_provider_declaration(f"provider:{name}", hook)
 
 
+def _refuse_a_plugin_registration(kind: str, name: str, cls: type, current: Any) -> None:
+    """Refuse what a loading plugin may not register: a built-in id, or another name."""
+    refusal = registration_refusal(
+        kind, name, cls, current, lambda: _BUILT_IN.get(kind, frozenset())
+    )
+    if refusal:
+        raise PluginRefused(refusal)
+
+
 def register_static_provider(name: str):  # type: ignore[no-untyped-def]
     def decorator(cls: type) -> type:
         with _LOCK:
+            _refuse_a_plugin_registration("static", name, cls, _STATIC_REGISTRY.get(name))
             if name in _STATIC_REGISTRY:
                 logger.debug("Static provider '%s' re-registered (overwriting).", name)
             cls.id = name  # type: ignore[attr-defined]
@@ -72,6 +101,7 @@ def register_static_provider(name: str):  # type: ignore[no-untyped-def]
 def register_sandbox_provider(name: str):  # type: ignore[no-untyped-def]
     def decorator(cls: type) -> type:
         with _LOCK:
+            _refuse_a_plugin_registration("sandbox", name, cls, _SANDBOX_REGISTRY.get(name))
             if name in _SANDBOX_REGISTRY:
                 logger.debug("Sandbox provider '%s' re-registered (overwriting).", name)
             cls.id = name  # type: ignore[attr-defined]
@@ -85,7 +115,11 @@ def register_sandbox_provider(name: str):  # type: ignore[no-untyped-def]
     return decorator
 
 
-def discover_providers() -> None:
+def _shipped(cls: object) -> bool:
+    return str(getattr(cls, "__module__", "")).startswith("maljan.")
+
+
+def _import_built_ins() -> None:
     """Import the built-in adapters once to trigger their decorators."""
     global _DISCOVERY_DONE
     if _DISCOVERY_DONE:
@@ -102,7 +136,88 @@ def discover_providers() -> None:
 
         import_built_ins()
 
+        _BUILT_IN["static"] = frozenset(k for k, c in _STATIC_REGISTRY.items() if _shipped(c))
+        _BUILT_IN["sandbox"] = frozenset(k for k, c in _SANDBOX_REGISTRY.items() if _shipped(c))
         _DISCOVERY_DONE = True
+
+
+def discover_providers() -> None:
+    """Import the built-in adapters once to trigger their decorators.
+
+    No plugin is loaded here: a process loads the allowed plugins when it is
+    told to, with the list to load by (``load_plugins``).
+    """
+    _import_built_ins()
+
+
+def load_plugins(allowed: Any) -> None:
+    """Bring the static and sandbox provider plugins in line with the allow-list ``allowed``.
+
+    The plugins of the ``maljan.static_providers`` and
+    ``maljan.sandbox_providers`` entry-point groups it names are loaded once
+    each, and one it no longer names is withdrawn
+    (``maljan.core.plugins.load_allowed``).
+    """
+    entries = usable_list(allowed)
+    reconcile(_STATIC_PLUGINS, entries)
+    reconcile(_SANDBOX_PLUGINS, entries)
+
+
+def plugin_registry(kind: str) -> PluginRegistry:
+    """How the ``static`` or ``sandbox`` registry takes and gives back plugins."""
+    return _STATIC_PLUGINS if kind == "static" else _SANDBOX_PLUGINS
+
+
+def built_in_ids(kind: str) -> frozenset[str]:
+    """The ids the built-in adapters of ``kind`` (``static`` or ``sandbox``) register."""
+    _import_built_ins()
+    return _BUILT_IN.get(kind, frozenset())
+
+
+def _plugin_registrar(kind: str) -> Callable[[InstalledPlugin, object], None]:
+    def register(plugin: InstalledPlugin, loaded: object) -> None:
+        """Register the class a plugin's entry point named, under the plugin's name."""
+        from maljan.providers.base import SandboxProvider, StaticProvider
+
+        base: type = StaticProvider if kind == "static" else SandboxProvider
+        if not (isinstance(loaded, type) and issubclass(loaded, base)):
+            raise PluginRefused(
+                f"its entry point names {describe(loaded)}, which is not a subclass of "
+                f"maljan.providers.base.{base.__name__}"
+            )
+        if inspect.isabstract(loaded):
+            missing = ", ".join(sorted(getattr(loaded, "__abstractmethods__", ()) or ()))
+            raise PluginRefused(f"{describe(loaded)} leaves abstract methods unwritten ({missing})")
+        registry = _STATIC_REGISTRY if kind == "static" else _SANDBOX_REGISTRY
+        if registry.get(plugin.name) is not loaded:
+            decorate = register_static_provider if kind == "static" else register_sandbox_provider
+            decorate(plugin.name)(loaded)
+
+    return register
+
+
+def _registered_in(registry: dict[str, type]) -> Callable[[], list[str]]:
+    def registered() -> list[str]:
+        _import_built_ins()
+        return list(registry)
+
+    return registered
+
+
+_STATIC_PLUGINS = PluginRegistry(
+    kind="static",
+    builtin=lambda: built_in_ids("static"),
+    registered=_registered_in(_STATIC_REGISTRY),
+    register=_plugin_registrar("static"),
+    withdraw=lambda name: forget_static_provider(name),
+)
+_SANDBOX_PLUGINS = PluginRegistry(
+    kind="sandbox",
+    builtin=lambda: built_in_ids("sandbox"),
+    registered=_registered_in(_SANDBOX_REGISTRY),
+    register=_plugin_registrar("sandbox"),
+    withdraw=lambda name: forget_sandbox_provider(name),
+)
 
 
 def static_provider_ids() -> list[str]:
@@ -110,29 +225,52 @@ def static_provider_ids() -> list[str]:
     return sorted(_STATIC_REGISTRY)
 
 
+def static_provider_servers(name: str, cfg: Any) -> frozenset[str]:
+    """The registry servers the static provider ``name`` calls for a job; none if unknown."""
+    discover_providers()
+    cls = _STATIC_REGISTRY.get(name)
+    if cls is None:
+        return frozenset()
+    return frozenset(cls.registry_servers(cfg))  # type: ignore[attr-defined]
+
+
 def sandbox_provider_ids() -> list[str]:
     discover_providers()
     return sorted(_SANDBOX_REGISTRY)
 
 
+def _unknown(registry: dict[str, type], name: str, kind: str) -> str:
+    """Why ``name`` names no registered provider of ``kind``, with the registered ids."""
+    available = ", ".join(sorted(registry)) or "(none)"
+    said = f"Unknown {kind} provider: {name!r}. Available: {available}"
+    reason = unavailable_reason(kind, str(name or ""))
+    return f"{said}; {reason}" if reason else said
+
+
 def _build(registry: dict[str, type], name: str, cfg: Any, kind: str) -> Any:
     cls = registry.get(name)
     if cls is None:
-        available = ", ".join(sorted(registry)) or "(none)"
-        raise ProviderConfigurationError(
-            f"Unknown {kind} provider: {name!r}. Available: {available}"
-        )
+        raise ProviderConfigurationError(_unknown(registry, name, kind))
     return cls.from_settings(cfg)  # type: ignore[attr-defined]
 
 
 def forget_static_provider(name: str) -> None:
     """Take the static provider registered as ``name`` out of the registry (a runtime one)."""
+    _forget(_STATIC_REGISTRY, _SANDBOX_REGISTRY, name)
+
+
+def forget_sandbox_provider(name: str) -> None:
+    """Take the sandbox provider registered as ``name`` out of the registry (a runtime one)."""
+    _forget(_SANDBOX_REGISTRY, _STATIC_REGISTRY, name)
+
+
+def _forget(registry: dict[str, type], other: dict[str, type], name: str) -> None:
     from maljan.core.tool_declarations import forget_provider_block, forget_provider_declaration
 
     with _LOCK:
-        if _STATIC_REGISTRY.pop(name, None) is not None:
+        if registry.pop(name, None) is not None:
             _VERSION[0] += 1
-            if name not in _SANDBOX_REGISTRY:
+            if name not in other:
                 forget_provider_declaration(f"provider:{name}")
                 forget_provider_block(f"provider:{name}")
 
@@ -167,7 +305,7 @@ def static_provider_class(name: str) -> type[StaticProvider]:
     discover_providers()
     cls = _STATIC_REGISTRY.get(name)
     if cls is None:
-        raise ProviderConfigurationError(f"Unknown static provider: {name!r}")
+        raise ProviderConfigurationError(_unknown(_STATIC_REGISTRY, name, "static"))
     return cls  # type: ignore[return-value]
 
 
@@ -176,7 +314,7 @@ def sandbox_provider_class(name: str) -> type[SandboxProvider]:
     discover_providers()
     cls = _SANDBOX_REGISTRY.get(name)
     if cls is None:
-        raise ProviderConfigurationError(f"Unknown sandbox provider: {name!r}")
+        raise ProviderConfigurationError(_unknown(_SANDBOX_REGISTRY, name, "sandbox"))
     return cls  # type: ignore[return-value]
 
 

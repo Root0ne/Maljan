@@ -566,3 +566,58 @@ export function legendLayout(
   }
   return { items, height: y + rowHeight / 2 + margin / 2 };
 }
+
+/** What a failed fetch of the rendered STIX bundle says. The stored copy is
+ *  named only when there is one; otherwise there is nothing to show, and the
+ *  panel must not draw an empty bundle as if it were the answer. */
+export function stixFetchNotice(message: string, hasStoredCopy: boolean): string {
+  return hasStoredCopy
+    ? `Could not fetch the freshly rendered STIX bundle (${message}). Showing the stored copy.`
+    : `Could not fetch the STIX bundle (${message}), and the report holds no stored copy: there is no bundle to show.`;
+}
+
+/** What the Graph option says about its cost. The layout compares every pair
+ *  of objects, so a bundle past the size the panel opens the graph on lays out
+ *  slowly; the option says so before it is chosen, and says nothing for a
+ *  bundle small enough to be quick. */
+export function graphViewHint(objectCount: number): string | null {
+  return objectCount > GRAPH_FIRST_LIMIT
+    ? `Large bundles lay out slowly: this one holds ${objectCount} objects, so drawing the graph may take a while.`
+    : null;
+}
+
+/** The file name a bundle downloads under: a draft never carries the export's. */
+export const STIX_EXPORT_FILE = "maljan-stix-bundle.json";
+export const STIX_DRAFT_FILE = "maljan-stix-bundle-draft.json";
+/** The ATT&CK Navigator layer of the techniques the report publishes. */
+export const NAVIGATOR_LAYER_FILE = "maljan-attack-layer.json";
+
+export interface StixAnswer {
+  bundle: Record<string, unknown>;
+  /** True when the bundle is the judge's unpublished draft, not the export. */
+  draft: boolean;
+  notice: string | null;
+}
+
+/**
+ * What `/stix` (or the stored report's bundle) holds, read for its label.
+ * The API names the flag `published` in its envelope (`{published: false,
+ * notice, bundle}`); only a stored bundle names it `x_maljan_published`.
+ */
+export function readStixAnswer(data: unknown): StixAnswer {
+  const record: Record<string, unknown> =
+    data && typeof data === "object" ? (data as Record<string, unknown>) : {};
+  const inner = record.bundle;
+  if (record.published === false && inner && typeof inner === "object") {
+    return {
+      bundle: inner as Record<string, unknown>,
+      draft: true,
+      notice: typeof record.notice === "string" ? record.notice : null,
+    };
+  }
+  if (record.x_maljan_published === false) {
+    const note = record.x_maljan_notice;
+    return { bundle: record, draft: true, notice: typeof note === "string" ? note : null };
+  }
+  return { bundle: record, draft: false, notice: null };
+}

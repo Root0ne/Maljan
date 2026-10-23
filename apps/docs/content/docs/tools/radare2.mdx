@@ -35,9 +35,10 @@ r2mcp is looked for](/configuration/#where-r2mcp-is-looked-for).
 ## The mirror directory
 
 r2 reads the sample from a copy the worker makes under the samples directory:
-`core.static.r2.mirror_dir`, `data/samples/r2-work` by default (only its last
-segment is used). The copy is hardened like every mirror — a 0o700 directory, a
-0o600 file — and removed when the job ends.
+`core.static.r2.work_dir`, `r2-work` by default (one directory name, as for
+every server). A value stored as `core.static.r2.mirror_dir` by an earlier
+release is read as this setting, by its last segment. The copy is hardened like
+every mirror — a 0o700 directory, a 0o600 file — and removed when the job ends.
 
 <Callout type="warn" title="The mirror directory may not be hidden">
 

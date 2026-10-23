@@ -201,7 +201,7 @@ class TestTheDirectoriesComeFromTheConfiguration:
             **{
                 "static.provider": "r2",
                 "static.r2.enabled": True,
-                "static.r2.mirror_dir": "data/samples/r2-elsewhere",
+                "static.r2.work_dir": "r2-elsewhere",
             }
         )
         assert mirror_work_dirs(settings) == ("r2-elsewhere",)

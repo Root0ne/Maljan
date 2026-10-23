@@ -6,13 +6,60 @@ x-backend-image: &backend-image
     context: ..
     dockerfile: docker/Dockerfile.backend
   image: maljan-backend
+  # A fixed unprivileged uid/gid (the image's own account, 10001), no Linux
+  # capability, and no way to gain one it was not started with (a setuid
+  # binary, a file capability) (AUD-32-M5). The image's virtual environment
+  # and sources are root-owned, so read-only to this user. MALJAN_UID and
+  # MALJAN_GID run them under another id instead: a host whose login user
+  # also writes data/ sets them to that user's ids (`make docker-up` and
+  # `make dev-up` do, when neither the environment nor docker/.env does). The
+  # volume-init service below hands what root owns in the writable volumes to
+  # whichever id this is, and refuses to start the stack over anyone else's.
+  user: "${MALJAN_UID:-10001}:${MALJAN_GID:-10001}"
+  cap_drop:
+    - ALL
+  security_opt:
+    - no-new-privileges:true
+
+# What every identification sidecar (die-mcp, ilspy-mcp, goresym-mcp below)
+# is held to. Each opens the sample, so each is held as ghidra-mcp is (X2):
+# the worker's unprivileged ids (the worker writes its sample mirrors
+# 0700/0600 and these must read them), no Linux capability and no way to gain
+# one, a pids limit against a fork storm, and a read-only root whose only
+# writable place is a tmpfs for each run's scratch directory. Each holds no
+# platform credential: its only secret is its own token.
+x-identification-sidecar: &identification-sidecar
+  restart: unless-stopped
+  user: "${MALJAN_UID:-10001}:${MALJAN_GID:-10001}"
+  cap_drop:
+    - ALL
+  security_opt:
+    - no-new-privileges:true
+  read_only: true
+  tmpfs:
+    - /tmp
+  pids_limit: 256
+
+# What each sidecar's published-port relay is held to, as ghidra-port is: it
+# forwards bytes and nothing else, mounts nothing and holds nothing.
+x-sidecar-relay: &sidecar-relay
+  image: alpine/socat:1.8.1.1@sha256:7f9a06753033f2b7de18edc2353f2c15153413d95a039163c6db270fc7a6c3b0
+  restart: unless-stopped
+  user: "65534:65534"
+  cap_drop:
+    - ALL
+  security_opt:
+    - no-new-privileges:true
+  read_only: true
+  pids_limit: 64
+  mem_limit: 64m
 
 services:
   # ─────────────────────────────────────────────
   # PostgreSQL 16 — Relational data store
   # ─────────────────────────────────────────────
   postgres:
-    image: postgres:16-alpine
+    image: postgres:16-alpine@sha256:721873c34ceb9f8d8fc265984940dc982404c105f19ad51be9fdc5970a6080ea
     container_name: maljan-postgres
     restart: unless-stopped
     environment:
@@ -33,7 +80,7 @@ services:
   # Redis 7 — Task queue, PubSub, cache
   # ─────────────────────────────────────────────
   redis:
-    image: redis:7-alpine
+    image: redis:7-alpine@sha256:858f009f9709ce576febc734aa78b8f6d624b82571f9ddb6bda4377c833b3499
     container_name: maljan-redis
     restart: unless-stopped
     command:
@@ -78,7 +125,7 @@ services:
     # unpinned server drifted to 1.18.x while the pinned qdrant-client is
     # 1.17.1, which logged "Failed to obtain server version. Unable to check
     # client-server compatibility" on every run. Pinning removes that drift.
-    image: qdrant/qdrant:v1.18.2
+    image: qdrant/qdrant:v1.18.2@sha256:75eab8c4ba42096724fdcfde8b4de0b5713d529dde32f285a1f86fdcb2c9e50c
     container_name: maljan-qdrant
     restart: unless-stopped
     environment:
@@ -101,7 +148,7 @@ services:
   # MinIO — S3-compatible object storage
   # ─────────────────────────────────────────────
   minio:
-    image: minio/minio:latest
+    image: minio/minio:RELEASE.2025-09-07T16-13-09Z@sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e
     container_name: maljan-minio
     restart: unless-stopped
     command: server /data --console-address ":9001"
@@ -137,10 +184,28 @@ services:
     # `no` keeps a stopped container stopped across a reboot or a daemon
     # restart, for a host that starts Ghidra only for the runs that need it.
     restart: ${GHIDRA_RESTART:-unless-stopped}
+    # It opens the sample, so it is held as the backend services are: the
+    # worker's unprivileged ids, no Linux capability and no way to gain one
+    # (X2). The ids are the worker's because the worker writes its sample
+    # mirrors 0700/0600 and this container must read them; it shares nothing
+    # else with the worker (its own process table, mounts and network, and
+    # the mirror read-only), so the shared id opens no file of the worker's
+    # beyond the sample. The image ran as root before; volume-init hands
+    # ghidra_projects to these ids, and HOME and the JVM's user.home point at
+    # /tmp, since the ids have no home in the image.
+    user: "${MALJAN_UID:-10001}:${MALJAN_GID:-10001}"
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    # Bounds a fork or thread storm from a hostile binary. The JVM runs a
+    # thread per core in its analysis pools, so the bound is far above that.
+    pids_limit: ${GHIDRA_PIDS_LIMIT:-2048}
     environment:
       # Not a `:?` guard, for the reason given on Qdrant above. The server
       # refuses to bind 0.0.0.0 without a token, so an unset one stops this
-      # container and no other.
+      # container and no other. It is the only secret this container holds,
+      # and its own: no platform credential is passed here.
       GHIDRA_MCP_AUTH_TOKEN: ${GHIDRA_MCP_AUTH_TOKEN:-}
       GHIDRA_MCP_BIND_ADDRESS: 0.0.0.0
       GHIDRA_MCP_PORT: 8089
@@ -148,8 +213,30 @@ services:
       # here and the container limit below move together: see the comment
       # on mem_limit for how much room off-heap memory needs.
       JAVA_OPTS: ${GHIDRA_JAVA_OPTS:--Xmx4g -XX:+UseG1GC}
-    ports:
-      - "${BIND_ADDRESS:-127.0.0.1}:${GHIDRA_MCP_PORT:-8089}:8089"
+      # Read by every JVM whatever JAVA_OPTS holds, so an operator's own
+      # options keep a writable home for Ghidra's user settings.
+      JAVA_TOOL_OPTIONS: -Duser.home=/tmp
+      HOME: /tmp
+      # The name Ghidra opens projects as. Empty (the default) is the JVM's
+      # own, which no project relies on: the platform imports each sample
+      # without one. A project created while the image ran as root is owned
+      # by "root", and Ghidra refuses a project owned by another name, so an
+      # operator who opens such projects sets GHIDRA_USER=root.
+      GHIDRA_USER: ${GHIDRA_USER:-}
+    # No route out and none to the platform's stores (X2). `ghidra` is
+    # internal (no gateway at all) and shared only with the API and the
+    # worker, which reach it at http://ghidra-mcp:8089, and with ghidra-port
+    # below, which publishes its port for a worker run on the host; postgres,
+    # redis, minio and qdrant are not on it. An internal network cannot
+    # publish a port, which is why this service publishes none. A deployment
+    # that points Ghidra at a shared Ghidra server elsewhere needs a network
+    # with a route to it.
+    networks:
+      - ghidra
+    # ghidra_projects changes hands before the first start as a non-root user.
+    depends_on:
+      volume-init:
+        condition: service_completed_successfully
     # A ceiling the kernel enforces, because the JVM's own does not bound the
     # container. `-Xmx4g` caps the *heap*; Ghidra's database is memory-mapped and
     # its direct buffers live outside it, so RSS was measured at 5.15 GB while
@@ -169,14 +256,247 @@ services:
     volumes:
       # The right-hand side is Ghidra's declared sample_mount
       # (core.static.ghidra.sample_mount): change the two together.
+      # The worker writes its mirrors 0700/0600 as MALJAN_UID, which is why
+      # Ghidra runs as that id (see `user:` above); a Ghidra that runs as
+      # another user needs a group it shares with the worker and mirrors
+      # written 0750/0640 for it.
       - ../data/samples:/data/samples:ro
-      - ghidra_projects:/projects
+      # nocopy: the image's /projects is not copied into the volume, so the
+      # volume holds only what Ghidra wrote and volume-init handed over.
+      - type: volume
+        source: ghidra_projects
+        target: /projects
+        volume:
+          nocopy: true
     healthcheck:
       test: ["CMD-SHELL", "curl -fsS http://localhost:8089/check_connection || exit 1"]
       interval: 15s
       timeout: 10s
       retries: 10
       start_period: 60s
+
+  # -────────────────────────────────────────────
+  # Ghidra's published port — a relay, under the `ghidra` profile
+  # -────────────────────────────────────────────
+  # ghidra-mcp is on an internal network only, which cannot publish a port.
+  # A worker run on the host reaches Ghidra at http://localhost:8089 through
+  # this relay instead: it forwards bytes to ghidra-mcp:8089 and nothing
+  # else. It opens no sample and mounts nothing; it runs as nobody, with no
+  # capability, no way to gain one and a read-only root. `ghidra-publish` is
+  # a network of its own that nothing else is on, so the published port
+  # gives ghidra-mcp no route to the host, and ghidra-mcp's only network
+  # stays internal.
+  ghidra-port:
+    profiles: [ghidra]
+    image: alpine/socat:1.8.1.1@sha256:7f9a06753033f2b7de18edc2353f2c15153413d95a039163c6db270fc7a6c3b0
+    container_name: maljan-ghidra-port
+    restart: ${GHIDRA_RESTART:-unless-stopped}
+    user: "65534:65534"
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    pids_limit: 64
+    mem_limit: 64m
+    command:
+      - tcp-listen:8089,fork,reuseaddr
+      - tcp-connect:ghidra-mcp:8089
+    networks:
+      - ghidra
+      - ghidra-publish
+    ports:
+      - "${BIND_ADDRESS:-127.0.0.1}:${GHIDRA_MCP_PORT:-8089}:8089"
+
+  # -────────────────────────────────────────────
+  # Identification sidecars — Detect It Easy, ILSpy, GoReSym, each optional
+  # -────────────────────────────────────────────
+  # One analysis program each, served over MCP (services/die-mcp,
+  # services/ilspy-mcp, services/goresym-mcp): Detect It Easy's packer,
+  # compiler and protector names for any file, ILSpy's view of a .NET
+  # assembly, GoReSym's recovery of a Go binary's functions and types. None
+  # runs by default: each starts only under its profile, which the shipped
+  # docker/.env does not turn on, and the platform's built-in server blocks
+  # die, ilspy and goresym ship switched off. To use one, add its profile to
+  # COMPOSE_PROFILES, set its token here, and switch its block on in the
+  # console with the same token as the block's auth_token. Its pack step then
+  # runs and agents are offered its tools; nothing waits for it, and a block
+  # switched on with no container behind it is a step that says it failed.
+  #
+  # Held as x-identification-sidecar says, with the sample directory mounted
+  # read-only at the blocks' declared sample_mount (/data/samples), and on an
+  # internal network of its own (no gateway) shared only with the API and the
+  # worker, which reach it at http://<service>:<port>/mcp. It publishes no
+  # port; its relay below does, for a worker run on the host. The server
+  # refuses to listen without its token, so an unset token stops this
+  # container and no other.
+  #
+  # A memory ceiling the kernel enforces, as Ghidra's is: a machine-safety
+  # limit, not a bound on the analysis. The program's output is read whole,
+  # and a pathological file could otherwise grow the container until the host
+  # runs out. Past it the container's process dies, the call fails and the run
+  # records the failure. Swap is pinned to the same value. DIE_MEM_LIMIT,
+  # ILSPY_MEM_LIMIT and GORESYM_MEM_LIMIT set each (2g, 4g, 2g by default).
+  die-mcp:
+    <<: *identification-sidecar
+    profiles: [die]
+    build:
+      context: ../services
+      dockerfile: die-mcp/Dockerfile
+    image: maljan-die-mcp:3.21
+    container_name: maljan-die-mcp
+    environment:
+      MCP_AUTH_TOKEN: ${DIE_MCP_AUTH_TOKEN:-}
+    mem_limit: ${DIE_MEM_LIMIT:-2g}
+    memswap_limit: ${DIE_MEM_LIMIT:-2g}
+    networks:
+      - die
+    volumes:
+      - ../data/samples:/data/samples:ro
+    healthcheck: &sidecar-health
+      test: ["CMD", "python3", "-c", "import os, socket; socket.create_connection(('127.0.0.1', int(os.environ['MCP_PORT'])), 5)"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 10s
+
+  die-port:
+    <<: *sidecar-relay
+    profiles: [die]
+    container_name: maljan-die-port
+    command:
+      - tcp-listen:8090,fork,reuseaddr
+      - tcp-connect:die-mcp:8090
+    networks:
+      - die
+      - die-publish
+    ports:
+      - "${BIND_ADDRESS:-127.0.0.1}:${DIE_MCP_PORT:-8090}:8090"
+
+  ilspy-mcp:
+    <<: *identification-sidecar
+    profiles: [ilspy]
+    build:
+      context: ../services
+      dockerfile: ilspy-mcp/Dockerfile
+    image: maljan-ilspy-mcp:11.1.0.9782
+    container_name: maljan-ilspy-mcp
+    environment:
+      MCP_AUTH_TOKEN: ${ILSPY_MCP_AUTH_TOKEN:-}
+    mem_limit: ${ILSPY_MEM_LIMIT:-4g}
+    memswap_limit: ${ILSPY_MEM_LIMIT:-4g}
+    networks:
+      - ilspy
+    volumes:
+      - ../data/samples:/data/samples:ro
+    healthcheck: *sidecar-health
+
+  ilspy-port:
+    <<: *sidecar-relay
+    profiles: [ilspy]
+    container_name: maljan-ilspy-port
+    command:
+      - tcp-listen:8091,fork,reuseaddr
+      - tcp-connect:ilspy-mcp:8091
+    networks:
+      - ilspy
+      - ilspy-publish
+    ports:
+      - "${BIND_ADDRESS:-127.0.0.1}:${ILSPY_MCP_PORT:-8091}:8091"
+
+  goresym-mcp:
+    <<: *identification-sidecar
+    profiles: [goresym]
+    build:
+      context: ../services
+      dockerfile: goresym-mcp/Dockerfile
+    image: maljan-goresym-mcp:3.4.1
+    container_name: maljan-goresym-mcp
+    environment:
+      MCP_AUTH_TOKEN: ${GORESYM_MCP_AUTH_TOKEN:-}
+    mem_limit: ${GORESYM_MEM_LIMIT:-2g}
+    memswap_limit: ${GORESYM_MEM_LIMIT:-2g}
+    networks:
+      - goresym
+    volumes:
+      - ../data/samples:/data/samples:ro
+    healthcheck: *sidecar-health
+
+  goresym-port:
+    <<: *sidecar-relay
+    profiles: [goresym]
+    container_name: maljan-goresym-port
+    command:
+      - tcp-listen:8092,fork,reuseaddr
+      - tcp-connect:goresym-mcp:8092
+    networks:
+      - goresym
+      - goresym-publish
+    ports:
+      - "${BIND_ADDRESS:-127.0.0.1}:${GORESYM_MCP_PORT:-8092}:8092"
+
+  # -────────────────────────────────────────────
+  # Volume ownership — one-shot, before api, worker and Ghidra
+  # -────────────────────────────────────────────
+  # The backend services and Ghidra used to run as root, so an existing
+  # deployment's sample mirror, upload staging, ATT&CK cache and Ghidra
+  # projects are owned by root, and the unprivileged services could not write
+  # them. This hands the entries of those four that root owns, and nothing
+  # else, to MALJAN_UID:MALJAN_GID. It never
+  # takes a file from anyone else: an entry owned by neither root nor that id
+  # stops it, before it has changed anything, with the id to set, and the stack
+  # does not start. It changes ownership only (chown, never content or mode),
+  # never through a symbolic link and never past the mount, so a second run
+  # changes nothing, and executes nothing it finds. It runs as root with the
+  # one capability chown needs and the one that lets it enter the 0700 work
+  # directories, with no network, and exits.
+  volume-init:
+    <<: *backend-image
+    container_name: maljan-volume-init
+    restart: "no"
+    user: "0:0"
+    cap_add:
+      - CHOWN
+      - DAC_READ_SEARCH
+    network_mode: none
+    environment:
+      MALJAN_UID: ${MALJAN_UID:-10001}
+      MALJAN_GID: ${MALJAN_GID:-10001}
+    # Each target names its source after /own/, which is how a refusal names it.
+    volumes:
+      - ../data/samples:/own/data/samples
+      - ../data/uploads:/own/data/uploads
+      - attck_cache:/own/attck_cache
+      - ghidra_projects:/own/ghidra_projects
+    command:
+      - /bin/sh
+      - -euc
+      - |
+        for id in "$$MALJAN_UID" "$$MALJAN_GID"; do
+          case "$$id" in ''|*[!0-9]*) id=0;; esac
+          if [ "$$id" -eq 0 ]; then
+            echo "volume-init: MALJAN_UID and MALJAN_GID must be non-zero numbers" >&2
+            exit 1
+          fi
+        done
+        dirs="/own/data/samples /own/data/uploads /own/attck_cache /own/ghidra_projects"
+        for dir in $$dirs; do
+          owner=$$(find "$$dir" -xdev ! -uid 0 ! -uid "$$MALJAN_UID" -printf '%U\n' -quit)
+          if [ -n "$$owner" ]; then
+            echo "volume-init: $${dir#/own/} is owned by uid $$owner;" \
+              "set MALJAN_UID/MALJAN_GID=$$owner in docker/.env" >&2
+            exit 1
+          fi
+          group=$$(find "$$dir" -xdev ! -gid 0 ! -gid "$$MALJAN_GID" -printf '%G\n' -quit)
+          if [ -n "$$group" ]; then
+            echo "volume-init: $${dir#/own/} is owned by gid $$group;" \
+              "set MALJAN_GID=$$group in docker/.env" >&2
+            exit 1
+          fi
+        done
+        for dir in $$dirs; do
+          find "$$dir" -xdev \( -uid 0 -o -gid 0 \) -exec chown -h "$$MALJAN_UID:$$MALJAN_GID" {} +
+        done
 
   # -────────────────────────────────────────────
   # Migrations — one-shot Alembic upgrade, before api and worker
@@ -194,9 +514,12 @@ services:
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-maljan}:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in docker/.env (see README)}@postgres:5432/${POSTGRES_DB:-maljan}
       JWT_SECRET_KEY: ${JWT_SECRET_KEY:?set JWT_SECRET_KEY in docker/.env}
       SETTINGS_ENCRYPTION_KEY: ${SETTINGS_ENCRYPTION_KEY:?set SETTINGS_ENCRYPTION_KEY in docker/.env}
+      # Retired; read once into core.validation.attck_refresh_days by the
+      # revision that retired it, when docker/.env still sets it.
+      MALJAN_ATTCK_MAX_AGE_DAYS: ${MALJAN_ATTCK_MAX_AGE_DAYS:-}
     volumes:
-      - ../src:/app/src
-      - ../apps:/app/apps
+      - ../src:/app/src:ro
+      - ../apps:/app/apps:ro
     depends_on:
       postgres:
         condition: service_healthy
@@ -220,6 +543,10 @@ services:
       MINIO_ENDPOINT: minio:9000
       MINIO_ACCESS_KEY: ${MINIO_ROOT_USER:?set MINIO_ROOT_USER in docker/.env}
       MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD:?set MINIO_ROOT_PASSWORD in docker/.env}
+      # The audit chain's anchor outside the database (bootstrap.env.example):
+      # unset keeps the chain checked against its database head only.
+      AUDIT_ANCHOR: ${AUDIT_ANCHOR:-}
+      AUDIT_ANCHOR_DATABASE_URL: ${AUDIT_ANCHOR_DATABASE_URL:-}
       JWT_SECRET_KEY: ${JWT_SECRET_KEY:?set JWT_SECRET_KEY in docker/.env}
       SETTINGS_ENCRYPTION_KEY: ${SETTINGS_ENCRYPTION_KEY:?set SETTINGS_ENCRYPTION_KEY in docker/.env}
       SAMPLES_DIR: data/samples
@@ -245,15 +572,34 @@ services:
     # settings store's LLM/sandbox URLs point there.
     extra_hosts:
       - "host.docker.internal:host-gateway"
+    # `default` as before; `ghidra` to reach Ghidra, which is on no other
+    # network these services share (see ghidra-mcp), and `die`, `ilspy` and
+    # `goresym` to reach the identification sidecars the same way.
+    networks:
+      - default
+      - ghidra
+      - die
+      - ilspy
+      - goresym
+    # The source trees are read-only: a process in this container that opens
+    # hostile bytes cannot plant code the API or a later worker would run, or
+    # change the host's working tree. data/ is read-only as well (its rule sets
+    # and reference tables are only read); only the sample mirrors and the
+    # upload staging under it are writable. The development overlay mounts the
+    # sources writable.
     volumes:
-      - ../src:/app/src
-      - ../apps:/app/apps
-      - ../data:/app/data
-      - ../tests:/app/tests
-      - ../services:/app/services
+      - ../src:/app/src:ro
+      - ../apps:/app/apps:ro
+      - ../data:/app/data:ro
+      - ../data/samples:/app/data/samples
+      - ../data/uploads:/app/data/uploads
+      - ../tests:/app/tests:ro
+      - ../services:/app/services:ro
     ports:
       - "${BIND_ADDRESS:-127.0.0.1}:${API_PORT:-8000}:8000"
     depends_on:
+      volume-init:
+        condition: service_completed_successfully
       migrate:
         condition: service_completed_successfully
       postgres:
@@ -269,8 +615,10 @@ services:
       timeout: 5s
       retries: 12
       start_period: 30s
+    # No --reload here: a reload runs whatever Python lands under /app. The
+    # development overlay turns it back on.
     command: >
-      uv run uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+      uv run uvicorn app.main:app --host 0.0.0.0 --port 8000
 
   # -────────────────────────────────────────────
   # Backend Worker — ARQ background task runner
@@ -301,6 +649,10 @@ services:
       MINIO_ENDPOINT: minio:9000
       MINIO_ACCESS_KEY: ${MINIO_ROOT_USER:?set MINIO_ROOT_USER in docker/.env}
       MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD:?set MINIO_ROOT_PASSWORD in docker/.env}
+      # The audit chain's anchor outside the database (bootstrap.env.example):
+      # unset keeps the chain checked against its database head only.
+      AUDIT_ANCHOR: ${AUDIT_ANCHOR:-}
+      AUDIT_ANCHOR_DATABASE_URL: ${AUDIT_ANCHOR_DATABASE_URL:-}
       JWT_SECRET_KEY: ${JWT_SECRET_KEY:?set JWT_SECRET_KEY in docker/.env}
       SETTINGS_ENCRYPTION_KEY: ${SETTINGS_ENCRYPTION_KEY:?set SETTINGS_ENCRYPTION_KEY in docker/.env}
       SAMPLES_DIR: data/samples
@@ -339,6 +691,14 @@ services:
     # F8 (2026-07-05): resolve host.docker.internal on Linux (see backend-api).
     extra_hosts:
       - "host.docker.internal:host-gateway"
+    # As on the API: `ghidra` is how the worker reaches Ghidra, and `die`,
+    # `ilspy` and `goresym` the identification sidecars.
+    networks:
+      - default
+      - ghidra
+      - die
+      - ilspy
+      - goresym
     # Hard ceiling (2026-07-26). One analysis took this process from 3.4 GB to
     # 8.5 GB and never gave it back; two in a row exhausted a 30 GB host that
     # also runs a ~15 GB llama-server, and the machine locked up. The graceful
@@ -348,22 +708,28 @@ services:
     # startup orphan sweep repairs the job row it was holding.
     mem_limit: 8g
     memswap_limit: 8g
+    # Read-only sources and data, as on the API (see there).
     volumes:
-      - ../src:/app/src
-      - ../apps:/app/apps
-      - ../data:/app/data
-      - ../tests:/app/tests
-      - ../services:/app/services
+      - ../src:/app/src:ro
+      - ../apps:/app/apps:ro
+      - ../data:/app/data:ro
+      - ../data/samples:/app/data/samples
+      - ../data/uploads:/app/data/uploads
+      - ../tests:/app/tests:ro
+      - ../services:/app/services:ro
       # Derived caches, not source data — but expensive enough that losing them
       # is a production problem rather than a warm-up. Two things live here: the
       # 40 MB ATT&CK STIX bundle (re-downloaded from MITRE when absent), and the
       # ATT&CK embedding cache, whose absence costs the judge node +1.3 GB of
       # resident memory and 105 s on the first analysis — measured 2026-07-28.
       # Without this volume both are rebuilt on every container recreation,
-      # because /root is in the container's writable layer and a rebuild
-      # discards it.
-      - attck_cache:/root/.cache/maljan
+      # because HOME is in the container's writable layer and a rebuild
+      # discards it. The volume keeps its name from when the worker ran as
+      # root and mounted it at /root/.cache/maljan; volume-init hands it over.
+      - attck_cache:/home/maljan/.cache/maljan
     depends_on:
+      volume-init:
+        condition: service_completed_successfully
       migrate:
         condition: service_completed_successfully
       backend-api:
@@ -414,12 +780,16 @@ services:
       MINIO_ENDPOINT: minio:9000
       MINIO_ACCESS_KEY: ${MINIO_ROOT_USER:?set MINIO_ROOT_USER in docker/.env}
       MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD:?set MINIO_ROOT_PASSWORD in docker/.env}
+      # The audit chain's anchor outside the database (bootstrap.env.example):
+      # unset keeps the chain checked against its database head only.
+      AUDIT_ANCHOR: ${AUDIT_ANCHOR:-}
+      AUDIT_ANCHOR_DATABASE_URL: ${AUDIT_ANCHOR_DATABASE_URL:-}
     extra_hosts:
       - "host.docker.internal:host-gateway"
     mem_limit: 2g
     volumes:
-      - ../src:/app/src
-      - ../apps:/app/apps
+      - ../src:/app/src:ro
+      - ../apps:/app/apps:ro
     depends_on:
       migrate:
         condition: service_completed_successfully
@@ -449,10 +819,39 @@ services:
         NEXT_PUBLIC_AUTH_DISABLED: "${NEXT_PUBLIC_AUTH_DISABLED:-false}"
     container_name: maljan-frontend
     restart: unless-stopped
+    # The image runs as its unprivileged ``node`` user (Dockerfile.frontend),
+    # which needs no capability and gains none.
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
     ports:
       - "${BIND_ADDRESS:-127.0.0.1}:${FRONTEND_PORT:-3000}:3000"
     depends_on:
       - backend-api
+
+# The networks of a container that opens the sample (X2). `default` is the
+# project's own network, which every other service is on.
+networks:
+  # No gateway: what is on it reaches only what else is on it.
+  ghidra:
+    internal: true
+  # The relay's side for Ghidra's published port; nothing else is on it.
+  ghidra-publish:
+    driver: bridge
+  # Each identification sidecar's own, as `ghidra` is, and its relay's side.
+  die:
+    internal: true
+  die-publish:
+    driver: bridge
+  ilspy:
+    internal: true
+  ilspy-publish:
+    driver: bridge
+  goresym:
+    internal: true
+  goresym-publish:
+    driver: bridge
 
 volumes:
   pgdata:

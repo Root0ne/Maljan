@@ -19,7 +19,8 @@ from typing import TYPE_CHECKING, Any
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import async_session_factory
-from app.services.settings_catalog_api import API_DEFAULTS
+from app.logsafe import log_safe
+from app.services.settings_catalog_api import API_DEFAULTS, API_EDITABLE
 from app.services.settings_service import SettingsService, core_settings_cache
 
 if TYPE_CHECKING:
@@ -28,6 +29,41 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 SessionFactory = Callable[[], AbstractAsyncContextManager[AsyncSession]]
+
+
+_WARNED: set[tuple[str, Any]] = set()
+
+
+def _within_bounds(name: str, value: Any) -> Any:
+    """``value`` held to the catalog's minimum and maximum for ``name``.
+
+    A save refuses a value outside them, but a row stored before the bound
+    existed (or written to the database directly) must still load: it is
+    clamped, with a warning, never refused. Only a plain number is clamped.
+    """
+    bounds = API_EDITABLE.get(name, {})
+    low, high = bounds.get("minimum"), bounds.get("maximum")
+    if high is None and low is None:
+        return value
+    if isinstance(value, bool) or not isinstance(value, int | float):
+        return value
+    clamped = value
+    if high is not None and clamped > high:
+        clamped = high
+    if low is not None and clamped < low:
+        clamped = low
+    if clamped != value:
+        if (name, value) in _WARNED:
+            return type(value)(clamped) if isinstance(value, int) else clamped
+        _WARNED.add((name, value))
+        logger.warning(
+            "stored setting api.%s is outside its allowed range %s..%s; the nearest bound is used",
+            log_safe(name),
+            log_safe(low),
+            log_safe(high),
+        )
+        return type(value)(clamped) if isinstance(value, int) else clamped
+    return value
 
 
 class RuntimeConfig:
@@ -59,14 +95,42 @@ class RuntimeConfig:
         self._loaded_at = now
         return self._cache
 
+    async def stored_value(self, key: str) -> Any:
+        """The stored override for a whole key (``core.plugins.allowed``), or ``None``."""
+        return (await self._overrides()).get(key)
+
     async def get(self, name: str) -> Any:
         overrides = await self._overrides()
         if f"api.{name}" in overrides:
-            value = overrides[f"api.{name}"]
+            value = _within_bounds(name, overrides[f"api.{name}"])
         else:
             value = API_DEFAULTS[name]
+        if name == "refresh_reuse_grace_seconds":
+            value = await self._grace_within_token(value, overrides)
         self._resolved[name] = value
         return value
+
+    async def _grace_within_token(self, grace: Any, overrides: dict[str, Any]) -> Any:
+        """The reuse grace window, never longer than the (clamped) access token."""
+        if isinstance(grace, bool) or not isinstance(grace, int | float) or grace <= 0:
+            return grace
+        minutes = _within_bounds(
+            "jwt_access_token_expire_minutes",
+            overrides.get(
+                "api.jwt_access_token_expire_minutes",
+                API_DEFAULTS["jwt_access_token_expire_minutes"],
+            ),
+        )
+        if isinstance(minutes, bool) or not isinstance(minutes, int | float):
+            return grace
+        ceiling = int(minutes * 60) - 1
+        if grace > ceiling:
+            logger.warning(
+                "stored refresh reuse grace is longer than the access lifetime; using %s seconds",
+                log_safe(ceiling),
+            )
+            return ceiling
+        return grace
 
     async def core(self) -> Settings:
         """The core settings a running job would see, on the same short TTL.
@@ -79,11 +143,15 @@ class RuntimeConfig:
         reason every read here does: a settings read must not take a request
         down.
         """
-        from maljan.core.settings_overrides import build_settings
+        from maljan.core.settings_overrides import StoredValueRefused, build_settings
 
         try:
             async with self._factory() as db:
                 return await core_settings_cache.get(db)
+        except StoredValueRefused:
+            # A refused stored value is never replaced by a default here: the
+            # caller fails with the key named and the remedy.
+            raise
         except Exception as exc:  # noqa: BLE001 - fall back to static settings
             logger.warning("core settings unavailable, using defaults: %s", exc)
             return build_settings({})

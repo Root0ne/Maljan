@@ -1,0 +1,116 @@
+---
+title: "Identification servers"
+description: "Detect It Easy, ILSpy and GoReSym: one container each, shipped switched off, with their own pack steps."
+---
+
+Three built-in tool servers name what a sample was built with and read what a
+managed or Go binary keeps of its own structure. Each wraps one command-line
+program in an image of its own under `services/`, each ships **switched off**,
+and each is used at full strength once it is on: agents are offered every tool
+it advertises, and its triage pack step runs.
+
+| Server | Program | Offers | Pack step |
+| :-- | :-- | :-- | :-- |
+| `die` | Detect It Easy 3.21 (`diec`) | `die_scan`: the packers, compilers, linkers, protectors, installers and libraries its signatures name in any file, one row per detected item | `die_scan`, on every sample |
+| `ilspy` | ilspycmd 11.1.0.9782 on the .NET 10 runtime | `dotnet_types`, `dotnet_decompile_type`, `dotnet_decompile_member`, `dotnet_decompile_assembly`, `dotnet_resources`, `dotnet_metadata_table` | `dotnet_types`, on a PE sample whose `die_scan` answer names `.NET Framework` or `.NET Core` |
+| `goresym` | GoReSym 3.4.1 | `go_symbols`, `go_types`, `go_strings`: functions with their addresses, build facts, types and strings from the Go runtime's own tables | `go_symbols`, on a PE, ELF or Mach-O sample whose `die_scan` answer names the `Go` compiler |
+
+None of the programs runs the sample: each reads the file it is given.
+
+Detect It Easy names the Go compiler from its PE and ELF signatures and has
+none for Mach-O, so on a Mach-O sample the `go_symbols` step runs only where
+Detect It Easy's answer still names `Go`; otherwise it is a `not run:` entry,
+and an agent can call `go_symbols` itself.
+
+## Turning one on
+
+<Steps>
+
+<Step>
+
+Add its profile to `COMPOSE_PROFILES` in `docker/.env` (`die`, `ilspy`,
+`goresym`) and set its token there (`DIE_MCP_AUTH_TOKEN`,
+`ILSPY_MCP_AUTH_TOKEN`, `GORESYM_MCP_AUTH_TOKEN`). The container refuses to
+start without it.
+
+</Step>
+
+<Step>
+
+Start it: `docker compose -f docker/docker-compose.yml up -d die-mcp die-port`
+(or the `ilspy-` or `goresym-` pair). The first start builds the image.
+
+</Step>
+
+<Step>
+
+In **Settings → Configuration**, open the server block of the same name, set
+its `auth_token` to the same token, switch it on and test it. The block
+already points at the container (`http://die-mcp:8090/mcp`,
+`http://ilspy-mcp:8091/mcp`, `http://goresym-mcp:8092/mcp`); a worker run on
+the host uses the relay's port instead (`http://localhost:8090/mcp` and so
+on).
+
+</Step>
+
+</Steps>
+
+A server that is switched off, not configured, or does not offer its step's
+tool (its `tools` list leaves it out) leaves its pack step off: no call, no
+entry, and the reason in the worker's log and on the pack's result. A
+deployment without these servers runs the pack exactly as before. A block
+switched on with no container behind it is a step that fails, said as such.
+
+## What each container is held to
+
+Each is held as the Ghidra container is (see
+[Deployment](/deployment/#the-container-that-opens-the-sample)): the worker's
+unprivileged ids, no Linux capability and no way to gain one, a pids limit, a
+read-only root whose only writable place is a tmpfs for each run's scratch
+directory, the samples directory mounted read-only at `/data/samples` (the
+blocks' declared `sample_mount`, where the worker mirrors each job's sample),
+no platform credential (its only secret is its own token), a memory ceiling
+with swap pinned to it (`DIE_MEM_LIMIT` 2g, `ILSPY_MEM_LIMIT` 4g,
+`GORESYM_MEM_LIMIT` 2g; a machine-safety limit like Ghidra's, not a bound on
+the analysis), and an internal network of its own shared only with the API
+and the worker. It publishes no
+port; a relay that mounts nothing and holds nothing publishes it on
+`BIND_ADDRESS` for a worker run on the host.
+
+A server reads a path only under the directories `MALJAN_SAMPLE_ROOTS` lists
+(the mount, in the image) and answers anything else `path_outside_roots`. A run
+past `TOOL_TIMEOUT_SECONDS` (unset: no bound of its own) is killed with every
+process it started and answered `timeout`; a call the platform gave up on kills
+its run the same way. A program that is not installed is `missing_dependency`
+with the install hint, and the server's `capabilities` tool says so before any
+run.
+
+## What their tools declare
+
+Each tool's declaration says what its answer is and what it shows and does not
+show (`shows`, `does_not_show`), so the console, the docs and, with
+`mcp.answer_scope_notes` on, the model read the same words:
+
+| Tool | Kind | Rows and values |
+| :-- | :-- | :-- |
+| `die_scan` | `identification` | `/detections/*`: `name`, `type`, `version`, `file_type` |
+| `dotnet_types` | `type_list` | `/types/*`: `name`, `type_kind` |
+| `dotnet_decompile_type`, `dotnet_decompile_member` | `decompile` | — |
+| `dotnet_decompile_assembly` | `decompile_batch`, the aggregate form of the two above | — |
+| `dotnet_resources` | `resource_listing` | `/resources/*`: `name` |
+| `dotnet_metadata_table` | `metadata_table` | `/rows/*` |
+| `go_symbols` | `function_list` | `/functions/*`: `name`, `package`, at `address` (`/start`) |
+| `go_types` | `type_list` | `/types/*`: `name`, `type_kind` |
+| `go_strings` | `embedded_strings` (holds the sample's strings) | `/strings/*`: `text` |
+
+Every tool is read-only, runs nothing, reaches no network and sends nothing to
+a third party. The pack steps' conditions are on `die_scan`'s declared `name`
+value, never on a tool's name: an operator may replace any of the three
+servers with one of their own whose tools declare the same values.
+
+## On the worker's host instead
+
+Each `server.py` also serves over stdio (`python3 services/die-mcp/server.py
+--stdio`) for an operator who installs the program on the worker's host: point
+the block's `transport` at `stdio` and its `command` and `args` at the script,
+clear its `sample_mount`, and add `MALJAN_SAMPLE_ROOTS` to its `env_allow`.

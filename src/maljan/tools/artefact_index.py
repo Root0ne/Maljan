@@ -95,7 +95,6 @@ The sample is only read; nothing in it is run.
 
 from __future__ import annotations
 
-import heapq
 import re
 from bisect import bisect_left, bisect_right
 from collections.abc import Iterable, Mapping, Sequence
@@ -113,7 +112,7 @@ from maljan.tools.call_sites import (
     _frame_store,
     decode,
 )
-from maljan.tools.pe_image import Image, Section
+from maljan.tools.pe_image import Code, Image, Section, read_as_bytes
 
 __all__ = [
     "FUNCTION_LISTS_ABSENT",
@@ -206,64 +205,57 @@ class _Graph:
 # -- reading the code -------------------------------------------------------
 
 
-class _Sections:
-    """Which section holds an RVA, answered by bisection rather than by a scan of every section.
+# How many code bytes one page of decoded-instruction marks covers: it bounds
+# the memory a walk that reads a few bytes of a large section takes, never
+# what the walk reads.
+_MARK_PAGE = pe_image._WINDOW_BYTES
 
-    The same answer ``pe_image.Image.section_at_rva`` gives (the first section
-    in the header's order whose range, the larger of its virtual and raw size,
-    holds the RVA), computed once: the ranges are cut into the intervals
-    between their ends, each interval given the first section that covers it,
-    with a sweep over the sorted ends. Building it costs the sections times
-    their logarithm, and each lookup the logarithm of the intervals, so the
-    walk costs calls plus sections, not their product.
+
+class _Marks:
+    """Which instruction starts of one code section a walk has decoded, a page at a time.
+
+    Read as the byte array it replaces (zero for an unmarked byte); a page is
+    made when the walk first marks a byte in it, so a section the walk barely
+    enters costs a page and not its size.
+    """
+
+    __slots__ = ("pages",)
+
+    def __init__(self) -> None:
+        self.pages: dict[int, bytearray] = {}
+
+    def __getitem__(self, at: int) -> int:
+        page, inside = divmod(at, _MARK_PAGE)
+        held = self.pages.get(page)
+        return 0 if held is None else held[inside]
+
+    def __setitem__(self, at: int, value: int) -> None:
+        page, inside = divmod(at, _MARK_PAGE)
+        held = self.pages.get(page)
+        if held is None:
+            held = self.pages[page] = bytearray(_MARK_PAGE)
+        held[inside] = value
+
+
+class _Sections:
+    """Which section holds an RVA: ``pe_image.Image.section_at_rva``, answered by bisection.
+
+    The image builds its first-match lookup over the section ranges once, so
+    the walk costs calls plus sections, not their product.
     """
 
     def __init__(self, image: Image) -> None:
         self.image = image
-        spans = [
-            (s.rva, s.rva + max(s.virtual_size, s.raw_size), index)
-            for index, s in enumerate(image.sections)
-            if max(s.virtual_size, s.raw_size) > 0
-        ]
-        ends = sorted({point for lo, hi, _ in spans for point in (lo, hi)})
-        by_start = sorted(spans)
-        self.starts: list[int] = []
-        self.owners: list[int | None] = []
-        active: list[tuple[int, int]] = []  # (header index, end), a heap by index
-        position = 0
-        for point in ends:
-            while position < len(by_start) and by_start[position][0] == point:
-                lo, hi, index = by_start[position]
-                heapq.heappush(active, (index, hi))
-                position += 1
-            while active and active[0][1] <= point:
-                heapq.heappop(active)
-            # A section whose end is passed but is not on top stays in the heap;
-            # it is dropped when it reaches the top, before it can answer.
-            self.starts.append(point)
-            self.owners.append(active[0][0] if active else None)
 
     def at(self, rva: int) -> Section | None:
-        position = bisect_right(self.starts, rva) - 1
-        if position < 0:
-            return None
-        index = self.owners[position]
-        if index is None:
-            return None
-        section = self.image.sections[index]
-        if section.rva <= rva < section.rva + max(section.virtual_size, section.raw_size):
-            return section
-        return None
+        return self.image.section_at_rva(rva)
 
     def offset(self, rva: int) -> int | None:
         """``pe_image.Image.offset_of_rva``, through the same lookup."""
-        section = self.at(rva)
-        if section is None or rva - section.rva >= section.mapped_size:
-            return None
-        return section.raw_offset + (rva - section.rva)
+        return self.image.offset_of_rva(rva)
 
 
-def _data_address(image: Image, code: bytes, at: int, ins: Instruction, rva_end: int) -> int | None:
+def _data_address(image: Image, code: Code, at: int, ins: Instruction, rva_end: int) -> int | None:
     """The RVA an instruction takes the address of, when it names one the bytes state.
 
     x64: a RIP-relative memory operand. x86: an absolute ``[disp32]`` memory
@@ -385,9 +377,19 @@ class _Reader:
         self.sorted_starts: list[int] = []
         self.known: set[int] = set()
         self.ranges_of: dict[int, list[tuple[int, int]]] = {}
-        self.code = {section.rva: image.section_bytes(section) for section in image.code_sections()}
+        # Each code section's bytes as a view of the file, never a copy; where
+        # two sections start at one address the later one's bytes answer for
+        # that address, as they always have, so only its view is taken.
+        whole = memoryview(image.data)
+        last = {section.rva: section for section in image.code_sections()}
+        self.code: dict[int, memoryview] = {
+            rva: whole[section.raw_offset : section.raw_offset + section.mapped_size]
+            for rva, section in last.items()
+        }
         self.attributing = False
-        self.read: dict[int, bytearray] = {}
+        # Which instruction starts a walk has decoded, per code section: made
+        # for a section when the walk first reads it (``_marks``).
+        self.read: dict[int, _Marks] = {}
         self.graph.sections = self.sections
 
     def add(self, start: int, source: str) -> None:
@@ -415,7 +417,7 @@ class _Reader:
         return self.graph
 
     def _walk(self) -> None:
-        self.read = {rva: bytearray(len(code)) for rva, code in self.code.items()}
+        self.read = {}
         if not self.attributing:
             self.sorted_starts = sorted(self.known)
         index = 0
@@ -430,7 +432,14 @@ class _Reader:
             else:
                 self._descend(function)
 
-    def _section(self, rva: int) -> tuple[int, bytes] | None:
+    def _marks(self, base: int) -> _Marks:
+        """The decoded-instruction marks of the code section at ``base``, made on first use."""
+        marks = self.read.get(base)
+        if marks is None:
+            marks = self.read[base] = _Marks()
+        return marks
+
+    def _section(self, rva: int) -> tuple[int, Code] | None:
         section = self.sections.at(rva)
         if section is None or not section.executable or section.rva not in self.code:
             return None
@@ -469,7 +478,7 @@ class _Reader:
             target + 6 + displacement if self.image.is64 else displacement - self.image.image_base
         )
 
-    def _note(self, function: _Function, rva: int, ins: Instruction, code: bytes, at: int) -> None:
+    def _note(self, function: _Function, rva: int, ins: Instruction, code: Code, at: int) -> None:
         """What one decoded instruction says: its call, and in the second walk the rest."""
         if ins.kind == "call":
             callee = self._callee(rva, ins)
@@ -550,7 +559,7 @@ class _Reader:
         if arguments:
             function.passes.append((rva, callee, arguments))
 
-    def _slot_of(self, code: bytes, at: int, rva: int, ins: Instruction) -> int | None:
+    def _slot_of(self, code: Code, at: int, rva: int, ins: Instruction) -> int | None:
         """The slot an instruction's memory operand names, by offset, or ``None``."""
         found = _memory_operand(code, at, self.image.is64)
         if found is None:
@@ -562,7 +571,7 @@ class _Reader:
         return slot if slot >= 0 else None
 
     def _through(
-        self, code: bytes, at: int, rva: int, ins: Instruction, *, jump: bool = False
+        self, code: Code, at: int, rva: int, ins: Instruction, *, jump: bool = False
     ) -> int | None:
         """The slot a call or jump goes through when the import table does not fill it:
         its memory operand, or the register a straight-line load from a slot set."""
@@ -579,7 +588,7 @@ class _Reader:
 
     def _read_events(
         self,
-        code: bytes,
+        code: Code,
         at: int,
         rva: int,
         ins: Instruction,
@@ -694,7 +703,7 @@ class _Reader:
             self.events.append(("overwrite",))
         return taken
 
-    def _move_frame(self, code: bytes, at: int, ins: Instruction) -> None:
+    def _move_frame(self, code: Code, at: int, ins: Instruction) -> None:
         """Follow what one instruction does to the frame's base registers.
 
         A push or a pop of a whole word moves the stack pointer by that word,
@@ -722,7 +731,7 @@ class _Reader:
 
     def _frame_events(
         self,
-        code: bytes,
+        code: Code,
         at: int,
         rva: int,
         ins: Instruction,
@@ -817,7 +826,7 @@ class _Reader:
         if found is None:
             return
         base, code = found
-        read = self.read[base]
+        read = self._marks(base)
         at = begin - base
         self._end_run()
         while base + at < end and at < len(code):
@@ -849,7 +858,7 @@ class _Reader:
             self.sorted_starts[later] if later < len(self.sorted_starts) else base + len(code),
             base + len(code),
         )
-        read = self.read[base]
+        read = self._marks(base)
         pending = [function.start]
         while pending:
             rva = pending.pop()
@@ -884,7 +893,7 @@ class _Reader:
 # -- the slots a hash resolution fills ----------------------------------------
 
 
-def _operand_bytes(code: bytes, at: int, is64: bool) -> tuple[int, int, int] | None:
+def _operand_bytes(code: Code, at: int, is64: bool) -> tuple[int, int, int] | None:
     """``(opcode, rex, index after the opcode)`` with legacy prefixes and REX read off; ``None``
     for an operand-size or address-size prefix, which no pointer store or load carries."""
     i = at
@@ -905,7 +914,7 @@ def _operand_bytes(code: bytes, at: int, is64: bool) -> tuple[int, int, int] | N
 _ARGUMENT_REGISTERS = (1, 2, 8, 9)
 
 
-def _register_copy(code: bytes, at: int, is64: bool) -> tuple[int, int] | None:
+def _register_copy(code: Code, at: int, is64: bool) -> tuple[int, int] | None:
     """``(destination, source)`` of a register-to-register ``mov`` of 32 or 64 bits.
 
     ``call_sites._register_move`` reads the 64-bit form only; a hashed value is
@@ -923,19 +932,19 @@ def _register_copy(code: bytes, at: int, is64: bool) -> tuple[int, int] | None:
     return (rm, reg) if op == 0x89 else (reg, rm)
 
 
-def _rex_w(code: bytes, at: int) -> bool:
+def _rex_w(code: Code, at: int) -> bool:
     """Whether an x64 instruction carries REX.W (a 64-bit operand)."""
     found = _operand_bytes(code, at, True)
     return found is not None and bool(found[1] & 8)
 
 
-def _stack_pointer_store(code: bytes, at: int) -> bool:
+def _stack_pointer_store(code: Code, at: int) -> bool:
     """Whether the instruction stores to ``[esp+x]``/``[rsp+x]``, by ``call_sites._frame_store``."""
     stored = _frame_store(code, at)
     return stored is not None and stored[0] == 4
 
 
-def _stack_store(code: bytes, at: int) -> bool:
+def _stack_store(code: Code, at: int) -> bool:
     """Whether an x86 instruction stores an immediate to ``[esp+x]``."""
     found = _operand_bytes(code, at, False)
     if found is None:
@@ -947,7 +956,7 @@ def _stack_store(code: bytes, at: int) -> bool:
     return modrm >> 6 in (0, 1, 2) and modrm & 7 == 4 and code[after + 1] & 7 == 4
 
 
-def _indirect_jump(code: bytes, at: int, is64: bool) -> bool:
+def _indirect_jump(code: Code, at: int, is64: bool) -> bool:
     """Whether the instruction at ``at`` is an indirect jump, through any operand."""
     found = _operand_bytes(code, at, is64)
     if found is None:
@@ -956,7 +965,7 @@ def _indirect_jump(code: bytes, at: int, is64: bool) -> bool:
     return op == 0xFF and after < len(code) and (code[after] >> 3) & 7 in (4, 5)
 
 
-def _memory_operand(code: bytes, at: int, is64: bool) -> int | None:
+def _memory_operand(code: Code, at: int, is64: bool) -> int | None:
     """The 32-bit displacement of a ModRM operand that is rip-relative (x64) or an absolute
     address (x86): mod 00, r/m 101."""
     found = _operand_bytes(code, at, is64)
@@ -971,9 +980,7 @@ def _memory_operand(code: bytes, at: int, is64: bool) -> int | None:
     return int.from_bytes(code[after + 1 : after + 5], "little", signed=is64)
 
 
-def _through_slot(
-    code: bytes, at: int, is64: bool, *, jump: bool = False
-) -> tuple[str, int] | None:
+def _through_slot(code: Code, at: int, is64: bool, *, jump: bool = False) -> tuple[str, int] | None:
     """What an indirect call (or, with ``jump``, an indirect jump) goes through: ``("memory",
     0)`` for a slot at a rip-relative or absolute address, ``("register", r)``; else ``None``."""
     found = _operand_bytes(code, at, is64)
@@ -993,7 +1000,7 @@ def _through_slot(
 
 
 def _slot_shape(
-    code: bytes, at: int, is64: bool, length: int
+    code: Code, at: int, is64: bool, length: int
 ) -> tuple[str, int | None, int | None] | None:
     """``(kind, register, absolute address)`` of an instruction that stores a register to a
     slot, loads one from a slot, or takes an address: ``store``, ``load`` or ``address``.
@@ -1446,6 +1453,7 @@ class _Placer:
         return []
 
 
+@read_as_bytes
 def index_image(
     image: Image,
     *,
@@ -1870,7 +1878,7 @@ def _answer(
         "unplaced": dict(sorted(unplaced.items())),
         "total": len(out),
         "rows": out,
-    }
+    } | ({"imports_cut": image.imports_note} if image.imports_note else {})
 
 
 # The sources when no answer listed function starts.
@@ -1979,7 +1987,7 @@ def sample_text(value: Any) -> str:
     """A value the sample wrote (a name from its tables), quoted with the pack's escaping."""
     from maljan.utils.written_forms import pack_escaped
 
-    return f'"{pack_escaped(str(value or ""))}"'
+    return f'"{pack_escaped(str(value or ""), ids=True)}"'
 
 
 def head_text(data: Mapping[str, Any], rows: int) -> str:
@@ -2002,6 +2010,8 @@ def head_text(data: Mapping[str, Any], rows: int) -> str:
     if unplaced:
         counted = ", ".join(f"{tool} {n}" for tool, n in unplaced.items())
         said += f"; places no function holds, not counted: {counted}"
+    if data.get("imports_cut"):
+        said += f"; imports: {data['imports_cut']}"
     if not rows:
         return said
     return (
@@ -2232,6 +2242,19 @@ def served_index(path: str | Path, address: Any = None) -> dict[str, Any]:
         readings = read
     answers: dict[str, Any] = {}
     absent: dict[str, str] = {}
+    # This server's own emulated strings tool, remembered for the file, read
+    # once: the decoder below compares with these same rows and the index
+    # joins them, so the two never read the memory at different moments.
+    emulated = emulated_strings.TOOL
+    # Rows that could not be read are none, with the reason, handed to the
+    # decoder as a partial comparison: the memory is read once either way.
+    unread = ""
+    try:
+        recovered = emulated_strings.remembered_rows(str(path))
+    except Exception as exc:  # noqa: BLE001 - stated under ``absent``, never lost
+        recovered = []
+        absent[emulated] = FLOSS_UNREADABLE.format(type(exc).__name__)
+        unread = f"FLOSS's rows for this file could not be read ({type(exc).__name__})"
     for name, call in (
         (
             "pe_info",
@@ -2240,7 +2263,12 @@ def served_index(path: str | Path, address: Any = None) -> dict[str, Any]:
             ),
         ),
         ("resolve_api_hashes", lambda: api_hashes.resolve_api_hashes(str(path))),
-        ("decode_string_blobs", lambda: string_blobs.decode_string_blobs(str(path))),
+        (
+            "decode_string_blobs",
+            lambda: string_blobs.decode_string_blobs(
+                str(path), recovered=recovered, recovered_partial=unread
+            ),
+        ),
     ):
         try:
             value = call()
@@ -2254,15 +2282,8 @@ def served_index(path: str | Path, address: Any = None) -> dict[str, Any]:
             if isinstance(said, dict):
                 said = said.get("message") or said
             absent[name] = ERROR_HERE.format(said)
-    # This server's own emulated strings tool, remembered for the file: its
-    # rows are cited by the tool's name, as no ledger entry exists here.
-    emulated = emulated_strings.TOOL
+    # Its rows are cited by the tool's name, as no ledger entry exists here.
     sites: list[SiteSource] = []
-    try:
-        recovered = emulated_strings.remembered_rows(str(path))
-    except Exception as exc:  # noqa: BLE001 - stated under ``absent``, never lost
-        recovered = []
-        absent[emulated] = FLOSS_UNREADABLE.format(exc)
     if recovered:
         answers[emulated] = (emulated, {"strings": recovered})
         sites.append((emulated, emulated, recovered))
@@ -2282,6 +2303,8 @@ def served_index(path: str | Path, address: Any = None) -> dict[str, Any]:
     data["joined"] = sorted(answers)
     rows = rows_of(data)
     out = {key: data[key] for key in _SERVED_KEYS}
+    if data.get("imports_cut"):
+        out["imports_cut"] = data["imports_cut"]
     if not readings:
         table = [head_text(data, len(rows)), *(row_line(row, THIS_ANSWER) for row in rows)]
         return out | {"table": "\n".join(table)}

@@ -90,6 +90,7 @@ def _attck_doors() -> dict[str, Any]:
         "index": attck_index.load_all_domains,
         "data": attck_loader.load_attck_data,
         "fetch": attck_loader._fetch_bundle,
+        "download": attck_loader._download_bundle_file,
         "model": embeddings._try_load_fastembed,
     }
 
@@ -136,6 +137,7 @@ def _no_attck_downloads(
     monkeypatch.setattr(attck_index, "load_all_domains", _refuse_build)
     monkeypatch.setattr(attck_loader, "load_attck_data", _refuse_build)
     monkeypatch.setattr(attck_loader, "_fetch_bundle", _refuse_fetch)
+    monkeypatch.setattr(attck_loader, "_download_bundle_file", _refuse_fetch)
     monkeypatch.setattr(embeddings, "_try_load_fastembed", _bag_of_words)
     monkeypatch.setattr(embeddings, "_model", None)
     monkeypatch.setattr(attck_loader, "ATTCK_CACHE_DIR", _attck_cache_dir)
@@ -165,5 +167,6 @@ def real_attck_index(
     monkeypatch.setattr(attck_index, "load_all_domains", _attck_doors["loader"])
     monkeypatch.setattr(attck_loader, "load_attck_data", _attck_doors["data"])
     monkeypatch.setattr(attck_loader, "_fetch_bundle", _attck_doors["fetch"])
+    monkeypatch.setattr(attck_loader, "_download_bundle_file", _attck_doors["download"])
     monkeypatch.setattr(embeddings, "_try_load_fastembed", _attck_doors["model"])
     yield

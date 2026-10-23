@@ -71,6 +71,7 @@ from maljan.core.undeclared_tools import (
 )
 from maljan.pipeline.events import safe_finding_value
 from maljan.pipeline.validation import (
+    _AND_AT_END_RE,
     _BARE_ADDRESS,
     _CLAUSE_BREAK_RE,
     _CODE_SPAN_RE,
@@ -80,11 +81,14 @@ from maljan.pipeline.validation import (
     _LIST_END_RE,
     _LIST_ITEM,
     _NAME_ARGUMENTS,
+    _NAMED_LIST_RE,
     _NEGATED_NOUN_LIST_RE,
+    _NEGATED_OBJECT_WORDS,
     _NEGATED_VERB_RE,
     _NEGATION_RE,
     _NEGATION_REACH_END_RE,
     _NEGATION_WINDOW,
+    _NEW_SUBJECT_RE,
     _NOT_A_NEGATION,
     _NOUN_NEGATION_RE,
     _QUOTED_SPAN_RE,
@@ -561,15 +565,31 @@ class FunctionFacts:
         )
 
     def offset(self, address: int | None) -> int | None:
-        """The index offset of a function an answer gave by address, or ``None``."""
+        """The index offset of a function an answer gave by address, or ``None``.
+
+        The address read as an offset and read as a virtual address over each
+        base the run read: placed only when every reading the index knows is
+        one function, or, of two or more, when exactly one row shows the
+        address as cited. Otherwise none, since which one the answer meant
+        cannot be told.
+        """
         if address is None:
             return None
-        if address in self.known:
-            return address
+        readings = {address} if address in self.known else set()
         for base in self.bases:
             if address >= base and address - base in self.known:
-                return address - base
-        return None
+                readings.add(address - base)
+        if len(readings) == 1:
+            return readings.pop()
+        # Two functions it could be: the one whose row shows the address as
+        # cited (``artefact_index.row_line``) is the one meant, when only one
+        # does.
+        shown = [
+            start
+            for start in readings
+            if start in self.rows and _hex(self.rows[start].get("function")) == address
+        ]
+        return shown[0] if len(shown) == 1 else None
 
     def va(self, offset: int) -> str:
         return hex(self.base + offset)
@@ -812,15 +832,6 @@ _ITEMS_AT = re.compile(
     _NEGATED_NOUN_LIST_RE.flags,
 )
 _ASSERTS_AT = re.compile(_CUE_THAT_ASSERTS_RE.pattern.removeprefix("^"), _CUE_THAT_ASSERTS_RE.flags)
-# ``_in_a_named_list``'s readings: the list a noun negation names, and a term
-# that opens a new subject after a final "and".
-_NAMED_LIST = re.compile(r",\s*such\s+as\b", re.IGNORECASE)
-_NEW_SUBJECT = re.compile(r"\w+(?:\s+\w+)?\s+(?:is|are|was|were|has|have|had)\b", re.IGNORECASE)
-_AND_AT_END = re.compile(r"\band\s*$", re.IGNORECASE)
-# The words a negated verb's object runs over before the mention, at most
-# (``_NEGATED_OBJECT_RE``: the verb, six words, a participle and a preposition,
-# a determiner).
-_OBJECT_WORDS = 10
 
 
 @dataclass
@@ -942,7 +953,7 @@ class _Clauses:
                 lambda m: " " * len(m.group(0)), text[cue.end() : stop]
             )
             reach = _NEGATION_REACH_END_RE.search(masked)
-            named = _NAMED_LIST.search(text, cue.end(), stop)
+            named = _NAMED_LIST_RE.search(text, cue.end(), stop)
             ended = _LIST_END_RE.search(text, named.end(), stop) if named else None
             region.nouns.append(
                 _NounCue(
@@ -980,8 +991,10 @@ class _Clauses:
         tail = begin
         while tail > cue.named and self.text[tail - 1].isspace():
             tail -= 1
-        ends_with_and = _AND_AT_END.search(self.text, max(cue.named, tail - 3), begin) is not None
-        return not (ends_with_and and _NEW_SUBJECT.match(self.text, begin))
+        ends_with_and = (
+            _AND_AT_END_RE.search(self.text, max(cue.named, tail - 3), begin) is not None
+        )
+        return not (ends_with_and and _NEW_SUBJECT_RE.match(self.text, begin))
 
     def _in_negated_object(self, region: _Region, begin: int) -> bool:
         """``_in_a_negated_object`` read within the last negated verb before begin, when the
@@ -993,7 +1006,7 @@ class _Clauses:
             return False
         start, verb_end = region.verbs[k]
         words = bisect_left(region.spaces, begin) - bisect_left(region.spaces, verb_end)
-        if words > _OBJECT_WORDS or "," in self.text[verb_end:begin]:
+        if words > _NEGATED_OBJECT_WORDS or "," in self.text[verb_end:begin]:
             return False
         return _in_a_negated_object(self.text[start:begin], begin - start)
 
@@ -1288,6 +1301,7 @@ def check_function_claims(
         sources: list[_Held] = [facts.listings[i] for i in listing_ids if i in facts.listings]
         reason = ""
         starts: list[int] = []
+        asked_about: list[DecompiledFunction] = []
         for function in about:
             start = facts.offset(function.address)
             if start is None:
@@ -1300,26 +1314,34 @@ def check_function_claims(
             if facts.shown is not None and start in facts.rows and start not in facts.shown:
                 reason = ROW_NOT_SHOWN.format(address=facts.va(start))
                 break
-            starts.append(start)
+            if start not in starts:
+                starts.append(start)
+                asked_about.append(function)
         if not reason and facts.undecoded is None:
             reason = UNDECODED_UNKNOWN.format(entry=facts.index_entry)
         reached: _Reached | None = None
         if not reason:
             reached = facts.reach(starts)
             if reached.stopped:
-                reason = UNDECODED.format(address=facts.va(starts[0]))
+                reason = UNDECODED.format(
+                    address=facts.va(_first_start(starts, reached, "stopped"))
+                )
         if reason or reached is None:
             out.not_checked.append(f"claim {number}: {reason}")
             continue
         out.checked += 1
-        where = facts.va(starts[0])
         api_reason = ""
         if facts.unnamed is None:
             api_reason = UNNAMED_UNKNOWN.format(entry=facts.index_entry)
         elif not reached.whole:
-            api_reason = CALLEES_UNKNOWN.format(entry=facts.index_entry, address=where)
+            api_reason = CALLEES_UNKNOWN.format(
+                entry=facts.index_entry,
+                address=facts.va(_first_start(starts, reached, "whole", missing=True)),
+            )
         elif reached.unnamed:
-            api_reason = UNNAMED_CALLS.format(address=where)
+            api_reason = UNNAMED_CALLS.format(
+                address=facts.va(_first_start(starts, reached, "unnamed"))
+            )
         # Each value is the function's only where the claim gives it to it: the
         # function it last names before the value, in the value's own clause.
         apis: list[str] = []
@@ -1369,7 +1391,7 @@ def check_function_claims(
                 index,
                 number,
                 sentence,
-                about,
+                asked_about,
                 starts,
                 reached.count() - len(starts),
                 unheld,
@@ -1378,6 +1400,20 @@ def check_function_claims(
             )
         )
     return out
+
+
+def _first_start(
+    starts: Sequence[int], reached: _Reached, flag: str, *, missing: bool = False
+) -> int:
+    """The first of ``starts`` whose own reach has ``flag`` set (or lacks it, ``missing``).
+
+    ``reached`` holds one part per start, in order, so a message naming
+    the function the fault is in names that one and not the claim's first.
+    """
+    for start, part in zip(starts, reached.parts, strict=False):
+        if bool(getattr(part, flag)) is not missing:
+            return start
+    return starts[0]
 
 
 def _attribution(

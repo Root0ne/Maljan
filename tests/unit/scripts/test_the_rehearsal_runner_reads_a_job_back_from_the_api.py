@@ -225,16 +225,216 @@ class TestTheGateChangesOnlyTheEndpoints:
         assert changes["api.enrichment_enabled"] is False
         servers = changes["core.mcp.servers"]
         assert servers["analysis"]["enabled"] and servers["local"]["enabled"]
-        assert servers["threatintel"]["enabled"] and servers["threatintel"]["env_allow"] == []
+        # Its declarations say it reaches a third party: disabled, its keys untouched.
+        assert not servers["threatintel"]["enabled"]
+        assert servers["threatintel"]["env_allow"] == ["VIRUSTOTAL_API_KEY", "ABUSEIPDB_API_KEY"]
         assert not servers["virustotal"]["enabled"]
         assert servers["virustotal"]["token"] == "**********"
         assert "core.mcp.servers" in gate_changes(values, STUB)
         described = describe_changes(values, changes)
-        assert described["servers_disabled"] == ["virustotal"]
-        assert described["servers_with_keys_withheld"] == ["threatintel"]
+        assert described["servers_disabled"] == ["threatintel", "virustotal"]
+        assert described["servers_kept"] == {"local": "kept: effects not declared"}
         assert described["settings"]["core.sandbox.provider"] == {
             "before": "triage",
             "rehearsed": "mock",
+        }
+
+    def test_a_server_declaring_a_third_party_is_disabled_whatever_its_environment(
+        self,
+    ) -> None:
+        """Declarations decide, never the key, the environment, the arguments or the transport."""
+        lookup = {"lookup": {"effects": {"executes": "no", "network": True, "third_party": "hash"}}}
+        offline = {"read": {"effects": {"executes": "no", "network": False, "third_party": "no"}}}
+        values = _values(
+            **{
+                "core.mcp.servers": {
+                    "value": {
+                        "token_in_env": {
+                            "enabled": True,
+                            "transport": "stdio",
+                            "env": {"MY_INTEL_KEY": "**********"},
+                            "tool_facts": lookup,
+                        },
+                        "keys_from_host": {
+                            "enabled": True,
+                            "transport": "stdio",
+                            "env_allow": ["MY_INTEL_KEY"],
+                            "tool_facts": lookup,
+                        },
+                        "loopback_http": {
+                            "enabled": True,
+                            "transport": "streamable-http",
+                            "url": "http://127.0.0.1:9200/mcp",
+                            "env_allow": ["MY_INTEL_KEY"],
+                            "tool_facts": lookup,
+                        },
+                        "key_in_args": {
+                            "enabled": True,
+                            "transport": "stdio",
+                            "args": ["server.py", "--api-key", "**********"],
+                            "tool_facts": lookup,
+                        },
+                        "no_env_at_all": {
+                            "enabled": True,
+                            "transport": "stdio",
+                            "tool_facts": {"lookup": {"effects": {"network": True}}},
+                        },
+                        "refused": {
+                            "enabled": True,
+                            "transport": "stdio",
+                            "tool_facts": {"lookup": {"effects": {"network": "nowhere"}}},
+                        },
+                        "offline_mine": {
+                            "enabled": True,
+                            "transport": "stdio",
+                            "env": {"SOME_SETTING": "x"},
+                            "env_allow": ["SOME_NAME"],
+                            "tool_facts": offline,
+                        },
+                    },
+                    "source": "ui",
+                },
+            }
+        )
+        changes = third_party_off(values)
+        servers = changes["core.mcp.servers"]
+        for key in (
+            "token_in_env",
+            "keys_from_host",
+            "loopback_http",
+            "key_in_args",
+            "no_env_at_all",
+            "refused",
+        ):
+            assert not servers[key]["enabled"], key
+        assert servers["keys_from_host"]["env_allow"] == ["MY_INTEL_KEY"]
+        assert servers["token_in_env"]["env"] == {"MY_INTEL_KEY": "**********"}
+        assert servers["offline_mine"]["enabled"]
+        assert servers["offline_mine"]["env_allow"] == ["SOME_NAME"]
+        described = describe_changes(values, changes)
+        assert "offline_mine" not in described["servers_disabled"]
+        assert described["servers_kept"] == {}
+
+    def test_an_undeclared_server_is_kept_at_full_strength_and_named(self) -> None:
+        values = _values(
+            **{
+                "core.mcp.servers": {
+                    "value": {
+                        "mine": {
+                            "enabled": True,
+                            "transport": "stdio",
+                            "env_allow": ["MY_TOKEN"],
+                            "env": {"MY_SETTING": "x"},
+                        },
+                        "analysis": {"enabled": True, "transport": "stdio"},
+                    },
+                    "source": "ui",
+                },
+            }
+        )
+        changes = third_party_off(values)
+        assert "core.mcp.servers" not in changes
+        described = describe_changes(values, changes)
+        assert described["servers_kept"] == {"mine": "kept: effects not declared"}
+        assert described["servers_disabled"] == []
+
+    def test_a_server_with_some_tools_undeclared_is_kept_and_named(self) -> None:
+        declared = {"effects": {"executes": "no", "network": False, "third_party": "no"}}
+        values = _values(
+            **{
+                "core.mcp.servers": {
+                    "value": {
+                        "mixed": {
+                            "enabled": True,
+                            "transport": "stdio",
+                            "tool_facts": {"read": declared, "other": {}},
+                        },
+                    },
+                    "source": "ui",
+                },
+            }
+        )
+        changes = third_party_off(values)
+        assert "core.mcp.servers" not in changes
+        described = describe_changes(values, changes)
+        assert described["servers_kept"] == {"mixed": "kept: effects not declared for some tools"}
+
+    def test_an_allowed_tool_with_no_entry_at_all_makes_the_server_partly_declared(self) -> None:
+        declared = {"effects": {"executes": "no", "network": False, "third_party": "no"}}
+        servers = {
+            "listed": {
+                "enabled": True,
+                "transport": "stdio",
+                "tools": ["read", "write"],
+                "tool_facts": {"read": declared},
+            },
+            "whole": {
+                "enabled": True,
+                "transport": "stdio",
+                "tools": ["read"],
+                "tool_facts": {"read": declared},
+            },
+        }
+        values = _values(**{"core.mcp.servers": {"value": servers, "source": "ui"}})
+        described = describe_changes(values, third_party_off(values))
+        assert described["servers_kept"] == {"listed": "kept: effects not declared for some tools"}
+
+    def test_a_server_declaring_it_answers_offline_without_credentials_is_kept_and_named(
+        self,
+    ) -> None:
+        offline = {
+            "effects": {
+                "network": True,
+                "third_party": "hash",
+                "offline_without_credentials": True,
+            }
+        }
+        reaching = {"effects": {"network": True, "third_party": "hash"}}
+        servers = {
+            "offline": {
+                "enabled": True,
+                "transport": "stdio",
+                "env": {"MY_KEY": "x"},
+                "env_allow": ["OTHER_KEY"],
+                "auth_token": "secret-token",
+                "args": ["--serve", "--api-key", "abc", "--mode=fast", "TOKEN_X=1"],
+                "tool_facts": {"lookup": offline},
+            },
+            "bytes": {
+                "enabled": True,
+                "transport": "stdio",
+                "tool_facts": {
+                    "put": {
+                        "discloses_sample": True,
+                        "effects": {"network": True, "offline_without_credentials": True},
+                    },
+                    "put2": {
+                        "effects": {
+                            "network": True,
+                            "third_party": "bytes",
+                            "offline_without_credentials": True,
+                        }
+                    },
+                },
+            },
+            "mixed": {
+                "enabled": True,
+                "transport": "stdio",
+                "tool_facts": {"lookup": offline, "other": reaching},
+            },
+        }
+        values = _values(**{"core.mcp.servers": {"value": servers, "source": "ui"}})
+        changes = third_party_off(values)
+        assert changes["core.mcp.servers"]["offline"]["enabled"]
+        kept = changes["core.mcp.servers"]["offline"]
+        assert kept["env"] == {} and kept["env_allow"] == [] and kept["auth_token"] == ""
+        assert kept["args"] == ["--serve", "--mode=fast"]
+        assert not changes["core.mcp.servers"]["bytes"]["enabled"]
+        assert not changes["core.mcp.servers"]["mixed"]["enabled"]
+        described = describe_changes(values, changes)
+        assert described["servers_disabled"] == ["bytes", "mixed"]
+        assert described["servers_kept"] == {
+            "offline": "kept: declares it answers offline without credentials; credentials withheld"
         }
 
     def test_the_harness_mode_touches_no_key_and_keeps_the_stack_s_tools(self) -> None:

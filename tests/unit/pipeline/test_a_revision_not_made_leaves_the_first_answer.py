@@ -23,7 +23,7 @@ from maljan.core.exceptions import AnalystError
 from maljan.core.spend import SpendCeilingStop
 from maljan.pipeline import events as ev
 from maljan.pipeline.evidence_summary import summarise
-from maljan.pipeline.nodes import make_revision_node
+from maljan.pipeline.nodes import RevisionInput, make_revision_node
 from maljan.pipeline.state import _merge_dicts
 from maljan.schemas.isr_models import AgentISR, ClaimEvidence
 from tests.stages import paper_profile
@@ -106,7 +106,7 @@ def _run(
         labels = {}
     state = _state()
     with pytest.MonkeyPatch.context() as mp:
-        mp.setattr("maljan.pipeline.nodes._revision_input_is_absent", lambda *a: False)
+        mp.setattr("maljan.pipeline.nodes._revision_input", lambda *a: RevisionInput(text="data"))
         mp.setattr("maljan.pipeline.nodes.label_of", lambda _c, key: labels.get(key, key))
         update = asyncio.run(make_revision_node(container)(state))
     merged = _merge_dicts(state["isr_reports"], update["isr_reports"])

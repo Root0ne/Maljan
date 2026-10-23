@@ -1,0 +1,1613 @@
+{
+ "dump": {
+  "acknowledgements": null,
+  "appendices": [],
+  "attck_defense": [],
+  "attck_defense_version": "",
+  "attribution": {
+   "actor": null,
+   "campaign": null,
+   "family": "ExampleLoader",
+   "family_confidence": 0.72,
+   "family_evidence_ids": [
+    "ev_0006"
+   ],
+   "family_grounded": true,
+   "family_rag_candidates": [],
+   "family_source": "judge",
+   "function_hash_matches": [],
+   "similar_samples": []
+  },
+  "c2_channels": [
+   {
+    "beacon_format": "form-encoded fields",
+    "encryption": "unknown",
+    "endpoints": [
+     "http://c2.evil.tld/gate.php",
+     "10.0.0.5"
+    ],
+    "evidence_ref": null,
+    "evidence_refs": [
+     "ev_0009"
+    ],
+    "name": "HTTP gate",
+    "packet_layout": null,
+    "protocol": "HTTP POST"
+   }
+  ],
+  "capabilities_narrative": [],
+  "capability_matrix": [
+   {
+    "confidence": 0.8,
+    "confidence_source": "the static analyst",
+    "contributing_layers": [
+     "static",
+     "capa"
+    ],
+    "domain": "",
+    "evidence": [
+     "Injects into a suspended process [ev_0010]"
+    ],
+    "evidence_roots": [],
+    "identical_statements": 0,
+    "independent_layers": [],
+    "independent_sources": 0,
+    "is_corroborated": null,
+    "not_published": "",
+    "note": "",
+    "platforms": [],
+    "roots_not_read": [],
+    "source_kinds": {},
+    "sources": [],
+    "statements": [],
+    "support": "",
+    "tactic": "TA0005",
+    "tactic_name": "Defense Evasion",
+    "technique_id": "T1055",
+    "technique_id_valid": true,
+    "technique_name": "Process Injection"
+   },
+   {
+    "confidence": 0.92,
+    "confidence_source": "the judge",
+    "contributing_layers": [
+     "dynamic",
+     "judge"
+    ],
+    "domain": "",
+    "evidence": [
+     "Writes the Run key for its copy [ev_0012]"
+    ],
+    "evidence_roots": [],
+    "identical_statements": 0,
+    "independent_layers": [],
+    "independent_sources": 0,
+    "is_corroborated": null,
+    "not_published": "",
+    "note": "",
+    "platforms": [],
+    "roots_not_read": [],
+    "source_kinds": {},
+    "sources": [],
+    "statements": [],
+    "support": "",
+    "tactic": "TA0003",
+    "tactic_name": "Persistence",
+    "technique_id": "T1547.001",
+    "technique_id_valid": true,
+    "technique_name": "Registry Run Keys / Startup Folder"
+   },
+   {
+    "confidence": 0.4,
+    "confidence_source": "",
+    "contributing_layers": [
+     "static"
+    ],
+    "domain": "",
+    "evidence": [
+     "claimed on a finding"
+    ],
+    "evidence_roots": [],
+    "identical_statements": 0,
+    "independent_layers": [],
+    "independent_sources": 0,
+    "is_corroborated": null,
+    "not_published": "it was named on a finding rather than on a claim",
+    "note": "",
+    "platforms": [],
+    "roots_not_read": [],
+    "source_kinds": {},
+    "sources": [],
+    "statements": [],
+    "support": "",
+    "tactic": "TA0007",
+    "tactic_name": "Discovery",
+    "technique_id": "T1082",
+    "technique_id_valid": true,
+    "technique_name": "System Information Discovery"
+   }
+  ],
+  "claims_not_discussed": [],
+  "conclusion": null,
+  "consolidated_iocs": [
+   {
+    "context": "the sample",
+    "description": "the sample",
+    "is_network": false,
+    "kind": "hash",
+    "published": "yes: the sample's own digest",
+    "recovered_by": "",
+    "source": "identity",
+    "type": "SHA-256",
+    "value": "275a021bbfb6489e54d471899f7db9d1663fc695ec2fe2a2c4538aabf651fd0f"
+   },
+   {
+    "context": "the sample",
+    "description": "the sample",
+    "is_network": false,
+    "kind": "hash",
+    "published": "yes: the sample's own digest",
+    "recovered_by": "",
+    "source": "identity",
+    "type": "SHA-1",
+    "value": "3395856ce81f2b7382dee72602f798b642f14140"
+   },
+   {
+    "context": "the sample",
+    "description": "the sample",
+    "is_network": false,
+    "kind": "hash",
+    "published": "yes: the sample's own digest",
+    "recovered_by": "",
+    "source": "identity",
+    "type": "MD5",
+    "value": "44d88612fea8a8f36de82e1278abb02f"
+   },
+   {
+    "context": "the sample",
+    "description": "the sample",
+    "is_network": false,
+    "kind": "hash",
+    "published": "yes: the sample's own digest",
+    "recovered_by": "",
+    "source": "identity",
+    "type": "imphash",
+    "value": "f34d5f2d4577ed6d9ceec516c1f5a744"
+   },
+   {
+    "context": "dropped C:\\Users\\admin\\AppData\\svchost.exe",
+    "description": "dropped C:\\Users\\admin\\AppData\\svchost.exe",
+    "is_network": false,
+    "kind": "hash",
+    "published": null,
+    "recovered_by": "",
+    "source": "sandbox",
+    "type": "SHA-256",
+    "value": "aa"
+   },
+   {
+    "context": "written by the sample",
+    "description": "written by the sample",
+    "is_network": false,
+    "kind": "path",
+    "published": null,
+    "recovered_by": "",
+    "source": "sandbox",
+    "type": "File path",
+    "value": "C:\\Users\\admin\\AppData\\svchost.exe"
+   },
+   {
+    "context": "modify",
+    "description": "modify",
+    "is_network": false,
+    "kind": "registry",
+    "published": null,
+    "recovered_by": "",
+    "source": "sandbox",
+    "type": "Registry key",
+    "value": "HKLM\\Software\\Microsoft\\Windows\\CurrentVersion\\Run"
+   },
+   {
+    "context": "create",
+    "description": "create",
+    "is_network": false,
+    "kind": "registry",
+    "published": null,
+    "recovered_by": "",
+    "source": "sandbox",
+    "type": "Registry key",
+    "value": "HKCU\\Software\\Evil\\Config"
+   },
+   {
+    "context": "created at run time",
+    "description": "created at run time",
+    "is_network": false,
+    "kind": "mutex",
+    "published": null,
+    "recovered_by": "",
+    "source": "sandbox",
+    "type": "Mutex",
+    "value": "Global\\LockBitMutex"
+   },
+   {
+    "context": "",
+    "description": "",
+    "is_network": false,
+    "kind": "scheduled_task",
+    "published": null,
+    "recovered_by": "",
+    "source": "persistence",
+    "type": "Scheduled task",
+    "value": "schtasks /create /tn EvilTask /tr C:\\evil.exe"
+   },
+   {
+    "context": "",
+    "description": "",
+    "is_network": false,
+    "kind": "service",
+    "published": null,
+    "recovered_by": "",
+    "source": "persistence",
+    "type": "Service",
+    "value": "EvilUpdater"
+   },
+   {
+    "context": "",
+    "description": "",
+    "is_network": true,
+    "kind": "domain",
+    "published": "yes: the host of http://c2.evil.tld/gate.php, which this run publishes",
+    "recovered_by": "",
+    "source": "sandbox",
+    "type": "Domain",
+    "value": "c2.evil.tld"
+   },
+   {
+    "context": "reached by the sample's process tree",
+    "description": "reached by the sample's process tree",
+    "is_network": true,
+    "kind": "ip",
+    "published": "yes: the sandbox recorded it",
+    "recovered_by": "",
+    "source": "sandbox",
+    "type": "IPv4",
+    "value": "185.220.101.5"
+   },
+   {
+    "context": "POST",
+    "description": "POST",
+    "is_network": true,
+    "kind": "url",
+    "published": "yes: the sandbox recorded it",
+    "recovered_by": "",
+    "source": "sandbox",
+    "type": "URL",
+    "value": "http://c2.evil.tld/gate.php"
+   }
+  ],
+  "defensive_recommendations": [
+   {
+    "action": "Block c2.evil.tld at the egress proxy.",
+    "category": "firewall",
+    "detection": "Proxy POST requests to c2.evil.tld/gate.php.",
+    "priority": "P0",
+    "rationale": "It is the only C2 the sandbox saw.",
+    "technique_id": "T1071.001"
+   },
+   {
+    "action": "Remove the Run value and the dropped copy.",
+    "category": "registry_hardening",
+    "detection": "Sysmon event 13 on the CurrentVersion\\Run key.",
+    "priority": "P1",
+    "rationale": "The Run key restarts it at logon.",
+    "technique_id": "T1547.001"
+   },
+   {
+    "action": "Hunt for processes created suspended and written to.",
+    "category": "edr_hunting",
+    "detection": null,
+    "priority": "P2",
+    "rationale": "It injects into a suspended process.",
+    "technique_id": "T1055"
+   }
+  ],
+  "degradation_reasons": [],
+  "degraded_mode": false,
+  "detection_signatures": [],
+  "disclaimer": null,
+  "dynamic": {
+   "api_capabilities": {},
+   "file_operations": [
+    {
+     "name": "Global\\LockBitMutex",
+     "operation": "mutex"
+    },
+    {
+     "name": "svchost.exe",
+     "operation": "write",
+     "path": "C:\\Users\\admin\\AppData\\svchost.exe",
+     "sha256": "aa",
+     "size": 51200,
+     "type": "PE32 executable"
+    }
+   ],
+   "notable_apis": [
+    {
+     "api": "VirtualAllocEx",
+     "arguments": "{'ProcessHandle': '0x1a4', 'Size': 4096}",
+     "count": 4,
+     "process": ""
+    },
+    {
+     "api": "RegSetValueExA",
+     "arguments": "",
+     "count": 3,
+     "process": ""
+    }
+   ],
+   "process_tree": [
+    {
+     "children": [],
+     "command_line": "evil.exe -install",
+     "injected_into": [],
+     "name": "evil.exe",
+     "pid": 1234,
+     "ppid": 800
+    }
+   ],
+   "registry_mods": [
+    {
+     "hive": "HKLM",
+     "key": "HKLM\\Software\\Microsoft\\Windows\\CurrentVersion\\Run",
+     "new_value": "C:\\Users\\Public\\lockbit.exe",
+     "operation": "modify",
+     "value_name": null
+    },
+    {
+     "hive": "HKCU",
+     "key": "HKCU\\Software\\Evil\\Config",
+     "new_value": null,
+     "operation": "create",
+     "value_name": null
+    }
+   ],
+   "sandbox_signatures": [
+    {
+     "description": "Injects into a suspended process",
+     "marks": [],
+     "name": "injection_runpe",
+     "severity": 3,
+     "technique_ids": []
+    }
+   ],
+   "unavailable": []
+  },
+  "emulated_strings": {
+   "partial": "",
+   "plain": {},
+   "recovered_by": {},
+   "spelled": {},
+   "values": {}
+  },
+  "evidence_index": [
+   {
+    "agent": "pipeline",
+    "duration_ms": 0,
+    "id": "ev_0001",
+    "ok": true,
+    "repeated_of": null,
+    "server": null,
+    "tool": "identify_file",
+    "truncated": false
+   },
+   {
+    "agent": "pipeline",
+    "duration_ms": 0,
+    "id": "ev_0002",
+    "ok": true,
+    "repeated_of": null,
+    "server": null,
+    "tool": "hashes",
+    "truncated": false
+   },
+   {
+    "agent": "pipeline",
+    "duration_ms": 0,
+    "id": "ev_0003",
+    "ok": true,
+    "repeated_of": null,
+    "server": null,
+    "tool": "pe_info",
+    "truncated": false
+   },
+   {
+    "agent": "static",
+    "duration_ms": 0,
+    "id": "ev_0004",
+    "ok": true,
+    "repeated_of": null,
+    "server": null,
+    "tool": "strings",
+    "truncated": false
+   },
+   {
+    "agent": "static",
+    "duration_ms": 0,
+    "id": "ev_0005",
+    "ok": true,
+    "repeated_of": null,
+    "server": null,
+    "tool": "iocs_from_file",
+    "truncated": false
+   },
+   {
+    "agent": "pipeline",
+    "duration_ms": 0,
+    "id": "ev_0006",
+    "ok": true,
+    "repeated_of": null,
+    "server": null,
+    "tool": "yara_scan",
+    "truncated": false
+   },
+   {
+    "agent": "pipeline",
+    "duration_ms": 0,
+    "id": "ev_0007",
+    "ok": true,
+    "repeated_of": null,
+    "server": null,
+    "tool": "capa",
+    "truncated": false
+   },
+   {
+    "agent": "dynamic",
+    "duration_ms": 0,
+    "id": "ev_0008",
+    "ok": true,
+    "repeated_of": null,
+    "server": null,
+    "tool": "sandbox_processes",
+    "truncated": false
+   },
+   {
+    "agent": "dynamic",
+    "duration_ms": 0,
+    "id": "ev_0009",
+    "ok": true,
+    "repeated_of": null,
+    "server": null,
+    "tool": "sandbox_network",
+    "truncated": false
+   },
+   {
+    "agent": "dynamic",
+    "duration_ms": 0,
+    "id": "ev_0010",
+    "ok": true,
+    "repeated_of": null,
+    "server": null,
+    "tool": "sandbox_signatures",
+    "truncated": false
+   },
+   {
+    "agent": "dynamic",
+    "duration_ms": 0,
+    "id": "ev_0011",
+    "ok": true,
+    "repeated_of": null,
+    "server": null,
+    "tool": "sandbox_dropped_files",
+    "truncated": false
+   },
+   {
+    "agent": "dynamic",
+    "duration_ms": 0,
+    "id": "ev_0012",
+    "ok": true,
+    "repeated_of": null,
+    "server": null,
+    "tool": "sandbox_registry_ops",
+    "truncated": false
+   },
+   {
+    "agent": "dynamic",
+    "duration_ms": 0,
+    "id": "ev_0013",
+    "ok": true,
+    "repeated_of": null,
+    "server": null,
+    "tool": "sandbox_api_calls",
+    "truncated": false
+   },
+   {
+    "agent": "dynamic",
+    "duration_ms": 0,
+    "id": "ev_0014",
+    "ok": true,
+    "repeated_of": null,
+    "server": null,
+    "tool": "sandbox_mutexes",
+    "truncated": false
+   },
+   {
+    "agent": "dynamic",
+    "duration_ms": 0,
+    "id": "ev_0015",
+    "ok": true,
+    "repeated_of": null,
+    "server": null,
+    "tool": "sandbox_services_and_tasks",
+    "truncated": false
+   },
+   {
+    "agent": "dynamic",
+    "duration_ms": 0,
+    "id": "ev_0016",
+    "ok": true,
+    "repeated_of": null,
+    "server": null,
+    "tool": "sigma_match",
+    "truncated": false
+   },
+   {
+    "agent": "network",
+    "duration_ms": 0,
+    "id": "ev_0017",
+    "ok": true,
+    "repeated_of": null,
+    "server": null,
+    "tool": "pcap_summary",
+    "truncated": false
+   }
+  ],
+  "executive_summary": "The sample is a Windows loader that we assess with moderate-to-high confidence belongs to the ExampleLoader family. It persists through a Run key and posts to c2.evil.tld over HTTP [ev_0009, ev_0013]. Hosts that ran it should be isolated.",
+  "figures": [],
+  "flagged_statements": [],
+  "front_matter": {
+   "authors": null,
+   "codename": null,
+   "copyright": "\u00a9 2026 Maljan",
+   "license": null,
+   "malware_name": "ExampleLoader",
+   "product_type": "Malware Analysis Report",
+   "publisher": "Maljan",
+   "report_date": "2026-10-22",
+   "report_number": "MJN20261022-275a02",
+   "subtitle": "loader targeting Windows",
+   "team": "Maljan Multi-Agent Pipeline",
+   "tlp": "AMBER",
+   "version": "1.0"
+  },
+  "generated_at": "2026-10-01T12:00:00Z",
+  "identity": {
+   "architecture": "x86",
+   "compile_timestamp": "2021-03-01T00:00:00Z",
+   "export_name": null,
+   "file_name": "invoice.exe",
+   "file_size_bytes": 204800,
+   "file_type": "PE",
+   "hashes": {
+    "imphash": "f34d5f2d4577ed6d9ceec516c1f5a744",
+    "md5": "44d88612fea8a8f36de82e1278abb02f",
+    "sha1": "3395856ce81f2b7382dee72602f798b642f14140",
+    "sha256": "275a021bbfb6489e54d471899f7db9d1663fc695ec2fe2a2c4538aabf651fd0f",
+    "sha512": null,
+    "ssdeep": null,
+    "tlsh": null
+   },
+   "internal_name": null,
+   "is_dll": false,
+   "language_or_compiler": null,
+   "magic_bytes": "4d5a90000300000004000000ffff0000",
+   "mime_type": "application/x-dosexec",
+   "platform": "windows",
+   "signing": {
+    "evidence_id": null,
+    "is_signed": false,
+    "signature_valid": null,
+    "signer_issuer": null,
+    "signer_subject": null,
+    "signer_thumbprint": null
+   }
+  },
+  "intro_background": "Loaders of this kind are reported to arrive through phishing attachments; this run saw only the file itself.",
+  "judge_indicators": [],
+  "key_findings": [
+   {
+    "evidence_ids": [
+     "ev_0010"
+    ],
+    "text": "It injects code into a suspended child process."
+   },
+   {
+    "evidence_ids": [
+     "ev_0012"
+    ],
+    "text": "It writes a Run key that starts its dropped copy at logon."
+   },
+   {
+    "evidence_ids": [
+     "ev_0009"
+    ],
+    "text": "It posts to http://c2.evil.tld/gate.php, likely its C2."
+   }
+  ],
+  "malware_category": "loader",
+  "misp_attributes": null,
+  "negotiation_summary": {
+   "confidence_history": [],
+   "final_confidence": 0.86,
+   "rounds_completed": 2,
+   "sycophancy_events": 0,
+   "termination_reason": "consensus"
+  },
+  "network": {
+   "domains": [
+    {
+     "capture_only": false,
+     "dga_score": 0.0,
+     "fqdn": "c2.evil.tld",
+     "homograph_target": null,
+     "is_punycode": false,
+     "is_suspicious": false,
+     "kept_by": [],
+     "mentioned_by": [],
+     "queried_pids": [],
+     "reason": null,
+     "reputation": null,
+     "resolved_ips": [],
+     "source": "sandbox"
+    }
+   ],
+   "ips": [
+    {
+     "address": "185.220.101.5",
+     "asn": null,
+     "file_only_processes": [],
+     "geo": null,
+     "is_suspicious": false,
+     "kept_by": [],
+     "marked_only_processes": [],
+     "mentioned_by": [],
+     "outside_processes": [],
+     "port": null,
+     "public_resolver": false,
+     "reputation": null,
+     "sample_process_tree": true,
+     "source": "sandbox",
+     "transport": null
+    }
+   ],
+   "ja3_fingerprints": [],
+   "ja3s_fingerprints": [],
+   "urls": [
+    {
+     "method": "POST",
+     "source": "sandbox",
+     "status": null,
+     "url": "http://c2.evil.tld/gate.php",
+     "user_agent": null
+    }
+   ],
+   "user_agents": []
+  },
+  "overall_confidence": 0.86,
+  "persistence": [
+   {
+    "evidence_ref": "ev_0012",
+    "kind": "registry_run",
+    "payload": "C:\\Users\\Public\\lockbit.exe",
+    "target": "HKLM\\Software\\Microsoft\\Windows\\CurrentVersion\\Run",
+    "technique_id": null
+   },
+   {
+    "evidence_ref": "ev_0015",
+    "kind": "service",
+    "payload": "",
+    "target": "EvilUpdater",
+    "technique_id": "T1543.003"
+   },
+   {
+    "evidence_ref": "ev_0015",
+    "kind": "scheduled_task",
+    "payload": "",
+    "target": "schtasks /create /tn EvilTask /tr C:\\evil.exe",
+    "technique_id": "T1053.005"
+   }
+  ],
+  "references": [
+   {
+    "note": "VT detection summary",
+    "sigma": true,
+    "source": "VirusTotal",
+    "url": "https://www.virustotal.com/gui/file/275a021bbfb6489e54d471899f7db9d1663fc695ec2fe2a2c4538aabf651fd0f"
+   },
+   {
+    "note": "Sample lookup",
+    "source": "MalwareBazaar",
+    "url": "https://bazaar.abuse.ch/sample/275a021bbfb6489e54d471899f7db9d1663fc695ec2fe2a2c4538aabf651fd0f/"
+   }
+  ],
+  "reputation": [],
+  "rule_match_strings": {},
+  "run_summary": {
+   "corroboration": {
+    "T1055": {
+     "asserted_by": [
+      "capa"
+     ],
+     "claimed_by": [
+      "static"
+     ]
+    },
+    "T1547.001": {
+     "asserted_by": [
+      "sigma"
+     ],
+     "claimed_by": [
+      "dynamic",
+      "judge"
+     ]
+    }
+   },
+   "elapsed_seconds": 412.5,
+   "evidence": {
+    "entries": 17,
+    "failed": 0,
+    "ok": 17,
+    "trimmed": 0
+   },
+   "final_decision": "Malware",
+   "negotiation": {
+    "final_confidence": 0.86,
+    "rounds_completed": 2,
+    "termination_reason": "consensus"
+   },
+   "stages": [
+    {
+     "duration_ms": 4200,
+     "key": "triage",
+     "kind": "pipeline",
+     "ran": true
+    },
+    {
+     "duration_ms": 280000,
+     "key": "analysts",
+     "kind": "team",
+     "ran": true
+    },
+    {
+     "duration_ms": 61000,
+     "key": "judge",
+     "kind": "judge",
+     "ran": true
+    }
+   ],
+   "validation": {
+    "by_code": {
+     "narrative.ungrounded_capability": 1
+    },
+    "retries": 1,
+    "unresolved": [
+     {
+      "agent": "judge",
+      "code": "stix.unpublishable_endpoint",
+      "message": "a name that does not resolve outside the analysed network"
+     }
+    ]
+   }
+  },
+  "schema_version": "1.0",
+  "sections": [
+   {
+    "columns": [
+     "Field",
+     "Value"
+    ],
+    "evidence_ids": [
+     "ev_0001",
+     "ev_0002"
+    ],
+    "items": [],
+    "key": "identity",
+    "kind": "kv",
+    "rows": [
+     [
+      "file type",
+      "PE"
+     ],
+     [
+      "platform",
+      "windows"
+     ],
+     [
+      "mime",
+      "application/x-dosexec"
+     ],
+     [
+      "size",
+      "204800"
+     ],
+     [
+      "magic hex",
+      "4d5a90000300000004000000ffff0000"
+     ],
+     [
+      "category",
+      "executable"
+     ],
+     [
+      "md5",
+      "44d88612fea8a8f36de82e1278abb02f"
+     ],
+     [
+      "sha1",
+      "3395856ce81f2b7382dee72602f798b642f14140"
+     ],
+     [
+      "sha256",
+      "275a021bbfb6489e54d471899f7db9d1663fc695ec2fe2a2c4538aabf651fd0f"
+     ],
+     [
+      "imphash",
+      "f34d5f2d4577ed6d9ceec516c1f5a744"
+     ]
+    ],
+    "source": "routing",
+    "text": "",
+    "title": "Sample identity"
+   },
+   {
+    "columns": [],
+    "evidence_ids": [
+     "ev_0003"
+    ],
+    "items": [],
+    "key": "pe_header",
+    "kind": "kv",
+    "rows": [
+     [
+      "machine",
+      "332"
+     ],
+     [
+      "timestamp",
+      "1614556800"
+     ],
+     [
+      "subsystem",
+      "2"
+     ],
+     [
+      "entry point",
+      "4096"
+     ],
+     [
+      "is dll",
+      "no"
+     ],
+     [
+      "size",
+      "204800"
+     ],
+     [
+      "pdb path",
+      "C:\\build\\loader.pdb"
+     ]
+    ],
+    "source": "tool:pe_info",
+    "text": "",
+    "title": "PE header"
+   },
+   {
+    "columns": [
+     "Name",
+     "Virtual address",
+     "Virtual size",
+     "Raw size",
+     "Entropy"
+    ],
+    "evidence_ids": [
+     "ev_0003"
+    ],
+    "items": [],
+    "key": "pe_sections",
+    "kind": "table",
+    "rows": [
+     [
+      ".text",
+      "4096",
+      "12288",
+      "12800",
+      "6.4213"
+     ],
+     [
+      ".rsrc",
+      "20480",
+      "4096",
+      "4096",
+      "7.9012"
+     ]
+    ],
+    "source": "tool:pe_info",
+    "text": "",
+    "title": "PE sections"
+   },
+   {
+    "columns": [
+     "Library",
+     "Function"
+    ],
+    "evidence_ids": [
+     "ev_0003"
+    ],
+    "items": [],
+    "key": "pe_imports",
+    "kind": "table",
+    "rows": [
+     [
+      "KERNEL32.dll",
+      "VirtualAllocEx"
+     ],
+     [
+      "WS2_32.dll",
+      "connect"
+     ]
+    ],
+    "source": "tool:pe_info",
+    "text": "",
+    "title": "PE imports"
+   },
+   {
+    "columns": [],
+    "evidence_ids": [
+     "ev_0003"
+    ],
+    "items": [
+     "StartService"
+    ],
+    "key": "pe_exports",
+    "kind": "list",
+    "rows": [],
+    "source": "tool:pe_info",
+    "text": "",
+    "title": "PE exports"
+   },
+   {
+    "columns": [
+     "Packer",
+     "Sections"
+    ],
+    "evidence_ids": [
+     "ev_0003"
+    ],
+    "items": [],
+    "key": "packer_signatures",
+    "kind": "table",
+    "rows": [
+     [
+      "UPX",
+      ".text"
+     ]
+    ],
+    "source": "tool:pe_info",
+    "text": "",
+    "title": "Packer section matches"
+   },
+   {
+    "columns": [
+     "Offset",
+     "Encoding",
+     "Text"
+    ],
+    "evidence_ids": [
+     "ev_0004"
+    ],
+    "items": [],
+    "key": "strings",
+    "kind": "table",
+    "rows": [
+     [
+      "4160",
+      "ascii",
+      "http://c2.evil.tld/gate.php"
+     ],
+     [
+      "4224",
+      "utf16le",
+      "SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Run"
+     ]
+    ],
+    "source": "tool:strings",
+    "text": "",
+    "title": "Printable strings"
+   },
+   {
+    "columns": [
+     "Kind",
+     "Value",
+     "Notes",
+     "Evidence"
+    ],
+    "evidence_ids": [
+     "ev_0005"
+    ],
+    "items": [],
+    "key": "iocs",
+    "kind": "table",
+    "rows": [
+     [
+      "domain",
+      "c2.evil.tld",
+      "hard-coded",
+      "ev_0005"
+     ],
+     [
+      "url",
+      "http://c2.evil.tld/gate.php",
+      "",
+      "ev_0005"
+     ]
+    ],
+    "source": "tool:iocs_from_file",
+    "text": "",
+    "title": "Indicators recovered from the sample"
+   },
+   {
+    "columns": [
+     "Rule",
+     "Tags",
+     "Where"
+    ],
+    "evidence_ids": [
+     "ev_0006"
+    ],
+    "items": [],
+    "key": "yara_matches",
+    "kind": "table",
+    "rows": [
+     [
+      "Win32_Loader_Generic",
+      "loader",
+      "$a at 0x1040"
+     ]
+    ],
+    "source": "tool:yara_scan",
+    "text": "",
+    "title": "YARA rule matches"
+   },
+   {
+    "columns": [
+     "Namespace",
+     "Rule",
+     "ATT&CK",
+     "MBC"
+    ],
+    "evidence_ids": [
+     "ev_0007"
+    ],
+    "items": [],
+    "key": "capa_capabilities",
+    "kind": "table",
+    "rows": [
+     [
+      "host-interaction/process/inject",
+      "inject code",
+      "Defense Evasion::Process Injection [T1055]",
+      ""
+     ]
+    ],
+    "source": "tool:capa",
+    "text": "",
+    "title": "capa capabilities"
+   },
+   {
+    "columns": [
+     "PID",
+     "Parent",
+     "Name",
+     "Command line"
+    ],
+    "evidence_ids": [
+     "ev_0008"
+    ],
+    "items": [],
+    "key": "sandbox_processes",
+    "kind": "table",
+    "rows": [
+     [
+      "1234",
+      "800",
+      "evil.exe",
+      "evil.exe -install"
+     ]
+    ],
+    "source": "tool:sandbox_processes",
+    "text": "",
+    "title": "Processes observed"
+   },
+   {
+    "columns": [
+     "Kind",
+     "Endpoint",
+     "Detail"
+    ],
+    "evidence_ids": [
+     "ev_0009"
+    ],
+    "items": [],
+    "key": "sandbox_network",
+    "kind": "table",
+    "rows": [
+     [
+      "dns",
+      "c2.evil.tld",
+      "type=A"
+     ],
+     [
+      "http",
+      "http://c2.evil.tld/gate.php",
+      "method=POST"
+     ],
+     [
+      "tcp",
+      "185.220.101.5",
+      "dport=443, sample_process_tree=yes"
+     ]
+    ],
+    "source": "tool:sandbox_network",
+    "text": "",
+    "title": "Network activity observed"
+   },
+   {
+    "columns": [
+     "Name",
+     "Severity",
+     "Description"
+    ],
+    "evidence_ids": [
+     "ev_0010"
+    ],
+    "items": [],
+    "key": "sandbox_signatures",
+    "kind": "table",
+    "rows": [
+     [
+      "injection_runpe",
+      "3",
+      "Injects into a suspended process"
+     ]
+    ],
+    "source": "tool:sandbox_signatures",
+    "text": "",
+    "title": "Sandbox signature hits"
+   },
+   {
+    "columns": [
+     "Name",
+     "Path",
+     "Size",
+     "SHA-256"
+    ],
+    "evidence_ids": [
+     "ev_0011"
+    ],
+    "items": [],
+    "key": "sandbox_dropped_files",
+    "kind": "table",
+    "rows": [
+     [
+      "svchost.exe",
+      "C:\\Users\\admin\\AppData\\svchost.exe",
+      "51200",
+      "aa"
+     ]
+    ],
+    "source": "tool:sandbox_dropped_files",
+    "text": "",
+    "title": "Files written"
+   },
+   {
+    "columns": [
+     "Key",
+     "Operation",
+     "Value"
+    ],
+    "evidence_ids": [
+     "ev_0012"
+    ],
+    "items": [],
+    "key": "sandbox_registry",
+    "kind": "table",
+    "rows": [
+     [
+      "HKLM\\Software\\Microsoft\\Windows\\CurrentVersion\\Run",
+      "modify",
+      "C:\\Users\\Public\\lockbit.exe"
+     ],
+     [
+      "HKCU\\Software\\Evil\\Config",
+      "create",
+      ""
+     ]
+    ],
+    "source": "tool:sandbox_registry_ops",
+    "text": "",
+    "title": "Registry activity"
+   },
+   {
+    "columns": [
+     "API",
+     "Calls",
+     "Processes",
+     "First arguments"
+    ],
+    "evidence_ids": [
+     "ev_0013"
+    ],
+    "items": [],
+    "key": "sandbox_api_calls",
+    "kind": "table",
+    "rows": [
+     [
+      "VirtualAllocEx",
+      "4",
+      "",
+      "{'ProcessHandle': '0x1a4', 'Size': 4096}"
+     ],
+     [
+      "RegSetValueExA",
+      "3",
+      "",
+      ""
+     ]
+    ],
+    "source": "tool:sandbox_api_calls",
+    "text": "",
+    "title": "API calls observed"
+   },
+   {
+    "columns": [],
+    "evidence_ids": [
+     "ev_0014"
+    ],
+    "items": [
+     "Global\\LockBitMutex"
+    ],
+    "key": "sandbox_mutexes",
+    "kind": "list",
+    "rows": [],
+    "source": "tool:sandbox_mutexes",
+    "text": "",
+    "title": "Mutexes"
+   },
+   {
+    "columns": [
+     "Kind",
+     "Value"
+    ],
+    "evidence_ids": [
+     "ev_0015"
+    ],
+    "items": [],
+    "key": "sandbox_services_and_tasks",
+    "kind": "table",
+    "rows": [
+     [
+      "service",
+      "EvilUpdater"
+     ],
+     [
+      "task",
+      "schtasks /create /tn EvilTask /tr C:\\evil.exe"
+     ],
+     [
+      "command",
+      "schtasks /create /tn EvilTask /tr C:\\evil.exe"
+     ],
+     [
+      "command",
+      "vssadmin delete shadows /all"
+     ]
+    ],
+    "source": "tool:sandbox_services_and_tasks",
+    "text": "",
+    "title": "Services, tasks and commands"
+   },
+   {
+    "columns": [
+     "Rule",
+     "Level",
+     "Technique",
+     "Matched fields"
+    ],
+    "evidence_ids": [
+     "ev_0016"
+    ],
+    "items": [],
+    "key": "sigma_matches",
+    "kind": "table",
+    "rows": [
+     [
+      "Suspicious Run Key",
+      "high",
+      "T1547.001",
+      "TargetObject"
+     ]
+    ],
+    "source": "tool:sigma_match",
+    "text": "",
+    "title": "Sigma rule matches"
+   },
+   {
+    "columns": [],
+    "evidence_ids": [
+     "ev_0017"
+    ],
+    "items": [],
+    "key": "pcap_summary",
+    "kind": "text",
+    "rows": [],
+    "source": "tool:pcap_summary",
+    "text": "12 conversations, 3 SNI values, beacon interval 60.0s +/- 1.2s",
+    "title": "Capture summary"
+   }
+  ],
+  "severity": {
+   "affected_platforms": [
+    "Windows"
+   ],
+   "business_impact": "The sample persists through a Run key and injects into a suspended process [ev_0010, ev_0012].",
+   "likely_targets": [],
+   "rating": "High"
+  },
+  "static": {
+   "api_capabilities": {},
+   "api_capabilities_evidence_ids": [],
+   "api_capabilities_resolved": {},
+   "api_capabilities_resolved_evidence_ids": [],
+   "api_capability_corpus": "",
+   "api_capability_rates": {},
+   "api_technique_hits": [
+    {
+     "matched_apis": [
+      "host-interaction/process/inject"
+     ],
+     "name": "inject code",
+     "source": "capa",
+     "technique_id": "T1055"
+    }
+   ],
+   "embedded_resources": [],
+   "export_rows": [],
+   "exports": [
+    "StartService"
+   ],
+   "imports": [
+    {
+     "dll": "KERNEL32.dll",
+     "function": "VirtualAllocEx"
+    },
+    {
+     "dll": "WS2_32.dll",
+     "function": "connect"
+    }
+   ],
+   "interesting_strings": [
+    {
+     "kind": "domain",
+     "notes": "hard-coded",
+     "value": "c2.evil.tld"
+    },
+    {
+     "kind": "url",
+     "notes": null,
+     "value": "http://c2.evil.tld/gate.php"
+    }
+   ],
+   "obfuscation_indicators": [],
+   "packer_hint": "UPX",
+   "packer_matches": [
+    {
+     "evidence": [
+      ".text"
+     ],
+     "kind": "packer",
+     "method": "section_name",
+     "name": "UPX"
+    }
+   ],
+   "pdb_path": "C:\\build\\loader.pdb",
+   "sections": [
+    {
+     "characteristics": "rx",
+     "entropy": 6.4213,
+     "is_suspicious": false,
+     "name": ".text",
+     "raw_offset": 1024,
+     "raw_size": 12800,
+     "virtual_address": "0x1000",
+     "virtual_size": 12288
+    },
+    {
+     "characteristics": "r",
+     "entropy": 7.9012,
+     "is_suspicious": false,
+     "name": ".rsrc",
+     "raw_offset": 14336,
+     "raw_size": 4096,
+     "virtual_address": "0x5000",
+     "virtual_size": 4096
+    }
+   ]
+  },
+  "stix_bundle_extended": {
+   "objects": []
+  },
+  "technical_analysis": {
+   "cli_flags": [
+    {
+     "description": "Installs the sample",
+     "evidence_ref": null,
+     "flag": "-install"
+    }
+   ],
+   "command_and_control": {
+    "body": "It posts to http://c2.evil.tld/gate.php; we assess the body is encoded.",
+    "evidence_refs": [
+     "ev_0009"
+    ],
+    "title": "Command and Control"
+   },
+   "commands": [
+    {
+     "description": "Copies itself and writes the Run key",
+     "evidence_refs": [
+      "ev_0012"
+     ],
+     "id": "1",
+     "name": "install"
+    }
+   ],
+   "configuration": [
+    {
+     "evidence_refs": [
+      "ev_0009"
+     ],
+     "how_obtained": "observed",
+     "key": "C2 URL",
+     "value": "http://c2.evil.tld/gate.php"
+    },
+    {
+     "evidence_refs": [],
+     "how_obtained": "inferred",
+     "key": "Beacon interval",
+     "value": "60 s"
+    }
+   ],
+   "discovery": null,
+   "encryption_scheme": null,
+   "evasion_antiforensics": null,
+   "execution_flow": [
+    {
+     "action": "Starts as evil.exe with the -install argument",
+     "evidence_refs": [
+      "ev_0008"
+     ],
+     "order": 1,
+     "voice": "observed"
+    },
+    {
+     "action": "Creates the mutex Global\\LockBitMutex and exits if it exists",
+     "evidence_refs": [
+      "ev_0014"
+     ],
+     "order": 2,
+     "voice": "observed"
+    },
+    {
+     "action": "Resolves its injection APIs before writing into a suspended process",
+     "evidence_refs": [
+      "ev_0007"
+     ],
+     "order": 3,
+     "voice": "assessed"
+    },
+    {
+     "action": "Beacons to its C2 every minute",
+     "evidence_refs": [],
+     "order": 4,
+     "voice": "observed"
+    }
+   ],
+   "host_identifiers": [],
+   "message_packet_structure": null,
+   "packing_obfuscation": {
+    "body": "No packer signature matched and the .text entropy is ordinary [ev_0003].",
+    "evidence_refs": [
+     "ev_0003"
+    ],
+    "title": "Packing & Obfuscation"
+   },
+   "payloads": null,
+   "persistence_detail": {
+    "body": "It writes HKLM Run with the path of its dropped copy.",
+    "evidence_refs": [
+     "ev_0012"
+    ],
+    "title": "Persistence"
+   },
+   "ransom_note": null,
+   "service_process_kill": null,
+   "shadow_copy_destruction": [],
+   "string_resolution": null
+  },
+  "technical_evidence": {},
+  "tlp": "AMBER",
+  "tool_queries": {},
+  "tool_sightings": {},
+  "ttp_mappings": [
+   {
+    "confidence": 0.8,
+    "contributing_layers": [
+     "static",
+     "capa"
+    ],
+    "evidence_quotes": [
+     "Injects into a suspended process [ev_0010]"
+    ],
+    "evidence_roots": [],
+    "identical_statements": 0,
+    "independent_layers": [],
+    "independent_sources": 0,
+    "is_corroborated": true,
+    "roots_not_read": [],
+    "source_kinds": {},
+    "sources": [],
+    "support": "",
+    "tactic": "TA0005",
+    "tactic_name": "Defense Evasion",
+    "technique_id": "T1055",
+    "technique_id_valid": true,
+    "technique_name": "Process Injection"
+   },
+   {
+    "confidence": 0.92,
+    "contributing_layers": [
+     "dynamic",
+     "judge"
+    ],
+    "evidence_quotes": [
+     "Writes the Run key for its copy [ev_0012]"
+    ],
+    "evidence_roots": [],
+    "identical_statements": 0,
+    "independent_layers": [],
+    "independent_sources": 0,
+    "is_corroborated": false,
+    "roots_not_read": [],
+    "source_kinds": {},
+    "sources": [],
+    "support": "",
+    "tactic": "TA0003",
+    "tactic_name": "Persistence",
+    "technique_id": "T1547.001",
+    "technique_id_valid": true,
+    "technique_name": "Registry Run Keys / Startup Folder"
+   }
+  ],
+  "unmapped_behaviours": [],
+  "verdict": "Malware",
+  "verdict_not_assessed": null,
+  "version_history": [
+   {
+    "authors": "Maljan Multi-Agent Pipeline",
+    "date": "2026-10-22",
+    "description": "Automated multi-agent analysis \u2014 initial report.",
+    "version": "1.0"
+   }
+  ]
+ },
+ "markdown": "# ExampleLoader loader analysis\n\n**TLP:AMBER** \u00b7 Report MJN20261022-275a02 \u00b7 2026-10-22 \u00b7 Maljan report version 1.0  \n**Sample:** `275a021bbfb6489e54d471899f7db9d1663fc695ec2fe2a2c4538aabf651fd0f` (PE, 204,800 bytes)  \n**Verdict:** Malware (moderate-to-high confidence, 0.86, stated by the judge) \u00b7 **Severity:** High \u00b7 **Family:** ExampleLoader (moderate-to-high confidence, 0.72, stated by the judge) [ev_0006]\n\nEvidence: 17 tool call(s) (see \u00a713).\n\n## 1. Key findings \u00b7 _Written by the report model_\n\n- It injects code into a suspended child process. [ev_0010]\n- It writes a Run key that starts its dropped copy at logon. [ev_0012]\n- It posts to hxxp://c2[.]evil[.]tld/gate.php, likely its C2. [ev_0009]\n\nThe sample is a Windows loader that we assess with moderate-to-high confidence belongs to the ExampleLoader family. It persists through a Run key and posts to c2[.]evil[.]tld over HTTP [ev_0009, ev_0013]. Hosts that ran it should be isolated.\n\n## 2. Sample overview \u00b7 _Measured_\n\n| Field | Value |\n|---|---|\n| File name (as submitted) | `invoice.exe` |\n| Size | 204,800 bytes |\n| Type | PE, x86, executable |\n| Platform | Windows (from the file format) |\n| MIME | application/x-dosexec |\n| Magic bytes | `4d5a90000300000004000000ffff0000` |\n| Compile timestamp | 2021-03-01T00:00:00+00:00 (header value; can be forged) |\n| Signed | no |\n| Packer signatures | UPX |\n| Reputation | no reputation lookup in this run |\n| Report generated | 2026-10-01T12:00:00+00:00 |\n\n| Algorithm | Value |\n|---|---|\n| MD5 | `44d88612fea8a8f36de82e1278abb02f` |\n| SHA-1 | `3395856ce81f2b7382dee72602f798b642f14140` |\n| SHA-256 | `275a021bbfb6489e54d471899f7db9d1663fc695ec2fe2a2c4538aabf651fd0f` |\n| imphash | `f34d5f2d4577ed6d9ceec516c1f5a744` |\n\n## 3. Verdict and assessment \u00b7 _Assessed by the judge_\n\n**Verdict:** Malware (moderate-to-high confidence, 0.86, stated by the judge)\n\n**Severity:** `[HIGH]`\n\n**Why, in the judge's words:**\n\n> The sample persists through a Run key and injects into a suspended process [ev_0010, ev_0012].\n\n**Category:** loader _(a behavioural class, not a family)_\n\n**Family:** ExampleLoader (moderate-to-high confidence, 0.72, stated by the judge) [ev_0006]\n\n**Analyst agreement:** the analysts reached consensus after 2 round(s) _(Measured)_.\n\n## 4. Execution flow \u00b7 _Written by the report model_\n\n_Each step is marked as the report model marked it: observed in the sandbox, or assessed from the code and the analysts' claims._\n\n1. Starts as evil.exe with the -install argument (observed in sandbox) [ev_0008]\n2. Creates the mutex Global\\LockBitMutex and exits if it exists (observed in sandbox) [ev_0014]\n3. Resolves its injection APIs before writing into a suspended process (assessed) [ev_0007]\n4. Beacons to its C2 every minute (observed in sandbox) _(no evidence cited)_\n\n## 5. Technical analysis \u00b7 _Source per subsection_\n\n### 5.1 Packing, obfuscation and anti-analysis \u00b7 _Source per row_\n\n_Written by the report model:_\n\nNo packer signature matched and the .text entropy is ordinary [ev_0003].\n\n[ev_0003]\n\n_Measured:_ section entropy `.text` 6.42, `.rsrc` 7.90 [HIGH].\n\n_Measured:_ packer signatures\n\n| Name | Kind | Method | Evidence |\n|---|---|---|---|\n| UPX | packer | section_name | `.text` |\n\n### 5.2 API and string resolution \u00b7 _Measured_\n\n_Measured:_ 2 static imports from 2 libraries.\n\n### 5.3 Configuration \u00b7 _Written by the report model_\n\n| Key | Value | How obtained | Evidence |\n|---|---|---|---|\n| C2 URL | hxxp://c2[.]evil[.]tld/gate.php | observed | ev_0009 |\n| Beacon interval | 60 s | inferred | no evidence cited |\n\n### 5.4 Persistence \u00b7 _Source per row_\n\n_Written by the report model:_\n\nIt writes HKLM Run with the path of its dropped copy.\n\n[ev_0012]\n\n_Source per row:_ persistence mechanisms\n\n| Kind | Target | Payload | Technique | Source | Evidence |\n|---|---|---|---|---|---|\n| registry_run | `HKLM\\Software\\Microsoft\\Windows\\CurrentVersion\\Run` | `C:\\Users\\Public\\lockbit.exe` | - | dynamic (sandbox_registry_ops) | ev_0012 |\n| service | `EvilUpdater` | - | T1543.003 | dynamic (sandbox_services_and_tasks) | ev_0015 |\n| scheduled_task | `schtasks /create /tn EvilTask /tr C:\\evil.exe` | - | T1053.005 | dynamic (sandbox_services_and_tasks) | ev_0015 |\n\n### 5.5 Discovery \u00b7 _Measured_\n\nNothing recorded in this run: the tools that ran over the file (capa, yara_scan, strings, identify_file, hashes, pe_info and 2 more) recorded no discovery command; the report model wrote nothing on it.\n\n### 5.6 Commands and capabilities \u00b7 _Written by the report model_\n\n| ID | Command | Description | Evidence |\n|---|---|---|---|\n| 1 | install | Copies itself and writes the Run key | ev_0012 |\n\nCommand-line flags:\n\n| Flag | Meaning | Evidence |\n|---|---|---|\n| `-install` | Installs the sample | no evidence cited |\n\n### 5.7 Command and control \u00b7 _Source per row_\n\n_Written by the report model:_\n\nIt posts to hxxp://c2[.]evil[.]tld/gate.php; we assess the body is encoded.\n\n[ev_0009]\n\n_Written by the report model:_ channels\n\n| Channel | Protocol | Endpoint(s) | Encryption | Beacon/packet format | Evidence |\n|---|---|---|---|---|---|\n| HTTP gate | HTTP POST | `hxxp://c2[.]evil[.]tld/gate.php`; `10[.]0[.]0[.]5` (not an address this run may publish) | unknown | form-encoded fields | ev_0009 |\n\n_Observed in sandbox:_ requests\n\n| Method | URL | Status | User-Agent |\n|---|---|---|---|\n| POST | `hxxp://c2[.]evil[.]tld/gate.php` | - | - |\n\n### 5.8 Payloads and dropped files \u00b7 _Source per row_\n\n_Source per row:_ payloads\n\n| Name/offset | Size | SHA-256 | Type | Source |\n|---|---|---|---|---|\n| `C:\\Users\\admin\\AppData\\svchost.exe` | 51200 bytes | `aa` | PE32 executable | dropped (sandbox) |\n\n### 5.9 Family-specific behaviour \u00b7 _Measured_\n\nNot written in this run: the report model described no family-specific behaviour.\n\n## 6. Observed behaviour \u00b7 _Observed in sandbox_\n\nEnvironment: the sandbox's own report recorded no environment details in this run.\n\n### Process tree\n\n```\npid=1234 ppid=800 evil.exe  (evil.exe -install)\n```\n\n### File operations\n\n| Path | Operation | API |\n|---|---|---|\n| `C:\\Users\\admin\\AppData\\svchost.exe` | write | - |\n\n### Registry modifications\n\n| Hive | Key | Value | Operation |\n|---|---|---|---|\n| HKLM | `HKLM\\Software\\Microsoft\\Windows\\CurrentVersion\\Run` | `-` | modify |\n| HKCU | `HKCU\\Software\\Evil\\Config` | `-` | create |\n\n### Mutexes\n\n- `Global\\LockBitMutex`\n\n### Services and tasks\n\n| Kind | Value |\n|---|---|\n| service | EvilUpdater |\n| task | schtasks /create /tn EvilTask /tr C:\\\\evil.exe |\n| command | schtasks /create /tn EvilTask /tr C:\\\\evil.exe |\n| command | vssadmin delete shadows /all |\n\n_Evidence: ev_0015_\n\n### Notable APIs\n\n| API | Process | Count |\n|---|---|---|\n| `VirtualAllocEx` | `-` | 4 |\n| `RegSetValueExA` | `-` | 3 |\n\n### Sandbox signatures\n\n| Name | Severity | Techniques | Description |\n|---|---|---|---|\n| injection_runpe | 3 | - | Injects into a suspended process |\n\n## 7. Static properties \u00b7 _Measured_\n\n### Sections\n\n| Name | VA | VSize | Raw offset | Raw size | Entropy | Flags |\n|---|---|---|---|---|---|---|\n| `.text` | 0x1000 | 12288 | 0x400 | 12800 | 6.42 | rx |\n| `.rsrc` | 0x5000 | 4096 | 0x3800 | 4096 | 7.90 | r [HIGH ENTROPY] |\n\n### Imports\n\n| Library | Functions |\n|---|---|\n| `KERNEL32.dll` | `VirtualAllocEx` |\n| `WS2_32.dll` | `connect` |\n\n### Exports\n\n| Name | Ordinal | RVA |\n|---|---|---|\n| `StartService` | - | - |\n\n### Rule hits\n\nYARA rule matches:\n\n| Rule | Tags | Where |\n|---|---|---|\n| Win32_Loader_Generic | loader | $a at 0x1040 |\n\n_Evidence: ev_0006_\n\ncapa capabilities:\n\n| Namespace | Rule | ATT&CK | MBC |\n|---|---|---|---|\n| host-interaction/process/inject | inject code | Defense Evasion::Process Injection \\[T1055\\] |  |\n\n_Evidence: ev_0007_\n\nSigma rule matches:\n\n| Rule | Level | Technique | Matched fields |\n|---|---|---|---|\n| Suspicious Run Key | high | T1547.001 | TargetObject |\n\n_Evidence: ev_0016_\n\n### Strings of note\n\n_Values extracted from the file's bytes, printed as they are, network values defanged. A network-looking string is not an observed endpoint._\n\n| Value | Kind | Notes | Published |\n|---|---|---|---|\n| `c2[.]evil[.]tld` | domain | hard-coded | yes: the host of hxxp://c2[.]evil[.]tld/gate.php, which this run publishes |\n| `hxxp://c2[.]evil[.]tld/gate.php` | url | - | yes: the sandbox recorded it |\n\nDebug PDB path: `C:\\build\\loader.pdb`\n\n## 8. MITRE ATT&CK mapping \u00b7 _Source per row_\n\n| Tactic | ID | Technique | Procedure | Source | Confidence | Status | Evidence |\n|---|---|---|---|---|---|---|---|\n| Persistence (TA0003) | T1547.001 | Registry Run Keys / Startup Folder | Writes the Run key for its copy [ev_0012] | sigma (rule match), dynamic, judge | high confidence, 0.92, stated by the judge | published | ev_0012 |\n| Defense Evasion (TA0005) | T1055 | Process Injection | Injects into a suspended process [ev_0010]; rule inject code (capa), namespace `host-interaction/process/inject`; base rate not measured | capa (rule match), static | moderate-to-high confidence, 0.80, stated by the static analyst | published, corroborated | ev_0010, ev_0007 |\n| Discovery (TA0007) | T1082 | System Information Discovery | claimed on a finding | static | low confidence, 0.40, producer not recorded | claimed, not published: it was named on a finding rather than on a claim | - |\n\n_A source marked `(rule match)` or `pipeline:` is a rule that fired over the binary \u2014 capa's over its code, the knowledge table's over its imports \u2014 with no sandbox and no model. The rule names are in the Procedure cell, each with its base rate: how much ordinary software it fires on, over the corpus it names. It says nothing about how likely this sample is to be benign, and `not measured` means the rule has no measurement, not that it never fires._\n\n### Claims that were not published as techniques\n\n- T1082 System Information Discovery: it was named on a finding rather than on a claim\n\n## 9. Indicators of compromise \u00b7 _Source per row_\n\n### File and host indicators \u00b7 _Source per row_\n\n| Type | Value | Context | Source | Published |\n|---|---|---|---|---|\n| SHA-256 | `275a021bbfb6489e54d471899f7db9d1663fc695ec2fe2a2c4538aabf651fd0f` | the sample | identity | yes: the sample's own digest |\n| SHA-1 | `3395856ce81f2b7382dee72602f798b642f14140` | the sample | identity | yes: the sample's own digest |\n| MD5 | `44d88612fea8a8f36de82e1278abb02f` | the sample | identity | yes: the sample's own digest |\n| imphash | `f34d5f2d4577ed6d9ceec516c1f5a744` | the sample | identity | yes: the sample's own digest |\n| SHA-256 | `aa` | dropped C:\\\\Users\\\\admin\\\\AppData\\\\svchost.exe | sandbox | - |\n| File path | `C:\\Users\\admin\\AppData\\svchost.exe` | written by the sample | sandbox | - |\n| Registry key | `HKLM\\Software\\Microsoft\\Windows\\CurrentVersion\\Run` | modify | sandbox | - |\n| Registry key | `HKCU\\Software\\Evil\\Config` | create | sandbox | - |\n| Mutex | `Global\\LockBitMutex` | created at run time | sandbox | - |\n| Scheduled task | `schtasks /create /tn EvilTask /tr C:\\evil.exe` | - | persistence | - |\n| Service | `EvilUpdater` | - | persistence | - |\n\n_A dash under Published: the platform's export mints no indicator from this row. The judge's own bundle may still carry the value._\n\n### Network indicators \u00b7 _Source per row_\n\n| Type | Value (defanged) | Port/Path | Context | Source | Published |\n|---|---|---|---|---|---|\n| Domain | `c2[.]evil[.]tld` | - | - | sandbox | yes: the host of hxxp://c2[.]evil[.]tld/gate.php, which this run publishes |\n| IPv4 | `185[.]220[.]101[.]5` | - | reached by the sample's process tree | sandbox | yes: the sandbox recorded it |\n| URL | `hxxp://c2[.]evil[.]tld/gate.php` | /gate.php | POST | sandbox | yes: the sandbox recorded it |\n\nNetwork values are defanged for reading. The STIX 2.1 bundle (`/reports/{report_id}/stix`) and the machine-readable list (`/reports/{report_id}/iocs`, see Reports on the documentation's REST API page) carry them live.\n\n## 10. Detection \u00b7 _Source per subsection_\n\n### 10.1 Rules that matched this sample \u00b7 _Measured_\n\n- YARA rule matches (ev_0006): `Win32_Loader_Generic`\n- capa capabilities (ev_0007): `inject code`\n- Sigma rule matches (ev_0016): `Suspicious Run Key`\n\n_The rule sets and their licences are the tools' own; see Rule hits in \u00a77._\n\n### 10.2 Draft detection rules \u00b7 _Measured_\n\nNothing generated in this run: no draft rule was built from the indicators this report publishes.\n\n### 10.3 Hunting notes \u00b7 _Written by the report model_\n\n- Proxy POST requests to c2[.]evil[.]tld/gate.php. (T1071.001)\n- Sysmon event 13 on the CurrentVersion\\Run key. (T1547.001)\n\n## 11. Recommendations \u00b7 _Written by the report model_\n\n| Priority | Category | Action | Rationale | Technique |\n|---|---|---|---|---|\n| P0 | firewall | Block c2[.]evil[.]tld at the egress proxy. | It is the only C2 the sandbox saw. | T1071.001 |\n| P1 | registry_hardening | Remove the Run value and the dropped copy. | The Run key restarts it at logon. | T1547.001 |\n| P2 | edr_hunting | Hunt for processes created suspended and written to. | It injects into a suspended process. | T1055 |\n\n## 12. Attribution and related activity \u00b7 _Source per subsection_\n\n### 12.1 Family \u00b7 _Assessed by the judge_\n\n**Family:** ExampleLoader (moderate-to-high confidence, 0.72, stated by the judge) [ev_0006]\n\n**Category:** loader _(a behavioural class, not a family)_\n\n### 12.2 Similarity \u00b7 _Measured_\n\nNothing recorded in this run: no similarity search returned a match.\n\n### 12.3 Background \u00b7 _Written by the report model_\n\nLoaders of this kind are reported to arrive through phishing attachments; this run saw only the file itself.\n\n_Written by the report model with no evidence cited; check it against the measured sections before quoting it._\n\n## 13. Limitations and analysis notes \u00b7 _Measured_\n\n**What ran:**\n\n- `triage` ran\n- `analysts` ran\n- `judge` ran\n\nA sandbox recorded the sample's behaviour.\n\n**Evidence bounds:** 17 ledger entries, 17 ok, 0 failed, 0 trimmed to the budget.\n\n**Validation:** 1 feedback retries, 0 finding(s) left unresolved.\n\n**Export decisions:**\n\n- `stix.unpublishable_endpoint`: a name that does not resolve outside the analysed network\n\nValues in Measured sections come from tools and are reported as the tools returned them. Assessed sections are the models' conclusions, reported as they wrote them; the checks above are the platform's comments on them.\n\n## Appendix A. Evidence index \u00b7 _Source per subsection_\n\n| ID | Agent | Server | Tool | OK | Duration | Trimmed |\n|---|---|---|---|---|---|---|\n| ev_0001 | pipeline | - | identify_file | yes | 0 ms | no |\n| ev_0002 | pipeline | - | hashes | yes | 0 ms | no |\n| ev_0003 | pipeline | - | pe_info | yes | 0 ms | no |\n| ev_0004 | static | - | strings | yes | 0 ms | no |\n| ev_0005 | static | - | iocs_from_file | yes | 0 ms | no |\n| ev_0006 | pipeline | - | yara_scan | yes | 0 ms | no |\n| ev_0007 | pipeline | - | capa | yes | 0 ms | no |\n| ev_0008 | dynamic | - | sandbox_processes | yes | 0 ms | no |\n| ev_0009 | dynamic | - | sandbox_network | yes | 0 ms | no |\n| ev_0010 | dynamic | - | sandbox_signatures | yes | 0 ms | no |\n| ev_0011 | dynamic | - | sandbox_dropped_files | yes | 0 ms | no |\n| ev_0012 | dynamic | - | sandbox_registry_ops | yes | 0 ms | no |\n| ev_0013 | dynamic | - | sandbox_api_calls | yes | 0 ms | no |\n| ev_0014 | dynamic | - | sandbox_mutexes | yes | 0 ms | no |\n| ev_0015 | dynamic | - | sandbox_services_and_tasks | yes | 0 ms | no |\n| ev_0016 | dynamic | - | sigma_match | yes | 0 ms | no |\n| ev_0017 | network | - | pcap_summary | yes | 0 ms | no |\n\n### Sample identity \u00b7 _Measured_\n\n| Field | Value |\n|---|---|\n| file type | PE |\n| platform | windows |\n| mime | application/x-dosexec |\n| size | 204800 |\n| magic hex | 4d5a90000300000004000000ffff0000 |\n| category | executable |\n| md5 | 44d88612fea8a8f36de82e1278abb02f |\n| sha1 | 3395856ce81f2b7382dee72602f798b642f14140 |\n| sha256 | 275a021bbfb6489e54d471899f7db9d1663fc695ec2fe2a2c4538aabf651fd0f |\n| imphash | f34d5f2d4577ed6d9ceec516c1f5a744 |\n\n_Evidence: ev_0001, ev_0002_\n\n### PE header \u00b7 _Measured_\n\n| Column 1 | Column 2 |\n|---|---|\n| machine | 332 |\n| timestamp | 1614556800 |\n| subsystem | 2 |\n| entry point | 4096 |\n| is dll | no |\n| size | 204800 |\n| pdb path | C:\\\\build\\\\loader.pdb |\n\n_Evidence: ev_0003_\n\n### PE sections \u00b7 _Measured_\n\n| Name | Virtual address | Virtual size | Raw size | Entropy |\n|---|---|---|---|---|\n| .text | 4096 | 12288 | 12800 | 6.4213 |\n| .rsrc | 20480 | 4096 | 4096 | 7.9012 |\n\n_Evidence: ev_0003_\n\n### PE imports \u00b7 _Measured_\n\n| Library | Function |\n|---|---|\n| KERNEL32.dll | VirtualAllocEx |\n| WS2_32.dll | connect |\n\n_Evidence: ev_0003_\n\n### PE exports \u00b7 _Measured_\n\n- StartService\n\n_Evidence: ev_0003_\n\n### Packer section matches \u00b7 _Measured_\n\n| Packer | Sections |\n|---|---|\n| UPX | .text |\n\n_Evidence: ev_0003_\n\n### Printable strings \u00b7 _Measured_\n\n| Offset | Encoding | Text |\n|---|---|---|\n| 4160 | ascii | hxxp://c2[.]evil[.]tld/gate.php |\n| 4224 | utf16le | SOFTWARE\\\\Microsoft\\\\Windows\\\\CurrentVersion\\\\Run |\n\n_Evidence: ev_0004_\n\n### Indicators recovered from the sample \u00b7 _Measured_\n\n| Kind | Value | Notes | Evidence |\n|---|---|---|---|\n| domain | c2[.]evil[.]tld | hard-coded | ev_0005 |\n| url | hxxp://c2[.]evil[.]tld/gate.php |  | ev_0005 |\n\n_Evidence: ev_0005_\n\n### YARA rule matches \u00b7 _Measured_\n\n| Rule | Tags | Where |\n|---|---|---|\n| Win32_Loader_Generic | loader | $a at 0x1040 |\n\n_Evidence: ev_0006_\n\n### capa capabilities \u00b7 _Measured_\n\n| Namespace | Rule | ATT&CK | MBC |\n|---|---|---|---|\n| host-interaction/process/inject | inject code | Defense Evasion::Process Injection \\[T1055\\] |  |\n\n_Evidence: ev_0007_\n\n### Processes observed \u00b7 _Measured_\n\n| PID | Parent | Name | Command line |\n|---|---|---|---|\n| 1234 | 800 | evil.exe | evil.exe -install |\n\n_Evidence: ev_0008_\n\n### Network activity observed \u00b7 _Measured_\n\n| Kind | Endpoint | Detail |\n|---|---|---|\n| dns | c2[.]evil[.]tld | type=A |\n| http | hxxp://c2[.]evil[.]tld/gate.php | method=POST |\n| tcp | 185[.]220[.]101[.]5 | dport=443, sample_process_tree=yes |\n\n_Evidence: ev_0009_\n\n### Sandbox signature hits \u00b7 _Measured_\n\n| Name | Severity | Description |\n|---|---|---|\n| injection_runpe | 3 | Injects into a suspended process |\n\n_Evidence: ev_0010_\n\n### Files written \u00b7 _Measured_\n\n| Name | Path | Size | SHA-256 |\n|---|---|---|---|\n| svchost.exe | C:\\\\Users\\\\admin\\\\AppData\\\\svchost.exe | 51200 | aa |\n\n_Evidence: ev_0011_\n\n### Registry activity \u00b7 _Measured_\n\n| Key | Operation | Value |\n|---|---|---|\n| HKLM\\\\Software\\\\Microsoft\\\\Windows\\\\CurrentVersion\\\\Run | modify | C:\\\\Users\\\\Public\\\\lockbit.exe |\n| HKCU\\\\Software\\\\Evil\\\\Config | create |  |\n\n_Evidence: ev_0012_\n\n### API calls observed \u00b7 _Measured_\n\n| API | Calls | Processes | First arguments |\n|---|---|---|---|\n| VirtualAllocEx | 4 |  | {'ProcessHandle': '0x1a4', 'Size': 4096} |\n| RegSetValueExA | 3 |  |  |\n\n_Evidence: ev_0013_\n\n### Mutexes \u00b7 _Measured_\n\n- Global\\\\LockBitMutex\n\n_Evidence: ev_0014_\n\n### Services, tasks and commands \u00b7 _Measured_\n\n| Kind | Value |\n|---|---|\n| service | EvilUpdater |\n| task | schtasks /create /tn EvilTask /tr C:\\\\evil.exe |\n| command | schtasks /create /tn EvilTask /tr C:\\\\evil.exe |\n| command | vssadmin delete shadows /all |\n\n_Evidence: ev_0015_\n\n### Sigma rule matches \u00b7 _Measured_\n\n| Rule | Level | Technique | Matched fields |\n|---|---|---|---|\n| Suspicious Run Key | high | T1547.001 | TargetObject |\n\n_Evidence: ev_0016_\n\n### Capture summary \u00b7 _Measured_\n\n```\n12 conversations, 3 SNI values, beacon interval 60.0s +/- 1.2s\n```\n\n_Evidence: ev_0017_\n\n## Appendix B. Run summary \u00b7 _Measured_\n\n- Elapsed: 412.5s (the whole run, to this report)\n- Per stage: triage 4.2s, analysts 280.0s, judge 61.0s\n- Verdict: Malware\n- Negotiation rounds: 2\n- Termination reason: `consensus`\n- Final confidence: 0.860\n- TTPs: 2 claimed, 2 published, 2 claimed by more than one source, 2 asserted by a deterministic source\n\n**Corroboration per technique:**\n\n_Catalogue is the API table's association, shown for reference; it is not a rule match and counts for nothing._\n\n| Technique | Asserted by | Claimed by | Catalogue |\n|---|---|---|---|\n| T1055 | capa | static | \u2014 |\n| T1547.001 | sigma | dynamic, judge | \u2014 |\n\n## Appendix C. References \u00b7 _Reference_\n\n- [VirusTotal](https://www.virustotal.com/gui/file/275a021bbfb6489e54d471899f7db9d1663fc695ec2fe2a2c4538aabf651fd0f) \u2014 VT detection summary\n- [MalwareBazaar](https://bazaar.abuse.ch/sample/275a021bbfb6489e54d471899f7db9d1663fc695ec2fe2a2c4538aabf651fd0f/) \u2014 Sample lookup\n\n## Appendix D. Methodology \u00b7 _Reference_\n\nThis report was produced by an automated team of language-model analysts working over tool servers. The analysts' claims were negotiated, a judge stated the verdict and the STIX bundle, and a report model wrote the assessed prose. Every tool call is in Appendix A. A table value that ends in \u2026 is cut to fit the page; the JSON report and the evidence ledger (Appendix A's ids) carry it whole.\n\n- Team: not recorded in this report\n- Stages run: triage, analysts, judge\n- Sandbox: recorded the sample's behaviour\n- Report generated: 2026-10-01T12:00:00+00:00\n\n| Version | Date | Authors | Description |\n|---|---|---|---|\n| 1.0 | 2026-10-22 | Maljan Multi-Agent Pipeline | Automated multi-agent analysis \u2014 initial report. |\n"
+}

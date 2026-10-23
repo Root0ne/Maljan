@@ -30,6 +30,17 @@ class ServerToolCaller:
         self._job_key = job_key
         self._handles: dict[str, Any] = {}
         self._failed: set[str] = set()
+        # The source tools their host withheld, by ``(server, tool)``, with the
+        # manifest's reason: the enrichment's disclosure records them
+        # (``analysis.disclosure.with_enrichment_asked``), not only the log.
+        self._withheld: dict[tuple[str, str], str] = {}
+
+    def withheld_rows(self) -> list[dict[str, str]]:
+        """The source tools their host withheld: ``server``, ``tool`` and ``reason`` each."""
+        return [
+            {"server": server, "tool": tool, "reason": reason}
+            for (server, tool), reason in sorted(self._withheld.items())
+        ]
 
     def servers(self) -> Mapping[str, Any]:
         """The tool servers in force, by key."""
@@ -69,13 +80,32 @@ class ServerToolCaller:
         self._handles[server] = handle
         return handle
 
+    async def withheld_reason(self, server: str, tool: str) -> str | None:
+        """Why the host withholds ``tool``, recorded for the disclosure; ``None`` when it does not.
+
+        Asked before a question is told (``SourceAsker._ask_server``), so a
+        withheld source shows only as withheld, never as asked.
+        """
+        handle = await self._handle(server)
+        if handle is None:
+            return None
+        reason = handle.withheld_reason(tool)
+        if reason:
+            self._withheld[(server, tool)] = reason
+        return str(reason) if reason else None
+
     async def __call__(self, server: str, tool: str, args: dict[str, Any]) -> Any:
         handle = await self._handle(server)
         if handle is None:
             return None
         picked = [t for t in handle.tools() if str(getattr(t, "name", "")) == tool]
         if not picked:
-            logger.warning("enrich: a source's server offers no tool of the name it declares.")
+            withheld = handle.withheld_reason(tool)
+            if withheld:
+                logger.warning("enrich: a source's tool is withheld on this host: %s", withheld)
+                self._withheld[(server, tool)] = withheld
+            else:
+                logger.warning("enrich: a source's server offers no tool of the name it declares.")
             return None
         answer = await asyncio.wait_for(picked[0].ainvoke(args), CALL_TIMEOUT_SECONDS)
         return answer if isinstance(answer, dict | list) else str(answer)

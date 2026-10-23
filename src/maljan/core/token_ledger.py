@@ -34,7 +34,10 @@ from __future__ import annotations
 
 import threading
 from collections.abc import Callable, Sequence
+from dataclasses import dataclass
 from typing import Any
+
+from maljan.llm.context_window import tokens_for_chars
 
 
 def estimate_tokens(text: str) -> int:
@@ -45,7 +48,7 @@ def estimate_tokens(text: str) -> int:
     """
     if not text:
         return 0
-    return max(1, len(text) // 4)
+    return max(1, tokens_for_chars(len(text), 4, ceil=False))
 
 
 def _cost_of(response: Any) -> float | None:
@@ -295,8 +298,20 @@ def call_record(
     return row
 
 
+# The mark on a record whose charge landed after the job ended, so after the
+# run summary's figures were sealed.
+LANDED_AFTER_END = "landed_after_job_ended"
+
 # The ``call`` of a record that is a retry of a model request, not a call.
 RETRY_RECORD = "retry"
+
+# The calls an analyst's validation turn makes after its answer: asking again
+# for an answer that failed a check, asking for the whole answer when a retry's
+# could not be merged, and asking which of the items a kept retry left out were
+# meant to go. ``analysis.efficiency`` reads their share of the output.
+VALIDATION_RETRY_CALL = "validation retry"
+WHOLE_ANSWER_RETRY_CALL = "whole answer after an unmerged retry"
+RETRY_DROPS_QUESTION_CALL = "kept-retry drops question"
 
 # What a record says the job's spend meter charged for it, as the meter
 # settled it: what it cost, where the price came from, and for a charge by
@@ -358,6 +373,10 @@ class TokenLedger:
         # (``maljan.llm.transient``), filed under the call that then answered.
         self._retries: list[dict[str, str]] = []
         self._unreported: list[dict[str, str]] = []
+        # Per agent and per call name, the calls and their reported figures:
+        # what ``analysis.efficiency`` reads a kind of call's share from. Not
+        # in the snapshot, so the summary's token block reads as it always did.
+        self._by_call: dict[tuple[str, str], dict[str, int]] = {}
         # Told of every recorded call as it is recorded, with the call's own
         # figures (``call_record``): the worker commits each one to the job's
         # event record once its loop runs the publish, so what a run spent is
@@ -365,6 +384,44 @@ class TokenLedger:
         # built (all but a call recorded in the last moments before the kill).
         # ``None`` where nothing listens.
         self.on_call: Callable[[dict[str, Any]], None] | None = None
+        # Set when the job has ended (``end``): a charge that lands later
+        # (an abandoned call's answer, billed in full) is in no run summary,
+        # whose figures are sealed. It is kept here, marked, and handed to the
+        # listener marked, so the spend is stated and the summary never
+        # rewritten.
+        self._ended = False
+        self._late: list[dict[str, Any]] = []
+
+    def end(self) -> None:
+        """The run summary's figures are final: what is charged from now on landed after it.
+
+        Called once the summary's token block is taken (the worker, right after
+        the stored report's inputs are built) and again when the job's
+        container closes, as the backstop. Idempotent.
+        """
+        with self._lock:
+            self._ended = True
+
+    def _record_late(self, row: dict[str, Any]) -> bool:
+        """Mark ``row`` and keep it where the job has ended; whether it was late."""
+        with self._lock:
+            if not self._ended:
+                return False
+            row[LANDED_AFTER_END] = True
+            self._late.append(dict(row))
+            return True
+
+    def late_charges(self) -> list[dict[str, Any]]:
+        """The charges that landed after the job ended, one record each, as a plain copy.
+
+        Not in :meth:`snapshot`: a stored run's token block reads as it was
+        sealed. The durable record of a late charge is the call feed: each is
+        handed to ``on_call`` marked :data:`LANDED_AFTER_END`, as the worker
+        commits every call record to the job's events; this list is the
+        in-process view, gone with the process.
+        """
+        with self._lock:
+            return [dict(row) for row in self._late]
 
     def add(
         self,
@@ -385,7 +442,21 @@ class TokenLedger:
         answer ended while it streamed): it is handed to the spend meter only,
         and the call stays one that reported no usage here. ``retries`` are
         the failed attempts made before this call answered, one line each.
+
+        A call recorded after :meth:`end` is a late one: it is settled on the
+        spend meter and handed to the listener marked
+        :data:`LANDED_AFTER_END`, kept in :meth:`late_charges`, and counted in
+        none of the totals, so the sealed summary and the ledger's own figures
+        stay what the summary said.
         """
+        if self._ended:
+            charged = self._settle(usage, model, call, estimated)
+            row = _with_charge(
+                call_record(usage, agent=agent, model=model, call=call), usage, estimated, charged
+            )
+            if self._record_late(row):
+                self._tell(row)
+                return
         with self._lock:
             if usage is None:
                 self._unreported.append({"agent": agent, "call": call, "model": model})
@@ -413,6 +484,16 @@ class TokenLedger:
                 if "cost" in usage:
                     tally.cost += float(usage["cost"])
                     tally.cost_calls += 1
+            named = self._by_call.setdefault(
+                (agent, call),
+                {"calls": 0, "unreported_calls": 0, "input_tokens": 0, "output_tokens": 0},
+            )
+            named["calls"] += 1
+            if usage is None:
+                named["unreported_calls"] += 1
+            else:
+                named["input_tokens"] += int(usage.get("input_tokens") or 0)
+                named["output_tokens"] += int(usage.get("output_tokens") or 0)
             if fallback:
                 self._fallbacks.append({"agent": agent, "model": model, "reason": fallback})
             for reason in retries:
@@ -484,8 +565,11 @@ class TokenLedger:
         afterwards keeps what the attempt cost.
         """
         charged = self._settle(usage, model, call, estimated)
-        row = call_record(usage, agent=agent, model=model, call=call)
-        self._tell(_with_charge(row, usage, estimated, charged))
+        row = _with_charge(
+            call_record(usage, agent=agent, model=model, call=call), usage, estimated, charged
+        )
+        self._record_late(row)
+        self._tell(row)
 
     @property
     def input_tokens(self) -> int:
@@ -502,6 +586,18 @@ class TokenLedger:
     @property
     def total_tokens(self) -> int:
         return self._total.input_tokens + self._total.output_tokens
+
+    def by_call(self) -> dict[str, dict[str, dict[str, int]]]:
+        """Per agent, per call name, the calls and their reported figures, as a plain copy.
+
+        ``{agent: {call: {calls, unreported_calls, input_tokens, output_tokens}}}``;
+        the tokens are the reported calls' only.
+        """
+        with self._lock:
+            out: dict[str, dict[str, dict[str, int]]] = {}
+            for (agent, call), row in sorted(self._by_call.items()):
+                out.setdefault(agent, {})[call] = dict(row)
+            return out
 
     def snapshot(self) -> dict[str, Any]:
         """A plain-dict copy for handing to the RunSummary builder."""
@@ -577,6 +673,124 @@ def record_lost_retries(
             ledger.add_retry(agent=agent, model=model, reason=reason)
     except Exception:  # noqa: BLE001 — telemetry must never break analysis
         return
+
+
+@dataclass(frozen=True)
+class StructuredReply:
+    """A structured request's answer as read: the parsed object, the raw answer, why none parsed.
+
+    ``unread`` is empty when ``parsed`` holds the object; otherwise it says
+    why nothing parsed, as a phrase that follows "the structured answer".
+    """
+
+    parsed: Any
+    raw: Any = None
+    unread: str = ""
+
+    @property
+    def kept(self) -> Any:
+        """The raw answer when nothing parsed and it holds an object, else ``None``.
+
+        The request asked for the object in its prompt too, so an object the
+        answer holds — a tool call's arguments, or JSON in its text — is the
+        model's answer to it, and the caller reads it rather than asking again.
+        Text that holds no object (a preamble, a one-line refusal) is no answer
+        to read: its caller asks again, as for an empty one.
+        """
+        from maljan.llm.answer_text import structured_answer_text
+        from maljan.utils.json_cleaner import safe_parse_json
+
+        if self.parsed is not None or self.raw is None:
+            return None
+        text = structured_answer_text(self.raw)
+        if not text.strip():
+            return None
+        payload = safe_parse_json(text)
+        return self.raw if isinstance(payload, dict | list) and payload else None
+
+
+def read_structured_reply(
+    answer: Any,
+    ledger: TokenLedger | None,
+    *,
+    agent: str = "",
+    model: str = "",
+    call: str = "",
+    schema: Any = None,
+    announce: Callable[[Any], None] | None = None,
+) -> StructuredReply:
+    """:func:`structured_answer`, keeping the raw answer a failed parse leaves behind.
+
+    The raw turn is recorded on ``ledger`` either way, and handed to
+    ``announce`` (a model list's switch carried on it is said there): once
+    each, as the one place every structured answer is read. A parse that
+    failed on an answer that carries its raw turn is not raised: the raw turn
+    is handed back with why, so a caller can read it as text. An answer in any
+    other shape raises as :func:`structured_answer` does.
+
+    ``schema`` is the model class the request asked for. A parser that hands
+    back a plain dict is read through it: an object that fits is the parsed
+    answer, and one that does not is the raw turn with why, as a failed parse.
+    """
+    raw = answer.get("raw") if isinstance(answer, dict) and "raw" in answer else None
+    try:
+        parsed = structured_answer(answer, ledger, agent=agent, model=model, call=call)
+    except Exception as exc:  # noqa: BLE001 - the raw turn is read instead
+        if raw is None:
+            raise
+        _announced(announce, raw)
+        why = f"carries an object that does not fit the schema ({type(exc).__name__})"
+        return StructuredReply(None, raw, why)
+    _announced(announce, raw if raw is not None else answer)
+    validate = getattr(schema, "model_validate", None)
+    if isinstance(parsed, dict) and callable(validate):
+        try:
+            parsed = validate(parsed)
+        except Exception as exc:  # noqa: BLE001 - the raw turn is read instead
+            if raw is None:
+                raise
+            why = f"carries an object that does not fit the schema ({type(exc).__name__})"
+            return StructuredReply(None, raw, why)
+    return StructuredReply(
+        parsed, raw, "" if parsed is not None else "carries no object the schema reads"
+    )
+
+
+def _announced(announce: Callable[[Any], None] | None, message: Any) -> None:
+    """Hand ``message`` to ``announce``; an announcement never costs the answer."""
+    if announce is None:
+        return
+    try:
+        announce(message)
+    except Exception as exc:  # noqa: BLE001 - an announcement never costs a turn
+        from maljan.core.logger import logger
+
+        logger.debug("a structured answer's model switch was not announced (%s).", exc)
+
+
+def say_structured_reply(owner: str, reply: StructuredReply) -> None:
+    """Log what becomes of a structured answer that parsed to nothing: kept, or asked again.
+
+    ``owner`` leads the line ("NarrativeAgent", "ReportComposer: section 'x'").
+    A kept answer is said at INFO; one with no object in it, which its caller
+    asks again without the schema's tool, at WARNING.
+    """
+    from maljan.core.logger import logger
+
+    if reply.kept is not None:
+        logger.info(
+            "%s: the structured answer %s; its text is read as the answer, and it is not "
+            "asked again.",
+            owner,
+            reply.unread,
+        )
+    else:
+        logger.warning(
+            "%s: the structured answer %s and holds no object to read; it is asked again "
+            "without the schema's tool.",
+            owner,
+            reply.unread or "carries no object the schema reads",
+        )
 
 
 def structured_answer(

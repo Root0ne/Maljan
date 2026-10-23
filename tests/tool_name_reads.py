@@ -11,7 +11,8 @@ parameter named ``tool`` or ``*_tool``, ``tool_of(...)``, ``section_tool(...)``,
 ``declared_name(...)``, ``_tool(...)``, ``bare_name(...)``,
 ``getattr(x, "tool")``, ``x["tool"]``, ``x.get("tool")``, and any local
 assigned from one, through ``str``, ``lower``, ``strip``, ``removeprefix``,
-``split``, ``or``, ``+`` and f-strings) and reports:
+``split``, ``or``, ``+``, f-strings, tuple unpacking and comprehensions over
+them) and reports:
 
 * a comparison or membership test of such a value with anything that is not
   itself a tool read (a literal, a collection, a constant, an imported name);
@@ -20,6 +21,16 @@ assigned from one, through ``str``, ``lower``, ``strip``, ``removeprefix``,
 * ``getattr`` or ``hasattr`` with it as the attribute;
 * a lookup of it (``x[tool]``, ``x.get(tool)``, ``x.pop(tool)``) in a
   dictionary that is not a local one the code itself keys by tool reads;
+* a tool read handed to a pattern matcher (``re.*``, a compiled pattern's
+  ``match``/``search``/``sub``..., ``fnmatch.*``);
+* a string literal handed to a parameter named ``tool`` or ``*_tool`` (by
+  position or by keyword), or given as such a parameter's default; a function
+  the module imports from another one is known by ``shared`` (see
+  :func:`tool_parameters_under`);
+* a ``.server`` read held against a non-empty literal (an empty one asks only
+  whether a server was recorded, and ``self``'s own ``.server`` is no entry's),
+  and a ``.source`` read held against an ``mcp:<server>`` literal or an
+  f-string or concatenation that builds one (the registry key, spelled out);
 * an import of a legacy table module (``legacy_modules``), except in a
   gateway module, whose reads of it must sit on a branch for an entry with no
   recorded source (``source_of(...) is None``) or in a ``stored_*`` function.
@@ -31,6 +42,8 @@ membership test like any other and is reported.
 from __future__ import annotations
 
 import ast
+from functools import cache
+from pathlib import Path
 from typing import NamedTuple
 
 LEGACY_MODULES = ("legacy_tool_names", "legacy_tool_tables", "legacy_reputation")
@@ -53,6 +66,17 @@ _STRING_METHODS = (
 )
 _NAME_TESTS = ("startswith", "endswith", "find", "rfind", "index", "rindex", "count")
 _LOOKUPS = ("get", "pop")
+_PATTERN_CALLS = (
+    "match",
+    "search",
+    "fullmatch",
+    "sub",
+    "subn",
+    "fnmatch",
+    "fnmatchcase",
+)
+_COMPREHENSIONS = (ast.ListComp, ast.SetComp, ast.GeneratorExp)
+_SERVER_FIELDS = ("server", "server_name")
 _KEYING = ("setdefault", "add", "append", "discard", "remove")
 
 
@@ -75,6 +99,75 @@ def _called(node: ast.Call) -> str:
     return func.id if isinstance(func, ast.Name) else ""
 
 
+def _tool_param(name: str) -> bool:
+    return name in _TOOL_FIELDS or name.endswith("_tool")
+
+
+def _str_literal(node: ast.AST | None) -> bool:
+    return isinstance(node, ast.Constant) and isinstance(node.value, str)
+
+
+def _literals_only(node: ast.AST) -> bool:
+    """Whether ``node`` is a string, or a collection of strings, written out."""
+    if isinstance(node, ast.Tuple | ast.List | ast.Set):
+        return bool(node.elts) and all(_str_literal(e) for e in node.elts)
+    return _str_literal(node)
+
+
+def _spells_a_registry_key(node: ast.AST) -> bool:
+    """Whether ``node`` is, or builds (f-string, ``+``), an ``mcp:<server>`` string."""
+    elements = node.elts if isinstance(node, ast.Tuple | ast.List | ast.Set) else [node]
+    return any(_opens_with_mcp(e) for e in elements)
+
+
+def _opens_with_mcp(node: ast.AST) -> bool:
+    if isinstance(node, ast.Constant):
+        return isinstance(node.value, str) and node.value.startswith("mcp:")
+    if isinstance(node, ast.JoinedStr):
+        return bool(node.values) and _opens_with_mcp(node.values[0])
+    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add):
+        return _opens_with_mcp(node.left)
+    return False
+
+
+def _names_a_server(node: ast.AST) -> bool:
+    """Whether ``node`` is a non-empty string, or a collection of strings with one, written out."""
+    if isinstance(node, ast.Tuple | ast.List | ast.Set):
+        return _literals_only(node) and any(_names_a_server(e) for e in node.elts)
+    return isinstance(node, ast.Constant) and isinstance(node.value, str) and bool(node.value)
+
+
+def _spells_a_server(node: ast.Compare) -> bool:
+    """Whether a comparison holds an entry's ``.server`` and a name, or ``.source`` and a key."""
+    sides = [node.left, *node.comparators]
+    for side, others in ((s, [o for o in sides if o is not s]) for s in sides):
+        if not isinstance(side, ast.Attribute):
+            continue
+        own = isinstance(side.value, ast.Name) and side.value.id in ("self", "cls")
+        if side.attr in _SERVER_FIELDS and not own and any(_names_a_server(o) for o in others):
+            return True
+        if side.attr == "source" and any(_spells_a_registry_key(o) for o in others):
+            return True
+    return False
+
+
+_ToolParams = dict[str, tuple[list[int], set[str]]]
+
+
+def _literal_to_a_tool_parameter(
+    node: ast.Call, tool_params: _ToolParams, shared: _ToolParams, modules: set[str]
+) -> bool:
+    name = _called(node)
+    positions, keywords = tool_params.get(name, ([], set()))
+    func = node.func
+    if isinstance(func, ast.Attribute) and isinstance(func.value, ast.Name):
+        if func.value.id in modules and name in shared:
+            positions, keywords = shared[name]
+    if any(k.arg in keywords and _str_literal(k.value) for k in node.keywords):
+        return True
+    return any(i < len(node.args) and _str_literal(node.args[i]) for i in positions)
+
+
 def _const_field(node: ast.AST) -> bool:
     return isinstance(node, ast.Constant) and node.value in _TOOL_FIELDS
 
@@ -84,9 +177,9 @@ class _Scope:
 
     def __init__(self, params: list[str], parent: _Scope | None = None) -> None:
         # A nested function or lambda sees the values its enclosing scope holds.
-        self.tainted = set(parent.tainted) if parent else set()
-        self.keyed = set(parent.keyed) if parent else set()
-        self.tainted |= {p for p in params if p in _TOOL_FIELDS or p.endswith("_tool")}
+        self.tainted: set[str] = set(parent.tainted) if parent else set()
+        self.keyed: set[str] = set(parent.keyed) if parent else set()
+        self.tainted |= {p for p in params if _tool_param(p)}
 
     def reads(self, node: ast.AST | None, *, keyed: bool = True) -> bool:
         """Whether ``node`` holds a tool read; with ``keyed``, a container keyed by them too."""
@@ -111,6 +204,8 @@ class _Scope:
             return False
         if isinstance(node, ast.Subscript):
             return _const_field(node.slice) or self.reads(node.value)
+        if isinstance(node, _COMPREHENSIONS):
+            return self.reads(node.elt, keyed=False)
         if isinstance(node, ast.BoolOp):
             return any(self.reads(v) for v in node.values)
         if isinstance(node, ast.IfExp):
@@ -123,6 +218,25 @@ class _Scope:
             return self.reads(node.left) or self.reads(node.right)
         return False
 
+    def _taint(self, target: ast.AST) -> None:
+        for name in ast.walk(target):
+            if isinstance(name, ast.Name):
+                self.tainted.add(name.id)
+
+    def _bind(self, target: ast.AST, value: ast.AST | None) -> None:
+        """Taint what ``target`` binds from a tool read, a tuple's names one by one."""
+        if isinstance(target, ast.Name):
+            if self.reads(value):
+                self.tainted.add(target.id)
+        elif isinstance(target, ast.Tuple | ast.List):
+            if isinstance(value, ast.Tuple | ast.List) and len(value.elts) == len(target.elts):
+                for sub, part in zip(target.elts, value.elts, strict=True):
+                    self._bind(sub, part)
+            elif self.reads(value):
+                self._taint(target)
+        elif isinstance(target, ast.Starred):
+            self._bind(target.value, value)
+
     def learn(self, nodes: list[ast.AST]) -> None:
         """Mark the locals assigned from tool reads, and the dicts keyed by them."""
         for _ in range(3):
@@ -131,20 +245,21 @@ class _Scope:
                     targets = node.targets if isinstance(node, ast.Assign) else [node.target]
                     value = node.value
                     for target in targets:
-                        if isinstance(target, ast.Name) and self.reads(value):
-                            self.tainted.add(target.id)
+                        self._bind(target, value)
+                        if (
+                            isinstance(target, ast.Name)
+                            and isinstance(value, ast.DictComp)
+                            and self.reads(value.key, keyed=False)
+                        ):
+                            self.keyed.add(target.id)
                         if (
                             isinstance(target, ast.Subscript)
                             and isinstance(target.value, ast.Name)
                             and self.reads(target.slice)
                         ):
                             self.keyed.add(target.value.id)
-                if (
-                    isinstance(node, ast.For)
-                    and isinstance(node.target, ast.Name)
-                    and self.reads(node.iter)
-                ):
-                    self.tainted.add(node.target.id)
+                if isinstance(node, ast.For | ast.comprehension) and self.reads(node.iter):
+                    self._taint(node.target)
                 if (
                     isinstance(node, ast.Call)
                     and isinstance(node.func, ast.Attribute)
@@ -257,17 +372,89 @@ def _scopes(tree: ast.Module) -> list[tuple[_Scope, list[ast.AST]]]:
     return out
 
 
+def _declared_tool_params(tree: ast.Module) -> tuple[_ToolParams, list[ast.expr]]:
+    """Each function a tree defines that takes a tool, by name, and the defaults that name one.
+
+    The positions (self and cls dropped) and keywords of its parameters named
+    for a tool that the function holds against something (a writer that just
+    stores the name it is given reads nothing).
+    """
+    tool_params: _ToolParams = {}
+    default_nodes: list[ast.expr] = []
+    for func in _functions(tree):
+        assert isinstance(func, ast.FunctionDef | ast.AsyncFunctionDef)
+        args = func.args
+        names = [a.arg for a in (*args.posonlyargs, *args.args)]
+        if names[:1] in (["self"], ["cls"]):
+            names = names[1:]
+        # Only a parameter the function holds against something (a writer
+        # that just stores the name it is given reads nothing).
+        held = {
+            n.id
+            for c in ast.walk(func)
+            if isinstance(c, ast.Compare)
+            for n in ast.walk(c)
+            if isinstance(n, ast.Name)
+        }
+        positions = [i for i, n in enumerate(names) if _tool_param(n) and n in held]
+        keywords = {
+            a.arg for a in (*args.args, *args.kwonlyargs) if _tool_param(a.arg) and a.arg in held
+        }
+        if positions or keywords:
+            at, by = tool_params.setdefault(func.name, ([], set()))
+            at.extend(positions)
+            by |= keywords
+        defaults = list(zip(reversed(args.args), reversed(args.defaults), strict=False))
+        defaults += [
+            (a, d) for a, d in zip(args.kwonlyargs, args.kw_defaults, strict=True) if d is not None
+        ]
+        for arg, default in defaults:
+            if (
+                _tool_param(arg.arg)
+                and arg.arg in held
+                and isinstance(default, ast.Constant)
+                and default.value
+                and _str_literal(default)
+            ):
+                default_nodes.append(default)
+
+    return tool_params, default_nodes
+
+
+def tool_parameters(source: str) -> _ToolParams:
+    """The functions ``source`` defines that take a tool, for ``shared`` of other modules."""
+    return _declared_tool_params(ast.parse(source))[0]
+
+
+@cache
+def tool_parameters_under(root: Path) -> _ToolParams:
+    """The tool parameters of every module under ``root``, merged by function name.
+
+    A guard passes it as ``shared`` so a literal handed to a helper another
+    module defines is seen as one handed to a parameter that takes a tool.
+    """
+    merged: _ToolParams = {}
+    for path in sorted(root.rglob("*.py")):
+        for name, (positions, keywords) in tool_parameters(path.read_text("utf-8")).items():
+            at, by = merged.setdefault(name, ([], set()))
+            at.extend(i for i in positions if i not in at)
+            by |= keywords
+    return merged
+
+
 def findings(
     source: str,
     label: str = "<module>",
     *,
     gateway: bool = False,
     legacy_modules: tuple[str, ...] = LEGACY_MODULES,
+    shared: _ToolParams | None = None,
 ) -> list[Finding]:
     """Every place ``source`` reads an entry's tool by a tool's name."""
     tree = ast.parse(source)
     found: list[Finding] = []
     lines = source.splitlines()
+    shared = shared or {}
 
     def text_at(line: int) -> str:
         return lines[line - 1].strip() if 0 < line <= len(lines) else ""
@@ -299,6 +486,31 @@ def findings(
                     )
                 )
 
+    tool_params, default_nodes = _declared_tool_params(tree)
+    for default in default_nodes:
+        found.append(
+            Finding(
+                label,
+                default.lineno,
+                "defaults a tool parameter to a name",
+                text_at(default.lineno),
+            )
+        )
+    # What the module imports from another one of ours: ``from m import f`` brings
+    # ``f``'s tool parameters under the name it is bound to, ``import m`` (or
+    # ``from p import m``) lets ``m.f(...)`` find them.
+    modules: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom) and (
+            node.level or (node.module or "").startswith("maljan")
+        ):
+            for alias in node.names:
+                if alias.name in shared and alias.name not in tool_params:
+                    tool_params[alias.asname or alias.name] = shared[alias.name]
+                modules.add(alias.asname or alias.name)
+        elif isinstance(node, ast.Import):
+            modules |= {a.asname or a.name for a in node.names if a.name.startswith("maljan")}
+
     seen: set[tuple[int, int, str]] = set()
 
     def flag(node: ast.AST, what: str) -> None:
@@ -319,6 +531,8 @@ def findings(
                     for s in sides
                 ):
                     flag(node, "compares a tool with something that is not a tool")
+                elif _spells_a_server(node):
+                    flag(node, "compares a server with a literal")
             elif isinstance(node, ast.Match) and scope.reads(node.subject):
                 flag(node, "matches on a tool")
             elif isinstance(node, ast.Call):
@@ -330,6 +544,13 @@ def findings(
                     and scope.reads(func_node.value)
                 ):
                     flag(node, f"{name} on a tool")
+                elif name in _PATTERN_CALLS and any(
+                    scope.reads(a, keyed=False)
+                    for a in (*node.args, *(k.value for k in node.keywords))
+                ):
+                    flag(node, f"{name} matches a pattern against a tool")
+                elif _literal_to_a_tool_parameter(node, tool_params, shared, modules):
+                    flag(node, "hands a tool's name to a parameter that takes a tool")
                 elif name in ("getattr", "hasattr") and len(node.args) > 1:
                     if scope.reads(node.args[1]):
                         flag(node, f"{name} with a tool")
@@ -357,9 +578,15 @@ def violations(
     *,
     gateway: bool = False,
     legacy_modules: tuple[str, ...] = LEGACY_MODULES,
+    shared: _ToolParams | None = None,
 ) -> list[str]:
     """:func:`findings` as ``label:line: what`` lines."""
-    return [str(f) for f in findings(source, label, gateway=gateway, legacy_modules=legacy_modules)]
+    return [
+        str(f)
+        for f in findings(
+            source, label, gateway=gateway, legacy_modules=legacy_modules, shared=shared
+        )
+    ]
 
 
 # The ways a name is read that each guard holds the detection to.
@@ -393,4 +620,22 @@ NAME_READ_SNIPPETS: tuple[str, ...] = (
     "from maljan.core.legacy_tool_tables import RULE_TOOLS\n",
     'ok = "decompil" in entry.tool\n',
     "from maljan.core.legacy_reputation import stored_report_counts\n",
+    'tool, ok = entry.tool, entry.ok\nfound = tool == "capa"\n',
+    'tool, ok = entry.tool, entry.ok\nfound = ok == tool\nbad = tool.startswith("x")\n',
+    'tools = [e.tool for e in entries]\nfound = "capa" in tools\n',
+    'names = {e.tool for e in entries}\nfound = "capa" in names\n',
+    'for t in [e.tool for e in entries]:\n    ok = t == "capa"\n',
+    'import re\nok = re.match(r"^capa", entry.tool)\n',
+    'import fnmatch\nok = fnmatch.fnmatch(entry.tool, "sandbox_*")\n',
+    'import re\n_PATTERN = re.compile("capa")\nok = _PATTERN.search(entry.tool)\n',
+    'def find(es, tool="capa"):\n    return [e for e in es if e.tool == tool]\n',
+    'def find(es, tool):\n    return [e for e in es if e.tool == tool]\nfind(es, "capa")\n',
+    (
+        "def find(es, *, wanted_tool):\n"
+        "    return [e for e in es if e.tool == wanted_tool]\n"
+        'find(es, wanted_tool="capa")\n'
+    ),
+    'ok = entry.server == "radare2"\n',
+    'ok = entry.source == "mcp:radare2"\n',
+    'ok = entry.source in ("mcp:radare2", "mcp:ghidra")\n',
 )

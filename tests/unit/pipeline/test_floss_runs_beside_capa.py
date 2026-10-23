@@ -20,6 +20,8 @@ memory of the pack's process tree 1,600 MB → 2,291 MB.
 
 from __future__ import annotations
 
+import sys
+import threading
 import time
 from pathlib import Path
 from typing import Any
@@ -29,7 +31,7 @@ import pytest
 from maljan.pipeline import triage_pack
 from maljan.pipeline.triage_pack import DECLARED, MEASURED, cgroup_headroom_bytes, room_beside
 from maljan.providers.static import capa_yara
-from maljan.tools import emulated_strings, rules
+from maljan.tools import emulated_strings, rules, staging
 from tests.unit.pipeline.test_decoded_strings_in_the_pack import (
     ROWS,
     _answer,
@@ -45,20 +47,43 @@ BOUND = emulated_strings.FLOSS_ADDRESS_SPACE_BYTES
 FLOOR = 10 * GIB
 
 
+# The order each tool's run began and ended in, counted rather than timed: two
+# runs overlapped when each began before the other ended, which holds on a
+# loaded host as on an idle one, where a wall-clock bound does not.
+_ORDER: list[str] = []
+# Set by the test that expects the overlap: each fake waits here for the other,
+# so a serial run times the barrier out and fails, and a parallel run passes
+# however loaded the host is.
+_RENDEZVOUS: list[threading.Barrier] = []
+
+
+def _meet() -> None:
+    if _RENDEZVOUS:
+        _RENDEZVOUS[0].wait()
+
+
 def _slow_capa(path: str, **_: Any) -> dict[str, Any]:
+    _ORDER.append("capa begins")
+    _meet()
     time.sleep(WORK)
+    _ORDER.append("capa ends")
     return {"capabilities": [], "meta": {}}
 
 
 @pytest.fixture
 def _slow_tools(monkeypatch: pytest.MonkeyPatch) -> None:
+    _ORDER.clear()
+    _RENDEZVOUS.clear()
     monkeypatch.setattr(rules, "capa", _slow_capa)
     fake = _installed(monkeypatch, _answer(ROWS))
     answer = fake.answer
 
     def _slow_floss(path: str, **kwargs: Any) -> dict[str, Any]:
         fake.calls.append({"path": path, **kwargs})
+        _ORDER.append("floss begins")
+        _meet()
         time.sleep(WORK)
+        _ORDER.append("floss ends")
         return answer
 
     monkeypatch.setattr(emulated_strings, "floss", _slow_floss)
@@ -177,10 +202,11 @@ class TestCapaSPeakIsMeasured:
 
         assert capa_yara.measured_capa_peak_bytes() == 3 * GIB
 
-    def test_the_child_s_peak_is_read_before_its_answer(
+    def test_the_child_s_peak_is_read_as_it_is_reaped(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         monkeypatch.setattr(capa_yara, "_CAPA_PEAK_BYTES", None)
+        monkeypatch.setenv(staging.STAGING_DIR_ENV, str(tmp_path / "staging"))
         sample = tmp_path / "s.bin"
         sample.write_bytes(b"MZ")
 
@@ -190,17 +216,23 @@ class TestCapaSPeakIsMeasured:
             signatures_dir=str(tmp_path),
             backend_name="BACKEND_VIV",
             timeout_seconds=60,
-            target=_peak_then_answer,
+            child=[sys.executable, "-c", _HOLD_THEN_ANSWER],
         )
 
         assert document == {"rules": {}}
-        assert capa_yara.measured_capa_peak_bytes() == 1234 * MIB
+        peak = capa_yara.measured_capa_peak_bytes()
+        assert peak is not None and peak >= 64 * MIB
 
 
-def _peak_then_answer(sample_path, rules_dir, signatures_dir, backend_name, queue):  # type: ignore[no-untyped-def]
-    """Module-level so the spawn start method can import it in the child."""
-    queue.put(("peak", 1234 * 1024 * 1024))
-    queue.put(("ok", {"rules": {}}))
+# A child that holds 64 MiB, touched page by page, then answers: the kernel's
+# own count of its peak is what the parent reads when it reaps it.
+_HOLD_THEN_ANSWER = (
+    "import json, sys\n"
+    "held = bytearray(64 * 1024 * 1024)\n"
+    "for at in range(0, len(held), 4096):\n"
+    "    held[at] = 1\n"
+    "open(sys.argv[-1], 'w').write(json.dumps({'ok': {'rules': {}}}))\n"
+)
 
 
 @pytest.mark.usefixtures("_slow_tools")
@@ -209,16 +241,19 @@ class TestBesideCapa:
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         _available(monkeypatch, 32 * GIB)
+        _RENDEZVOUS.append(threading.Barrier(2, timeout=30))
 
         started = time.monotonic()
         result = _pack(tmp_path)
         took = time.monotonic() - started
 
-        assert took < 2 * WORK, f"{took:.2f}s: capa and FLOSS still ran one after the other"
-        assert result.entries[-5].tool == "floss"
+        assert _ORDER.index("floss begins") < _ORDER.index("capa ends"), _ORDER
+        assert _ORDER.index("capa begins") < _ORDER.index("floss ends"), _ORDER
+        assert result.entries[-6].tool == "floss"
         entry = _floss_entry(result)
         assert entry.ok is True
-        assert entry.duration_ms < 2 * WORK * 1000, "the entry's clock is FLOSS's own"
+        # FLOSS's own clock: its own run, so never longer than the whole pack.
+        assert WORK * 1000 * 0.9 <= entry.duration_ms <= took * 1000
         assert result.to_state()["floss"] == "beside capa"
 
     def test_a_worker_that_has_not_measured_capa_runs_them_in_turn(
@@ -226,11 +261,15 @@ class TestBesideCapa:
     ) -> None:
         _available(monkeypatch, 64 * GIB, capa_peak=None)
 
-        started = time.monotonic()
         result = _pack(tmp_path)
 
-        assert time.monotonic() - started >= 2 * WORK
-        assert result.entries[-5].tool == "floss"
+        assert _ORDER == ["capa begins", "capa ends", "floss begins", "floss ends"] or _ORDER == [
+            "floss begins",
+            "floss ends",
+            "capa begins",
+            "capa ends",
+        ], _ORDER
+        assert result.entries[-6].tool == "floss"
         assert result.to_state()["floss"] == (
             "in turn: capa's memory has not been measured in this worker yet"
         )

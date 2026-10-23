@@ -4,25 +4,45 @@ import type { EvidenceListResponse, EvidenceQuery } from "@/types/evidence";
 import type { RunDiff } from "@/types/runDiff";
 import type {
   EnrichTriggerResponse,
+  FollowUp,
+  FollowUpList,
   MalwareReport,
   RunSummary,
 } from "@/types/malware-report";
-import { ApiError } from "@/lib/errors";
-import { SettingsValidationError } from "@/types/settings";
+import { ApiError, detailMessage, getErrorMessage, parseRetryAfter } from "@/lib/errors";
+import type { ProfileUpdateBody, ProfileUpdateResponse } from "@/lib/profileUpdate";
+import { withRefreshLock } from "@/lib/refreshLock";
+import { refreshAccessToken } from "@/lib/refreshRequest";
+import { renewSession, type Renewal } from "@/lib/sessionRenewal";
+import { SettingsConflictError, SettingsValidationError } from "@/types/settings";
+import { exportUnreadable } from "@/lib/settingsExport";
 import type {
+  AttckCheckResult,
+  AttckStatus,
+  AttckUpdateProgress,
   ContextWindow,
   CredentialBootstrapResult,
   EffortOptions,
   ImportRequest,
   MappingPreview,
   PatchResult,
+  PluginsListing,
   ProbeResult,
   SettingsSchema,
   SettingsValues,
   TeamLintResult,
 } from "@/types/settings";
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000";
+import { API_BASE } from "@/lib/apiBase";
+
+/** Whether the API refused the credential: a 401, or the 403 the backend
+ *  answers a missing one with. */
+async function isCredentialRefusal(res: Response): Promise<boolean> {
+  if (res.status === 401) return true;
+  if (res.status !== 403) return false;
+  const body = (await res.clone().json().catch(() => ({}))) as { detail?: unknown };
+  return body?.detail === "Not authenticated";
+}
 
 /* ── Shared response types ────────────────────────────── */
 
@@ -395,23 +415,63 @@ class ApiClient {
     return localStorage.getItem("access_token");
   }
 
+  /**
+   * Send a request with the stored token, renewing the session once when the
+   * API refuses a token it was sent.
+   *
+   * A 401 used to clear the token on the spot, which sent a tab whose token
+   * had merely expired to /login while its refresh cookie was still good. The
+   * refusal now asks for a new token first (`renewSession`, one per tab at a
+   * time and serialised across tabs) and the request is sent again with it.
+   * Only a refused renewal leaves the 401 standing for the caller to clear;
+   * a renewal that got no answer at all is said as that, not as a sign-out.
+   * Sign-in, registration and sign-out are sent with `renew: false`: their 401
+   * is about the password, not the token.
+   */
+  private async authedFetch(
+    path: string,
+    build: (token: string | null) => RequestInit,
+    renew = true
+  ): Promise<Response> {
+    const token = this.getToken();
+    const res = await fetch(`${this.baseUrl}${path}`, build(token));
+    if (!renew || !token || !(await isCredentialRefusal(res))) return res;
+    const renewal = await this.renewSession(token);
+    if (renewal.kind === "renewed") {
+      return fetch(`${this.baseUrl}${path}`, build(renewal.token));
+    }
+    if (renewal.kind === "unreachable") {
+      throw new Error(
+        `The session could not be renewed (${getErrorMessage(renewal.error) || "no answer"}).`
+      );
+    }
+    return res;
+  }
+
+  /** Replace a refused access token through the refresh cookie (`sessionRenewal.ts`). */
+  renewSession(refused: string | null): Promise<Renewal> {
+    return renewSession(refused, { refresh: (signal) => this.refresh(signal) });
+  }
+
   private async request<T>(
     path: string,
-    options: RequestInit = {}
+    options: RequestInit = {},
+    { renew = true }: { renew?: boolean } = {}
   ): Promise<T> {
-    const token = this.getToken();
-    const headers: Record<string, string> = {
-      "Content-Type": "application/json",
-      ...(options.headers as Record<string, string>),
-    };
-    if (token) {
-      headers["Authorization"] = `Bearer ${token}`;
-    }
-
-    const res = await fetch(`${this.baseUrl}${path}`, {
-      ...options,
-      headers,
-    });
+    const res = await this.authedFetch(
+      path,
+      (token) => {
+        const headers: Record<string, string> = {
+          "Content-Type": "application/json",
+          ...(options.headers as Record<string, string>),
+        };
+        if (token) {
+          headers["Authorization"] = `Bearer ${token}`;
+        }
+        return { ...options, headers };
+      },
+      renew
+    );
 
     if (res.status === 401 || (res.status === 403 && (await res.clone().json().catch(() => ({})))?.detail === "Not authenticated")) {
       if (typeof window !== "undefined") {
@@ -422,7 +482,11 @@ class ApiClient {
 
     if (!res.ok) {
       const body = await res.json().catch(() => ({}));
-      throw new ApiError(body.detail || `Request failed: ${res.status}`, res.status);
+      throw new ApiError(
+        detailMessage(body, `Request failed: ${res.status}`),
+        res.status,
+        parseRetryAfter(res.headers.get("Retry-After"))
+      );
     }
 
     if (res.status === 204) return {} as T;
@@ -438,15 +502,14 @@ class ApiClient {
    * it, not re-serialised.
    */
   private async settingsFetch(path: string, options: RequestInit = {}): Promise<Response> {
-    const token = this.getToken();
-    const res = await fetch(`${this.baseUrl}${path}`, {
+    const res = await this.authedFetch(path, (token) => ({
       ...options,
       headers: {
         ...(options.body ? { "Content-Type": "application/json" } : {}),
         ...(token ? { Authorization: `Bearer ${token}` } : {}),
         ...(options.headers as Record<string, string>),
       },
-    });
+    }));
     if (res.status === 401) {
       if (typeof window !== "undefined") {
         localStorage.removeItem("access_token");
@@ -459,9 +522,17 @@ class ApiClient {
       };
       throw new SettingsValidationError(body.errors ?? {});
     }
+    if (res.status === 409) {
+      const body = (await res.json().catch(() => ({}))) as {
+        errors?: Record<string, string>;
+        detail?: string;
+      };
+      if (body.errors) throw new SettingsConflictError(body.errors);
+      throw new ApiError(detailMessage(body, `Request failed: ${res.status}`), res.status);
+    }
     if (!res.ok) {
       const body = await res.json().catch(() => ({}));
-      throw new ApiError(body.detail || `Request failed: ${res.status}`, res.status);
+      throw new ApiError(detailMessage(body, `Request failed: ${res.status}`), res.status);
     }
     return res;
   }
@@ -470,17 +541,14 @@ class ApiClient {
     path: string,
     options: RequestInit = {}
   ): Promise<string> {
-    const token = this.getToken();
-    const headers: Record<string, string> = {
-      ...(options.headers as Record<string, string>),
-    };
-    if (token) {
-      headers["Authorization"] = `Bearer ${token}`;
-    }
-
-    const res = await fetch(`${this.baseUrl}${path}`, {
-      ...options,
-      headers,
+    const res = await this.authedFetch(path, (token) => {
+      const headers: Record<string, string> = {
+        ...(options.headers as Record<string, string>),
+      };
+      if (token) {
+        headers["Authorization"] = `Bearer ${token}`;
+      }
+      return { ...options, headers };
     });
 
     if (res.status === 401) {
@@ -492,7 +560,7 @@ class ApiClient {
 
     if (!res.ok) {
       const body = await res.json().catch(() => ({}));
-      throw new ApiError(body.detail || `Request failed: ${res.status}`, res.status);
+      throw new ApiError(detailMessage(body, `Request failed: ${res.status}`), res.status);
     }
 
     return res.text();
@@ -503,15 +571,15 @@ class ApiClient {
     path: string,
     options: RequestInit = {}
   ): Promise<Blob> {
-    const token = this.getToken();
-    const headers: Record<string, string> = {
-      ...(options.headers as Record<string, string>),
-    };
-    if (token) {
-      headers["Authorization"] = `Bearer ${token}`;
-    }
-
-    const res = await fetch(`${this.baseUrl}${path}`, { ...options, headers });
+    const res = await this.authedFetch(path, (token) => {
+      const headers: Record<string, string> = {
+        ...(options.headers as Record<string, string>),
+      };
+      if (token) {
+        headers["Authorization"] = `Bearer ${token}`;
+      }
+      return { ...options, headers };
+    });
 
     if (res.status === 401) {
       if (typeof window !== "undefined") {
@@ -524,7 +592,7 @@ class ApiClient {
       // The error body is JSON even though the success body is not, so it has
       // to be read as JSON here rather than reusing the blob.
       const body = await res.json().catch(() => ({}));
-      throw new ApiError(body.detail || `Request failed: ${res.status}`, res.status);
+      throw new ApiError(detailMessage(body, `Request failed: ${res.status}`), res.status);
     }
 
     return res.blob();
@@ -534,17 +602,11 @@ class ApiClient {
     path: string,
     formData: FormData
   ): Promise<T> {
-    const token = this.getToken();
-    const headers: Record<string, string> = {};
-    if (token) {
-      headers["Authorization"] = `Bearer ${token}`;
-    }
-
-    const res = await fetch(`${this.baseUrl}${path}`, {
+    const res = await this.authedFetch(path, (token) => ({
       method: "POST",
-      headers,
+      headers: (token ? { Authorization: `Bearer ${token}` } : {}) as Record<string, string>,
       body: formData,
-    });
+    }));
 
     if (res.status === 401 || (res.status === 403 && (await res.clone().json().catch(() => ({})))?.detail === "Not authenticated")) {
       if (typeof window !== "undefined") {
@@ -555,7 +617,7 @@ class ApiClient {
 
     if (!res.ok) {
       const body = await res.json().catch(() => ({}));
-      throw new ApiError(body.detail || `Upload failed: ${res.status}`, res.status);
+      throw new ApiError(detailMessage(body, `Upload failed: ${res.status}`), res.status);
     }
     return res.json();
   }
@@ -568,14 +630,16 @@ class ApiClient {
         method: "POST",
         body: JSON.stringify({ email, password }),
         credentials: "include",
-      }
+      },
+      { renew: false }
     );
   }
 
   register(email: string, password: string, full_name: string) {
     return this.request<{ id: string; email: string }>(
       "/api/v1/auth/register",
-      { method: "POST", body: JSON.stringify({ email, password, full_name }) }
+      { method: "POST", body: JSON.stringify({ email, password, full_name }) },
+      { renew: false }
     );
   }
 
@@ -588,30 +652,53 @@ class ApiClient {
     }>("/api/v1/auth/me");
   }
 
-  updateMe(body: { full_name?: string; password?: string }) {
-    return this.request<{
-      id: string;
-      email: string;
-      full_name: string;
-      role: string;
-    }>("/api/v1/auth/me", {
-      method: "PATCH",
-      body: JSON.stringify(body),
-    });
+  /**
+   * Update the caller's profile. A new `password` needs `current_password`.
+   *
+   * A password change revokes every earlier session and API key of the
+   * account; the answer carries this session's replacement access token (and
+   * sets the replacement refresh cookie, hence `credentials: "include"`). It
+   * is stored here, where every other access token is, so the next request and
+   * the refresh timer (which adopts a token it did not schedule) carry on as
+   * the same session. A password change holds the refresh lock
+   * (`withRefreshLock`), so no tab's refresh races the cookie it replaces.
+   */
+  async updateMe(body: ProfileUpdateBody) {
+    const save = async (signal?: AbortSignal) => {
+      const updated = await this.request<ProfileUpdateResponse>("/api/v1/auth/me", {
+        method: "PATCH",
+        body: JSON.stringify(body),
+        credentials: "include",
+        signal,
+      });
+      if (updated.access_token && typeof window !== "undefined") {
+        localStorage.setItem("access_token", updated.access_token);
+      }
+      return updated;
+    };
+    return body.password ? withRefreshLock(save) : save();
   }
 
-  refresh() {
-    return this.request<{ access_token: string; token_type: string }>(
-      "/api/v1/auth/refresh",
-      { method: "POST", credentials: "include" }
-    );
+  /**
+   * Exchange the refresh cookie for a new access token.
+   *
+   * Not through `request()`: that clears the stored access token on any 401,
+   * and a refresh refused because another tab rotated the cookie first would
+   * then wipe the token the winning tab just stored, signing every tab out.
+   * A refusal here leaves storage alone and throws the same `Unauthorized`
+   * error, so the caller decides (see `runRefresh` in `auth.tsx`). `signal`
+   * aborts the request when the refresh lock's lease ends.
+   */
+  refresh(signal?: AbortSignal) {
+    return refreshAccessToken(this.baseUrl, fetch, signal);
   }
 
   logout() {
-    return this.request<Record<string, never>>("/api/v1/auth/logout", {
-      method: "POST",
-      credentials: "include",
-    });
+    return this.request<Record<string, never>>(
+      "/api/v1/auth/logout",
+      { method: "POST", credentials: "include" },
+      { renew: false }
+    );
   }
 
   /* ── Dashboard ─────────────────────────────────────── */
@@ -641,26 +728,42 @@ class ApiClient {
     return this.request<SettingsValues>("/api/v1/settings");
   }
 
-  async patchSettings(changes: Record<string, unknown>): Promise<PatchResult> {
+  /** `versions` names, per changed key, the `updated_at` the page was served
+   *  it with (`null`: no stored row); a key changed since is refused with a
+   *  `SettingsConflictError` and nothing is saved. `currentPassword` is sent
+   *  when a change touches a setting marked `needs_current_password`. */
+  async patchSettings(
+    changes: Record<string, unknown>,
+    versions: Record<string, string | null> = {},
+    currentPassword?: string
+  ): Promise<PatchResult> {
+    const body = currentPassword
+      ? { changes, versions, current_password: currentPassword }
+      : { changes, versions };
     const res = await this.settingsFetch("/api/v1/settings", {
       method: "PATCH",
-      body: JSON.stringify({ changes }),
+      body: JSON.stringify(body),
     });
     return res.json();
   }
 
-  resetSetting(key: string) {
-    return this.request<{ reset: string[] }>(
-      `/api/v1/settings/${encodeURIComponent(key)}`,
-      { method: "DELETE" }
-    );
+  /** `currentPassword` is sent when the reset removes a stored setting
+   *  marked `needs_current_password`; a 422 for a missing one is a
+   *  `SettingsValidationError` naming `current_password`. */
+  async resetSetting(key: string, currentPassword?: string): Promise<{ reset: string[] }> {
+    const res = await this.settingsFetch(`/api/v1/settings/${encodeURIComponent(key)}`, {
+      method: "DELETE",
+      ...(currentPassword ? { body: JSON.stringify({ current_password: currentPassword }) } : {}),
+    });
+    return res.json();
   }
 
-  resetSettingsGroup(group: string) {
-    return this.request<{ reset: string[] }>(
-      `/api/v1/settings?group=${encodeURIComponent(group)}`,
-      { method: "DELETE" }
-    );
+  async resetSettingsGroup(group: string, currentPassword?: string): Promise<{ reset: string[] }> {
+    const res = await this.settingsFetch(`/api/v1/settings?group=${encodeURIComponent(group)}`, {
+      method: "DELETE",
+      ...(currentPassword ? { body: JSON.stringify({ current_password: currentPassword }) } : {}),
+    });
+    return res.json();
   }
 
   /** The window the configured models serve. Read-only, and costs no tokens. */
@@ -675,8 +778,34 @@ class ApiClient {
     return this.request<EffortOptions>(`/api/v1/settings/effort-options?${query}`);
   }
 
+  /** The cached ATT&CK bundles, per domain, as the worker that holds them reads them. */
+  getAttckStatus() {
+    return this.request<AttckStatus>("/api/v1/settings/attck");
+  }
+
+  /** Compare the cache with MITRE's release index now; downloads and changes nothing. */
+  checkAttck() {
+    return this.request<AttckCheckResult>("/api/v1/settings/attck/check", { method: "POST" });
+  }
+
+  /** Queue the update; poll `getAttckUpdate` with the id it returns. */
+  startAttckUpdate() {
+    return this.request<{ job_id: string }>("/api/v1/settings/attck/update", { method: "POST" });
+  }
+
+  getAttckUpdate(jobId: string) {
+    return this.request<AttckUpdateProgress>(
+      `/api/v1/settings/attck/update/${encodeURIComponent(jobId)}`
+    );
+  }
+
+  /** Every installed provider plugin per kind, read from package metadata (admin). */
+  getSettingsPlugins() {
+    return this.request<PluginsListing>("/api/v1/settings/plugins");
+  }
+
   testSettingsProbe(probe: string, values: Record<string, unknown>) {
-    return this.request<ProbeResult>(`/api/v1/settings/test/${probe}`, {
+    return this.request<ProbeResult>(`/api/v1/settings/test/${encodeURIComponent(probe)}`, {
       method: "POST",
       body: JSON.stringify({ values }),
     });
@@ -762,11 +891,12 @@ class ApiClient {
    * as `maljan-settings.json` — no server round trip beyond the fetch
    * already made, and the viewer never sees a bare `data:` link. The
    * document is downloaded byte-for-byte as the API sent it (`format`,
-   * `exported_at`, `values`, `secrets_omitted` in that order) rather than
+   * `exported_at`, `values`, `secrets_omitted`, `unreadable` in that order) rather than
    * re-serialised, so the file on disk is exactly what `GET
-   * /settings/export` returned.
+   * /settings/export` returned. Returns the document's `unreadable` map:
+   * the keys it left out, with why.
    */
-  async exportSettings(): Promise<void> {
+  async exportSettings(): Promise<Record<string, string>> {
     const res = await this.settingsFetch("/api/v1/settings/export");
     const text = await res.text();
     const blob = new Blob([text], { type: "application/json" });
@@ -778,6 +908,7 @@ class ApiClient {
     a.click();
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
+    return exportUnreadable(text);
   }
 
   /** Imports a previously exported (or hand-written) configuration document.
@@ -794,14 +925,15 @@ class ApiClient {
   }
 
   /* ── Samples ───────────────────────────────────────── */
-  getSamples(page = 1, pageSize = 50) {
+  getSamples(page = 1, pageSize = 50, signal?: AbortSignal) {
     return this.request<PaginatedResponse<SampleDTO>>(
-      `/api/v1/samples?page=${page}&page_size=${pageSize}`
+      `/api/v1/samples?page=${page}&page_size=${pageSize}`,
+      { signal }
     );
   }
 
   getSample(sampleId: string) {
-    return this.request<SampleDTO>(`/api/v1/samples/${sampleId}`);
+    return this.request<SampleDTO>(`/api/v1/samples/${encodeURIComponent(sampleId)}`);
   }
 
   uploadSample(file: File) {
@@ -816,7 +948,13 @@ class ApiClient {
   /* ── Jobs ──────────────────────────────────────────── */
   /** One page of the caller's jobs; `sampleId` narrows it to one sample's
    *  runs, which is how a run finds its siblings to compare with. */
-  getJobs(page = 1, pageSize = 50, status?: string, sampleId?: string) {
+  getJobs(
+    page = 1,
+    pageSize = 50,
+    status?: string,
+    sampleId?: string,
+    signal?: AbortSignal
+  ) {
     const params = new URLSearchParams({
       page: String(page),
       page_size: String(pageSize),
@@ -824,20 +962,22 @@ class ApiClient {
     if (status) params.set("status", status);
     if (sampleId) params.set("sample_id", sampleId);
     return this.request<PaginatedResponse<JobDTO>>(
-      `/api/v1/jobs?${params}`
+      `/api/v1/jobs?${params}`,
+      { signal }
     );
   }
 
   async getJob(jobId: string) {
-    const data = await this.request<JobDTO>(`/api/v1/jobs/${jobId}`);
+    const data = await this.request<JobDTO>(`/api/v1/jobs/${encodeURIComponent(jobId)}`);
     assertShape("getJob", data, _JOB_SCHEMA);
     return data;
   }
 
   /** Start a job. `config` accepts the known keys the API validates at submit
    *  time — `llm_provider`, `max_iterations`, `static_provider`,
-   *  `sandbox_provider`, `sandbox_report_id` and `profile` — plus anything
-   *  else, which passes through untouched. */
+   *  `sandbox_provider`, `sandbox_report_id`, `profile` and `questions` (the
+   *  questions the report answers, each with some text) — plus anything else,
+   *  which passes through untouched. */
   createJob(sampleId: string, config?: Record<string, unknown>) {
     return this.request<JobDTO>(
       "/api/v1/jobs",
@@ -847,7 +987,7 @@ class ApiClient {
 
   cancelJob(jobId: string) {
     return this.request<void>(
-      `/api/v1/jobs/${jobId}`,
+      `/api/v1/jobs/${encodeURIComponent(jobId)}`,
       { method: "DELETE" }
     );
   }
@@ -857,21 +997,21 @@ class ApiClient {
     const fd = new FormData();
     fd.append("file", file);
     return this.uploadRequest<SandboxReportDTO>(
-      `/api/v1/samples/${sampleId}/sandbox-reports`,
+      `/api/v1/samples/${encodeURIComponent(sampleId)}/sandbox-reports`,
       fd
     );
   }
 
   getSandboxReports(sampleId: string) {
     return this.request<{ items: SandboxReportDTO[]; total: number }>(
-      `/api/v1/samples/${sampleId}/sandbox-reports`
+      `/api/v1/samples/${encodeURIComponent(sampleId)}/sandbox-reports`
     );
   }
 
   /** An unread upload with its proposed declaration, read again from the stored report. */
   getSandboxReportProposal(sampleId: string, reportId: string) {
     return this.request<SandboxReportDTO>(
-      `/api/v1/samples/${sampleId}/sandbox-reports/${reportId}/proposal`
+      `/api/v1/samples/${encodeURIComponent(sampleId)}/sandbox-reports/${encodeURIComponent(reportId)}/proposal`
     );
   }
 
@@ -889,7 +1029,7 @@ class ApiClient {
 
   deleteSandboxReport(sampleId: string, reportId: string) {
     return this.request<void>(
-      `/api/v1/samples/${sampleId}/sandbox-reports/${reportId}`,
+      `/api/v1/samples/${encodeURIComponent(sampleId)}/sandbox-reports/${encodeURIComponent(reportId)}`,
       { method: "DELETE" }
     );
   }
@@ -917,7 +1057,7 @@ class ApiClient {
         stream_id?: string;
       }>;
       count: number;
-    }>(`/api/v1/jobs/${jobId}/events?${params.toString()}`);
+    }>(`/api/v1/jobs/${encodeURIComponent(jobId)}/events?${params.toString()}`);
   }
 
   /**
@@ -925,6 +1065,34 @@ class ApiClient {
    * Filters narrow to one stage, one agent or one tool; the order is always
    * the order the calls were made in.
    */
+  /** One part of an entry's answer kept whole in object storage (`spilled`). */
+  async getEvidenceObject(
+    jobId: string,
+    entryId: string,
+    part: string
+  ): Promise<{ bytes: ArrayBuffer; contentType: string; declaredLength: number | null }> {
+    const path = `/api/v1/jobs/${encodeURIComponent(jobId)}/evidence/${encodeURIComponent(entryId)}/objects/${encodeURIComponent(part)}`;
+    const res = await this.authedFetch(path, (token) => ({
+      headers: token ? { Authorization: `Bearer ${token}` } : ({} as Record<string, string>),
+    }));
+    if (res.status === 401) {
+      if (typeof window !== "undefined") localStorage.removeItem("access_token");
+      throw new ApiError("Unauthorized", res.status);
+    }
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      throw new ApiError(detailMessage(body, `Request failed: ${res.status}`), res.status);
+    }
+    const length = Number(res.headers.get("Content-Length"));
+    return {
+      bytes: await res.arrayBuffer(),
+      contentType: res.headers.get("Content-Type") ?? "",
+      // Absent under a compressed transfer, where the header counts the wire bytes.
+      declaredLength:
+        res.headers.get("Content-Encoding") || !Number.isFinite(length) || length <= 0 ? null : length,
+    };
+  }
+
   getJobEvidence(jobId: string, query: EvidenceQuery = {}) {
     const params = new URLSearchParams({
       page: String(query.page ?? 1),
@@ -934,7 +1102,7 @@ class ApiClient {
     if (query.tool) params.set("tool", query.tool);
     if (query.stage) params.set("stage", query.stage);
     return this.request<EvidenceListResponse>(
-      `/api/v1/jobs/${jobId}/evidence?${params}`
+      `/api/v1/jobs/${encodeURIComponent(jobId)}/evidence?${params}`
     );
   }
 
@@ -943,7 +1111,7 @@ class ApiClient {
    * zero call sites and were removed. The pages reach a report through its
    * job id. */
   getReportByJobId(jobId: string) {
-    return this.request<ReportDetailDTO>(`/api/v1/reports/job/${jobId}`);
+    return this.request<ReportDetailDTO>(`/api/v1/reports/job/${encodeURIComponent(jobId)}`);
   }
 
   /** What changed between two stored runs, both named by their job id.
@@ -955,13 +1123,20 @@ class ApiClient {
 
   getReportTimeline(reportId: string) {
     return this.request<Record<string, unknown>>(
-      `/api/v1/reports/${reportId}/timeline`
+      `/api/v1/reports/${encodeURIComponent(reportId)}/timeline`
     );
   }
 
   getReportStix(reportId: string) {
     return this.request<Record<string, unknown>>(
-      `/api/v1/reports/${reportId}/stix`
+      `/api/v1/reports/${encodeURIComponent(reportId)}/stix`
+    );
+  }
+
+  /** The ATT&CK Navigator layer of the techniques the report publishes. */
+  getReportAttackLayer(reportId: string) {
+    return this.request<Record<string, unknown>>(
+      `/api/v1/reports/${encodeURIComponent(reportId)}/attack-layer`
     );
   }
 
@@ -979,7 +1154,7 @@ class ApiClient {
     include: "published" | "unpublished" | "all" = "all"
   ) {
     const data = await this.request<IOCListResponse>(
-      `/api/v1/reports/${reportId}/iocs?include=${include}`
+      `/api/v1/reports/${encodeURIComponent(reportId)}/iocs?include=${include}`
     );
     for (const row of data?.items ?? []) {
       assertShape("getReportIOCs.item", row, _IOC_ROW_SCHEMA);
@@ -989,37 +1164,52 @@ class ApiClient {
 
   getReportMitre(reportId: string) {
     return this.request<{ techniques: unknown[] }>(
-      `/api/v1/reports/${reportId}/mitre`
+      `/api/v1/reports/${encodeURIComponent(reportId)}/mitre`
     );
   }
 
-  getReports(page = 1, pageSize = 50) {
+  getReports(page = 1, pageSize = 50, signal?: AbortSignal) {
     return this.request<PaginatedResponse<ReportSummaryDTO>>(
-      `/api/v1/reports?page=${page}&page_size=${pageSize}`
+      `/api/v1/reports?page=${page}&page_size=${pageSize}`,
+      { signal }
     );
   }
 
   getReportMarkdown(reportId: string) {
-    return this.textRequest(`/api/v1/reports/${reportId}/markdown`);
+    return this.textRequest(`/api/v1/reports/${encodeURIComponent(reportId)}/markdown`);
   }
 
   /** Standalone HTML report — inline CSS and SVG figures, no external requests. */
   getReportHtml(reportId: string) {
-    return this.textRequest(`/api/v1/reports/${reportId}/html`);
+    return this.textRequest(`/api/v1/reports/${encodeURIComponent(reportId)}/html`);
   }
 
   /** Print-ready PDF of the same document. 503 when the host lacks WeasyPrint. */
   getReportPdf(reportId: string) {
-    return this.blobRequest(`/api/v1/reports/${reportId}/pdf`);
+    return this.blobRequest(`/api/v1/reports/${encodeURIComponent(reportId)}/pdf`);
   }
 
   getReportSignature(reportId: string, kind: "yara" | "sigma" | "suricata" | "snort") {
-    return this.textRequest(`/api/v1/reports/${reportId}/signatures/${kind}`);
+    return this.textRequest(`/api/v1/reports/${encodeURIComponent(reportId)}/signatures/${encodeURIComponent(kind)}`);
+  }
+
+  /** The follow-up questions asked of a finished job, oldest first. */
+  getFollowUps(jobId: string) {
+    return this.request<FollowUpList>(`/api/v1/jobs/${encodeURIComponent(jobId)}/follow-ups`);
+  }
+
+  /** Ask a finished job a new question; answered from its stored run once the
+   *  model has answered. 409 while the job runs or when it stored no report. */
+  askFollowUp(jobId: string, question: string) {
+    return this.request<FollowUp>(`/api/v1/jobs/${encodeURIComponent(jobId)}/follow-ups`, {
+      method: "POST",
+      body: JSON.stringify({ question }),
+    });
   }
 
   enrichReport(reportId: string) {
     return this.request<EnrichTriggerResponse>(
-      `/api/v1/reports/${reportId}/enrich`,
+      `/api/v1/reports/${encodeURIComponent(reportId)}/enrich`,
       { method: "POST" }
     );
   }
@@ -1044,16 +1234,21 @@ class ApiClient {
     );
   }
 
-  createApiKey(name: string, expiresInDays?: number) {
-    return this.request<ApiKeyCreateDTO>(
-      "/api/v1/audit/api-keys",
-      { method: "POST", body: JSON.stringify({ name, expires_in_days: expiresInDays || null }) }
-    );
+  /** A key outlives the access token, so the API asks for the password again. */
+  createApiKey(name: string, currentPassword: string, expiresInDays?: number) {
+    return this.request<ApiKeyCreateDTO>("/api/v1/audit/api-keys", {
+      method: "POST",
+      body: JSON.stringify({
+        name,
+        expires_in_days: expiresInDays || null,
+        current_password: currentPassword,
+      }),
+    });
   }
 
   revokeApiKey(keyId: string) {
     return this.request<void>(
-      `/api/v1/audit/api-keys/${keyId}`,
+      `/api/v1/audit/api-keys/${encodeURIComponent(keyId)}`,
       { method: "DELETE" }
     );
   }

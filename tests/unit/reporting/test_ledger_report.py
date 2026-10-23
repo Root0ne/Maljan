@@ -112,8 +112,9 @@ class TestBinaryBuilders:
     def test_the_static_projection_takes_an_unread_permission_list_as_no_permissions(
         self,
     ) -> None:
-        """An APK's permissions become the static block's exports; the string
-        ``no: <reason>`` iterated there would be one export per character."""
+        """An APK's permissions become the static block's permissions, never its
+        exports; the string ``no: <reason>`` iterated there would be one
+        permission per character."""
         from maljan.reporting.ledger_projection import static_from_ledger
         from maljan.schemas.evidence import LedgerEntry
 
@@ -123,7 +124,8 @@ class TestBinaryBuilders:
                 [LedgerEntry(id="ev_0001", agent="static", tool="apk_info", structured=answer)]
             )
             assert static is not None
-            return list(static.exports)
+            assert static.exports == []
+            return list(static.permissions)
 
         assert _static("no: the manifest could not be parsed") == []
         assert _static(["android.permission.INTERNET"]) == ["android.permission.INTERNET"]
@@ -386,3 +388,26 @@ class TestGroundingContract:
         ]
         for section in build_sections(entries, {}, "PE", "windows"):
             assert section.evidence_ids or section.source, section.key
+
+
+class TestFunctionsExaminedNamesTheFunction:
+    def test_a_decompiler_with_its_own_address_argument_names_the_address(self) -> None:
+        entry = _entry("decompile_function", "void f() { }", args={"name_or_address": "0x401000"})
+        items = _by_key(build_sections([entry]))["functions_examined"].items
+        assert items == ["0x401000 (decompile_function)"]
+
+    def test_an_integer_address_is_printed_in_hex(self) -> None:
+        entry = _entry("decompile_function", "void f() { }", args={"address": 4198400})
+        items = _by_key(build_sections([entry]))["functions_examined"].items
+        assert items == ["0x401000 (decompile_function)"]
+
+    def test_a_call_naming_nothing_never_repeats_the_tool_name(self) -> None:
+        entries = [
+            _entry("decompile_function", "void f() { }", args={}),
+            _entry("list_functions", "- 0x401000 main", args={}, seq=2),
+        ]
+        items = _by_key(build_sections(entries))["functions_examined"].items
+        assert items == [
+            "no address in the call (decompile_function)",
+            "function listing (list_functions)",
+        ]

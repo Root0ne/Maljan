@@ -1,0 +1,16 @@
+[
+ {"text": "{sample_path}", "unknown": []},
+ {"text": "--hash {sha256} --as {file_type}", "unknown": []},
+ {"text": "no placeholder at all", "unknown": []},
+ {"text": "{{sample_path}}", "unknown": []},
+ {"text": "{ sample_path }", "unknown": []},
+ {"text": "{9lives}", "unknown": []},
+ {"text": "{}", "unknown": []},
+ {"text": "{sample-path}", "unknown": []},
+ {"text": "{path}", "unknown": ["path"]},
+ {"text": "{_hidden}", "unknown": ["_hidden"]},
+ {"text": "{Sample_Path}", "unknown": ["Sample_Path"]},
+ {"text": "{sha256}{md5}{file_type}{size}", "unknown": ["md5", "size"]},
+ {"text": "{a{sample_path}", "unknown": []},
+ {"text": "{sample_path{x}}", "unknown": ["x"]}
+]

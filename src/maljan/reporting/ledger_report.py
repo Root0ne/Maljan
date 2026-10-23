@@ -32,9 +32,15 @@ from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
 from maljan.agents.output_shortening import BOOKKEEPING_KEY, our_key_in
-from maljan.analysis.technique_ids import says_no_technique, sigma_technique_ids
+from maljan.analysis import behaviour_code
+from maljan.analysis.technique_ids import (
+    says_no_technique,
+    sigma_technique_ids,
+    technique_ids_in,
+)
 from maljan.core.reputation import reputation_of
 from maljan.core.tool_declarations import first, select
+from maljan.core.undeclared_tools import address_arguments
 from maljan.reporting import tool_kinds
 from maljan.reporting.dedupe import (
     MergeTally,
@@ -42,8 +48,9 @@ from maljan.reporting.dedupe import (
     indicator_fingerprint,
     merge_cell,
 )
-from maljan.reporting.models import EvidenceSection
+from maljan.reporting.models import OPEN_QUESTION_SOURCE, EvidenceSection
 from maljan.schemas.evidence import answer_not_shown
+from maljan.schemas.isr_models import would_answer_text
 from maljan.schemas.sandbox_document import DNS_NAME_KEYS, dns_name_key
 from maljan.utils.marked_cut import marked_cut
 
@@ -168,6 +175,15 @@ class _Sections:
         self.cite(section, entry.id)
         note_if_shortened(section, entry.structured)
 
+    def add_column(self, section: EvidenceSection, name: str, fill: str = "-") -> None:
+        """Give a table one more column, each row it holds already ``fill`` under it."""
+        if name in section.columns:
+            return
+        section.columns.append(name)
+        for row in section.rows:
+            row.append(fill)
+        self._seen[section.key] = {tuple(row) for row in section.rows}
+
     def add_row(self, section: EvidenceSection, row: list[str]) -> None:
         fingerprint = tuple(row)
         seen = self._seen.setdefault(section.key, set())
@@ -234,8 +250,11 @@ class _Sections:
 # What a section's ``source`` may say and still count as grounded on its own.
 # A tool section is grounded by the entry ids it cites, never by naming a tool:
 # a builder that produced rows without recording which call they came from is
-# the defect ``sections_without_evidence`` exists to surface.
-_GROUNDED_SOURCES = frozenset({"routing", "finding"})
+# the defect ``sections_without_evidence`` exists to surface. The "Open
+# questions" section is grounded on its own, as an answer the analysts wrote,
+# and is no analyst section source (``ANALYST_SECTION_SOURCES``): the ids it
+# cites corroborate no value.
+_GROUNDED_SOURCES = frozenset({"routing", "finding", OPEN_QUESTION_SOURCE})
 
 
 def section_is_grounded(section: EvidenceSection) -> bool:
@@ -243,7 +262,7 @@ def section_is_grounded(section: EvidenceSection) -> bool:
 
     Either it cites ledger entries, or it came from something that is itself an
     answer rather than a derivation: the routing minimum, an agent's finding,
-    or an artifact an agent established.
+    an artifact an agent established, or a question an agent left open.
     """
     if section.evidence_ids:
         return True
@@ -378,7 +397,10 @@ def _signing(acc: _Sections, entry: LedgerEntry, data: dict[str, Any]) -> None:
 
 def _binary_info(acc: _Sections, entry: LedgerEntry, data: dict[str, Any]) -> None:
     """The structural facts of a PE, ELF, Mach-O or APK, one table per shape."""
-    prefix = entry.tool.split("_")[0]
+    # The section is named for the tool that answered, whole: two tools that
+    # share a first word ("pe_info", "pe_strip_info") are two sections, not
+    # one holding both their rows.
+    prefix = entry.tool.removesuffix("_info") or entry.tool
 
     header = acc.get(f"{prefix}_header", f"{prefix.upper()} header", "kv")
     for key in (
@@ -778,14 +800,24 @@ def _sandbox_signatures(acc: _Sections, entry: LedgerEntry, data: dict[str, Any]
         "table",
         columns=["Name", "Severity", "Description"],
     )
-    for row in rows:
+    tagged = [
+        technique_ids_in(row.get("technique_ids")) if isinstance(row, dict) else [] for row in rows
+    ]
+    if any(tagged):
+        # The ids the sandbox tags a signature with, in a column of their own
+        # once any signature of the run carries them.
+        acc.add_column(table, SIGNATURE_TECHNIQUES_COLUMN)
+    with_ids = SIGNATURE_TECHNIQUES_COLUMN in table.columns
+    for row, ids in zip(rows, tagged, strict=True):
         if not isinstance(row, dict):
             continue
-        acc.add_row(
-            table,
-            [_text(row.get("name")), _text(row.get("severity")), _text(row.get("description"))],
-        )
+        cells = [_text(row.get("name")), _text(row.get("severity")), _text(row.get("description"))]
+        acc.add_row(table, [*cells, ", ".join(ids) or "-"] if with_ids else cells)
     acc.credit(table, entry)
+
+
+# The column the sandbox signature table names a signature's techniques under.
+SIGNATURE_TECHNIQUES_COLUMN = "Techniques"
 
 
 def _sandbox_dropped(acc: _Sections, entry: LedgerEntry, data: dict[str, Any]) -> None:
@@ -936,6 +968,78 @@ def _sandbox_status(acc: _Sections, entry: LedgerEntry, data: dict[str, Any]) ->
     acc.credit(section, entry)
 
 
+# The section of the behaviour links (``analysis.behaviour_code``), and its
+# columns that hold the sample's or the sandbox's own text: the report writes
+# each of those as a code span (``renderers.markdown``).
+BEHAVIOUR_CODE_SECTION = "behaviour_code_links"
+BEHAVIOUR_CODE_COLUMNS = ["Observed", "Value", "Sandbox items", "Held at", "Match", "Function"]
+BEHAVIOUR_CODE_SAMPLE_COLUMNS = (1, 3)
+# The platform's own words a "Held at" cell holds where no place holds the value.
+BEHAVIOUR_CODE_PLAIN_WORDS = (behaviour_code.OBSERVED_ONLY, behaviour_code.PARTLY_READ)
+
+
+def _behaviour_code(acc: _Sections, entry: LedgerEntry, data: dict[str, Any]) -> None:
+    """Each value the sandbox observed, one row per static place that holds it, or observed only.
+
+    The text above the rows says what was compared, how much of each answer,
+    and where the functions came from or why none could be stated.
+    """
+    links = [row for row in data.get("links") or [] if isinstance(row, dict)]
+    table = acc.get(
+        BEHAVIOUR_CODE_SECTION,
+        "Observed behaviour linked to code",
+        "table",
+        columns=list(BEHAVIOUR_CODE_COLUMNS),
+    )
+    functions = data.get("functions")
+    compared = [row for row in data.get("compared") or [] if isinstance(row, dict)]
+    read = ", ".join(behaviour_code.compared_words(row) for row in compared)
+    only = _text(data.get("observed_only_label")) or behaviour_code.OBSERVED_ONLY
+    said = [
+        f"{data.get('observed', 0)} values the sandbox observed, compared exactly (after the "
+        f"platform's normalisation for each kind) with the texts of {read or 'no static answer'}: "
+        f"{data.get('held', 0)} held, {data.get('observed_only', 0)} {only}."
+    ]
+    if isinstance(functions, dict):
+        said.append(f"Functions from [{functions.get('entry')}] {functions.get('tool')}.")
+    else:
+        said.append(f"Functions: {functions}.")
+    for key, reason in (data.get("absent") or {}).items():
+        said.append(f"{key}: {reason}.")
+    said.extend(f"{one[:1].upper()}{one[1:]}." for one in behaviour_code.unread_words(data))
+    table.text = _cut_text(" ".join(said), entry.id)
+    for row in links:
+        kind, value = _text(row.get("kind")), _text(row.get("value"))
+        items = ", ".join(str(item) for item in row.get("items") or [])
+        if row.get("attribution") == behaviour_code.NOT_ATTRIBUTED:
+            items += f" ({behaviour_code.NOT_ATTRIBUTED})"
+        held = [h for h in row.get("held") or [] if isinstance(h, dict)]
+        if not held:
+            acc.add_row(table, [kind, value, items, only, "", ""])
+            continue
+        for holding in held:
+            details = behaviour_code.place_details(holding)
+            place = f"[{holding.get('entry')}] {behaviour_code.place_words(holding)}"
+            if details:
+                place += f" ({', '.join(details)})"
+            how = _text(holding.get("matched")) or behaviour_code.EXACT
+            if how != behaviour_code.EXACT:
+                # The text that held the value, beside the place: it is not the value.
+                place += f": {_text(holding.get('text'))}"
+            acc.add_row(
+                table,
+                [
+                    kind,
+                    value,
+                    items,
+                    place,
+                    how,
+                    behaviour_code.function_words(holding, functions),
+                ],
+            )
+    acc.credit(table, entry)
+
+
 def _pcap(acc: _Sections, entry: LedgerEntry, data: dict[str, Any]) -> None:
     summary = data.get("summary")
     if not summary:
@@ -959,9 +1063,35 @@ _FUNCTION_CONSUMERS = ("ledger_report._FUNCTION_TOOLS", "ledger_report._FUNCTION
 FUNCTION_NOT_SHOWN = "answer not shown: no room left in the conversation"
 
 
+def _called_address(entry: LedgerEntry) -> str:
+    """The address a call gave in the argument its tool declares for one, or ``""``.
+
+    ``arguments`` is read without a kind (``kind_free_facts``); an entry read
+    by the legacy tables gives the shared address names only, as it always did.
+    """
+    facts = None if tool_kinds.read_by_name(entry) else tool_kinds.kind_free_facts(entry)
+    for name in address_arguments(facts, tuple(entry.args)):
+        value = entry.args.get(name)
+        if isinstance(value, bool):
+            continue
+        if isinstance(value, int):
+            return f"0x{value:x}"
+        if isinstance(value, str) and value.strip():
+            return value.strip()[:120]
+    return ""
+
+
 def _functions_examined(acc: _Sections, entry: LedgerEntry, _data: Any) -> None:
     section = acc.get("functions_examined", "Functions examined", "list")
-    label = entry.symbol or entry.tool
+    label = entry.symbol or _called_address(entry)
+    if not label:
+        # No argument of the call holds an address: the item says only that,
+        # never the tool's own name twice.
+        label = (
+            "function listing"
+            if tool_kinds.is_of(entry, "ledger_report._FUNCTION_LIST_TOOLS")
+            else "no address in the call"
+        )
     if answer_not_shown(entry):
         acc.add_item(section, f"{label} ({entry.tool}; {FUNCTION_NOT_SHOWN})")
     else:
@@ -1021,6 +1151,7 @@ _BUILDERS: dict[str, Any] = {
         _sandbox_section,
         _sandbox_items,
         _sandbox_status,
+        _behaviour_code,
         _pcap,
         _reputation,
     )
@@ -1141,26 +1272,96 @@ def _artifact_sections(acc: _Sections, isrs: dict[str, Any]) -> None:
             by_kind.setdefault(kind, []).append((source, artifact))
     for kind, listed in by_kind.items():
         merged = len(listed) > 1
+        shaped: list[tuple[str, Any, list[Any], list[str]]] = []
         for source, artifact in listed:
             rows = list(getattr(artifact, "rows", None) or [])
-            columns = list(getattr(artifact, "columns", None) or []) or ["Value"]
+            columns = [str(c) for c in getattr(artifact, "columns", None) or []] or ["Value"]
             if not rows:
                 label = getattr(artifact, "label", "") or kind
                 rows = [[label, getattr(artifact, "value", "")]]
                 columns = ["Label", "Value"]
+            shaped.append((source, artifact, rows, columns))
+        # A merged table is headed as its first artifact is (as it always was);
+        # a later artifact headed otherwise has each row read by its own
+        # headings and written in the table's layout (:func:`_placed`).
+        headings = shaped[0][3]
+        for source, artifact, rows, columns in shaped:
             section = acc.get(
                 f"artifact_{kind}",
                 kind.replace("_", " ").capitalize(),
                 "table",
-                columns=[LISTED_BY_COLUMN, EVIDENCE_COLUMN, *columns] if merged else columns,
+                columns=[LISTED_BY_COLUMN, EVIDENCE_COLUMN, *headings] if merged else columns,
             )
             _listed_by(section, source)
             cited = ", ".join(str(i) for i in getattr(artifact, "evidence_ids", None) or [])
             for row in rows:
                 cells = [_text(cell) for cell in row]
+                if merged:
+                    cells = _placed(cells, columns, headings)
                 acc.add_row(section, [_text(source), cited, *cells] if merged else cells)
             for entry_id in getattr(artifact, "evidence_ids", None) or []:
                 acc.cite(section, str(entry_id))
+
+
+def _heading_keys(columns: list[str]) -> list[tuple[str, int]]:
+    """Each heading as one key: its folded spelling, and which of that spelling it is."""
+    counted: dict[str, int] = {}
+    keys: list[tuple[str, int]] = []
+    for column in columns:
+        folded = column.strip().lower()
+        keys.append((folded, counted.get(folded, 0)))
+        counted[folded] = counted.get(folded, 0) + 1
+    return keys
+
+
+def _roles(columns: list[str]) -> tuple[int, int, int | None] | None:
+    """The type, value and payload places of a listing: by its headings, else by position."""
+    from maljan.reporting.ledger_projection import listed_columns
+
+    named = listed_columns(columns)
+    if named is not None:
+        typed, valued, payload = named
+        return typed, valued, payload if payload is not None and payload < len(columns) else None
+    if len(columns) < 2:
+        return None
+    return 0, 1, 2 if len(columns) > 2 else None
+
+
+def _placed(cells: list[str], columns: list[str], headings: list[str]) -> list[str]:
+    """One artifact's row, read by its own ``columns``, in a table headed ``headings``.
+
+    A row of an artifact headed as the table is kept as it is, and so is one
+    where either side names no type and value (read by position, as it was).
+    Otherwise its type, value and payload go where the table's headings put
+    them, any other cell under the heading of its own spelling, and what the
+    table has no place for follows the table's columns, the payload first:
+    the place a reader takes a payload from when the headings name none.
+    """
+    if _heading_keys(columns) == _heading_keys(headings):
+        return cells
+    mine, table = _roles(columns), _roles(headings)
+    if mine is None or table is None:
+        return cells
+    placed: dict[int, int] = {mine[0]: table[0], mine[1]: table[1]}
+    if mine[2] is not None and table[2] is not None:
+        placed[mine[2]] = table[2]
+    taken = set(placed.values())
+    places = {key: at for at, key in enumerate(_heading_keys(headings))}
+    for at, key in enumerate(_heading_keys(columns)):
+        if at not in placed and places.get(key) is not None and places[key] not in taken:
+            placed[at] = places[key]
+            taken.add(places[key])
+    out = [""] * len(headings)
+    rest: list[str] = []
+    for at, cell in enumerate(cells):
+        if at in placed:
+            out[placed[at]] = cell
+        elif at != mine[2]:
+            rest.append(cell)
+    if table[2] is None and (rest or (mine[2] is not None and mine[2] not in placed)):
+        payload = cells[mine[2]] if mine[2] is not None and mine[2] < len(cells) else ""
+        rest = [payload if mine[2] not in placed else "", *rest]
+    return out + rest
 
 
 # The first two columns of an artifact table more than one artifact listed rows in.
@@ -1190,6 +1391,16 @@ def listed_rows(section: Any) -> list[tuple[str, str, list[str]]]:
     return [(one, cited, row) for row in rows]
 
 
+def listed_headings(section: Any) -> list[str]:
+    """The headings of the cells :func:`listed_rows` gives each row of an artifact section."""
+    columns = [str(c) for c in getattr(section, "columns", None) or []]
+    if columns[:2] == [LISTED_BY_COLUMN, EVIDENCE_COLUMN]:
+        return columns[2:]
+    if columns[:1] == [LISTED_BY_COLUMN]:
+        return columns[1:]
+    return columns
+
+
 def artifact_sections(sections: Any) -> list[tuple[str, Any]]:
     """Each Appendix A section an analyst's artifact filled, with the kind it names."""
     return [
@@ -1202,21 +1413,27 @@ def artifact_sections(sections: Any) -> list[tuple[str, Any]]:
 def analyst_persistence(sections: Any) -> list[dict[str, str]]:
     """The persistence the analysts listed, row by row, read from their Appendix A tables.
 
-    ``kind``, ``target`` and ``payload`` by position, as an analyst's
-    persistence table is shaped, with the analyst that listed the row and the
+    ``kind``, ``target`` and ``payload`` under the headings that name them
+    (``ledger_projection.listed_columns``), by position where the headings
+    name none, as an analyst's persistence table is shaped, with the analyst
+    that listed the row and the
     ids that row's artifact cites. Never read from ``MalwareReport.persistence``, which
     is the tools' and which the IOC table, the detection drafts, the
     corroboration corpus and the counts read; a stored report carries the same
     tables, so it reads the same rows.
     """
+    from maljan.reporting.ledger_projection import listed_cells, listed_columns
+
     out: list[dict[str, str]] = []
     for kind, section in artifact_sections(sections):
         if kind.strip().lower() != "persistence":
             continue
+        named = listed_columns(listed_headings(section))
         for analyst, cited, row in listed_rows(section):
             cells = [cell.strip() for cell in row]
             if not any(cells):
                 continue
+            cells = listed_cells(cells, named)
             out.append(
                 {
                     "kind": cells[0] if len(cells) > 1 else "",
@@ -1319,6 +1536,66 @@ def _findings_section(
                 acc.cite(section, str(entry_id))
 
 
+def _agents_by_kind(ledger: list[LedgerEntry]) -> dict[str, list[str]]:
+    """Each declared tool kind, with the agents whose calls of that kind answered, in order."""
+    found: dict[str, dict[str, None]] = {}
+    for entry in ledger:
+        if not entry.ok or not entry.agent:
+            continue
+        kind = tool_kinds.kind_of(entry)
+        if kind:
+            found.setdefault(kind, {})[str(entry.agent)] = None
+    return {kind: list(agents) for kind, agents in found.items()}
+
+
+def _open_questions_section(
+    acc: _Sections, isrs: dict[str, Any], ledger: list[LedgerEntry]
+) -> None:
+    """Every question an analyst left open, why, what would answer it and who could.
+
+    "Who could answer" is read from the ledger, never guessed: the agents
+    whose calls of the tool kind the question names answered in this run. A
+    question that names no kind leaves the cell empty. Absent when no analyst
+    left a question open, so a run without one renders as it did.
+    """
+    section: EvidenceSection | None = None
+    by_kind: dict[str, list[str]] | None = None
+    for agent, isr in (isrs or {}).items():
+        for question in list(getattr(isr, "open_questions", None) or []):
+            if section is None:
+                section = acc.get(
+                    "open_questions",
+                    "Open questions",
+                    "table",
+                    columns=[
+                        "Agent",
+                        "Question",
+                        "Why open",
+                        "What would answer it",
+                        "Who could answer",
+                        "Evidence",
+                    ],
+                    source=OPEN_QUESTION_SOURCE,
+                )
+            kind = question.tool_kind.strip()
+            if kind and by_kind is None:
+                by_kind = _agents_by_kind(ledger)
+            why = question.why_open
+            acc.add_row(
+                section,
+                [
+                    _text(question.source or agent),
+                    _text(question.question),
+                    _text(f"{why}: {question.detail}" if question.detail else why),
+                    _text(would_answer_text(question)),
+                    _text((by_kind or {}).get(kind, []) if kind else []),
+                    _text(question.evidence_ids),
+                ],
+            )
+            for entry_id in question.evidence_ids:
+                acc.cite(section, str(entry_id))
+
+
 # ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
@@ -1381,6 +1658,7 @@ def build_sections(
     _function_map_coverage(acc, ledger or [])
     _artifact_sections(acc, isrs or {})
     _findings_section(acc, isrs or {}, published_techniques)
+    _open_questions_section(acc, isrs or {}, ledger or [])
     return acc.result()
 
 

@@ -61,7 +61,10 @@ __all__ = [
     "Shortening",
     "MAX_NARROWING_NAMES",
     "MAX_SENTENCE_ROOM",
+    "bounding_arguments",
+    "is_plain_name",
     "narrowing_arguments",
+    "paging_arguments",
     "our_key_in",
     "shorten_json_document",
     "shorten_target",
@@ -109,12 +112,13 @@ SHORTENING_BUDGET_SECONDS = 1.0
 # under eight megabytes — and far enough below the shapes that cost a second
 # that the two together are a real bound rather than a stated one.
 #
-# Nothing about the limit an answer is shortened *to* moves this. That limit is
-# now derived from the served model's context window and can be far larger than
-# the 6,000 characters it replaced, but this bounds what *arrives* — what the
-# tool server sent — and a tool sends what it sends whatever the model can
-# read. The parse-cost measurement above is therefore the whole argument, and
-# it is unchanged.
+# Measured at 8, 10 and 12 MB, by shape (T-112), with the wall off: a list of
+# rows shortens in 0.30 s at 8 MB and 0.37 s at 10 MB, a list of integers in
+# 0.29 s and 0.35 s, and a wide object of small objects, the costliest shape
+# and one that cannot be shortened, is read in 0.58 s, 0.76 s and 0.91 s at 8,
+# 10 and 12 MB. Linear in the size, about 0.04 to 0.08 s per megabyte, so the
+# whole range up to the constant stays inside ``SHORTENING_BUDGET_SECONDS``
+# and the constant stands as stated.
 MAX_SHORTENABLE_CHARS = 12_000_000
 
 # A subtree under this key is never touched. A returned error is the one answer
@@ -294,41 +298,43 @@ def _walk(document: dict[str, Any], separators: tuple[str, str] | None) -> list[
     """
     found: list[_Candidate] = []
 
-    def visit(node: Any, path: str) -> None:
-        if isinstance(node, dict):
-            for key, value in node.items():
-                name = str(key)
-                if name == _NEVER_TOUCHED:
-                    continue
-                here = f"{path}/{_escaped(name)}"
-                if isinstance(value, list) and value:
-                    found.append(
-                        _Candidate(
-                            node,
-                            name,
-                            here,
-                            is_list=True,
-                            value=value,
-                            whole=_cost_of(value, separators) - 2,
-                        )
+    # An explicit stack, not recursion: a document nested deeper than the
+    # interpreter's recursion limit is still walked. Each frame is the
+    # iterator over one container's children and the path of that container;
+    # a child is visited, after it is judged, before its next sibling, which
+    # is the depth-first declaration order a recursion gives.
+    stack: list[tuple[Any, str, dict[str, Any] | None]] = [(iter(document.items()), "", document)]
+    while stack:
+        children, path, holder = stack[-1]
+        step = next(children, None)
+        if step is None:
+            stack.pop()
+            continue
+        if holder is not None:
+            key, value = step
+            name = str(key)
+            if name == _NEVER_TOUCHED:
+                continue
+            here = f"{path}/{_escaped(name)}"
+            is_list = isinstance(value, list) and bool(value)
+            if is_list or (isinstance(value, str) and len(value) >= _MIN_SHORTENABLE_STRING):
+                found.append(
+                    _Candidate(
+                        holder,
+                        name,
+                        here,
+                        is_list=is_list,
+                        value=value,
+                        whole=_cost_of(value, separators) - 2,
                     )
-                elif isinstance(value, str) and len(value) >= _MIN_SHORTENABLE_STRING:
-                    found.append(
-                        _Candidate(
-                            node,
-                            name,
-                            here,
-                            is_list=False,
-                            value=value,
-                            whole=_cost_of(value, separators) - 2,
-                        )
-                    )
-                visit(value, here)
-        elif isinstance(node, list):
-            for index, item in enumerate(node):
-                visit(item, f"{path}/{index}")
-
-    visit(document, "")
+                )
+        else:
+            index, value = step
+            here = f"{path}/{index}"
+        if isinstance(value, dict):
+            stack.append((iter(value.items()), here, value))
+        elif isinstance(value, list):
+            stack.append((iter(enumerate(value)), here, None))
     return found
 
 
@@ -439,9 +445,12 @@ def _our_key(document: dict[str, Any]) -> str:
 # The built-in sidecars between them offer every name here: ``strings`` pages
 # with ``limit``/``offset`` and filters with ``pattern``/``start``/``end``, the
 # network tools bound with ``packet_limit``, the knowledge tools with ``k``,
-# and ``archive_list``/``apk_info`` with ``limit``.
+# and ``archive_list``/``apk_info`` with ``limit``. A ``cursor`` is how an MCP
+# server, and many others, page: the answer names the next one and the call
+# passes it back.
 _NARROWING_NAMES = frozenset(
     {
+        "cursor",
         "end",
         "filter",
         "k",
@@ -460,7 +469,7 @@ _NARROWING_NAMES = frozenset(
 # ``block_size`` name a machine detail and narrow nothing, so it counts only
 # under a name that already reads as a bound.
 _NARROWING_PREFIXES = ("max_",)
-_NARROWING_SUFFIXES = ("_limit", "_offset", "_page")
+_NARROWING_SUFFIXES = ("_cursor", "_limit", "_offset", "_page")
 _SIZE_SUFFIX = "_size"
 _SIZE_PREFIXES = ("page_", "max_")
 
@@ -477,6 +486,11 @@ MAX_NARROWING_NAME_CHARS = 40
 # model is reading a list instead of narrowing a call, and the cap is what
 # bounds what a server can spend of the answer's own budget.
 MAX_NARROWING_NAMES = 6
+
+
+def is_plain_name(name: str) -> bool:
+    """Whether ``name`` is a plain identifier the platform's own sentences may name."""
+    return bool(_PLAIN_NAME_RE.match(str(name)))
 
 
 def narrowing_arguments(names: Any) -> tuple[str, ...]:
@@ -504,6 +518,48 @@ def narrowing_arguments(names: Any) -> tuple[str, ...]:
             found.append(name)
         if len(found) == MAX_NARROWING_NAMES:
             break
+    return tuple(found)
+
+
+# Of the narrowing names, the ones that bound how many rows come back rather
+# than choose which: ``limit``, ``k``, a ``max_`` or ``_limit`` name, a page or
+# maximum ``_size``. ``offset``, ``page``, ``pattern`` and the rest choose.
+_BOUNDING_NAMES = frozenset({"k", "limit"})
+_BOUNDING_SUFFIXES = ("_limit",)
+
+
+# Of the narrowing names, the ones that choose which rows rather than page
+# through them: a filter reaches a different answer, never the rest of this one.
+_FILTER_NAMES = frozenset({"end", "filter", "pattern", "query", "start"})
+
+
+def paging_arguments(names: Any) -> tuple[str, ...]:
+    """Of a tool's narrowing arguments, those that page its answer: never a filter.
+
+    ``offset``, ``limit``, ``cursor``, ``page``, ``k`` and their declared forms
+    (``…_offset``, ``…_limit``, ``…_cursor``, ``…_page``, ``max_…``,
+    ``page_size``). What the completeness line (``schemas.answer_completeness``)
+    names as reading further.
+    """
+    return tuple(name for name in narrowing_arguments(names) if name.lower() not in _FILTER_NAMES)
+
+
+def bounding_arguments(names: Any) -> tuple[str, ...]:
+    """Of a tool's narrowing arguments (:func:`narrowing_arguments`), those that bound a count.
+
+    Read by the completeness line (``schemas.answer_completeness``): a call
+    that passed one and got back a list exactly that long has a full page.
+    """
+    found: list[str] = []
+    for name in narrowing_arguments(names):
+        lowered = name.lower()
+        if (
+            lowered in _BOUNDING_NAMES
+            or lowered.startswith(_NARROWING_PREFIXES)
+            or lowered.endswith(_BOUNDING_SUFFIXES)
+            or (lowered.endswith(_SIZE_SUFFIX) and lowered.startswith(_SIZE_PREFIXES))
+        ):
+            found.append(name)
     return tuple(found)
 
 

@@ -45,6 +45,9 @@ dependencies = [
     # extra: sandbox.provider=rest must work on a plain `uv sync`.
     "jsonpath-rfc9535>=1.0.0",
     "pyelftools>=0.32",
+    # The XML reader of an OOXML document's relationship parts: expat, with a
+    # document type, an entity declaration and an external reference refused.
+    "defusedxml>=0.7.1",
     # Report export (Phase 6). markdown-it-py converts the MarkdownRenderer
     # output to HTML with raw-HTML passthrough disabled — the XSS guard for
     # LLM/malware-derived report text. weasyprint prints that HTML to PDF; it
@@ -114,7 +117,7 @@ tools = [
 
 [dependency-groups]
 dev = [
-    "fakeredis>=2.35.1",
+    "fakeredis[lua]>=2.35.1",
     "mypy>=1.20.0",
     "pre-commit>=4.2.0",
     "pytest>=9.0.2",
@@ -145,6 +148,8 @@ ignore = []
 [tool.ruff.lint.per-file-ignores]
 # Agent files contain LLM prompt strings that are intentionally long
 "src/maljan/agents/*.py" = ["E501"]
+# A sidecar routes logging to stderr before the imports that can log
+"services/*/server.py" = ["E402"]
 # FastAPI dependency injection and query params are standard patterns
 # (configured in apps/api/pyproject.toml because that sub-package has its own Ruff config)
 

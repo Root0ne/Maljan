@@ -1488,6 +1488,9 @@
     "total": 20
   },
   "sandbox_network": {
+    "absent": [
+      "network.tls"
+    ],
     "dns": [
       {
         "answers": [],
@@ -2425,6 +2428,7 @@
     ],
     "http": [],
     "icmp": [],
+    "statement": "The report does not hold this part, so whether there was any is not known. This is not the same as none.",
     "tcp": [
       {
         "dport": 443,

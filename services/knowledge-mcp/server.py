@@ -20,6 +20,13 @@ from typing import Any
 
 from mcp.server.fastmcp import FastMCP
 
+from maljan.core.stdio_safe import route_logging_to_stderr
+
+# Only when run as the stdio server: a test or tool that imports this module
+# in-process keeps its own logging.
+if __name__ == "__main__":
+    route_logging_to_stderr()
+
 from maljan.tools import knowledge as knowledge_tools
 from maljan.tools.arguments import read_unquoted, says_unquoted, with_read_as
 from maljan.tools.capabilities import CAPABILITIES_TOOL, ToolNeeds, manifest, module
@@ -196,6 +203,8 @@ def similar_cases(text: str, k: int = 5) -> dict[str, Any]:
         searched={"query": "text"},
         query=text,
         k=k,
+        # The platform's fact for this run, never an argument the model sets.
+        exclude_sample_id=os.environ.get(knowledge_tools.SAMPLE_SHA256_ENV, "").strip(),
     )
 
 

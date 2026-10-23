@@ -30,6 +30,7 @@ import asyncio
 import contextlib
 import threading
 import time
+from collections.abc import Iterator
 from contextvars import ContextVar
 from typing import Any
 
@@ -44,6 +45,9 @@ from maljan.core.logger import logger
 # The keys an answer carries about the model that gave it.
 MODEL_KEY = "maljan_model"
 FALLBACK_KEY = "maljan_fallback"
+# The keyword a loop's binding carries a turn's spend admission under
+# (``core.spend.Admission``); popped before any model is called.
+ADMISSION_KEY = "maljan_admission"
 
 # The statuses that describe the provider rather than the request: the server
 # is failing (5xx), it is not serving now (408, 429), it does not have what
@@ -315,6 +319,57 @@ class FallbackChatModel(BaseChatModel):
         with self._lock:
             self._start = 0
 
+    @contextlib.contextmanager
+    def _attempt(
+        self, index: int, admission: Any, call: dict[str, Any]
+    ) -> Iterator[dict[str, Any]]:
+        """The spend ceiling's admission of one attempt at a model after the first.
+
+        ``admission`` is the call's own (``core.spend.Admission``): the kind it
+        was admitted as, its prompt and its slot. The attempt is admitted again
+        under that slot, at this model's own price and output cap, replacing the
+        reservation of the model that failed; the caller's release frees it.
+        Yields the keywords the attempt is made with: the call's own, with the
+        output cap this model is held to where the ceiling holds it. The first
+        model was admitted by the caller; a call with no admission, one whose
+        reservation is gone, or a model with no built output cap is made as it
+        is. Raises :class:`maljan.core.spend.SpendCeilingStop` when the attempt
+        is not to be made.
+        """
+        model = self.models[index]
+        # Every model of a list is built at the list's one cap.
+        from maljan.llm.context_window import built_output_cap
+
+        cap = built_output_cap(model) or built_output_cap(self)
+        if index == 0 or admission is None or cap is None or not admission.held():
+            yield call
+            return
+        from maljan.core.spend import call_deadline_of
+        from maljan.llm.context_window import accepts_output_bound, output_bound_kwargs
+        from maljan.llm.generation_rate import model_name_of
+
+        held = admission.meter.admit(
+            kind=admission.kind,
+            model=model_name_of(model),
+            prompt_chars=admission.prompt_chars,
+            cap_tokens=int(cap.tokens),
+            slot=admission.slot,
+            holdable=accepts_output_bound(model),
+            deadline_s=call_deadline_of(model),
+            attempt=True,
+        )
+        if held is None:
+            yield call
+            return
+        bound = output_bound_kwargs(model, int(held))
+        yield {
+            **call,
+            **{
+                k: min(int(call[k]), v) if isinstance(call.get(k), int) else v
+                for k, v in bound.items()
+            },
+        }
+
     def _stick(self, index: int) -> None:
         with self._lock:
             self._start = max(self._start, index)
@@ -327,6 +382,7 @@ class FallbackChatModel(BaseChatModel):
     @staticmethod
     def _split(kwargs: dict[str, Any]) -> tuple[Any, dict[str, Any], dict[str, Any]]:
         call = dict(kwargs)
+        call.pop(ADMISSION_KEY, None)
         tools = call.pop("tools", None)
         tool_kwargs: dict[str, Any] = {}
         for key in ("tool_choice", "parallel_tool_calls", "strict"):
@@ -456,20 +512,42 @@ class FallbackChatModel(BaseChatModel):
         # daemon it does not hold up the process's exit while it does — a
         # pool's worker is joined at interpreter exit, which let one stalled
         # model delay a worker's graceful shutdown by up to that timeout.
+        #
+        # The request it leaves behind is still billed: an answer that arrives
+        # once the turn has given up on it is charged to the job's spend
+        # ceiling as its provider reported it (``transient.charge_abandoned``);
+        # one that fails is charged as any failed attempt is.
         outcome: dict[str, Any] = {}
         done = threading.Event()
+        settled = threading.Lock()
+        given_up: list[bool] = []
+        model = self.models[index]
 
         def _run() -> None:
             try:
-                outcome["answer"] = runnable.invoke(messages, stop=stop, **call)
+                answer = runnable.invoke(messages, stop=stop, **call)
             except BaseException as exc:  # noqa: BLE001 — handed back to the caller
-                outcome["error"] = exc
+                with settled:
+                    outcome["error"] = exc
+            else:
+                with settled:
+                    outcome["answer"] = answer
+                    abandoned = bool(given_up)
+                if abandoned:
+                    from maljan.llm.transient import charge_abandoned
+
+                    charge_abandoned(model, answer, messages)
             finally:
                 done.set()
 
         threading.Thread(target=_run, name=f"model-turn:{self._label(index)}", daemon=True).start()
         if not done.wait(timeout=deadline):
-            raise self._stalled(index, deadline)
+            with settled:
+                # An outcome that landed as the wait ended is the turn's own.
+                if not outcome:
+                    given_up.append(True)
+            if given_up:
+                raise self._stalled(index, deadline)
         if "error" in outcome:
             raise outcome["error"]
         return outcome["answer"]
@@ -494,6 +572,12 @@ class FallbackChatModel(BaseChatModel):
         run_manager: Any = None,
         **kwargs: Any,
     ) -> ChatResult:
+        return self._generate_in_order(messages, stop, **kwargs)
+
+    def _generate_in_order(
+        self, messages: list[BaseMessage], stop: list[str] | None, **kwargs: Any
+    ) -> ChatResult:
+        admission = _admission_of(kwargs)
         tools, tool_kwargs, call = self._split(kwargs)
         failures: list[str] = []
         retried: list[str] = []
@@ -502,7 +586,8 @@ class FallbackChatModel(BaseChatModel):
         while index < len(self.models):
             runnable = self._runnable(self.models[index], tools, tool_kwargs)
             try:
-                answer = self._ask_sync(index, runnable, messages, stop, call)
+                with self._attempt(index, admission, call) as attempt_call:
+                    answer = self._ask_sync(index, runnable, messages, stop, attempt_call)
             except Exception as exc:
                 if provider_failure(exc) is None:
                     raise
@@ -528,6 +613,12 @@ class FallbackChatModel(BaseChatModel):
         run_manager: Any = None,
         **kwargs: Any,
     ) -> ChatResult:
+        return await self._agenerate_in_order(messages, stop, **kwargs)
+
+    async def _agenerate_in_order(
+        self, messages: list[BaseMessage], stop: list[str] | None, **kwargs: Any
+    ) -> ChatResult:
+        admission = _admission_of(kwargs)
         tools, tool_kwargs, call = self._split(kwargs)
         failures: list[str] = []
         retried: list[str] = []
@@ -536,7 +627,8 @@ class FallbackChatModel(BaseChatModel):
         while index < len(self.models):
             runnable = self._runnable(self.models[index], tools, tool_kwargs)
             try:
-                answer = await self._ask_async(index, runnable, messages, stop, call)
+                with self._attempt(index, admission, call) as attempt_call:
+                    answer = await self._ask_async(index, runnable, messages, stop, attempt_call)
             except Exception as exc:
                 if provider_failure(exc) is None:
                     raise
@@ -554,6 +646,13 @@ class FallbackChatModel(BaseChatModel):
                 continue
             return self._stamp(answer, index, failures, retried)
         raise RuntimeError(f"{self.agent or 'agent'} has no model to call")
+
+
+def _admission_of(kwargs: dict[str, Any]) -> Any:
+    """The admission of the call: its binding's, else the one of the task making it."""
+    from maljan.core.spend import current_admission
+
+    return kwargs.get(ADMISSION_KEY) or current_admission()
 
 
 def restart_models(

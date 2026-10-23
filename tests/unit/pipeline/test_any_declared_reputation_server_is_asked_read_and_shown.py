@@ -286,6 +286,23 @@ class TestEveryReaderReadsIt:
         entry = _lookup_entry()
         assert _reputation_asked({"evidence_ledger": [entry.model_dump()]}) is True
 
+    def test_a_native_prefix_is_no_rename_for_the_judge(self, installed: Any) -> None:
+        from unittest.mock import MagicMock
+
+        from maljan.agents.judge_agent import JudgeAgent
+
+        installed(_settings(hashrep=INVENTED))
+        judge = JudgeAgent.__new__(JudgeAgent)
+        judge.logger = MagicMock()
+        meta = {"maljan_server": "hashrep"}
+        tool = type("_T", (), {"name": "hashrep__lookup_digest", "metadata": meta})
+        judge.tools = [tool()]
+        assert judge._holds_attached_lookup_tool() is False
+
+        renamed = {**meta, "maljan_declared_name": "lookup_digest"}
+        judge.tools = [type("_T", (), {"name": "hashrep__lookup_digest", "metadata": renamed})()]
+        assert judge._holds_attached_lookup_tool() is True
+
     def test_it_reaches_only_the_agents_its_own_settings_allow(self, installed: Any) -> None:
         """A capability reference never broadens access: an operator's server is bound by
         its own ``agents`` list alone, and reaches no agent that list leaves out."""
@@ -477,7 +494,10 @@ class TestOnlyTheServicesAnswerIsARecord:
             id="ev_0003", tool="check_hash", server="threatintel", output=note, truncated=True
         )
         answered = LedgerEntry(
-            id="ev_0004", tool="check_hash", server="threatintel", output="3/9 detections"
+            id="ev_0004",
+            tool="check_hash",
+            server="threatintel",
+            output='{"last_analysis_stats": {"malicious": 3, "undetected": 6}}',
         )
         blanked = LedgerEntry(
             id="ev_0005", tool="check_hash", server="threatintel", output="", truncated=True

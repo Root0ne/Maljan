@@ -18,7 +18,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from maljan.pipeline.nodes import make_negotiation_node, make_revision_node
+from maljan.pipeline.nodes import RevisionInput, make_negotiation_node, make_revision_node
 from maljan.pipeline.state import AgentArgument, _merge_stage_results
 from maljan.schemas.isr_models import AgentISR, ClaimEvidence
 from tests.stages import paper_profile
@@ -84,8 +84,7 @@ def _state() -> dict[str, Any]:
 def _run(outcomes: dict[str, tuple[str, AgentISR]], ledger: dict[str, int] | None = None) -> Any:
     container, agents = _container(outcomes, ledger or {})
     with pytest.MonkeyPatch.context() as mp:
-        mp.setattr("maljan.pipeline.nodes._revision_input_is_absent", lambda *a: False)
-        mp.setattr("maljan.pipeline.nodes._build_revision_context", lambda *a: "data")
+        mp.setattr("maljan.pipeline.nodes._revision_input", lambda *a: RevisionInput(text="data"))
         update = asyncio.run(make_revision_node(container)(_state()))
     return update, agents
 
@@ -105,6 +104,7 @@ class TestTheRoundRecord:
                 "stage": "debate",
                 "made": 2,
                 "identical": True,
+                "reworded": True,
                 "revised": NAMES,
                 "not_revised": {},
                 "converged": [],
@@ -126,11 +126,26 @@ class TestTheRoundRecord:
                 "stage": "debate",
                 "made": 2,
                 "identical": False,
+                "reworded": True,
                 "revised": NAMES,
                 "not_revised": {},
                 "converged": [],
             }
         ]
+
+    def test_a_revision_that_changes_a_claim_is_not_reworded(self) -> None:
+        update, _ = _run(
+            {
+                "static": (
+                    "static changed",
+                    _isr("static", "Opens a key at 0x44.", "Prose claim."),
+                ),
+                "dynamic": ("dynamic in force", IN_FORCE["dynamic"]),
+            }
+        )
+
+        [record] = update["revision_rounds"]
+        assert record["identical"] is False and record["reworded"] is False
 
 
 class TestTheAnswerInForceIsRevised:
@@ -211,8 +226,9 @@ class TestTheDebateDuration:
             {"static": ("t", IN_FORCE["static"]), "dynamic": ("t", IN_FORCE["dynamic"])}, {}
         )
         with pytest.MonkeyPatch.context() as mp:
-            mp.setattr("maljan.pipeline.nodes._revision_input_is_absent", lambda *a: False)
-            mp.setattr("maljan.pipeline.nodes._build_revision_context", lambda *a: "data")
+            mp.setattr(
+                "maljan.pipeline.nodes._revision_input", lambda *a: RevisionInput(text="data")
+            )
             mp.setattr("maljan.pipeline.nodes._debate_participants", lambda *a: NAMES)
             update = asyncio.run(make_revision_node(container, stage=debate)(_state()))
 
@@ -307,8 +323,9 @@ class TestTheLedgerCountsRideOnCallsAlreadyMade:
         )
         state = {**_state(), "discussion_history": [argument]}
         with pytest.MonkeyPatch.context() as mp:
-            mp.setattr("maljan.pipeline.nodes._revision_input_is_absent", lambda *a: False)
-            mp.setattr("maljan.pipeline.nodes._build_revision_context", lambda *a: "data")
+            mp.setattr(
+                "maljan.pipeline.nodes._revision_input", lambda *a: RevisionInput(text="data")
+            )
             asyncio.run(make_revision_node(container)(state))
 
         told_static = agents["static"].safe_revise_isr.call_args.args[3]

@@ -24,6 +24,7 @@ from pydantic import create_model
 from maljan.agents.mcp_client import tool_error_marker
 from maljan.agents.output_shortening import narrowing_arguments
 from maljan.core.logger import logger
+from maljan.providers.server_guard import transport_failure
 from maljan.tools.errors import SERVER_WORDS_LIMIT
 
 # What a character cut leaves behind, and the room kept back for it.
@@ -97,6 +98,7 @@ class GhidraHTTPClient:
         long_running_tools: frozenset[str] = frozenset(),
         explicit_call_timeout: float = 0.0,
         categories: Mapping[str, str] | None = None,
+        guard: Any | None = None,
     ):
         self.base_url = base_url.rstrip("/")
         # The rule every tool server's guard applies (``ServerGuard.call_timeout``),
@@ -107,6 +109,10 @@ class GhidraHTTPClient:
         # client's own request timeout.
         self._long_running = frozenset(t for t in long_running_tools if t)
         self._explicit_call_timeout = max(0.0, float(explicit_call_timeout or 0.0))
+        # The job's breaker and call cap for this server, the one every other
+        # tool server's calls go through (``maljan.providers.server_guard``).
+        # None outside a job's settings, and every call is then sent as it was.
+        self._guard = guard
         # The tag each tool's description is shown with, as Ghidra's block
         # declares it (``ToolFacts.category``).
         self._categories = dict(categories or {})
@@ -225,6 +231,106 @@ class GhidraHTTPClient:
             args_schema=args_schema,
         )
 
+    async def _send(
+        self,
+        method: str,
+        url: str,
+        query: dict[str, Any],
+        body: dict[str, Any],
+        tool: str,
+        path: str,
+        timeout: Any,
+        *,
+        on_failure: Any = None,
+    ) -> str:
+        """One request, as the answer a model reads; ``on_failure`` hears of a transport failure."""
+        client = await self._get_http()
+        try:
+            if method == "POST":
+                resp = await client.post(
+                    url,
+                    params=query,
+                    json=body,
+                    headers={"Content-Type": "application/json"},
+                    timeout=timeout,
+                )
+            else:
+                resp = await client.get(url, params=query, timeout=timeout)
+            resp.raise_for_status()
+            return no_program_as_error(resp.text, tool)
+        except httpx.HTTPStatusError as exc:
+            return tool_error_marker(
+                "http_status",
+                tool,
+                status=str(exc.response.status_code),
+                path=path,
+                detail=" ".join(exc.response.text.split())[:SERVER_WORDS_LIMIT],
+            )
+        except httpx.RequestError as exc:
+            if on_failure is not None:
+                on_failure(exc)
+            return tool_error_marker("request_failed", tool, type=type(exc).__name__, path=path)
+
+    async def _send_guarded(
+        self,
+        guard: Any,
+        method: str,
+        url: str,
+        query: dict[str, Any],
+        body: dict[str, Any],
+        tool: str,
+        path: str,
+        timeout: Any,
+    ) -> str:
+        """:meth:`_send` through the server's breaker and call cap.
+
+        A server that answered, even with its own error status, is up; a
+        request that never got an answer counts toward the rest, as it does
+        for every other tool server. A sent call its caller's budget cut off
+        counts as one the server did not answer, unless the tool is
+        long-running (it has no clock of its own, so its caller stopping is no
+        verdict on the server); one cancelled while it queued for a slot was
+        never sent and is nothing.
+        """
+        refused, trial = guard.admit(tool)
+        if refused is not None:
+            return str(refused)
+        sent = False
+        settled = False
+
+        def failed(exc: BaseException) -> None:
+            nonlocal settled
+            reason = transport_failure(exc)
+            if reason is not None:
+                guard.failed(reason, trial=trial)
+                settled = True
+
+        try:
+            async with guard.slot():
+                if not trial:
+                    refused, trial = guard.admit(tool)
+                    if refused is not None:
+                        return str(refused)
+                sent = True
+                output = await self._send(
+                    method, url, query, body, tool, path, timeout, on_failure=failed
+                )
+                if not settled:
+                    guard.answered()
+                    settled = True
+                return output
+        except BaseException as exc:
+            if not settled:
+                if (
+                    sent
+                    and isinstance(exc, asyncio.CancelledError)
+                    and not guard.long_running(tool)
+                ):
+                    guard.failed("the call did not finish within its caller's budget", trial=trial)
+                else:
+                    guard.abandoned(trial=trial)
+            raise
+
     async def _call_endpoint(
         self,
         path: str,
@@ -247,33 +353,14 @@ class GhidraHTTPClient:
                     query[pname] = kwargs[pname]
 
         tool = path.lstrip("/").replace("/", "_")
-        client = await self._get_http()
         timeout: Any = httpx.USE_CLIENT_DEFAULT
         if tool in self._long_running:
             timeout = self._explicit_call_timeout or None
-        try:
-            if method == "POST":
-                resp = await client.post(
-                    url,
-                    params=query,
-                    json=body,
-                    headers={"Content-Type": "application/json"},
-                    timeout=timeout,
-                )
-            else:
-                resp = await client.get(url, params=query, timeout=timeout)
-            resp.raise_for_status()
-            output = no_program_as_error(resp.text, tool)
-        except httpx.HTTPStatusError as exc:
-            output = tool_error_marker(
-                "http_status",
-                tool,
-                status=str(exc.response.status_code),
-                path=path,
-                detail=" ".join(exc.response.text.split())[:SERVER_WORDS_LIMIT],
-            )
-        except httpx.RequestError as exc:
-            output = tool_error_marker("request_failed", tool, type=type(exc).__name__, path=path)
+        guard = self._guard
+        if guard is None:
+            output = await self._send(method, url, query, body, tool, path, timeout)
+        else:
+            output = await self._send_guarded(guard, method, url, query, body, tool, path, timeout)
 
         if path == "/load_program":
             await self._activate_loaded_program(output)
@@ -300,8 +387,6 @@ class GhidraHTTPClient:
         an exception raised here would be a failed analysis, which is worse.
         """
         from maljan.providers.static.ghidra.program import (
-            SWITCH_PARAM,
-            SWITCH_PATH,
             program_name_from_load,
             switch_is_confirmed,
         )
@@ -310,22 +395,33 @@ class GhidraHTTPClient:
         if not name:
             return
         try:
-            client = await self._get_http()
-            resp = await client.post(
-                f"{self.base_url}{SWITCH_PATH}",
-                params={SWITCH_PARAM: name},
-                json={},
-                headers={"Content-Type": "application/json"},
-            )
-            if not switch_is_confirmed(resp.text, name):
+            text = await self._switch_program(name)
+            if not switch_is_confirmed(text, name):
                 logger.warning(
                     "Ghidra switch_program did not confirm '%s' (%s) — subsequent tool "
                     "calls may read the previously loaded program.",
                     name,
-                    resp.text[:160],
+                    text[:160],
                 )
         except Exception as exc:  # noqa: BLE001 — never fail an analysis over this
             logger.warning("Ghidra switch_program failed for '%s' (non-fatal): %s", name, exc)
+
+    async def _switch_program(self, name: str) -> str:
+        """The answer of ``switch_program`` for ``name``, through the guard when there is one."""
+        from maljan.providers.static.ghidra.program import SWITCH_PARAM, SWITCH_PATH
+
+        tool = SWITCH_PATH.lstrip("/").replace("/", "_")
+        url = f"{self.base_url}{SWITCH_PATH}"
+        query = {SWITCH_PARAM: name}
+        if self._guard is None:
+            client = await self._get_http()
+            resp = await client.post(
+                url, params=query, json={}, headers={"Content-Type": "application/json"}
+            )
+            return resp.text
+        return await self._send_guarded(
+            self._guard, "POST", url, query, {}, tool, SWITCH_PATH, httpx.USE_CLIENT_DEFAULT
+        )
 
     def _tag_description(self, path: str, description: str) -> str:
         """Prefix the description with its category tag; the text itself is kept whole.
@@ -427,17 +523,26 @@ class GhidraHTTPClient:
         better of the two: the summariser answers in English prose, and prose
         is exactly what leaves the record with nothing structured in it. A
         decompilation that arrives as plain text still reaches the summariser
-        and then the character cut, byte for byte as before.
+        and then the character cut, which keeps back the room of the
+        completeness line the recorder appends to a cut answer
+        (``schemas.answer_completeness.cut_line_room``).
         """
         from maljan.agents.output_shortening import shorten_json_document, shorten_target
         from maljan.agents.tool_fence import cut_length, view_room
         from maljan.core.truncation_ledger import record_guardrail_outcome
-        from maljan.llm.context_window import note_answer_not_shown, output_limit
+        from maljan.llm.context_window import (
+            note_answer_line_room,
+            note_answer_not_shown,
+            note_answer_whole,
+            output_limit,
+        )
+        from maljan.schemas.answer_completeness import cut_line_room, shortened_line_room
 
         chars_in = len(output)
         limit = output_limit(self._max_output_chars, self._context_budget)
 
         if limit <= 0:
+            note_answer_whole(output)
             note_answer_not_shown(chars_in)
             said = self._no_room(chars_in)
             record_guardrail_outcome(
@@ -464,13 +569,28 @@ class GhidraHTTPClient:
             )
             return output
 
+        # The answer as the tool gave it, for the call's entry to keep whole
+        # when what follows cuts it (``schemas.evidence_spill``).
+        note_answer_whole(output)
         logger.warning(
             "Ghidra tool output exceeds limit (%d > %d chars). Applying guardrail.",
             chars_in,
             limit,
         )
 
-        attempt = shorten_json_document(output, shorten_target(limit, narrowing), cap=limit)
+        # The completeness line under a shortened document is kept back from
+        # the shortening's target as its sentence is, so the answer, the
+        # sentence and the line together are inside the limit; the compact
+        # form is still measured against the limit itself.
+        # Kept back only while the shortening still has a target left;
+        # otherwise the line is charged by the recorder.
+        target = shorten_target(limit, narrowing) - shortened_line_room(output, narrowing)
+        line_kept_back = target >= 1
+        if not line_kept_back:
+            target = shorten_target(limit, narrowing)
+        attempt = shorten_json_document(output, target, cap=limit)
+        if attempt.shortened and line_kept_back:
+            note_answer_line_room()
         if attempt.compacted:
             record_guardrail_outcome(
                 self._truncation_ledger,
@@ -499,7 +619,13 @@ class GhidraHTTPClient:
             except Exception as exc:
                 logger.warning("Output guardrail failed: %s - falling back to truncation.", exc)
             else:
-                self._charge_overage(len(summarised) + view_room(summarised), limit)
+                # The completeness line the recorder appends to a cut answer
+                # (``schemas.answer_completeness``) enters the conversation too.
+                self._charge_overage(
+                    len(summarised) + view_room(summarised) + cut_line_room(chars_in, narrowing),
+                    limit,
+                )
+                note_answer_line_room()
                 record_guardrail_outcome(
                     self._truncation_ledger,
                     chars_in=chars_in,
@@ -511,8 +637,19 @@ class GhidraHTTPClient:
                 return summarised
 
         # The kept part is text and fenced: the fence and the escapes inside
-        # the kept part, never the whole answer's, are kept back.
-        result = output[: cut_length(output, truncation_target(limit))] + TRUNCATION_MARKER
+        # the kept part, never the whole answer's, are kept back, and so is the
+        # completeness line the recorder appends to it, so the answer and the
+        # line together are inside the limit.
+        # Kept back only while some of the answer still fits beside it; a
+        # limit too small for both keeps the answer's place, as it always
+        # did, and the recorder charges the line instead.
+        room = cut_line_room(chars_in, narrowing)
+        kept = cut_length(output, max(0, truncation_target(limit) - room))
+        if kept > 0:
+            note_answer_line_room()
+        else:
+            kept = cut_length(output, truncation_target(limit))
+        result = output[:kept] + TRUNCATION_MARKER
         self._charge_overage(len(result) + view_room(result), limit)
         record_guardrail_outcome(
             self._truncation_ledger,

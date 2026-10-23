@@ -25,8 +25,8 @@ import re
 import sys
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
-from pathlib import PurePosixPath
-from typing import Annotated, Any, Literal
+from datetime import date as _date
+from typing import Annotated, Any, Literal, NoReturn
 
 from pydantic import (
     BaseModel,
@@ -34,6 +34,7 @@ from pydantic import (
     Field,
     SecretStr,
     SerializerFunctionWrapHandler,
+    ValidationInfo,
     field_validator,
     model_serializer,
     model_validator,
@@ -52,7 +53,16 @@ from maljan.core.pack_steps import (
     PackStep,
     check_steps,
     effective_steps,
+    on_its_shipped_server,
     written_for,
+)
+from maljan.core.platform_secrets import platform_secrets_refusal
+from maljan.core.plugins import (
+    PluginsConfig,
+    id_refusal,
+    install_allow_list,
+    shipped_ids,
+    unloaded_plugin,
 )
 from maljan.core.report_formats import (
     READER_ID_PATTERN,
@@ -76,13 +86,38 @@ from maljan.core.tool_declarations import (
     check_roles,
     check_tool_facts_keys,
     check_work_dir,
+    compile_pattern,
     fill_declaration,
+    known_aggregates,
 )
 
 # The stdlib logger rather than ``maljan.core.logger``: this module is imported
 # by almost everything, including the logging setup itself, and it has exactly
 # one thing to say — a stored value it had to fall back from.
 logger = logging.getLogger(__name__)
+
+
+def _refuse_at(loc: tuple[str | int, ...], reason: str, value: Any = None) -> NoReturn:
+    """Refuse from a model validator at ``loc``, the setting the refusal is about.
+
+    A whole-document validator that raises a bare ``ValueError`` is reported
+    at no location, so nothing can say which stored key to read past (the
+    console then cannot open to repair it) and the error echoes the document
+    itself. ``value`` is what the refusal shows as its input: never a secret.
+    """
+    from pydantic_core import InitErrorDetails, PydanticCustomError, ValidationError
+
+    raise ValidationError.from_exception_data(
+        "Settings",
+        [
+            InitErrorDetails(
+                type=PydanticCustomError("value_error", "{reason}", {"reason": reason}),
+                loc=loc,
+                input=value,
+            )
+        ],
+    )
+
 
 # ---------------------------------------------------------------------------
 # Per-provider LLM configs
@@ -152,6 +187,12 @@ class OpenAIConfig(BaseModel):
     # the salvage conversation to a fraction of the window rather than to a
     # fixed number of characters chosen for one deployment.
     context_size: Annotated[int, Field(ge=0)] = 0
+    # Plain http to ``base_url`` (and to an agent entry's own endpoint on this
+    # provider) is taken, with a key set, only for a host inside this
+    # deployment. Set, it is taken for any host: the API key then travels in
+    # clear to that address, which is the operator's decision to make for a
+    # keyed server on a network they trust.
+    allow_plain_http: bool = False
 
 
 # The levels Anthropic's ``output_config.effort`` takes, in order: part of the
@@ -200,6 +241,79 @@ def _is_docker_host(host: str) -> bool:
     if not isinstance(address, ipaddress.IPv4Address):
         return False
     return ipaddress.IPv4Address("172.17.0.0") <= address <= ipaddress.IPv4Address("172.31.255.255")
+
+
+# IPv6 prefixes that carry, and route to, an IPv4 address elsewhere: 6to4,
+# Teredo, and NAT64 in its well-known and its local-use prefix. ``host_locality``
+# reads them as the address they carry, which is right for saying where a call
+# went and too generous for letting a key cross in clear: the hop to the relay
+# is not inside the deployment.
+_TUNNELLED_PREFIXES = ("2002::/16", "2001::/32", "64:ff9b::/96", "64:ff9b:1::/48")
+
+
+def _tunnelled(host: str) -> bool:
+    import ipaddress
+
+    try:
+        address = ipaddress.ip_address(host.strip("[]"))
+    except ValueError:
+        return False
+    return isinstance(address, ipaddress.IPv6Address) and any(
+        address in ipaddress.ip_network(prefix) for prefix in _TUNNELLED_PREFIXES
+    )
+
+
+def credential_in_clear_refusal(
+    url: object, what: str, *, can_allow_plain_http: bool = True
+) -> str:
+    """Why a provider's credential may not be sent to ``url``; ``""`` when it may.
+
+    The rule for every address a provider sends its API key to: ``https``
+    anywhere, plain ``http`` only to a host inside this deployment as
+    ``core.host_locality`` places it from its text alone (loopback, a private,
+    shared or link-local address, a container runtime's name for its host, a
+    ``.local`` or ``.internal`` name, a single-label service name), never an
+    IPv6 address that tunnels to IPv4 elsewhere (6to4, Teredo, NAT64). Any
+    other host would receive the key in clear over a network nobody here
+    controls. An address that cannot be read is refused, and so is a plain
+    http one that HTTP clients may read differently (a backslash, a space or a
+    control character in it), because the host checked would not be the host
+    called. Anthropic's own base URL keeps its stricter rule (``AnthropicConfig``).
+
+    ``can_allow_plain_http`` says whether the caller's block has an
+    ``allow_plain_http`` field: the message names that switch only where it exists.
+    """
+    from urllib.parse import urlsplit
+
+    from maljan.core.host_locality import LOCAL, host_locality
+
+    text = str(url or "").strip()
+    if not text:
+        return ""
+    try:
+        parts = urlsplit(text)
+        host = parts.hostname or ""
+        parts.port  # noqa: B018 — read for the ValueError an unusable port raises
+    except ValueError:
+        return f"{what} cannot be read as an address, so where it sends the API key is not known"
+    if parts.scheme.lower() != "http":
+        return ""
+    if any(ch == "\\" or ch.isspace() or ord(ch) < 32 or ord(ch) == 127 for ch in text):
+        return (
+            f"{what} holds a backslash, a space or a control character, which HTTP clients "
+            "read differently; with plain http the API key could go to a host other than the "
+            "one checked"
+        )
+    if host_locality(host) == LOCAL and not _tunnelled(host):
+        return ""
+    shown = host or "a host this address does not name"
+    return (
+        f"{what} would send the API key in clear to {shown}: plain http is taken only for a "
+        "host inside this deployment (loopback, a private or link-local address, a container "
+        "host name, a .local or .internal name, a single-label service name)"
+        + (", unless the provider's allow_plain_http is set" if can_allow_plain_http else "")
+        + "; use https"
+    )
 
 
 class AnthropicConfig(BaseModel):
@@ -371,7 +485,11 @@ class ModelChoice(BaseModel):
         if self.base_url:
             from maljan.llm.provider_base import facts_of, provider_names
 
-            if not facts_of(self.provider).supports_agent_base_url:
+            # An installed plugin this process has not loaded keeps its facts
+            # in its own code: checked where it is loaded (the worker).
+            if not facts_of(self.provider).supports_agent_base_url and not unloaded_plugin(
+                "llm", self.provider
+            ):
                 supported = " and ".join(
                     f"'{name}'"
                     for name in provider_names()
@@ -399,16 +517,19 @@ class ModelChoice(BaseModel):
             return self
         from maljan.llm.provider_base import effort_providers, facts_of
 
-        facts = facts_of(self.provider)
-        if not facts.effort_setting:
-            supported = " and ".join(f"'{p}'" for p in effort_providers())
-            raise ValueError(
-                f"effort is only supported for the {supported} providers, "
-                f"not '{self.provider}'; that provider sends no reasoning effort."
-            )
-        refusal = facts.effort_refusal(self.effort)
-        if refusal:
-            raise ValueError(refusal)
+        # An installed plugin this process has not loaded keeps its effort
+        # levels in its own code: checked where it is loaded (the worker).
+        if not unloaded_plugin("llm", self.provider):
+            facts = facts_of(self.provider)
+            if not facts.effort_setting:
+                supported = " and ".join(f"'{p}'" for p in effort_providers())
+                raise ValueError(
+                    f"effort is only supported for the {supported} providers, "
+                    f"not '{self.provider}'; that provider sends no reasoning effort."
+                )
+            refusal = facts.effort_refusal(self.effort)
+            if refusal:
+                raise ValueError(refusal)
         # A probe of this model is filed under the model and its effort
         # together; a spelling wider than the column that holds it could never
         # be filed, and the gate would call the model unprobed with no reason.
@@ -448,9 +569,62 @@ class AgentLLMConfig(ModelChoice):
     that wrote it, because asking another model instead would be the platform
     choosing a different answer. Empty keeps the single-model form, which is
     every entry written before the list existed.
+
+    ``max_spend_usd`` and ``max_unpriced_tokens`` are the agent's own ceilings
+    (``core.spend.SpendMeter.agent_refusal``): what its priced calls may cost,
+    and how many tokens its calls of a model with no known price (a local or
+    unpriced one) may use. Every model of the list counts toward the same
+    agent, fallbacks included. Once either is reached the agent makes no
+    further model call; what it already produced is kept, and no other agent
+    is affected. ``None``, the default, is no ceiling.
     """
 
+    # Blank only on an entry that holds nothing but its ceilings: the agent
+    # then runs on the model it runs on with no entry, and the entry only
+    # bounds it (:meth:`names_a_model`).
+    provider: str = ""
+    model: str = ""
     fallbacks: list[ModelChoice] = Field(default_factory=list)
+    # Left out of every dump while unset, so an entry with no ceiling dumps
+    # exactly as it did before ceilings existed.
+    max_spend_usd: Annotated[float, Field(gt=0)] | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
+    max_unpriced_tokens: Annotated[int, Field(gt=0)] | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
+
+    def names_a_model(self) -> bool:
+        """Whether the entry chooses the agent's model, rather than only holding its ceilings."""
+        return bool(self.provider or self.model)
+
+    @model_validator(mode="after")
+    def _a_model_or_only_ceilings(self) -> "AgentLLMConfig":
+        """An entry names its provider and model, or holds nothing but a ceiling.
+
+        A ceiling-only entry leaves the agent on the model it runs on without
+        an entry; a model setting beside it (a temperature, an endpoint, an
+        effort, a fallback) would have no model to apply to.
+        """
+        if self.names_a_model():
+            if not (self.provider and self.model):
+                raise ValueError("an agent entry names both its provider and its model.")
+            return self
+        if self.max_spend_usd is None and self.max_unpriced_tokens is None:
+            raise ValueError(
+                "an agent entry names its provider and model, or sets a ceiling "
+                "(max_spend_usd, max_unpriced_tokens)."
+            )
+        stray = [
+            name
+            for name in ("temperature", "base_url", "effort")
+            if getattr(self, name) is not None
+        ] + (["fallbacks"] if self.fallbacks else [])
+        if stray:
+            raise ValueError(
+                f"an entry with only a ceiling names no model for {', '.join(stray)} to apply to."
+            )
+        return self
 
     @model_validator(mode="after")
     def _each_model_once(self) -> "AgentLLMConfig":
@@ -466,8 +640,26 @@ class AgentLLMConfig(ModelChoice):
         return self
 
     def chain(self) -> list[ModelChoice]:
-        """The agent's models in the order they are tried, first model first."""
+        """The agent's models in the order they are tried, first model first.
+
+        Empty for an entry that holds only ceilings: it chooses no model.
+        """
+        if not self.names_a_model():
+            return []
         return [self, *self.fallbacks]
+
+
+def model_entry(agents: Any, key: str) -> Any:
+    """The ``llm.agents`` entry of ``key`` when it chooses the agent's model, else ``None``.
+
+    An entry holding only ceilings chooses none: the agent runs on the model it
+    runs on with no entry.
+    """
+    entry = (agents or {}).get(key)
+    if entry is None:
+        return None
+    names = getattr(entry, "names_a_model", None)
+    return entry if not callable(names) or names() else None
 
 
 class FrontierArm(BaseModel):
@@ -536,6 +728,22 @@ class FrontierArm(BaseModel):
     total_params_b: Annotated[float, Field(ge=0)] = 0.0
     active_params_b: Annotated[float, Field(ge=0)] = 0.0
     quantisation: str = ""
+
+    @model_validator(mode="after")
+    def _no_key_in_clear(self) -> "FrontierArm":
+        """The arm sends its own key to its own address: the provider address rule applies.
+
+        An arm with no key sends none, and is not held to it.
+        """
+        if self.api_key is None or not self.api_key.get_secret_value():
+            return self
+        refused = credential_in_clear_refusal(
+            self.base_url, "the frontier arm's base_url", can_allow_plain_http=False
+        )
+        if refused:
+            # Located, with no input echoed: the arm's block holds its key.
+            _refuse_at(("base_url",), refused)
+        return self
 
 
 class FrontierConfig(FrontierArm):
@@ -877,7 +1085,8 @@ class ChunkingConfig(BaseModel):
     # fit that room together are one chunk, so the analyst runs one loop over
     # all of them. With no window learned nothing is derived: a chunk is the
     # size this setting shipped with (``UNKNOWN_WINDOW_CHUNK_TOKENS``), as a
-    # tool answer keeps its old constant. A number set here wins over the
+    # tool answer keeps its old constant, and a run whose input it split says
+    # so in its summary with the remedy. A number set here wins over the
     # derived room, for splitting and for joining.
     #
     # Each chunk is a full tool loop, run one after another, so a figure below
@@ -1189,6 +1398,13 @@ PROVIDER_REFERENCE_RULE = (
     f"provider tool references are only valid on {' and '.join(PROMPT_ROLES)} "
     "definitions; built-in roles open their provider themselves"
 )
+# Why turning the ATT&CK technique line off is refused, in one sentence. A
+# built-in role runs its own class and its own claim format, which the switch
+# does not reach.
+ATTCK_OPT_OUT_RULE = (
+    f"attck_techniques can be turned off only on {' and '.join(PROMPT_ROLES)} "
+    "definitions; built-in roles keep their own claim format"
+)
 
 # Deprecated. ``MCPServerConfig.agents`` used to be a Literal of the four
 # built-in roles; an operator can now bind a server to any definition key, so
@@ -1211,6 +1427,10 @@ BUILTIN_SERVER_KEYS: tuple[str, ...] = (
     "threatintel",
     virustotal.SERVER_KEY,
 )
+# Names a server may not take: the built-ins', the providers' own, and the two
+# in-process sources the evidence ledger files calls under (``pipeline`` for the
+# triage pack, ``sandbox`` for the job's sandbox) — a server of either name
+# would be read as that source. A key already in the stored map is kept.
 RESERVED_SERVER_KEYS: tuple[str, ...] = (
     "analysis",
     "knowledge",
@@ -1219,6 +1439,8 @@ RESERVED_SERVER_KEYS: tuple[str, ...] = (
     virustotal.SERVER_KEY,
     "ghidra",
     "cape",
+    "pipeline",
+    "sandbox",
 )
 
 
@@ -1235,6 +1457,24 @@ class SampleOpenConfig(BaseModel):
     opened (the value the select and analysis tools are given); empty means
     the path itself. All empty declares nothing, and the server's tools are
     offered as they are.
+
+    On a server other jobs share (one reached at an address), the server's
+    current program is every job's, so each call is held to the job's own
+    (``sample_open.pin_program_argument``): ``program_arguments`` names the
+    further arguments a tool names an opened program by (a diff's two
+    programs, say), checked against the programs the job opened beside
+    ``select_argument`` and ``analyse_argument``; ``open_path_arguments`` the
+    further arguments that name a file a tool opens, beside
+    ``path_argument``, which may only name the job's own copy of the sample;
+    and ``job_safe_tools`` the tools that take neither and read nothing a job
+    opened (a number converter, a lookup). Any other tool is withheld there,
+    as is every tool ``shared_withheld_tools`` lists (one that runs code or
+    changes the whole project), whatever arguments it takes.
+
+    ``close_tool`` and ``close_argument`` name the tool that closes or deletes
+    an opened program and the argument the program's name goes in. Declared,
+    the platform closes each program the job opened there when the job ends;
+    empty, a program the job opened stays on the server.
     """
 
     open_tool: str = ""
@@ -1244,15 +1484,69 @@ class SampleOpenConfig(BaseModel):
     select_argument: str = ""
     analyse_tool: str = ""
     analyse_argument: str = ""
+    program_arguments: list[str] = Field(default_factory=list)
+    open_path_arguments: list[str] = Field(default_factory=list)
+    job_safe_tools: list[str] = Field(default_factory=list)
+    shared_withheld_tools: list[str] = Field(default_factory=list)
+    close_tool: str = ""
+    close_argument: str = ""
 
     @model_validator(mode="after")
     def _an_open_tool_names_its_path(self) -> "SampleOpenConfig":
-        rest = (self.name_field, self.select_tool, self.select_argument, self.analyse_tool)
+        rest = (
+            self.name_field,
+            self.select_tool,
+            self.select_argument,
+            self.analyse_tool,
+            self.close_tool,
+            self.close_argument,
+        )
+        if bool(self.close_tool) != bool(self.close_argument):
+            raise ValueError("sample_open.close_tool and close_argument are declared together")
         if self.open_tool and not self.path_argument:
             raise ValueError("sample_open.open_tool needs path_argument, where the path goes")
-        if not self.open_tool and (self.path_argument or any(rest) or self.analyse_argument):
+        held = (
+            self.program_arguments,
+            self.open_path_arguments,
+            self.job_safe_tools,
+            self.shared_withheld_tools,
+        )
+        if not self.open_tool and (
+            self.path_argument or any(rest) or self.analyse_argument or any(held)
+        ):
             raise ValueError("sample_open declares a select or analysis tool but no open_tool")
         return self
+
+
+class PrepassToolsConfig(BaseModel):
+    """Which of a server's tools the platform calls itself, once per job, before a model turn.
+
+    Read when the server is the one the generic static provider drives
+    (``static.generic.server``, and radare2's own block): ``call_graph`` names
+    the tool that answers the opened program's whole call graph, read for the
+    priority-functions pre-pass (``StaticProvider.call_graph``);
+    ``function_hashes`` the tool that answers a hash per function, read for
+    function-hash attribution (``StaticProvider.function_hashes``); and
+    ``anti_analysis`` the tool that scans the program for anti-analysis code,
+    read for the triage pack's scan (``StaticProvider.anti_analysis_scan``).
+    Each answer is read by the tool's own declaration (``tool_facts``: its
+    ``rows``, ``values``, ``places`` and ``arguments``;
+    ``providers.static.declared_prepass``). An empty name declares nothing,
+    and the provider answers ``None`` for that pass as it does undeclared.
+    """
+
+    call_graph: str = ""
+    function_hashes: str = ""
+    anti_analysis: str = ""
+
+    @field_validator("call_graph", "function_hashes", "anti_analysis")
+    @classmethod
+    def _names_a_tool(cls, value: str, info: ValidationInfo) -> str:
+        if not value:
+            return value
+        from maljan.core.tool_declarations import check_tool_name
+
+        return check_tool_name(value, f"prepass_tools.{info.field_name}")
 
 
 # Ghidra's own declaration: ``load_program`` imports the file afresh in the
@@ -1267,6 +1561,20 @@ GHIDRA_SAMPLE_OPEN = SampleOpenConfig(
     select_argument="program",
     analyse_tool="run_analysis",
     analyse_argument="program",
+    # Held to the job on a Ghidra other jobs share: the further arguments
+    # that name a program, the further one that names a file to open, and the
+    # tools that take neither and read nothing a job opened.
+    program_arguments=["program_a", "program_b", "source_program", "target_program"],
+    open_path_arguments=["file_path"],
+    # Ghidra's own tools that take no program and read nothing a job opened.
+    job_safe_tools=["convert_number", "list_scripts"],
+    # Ghidra's tools that run code or change the whole project, whatever
+    # program they are given.
+    shared_withheld_tools=["create_folder", "run_ghidra_script", "run_script_inline"],
+    # Ghidra's tool that closes an open program by its name, the one
+    # ``load_program`` answered under ``name_field``.
+    close_tool="close_program",
+    close_argument="name",
 )
 
 
@@ -1291,7 +1599,9 @@ class MCPServerConfig(BaseModel):
     cwd: str = ""
     # Names copied out of the API process's own environment into the child.
     # The only way a credential reaches a sidecar: ``env`` below is a visible
-    # setting, so a token written there would be readable in the UI.
+    # setting, so a token written there would be readable in the UI. The
+    # platform's own bootstrap variables are never among them, here or in
+    # ``env`` (``_carries_no_platform_secret``).
     env_allow: list[str] = Field(default_factory=list)
     # Allow-list. ``None`` exposes every tool the server advertises (what the
     # built-ins do today); ``[]`` exposes nothing, which is what a freshly
@@ -1353,16 +1663,64 @@ class MCPServerConfig(BaseModel):
     # How the server's credential is obtained by one request, when it can be
     # (``CredentialBootstrap``); ``None`` for a server whose token is typed in.
     credential_bootstrap: CredentialBootstrap | None = None
+    # How many levels at the top of the process tree the worker starts for
+    # this server belong to a launcher that does not itself read the sample
+    # (a sandbox's monitor, a namespace or user switch): ``1`` is the started
+    # process alone. The run's isolation part holds those levels only to
+    # carrying no platform variable and every process under them to every
+    # check (``analysis.isolation.isolation_part``). ``None`` (every built-in)
+    # declares no launcher.
+    launcher_depth: Annotated[int, Field(ge=0)] | None = None
+    # Which of the server's tools the platform calls itself before a model turn
+    # (``PrepassToolsConfig``). ``None`` (every built-in) declares none.
+    prepass_tools: PrepassToolsConfig | None = None
 
     @field_validator("roles")
     @classmethod
     def _roles_are_words(cls, value: list[str]) -> list[str]:
         return check_roles(value)
 
+    @field_validator("prepass_tools")
+    @classmethod
+    def _no_tool_is_none_declared(
+        cls, value: PrepassToolsConfig | None
+    ) -> PrepassToolsConfig | None:
+        # Three empty names declare nothing: held as unset, so no digest moves.
+        if value is not None and not (
+            value.call_graph or value.function_hashes or value.anti_analysis
+        ):
+            return None
+        return value
+
     @field_validator("required_env_allow", "variable_names")
     @classmethod
-    def _names_are_env_names(cls, value: list[str]) -> list[str]:
-        return check_env_names(value)
+    def _names_are_env_names(cls, value: list[str], info: ValidationInfo) -> list[str]:
+        names = check_env_names(value)
+        # A server that cannot run without one of the platform's own bootstrap
+        # variables cannot run here at all: its ``env_allow`` would be refused.
+        if info.field_name == "required_env_allow":
+            refusal = platform_secrets_refusal(names, "required_env_allow")
+            if refusal:
+                raise ValueError(refusal)
+        return names
+
+    @field_validator("env", "env_allow")
+    @classmethod
+    def _carries_no_platform_secret(cls, value: Any, info: ValidationInfo) -> Any:
+        """A variable that opens one of the platform's own stores is no server's to read.
+
+        ``env_allow`` copies a name's value out of the worker's (or the API's)
+        own environment into the child, and ``env`` writes one in by value. A
+        name the bootstrap contract reads the database, the queue, the object
+        store, the settings key or a signing key from is refused in either
+        (``core.platform_secrets``), here, where a save, a stored row loaded
+        for a job and a connection test all validate the block. The refusal
+        names the variables and what each opens, never a value.
+        """
+        refusal = platform_secrets_refusal(value, str(info.field_name))
+        if refusal:
+            raise ValueError(refusal)
+        return value
 
     @field_validator("sample_mount")
     @classmethod
@@ -1413,6 +1771,20 @@ class MCPServerConfig(BaseModel):
         return check_tool_facts_keys(value)
 
     @model_validator(mode="after")
+    def _aggregates_name_tools_of_this_server(self) -> "MCPServerConfig":
+        """Each ``aggregate_of`` names tools this server declares or lists in ``tools``.
+
+        A name that is not one is left out with a warning
+        (``tool_declarations.known_aggregates``); a save refuses it where the
+        operator's edit is checked (``changed_declaration_errors``).
+        """
+        kept = known_aggregates(self.tool_facts, self.tools, where="tool ")
+        # In place: an assignment would count the field as one the block set.
+        if kept is not self.tool_facts:
+            self.tool_facts.update(kept)
+        return self
+
+    @model_validator(mode="after")
     def _refuse_the_composed_names(self) -> "MCPServerConfig":
         """A name the spawn composes is not a name a stored row may carry.
 
@@ -1447,7 +1819,8 @@ class MCPServerConfig(BaseModel):
 # process where the ATT&CK index is actually built, so one that loses
 # ``MALJAN_INDEX_RETRY_SECONDS`` keeps re-attempting a fifty-megabyte download
 # every fifteen minutes on a deployment that set the interval to zero to stop
-# exactly that.
+# exactly that, and one that loses ``MALJAN_ATTCK_REFRESH_DAYS`` refreshes its
+# ATT&CK bundles weekly on a deployment that chose another interval, or none.
 #
 # Everything else a built-in ships with is a default an operator may take
 # away. ``threatintel``'s ``VIRUSTOTAL_API_KEY`` and ``ABUSEIPDB_API_KEY`` are
@@ -1456,7 +1829,11 @@ class MCPServerConfig(BaseModel):
 REQUIRED_ENV_ALLOW: dict[str, tuple[str, ...]] = {
     "analysis": ("MALJAN_STAGING_DIR", "MALJAN_STAGING_TTL_HOURS", "MALJAN_SAMPLE_ROOTS"),
     "network": ("MALJAN_STAGING_DIR", "MALJAN_SAMPLE_ROOTS"),
-    "knowledge": ("MALJAN_INDEX_RETRY_SECONDS",),
+    "knowledge": (
+        "MALJAN_INDEX_RETRY_SECONDS",
+        "MALJAN_ATTCK_REFRESH_DAYS",
+        "MALJAN_SAMPLE_SHA256",
+    ),
 }
 
 
@@ -1483,7 +1860,8 @@ def _builtin_servers() -> dict[str, MCPServerConfig]:
     ``MALJAN_STAGING_TTL_HOURS``, which say where its ``put_sample`` uploads
     land and how long they are kept, and ``knowledge`` sees
     ``MALJAN_INDEX_RETRY_SECONDS``, which is how long it believes a failed
-    ATT&CK index build. Both file-reading sidecars also see
+    ATT&CK index build, and ``MALJAN_ATTCK_REFRESH_DAYS``, how old its cached
+    ATT&CK bundles may get. Both file-reading sidecars also see
     ``MALJAN_SAMPLE_ROOTS``: the directories they may read a path argument in,
     on top of the staging directory. The worker exports the mirror it copies
     a sample into; without it a sidecar reads only what it staged itself.
@@ -1530,7 +1908,7 @@ def _builtin_servers() -> dict[str, MCPServerConfig]:
             command=sys.executable,
             args=["services/knowledge-mcp/server.py"],
             cwd="services/knowledge-mcp",
-            env_allow=["MALJAN_INDEX_RETRY_SECONDS"],
+            env_allow=["MALJAN_INDEX_RETRY_SECONDS", "MALJAN_ATTCK_REFRESH_DAYS"],
             agents=[],
             label="Knowledge MCP",
         ),
@@ -1576,6 +1954,30 @@ def _builtin_servers() -> dict[str, MCPServerConfig]:
             agents=[],
             label=virustotal.SERVER_LABEL,
         ),
+        # The identification sidecars, one analysis program each in an image
+        # of its own (``services/die-mcp``, ``services/ilspy-mcp``,
+        # ``services/goresym-mcp``), each reached over streamable HTTP at the
+        # address the shipped compose file gives it under its profile. Off
+        # until an operator starts the container and switches the block on with
+        # the container's token as ``auth_token``: a block on with nothing
+        # behind it would only ever contribute a failure. Switched on, the
+        # static analyst and the reverser are offered every tool the server
+        # advertises, and its triage pack step runs (``core.pack_steps``).
+        **{
+            key: _declared(
+                key,
+                enabled=False,
+                transport="streamable-http",
+                url=url,
+                agents=["static", "reverser"],
+                label=label,
+            )
+            for key, url, label in (
+                ("die", "http://die-mcp:8090/mcp", "Detect It Easy MCP"),
+                ("ilspy", "http://ilspy-mcp:8091/mcp", "ILSpy MCP"),
+                ("goresym", "http://goresym-mcp:8092/mcp", "GoReSym MCP"),
+            )
+        },
     }
 
 
@@ -1656,6 +2058,12 @@ class MCPConfig(BaseModel):
     # how many calls it may have in flight at once. Per job and per server;
     # see ``maljan.providers.server_guard``.
     breaker: MCPBreakerConfig = Field(default_factory=lambda: MCPBreakerConfig())
+    # Whether a tool's description, as the model is shown it, ends with what
+    # its answer shows and does not show, where its declaration says
+    # (``ToolFacts.shows`` / ``does_not_show``). Off by default: the
+    # declarations are shown in the console and the docs, and the prompts stay
+    # as they were until an A/B turns it on (``servers.settle_tool_notes``).
+    answer_scope_notes: bool = False
 
     @model_validator(mode="after")
     def _no_tool_is_declared_under_a_renamed_spelling(self) -> "MCPConfig":
@@ -1699,6 +2107,10 @@ class MCPConfig(BaseModel):
 # maps' rules from drifting apart.
 AGENT_KEY_PATTERN = SERVER_KEY_PATTERN
 JUDGE_AGENT_KEY = "judge"
+# The built-in agents whose ``enabled`` switch a save may not change: the run's
+# skeleton always runs them. One tuple, read by the settings model's built-in
+# comparison and the API's, and served to the console, so the three agree.
+ALWAYS_ENABLED_AGENTS: tuple[str, ...] = (JUDGE_AGENT_KEY,)
 # The narrative/composer step, as a definition. It exists so the report has an
 # LLM entry and a prompt of its own instead of borrowing the judge's, and so a
 # report stage names an agent like every other stage does.
@@ -1710,6 +2122,8 @@ BUILTIN_AGENTS: tuple[str, ...] = ("static", "dynamic", "network", "judge", "rep
 # always has; a judge entry does not move the mediator. No definition may take
 # either key, because its ``llm.agents`` entry would then be read twice.
 MEDIATOR_AGENT_KEY = "mediator"
+# The name the mediator's debate arguments are written under, and read back by.
+MEDIATOR_AGENT_NAME = "Mediator"
 SUMMARIZER_AGENT_KEY = "summarizer"
 ROLE_ENTRY_KEYS: tuple[str, ...] = (MEDIATOR_AGENT_KEY, SUMMARIZER_AGENT_KEY)
 
@@ -2055,6 +2469,13 @@ class AgentDefinition(BaseModel):
     # pointed at the sandbox behaviour log without also becoming a dynamic
     # analyst. Naming the sources makes that a two-word edit.
     data_sources: list[str] = Field(default_factory=list)
+    # Where a source named in ``data_sources`` is cut into chunks when it does
+    # not fit one: a regular expression for the start of a unit (a function's
+    # header, a process's banner), as a source name's value. The source is
+    # split before each match, whole units packed into a chunk, as the
+    # built-in domains' own boundaries do. A source named nowhere here is cut
+    # as before: by the built-in boundary of its domain, else by a window.
+    chunk_boundary: dict[str, str] = Field(default_factory=dict)
     # How long one loop of this agent may run and how many steps it may take.
     # ``None`` means the deployment-wide ``react_agent_timeout`` /
     # ``react_agent_max_steps``, by way of the deprecated per-agent override
@@ -2069,6 +2490,29 @@ class AgentDefinition(BaseModel):
     # places nothing. A definition that never wrote the field reads its role's
     # (``ROLE_TABS``); a clone copies it.
     tab: str | None = None
+    # Whether the agent is asked for an ATT&CK technique line on each claim.
+    # True is what every definition written before the field reads, and what
+    # every built-in keeps. False leaves the request out of a prompt-role
+    # agent's prompt (``agents.configurable_analyst``), for an agent whose
+    # work is not malware behaviour; a TECHNIQUE line the agent writes anyway
+    # is still read and checked like any other.
+    attck_techniques: bool = True
+
+    @model_serializer(mode="wrap")
+    def _attck_techniques_only_when_off(self, handler: SerializerFunctionWrapHandler) -> Any:
+        """Dump ``attck_techniques`` only when it is off.
+
+        Every stored definition, export and pinned dump was written before the
+        field existed and reads as on; a definition that keeps it on dumps
+        exactly as it always did, so none of them reads as changed.
+        """
+        dumped = handler(self)
+        if isinstance(dumped, dict) and self.attck_techniques:
+            dumped.pop("attck_techniques", None)
+        # Likewise ``chunk_boundary``: written only by a definition that names one.
+        if isinstance(dumped, dict) and not self.chunk_boundary:
+            dumped.pop("chunk_boundary", None)
+        return dumped
 
     @model_validator(mode="before")
     @classmethod
@@ -2095,6 +2539,34 @@ class AgentDefinition(BaseModel):
                 raise ValueError(f"data source {source!r} is listed twice")
             seen.add(source)
         return self
+
+    @model_validator(mode="after")
+    def _chunk_boundaries_are_patterns_of_a_listed_source(self) -> "AgentDefinition":
+        for source, pattern in self.chunk_boundary.items():
+            if source not in self.data_sources:
+                raise ValueError(
+                    f"chunk_boundary names {source!r}, which is not in this agent's data_sources"
+                )
+            try:
+                compiled = compile_pattern(f"(?m){pattern}")
+            except ValueError as exc:
+                raise ValueError(f"chunk_boundary for {source!r}: {exc}") from exc
+            if compiled.search(""):
+                raise ValueError(
+                    f"chunk_boundary for {source!r} matches the empty text, so it would "
+                    "mark a unit start everywhere; name what a unit starts with"
+                )
+        return self
+
+    @field_validator("attck_techniques")
+    @classmethod
+    def _attck_opt_out_is_a_prompt_role_s(cls, value: bool, info: ValidationInfo) -> bool:
+        # A built-in role runs its own class and its own claim format, which
+        # this switch does not reach; accepting it there would be a setting
+        # that silently does nothing.
+        if not value and info.data.get("role") not in PROMPT_ROLES:
+            raise ValueError(ATTCK_OPT_OUT_RULE)
+        return value
 
 
 class DebateOptions(BaseModel):
@@ -2485,18 +2957,6 @@ class ProfileDefinition(BaseModel):
             raise ValueError(problems[0].message)
         return self
 
-    def entry_node_count(self, stage: "StageDefinition") -> int:
-        """How many graph nodes a dependency of ``stage`` has to point at."""
-        return _entry_node_count(stage)
-
-    def debate_handover_error(self, stage: "StageDefinition") -> str:
-        """Why ``stage`` cannot hand over, or an empty string when it can."""
-        return _debate_handover_error(self.stages, stage)
-
-    def _reachable(self, key: str) -> set[str]:
-        """Every stage ``key`` transitively depends on."""
-        return _upstream_of(self.stages, key)
-
     def stage(self, key: str) -> StageDefinition | None:
         for candidate in self.stages:
             if candidate.key == key:
@@ -2531,8 +2991,8 @@ def _entry_node_count(stage: StageDefinition) -> int:
     return 1
 
 
-def _debate_handover_error(stages: list[StageDefinition], stage: StageDefinition) -> str:
-    """Why debate ``stage`` cannot hand over, or an empty string when it can.
+def _handover_message(stage: StageDefinition, fed_by: list[StageDefinition]) -> str:
+    """The hand-over refusal for debate ``stage`` feeding ``fed_by``, or ``""``.
 
     A debate leaves through a conditional edge, and a conditional edge has
     exactly one destination per branch. A debate that feeds two stages — or
@@ -2544,11 +3004,6 @@ def _debate_handover_error(stages: list[StageDefinition], stage: StageDefinition
     uploaded and detonated and every job under that team fails; an operator
     has to be told while they are still editing.
     """
-    return _handover_message(stage, [c for c in stages if stage.key in c.depends_on])
-
-
-def _handover_message(stage: StageDefinition, fed_by: list[StageDefinition]) -> str:
-    """The hand-over refusal for debate ``stage`` feeding ``fed_by``, or ``""``."""
     heads = sum(_entry_node_count(candidate) for candidate in fed_by)
     fed = [candidate.key for candidate in fed_by]
     if heads <= 1:
@@ -2558,20 +3013,6 @@ def _handover_message(stage: StageDefinition, fed_by: list[StageDefinition]) -> 
         f"({', '.join(fed)}); a debate hands over to exactly one stage, and not "
         "to a parallel analysis stage with more than one agent"
     )
-
-
-def _upstream_of(stages: list[StageDefinition], key: str) -> set[str]:
-    """Every stage ``key`` transitively depends on."""
-    by_key = {s.key: s for s in stages}
-    out: set[str] = set()
-    pending = list(by_key[key].depends_on) if key in by_key else []
-    while pending:
-        current = pending.pop()
-        if current in out or current not in by_key:
-            continue
-        out.add(current)
-        pending.extend(by_key[current].depends_on)
-    return out
 
 
 def _dependents_by_key(stages: list[StageDefinition]) -> dict[str, list[StageDefinition]]:
@@ -2586,11 +3027,10 @@ def _dependents_by_key(stages: list[StageDefinition]) -> dict[str, list[StageDef
 def _keys_after_an_analysis(stages: list[StageDefinition]) -> set[str]:
     """Every key with an analysis stage among what it transitively depends on.
 
-    ``_upstream_of`` asked once per stage, answered for all of them in one
-    breadth-first pass from the analysis stages along the reversed edges, so a
-    team of any size costs its stages plus its edges. The edges are read the
-    way ``_upstream_of`` reads them: a repeated key's dependencies are the
-    last declaration's, and a key counts as analysis if any stage keyed so is.
+    Answered for every stage in one breadth-first pass from the analysis
+    stages along the reversed edges, so a team of any size costs its stages
+    plus its edges. A repeated key's dependencies are the last declaration's,
+    and a key counts as analysis if any stage keyed so is.
     """
     by_key = {s.key: s for s in stages}
     reverse: dict[str, list[str]] = {}
@@ -3403,7 +3843,7 @@ class AgentsConfig(BaseModel):
         for key, seed in _builtin_definitions().items():
             current = self.definitions[key].model_dump()
             expected = seed.model_dump()
-            if key != "judge":
+            if key not in ALWAYS_ENABLED_AGENTS:
                 current.pop("enabled", None)
                 expected.pop("enabled", None)
             if current != expected:
@@ -3564,11 +4004,12 @@ def builtin_profile_changed(name: str, profile: ProfileDefinition) -> bool:
 class StaticR2Config(MCPServerConfig):
     """radare2 MCP server, plus where the sample has to be for r2 to read it.
 
-    ``mirror_dir`` names the ``samples_dir`` subdirectory the worker copies the
-    sample into for r2 to open; only its last segment is used, and the copy
-    keeps the same hardening every mirror gets (0o700 directory, 0o600 file,
-    removed when the job ends) — see
-    ``apps/api/app/worker/sample_files.work_dir()``.
+    The sample is copied into the block's declared ``work_dir`` (one name under
+    ``samples_dir``, as for every server), with the same hardening every mirror
+    gets (0o700 directory, 0o600 file, removed when the job ends) — see
+    ``apps/api/app/worker/sample_files.work_dir()``. An earlier release kept a
+    second setting, ``mirror_dir`` (a path whose last segment was used); a
+    stored one is read as ``work_dir`` where that is not stored.
 
     **It may not be hidden.** radare2 rejects a path carrying a ``/.`` segment,
     so an r2mcp handed a sample under ``.work`` answers "Failed to open file."
@@ -3576,46 +4017,44 @@ class StaticR2Config(MCPServerConfig):
     2026-09-07, where the default *was* ``.work``. Reproduced against a live
     r2mcp with one PE: it opens from ``data/samples/<sha>.exe`` and from
     ``data/samples/r2work/<sha>.exe``, and fails from
-    ``data/samples/.work/<sha>.exe``, with ``-g none`` too. Hence the default
-    below and the validator: an operator who points this back at a hidden
+    ``data/samples/.work/<sha>.exe``, with ``-g none`` too. Hence the shipped
+    ``r2-work`` and the validator: an operator who points this back at a hidden
     directory is told why, rather than getting a provider that silently reads
     nothing.
     """
 
     binary_path: str = "r2mcp"
-    mirror_dir: str = "data/samples/r2-work"
 
-    @field_validator("mirror_dir")
+    @model_validator(mode="before")
     @classmethod
-    def _no_hidden_segment(cls, value: str) -> str:
-        hidden = [
-            part
-            for part in PurePosixPath(value.replace("\\", "/")).parts
-            if part.startswith(".") and part not in (".", "..")
-        ]
-        if hidden:
+    def _stored_mirror_dir(cls, data: Any) -> Any:
+        """Read a stored ``mirror_dir`` as ``work_dir``; a stored ``work_dir`` wins."""
+        if not isinstance(data, Mapping) or "mirror_dir" not in data:
+            return data
+        out = dict(data)
+        legacy = out.pop("mirror_dir")
+        if "work_dir" not in out:
+            from maljan.core.settings_annotations import last_segment
+
+            name = last_segment(legacy)
+            if name == "":
+                raise ValueError(
+                    f"mirror_dir {legacy!r} does not name a directory: only its last "
+                    f"segment is used, and that segment is empty. Use a directory name "
+                    f"such as 'r2-work' as work_dir."
+                )
+            out["work_dir"] = name
+        return out
+
+    @field_validator("work_dir")
+    @classmethod
+    def _no_hidden_work_dir(cls, value: str) -> str:
+        if value.startswith("."):
             raise ValueError(
                 f"radare2 cannot open a sample under a hidden directory, and "
-                f"{value!r} contains {', '.join(repr(h) for h in hidden)}: r2 rejects any "
-                f"path with a '/.' segment, so every tool call would answer "
-                f"'Failed to open file.'. Use an unhidden directory such as "
-                f"'data/samples/r2-work'."
-            )
-        # Only the last segment is honoured — the mirror is always a
-        # subdirectory of the worker's ``samples_dir`` — so a value whose last
-        # segment names a directory itself or its parent is not a mirror
-        # location at all. ``..`` is the one that matters: it slipped through
-        # the check above (which excludes it as "not hidden") and resolved
-        # *outside* ``samples_dir``, into a directory the worker would then
-        # chmod 0o700 and sweep stale files from. ``''`` and ``'.'`` used to
-        # fall back to the hidden default, which is BUG 10 again.
-        last = PurePosixPath(value.replace("\\", "/")).name
-        if last in ("", ".", ".."):
-            raise ValueError(
-                f"{value!r} does not name a mirror directory: only its last segment is "
-                f"used, and that segment is {last!r}, which means the samples directory "
-                f"itself or its parent. Use a subdirectory name such as "
-                f"'data/samples/r2-work'."
+                f"{value!r} is one: r2 rejects any path with a '/.' segment, so every "
+                f"tool call would answer 'Failed to open file.'. Use an unhidden "
+                f"directory name such as 'r2-work'."
             )
         return value
 
@@ -3630,11 +4069,17 @@ class StaticCapaConfig(BaseModel):
 
 
 class StaticYaraConfig(BaseModel):
-    """Rule directory for the evidence-only YARA pass of the capa_yara provider.
+    """The capa_yara provider's YARA rule directory, and the drafted rule's check budget.
 
     The deterministic YARA *layer* (``analysis/yara_layer.py``) keeps its own
-    vendored corpus; this is the operator's own rule directory, scanned only by
-    the capa_yara static provider.
+    vendored corpus; ``rules_dir`` is the operator's own rule directory, scanned
+    only by the capa_yara static provider. ``timeout_seconds`` is in force under
+    every provider: it bounds the check of the drafted YARA rule against its
+    sample (``reporting.detection_signatures``), and it is one of the two values
+    whose longer is the per-call budget of a tool server that declares none,
+    when ``mcp.breaker.call_timeout_seconds`` is unset
+    (``core.legacy_tool_tables.legacy_call_floor``). The capa_yara provider's
+    own scan does not read it.
     """
 
     rules_dir: str = "data/yara_rules"
@@ -3694,8 +4139,9 @@ class StaticConfig(BaseModel):
     """Which static-analysis tool the static analyst attaches, and its settings.
 
     ``provider`` is the single switch; every block below is the configuration of
-    one provider and is inert unless that provider is selected. ``ghidra`` is
-    the default.
+    one provider, read when that provider is selected. Some fields are read
+    under every provider as well, ``yara.timeout_seconds`` among them
+    (``StaticYaraConfig``). ``ghidra`` is the default.
     """
 
     # A registered static provider's id (``maljan.providers.registry``): the
@@ -4151,6 +4597,13 @@ class EventsConfig(BaseModel):
     retention_days: Annotated[int, Field(ge=1)] = 30
 
 
+# The longest ATT&CK refresh interval: the one whose next-check date is still a
+# calendar date (year 9999 at most) for a cache written at the start of 2100.
+# A validity bound, not a default limit: any interval up to it is accepted,
+# and every longer one has no date to be due on.
+ATTCK_REFRESH_DAYS_MAX = (_date(9999, 12, 31) - _date(2100, 1, 1)).days
+
+
 class ValidationConfig(BaseModel):
     """The technique check's one heuristic part, and when it is allowed to run.
 
@@ -4173,11 +4626,17 @@ class ValidationConfig(BaseModel):
     ``index_retry_seconds`` is how long a failed index build is believed before
     another is attempted. A worker used to remember one network blip for its
     whole life, so every later job in it ran without the index; 0 restores that.
+
+    ``attck_refresh_days`` is how old the cached ATT&CK bundles the index is
+    built from may get before they are compared with MITRE's latest release
+    and replaced when a newer one is out (``memory.attck_update``); 0 never
+    checks on its own, and the console's check and update still work.
     """
 
     alignment_gate: Literal["auto", "off"] = "auto"
     alignment_gate_build: bool = False
     index_retry_seconds: Annotated[int, Field(ge=0)] = 900
+    attck_refresh_days: Annotated[int, Field(ge=0, le=ATTCK_REFRESH_DAYS_MAX)] = 7
     alignment_threshold: Annotated[float, Field(ge=0.0, le=1.0)] = 0.05
     alignment_margin: Annotated[float, Field(ge=0.0, le=1.0)] = 0.20
     weak_alignment: bool = False
@@ -4263,6 +4722,8 @@ class Settings(BaseSettings):
     # Which analysts exist, in what order, and what each one gets. The
     # ``default`` profile is the architecture this project measured itself on.
     agents: AgentsConfig = Field(default_factory=AgentsConfig)
+    # The installed provider plugins this deployment loads; none by default.
+    plugins: PluginsConfig = Field(default_factory=PluginsConfig)
 
     @classmethod
     def settings_customise_sources(
@@ -4323,6 +4784,11 @@ class Settings(BaseSettings):
     # are where one is set now, and a definition's own value wins. These maps
     # ship empty; an entry an operator writes is still read, after the
     # definition and before the deployment-wide value above.
+    # Removal: no release is named for it, so the maps stay (``loop_limits``
+    # reads them, each value held to a whole number of at least one by the
+    # validator below). When a release is named, delete both fields, their
+    # validator, the two reads in ``loop_limits``, the settings annotations
+    # and ``agent_key_migration``'s rename of their keys.
     react_agent_timeout_overrides: dict[str, int] = Field(default_factory=dict)
     react_agent_max_steps_overrides: dict[str, int] = Field(default_factory=dict)
 
@@ -4435,27 +4901,48 @@ class Settings(BaseSettings):
         """The agent rules that need more than ``AgentsConfig`` to check.
 
         Three references leave the model that owns them: a ``ToolRef`` names a
-        server in ``mcp.servers``, a definition may name a static provider in
-        the provider registry, and a server names the agents it is bound to.
+        server in ``mcp.servers``, a definition or a team may name a static
+        provider in the provider registry, and a server names the agents it is bound to.
         Checking them here rather than in ``AgentsConfig`` is what lets a single
         PATCH that adds a server *and* an agent that uses it validate as one
         unit instead of failing on whichever half pydantic built first.
         """
-        from maljan.providers.registry import static_provider_ids
-
-        provider_ids = set(static_provider_ids())
         for key, definition in self.agents.definitions.items():
             if definition.static_provider is not None:
-                if definition.static_provider not in provider_ids:
-                    available = ", ".join(sorted(provider_ids))
-                    raise ValueError(
+                # A shipped id, or an installed plugin these settings' own
+                # allow-list names, read from package metadata: never what
+                # this process happens to have loaded.
+                refused = id_refusal("static", definition.static_provider, self.plugins.allowed)
+                if refused:
+                    available = ", ".join(sorted(shipped_ids("static")))
+                    _refuse_at(
+                        ("agents", "definitions", key, "static_provider"),
                         f"{key!r}: unknown static provider "
-                        f"{definition.static_provider!r}. Available: {available}"
+                        f"{definition.static_provider!r}. Available: {available}; {refused}",
+                        definition.static_provider,
                     )
-            for ref in definition.tools:
+            for index, ref in enumerate(definition.tools):
                 if ref.kind != "mcp":
                     continue
-                self._check_server_tool(repr(key), str(ref.server), ref.name)
+                try:
+                    self._check_server_tool(repr(key), str(ref.server), ref.name)
+                except ValueError as exc:
+                    _refuse_at(("agents", "definitions", key, "tools", index), str(exc), ref.server)
+
+        # A team's static provider outranks each member's own choice at run
+        # time, so it is judged as a definition's is, at the team's own key.
+        for name, team in self.agents.profiles.items():
+            if team.static_provider is None:
+                continue
+            refused = id_refusal("static", team.static_provider, self.plugins.allowed)
+            if refused:
+                available = ", ".join(sorted(shipped_ids("static")))
+                _refuse_at(
+                    ("agents", "profiles", name, "static_provider"),
+                    f"team {name!r}: unknown static provider "
+                    f"{team.static_provider!r}. Available: {available}; {refused}",
+                    team.static_provider,
+                )
 
         # A triage pack step that calls a server's tool is checked as an
         # agent's reference is, so a list that cannot run is refused here, and
@@ -4463,7 +4950,7 @@ class Settings(BaseSettings):
         for step in effective_steps(self.triage.steps):
             problem = self.pack_step_problem(step)
             if problem:
-                raise ValueError(problem)
+                _refuse_at(("triage", "steps"), problem, step.id)
 
         self._rederive_converted_profiles()
 
@@ -4472,10 +4959,84 @@ class Settings(BaseSettings):
             for agent in server.agents:
                 if agent not in known:
                     available = ", ".join(sorted(known))
-                    raise ValueError(
+                    _refuse_at(
+                        ("mcp", "servers", name, "agents"),
                         f"server {name!r} is bound to unknown agent {agent!r}. "
-                        f"Available: {available}"
+                        f"Available: {available}",
+                        agent,
                     )
+        return self
+
+    @model_validator(mode="after")
+    def _agent_models_name_a_registered_provider(self) -> "Settings":
+        """Refuse an ``llm.agents`` entry, or a fallback, naming no registered LLM provider.
+
+        Such an entry used to be saved and then built on the role's global
+        model with a warning, so the agent ran a model nobody chose for it and
+        the probe gate checked that one instead. Accepted: a registered
+        provider, or an installed plugin these settings' own allow-list names
+        (``plugins.id_refusal``, read from package metadata); the worker that
+        loads the plugin refuses at build time if it then fails to load.
+        """
+        for key, entry in self.llm.agents.items():
+            for position, choice in enumerate(entry.chain()):
+                refused = id_refusal("llm", choice.provider, self.plugins.allowed)
+                if not refused:
+                    continue
+                loc: tuple[str | int, ...] = ("llm", "agents", key, "provider")
+                if position:
+                    loc = ("llm", "agents", key, "fallbacks", position - 1, "provider")
+                _refuse_at(
+                    loc,
+                    f"agent {key!r} names LLM provider {choice.provider!r}, which is not "
+                    f"registered: {refused}",
+                    choice.provider,
+                )
+        return self
+
+    @model_validator(mode="after")
+    def _no_provider_key_in_clear(self) -> "Settings":
+        """Refuse a provider address that would carry a configured API key in clear off-site.
+
+        Every registered provider that holds a credential and sends it to an
+        address of its settings (``credential_leaf`` and ``base_url_leaf``), a
+        plugin's included, and every ``llm.agents`` entry or fallback with an
+        endpoint of its own (it authenticates with its provider's key), is
+        held to :func:`credential_in_clear_refusal`, located at that address.
+        Not held to it: a provider with no key set (it sends none; the flat
+        ``*_api_key`` settings are merged in by now), and one whose block sets
+        ``allow_plain_http``, the operator's explicit acceptance that the key
+        travels in clear to that address.
+        """
+        from maljan.llm.provider_base import facts_of, registered_facts
+
+        def _sends_a_key(facts: Any) -> bool:
+            if not facts.credential_leaf or not facts.api_key(self):
+                return False
+            block = facts.settings_block(self)
+            return getattr(block, "allow_plain_http", False) is not True
+
+        for facts in registered_facts():
+            if not facts.base_url_leaf or not _sends_a_key(facts):
+                continue
+            url = getattr(facts.settings_block(self), facts.base_url_leaf, None)
+            refused = credential_in_clear_refusal(url, f"llm.{facts.name}.{facts.base_url_leaf}")
+            if refused:
+                # No input echoed: an address can carry a user name and password.
+                _refuse_at(("llm", facts.name, facts.base_url_leaf), refused)
+        for key, entry in self.llm.agents.items():
+            for position, choice in enumerate(entry.chain()):
+                if not choice.base_url or unloaded_plugin("llm", choice.provider):
+                    continue
+                if not _sends_a_key(facts_of(choice.provider)):
+                    continue
+                refused = credential_in_clear_refusal(choice.base_url, f"agent {key!r}'s base_url")
+                if not refused:
+                    continue
+                loc: tuple[str | int, ...] = ("llm", "agents", key, "base_url")
+                if position:
+                    loc = ("llm", "agents", key, "fallbacks", position - 1, "base_url")
+                _refuse_at(loc, refused)
         return self
 
     def pack_step_problem(self, step: PackStep) -> str:
@@ -4488,9 +5049,13 @@ class Settings(BaseSettings):
         another kind, or none, it would call that tool's rows what they are
         not. The step's own ``kind`` declares its tool's kind where it is set.
         Read strictly on a save, leniently for stored settings
-        (``core.pack_steps.lenient_steps``).
+        (``core.pack_steps.lenient_steps``). A shipped step of a server's tool
+        still calling that server's shipped tool is never refused for its
+        server: it is off where the server is not configured, switched off or
+        does not offer the tool (``core.pack_steps.steps_on_servers``). Its
+        renderer and kind are held to the rule above as any step's are.
         """
-        if not step.builtin:
+        if not step.builtin and not on_its_shipped_server(step):
             try:
                 self._check_server_tool(f"triage step {step.id!r}", step.server, step.called)
             except ValueError as exc:
@@ -4606,6 +5171,11 @@ def install_settings(instance: Settings) -> None:
     """
     global _settings_instance
     _settings_instance = instance
+    # Its plugin allow-list is the one this process judges a provider id by
+    # when a check is handed none; loading follows only an explicit list.
+    plugins = getattr(instance, "plugins", None)
+    if plugins is not None:
+        install_allow_list(getattr(plugins, "allowed", None))
 
 
 class _LazySettingsProxy:

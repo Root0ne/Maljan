@@ -58,7 +58,7 @@ class TestTheStoredEvidence:
 class TestWhereItIsShown:
     def test_the_live_transcript_marks_a_cut_claim(self) -> None:
         claim = SimpleNamespace(
-            claim="x" * 500, evidence_ref="y" * 400, confidence=0.5, technique_id=None
+            claim="word " * 100, evidence_ref="note " * 80, confidence=0.5, technique_id=None
         )
 
         (row,) = claims_to_payload([claim])

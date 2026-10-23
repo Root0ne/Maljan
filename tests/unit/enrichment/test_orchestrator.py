@@ -12,7 +12,9 @@ import pytest
 from maljan.enrichment.declared import (
     EnrichmentSource,
     ReadySource,
+    Threshold,
     annotate_age,
+    declared_verdict,
     effective_sources,
     is_malicious,
 )
@@ -203,6 +205,13 @@ class TestReputationHelpers:
         assert _is_public_ip("127.0.0.1") is False
         assert _is_public_ip("169.254.1.1") is False
         assert _is_public_ip("not-an-ip") is False
+
+    def test_the_whois_lookup_refuses_what_the_orchestrator_refuses(self) -> None:
+        from maljan.enrichment import whois_client
+
+        assert whois_client._is_public_ip is _is_public_ip
+        for address in ("240.0.0.1", "0.0.0.0", "::", "224.0.0.1", "192.168.1.1"):
+            assert whois_client._is_public_ip(address) is False
 
     def test_a_record_is_malicious_by_its_source_s_thresholds(self) -> None:
         vt = effective_sources({})["virustotal"]
@@ -415,3 +424,106 @@ class TestAttribution:
 
 def test_a_source_validates_as_its_own_model() -> None:
     assert isinstance(effective_sources({})["virustotal"], EnrichmentSource)
+
+
+class TestWhatTheCapLeavesUnasked:
+    @pytest.mark.asyncio
+    async def test_the_report_states_each_row_and_question_not_asked(self) -> None:
+        mr = _mr(
+            domains=[{"fqdn": f"d{i}.com"} for i in range(4)],
+            ips=[
+                {"address": "8.8.8.8"},
+                {"address": "1.1.1.1", "reputation": {"source": "x"}, "geo": "US"},
+            ],
+        )
+        wire = _Wire({VT_HOST: _vt_answer()})
+        async with wire.client() as http:
+            with patch("maljan.enrichment.orchestrator.WhoisClient", return_value=_whois_mock()):
+                out = await enrich_malware_report(
+                    mr,
+                    sources=[_shipped("virustotal", _key("vt", "k"))],
+                    http_client=http,
+                    max_lookups_per_kind=1,
+                )
+        rows = {(r["kind"], r["value"]): r for r in out["enrichment_not_asked"]}
+        assert [v for k, v in rows if k == "domain"] == ["d1.com", "d2.com", "d3.com"]
+        assert rows[("domain", "d1.com")]["questions"] == ["reputation"]
+        # An address holding its reputation is not said to lack it: only the ASN is not asked.
+        assert rows[("ip", "1.1.1.1")]["questions"] == ["asn"]
+        assert rows[("ip", "1.1.1.1")]["cap"] == 1
+
+    @pytest.mark.asyncio
+    async def test_nothing_unasked_leaves_no_statement_and_clears_an_old_one(self) -> None:
+        mr = _mr(domains=[{"fqdn": "evil.com"}])
+        mr["enrichment_not_asked"] = [
+            {"kind": "domain", "value": "evil.com", "questions": ["reputation"], "cap": 1}
+        ]
+        wire = _Wire({VT_HOST: _vt_answer()})
+        async with wire.client() as http:
+            await enrich_malware_report(
+                mr, sources=[_shipped("virustotal", _key("vt", "k"))], http_client=http
+            )
+        assert "enrichment_not_asked" not in mr
+
+
+class TestTheDeclaredVerdictIsStored:
+    @pytest.mark.asyncio
+    async def test_the_record_carries_the_sources_verdict(self) -> None:
+        mr = _mr(domains=[{"fqdn": "bad.com"}, {"fqdn": "fine.com"}])
+        wire = _Wire({VT_HOST: _vt_answer(malicious=5)})
+        async with wire.client() as http:
+            await enrich_malware_report(
+                mr, sources=[_shipped("virustotal", _key("vt", "k"))], http_client=http
+            )
+        assert all(d["reputation"]["malicious_verdict"] is True for d in mr["network"]["domains"])
+
+    def test_no_count_is_unknown_not_false(self) -> None:
+        vt = effective_sources({})["virustotal"]
+        assert (
+            declared_verdict({"source": "virustotal", "malicious": 0, "suspicious": 0}, vt) is False
+        )
+        assert declared_verdict({"source": "virustotal", "malicious": 0}, vt) is None
+        assert declared_verdict({"source": "virustotal"}, vt) is None
+        assert declared_verdict({"source": "virustotal", "malicious": 9, "stale": True}, vt) is None
+
+
+class TestOrThresholds:
+    def test_a_met_threshold_is_true_whatever_the_other_holds(self) -> None:
+        abuse = effective_sources({})["abuseipdb"].model_copy(
+            update={
+                "malicious_when": [
+                    Threshold(field="abuse_confidence", at_least=50),
+                    Threshold(field="reports", at_least=3),
+                ]
+            }
+        )
+        assert declared_verdict({"abuse_confidence": 80}, abuse) is True
+        assert declared_verdict({"reports": 5}, abuse) is True
+
+    def test_false_only_when_every_threshold_field_holds_a_count(self) -> None:
+        abuse = effective_sources({})["abuseipdb"].model_copy(
+            update={
+                "malicious_when": [
+                    Threshold(field="abuse_confidence", at_least=50),
+                    Threshold(field="reports", at_least=3),
+                ]
+            }
+        )
+        assert declared_verdict({"abuse_confidence": 10, "reports": 1}, abuse) is False
+        # One count missing and the held one unmet: the missing one could have met it.
+        assert declared_verdict({"abuse_confidence": 10}, abuse) is None
+
+    @pytest.mark.asyncio
+    async def test_a_second_enrichment_overwrites_the_verdict_and_pops_an_unknown(self) -> None:
+        mr = _mr(domains=[{"fqdn": "evil.com"}])
+        source = _shipped("virustotal", _key("vt", "k"))
+        wire = _Wire({VT_HOST: _vt_answer(malicious=5)})
+        async with wire.client() as http:
+            await enrich_malware_report(mr, sources=[source], http_client=http)
+        assert mr["network"]["domains"][0]["reputation"]["malicious_verdict"] is True
+        # The same keys come back in a later answer carrying the key itself.
+        rep = {"source": "virustotal", "malicious_verdict": True, "harmless": 3}
+        from maljan.enrichment.orchestrator import _keep
+
+        _keep({}, (source, rep))
+        assert "malicious_verdict" not in rep

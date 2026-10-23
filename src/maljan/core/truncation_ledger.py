@@ -50,10 +50,9 @@ INTEGRITY_REASONS = (
 # takes out of a report's or a note's ``object_refs`` without removing an
 # object. Neither is a repair and neither belongs in ``INTEGRITY_REASONS`` —
 # the reasons there total to what the pass removed, and folding two other
-# kinds of loss in would break that total. They are counted here so that
+# kinds of loss in would break that total. They are counted in their own
+# fields (``indicator_cap_removed``, ``integrity_refs_trimmed``) so that
 # everything that leaves a bundle leaves under a name.
-INDICATOR_CAP_REASON = "indicator_cap"
-REFS_TRIMMED_REASON = "refs_trimmed"
 
 # Whose removals a run of the integrity pass is. The pass runs on two bundles
 # and the two do not add up to one number: the export's passes act on the
@@ -277,6 +276,11 @@ class TruncationLedger:
         # (``BaseAnalyst._truncate_input``): one sentence per shortening, read by
         # the judge node into the run's degradation reasons.
         self.input_shortened: list[str] = []
+        # An analyst's input split at the shipped chunk size because no window
+        # was learned (``loaders.binary_chunker.SHIPPED_CHUNK_CHARS``): one row
+        # per agent, its chunk count the largest it was split into, and the
+        # remedy an operator acts on: ``(chunks, chunk characters, remedy)``.
+        self.input_split_unknown_window: dict[str, tuple[int, int, str]] = {}
         # Function summaries cut at their output limit, counted per limit
         # (tokens): one sentence in ``input_shortened`` per limit states the count.
         self._summary_cuts: dict[int, int] = {}
@@ -411,6 +415,22 @@ class TruncationLedger:
                 self.input_shortened[index] = sentence
         elif sentence not in self.input_shortened:
             self.input_shortened.append(sentence)
+
+    def record_unknown_window_split(
+        self, *, agent: str, chunks: int, chunk_chars: int, remedy: str
+    ) -> bool:
+        """Agent ``agent``'s input split into ``chunks`` at the shipped size, no window learned.
+
+        One row per agent: a later split of the same input (a revision reading
+        it again) keeps the row unless it was split into more chunks. True when
+        the row is new or grew, so a caller logs it once.
+        """
+        with self._lock:
+            row = self.input_split_unknown_window.get(agent)
+            if row is not None and row[0] >= int(chunks):
+                return False
+            self.input_split_unknown_window[agent] = (int(chunks), int(chunk_chars), remedy)
+            return True
 
     def record_summary_cut(self, cap: int) -> None:
         """One function summary ended at its ``cap``-token output limit.
@@ -594,6 +614,10 @@ class TruncationLedger:
                 "evidence_corpus_answers": self.evidence_corpus_answers,
                 "evidence_corpus_bytes_held": self.evidence_corpus_bytes_held,
                 "evidence_corpus_bytes_ceiling": self.evidence_corpus_bytes_ceiling,
+                "input_split_unknown_window": [
+                    {"agent": agent, "chunks": chunks, "chunk_chars": chars, "remedy": remedy}
+                    for agent, (chunks, chars, remedy) in self.input_split_unknown_window.items()
+                ],
             }
 
     @property

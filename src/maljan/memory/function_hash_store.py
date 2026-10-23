@@ -22,6 +22,14 @@ Design notes:
 - **Tiny-function caveat is the caller's job.** This store matches whatever
   hashes it is given; the caller must filter out low-instruction-count stubs
   (which collide across unrelated binaries) before upserting/matching.
+- **One spelling per family.** Each point keeps the family as the judge wrote
+  it and its ``family_key`` (``long_term_memory.family_key``), so a family
+  written three ways is one family to a match; a point stored before the key
+  was recorded has it computed from its family when it is read.
+- **Owners.** A sample filed by a job with an owner carries it, under point
+  IDs of their own, and is matched by that owner's jobs alone; unscoped points
+  (every point stored before owners were recorded among them) are matched only
+  by jobs with no owner (``long_term_memory.match_functions``).
 """
 
 from __future__ import annotations
@@ -33,9 +41,35 @@ from typing import Any
 from maljan.core.exceptions import MemoryStoreError
 from maljan.core.logger import logger
 from maljan.core.settings_overrides import redact_url
+from maljan.memory.long_term_memory import family_key, owner_key
 
 # 1-dim dummy vector: we only ever filter by payload, never search by vector.
 _DUMMY_VECTOR: list[float] = [1.0]
+
+# Words a model writes where it has no family to name. A report still prints
+# them as written; the corpus never files code under a name made of nothing
+# else (``Generic``, ``Trojan.Generic``, ``generic trojan``, ``GENERIC-``),
+# since every sample sharing a routine would become "the same family".
+FILING_PLACEHOLDER_WORDS = frozenset({"generic", "unclassified", "trojan"})
+
+
+def names_no_family(key: str) -> bool:
+    """Whether a family key is only placeholder words, one or more, in any order.
+
+    ``key`` is ``family_key``'s spelling, so separators are already gone; the
+    words are found by one pass over it, never by backtracking.
+    """
+    words = {family_key(word) for word in FILING_PLACEHOLDER_WORDS}
+    reachable = [True] + [False] * len(key)
+    for end in range(1, len(key) + 1):
+        reachable[end] = any(
+            reachable[end - len(word)] and key.endswith(word, 0, end)
+            for word in words
+            if len(word) <= end
+        )
+    return bool(key) and reachable[len(key)]
+
+
 # Cap the MatchAny list size per scroll so a 1000-function binary does not
 # build a single pathological filter.
 _MATCH_BATCH = 256
@@ -56,11 +90,18 @@ class FunctionMatch:
     family: str
     sample_id: str
     func_name: str
+    # ``family`` in one spelling (``long_term_memory.family_key``); "" on a
+    # match built without it, which the aggregation then computes.
+    family_key: str = ""
 
 
-def _point_id(sample_id: str, func_hash: str) -> int:
-    """Return a stable uint64 point ID for a (sample_id, func_hash) pair."""
-    digest = hashlib.sha256(f"{sample_id}|{func_hash}".encode()).digest()
+def _point_id(sample_id: str, func_hash: str, owner: str | None = None) -> int:
+    """Return a stable uint64 point ID for a (sample_id, func_hash) pair, per owner.
+
+    An unscoped point keeps the ID it always had.
+    """
+    key = f"{sample_id}|{func_hash}" if owner is None else f"{owner}\x1f{sample_id}|{func_hash}"
+    digest = hashlib.sha256(key.encode()).digest()
     return int.from_bytes(digest[:8], "little")
 
 
@@ -73,6 +114,11 @@ class FunctionHashStore:
         store.upsert_sample(sample_id, family, [(func_hash, func_name), ...])
         matches = store.match([h1, h2, ...], exclude_sample_id=sample_id)
     """
+
+    keeps_owners = True
+    # Each point records every verdict (job) that filed it, so one verdict
+    # edited later takes back its own filing and no other's (:meth:`unfile`).
+    keeps_filer = True
 
     def __init__(
         self,
@@ -105,35 +151,77 @@ class FunctionHashStore:
     # Public API
     # ------------------------------------------------------------------
 
-    def upsert_sample(self, sample_id: str, family: str, functions: list[tuple[str, str]]) -> int:
+    def upsert_sample(
+        self,
+        sample_id: str,
+        family: str,
+        functions: list[tuple[str, str]],
+        owner: str | None = None,
+        filed_by: str = "",
+    ) -> int:
         """Upsert one point per function for ``sample_id`` under ``family``.
 
+        ``filed_by`` names the verdict that filed them (its job id). It joins
+        the ``filers`` the point already has, so two verdicts filing the same
+        sample's function keep one point that both vouch for and
+        :meth:`unfile` takes back one filer at a time; empty files none.
+
         ``functions`` is a list of ``(func_hash, func_name)`` tuples (already
-        filtered by the caller for meaningful instruction counts). Returns the
-        number of points written; 0 on any failure (fail-safe).
+        filtered by the caller for meaningful instruction counts). ``owner``
+        files them under the job's owner; ``None`` files them unscoped.
+        Returns the number of points written; 0 on any failure (fail-safe),
+        and 0 for a placeholder family (``reporting.models.NO_FAMILY_WORDS``,
+        ``FILING_PLACEHOLDER_WORDS``)
+        or one with no spelling left once normalised.
         """
-        if not functions:
+        from maljan.reporting.models import stated_family
+
+        # A placeholder ("Unknown", "none", "n/a") names no family: filed, it
+        # would make every sample sharing a routine "the same family".
+        written = stated_family(family)
+        key = family_key(written)
+        if not functions or not key or names_no_family(key):
             return 0
+        scope = owner_key(owner)
         try:
             from qdrant_client.models import PointStruct
 
             self._ensure_collection()
             seen: set[str] = set()
             points = []
+            earlier = self._filers_of(
+                [
+                    _point_id(sample_id, func_hash, scope)
+                    for func_hash in dict.fromkeys(h for h, _ in functions)
+                    if func_hash
+                ]
+            )
             for func_hash, func_name in functions:
                 if not func_hash or func_hash in seen:
                     continue
                 seen.add(func_hash)
+                payload: dict[str, Any] = {
+                    "func_hash": func_hash,
+                    "family": family,
+                    "family_key": key,
+                    "sample_id": sample_id,
+                    "func_name": func_name,
+                }
+                if scope is not None:
+                    payload["owner"] = scope
+                point_id = _point_id(sample_id, func_hash, scope)
+                if filed_by:
+                    payload["filers"] = [
+                        *(f for f in earlier.get(point_id, []) if f != str(filed_by)),
+                        str(filed_by),
+                    ]
+                elif point_id in earlier:
+                    payload["filers"] = earlier[point_id]
                 points.append(
                     PointStruct(
-                        id=_point_id(sample_id, func_hash),
+                        id=point_id,
                         vector=_DUMMY_VECTOR,
-                        payload={
-                            "func_hash": func_hash,
-                            "family": family,
-                            "sample_id": sample_id,
-                            "func_name": func_name,
-                        },
+                        payload=payload,
                     )
                 )
             if not points:
@@ -150,26 +238,139 @@ class FunctionHashStore:
             logger.warning("FunctionHashStore.upsert_sample failed (%s); skipped.", exc)
             return 0
 
+    def _filers_of(self, ids: list[int]) -> dict[int, list[str]]:
+        """The filers each stored point of ``ids`` already has (absent for a new one)."""
+        found: dict[int, list[str]] = {}
+        if not ids or not self._collection_exists():
+            return found
+        for start in range(0, len(ids), _MATCH_BATCH):
+            for point in self._client.retrieve(
+                collection_name=self._collection,
+                ids=ids[start : start + _MATCH_BATCH],
+                with_payload=True,
+                with_vectors=False,
+            ):
+                filers = (point.payload or {}).get("filers")
+                found[int(point.id)] = [str(f) for f in filers] if isinstance(filers, list) else []
+        return found
+
+    def unfile(self, filed_by: str, owner: str | None = None) -> int:
+        """Take back the filing of the verdict ``filed_by``; the number of points it was taken from.
+
+        For a verdict edited later (no longer Malware, or another family): its
+        filing no longer vouches for a family. It is removed from each point's
+        ``filers``, and the point is deleted only when no filer is left, so a
+        function another verdict also filed stays. Only ``owner``'s points
+        (the unscoped ones for ``None``) are touched, and a point filed before
+        filers were recorded names none, so it is never matched here. 0 on any
+        failure (fail-safe), and for an empty ``filed_by``.
+        """
+        if not filed_by or not self._collection_exists():
+            return 0
+        scope = owner_key(owner)
+        try:
+            from qdrant_client.models import (
+                FieldCondition,
+                Filter,
+                IsEmptyCondition,
+                MatchValue,
+                PayloadField,
+                PointIdsList,
+            )
+
+            owned = (
+                IsEmptyCondition(is_empty=PayloadField(key="owner"))
+                if scope is None
+                else FieldCondition(key="owner", match=MatchValue(value=scope))
+            )
+            flt = Filter(
+                must=[FieldCondition(key="filers", match=MatchValue(value=str(filed_by))), owned]
+            )
+            doomed: list[Any] = []
+            trimmed: dict[Any, list[str]] = {}
+            offset: Any = None
+            while True:
+                points, offset = self._client.scroll(
+                    collection_name=self._collection,
+                    scroll_filter=flt,
+                    limit=256,
+                    offset=offset,
+                    with_payload=True,
+                    with_vectors=False,
+                )
+                for point in points:
+                    rest = [
+                        str(f)
+                        for f in (point.payload or {}).get("filers") or []
+                        if str(f) != str(filed_by)
+                    ]
+                    if rest:
+                        trimmed[point.id] = rest
+                    else:
+                        doomed.append(point.id)
+                if offset is None:
+                    break
+            for point_id, rest in trimmed.items():
+                self._client.set_payload(
+                    collection_name=self._collection,
+                    payload={"filers": rest},
+                    points=[point_id],
+                    wait=True,
+                )
+            if doomed:
+                self._client.delete(
+                    collection_name=self._collection,
+                    points_selector=PointIdsList(points=doomed),
+                    wait=True,
+                )
+            logger.info(
+                "FunctionHashStore: unfiled verdict %s from %d function hashes (%d deleted).",
+                str(filed_by)[:16],
+                len(doomed) + len(trimmed),
+                len(doomed),
+            )
+            return len(doomed) + len(trimmed)
+        except Exception as exc:  # fail-safe: never break the caller
+            logger.warning("FunctionHashStore.unfile failed (%s); nothing removed.", exc)
+            return 0
+
     def match(
         self,
         hashes: list[str],
         exclude_sample_id: str | None = None,
+        owner: str | None = None,
     ) -> list[FunctionMatch]:
         """Return stored functions whose hash is in ``hashes``.
 
         Filters out points belonging to ``exclude_sample_id`` so a re-analysis
-        cannot match its own previous run. Empty list on any failure.
+        cannot match its own previous run, and reads only ``owner``'s points
+        (the unscoped ones for ``None``). Empty list on any failure.
         """
         candidates = [h for h in dict.fromkeys(hashes) if h]
         if not candidates or not self._collection_exists():
             return []
+        scope = owner_key(owner)
         try:
-            from qdrant_client.models import FieldCondition, Filter, MatchAny
+            from qdrant_client.models import (
+                FieldCondition,
+                Filter,
+                IsEmptyCondition,
+                MatchAny,
+                MatchValue,
+                PayloadField,
+            )
 
+            owned = (
+                IsEmptyCondition(is_empty=PayloadField(key="owner"))
+                if scope is None
+                else FieldCondition(key="owner", match=MatchValue(value=scope))
+            )
             results: list[FunctionMatch] = []
             for start in range(0, len(candidates), _MATCH_BATCH):
                 batch = candidates[start : start + _MATCH_BATCH]
-                flt = Filter(must=[FieldCondition(key="func_hash", match=MatchAny(any=batch))])
+                flt = Filter(
+                    must=[FieldCondition(key="func_hash", match=MatchAny(any=batch)), owned]
+                )
                 offset: Any = None
                 while True:
                     points, offset = self._client.scroll(
@@ -185,12 +386,16 @@ class FunctionHashStore:
                         sid = p.get("sample_id", "")
                         if exclude_sample_id and sid == exclude_sample_id:
                             continue
+                        if owner_key(p.get("owner")) != scope:
+                            continue
+                        family = p.get("family", "UNKNOWN")
                         results.append(
                             FunctionMatch(
                                 func_hash=p.get("func_hash", ""),
-                                family=p.get("family", "UNKNOWN"),
+                                family=family,
                                 sample_id=sid,
                                 func_name=p.get("func_name", ""),
+                                family_key=str(p.get("family_key") or family_key(family)),
                             )
                         )
                     if offset is None:
@@ -234,7 +439,7 @@ class FunctionHashStore:
             return False
 
     def _ensure_collection(self) -> None:
-        """Create the collection + ``func_hash`` keyword index if needed."""
+        """Create the collection if needed, and the ``func_hash`` and ``filers`` keyword indexes."""
         if self._collection_ready:
             return
         from qdrant_client.models import Distance, PayloadSchemaType, VectorParams
@@ -246,16 +451,19 @@ class FunctionHashStore:
                 # never searched, so COSINE zero-norm issues do not apply.
                 vectors_config=VectorParams(size=1, distance=Distance.DOT),
             )
-            try:
-                self._client.create_payload_index(
-                    collection_name=self._collection,
-                    field_name="func_hash",
-                    field_schema=PayloadSchemaType.KEYWORD,
-                )
-            except Exception as exc:  # index is an optimization, not required
-                logger.debug("FunctionHashStore: func_hash index skipped (%s).", exc)
             logger.info(
                 "FunctionHashStore: created collection '%s' (1-dim DOT, func_hash index).",
                 self._collection,
             )
+        # Both indexes are optimisations, not requirements; asked for on an
+        # existing collection too, so one made before ``filers`` gains it.
+        for field in ("func_hash", "filers"):
+            try:
+                self._client.create_payload_index(
+                    collection_name=self._collection,
+                    field_name=field,
+                    field_schema=PayloadSchemaType.KEYWORD,
+                )
+            except Exception as exc:  # index is an optimization, not required
+                logger.debug("FunctionHashStore: %s index skipped (%s).", field, exc)
         self._collection_ready = True

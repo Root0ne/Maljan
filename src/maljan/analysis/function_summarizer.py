@@ -106,6 +106,14 @@ SUMMARY_CUT_NOTE = (
 )
 
 
+def _unsummarised_note(exc: BaseException) -> str:
+    """The line that heads text returned in place of a summary that failed."""
+    return (
+        f"[summary unavailable: the summarizer failed ({type(exc).__name__}); "
+        "the text below is the unsummarised input]"
+    )
+
+
 class FunctionSummarizer:
     """Two-stage LLM-based token-cost optimisation.
 
@@ -204,7 +212,8 @@ class FunctionSummarizer:
             )
             # Graceful degradation: on error return the raw chunk, whole; the
             # analyst's input it becomes is sized from the analyst's window.
-            return code_chunk
+            # The text says so, or it would read as a summary nobody wrote.
+            return f"{_unsummarised_note(exc)}\n{code_chunk}"
 
     def _fitted(self, text: str, framing: str) -> str:
         """``text`` whole when the window's room holds it beside ``framing``, else shortened, said.
@@ -222,7 +231,7 @@ class FunctionSummarizer:
         ``escaped`` counts the backslashes a fence adds inside the text
         (``agents.tool_fence.escapes``) as part of its length.
         """
-        from maljan.agents.tool_fence import escapes
+        from maljan.agents.tool_fence import escapes, template_tokens_room
         from maljan.utils.marked_cut import marked_cut
 
         try:
@@ -232,10 +241,11 @@ class FunctionSummarizer:
         if not isinstance(room, int) or room <= 0:
             return "", text
         width = room - len(framing) - SHORTENED_NOTE_ROOM
-        grown = escapes(text) if escaped else 0
+        grown = escapes(text) + template_tokens_room(text) if escaped else 0
         if len(text) + grown <= width:
             return "", text
-        kept = width - (escapes(text[: max(0, width)]) if escaped else 0)
+        head = text[: max(0, width)]
+        kept = width - (escapes(head) + template_tokens_room(head) if escaped else 0)
         shown = marked_cut(text, max(1, kept))
         logger.warning(
             "FunctionSummarizer: %d of %d characters fit the window; the rest is left out.",
@@ -409,4 +419,4 @@ class FunctionSummarizer:
             logger.warning(
                 "FunctionSummarizer._merge_summaries failed: %s — returning concatenated.", exc
             )
-            return combined
+            return f"{_unsummarised_note(exc)}\n{combined}"

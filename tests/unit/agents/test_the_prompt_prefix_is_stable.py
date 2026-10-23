@@ -358,7 +358,6 @@ class TestTheRetries:
 
     def test_an_analysts_validation_retry_moves_the_block_to_its_question(self) -> None:
         """Through the analyst's own retry, which frames each request it sends."""
-        from maljan.agents import base_agent
         from maljan.schemas.isr_models import AgentISR, ClaimEvidence
 
         told = [Violation(code="isr.ungrounded_technique", message="cite ev_0001")]
@@ -379,7 +378,7 @@ class TestTheRetries:
                 ClaimEvidence(claim="c", evidence_ref="x", confidence=0.5, technique_id="T1055")
             ],
         )
-        with patch.object(base_agent, "validate_isr", lambda *_a, **_k: next(answers, [])):
+        with patch("maljan.pipeline.validation.validate_isr", lambda *_a, **_k: next(answers, [])):
             agent._validate_isr(isr, "the raw data")
         assert sent
         retry = sent[0]

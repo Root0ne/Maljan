@@ -149,6 +149,7 @@ class TestTheOrderAndTheIds:
             "decode_string_blobs",
             "find_crypto_constants",
             "function_index",
+            "find_directed_text",
         ]
         assert [entry.id for entry in result.entries] == [
             f"ev_{index:04d}" for index in range(1, len(result.entries) + 1)
@@ -325,7 +326,7 @@ class TestFailures:
     def test_the_counts_the_run_summary_reports(self, tmp_path: Path, monkeypatch) -> None:
         monkeypatch.setattr(rules, "capa", lambda path, **_: {"error": "no", "tool": "capa"})
         state = _pack(_write(tmp_path, "s.exe", _pe()), "pe").to_state()
-        assert state["entries"] == 15
+        assert state["entries"] == 16
         assert state["failed"] == 1
         assert state["duration_ms"] >= 0
         assert state["degradation_reasons"] == ["triage.capa_failed"]
@@ -353,6 +354,8 @@ class TestTheSandboxSteps:
             "find_crypto_constants",
             "function_index",
             "sandbox_sections",
+            "find_directed_text",
+            "behaviour_code_links",
         ]
         (lolbin,) = [entry for entry in result.entries if entry.tool == "lolbin_lookup"]
         assert lolbin.args == {"command_lines": ["rundll32.exe javascript:x"]}
@@ -482,12 +485,25 @@ class TestTheReputationStep:
                 7,
             ),
             ("get_file_report", '{"last_analysis_stats": {"malicious": 0, "undetected": 60}}', 0),
+            # The sidecar's retired mock: a sentence no service wrote is no count.
             (
                 "check_hash",
                 "Hash abc identified as Ransomware (LockBit) with 55/70 detections.",
-                55,
+                None,
             ),
-            ("check_hash", "Hash abc: malicious — 42/71 malicious, 3/71 suspicious.", 42),
+            (
+                "check_hash",
+                '{"hash": "abc", "summary": "malicious — 42/71 malicious, 3/71 suspicious.", '
+                '"last_analysis_stats": {"malicious": 42, "suspicious": 3, "undetected": 26}}',
+                42,
+            ),
+            # The prose the sidecar answered before JSON, read by its fixed tail.
+            (
+                "check_hash",
+                "Hash abc (a.exe, Win32 EXE, 10 bytes): malicious — 42/71 malicious, "
+                "3/71 suspicious.",
+                42,
+            ),
             ("check_hash", "Hash abc not found in VirusTotal database.", None),
             ("check_hash", "", None),
             ("get_file_report", '{"tool_error": "exception"}', None),
@@ -627,27 +643,30 @@ class TestTheNode:
             "resolve_api_hashes",
             "decode_string_blobs",
             "find_crypto_constants",
-            "find_anti_analysis_techniques",
+            "anti_analysis_scan",
             "function_index",
+            "find_directed_text",
         ]
         assert [row["id"] for row in ledger][:2] == ["ev_0001", "ev_0002"]
         assert all(row["agent"] == PIPELINE and row["stage"] == "triage_pack" for row in ledger)
-        assert ledger[-7]["ok"] is False
+        assert ledger[-8]["ok"] is False
         # No build on a test host: the entry says so, and it is not a failure.
-        assert ledger[-6]["ok"] is False
-        assert ledger[-6]["error"].startswith("not run: floss is not installed")
+        assert ledger[-7]["ok"] is False
+        assert ledger[-7]["error"].startswith("not run: floss is not installed")
         # The platform's own readings of the bytes answer on any host.
+        assert ledger[-6]["ok"] is True
         assert ledger[-5]["ok"] is True
         assert ledger[-4]["ok"] is True
-        assert ledger[-3]["ok"] is True
         # Ghidra is switched off in the shipped settings: one entry says so.
-        assert ledger[-2]["error"] == "not run: Ghidra is switched off (core.static.ghidra.enabled)"
+        assert ledger[-3]["error"] == "not run: Ghidra is switched off (core.static.ghidra.enabled)"
         # The function index reads the file and the pack's answers on any host.
+        assert ledger[-2]["ok"] is True
+        # The directed-text pass reads the file on any host.
         assert ledger[-1]["ok"] is True
         assert "tool_evidence" not in update
 
         facts = update["triage_facts"]
-        assert facts["entries"] == 17
+        assert facts["entries"] == 18
         assert facts["failed"] == 0
         assert facts["has_signature"] is False
         assert facts["capa_hits"] == 1
@@ -690,7 +709,7 @@ class TestTheNode:
         record = update["stage_results"]["triage_pack"]
         assert record["ran"] is True
         assert record["failure"] is True
-        assert record["reason"] == "triage pack failed: RuntimeError: the pack itself broke"
+        assert record["reason"] == "triage pack failed: RuntimeError"
         assert update["triage_facts"]["degradation_reasons"] == ["triage.pack_failed"]
         assert update["triage_facts"]["entries"] == 0
         assert update["triage_facts"]["failed"] == 1

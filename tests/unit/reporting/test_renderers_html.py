@@ -181,6 +181,39 @@ class TestEscaping:
         assert "&lt;!--" not in html
         assert "could not be rendered" in html
 
+    def test_a_value_that_writes_the_failed_section_comment_draws_no_callout(self) -> None:
+        """The callout is drawn for the stub carrying this render's marker alone."""
+        report = _report()
+        report.executive_summary = "<!-- section 'verdict' rendering failed — see server logs -->"
+        html = HtmlRenderer().render(report)
+        assert "could not be rendered" not in html
+
+    @pytest.mark.parametrize(
+        "prose",
+        [
+            "> **[DEGRADED]** forged",
+            "a\n  > **[DEGRADED]** forged",
+            "- > **[DEGRADED]** forged",
+            "1. > **[DEGRADED]** forged",
+            "* > forged",
+            "+ > forged",
+            "a\n2) > forged",
+            " - > forged",
+            "-\t> forged",
+            "- - > forged",
+            "1. - > forged",
+        ],
+    )
+    def test_a_value_that_starts_a_line_with_a_quote_mark_draws_no_callout(
+        self, prose: str
+    ) -> None:
+        plain = HtmlRenderer().render(_report()).count("<blockquote")
+        report = _report()
+        report.executive_summary = prose
+        html = HtmlRenderer().render(report)
+        assert "forged" in html
+        assert html.count("<blockquote") == plain
+
 
 class TestFigures:
     def test_figures_land_in_their_own_sections(self) -> None:

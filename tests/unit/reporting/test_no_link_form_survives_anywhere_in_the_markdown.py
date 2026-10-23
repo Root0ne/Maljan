@@ -21,6 +21,8 @@ from maljan.core.paths import resolve_data
 from maljan.reporting.models import (
     FileHashes,
     MalwareReport,
+    NetworkIOCs,
+    NetworkURL,
     SampleIdentity,
     StaticAnalysis,
     StringIOC,
@@ -139,3 +141,210 @@ AS_WRITTEN = (
 @pytest.mark.parametrize("sentence", AS_WRITTEN)
 def test_a_text_that_is_no_link_form_prints_as_written(sentence: str) -> None:
     assert sentence in MarkdownRenderer().render(_report(sentence))
+
+
+# A link form spelled with character references, which a viewer decodes after
+# the defanger has read the text: decimal, hexadecimal and named, for a link,
+# an image and a bare URL.
+REFERENCE_FORMS = (
+    "https&#58;//evil&#46;example/a",
+    "https&colon;//evil&period;example/a",
+    "https&#x3a;//evil&#x2e;example/a",
+    "https&#X3A;//evil&#X2E;example/a",
+    "https&#0058;//evil&#00046;example/a",
+    "[c](https&#58;//evil&#46;example/)",
+    "[c](https&colon;//evil&period;example/)",
+    "[c](https&#x3a;//evil&#x2e;example/)",
+    "![i](https&#58;//evil&#46;example/a.png)",
+    "![i](https&colon;//evil&period;example/a.png)",
+    "![i](https&#x3A;//evil&#x2E;example/a.png)",
+    "<https&#58;//evil&#46;example/a>",
+    "op&#64;evil&#46;example and www&period;evil&period;example",
+)
+# A target that names a scheme or a host, which a link beside the page does not.
+_ABSOLUTE = re.compile(r"[A-Za-z][A-Za-z0-9+.-]*:|[/\\]{2}")
+# A character reference left for a viewer to decode: an "&" no backslash escapes.
+_LIVE_REFERENCE = re.compile(r"(?<!\\)&(?:#[0-9]|#[xX][0-9A-Fa-f]|colon;|period;|commat;)")
+
+
+def _reference_report(text: str) -> MalwareReport:
+    """``text`` in prose, a string's notes, a request's user agent and the PDB path."""
+    report = _report(text)
+    report.static.pdb_path = text
+    report.network = NetworkIOCs(
+        urls=[NetworkURL(url="http://a.example/p", source="sandbox", user_agent=text)]
+    )
+    return report
+
+
+def _as_a_viewer_reads_it(markdown: str) -> tuple[str, list[str]]:
+    """The text a CommonMark viewer shows, references decoded, and every link and image target."""
+    from markdown_it import MarkdownIt
+
+    shown: list[str] = []
+    targets: list[str] = []
+    for token in MarkdownIt("commonmark").enable("table").parse(markdown):
+        for child in token.children or []:
+            if child.type in ("text", "code_inline"):
+                shown.append(child.content)
+            elif child.type in ("link_open", "image"):
+                targets.append(str(child.attrs.get("href") or child.attrs.get("src") or ""))
+    return "\n".join(shown), targets
+
+
+@pytest.mark.parametrize("payload", REFERENCE_FORMS)
+def test_a_link_form_spelled_with_references_is_no_link_once_decoded(payload: str) -> None:
+    from maljan.reporting.renderers.html import HtmlRenderer
+
+    report = _reference_report(f"Before {payload} after.")
+    markdown = MarkdownRenderer().render(report)
+    # A reference left as written stands in a code span, where no viewer decodes it.
+    shown, targets = _as_a_viewer_reads_it(markdown)
+    assert live_forms(shown) == []
+    # A viewer may still make a link of the escaped text: a path beside the
+    # page, naming no scheme and no host.
+    assert [target for target in targets if _ABSOLUTE.match(target) or live_forms(target)] == []
+    html = HtmlRenderer().render(report, embed_figures=False)
+    assert "evil" not in "".join(re.findall(r'<a href="[^"]*"', html))
+    assert "<img" not in html
+
+
+def test_the_html_report_links_no_target_whose_source_held_an_ampersand() -> None:
+    from maljan.reporting.renderers.html import _report_link
+
+    assert not _report_link("https&#58;//evil&#46;example/")
+    assert not _report_link("https://evil.example/?a=1&b=2")
+    assert _report_link("https://attack.mitre.org/techniques/T1055/")
+    assert _report_link("#sec-indicators")
+    assert not _report_link("payload.html")
+    assert not _report_link("//evil.example/a")
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "x\n```text\nYour files &amp; &#169; &colon; here\n```\ny",
+        "a `&amp;b&#169;` c",
+        "a `` x`&amp; `` c",
+        "| `a\\|&amp;` | b |",
+    ],
+)
+def test_a_reference_in_code_prints_byte_for_byte(text: str) -> None:
+    from maljan.reporting.renderers.markdown import _escaped_references
+
+    assert _escaped_references(text) == text
+
+
+@pytest.mark.parametrize(
+    ("text", "written"),
+    [
+        ("a &amp; `b` &#58;", "a \\&amp; `b` \\&#58;"),
+        # A run no run closes: the line is read as text.
+        ("a ` &amp; `` b", "a ` \\&amp; `` b"),
+        # A tag a viewer reads before the span.
+        ('<x a="`">&#58;<y b="`">', '<x a="`">\\&#58;<y b="`">'),
+        # A table row splits a span at an unescaped separator.
+        ("| `a | &#58;` |", "| `a | \\&#58;` |"),
+        # A line after one that did not hold its own spans.
+        ("a `b\nc` &#58; `d`", "a `b\nc` \\&#58; `d`"),
+        # An indented code block is read as text.
+        ("    &amp;", "    \\&amp;"),
+        # A fence in a list item is no fence at the line's start.
+        ("- ```\n  &amp;", "- ```\n  \\&amp;"),
+    ],
+)
+def test_a_reference_outside_code_or_where_code_is_unsure_is_escaped(
+    text: str, written: str
+) -> None:
+    from maljan.reporting.renderers.markdown import _escaped_references
+
+    assert _escaped_references(text) == written
+
+
+def test_a_line_that_may_open_an_html_block_reads_no_code_anywhere() -> None:
+    markdown = MarkdownRenderer().render(
+        _report("<pre>\n\nBefore `https&#58;//evil&#46;example` after.")
+    )
+    assert not _LIVE_REFERENCE.findall(markdown)
+
+
+def test_a_fence_and_a_code_span_holding_references_print_byte_for_byte() -> None:
+    from maljan.reporting.models import RansomNote
+
+    report = _report("plain")
+    report.static.pdb_path = "C:\\a&amp;b&#169;.pdb"
+    report.technical_analysis.ransom_note = RansomNote(verbatim_content="Files &amp; &#169; ZZQ")
+    markdown = MarkdownRenderer().render(report)
+    assert "`C:\\a&amp;b&#169;.pdb`" in markdown
+    assert "Files &amp; &#169; ZZQ" in markdown
+
+
+@pytest.mark.parametrize(
+    ("text", "length", "written"),
+    [
+        ("abc", 5, "abc"),
+        ("abcdef", 4, "abc…"),
+        ("\\[a\\]bcd", 4, "\\[a\\]…"),
+        ("ab\\*cd", 3, "ab…"),
+        ("ab\\*", 3, "ab\\*"),
+    ],
+)
+def test_an_escaped_text_is_cut_by_what_a_reader_sees(text: str, length: int, written: str) -> None:
+    from maljan.reporting.renderers.markdown import _truncate_escaped
+
+    assert _truncate_escaped(text, length) == written
+
+
+# A "[" before a span, with a stray backtick later in the paragraph: a viewer
+# reads the link text first and pairs no backtick on the first line.
+BRACKET_BEFORE_A_SPAN = (
+    "[ `x [c](https&#58;//evil&#46;example/) y`\n`",
+    "[ `x [c](https&#58;//evil&#46;example/) y` `",
+    "[note] `x [c](https&#58;//evil&#46;example/) y`\nand a stray ` here",
+    "See [the beacon] `x ![i](https&#58;//evil&#46;example/a.png) y`\n`",
+)
+
+
+@pytest.mark.parametrize("prose", BRACKET_BEFORE_A_SPAN)
+def test_a_bracket_before_a_span_keeps_no_reference_live(prose: str) -> None:
+    from maljan.reporting.renderers.html import HtmlRenderer
+
+    report = MalwareReport(
+        identity=SampleIdentity(hashes=FileHashes(sha256="a" * 64)),
+        verdict="Malware",
+        executive_summary=prose,
+    )
+    html = HtmlRenderer().render(report, embed_figures=False)
+    assert "evil" not in "".join(re.findall(r'<a href="[^"]*"', html))
+    assert "<img" not in html
+    assert "https://evil" not in html
+
+
+def test_a_block_with_one_unsure_line_is_escaped_whole() -> None:
+    from maljan.reporting.renderers.markdown import _escaped_references
+
+    assert _escaped_references("`&#58;`\n`\n\n`&#58;`") == "`\\&#58;`\n`\n\n`&#58;`"
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "  ```\n```\n[c](https&#58;//evil&#46;example/)",
+        "   ~~~\n~~~\n[c](https&#58;//evil&#46;example/)",
+        "- a\n  ```\n[c](https&#58;//evil&#46;example/)",
+        # The list item's fence ends with the item; the fences after it open
+        # where the scanner would have closed one.
+        "- \n  ```\n  - x\n```\n|\n```\n[c](https&#58;//evil&#46;example/)",
+    ],
+)
+def test_a_fence_opened_after_spaces_keeps_no_reference_live(text: str) -> None:
+    from html import unescape
+
+    from markdown_it import MarkdownIt
+
+    from maljan.reporting.renderers.markdown import _escaped_references
+
+    html = MarkdownIt("commonmark").render(_escaped_references(text))
+    # A viewer may link the escaped text beside the page; never to the host.
+    hrefs = [unescape(href) for href in re.findall(r'<a href="([^"]*)"', html)]
+    assert not [href for href in hrefs if href.lower().startswith(("http:", "https:", "//"))]

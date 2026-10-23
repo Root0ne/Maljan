@@ -48,6 +48,7 @@ from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator, m
 
 from maljan.core.logger import logger
 from maljan.core.tool_declarations import first, parse_path, select
+from maljan.tools.errors import error_parts
 
 # The indicator kinds post-verdict enrichment asks about: the report holds a
 # reputation slot for each (``network.domains``, ``network.ips``).
@@ -185,7 +186,8 @@ class RestRequest(BaseModel):
 class RecordField(BaseModel):
     """One field of the stored reputation record, read from the answer.
 
-    ``read``: ``count`` is a whole number, 0 when the answer gave none;
+    ``read``: ``count`` is a whole number, written only when the answer gave
+    one (an absent or unreadable count is not 0: nothing was counted);
     ``value`` the value as written, ``None`` when absent; ``whole`` a whole
     number written only when the answer gave one; ``texts`` the texts of an
     object's values or a list's items (the first ``limit``), written only
@@ -433,9 +435,14 @@ class ReadySource:
 # ---------------------------------------------------------------------------
 
 
-def _count(value: Any) -> int:
-    if isinstance(value, bool):
-        return int(value)
+def _count(value: Any) -> int | None:
+    """``value`` as a whole-number count, or ``None`` when it is no count.
+
+    An absent or unreadable count stays absent: reading it as 0 would record
+    "no engine flagged it" for an answer that counted nothing.
+    """
+    if isinstance(value, bool) or value is None:
+        return None
     if isinstance(value, int):
         return value
     if isinstance(value, float):
@@ -444,8 +451,8 @@ def _count(value: Any) -> int:
         try:
             return int(value.strip())
         except ValueError:
-            return 0
-    return 0
+            return None
+    return None
 
 
 def _document(output: Any) -> Any:
@@ -461,17 +468,28 @@ def _document(output: Any) -> Any:
 
 
 def read_record(key: str, source: EnrichmentSource, answer: Any) -> dict[str, Any] | None:
-    """The record ``source``'s answer gives, or ``None`` when its root holds no object."""
+    """The record ``source``'s answer gives, or ``None`` when it gives none.
+
+    ``None`` when its root holds no object, or when no declared field found a
+    value in it (an answer saying the service has nothing, or a shape the
+    declaration does not read): a record of the source's name alone would
+    mark the indicator as looked up, and stop the next source being asked,
+    for an answer that said nothing.
+    """
     document = _document(answer)
     root = first(document, source.answer_root) if source.answer_root else document
     if not isinstance(root, Mapping):
         return None
     record: dict[str, Any] = {"source": source.record_source or key}
+    gave = False
     for spec in source.record:
         found = select(root, spec.path)
         value = found[0] if found else None
+        gave = gave or value is not None
         if spec.read == "count":
-            record[spec.name] = _count(value)
+            counted = _count(value)
+            if counted is not None:
+                record[spec.name] = counted
         elif spec.read == "value":
             record[spec.name] = value
         elif spec.read == "whole":
@@ -480,7 +498,7 @@ def read_record(key: str, source: EnrichmentSource, answer: Any) -> dict[str, An
         elif isinstance(value, Mapping | list):
             items = list(value.values()) if isinstance(value, Mapping) else list(value)
             record[spec.name] = [str(v) for v in items[: spec.limit]]
-    return record
+    return record if gave else None
 
 
 def annotate_age(record: dict[str, Any], source: EnrichmentSource) -> None:
@@ -495,11 +513,26 @@ def annotate_age(record: dict[str, Any], source: EnrichmentSource) -> None:
             record["stale"] = True
 
 
+def declared_verdict(record: dict[str, Any] | None, source: EnrichmentSource) -> bool | None:
+    """The source's own verdict on a fresh record, or ``None`` where it gives none.
+
+    ``True`` when a threshold whose field holds a count is reached (the
+    thresholds are alternatives, so one is enough). ``False`` only when every
+    threshold's field holds a count and none is reached. ``None`` (unknown, never
+    ``False``) in every other case: the source declares no threshold, the record
+    is stale, or a threshold's field holds no count and no other threshold is reached.
+    """
+    if not isinstance(record, dict) or record.get("stale") or not source.malicious_when:
+        return None
+    counts = [(_count(record.get(t.field)), t.at_least) for t in source.malicious_when]
+    if any(counted is not None and counted >= at_least for counted, at_least in counts):
+        return True
+    return False if all(counted is not None for counted, _ in counts) else None
+
+
 def is_malicious(record: dict[str, Any] | None, source: EnrichmentSource) -> bool:
     """Whether a fresh record reaches any of the source's ``malicious_when`` thresholds."""
-    if not isinstance(record, dict) or record.get("stale"):
-        return False
-    return any(_count(record.get(t.field)) >= t.at_least for t in source.malicious_when)
+    return declared_verdict(record, source) is True
 
 
 # ---------------------------------------------------------------------------
@@ -523,16 +556,69 @@ def safe_value(kind: str, value: str) -> bool:
 
 
 ToolCaller = Callable[[str, str, dict[str, Any]], Awaitable[Any]]
+# Told of each question about to be sent: ``(source, host, kind, server)``,
+# the host for a REST source and the server's key for a server source. It may
+# answer an awaitable, awaited before the question goes out, and may answer
+# (or resolve to) a settle function, called with whether the question was
+# answered once it was or failed (``settle_asked``).
+AskListener = Callable[[str, str, str, str], Any]
+Settle = Callable[..., None]
+
+
+async def tell_listener(
+    listener: AskListener | None, source: str, host: str, kind: str, server: str
+) -> Settle | None:
+    """Tell ``listener`` of a question about to go out; its settle function, or ``None``.
+
+    Never raises: a listener that fails never costs a lookup.
+    """
+    if listener is None:
+        return None
+    try:
+        said = listener(source, host, kind, server)
+        if asyncio.iscoroutine(said) or isinstance(said, asyncio.Future):
+            said = await said
+        return said if callable(said) else None
+    except asyncio.CancelledError:
+        raise
+    except Exception as exc:  # noqa: BLE001 — a listener never costs a lookup
+        logger.debug("enrich: the ask listener failed (%s).", type(exc).__name__)
+        return None
+
+
+def settle_asked(settle: Settle | None, answered: bool, *, errored: bool = False) -> None:
+    """Tell a question's settle function how it ended. Never raises.
+
+    ``errored`` is a reply with an error status (refused, rate-limited, a
+    fault): the question arrived, though it was not answered.
+    """
+    if settle is None:
+        return
+    try:
+        if errored and not answered:
+            settle(answered, True)
+        else:
+            settle(answered)
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("enrich: the ask listener failed to settle (%s).", type(exc).__name__)
 
 
 @dataclass
 class SourceAsker:
-    """Asks the ready sources, one HTTP client and one pace per source for a whole enrichment."""
+    """Asks the ready sources, one HTTP client and one pace per source for a whole enrichment.
+
+    ``on_ask`` is told of each question just before it is sent, for the run's
+    disclosure block (``analysis.disclosure.with_enrichment_asked``).
+    """
 
     http: httpx.AsyncClient
     tool_caller: ToolCaller | None = None
     tool_arguments: Callable[[str, str], Mapping[str, str]] | None = None
+    on_ask: AskListener | None = None
     _paces: dict[str, asyncio.Semaphore] = field(default_factory=dict)
+
+    async def _told(self, source: str, host: str, kind: str, server: str) -> Settle | None:
+        return await tell_listener(self.on_ask, source, host, kind, server)
 
     async def ask(self, ready: ReadySource, kind: str, value: str) -> dict[str, Any] | None:
         """``ready``'s record for ``value``, or ``None`` on any failure (never raises)."""
@@ -548,6 +634,15 @@ class SourceAsker:
             return None
         if answer is None:
             return None
+        failure = error_parts(answer)
+        if failure is not None:
+            # A tool's structured failure (not configured, rate-limited, a
+            # refused argument) is no answer about the indicator, and its
+            # JSON must not be read as a record of one.
+            logger.warning(
+                "enrich: source %s answered a failure (%s); not recorded.", ready.key, failure[0]
+            )
+            return None
         return read_record(ready.key, ready.source, answer)
 
     async def _ask_server(self, ready: ReadySource, kind: str, value: str) -> Any:
@@ -560,7 +655,19 @@ class SourceAsker:
         if not argument:
             logger.warning("enrich: source %s names no argument for a kind; not asked.", ready.key)
             return None
-        return await self.tool_caller(source.server, source.tool, {argument: value})
+        # A tool its host withholds is never asked, so it is never told as a
+        # question either: the caller records it as withheld, with its reason.
+        withheld = getattr(self.tool_caller, "withheld_reason", None)
+        if withheld is not None and await withheld(source.server, source.tool):
+            return None
+        settle = await self._told(ready.key, "", kind, source.server)
+        answer = None
+        try:
+            answer = await self.tool_caller(source.server, source.tool, {argument: value})
+        finally:
+            # Answered only when the tool gave an answer that is not a failure.
+            settle_asked(settle, answer is not None and error_parts(answer) is None)
+        return answer
 
     async def _ask_rest(self, ready: ReadySource, kind: str, value: str) -> Any:
         source = ready.source
@@ -571,9 +678,16 @@ class SourceAsker:
             return None
         pace = self._paces.setdefault(ready.key, asyncio.Semaphore(1))
         async with pace:
+            settle = await self._told(ready.key, request.host, kind, "")
             try:
                 resp = await self.http.request(**built, timeout=source.timeout_seconds)
+                # An error status (refused, rate-limited, a fault) is no answer
+                # about the indicator, but it proves the indicator arrived; a 404
+                # is an answer: the source has no record of it.
+                answered = resp.status_code < 400 or resp.status_code == 404
+                settle_asked(settle, answered, errored=not answered)
             except httpx.HTTPError as exc:
+                settle_asked(settle, False)
                 logger.warning(
                     "enrich: source %s request failed (%s).", ready.key, type(exc).__name__
                 )

@@ -50,6 +50,9 @@ _RETRY_AFTER_SECONDS: float = 900.0
 # settings store. The knowledge server is the process where the build actually
 # happens, so it is the one the operator's value has to arrive at.
 INDEX_RETRY_ENV = "MALJAN_INDEX_RETRY_SECONDS"
+# The run's sample sha256, which the platform gives a server that asks for it so
+# that a case lookup leaves out the sample's own earlier case.
+SAMPLE_SHA256_ENV = "MALJAN_SAMPLE_SHA256"
 
 
 def set_index_retry_after(seconds: float) -> None:
@@ -182,7 +185,8 @@ def catalogue_available() -> bool:
 def technique_alignment(text: str, technique_id: str, k: int = 5) -> dict[str, Any] | None:
     """The index's gate score for ``technique_id`` against ``text``, and its candidates.
 
-    ``None`` when the index is not built in this process: this never builds
+    ``None`` when the index is not built in this process, or cannot score the
+    claimed id: this never builds
     it, because the caller is an analyst's validation turn and a build there
     would cost every run on a cold worker seconds it did not budget. The
     ranking is the same ``resolve_technique`` gives; the one addition is the
@@ -201,9 +205,11 @@ def technique_alignment(text: str, technique_id: str, k: int = 5) -> dict[str, A
     ]
     try:
         gate_score = round(float(index.validate_and_score(tid, text)), 4)
-    except Exception as exc:  # noqa: BLE001 — an id the index cannot score scores nothing
+    except Exception as exc:  # noqa: BLE001 — a gate that cannot score has no answer
+        # A score of 0.0 would read as "aligns with nothing" and challenge the
+        # claim; a failure is no score at all.
         logger.debug("knowledge: no gate score for %s (%s).", tid, exc)
-        gate_score = 0.0
+        return None
     return {"technique_id": tid, "gate_score": gate_score, "candidates": candidates}
 
 
@@ -579,13 +585,19 @@ def family_lookup(
 
 
 def similar_cases(
-    query: str, k: int = 5, corpus: str = DEFAULT_CASE_CORPUS, min_score: float = 0.0
+    query: str,
+    k: int = 5,
+    corpus: str = DEFAULT_CASE_CORPUS,
+    min_score: float = 0.0,
+    exclude_sample_id: str = "",
 ) -> dict[str, Any]:
     """Prior cases whose behavioural summary is closest to the query text.
 
     Returns both the neighbours and the techniques they agree on: ``support``
     is how many of the retrieved cases exhibited the technique, which is the
     number that says whether a candidate is a pattern or one case's quirk.
+    ``exclude_sample_id`` is the sample's own hash: its own earlier case is not
+    a prior one.
     """
     from maljan.memory.attck_case_index import load_attck_case_index
 
@@ -602,9 +614,16 @@ def similar_cases(
         return {"cases": [], "techniques": [], "reason": f"no ATT&CK case corpus at {path}"}
     top_k = max(0, int(k))
     try:
-        neighbours = index.search(query, top_k=top_k, min_score=float(min_score))
+        own = (exclude_sample_id or "").strip()
+        neighbours = index.search(
+            query, top_k=top_k, min_score=float(min_score), exclude_sample_id=own
+        )
         techniques = index.recommend_techniques(
-            query, top_k=top_k, min_score=float(min_score), max_techniques=top_k
+            query,
+            top_k=top_k,
+            min_score=float(min_score),
+            max_techniques=top_k,
+            exclude_sample_id=own,
         )
     except Exception as exc:  # noqa: BLE001 — the embedding backend is optional
         return {
@@ -642,6 +661,7 @@ def function_matches(
     func_hashes: list[str],
     store: FunctionHashIndex | None,
     exclude_sample_id: str = "",
+    owner: str | None = None,
 ) -> dict[str, Any]:
     """Stored samples that share a function hash with this one.
 
@@ -650,7 +670,8 @@ def function_matches(
     is the configured memory backend's function-hash store
     (``maljan.memory.store_factory.build_function_hash_store``); ``None`` is a
     backend that keeps none, and the answer says so instead of raising, as it
-    does for a store that cannot be reached.
+    does for a store that cannot be reached. Only ``owner``'s samples are
+    matched, the unscoped ones for ``None`` (``long_term_memory.recall``).
     """
     wanted = [str(h).strip() for h in (func_hashes or []) if str(h).strip()]
     if not wanted:
@@ -658,7 +679,11 @@ def function_matches(
     if store is None:
         return {"matches": [], "reason": NO_FUNCTION_HASH_STORE}
     try:
-        found = store.match(wanted, exclude_sample_id=exclude_sample_id)
+        from maljan.memory.long_term_memory import match_functions
+
+        found = match_functions(
+            store, wanted, exclude_sample_id=exclude_sample_id or None, owner=owner
+        )
     except Exception as exc:  # noqa: BLE001
         return {"matches": [], "reason": f"the function-hash store is unavailable: {exc}"}
     return {

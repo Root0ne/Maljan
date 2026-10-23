@@ -89,6 +89,10 @@ export interface Technique {
    *  did. A producer named it and the report keeps the claim; the card says
    *  the claim was not published rather than drawing it as a capability. */
   notPublished: string;
+  /** A note on a published row, in words, and empty when there is none: the
+   *  analyst claims naming it read as absence and the analyst kept the
+   *  technique when asked. It changes nothing about the row's publication. */
+  note: string;
   /** The backend's own corroboration decision (`is_corroborated`), or `null`
    *  on a row stored before it was recorded, which is then counted here. */
   corroborated: boolean | null;
@@ -193,6 +197,7 @@ export function parseTechniques(raw: unknown[]): Tactic[] {
     // Only a capability cell carries this; a published mapping and a /mitre
     // row never do, which reads as published, which they are.
     const notPublished = String(t.not_published ?? "");
+    const note = typeof t.note === "string" ? t.note : "";
     // The layers the backend credits with a statement of their own. Layers that
     // wrote the same words count once there, and they count once here.
     const independent = Array.isArray(t.independent_layers)
@@ -234,6 +239,7 @@ export function parseTechniques(raw: unknown[]): Tactic[] {
         : existing.sources.filter((source) => !isJudge(source));
       existing.valid = existing.valid && valid;
       existing.notPublished = existing.notPublished || notPublished;
+      existing.note = existing.note || note;
       existing.corroborated =
         existing.corroborated === null ? corroborated : existing.corroborated && corroborated !== false;
       existing.support = existing.support || support;
@@ -251,6 +257,7 @@ export function parseTechniques(raw: unknown[]): Tactic[] {
         corroborating: independent ?? sources.filter((source) => !isJudge(source)),
         valid,
         notPublished,
+        note,
         corroborated,
         support,
         sourceCount,

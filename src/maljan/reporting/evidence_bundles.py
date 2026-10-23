@@ -26,7 +26,7 @@ from urllib.parse import urlsplit
 from maljan.analysis.sandbox_sections import ItemIndex
 from maljan.reporting import tool_kinds
 from maljan.reporting.dedupe import distinct_processes
-from maljan.reporting.models import MalwareReport
+from maljan.reporting.models import MalwareReport, is_open_question_section
 from maljan.schemas.sandbox_report import SAMPLE_TREE_KEY, section_id
 
 # Section keys the Composer authors. Kept as plain strings (not an enum) so the
@@ -243,6 +243,11 @@ def _word_starts(text: str) -> Iterator[int]:
 # ``rehearsal``, ``c2`` in ``0xc2c4``) and matches only where a word begins or
 # ends.
 _STEM_LENGTH = 6
+# A keyword shorter than this names nothing at a word's end: ``c2`` ends
+# ``toc2`` and ``epic2`` by chance, while ``rc4`` in ``ARC4`` and ``key`` in
+# ``pubkey`` carry enough letters to be a compound's last part. A shorter
+# keyword still matches where a word begins and as a whole word.
+_END_LENGTH = 3
 
 # A run of letters and digits (no underscore): the unit a word end is read in.
 _RUN = re.compile(r"[^\W_]+")
@@ -295,8 +300,10 @@ def mentions(text: str, keywords: tuple[str, ...]) -> bool:
     ``KeyBlob``), or where a word ends, a plural, verb, agent or API suffix
     allowed after it (``rc4`` in ``ARC4``, ``key`` in ``pubkey``, ``http`` in
     ``winhttp``, ``task`` in ``schtasks``, ``hash`` in ``apihashing``,
-    ``mutex`` in ``createmutexw``); never inside a word (``rsa`` in
-    ``rehearsal``, ``aes`` in ``caesar``), never in an ordinary word that
+    ``mutex`` in ``createmutexw``); a keyword of one or two characters
+    matches only where a word begins (``c2`` in ``C2Server``, not in
+    ``toc2``); never inside a word (``rsa`` in ``rehearsal``, ``aes`` in
+    ``caesar``), never in an ordinary word that
     ends with it by chance (``key`` in ``monkey``), and never starting or
     ending inside a number written in hex (``c2`` in ``0xC2C4``). A longer
     one matches anywhere, as it always did. Case is ignored. Linear in the
@@ -314,7 +321,7 @@ def mentions(text: str, keywords: tuple[str, ...]) -> bool:
     if not short:
         return False
     # A keyword written with a space or a dash spans runs: read where a word starts.
-    words = tuple(k for k in short if k.isalnum())
+    words = tuple(k for k in short if k.isalnum() and len(k) >= _END_LENGTH)
     for found in _RUN.finditer(text):
         run = found.group(0)
         if _HEX_RUN.fullmatch(run):
@@ -400,6 +407,18 @@ def _filter_tool_outputs(
     return picked
 
 
+# The section facts whose values are the platform's own citations (an entry
+# id and its tool), which the composer shows readable. Every other fact is the
+# sample's or a tool's text, and every ledger id in it is written out
+# (``composer._fact_line``), as the pack writes the sample's text.
+PLATFORM_CITED_FACTS: frozenset[str] = frozenset(
+    {"sandbox_entries", "string_entries", "crypto_finding_entries"}
+)
+# The fact mapping each of the sample's values to the entries holding it
+# (:func:`value_entries`): its values are the sample's, its ids the platform's.
+VALUE_HOLDERS_FACT = "entries_holding"
+
+
 def binary_facts(report: MalwareReport) -> dict[str, Any]:
     """What the binary demonstrably *is*, straight from the parsers.
 
@@ -423,9 +442,13 @@ def binary_facts(report: MalwareReport) -> dict[str, Any]:
     identity = report.identity
     static = report.static
     dlls: list[str] = []
+    partial: list[str] = []
     if static is not None:
         seen: set[str] = set()
-        for row in static.imports:
+        # The delay-load table is the binary's imports as surely as the
+        # import table is: a list without it is not the complete list.
+        partial = list(static.imports_partial)
+        for row in [*static.imports, *static.delay_imports]:
             name = (row.dll or "").lower()
             if name and name not in seen:
                 seen.add(name)
@@ -450,16 +473,26 @@ def binary_facts(report: MalwareReport) -> dict[str, Any]:
         # it as unproven: it kept a static-analyst claim that the binary loads
         # `mscoree.dll` while the list plainly did not contain it, and
         # reconciled the two into "a VC++ binary that is also a .NET wrapper".
-        # The list is shown whole, so it is always complete: no count cuts a
-        # fact the section is grounded in, and the composer accounts for the
-        # window it takes (``ReportComposer._room_chars``).
-        facts[f"imported_dlls (complete list, {len(ordered)} total)"] = ordered
+        # The list is shown whole: no count cuts a fact the section is
+        # grounded in, and the composer accounts for the window it takes
+        # (``ReportComposer._room_chars``). It is complete when an answer read
+        # the import tables whole (``StaticAnalysis.imports_partial``); a list
+        # read only from shortened, truncated or damaged answers says so and
+        # why, and an absence from it refutes nothing.
+        if partial:
+            facts[f"imported_dlls (partial list, {len(ordered)} read; {'; '.join(partial)})"] = (
+                ordered
+            )
+        else:
+            facts[f"imported_dlls (complete list, {len(ordered)} total)"] = ordered
         # Stated as its own fact rather than left to be inferred from the list.
         # Deliberately named for what is actually measured: a binary that does
         # not import the CLR shim is not thereby proven managed-code-free, but
         # "does not import mscoree.dll" is exactly true and is what refutes the
-        # specific claim that it calls `_CorExeMain` from it.
-        facts["imports_dotnet_runtime (mscoree.dll)"] = "mscoree.dll" in dlls
+        # specific claim that it calls `_CorExeMain` from it. Its absence from a
+        # partial list is not known, so it is then stated only when present.
+        if not partial or "mscoree.dll" in dlls:
+            facts["imports_dotnet_runtime (mscoree.dll)"] = "mscoree.dll" in dlls
     return facts
 
 
@@ -544,6 +577,12 @@ def bundle_for(
                     if row.id in sandbox_ids
                 ],
                 "exports": list(report.static.exports) if report.static else [],
+                # An Android package's manifest permissions, never its exports.
+                **(
+                    {"declared_permissions": list(report.static.permissions)}
+                    if report.static and report.static.permissions
+                    else {}
+                ),
             },
         }
     if section == "mitigations":
@@ -571,10 +610,10 @@ def bundle_for(
             "binary": base,
             "facts": {
                 "domains": [d.fqdn for d in (net.domains if net else [])],
-                "ips": [f"{i.address}:{i.port}" for i in (net.ips if net else [])],
+                "ips": [_endpoint(i) for i in (net.ips if net else [])],
                 "urls": [u.url for u in (net.urls if net else [])],
                 "user_agents": (net.user_agents if net else []),
-                "entries_holding": _network_holders(report),
+                VALUE_HOLDERS_FACT: _network_holders(report),
             },
         }
 
@@ -664,6 +703,9 @@ def sandbox_entry_ids(report: MalwareReport) -> list[str]:
     }
     holding: set[str] = set()
     for section in report.sections:
+        # A question an analyst left open is not behaviour any entry held.
+        if is_open_question_section(section):
+            continue
         cited = set(rows).intersection(section.evidence_ids)
         if not cited or not section_holds_something(section):
             continue
@@ -897,6 +939,9 @@ def _value_holders(report: MalwareReport, wanted: frozenset[str]) -> dict[str, l
             if row is not None and str(getattr(row, "tool", "")) == tool:
                 add(str(output.get("output") or ""), (entry_id,))
     for section in report.sections:
+        # A question an analyst left open holds no value its entry answered.
+        if is_open_question_section(section):
+            continue
         if len(section.evidence_ids) == 1:
             for row in section.rows:
                 for cell in row:
@@ -925,10 +970,10 @@ def _lookups(value: str) -> tuple[str, ...]:
 # once: keyed by the report object (held weakly) and the values asked for.
 # A report model is not hashable, so it is keyed by its identity, and its
 # entry leaves when the report is collected.
-_HOLDERS_READ: dict[int, tuple[weakref.ref[Any], dict[tuple[str, ...], list[str]]]] = {}
+_HOLDERS_READ: dict[int, tuple[weakref.ref[Any], dict[tuple[str, ...], dict[str, list[str]]]]] = {}
 
 
-def _holders_read(report: MalwareReport) -> dict[tuple[str, ...], list[str]]:
+def _holders_read(report: MalwareReport) -> dict[tuple[str, ...], dict[str, list[str]]]:
     """What was read of ``report`` so far, by value list."""
     key = id(report)
     held = _HOLDERS_READ.get(key)
@@ -979,8 +1024,8 @@ def _read_fingerprint(report: MalwareReport) -> int:
     return hash(tuple(parts))
 
 
-def value_entries(report: MalwareReport, values: Iterable[str]) -> list[str]:
-    """``<value>: ev_0006, ev_0030`` for each of ``values`` an answered entry holds, in order.
+def value_entries(report: MalwareReport, values: Iterable[str]) -> dict[str, list[str]]:
+    """``{<value>: [ev_0006, ev_0030]}`` for each of ``values`` an answered entry holds, in order.
 
     A value no entry is known to hold is left out rather than given an entry
     that may not hold it. An ``address:port`` value is looked up by its
@@ -989,35 +1034,35 @@ def value_entries(report: MalwareReport, values: Iterable[str]) -> list[str]:
     """
     asked = tuple(v for v in dict.fromkeys(values) if v)
     if not asked:
-        return []
+        return {}
     cached = _holders_read(report)
     # What was read changes the key: a report whose entries, outcomes,
     # captured outputs or sections changed since, in place or not, is read
     # again (``_read_fingerprint``).
     key = (*asked, f"\0{_read_fingerprint(report)}")
     if key in cached:
-        return list(cached[key])
+        return {value: list(ids) for value, ids in cached[key].items()}
     held = _value_holders(report, frozenset(f for v in asked for f in _lookups(v)))
-    out: list[str] = []
+    out: dict[str, list[str]] = {}
     for value in asked:
         ids = next((held[form] for form in _lookups(value) if held.get(form)), None)
         if ids:
-            out.append(f"{value}: {', '.join(ids)}")
+            out[value] = list(ids)
     cached[key] = out
-    return list(out)
+    return {value: list(ids) for value, ids in out.items()}
 
 
-def _network_holders(report: MalwareReport) -> list[str]:
+def _network_holders(report: MalwareReport) -> dict[str, list[str]]:
     """The entries holding each url, domain and ip of the report's network block."""
     net = report.network
     if net is None:
-        return []
+        return {}
     return value_entries(
         report,
         [
             *(u.url for u in net.urls),
             *(d.fqdn for d in net.domains),
-            *(f"{i.address}:{i.port}" for i in net.ips),
+            *(_endpoint(i) for i in net.ips),
         ],
     )
 
@@ -1062,6 +1107,20 @@ _SANDBOX_CALLED_CATEGORIES: dict[str, tuple[str, ...]] = {
 }
 
 
+def _profile_counts(static: Any, **categories: str) -> dict[str, int]:
+    """``{fact: count}`` of the capability profile's categories, when the profile was measured.
+
+    A count of 0 is a finding only where something counted: with no profile
+    (no catalogue answer read the import table) each fact is left out, as an
+    absent key reads "not measured", rather than stated as 0.
+    """
+    caps = (getattr(static, "api_capabilities", None) or {}) if static is not None else {}
+    measured = bool(caps) or bool(getattr(static, "api_capabilities_evidence_ids", None))
+    if not measured:
+        return {}
+    return {fact: int(caps.get(category, 0)) for fact, category in categories.items()}
+
+
 def _technical_facts(section: str, report: MalwareReport) -> dict[str, Any]:
     """Deterministic measurements for one technical-spine section.
 
@@ -1074,12 +1133,14 @@ def _technical_facts(section: str, report: MalwareReport) -> dict[str, Any]:
     if section == "persistence_detail":
         # The tools' mechanisms and the analysts' listed rows, as two facts:
         # a run whose static block is empty still has both to state.
-        profile = (report.static.api_capabilities or {}) if report.static else {}
         return {
             "persistence_mechanisms": [p.kind for p in report.persistence],
             "persistence_assessed": _assessed_persistence(report),
-            "persistence_api_count": profile.get("persistence", 0),
-            "registry_api_count": profile.get("registry", 0),
+            **_profile_counts(
+                report.static,
+                persistence_api_count="persistence",
+                registry_api_count="registry",
+            ),
         }
     if section == "configuration":
         net = report.network
@@ -1088,7 +1149,7 @@ def _technical_facts(section: str, report: MalwareReport) -> dict[str, Any]:
             "domains": [d.fqdn for d in (net.domains if net else [])],
             "user_agents": (net.user_agents if net else []),
             "string_entries": _string_entries(report),
-            "entries_holding": _network_holders(report),
+            VALUE_HOLDERS_FACT: _network_holders(report),
         }
     if section == "host_identifiers":
         static = report.static
@@ -1166,17 +1227,18 @@ def _technical_facts(section: str, report: MalwareReport) -> dict[str, Any]:
     # aggregated. The per-import lists that sat beside them were that table
     # read back one import at a time, and they are gone.
     if section == "encryption_scheme":
-        return {"crypto_api_count": caps.get("crypto", 0), **observed[section]}
+        return {**_profile_counts(static, crypto_api_count="crypto"), **observed[section]}
     if section == "discovery":
         return {
-            "discovery_api_count": caps.get("discovery", 0),
+            **_profile_counts(static, discovery_api_count="discovery"),
             "discovery_techniques": [t for t in techniques if t in _DISCOVERY_TECHNIQUES],
             **observed[section],
         }
     if section == "evasion_antiforensics":
         return {
-            "anti_debug_api_count": caps.get("anti_debug", 0),
-            "evasion_api_count": caps.get("evasion", 0),
+            **_profile_counts(
+                static, anti_debug_api_count="anti_debug", evasion_api_count="evasion"
+            ),
             "evasion_techniques": [t for t in techniques if t in _EVASION_TECHNIQUES],
             **observed[section],
         }
@@ -1238,6 +1300,23 @@ _EVASION_TECHNIQUES = frozenset(
 )
 
 
+def _endpoint(ip: Any) -> str:
+    """An address with its port, or the bare address when the run recorded no port."""
+    port = getattr(ip, "port", None)
+    return f"{ip.address}:{port}" if port is not None else str(ip.address)
+
+
+def _carved_line(res: dict[str, Any]) -> str:
+    """A carved payload as the tool stated it: a size only when the tool gave one."""
+    size = res.get("size")
+    sized = (
+        f", {size} bytes" if isinstance(size, int | float) and not isinstance(size, bool) else ""
+    )
+    return (
+        f"{res.get('id')} ({res.get('type') or '?'}{sized}, sha256 {str(res.get('sha256') or '')})"
+    )
+
+
 def _packer_line(match: dict[str, Any]) -> str:
     """A packer match as the tool stated it: a confidence only when it gave one."""
     confidence = match.get("confidence")
@@ -1249,8 +1328,7 @@ def _packer_line(match: dict[str, Any]) -> str:
 def _payload_facts(report: MalwareReport) -> dict[str, Any]:
     """The carved payloads and the dropped files, as the tools stated them."""
     carved = [
-        f"{res.get('id')} ({res.get('type') or '?'}, {res.get('size', 0)} bytes, "
-        f"sha256 {str(res.get('sha256') or '')})"
+        _carved_line(res)
         for res in (report.static.embedded_resources if report.static else [])
         if res.get("carved")
     ]

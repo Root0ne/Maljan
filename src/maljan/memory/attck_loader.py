@@ -6,15 +6,21 @@ extracts:
   - ``attack-pattern`` objects -> techniques / sub-techniques, and
   - ``x-mitre-tactic`` objects -> the tactic catalogue, in matrix column order.
 
-The raw STIX bundle is cached locally. The cache AUTO-REFRESHES once it is older
-than ``MALJAN_ATTCK_MAX_AGE_DAYS`` days (default 30), so new ATT&CK releases
-(e.g. the v19 "Defense Evasion" -> "Stealth" + "Defense Impairment" split) flow
-through with no code changes. If a refresh download fails, the existing (stale)
-cache is reused rather than breaking the analysis run.
+The raw STIX bundle is cached locally. An EMPTY cache is filled from the
+version-less bundles at one pinned release commit (``_PINNED_COMMIT``). Once a
+cache exists this module never replaces it with that pinned bundle, however old
+the cache is or whether a refresh is forced: new ATT&CK releases (e.g. the v19
+"Defense Evasion" -> "Stealth" + "Defense Impairment" split) arrive through
+``attck_update``, which reads MITRE's release index and the versioned files
+(its schedule is ``validation.attck_refresh_days``, default 7, reaching this
+module and the knowledge tool server as ``MALJAN_ATTCK_REFRESH_DAYS``). A bundle
+at another URL is still refreshed here when older than that setting, and a
+failed download reuses the existing (stale) cache rather than breaking the
+analysis run. A refreshed bundle is written beside the old one and moved over
+it in one rename (``attck_update``), so a reader never sees half a file.
 
 Cache location: ~/.cache/maljan/attck/ (or MALJAN_ATTCK_CACHE env var).
-Force a refresh: ``python -m maljan.memory.attck_loader`` (or load with
-force_refresh=True).
+Update the cache: ``python -m maljan.memory.attck_loader`` (runs ``attck_update``).
 
 MITRE ATT&CK data is CC BY 4.0 licensed.
 Source: https://github.com/mitre-attack/attack-stix-data
@@ -30,11 +36,23 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from maljan.analysis.technique_ids import TECHNIQUE_ID_EXACT_RE
 from maljan.core.logger import logger
 
-# Official, maintained MITRE ATT&CK STIX 2.1 source. The version-less
-# ``<domain>-attack.json`` always points at the latest release.
+# Official, maintained MITRE ATT&CK STIX 2.1 source. This base is the moving
+# one: ``attck_update`` reads the release index and the immutable, versioned
+# ``<domain>-attack-<version>.json`` files through it, so it must follow the
+# upstream branch to see a new release.
 _BUNDLE_BASE_URL = "https://raw.githubusercontent.com/mitre-attack/attack-stix-data/master"
+
+# The version-less ``<domain>-attack.json`` that ``load_attck_data`` fetches
+# when no cache exists is read at one commit, so the first catalogue of an
+# install is the release the vendored data was built from, not whatever the
+# branch holds that day. A newer release arrives through ``attck_update``.
+_PINNED_COMMIT = "20664a889568dce884a1dac0ec7b12ae3a199f51"  # attack-stix-data v20.0
+_PINNED_BASE_URL = (
+    f"https://raw.githubusercontent.com/mitre-attack/attack-stix-data/{_PINNED_COMMIT}"
+)
 
 # The three ATT&CK domains, in the order a technique id is looked up in them.
 # Enterprise is the one this project cannot run without; Mobile and ICS are
@@ -43,7 +61,7 @@ _BUNDLE_BASE_URL = "https://raw.githubusercontent.com/mitre-attack/attack-stix-d
 DOMAINS: tuple[str, ...] = ("enterprise", "mobile", "ics")
 
 ATTCK_BUNDLE_URLS: dict[str, str] = {
-    domain: f"{_BUNDLE_BASE_URL}/{domain}-attack/{domain}-attack.json" for domain in DOMAINS
+    domain: f"{_PINNED_BASE_URL}/{domain}-attack/{domain}-attack.json" for domain in DOMAINS
 }
 ATTCK_BUNDLE_URL = ATTCK_BUNDLE_URLS["enterprise"]
 
@@ -54,6 +72,11 @@ ATTCK_CACHE_FILES: dict[str, Path] = {
     domain: ATTCK_CACHE_DIR / f"{domain}-attack.json" for domain in DOMAINS
 }
 ATTCK_CACHE_FILE = ATTCK_CACHE_FILES["enterprise"]
+
+# How many times its own domain's cached bundle one download may be
+# (``_size_bound``). A release grows a catalogue by a few per cent; four times
+# is room for any real one and still stops a response that does not end.
+DOWNLOAD_SIZE_FACTOR = 4
 
 # The vendored technique universe, shipped so validation works with no network.
 # New shape: one sorted id list per domain. The former flat list (and the
@@ -90,21 +113,45 @@ def mitre_platforms(sample_platform: str | None) -> tuple[str, ...]:
     return MITRE_PLATFORM_MAP.get((sample_platform or "").strip().lower(), ())
 
 
-# Regexes for ATT&CK IDs
-TECHNIQUE_ID_RE = re.compile(r"^T\d{4}(?:\.\d{3})?$")
-TACTIC_ID_RE = re.compile(r"^TA\d{4}$")
+# Regexes for ATT&CK IDs: the whole string, so an id with a newline after it is no id.
+TECHNIQUE_ID_RE = TECHNIQUE_ID_EXACT_RE
+TACTIC_ID_RE = re.compile(r"\ATA\d{4}\Z")
+
+
+# A week: an ATT&CK release reaches the cache within seven days of its
+# publication instead of up to a month later.
+DEFAULT_MAX_AGE_DAYS = 7
+
+# How ``validation.attck_refresh_days`` reaches this module. The service
+# container writes it from the settings store, and the knowledge tool server —
+# a process with an environment and no settings store — has it on its
+# ``env_allow``. It is a transport, not an operator's knob: the variable an
+# operator used to set, ``MALJAN_ATTCK_MAX_AGE_DAYS``, is retired
+# (``settings_annotations.RETIRED_ENVIRONMENT``).
+ATTCK_REFRESH_DAYS_ENV = "MALJAN_ATTCK_REFRESH_DAYS"
 
 
 def _default_max_age_days() -> int:
-    """Cache auto-refresh threshold in days (env MALJAN_ATTCK_MAX_AGE_DAYS).
+    """Cache auto-refresh threshold in days, as the container announced it.
 
     0 (or negative) disables the age check: the cache is then used until it is
-    missing or a force_refresh is requested.
+    missing or a force_refresh is requested. A process no container announced
+    the setting to (a script, the refresh CLI) uses the shipped default; an
+    unreadable value is said and the default used.
     """
+    raw = os.environ.get(ATTCK_REFRESH_DAYS_ENV, "").strip()
+    if not raw:
+        return DEFAULT_MAX_AGE_DAYS
     try:
-        return int(os.environ.get("MALJAN_ATTCK_MAX_AGE_DAYS", "30"))
+        return int(raw)
     except ValueError:
-        return 30
+        logger.warning(
+            "%s=%r is not a whole number of days; the ATT&CK cache is checked every %d days.",
+            ATTCK_REFRESH_DAYS_ENV,
+            raw,
+            DEFAULT_MAX_AGE_DAYS,
+        )
+        return DEFAULT_MAX_AGE_DAYS
 
 
 @dataclass
@@ -165,8 +212,8 @@ def load_attck_data(
     """Load techniques + tactics + version from the ATT&CK bundle.
 
     Uses the local cache when it is fresh; auto-refreshes when it is older than
-    ``max_age_days`` (defaults to MALJAN_ATTCK_MAX_AGE_DAYS / 30). On a failed
-    refresh, falls back to the stale cache instead of raising.
+    ``max_age_days`` (defaults to ``validation.attck_refresh_days``, 7). On a
+    failed refresh, falls back to the stale cache instead of raising.
     """
     raw = _load_raw_bundle(url, cache_file, force_refresh, max_age_days)
     techniques = _parse_bundle(raw)
@@ -179,23 +226,6 @@ def load_attck_data(
         len(tactics),
     )
     return ATTCKData(techniques=techniques, tactics=tactics, version=version)
-
-
-def load_attck_bundle(
-    url: str = ATTCK_BUNDLE_URL,
-    cache_file: Path = ATTCK_CACHE_FILE,
-    force_refresh: bool = False,
-    max_age_days: int | None = None,
-) -> list[ATTCKTechnique]:
-    """Back-compat wrapper returning only the technique list.
-
-    Returns:
-        List of parsed ATTCKTechnique objects.
-
-    Raises:
-        RuntimeError: If the bundle cannot be fetched and no cache exists.
-    """
-    return load_attck_data(url, cache_file, force_refresh, max_age_days).techniques
 
 
 def _read_cache(cache_file: Path) -> dict:
@@ -213,6 +243,18 @@ def _load_raw_bundle(
     """Return the raw STIX bundle dict, honouring cache freshness + fallback."""
     max_age = _default_max_age_days() if max_age_days is None else max_age_days
 
+    if cache_file.exists() and url in ATTCK_BUNDLE_URLS.values():
+        # The pinned bundle is the first download of an install, never a
+        # refresh: it would put the release the vendored data was built from
+        # over a newer cached one. A stale or forced refresh is the index-based
+        # update, ``attck_update``.
+        logger.info(
+            "ATT&CK cache %s is kept: the pinned download is only for an empty cache; "
+            "attck_update is the update path.",
+            cache_file,
+        )
+        return _read_cache(cache_file)
+
     cache_fresh = False
     if cache_file.exists() and not force_refresh:
         if max_age <= 0:
@@ -220,7 +262,17 @@ def _load_raw_bundle(
         else:
             age_days = (time.time() - cache_file.stat().st_mtime) / 86400.0
             cache_fresh = age_days <= max_age
-            if not cache_fresh:
+            if not cache_fresh and _refused_within(cache_file, max_age):
+                # A refresh refused within the interval is not asked again
+                # before the interval has passed since it.
+                logger.info(
+                    "ATT&CK cache is %.1f days old; a refresh was refused within the last "
+                    "%d days, so the cache is used until that interval has passed.",
+                    age_days,
+                    max_age,
+                )
+                cache_fresh = True
+            elif not cache_fresh:
                 logger.info("ATT&CK cache is %.1f days old (> %d) — refreshing.", age_days, max_age)
 
     if cache_fresh:
@@ -237,13 +289,139 @@ def _load_raw_bundle(
             logger.warning("ATT&CK refresh failed (%s); using stale cache: %s", exc, cache_file)
             return _read_cache(cache_file)
         raise
+    from maljan.memory import attck_update
+
+    # A forced refresh is the operator's own decision to replace the cache: it
+    # is still refused when it is no bundle, but it is not held to the cached
+    # one, and a refusal does not hold back the next automatic refresh.
+    compared = None if force_refresh or not cache_file.exists() else _read_cache(cache_file)
+    refused = attck_update.refresh_refusal(raw, compared)
+    if refused is not None:
+        if not force_refresh:
+            _note_refusal(cache_file, refused)
+        # Not written: a good cache is never replaced by a download that is
+        # no bundle, nor its age reset by one. The stale copy stays in use,
+        # as it does when the download fails outright.
+        if cache_file.exists():
+            logger.warning(
+                "ATT&CK refresh refused (the download %s); using stale cache: %s",
+                refused,
+                cache_file,
+            )
+            return _read_cache(cache_file)
+        raise RuntimeError(f"The ATT&CK bundle from {url} is refused: the download {refused}")
     _save_cache(raw, cache_file)
     return raw
 
 
-def _fetch_bundle(url: str) -> dict:
-    """Download the STIX bundle from the given URL (HTTP/HTTPS only)."""
-    import urllib.request  # stdlib — no requests dependency needed for one-off download
+def refusal_path(bundle: Path) -> Path:
+    """Where the last refused refresh of a cached bundle is recorded, beside it."""
+    return bundle.with_name(f"{bundle.stem}.refused.json")
+
+
+def _note_refusal(bundle: Path, reason: str) -> None:
+    """Record that a refresh of ``bundle`` was refused, and why. Never raises."""
+    try:
+        refusal_path(bundle).write_text(
+            json.dumps({"refused_at": time.time(), "reason": reason}), encoding="utf-8"
+        )
+    except OSError as exc:
+        logger.warning("Could not record the refused ATT&CK refresh: %s", exc)
+
+
+def _refused_within(bundle: Path, max_age_days: int) -> bool:
+    """Whether a refresh of ``bundle`` was refused less than ``max_age_days`` ago."""
+    try:
+        record = json.loads(refusal_path(bundle).read_text(encoding="utf-8"))
+        at = float(record["refused_at"])
+    except (OSError, ValueError, KeyError, TypeError):
+        return False
+    return (time.time() - at) / 86400.0 < max_age_days
+
+
+def meta_path(bundle: Path) -> Path:
+    """Where the facts read out of a cached bundle are kept, beside it (``attck_update``)."""
+    return bundle.with_name(f"{bundle.stem}.meta.json")
+
+
+def _known_good_size(bundle: Path) -> int | None:
+    """The bundle's size when its kept facts say it was read whole; else ``None``.
+
+    A truncated or hand-edited file has no matching facts, so its size never
+    bounds the download that is meant to replace it.
+    """
+    try:
+        stat = bundle.stat()
+        meta = json.loads(meta_path(bundle).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    if (
+        isinstance(meta, dict)
+        and meta.get("inode") == stat.st_ino
+        and meta.get("size") == stat.st_size
+        and int(meta.get("techniques") or 0) > 0
+    ):
+        return stat.st_size
+    return None
+
+
+def _domain_of_url(url: str) -> str | None:
+    for domain in DOMAINS:
+        if f"/{domain}-attack/" in url:
+            return domain
+    return None
+
+
+def _size_bound(url: str) -> int | None:
+    """How many bytes a download of ``url`` may be: a multiple of its own domain's bundle.
+
+    ``DOWNLOAD_SIZE_FACTOR`` times the size of the same domain's cached bundle,
+    when that bundle is known to have been read whole. Another domain's size
+    is never used: a missing Enterprise bundle must not be held to a bound
+    made from the far smaller Mobile one. ``None`` otherwise (the release
+    index, a domain not cached or not known good): the response's declared
+    length then bounds it, and with none it is unbounded, which is logged.
+    """
+    domain = _domain_of_url(url)
+    if domain is None or domain not in ATTCK_CACHE_FILES:
+        return None
+    size = _known_good_size(Path(ATTCK_CACHE_FILES[domain]))
+    return DOWNLOAD_SIZE_FACTOR * size if size else None
+
+
+def _guarded_opener() -> Any:
+    """An opener that follows a redirect only to HTTPS on the same host."""
+    import urllib.error
+    import urllib.request
+    from urllib.parse import urlparse
+
+    class _SameHostRedirects(urllib.request.HTTPRedirectHandler):
+        def redirect_request(  # type: ignore[override]
+            self, req: Any, fp: Any, code: int, msg: str, headers: Any, newurl: str
+        ) -> Any:
+            old, new = urlparse(req.full_url), urlparse(newurl)
+            if new.scheme.lower() != "https" or new.hostname != old.hostname:
+                raise urllib.error.HTTPError(
+                    newurl, code, f"redirect to {new.scheme}://{new.hostname} refused", headers, fp
+                )
+            return super().redirect_request(req, fp, code, msg, headers, newurl)
+
+    return urllib.request.build_opener(_SameHostRedirects)
+
+
+def _stream(
+    url: str,
+    out: Any,
+    *,
+    timeout: float,
+    deadline: float | None,
+    max_bytes: int | None,
+) -> None:
+    """Copy ``url``'s body into ``out``, within a total deadline and a size bound.
+
+    ``timeout`` bounds each read; ``deadline`` (a ``time.monotonic`` instant)
+    bounds the whole transfer, so a trickling response cannot last for ever.
+    """
     from urllib.parse import urlparse
 
     # Defense-in-depth for CWE-939: ``url`` is a module constant or an explicit
@@ -253,23 +431,108 @@ def _fetch_bundle(url: str) -> dict:
     scheme = urlparse(url).scheme.lower()
     if scheme not in ("http", "https"):
         raise RuntimeError(f"Refusing non-HTTP(S) ATT&CK bundle URL: {url!r}")
+    # nosemgrep: dynamic-urllib-use-detected — scheme validated; trusted constant URL
+    with _guarded_opener().open(url, timeout=timeout) as resp:
+        declared = resp.headers.get("Content-Length") if getattr(resp, "headers", None) else None
+        bound = max_bytes
+        if bound is None and declared and str(declared).isdigit():
+            bound = int(declared)
+        if bound is None:
+            logger.warning(
+                "ATT&CK download from %s has no size bound: nothing to derive one from "
+                "and no declared length.",
+                url,
+            )
+        read = 0
+        while True:
+            if deadline is not None and time.monotonic() > deadline:
+                raise RuntimeError("the download did not finish in the time it was given")
+            chunk = resp.read(1 << 20)
+            if not chunk:
+                break
+            read += len(chunk)
+            if bound is not None and read > bound:
+                logger.warning(
+                    "ATT&CK download from %s passed its size bound of %d bytes; stopped.",
+                    url,
+                    bound,
+                )
+                raise RuntimeError(f"the download passed its size bound of {bound} bytes")
+            out.write(chunk)
+
+
+def _fetch_bundle(
+    url: str,
+    timeout: float = 60,
+    *,
+    deadline: float | None = None,
+    max_bytes: int | None = None,
+) -> dict:
+    """Download a JSON document from the given URL (HTTP/HTTPS only).
+
+    The STIX bundles, and the release index ``attck_update`` reads versions
+    from: both are platform constants on the same host. A redirect is
+    followed only to HTTPS on the same host, and the body is bounded by
+    ``max_bytes`` or, when none is given, by ``_size_bound(url)``.
+    """
+    import io
 
     try:
-        # nosemgrep: dynamic-urllib-use-detected — scheme validated; trusted constant URL
-        with urllib.request.urlopen(url, timeout=60) as resp:  # noqa: S310
-            data = resp.read().decode("utf-8")
-        raw: dict[str, Any] = json.loads(data)
+        buffer = io.BytesIO()
+        _stream(
+            url,
+            buffer,
+            timeout=timeout,
+            deadline=deadline,
+            max_bytes=max_bytes if max_bytes is not None else _size_bound(url),
+        )
+        raw: dict[str, Any] = json.loads(buffer.getvalue().decode("utf-8"))
         return raw
     except Exception as exc:
         raise RuntimeError(f"Failed to fetch ATT&CK bundle from {url}: {exc}") from exc
 
 
-def _save_cache(bundle: dict, cache_file: Path) -> None:
-    """Persist the raw bundle JSON to the local cache file."""
+def _download_bundle_file(
+    url: str,
+    target: Path,
+    timeout: float = 300,
+    *,
+    deadline: float | None = None,
+    max_bytes: int | None = None,
+) -> None:
+    """Stream a bundle from ``url`` into ``target`` (HTTP/HTTPS only).
+
+    The console's update writes the download to a file of its own and checks
+    it there, so a bundle of tens of megabytes is never held twice in memory
+    and never reaches the cache path before it has been read back whole. The
+    same redirect rule, size bound and total deadline as ``_fetch_bundle``.
+    """
     try:
-        cache_file.parent.mkdir(parents=True, exist_ok=True)
-        cache_file.write_text(json.dumps(bundle), encoding="utf-8")
-        logger.info("ATT&CK bundle cached at: %s", cache_file)
+        with target.open("wb") as out:
+            _stream(
+                url,
+                out,
+                timeout=timeout,
+                deadline=deadline,
+                max_bytes=max_bytes if max_bytes is not None else _size_bound(url),
+            )
+    except Exception as exc:
+        raise RuntimeError(f"Failed to fetch ATT&CK bundle from {url}: {exc}") from exc
+
+
+def _save_cache(bundle: dict, cache_file: Path) -> None:
+    """Persist the raw bundle JSON to the local cache file, in one rename.
+
+    Written beside the cache file and moved over it, under the cache's update
+    lock, so an analysis reading the bundle at that moment reads the old file
+    or the new one and never a half-written one. While the console's update
+    holds the lock this refresh is not written: that update is writing the
+    same files.
+    """
+    from maljan.memory import attck_update
+
+    try:
+        attck_update.save_refreshed_bundle(bundle, cache_file)
     except OSError as e:
         logger.warning("Could not write ATT&CK cache: %s", e)
 
@@ -767,10 +1030,14 @@ def _main() -> None:
 
     Run as: ``python -m maljan.memory.attck_loader``
     """
-    loaded = load_all_domains(force_refresh=True)
+    from maljan.memory import attck_update
+
+    outcome = attck_update.update(trigger="cli")
+    print(f"ATT&CK update: {outcome.get('outcome')} {outcome.get('reason') or ''}".rstrip())
+    loaded = load_all_domains()
     for domain, data in loaded.items():
         print(
-            f"ATT&CK {domain} refreshed: version={data.version or 'unknown'}, "
+            f"ATT&CK {domain}: version={data.version or 'unknown'}, "
             f"{len(data.techniques)} techniques, {len(data.tactics)} tactics"
         )
     missing = [d for d in DOMAINS if d not in loaded]

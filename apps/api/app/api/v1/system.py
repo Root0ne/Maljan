@@ -7,11 +7,13 @@ can purge low-signal LTM entries that pre-date the write-time quality gate).
 
 from __future__ import annotations
 
+import asyncio
+import uuid
 from typing import TYPE_CHECKING, Any
 
 import redis.asyncio as aioredis
-from fastapi import APIRouter, Depends, HTTPException, status
-from maljan.core.settings_overrides import redact_url
+from fastapi import APIRouter, Depends, HTTPException, Request, status
+from maljan.core.settings_masking import masked_text
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -19,10 +21,11 @@ from app import observability
 from app.auth.throttle import throttle_state
 from app.config import settings
 from app.database import end_read_transaction, get_db
-from app.deps import optional_current_user, require_admin
+from app.deps import optional_current_user, require_admin, require_admin_session
 from app.logging_config import get_logger
 from app.models.user import User
 from app.runtime_config import runtime_config
+from app.services import audit
 
 if TYPE_CHECKING:
     from maljan.memory.long_term_memory import MemoryStore
@@ -292,17 +295,27 @@ async def _build_memory_store(db: AsyncSession) -> MemoryStore:
     reads and writes the UI-configured store, and purging another one would be
     destructive and silent.
     """
+    from maljan.core.plugins import ALLOW_LIST_PATH
     from maljan.core.settings_overrides import build_settings
     from maljan.memory.store_factory import build_memory_store
 
+    from app.services.plugins import load_in_background
+    from app.services.settings_probes import TIMEOUT
     from app.services.settings_service import load_core_overrides
 
-    return build_memory_store(build_settings(await load_core_overrides(db)))
+    overrides = await load_core_overrides(db)
+    # The selected backend, when it is an allowed plugin, is the code a purge
+    # runs: that plugin alone, loaded off the event loop, waited for at most a
+    # connection test's budget.
+    selected = str(overrides.get("memory.backend") or "").strip().lower()
+    await load_in_background(overrides.get(ALLOW_LIST_PATH), [f"memory:{selected}"], TIMEOUT)
+    return build_memory_store(build_settings(overrides))
 
 
 @router.post("/ltm/purge", response_model=LTMPurgeResponse)
 async def ltm_purge(
     body: LTMPurgeRequest,
+    request: Request,
     admin: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ) -> LTMPurgeResponse:
@@ -314,12 +327,13 @@ async def ltm_purge(
     try:
         store = await _build_memory_store(db)
     except Exception as exc:
-        logger.warning("ltm_purge: failed to build memory store: %s", exc)
+        # The store's own error names the URL it was built with, and that URL
+        # may carry an API key or a password: masked in the log and the answer.
+        said = masked_text(f"{type(exc).__name__}: {exc}")
+        logger.warning("ltm_purge: failed to build memory store: %s", said)
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            # The store's own error names the URL it was built with, and that
-            # URL may carry an API key or a password.
-            detail=redact_url(f"memory store unavailable: {exc}"),
+            detail=masked_text(f"memory store unavailable: {exc}"),
         ) from exc
 
     # The settings that name the store have been read; the purge itself may
@@ -329,10 +343,58 @@ async def ltm_purge(
     # store that is unavailable.
     await end_read_transaction(db)
 
+    details: dict[str, Any] = {
+        "backend": type(store).__name__,
+        "max_total_techniques": body.max_total_techniques,
+        "require_uncorroborated": body.require_uncorroborated,
+        "include_analyst_errors": body.include_analyst_errors,
+    }
+    before = None if body.dry_run else await _count_of(store)
     try:
-        return _purge(store, body, admin)
+        # The store's client is synchronous and a purge walks the whole store:
+        # on the loop it stopped every other request, WebSocket frame and the
+        # worker's heartbeat for as long as the walk took.
+        answer = await asyncio.to_thread(_purge, store, body, admin)
+    except BaseException as exc:
+        # A purge that fails partway has still deleted some cases: the row
+        # says so, with what the store lost (its count before and after) and
+        # the class of the error, never its text.
+        if not body.dry_run:
+            after = await _count_of(store)
+            await audit.record(
+                "ltm.purge",
+                resource_type="memory",
+                user_id=admin.id,
+                details={
+                    **details,
+                    "outcome": "failed",
+                    "error": type(exc).__name__,
+                    "removed": before - after if before is not None and after is not None else None,
+                },
+                request=request,
+            )
+        raise
     finally:
-        store.close()
+        await asyncio.to_thread(store.close)
+    # A purge deletes the operator's accumulated cases, so it leaves a row
+    # (a dry run deletes nothing and leaves none).
+    if not answer.dry_run:
+        await audit.record(
+            "ltm.purge",
+            resource_type="memory",
+            user_id=admin.id,
+            details={**details, "outcome": "completed", "removed": answer.removed},
+            request=request,
+        )
+    return answer
+
+
+async def _count_of(store: MemoryStore) -> int | None:
+    """How many cases the store holds, or ``None`` when it cannot say."""
+    try:
+        return int(await asyncio.to_thread(store.count))
+    except Exception:  # noqa: BLE001 - a count for the audit row is best effort
+        return None
 
 
 def _purge(store: MemoryStore, body: LTMPurgeRequest, admin: User) -> LTMPurgeResponse:
@@ -360,3 +422,107 @@ def _purge(store: MemoryStore, body: LTMPurgeRequest, admin: User) -> LTMPurgeRe
         removed,
     )
     return LTMPurgeResponse(removed=removed, backend=backend_name, dry_run=False)
+
+
+class LTMAdoptRequest(BaseModel):
+    user_id: uuid.UUID = Field(
+        description="The existing user who takes the memory written before owners existed."
+    )
+
+
+class LTMAdoptResponse(BaseModel):
+    owner: str
+    backend: str
+    cases: int
+    function_hashes: int
+    dropped_cases: int
+    dropped_function_hashes: int
+    skipped_cases: int
+    skipped_function_hashes: int
+
+
+@router.post("/ltm/adopt", response_model=LTMAdoptResponse)
+async def ltm_adopt(
+    body: LTMAdoptRequest,
+    request: Request,
+    admin: User = Depends(require_admin_session),
+    db: AsyncSession = Depends(get_db),
+) -> LTMAdoptResponse:
+    """Adopt the ownerless long-term memory under one existing user.
+
+    Memory written before owners existed is never adopted automatically (an
+    owned job does not read it). This is the explicit action: every ownerless
+    case and function hash is filed under the named user. Idempotent (a second
+    call finds nothing ownerless and says 0), a bearer-session admin only, and
+    audited with the actor, the target owner and the counts. Where the owner
+    holds the same case, the copy with the later ``created_at`` is kept; a
+    sample's function hashes are kept from one side only. Best run while no
+    jobs are running: a job storing for the owner meanwhile is not locked out.
+    A failure part way is audited with ``outcome=failed`` and the counts so far.
+    """
+    target = await db.get(User, body.user_id)
+    if target is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No such user.")
+    try:
+        store = await _build_memory_store(db)
+    except Exception as exc:
+        said = masked_text(f"{type(exc).__name__}: {exc}")
+        logger.warning("ltm_adopt: failed to build memory store: %s", said)
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=masked_text(f"memory store unavailable: {exc}"),
+        ) from exc
+    await end_read_transaction(db)
+    backend = type(store).__name__
+    owner = str(target.id)
+
+    def _details(counts: dict[str, int], outcome: str, **more: Any) -> dict[str, Any]:
+        return {
+            "actor": str(admin.id),
+            "owner": owner,
+            "backend": backend,
+            "outcome": outcome,
+            **counts,
+            "count": counts.get("cases", 0) + counts.get("function_hashes", 0),
+            **more,
+        }
+
+    adopt = getattr(store, "adopt_unowned", None)
+    if not callable(adopt):
+        await asyncio.to_thread(store.close)
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"The {backend} memory backend keeps no owners, so it cannot adopt.",
+        )
+    try:
+        counts = await asyncio.to_thread(adopt, owner)
+    except Exception as exc:
+        partial = getattr(exc, "counts", None) or {}
+        cause = exc.__cause__ if partial and exc.__cause__ is not None else exc
+        await audit.record(
+            "ltm.adopt",
+            resource_type="memory",
+            user_id=admin.id,
+            details=_details(partial, "failed", error=type(cause).__name__),
+            request=request,
+        )
+        raise cause from None
+    finally:
+        await asyncio.to_thread(store.close)
+    await audit.record(
+        "ltm.adopt",
+        resource_type="memory",
+        user_id=admin.id,
+        details=_details(counts, "completed"),
+        request=request,
+    )
+    return LTMAdoptResponse(
+        owner=owner,
+        backend=backend,
+        cases=counts["cases"],
+        function_hashes=counts["function_hashes"],
+        dropped_cases=counts["dropped_cases"],
+        dropped_function_hashes=counts["dropped_function_hashes"],
+        skipped_cases=counts["skipped_cases"],
+        skipped_function_hashes=counts["skipped_function_hashes"],
+    )

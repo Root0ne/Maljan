@@ -110,6 +110,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
+from maljan.core.context_reset import reset_in_own_context
 from maljan.core.logger import logger
 
 MILLION = 1_000_000
@@ -158,7 +159,15 @@ STAGE_CALL_KINDS: dict[str, tuple[str, ...]] = {
 
 # What the token ledger names a verdict or report call, and the planned kind
 # each one is.
-TAIL_CALLS = {"verdict": "verdict", "report section": "report", "narrative": "report"}
+TAIL_CALLS = {
+    "verdict": "verdict",
+    "report section": "report",
+    "narrative": "report",
+    # The report's question round (``reporting.question_round.QUESTION_CALL``).
+    "questions": "report",
+    # A follow-up question asked of a finished run (``reporting.follow_up.FOLLOW_UP_CALL``).
+    "follow-up": "report",
+}
 
 # Set on a stated estimate whose prompt is to be priced at the share of the
 # model's input this job measured read from the provider's cache.
@@ -184,6 +193,24 @@ class SpendCeilingStop(Exception):
     """A model call the operator's spend ceiling does not admit, in the words the run records."""
 
 
+class AgentCeilingStop(SpendCeilingStop):
+    """A model call one agent's own ceiling does not admit (``llm.agents.<key>.max_spend_usd``).
+
+    A :class:`SpendCeilingStop`, so every caller takes the salvage path it takes
+    for the job's ceiling; the job's spend is not exhausted by it, and no other
+    agent's call is refused.
+    """
+
+    def __init__(self, said: str, agent: str) -> None:
+        super().__init__(said)
+        self.agent = agent
+
+
+# What the call feed names the record of an agent stopped at its own ceiling
+# (``token_ledger.TokenLedger.on_call``): not a call, and no count moves.
+AGENT_CEILING_RECORD = "agent ceiling"
+
+
 # Set while a validation loop sends its correction turn: the call admitted
 # then is a retry of the call before it, counted apart from first calls.
 _RETRYING: ContextVar[bool] = ContextVar("maljan_spend_retrying", default=False)
@@ -203,6 +230,58 @@ def validation_retry() -> Iterator[None]:
         _RETRYING.reset(token)
 
 
+class Admission:
+    """What one admitted call was admitted as, for the fallback attempts made in its place.
+
+    The kind of call, the prompt it was measured over and the slot its worst
+    case is reserved under. A model list that moves to its next model asks the
+    meter again under the same slot, at that model's own price and output cap
+    (``llm.fallback``). Copying one gives the same object: it names a
+    reservation of the meter and is never a value of its own.
+    """
+
+    __slots__ = ("kind", "meter", "prompt_chars", "slot")
+
+    def __init__(self, meter: SpendMeter, kind: str, prompt_chars: int, slot: Any) -> None:
+        self.meter = meter
+        self.kind = kind
+        self.prompt_chars = prompt_chars
+        self.slot = slot
+
+    def __copy__(self) -> Admission:
+        return self
+
+    def __deepcopy__(self, memo: Any) -> Admission:
+        return self
+
+    def held(self) -> bool:
+        """Whether its reservation is still held, so a later call may use its slot."""
+        return self.meter.holds(self.slot)
+
+
+# The admission of the call being made, per task and thread: set by the admission
+# itself, carried across the hop to the agent loop with the stream rule
+# (``agents.base_agent._submit_to_agent_loop``), and ignored once its slot is
+# released, so a call nobody admitted never borrows an earlier one's.
+_ADMISSION: ContextVar[Admission | None] = ContextVar("maljan_spend_admission", default=None)
+
+
+def current_admission() -> Admission | None:
+    """The admission of the call this task is making, while its reservation is held."""
+    found = _ADMISSION.get()
+    return found if found is not None and found.held() else None
+
+
+@contextlib.contextmanager
+def carrying(admission: Admission | None) -> Iterator[None]:
+    """Make ``admission`` the one of the calls made inside the block."""
+    token = _ADMISSION.set(admission)
+    try:
+        yield
+    finally:
+        reset_in_own_context(_ADMISSION, token)
+
+
 def _meter_of(ledger: Any) -> SpendMeter | None:
     meter = getattr(ledger, "spend", None)
     return meter if isinstance(meter, SpendMeter) else None
@@ -212,6 +291,18 @@ def spend_ceiling_set(ledger: Any) -> bool:
     """Whether the job ``ledger`` records has a spend ceiling. Never raises."""
     meter = _meter_of(ledger)
     return meter is not None and meter.ceiling_usd is not None
+
+
+def usd_said(amount: float) -> str:
+    """A US-dollar amount as written to a reader: to six places, trailing zeros dropped."""
+    text = f"{float(amount):.6f}".rstrip("0").rstrip(".")
+    return text or "0"
+
+
+def agent_ceiling_set(ledger: Any, agent: str) -> bool:
+    """Whether ``agent`` (its ``llm.agents`` key) sets a ceiling of its own. Never raises."""
+    meter = _meter_of(ledger)
+    return meter is not None and meter.agent_ceiling(agent) is not None
 
 
 def call_deadline_of(llm: Any, messages: Any = None) -> float | None:
@@ -465,13 +556,43 @@ class Price:
     def highest_over(self, start: datetime, seconds: float) -> Price:
         """The highest prices in force at any instant from ``start`` for ``seconds``."""
         until = start + timedelta(seconds=max(0.0, float(seconds)))
-        best = self.at(start)
+        found: list[Price] = [self.at(start)]
         for window in self.windows:
             for edge in window.edges(start, until):
-                found = self.at(edge)
-                if (found.output, found.input) > (best.output, best.input):
-                    best = found
-        return best
+                found.append(self.at(edge))
+        distinct = list({id(price): price for price in found}.values())
+        if len(distinct) == 1:
+            return distinct[0]
+        return Price._dearest_of(distinct)
+
+    @staticmethod
+    def _dearest_of(rows: list[Price]) -> Price:
+        """One price holding, for each component, the highest of ``rows``' figures.
+
+        A window dearer only on input must not hide behind one dearer on
+        output: the worst case of a call is each component at its own worst.
+        Tiers are merged the same way at every threshold any row names.
+        """
+        thresholds = sorted({over for row in rows for over, _ in row.tiers})
+        tiers = (
+            tuple(
+                (over, Price._dearest_of([row.for_prompt(over + 1) for row in rows]))
+                for over in thresholds
+            )
+            if thresholds
+            else ()
+        )
+        base = [row.for_prompt(0) if tiers else row for row in rows]
+        return Price(
+            max(row.input for row in base),
+            max(row.output for row in base),
+            max(row.cached for row in base),
+            rows[0].source,
+            (),
+            cache_write=max(row.written for row in base),
+            cache_write_1h=max(row.written_1h for row in base),
+            tiers=tiers,
+        )
 
     @property
     def cached(self) -> float:
@@ -590,12 +711,31 @@ def _tier_from(row: Any, parent_source: str) -> tuple[int, Price] | None:
 
 
 _table: dict[str, Price] | None = None
+# Why the last read of the vendored table failed, or ``None``; read by the
+# unpriced statement so a model it could not price is not blamed alone.
+table_failure: str | None = None
 _table_lock = threading.Lock()
+# The table file's stat (existence, mtime, size) at the last failed read; an
+# unchanged stat is not read again. ``None``: no failure is held.
+_failed_stat: tuple[bool, int, int] | None = None
+
+
+def _stat_of(path: Path) -> tuple[bool, int, int]:
+    try:
+        info = path.stat()
+    except OSError:
+        return (False, 0, 0)
+    return (True, info.st_mtime_ns, info.st_size)
 
 
 def table_prices() -> dict[str, Price]:
-    """The vendored model table's ``prices`` rows, read once; keyed by lower-cased model name."""
-    global _table
+    """The vendored model table's ``prices`` rows, read once; keyed by lower-cased model name.
+
+    A failed read is not kept as the table: it is read again once the file's
+    stat differs from the one recorded at the failure, and warned about only
+    when its text changes.
+    """
+    global _table, table_failure, _failed_stat
     from maljan.core.paths import resolve_data
     from maljan.llm.context_window import TABLE_PATH
 
@@ -603,8 +743,12 @@ def table_prices() -> dict[str, Price]:
         if _table is not None:
             return _table
         rows: dict[str, Price] = {}
+        path: Path | None = None
         try:
-            raw = json.loads(Path(resolve_data(TABLE_PATH)).read_text(encoding="utf-8"))
+            path = Path(resolve_data(TABLE_PATH))
+            if _failed_stat is not None and _stat_of(path) == _failed_stat:
+                return rows
+            raw = json.loads(path.read_text(encoding="utf-8"))
             for key, row in (raw.get("prices") or {}).items():
                 if str(key).startswith("_"):
                     continue
@@ -612,9 +756,49 @@ def table_prices() -> dict[str, Price]:
                 if price is not None and price.source:
                     rows[str(key).lower()] = price
         except Exception as exc:  # noqa: BLE001 — a fallback table never fails a run
-            logger.debug("the vendored price table could not be read: %s", exc)
+            said = f"{type(exc).__name__}: {exc}"
+            _failed_stat = _stat_of(path) if path is not None else None
+            if said != table_failure:
+                logger.warning(
+                    "the vendored price table could not be read (%s); models are priced from "
+                    "the operator's llm.model_prices only until it can be",
+                    exc,
+                )
+            table_failure = said
+            return {}
         _table = rows
+        table_failure = None
+        _failed_stat = None
         return _table
+
+
+def _uncapped_output(name: str) -> tuple[int, str]:
+    """``(tokens, where from)``: the most a call sent with no output cap may answer.
+
+    :func:`_uncapped_is_declared` says which of the two it is.
+
+    The model's declared maximum output where its provider or the vendored
+    table states one, else the documented fallback reply the derived caps use
+    for a hosted API that declares none (``context_window.DEFAULT_REPLY_TOKENS``).
+    Only a priced call is asked about, and a priced model is a hosted one.
+    """
+    from maljan.llm.context_window import DEFAULT_REPLY_TOKENS
+    from maljan.llm.model_output_limits import declared_output
+
+    tokens, where = declared_output(name)
+    if tokens > 0:
+        return tokens, f"the model's declared maximum output, from {where}"
+    return DEFAULT_REPLY_TOKENS, (
+        f"the documented fallback reply of {DEFAULT_REPLY_TOKENS:,} tokens, the model "
+        "declaring no maximum output"
+    )
+
+
+def _uncapped_is_declared(name: str) -> bool:
+    """Whether :func:`_uncapped_output` for ``name`` is the model's own declared maximum."""
+    from maljan.llm.model_output_limits import declared_output
+
+    return declared_output(name)[0] > 0
 
 
 def _clean(model: str) -> str:
@@ -662,6 +846,7 @@ class _Decision:
         "available",
         "bound",
         "cap",
+        "fallback_cap",
         "input_cost",
         "minimum",
         "minimum_said",
@@ -684,6 +869,9 @@ class _Decision:
         self.minimum = 0
         self.minimum_said = ""
         self.cap = 0
+        # Set when a call sent with no cap of its own is given one only because
+        # the most it may answer is the fallback figure, not a model's limit.
+        self.fallback_cap = 0
 
 
 class SpendMeter:
@@ -725,6 +913,9 @@ class SpendMeter:
         # A running loop's turns so far, and the worst case of each call in flight.
         self._in_flight: dict[Any, float] = {}
         self._reserved: dict[Any, float] = {}
+        # Every slot an admitted call holds now, priced or not: a model with
+        # no price reserves nothing, and its call is still in flight.
+        self._active: set[Any] = set()
         self._unpriced: dict[str, int] = {}
         self._priced_from: dict[str, set[str]] = {}
         self._reached_at: float | None = None
@@ -780,15 +971,177 @@ class SpendMeter:
         self._calls_made: dict[str, list[int]] = {}
         # Set when the job is cancelled (:meth:`close`): no call waits any more.
         self._closed = False
+        # Each agent's own ceilings, by its ``llm.agents`` key: (USD, tokens of
+        # unpriced calls), either ``None``. Only the agents that set one.
+        self._agent_ceilings: dict[str, tuple[float | None, int | None]] = {}
+        # What each of those agents' calls cost and used so far: [priced USD,
+        # tokens of calls with no price, calls counted at a stated estimate],
+        # and the sentence of each one stopped.
+        self._agent_spent: dict[str, list[float]] = {}
+        self._agent_stops: dict[str, str] = {}
 
     @classmethod
     def from_settings(cls, cfg: Any) -> SpendMeter:
         llm = getattr(cfg, "llm", None)
-        return cls(
+        meter = cls(
             getattr(llm, "max_spend_usd_per_job", None),
             getattr(llm, "model_prices", None) or {},
             hour_writes=hour_cache_models(cfg),
         )
+        for key, entry in (getattr(llm, "agents", None) or {}).items():
+            meter.set_agent_ceiling(
+                str(key),
+                getattr(entry, "max_spend_usd", None),
+                getattr(entry, "max_unpriced_tokens", None),
+            )
+        return meter
+
+    # ── One agent's own ceiling ───────────────────────────────────────────
+
+    def set_agent_ceiling(
+        self, agent: str, usd: float | None = None, unpriced_tokens: int | None = None
+    ) -> None:
+        """Give ``agent`` (its ``llm.agents`` key) a ceiling of its own; both ``None`` is none."""
+        key = str(agent).lower()
+        with self._lock:
+            if usd is None and unpriced_tokens is None:
+                self._agent_ceilings.pop(key, None)
+                return
+            self._agent_ceilings[key] = (
+                None if usd is None else float(usd),
+                None if unpriced_tokens is None else int(unpriced_tokens),
+            )
+
+    def agent_ceiling(self, agent: str) -> tuple[float | None, int | None] | None:
+        """``agent``'s own ceilings (USD, unpriced tokens), or ``None`` when it sets none."""
+        with self._lock:
+            return self._agent_ceilings.get(str(agent).lower())
+
+    def note_agent_call(
+        self,
+        agent: str,
+        usage: Mapping[str, Any] | None,
+        model: str,
+        *,
+        estimated: Mapping[str, Any] | None = None,
+    ) -> None:
+        """One call of ``agent`` its provider billed, toward its own ceiling. Never raises.
+
+        Priced the way :meth:`settle` prices a call (the provider's reported
+        cost, else the model's rates in force when it was sent); a call whose
+        model has no price counts its input and output tokens instead.
+        ``estimated`` is the stated estimate a call that reported no usage
+        carried (an answer ended while it streamed, a failed attempt the
+        provider bills): its tokens are counted, the prompt as uncached input,
+        and the call is counted as one that reported no usage. With neither,
+        nothing is counted, as nothing is toward the job's ceiling.
+        """
+        key = str(agent).lower()
+        if self.agent_ceiling(key) is None:
+            return
+        try:
+            figures: dict[str, Any] | None = dict(usage) if usage is not None else None
+            by_estimate = False
+            if estimated:
+                guessed = {
+                    "input_tokens": int(estimated.get("input_tokens") or 0),
+                    "output_tokens": int(estimated.get("output_tokens") or 0),
+                }
+                if figures is None:
+                    figures, by_estimate = guessed, True
+                elif estimated.get(OUTPUT_ESTIMATED):
+                    figures["output_tokens"] = guessed["output_tokens"]
+                    by_estimate = True
+            if figures is None:
+                return
+            charged = self._charged(figures, model)
+            tokens = int(figures.get("input_tokens") or 0) + int(figures.get("output_tokens") or 0)
+            with self._lock:
+                spent = self._agent_spent.setdefault(key, [0.0, 0.0, 0.0])
+                if charged is None:
+                    spent[1] += tokens
+                else:
+                    spent[0] += charged[0]
+                if by_estimate:
+                    spent[2] += 1
+        except Exception as exc:  # noqa: BLE001 — telemetry never costs a run
+            logger.debug("agent spend not noted (%s).", exc)
+
+    def agent_refusal(self, agent: str) -> tuple[str, bool]:
+        """Why ``agent`` makes no further model call, and whether this is the first time said.
+
+        ``("", False)`` while it is under its own ceilings. Once its priced
+        calls have cost its ``max_spend_usd`` or its unpriced calls used its
+        ``max_unpriced_tokens``, every further call of it is refused, the job's
+        spend and every other agent untouched. Checked before each call, so the
+        call that crosses a ceiling is the agent's last and its answer is kept.
+        """
+        key = str(agent).lower()
+        with self._lock:
+            limits = self._agent_ceilings.get(key)
+            if limits is None:
+                return "", False
+            said = self._agent_stops.get(key)
+            if said is not None:
+                return said, False
+            usd, tokens = limits
+            spent_usd, spent_tokens, guessed = self._agent_spent.get(key, [0.0, 0.0, 0.0])
+            if usd is not None and spent_usd >= usd:
+                said = (
+                    f"agent {key} reached its spend ceiling of {usd_said(usd)} USD "
+                    f"(llm.agents.{key}.max_spend_usd) at {usd_said(spent_usd)} USD spent"
+                )
+            elif tokens is not None and spent_tokens >= tokens:
+                said = (
+                    f"agent {key} reached its unpriced-token ceiling of {tokens:,} tokens "
+                    f"(llm.agents.{key}.max_unpriced_tokens) at {int(spent_tokens):,} tokens "
+                    "used by calls of a model with no price"
+                )
+            else:
+                return "", False
+            if guessed:
+                said += (
+                    f"; {int(guessed)} call(s) reported no usage and are counted at a stated "
+                    "estimate"
+                )
+            self._agent_stops[key] = said
+        logger.warning("%s; it makes no further model call.", said)
+        return said, True
+
+    def agents_stopped(self) -> frozenset[str]:
+        """The ``llm.agents`` keys of the agents stopped at their own ceiling."""
+        with self._lock:
+            return frozenset(self._agent_stops)
+
+    def agent_reasons(self) -> list[str]:
+        """One degradation reason per agent stopped at its own ceiling, in key order."""
+        with self._lock:
+            stops = dict(self._agent_stops)
+        return [
+            f"The {stops[key]}: it made no further model call, what it had produced was kept, "
+            "and no other agent was affected."
+            for key in sorted(stops)
+        ]
+
+    def _agent_block_locked(self) -> dict[str, Any]:
+        """The ``agent_ceilings`` block: each agent's ceilings, what it used, whether it stopped."""
+        out: dict[str, Any] = {}
+        for key in sorted(self._agent_ceilings):
+            usd, tokens = self._agent_ceilings[key]
+            spent_usd, spent_tokens, guessed = self._agent_spent.get(key, [0.0, 0.0, 0.0])
+            row: dict[str, Any] = {"spent_usd": round(spent_usd, 6)}
+            if usd is not None:
+                row["max_spend_usd"] = usd
+            if tokens is not None:
+                row["max_unpriced_tokens"] = tokens
+            row["unpriced_tokens"] = int(spent_tokens)
+            if guessed:
+                row["estimated_calls"] = int(guessed)
+            row["stopped"] = key in self._agent_stops
+            if key in self._agent_stops:
+                row["stopped_because"] = self._agent_stops[key]
+            out[key] = row
+        return out
 
     def writes_hour_caches(self, model: str) -> bool:
         """Whether ``model``'s requests may write the prompt cache for an hour."""
@@ -894,9 +1247,10 @@ class SpendMeter:
         if first:
             logger.warning(
                 "spend ceiling: model %r has no price (llm.model_prices or the vendored "
-                "table), so its calls are not counted; the ceiling is compared with what "
+                "table%s), so its calls are not counted; the ceiling is compared with what "
                 "the priced calls cost, which the job has spent at least.",
                 name,
+                f"; the table could not be read: {table_failure}" if table_failure else "",
             )
 
     # ── What was spent ────────────────────────────────────────────────────
@@ -1089,6 +1443,7 @@ class SpendMeter:
                 self._in_flight[key] = total
                 self._loop_inputs[key] = inputs
                 self._reserved.pop(key, None)
+                self._active.discard(key)
                 self._drained.notify_all()
             self._after_drain()
         except Exception as exc:  # noqa: BLE001 — telemetry never costs a run
@@ -1106,6 +1461,7 @@ class SpendMeter:
                 sums[0] += total
                 sums[1] += cached
             self._reserved.pop(key, None)
+            self._active.discard(key)
             self._drained.notify_all()
         self._after_drain()
 
@@ -1113,6 +1469,7 @@ class SpendMeter:
         """The call reserved under ``slot`` has returned and its cost is on the ledger."""
         with self._lock:
             self._reserved.pop(slot, None)
+            self._active.discard(slot)
             self._drained.notify_all()
         self._after_drain()
 
@@ -1185,7 +1542,9 @@ class SpendMeter:
         ``{kind: (model, calls[, prompt tokens[, output cap]])}``: the prompt is
         what the window accounting allows that kind of call (its window less
         its output budget), ``0`` where no window is known; the cap is the
-        output cap the call is admitted with, ``0`` unknown.
+        output cap the call is admitted with, ``0`` for none known, which is
+        planned, with nothing measured, at the most a call sent with no cap may
+        answer (the model's declared maximum output, else the fallback reply).
         """
         with self._lock:
             for kind, row in calls.items():
@@ -1262,6 +1621,11 @@ class SpendMeter:
                     break
         if tokens and cap and tokens > cap:
             return cap, f"{said}, bounded by its cap of {cap:,}"
+        if not tokens and cap <= 0:
+            # Planned with no cap of its own and nothing measured: reserved for
+            # the most it may answer, never for nothing.
+            most, where = _uncapped_output(name)
+            return most, f"the most it may answer, sent with no cap ({where})"
         return tokens, said
 
     def _planned_retries_locked(self, kind: str, firsts: int) -> tuple[int, str]:
@@ -1391,6 +1755,11 @@ class SpendMeter:
                     min(measured, cap) if cap else measured,
                     f"the largest {what} this job has measured of {name}",
                 )
+        if cap <= 0:
+            # Sent with no cap of its own: the most it may answer is what it
+            # may need, so a planned call of it is reserved for that.
+            tokens, said = _uncapped_output(name)
+            return tokens, f"the most it may answer, sent with no cap ({said})"
         return cap, "its configured output cap, with no answer of its kind measured yet"
 
     def _decide_locked(
@@ -1416,6 +1785,22 @@ class SpendMeter:
             return decision
         if price is None:
             return decision
+        # A call sent with no output cap of its own (cap 0) is not refused for
+        # want of one: it is priced at the most it may answer, the model's
+        # declared maximum output, else the documented fallback reply.
+        uncapped_said = ""
+        if cap <= 0:
+            if not holdable and not _uncapped_is_declared(name):
+                # Nothing bounds its answer: no cap is sent, none can be, and
+                # the model declares no maximum, so no reservation could hold.
+                decision.refused = (
+                    "it is sent with no output cap, its model takes none per call, and the "
+                    "model declares no maximum output, so what it may cost cannot be bounded "
+                    "under the spend ceiling"
+                )
+                return decision
+            cap, uncapped_said = _uncapped_output(name)
+            decision.cap = cap
         others = (
             sum(v for k, v in self._reserved.items() if k is not slot) if count_reserved else 0.0
         )
@@ -1424,6 +1809,11 @@ class SpendMeter:
         available = float(self.ceiling_usd or 0.0) - committed - reserve
         input_cost = prompt_tokens * price.input / MILLION
         minimum, minimum_said = self._minimum_locked(kind, name, cap)
+        if uncapped_said and minimum == cap:
+            minimum_said = (
+                f"the most it may answer, sent with no cap ({uncapped_said}), with no answer "
+                "of its kind measured yet"
+            )
         # A loop turn keeps room for the loop's closing answer after it.
         closing = input_cost + minimum * price.output / MILLION if kind in LOOP_KINDS else 0.0
         spendable = available - input_cost - closing
@@ -1438,16 +1828,23 @@ class SpendMeter:
         if spendable >= 0 and (price.output <= 0 or (cap and room >= cap)):
             decision.bound = None
             decision.reservation = input_cost + cap * price.output / MILLION
+            if uncapped_said and holdable and price.output > 0 and not _uncapped_is_declared(name):
+                # The fallback figure is what was reserved, and only a model's
+                # own limit stops an uncapped answer from running past it: it
+                # is sent as the call's cap, so the reservation holds.
+                decision.bound = cap
+                decision.fallback_cap = cap
             return decision
         if holdable and cap and room >= max(minimum, 1):
             decision.bound = room
             decision.reservation = input_cost + room * price.output / MILLION
             return decision
-        needed = (
-            f"its whole {cap:,}-token cap (its model takes no cap of its own per call)"
-            if not holdable
-            else f"the {minimum:,} tokens of the smallest answer it can give ({minimum_said})"
-        )
+        if not holdable and uncapped_said:
+            needed = f"the {cap:,} tokens it may answer with, sent with no cap ({uncapped_said})"
+        elif not holdable:
+            needed = f"its whole {cap:,}-token cap (its model takes no cap of its own per call)"
+        else:
+            needed = f"the {minimum:,} tokens of the smallest answer it can give ({minimum_said})"
         decision.refused = (
             f"the {decision.available:.4f} USD it may spend under the spend ceiling of "
             f"{self.ceiling_usd:.4f} USD"
@@ -1495,10 +1892,10 @@ class SpendMeter:
         """
         if self.ceiling_usd is None:
             return None
-        from maljan.llm.context_window import CHARS_PER_TOKEN
+        from maljan.llm.context_window import tokens_for_chars
 
         now = self._clock()
-        prompt_tokens = -(-max(0, int(prompt_chars)) // CHARS_PER_TOKEN)
+        prompt_tokens = tokens_for_chars(prompt_chars)
         price = self._admission_price(model, now, deadline_s, prompt_tokens)
         with self._lock:
             decision = self._decide_locked(
@@ -1524,8 +1921,14 @@ class SpendMeter:
         holdable: bool = True,
         deadline_s: float | None = None,
         wait_s: float | None = None,
+        attempt: bool = False,
     ) -> int | None:
         """Whether a call may be made, before it is: ``None`` as it is, a number as a held cap.
+
+        ``attempt`` is a model list's fallback attempt at a call already
+        admitted: the same logical call at another model's price, so it is not
+        counted as a call of its kind and takes nothing from the planned tail.
+        Given the call's own ``slot`` it replaces that reservation.
 
         With no ceiling every call is made as it is. With one, a call is made
         with its output cap held to what the spend it may use pays for after
@@ -1557,10 +1960,10 @@ class SpendMeter:
         if self.ceiling_usd is None:
             return None
         from maljan.core import cancellation
-        from maljan.llm.context_window import CHARS_PER_TOKEN
+        from maljan.llm.context_window import tokens_for_chars
 
         job = cancellation.current()
-        prompt_tokens = -(-max(0, int(prompt_chars)) // CHARS_PER_TOKEN)
+        prompt_tokens = tokens_for_chars(prompt_chars)
         cap = max(0, int(cap_tokens or 0))
         name = _clean(model) or "the model"
         retrying = _RETRYING.get()
@@ -1580,7 +1983,7 @@ class SpendMeter:
             # reached is read against the latch.
             self.reached()
             with self._lock:
-                if not noted:
+                if not noted and not attempt:
                     self._note_kind_locked(kind, model, prompt_tokens, cap, holdable, deadline_s)
                     noted = True
                 decision = self._decide_locked(
@@ -1617,19 +2020,23 @@ class SpendMeter:
                         continue
                 if not decision.refused:
                     key = self._prompt_key(kind)
-                    if prompt_tokens > self._largest_prompt.get(key, 0):
+                    if not attempt and prompt_tokens > self._largest_prompt.get(key, 0):
                         self._largest_prompt[key] = prompt_tokens
                     made = self._calls_made.setdefault(kind, [0, 0])
-                    made[1 if retrying else 0] += 1
+                    if not attempt:
+                        made[1 if retrying else 0] += 1
                     if (
-                        not retrying
+                        not attempt
+                        and not retrying
                         and kind in TAIL_KINDS
                         and kind in self._tail
                         and self._tail[kind][1] > 0
                     ):
                         self._tail[kind][1] -= 1
-                    if slot is not None and price is not None:
-                        self._reserved[slot] = decision.reservation
+                    if slot is not None:
+                        self._active.add(slot)
+                        if price is not None:
+                            self._reserved[slot] = decision.reservation
             break
         if decision.refused:
             if gave_up:
@@ -1647,10 +2054,24 @@ class SpendMeter:
             self._note_held(said)
             self._exhaust_if_nothing_fits(said, now)
             raise SpendCeilingStop(said)
-        if decision.bound is not None:
+        if decision.fallback_cap:
+            logger.debug(
+                "spend ceiling: the %s call of %s, sent with no cap of its own, is sent with a "
+                "cap of %d tokens: the most it was reserved for, its model declaring no maximum "
+                "output.",
+                kind,
+                name,
+                decision.fallback_cap,
+            )
+        elif decision.bound is not None:
+            had = (
+                f"its cap was {cap:,}"
+                if cap
+                else f"it was sent with no cap of its own, so it may answer {decision.cap:,} tokens"
+            )
             self._note_held(
                 f"the {kind} call of {name} was held to {decision.bound:,} output tokens "
-                f"(its cap was {cap:,}): what the {decision.available:.4f} USD it may spend "
+                f"({had}): what the {decision.available:.4f} USD it may spend "
                 "under the spend ceiling pays for after its prompt "
                 f"({decision.input_cost:.4f} USD)"
                 + (
@@ -1664,7 +2085,14 @@ class SpendMeter:
                     else ""
                 )
             )
+        if slot is not None and not attempt:
+            _ADMISSION.set(Admission(self, kind, int(prompt_chars), slot))
         return decision.bound
+
+    def holds(self, slot: Any) -> bool:
+        """Whether ``slot`` has a reservation held now."""
+        with self._lock:
+            return slot in self._active
 
     @contextlib.contextmanager
     def held(
@@ -1879,9 +2307,16 @@ class SpendMeter:
         )
 
     def snapshot(self) -> dict[str, Any] | None:
-        """The run summary's ``spend`` block, or ``None`` with no ceiling set."""
+        """The run summary's ``spend`` block, or ``None`` with no ceiling set.
+
+        ``agent_ceilings`` is there only when an agent sets a ceiling of its
+        own, and is then the whole block where the job sets none.
+        """
         if self.ceiling_usd is None:
-            return None
+            with self._lock:
+                if not self._agent_ceilings:
+                    return None
+                return {"agent_ceilings": self._agent_block_locked()}
         now = self._clock()
         with self._lock:
             reserve, rows = self._reserve_locked(now)
@@ -1920,6 +2355,11 @@ class SpendMeter:
                     + ": their calls are not counted, so spent_usd is what the priced calls "
                     "cost and the job spent at least that"
                 )
+                if table_failure:
+                    out["note"] += f"; price table could not be read: {table_failure}"
+                    out["price_table_error"] = table_failure
+            if self._agent_ceilings:
+                out["agent_ceilings"] = self._agent_block_locked()
             return out
 
 

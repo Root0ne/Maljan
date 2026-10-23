@@ -19,9 +19,9 @@ import time
 import pytest
 
 from maljan.agents.base_agent import strip_tool_call_scaffolding
-from maljan.agents.claim_headings import claim_heading_counts
 from maljan.agents.repeat_watch import ClaimRepeatReader
 from maljan.pipeline.validation import claims_repeated
+from tests.claim_block_counts import begun_and_distinct
 
 SENTENCES = [
     "The file reads its configuration from a resource.",
@@ -59,6 +59,11 @@ HEADINGS = [
     "\xa0CLAIM: ",
     "> CLAIM #7: ",
     "claim: ",
+    "CLAIM R3: ",
+    "**CLAIM N1 (was claim 1):** ",
+    "CLAIM #U14 — ",
+    "CLAIM R: ",
+    "CLAIM Routine: ",
 ]
 PROSE = [
     "Summary: the sample is a loader.",
@@ -201,7 +206,7 @@ def _pieces(rng: random.Random, text: str) -> list[str]:
 
 def _expected(prefix: str, margin: int | None) -> tuple[int, int, bool]:
     stripped = strip_tool_call_scaffolding(prefix)
-    begun, distinct = claim_heading_counts(stripped)
+    begun, distinct = begun_and_distinct(stripped)
     return begun, distinct, claims_repeated(stripped, margin) is not None
 
 
@@ -379,12 +384,12 @@ def test_the_automata_are_built_from_the_patterns_the_check_reads() -> None:
     """The heading patterns, as the automata in ``repeat_watch`` mirror them."""
     from maljan.agents import claim_headings
 
-    prefix = "[ \\t>*_#]*(?:(?:[-+]|\\d+[.)])[ \\t]+)?[ \\t>*_#]*"
+    prefix = "[ \\t>*_#]*+(?:(?:[-+]|\\d++[.)])[ \\t]++)?[ \\t>*_#]*+"
     assert claim_headings.LINE_PREFIX == prefix
     assert claim_headings.CLAIM_HEAD_RE.pattern == (
-        "^" + prefix + "CLAIM(?:[ \\t]*#?(?P<number>\\d+))?"
-        "(?:[ \\t]*(?P<note>\\([^)\\n]*\\)|\\[[^\\]\\n]*\\]))?[ \\t]*(?:\\*\\*)?[ \\t]*"
-        "(?:(?P<delim>:|\u2014|\u2013|-(?=\\s))[ \\t]*(?:\\*\\*)?[ \\t]*|(?(note)$|(?!)))"
+        "^" + prefix + "CLAIM(?:(?:[ \\t]++#?(?P<label>[A-Za-z]++)|[ \\t]*+#?)(?P<number>\\d++))?"
+        "(?:[ \\t]*+(?P<note>\\([^)\\n]*+\\)|\\[[^\\]\\n]*+\\]))?[ \\t]*+(?:\\*\\*)?[ \\t]*+"
+        "(?:(?P<delim>:|\u2014|\u2013|-(?=\\s))[ \\t]*+(?:\\*\\*)?[ \\t]*+|(?(note)$|(?!)))"
     )
     assert claim_headings._SEPARATOR_RE.pattern == "^[ \\t]*-{3,}[ \\t]*$"
     assert claim_headings._FIELD_LABEL_RE.pattern == (

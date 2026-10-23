@@ -70,6 +70,35 @@ def test_a_memory_store_that_will_not_build_names_no_password() -> None:
     assert PASSWORD not in response.json()["detail"]
 
 
+def test_a_memory_store_that_will_not_build_logs_no_credential() -> None:
+    """The purge's log line is masked as its answer is (AUD-32): userinfo and query values."""
+    from app.api.v1 import system as system_module
+
+    app = FastAPI()
+    app.include_router(system_module.router, prefix="/api/v1")
+    app.dependency_overrides[get_db] = lambda: MagicMock()
+    app.dependency_overrides[require_admin] = lambda: MagicMock(id="u")
+    client = TestClient(app)
+    keyed = f"https://qdrant.internal:6333/collections?api_key={PASSWORD}"
+
+    with (
+        patch.object(
+            system_module,
+            "_build_memory_store",
+            AsyncMock(side_effect=RuntimeError(f"no route to {DSN} or {keyed}")),
+        ),
+        patch.object(system_module.logger, "warning") as warned,
+    ):
+        response = client.post("/api/v1/system/ltm/purge", json={"dry_run": True})
+
+    assert response.status_code == 503, response.text
+    assert PASSWORD not in response.json()["detail"]
+    logged = " ".join(str(part) for call in warned.call_args_list for part in call.args)
+    assert "RuntimeError" in logged
+    assert "redis.internal" in logged
+    assert PASSWORD not in logged
+
+
 def test_an_enrichment_queue_that_is_down_names_no_password() -> None:
     from app.api.v1 import reports as reports_module
     from app.services.report_service import EnrichmentEnqueueError

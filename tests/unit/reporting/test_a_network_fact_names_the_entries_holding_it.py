@@ -69,11 +69,11 @@ def test_each_value_names_the_entries_whose_answers_hold_it() -> None:
     )
     for section in ("communications", "command_and_control", "configuration"):
         facts = bundle_for(section, report)["facts"]
-        assert facts["entries_holding"] == [
-            f"{URL}: ev_0006, ev_0030",
-            f"{HOST}: ev_0006, ev_0030",
-            "192.0.2.7:443: ev_0006",
-        ], section
+        assert facts["entries_holding"] == {
+            URL: ["ev_0006", "ev_0030"],
+            HOST: ["ev_0006", "ev_0030"],
+            "192.0.2.7:443": ["ev_0006"],
+        }, section
         assert facts["urls"] == [URL]
 
 
@@ -84,7 +84,7 @@ def test_a_failed_or_mismatched_entry_holds_nothing() -> None:
         # The call number names ev_0030, but the index files another tool there.
         technical_evidence={"static": [_output("floss", 29, URL)]},
     )
-    assert value_entries(report, [URL, HOST]) == []
+    assert value_entries(report, [URL, HOST]) == {}
 
 
 def test_a_section_of_several_entries_is_read_only_by_the_entry_a_row_names() -> None:
@@ -92,7 +92,7 @@ def test_a_section_of_several_entries_is_read_only_by_the_entry_a_row_names() ->
     unnamed = EvidenceSection(
         key="mixed", title="M", kind="table", rows=[[URL]], evidence_ids=["ev_0005", "ev_0006"]
     )
-    assert value_entries(_report(evidence_index=rows, sections=[unnamed]), [URL]) == []
+    assert value_entries(_report(evidence_index=rows, sections=[unnamed]), [URL]) == {}
     named = EvidenceSection(
         key="mixed",
         title="M",
@@ -101,9 +101,9 @@ def test_a_section_of_several_entries_is_read_only_by_the_entry_a_row_names() ->
         rows=[[URL, "ev_0006"], ["other", "ev_0005"]],
         evidence_ids=["ev_0005", "ev_0006"],
     )
-    assert value_entries(_report(evidence_index=rows, sections=[named]), [URL]) == [
-        f"{URL}: ev_0006"
-    ]
+    assert value_entries(_report(evidence_index=rows, sections=[named]), [URL]) == {
+        URL: ["ev_0006"]
+    }
 
 
 def test_a_url_s_scheme_is_never_read_as_an_address() -> None:
@@ -111,12 +111,12 @@ def test_a_url_s_scheme_is_never_read_as_an_address() -> None:
         evidence_index=[_row("ev_0001", "notes")],
         sections=[EvidenceSection(key="n", title="N", text="http only", evidence_ids=["ev_0001"])],
     )
-    assert value_entries(report, ["http://elsewhere.test/x"]) == []
+    assert value_entries(report, ["http://elsewhere.test/x"]) == {}
 
 
 def test_no_network_block_holds_nothing() -> None:
     report = MalwareReport(identity=SampleIdentity(hashes=FileHashes(sha256="a" * 64)))
-    assert bundle_for("communications", report)["facts"]["entries_holding"] == []
+    assert bundle_for("communications", report)["facts"]["entries_holding"] == {}
 
 
 def test_reading_the_holders_stays_linear() -> None:
@@ -155,7 +155,7 @@ def test_a_huge_answer_keeps_only_the_wanted_values_in_memory() -> None:
             return tracemalloc.get_traced_memory()[1]
         finally:
             tracemalloc.stop()
-            assert held == [f"{URL}: ev_0001", f"{HOST}: ev_0001", "192.0.2.7:443: ev_0001"]
+            assert held == {URL: ["ev_0001"], HOST: ["ev_0001"], "192.0.2.7:443": ["ev_0001"]}
 
     # About 7 MB and a quarter of a million distinct tokens, against a
     # thousandth of it: the peak is the same.
@@ -187,13 +187,13 @@ def test_a_change_in_place_is_read_again_never_answered_from_the_cache() -> None
         evidence_index=[_row("ev_0030", "strings")],
         technical_evidence={"static": [_output("strings", 29, json.dumps({"text": URL}))]},
     )
-    assert value_entries(report, [URL]) == [f"{URL}: ev_0030"]
+    assert value_entries(report, [URL]) == {URL: ["ev_0030"]}
     # The entry's outcome flipped in place: it no longer holds the value.
     report.evidence_index[0].ok = False
-    assert value_entries(report, [URL]) == []
+    assert value_entries(report, [URL]) == {}
     report.evidence_index[0].ok = True
-    assert value_entries(report, [URL]) == [f"{URL}: ev_0030"]
+    assert value_entries(report, [URL]) == {URL: ["ev_0030"]}
     # The answer's text replaced in place with one of the same length.
     output = report.technical_evidence["static"][0]
     output["output"] = output["output"].replace("beacon", "nobody")
-    assert value_entries(report, [URL]) == []
+    assert value_entries(report, [URL]) == {}

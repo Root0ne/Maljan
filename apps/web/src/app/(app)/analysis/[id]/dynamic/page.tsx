@@ -3,70 +3,29 @@
 import { useState } from "react";
 
 import { useReport } from "../layout";
+import ReportAbsent from "@/components/analysis/ReportAbsent";
+import { reportAbsence } from "@/components/analysis/reportAbsence";
 import type { ProcessNode } from "@/types/malware-report";
-import { confidenceClass } from "@/lib/report-utils";
-import { runSignatureScale, signatureScore } from "@/lib/severity";
+import { bySignatureSeverity, runSignatureScale, signatureScore } from "@/lib/severity";
 import Th from "@/components/ui/Th";
 import { ArtifactSections } from "@/components/analysis/ArtifactTable";
 import { hasSection, isCoveredBySection, sectionsForTab } from "@/components/analysis/reportSections";
-import { dynamicAnalystClaims, type AnalystClaims } from "@/components/analysis/dynamicClaims";
-
-function AnalystFindings({ findings }: { findings: AnalystClaims[] }) {
-  return (
-    <div className="bg-bg-surface border border-border rounded">
-      <div className="px-4 py-3 border-b border-border">
-        <h2 className="text-xs font-medium text-text-primary uppercase tracking-wider">
-          Analyst findings
-        </h2>
-      </div>
-      <div className="p-4 space-y-3">
-        {findings.map((f) => (
-          <div key={f.agent}>
-            <p className="text-[11px] uppercase tracking-wider text-text-muted mb-1.5">
-              {f.agent}
-            </p>
-            <ul className="space-y-2">
-              {f.claims.map((c, i) => {
-                const conf =
-                  typeof c.confidence === "number" ? Math.round(c.confidence * 100) : null;
-                const evidence = Array.isArray(c.evidence_ref)
-                  ? c.evidence_ref.join(", ")
-                  : c.evidence_ref;
-                return (
-                  <li key={i} className="border border-border-light rounded p-3">
-                    <p className="text-sm text-text-primary leading-relaxed">
-                      {c.claim || c.description || "(no text)"}
-                    </p>
-                    <div className="flex flex-wrap gap-3 mt-1.5 text-[11px] text-text-muted">
-                      {conf !== null && (
-                        <span className={`font-mono ${confidenceClass(conf)}`}>{conf}%</span>
-                      )}
-                      {evidence && (
-                        <span>
-                          <span className="text-text-secondary">Evidence: </span>
-                          {evidence}
-                        </span>
-                      )}
-                    </div>
-                  </li>
-                );
-              })}
-            </ul>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
+import { dynamicAnalystClaims } from "@/components/analysis/dynamicClaims";
+import AnalystFindings from "@/components/analysis/AnalystFindings";
 
 export default function DynamicTab() {
-  const { report, loading } = useReport();
+  const { report, job, loading, reportError } = useReport();
 
   if (loading) {
     return <div className="p-4 text-sm text-text-secondary">Loading...</div>;
   }
 
-  const analystFindings = dynamicAnalystClaims(report?.agent_findings);
+  /* No report is not an empty report: say which absence this is rather than
+   * drawing this tab's negative (`reportAbsence`). */
+  const absent = reportAbsence({ report, job, reportError });
+  if (absent) return <ReportAbsent absence={absent} />;
+
+  const analystFindings = dynamicAnalystClaims(report?.agent_findings, job?.roster);
   const dyn = report?.malware_report?.dynamic;
   // The registry exists on Windows and nowhere else, and an empty "Registry
   // Modifications" panel on a Linux, macOS or Android sample reads as a
@@ -101,9 +60,7 @@ export default function DynamicTab() {
    * scales were is read by the legacy table. */
   const signatureScale = runSignatureScale(report?.run_summary);
 
-  const sortedSignatures = [...dyn.sandbox_signatures].sort(
-    (a, b) => b.severity - a.severity,
-  );
+  const sortedSignatures = [...dyn.sandbox_signatures].sort(bySignatureSeverity);
 
   // D10: detect anti-emulation / anti-VM / anti-debug signatures so the
   // empty process-tree state can explain why the sandbox traced nothing.

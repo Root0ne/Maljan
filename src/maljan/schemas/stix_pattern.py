@@ -39,6 +39,7 @@ from __future__ import annotations
 import difflib
 import ipaddress
 import re
+from collections.abc import Callable
 from dataclasses import dataclass
 
 # An object path written outside the quotes: the type, then the property. The
@@ -46,9 +47,11 @@ from dataclasses import dataclass
 # ``network-traffic:dst_ref.value``, ``domain-name:resolves_to_refs[*].value``
 # and ``file:extensions['pe'].pe_imphash`` are all one path. Case carries no
 # meaning in a STIX object path and a judge writes ``[URL:value = …]`` often
-# enough that reading it as some other kind would be a hole.
+# enough that reading it as some other kind would be a hole. A type starts
+# only where a run of type characters starts: tried from inside a long run with
+# no colon, every try read to the end of the run, which cost the square of it.
 _OBJECT_PATH_RE = re.compile(
-    r"([a-z0-9-]+):([a-z0-9_]+(?:\.[a-z0-9_]+|\.'(?:\\.|[^'\\])*'|\['(?:\\.|[^'\\])*'\]|\[[^\]']*\])*)",
+    r"(?<![a-z0-9-])([a-z0-9-]+):([a-z0-9_]+(?:\.[a-z0-9_]+|\.'(?:\\.|[^'\\])*'|\['(?:\\.|[^'\\])*'\]|\[[^\]']*\])*)",
     re.IGNORECASE,
 )
 
@@ -91,6 +94,9 @@ class Comparison:
     # still reads such a value — as the backslash it plainly means — so the
     # questions about it can be asked; this says the pattern is not valid.
     stray_backslash: bool = False
+    # Which observation expression (``[...]``) of the pattern the comparison
+    # is in, counted from 0.
+    observation: int = 0
 
     @property
     def path(self) -> str:
@@ -106,29 +112,47 @@ def read_comparisons(pattern: str) -> list[Comparison]:
     before it. A pattern that chains keys therefore costs what its length
     costs, rather than the square of it.
     """
+    return [comparison for _kind, _start, _end, comparison in _quoted_spans(pattern) if comparison]
+
+
+# What a quoted span in a pattern is: a key inside an object path, a value a
+# comparison answers, or a qualifier's own literal.
+_KEY, _VALUE, _QUALIFIER = "key", "value", "qualifier"
+
+
+def _quoted_spans(pattern: str) -> list[tuple[str, int, int, Comparison | None]]:
+    """Every quoted span of ``pattern``: its kind, where it starts and ends, and a value's record.
+
+    The one scan :func:`read_comparisons` and :func:`canonical_pattern` read.
+    """
     text = str(pattern or "")
-    found: list[Comparison] = []
+    found: list[tuple[str, int, int, Comparison | None]] = []
     outside = 0
     object_type = ""
     written_type = ""
     prop = ""
     operator = ""
     observation_closed = False
+    observation = 0
     index = 0
     while index < len(text):
         if text[index] != "'":
             index += 1
             continue
+        start = index
         literal, end, closed, stray = _read_quoted(text, index)
         if closed and _opens_a_key(text, outside, index):
             # A key continues the path rather than answering it, and the path
             # regex above reads it back out of the text it is written in.
+            found.append((_KEY, start, end, None))
             index = end
             continue
         before = text[outside:index]
         index = end
         outside = end
         paths = list(_OBJECT_PATH_RE.finditer(before))
+        if "]" in before and not observation_closed:
+            observation += 1
         if paths:
             object_type = paths[-1].group(1).lower()
             written_type = paths[-1].group(1)
@@ -141,19 +165,71 @@ def read_comparisons(pattern: str) -> list[Comparison]:
             # follows belongs to a qualifier.
             observation_closed = observation_closed or "]" in before
             if observation_closed:
+                found.append((_QUALIFIER, start, end, None))
                 continue
         found.append(
-            Comparison(
-                object_type=object_type,
-                written_type=written_type,
-                prop=prop,
-                operator=operator,
-                literal=literal,
-                readable=closed and bool(object_type),
-                stray_backslash=stray,
+            (
+                _VALUE,
+                start,
+                end,
+                Comparison(
+                    object_type=object_type,
+                    written_type=written_type,
+                    prop=prop,
+                    operator=operator,
+                    literal=literal,
+                    readable=closed and bool(object_type),
+                    stray_backslash=stray,
+                    observation=observation,
+                ),
             )
         )
     return found
+
+
+_WHITESPACE_RUN_RE = re.compile(r"\s+")
+# A space with punctuation on either side of it separates nothing: ``= 'a'``
+# and ``='a'`` are one comparison. A space between two words (``NOT LIKE``,
+# ``WITHIN 5 SECONDS``) is kept, as one space.
+_SPACE_BESIDE_PUNCTUATION_RE = re.compile(r" (?=\W)|(?<=\W) ")
+
+
+def canonical_pattern(pattern: str, canonical: Callable[[Comparison], str]) -> str:
+    """``pattern`` in the spelling two writers of the same pattern share.
+
+    Outside the quotes, where a STIX pattern is syntax, case carries no meaning
+    and whitespace only separates words: it is folded and closed up. A key in
+    an object path is folded with it, as :attr:`Comparison.path` folds it. A
+    value a comparison answers is replaced by ``canonical(comparison)``, quoted
+    and escaped, so the caller decides what makes two values one. A value the
+    reader cannot read (an unterminated quote, no object path before it) and a
+    qualifier's own literal are kept exactly as written: nothing about them is
+    known well enough to fold.
+
+    One pass over the spans the reader already found, then one pass of two
+    linear regexes over each stretch of syntax between them.
+    """
+    text = str(pattern or "")
+    out: list[str] = []
+    last = 0
+    for kind, start, end, comparison in _quoted_spans(text):
+        out.append(_canonical_syntax(text[last:start]))
+        if kind == _KEY:
+            out.append(text[start:end].lower())
+        elif kind == _VALUE and comparison is not None and comparison.readable:
+            value = canonical(comparison).replace("\\", "\\\\").replace("'", "\\'")
+            out.append(f"'{value}'")
+        else:
+            out.append(text[start:end])
+        last = end
+    out.append(_canonical_syntax(text[last:]))
+    return "".join(out)
+
+
+def _canonical_syntax(text: str) -> str:
+    """One stretch of a pattern outside its quotes, folded and closed up."""
+    spaced = _WHITESPACE_RUN_RE.sub(" ", text.lower()).strip()
+    return _SPACE_BESIDE_PUNCTUATION_RE.sub("", spaced)
 
 
 def _opens_a_key(text: str, start: int, quote: int) -> bool:

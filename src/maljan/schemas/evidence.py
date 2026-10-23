@@ -39,11 +39,12 @@ from __future__ import annotations
 
 import json
 import re
+import sys
 import threading
 from collections.abc import Mapping, Sequence
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, PrivateAttr
 
 from maljan.schemas.tool_evidence import (
     CapturedToolOutput,
@@ -65,6 +66,26 @@ _ID_DIGITS = 4
 # that writes ``EV_0002`` back is citing the same entry, and a false flag
 # here costs a full analyst feedback turn.
 ENTRY_ID_RE = re.compile(r"\bev_\d{3,}\b", re.IGNORECASE)
+
+# Where an entry id's prefix meets its digits. A text that only mentions an id,
+# such as a sample's string written into a triage pack line, has this underscore
+# written out (``utils.written_forms.ids_written_out``). Neither ``ENTRY_ID_RE``
+# nor a reader then finds a citation in it. On raw text it matches only where
+# ``ENTRY_ID_RE`` would begin: ``ev_`` after a word boundary and before a digit,
+# so ``prev_2024`` and ``dev_1`` are left alone. On text whose control characters
+# are already written out, an id that stands right after an escape is matched
+# too: ``\n``, ``\t``, ``\r``, ``\"`` and ``\x`` with any number of hex digits
+# up to the widest code point. One hex digit covers the id whose ``e`` is the
+# escape's own last digit (``\x0e`` then ``v_0003``), which a reader sees as
+# ``ev_0003``.
+_ESCAPE_HEX_DIGITS = len(f"{sys.maxunicode:x}")
+_AFTER_AN_ESCAPE = "|".join(
+    [r'(?<=\\[ntr"])'] + [rf"(?<=\\x[0-9a-f]{{{n}}})" for n in range(1, _ESCAPE_HEX_DIGITS + 1)]
+)
+ENTRY_ID_JOIN_RE = re.compile(rf"(?:(?<!\w)|{_AFTER_AN_ESCAPE})ev_(?=\d)", re.IGNORECASE)
+# The same, only right after an escape: on a line the platform built, whose own
+# ids stand after no escape, these are the ids a written-out control brought.
+ENTRY_ID_AFTER_ESCAPE_RE = re.compile(rf"(?:{_AFTER_AN_ESCAPE})ev_(?=\d)", re.IGNORECASE)
 
 
 def entry_ids_in(text: str) -> set[str]:
@@ -218,7 +239,8 @@ def parse_structured(output: str) -> dict[str, Any] | list[Any] | None:
         return None
     try:
         parsed = json.loads(text)
-    except (ValueError, TypeError):
+    except (ValueError, TypeError, RecursionError):
+        # Nesting deeper than the interpreter reads is not a structure it can hold.
         return None
     return parsed if isinstance(parsed, dict | list) else None
 
@@ -297,6 +319,16 @@ class LedgerEntry(BaseModel):
     )
     started_at: float = Field(default=0.0, description="Unix timestamp the call started at.")
     duration_ms: int = Field(default=0, description="Wall-clock duration of the call.")
+    waited_ms: int = Field(
+        default=0,
+        # Absent when zero, so an entry written before the field existed (or a
+        # call nothing queued) dumps exactly as it did.
+        exclude_if=lambda value: not value,
+        description=(
+            "How long the call waited for a free slot at its server before it was sent; "
+            "``duration_ms`` runs from the moment it was sent."
+        ),
+    )
     seq: int = Field(default=0, description="Call order within the job, 1-based.")
     source: str | None = Field(
         default=None,
@@ -347,7 +379,10 @@ class LedgerEntry(BaseModel):
         description=(
             "The triage pack step that wrote the entry, where an operator declared it "
             "(core.pack_steps): {'v': 1, 'id', and where set 'label' (what the pack's line "
-            "calls it) and 'renderer' (how the pack's line shows its answer)}. None on an "
+            "calls it), 'renderer' (how the pack's line shows its answer), 'wrote' (each file "
+            "the call wrote that the job's artefact store took in: 'id', 'sha256', 'size', "
+            "'name'), 'not_taken' (each it did not: 'name', 'reason') and 'read' (the artefact "
+            "id of each file placeholder the call was handed, pipeline.artefacts)}. None on an "
             "entry of a step as shipped, and on every other entry, which the pack reads by "
             "its shipped steps. Read later from here, never from the reading process's "
             "settings."
@@ -388,6 +423,21 @@ class LedgerEntry(BaseModel):
             "is placed by when its kind places none. None where the definition declares none."
         ),
     )
+    spilled: list[dict[str, Any]] | None = Field(
+        default=None,
+        # Like ``source``: an entry nothing was taken from dumps as it did.
+        exclude_if=lambda value: value is None,
+        description=(
+            "Where the parts of the answer this entry does not keep whole are kept whole "
+            "(schemas.evidence_spill): one reference per part the run shortened, blanked or "
+            "dropped (answer, structured_content, output, structured), each with the object "
+            "key, the byte length and the SHA-256 of the bytes, or with no key and the reason "
+            "the upload failed. None where nothing was taken, or the run had no store."
+        ),
+    )
+    # The job's store for those parts, set by the recorder that wrote the
+    # entry; never dumped and never copied into a dump. ``None`` outside a job.
+    _spill: Any = PrivateAttr(default=None)
 
     def to_captured(self) -> CapturedToolOutput:
         """This entry in the shape readers of the previous capture expect."""
@@ -439,6 +489,7 @@ def build_entry(
     error: str | None = None,
     started_at: float = 0.0,
     duration_ms: int = 0,
+    waited_ms: int = 0,
     stage: str = "analysis",
     max_chars: int = 0,
     repeated_of: str | None = None,
@@ -452,6 +503,8 @@ def build_entry(
     structured_content: dict[str, Any] | None = None,
     agent_role: str | None = None,
     agent_tab: str | None = None,
+    hints: Any = None,
+    declared_name: str | None = None,
 ) -> LedgerEntry:
     """One entry, with the output trimmed and parsed the same way every time.
 
@@ -490,6 +543,8 @@ def build_entry(
     ``output`` is then the statement of the cut (:func:`not_shown_record`),
     the entry is marked ``truncated`` and nothing is parsed out of it.
 
+    ``error`` is held to ``max_chars`` as ``output`` is, and says so the same way.
+
     ``chars_dropped`` is what the tool-output guardrail cut from the answer
     before the model read it: ``output`` is what the model was handed, and
     the entry is marked ``truncated`` because it is not the whole answer.
@@ -500,6 +555,17 @@ def build_entry(
     (the text is not JSON and the object is not the text wrapped again) and
     the entry holds the whole answer: an answer cut, not shown or repeated
     keeps no structure the model did not read.
+
+    ``hints`` are the MCP hints the tool's own server gave it when it was
+    attached: kept on the facts record, beside what its source declares
+    (``core.declared_reading.with_hints``).
+
+    ``declared_name`` is the name the tool's source declares it under (the original,
+    where the request offered it renamed): the facts stored with the entry are
+    the declaration of that name, found exactly, so a tool a server natively
+    spells ``<its key>__x`` is never read as its tool ``x``. Where it differs
+    from ``tool`` it is kept on that record (``core.declared_reading.
+    with_declared_name``), the one place a later reader takes it from.
     """
     safe_args = dict(args) if isinstance(args, dict) else {}
     full = str(output or "")
@@ -512,7 +578,7 @@ def build_entry(
             _code, message, hint = returned
             ok, error = False, message
             remediation = remediation or hint
-    facts = _facts_at_write(source, tool)
+    facts = _facts_at_write(source, tool, hints, declared_name)
     if ok and error is None and not repeated_of and _declares_no_kind(facts):
         # A tool its source declares nothing for has no declared way to say
         # it failed: an answer that is only an error line is filed as failed.
@@ -525,6 +591,13 @@ def build_entry(
     # it, or the guardrail or a ceiling left a prefix. No reputation record is
     # read from such an output (``_reputation_at_write``).
     cut = bool(not_shown) or len(text) < len(full) or int(chars_dropped) > 0
+    # A failure message is held to the same result budget as the output, and
+    # the cut is stated the same way (the closing "…", the entry ``truncated``):
+    # a server that answers a failure with a traceback would otherwise carry it
+    # whole, with its paths, into every header that lists the failure.
+    if error and int(max_chars) > 0 and len(error) > int(max_chars):
+        error = trim_output(error, max_chars)
+        cut = True
     structured = None if repeated_of or not_shown else parse_structured(full)
     content = (
         _structured_beside(structured_content, full, structured)
@@ -554,6 +627,7 @@ def build_entry(
         model=model or None,
         started_at=started_at,
         duration_ms=max(0, int(duration_ms)),
+        waited_ms=max(0, int(waited_ms)),
         seq=seq,
         source=source or None,
         facts=facts,
@@ -570,13 +644,30 @@ def build_entry(
     )
 
 
-def _facts_at_write(source: str | None, tool: str) -> dict[str, Any] | None:
-    """The tool's declared facts under ``source``, resolved now, to be stored with the entry."""
+def _facts_at_write(
+    source: str | None, tool: str, hints: Any = None, declared_name: str | None = None
+) -> dict[str, Any] | None:
+    """The tool's declared facts under ``source``, resolved now, to be stored with the entry.
+
+    With the hints its own server gave it, where it gave any, and the name
+    the source declares the tool under, where the request offered it renamed.
+    """
     if not source:
         return None
-    from maljan.core.declared_reading import facts_record
+    from maljan.core.declared_reading import (
+        FACTS_VERSION,
+        facts_record,
+        with_declared_name,
+        with_hints,
+    )
 
-    return facts_record(source, tool)
+    record = facts_record(source, tool, declared_name=declared_name)
+    if record is None and declared_name and declared_name != tool:
+        # Settings that could not be read still leave the call's original
+        # name, which only its handle knew: kept on a record that declares
+        # nothing, so the entry reads as an undeclared tool by that name.
+        record = {"v": FACTS_VERSION}
+    return with_hints(with_declared_name(record, tool, declared_name), hints)
 
 
 def _declares_no_kind(facts: dict[str, Any] | None) -> bool:
@@ -649,7 +740,16 @@ def beside_bytes(entry: LedgerEntry) -> int:
         return 0
 
 
+def _spill_before_loss(entry: Any, part: str, value: Any, spill: Any = None) -> None:
+    """Keep ``value`` whole before the entry loses it, where the entry's job has a store."""
+    from maljan.schemas.evidence_spill import spill_into
+
+    sink = spill if spill is not None else getattr(entry, "_spill", None)
+    spill_into(entry, sink, part, value)
+
+
 def _drop_beside(entry: LedgerEntry) -> None:
+    _spill_before_loss(entry, "structured", entry.structured)
     entry.structured = None
     entry.structured_from_server = False
 
@@ -683,7 +783,9 @@ def _beside_cost(entry: Any) -> int:
         return 0
 
 
-def fit_structures_to_budget(entries: Sequence[Any], budget_bytes: int) -> int:
+def fit_structures_to_budget(
+    entries: Sequence[Any], budget_bytes: int, *, spill: Any = None
+) -> int:
     """Drop kept structures, largest first, until each agent's kept bytes fit its budget.
 
     The last pass over a run's ledger (ledger entries or their dumps) before
@@ -694,6 +796,11 @@ def fit_structures_to_budget(entries: Sequence[Any], budget_bytes: int) -> int:
     ``budget_bytes``. A text is never touched. Nothing happens when no entry
     carries such a structure (every built-in's ledger) or with no budget.
     Returns how many structures were dropped.
+
+    ``spill`` is the job's store (``schemas.evidence_spill.EvidenceSpill``)
+    for a pass over dumps, which carry none of their own: a dropped structure
+    is kept there whole and the dump references it. A ledger entry uses the
+    store its recorder gave it.
     """
     if budget_bytes <= 0:
         return 0
@@ -719,8 +826,11 @@ def fit_structures_to_budget(entries: Sequence[Any], budget_bytes: int) -> int:
                 break
             total -= _beside_cost(entry)
             if isinstance(entry, LedgerEntry):
+                if spill is not None and entry._spill is None:
+                    _spill_before_loss(entry, "structured", entry.structured, spill)
                 _drop_beside(entry)
             else:
+                _spill_before_loss(entry, "structured", entry["structured"], spill)
                 entry["structured"] = None
                 entry.pop("structured_from_server", None)
             dropped += 1
@@ -772,6 +882,12 @@ def apply_budget(
         if spent + size <= budget_bytes:
             spent += size
             continue
+        # What the budget takes is kept whole first, where the job has a store.
+        # A structure parsed from the output is that output read again; only
+        # one the server returned beside it is a part of its own.
+        _spill_before_loss(entry, "output", entry.output)
+        if entry.structured_from_server:
+            _spill_before_loss(entry, "structured", entry.structured)
         entry.output = ""
         entry.structured = None
         entry.structured_from_server = False

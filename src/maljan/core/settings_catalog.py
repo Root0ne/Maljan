@@ -33,7 +33,17 @@ ChoicesFrom = Literal[
     "llm_providers",
     "sandbox_report_readers",
 ]
-Editor = Literal["server_map", "rest_sandbox", "agent_definitions", "stages", "tool_facts"]
+Editor = Literal[
+    "server_map",
+    "rest_sandbox",
+    "agent_definitions",
+    "stages",
+    "tool_facts",
+    "pack_steps",
+    "plugin_allow_list",
+    "enrichment_sources",
+    "report_formats",
+]
 
 # Field names that are secrets although typed as plain str.
 _SECRET_NAMES = {"auth_token", "api_key"}
@@ -112,6 +122,33 @@ class CatalogEntry:
     # (``agents.composition.capability_servers``), served so the console draws
     # a capability reference with the servers it reaches, never a copy of the rule.
     capability_servers: dict[str, list[str]] | None = None
+    # For the agent definitions: the input slices a definition may name in its
+    # ``data_sources`` (``config.DATA_SOURCES``), served so the console offers
+    # exactly what the settings model accepts.
+    data_source_choices: list[str] | None = None
+    # For the tool-server map: the agent keys a server may be bound to, the
+    # effective definition map's keys, so the console offers every agent of
+    # the roster rather than a fixed list.
+    agent_keys: list[str] | None = None
+    # The seeded definition keys, which stay known whatever a save does to the
+    # stored map, so the console can tell which agents a staged definition
+    # edit leaves bindable (``server_map._definition_keys``). Served on the
+    # agent definitions' entry too: every one of them is built in, and the
+    # settings model refuses an edit to any but its ``enabled`` switch.
+    builtin_agent_keys: list[str] | None = None
+    # For the agent definitions: the built-ins whose ``enabled`` switch the
+    # settings model refuses to change (``config.ALWAYS_ENABLED_AGENTS``).
+    always_enabled_agent_keys: list[str] | None = None
+    # For the triage pack's steps: what a declared step may say
+    # (``core.pack_steps.step_vocabulary``): its fields with their types and
+    # defaults, the placeholders an argument template may name and the rule a
+    # template is read by, the routed formats, the renderers and the shipped
+    # steps, served so the console's step editor keeps no copy of any of them.
+    pack_step_vocabulary: dict[str, Any] | None = None
+    # A change to this setting asks for the admin's current password again
+    # (the API's sign-in policy: the login lockout, the trusted proxies, the
+    # token lifetimes), so a stolen session cannot weaken it on its own.
+    needs_current_password: bool = False
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -188,8 +225,8 @@ def _undeclared_memory_backends() -> dict[str, Any]:
 
 
 def _annotation(path: str, undeclared: Mapping[str, Any] | None = None) -> Any:
-    """``path``'s annotation: the shared table's, else the one its memory backend or LLM
-    provider declares for the leaves of its own settings."""
+    """``path``'s annotation: the shared table's, else the one its memory backend (the
+    shipped Qdrant one included) or LLM provider declares for its own settings' leaves."""
     found = ANNOTATIONS.get(path)
     if found is not None:
         return found
@@ -204,20 +241,40 @@ def _annotation(path: str, undeclared: Mapping[str, Any] | None = None) -> Any:
     if not path.startswith("memory."):
         return found
     backend_id, _, leaf = path[len("memory.") :].partition(".")
-    backend = _undeclared_memory_backends().get(backend_id)
+    from maljan.memory.store_factory import registered_backends
+
+    backend = registered_backends().get(backend_id)
     return backend.annotations.get(leaf) if backend is not None and leaf else None
 
 
+# The registry sources an installed plugin adds to, by the kind of plugin.
+PLUGIN_CHOICE_KINDS: dict[str, str] = {
+    "llm_providers": "llm",
+    "static_providers": "static",
+    "sandbox_providers": "sandbox",
+    "memory_backends": "memory",
+}
+
+
 def _registry_choices(source: str | None) -> list[str] | None:
-    """The choices a core registry holds for ``source``, or ``None`` when it is not one."""
+    """The choices a core registry holds for ``source``, or ``None`` when it is not one.
+
+    Shipped and in-process ids only: a plugin's id is offered from its
+    package metadata and the stored allow-list (``maljan.core.plugins``),
+    never because this process happens to have loaded it.
+    """
+    from maljan.core.plugins import loaded_names
+
+    kind = PLUGIN_CHOICE_KINDS.get(str(source))
+    plugin_ids = loaded_names(kind) if kind else set()
     if source == "memory_backends":
         from maljan.memory.store_factory import memory_backends
 
-        return list(memory_backends())
+        return [i for i in memory_backends() if i not in plugin_ids]
     if source == "llm_providers":
         from maljan.llm.provider_base import provider_names
 
-        return provider_names()
+        return [i for i in provider_names() if i not in plugin_ids]
     if source == "sandbox_report_readers":
         from maljan.providers.sandbox.readers import choosable_reader_ids
 
@@ -234,7 +291,10 @@ def _registry_choices(source: str | None) -> list[str] | None:
         ids = static_provider_ids() if static else sandbox_provider_ids()
         cls_of = static_provider_class if static else sandbox_provider_class
         # In the order each provider declares, then by id.
-        return sorted(ids, key=lambda i: (getattr(cls_of(i), "choice_order", 100), i))
+        return sorted(
+            (i for i in ids if i not in plugin_ids),
+            key=lambda i: (getattr(cls_of(i), "choice_order", 100), i),
+        )
     return None
 
 
@@ -440,6 +500,43 @@ def _url_secrets(url: str) -> list[str]:
     return found
 
 
+def snapshot_hidden_paths(settings: BaseModel) -> tuple[list[str], list[str]]:
+    """``(secret leaves, tool-server blocks)`` of a settings instance, by dotted path.
+
+    A secret leaf is what this catalogue types as a secret (a ``SecretStr``,
+    or a field named in ``_SECRET_NAMES``) wherever it sits, a model inside a
+    mapping included (each tool server's ``auth_token`` under
+    ``mcp.servers``). A tool-server block is every ``MCPServerConfig``
+    (``mcp.servers.<key>``, ``static.ghidra``, ``static.r2``,
+    ``sandbox.cape2.mcp``): its ``env`` map is where a server's own
+    credential is written and no type marks it, and its arguments and address
+    can carry one (``settings_masking.masked_server``). The paths are those of
+    ``model_dump``, the form the run settings snapshot is read from
+    (``settings_overrides.public_snapshot``).
+    """
+    from maljan.core.config import MCPServerConfig
+
+    secrets: list[str] = []
+    servers: list[str] = []
+
+    def _walk(value: Any, path: str) -> None:
+        if isinstance(value, BaseModel):
+            if isinstance(value, MCPServerConfig):
+                servers.append(path.removesuffix("."))
+            for key, field in type(value).model_fields.items():
+                tp, _ = _unwrap_optional(field.annotation)
+                if tp is SecretStr or key in _SECRET_NAMES:
+                    secrets.append(f"{path}{key}")
+                else:
+                    _walk(getattr(value, key, None), f"{path}{key}.")
+        elif isinstance(value, Mapping):
+            for key, item in value.items():
+                _walk(item, f"{path}{key}.")
+
+    _walk(settings, "")
+    return secrets, servers
+
+
 def configured_secret_values(*sources: Any) -> set[str]:
     """Every secret-kind value the given settings hold, as the platform would send it.
 
@@ -478,6 +575,13 @@ def configured_secret_values(*sources: Any) -> set[str]:
                 if key in _FIELD_MAPS:
                     continue
                 _walk(getattr(value, key, None), key, key in _SECRET_NAMES)
+            # A model that keeps extra keys holds blocks no field declares: a
+            # plugin's ``llm.<id>`` or ``memory.<id>`` settings, read with its
+            # own settings model or kept as stored. Their keys are read as a
+            # field's are, so a plugin's credential is scrubbed like a shipped one.
+            for key, item in (getattr(value, "__pydantic_extra__", None) or {}).items():
+                name = str(key)
+                _walk(item, name, name in _SECRET_NAMES or names_a_credential_value(name))
         elif isinstance(value, dict):
             for key, item in value.items():
                 _walk(item, str(key), names_a_credential_value(str(key)))

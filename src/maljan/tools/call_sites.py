@@ -61,10 +61,13 @@ read: the answer is absent rather than guessed.
 
 from __future__ import annotations
 
+import copy
+from array import array
+from bisect import bisect_left
 from dataclasses import dataclass, field
 from typing import Any
 
-from maljan.tools.pe_image import Image
+from maljan.tools.pe_image import Code, Image, Section, read_as_bytes
 
 # The Windows x64 argument registers, by register number: rcx, rdx, r8, r9.
 _X64_ARGUMENTS = {1: 1, 2: 2, 8: 3, 9: 4}
@@ -93,7 +96,7 @@ class Instruction:
     moves_stack: bool = False
 
 
-def _modrm_length(code: bytes, at: int, is64: bool, address16: bool) -> int | None:
+def _modrm_length(code: Code, at: int, is64: bool, address16: bool) -> int | None:
     """The bytes a ModRM operand takes from ``at`` (the ModRM byte itself included)."""
     if at >= len(code) or address16:
         return None
@@ -147,7 +150,7 @@ _TWO_BYTE_IMM8 = {0x70, 0x71, 0x72, 0x73, 0xA4, 0xAC, 0xBA, 0xC2, 0xC4, 0xC5, 0x
 _TWO_BYTE_NO_GPR_WRITE = {0x11, 0x13, 0x17, 0x29, 0x2B, 0x2E, 0x2F, 0xA3, 0xE7, 0xD6}
 
 
-def decode(code: bytes, at: int, is64: bool) -> Instruction | None:
+def decode(code: Code, at: int, is64: bool) -> Instruction | None:
     """The instruction at ``at``, or ``None`` when it is not one this reading decodes."""
     start = at
     operand16 = address16 = rep = False
@@ -317,7 +320,7 @@ def decode(code: bytes, at: int, is64: bool) -> Instruction | None:
 
 
 def _decode_two_byte(
-    code: bytes,
+    code: Code,
     start: int,
     at: int,
     is64: bool,
@@ -373,7 +376,7 @@ def _decode_two_byte(
     return Instruction(end - start, "other", written, moves_stack=_SP in written)
 
 
-def _decode_vex(code: bytes, start: int, at: int, is64: bool, op: int) -> Instruction | None:
+def _decode_vex(code: Code, start: int, at: int, is64: bool, op: int) -> Instruction | None:
     """A VEX-encoded instruction: every register its operands name may be written."""
     prefix_bytes = 1 if op == 0xC5 else 2
     if at + prefix_bytes >= len(code):
@@ -451,28 +454,33 @@ def _callee(image: Image, call_rva: int, instruction: Instruction) -> dict[str, 
     kind, value = instruction.target
     after = call_rva + instruction.length
     imports = image.imports_by_slot()
+    # Where the import tables were not read whole, a slot without a name says why.
+    unread = {"imports_cut": image.imports_note} if image.imports_note else {}
     if kind == "rel":
         target = after + value
         slot = _thunk_slot(image, target)
         if slot is not None and slot in imports:
             return {"import": imports[slot], "function": hex(target)}
-        return {"function": hex(target)}
+        return {"function": hex(target), **(unread if slot is not None else {})}
     if kind == "mem":
         slot = after + value if instruction.rip_relative else value - image.image_base
         if slot in imports:
             return {"import": imports[slot], "slot": hex(slot)}
-        return {"slot": hex(slot)}
+        return {"slot": hex(slot), **unread}
     return None
 
 
 def _callee_words(joined: dict[str, Any]) -> str:
     stated = joined.get("callee")
     callee: dict[str, Any] = stated if isinstance(stated, dict) else {}
-    return (
+    named = (
         str(callee.get("import") or "")
         or (f"the function at {callee['function']}" if callee.get("function") else "")
         or (f"the pointer stored at {callee['slot']}" if callee.get("slot") else "")
     )
+    if named and callee.get("imports_cut"):
+        named += f" (no import name read for it: {callee['imports_cut']})"
+    return named
 
 
 def _call_words(joined: Any) -> str:
@@ -521,26 +529,51 @@ def passed_to_words(joined: Any) -> str:
     return out
 
 
-def _begins_an_instruction(
-    code: bytes, section_rva: int, function_start: int, rva: int, is64: bool
-) -> bool:
-    """Whether decoding from the function's start lands on ``rva`` as an instruction's start.
+class _Starts:
+    """The instruction starts a decode from one place reaches, decoded once and on demand.
 
     The bytes of a load can also be the middle of another instruction; the
     load is read as one only when a decode of the function from its start,
     instruction after instruction, arrives at it exactly. A byte the decode
-    cannot read on the way leaves the question unanswered, and no load is read.
+    cannot read on the way leaves the question unanswered, and no load is
+    read. That decode is the same walk whichever load asks, so it is kept:
+    it goes no further than the furthest load asked about, and each
+    instruction is decoded once however many loads the function holds. The
+    starts rise, so they are held as one array of numbers and searched by
+    bisection.
     """
-    at = function_start - section_rva
-    target = rva - section_rva
+
+    __slots__ = ("seen", "stuck")
+
+    def __init__(self, at: int) -> None:
+        self.seen = array("q", [at])
+        # Set when the byte at the last start cannot be decoded.
+        self.stuck = False
+
+    def reaches(self, view: Code, target: int, is64: bool) -> bool:
+        seen = self.seen
+        while not self.stuck and seen[-1] < target:
+            instruction = decode(view, seen[-1], is64)
+            if instruction is None:
+                self.stuck = True
+                break
+            seen.append(seen[-1] + instruction.length)
+        index = bisect_left(seen, target)
+        return index < len(seen) and seen[index] == target
+
+
+def _begins(image: Image, section: Section, function_start: int, rva: int) -> bool:
+    """Whether decoding from the function's start lands on ``rva`` as an instruction's start."""
+    at = function_start - section.rva
+    target = rva - section.rva
     if at < 0 or target < at:
         return False
-    while at < target:
-        instruction = decode(code, at, is64)
-        if instruction is None:
-            return False
-        at += instruction.length
-    return at == target
+    walks = image.walks()
+    key = ("starts", section.raw_offset, section.mapped_size, at, image.is64)
+    starts = walks.get(key)
+    if starts is None:
+        starts = walks[key] = _Starts(at)
+    return bool(starts.reaches(image.section_view(section), target, image.is64))
 
 
 # Registers a call leaves as they were under the Windows x64 convention: a value
@@ -549,7 +582,7 @@ _X64_NONVOLATILE = frozenset({3, 5, 6, 7, 12, 13, 14, 15})
 _REGISTER_NAMES = "rax rcx rdx rbx rsp rbp rsi rdi r8 r9 r10 r11 r12 r13 r14 r15".split()
 
 
-def _stack_lea(code: bytes, at: int) -> tuple[int, int, int] | None:
+def _stack_lea(code: Code, at: int) -> tuple[int, int, int] | None:
     """``(register, base, displacement)`` for an x64 ``lea r64, [rsp+d]`` or ``[rbp+d]``.
 
     Only those two forms: the address of a slot in the function's own frame.
@@ -578,7 +611,7 @@ def _stack_lea(code: bytes, at: int) -> tuple[int, int, int] | None:
     return reg, base, displacement
 
 
-def _register_move(code: bytes, at: int) -> tuple[int, int] | None:
+def _register_move(code: Code, at: int) -> tuple[int, int] | None:
     """``(destination, source)`` for an x64 ``mov r64, r64``."""
     if at + 3 > len(code):
         return None
@@ -590,44 +623,76 @@ def _register_move(code: bytes, at: int) -> tuple[int, int] | None:
     return (rm, reg) if op == 0x89 else (reg, rm)
 
 
-def _straight_run_before(
-    code: bytes, section_rva: int, bounds: tuple[int, int], call_rva: int
-) -> list[tuple[int, Instruction]] | None:
-    """The instructions from the last jump target or transfer before ``call_rva`` up to it.
+class _Decoded:
+    """Where each instruction of one function starts and where the run before it begins.
 
-    Decoded from the function's start, so every one is an instruction; the run
-    begins after the last instruction that transfers control and at the last
-    address any jump in the function lands on, so each instruction in it runs
-    before the call on every path that reaches the call.
+    The straight run before a call is the instructions from the last jump
+    target or transfer before it up to it: decoded from the function's
+    start, so every one is an instruction, beginning after the last
+    instruction that transfers control and at the last address any jump in
+    the function lands on, so each instruction in it runs before the call on
+    every path that reaches the call. A byte the decode cannot read leaves
+    every run unread. The function is decoded once for every call in it:
+    the instruction starts, and for each the start of the run that ends
+    before it, are kept as two arrays of numbers, and the run before a call
+    is decoded again from those (the runs before two different calls never
+    share an instruction, since a call ends a run).
     """
-    at = bounds[0] - section_rva
-    end = bounds[1] - section_rva
-    decoded: list[tuple[int, Instruction]] = []
-    targets: set[int] = set()
-    while at < end:
-        instruction = decode(code, at, True)
-        if instruction is None:
+
+    __slots__ = ("begins", "rvas", "whole")
+
+    def __init__(self, view: Code, section_rva: int, bounds: tuple[int, int]) -> None:
+        at = bounds[0] - section_rva
+        end = bounds[1] - section_rva
+        self.rvas = array("q")
+        targets: set[int] = set()
+        # Whether the decode reached the function's end; a byte it cannot
+        # read leaves every run in the function unread, as the walk did.
+        self.whole = True
+        kinds = bytearray()
+        while at < end:
+            instruction = decode(view, at, True)
+            if instruction is None:
+                self.whole = False
+                break
+            rva = section_rva + at
+            self.rvas.append(rva)
+            kinds.append(instruction.kind in ("stop", "call"))
+            kind, value = instruction.target
+            if kind in ("jump", "branch"):
+                targets.add(rva + instruction.length + value)
+            at += instruction.length
+        # ``begins[k]``: the index where the run ending before instruction ``k`` begins.
+        self.begins = array("q")
+        begin = 0
+        for index, rva in enumerate(self.rvas):
+            self.begins.append(begin)
+            if kinds[index]:
+                begin = index + 1
+            elif rva in targets:
+                begin = index
+        self.begins.append(begin)
+
+    def run_before(
+        self, view: Code, section_rva: int, call_rva: int
+    ) -> list[tuple[int, Instruction]] | None:
+        """The straight run before ``call_rva``, or ``None`` when no instruction starts there."""
+        if not self.whole:
             return None
-        rva = section_rva + at
-        decoded.append((rva, instruction))
-        kind, value = instruction.target
-        if kind in ("jump", "branch"):
-            targets.add(rva + instruction.length + value)
-        at += instruction.length
-    run: list[tuple[int, Instruction]] = []
-    for rva, instruction in decoded:
-        if rva >= call_rva:
-            break
-        if instruction.kind in ("stop", "call") or rva in targets:
-            run = []
-            if instruction.kind in ("stop", "call"):
-                continue
-        run.append((rva, instruction))
-    return run if any(rva == call_rva for rva, _ in decoded) else None
+        index = bisect_left(self.rvas, call_rva)
+        if index >= len(self.rvas) or self.rvas[index] != call_rva:
+            return None
+        run: list[tuple[int, Instruction]] = []
+        for rva in self.rvas[self.begins[index] : index]:
+            instruction = decode(view, rva - section_rva, True)
+            if instruction is None:  # never: decoded the same way when the function was
+                return None
+            run.append((rva, instruction))
+        return run
 
 
 def _output_buffer(
-    code: bytes, section_rva: int, run: list[tuple[int, Instruction]], skip: int
+    code: Code, section_rva: int, run: list[tuple[int, Instruction]], skip: int
 ) -> tuple[int, int, int] | None:
     """``(argument register, base, displacement)`` of a frame slot's address passed to the call.
 
@@ -646,7 +711,7 @@ def _output_buffer(
     return next(iter(found.values())) if len(found) == 1 else None
 
 
-def _frame_ref(code: bytes, at: int) -> tuple[int, int, int, int, int] | None:
+def _frame_ref(code: Code, at: int) -> tuple[int, int, int, int, int] | None:
     """``(rex, opcode, reg field, base, displacement)`` for a one-byte-opcode x64
     instruction whose memory operand is ``[rsp+d]`` or ``[rbp+d]``; ``None`` otherwise."""
     rex = 0
@@ -702,7 +767,7 @@ _VEX_STORES = {
 _UNREAD_WIDTH_REACH = 16
 
 
-def _frame_store(code: bytes, at: int) -> tuple[int, int, int | None] | None:
+def _frame_store(code: Code, at: int) -> tuple[int, int, int | None] | None:
     """``(base, displacement, width)`` of a store to ``[rsp+d]`` or ``[rbp+d]``, or ``None``.
 
     Any encoding: legacy prefixes, REX, the one-byte, 0F, 0F38 and 0F3A maps
@@ -766,7 +831,7 @@ def _frame_store(code: bytes, at: int) -> tuple[int, int, int | None] | None:
 
 
 def _frame_operand(
-    code: bytes, i: int, rex: int, width: int | None
+    code: Code, i: int, rex: int, width: int | None
 ) -> tuple[int, int, int | None] | None:
     """The ``[rsp+d]``/``[rbp+d]`` memory operand whose ModRM byte is at ``i``, with ``width``."""
     if i >= len(code) or rex & 1:
@@ -802,6 +867,7 @@ def _overlaps(slot: tuple[int, int], store: tuple[int, int, int | None]) -> bool
     return slot[1] < displacement + width and displacement < slot[1] + 8
 
 
+@read_as_bytes
 def output_passed_to(image: Image, call_rva: int, skip: int) -> dict[str, Any] | None:
     """Where the output of the call at ``call_rva`` goes next in its function, or ``None``.
 
@@ -827,8 +893,27 @@ def output_passed_to(image: Image, call_rva: int, skip: int) -> dict[str, Any] |
     bounds = image.function_bounds(call_rva)
     if section is None or bounds is None:
         return None
-    code = image.section_bytes(section)
-    run = _straight_run_before(code, section.rva, bounds, call_rva)
+    walks = image.walks()
+    key = ("output", call_rva, skip, section, bounds)
+    if key not in walks:
+        walks[key] = _output_passed_to(image, call_rva, skip, section, bounds)
+    held = walks[key]
+    # A copy: the caller adds to the answer it is handed.
+    return copy.deepcopy(held) if held is not None else None
+
+
+def _output_passed_to(
+    image: Image, call_rva: int, skip: int, section: Section, bounds: tuple[int, int]
+) -> dict[str, Any] | None:
+    """:func:`output_passed_to`, read once per call, output register, section and bounds."""
+    code = image.section_view(section)
+    walks = image.walks()
+    key = ("decoded", section.raw_offset, section.mapped_size, section.rva, bounds)
+    decoded = walks.get(key)
+    if decoded is None:
+        decoded = _Decoded(code, section.rva, bounds)
+        walks[key] = decoded
+    run = decoded.run_before(code, section.rva, call_rva)
     if run is None:
         return None
     call = decode(code, call_rva - section.rva, True)
@@ -865,7 +950,7 @@ def output_passed_to(image: Image, call_rva: int, skip: int) -> dict[str, Any] |
 
 
 def _follow(
-    code: bytes,
+    code: Code,
     section_rva: int,
     bounds: tuple[int, int],
     start_rva: int,
@@ -933,6 +1018,7 @@ def _follow(
     return None
 
 
+@read_as_bytes
 def passed_to(image: Image, site: int) -> dict[str, Any] | None:
     """The call a string's address is passed to from the reference at file offset ``site``.
 
@@ -953,8 +1039,8 @@ def passed_to(image: Image, site: int) -> dict[str, Any] | None:
     bounds = image.function_bounds(load_rva)
     if bounds is None:
         return None
-    code = image.section_bytes(section)
-    if not _begins_an_instruction(code, section.rva, bounds[0], load_rva, image.is64):
+    code = image.section_view(section)
+    if not _begins(image, section, bounds[0], load_rva):
         return None
     at = start - section.raw_offset + length
     pushes = 0

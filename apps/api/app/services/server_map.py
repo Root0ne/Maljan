@@ -19,6 +19,7 @@ rather than a token whose literal characters are ten asterisks.
 
 from __future__ import annotations
 
+import json
 import re
 from typing import Any
 
@@ -35,6 +36,7 @@ from maljan.core.settings_overrides import (
     SERVER_MAP_PATH,
     server_entry_in_force,
     shipped_tool_facts,
+    shipped_tools,
 )
 from maljan.core.tool_declarations import (
     changed_declaration_errors,
@@ -86,6 +88,53 @@ def server_token_key(server: str) -> str:
     ``check_keys``. Nothing else in the system may write a key of this shape.
     """
     return f"{SERVER_MAP_KEY}.{server}.auth_token"
+
+
+# The suffix of the row one server's ``env`` map is stored under, encrypted.
+SERVER_ENV_SUFFIX = ".env"
+
+
+def server_env_key(server: str) -> str:
+    """The settings key one server's ``env`` map is stored under, as :func:`server_token_key`.
+
+    The ``env`` map is where a server's own credentials live (an API key the
+    sidecar reads from its environment), so it is kept out of the map's clear
+    row like the token: one encrypted row per server holding its whole map.
+    """
+    return f"{SERVER_MAP_KEY}.{server}{SERVER_ENV_SUFFIX}"
+
+
+def split_server_env(servers: Any) -> tuple[Any, dict[str, str | None]]:
+    """The validated map without its ``env`` values, and each server's env to encrypt.
+
+    The second element says, for every server of the map, what its env row
+    holds after the save: the JSON of a non-empty ``env`` map, or ``None`` for
+    no row. An empty ``env`` stays in the map as written, so the stored map and
+    what :func:`merge_server_secrets` folds back together read exactly as the
+    map that went in.
+    """
+    if not isinstance(servers, dict):
+        return servers, {}
+    out: dict[str, Any] = {}
+    envs: dict[str, str | None] = {}
+    for name, entry in servers.items():
+        env = entry.get("env") if isinstance(entry, dict) else None
+        if isinstance(env, dict) and env:
+            out[name] = {k: v for k, v in entry.items() if k != "env"}
+            envs[name] = json.dumps(env, sort_keys=True)
+        else:
+            out[name] = entry
+            envs[name] = None
+    return out, envs
+
+
+def env_of_row(row_value: Any) -> dict[str, Any] | None:
+    """A server's env map from its decrypted row, or ``None`` when it is not one."""
+    try:
+        env = json.loads(str(row_value))
+    except ValueError:
+        return None
+    return env if isinstance(env, dict) else None
 
 
 class ServerMapError(Exception):
@@ -171,7 +220,17 @@ def validate_server_map(
             )
             entry = {**entry, "tool_facts": in_force}
             before: list[Any] = [stored_in_force, shipped]
-            refused = changed_declaration_errors(in_force, before)
+            # An ``aggregate_of`` names a tool the map declares or the entry's
+            # allow-list in force names: sent, else stored, else shipped, as a load reads it.
+            if "tools" in entry:
+                listed = entry.get("tools")
+            elif isinstance(stored_entry, dict) and "tools" in stored_entry:
+                listed = stored_entry.get("tools")
+            else:
+                listed = shipped_tools(f"{SERVER_MAP_PATH}.{key}")
+            refused = changed_declaration_errors(
+                in_force, before, tools=listed if isinstance(listed, list) else None
+            )
             if refused:
                 for path, message in refused.items():
                     errors[f"{key}.tool_facts.{path}"] = message
@@ -303,7 +362,7 @@ def _keep_masked_env(value: Any, stored: dict[str, Any] | None) -> Any:
 
 
 def merge_server_secrets(overrides: dict[str, Any]) -> dict[str, Any]:
-    """Fold the per-server token rows back into the map, and drop them.
+    """Fold the per-server token and env rows back into the map, and drop them.
 
     Done here rather than by letting both key shapes reach ``nest()``: that
     function walks a flat mapping in iteration order, so a ``core.mcp.servers``
@@ -313,7 +372,8 @@ def merge_server_secrets(overrides: dict[str, Any]) -> dict[str, Any]:
     """
     prefix = f"{SERVER_MAP_KEY}."
     token_keys = [k for k in overrides if k.startswith(prefix) and k.endswith(".auth_token")]
-    out = {k: v for k, v in overrides.items() if k not in token_keys}
+    env_keys = [k for k in overrides if k.startswith(prefix) and k.endswith(SERVER_ENV_SUFFIX)]
+    out = {k: v for k, v in overrides.items() if k not in token_keys and k not in env_keys}
     servers = out.get(SERVER_MAP_KEY)
     if not isinstance(servers, dict):
         return out
@@ -329,5 +389,12 @@ def merge_server_secrets(overrides: dict[str, Any]) -> dict[str, Any]:
             merged[name]["auth_token"] = overrides[key]
         # A row whose server is gone is simply dropped: `save` deletes these,
         # and a stale one must never resurrect a server that is not in the map.
+    for key in env_keys:
+        name = key[len(prefix) : -len(SERVER_ENV_SUFFIX)]
+        env = env_of_row(overrides[key])
+        if name in merged and env is not None:
+            # The encrypted row is the server's env; a map written before the
+            # rows existed may still carry one in clear, and the row wins.
+            merged[name]["env"] = env
     out[SERVER_MAP_KEY] = merged
     return out

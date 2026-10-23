@@ -175,3 +175,48 @@ async def read_setting_secret(key: str) -> str:
         plain = node.get_secret_value() if hasattr(node, "get_secret_value") else node
         return str(plain) if isinstance(plain, str) else ""
     return ""
+
+
+async def enrichment_reach(
+    stored: Any,
+    read_setting: SecretReader,
+    servers: Mapping[str, Any] | None = None,
+) -> list[dict[str, Any]]:
+    """Where an enrichment job may send a report's indicators, for the run's disclosure block.
+
+    RDAP first, which the job asks about each public address with no key,
+    then every source configured to ask (enabled, holding the credential it
+    needs, its server on), in its declared order: the hosts its requests name,
+    or the tool server it is asked through, with the indicator kinds it
+    answers (``analysis.disclosure.enrichment_source_row``). Never a
+    credential: the secret is read only to tell whether the source is
+    configured, as the job reads it.
+    """
+    from maljan.analysis.disclosure import enrichment_source_row, registry_rows
+    from maljan.enrichment.declared import ASKED_KINDS
+
+    rows = registry_rows()
+    ready = await ready_sources(stored, read_setting, servers)
+    for item in sorted((s for s in ready if s.configured), key=lambda s: s.source.order):
+        source = item.source
+        kinds = [kind for kind in source.kinds if kind in ASKED_KINDS]
+        if source.server:
+            cfg = (servers or {}).get(source.server)
+            rows.append(
+                enrichment_source_row(
+                    item.key,
+                    kinds=kinds,
+                    server=source.server,
+                    transport=str(getattr(cfg, "transport", "") or ""),
+                    server_url=str(getattr(cfg, "url", "") or ""),
+                )
+            )
+            continue
+        rows.append(
+            enrichment_source_row(
+                item.key,
+                kinds=kinds,
+                hosts=[request.host for kind, request in source.requests.items() if kind in kinds],
+            )
+        )
+    return rows

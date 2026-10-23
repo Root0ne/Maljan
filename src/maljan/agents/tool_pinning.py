@@ -50,6 +50,16 @@ SERVER_FRAGMENT_METADATA_KEY = "maljan_server_fragment"
 # only while the server's tools are in the request, and never read as a
 # template, being the server's words and not a declaration.
 SERVER_OWN_WORDS_METADATA_KEY = "maljan_server_own_words"
+# The name a server declares a tool under, set on a tool the request offers
+# renamed (``<server>__<tool>``): the declaration is read by it, never by
+# taking a prefix off the offered name.
+DECLARED_NAME_METADATA_KEY = "maljan_declared_name"
+# Set on a tool its own server marks read-only (MCP ``readOnlyHint`` true).
+READ_ONLY_METADATA_KEY = "maljan_read_only"
+# The MCP hints its own server gave a tool when it was attached
+# (``core.declared_reading.SERVER_HINTS``), kept on each of its entries for
+# the run's tool-effects part (``analysis.tool_effects``).
+SERVER_HINTS_METADATA_KEY = "maljan_server_hints"
 
 # An argument whose *name* looks like it takes a file. Substring matches cover
 # ``file``, ``file_path``, ``filepath``, ``filename``, ``path``, ``target_file``;
@@ -97,12 +107,14 @@ SAMPLE_ARG_NAMES = frozenset(
 
 
 # How the worker hands a server that cannot see this filesystem the sample's
-# bytes. It is the platform's delivery primitive and never an analysis step, so
-# it is not in the toolbox the model is shown — a live run called it with
+# bytes, and reads back a file the server wrote (``get_artefact``, for the
+# job's artefact store, ``pipeline.artefacts``). They are the platform's
+# delivery primitives and never an analysis step, so they are not in the
+# toolbox the model is shown — a live run called ``put_sample`` with
 # ``{"sha256": "null", "content_b64": ""}`` and was told, correctly, that the
 # empty string's digest is not the sample's.
 DELIVERY_TOOLS = frozenset(
-    {"put_sample", "put_sample_begin", "put_sample_chunk", "put_sample_finish"}
+    {"put_sample", "put_sample_begin", "put_sample_chunk", "put_sample_finish", "get_artefact"}
 )
 
 
@@ -167,11 +179,17 @@ def reads_staged_sample(tool: Any) -> bool:
     return bool(held is not None and held.reads_staged_sample)
 
 
+def declared_name_of(tool: Any) -> str:
+    """The name a tool's source declares it under: its original when it was renamed, else its own."""
+    metadata = getattr(tool, "metadata", None) or {}
+    return str(metadata.get(DECLARED_NAME_METADATA_KEY) or getattr(tool, "name", "") or "")
+
+
 def declared_facts_of(tool: Any) -> Any:
     """What a tool declares about itself (``core.tool_declarations.ToolFacts``), or ``None``.
 
     Read by the source the tool was built under (:func:`declared_source_of`)
-    and the name it is offered under, from the live declarations: what the
+    and the name it is declared under (:func:`declared_name_of`), from the live declarations: what the
     request is about to offer, never a persisted record. A tool nothing
     stamped, or whose source declares nothing for it, has none; it is never
     guessed from the tool's name.
@@ -182,7 +200,7 @@ def declared_facts_of(tool: Any) -> Any:
     try:
         from maljan.core.declared_reading import declarations
 
-        return declarations().declaration_for((source, str(getattr(tool, "name", "") or "")))
+        return declarations().declaration_for((source, declared_name_of(tool)), exact=True)
     except Exception as exc:  # noqa: BLE001 — an unreadable declaration declares nothing
         logger.debug("declared facts of a tool not read (%s).", type(exc).__name__)
         return None
@@ -496,3 +514,19 @@ def _pin_tool(
     except Exception as exc:  # noqa: BLE001 — a guardrail never costs a tool
         logger.warning("%s: path guard skipped for tool '%s': %s", agent_name or "agent", name, exc)
         return tool
+
+
+def answers_again(tool: Any) -> bool:
+    """Whether an identical call of ``tool`` answers the same: it changes nothing.
+
+    True for a tool its own server marks read-only (MCP ``readOnlyHint``,
+    carried as ``metadata["maljan_read_only"]``) or whose declaration marks it
+    read-only or idempotent (``ToolFacts.read_only``). Any other tool, and one
+    nothing says anything about, may change state or answer differently later
+    (a rename, a status poll), so it is not.
+    """
+    metadata = getattr(tool, "metadata", None) or {}
+    if metadata.get(READ_ONLY_METADATA_KEY) is True:
+        return True
+    facts = declared_facts_of(tool)
+    return bool(facts is not None and getattr(facts, "read_only", False) is True)

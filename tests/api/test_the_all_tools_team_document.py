@@ -45,12 +45,21 @@ GHIDRA_SCHEMA = {
             "method": "POST",
             "params": [{"name": "file", "type": "string", "required": True}],
         },
+        # Each takes the program it reads, as Ghidra's own tools do: on a
+        # Ghidra other jobs share, a tool that takes none is withheld.
         {
             "path": "/decompile_function",
             "method": "GET",
-            "params": [{"name": "address", "type": "string", "required": True}],
+            "params": [
+                {"name": "address", "type": "string", "required": True},
+                {"name": "program", "type": "string"},
+            ],
         },
-        {"path": "/get_xrefs_to", "method": "GET", "params": []},
+        {
+            "path": "/get_xrefs_to",
+            "method": "GET",
+            "params": [{"name": "program", "type": "string"}],
+        },
     ]
 }
 

@@ -7,6 +7,7 @@ needing a real ARQ worker process.
 
 from __future__ import annotations
 
+import json
 import logging
 import uuid
 from datetime import UTC, datetime
@@ -377,6 +378,383 @@ async def test_reporting_disabled_completes_without_a_malware_report(
     assert "error_message" not in statuses[-1]
 
 
+def _job_rows(job: Any, sample: Any) -> list[MagicMock]:
+    rows = []
+    for obj in (job, sample):
+        m = MagicMock()
+        if isinstance(getattr(obj, "status", None), str):
+            m.scalar_one_or_none.return_value = obj
+        else:
+            m.scalar_one.return_value = obj
+        rows.append(m)
+    return rows
+
+
+@pytest.mark.parametrize(
+    ("stored", "named"),
+    [
+        ({"llm.max_spend_usd_per_job": -5.0}, "core.llm.max_spend_usd_per_job"),
+        (
+            {
+                "mcp.servers": {
+                    "custom": {
+                        "enabled": True,
+                        "transport": "stdio",
+                        "command": "x",
+                        "env_allow": 5,
+                    }
+                }
+            },
+            "core.mcp.servers",
+        ),
+        (
+            {
+                "mcp.servers": {
+                    "custom": {
+                        "enabled": True,
+                        "transport": "stdio",
+                        "command": "x",
+                        "env_allow": ["DATABASE_URL"],
+                    }
+                }
+            },
+            "core.mcp.servers",
+        ),
+        ({"job_timeout": 0}, "core.job_timeout"),
+    ],
+)
+@pytest.mark.asyncio
+async def test_a_refused_stored_value_fails_the_job_by_name_and_runs_nothing(
+    mock_ctx: dict[str, Any],
+    mock_db_session: AsyncMock,
+    monkeypatch: pytest.MonkeyPatch,
+    stored: dict[str, Any],
+    named: str,
+) -> None:
+    """No retry on the shipped defaults: the job fails, says which stored key
+    and what to do, and the pipeline never starts."""
+    from app.services import settings_service
+
+    async def _stored(_db: Any) -> dict[str, Any]:
+        return dict(stored)
+
+    monkeypatch.setattr(settings_service, "load_core_overrides", _stored)
+    job = _make_job()
+    sample = _make_sample()
+    recorded = _answer_reads(mock_db_session, _job_rows(job, sample))
+    pipeline = AsyncMock(return_value={"final_decision": "Malware"})
+
+    with patch("maljan.app.MaljanApp.arun", new=pipeline):
+        result = await run_analysis(mock_ctx, str(job.id))
+
+    assert result["status"] == "failed", result
+    assert named in result["error"]
+    assert "Fix it or reset it in the console" in result["error"]
+    pipeline.assert_not_awaited()
+    failed = [u for u in updates_in(recorded, "analysis_jobs") if u["status"] == "failed"]
+    assert len(failed) == 1 and named in failed[0]["error_message"]
+    published = " ".join(str(call.args) for call in mock_ctx["redis"].publish.await_args_list)
+    assert '"error"' in published or "'error'" in published
+
+
+@pytest.mark.asyncio
+async def test_unreadable_stored_settings_fail_the_job_and_run_nothing(
+    mock_ctx: dict[str, Any],
+    mock_db_session: AsyncMock,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A database that cannot give the stored settings fails the job: running
+    on the shipped defaults would drop the operator's caps without a word."""
+    from app.services import settings_service
+
+    async def _unreadable(_db: Any) -> dict[str, Any]:
+        raise ConnectionError("postgresql://maljan:hunter2@db:5432 refused")
+
+    monkeypatch.setattr(settings_service, "load_core_overrides", _unreadable)
+    job = _make_job()
+    sample = _make_sample()
+    recorded = _answer_reads(mock_db_session, _job_rows(job, sample))
+    pipeline = AsyncMock(return_value={"final_decision": "Malware"})
+
+    with patch("maljan.app.MaljanApp.arun", new=pipeline):
+        result = await run_analysis(mock_ctx, str(job.id))
+
+    assert result["status"] == "failed", result
+    assert "The stored settings could not be read" in result["error"]
+    assert "did not run on defaults" in result["error"]
+    assert "once the database answers" in result["error"]
+    assert "hunter2" not in result["error"]
+    pipeline.assert_not_awaited()
+    failed = [u for u in updates_in(recorded, "analysis_jobs") if u["status"] == "failed"]
+    assert len(failed) == 1
+    assert "The stored settings could not be read" in failed[0]["error_message"]
+    published = [json.loads(call.args[1]) for call in mock_ctx["redis"].publish.await_args_list]
+    assert any(event.get("type") == "error" for event in published)
+
+
+@pytest.mark.asyncio
+async def test_a_stored_secret_the_worker_cannot_decrypt_fails_the_job_naming_its_key(
+    mock_ctx: dict[str, Any],
+    mock_db_session: AsyncMock,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The row used to be dropped and the job ran on the default in its place."""
+    from app.services import settings_service
+    from maljan.core.settings_overrides import StoredValueRefused
+
+    async def _undecryptable(_db: Any) -> dict[str, Any]:
+        raise StoredValueRefused({"llm.api_key": "the stored secret cannot be decrypted"})
+
+    monkeypatch.setattr(settings_service, "load_core_overrides", _undecryptable)
+    job = _make_job()
+    _answer_reads(mock_db_session, _job_rows(job, _make_sample()))
+    pipeline = AsyncMock(return_value={"final_decision": "Malware"})
+
+    with patch("maljan.app.MaljanApp.arun", new=pipeline):
+        result = await run_analysis(mock_ctx, str(job.id))
+
+    assert result["status"] == "failed", result
+    # The owner reads the job, so its message names no setting key.
+    assert "api_key" not in result["error"]
+    assert "did not run on a default" in result["error"]
+    pipeline.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_a_secret_of_a_server_the_job_never_calls_does_not_stop_the_worker(
+    mock_ctx: dict[str, Any],
+    mock_db_session: AsyncMock,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An orphan server's token that cannot be read is no reason to fail a job."""
+    from app.services import settings_service
+    from maljan.core.settings_overrides import StoredValueRefused
+
+    calls: list[int] = []
+
+    async def _read(_db: Any) -> dict[str, Any]:
+        calls.append(1)
+        if len(calls) == 1:
+            raise StoredValueRefused({"mcp.servers.orphan.auth_token": "cannot be decrypted"})
+        return {}
+
+    monkeypatch.setattr(settings_service, "load_core_overrides", _read)
+    job = _make_job()
+    _answer_reads(mock_db_session, _job_rows(job, _make_sample()))
+    pipeline = AsyncMock(return_value={"final_decision": "Malware"})
+
+    with patch("maljan.app.MaljanApp.arun", new=pipeline):
+        result = await run_analysis(mock_ctx, str(job.id))
+
+    assert "cannot be decrypted" not in str(result.get("error", "")), result
+    assert len(calls) >= 2
+
+
+@pytest.mark.asyncio
+async def test_the_workers_real_settings_read_refuses_an_undecryptable_secret_row(
+    mock_ctx: dict[str, Any],
+    mock_db_session: AsyncMock,
+) -> None:
+    """Through the real ``load_core_overrides`` and its context variable: no fake."""
+    from types import SimpleNamespace
+
+    from maljan.core import settings_secrets as box
+
+    job = _make_job()
+    rows = MagicMock()
+    rows.scalars.return_value.all.return_value = [
+        SimpleNamespace(key="core.llm.api_key", value="gAAAA-unreadable", is_secret=True)
+    ]
+    _answer_reads(mock_db_session, [*_job_rows(job, _make_sample()), MagicMock(), rows])
+    pipeline = AsyncMock(return_value={"final_decision": "Malware"})
+
+    with (
+        patch.object(box, "decrypt", side_effect=box.SecretsUnavailable("rotated")),
+        patch("maljan.app.MaljanApp.arun", new=pipeline),
+    ):
+        result = await run_analysis(mock_ctx, str(job.id))
+
+    assert result["status"] == "failed", result
+    # The owner reads the job, so its message names no setting key.
+    assert "api_key" not in result["error"]
+    pipeline.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_a_refused_job_option_fails_the_job_by_field_without_its_value(
+    mock_ctx: dict[str, Any],
+    mock_db_session: AsyncMock,
+) -> None:
+    """The other arm: a refusal that is no stored key also fails loudly, naming
+    the field, never running on defaults and never quoting the value."""
+    job = _make_job(config={"max_iterations": -7777})
+    sample = _make_sample()
+    _answer_reads(mock_db_session, _job_rows(job, sample))
+    pipeline = AsyncMock(return_value={"final_decision": "Malware"})
+
+    with patch("maljan.app.MaljanApp.arun", new=pipeline):
+        result = await run_analysis(mock_ctx, str(job.id))
+
+    assert result["status"] == "failed", result
+    assert "negotiation.max_iterations" in result["error"]
+    assert "-7777" not in result["error"]
+    pipeline.assert_not_awaited()
+
+
+def _database_error(secret: str) -> Exception:
+    from sqlalchemy.exc import OperationalError
+
+    return OperationalError("SELECT 1", {}, Exception(f"password {secret} was refused"))
+
+
+def _connection_error(secret: str) -> Exception:
+    return ConnectionRefusedError(f"db:5432 refused the login {secret}")
+
+
+@pytest.mark.parametrize(
+    ("unreadable", "named"),
+    [(_database_error, "OperationalError"), (_connection_error, "ConnectionRefusedError")],
+    ids=["database", "connection"],
+)
+@pytest.mark.asyncio
+async def test_a_database_that_cannot_give_the_settings_is_named_with_its_error_class(
+    mock_ctx: dict[str, Any],
+    mock_db_session: AsyncMock,
+    monkeypatch: pytest.MonkeyPatch,
+    unreadable: Any,
+    named: str,
+) -> None:
+    from app.services import settings_service
+    from tests.credential_shapes import password
+
+    secret = password(14)
+
+    async def _unreadable(_db: Any) -> dict[str, Any]:
+        raise unreadable(secret)
+
+    monkeypatch.setattr(settings_service, "load_core_overrides", _unreadable)
+    job = _make_job()
+    _answer_reads(mock_db_session, _job_rows(job, _make_sample()))
+    pipeline = AsyncMock(return_value={"final_decision": "Malware"})
+
+    with patch("maljan.app.MaljanApp.arun", new=pipeline):
+        result = await run_analysis(mock_ctx, str(job.id))
+
+    assert result["status"] == "failed", result
+    assert f"could not be read from the database ({named})" in result["error"]
+    assert "once the database answers" in result["error"]
+    assert secret not in result["error"]
+    pipeline.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_a_settings_read_that_fails_for_another_reason_is_not_blamed_on_the_database(
+    mock_ctx: dict[str, Any],
+    mock_db_session: AsyncMock,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Not an outage to wait out: the job fails by the error's class, the pipeline never starts."""
+    from app.services import settings_service
+
+    async def _unmergeable(_db: Any) -> dict[str, Any]:
+        raise RecursionError("maximum recursion depth exceeded")
+
+    monkeypatch.setattr(settings_service, "load_core_overrides", _unmergeable)
+    job = _make_job()
+    recorded = _answer_reads(mock_db_session, _job_rows(job, _make_sample()))
+    pipeline = AsyncMock(return_value={"final_decision": "Malware"})
+
+    with patch("maljan.app.MaljanApp.arun", new=pipeline):
+        result = await run_analysis(mock_ctx, str(job.id))
+
+    assert result["status"] == "failed", result
+    assert result["error"].startswith("RecursionError (error id "), result["error"]
+    assert "database" not in result["error"]
+    pipeline.assert_not_awaited()
+    failed = [u for u in updates_in(recorded, "analysis_jobs") if u["status"] == "failed"]
+    assert len(failed) == 1 and failed[0]["error_message"].startswith("RecursionError")
+
+
+@pytest.mark.asyncio
+async def test_a_plain_settings_refusal_is_stated_by_its_class_never_its_text(
+    mock_ctx: dict[str, Any],
+    mock_db_session: AsyncMock,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The refused value can be a stored secret; it reaches neither the job nor the log."""
+    from app.worker import analysis_worker
+    from tests.credential_shapes import password
+
+    secret = password(16)
+
+    def _refuses(overrides: Any, job_config: Any) -> Any:
+        raise ValueError(f"the value {secret} is not one this field takes")
+
+    monkeypatch.setattr(analysis_worker, "build_job_settings", _refuses)
+    job = _make_job()
+    _answer_reads(mock_db_session, _job_rows(job, _make_sample()))
+    pipeline = AsyncMock(return_value={"final_decision": "Malware"})
+
+    with (
+        patch("maljan.app.MaljanApp.arun", new=pipeline),
+        caplog.at_level(logging.INFO, logger="app.worker.analysis_worker"),
+    ):
+        result = await run_analysis(mock_ctx, str(job.id))
+
+    assert result["status"] == "failed", result
+    assert "The settings this job would run with are refused (ValueError)." in result["error"]
+    assert "did not run on defaults" in result["error"]
+    assert secret not in result["error"]
+    stated = [r for r in caplog.records if "rather than running on defaults" in r.getMessage()]
+    assert len(stated) == 1 and "ValueError" in stated[0].getMessage()
+    # ``from None``: the refusal's own text is not chained onto the failure's
+    # traceback, which the failure path logs whole.
+    assert secret not in caplog.text
+    pipeline.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_a_provider_with_no_role_block_is_refused_by_its_setting_with_why(
+    mock_ctx: dict[str, Any],
+    mock_db_session: AsyncMock,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The one refusal written here from setting names keeps its sentence."""
+    from app.services import settings_service
+    from maljan.llm import registry
+    from maljan.llm.provider_base import _FACTS, LLMProvider
+
+    class _Bare(LLMProvider):
+        name = "bare"
+
+        def __init__(self, config: Any) -> None:
+            self._config = config
+
+    async def _stored(_db: Any) -> dict[str, Any]:
+        return {"llm.provider": "bare"}
+
+    registry.discover_providers()
+    registry.register_provider("bare")(_Bare)
+    monkeypatch.setattr(settings_service, "load_core_overrides", _stored)
+    job = _make_job()
+    _answer_reads(mock_db_session, _job_rows(job, _make_sample()))
+    pipeline = AsyncMock(return_value={"final_decision": "Malware"})
+    try:
+        with patch("maljan.app.MaljanApp.arun", new=pipeline):
+            result = await run_analysis(mock_ctx, str(job.id))
+    finally:
+        registry._PROVIDER_REGISTRY.pop("bare", None)
+        _FACTS.pop("bare", None)
+
+    assert result["status"] == "failed", result
+    assert result["error"].startswith(
+        "The settings this job would run with are refused: llm.provider: the bare provider "
+        "keeps no settings block"
+    ), result["error"]
+    pipeline.assert_not_awaited()
+
+
 @pytest.mark.asyncio
 async def test_pipeline_failure_sets_failed_status(
     mock_ctx: dict[str, Any], mock_db_session: AsyncMock
@@ -673,6 +1051,44 @@ async def test_an_attached_report_of_a_format_no_longer_allowed_fails_in_words(
     assert "'cuckoo', which sandbox.upload.allowed_formats no longer accepts" in result["error"]
 
 
+@pytest.mark.asyncio
+async def test_a_provider_s_own_words_over_an_attached_report_are_stated_by_their_class(
+    mock_ctx: dict[str, Any],
+    mock_db_session: AsyncMock,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A plug-in provider's refusal can quote a value: the job says its class, the log no text."""
+    from maljan.providers.errors import ProviderError
+    from maljan.providers.sandbox.upload import UploadSandboxProvider
+    from tests.credential_shapes import password
+
+    secret = password(12)
+
+    def _refuses(self: Any, blob: bytes, **_: Any) -> None:
+        raise ProviderError(f"the report store refused the password '{secret}'")
+
+    job = _make_job(config={"sandbox_report_id": "0b6c6e0e-0000-4000-8000-000000000000"})
+    sample = _make_sample()
+    report_row = MagicMock()
+    report_row.id = uuid.UUID("0b6c6e0e-0000-4000-8000-000000000000")
+    report_row.sample_id = sample.id
+    report_row.storage_path = "sandbox-reports/0b/0b6c.../report.json"
+    report_row.format = "cape2"
+    report_row.sample_sha256_match = True
+
+    with (
+        patch.object(UploadSandboxProvider, "set_pending_blob", _refuses),
+        caplog.at_level(logging.INFO),
+    ):
+        result = await _run_with_attached_report(mock_ctx, mock_db_session, job, sample, report_row)
+
+    assert result["status"] == "failed", result
+    assert "could not read the attached sandbox report (ProviderError)" in result["error"]
+    assert "did not run without it" in result["error"]
+    assert secret not in result["error"]
+    assert secret not in caplog.text
+
+
 # ---------------------------------------------------------------------------
 # H3 (security hardening): the worker's private sample copies (download +
 # Ghidra mirror) are removed when the job ends, success or failure alike.
@@ -715,7 +1131,7 @@ async def test_worker_removes_private_sample_copies_after_success(
     recorded: list[tuple[Any, str | None]] = []
     monkeypatch.setattr(
         sample_files,
-        "remove_quietly",
+        "release_copy",
         lambda path, *, job_id=None: recorded.append((path, job_id)),
     )
 
@@ -740,7 +1156,9 @@ async def test_worker_removes_private_sample_copies_after_success(
 
     assert result["status"] == "completed"
     expected_temp = (tmp_path / "tmp" / f"{sample.sha256}.exe").resolve()
-    expected_mirror = (tmp_path / "samples" / ".work" / f"{sample.sha256}.exe").resolve()
+    # The mirror is the job's own copy (``sample_files.copy_name``).
+    mirror_name = sample_files.copy_name(sample.sha256, ".exe", str(job.id))
+    expected_mirror = (tmp_path / "samples" / ".work" / mirror_name).resolve()
     called_paths = {Path(p).resolve() for p, _ in recorded if p is not None}
     assert expected_temp in called_paths
     assert expected_mirror in called_paths
@@ -774,7 +1192,7 @@ async def test_worker_removes_private_sample_copies_after_pipeline_failure(
     recorded: list[tuple[Any, str | None]] = []
     monkeypatch.setattr(
         sample_files,
-        "remove_quietly",
+        "release_copy",
         lambda path, *, job_id=None: recorded.append((path, job_id)),
     )
 
@@ -807,7 +1225,9 @@ async def test_worker_removes_private_sample_copies_after_pipeline_failure(
 
     assert result["status"] == "failed"
     expected_temp = (tmp_path / "tmp" / f"{sample.sha256}.exe").resolve()
-    expected_mirror = (tmp_path / "samples" / ".work" / f"{sample.sha256}.exe").resolve()
+    # The mirror is the job's own copy (``sample_files.copy_name``).
+    mirror_name = sample_files.copy_name(sample.sha256, ".exe", str(job.id))
+    expected_mirror = (tmp_path / "samples" / ".work" / mirror_name).resolve()
     called_paths = {Path(p).resolve() for p, _ in recorded if p is not None}
     assert expected_temp in called_paths
     assert expected_mirror in called_paths
@@ -870,18 +1290,17 @@ def test_upload_temp_dir_resolves_to_absolute_path() -> None:
 
 
 @pytest.mark.asyncio
-async def test_override_load_failure_falls_back_to_default_settings(
+async def test_override_load_failure_fails_the_job_and_logs_no_secret(
     mock_ctx: dict[str, Any],
     mock_db_session: AsyncMock,
     monkeypatch: pytest.MonkeyPatch,
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    """A DB error while loading UI overrides must not fail the job.
+    """A DB error while loading the stored settings fails the job.
 
-    The job runs on default settings (Task 3: build_settings is store-only,
-    so "default" replaces what used to be "environment") and one warning
-    names the exception type only -- never a value, never a connection
-    string.
+    Running on the shipped defaults would drop the operator's spend cap,
+    server map and timeout without a word. One error names the exception type
+    only -- never a value, never a connection string.
     """
     job = _make_job()
     sample = _make_sample()
@@ -917,8 +1336,9 @@ async def test_override_load_failure_falls_back_to_default_settings(
         result = await run_analysis(mock_ctx, str(job.id))
     api_config._settings = None
 
-    assert result["status"] == "completed"
-    warnings = [r for r in caplog.records if "default settings only" in r.getMessage()]
-    assert len(warnings) == 1
-    assert "ConnectionError" in warnings[0].getMessage()
+    assert result["status"] == "failed"
+    errors = [r for r in caplog.records if "rather than running on defaults" in r.getMessage()]
+    assert len(errors) == 1
+    assert "ConnectionError" in errors[0].getMessage()
     assert "s3cret" not in caplog.text
+    assert "s3cret" not in result["error"]

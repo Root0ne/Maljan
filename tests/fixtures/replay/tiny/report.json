@@ -1,0 +1,48 @@
+{
+ "verdict": "Malware",
+ "identity": {
+  "file_type": "pe",
+  "platform": "windows",
+  "file_name": "fixture.bin",
+  "hashes": {
+   "sha256": "6abc1626f78cdbe20895273317295fa86ef2f65069382495938fe76d34657448",
+   "md5": "4a7367cffaef5fa2bdf5b9e1f8f4515a"
+  }
+ },
+ "degraded_mode": true,
+ "degradation_reasons": ["zero cross-layer corroboration (3 claimed techniques)", "no sandbox report (dynamic detonation unavailable) — static-only evidence"],
+ "sections": [
+  {
+   "key": "findings",
+   "kind": "table",
+   "title": "Findings",
+   "source": "finding",
+   "columns": ["Agent", "Finding", "Techniques", "Confidence", "Evidence"],
+   "rows": [
+    ["static", "Configuration strings are XOR-encoded", "T1027", "0.70", "ev_0002"],
+    ["static", "Process injection is not established", "T1055 (claimed, not published)", "not given", "ev_0002"]
+   ],
+   "evidence_ids": ["ev_0002"]
+  }
+ ],
+ "capability_matrix": [],
+ "executive_summary": "The sample is a 32-bit Windows executable whose configuration strings are XOR-encoded and decoded at run time [ev_0002]. No network contact was captured during the run [ev_0003].",
+ "key_findings": [
+  {"text": "Its configuration strings are XOR-encoded in two blobs.", "evidence_ids": ["ev_0002"]},
+  {"text": "It contacts a server the run never captured.", "evidence_ids": ["ev_0099"]}
+ ],
+ "defensive_recommendations": [
+  {"category": "edr_hunting", "action": "Hunt for the two encoded blobs in memory.", "rationale": "The configuration is decoded at run time.", "priority": "P1", "technique_id": "T1027", "detection": "A memory scan for the decoded configuration."},
+  {"category": "other", "action": "Keep the sample's hash on the blocklist.", "rationale": "The sample is malicious.", "priority": "P2", "technique_id": null, "detection": "File hash match."},
+  {"category": "other", "action": "Review scheduled tasks named Updater.", "rationale": "An analyst named one.", "priority": "P3", "technique_id": "T1053.005", "detection": "Task creation events."}
+ ],
+ "intro_background": "The sample is a small loader whose behaviour this run read statically [ev_0042].",
+ "technical_analysis": {
+  "packing_obfuscation": {
+   "title": "Packing & Obfuscation",
+   "body": "Two configuration blobs are XOR-encoded [ev_0002].",
+   "evidence_refs": ["ev_0002"]
+  }
+ },
+ "c2_channels": []
+}

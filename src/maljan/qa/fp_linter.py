@@ -30,7 +30,6 @@ an audit banner without re-running the pipeline.
 
 from __future__ import annotations
 
-import re
 from dataclasses import asdict, dataclass
 from typing import Any
 
@@ -38,6 +37,7 @@ from maljan.agents._indicator_denylists import (
     MAX_FILE_NAME_INDICATORS,
     MAX_TOTAL_INDICATORS,
 )
+from maljan.analysis.technique_ids import technique_ids_in
 
 
 @dataclass(frozen=True)
@@ -72,8 +72,6 @@ _PLATFORM_INCOMPATIBLE_TERMS: dict[str, frozenset[str]] = {
     "android": frozenset({"powershell", "windows registry", "macos", "cloud auth", "azure"}),
     "ios": frozenset({"powershell", "windows registry", "cloud auth", "azure"}),
 }
-
-_TID_RE = re.compile(r"T\d{4}(?:\.\d{3})?")
 
 
 def lint_report(report: Any, sample_platform: str | None) -> list[FPWarning]:
@@ -144,7 +142,9 @@ def lint_report(report: Any, sample_platform: str | None) -> list[FPWarning]:
         text_blob = " ".join(
             str(getattr(rec, attr, "") or "") for attr in ("action", "rationale", "category")
         )
-        for tid in set(_TID_RE.findall(text_blob)):
+        # Whole ids only (``AT10551x`` names none), each once, in the order
+        # written, so the warnings come out in the same order every run.
+        for tid in technique_ids_in(text_blob):
             if tid not in capability_ids:
                 warnings.append(
                     FPWarning(
@@ -313,7 +313,8 @@ def _ungrounded_claim_count(report: Any) -> int:
             if not section_is_grounded(section):
                 count += 1
         except Exception:  # noqa: BLE001 — a linter never fails a report
-            continue
+            # A check that could not run has not shown the section grounded.
+            count += 1
     for mapping in getattr(report, "ttp_mappings", None) or []:
         if not getattr(mapping, "contributing_layers", None) and not getattr(
             mapping, "evidence_quotes", None

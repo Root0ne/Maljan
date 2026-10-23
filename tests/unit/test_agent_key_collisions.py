@@ -199,6 +199,39 @@ class TestEveryReferenceMovesWithTheRename:
         )
         assert cfg.mcp.servers["mine"].agents == ["reverser_custom"]
 
+    def test_an_agent_tool_of_another_definition_follows(self) -> None:
+        """A lead's agent tool asks the operator's agent, not the built-in seeded under its name."""
+        cfg = _settings(
+            agents={
+                "definitions": {
+                    "reverser": {"role": "generic", "prompt": "mine"},
+                    "my_lead": {
+                        "role": "lead",
+                        "prompt": "lead",
+                        "tools": [
+                            {"kind": "agent", "agent": "reverser"},
+                            {"kind": "agent", "agent": "static"},
+                        ],
+                    },
+                }
+            }
+        )
+        called = [ref.agent for ref in cfg.agents.definitions["my_lead"].tools]
+        assert called == ["reverser_custom", "static"]
+
+    def test_a_definition_with_no_moved_agent_tool_is_the_same_object(self) -> None:
+        untouched = {"role": "lead", "prompt": "lead", "tools": [{"kind": "agent", "agent": "x"}]}
+        document = {
+            "agents": {
+                "definitions": {
+                    "reverser": {"role": "generic", "prompt": "mine"},
+                    "lead2": untouched,
+                }
+            }
+        }
+        out, _ = rename_colliding_agent_keys(document)
+        assert out["agents"]["definitions"]["lead2"] is untouched
+
 
 class TestThePassItself:
     def test_it_is_idempotent(self) -> None:

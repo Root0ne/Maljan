@@ -386,12 +386,6 @@ def _checksum_byte(block: bytes) -> int:
     return sum(block[4:31]) % 251
 
 
-def read_pack_header(data: bytes) -> PackHeader:
-    """The pack header where UPX writes it, or :class:`NotRead` or :class:`Damaged` saying why."""
-    packed = _read_packed(data)
-    return _find_header(packed)
-
-
 # How many bytes of a file hold its headers for the pack header test: the DOS
 # header, the PE header and a section table of the most sections a PE has.
 _HEADER_BYTES = 0x1000 + 24 + 0xF0 + 40 * 0xFFFF
@@ -1626,11 +1620,14 @@ def _sections_of(image: bytes) -> list[dict[str, Any]]:
     ]
 
 
-def _import_counts(image: bytes) -> tuple[int, int]:
-    """How many functions the rebuilt file's own import table names, and from how many libraries."""
-    slots = pe_image.parse(image).imports_by_slot()
-    libraries = {name.split("!", 1)[0].lower() for name in slots.values() if "!" in name}
-    return len(slots), len(libraries)
+def _import_counts(image: bytes) -> tuple[int, int, str]:
+    """How many functions the rebuilt file's own import table names, from how many libraries.
+
+    The third item is what the import reader says it did not read, or empty.
+    """
+    parsed = pe_image.parse(image)
+    slots = parsed.imports_by_slot()
+    return len(slots), len(slots.libraries()), parsed.imports_note
 
 
 def unpack_upx(
@@ -1670,7 +1667,7 @@ def unpack_upx(
     written = (write or binary._write_carved)(child, result.image)
     if written is not None:
         return tool_error(TOOL_FAILED, written, tool=TOOL, remediation=REMEDIATION)
-    functions, libraries = _import_counts(result.image)
+    functions, libraries, imports_cut = _import_counts(result.image)
     return {
         "unpacked": "yes",
         "pack_header": header.facts(),
@@ -1700,6 +1697,7 @@ def unpack_upx(
         "entry_point": hex(result.entry_point),
         "import_count": functions,
         "import_libraries": libraries,
+        **({"import_count_cut": imports_cut} if imports_cut else {}),
         "rebuilt": result.rebuilt,
         "overlay_bytes": result.overlay,
         "sections": _sections_of(result.image),

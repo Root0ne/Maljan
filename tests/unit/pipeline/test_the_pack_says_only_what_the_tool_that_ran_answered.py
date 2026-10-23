@@ -249,10 +249,18 @@ class TestEveryReaderTakesEitherName:
 @pytest.mark.usefixtures("settings")
 class TestStepsStartedBesideThePack:
     def test_a_long_chain_holds_only_the_threads_still_working(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, request: pytest.FixtureRequest
     ) -> None:
         monkeypatch.setattr(triage_pack, "available_memory_bytes", lambda: 10**13)
         monkeypatch.setattr(triage_pack, "cgroup_headroom_bytes", lambda: None)
+        # Under a ``ulimit -v`` cap (3 to 4 GB) the test starts its threads
+        # with a small stack and fails with "can't start new thread" with the
+        # default one: the cap is on address space, and each thread reserves
+        # its stack in it. The steps here do almost nothing, so a small stack
+        # serves, and what is measured (how many threads are held at once) does
+        # not depend on it.
+        stack_before = threading.stack_size(256 * 1024)
+        request.addfinalizer(lambda: threading.stack_size(stack_before))
         peak = [0]
 
         def call(step: Any, values: Any, left: Any) -> ServerAnswer:

@@ -103,20 +103,21 @@ BUILDERS: dict[str, str] = {
     "check_hash": "_reputation",
 }
 
-# ``evidence_bundles``: the sandbox tools by prefix, the two network answers,
-# the entries that state what the report is rather than what it saw, and the
-# sample's own strings.
+# ``evidence_bundles``: the sandbox tools by prefix, the two network answers
+# and the sample's own strings.
 SANDBOX_TOOL_PREFIXES = ("sandbox_", "pcap_summary")
 NETWORK_SANDBOX_TOOLS = frozenset({"sandbox_network", "pcap_summary"})
-NOT_OBSERVATIONS = frozenset({"sandbox_status", "sandbox_sections"})
-SANDBOX_REPORT_SECTION_TOOL = "sandbox_report_section"
-SANDBOX_ITEMS_TOOL = "sandbox_items"
 STRING_TOOLS = frozenset({"strings", "floss", "iocs_from_file", "list_strings"})
 
 # ``evidence_bundles._SECTION_TOOL_HINTS``: which captured outputs each
 # composer section was shown, by a part of the tool's name.
 SECTION_TOOL_HINTS: dict[str, tuple[str, ...]] = {
-    "packing_obfuscation": ("list_segments", "find_anti_analysis", "detect_malware_behaviors"),
+    "packing_obfuscation": (
+        "list_segments",
+        "find_anti_analysis",
+        "anti_analysis_scan",
+        "detect_malware_behaviors",
+    ),
     "cli_flags": ("decompile_function", "analyze_function_complete", "list_strings"),
     "encryption_scheme": (
         "detect_crypto_constants",
@@ -128,6 +129,7 @@ SECTION_TOOL_HINTS: dict[str, tuple[str, ...]] = {
     "persistence_detail": ("list_strings", "decompile_function", "analyze_api_call_chains"),
     "evasion_antiforensics": (
         "find_anti_analysis_techniques",
+        "anti_analysis_scan",
         "detect_malware_behaviors",
         "decompile_function",
     ),
@@ -163,11 +165,9 @@ SECTION_TOOL_HINTS: dict[str, tuple[str, ...]] = {
 CODE_LISTING_TOOL = "decompile_function"
 
 # ``renderers.markdown``: the analysis tools in the order the report listed
-# them, the sandbox tools by prefix with the status entry apart, and the
-# reputation lookups.
+# them, the sandbox tools by prefix, and the reputation lookups.
 ANALYSIS_TOOLS = ("capa", "yara_scan", "lolbin_lookup", "api_capability", "strings")
 MARKDOWN_SANDBOX_TOOLS = ("sandbox_", "pcap_summary")
-SANDBOX_STATUS_TOOL = "sandbox_status"
 REPUTATION_TOOLS = ("get_file_report", "check_hash", "file_report", "hash_lookup")
 # The technique-hit source a stored report's hits of each kind were recorded under.
 HIT_SOURCES: dict[str, tuple[str, ...]] = {
@@ -175,8 +175,8 @@ HIT_SOURCES: dict[str, tuple[str, ...]] = {
     "api_catalogue": ("api_capability",),
 }
 
-# ``renderers.stix_renderer``: the recovering tools, the static decoder, the
-# string sweep, and the two network records.
+# ``renderers.stix_renderer``: the recovering tools, the static decoder and the
+# string sweep.
 EMULATING_TOOL = "floss"
 # The emulator a stored record's partial reason names.
 EMULATOR_WORD = "FLOSS"
@@ -184,8 +184,6 @@ DECODER_TOOL = "decode_string_blobs"
 STRING_SWEEP_TOOLS = ("strings", "iocs_from_file", "iocs_from_text")
 PLAIN_STRING_TOOLS = ("strings",)
 FILE_IOC_TOOLS = ("iocs_from_file",)
-NETWORK_RECORD_TOOLS = frozenset({"sandbox_network", "pcap_summary"})
-CAPTURE_TOOL = "pcap_summary"
 # ``ledger_projection``: the tools whose rule rows became technique hits.
 TECHNIQUE_HIT_TOOLS = ("capa",)
 # A recovery recorded with no kind (a record stored before kinds were) is read

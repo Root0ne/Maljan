@@ -442,7 +442,7 @@ async def test_an_unparseable_job_id_records_nothing(redis_stub: MagicMock) -> N
 
 @pytest.mark.asyncio
 async def test_a_cancelled_row_is_not_overwritten_by_a_failure() -> None:
-    """``mark_job_failed`` leaves the operator's decision alone."""
+    """``mark_job_failed`` leaves the operator's decision, and a recorded completion, alone."""
     from app.worker.analysis_worker import mark_job_failed
 
     factory = SessionFactory(rows_for(None, None))
@@ -451,8 +451,9 @@ async def test_a_cancelled_row_is_not_overwritten_by_a_failure() -> None:
     )
     assert ok
     statement = factory.statements()[0]
-    where = str(statement.whereclause)
-    assert "status" in where and "!=" in where
+    where = str(statement.whereclause.compile(compile_kwargs={"literal_binds": True}))
+    assert "status NOT IN" in where
+    assert "'cancelled'" in where and "'completed'" in where
 
 
 @pytest.mark.asyncio

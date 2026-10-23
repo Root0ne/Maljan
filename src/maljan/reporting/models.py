@@ -20,7 +20,7 @@ Design notes:
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Annotated, Any, Literal
+from typing import Annotated, Any, Literal, get_args
 
 from pydantic import (
     BaseModel,
@@ -224,6 +224,31 @@ class ExportRow(BaseModel):
     rva: str | None = None
 
 
+class DirectedText(BaseModel):
+    """One phrase group of the directed-text families the sample carries.
+
+    As the triage pack's directed-text pass recorded it
+    (``analysis.directed_text``): the family, the normalised phrase in the
+    pack's quoted-data form (escaped, never raw), how many times it stands,
+    where it first stands (a file offset with its byte length, encoding and
+    region, or the place in the source that recovered it, every part held
+    escaped), how it was disguised, how many of its matches stand inside a
+    chat template structure of their own text, and the ledger entry. Every
+    match is counted as a finding either way. It is evidence about the
+    sample and moves no verdict by itself.
+    """
+
+    model_config = _STRICT_CONFIG
+
+    family: str
+    text: str
+    count: int = 1
+    where: str = ""
+    disguises: list[str] = Field(default_factory=list)
+    inside_template: int = 0
+    evidence_id: str = ""
+
+
 class StaticAnalysis(BaseModel):
     """Findings from binary parsing / disassembly (no execution)."""
 
@@ -231,11 +256,30 @@ class StaticAnalysis(BaseModel):
 
     sections: list[PESection] = Field(default_factory=list)
     imports: list[ImportRow] = Field(default_factory=list)
+    # The delay-load import table, as the format tool read it beside
+    # ``imports``: a binary that resolves its APIs through ``.didat`` imports
+    # them as surely. Kept apart, so the import table every surface prints is
+    # unchanged; left out of the dump when empty, as on a report stored before
+    # the field existed.
+    delay_imports: list[ImportRow] = Field(default_factory=list, exclude_if=lambda value: not value)
+    # Why the import tables read may hold part of the binary's imports, one
+    # note per answer that read them, when no answer read them whole: shortened,
+    # saying itself truncated, or reading the import directory as damaged.
+    # Empty when an answer read them whole, and then left out of the dump.
+    imports_partial: list[str] = Field(default_factory=list, exclude_if=lambda value: not value)
+    # Said when the section table was not read whole: an ELF whose compressed
+    # sections would inflate past the platform's sample upload cap stops there
+    # (``extractors.pe_extractor.ELF_SECTIONS_STOPPED``).
+    sections_partial: list[str] = Field(default_factory=list, exclude_if=lambda value: not value)
     exports: list[str] = Field(default_factory=list)
     # The same exports with their ordinal and address, when the format tool
     # reported them. ``exports`` stays the plain list every older consumer and
     # every stored report reads.
     export_rows: list[ExportRow] = Field(default_factory=list)
+    # The permissions an Android package declares in its manifest: what its
+    # author asked the platform for. Never exports, which a package has none
+    # of. Empty for every other format, and then left out of the dump.
+    permissions: list[str] = Field(default_factory=list, exclude_if=lambda value: not value)
     interesting_strings: list[StringIOC] = Field(default_factory=list)
     embedded_resources: list[dict[str, Any]] = Field(default_factory=list)
     packer_hint: str | None = None
@@ -320,7 +364,9 @@ class SandboxSignature(BaseModel):
 
     name: str
     description: str = ""
-    severity: int = 0
+    # ``None`` where the sandbox gave no severity the report can read: unknown,
+    # never 0 (a stored row that holds 0 reads as 0).
+    severity: int | None = None
     technique_ids: list[str] = Field(default_factory=list)
     marks: list[str] = Field(default_factory=list)
 
@@ -496,6 +542,24 @@ class NetworkIOCs(BaseModel):
 # ---------------------------------------------------------------------------
 # Persistence
 # ---------------------------------------------------------------------------
+
+
+class EnrichmentNotAsked(BaseModel):
+    """A network value the post-verdict enrichment left unasked, and the questions it did not ask.
+
+    The enrichment asks at most the operator's per-kind lookup cap
+    (``enrichment_max_lookups``, ``cap`` here) of the values still to ask about;
+    every value past it is listed, with each question it would have been asked
+    (``reputation``, ``asn``, ``geo``), so a missing reputation is read as
+    "not asked" and never as "clean".
+    """
+
+    model_config = _STRICT_CONFIG
+
+    kind: Literal["domain", "ip"]
+    value: str
+    questions: list[str] = Field(default_factory=list)
+    cap: int
 
 
 class PersistenceMechanism(BaseModel):
@@ -678,6 +742,36 @@ class TTPMapping(BaseModel):
     support: str = ""
 
 
+class AttckLink(BaseModel):
+    """One ATT&CK object a published technique links to, as the cached bundle states it."""
+
+    model_config = _STRICT_CONFIG
+
+    attck_id: str = ""
+    name: str = ""
+    # The relationship's own sentence on how it applies to the technique
+    # (mitigations); empty for a detection strategy or a data component.
+    text: str = ""
+
+
+class AttckDefenseRow(BaseModel):
+    """What ATT&CK itself lists against one published technique.
+
+    Read from the cached ATT&CK bundles with no model call
+    (``memory.attck_defense``); ``evidence_ids`` are the technique's own
+    sources, so the row cites what the technique rests on.
+    """
+
+    model_config = _STRICT_CONFIG
+
+    technique_id: str
+    technique_name: str = ""
+    mitigations: list[AttckLink] = Field(default_factory=list)
+    detection_strategies: list[AttckLink] = Field(default_factory=list)
+    data_components: list[AttckLink] = Field(default_factory=list)
+    evidence_ids: list[str] = Field(default_factory=list)
+
+
 # ---------------------------------------------------------------------------
 # Attribution
 # ---------------------------------------------------------------------------
@@ -751,6 +845,26 @@ class FamilyAttribution(BaseModel):
 # ---------------------------------------------------------------------------
 
 
+class SampleString(BaseModel):
+    """One string of a drafted YARA rule, as the rule's engine found it in the sample.
+
+    ``offset`` is the first byte the engine matched the string at, counted from
+    the start of the file, and ``None`` when it matched nowhere in the sample.
+    The first place only: the record stays the size of the rule however often
+    the sample repeats a string, and the rule, run again, finds every place.
+    """
+
+    model_config = _STRICT_CONFIG
+
+    identifier: str
+    offset: int | None = None
+
+
+# The clauses of a drafted YARA rule's condition, in the order the draft writes
+# them: the sample's sha256, its import hash, and the rule's strings.
+RuleClause = Literal["sha256", "imphash", "strings"]
+
+
 class DetectionRule(BaseModel):
     """Auto-generated detection content with the body kept as plain text."""
 
@@ -762,6 +876,21 @@ class DetectionRule(BaseModel):
     auto_generated: bool = True
     source_evidence: list[str] = Field(default_factory=list)
     compile_error: str | None = None  # only set when template validation fails
+    # A drafted YARA rule checked against the sample it was drafted from
+    # (``reporting.detection_signatures``): whether the rule matched it, which
+    # clauses of its condition held (the engine's answer, in the draft's order;
+    # empty when none did), each of the rule's strings with where the engine
+    # first found it, or why the rule was not checked. Absent on a Sigma or
+    # Suricata draft, which no engine runs on a file, and on a rule stored
+    # before the check, which renders as it did.
+    matches_sample: bool | None = Field(default=None, exclude_if=lambda value: value is None)
+    matched_by: list[RuleClause] | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
+    sample_strings: list[SampleString] | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
+    sample_not_checked: str | None = Field(default=None, exclude_if=lambda value: value is None)
 
 
 class DefensiveRecommendation(BaseModel):
@@ -1117,6 +1246,59 @@ class FlaggedStatement(BaseModel):
     asked: bool = True
 
 
+# What the report says of a question the analyst asked of the run, in a fixed
+# vocabulary, so a reader can tell an answer the evidence stands behind from a
+# partial one, a negative bounded by what was looked at, a question this run
+# could not settle, and one no run of this kind can. The report model picks the
+# word (``reporting.question_round``); code refuses "established" with no
+# answered entry behind it and "limited negative" with no record of what was
+# looked at, and never turns an open question into an absence.
+QuestionOutcome = Literal[
+    "established",
+    "partial",
+    "limited_negative",
+    "not_determinable",
+    "out_of_scope",
+]
+QUESTION_OUTCOMES: tuple[str, ...] = get_args(QuestionOutcome)
+# Each outcome as every surface prints it.
+QUESTION_OUTCOME_WORDS: dict[str, str] = {
+    "established": "established",
+    "partial": "partial",
+    "limited_negative": "limited negative",
+    "not_determinable": "not determinable from this run",
+    "out_of_scope": "out of scope",
+}
+
+
+class QuestionAnswer(BaseModel):
+    """One question the analyst asked of the run, and what the report answers.
+
+    ``outcome`` is the word the report stands by. Where the checks refused the
+    report model's own word, ``answered`` keeps it and ``outcome`` is "not
+    determinable from this run"; ``checks`` says, in the platform's words,
+    what the checks found. ``looked_at`` is the coverage record a limited
+    negative rests on: the entries of the calls that looked. ``open_questions``
+    are the analysts' open questions the answer names, as "agent: question".
+    """
+
+    model_config = _STRICT_CONFIG
+
+    question: str
+    outcome: QuestionOutcome
+    answer: str = ""
+    evidence_ids: list[str] = Field(default_factory=list)
+    looked_at: list[str] = Field(default_factory=list)
+    open_questions: list[str] = Field(default_factory=list)
+    answered: QuestionOutcome | None = Field(default=None, exclude_if=lambda value: value is None)
+    checks: list[str] = Field(default_factory=list)
+
+
+def outcome_words(outcome: Any) -> str:
+    """An outcome as the report prints it; an unknown word as written."""
+    return QUESTION_OUTCOME_WORDS.get(str(outcome or ""), str(outcome or ""))
+
+
 class JudgeIndicator(BaseModel):
     """One value a judge indicator names: its IOC kind, the value, a hash's algorithm."""
 
@@ -1176,6 +1358,7 @@ class Figure(BaseModel):
         "network_graph",
         "infection_chain",
         "code_listing",
+        "not_drawn",
     ]
     content: str  # inline SVG or <pre> HTML
     legend: str | None = None
@@ -1238,6 +1421,24 @@ class EvidenceSection(BaseModel):
     # ``agent:<name>``. Read by the grounding check, which accepts a finding
     # source in place of an evidence id.
     source: str = ""
+    # The one tool server every cited entry came from
+    # (``reporting.section_servers``), when they agree on one. Derived where
+    # the report is built and where a stored one is served; ``None`` is left
+    # out of the dump, so a section without one dumps as it always did.
+    source_server: str | None = Field(default=None, exclude_if=lambda value: value is None)
+
+
+# The ``source`` of the "Open questions" section (``ledger_report``): what the
+# analysts said they could not establish. An open question names an unknown,
+# so a reader that looks for what the run saw, holds or grounds — the
+# capability grounding, the value holders, the corroboration corpus — skips
+# the section, and the ids it cites stand for nothing it found.
+OPEN_QUESTION_SOURCE = "open_question"
+
+
+def is_open_question_section(section: Any) -> bool:
+    """Whether ``section`` is the "Open questions" section, read by its source."""
+    return str(getattr(section, "source", "") or "").strip().lower() == OPEN_QUESTION_SOURCE
 
 
 class EvidenceIndexRow(BaseModel):
@@ -1379,6 +1580,14 @@ class MalwareReport(BaseModel):
 
     # --- Deterministic analyses ---
     static: StaticAnalysis | None = None
+    # The phrase groups of the directed-text families the pack's pass found
+    # (``ledger_projection.directed_text_from_ledger``), apart from ``static``
+    # so they add no static block to a run that has none. Left out of the JSON
+    # when there are none, so a report stored before the field existed, or one
+    # with nothing found, reads as it did.
+    directed_text: list[DirectedText] = Field(
+        default_factory=list, exclude_if=lambda value: not value
+    )
     dynamic: DynamicBehavior | None = None
     network: NetworkIOCs | None = None
     persistence: list[PersistenceMechanism] = Field(default_factory=list)
@@ -1392,6 +1601,12 @@ class MalwareReport(BaseModel):
     # after being asked for one. A behaviour, reported as a behaviour: it is
     # never published as an ATT&CK technique, and it is not dropped either.
     unmapped_behaviours: list[str] = Field(default_factory=list)
+    # ATT&CK's own mitigations, detection strategies and data components for
+    # each published technique, from the cached bundles. Empty when no bundle
+    # is cached or ATT&CK lists nothing for the technique.
+    attck_defense: list[AttckDefenseRow] = Field(default_factory=list)
+    # The ATT&CK release those rows were read from; empty when there are none.
+    attck_defense_version: str = ""
 
     # --- Attribution ---
     attribution: FamilyAttribution = Field(default_factory=FamilyAttribution)
@@ -1429,6 +1644,13 @@ class MalwareReport(BaseModel):
     # after the body is composed (``reporting.claim_coverage``) and printed in
     # a section of their own; empty on a report stored before the field existed.
     claims_not_discussed: list[ClaimNotDiscussed] = Field(default_factory=list)
+    # The questions the analyst asked of the run when submitting it, each with
+    # the report's answer (``QuestionAnswer``). Left out of the dump when none
+    # was asked, so a report stored before the field, or of a job asked
+    # nothing, reads and dumps as it did.
+    question_answers: list[QuestionAnswer] = Field(
+        default_factory=list, exclude_if=lambda value: not value
+    )
     # For each technique a signature rule of this run asserted, the rules, how
     # many of each rule's own strings matched and the asserting layer that
     # matched it (``{"rule", "strings", "source"}``; a row stored before
@@ -1479,6 +1701,22 @@ class MalwareReport(BaseModel):
     # an empty list says the run's lookups established nothing.
     reputation: Annotated[list[ReputationAnswer] | None, BeforeValidator(_readable_reputation)] = (
         Field(default=None, exclude_if=lambda value: value is None)
+    )
+    # The network values the last enrichment left unasked because the
+    # operator's per-kind lookup cap was reached (``EnrichmentNotAsked``).
+    # ``None`` where none was left (and on a report stored before the field),
+    # and then left out of the dump, so a stored report reads and dumps as it did.
+    enrichment_not_asked: list[EnrichmentNotAsked] | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
+    # The stored ledger's seal and the amendments chained onto it since,
+    # written by the worker when the run is stored and by an enrichment that
+    # changes the stored report afterwards (``app.services.ledger_chain``).
+    # Never built in the run, so no model sees them; ``None`` on a report
+    # stored before sealing existed, and then left out of the dump.
+    ledger_seal: dict[str, Any] | None = Field(default=None, exclude_if=lambda value: value is None)
+    ledger_amendments: list[dict[str, Any]] | None = Field(
+        default=None, exclude_if=lambda value: value is None
     )
 
     # --- Professional-report front-matter & spine ---

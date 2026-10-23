@@ -20,7 +20,12 @@ import Link from "next/link";
 
 import { api } from "@/lib/api";
 import type { MalwareReport } from "@/types/malware-report";
-import { carriesReputationRecords, reputationFromReport, type Reputation } from "./reputation";
+import {
+  carriesReputationRecords,
+  detectionsFigure,
+  reputationFromReport,
+  type Reputation,
+} from "./reputation";
 import { REPUTATION_TOOLS, reputationFromLedger } from "./reputationLegacy";
 
 /** The reputation answer of a report stored before records, read from its ledger. */
@@ -84,9 +89,10 @@ export default function ReputationSection({
   if (!reputation) return null;
 
   const { engines, malicious, suspicious, labels, firstSeen, lastSeen, link } = reputation;
+  const figure = detectionsFigure(reputation);
   const detectionClass =
     malicious === null
-      ? "text-text-primary"
+      ? "text-text-muted"
       : malicious > 0
         ? "text-status-red"
         : "text-status-green";
@@ -122,9 +128,11 @@ export default function ReputationSection({
               <div className="text-[11px] text-text-muted uppercase tracking-wider">
                 Detections
               </div>
-              <div className={`text-2xl font-mono ${detectionClass}`}>
-                {malicious ?? 0}
-                <span className="text-sm text-text-muted">/{engines}</span>
+              <div className={`font-mono ${figure.known ? "text-2xl" : "text-sm"} ${detectionClass}`}>
+                {figure.count}
+                <span className="text-sm text-text-muted">
+                  {figure.known ? `/${engines}` : ` of ${engines} engines`}
+                </span>
               </div>
             </div>
             {suspicious !== null && suspicious > 0 && (

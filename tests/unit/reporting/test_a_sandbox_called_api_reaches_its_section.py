@@ -129,7 +129,9 @@ def test_the_pack_asks_the_catalogue_about_the_sandbox_s_calls(tmp_path: Any) ->
         "api_names": ["HttpSendRequestW", "CryptAcquireContextW"],
         "platform": "windows",
     }
-    assert result.entries[-1] is asked
+    # After it only the directed-text pass and the behaviour links, the pack's last steps.
+    assert result.entries[-3] is asked
+    assert [e.tool for e in result.entries[-2:]] == ["find_directed_text", "behaviour_code_links"]
     # Its line says these are the sandbox's recorded calls; an import
     # catalogue line keeps its own name.
     from maljan.pipeline.triage_pack import render_pack

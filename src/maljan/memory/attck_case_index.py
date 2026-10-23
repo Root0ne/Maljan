@@ -97,14 +97,23 @@ class AttckCaseIndex:
     def __len__(self) -> int:
         return len(self._entries)
 
-    def search(self, query_text: str, top_k: int, min_score: float) -> list[CaseNeighbour]:
-        """Return up to ``top_k`` cases with cosine >= ``min_score``, best first."""
+    def search(
+        self, query_text: str, top_k: int, min_score: float, exclude_sample_id: str = ""
+    ) -> list[CaseNeighbour]:
+        """Return up to ``top_k`` cases with cosine >= ``min_score``, best first.
+
+        ``exclude_sample_id`` drops the sample's own past case: a re-analysis
+        would otherwise find itself the closest neighbour and cite its own
+        earlier techniques as prior art.
+        """
+        own = (exclude_sample_id or "").strip().lower()
         if not self._entries or not query_text.strip():
             return []
         qv = embeddings.encode(query_text)
         scored = [
             CaseNeighbour(sid, embeddings.cosine(qv, vec), list(tids), cat)
             for sid, tids, cat, vec in self._entries
+            if not (own and sid.strip().lower() == own)
         ]
         scored = [n for n in scored if n.score >= min_score]
         scored.sort(key=lambda n: n.score, reverse=True)
@@ -117,6 +126,7 @@ class AttckCaseIndex:
         top_k: int,
         min_score: float,
         max_techniques: int,
+        exclude_sample_id: str = "",
     ) -> list[TechniqueCandidate]:
         """Aggregate the technique_ids of the top-k neighbours into ranked candidates.
 
@@ -125,7 +135,9 @@ class AttckCaseIndex:
         support (recurrence) then score (closest behavioural match), capped at
         ``max_techniques``. Returns ``[]`` when nothing clears the floor.
         """
-        neighbours = self.search(query_text, top_k=top_k, min_score=min_score)
+        neighbours = self.search(
+            query_text, top_k=top_k, min_score=min_score, exclude_sample_id=exclude_sample_id
+        )
         if not neighbours:
             return []
         support: dict[str, int] = {}

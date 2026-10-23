@@ -98,14 +98,12 @@ class TestNetwork:
         assert result["hosts"] == ["45.77.12.34"]
         assert result["http"][0]["uri"] == "http://evil-c2-host.top/gate.php"
 
-    def test_a_report_with_no_network_block_is_empty_lists_not_an_error(self) -> None:
-        assert sandbox_tools.sandbox_network({"behavior": {}}) == {
-            "dns": [],
-            "hosts": [],
-            "http": [],
-            "tcp": [],
-            "udp": [],
-        }
+    def test_a_report_with_no_network_block_is_absent_not_empty_lists(self) -> None:
+        """Empty lists read as "no network activity"; the report simply holds no section."""
+        answer = sandbox_tools.sandbox_network({"behavior": {}})
+        assert answer["absent"] == ["network"]
+        assert "error" not in answer
+        assert not any(kind in answer for kind in sandbox_tools.NETWORK_VIEW_KINDS)
 
     def test_every_row_comes_back_when_no_page_is_asked_for(self) -> None:
         report = {"network": {"dns": [{"request": f"h{i}.example"} for i in range(500)]}}

@@ -398,16 +398,19 @@ def test_deleting_a_report_removes_it_and_the_stored_object(monkeypatch):
     row = MagicMock(id=report_id, storage_path=f"sandbox-reports/{SHA[:2]}/{SHA}/{report_id}.json")
     result = MagicMock()
     result.scalar_one_or_none.return_value = row
+    result.scalar.return_value = 0  # no queued or running job names the report
     db = MagicMock()
     db.execute = AsyncMock(return_value=result)
+    db.commit = AsyncMock()
     minio = MagicMock()
     monkeypatch.setattr(module, "_minio_client", lambda: minio)
+    from app.config import settings
 
     r = _build_client(db, sample, user).delete(
         f"/api/v1/samples/{sample.id}/sandbox-reports/{report_id}"
     )
     assert r.status_code == 204
-    minio.remove_object.assert_called_once_with(module.settings.minio_bucket, row.storage_path)
+    minio.remove_object.assert_called_once_with(settings.minio_bucket, row.storage_path)
 
 
 def test_deleting_an_unknown_report_is_a_404(monkeypatch):

@@ -26,6 +26,8 @@ from collections import deque
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 
+from maljan.utils.written_forms import hint_escaped
+
 # ---------------------------------------------------------------------------
 # Sensitive sink catalogue: normalized-API-name -> capability category.
 # Names are stored lowercase and WITHOUT the trailing A/W charset suffix; the
@@ -104,6 +106,8 @@ SENSITIVE_SINKS: dict[str, str] = {
     "regsetvalueex": "persistence",
     "regcreatekey": "persistence",
     "regcreatekeyex": "persistence",
+    "ntsetvaluekey": "persistence",  # Zw* is folded onto Nt* by _normalize_api
+    "ntcreatekey": "persistence",
     "createservice": "persistence",
     "openscmanager": "persistence",
     "startservice": "persistence",
@@ -265,15 +269,26 @@ def rank_suspicious_functions(graph: CallGraph, max_funcs: int = 12) -> list[Sus
     return ranked[:max_funcs]
 
 
+# The clause of a priority follow-up that points the reading at a technique.
+# Its own constant so an agent whose definition turns the technique line off
+# (``AgentDefinition.attck_techniques``) is sent the follow-up without it.
+ATTCK_PURPOSE = " to pick the right ATT&CK technique"
+
 # What to do with the priority functions, in no provider's tools' words: the
 # sentence a provider that names none of its own (``priority_follow_up``) gets.
 FOLLOW_UP = (
     "Read these functions first with the tools in your tool list. NOTE: reachable is NOT "
     "the same as data-connected — before asserting a 'capability reached' claim, confirm "
     "the data path (forward from the source, or backward from the sink argument) and "
-    "classify the terminal (caller-supplied / decoded-config / fixed constant) to pick the "
-    "right ATT&CK technique.\n"
+    "classify the terminal (caller-supplied / decoded-config / fixed constant)"
+    + ATTCK_PURPOSE
+    + ".\n"
 )
+
+
+def _in_data_form(name: str) -> str:
+    """A sample-controlled name in the pack's data form: control characters escaped."""
+    return hint_escaped(str(name))
 
 
 def priority_hint(ranked: list[SuspiciousFunction], follow_up: str = FOLLOW_UP) -> str:
@@ -289,11 +304,13 @@ def priority_hint(ranked: list[SuspiciousFunction], follow_up: str = FOLLOW_UP) 
         "graph; decompile and analyse them FIRST (they form the malicious core):",
     ]
     for f in ranked:
-        where = f.address or f.name
+        # Names come from the sample's symbol table; each is quoted in the
+        # pack's data form so none can end its line or pose as an instruction.
+        where = _in_data_form(f.address or f.name)
         cats = ", ".join(sorted(f.categories))
-        sinks = ", ".join(sorted(f.sinks)[:4])
+        sinks = ", ".join(_in_data_form(s) for s in sorted(f.sinks)[:4])
         lines.append(
-            f"- {f.name} (@ {where}) [{cats}] -> reaches: {sinks} "
+            f"- {_in_data_form(f.name)} (@ {where}) [{cats}] -> reaches: {sinks} "
             f"({f.distance} hop{'s' if f.distance != 1 else ''})"
         )
     lines.append(follow_up)

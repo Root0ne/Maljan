@@ -1,6 +1,6 @@
 import {
   AGENT_DEFINITIONS_KEY,
-  BUILTIN_AGENT_KEYS,
+  builtinAgentKeysOf,
 } from "../configuration/agentStaging";
 import type { GuideId } from "./guides";
 import { choiceFacts, choiceTitle, LLM_SELECTOR } from "@/lib/providerFacts";
@@ -39,9 +39,6 @@ function countEnabled(value: unknown, skip: (key: string) => boolean = () => fal
     .length;
 }
 
-/** Agent keys the backend ships; anything else in the definitions map is a
- *  custom analyst. */
-const BUILTIN_AGENTS = BUILTIN_AGENT_KEYS;
 
 /**
  * Whether the language-model settings could plausibly run an analysis: a
@@ -89,8 +86,10 @@ function llmStatus(
   return parts.join(" · ");
 }
 
-function agentStatus(effective: EffectiveValue): string {
-  const custom = countEnabled(effective(AGENT_DEFINITIONS_KEY), (k) => BUILTIN_AGENTS.has(k));
+function agentStatus(effective: EffectiveValue, schema?: SettingsSchema | null): string {
+  // Anything the backend does not list as shipped is a custom analyst.
+  const builtins = builtinAgentKeysOf(schema);
+  const custom = countEnabled(effective(AGENT_DEFINITIONS_KEY), (k) => builtins.has(k));
   const profile = text(effective("core.agents.profile")) || "default";
   const head =
     custom === 0
@@ -173,7 +172,7 @@ export function guideStatus(
       return count === 0 ? "No servers enabled" : `${count} server${count === 1 ? "" : "s"} enabled`;
     }
     case "agent":
-      return agentStatus(effective);
+      return agentStatus(effective, schema);
     case "memory":
       return memoryStatus(effective, choiceLabel);
     case "enrichment":

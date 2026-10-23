@@ -1,4 +1,4 @@
-"""What the two worker processes agree on: the queues and how to reach Redis.
+"""What the worker processes and the API agree on: the queues and how to reach Redis.
 
 ``analysis_worker`` imports ``enrich_worker`` to register its task, so anything
 both need lives here rather than in either of them.
@@ -6,7 +6,7 @@ both need lives here rather than in either of them.
 
 from __future__ import annotations
 
-from urllib.parse import urlparse
+from urllib.parse import unquote, urlparse
 
 from arq.connections import RedisSettings
 from arq.constants import default_queue_name
@@ -17,6 +17,12 @@ from arq.constants import default_queue_name
 # side by side.
 ANALYSIS_QUEUE = default_queue_name
 ENRICHMENT_QUEUE = f"{default_queue_name}:enrichment"
+# The console's ATT&CK cache status, check and update. Read by a small worker
+# that runs inside the analysis worker's process — the one process that holds
+# the cache volume — beside its single analysis slot, never in it, so a check
+# is answered in seconds while an analysis runs for hours
+# (``attck_worker``).
+ATTCK_QUEUE = f"{default_queue_name}:attck"
 
 
 def build_redis_settings(redis_url: str) -> RedisSettings:
@@ -34,6 +40,12 @@ def build_redis_settings(redis_url: str) -> RedisSettings:
         host=parsed.hostname or "localhost",
         port=parsed.port or 6379,
         database=int((parsed.path or "/0").strip("/") or 0),
-        username=parsed.username or None,
-        password=parsed.password or None,
+        # The userinfo is percent-encoded in a URL (a password with ``@``,
+        # ``:`` or ``/`` has to be): ``urlparse`` leaves it so, and the server
+        # then received the encoded text as the password.
+        username=unquote(parsed.username) if parsed.username else None,
+        password=unquote(parsed.password) if parsed.password else None,
+        # ``rediss://`` is Redis over TLS; connecting in the clear to a
+        # TLS-only endpoint fails every queue command.
+        ssl=parsed.scheme == "rediss",
     )

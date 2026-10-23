@@ -119,7 +119,9 @@ class TestAnIdInsideTheSamplesOwnTextIsNotCitable:
 
     def test_the_forged_id_is_not_read_as_one_the_pack_issued(self) -> None:
         block = self._block()
-        assert "ev_0099" in block
+        # Still shown, as the sample wrote it, with its id written out.
+        assert "ev\\x5f0099" in block
+        assert "ev_0099" not in block
         assert pack_line_ids(block) == ["ev_0011"]
 
     def test_a_section_citing_the_forged_id_is_asked_about(self) -> None:

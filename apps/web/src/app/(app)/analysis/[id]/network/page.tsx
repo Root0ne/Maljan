@@ -1,17 +1,26 @@
 "use client";
 
 import { useReport } from "../layout";
+import ReportAbsent from "@/components/analysis/ReportAbsent";
+import { reportAbsence } from "@/components/analysis/reportAbsence";
 import Th from "@/components/ui/Th";
 import { ArtifactSections } from "@/components/analysis/ArtifactTable";
 import { isCoveredBySection, sectionsForTab } from "@/components/analysis/reportSections";
+import { endpointReputation, verdictWords } from "@/components/analysis/reputation";
+import { domainFacts, endpointCounts, ipFacts } from "@/components/analysis/networkFacts";
 import type { NetworkDomain, NetworkIP } from "@/types/malware-report";
 
 export default function NetworkTab() {
-  const { report, loading } = useReport();
+  const { report, job, loading, reportError } = useReport();
 
   if (loading) {
     return <div className="p-4 text-sm text-text-secondary">Loading...</div>;
   }
+
+  /* No report is not an empty report: say which absence this is rather than
+   * drawing this tab's negative (`reportAbsence`). */
+  const absent = reportAbsence({ report, job, reportError });
+  if (absent) return <ReportAbsent absence={absent} />;
 
   const mr = report?.malware_report;
   const net = mr?.network;
@@ -31,6 +40,7 @@ export default function NetworkTab() {
   const showsObservedTraffic = !isCoveredBySection(reportSections, ["sandbox_network"]);
   const showsStaticIocs =
     staticIocs.length > 0 && !isCoveredBySection(reportSections, ["iocs"]);
+  const endpoints = endpointCounts(net, staticIocs);
   if (!net && staticIocs.length === 0 && evidenceSections.length === 0) {
     return (
       <div className="p-8 text-center text-sm text-text-secondary">
@@ -45,10 +55,7 @@ export default function NetworkTab() {
       <ArtifactSections sections={evidenceSections} />
 
       <div className="text-xs text-text-muted">
-        {(net?.domains.length ?? 0) + staticIocs.filter((s) => s.kind === "domain").length}{" "}
-        domain(s) · {(net?.ips.length ?? 0) + staticIocs.filter((s) => s.kind === "ip").length}{" "}
-        IP(s) · {(net?.urls.length ?? 0) + staticIocs.filter((s) => s.kind === "url").length}{" "}
-        URL(s)
+        {endpoints.domains} domain(s) · {endpoints.ips} IP(s) · {endpoints.urls} URL(s)
         {staticIocs.length > 0 && (
           <span className="ml-1 text-text-tertiary">
             ({staticIocs.length} from static strings)
@@ -261,6 +268,7 @@ function DomainCard({ domain }: { domain: NetworkDomain }) {
               <span className="font-mono">{domain.queried_pids.join(", ")}</span>
             </div>
           )}
+          <FactLines lines={domainFacts(domain)} />
         </div>
         {rep && <ReputationBadge rep={rep} />}
       </div>
@@ -298,6 +306,7 @@ function IPCard({ ip }: { ip: NetworkIP }) {
             )}
             <SourceBadge source={ip.source} />
           </div>
+          <FactLines lines={ipFacts(ip)} />
         </div>
         {ip.reputation && <ReputationBadge rep={ip.reputation as Record<string, unknown>} />}
       </div>
@@ -332,32 +341,43 @@ function SourceBadge({ source }: { source?: string | null }) {
   );
 }
 
+/* The enrichment record beside a row, by the figure it carries and in a
+ * neutral tone: whether the source calls the endpoint malicious is its own
+ * declared rule, which the row's suspicious flag already carries
+ * (`endpointReputation`). */
 function ReputationBadge({ rep }: { rep: Record<string, unknown> }) {
-  const source = (rep.source as string) || "intel";
-  const malicious = rep.malicious as number | undefined;
-  const abuse = rep.abuse_confidence as number | undefined;
-  const score =
-    typeof malicious === "number"
-      ? malicious
-      : typeof abuse === "number"
-        ? abuse
-        : null;
-  const cls =
-    score === null
-      ? "text-text-muted bg-bg-active"
-      : score >= 70 || (malicious !== undefined && malicious >= 5)
-        ? "text-status-red bg-status-red/10"
-        : score >= 30 || (malicious !== undefined && malicious >= 1)
-          ? "text-status-orange bg-status-orange/10"
-          : "text-status-green bg-status-green/10";
-
+  const badge = endpointReputation(rep);
+  if (!badge) return null;
+  const verdict = verdictWords(badge.verdict);
   return (
     <span
-      className={`shrink-0 text-[11px] uppercase tracking-wider px-2 py-0.5 rounded font-mono ${cls}`}
+      className="shrink-0 text-[11px] uppercase tracking-wider px-2 py-0.5 rounded font-mono text-text-secondary bg-bg-active"
       title={JSON.stringify(rep)}
     >
-      {source}
-      {score !== null ? ` · ${score}` : ""}
+      {badge.source}
+      {badge.figure ? ` · ${badge.figure}` : ""}
+      {verdict && (
+        <span
+          className={verdict.tone === "red" ? "text-status-red" : "text-text-muted"}
+          title={`${badge.source}'s declared malicious_when thresholds`}
+        >
+          {` · ${verdict.text}`}
+        </span>
+      )}
     </span>
+  );
+}
+
+/** The attribution and listing facts a row carries (`networkFacts`). */
+function FactLines({ lines }: { lines: string[] }) {
+  if (lines.length === 0) return null;
+  return (
+    <ul className="mt-1 space-y-0.5">
+      {lines.map((line) => (
+        <li key={line} className="text-xs text-text-muted">
+          {line}
+        </li>
+      ))}
+    </ul>
   );
 }

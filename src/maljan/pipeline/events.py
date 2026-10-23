@@ -30,7 +30,7 @@ from collections.abc import Callable, Iterable
 from typing import Any
 
 from maljan.core.logger import logger
-from maljan.utils.marked_cut import CUT_MARK, marked_cut
+from maljan.utils.marked_cut import CUT_MARK
 
 # (event_type, payload) -> None. Must be safe to call from any thread.
 EventSink = Callable[[str, dict[str, Any]], None]
@@ -377,13 +377,21 @@ def summarize_claims(claims: Any, *, speaker: str, source: str = "") -> str:
     # markdown emphasis. This is a one-line headline, so collapse it — the
     # expandable claim list below shows the value verbatim.
     lead = " ".join(str(getattr(items[0], "claim", "") or "").split())
-    if len(lead) > 240:
-        lead = lead[:239] + "…"
+    lead = _scrubbed_cut(lead, 240, layout=False)
     plural = "" if len(items) == 1 else "s"
     headline = (
         f"{len(items)} evidence-backed claim{plural} from {source or f'the {speaker} layer'}."
     )
     return f"{headline} Leading: {lead}" if lead else headline
+
+
+def _cut_kept(text: str, limit: int) -> str:
+    """``text``, its own lines kept, scrubbed and then cut: never cut first.
+
+    A cut in front of the scrub leaves the head of a secret that no longer has
+    the shape the scrub knows.
+    """
+    return _scrubbed_cut(text, limit, layout=True)
 
 
 def claims_to_payload(claims: Any, limit: int = 12) -> list[dict[str, Any]]:
@@ -399,8 +407,8 @@ def claims_to_payload(claims: Any, limit: int = 12) -> list[dict[str, Any]]:
         try:
             out.append(
                 {
-                    "claim": marked_cut(str(getattr(claim, "claim", "") or ""), 400),
-                    "evidence_ref": marked_cut(str(getattr(claim, "evidence_ref", "") or ""), 300),
+                    "claim": _cut_kept(str(getattr(claim, "claim", "") or ""), 400),
+                    "evidence_ref": _cut_kept(str(getattr(claim, "evidence_ref", "") or ""), 300),
                     "confidence": round(float(getattr(claim, "confidence", 0.0) or 0.0), 4),
                     "technique_id": getattr(claim, "technique_id", None),
                 }
@@ -408,7 +416,7 @@ def claims_to_payload(claims: Any, limit: int = 12) -> list[dict[str, Any]]:
             # The heading's note, where the debate is read; only when there is one.
             note = getattr(claim, "heading_note", None)
             if note:
-                out[-1]["heading_note"] = marked_cut(str(note), 300)
+                out[-1]["heading_note"] = _cut_kept(str(note), 300)
         except Exception:  # noqa: BLE001 — one malformed claim must not drop the rest
             continue
     return out
@@ -1214,6 +1222,15 @@ def _hide_credentials(found: re.Match[str]) -> str:
       the stretch: ``host.example/<key>/x.php`` reads ``host.***.php``.
     """
     value = found.group(0)
+    if value in _attck_one_token_names() and not _LABEL_BEFORE_RE.search(
+        found.string[max(0, found.start() - 40) : found.start()]
+    ):
+        # A technique or tactic name of the vendored ATT&CK table as the whole
+        # run (``SyncAppvPublishingServer``) is a name, away from a credential
+        # label as a family name is: after ``password=`` the run is the
+        # credential, whatever it spells. A run that joins one to anything
+        # else is read as it always was.
+        return value
     if _names_only(value):
         return value
     if _is_a_family_name(value) and not _LABEL_BEFORE_RE.search(
@@ -1645,46 +1662,94 @@ def _scrub_line(line: str) -> str:
     return line
 
 
-# The ATT&CK names a label word stands in, read once from the vendored table:
-# for each, the text in front of the word and the word after it
-# (``Access Token Manipulation`` → ``("access ", "token", "Manipulation")``).
+# The vendored ATT&CK table's technique and tactic names and ids, read once.
+# The names a label word stands in are kept from the label rule, for each the
+# text in front of the word and the word after it (``Access Token
+# Manipulation`` → ``("access ", "token", "Manipulation")``); an id is never a
+# credential; and a name that is one token is a name the shape rules keep
+# (``SyncAppvPublishingServer``).
 _ATTCK_FILE = "data/attck_techniques.json"
+_ATTCK_NAMES: tuple[str, ...] | None = None
+_ATTCK_IDS: frozenset[str] | None = None
 _LABELLED_NAMES: frozenset[tuple[str, str, str]] | None = None
+_ATTCK_ONE_TOKEN_NAMES: frozenset[str] | None = None
 
 
-def _labelled_attck_names() -> frozenset[tuple[str, str, str]]:
-    """``(text before, label word, word after)`` for each vendored ATT&CK name with a label word."""
-    global _LABELLED_NAMES
-    if _LABELLED_NAMES is None:
-        found: set[tuple[str, str, str]] = set()
+def _attck_table() -> tuple[tuple[str, ...], frozenset[str]]:
+    """Every technique and tactic name of the vendored ATT&CK table, and every id; empty unread."""
+    global _ATTCK_NAMES, _ATTCK_IDS
+    if _ATTCK_NAMES is None or _ATTCK_IDS is None:
+        names: set[str] = set()
+        ids: set[str] = set()
         try:
-            import json
-
-            from maljan.core.paths import resolve_data
-
-            table = json.loads(resolve_data(_ATTCK_FILE).read_text(encoding="utf-8"))
+            table = _read_data(_ATTCK_FILE)
             for key, row in table.items():
                 if key.startswith("_") or not isinstance(row, dict):
                     continue
-                name = str(row.get("name") or "")
-                for match in re.finditer(r"(?i)\b(bearer|basic|token)\s+(\S+)", name):
-                    in_front = name[: match.start()].lower()
-                    found.add((in_front, match.group(1).lower(), match.group(2)))
-        except Exception as exc:  # noqa: BLE001 — every label then masks what follows it
+                ids.add(str(key))
+                names.add(str(row.get("name") or ""))
+            for tactics in (table.get("_tactics") or {}).values():
+                for tactic in (tactics or {}).values():
+                    if isinstance(tactic, dict):
+                        ids.add(str(tactic.get("id") or ""))
+                        names.add(str(tactic.get("name") or ""))
+        except Exception as exc:  # noqa: BLE001 — every rule then reads the names as any text
             logger.warning("The ATT&CK names were not read for the scrub (%s).", exc)
+        names.discard("")
+        ids.discard("")
+        _ATTCK_NAMES = tuple(sorted(names))
+        _ATTCK_IDS = frozenset(ids)
+    return _ATTCK_NAMES, _ATTCK_IDS
+
+
+def _labelled_attck_names() -> frozenset[tuple[str, str, str]]:
+    """``(text before, label word, word after)`` for each vendored ATT&CK name with a label word.
+
+    Technique and tactic names, as written. A word after the label that joins
+    alternatives with ``/`` is the name of each alternative too: ``Token
+    Impersonation`` and ``Token Theft`` are how a report shortens ``Token
+    Impersonation/Theft``, and are kept as the whole name is.
+    """
+    global _LABELLED_NAMES
+    if _LABELLED_NAMES is None:
+        found: set[tuple[str, str, str]] = set()
+        names, _ = _attck_table()
+        for name in names:
+            for match in re.finditer(r"(?i)\b(bearer|basic|token)\s+(\S+)", name):
+                in_front = name[: match.start()].lower()
+                label = match.group(1).lower()
+                word = match.group(2)
+                for spelling in (word, *word.split("/")):
+                    if spelling:
+                        found.add((in_front, label, spelling))
         _LABELLED_NAMES = frozenset(found)
     return _LABELLED_NAMES
 
 
-def _scheme_and_secret(found: re.Match[str]) -> str:
-    """An authorization scheme with what follows it masked, unless the two are an ATT&CK name.
+def _attck_one_token_names() -> frozenset[str]:
+    """The vendored ATT&CK technique and tactic names that are a single token."""
+    global _ATTCK_ONE_TOKEN_NAMES
+    if _ATTCK_ONE_TOKEN_NAMES is None:
+        names, _ = _attck_table()
+        _ATTCK_ONE_TOKEN_NAMES = frozenset(name for name in names if len(name.split()) == 1)
+    return _ATTCK_ONE_TOKEN_NAMES
 
-    Kept only on an exact match with a name in the vendored ATT&CK table, the
-    words in front of the label included: ``Access Token Manipulation``.
+
+def _scheme_and_secret(found: re.Match[str]) -> str:
+    """An authorization scheme with what follows it masked, unless the two are ATT&CK's.
+
+    Kept on an exact match with a name in the vendored ATT&CK table, the words
+    in front of the label included (``Access Token Manipulation``), or with an
+    alternative of a slash-joined name (``Token Impersonation``); and kept when
+    what follows is a technique or tactic id of the table, bracketed or not
+    (``Make and Impersonate Token (T1134.003)``), which no credential is.
     Anything else after ``Bearer``, ``Basic`` or ``token`` is masked.
     """
     scheme = found.group(1)
     after = found.group(0)[len(scheme) :].strip().rstrip(".,;:!?")
+    _, ids = _attck_table()
+    if after.lstrip("([{") in ids:
+        return found.group(0)
     before = found.string[max(0, found.start() - 80) : found.start()].lower()
     for in_front, label, word in _labelled_attck_names():
         if label == scheme.lower() and after == word and before.endswith(in_front):
@@ -1930,7 +1995,7 @@ _WHOLE_RUN = re.compile(
 )
 
 
-def _cut_whole(text: str, limit: int) -> str:
+def _cut_whole(text: str, limit: int, *, layout: bool = False, more: bool = False) -> str:
     """``text`` bounded near ``limit`` and marked, never cut inside a value the scrub kept.
 
     ``text`` is already scrubbed. A digest or an identifier the cut would
@@ -1942,26 +2007,87 @@ def _cut_whole(text: str, limit: int) -> str:
     that changes it, the cut moves back to the start of the word it falls in,
     so scrubbing the result again changes nothing.
     """
-    if len(text) <= limit:
+    if len(text) <= limit and not more:
         return text
-    cut = limit - 1
+    cut = min(limit - 1, len(text))
     for found in _WHOLE_RUN.finditer(text):
         if found.start() < cut < found.end():
             cut = found.end()
             break
     if cut >= len(text):
-        return text
+        if not more:
+            return text
+        cut = len(text)
     for found in _VALUE_RUN.finditer(text):
         if found.start() < cut < found.end():
             if _looks_like_a_credential(text[found.start() : cut]):
                 cut = found.start()
             break
-    made = text[:cut] + CUT_MARK
-    while cut > 0 and scrub(made) != made:
+    made = _marked(text, cut)
+    again = scrub_keeping_layout if layout else scrub
+    while cut > 0 and again(made) != made:
         cut = text.rfind(" ", 0, cut)
         cut = max(cut, 0)
-        made = text[:cut].rstrip() + CUT_MARK
+        made = _marked(text, cut)
     return made
+
+
+def _marked(text: str, cut: int) -> str:
+    """``text[:cut]`` with the cut mark, none added where it already ends in one.
+
+    A scrubbed URL ends in the mark; a second one is folded back into it by the
+    next scrub, which read as a change and backed the cut up past every URL.
+    """
+    head = text[:cut].rstrip()
+    return head if head.endswith(CUT_MARK) else head + CUT_MARK
+
+
+def _scrub_window(text: str, limit: int) -> tuple[str, bool]:
+    """The part of ``text`` worth scrubbing for a cut at ``limit``, and whether it is a part.
+
+    Every secret the scrub knows is whitespace-delimited, and the widest one
+    reads two words (an authorization scheme and the word after it). So the
+    window ends after the two whole words that follow ``limit``: a secret on
+    the cut is whole inside it, and the rest of a long text is never scrubbed.
+
+    The window reaches no further than twice ``limit``. A word that runs past
+    that edge is not read to its end: the text before it is kept and the word
+    is put as the mask, so no head of it is left and the cost stays in the
+    window however long the word is.
+    """
+    edge = 2 * limit
+    stop = limit
+    for _ in range(2):
+        gap = _SPACE.search(text, stop, edge + 1)
+        if gap is None:
+            return (text, False) if len(text) <= edge else _masked_tail(text, edge)
+        word = _WORD.search(text, gap.end(), edge + 1)
+        if word is None:
+            if gap.end() >= len(text):
+                return text, False
+            return text[: gap.start()], True
+        if word.end() > edge:
+            return _masked_tail(text, edge)
+        stop = word.end()
+    return text[:stop], stop < len(text)
+
+
+def _masked_tail(text: str, edge: int) -> tuple[str, bool]:
+    """``text`` up to the word that runs past ``edge``, that word as the mask."""
+    head = text[:edge]
+    blank = max(head.rfind(c) for c in " \n\t\r")
+    return head[: blank + 1] + _REDACTED, True
+
+
+_WORD = re.compile(r"\S+")
+_SPACE = re.compile(r"\s")
+
+
+def _scrubbed_cut(text: str, limit: int, *, layout: bool) -> str:
+    """``text`` scrubbed and then bounded at ``limit``: the scrub is read over a window only."""
+    window, partial = _scrub_window(text, limit)
+    scrubbed = scrub_keeping_layout(window) if layout else scrub(window)
+    return _cut_whole(scrubbed, limit, layout=layout, more=partial)
 
 
 def summarize_args(args: Any) -> str:
@@ -2302,8 +2428,3 @@ def roster_payload(profile: Any, definitions: Any, depth: int = 2) -> dict[str, 
         if not frontier:
             break
     return {"agents": list(agents_out.values()), "stages": stages_out}
-
-
-def emit_roster(sink: EventSink | None, payload: dict[str, Any]) -> None:
-    """The roster, once, at the start of the run."""
-    emit(sink, ROSTER, dict(payload))

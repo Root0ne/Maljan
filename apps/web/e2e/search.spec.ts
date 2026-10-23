@@ -10,7 +10,7 @@ import { test, expect } from "./fixtures";
  * palette's whole network path was untested while looking covered.
  */
 
-const SEARCH_LABEL = /Search files, hashes, IPs, or malware families/;
+const SEARCH_LABEL = /Search files, hashes, runs, or malware families/;
 
 /**
  * Press Ctrl+K until the palette opens.

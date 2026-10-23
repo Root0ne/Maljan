@@ -22,6 +22,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Set up Python
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
@@ -44,6 +46,9 @@ jobs:
       - name: Ruff format check
         run: uv run ruff format --check src/ tests/ apps/api/ services/ scripts/
 
+      - name: Changelog fragments
+        run: uv run python scripts/changelog/fold.py --check
+
       - name: mypy type check
         run: uv run mypy src/ apps/api/
 
@@ -54,6 +59,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - name: Set up Python
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
@@ -86,6 +93,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Set up Python ${{ matrix.python-version }}
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
@@ -110,13 +119,15 @@ jobs:
 
     services:
       qdrant:
-        image: qdrant/qdrant:v1.18.2
+        image: qdrant/qdrant:v1.18.2@sha256:75eab8c4ba42096724fdcfde8b4de0b5713d529dde32f285a1f86fdcb2c9e50c
         ports:
           - 6333:6333
 
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Wait for Qdrant to be ready
         run: |
@@ -157,6 +168,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Set up Node.js
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
@@ -190,6 +203,44 @@ jobs:
           NEXT_TELEMETRY_DISABLED: "1"
         run: npm run build
 
+  # Known advisories in the npm packages that ship (dev tooling left out), read
+  # from each lockfile with no install. A job of its own and not a required
+  # check: an advisory published overnight must not block an unrelated merge,
+  # and the registry being unreachable is not a finding. The console fails at
+  # high or critical, and so does the docs site. Each audit is retried once
+  # for the network.
+  npm-audit:
+    name: npm audit
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "22"
+
+      - name: Audit the console (high and above fail)
+        working-directory: apps/web
+        run: |
+          npm audit --audit-level=high --omit=dev || {
+            sleep 20
+            npm audit --audit-level=high --omit=dev
+          }
+
+      - name: Audit the docs site (high and above fail)
+        if: ${{ !cancelled() }}
+        working-directory: apps/docs
+        run: |
+          npm audit --audit-level=high --omit=dev || {
+            sleep 20
+            npm audit --audit-level=high --omit=dev
+          }
+
   e2e:
     name: E2E Tests (Playwright)
     runs-on: ubuntu-latest
@@ -198,6 +249,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Set up Node.js
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0

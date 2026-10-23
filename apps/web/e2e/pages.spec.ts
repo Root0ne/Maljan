@@ -178,12 +178,20 @@ test.describe("Settings", () => {
     });
 
     await page.goto("/settings/api-keys");
+    // The list is drawn once the page has hydrated and read its keys; filling
+    // the form earlier let a slow engine lose the typed values to the first render.
+    await expect(page.getByText("CI/CD integration")).toBeVisible();
     await page.getByLabel("Key name").fill("copy test");
+    await page.getByLabel("Current password").fill("account-password");
     await page.getByRole("button", { name: "Create", exact: true }).click();
 
-    const copy = page.getByRole("button", { name: "Copy", exact: true });
-    await expect(copy).toBeVisible();
-    await copy.click();
+    // Click only once the created-key panel shows the key, and once the list
+    // refresh that follows creation has settled, so the button is not replaced
+    // under the click.
+    await expect(page.getByText("API key created successfully.")).toBeVisible();
+    await expect(page.getByText("mlj_secret_value")).toBeVisible();
+    await expect(page.getByText("CI/CD integration")).toBeVisible();
+    await page.getByRole("button", { name: "Copy", exact: true }).click();
 
     await expect(page.getByRole("button", { name: "Copied" })).toBeVisible();
     await expect(page.getByText("Select and copy the key")).toHaveCount(0);

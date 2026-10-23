@@ -20,8 +20,9 @@ guard inside, recorder outside.
 from __future__ import annotations
 
 import json
+import re
 import time
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from typing import TYPE_CHECKING, Any
 
 from maljan.agents.mcp_client import structured_content_of
@@ -29,7 +30,7 @@ from maljan.agents.tool_fence import fenced
 from maljan.core.exceptions import SampleNotOpened
 from maljan.core.logger import logger
 from maljan.core.undeclared_tools import entry_decompiles
-from maljan.llm.context_window import answering_for
+from maljan.llm.context_window import CallAnswer, answering_for
 from maljan.llm.stream_watch import watching
 from maljan.pipeline.events import (
     EventSink,
@@ -80,6 +81,26 @@ def _platforms_own_resolution(entry: Any) -> bool:
 # character, changed one or inserted one anywhere but the end would be this
 # code deciding what the model meant.
 _CLOSERS = {"{": "}", "[": "]"}
+# A JSON number the text ends on, nothing after it, not even a line break
+# (``\Z``, never ``$``): a run of its characters not following a letter
+# (``true`` and ``false`` end on ``e``).
+_OPEN_NUMBER = re.compile(r"[0-9+\-.eE]+\Z")
+
+
+def platform_refusal(exc: BaseException) -> bool:
+    """Whether ``exc`` is a refusal the platform composed, in words of its own.
+
+    An ask the delegation layer would not make (``DelegationRefused``), an
+    attached report the platform will not read (``AttachedReportRefused``)
+    and a call stopped at the job's spend ceiling (``SpendCeilingStop``) are
+    sentences the platform wrote from its own state; every other failure a
+    tool call raises carries a third party's message.
+    """
+    from maljan.agents.delegation import DelegationRefused
+    from maljan.core.spend import SpendCeilingStop
+    from maljan.providers.errors import AttachedReportRefused
+
+    return isinstance(exc, DelegationRefused | AttachedReportRefused | SpendCeilingStop)
 
 
 def repair_arguments(text: str) -> dict[str, Any] | None:
@@ -95,6 +116,11 @@ def repair_arguments(text: str) -> dict[str, Any] | None:
     whether the cursor is inside a string and which brackets are open, and
     append the closers that are missing. Nothing is removed, nothing is
     substituted and nothing is inserted anywhere but the end.
+
+    A number at the very end (nothing after it, not even whitespace) and a
+    list left open are not repaired either: a number may have been cut short (``4198`` of ``4198400``) and a list may
+    have had more items, and closing either hands the tool a value the model
+    did not write.
 
     A value cut in the middle of a string is *not* repaired, and that is the
     rule this exists under: closing the quote would hand the tool an argument
@@ -129,6 +155,16 @@ def repair_arguments(text: str) -> dict[str, Any] | None:
     if in_string:
         # The model was still writing a value. Whatever it meant to type next
         # is not something this may guess.
+        return None
+    if "[" in stack:
+        # A list left open was cut somewhere in its items: closing it would
+        # hand the tool the items written so far as if they were all of them.
+        return None
+    cut_number = _OPEN_NUMBER.search(raw)
+    if cut_number is not None and not raw[: cut_number.start()][-1:].isalpha():
+        # A number at the very end may be one cut short: ``4198`` of
+        # ``4198400`` closes into a valid call at the wrong address. One the
+        # model followed with whitespace or a line break, it ended.
         return None
     tail = "".join(_CLOSERS[open_] for open_ in reversed(stack))
     if not tail:
@@ -246,6 +282,7 @@ class EvidenceRecorder:
         model: str = "",
         agent_role: str | None = None,
         agent_tab: str | None = None,
+        spill: Any = None,
     ) -> None:
         self.agent = agent
         self.agent_tab = agent_tab or None
@@ -268,6 +305,10 @@ class EvidenceRecorder:
         # Each entry by its id, kept beside the list so following a repeat to
         # its holder is one lookup per hop.
         self._by_id: dict[str, LedgerEntry] = {}
+        # The narrowing arguments the tool that made each entry's answer
+        # offered, by the entry's id: what a read-again answer's completeness
+        # line names for the tool that made it, never looked up by a name.
+        self._narrowing: dict[str, tuple[str, ...]] = {}
         # ``None`` outside a job, which makes every emit a no-op, exactly as
         # it does everywhere else in the pipeline.
         self.sink = sink
@@ -277,6 +318,11 @@ class EvidenceRecorder:
         # budget blanks the entry later, after the model has read it, and a
         # grounding check over what survived is a check over the wrong thing.
         self.corpus = corpus
+        # The job's store for the parts of an answer an entry does not keep
+        # whole (``schemas.evidence_spill``): given to every entry written
+        # here, so a byte budget or a structure eviction that later takes a
+        # part keeps it there first. ``None`` outside a job: nothing is kept.
+        self.spill = spill
 
     def note_turn(self, message: Any) -> None:
         """The model that gave ``message`` asked for the calls that follow it. Never raises."""
@@ -317,6 +363,25 @@ class EvidenceRecorder:
         """Whether this loop filed an entry under this id."""
         return str(entry_id or "").strip() in self._by_id
 
+    def entry_of(self, entry_id: str) -> LedgerEntry | None:
+        """The entry this loop filed under this id, or ``None``."""
+        return self._by_id.get(str(entry_id or "").strip())
+
+    def cut_of(self, entry_id: str) -> int:
+        """The characters the platform left out of the answer this entry holds (``platform_cut``)."""
+        from maljan.schemas.answer_completeness import platform_cut
+
+        entry = self._by_id.get(str(entry_id or "").strip())
+        return platform_cut(entry) if entry is not None else 0
+
+    def note_narrowing(self, entry_id: str, narrowing: Sequence[str]) -> None:
+        """Remember the narrowing arguments the tool that answered this entry offered."""
+        self._narrowing[str(entry_id or "").strip()] = tuple(narrowing)
+
+    def narrowing_of(self, entry_id: str) -> tuple[str, ...]:
+        """The narrowing arguments of the tool that made this entry's answer, as it offered them."""
+        return self._narrowing.get(str(entry_id or "").strip(), ())
+
     def entry_failed(self, entry_id: str) -> bool:
         """Whether the entry with this id recorded a failure.
 
@@ -341,6 +406,7 @@ class EvidenceRecorder:
         error: str | None = None,
         started_at: float = 0.0,
         duration_ms: int = 0,
+        waited_ms: int = 0,
         repeated_of: str | None = None,
         remediation: str | None = None,
         args_repaired: bool = False,
@@ -349,7 +415,11 @@ class EvidenceRecorder:
         cut: int | None = None,
         guard_answer: bool = False,
         source: str | None = None,
+        declared_name: str | None = None,
         structured_content: dict[str, Any] | None = None,
+        whole: str | None = None,
+        whole_structure: dict[str, Any] | None = None,
+        hints: Any = None,
     ) -> LedgerEntry:
         """Append one entry and return it, so the caller can quote its id.
 
@@ -365,9 +435,23 @@ class EvidenceRecorder:
         read and is marked ``truncated`` with ``chars_dropped``. ``source`` is
         where the tool's declaration lives (``mcp:<key>``, ``provider:<id>``,
         ``sandbox``, ``pack``), as the caller knows it; it is never guessed
-        later from the tool's name. ``structured_content`` is the structured
+        later from the tool's name. ``declared_name`` is the name that source
+        declares the tool under, given for a tool the request
+        offered, the original name where it was renamed: the entry's facts are
+        resolved by it, exactly. ``structured_content`` is the structured
         answer the tool's server returned beside its text (MCP
         ``structuredContent``), filed on the entry as returned.
+
+        ``whole`` is the answer as the tool gave it before the guardrail, and
+        ``whole_structure`` the structured answer its server returned beside
+        it, whether or not it reached this call. Where the job has a store, an
+        entry that does not hold them keeps a reference to them whole
+        (``schemas.evidence_spill``): the answer when the guardrail cut it or
+        the conversation had no room for it, the structure when the entry
+        keeps none although it adds something to the text. A repeat keeps
+        neither; the entry it names holds the answer. ``hints`` are the MCP
+        hints the tool's own server gave it when it was attached, kept on the
+        entry's facts record beside the declaration.
         """
         if repeated_of:
             repeated_of = self.holder_of(repeated_of)
@@ -386,6 +470,7 @@ class EvidenceRecorder:
             error=error,
             started_at=started_at,
             duration_ms=duration_ms,
+            waited_ms=waited_ms,
             stage=self.stage,
             repeated_of=repeated_of,
             remediation=remediation,
@@ -395,10 +480,17 @@ class EvidenceRecorder:
             not_shown=not_shown is not None,
             chars_dropped=int(cut or 0) if not_shown is None else 0,
             source=source,
+            declared_name=declared_name,
             structured_content=structured_content,
             agent_role=self.agent_role,
             agent_tab=self.agent_tab,
+            hints=hints,
         )
+        entry._spill = self.spill
+        if self.spill is not None and not repeated_of:
+            self._keep_whole(
+                entry, output, whole, whole_structure, lost=not_shown is not None or bool(cut)
+            )
         self.entries.append(entry)
         self._by_id[entry.id] = entry
         # The function names a hash resolution read are names, and the event
@@ -446,6 +538,26 @@ class EvidenceRecorder:
         )
         return entry
 
+    def _keep_whole(
+        self,
+        entry: LedgerEntry,
+        output: str,
+        whole: str | None,
+        structure: dict[str, Any] | None,
+        *,
+        lost: bool,
+    ) -> None:
+        """Keep the parts of the answer ``entry`` does not hold whole in the job's store."""
+        from maljan.schemas.evidence import _structured_beside, parse_structured
+        from maljan.schemas.evidence_spill import ANSWER, STRUCTURED_CONTENT, spill_into
+
+        if whole is not None and lost:
+            spill_into(entry, self.spill, ANSWER, whole)
+        if structure and not entry.structured_from_server:
+            text = whole if whole is not None else output
+            if _structured_beside(structure, text, parse_structured(text)) is not None:
+                spill_into(entry, self.spill, STRUCTURED_CONTENT, structure)
+
     def record_repeat(
         self,
         *,
@@ -456,6 +568,7 @@ class EvidenceRecorder:
         said: str,
         ok: bool = True,
         source: str | None = None,
+        declared_name: str | None = None,
     ) -> LedgerEntry:
         """File a call the repeat guard answered without running, as a repeat of ``first``.
 
@@ -480,6 +593,7 @@ class EvidenceRecorder:
             duration_ms=0,
             repeated_of=str(first),
             source=source,
+            declared_name=declared_name,
         )
 
     def record_guard_answer(
@@ -490,6 +604,7 @@ class EvidenceRecorder:
         server: str | None,
         said: str,
         source: str | None = None,
+        declared_name: str | None = None,
     ) -> LedgerEntry:
         """File a call a guard answered without running any tool, as the guard's answer.
 
@@ -515,6 +630,7 @@ class EvidenceRecorder:
             duration_ms=0,
             guard_answer=True,
             source=source,
+            declared_name=declared_name,
         )
 
 
@@ -580,6 +696,17 @@ class RepeatGuard:
         # can shape (a forged or a shared name), so a call is a repeat only
         # when its listing is the held one, or a prefix of it.
         self._functions: dict[tuple[str, Any], list[tuple[str, str]]] = {}
+        # Where each seeded entry was made: an earlier chunk of this input
+        # (``EARLIER_CHUNK``) or an earlier round of this analysis
+        # (``EARLIER_ROUND``), which is what its answer says.
+        self._origins: dict[str, str] = {}
+        # The server each earlier round's seeded call was made on, by its key:
+        # a call on that server that may change state makes the seed stale
+        # (:meth:`forget_round_seeds`).
+        self._seed_servers: dict[str, str] = {}
+        # The characters the platform left out of each seeded answer
+        # (``platform_cut``), which its replay states as its first showing did.
+        self._cuts: dict[str, int] = {}
 
     def _seeded_count(self, key: str) -> int:
         """Where a seeded call's count starts: one served retry for a failure or an unkept result."""
@@ -595,6 +722,9 @@ class RepeatGuard:
         failed: bool = False,
         recorded: str | None = None,
         rerun: bool = False,
+        origin: str = "",
+        server: str = "",
+        cut: int = 0,
     ) -> None:
         """A call an earlier chunk made: an identical one is answered from its entry, not run.
 
@@ -606,16 +736,23 @@ class RepeatGuard:
         the entry. A failed one (``failed``), and one whose result the run did
         not keep (``rerun``), is seeded as asked once, so one retry is served,
         as the guard serves any retry after a failure. No first touch counts
-        toward the loop's repeats (:meth:`first_touch_of_seed`).
+        toward the loop's repeats (:meth:`first_touch_of_seed`). ``origin`` is
+        where the call was made (``EARLIER_CHUNK`` when not given, or
+        ``EARLIER_ROUND``), which the answer to an identical call says.
         """
         key = self._key(tool, kwargs)
         self._seeded.setdefault(key, str(entry_id))
+        self._origins.setdefault(str(entry_id), origin or EARLIER_CHUNK)
+        if origin == EARLIER_ROUND:
+            self._seed_servers.setdefault(key, str(server or ""))
         if failed:
             self._seeded_failures.add(str(entry_id))
         elif rerun:
             self._seeded_reruns.add(str(entry_id))
         elif recorded is not None:
             self._recorded.setdefault(str(entry_id), str(recorded))
+            if cut:
+                self._cuts.setdefault(str(entry_id), int(cut))
         self._first.setdefault(key, str(entry_id))
         self._count[key] = max(self._count.get(key, 0), self._seeded_count(key))
 
@@ -632,6 +769,10 @@ class RepeatGuard:
             return None
         self._told.add(key)
         return entry, self._recorded[entry]
+
+    def recorded_cut(self, entry_id: str) -> int:
+        """The characters the platform left out of a seeded answer when it was first shown."""
+        return self._cuts.get(str(entry_id), 0)
 
     def first_touch_of_seed(self, tool: str, kwargs: dict[str, Any]) -> bool:
         """Whether this is the conversation's first ask of a seeded call; marks it asked.
@@ -667,6 +808,35 @@ class RepeatGuard:
             if held.startswith(body):
                 return entry_id
         return None
+
+    def forget_round_seeds(self, server: str) -> int:
+        """Drop every earlier round's seed made on ``server``: a call there may have changed it.
+
+        Called after a call that is not read-only runs on ``server``. Its
+        seeds' recorded answers may no longer be what the server would answer,
+        so an identical call runs again. ``""`` is the server of a call whose
+        server is unknown, and drops only the seeds whose server is unknown
+        too. A chunk's seeds are kept. Returns how many were dropped.
+        """
+        dropped = 0
+        for key, held in list(self._seed_servers.items()):
+            if held != str(server or ""):
+                continue
+            entry = self._seeded.pop(key, None)
+            del self._seed_servers[key]
+            if entry is None:
+                continue
+            # Its answer, told or not, is no longer what the server holds: the
+            # next identical call runs and answers for the call from then on.
+            if self._first.get(key) == entry:
+                del self._first[key]
+                self._count.pop(key, None)
+            dropped += 1
+        return dropped
+
+    def origin_of(self, entry_id: str) -> str:
+        """Where a seeded entry was made: ``EARLIER_CHUNK`` or ``EARLIER_ROUND``."""
+        return self._origins.get(str(entry_id), EARLIER_CHUNK)
 
     def seeded_failure(self, entry_id: str) -> bool:
         """Whether a seeded entry recorded a failure."""
@@ -740,8 +910,65 @@ class RepeatGuard:
         self._first.setdefault(key, entry_id)
 
 
-def seeded_repeat_guard(entries: Sequence[Any] | None) -> RepeatGuard:
+# A structured answer's fields that explain an outcome: a reason, an error or
+# a message makes the answer one not to hand back later (the backend may have
+# been unavailable then); a status is settled only with a word of completion.
+_EXPLANATION_KEY_RE = re.compile(
+    r"(?:^|_)(?:reason|error|errors|message|detail|details|warning)$", re.IGNORECASE
+)
+_STATUS_KEY_RE = re.compile(r"(?:^|_)status$", re.IGNORECASE)
+_SETTLED_STATUS = frozenset(
+    {"ok", "success", "succeeded", "complete", "completed", "done", "finished"}
+)
+
+
+def holds_a_settled_answer(entry: Any) -> bool:
+    """Whether an entry's answer may be handed back for an identical call later: a settled one.
+
+    Not for a call that failed (``ok`` false), an answer that only says the
+    call failed (``undeclared_tools.prose_error``), or a structured answer
+    that carries a reason, an error or a message, or a status that is not a
+    word of completion ("pending", "running"): what it answered then may not
+    be what it answers now. An empty answer is settled when nothing explains
+    it ("matches": [] alone, or beside a status "ok"). Anything in doubt is
+    not.
+    """
+    from maljan.core.undeclared_tools import prose_error
+
+    if not bool(getattr(entry, "ok", True)) or getattr(entry, "repeated_of", None):
+        return False
+    if prose_error(getattr(entry, "output", "") or ""):
+        return False
+    structured = getattr(entry, "structured", None)
+    if isinstance(structured, Mapping):
+        for key, value in structured.items():
+            if _EXPLANATION_KEY_RE.search(str(key)) and value:
+                return False
+            if _STATUS_KEY_RE.search(str(key)) and value is not None:
+                if not isinstance(value, str) or value.strip().lower() not in _SETTLED_STATUS:
+                    return False
+    return True
+
+
+def entry_server(entry: Any) -> str:
+    """The server a ledger entry's call was made on: its server key, else its source, else ``""``."""
+    return str(getattr(entry, "server", None) or getattr(entry, "source", None) or "")
+
+
+# Where a call a loop's guard was seeded with was made.
+EARLIER_CHUNK = "chunk"
+EARLIER_ROUND = "round"
+
+
+def seeded_repeat_guard(
+    entries: Sequence[Any] | None, *, earlier_rounds: Sequence[Any] | None = None
+) -> RepeatGuard:
     """A loop's repeat guard, seeded with the calls earlier chunks made (``RepeatGuard.seed``).
+
+    ``earlier_rounds`` are the calls this agent made in earlier rounds of the
+    run (a revision's first answer and the revisions before it), seeded first
+    and answered the same way: a revision that repeats an identical call reads
+    the result its entry recorded, and no tool runs.
 
     An answered call is seeded with the result its entry recorded, which is
     what a later identical call is answered with. A call whose entry does not
@@ -751,7 +978,12 @@ def seeded_repeat_guard(entries: Sequence[Any] | None) -> RepeatGuard:
     cut is held as the model read it, which a second call would hand back.
     """
     guard = RepeatGuard()
-    for entry in entries or ():
+    seeds = [
+        *((entry, EARLIER_ROUND) for entry in earlier_rounds or ()),
+        *((entry, EARLIER_CHUNK) for entry in entries or ()),
+    ]
+    for entry, origin in seeds:
+        server = entry_server(entry)
         tool = str(getattr(entry, "tool", "") or "")
         entry_id = str(getattr(entry, "id", "") or "")
         args = getattr(entry, "args", None)
@@ -761,13 +993,23 @@ def seeded_repeat_guard(entries: Sequence[Any] | None) -> RepeatGuard:
         if getattr(entry, "repeated_of", None):
             continue
         if not bool(getattr(entry, "ok", True)):
-            guard.seed(tool, args, entry_id, failed=True)
+            guard.seed(tool, args, entry_id, failed=True, origin=origin, server=server)
             continue
         if not holds_its_answer(entry):
-            guard.seed(tool, args, entry_id, rerun=True)
+            guard.seed(tool, args, entry_id, rerun=True, origin=origin, server=server)
             continue
         output = str(getattr(entry, "output", "") or "")
-        guard.seed(tool, args, entry_id, recorded=output)
+        from maljan.schemas.answer_completeness import platform_cut
+
+        guard.seed(
+            tool,
+            args,
+            entry_id,
+            recorded=output,
+            origin=origin,
+            server=server,
+            cut=platform_cut(entry),
+        )
         if entry_decompiles(entry):
             guard.note_function(listed_function(output), entry_id, output)
     return guard
@@ -815,7 +1057,15 @@ def same_function_notice(name: str, entry_id: str) -> str:
 
 
 def earlier_chunk_answer(
-    tool: str, entry_id: str, recorded: str, narrowing: Sequence[str] = ()
+    tool: str,
+    entry_id: str,
+    recorded: str,
+    narrowing: Sequence[str] = (),
+    *,
+    origin: str = EARLIER_CHUNK,
+    args: Mapping[str, Any] | None = None,
+    cut: int = 0,
+    charge: Callable[[str], str] | None = None,
 ) -> str:
     """What a later chunk's call an earlier chunk made is answered with.
 
@@ -823,17 +1073,34 @@ def earlier_chunk_answer(
     a call's own answer is stamped, and one sentence saying where it came
     from. No tool runs. The call is filed as a repeat of that entry
     (``EvidenceRecorder.record_repeat``), whose id the model is not shown:
-    the entry that holds the result is the one to cite.
+    the entry that holds the result is the one to cite. ``cut`` is the
+    characters the platform left out of it when it was first shown, which its
+    completeness line states again; ``charge`` charges that line to the
+    conversation it enters.
     """
     # The notice the original answer carried when it was shortened, read off
     # the recorded text the same way (``_stamp``).
     shortened = shortened_notice(recorded, narrowing=narrowing)
+    # And how complete the recorded answer is, read off it the same way, with
+    # the cut its first showing stated.
+    complete = completeness_notice(
+        recorded, narrowing=narrowing, args=args, cut=cut, shortened=bool(shortened)
+    )
+    if charge is not None:
+        complete = charge(complete)
     shown = fenced(entry_id, recorded)
-    return f"[{entry_id}]\n{shown}{shortened}\n\n{earlier_chunk_sentence(tool, entry_id)}"
+    said = earlier_chunk_sentence(tool, entry_id, origin=origin)
+    return f"[{entry_id}]\n{shown}{shortened}{complete}\n\n{said}"
 
 
-def earlier_chunk_sentence(tool: str, entry_id: str) -> str:
-    """The sentence under an earlier chunk's result, and the note its repeat entry keeps."""
+def earlier_chunk_sentence(tool: str, entry_id: str, *, origin: str = EARLIER_CHUNK) -> str:
+    """The sentence under an earlier chunk's (or round's) result, and the note its repeat keeps."""
+    if origin == EARLIER_ROUND:
+        return (
+            f"This call to {tool} with these arguments was made in an earlier round of this "
+            f"analysis and is not run again: the text above is the result recorded in "
+            f"[{entry_id}]."
+        )
     return (
         f"This call to {tool} with these arguments was made in an earlier chunk of this "
         f"input and is not run again: the text above is the result recorded in [{entry_id}]."
@@ -883,6 +1150,46 @@ def shortened_notice(text: str, *, narrowing: Sequence[str] = ()) -> str:
     if not ours:
         return ""
     return shortening_sentence(narrowing, key=ours)
+
+
+def completeness_notice(
+    text: str,
+    *,
+    narrowing: Sequence[str] = (),
+    bounds: Sequence[str] = (),
+    args: Mapping[str, Any] | None = None,
+    cut: int = 0,
+    shortened: bool = False,
+    original: str | None = None,
+) -> str:
+    """The line under an answer known to be partial, or ``""`` (``schemas.answer_completeness``).
+
+    Read off the answer as the model reads it, before any notice is appended:
+    its own paging words and counts, the call's bounding arguments, and the
+    characters the platform left out of it. An answer whose completeness
+    cannot be read gets nothing. A reading that fails costs the call nothing
+    and is logged. ``shortened`` says the platform shortened the answer as a
+    document; the line is then read off the ``original`` when it is at hand,
+    exactly as the guardrail measured the room it kept for it
+    (``answer_completeness.shortened_line_room``).
+    """
+    from maljan.schemas.answer_completeness import completeness_line
+    from maljan.schemas.evidence import parse_structured
+
+    read = original if shortened and original is not None else text
+    try:
+        return completeness_line(
+            parse_structured(read),
+            narrowing=narrowing,
+            bounds=() if shortened else bounds,
+            args=args,
+            cut=cut,
+            text_chars=len(read),
+            platform_shortened=shortened,
+        )
+    except Exception as exc:  # noqa: BLE001 — a notice is never worth a lost call
+        logger.warning("completeness of a tool answer could not be read: %s", exc)
+        return ""
 
 
 # What both notices say on the call before the loop ends. One sentence, in one
@@ -1059,8 +1366,13 @@ def _record_tool(
     """
     from langchain_core.tools import StructuredTool
 
-    from maljan.agents.output_shortening import narrowing_arguments
-    from maljan.agents.tool_pinning import declared_facts_of, declared_source_of, server_of
+    from maljan.agents.output_shortening import bounding_arguments, narrowing_arguments
+    from maljan.agents.tool_pinning import (
+        declared_facts_of,
+        declared_name_of,
+        declared_source_of,
+        server_of,
+    )
 
     func = getattr(tool, "func", None)
     coroutine = getattr(tool, "coroutine", None)
@@ -1073,8 +1385,17 @@ def _record_tool(
     # Where the tool's declaration lives (``core.tool_declarations``), read
     # from the tool itself as it was built and written on every entry.
     source = declared_source_of(tool)
+    # The name its server declares it under (the original, where the request
+    # offers it renamed): the declaration is read by that name, never by taking
+    # a prefix off the offered one.
+    declared_name = declared_name_of(tool)
     # What the tool declares about itself, read once for every call it makes.
     facts = declared_facts_of(tool)
+    # What its own MCP server said of it when it was attached, kept on each
+    # entry beside the declaration (``core.declared_reading.with_hints``).
+    from maljan.agents.tool_pinning import SERVER_HINTS_METADATA_KEY
+
+    hints = (getattr(tool, "metadata", None) or {}).get(SERVER_HINTS_METADATA_KEY)
     accepted = tuple(getattr(args_schema, "model_fields", {}) or {})
 
     # The arguments of this tool that reach a part its answer left out, read
@@ -1085,11 +1406,32 @@ def _record_tool(
     # is being given two accounts of the same tool. The guardrail that shortens
     # an answer reserves room for the sentence naming exactly these.
     narrowing = narrowing_arguments(accepted)
+    # Of those, the ones that bound how many rows come back: a call that passed
+    # one and got a list exactly that long is told its page is full.
+    bounds = bounding_arguments(accepted)
     # The read-again tool (``agents.tool_answer_clearing``): its answer is
     # another entry's, filed as a repeat of it.
     from maljan.agents.tool_answer_clearing import READS_EVIDENCE
 
     reads_evidence = bool((getattr(tool, "metadata", None) or {}).get(READS_EVIDENCE))
+    # Whether the tool changes nothing and answers the same (``answers_again``).
+    from maljan.agents.tool_pinning import answers_again
+
+    reads_only = answers_again(tool)
+
+    def _charged(line: str, reserved: bool = False) -> str:
+        """``line``, charged to this agent's conversation: it enters it beside the answer.
+
+        Not where the guardrail kept the line's room for this call's answer
+        (``reserved``, ``context_window.note_answer_line_room``): beside a text
+        cut or a summary (``answer_completeness.cut_line_room``) or from a
+        shortening's target (``answer_completeness.shortened_line_room``).
+        """
+        from maljan.llm.context_window import ContextBudget
+
+        if line and not reserved and isinstance(context_budget, ContextBudget):
+            context_budget.charge(len(line), recorder.agent)
+        return line
 
     def _the_room_is_gone(kwargs: dict[str, Any]) -> str | None:
         """The line a call gets once this agent's conversation has no room left.
@@ -1120,7 +1462,12 @@ def _record_tool(
             context_budget.charge(len(TOOL_PHASE_ENDED_NOTICE), recorder.agent)
             said = TOOL_PHASE_ENDED_NOTICE
         recorder.record_guard_answer(
-            tool=name, args=kwargs, server=server, source=source, said=said
+            tool=name,
+            args=kwargs,
+            server=server,
+            source=source,
+            declared_name=declared_name,
+            said=said,
         )
         return said
 
@@ -1157,7 +1504,12 @@ def _record_tool(
                 logger.debug("the question was not counted (%s).", exc)
         notice = self_named_notice(name, found)
         recorder.record_guard_answer(
-            tool=name, args=kwargs, server=server, source=source, said=notice
+            tool=name,
+            args=kwargs,
+            server=server,
+            source=source,
+            declared_name=declared_name,
+            said=notice,
         )
         return notice
 
@@ -1179,10 +1531,20 @@ def _record_tool(
                 args=kwargs,
                 server=server,
                 source=source,
+                declared_name=declared_name,
                 first=earlier,
-                said=earlier_chunk_sentence(name, earlier),
+                said=earlier_chunk_sentence(name, earlier, origin=repeats.origin_of(earlier)),
             )
-            return earlier_chunk_answer(name, *recorded, narrowing)
+            # Charged whole: this answer went through no guardrail now.
+            return earlier_chunk_answer(
+                name,
+                *recorded,
+                narrowing,
+                origin=repeats.origin_of(earlier),
+                args=kwargs,
+                cut=repeats.recorded_cut(earlier),
+                charge=_charged,
+            )
         if not repeats.first_touch_of_seed(name, kwargs):
             repeats.note_repeat()
         failed = recorder.entry_failed(first) or repeats.seeded_failure(first)
@@ -1201,6 +1563,7 @@ def _record_tool(
             args=kwargs,
             server=server,
             source=source,
+            declared_name=declared_name,
             first=first,
             said=notice,
             ok=not failed,
@@ -1217,6 +1580,10 @@ def _record_tool(
         """
         if repeats is not None:
             repeats.note(name, kwargs, entry_id)
+            # A call that may change its server's state makes every earlier
+            # round's answer from that server stale.
+            if not reads_only:
+                repeats.forget_round_seeds(server or source or "")
 
     def _served_again(kwargs: dict[str, Any]) -> str | None:
         """The first entry for a call being served a second time, counted as a repeat.
@@ -1284,6 +1651,8 @@ def _record_tool(
             args=kwargs,
             server=server,
             source=source,
+            declared_name=declared_name,
+            hints=hints,
             output=read_again_note(holder),
             ok=not recorder.entry_failed(holder),
             started_at=wall_clock,
@@ -1292,9 +1661,33 @@ def _record_tool(
             cut=cut,
         )
         _note(kwargs, holder)
+        # A page read past what the entry stored is read by the model and by no
+        # corpus entry yet: kept under its own key, so a value on it is found.
+        if recorder.corpus is not None and (kwargs.get("offset") or kwargs.get("limit")):
+            recorder.corpus.remember(
+                f"{holder}@{kwargs.get('offset') or 0}+{kwargs.get('limit') or ''}", name, text
+            )
         shortened = shortened_notice(text, narrowing=narrowing)
+        # How complete the held answer is: the cut its first showing stated or
+        # the cut this read made, whichever is more, and the paging arguments
+        # of the tool that made it. Charged whole: the room this read's own
+        # guardrail kept was for a line naming no argument.
+        held = recorder.entry_of(holder)
+        held_args = getattr(held, "args", None)
+        paged = bool(kwargs.get("offset") or kwargs.get("limit"))
+        complete = _charged(
+            completeness_notice(
+                text,
+                # A page states its own cut only: the held answer's cut and its
+                # tool's paging arguments are not what the page is.
+                narrowing=() if paged else recorder.narrowing_of(holder),
+                args=None if paged or not isinstance(held_args, Mapping) else held_args,
+                cut=int(cut or 0) if paged else max(recorder.cut_of(holder), int(cut or 0)),
+                shortened=bool(shortened),
+            )
+        )
         failed = recorder.entry_failed(holder)
-        return f"[{holder}]\n{fenced(holder, text)}{shortened}" + _steering(
+        return f"[{holder}]\n{fenced(holder, text)}{shortened}{complete}" + _steering(
             kwargs, repeated, failed=failed
         )
 
@@ -1306,6 +1699,10 @@ def _record_tool(
         repeated: str | None,
         not_shown: int | None = None,
         cut: int | None = None,
+        whole: str | None = None,
+        whole_structure: dict[str, Any] | None = None,
+        line_room: bool = False,
+        waited_ms: int = 0,
     ) -> str:
         text = result_text(value)
         raw = _was_repaired(kwargs)
@@ -1340,18 +1737,26 @@ def _record_tool(
             args=kwargs,
             server=server,
             source=source,
+            declared_name=declared_name,
+            hints=hints,
             # A repeat keeps the note, not a second copy of the listing the
             # entry it names already holds.
             output=same or text,
             started_at=wall_clock,
             duration_ms=int((time.monotonic() - started) * 1000),
+            waited_ms=waited_ms,
             repeated_of=holder,
             args_repaired=raw is not None,
             args_raw=raw,
             not_shown=not_shown,
             cut=cut,
             structured_content=None if same else structured_content_of(value),
+            whole=whole,
+            whole_structure=whole_structure,
         )
+        # Kept by the entry's id, so a read-again answer of it names this
+        # tool's paging arguments, not its own.
+        recorder.note_narrowing(entry.id, narrowing)
         # A repeat is noted under the entry that holds its answer, so a later
         # served or refused identical call names that entry, never the repeat.
         _note(kwargs, entry.repeated_of or entry.id)
@@ -1360,20 +1765,51 @@ def _record_tool(
             # what the window keeps of this conversation. It is stamped with
             # the entry that holds the function, which is the one to cite.
             shortened = shortened_notice(text, narrowing=narrowing)
+            complete = _charged(
+                completeness_notice(
+                    text,
+                    narrowing=narrowing,
+                    bounds=bounds,
+                    args=kwargs,
+                    cut=int(cut or 0),
+                    shortened=bool(shortened),
+                    original=whole,
+                ),
+                line_room,
+            )
             repaired = REPAIRED_NOTICE if raw is not None else ""
-            return f"[{holder}]\n{fenced(str(holder), text)}{repaired}{shortened}\n\n{same}"
+            return (
+                f"[{holder}]\n{fenced(str(holder), text)}{repaired}{shortened}{complete}\n\n{same}"
+            )
         if repeats is not None and entry.ok and function is not None:
             repeats.note_function(function, entry.id, text)
         # Read off the answer itself, before any notice is appended to it: a
         # notice is prose and prose does not parse.
         shortened = shortened_notice(text, narrowing=narrowing)
+        # How complete the answer is known to be (``schemas.answer_completeness``):
+        # its own paging words, the call's bounding arguments, and the cut the
+        # platform made, which the entry holds as the coverage record reads it.
+        from maljan.schemas.answer_completeness import platform_cut
+
+        complete = _charged(
+            completeness_notice(
+                text,
+                narrowing=narrowing,
+                bounds=bounds,
+                args=kwargs,
+                cut=platform_cut(entry),
+                shortened=bool(shortened),
+                original=whole,
+            ),
+            line_room,
+        )
         # The answer as the one view shows it (``agents.tool_fence``): a text
         # answer inside a fence its content cannot close, a JSON one with its
         # raw breaks escaped; the platform's own notices stand outside it.
         text = fenced(entry.id, text)
         if raw is not None:
             text = f"{text}{REPAIRED_NOTICE}"
-        text = f"{text}{shortened}"
+        text = f"{text}{shortened}{complete}"
         # ``text``, not ``entry.output``: the ledger trims what it stores, and
         # what the model reads is not the ledger's business. The size of a tool
         # result in a prompt is decided where it has always been decided —
@@ -1392,6 +1828,7 @@ def _record_tool(
         exc: Exception,
         repeated: str | None,
         sent: dict[str, Any] | None = None,
+        waited_ms: int = 0,
     ) -> str:
         message = f"{type(exc).__name__}: {exc}"
         raw = _was_repaired(kwargs)
@@ -1400,16 +1837,31 @@ def _record_tool(
             args=sent if sent is not None else kwargs,
             server=server,
             source=source,
+            declared_name=declared_name,
+            hints=hints,
             output=message,
             ok=False,
             error=message,
             started_at=wall_clock,
             duration_ms=int((time.monotonic() - started) * 1000),
+            waited_ms=waited_ms,
             args_repaired=raw is not None,
             args_raw=raw,
         )
         _note(kwargs, entry.id)
-        return f"[{entry.id}] tool call failed: {message}{_steering(kwargs, repeated, failed=True)}"
+        # The failure's type is the platform's word; a third party's message
+        # may repeat what the call was given or what the sample holds, so it
+        # is shown as a tool answer is (``agents.tool_fence``), never as a line
+        # of the platform's own. A refusal the platform composed is its own
+        # sentence and stays as written (``platform_refusal``).
+        if platform_refusal(exc):
+            return f"[{entry.id}] tool call failed: {message}{_steering(kwargs, repeated, failed=True)}"
+        said = str(exc)
+        shown = f"\n{fenced(entry.id, said)}" if said.strip() else ""
+        return (
+            f"[{entry.id}] tool call failed: {type(exc).__name__}{shown}"
+            f"{_steering(kwargs, repeated, failed=True)}"
+        )
 
     def _stopped(
         kwargs: dict[str, Any],
@@ -1417,6 +1869,7 @@ def _record_tool(
         wall_clock: float,
         exc: SampleNotOpened,
         repeated: str | None,
+        waited_ms: int = 0,
     ) -> str:
         """File a call that met an unopenable sample, and end this loop if it is this agent's.
 
@@ -1427,11 +1880,27 @@ def _record_tool(
         The entry records the arguments the call was actually sent with when
         the platform held them to its own path, not the ones the model wrote.
         """
-        stamped = _stamp_error(kwargs, started, wall_clock, exc, repeated, sent=exc.sent_args)
+        stamped = _stamp_error(
+            kwargs, started, wall_clock, exc, repeated, sent=exc.sent_args, waited_ms=waited_ms
+        )
         if exc.stopped_agent in (None, recorder.agent):
             exc.stopped_agent = recorder.agent
             raise exc
         return stamped
+
+    def _began(issued: float, answer: CallAnswer | None) -> tuple[float, int]:
+        """The moment the call started running, and how long it waited for it.
+
+        ``issued`` is when the wrapper was entered; a call queued behind a
+        server's slot began later, and the transport says when
+        (``CallAnswer.began``). The call's duration runs from that moment, so
+        a tool that waited is not charged for the tool it waited behind; the
+        wait is its own figure. A call nothing queued began when it was issued.
+        """
+        began = getattr(answer, "began", None)
+        if began is None or began < issued:
+            return issued, 0
+        return began, int((began - issued) * 1000)
 
     wrapped_func = None
     wrapped_coroutine = None
@@ -1459,25 +1928,33 @@ def _record_tool(
             # it took and cannot go backwards.
             started, wall_clock = time.monotonic(), time.time()
             repeated = _served_again(kwargs)
+            call_answer: CallAnswer | None = None
             try:
                 # Outside the analyst's repeated-claims watch: a model a tool
                 # calls (a summariser, another agent asked) is not the
                 # analyst's answer (``BaseAnalyst._claims_watched``).
                 with answering_for(recorder.agent) as call_answer, watching(None):
                     value = func(**kwargs)
+                ran, waited = _began(started, call_answer)
                 return _stamp(
                     kwargs,
-                    started,
+                    ran,
                     wall_clock,
                     value,
                     repeated,
                     call_answer.not_shown,
                     call_answer.cut,
+                    call_answer.whole,
+                    call_answer.structure,
+                    call_answer.line_room,
+                    waited_ms=waited,
                 )
             except SampleNotOpened as exc:
-                return _stopped(kwargs, started, wall_clock, exc, repeated)
+                ran, waited = _began(started, call_answer)
+                return _stopped(kwargs, ran, wall_clock, exc, repeated, waited)
             except Exception as exc:  # noqa: BLE001 — a failed call is evidence
-                return _stamp_error(kwargs, started, wall_clock, exc, repeated)
+                ran, waited = _began(started, call_answer)
+                return _stamp_error(kwargs, ran, wall_clock, exc, repeated, waited_ms=waited)
 
     if coroutine is not None:
 
@@ -1494,6 +1971,7 @@ def _record_tool(
             recorder.call_started(tool=name, args=kwargs, server=server)
             started, wall_clock = time.monotonic(), time.time()
             repeated = _served_again(kwargs)
+            call_answer: CallAnswer | None = None
             try:
                 # Named for the length of the call so the guardrail — two
                 # layers down, behind a toolkit every agent of the job shares —
@@ -1502,22 +1980,36 @@ def _record_tool(
                 # the guardrail to, because that copies the context.
                 with answering_for(recorder.agent) as call_answer, watching(None):
                     value = await coroutine(**kwargs)
+                ran, waited = _began(started, call_answer)
                 return _stamp(
                     kwargs,
-                    started,
+                    ran,
                     wall_clock,
                     value,
                     repeated,
                     call_answer.not_shown,
                     call_answer.cut,
+                    call_answer.whole,
+                    call_answer.structure,
+                    call_answer.line_room,
+                    waited_ms=waited,
                 )
             except SampleNotOpened as exc:
-                return _stopped(kwargs, started, wall_clock, exc, repeated)
+                ran, waited = _began(started, call_answer)
+                return _stopped(kwargs, ran, wall_clock, exc, repeated, waited)
             except Exception as exc:  # noqa: BLE001 — a failed call is evidence
-                return _stamp_error(kwargs, started, wall_clock, exc, repeated)
+                ran, waited = _began(started, call_answer)
+                return _stamp_error(kwargs, ran, wall_clock, exc, repeated, waited_ms=waited)
 
     try:
-        return StructuredTool.from_function(
+        # The tool's own class where it opts in (``keeps_named_args``): a tool
+        # that keeps to the arguments a call named keeps doing so in the recorder.
+        builder = (
+            type(tool)
+            if isinstance(tool, StructuredTool) and getattr(tool, "keeps_named_args", False)
+            else StructuredTool
+        )
+        return builder.from_function(
             func=wrapped_func,
             coroutine=wrapped_coroutine,
             name=name,

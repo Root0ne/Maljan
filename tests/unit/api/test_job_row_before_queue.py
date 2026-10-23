@@ -77,7 +77,10 @@ class TestTheRowIsCommittedBeforeTheQueueHearsOfIt:
         assert order == ["flush", "commit", "enqueue", "commit"]
         added = svc.db.add.call_args.args[0]
         assert added.status == "failed"
-        assert "redis down" in added.error_message
+        # The class, never the text: a Redis error quotes the address it dialled
+        # and the row's message is served back to the job's owner.
+        assert added.error_message == "Failed to enqueue job: ConnectionError"
+        assert "redis down" not in added.error_message
         assert added.completed_at is not None
 
 

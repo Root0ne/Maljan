@@ -81,6 +81,25 @@ class TestRuleC2:
         warns = lint_report(report, "linux")
         assert not any(w.rule == "C2" for w in warns)
 
+    def test_an_id_inside_a_longer_word_is_not_cited(self) -> None:
+        report = _stub_report(
+            capability_matrix=[_ns(technique_id="T1497")],
+            defensive_recommendations=[
+                _ns(action="Watch build AT10551x and KB T1497", rationale="r", category="c"),
+            ],
+        )
+        assert not any(w.rule == "C2" for w in lint_report(report, "linux"))
+
+    def test_the_warnings_follow_the_order_the_ids_are_written_in(self) -> None:
+        report = _stub_report(
+            capability_matrix=[_ns(technique_id="T1497")],
+            defensive_recommendations=[
+                _ns(action="T1105 then T1027, T1071 and T1105", rationale="r", category="c"),
+            ],
+        )
+        c2 = [w.message for w in lint_report(report, "linux") if w.rule == "C2"]
+        assert [m.split(" references ")[1].split()[0] for m in c2] == ["T1105", "T1027", "T1071"]
+
 
 # ---------------------------------------------------------------------------
 # C3 — exec summary mentioning platform-incompatible concepts

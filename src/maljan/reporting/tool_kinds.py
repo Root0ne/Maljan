@@ -23,18 +23,15 @@ section builders' are ``BUILDER_OF_KIND``.
 
 from __future__ import annotations
 
-import re
 from collections.abc import Iterable, Mapping
 from functools import cache
 from typing import Any
 
+from maljan.analysis.technique_ids import TECHNIQUE_WORD_RE
 from maljan.core import declared_reading
 from maljan.core.builtin_declarations import BUILDER_OF_KIND, CONSUMER_KINDS
-from maljan.core.tool_declarations import SourceRef, ToolDeclarations, ToolFacts, renamed_tool
+from maljan.core.tool_declarations import SourceRef, ToolDeclarations, ToolFacts
 from maljan.reporting import legacy_tool_names as legacy
-
-# A technique id as an ATT&CK label carries it, written as ATT&CK writes it.
-_TECHNIQUE_ID = re.compile(r"\bT\d{4}(?:\.\d{3})?\b")
 
 
 def tool_of(entry: Any) -> str:
@@ -145,17 +142,23 @@ def row_technique_ids(row: Mapping[str, Any], facts: ToolFacts) -> list[str]:
                 out.extend(sigma_technique_ids({"tags": items}))
                 continue
             for item in items:
-                match = _TECHNIQUE_ID.search(str(item or ""))
+                match = TECHNIQUE_WORD_RE.search(str(item or ""))
                 if match:
                     out.append(match.group(0))
     return out
 
 
 def declared_name(entry: Any) -> str:
-    """An entry's tool under the name its server declares it, a renamed tool's prefix off."""
-    name = tool_of(entry)
-    ref = source_of(entry)
-    return renamed_tool(ref.key, name) if ref is not None and ref.kind == "mcp" else name
+    """An entry's tool under the name its source declares it.
+
+    For an entry that recorded its source, the original name its call
+    recorded where the request offered the tool renamed, else its own
+    (``declared_reading.declared_name``): a ``<server>__`` prefix is never
+    taken off by the name alone. An entry with no source keeps its own name.
+    """
+    if source_of(entry) is None:
+        return tool_of(entry)
+    return declared_reading.declared_name(entry)
 
 
 def kind_of(entry: Any, tool: str | None = None) -> str:

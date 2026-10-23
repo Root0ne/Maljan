@@ -31,6 +31,8 @@ from collections.abc import AsyncIterator, Callable, Iterator
 from contextvars import ContextVar
 from typing import Any, Protocol
 
+from maljan.core.context_reset import reset_in_own_context
+
 logger = logging.getLogger(__name__)
 
 __all__ = [
@@ -90,7 +92,7 @@ def watching(rule: StopRule | None) -> Iterator[None]:
     try:
         yield
     finally:
-        _RULE.reset(token)
+        reset_in_own_context(_RULE, token)
 
 
 @contextlib.contextmanager
@@ -101,7 +103,7 @@ def ends_recorded() -> Iterator[list[str]]:
     try:
         yield found
     finally:
-        _ENDED.reset(token)
+        reset_in_own_context(_ENDED, token)
 
 
 def text_rule(check: Callable[[str], str | None]) -> StopRule:

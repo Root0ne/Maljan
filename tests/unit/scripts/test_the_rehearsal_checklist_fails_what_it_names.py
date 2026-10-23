@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import copy
 import time
+from datetime import UTC, datetime
 from typing import Any
 
 import pytest
@@ -885,6 +886,55 @@ class TestABrokenStreamIsChargedItsReportedPrompt:
         assert "tokens and spend as the provider reported them" not in _failed(record)
 
 
+# The end of DeepSeek's 06:00-10:00 UTC weekday peak window, on a Friday.
+PEAK_ENDS = datetime(2026, 10, 23, 10, 0, tzinfo=UTC).timestamp()
+
+
+class TestACallIsPricedWhenItWasSent:
+    """The spend meter prices a call at the rates in force when it was sent, and so does the check.
+
+    A call sent a moment before a rate window's edge reaches the stub a moment
+    after it: priced at the stub's clock, a correct charge read as a wrong one.
+    """
+
+    @staticmethod
+    def _sent(record: RunRecord, received: float, sent: float) -> None:
+        """Every call sent at ``sent`` and received at ``received``, charged as the meter does."""
+        for entry in record.stub_log:
+            entry["at"] = received
+        usage = [e for e in record.events if e.get("type") == "model_usage"]
+        for entry, event in zip(_billed_in_order(record), usage, strict=True):
+            event["data"]["sent_at"] = sent
+            event["data"]["priced_usd"] = stub_cost(entry, price_rows(), sent=sent)
+        record.run_summary["spend"]["spent_usd"] = round(priced_usage(record)[0], 6)
+
+    def test_a_call_sent_before_a_window_s_edge_and_received_after_it_passes(self) -> None:
+        record = _record()
+        self._sent(record, received=PEAK_ENDS + 0.004, sent=PEAK_ENDS - 0.004)
+        entry = record.stub_log[0]
+        # The peak rate it was charged is not the one in force when it was received.
+        assert stub_cost(entry, price_rows(), sent=PEAK_ENDS - 0.004) > stub_cost(
+            entry, price_rows()
+        )
+        assert _failed(record) == []
+
+    def test_a_charge_at_the_rate_in_force_when_it_was_received_fails(self) -> None:
+        record = _record()
+        self._sent(record, received=PEAK_ENDS + 0.004, sent=PEAK_ENDS - 0.004)
+        usage = next(e for e in record.events if e.get("type") == "model_usage")
+        usage["data"]["priced_usd"] = stub_cost(record.stub_log[0], price_rows())
+        assert _failed(record) == ["tokens and spend as the provider reported them"]
+
+    def test_a_record_sent_after_the_stub_received_its_call_fails(self) -> None:
+        record = _record()
+        self._sent(record, received=PEAK_ENDS - 60, sent=PEAK_ENDS - 60.01)
+        usage = next(e for e in record.events if e.get("type") == "model_usage")
+        usage["data"]["sent_at"] = PEAK_ENDS - 59
+        (check,) = [c for c in check_run(record) if c.name.startswith("tokens and spend")]
+        assert not check.ok
+        assert "its record was sent 1.000s after the stub received it" in check.detail
+
+
 class TestTheWindowInForce:
     """The window the product sized each model with must be the one the stub serves."""
 
@@ -1108,3 +1158,25 @@ class TestTheWindowInForce:
         record = _record()
         record.run_summary["generation"] = {}
         assert self._detail(record) == "the run summary records no output caps"
+
+
+class TestTheMarkdownNamesWhatTheGateChanged:
+    def test_kept_and_disabled_servers_and_the_older_withheld_key_are_named(self) -> None:
+        from scripts.rehearsal.checklist import as_markdown
+
+        record = _record()
+        record.gate = {
+            "settings": {},
+            "servers_disabled": ["lookup"],
+            "servers_kept": {
+                "mine": "kept: effects not declared",
+                "mixed": "kept: effects not declared for some tools",
+            },
+            # Written by an older runner: still read from a stored record.
+            "servers_with_keys_withheld": ["intel"],
+        }
+        text = as_markdown(record, check_run(record))
+        assert "- tool server lookup: disabled" in text
+        assert "- tool server mine: kept: effects not declared\n" in text
+        assert "- tool server mixed: kept: effects not declared for some tools" in text
+        assert "- tool server intel: reputation keys withheld (offline answers)" in text

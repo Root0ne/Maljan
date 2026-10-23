@@ -406,6 +406,119 @@ class TestSafeAnalyzeISRChunked:
 
         assert seen == [None]
 
+    def test_a_chunk_that_failed_is_stated_on_the_merged_answer(
+        self, analyst: _ConcreteAnalyst
+    ) -> None:
+        """Only logged, a failed chunk left a merged answer that read as covering all of it."""
+        real_analyze = analyst.analyze_isr
+        calls: list[int] = []
+
+        def _analyze(data: str) -> AgentISR:
+            calls.append(1)
+            if len(calls) == 2:
+                raise RuntimeError("http://user:secret@host/ refused")
+            return real_analyze(data)
+
+        analyst.analyze_isr = _analyze  # type: ignore[method-assign]
+        merged = analyst.safe_analyze_isr_chunked([_make_chunk(i, 3) for i in range(3)])
+
+        reason = merged.claims_unread_reason
+        assert "chunk 2 failed (RuntimeError)" in reason
+        assert "chunk 1" not in reason and "chunk 3" not in reason
+        assert "secret" not in reason, "a published reason carries the type, never the message"
+
+    def test_a_chunk_not_started_for_the_spend_ceiling_is_stated(
+        self, analyst: _ConcreteAnalyst, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from maljan.agents import base_agent
+
+        started: list[int] = []
+        monkeypatch.setattr(base_agent, "spend_reached", lambda _agent: bool(started))
+        real_analyze = analyst.analyze_isr
+
+        def _analyze(data: str) -> AgentISR:
+            started.append(1)
+            return real_analyze(data)
+
+        analyst.analyze_isr = _analyze  # type: ignore[method-assign]
+        merged = analyst.safe_analyze_isr_chunked([_make_chunk(i, 2) for i in range(2)])
+
+        assert "chunk 2 was not started (the spend ceiling is reached)" in (
+            merged.claims_unread_reason
+        )
+
+    def test_a_run_of_chunks_not_started_is_one_clause(
+        self, analyst: _ConcreteAnalyst, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from maljan.agents import base_agent
+
+        started: list[int] = []
+        monkeypatch.setattr(base_agent, "spend_reached", lambda _agent: bool(started))
+        real_analyze = analyst.analyze_isr
+
+        def _analyze(data: str) -> AgentISR:
+            started.append(1)
+            return real_analyze(data)
+
+        analyst.analyze_isr = _analyze  # type: ignore[method-assign]
+        merged = analyst.safe_analyze_isr_chunked([_make_chunk(i, 4) for i in range(4)])
+
+        reason = merged.claims_unread_reason
+        assert "chunks 2–4 were not started (the spend ceiling is reached)" in reason
+        assert reason.count("not started") == 1
+
+    def test_no_ask_runs_between_two_chunks(
+        self, analyst: _ConcreteAnalyst, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Held per chunk, the lock let an ask drain the earlier chunks' findings."""
+        import threading
+
+        from maljan.agents import base_agent
+
+        analyst.delegation_lock = threading.RLock()
+        free_between: list[bool] = []
+
+        def _between(_agent: object) -> bool:
+            # Checked before every chunk, outside the chunk's own loop: an ask
+            # from another thread must find the agent taken here too.
+            seen: list[bool] = []
+
+            def _try() -> None:
+                got = analyst.delegation_lock.acquire(blocking=False)
+                if got:
+                    analyst.delegation_lock.release()
+                seen.append(got)
+
+            other = threading.Thread(target=_try)
+            other.start()
+            other.join(5)
+            free_between.extend(seen)
+            return False
+
+        monkeypatch.setattr(base_agent, "spend_reached", _between)
+        analyst.safe_analyze_isr_chunked([_make_chunk(i, 3) for i in range(3)])
+
+        assert free_between == [False, False, False]
+
+    def test_the_findings_of_every_chunk_reach_the_merged_answer(
+        self, analyst: _ConcreteAnalyst
+    ) -> None:
+        from maljan.schemas.isr_models import Finding
+
+        real_analyze = analyst.analyze_isr
+
+        def _analyze(data: str) -> AgentISR:
+            n = len(analyst._findings_buffer) + 1
+            analyst._findings_buffer.append(
+                Finding(title=f"finding {n}", evidence_ids=[f"ev_{n:04d}"])
+            )
+            return real_analyze(data)
+
+        analyst.analyze_isr = _analyze  # type: ignore[method-assign]
+        merged = analyst.safe_analyze_isr_chunked([_make_chunk(i, 3) for i in range(3)])
+
+        assert [f.title for f in merged.findings] == ["finding 1", "finding 2", "finding 3"]
+
     def test_a_later_chunk_is_told_what_the_earlier_ones_called(
         self, analyst: _ConcreteAnalyst
     ) -> None:
@@ -476,7 +589,8 @@ class TestSafeAnalyzeISRChunked:
         from maljan.agents import base_agent
 
         source = inspect.getsource(base_agent.BaseAnalyst._run_tool_loop)
-        assert 'seeded_repeat_guard(getattr(self, "_prior_chunk_calls", None))' in source
+        assert 'settled_chunk_entries(self, getattr(self, "_prior_chunk_calls", None)),' in source
+        assert "earlier_rounds=repeatable_earlier_entries(self)" in source
 
 
 # ---------------------------------------------------------------------------

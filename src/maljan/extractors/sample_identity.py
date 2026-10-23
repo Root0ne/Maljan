@@ -16,7 +16,6 @@ from __future__ import annotations
 
 import io
 from collections.abc import Iterable
-from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -92,10 +91,21 @@ def _infer_platform(
 # prefix never shadows a longer one that starts with the same bytes.
 _MAGIC_PREFIXES: tuple[tuple[bytes, str], ...] = (
     (b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1", "ole2"),
+    # A dynamic or differencing virtual hard disk keeps a copy of its footer,
+    # whose cookie is "conectix", in its first 512 bytes (Virtual Hard Disk
+    # Image Format Specification, "Hard Disk Footer Format").
+    (b"conectix", "vhd"),
+    # Compiled HTML Help: the ITSF header and its version, 3 (or 2 from older
+    # compilers), little-endian.
+    (b"ITSF\x03\x00\x00\x00", "chm"),
+    (b"ITSF\x02\x00\x00\x00", "chm"),
     (b"\xfd7zXZ\x00", "xz"),
     (b"7z\xbc\xaf\x27\x1c", "7z"),
     (b"Rar!\x1a\x07", "rar"),
     (b"\x7fELF", "elf"),
+    # Rich Text Format opens with its group and the \rtf control word (RTF
+    # Specification 1.9.1, "RTF Version 1.9.1 Header").
+    (b"{\\rtf", "rtf"),
     (b"%PDF", "pdf"),
     (b"dex\n", "dex"),
     (b"BZh", "bz2"),
@@ -124,6 +134,33 @@ _ZIP_MAGICS: frozenset[bytes] = frozenset({b"PK\x03\x04", b"PK\x05\x06", b"PK\x0
 # ISO 9660 writes its volume descriptor identifier at this fixed offset.
 _ISO_MAGIC_OFFSET = 32769
 _ISO_MAGIC = b"CD001"
+
+# A raw disk image starts with a boot sector ending in the boot signature at
+# bytes 510-511, and the signature alone is two bytes any file can carry, so
+# the sector's own structures must say what it is, as each specification fixes
+# them: a GPT header ("EFI PART") at LBA 1; or an MBR whose four partition
+# entries from offset 446 are each marked inactive (0x00) or active (0x80), at
+# least one a partition (a type, a first sector past the MBR, a length) that
+# lies inside the file; or a volume boot record: a jump (EB xx 90 or E9 xx xx)
+# and a BIOS parameter block whose bytes per sector (offset 11) is 512, 1024,
+# 2048 or 4096 and whose sectors per cluster (offset 13) is a power of two, or,
+# for exFAT, whose OEM name "EXFAT   " stands at offset 3 with its sector
+# (offset 108, 9-12) and cluster (offset 109) shifts in range.
+_BOOT_SIGNATURE_OFFSET = 510
+_BOOT_SIGNATURE = b"\x55\xaa"
+_SECTOR_BYTES = 512
+_GPT_SIGNATURE = b"EFI PART"
+_MBR_ENTRIES_OFFSET = 446
+_MBR_ENTRY_BYTES = 16
+_MBR_STATUSES = frozenset({0x00, 0x80})
+_BPB_SECTOR_SIZES = frozenset({512, 1024, 2048, 4096})
+_EXFAT_OEM_NAME = b"EXFAT   "
+_EXFAT_SECTOR_SHIFTS = range(9, 13)
+_EXFAT_MAX_CLUSTER_SHIFT = 25
+
+# A fixed virtual hard disk is a raw disk with its footer as the file's last
+# 512 bytes, the "conectix" cookie first (511 bytes from a few old writers).
+_VHD_COOKIE = b"conectix"
 
 # Interpreters named on a shebang line, and the type each one gives the file.
 _SHEBANG_TYPES: tuple[tuple[str, str], ...] = (
@@ -157,6 +194,11 @@ _EXTENSION_TYPES: dict[str, str] = {
     ".iso": "iso",
 }
 
+# The label the detector gives a sample none of its rules recognises. A run
+# routes on it like any other label (to the neutral analysis path); it names no
+# format a tool could serve.
+UNKNOWN_FORMAT = "unknown"
+
 # Entries that identify what a ZIP container really is, in the order they are
 # looked for: an APK also carries META-INF/MANIFEST.MF, so ``jar`` must lose to
 # ``apk`` rather than win by arriving first.
@@ -170,6 +212,13 @@ _ZIP_SIGNATURE_ENTRIES: tuple[tuple[str, str], ...] = (
 # Every container format, grouped under the one word an operator routes on.
 ARCHIVE_FILE_TYPES: frozenset[str] = frozenset({"zip", "7z", "rar", "gz", "bz2", "xz", "iso"})
 DOCUMENT_FILE_TYPES: frozenset[str] = frozenset({"ole2", "ooxml", "pdf"})
+# Formats routed by name that no shipped reader opens, each carrying files of
+# its own (a disk image, a virtual disk, a compiled help file) or a document
+# (RTF); routed to whichever declared tool serves them (``ToolFacts.routed_formats``,
+# a pack step's ``formats``). Kept apart from the groups above, whose names
+# the shipped steps run their readers for.
+CARRIER_FILE_TYPES: frozenset[str] = frozenset({"img", "vhd", "chm"})
+UNREAD_DOCUMENT_FILE_TYPES: frozenset[str] = frozenset({"rtf"})
 SCRIPT_FILE_TYPES: frozenset[str] = frozenset(
     {"ps1", "bat", "cmd", "vbs", "js", "hta", "wsf", "sh", "py", "pl"}
 )
@@ -233,9 +282,9 @@ _MIME_HINTS: tuple[tuple[str, Platform], ...] = (
 def file_type_category(file_type: str) -> str:
     """The routing category of a file type: executable, document, script, archive."""
     ft = (file_type or "").lower()
-    if ft in ARCHIVE_FILE_TYPES:
+    if ft in ARCHIVE_FILE_TYPES or ft in CARRIER_FILE_TYPES:
         return "archive"
-    if ft in DOCUMENT_FILE_TYPES:
+    if ft in DOCUMENT_FILE_TYPES or ft in UNREAD_DOCUMENT_FILE_TYPES:
         return "document"
     if ft in SCRIPT_FILE_TYPES:
         return "script"
@@ -290,6 +339,79 @@ def _shebang_type(blob: bytes) -> str | None:
     return None
 
 
+def _file_size(path: Path, blob: bytes) -> int:
+    """The file's size: ``path``'s where it is a file, else the bytes handed in."""
+    try:
+        return path.stat().st_size if path.is_file() else len(blob)
+    except OSError:
+        return len(blob)
+
+
+def _mbr_partitions(blob: bytes, size: int) -> bool:
+    """Whether the four MBR entries are well formed and one is a partition inside the file."""
+    entries = [
+        blob[_MBR_ENTRIES_OFFSET + i * _MBR_ENTRY_BYTES :][:_MBR_ENTRY_BYTES] for i in range(4)
+    ]
+    if not all(entry[0] in _MBR_STATUSES for entry in entries):
+        return False
+    for entry in entries:
+        first = int.from_bytes(entry[8:12], "little")
+        length = int.from_bytes(entry[12:16], "little")
+        if entry[4] != 0 and first >= 1 and length > 0 and (first + length) * _SECTOR_BYTES <= size:
+            return True
+    return False
+
+
+def _volume_boot_record(blob: bytes) -> bool:
+    """Whether the sector opens with a jump and a plausible BIOS parameter block (or exFAT's)."""
+    jumps = (blob[0] == 0xEB and blob[2] == 0x90) or blob[0] == 0xE9
+    if not jumps:
+        return False
+    if blob[3:11] == _EXFAT_OEM_NAME:
+        return (
+            blob[108] in _EXFAT_SECTOR_SHIFTS and blob[108] + blob[109] <= _EXFAT_MAX_CLUSTER_SHIFT
+        )
+    per_sector = int.from_bytes(blob[11:13], "little")
+    per_cluster = blob[13]
+    return (
+        per_sector in _BPB_SECTOR_SIZES and per_cluster > 0 and not per_cluster & (per_cluster - 1)
+    )
+
+
+def _boot_sector(blob: bytes, size: int) -> bool:
+    """Whether ``blob`` opens with the boot sector of a raw disk image of ``size`` bytes.
+
+    The boot signature and what the sector's structures say (see the constants).
+    """
+    end = _BOOT_SIGNATURE_OFFSET + len(_BOOT_SIGNATURE)
+    if len(blob) < end or blob[_BOOT_SIGNATURE_OFFSET:end] != _BOOT_SIGNATURE:
+        return False
+    if blob[_SECTOR_BYTES : _SECTOR_BYTES + len(_GPT_SIGNATURE)] == _GPT_SIGNATURE:
+        return True
+    return _mbr_partitions(blob, size) or _volume_boot_record(blob)
+
+
+def _has_vhd_footer(path: Path, blob: bytes) -> bool:
+    """Whether the file ends in a virtual hard disk's footer: its last 512 bytes, read alone.
+
+    From ``blob`` when it holds the whole file, else by reading only those
+    bytes of ``path``; nothing else of the file is opened.
+    """
+    size = _file_size(path, blob)
+    if size < _SECTOR_BYTES:
+        return False
+    if size == len(blob):
+        tail = blob[-_SECTOR_BYTES:]
+    else:
+        try:
+            with path.open("rb") as fh:
+                fh.seek(size - _SECTOR_BYTES)
+                tail = fh.read(_SECTOR_BYTES)
+        except OSError:
+            return False
+    return tail.startswith(_VHD_COOKIE) or tail[1:].startswith(_VHD_COOKIE)
+
+
 def _detect_file_type(path: Path, blob: bytes) -> str:
     """Return the lowercase routing label for a sample: ``pe``, ``apk``, ``pdf``...
 
@@ -320,7 +442,15 @@ def _detect_file_type(path: Path, blob: bytes) -> str:
     shebang = _shebang_type(blob)
     if shebang:
         return shebang
-    return _EXTENSION_TYPES.get(path.suffix.lower(), "unknown")
+    # A script is named by its extension before a boot sector is looked for:
+    # two bytes at offset 510 never outrank what the file says it is.
+    by_name = _EXTENSION_TYPES.get(path.suffix.lower())
+    if by_name:
+        return by_name
+    if _boot_sector(blob, _file_size(path, blob)):
+        # A fixed virtual hard disk is a raw disk with a footer of its own.
+        return "vhd" if _has_vhd_footer(path, blob) else "img"
+    return UNKNOWN_FORMAT
 
 
 # The public name. ``_detect_file_type`` stays for the callers that grew up
@@ -328,6 +458,42 @@ def _detect_file_type(path: Path, blob: bytes) -> str:
 def detect_file_type(path: Path, blob: bytes) -> str:
     """Return the lowercase routing label for a sample: ``pe``, ``apk``, ``pdf``..."""
     return _detect_file_type(path, blob)
+
+
+# The labels ``_detect_file_type`` gives by a rule of its own rather than out of
+# one of the tables above: a Mach-O magic, the shortcut header, a ZIP no entry
+# names, an iOS application archive, the ISO volume descriptor, a raw disk's
+# boot sector, a fixed virtual disk's footer, and nothing known
+# (:data:`UNKNOWN_FORMAT`).
+_RULE_FILE_TYPES: tuple[str, ...] = (
+    "mach-o",
+    "lnk",
+    "zip",
+    "ipa",
+    "iso",
+    "img",
+    "vhd",
+    UNKNOWN_FORMAT,
+)
+
+
+def routed_formats() -> tuple[str, ...]:
+    """Every label :func:`detect_file_type` can give a sample, sorted: the formats a run routes on.
+
+    The one list of them, ``unknown`` included, read off the detector's own
+    tables and the labels its rules give beside them, so a format added to one
+    is listed with no second copy to keep. The triage pack's step vocabulary
+    serves it to the console (``core.pack_steps.step_vocabulary``), and a
+    declaration that names the formats a tool serves
+    (``ToolFacts.routed_formats``) is held to it, less :data:`UNKNOWN_FORMAT`,
+    which names no format a tool could serve.
+    """
+    labels = {label for _magic, label in _MAGIC_PREFIXES}
+    labels.update(label for _entry, label in _ZIP_SIGNATURE_ENTRIES)
+    labels.update(label for _needle, label in _SHEBANG_TYPES)
+    labels.update(_EXTENSION_TYPES.values())
+    labels.update(_RULE_FILE_TYPES)
+    return tuple(sorted(labels))
 
 
 def infer_platform(
@@ -392,6 +558,10 @@ _UNPARSED_CONTAINER_TYPES: dict[str, str] = {
     "bz2": "bzip2 archive",
     "xz": "xz archive",
     "iso": "disc image",
+    "img": "disc image",
+    "vhd": "virtual disk",
+    "chm": "compiled HTML help",
+    "rtf": "RTF document",
 }
 
 
@@ -499,7 +669,8 @@ def unparsed_container_reason(
         if not path.is_file():
             return None
         with path.open("rb") as fh:
-            header = fh.read(16)
+            # Far enough to hold the ISO 9660 identifier, which sits past 32 KiB.
+            header = fh.read(_ISO_MAGIC_OFFSET + len(_ISO_MAGIC))
     except OSError:
         return None
 
@@ -532,22 +703,6 @@ def _guess_mime(path: Path) -> str | None:
             return str(mime) if mime is not None else None
     except Exception:  # noqa: BLE001
         pass
-    return None
-
-
-def _extract_compile_timestamp(blob: bytes | None) -> datetime | None:
-    """Read the PE ``TimeDateStamp`` field (when applicable) as aware UTC."""
-    if blob is None or len(blob) < 64 or blob[:2] != b"MZ":
-        return None
-    try:
-        import pefile  # type: ignore[import-not-found]
-
-        pe = pefile.PE(data=blob, fast_load=True)
-        ts = getattr(pe.FILE_HEADER, "TimeDateStamp", 0)
-        if ts and 946684800 <= ts < 4102444800:  # plausibility window 2000-2100
-            return datetime.fromtimestamp(int(ts), tz=UTC)
-    except Exception:  # noqa: BLE001
-        return None
     return None
 
 
@@ -720,6 +875,24 @@ def _pe_compiler_fingerprint(blob: bytes) -> str | None:
     return None
 
 
+def _is_certificate_table(blob: bytes, at: int, size: int) -> bool:
+    """True when the security directory points at a well-formed WIN_CERTIFICATE.
+
+    A non-zero directory entry is only a claim; a packer or a corrupt header
+    can leave any number there. The table counts when it lies inside the file
+    and its header is coherent: a length that covers the header and fits the
+    directory, a known revision and a known certificate type.
+    """
+    if not size or not at or at + 8 > len(blob):
+        return False
+    declared = int.from_bytes(blob[at : at + 4], "little")
+    revision = int.from_bytes(blob[at + 4 : at + 6], "little")
+    kind = int.from_bytes(blob[at + 6 : at + 8], "little")
+    return (
+        8 < declared <= size and revision in (0x0100, 0x0200) and kind in (0x0001, 0x0002, 0x0004)
+    )
+
+
 def _extract_signing(blob: bytes | None) -> SignatureInfo:
     """Best-effort PE Authenticode probe — no verification, just metadata."""
     info = SignatureInfo()
@@ -735,7 +908,7 @@ def _extract_signing(blob: bytes | None) -> SignatureInfo:
         security_dir = pe.OPTIONAL_HEADER.DATA_DIRECTORY[
             pefile.DIRECTORY_ENTRY["IMAGE_DIRECTORY_ENTRY_SECURITY"]
         ]
-        if security_dir.Size and security_dir.VirtualAddress:
+        if _is_certificate_table(blob, security_dir.VirtualAddress, security_dir.Size):
             info.is_signed = True
             _name_the_signer(info, blob, security_dir.VirtualAddress, security_dir.Size)
     except Exception:  # noqa: BLE001

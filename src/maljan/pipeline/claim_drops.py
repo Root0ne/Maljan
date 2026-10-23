@@ -28,12 +28,14 @@ changed nothing.
 from __future__ import annotations
 
 import re
+from collections import Counter
 from dataclasses import dataclass
 from typing import Any
 
+from maljan.analysis.technique_ids import TECHNIQUE_WORD_RE, is_technique_id
+
 _HEX = re.compile(r"(?<![0-9A-Za-z_])0x([0-9a-fA-F]+)(?![0-9A-Za-z_])")
 _DECIMAL = re.compile(r"(?<![\w.%-])(\d+)(?![\w%]|\.\d)")
-_TECHNIQUE = re.compile(r"\bT\d{4}(?:\.\d{3})?\b")
 _QUOTED = re.compile(r"`([^`\s]{2,})`|\"([^\"\s]{2,})\"")
 # A decompiler's own name for a function or a label: a fixed prefix and the
 # address in hex.
@@ -70,7 +72,7 @@ _LIST_NUMBER = re.compile(r"(?m)^\s*\(?\d+[.)](?=\s)")
 def _without_hex_and_ids(text: str) -> str:
     text = _HEX.sub(" ", text)
     text = _DECOMPILER_NAME.sub(" ", text)
-    text = _TECHNIQUE.sub(" ", text)
+    text = TECHNIQUE_WORD_RE.sub(" ", text)
     return re.sub(r"\bev_\d+\b", " ", text)
 
 
@@ -84,8 +86,8 @@ def claim_values(text: str, technique_id: str | None = "") -> frozenset[str]:
     """The values a claim states: numbers (hex as ``0x…``), technique ids, quoted values."""
     plain = _refanged(text)
     values: set[str] = {f"0x{int(m.group(1), 16):x}" for m in _HEX.finditer(plain)}
-    values.update(_TECHNIQUE.findall(plain))
-    if technique_id and _TECHNIQUE.fullmatch(str(technique_id).strip()):
+    values.update(TECHNIQUE_WORD_RE.findall(plain))
+    if technique_id and is_technique_id(str(technique_id).strip()):
         values.add(str(technique_id).strip())
     for match in _QUOTED.finditer(plain):
         quoted = (match.group(1) or match.group(2) or "").strip().casefold()
@@ -111,13 +113,13 @@ def _searched(text: str) -> _Searched:
     return _Searched(
         numbers=numbers | names,
         names=names,
-        techniques=set(_TECHNIQUE.findall(plain)),
+        techniques=set(TECHNIQUE_WORD_RE.findall(plain)),
         folded=plain.casefold(),
     )
 
 
 def _is_stated(value: str, searched: _Searched) -> bool:
-    if _TECHNIQUE.fullmatch(value):
+    if is_technique_id(value):
         return value in searched.techniques
     number: int | None = None
     if re.fullmatch(r"0x[0-9a-f]+", value):
@@ -238,6 +240,157 @@ def dropped_values_sentence(name: str, revision_round: int, dropped: DroppedValu
         f"{', '.join(dropped.missing)}, which its answer in force stated in the claim "
         f'"{dropped.claim}".'
     )
+
+
+_EVIDENCE_ID = re.compile(r"\bev_\d+\b", re.IGNORECASE)
+# The words a claim says something is not so with: two claims that differ in
+# them differ in what they claim, whatever else they share.
+_NEGATORS = frozenset(
+    {
+        "not",
+        "no",
+        "never",
+        "none",
+        "nor",
+        "neither",
+        "without",
+        "absent",
+        "unconfirmed",
+        "unobserved",
+        "cannot",
+        "nothing",
+        "nowhere",
+    }
+)
+# A word as a claim writes it: letters, digits and the joiners an identifier,
+# a file name or a host name holds inside it.
+_WORD = re.compile(r"[A-Za-z0-9](?:[A-Za-z0-9_.\-']*[A-Za-z0-9])?")
+# Confidence is compared in steps of this size: two values in one step are the
+# same confidence, any other two a change.
+CONFIDENCE_STEP = 0.05
+# The key of one claim: values, entry ids, technique, negators, confidence
+# step and technical terms.
+ClaimKey = tuple[
+    frozenset[str], frozenset[str], str, tuple[str, ...], int | None, frozenset[str], frozenset[str]
+]
+# Words that carry no fact of a claim: articles, prepositions, conjunctions,
+# pronouns and forms of "be", "have" and "do". Anything else a claim writes
+# (a noun, a verb, an adjective, a number word, a modal, a polarity word) is
+# a content word, and a change of one is a change of the claim. "or", "nor"
+# and "but" are content words: "RC4 and XOR" against "RC4 or XOR" is a change.
+_STOPWORDS = frozenset(
+    {
+        "a", "an", "the", "of", "to", "in", "on", "at", "by", "for", "with", "from",
+        "into", "onto", "as", "and", "so", "than", "then", "also",
+        "is", "are", "was", "were", "be", "been", "being", "am",
+        "has", "have", "had", "having", "do", "does", "did",
+        "it", "its", "this", "that", "these", "those", "which", "who", "whom", "whose",
+        "there", "here", "they", "them", "their", "he", "she", "his", "her", "we", "our",
+        "us", "i", "you", "your", "itself", "themselves",
+    }
+)  # fmt: skip
+
+
+def _folded_word(word: str) -> str:
+    """A word lower-cased, its plural ending off ("strings" is "string", "entries" "entry")."""
+    w = word.lower()
+    if len(w) > 3 and w.endswith("ies"):
+        return w[:-3] + "y"
+    if len(w) > 3 and w.endswith(("ches", "shes", "sses", "xes", "zes")):
+        return w[:-2]
+    if len(w) > 2 and w.endswith("s") and not w.endswith(("ss", "us", "is")):
+        return w[:-1]
+    return w
+
+
+def content_words(text: str) -> frozenset[str]:
+    """A claim's content words: every word, folded, but the stopwords (:data:`_STOPWORDS`)."""
+    found: set[str] = set()
+    for word in _WORD.findall(text):
+        lower = word.lower()
+        # The stopword test reads the word as written first: "was", "has"
+        # and "does" are stopwords, and folded they would not be.
+        if lower in _STOPWORDS:
+            continue
+        folded = _folded_word(lower)
+        if folded not in _STOPWORDS:
+            found.add(folded)
+    return frozenset(found)
+
+
+def _technical(word: str) -> bool:
+    """Whether a word names a technical thing: an acronym, an identifier, a name with a digit.
+
+    "RC4", "XOR", "CreateMutexW", "FUN_1400", "a.dll" are; "Strings",
+    "decodes" are not.
+    """
+    if any(c.isdigit() for c in word) or any(c in "_." for c in word):
+        return True
+    letters = [c for c in word if c.isalpha()]
+    if len(letters) >= 2 and all(c.isupper() for c in letters):
+        return True
+    return any(c.isupper() for c in word[1:])
+
+
+def _negators(text: str) -> tuple[str, ...]:
+    words = [w.lower() for w in _WORD.findall(text)]
+    found = [w for w in words if w in _NEGATORS or w.endswith("n't")]
+    return tuple(sorted(found))
+
+
+def _confidence_step(claim: Any) -> int | None:
+    value = getattr(claim, "confidence", None)
+    if isinstance(value, bool) or not isinstance(value, int | float):
+        return None
+    return int(round(float(value) / CONFIDENCE_STEP))
+
+
+def claim_substance(isr: Any) -> Counter[ClaimKey]:
+    """What an answer's claims state, wording aside, one key per claim.
+
+    A claim's key holds everything that changes what it claims:
+    :func:`claim_values` (numbers, hex addresses, technique ids, quoted
+    values), the entry ids its evidence line cites, its technique, the
+    negators it writes ("not", "no", "never", "without", a word ending
+    "n't"), its confidence in steps of :data:`CONFIDENCE_STEP`, and its
+    technical terms (acronyms, identifiers, names holding a digit, folded:
+    "RC4" against "XOR"), and its content words (:func:`content_words`:
+    every word but the stopwords, case and plural folded, so "three" against
+    "four", "explorer" against "svchost" or "packed" against "unpacked" is a
+    change). Two claims are one key only when all of these are equal: a
+    reordering, punctuation or a stopword is wording.
+    """
+    keys: Counter[ClaimKey] = Counter()
+    for claim in getattr(isr, "claims", None) or []:
+        text = str(getattr(claim, "claim", "") or "")
+        technique = str(getattr(claim, "technique_id", "") or "").strip()
+        keys[
+            (
+                claim_values(text, technique),
+                frozenset(
+                    i.lower() for i in _EVIDENCE_ID.findall(str(getattr(claim, "evidence_ref", "")))
+                ),
+                technique,
+                _negators(text),
+                _confidence_step(claim),
+                frozenset(w.lower() for w in _WORD.findall(text) if _technical(w)),
+                content_words(text),
+            )
+        ] += 1
+    return keys
+
+
+def unchanged_in_substance(in_force: Any, revision: Any) -> bool:
+    """Whether a revision states the claims in force again, wording aside (:func:`claim_substance`).
+
+    An answer with no claim is not one: it states nothing to compare. Any
+    claim whose key cannot be read makes the round not reworded.
+    """
+    try:
+        before = claim_substance(in_force)
+        return bool(before) and before == claim_substance(revision)
+    except Exception:  # noqa: BLE001 — unsure is a change
+        return False
 
 
 def answer_unchanged(in_force: str, revision: str) -> bool:

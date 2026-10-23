@@ -2,11 +2,97 @@
 
 from __future__ import annotations
 
+import time
+from pathlib import Path
+
+import pytest
+
 from maljan.analysis.technique_ids import (
+    ID_BODY,
+    SIGMA_TAG_RE,
+    TECHNIQUE_ID_EXACT_RE,
+    TECHNIQUE_WORD_RE,
     api_capability_hits,
+    is_technique_id,
     sigma_technique_ids,
     technique_ids_in,
 )
+
+
+class TestOneStrictReader:
+    def test_an_id_and_a_sub_technique_are_ids(self) -> None:
+        assert is_technique_id("T1055")
+        assert is_technique_id("T1055.012")
+
+    @pytest.mark.parametrize(
+        "value",
+        [
+            "T1055\n",
+            "T1055\r\n",
+            " T1055",
+            "T1055 foo",
+            "T1055.1",
+            "T1055.0123",
+            "TA0005",
+            "T105",
+            "t1055",
+            "AT1055",
+            "",
+            None,
+            1055,
+        ],
+    )
+    def test_anything_else_is_not(self, value: object) -> None:
+        assert not is_technique_id(value)
+
+    def test_the_exact_pattern_refuses_a_final_newline_under_match(self) -> None:
+        # ``$`` matches before a final newline; the reader is anchored at the
+        # very end, so ``re.match`` callers get the strict answer too.
+        assert TECHNIQUE_ID_EXACT_RE.match("T1055\n") is None
+        assert SIGMA_TAG_RE.match("attack.t1055\n") is None
+        assert sigma_technique_ids({"tags": ["attack.ta0005"]}) == []
+
+    def test_the_word_reader_keeps_the_case_the_platform_writes(self) -> None:
+        assert TECHNIQUE_WORD_RE.findall("T1055, t1027 and AT1105") == ["T1055"]
+
+    def test_every_reader_is_built_from_the_one_body(self) -> None:
+        for pattern in (TECHNIQUE_ID_EXACT_RE, TECHNIQUE_WORD_RE, SIGMA_TAG_RE):
+            assert ID_BODY in pattern.pattern
+
+    def test_the_claim_line_readers_are_built_from_it_and_unchanged(self) -> None:
+        from maljan.agents import base_agent
+
+        # The claim grammar keeps its own boundaries; only the id is shared.
+        assert base_agent._ONE_TECHNIQUE_RE.pattern == r"T\d{4}(?:\.\d{3})?"
+        assert base_agent._ANY_TECHNIQUE_ID_RE.pattern == r"(?<![\w.])T\d{4}(?:\.\d{3})?(?!\w)"
+        assert base_agent._ID_AT_RE.pattern.startswith(r"(?P<id>T\d{4}(?:\.\d{3})?+)")
+
+    def test_hostile_input_is_read_in_linear_time(self) -> None:
+        # Ten times the text takes at most about ten times as long (twenty, for noise).
+        def took(size: int) -> float:
+            text = ("T1055." * size) + ("T" + "1" * 9) * size + "\n"
+            start = time.perf_counter()
+            technique_ids_in(text)
+            TECHNIQUE_WORD_RE.findall(text)
+            is_technique_id(text)
+            sigma_technique_ids({"tags": [f"attack.{text}"]})
+            return time.perf_counter() - start
+
+        small = min(took(20_000) for _ in range(3))
+        large = took(200_000)
+        assert large < 20 * small + 0.05
+
+    def test_no_reader_outside_this_module_writes_the_id_again(self) -> None:
+        import maljan
+
+        root = Path(maljan.__file__).parent
+        holders = {
+            str(path.relative_to(root))
+            for path in root.rglob("*.py")
+            if ID_BODY in path.read_text(encoding="utf-8")
+        }
+        # Every other reader is built from ``ID_BODY``.
+        assert holders == {"analysis/technique_ids.py"}
 
 
 class TestTechniqueIdsIn:

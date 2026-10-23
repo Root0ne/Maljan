@@ -58,6 +58,47 @@ from scripts.rehearsal.roles import Brain, composer_section, role_of  # noqa: E4
 LOOPBACK = "127.0.0.1"
 
 
+def check_bind_host(host: str, allow_private: bool = False) -> str:
+    """Return ``host`` if the stub may bind it, else raise ValueError.
+
+    The stub answers any caller without credentials. It binds what the settings
+    treat as this machine (``localhost``, 127.0.0.0/8) or as the Docker host
+    (172.17.0.0 to 172.31.255.255), the same checks that let the stack save a
+    plain-http URL, so bind and save agree. Another private IPv4 address
+    (podman's 10.88.x, a custom ``bip``, a LAN 192.168.x) only with
+    ``allow_private``. A wildcard, a public address or a name is never bound.
+    """
+    import ipaddress
+
+    from maljan.core.config import _is_docker_host, _is_loopback
+
+    if host == "localhost" or (_is_loopback(host) and _is_ipv4(host)):
+        return host
+    if not _is_ipv4(host):
+        raise ValueError(f"--stub-host {host!r} is not an IPv4 address or localhost")
+    if _is_docker_host(host):
+        return host
+    address = ipaddress.IPv4Address(host)
+    if (
+        allow_private
+        and address.is_private
+        and not (address.is_unspecified or address.is_link_local)
+    ):
+        return host
+    hint = "" if allow_private else "; --stub-host-private allows another private address"
+    raise ValueError(f"--stub-host {host!r} is not loopback or a Docker host address{hint}")
+
+
+def _is_ipv4(host: str) -> bool:
+    import ipaddress
+
+    try:
+        ipaddress.IPv4Address(host)
+    except ValueError:
+        return False
+    return True
+
+
 @dataclass
 class Pace:
     """How fast the simulated model answers."""
@@ -333,8 +374,8 @@ def build_app(state: StubState) -> Any:
         )
 
     async def log(http: HttpRequest) -> Any:
-        with state.lock:
-            return JSONResponse(state.calls())
+        # ``calls`` takes the (non-reentrant) lock itself.
+        return JSONResponse(state.calls())
 
     async def reset(http: HttpRequest) -> Any:
         with state.lock:
@@ -363,11 +404,18 @@ class StubServer:
     Port 0, the default, takes a free port; ``root`` says which.
     """
 
-    def __init__(self, state: StubState, port: int = 0, host: str = LOOPBACK) -> None:
+    def __init__(
+        self,
+        state: StubState,
+        port: int = 0,
+        host: str = LOOPBACK,
+        allow_private: bool = False,
+    ) -> None:
         import socket
 
         import uvicorn
 
+        check_bind_host(host, allow_private)
         self.state = state
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)

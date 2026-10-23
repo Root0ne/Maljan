@@ -32,7 +32,10 @@ import os
 import threading
 import uuid
 import weakref
+from collections.abc import Callable, Iterable
 from contextlib import suppress
+from contextvars import ContextVar
+from dataclasses import replace
 from typing import TYPE_CHECKING, Any, cast
 
 from langchain_core.language_models.chat_models import BaseChatModel
@@ -51,6 +54,7 @@ from maljan.core.exceptions import ConfigurationError
 from maljan.core.logger import logger
 from maljan.core.token_ledger import TokenLedger
 from maljan.core.truncation_ledger import TruncationLedger
+from maljan.llm.agent_ceiling import attach_agent_ceiling
 from maljan.llm.context_window import record_built_cap
 from maljan.llm.generation_rate import GenerationRates, attach_rate_meter
 from maljan.llm.registry import LLMProviderRegistry
@@ -60,6 +64,8 @@ from maljan.parsers.registry import ParserRegistry
 from maljan.schemas.evidence import EvidenceCounter
 
 if TYPE_CHECKING:
+    from pathlib import Path
+
     from maljan.agents.base_agent import BaseAnalyst
     from maljan.analysis.function_summarizer import FunctionSummarizer
     from maljan.loaders.binary_chunker import Room, TextChunk
@@ -85,6 +91,147 @@ _ACLOSE_BUDGET = 20.0
 # 20s bound — and because it runs in an executor, so the time it spends is a
 # worker thread's, not the event loop's.
 _CLOSE_ALL_BUDGET = 45.0
+
+
+# Whether the load running on this thread is the outermost one: an agent's
+# input is stated once, where the whole of it is known (``_note_chunking``),
+# never again by a load it is built from.
+_OUTERMOST_LOAD: ContextVar[bool] = ContextVar("maljan_outermost_chunk_load", default=True)
+
+
+def _with_content(chunks: list[TextChunk], agent_name: str = "") -> list[TextChunk]:
+    """The chunks that hold something: one of nothing but whitespace is no input to loop over."""
+    held = [chunk for chunk in chunks if str(getattr(chunk, "content", "") or "").strip()]
+    if len(held) < len(chunks):
+        logger.debug(
+            "%s: %d chunk(s) of nothing but whitespace left out of the input.",
+            agent_name,
+            len(chunks) - len(held),
+        )
+    return held
+
+
+def _head_alone(head: Room | None, alone: bool) -> Room | None:
+    """``head`` told whether its source is the agent's only one (``HeadRoom.alone_as``)."""
+    from maljan.loaders.binary_chunker import HeadRoom
+
+    return head.alone_as(alone) if isinstance(head, HeadRoom) else head
+
+
+def _first_pass_room(container: Any, agent_name: str, room: Room | None) -> Room | None:
+    """``room``, with the chunk size the agent's first analysis used where it measures nothing.
+
+    A revision asks for the agent's room by its name; an agent that cannot be
+    built then has no room to give. Its first analysis did measure one, and
+    chunking the same input again at that size is what the revision is meant
+    to read, so it is used in place of the unknown-window size.
+    """
+    from maljan.loaders.binary_chunker import HeadRoom
+
+    store = getattr(container, "_first_pass_chunk_chars", None)
+    remembered = store.get(agent_name) if isinstance(store, dict) else None
+    if not isinstance(remembered, int) or isinstance(remembered, bool):
+        return room
+
+    def measured(text: str) -> int | None:
+        chars = room(text) if room is not None else None
+        return remembered if chars is None else chars
+
+    # A head room stays one: what the node adds is still kept out of its first chunk.
+    return room.over(measured) if isinstance(room, HeadRoom) else measured
+
+
+def _markers_written_out(chunks: list[TextChunk]) -> list[TextChunk]:
+    """``chunks`` with any run-state marker in their text written out; the same list when none."""
+    from maljan.utils.written_forms import markers_written_out
+
+    out: list[TextChunk] = []
+    changed = False
+    for chunk in chunks:
+        content = chunk.content
+        written = markers_written_out(content) if isinstance(content, str) else content
+        if written != content:
+            out.append(replace(chunk, content=written))
+            changed = True
+        else:
+            out.append(chunk)
+    return out if changed else chunks
+
+
+def _note_chunking(
+    container: Any, agent_name: str, chunks: list[TextChunk], head: Room | None = None
+) -> None:
+    """What sized agent ``agent_name``'s chunks, kept for its revision and stated where unknown.
+
+    The first chunk size sized from the agent's window is kept
+    (``_first_pass_room``). An input the shipped size split, because no window
+    was learned, is a row in the run summary and a log line, each with the
+    remedy: the split is kept, never silent. Split means more than one chunk
+    once whole sources that fit the shipped size together are joined, as the
+    analyst node joins them: after it adds the sample path and the upstream
+    block to the first chunk, which ``head`` (a ``HeadRoom``) measures.
+    """
+    from maljan.llm.context_window import unknown_window_remedy
+    from maljan.loaders.binary_chunker import (
+        CHUNK_CHARS,
+        SHIPPED_CHUNK_CHARS,
+        SIZED_BY,
+        SIZED_BY_ROOM,
+        SIZED_BY_UNKNOWN_WINDOW,
+        HeadRoom,
+        joined_when_it_fits,
+    )
+
+    sized = [getattr(chunk, "metadata", None) or {} for chunk in chunks]
+    store = getattr(container, "_first_pass_chunk_chars", None)
+    if isinstance(store, dict) and agent_name not in store:
+        for facts in sized:
+            chars = facts.get(CHUNK_CHARS)
+            if facts.get(SIZED_BY) == SIZED_BY_ROOM and isinstance(chars, int):
+                store[agent_name] = chars
+                break
+    if len(chunks) < 2 or not any(f.get(SIZED_BY) == SIZED_BY_UNKNOWN_WINDOW for f in sized):
+        return
+    config = getattr(getattr(container, "config", None), "chunking", None)
+    shown = chunks
+    added = head.added_to(str(chunks[0].content)) if isinstance(head, HeadRoom) else 0
+    if added > 0:
+        # The node joins after the head carries what it adds: counted as it will be.
+        grown = str(chunks[0].content) + " " * added
+        shown = [replace(chunks[0], content=grown, char_count=len(grown)), *chunks[1:]]
+    count = len(joined_when_it_fits(shown, config, None)) if config is not None else len(chunks)
+    if count < 2:
+        return
+    remedy = unknown_window_remedy()
+    ledger = getattr(container, "_truncation_ledger", None)
+    record = getattr(ledger, "record_unknown_window_split", None)
+    new = True
+    if callable(record):
+        try:
+            new = bool(
+                record(
+                    agent=agent_name,
+                    chunks=count,
+                    chunk_chars=SHIPPED_CHUNK_CHARS,
+                    remedy=remedy,
+                )
+            )
+        except Exception as exc:  # noqa: BLE001 — a record never costs an analysis
+            logger.debug("%s: the unknown-window split was not recorded (%s).", agent_name, exc)
+    if new:
+        logger.warning(
+            "%s",
+            unknown_window_split_line(agent_name, count, SHIPPED_CHUNK_CHARS, remedy),
+        )
+
+
+def unknown_window_split_line(agent_name: str, chunks: int, chunk_chars: int, remedy: str) -> str:
+    """The log line for an input the shipped chunk size split because no window was learned."""
+    return (
+        f"Agent '{agent_name}': input split into {chunks} chunks at the shipped "
+        f"{chunk_chars:,} characters, not at the room a window leaves: no context window "
+        f"was learned. To size chunks from the window, {remedy}."
+    )
 
 
 # Every container that still exists, so a retired agent loop can invalidate the
@@ -352,9 +499,17 @@ class ServiceContainer:
         event_sink: EventSink | None = None,
         job_id: str = "",
         resolved_mode: Any = None,
+        memory_owner: str | None = None,
     ) -> None:
         self.config = config
         self.mock = mock
+        # Whose long-term memory this job reads and writes: the owner of the
+        # job, as the caller that queued it knows it. ``None`` reads and
+        # writes the unscoped memory (the command line, a caller naming no
+        # owner); ``long_term_memory.recall`` states the rule.
+        from maljan.memory.long_term_memory import owner_key
+
+        self.memory_owner: str | None = owner_key(memory_owner)
         # The job's analyst mode as the caller resolved it off its event loop
         # (``pipeline.analyst_mode.resolve_for``), or ``None`` to resolve it
         # here on first use.
@@ -403,6 +558,12 @@ class ServiceContainer:
         # creation may call get_agent_llm()).
         self._lock = threading.RLock()
 
+        # The chunk size, in characters, each agent's first analysis sized its
+        # input at from its window, by agent name. A revision whose agent
+        # cannot be built to measure its room chunks at this rather than at the
+        # unknown-window size (``_first_pass_room``).
+        self._first_pass_chunk_chars: dict[str, int] = {}
+
         # --- Caches ---
         # Every chat-model cache is keyed by the event loop the caller is on
         # (see ``PerLoopModels``). A model's httpx pool belongs to the first loop
@@ -424,9 +585,17 @@ class ServiceContainer:
         # the job completes (``remember_the_run``). A job that fails after its
         # judge leaves no entry behind.
         self.pending_memory_case: Any = None
+        # The case an earlier run stored for this job's sample, by sha256,
+        # read once (``long_term_memory.earlier_case_of``); ``None`` for none.
+        self.earlier_cases: dict[str, Any] = {}
         # The function-hash corpus write the judge decided on, as
         # ``(store, sample_id, family, functions)``, held for the same reason.
         self.pending_function_hashes: Any = None
+        # The function hashes the triage pack read for this job's mirrored
+        # sample, as ``(mirror path, hashes)``, kept only when the read was
+        # whole: the judge's attribution reads them here rather than hashing
+        # the same program a second time. ``None`` until the pack has read them.
+        self.function_hashes_read: Any = None
         # Set by ``aclose``: a hold handed over after teardown (a judge thread a
         # timeout abandoned) is let go of at once.
         self._closed = False
@@ -472,6 +641,25 @@ class ServiceContainer:
         # none; set by ``app.arun`` beside it and recorded on the run summary
         # (``report_formats.recorded_signature_scale``).
         self.sandbox_signature_scale: dict[str, Any] | None = None
+        # Why the job has no sandbox report, in words, where its submission
+        # failed (a refused report, a failed task state, an unreachable host);
+        # set by ``app._submit_to_sandbox`` and carried into the report's
+        # degradation reason (``pipeline.nodes.sandbox_degradation_reason``).
+        # ``None`` where the sandbox answered or was never asked.
+        self.sandbox_failure: str | None = None
+        # Each submission of the sample to the job's sandbox provider
+        # (``analysis.disclosure.upload_record``), set by ``app.arun`` as it
+        # submits and read by the run's disclosure block. Empty outside a job.
+        self.sample_uploads: list[dict[str, Any]] = []
+        # Each upload of the sample to a tool server over its ``put_sample``
+        # tools (``analysis.disclosure.staging_record``), written by
+        # ``agents.sample_staging`` as it uploads; read by the same block.
+        self.sample_stagings: list[dict[str, Any]] = []
+        # The model endpoints whose window probe answered as a model runtime in
+        # this job, by ``endpoint_label``, each with what answered
+        # (``llm.context_window.runtime_answer``): recorded where the job's
+        # windows are learned, read by the same block.
+        self.runtime_answers: dict[str, str] = {}
 
         # The job's sample, for the one step that needs the bytes rather than
         # a report: staging the sample to a tool server that does not share
@@ -482,6 +670,21 @@ class ServiceContainer:
         # The path each tool server that declares a ``sample_mount`` opens the
         # worker's copy of the sample at, by server key; empty outside a job.
         self.server_sample_paths: dict[str, str] = {}
+        # Where the worker places a file of the job's artefact store for a
+        # server that declares a ``sample_mount``, as it places the sample:
+        # ``(server key, the file, its sha256, its name)`` to the path that
+        # server opens the copy at, or ``None``. Set by the worker for a job;
+        # ``None`` outside one, and such a server is then handed no file
+        # (``pipeline.artefacts``).
+        self.place_for_server: Callable[[str, Path, str, str], str | None] | None = None
+        # Every path a file of the job's artefact store was handed to a server
+        # at (``pipeline.artefacts.hand_over``): read by the run's isolation
+        # part as a path of what came out of the sample. Empty outside a job.
+        self.artefact_paths: list[str] = []
+        # The path each static provider's mirror of the sample is handed to
+        # its server under, by provider; empty outside a job. Read by the run's
+        # isolation part, which counts a call handed one as a read of the sample.
+        self.static_sample_paths: dict[str, str] = {}
 
         # Per-run LLM token/cost ledger (findings-log §4 Item 1). Agents and the
         # judge add each call's usage; the judge node snapshots it into RunSummary.
@@ -491,6 +694,29 @@ class ServiceContainer:
 
         self._token_ledger = TokenLedger(spend=SpendMeter.from_settings(config))
         self._plan_the_verdict_and_report(self._token_ledger.spend)
+        # What each agent's requests were made of, measured as they are sent
+        # (``core.input_meter``); the report node reads it into
+        # ``run_summary.efficiency``.
+        from maljan.core.input_meter import InputMeter
+
+        self.input_meter = InputMeter()
+        # The job's setup as each agent was resolved: the resolution itself,
+        # and the name and version every tool server attached by then gave for
+        # itself. What the run fingerprint is made of (``analysis.efficiency``),
+        # so nothing a run does later — a retry, a revision, a clear, the
+        # mediator's fast path — moves it.
+        self._resolved_agents: dict[str, Any] = {}
+        self._setup_servers: dict[str, dict[str, str]] = {}
+        # The tools each agent was set up with, by its key: an analyst's as it
+        # was resolved, the judge's and the mediator's as their role binds them.
+        self._setup_tools: dict[str, list[Any]] = {}
+        # The analysts whose loop has bound its tools: from then on that list,
+        # not the resolution's, is the analyst's setup.
+        self._bound_agents: set[str] = set()
+        # The judge's and the mediator's servers as their settings declare
+        # them, for an agent the run never bound: never attached for the
+        # fingerprint, so recorded with no version and no tool definitions.
+        self._declared_setup: dict[str, dict[str, dict[str, Any]]] = {}
         # Each call, as it is recorded, on the job's event feed: the durable
         # trail of what the run spent, kept call by call by the worker.
         if event_sink is not None:
@@ -536,9 +762,25 @@ class ServiceContainer:
             int(getattr(config.reporting, "evidence_corpus_bytes", 0) or 0)
         )
 
+        # Where the parts of an answer a ledger entry does not keep whole are
+        # kept whole (``schemas.evidence_spill``). Set by the caller that owns
+        # a store, the analysis worker; ``None`` keeps nothing.
+        self._evidence_spill: Any = None
+
         # Per-job source of evidence-ledger ids. One counter for the whole job
         # so ``ev_0007`` names one tool call rather than one per agent.
         self._evidence_counter = EvidenceCounter()
+        # Everything that holds entries this counter issued before they reach
+        # the run's ledger, asked by ``collect_undrained_evidence``: every agent
+        # this container builds registers itself, and any other writer that
+        # holds entries registers a way to hand them over. Entries whose holder
+        # can no longer hand them to a node (a delegation answered after its
+        # caller's loop ended) are parked on ``_handed_over_evidence``.
+        self._evidence_holders: list[Callable[[], Iterable[Any]]] = []
+        self._handed_over_evidence: list[Any] = []
+        # Every entry ``collect_undrained_evidence`` has collected, by id, kept
+        # for the job's length so no later caller can miss one.
+        self._collected_evidence: dict[str, Any] = {}
 
         # The window this job's models were served with, and the cap it gives
         # one tool answer. Built on first use rather than here: learning the
@@ -562,6 +804,7 @@ class ServiceContainer:
 
         self._configure_langsmith()
         self._announce_index_retry()
+        self._announce_attck_refresh()
 
     @property
     def is_mock(self) -> bool:
@@ -688,6 +931,10 @@ class ServiceContainer:
                 attach_rate_meter(cached, getattr(self, "_generation_rates", None))
                 # Its calls are recorded under the judge agent that runs on it.
                 attach_retry_recorder(cached, getattr(self, "_token_ledger", None), "judge")
+                # Its own ceiling is the mediator entry's, not the judge's.
+                attach_agent_ceiling(
+                    cached, getattr(self, "_token_ledger", None), MEDIATOR_AGENT_KEY
+                )
                 self._mediator_llm_cache.put(loop, "", cached)
             return cached
 
@@ -716,6 +963,7 @@ class ServiceContainer:
                 record_built_cap(cached, cap)
                 attach_rate_meter(cached, getattr(self, "_generation_rates", None))
                 attach_retry_recorder(cached, getattr(self, "_token_ledger", None), "judge")
+                attach_agent_ceiling(cached, getattr(self, "_token_ledger", None), "judge")
                 self._judge_llm_cache.put(loop, "", cached)
             return cached
 
@@ -741,6 +989,9 @@ class ServiceContainer:
                 attach_retry_recorder(
                     cached, getattr(self, "_token_ledger", None), REPORTER_AGENT_KEY
                 )
+                attach_agent_ceiling(
+                    cached, getattr(self, "_token_ledger", None), REPORTER_AGENT_KEY
+                )
                 self._reporter_llm_cache.put(loop, "", cached)
             return cached
 
@@ -764,6 +1015,9 @@ class ServiceContainer:
                 )
                 attach_rate_meter(cached, getattr(self, "_generation_rates", None))
                 attach_retry_recorder(cached, getattr(self, "_token_ledger", None), "summarizer")
+                attach_agent_ceiling(
+                    cached, getattr(self, "_token_ledger", None), SUMMARIZER_AGENT_KEY
+                )
                 self._summarizer_llm_cache.put(loop, "", cached)
             return cached
 
@@ -782,6 +1036,7 @@ class ServiceContainer:
                 record_built_cap(cached, cap)
                 attach_rate_meter(cached, getattr(self, "_generation_rates", None))
                 attach_retry_recorder(cached, getattr(self, "_token_ledger", None), agent_name)
+                attach_agent_ceiling(cached, getattr(self, "_token_ledger", None), agent_name)
                 self._agent_llm_cache.put(loop, agent_name, cached)
             return cached
 
@@ -821,8 +1076,22 @@ class ServiceContainer:
         case, self.pending_memory_case = self.pending_memory_case, None
         if case is None:
             return False
+        from dataclasses import replace
+
+        from maljan.memory.long_term_memory import keeps_owners
+
         try:
-            self.get_memory_store().store(case)
+            store = self.get_memory_store()
+            if self.memory_owner is not None and not keeps_owners(store):
+                # Unscoped, it would reach every other owner's jobs.
+                logger.info(
+                    "LTM: case '%s' is not stored: the memory backend keeps no owners.",
+                    case.sample_id,
+                )
+                return False
+            store.store(
+                case if self.memory_owner is None else replace(case, owner=self.memory_owner)
+            )
         except Exception as exc:  # noqa: BLE001 — memory never costs a completed job
             logger.warning("LTM store failed (%s). The completed job is unaffected.", exc)
             return False
@@ -854,15 +1123,56 @@ class ServiceContainer:
         if replaced is not None:
             release_function_hash_store(replaced[0])
 
+    def drop_function_hashes(self, reason: str) -> None:
+        """Let go of the held corpus write unwritten, saying why. Never raises."""
+        with self._lock:
+            held, self.pending_function_hashes = self.pending_function_hashes, None
+        if held is None:
+            return
+        from maljan.memory.store_factory import release_function_hash_store
+
+        logger.info(
+            "Function-hash corpus: '%s' is not filed under %s (%s).",
+            str(held[1])[:16],
+            held[2],
+            reason,
+        )
+        release_function_hash_store(held[0])
+
     def _remember_the_function_hashes(self) -> bool:
         held, self.pending_function_hashes = self.pending_function_hashes, None
         if held is None:
             return False
         store, sample_id, family, functions = held
+        from maljan.memory.long_term_memory import keeps_owners
         from maljan.memory.store_factory import release_function_hash_store
 
+        # The provider answers ``(func_name, func_hash)``; the index files
+        # ``(func_hash, func_name)``. Filed the provider's way round, every
+        # name was stored as a hash and no later sample's hash could match it.
+        pairs = [(func_hash, name) for name, func_hash in functions]
+        # The verdict that files them, where the store records it, so an edit
+        # of that verdict can take them back (``FunctionHashStore.unfile``).
+        filer = (
+            {"filed_by": self.job_id}
+            if self.job_id and getattr(store, "keeps_filer", False)
+            else {}
+        )
         try:
-            written = int(store.upsert_sample(sample_id, family, functions) or 0)
+            if self.memory_owner is None:
+                written = int(store.upsert_sample(sample_id, family, pairs, **filer) or 0)
+            elif keeps_owners(store):
+                written = int(
+                    store.upsert_sample(sample_id, family, pairs, owner=self.memory_owner, **filer)
+                    or 0
+                )
+            else:
+                # Unscoped, it would reach every other owner's jobs.
+                logger.info(
+                    "Function-hash corpus: '%s' is not filed: the store keeps no owners.",
+                    str(sample_id)[:16],
+                )
+                return False
         except Exception as exc:  # noqa: BLE001 — the corpus never costs a completed job
             logger.warning(
                 "Function-hash corpus write failed (%s). The completed job is unaffected.", exc
@@ -900,6 +1210,10 @@ class ServiceContainer:
             fixtures = getattr(provider, "fixtures_dir", None)
             if fixtures is not None:
                 provider.fixtures_dir = self._samples_dir  # type: ignore[attr-defined]
+            # A provider whose server is measured for the run's isolation part
+            # (CAPE's MCP server) is told whose job it serves.
+            if hasattr(provider, "job_key"):
+                provider.job_key = self.job_key()
             logger.info("Sandbox provider: %s.", provider.id)
             self._sandbox_provider_cache = provider
             return provider
@@ -929,8 +1243,15 @@ class ServiceContainer:
                     cfg.static.provider = wanted  # type: ignore[assignment]
                 cached = build(cfg)
                 logger.info("Static provider: %s.", cached.id)
+                # A provider whose server rests announces it to this job's sink.
+                if hasattr(cached, "event_sink"):
+                    cached.event_sink = self.event_sink
                 if hasattr(cached, "sample_notes"):
                     cached.sample_notes = self.sample_notes
+                # A provider that does work of its own in the job's staging
+                # directory (capa_yara's capa runs) is told whose it is.
+                if hasattr(cached, "job_key"):
+                    cached.job_key = self.job_key()
                 self._static_provider_cache[wanted] = cached
             return cached
 
@@ -958,6 +1279,7 @@ class ServiceContainer:
                 self._server_registry_cache = ServerRegistry(
                     self.config,
                     sample_notes=self.sample_notes,
+                    sample_sha256=lambda: self.sample_sha256,
                     truncation_ledger=self._truncation_ledger,
                     context_budget=budget,
                     event_sink=self.event_sink,
@@ -985,7 +1307,114 @@ class ServiceContainer:
         ``server_degradation_reasons`` does.
         """
         registry = self._server_registry_cache
-        return [dict(row) for row in getattr(registry, "rests", None) or []]
+        rests = [dict(row) for row in getattr(registry, "rests", None) or []]
+        for provider in list(self._static_provider_cache.values()):
+            rests.extend(dict(row) for row in getattr(provider, "rests", None) or [])
+        return rests
+
+    def _note_the_setup(self, name: str, resolved: Any) -> None:
+        """Keep agent ``name``'s resolution and the servers attached by then. Never raises."""
+        try:
+            self._resolved_agents[name] = resolved
+            self._setup_tools.setdefault(name, list(getattr(resolved, "tools", None) or []))
+            self._note_setup_servers(None)
+        except Exception as exc:  # noqa: BLE001 — telemetry never costs an agent
+            logger.debug("the setup of '%s' was not noted (%s).", name, type(exc).__name__)
+
+    def _note_setup_servers(self, names: set[str] | None) -> None:
+        """The name and version each attached server gave, for ``names`` or every one."""
+        registry = self._server_registry_cache
+        versions = getattr(registry, "server_versions", None)
+        if not callable(versions):
+            return
+        for server, info in versions().items():
+            if names is None or server in names:
+                self._setup_servers.setdefault(server, dict(info))
+
+    def note_bound_tools(self, name: str, tools: Any) -> None:
+        """The tools analyst ``name``'s first loop binds, as its setup. Never raises.
+
+        A built-in role attaches its own servers after it was resolved, and its
+        prompt and requests are written for what its loop binds; the first
+        loop's list stands, and the servers attached by then are noted.
+        """
+        try:
+            if name in self._bound_agents:
+                return
+            self._bound_agents.add(name)
+            self._setup_tools[name] = list(tools or [])
+            self._note_setup_servers(None)
+        except Exception as exc:  # noqa: BLE001 — telemetry never costs an agent
+            logger.debug("the tools of '%s' were not noted (%s).", name, type(exc).__name__)
+
+    def note_role_setup(self, key: str, tools: Any, servers: set[str]) -> None:
+        """The tools agent ``key`` (the judge, the mediator) is set up with, and its servers.
+
+        Called where the agent's role binds its servers, as an analyst's are
+        noted where it is resolved; the first record of an agent stands. Never
+        raises.
+        """
+        try:
+            self._setup_tools.setdefault(str(key), list(tools or []))
+            self._note_setup_servers(set(servers))
+        except Exception as exc:  # noqa: BLE001 — telemetry never costs an agent
+            logger.debug("the setup of '%s' was not noted (%s).", key, type(exc).__name__)
+
+    def note_judge_declared_setup(self) -> None:
+        """The judge's and the mediator's servers from their settings, where the run bound none.
+
+        No server is attached for the fingerprint, and no agent is built: an
+        agent that never bound its role's servers in this run (a mediation
+        that took its fast path) is recorded by what the settings declare for
+        each server the ``judge`` role and definition bind — digests of its
+        launch identity with this host's paths replaced and of its tool filter
+        (``efficiency.declared_server``), never the values — marked not
+        attached, with no version and no tool definitions. An agent
+        the run set up is left as it is. Never raises.
+        """
+        try:
+            from maljan.agents.composition import _excluded_servers, mcp_refs_for
+            from maljan.analysis.efficiency import declared_server
+
+            servers = getattr(getattr(self.config, "mcp", None), "servers", None) or {}
+            registry = self.get_server_registry()
+            names = {
+                handle.name
+                for handle in registry.for_agent(
+                    "judge", exclude=_excluded_servers(self.config, "judge")
+                )
+            }
+            names |= {
+                str(ref.server)
+                for ref in mcp_refs_for(self.config, "judge")
+                if getattr(ref, "server", None)
+            }
+            declared = {
+                name: declared_server(servers[name]) for name in sorted(names) if name in servers
+            }
+            for key in ("judge", MEDIATOR_AGENT_KEY):
+                if key not in self._setup_tools and key not in self._declared_setup:
+                    self._declared_setup[key] = {
+                        name: dict(info) for name, info in declared.items()
+                    }
+        except Exception as exc:  # noqa: BLE001 — telemetry never costs a report
+            logger.debug("the judge's declared setup was not noted (%s).", type(exc).__name__)
+
+    def declared_setup(self) -> dict[str, dict[str, dict[str, Any]]]:
+        """Per agent the run never bound, its servers as their settings declare them."""
+        return {key: dict(held) for key, held in sorted(self._declared_setup.items())}
+
+    def resolved_agents(self) -> dict[str, Any]:
+        """Each agent this job resolved, by key, as it was resolved."""
+        return dict(self._resolved_agents)
+
+    def setup_tools(self) -> dict[str, list[Any]]:
+        """The tools each agent was set up with, by key."""
+        return {key: list(tools) for key, tools in sorted(self._setup_tools.items())}
+
+    def setup_server_versions(self) -> dict[str, dict[str, str]]:
+        """Per tool server attached by the time its agents were resolved, its name and version."""
+        return dict(sorted(self._setup_servers.items()))
 
     def get_token_ledger(self) -> TokenLedger:
         """Return the per-run LLM token/cost ledger (findings-log §4 Item 1)."""
@@ -1030,11 +1459,13 @@ class ServiceContainer:
         from maljan.agents.composition import window_assignments
         from maljan.llm.context_window import budget_for_settings
 
+        assignments = window_assignments(self.config)
         budget = budget_for_settings(
             self.config,
-            window_assignments(self.config),
+            assignments,
             probe=self._cap_is_derived() and not self.mock,
         )
+        self._note_runtime_answers(assignments)
         with self._lock:
             if self._context_budget is None:
                 self._context_budget = budget
@@ -1068,15 +1499,36 @@ class ServiceContainer:
         from maljan.core.model_assignments import assignment_chain_for
         from maljan.llm.context_window import budget_for_settings
 
+        assignments = assignment_chain_for(self.config, REPORTER_AGENT_KEY, role="judge")
         budget = budget_for_settings(
             self.config,
-            assignment_chain_for(self.config, REPORTER_AGENT_KEY, role="judge"),
+            assignments,
             probe=self._cap_is_derived() and not self.mock,
         )
+        self._note_runtime_answers(assignments)
         with self._lock:
             if self._reporter_context_budget is None:
                 self._reporter_context_budget = budget
             return self._reporter_context_budget
+
+    def _note_runtime_answers(self, assignments: Any) -> None:
+        """Keep which of these models' endpoints answered the window probe as a runtime.
+
+        Read from what the probe that just ran learned, with no request of its
+        own (``context_window.runtime_answers``); a mock container learns
+        nothing and keeps nothing. Never raises.
+        """
+        if self.mock:
+            return
+        try:
+            from maljan.llm.context_window import runtime_answers
+
+            found = runtime_answers(assignments)
+        except Exception as exc:  # noqa: BLE001 — a record of an answer is never worth a run
+            logger.debug("runtime answers not kept (%s).", type(exc).__name__)
+            return
+        with self._lock:
+            self.runtime_answers.update(found)
 
     def _cap_is_derived(self) -> bool:
         """Whether the tool-output cap comes from the window rather than a setting."""
@@ -1105,9 +1557,90 @@ class ServiceContainer:
         """
         return self._evidence_corpus
 
+    def get_evidence_spill(self) -> Any:
+        """Return the job's store for whole answers, or ``None`` when the run has none."""
+        return getattr(self, "_evidence_spill", None)
+
+    def set_evidence_spill(self, spill: Any) -> None:
+        """Give the job a store for whole answers; agents already built get it too."""
+        with self._lock:
+            self._evidence_spill = spill
+            for agent in (*self._agent_cache.values(), *self._judge_agent_cache.values()):
+                agent.evidence_spill = spill
+
     def get_evidence_counter(self) -> EvidenceCounter:
         """Return the per-job counter that issues evidence-ledger ids."""
         return self._evidence_counter
+
+    def register_evidence_holder(self, holder: Callable[[], Iterable[Any]]) -> None:
+        """Name something that may hold ledger entries no node has written yet.
+
+        ``holder`` returns the entries it still holds; it may hand over ones
+        already on the run's ledger, which ``collect_undrained_evidence``
+        leaves out by id. Every agent ``get_agent`` and ``get_judge_agent``
+        build is registered with its own drain.
+        """
+        with self._lock:
+            self._evidence_holders.append(holder)
+
+    def _hold_the_evidence_of(self, agent: Any) -> None:
+        drain = getattr(agent, "drain_evidence_entries", None)
+        if callable(drain):
+            self._evidence_holders.append(drain)
+
+    def hand_over_evidence(self, entries: Iterable[Any]) -> None:
+        """Keep entries for the run's ledger whose holder has no node left to drain it."""
+        entries = list(entries)
+        if not entries:
+            return
+        with self._lock:
+            self._handed_over_evidence.extend(entries)
+
+    def collect_undrained_evidence(self, known_ids: Iterable[str] = ()) -> list[Any]:
+        """Every entry this job's counter issued that the caller's ledger lacks.
+
+        The one place a path that persists or reports a ledger asks for what no
+        node drained: entries handed over through ``hand_over_evidence``, and
+        whatever every registered holder still holds — an analyst whose stage
+        node never ran its drain (a revision that raised, an analyst asked at
+        the verdict stage, a run stopped mid-stage), a judge loop. The ids were
+        issued, and the report and the console may already have shown them, so
+        the entries belong on the ledger.
+
+        Collecting loses nothing. Every entry ever collected is kept here, and
+        each call answers with all of them less ``known_ids``, the ids the
+        caller's ledger already holds. A caller that collected and then never
+        wrote what it got (a report node cancelled after its collection) leaves
+        the entries for the next caller (the stopped run's keep), which finds
+        them although the holders are already drained. An id collected twice
+        keeps its first entry. In ``seq`` order. Never raises.
+        """
+        with self._lock:
+            parked = self._handed_over_evidence
+            self._handed_over_evidence = []
+            holders = list(self._evidence_holders)
+        found: list[Any] = list(parked)
+        for holder in holders:
+            try:
+                found.extend(holder() or ())
+            except Exception as exc:  # noqa: BLE001 — a ledger read never fails a run
+                logger.warning("evidence: a holder's entries could not be read (%s).", exc)
+        with self._lock:
+            for entry in found:
+                entry_id = str(getattr(entry, "id", "") or "")
+                if entry_id and entry_id not in self._collected_evidence:
+                    self._collected_evidence[entry_id] = entry
+            kept = list(self._collected_evidence.items())
+        known = {str(entry_id) for entry_id in known_ids}
+        collected = [entry for entry_id, entry in kept if entry_id not in known]
+        if collected:
+            logger.warning(
+                "evidence: %d entr(y/ies) no node had written reach the ledger now (%s).",
+                len(collected),
+                ", ".join(str(entry.id) for entry in collected[:20]),
+            )
+        collected.sort(key=lambda entry: int(getattr(entry, "seq", 0) or 0))
+        return collected
 
     def drain_all_judge_evidence(self) -> list[Any]:
         """Every entry the judge agents gathered, drained from each cached role.
@@ -1304,12 +1837,15 @@ class ServiceContainer:
             agent.truncation_ledger = getattr(self, "_truncation_ledger", None)
             agent.evidence_counter = getattr(self, "_evidence_counter", None)
             agent.evidence_corpus = getattr(self, "_evidence_corpus", None)
+            agent.evidence_spill = getattr(self, "_evidence_spill", None)
             # Hand the agent a way back to this container. The static analyst
             # used to construct a *whole new* ServiceContainer on every failed
             # MCP init — per chunk, so up to ten of them per run.
             agent._container = self
             agent._resolved = resolved
+            self._note_the_setup(name, resolved)
             self._agent_cache[name] = agent
+            self._hold_the_evidence_of(agent)
             return agent
 
     def get_judge_agent(self, role: str = "judge") -> Any:
@@ -1336,6 +1872,7 @@ class ServiceContainer:
                 cached.truncation_ledger = getattr(self, "_truncation_ledger", None)
                 cached.evidence_counter = getattr(self, "_evidence_counter", None)
                 cached.evidence_corpus = getattr(self, "_evidence_corpus", None)
+                cached.evidence_spill = getattr(self, "_evidence_spill", None)
                 # Hand the judge a way back to this container, the same way
                 # ``get_agent`` does above. Without this, ``_server_registry()``
                 # always read ``None`` and the judge ran with zero threat-intel
@@ -1344,6 +1881,7 @@ class ServiceContainer:
                 # like a healthy one that had already attached.
                 cached._container = self
                 self._judge_agent_cache[role] = cached
+                self._hold_the_evidence_of(cached)
             return cached
 
     async def aclose(self) -> None:
@@ -1371,6 +1909,11 @@ class ServiceContainer:
             from maljan.memory.store_factory import release_function_hash_store
 
             release_function_hash_store(unwritten[0])
+        # What the model calls still running here are charged from now on
+        # landed after the job ended: the ledger marks and keeps it.
+        ledger = getattr(self, "_token_ledger", None)
+        if ledger is not None and hasattr(ledger, "end"):
+            ledger.end()
         with self._lock:
             analysts = list(self._agent_cache.values())
             judges = list(self._judge_agent_cache.values())
@@ -1409,17 +1952,25 @@ class ServiceContainer:
         # here for the sole purpose of closing it, and a misconfigured
         # ``provider`` id turned a harmless teardown into a
         # ``ProviderConfigurationError`` landing in this warning handler.
-        for provider in list(self._static_provider_cache.values()):
-            try:
-                provider.close()
-            except Exception as exc:  # noqa: BLE001 — teardown never raises
-                logger.warning("Static provider '%s' did not close cleanly: %s", provider.id, exc)
-
+        # ``close`` is synchronous and a provider may block in it (a Ghidra
+        # bridge waits up to 20 s): run each in an executor so the loop, and
+        # every fence on it, stays live. No limit of its own is added here.
+        loop = asyncio.get_running_loop()
+        closing: list[tuple[str, Any]] = [
+            (f"Static provider '{provider.id}'", provider.close)
+            for provider in list(self._static_provider_cache.values())
+        ]
         if self._sandbox_provider_cache is not None:
-            try:
-                self._sandbox_provider_cache.close()
-            except Exception as exc:  # noqa: BLE001 — teardown never propagates
-                logger.warning("Closing sandbox provider failed (non-fatal): %s", exc)
+            closing.append(("Sandbox provider", self._sandbox_provider_cache.close))
+        # Every close is handed to the executor before any is awaited: if the
+        # worker's fence cancels this wait, the closes already submitted still
+        # run, and none is left unsubmitted behind a slow one.
+        futures = [loop.run_in_executor(None, close) for _, close in closing]
+        if futures:
+            results = await asyncio.gather(*futures, return_exceptions=True)
+            for (name, _), result in zip(closing, results, strict=True):
+                if isinstance(result, Exception):
+                    logger.warning("%s did not close cleanly: %s", name, result)
 
         # Same rule as the providers above: close the *cached* registry, never
         # ``get_server_registry()`` — a job that never attached a tool server
@@ -1433,7 +1984,6 @@ class ServiceContainer:
             # precisely the way a teardown outlasts a budget nobody can
             # enforce. In an executor it costs a worker thread instead, and
             # every fence above stays live.
-            loop = asyncio.get_running_loop()
             try:
                 await asyncio.wait_for(
                     loop.run_in_executor(None, registry.close_all), timeout=_CLOSE_ALL_BUDGET
@@ -1492,6 +2042,11 @@ class ServiceContainer:
             staging.remove_job_staging(self.job_key())
         except Exception as exc:  # noqa: BLE001 — teardown never propagates
             logger.warning("Removing this run's staging failed (non-fatal): %s", exc)
+        # What this run noted of the processes that read its sample, read by
+        # its disclosure record inside the run.
+        from maljan.analysis.isolation import forget as forget_isolation_notes
+
+        forget_isolation_notes(self.job_key())
 
         # And what this run saw, which is the other thing it held that outlives
         # nothing. Dropping the container already frees it; this drops it here
@@ -1506,6 +2061,16 @@ class ServiceContainer:
         # evidence was whole — a sentinel that fails open on the one rule this
         # whole thread exists to protect. No corpus reads as no corpus.
         self._evidence_corpus = None
+
+        # The store for whole answers lets go of its writers; writes already
+        # handed to it still finish, and the worker drains it before it
+        # stores the ledger (``schemas.evidence_spill``).
+        spill = getattr(self, "_evidence_spill", None)
+        if spill is not None:
+            try:
+                spill.close()
+            except Exception as exc:  # noqa: BLE001 — teardown never propagates
+                logger.warning("Closing the evidence store failed (non-fatal): %s", exc)
 
     def get_narrative_agent(self) -> Any | None:
         """Return the singleton NarrativeAgent or ``None`` in mock mode.
@@ -1694,6 +2259,9 @@ class ServiceContainer:
                 attach_retry_recorder(
                     composer_llm, getattr(self, "_token_ledger", None), REPORTER_AGENT_KEY
                 )
+                attach_agent_ceiling(
+                    composer_llm, getattr(self, "_token_ledger", None), REPORTER_AGENT_KEY
+                )
                 self._report_composer_cache = ReportComposer(
                     llm=composer_llm,
                     section_max_tokens=rc.composer_section_max_tokens,
@@ -1727,21 +2295,38 @@ class ServiceContainer:
             return cached
 
     def load_chunked(
-        self, sample_id: str, data_type: str, room: Room | None = None
+        self,
+        sample_id: str,
+        data_type: str,
+        room: Room | None = None,
+        boundary: str | None = None,
     ) -> list[TextChunk]:
         """Return a list of TextChunk objects for a sample and data type.
 
         Re-uses the parsed-text cache when available; chunking itself is cheap
         and stateless so the chunk list is not cached. ``room`` is the
         analyst's input room (``BaseAnalyst._input_room_chars``), which sizes
-        a chunk where ``chunking.max_tokens_per_chunk`` is unset.
+        a chunk where ``chunking.max_tokens_per_chunk`` is unset. ``boundary``
+        is the source's declared unit start (``AgentDefinition.chunk_boundary``),
+        passed on only where there is one.
         """
-        key = (sample_id, data_type)
-        with self._lock:
-            cached_text = self._data_cache.get(key)
-        if cached_text is not None:
-            return self.loader.chunk_text(data_type, cached_text, room=room)
-        return self.loader.load_chunked(sample_id, data_type, room=room)
+        declared: dict[str, str] = {"boundary": boundary} if boundary else {}
+        outermost = _OUTERMOST_LOAD.get()
+        token = _OUTERMOST_LOAD.set(False)
+        try:
+            room = _first_pass_room(self, data_type, room)
+            key = (sample_id, data_type)
+            with self._lock:
+                cached_text = self._data_cache.get(key)
+            if cached_text is not None:
+                chunks = self.loader.chunk_text(data_type, cached_text, room=room, **declared)
+            else:
+                chunks = self.loader.load_chunked(sample_id, data_type, room=room, **declared)
+        finally:
+            _OUTERMOST_LOAD.reset(token)
+        if outermost:
+            _note_chunking(self, data_type, chunks, room)
+        return chunks
 
     def load_data_for_agent(
         self,
@@ -1775,22 +2360,62 @@ class ServiceContainer:
         """
         definition = self.config.agents.definitions.get(agent_name)
         sources = list(definition.data_sources) if definition is not None else []
-        if not sources:
-            return self._legacy_role_data(agent_name, file_hash, sandbox_report, room, head_room)
-
-        head = head_room if head_room is not None else room
-        chunks: list[TextChunk] = []
-        for source in sources:
-            chunks.extend(
-                self._data_source_chunks(
-                    agent_name,
-                    source,
-                    file_hash,
-                    sandbox_report,
-                    sample_path,
-                    room if chunks else head,
+        outermost = _OUTERMOST_LOAD.get()
+        token = _OUTERMOST_LOAD.set(False)
+        try:
+            room = _first_pass_room(self, agent_name, room)
+            head_room = _first_pass_room(self, agent_name, head_room)
+            if not sources:
+                chunks = self._legacy_role_data(
+                    agent_name, file_hash, sandbox_report, room, head_room
                 )
+            else:
+                chunks = self._sources_data(
+                    agent_name, sources, file_hash, sandbox_report, sample_path, room, head_room
+                )
+        finally:
+            _OUTERMOST_LOAD.reset(token)
+        if outermost:
+            _note_chunking(self, agent_name, chunks, head_room)
+            # The sample's text never carries the platform's run-state markers:
+            # written out one character for one, so no size above changes.
+            chunks = _markers_written_out(chunks)
+        return chunks
+
+    def _sources_data(
+        self,
+        agent_name: str,
+        sources: list[str],
+        file_hash: str,
+        sandbox_report: dict[str, Any] | None,
+        sample_path: str | None,
+        room: Room | None,
+        head_room: Room | None,
+    ) -> list[TextChunk]:
+        """``data_sources`` taken in order, each chunked on its own, the first at the head room."""
+        head = head_room if head_room is not None else room
+        head = _head_alone(head, len(sources) == 1)
+        chunks: list[TextChunk] = []
+        # A source that yields nothing but whitespace adds no chunk: beside
+        # another source it would be a loop over nothing. The source after it
+        # is then the head. Only an input of nothing at all keeps one such
+        # chunk, the single input it always was.
+        empty: list[TextChunk] = []
+        for source in sources:
+            got = self._data_source_chunks(
+                agent_name,
+                source,
+                file_hash,
+                sandbox_report,
+                sample_path,
+                room if chunks else head,
             )
+            held = _with_content(got, agent_name)
+            if got and not held:
+                empty.append(got[0])
+            chunks.extend(held)
+        if not chunks and empty:
+            chunks = empty[:1]
         return chunks
 
     def _data_source_chunks(
@@ -1814,10 +2439,18 @@ class ServiceContainer:
             if not path:
                 return []
             return self.loader.chunk_text(agent_name, f"analysis_file_path: {path}", room=room)
+        definition = self.config.agents.definitions.get(agent_name)
+        named = getattr(definition, "chunk_boundary", None)
+        named = named.get(source) if isinstance(named, dict) else None
+        boundary = named if isinstance(named, str) and named else None
         if source == "sample.chunks":
+            if boundary:
+                return self.load_chunked(file_hash, agent_name, room=room, boundary=boundary)
             return self.load_chunked(file_hash, agent_name, room=room)
         if not sandbox_report:
             return []
+        if boundary:
+            return self._sandbox_slice(agent_name, source, sandbox_report, room, boundary)
         return self._sandbox_slice(agent_name, source, sandbox_report, room)
 
     def _sandbox_slice(
@@ -1826,6 +2459,7 @@ class ServiceContainer:
         source: str,
         sandbox_report: dict[str, Any],
         room: Room | None = None,
+        boundary: str | None = None,
     ) -> list[TextChunk]:
         """One slice of the sandbox report as the agent reads it, chunked at ``room``.
 
@@ -1839,6 +2473,9 @@ class ServiceContainer:
         from maljan.core.safe_json import dumps
         from maljan.schemas.sandbox_document import place
 
+        # Passed on only where the source declares a boundary.
+        declared: dict[str, str] = {"boundary": boundary} if boundary else {}
+
         def compact(document: Any) -> str:
             # Depth-safe: a report nested past the guard is written with a
             # marked placeholder there, never a raise (``core.safe_json``).
@@ -1846,7 +2483,7 @@ class ServiceContainer:
 
         if source == "sandbox.target":
             return self.loader.chunk_text(
-                agent_name, compact(place(sandbox_report, "target", {})), room=room
+                agent_name, compact(place(sandbox_report, "target", {})), room=room, **declared
             )
         if source == "sandbox.network":
             network = sandbox_report.get("network", {})
@@ -1854,14 +2491,14 @@ class ServiceContainer:
                 text = self.parser_registry.create("network").parse(network)
             except KeyError:
                 text = compact(network)
-            return self.loader.chunk_text(agent_name, text, room=room)
+            return self.loader.chunk_text(agent_name, text, room=room, **declared)
         if source == "sandbox.behavior":
             try:
                 text = self.parser_registry.create("dynamic").parse(sandbox_report)
             except KeyError:
                 text = compact(sandbox_report)
-            return self.loader.chunk_text(agent_name, text, room=room)
-        return self.loader.chunk_text(agent_name, compact(sandbox_report), room=room)
+            return self.loader.chunk_text(agent_name, text, room=room, **declared)
+        return self.loader.chunk_text(agent_name, compact(sandbox_report), room=room, **declared)
 
     def _legacy_role_data(
         self,
@@ -1881,21 +2518,34 @@ class ServiceContainer:
         role = self.agent_role(agent_name)
         head = head_room if head_room is not None else room
         if role in PROMPT_ROLES:
-            static_context = self.load_chunked(file_hash, agent_name, room=head)
+            loaded = self.load_chunked(
+                file_hash, agent_name, room=_head_alone(head, not sandbox_report)
+            )
+            static_context = _with_content(loaded, agent_name)
             sandbox_chunks: list[TextChunk] = []
             if sandbox_report:
-                sandbox_chunks = self._sandbox_slice(
-                    agent_name, "sandbox.full", sandbox_report, room
+                # The sandbox report is the head where the static context
+                # holds nothing, and a context of nothing is no chunk of its own.
+                sandbox_chunks = _with_content(
+                    self._sandbox_slice(
+                        agent_name,
+                        "sandbox.full",
+                        sandbox_report,
+                        room if static_context else _head_alone(head, True),
+                    ),
+                    agent_name,
                 )
-            return [*static_context, *sandbox_chunks]
+            return [*static_context, *sandbox_chunks] or loaded[:1]
         if sandbox_report:
             slice_name = {
                 "static": "sandbox.target",
                 "network": "sandbox.network",
                 "dynamic": "sandbox.behavior",
             }.get(role, "sandbox.full")
-            return self._sandbox_slice(agent_name, slice_name, sandbox_report, head)
-        return self.load_chunked(file_hash, agent_name, room=head)
+            return self._sandbox_slice(
+                agent_name, slice_name, sandbox_report, _head_alone(head, True)
+            )
+        return self.load_chunked(file_hash, agent_name, room=_head_alone(head, True))
 
     def _prompt_room_chars(self) -> int | None:
         """What one prompt may carry before the reply room, or ``None`` with no window learned."""
@@ -1956,21 +2606,49 @@ class ServiceContainer:
         os.environ[knowledge_tools.INDEX_RETRY_ENV] = str(seconds)
         knowledge_tools.set_index_retry_after(seconds)
 
+    def _announce_attck_refresh(self) -> None:
+        """Put ``validation.attck_refresh_days`` where the ATT&CK loader reads it.
+
+        The loader runs in this process and in the knowledge sidecar, which
+        has an environment and no settings store (``env_allow`` carries the
+        name), so the value travels the way ``index_retry_seconds`` does. This
+        is the one place that writes it: the store is the only source, and the
+        variable an operator used to set is retired.
+        """
+        from maljan.memory.attck_loader import ATTCK_REFRESH_DAYS_ENV, DEFAULT_MAX_AGE_DAYS
+
+        days = int(
+            getattr(
+                getattr(self.config, "validation", None), "attck_refresh_days", DEFAULT_MAX_AGE_DAYS
+            )
+        )
+        os.environ[ATTCK_REFRESH_DAYS_ENV] = str(days)
+
     def _configure_langsmith(self) -> None:
-        """Propagate LangSmith tracing config into the OS environment."""
+        """Propagate LangSmith tracing config into the OS environment, or undo it.
+
+        The environment is the process's and outlives the job, so a job with
+        the setting off puts back what the platform set for an earlier one
+        (``core.tracing.apply_tracing_setting``), and an environment that
+        traces on its own is warned about there.
+        """
+        from maljan.core.tracing import apply_tracing_setting
+
         if not self.config.langchain_tracing_v2:
+            apply_tracing_setting(False)
             logger.debug("LangSmith tracing disabled (langchain_tracing_v2=False).")
             return
 
-        os.environ["LANGCHAIN_TRACING_V2"] = "true"
-        os.environ["LANGCHAIN_PROJECT"] = self.config.langchain_project
-
         api_key = self.config.langchain_api_key
+        secret_value = ""
         if api_key:
             secret_value = (
                 api_key.get_secret_value() if hasattr(api_key, "get_secret_value") else str(api_key)
             )
-            os.environ["LANGCHAIN_API_KEY"] = secret_value
+        apply_tracing_setting(
+            True, project=str(self.config.langchain_project or ""), api_key=secret_value
+        )
+        if api_key:
             # No part of the key reaches the log: a fragment narrows a brute
             # force and is enough to confirm a key found elsewhere.
             logger.info(

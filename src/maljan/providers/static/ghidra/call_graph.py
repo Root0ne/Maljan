@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import re
 
-from maljan.analysis.sink_reachability import CallGraph
+from maljan.analysis.sink_reachability import ATTCK_PURPOSE, CallGraph
 
 _FUN_ADDR_RE = re.compile(r"^FUN_0*([0-9a-fA-F]+)$")
 
@@ -21,7 +21,7 @@ PRIORITY_FOLLOW_UP = (
     "'capability reached' claim, confirm the data path with analyze_dataflow "
     "(forward from the source, or backward from the sink argument) and "
     "classify the terminal (caller-supplied / decoded-config / fixed "
-    "constant) to pick the right ATT&CK technique.\n"
+    "constant)" + ATTCK_PURPOSE + ".\n"
 )
 
 

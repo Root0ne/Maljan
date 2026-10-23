@@ -29,7 +29,9 @@ make setup        # uv sync --all-extras --all-packages, pre-commit, external/
 `scripts/dev/fetch_external.sh`, which reconstructs it; `make external` does the
 same on its own. The `ghidra-mcp` image is built from that tree, so the default
 stack cannot build without it (a stack without Ghidra does not need it; see
-below).
+below). The same script fetches capa's rules and signatures into
+`data/capa-rules` and `data/capa-signatures` at the capa version `uv.lock`
+pins; the stack's API and worker read them through their `data/` mount.
 
 ## The two configuration files
 
@@ -86,7 +88,9 @@ make dev-logs        # follow
 
 `make dev-up` sources `bootstrap.env` when it exists and layers
 `docker/docker-compose.dev.yml` over the production file, so the frontend runs
-`next dev` and the worker restarts on a source edit. For the production shape
+`next dev`, the worker restarts on a source edit and the API reloads on one.
+The production file mounts the source trees read-only and runs the API without
+`--reload`, so an edit reaches it only on a restart. For the production shape
 instead:
 
 ```bash

@@ -34,25 +34,33 @@ apps/web/.env.*.local
 **/.env
 **/.env.*
 !**/.env.example
-data/samples/*.apk
-data/samples/*.exe
-data/samples/*.dll
-data/samples/*.elf
-data/samples/*.so
-data/samples/*.dex
-data/samples/*.jar
-data/samples/*.bin
-data/samples/*.dat
-data/samples/*.sys
-data/samples/*.macho
-data/samples/.tmp/
-data/samples/rat-collection/
-data/samples/dike/
-data/samples/extracted/
-data/uploads/
-data/cape_reports/
+**/bootstrap.env
+# A sample is live malware whatever its name, and a working copy keeps samples
+# in more than one samples directory (apps/api/data/samples/ too) and in work
+# directories inside them. A list of extensions let every other name through.
+# The first line leaves out every file below any data/samples/; the exceptions
+# let back in only JSON files directly inside the three fixture directories
+# the repository tracks; the last line leaves out again anything below one of
+# those, a directory named like a JSON file included. Every line matches the
+# file itself, so the rule holds on builders that check a file's parents only
+# at the pattern's own depth (Docker Engine 20.10, docker-py) as on those that
+# check every parent (BuildKit 0.10 and later, Engine 23 and later). Any *.json
+# directly in a fixture directory is kept by design, whatever it holds.
+# Uploads and sandbox reports stay out wherever they sit.
+# tests/unit/test_no_sample_reaches_an_image_context.py holds this.
+**/data/samples/**
+!data/samples/dynamic/*.json
+!data/samples/network/*.json
+!data/samples/static/*.json
+**/data/samples/*/*/**
+**/data/uploads/
+**/data/cape_reports/
 data/external/
 data/sigma_rules/
+# The image fetches its own capa rules and signatures at the pinned version
+# (Dockerfile.backend, capa-data); a workstation's copies would merge into them.
+data/capa-rules/
+data/capa-signatures/
 models/
 logs/
 other/

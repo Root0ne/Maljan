@@ -85,12 +85,14 @@ class _Key:
         self.expires_at = expires_at
         self.user_id = user_id or uuid.uuid4()
         self.last_used_at: datetime | None = None
+        self.token_generation = 0
 
 
 class _User:
     def __init__(self, *, is_active: bool = True) -> None:
         self.id = uuid.uuid4()
         self.is_active = is_active
+        self.token_generation = 0
 
 
 class TestApiKeyAuthentication:
@@ -216,5 +218,5 @@ class TestDeepHealthProbe:
         components = await main_mod._probe_components()
 
         assert components["database"]["ok"] is False
-        assert "connection refused" in components["database"]["error"]
+        assert components["database"]["error"] == "RuntimeError"
         assert components["redis"]["ok"] is True

@@ -11,7 +11,8 @@ Three rules make that safe to run against a report nobody has seen:
 * A row that lacks the field its consumer indexes on is dropped, not guessed
   at, and the drop is counted — the preview endpoint shows those counts before
   a job is ever submitted.
-* A channel with no path goes into ``SandboxReport.unavailable``. An empty
+* A channel with no path, or whose path failed on the report, goes into
+  ``SandboxReport.unavailable``. An empty
   ``network.dns`` and a sandbox that publishes no DNS at all look identical in
   a rendered report, and only one of them means the sample was quiet.
 * Every channel is read whole, as a built-in reader reads its lists: no row
@@ -42,6 +43,7 @@ Three channels are not settings the operator can point anywhere:
 
 from __future__ import annotations
 
+import math
 import re
 from dataclasses import dataclass, field
 from itertools import islice
@@ -53,7 +55,8 @@ from maljan.schemas.sandbox_report import section_id
 
 if TYPE_CHECKING:
     from maljan.core.config import RestMappingConfig
-    from maljan.schemas.sandbox_report import SandboxReport
+    from maljan.core.report_formats import SignatureScale
+    from maljan.schemas.sandbox_report import SandboxReport, SandboxSignatureRow
 
 CHANNELS: tuple[str, ...] = (
     "processes",
@@ -238,6 +241,83 @@ def _coerce(channel: str, names: dict[str, str], raw: Any) -> Any | None:
         if row.get(required) in (None, ""):
             return None
     return row
+
+
+def whole_number(value: Any) -> int | None:
+    """An integer a sandbox wrote as a number or as numeric text, else ``None``.
+
+    Text is read as Python reads an integer literal (``"16"``, ``"0x10"``,
+    ``"0o20"``), then as a decimal with leading zeros, then as a number with a
+    fraction, cut toward zero. A word (``"high"``) is no number: ``None``, and
+    the caller keeps the word.
+    """
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float):
+        return int(value) if math.isfinite(value) else None
+    if not isinstance(value, str):
+        return None
+    text = value.strip()
+    for base in (0, 10):
+        try:
+            return int(text, base)
+        except ValueError:
+            continue
+    try:
+        number = float(text)
+    except ValueError:
+        return None
+    return int(number) if math.isfinite(number) else None
+
+
+def _texts(value: Any) -> list[str]:
+    """A field that is one value or a list of them, as its non-empty texts.
+
+    A single string is one value, never its characters.
+    """
+    if isinstance(value, list):
+        return [str(item) for item in value if item not in (None, "")]
+    return [str(value)] if value not in (None, "") else []
+
+
+def rung_score(word: Any, scale: SignatureScale | None) -> int | None:
+    """The score of the rung ``word`` names on ``scale``, or ``None`` where none does.
+
+    Score ``n`` is the scale's ``n``-th rung, so a word naming a rung (case
+    and blanks aside) is that score, the first such rung where several share a
+    name. No scale, or a word no rung names, is ``None``: unknown, never 0.
+    """
+    if scale is None or not isinstance(word, str):
+        return None
+    wanted = word.strip().lower()
+    for score, rung in enumerate(scale.rungs, start=1):
+        if str(rung).strip().lower() == wanted:
+            return score
+    return None
+
+
+def _signature_row(row: dict[str, Any], scale: SignatureScale | None) -> SandboxSignatureRow:
+    """One signature row; a severity that is no number is kept as the sandbox wrote it.
+
+    The number is the severity; a word (``"high"``) is the score of the rung
+    it names on the scale the report is read on (:func:`rung_score`), else
+    ``None`` (unknown, never 0), and is kept in ``extra["severity"]`` either way.
+    """
+    from maljan.schemas.sandbox_report import SandboxSignatureRow
+
+    said = row.get("severity")
+    number = whole_number(said)
+    extra = {"severity": said} if number is None and said not in (None, "") else {}
+    severity = number if number is not None else (rung_score(said, scale) if extra else 0)
+    return SandboxSignatureRow(
+        name=str(row.get("name") or ""),
+        description=str(row.get("description") or ""),
+        severity=severity,
+        ttp_tags=_texts(row.get("ttps")),
+        extra=extra,
+    )
 
 
 def _normalize_sha256(value: Any) -> tuple[str, str]:
@@ -473,14 +553,22 @@ def _select(
 
 
 def apply_mapping(
-    compiled: CompiledMapping, payload: dict[str, Any], *, provider: str, task_id: str
+    compiled: CompiledMapping,
+    payload: dict[str, Any],
+    *,
+    provider: str,
+    task_id: str,
+    signature_scale: SignatureScale | None = None,
 ) -> MappingResult:
-    """Map one report payload, and say per channel what happened."""
+    """Map one report payload, and say per channel what happened.
+
+    ``signature_scale`` is the scale the report is read on: a severity the
+    sandbox wrote as a rung's word is read as that rung's score.
+    """
     from maljan.schemas.sandbox_report import (
         SandboxNetwork,
         SandboxProcess,
         SandboxReport,
-        SandboxSignatureRow,
         SandboxTarget,
     )
 
@@ -507,8 +595,8 @@ def apply_mapping(
 
     processes = [
         SandboxProcess(
-            pid=int(r.get("pid") or 0),
-            ppid=int(r.get("ppid") or 0),
+            pid=whole_number(r.get("pid")) or 0,
+            ppid=whole_number(r.get("ppid")) or 0,
             name=str(r.get("name") or ""),
             command_line=str(r.get("command_line") or ""),
         )
@@ -518,7 +606,7 @@ def apply_mapping(
     apistats: dict[str, dict[str, int]] = {}
     orphaned = 0
     for call in rows["calls"]:
-        pid = int(call.get("pid") or 0)
+        pid = whole_number(call.get("pid")) or 0
         process = by_pid.get(pid)
         if process is None:
             orphaned += 1
@@ -536,15 +624,7 @@ def apply_mapping(
             truncated=stats["calls"].truncated,
         )
 
-    signatures = [
-        SandboxSignatureRow(
-            name=str(r.get("name") or ""),
-            description=str(r.get("description") or ""),
-            severity=int(r.get("severity") or 0),
-            ttp_tags=[str(t) for t in (r.get("ttps") or []) if t],
-        )
-        for r in rows["signatures"]
-    ]
+    signatures = [_signature_row(r, signature_scale) for r in rows["signatures"]]
 
     network = SandboxNetwork(
         dns=rows["dns"],
@@ -575,6 +655,12 @@ def apply_mapping(
     # mapping can never produce them — and ``apistats`` is only ever derived
     # from ``calls``, so it is unavailable exactly when ``calls`` is.
     unavailable_set.update({"generic_events", "screenshots"})
+    # A path that failed on this report read nothing: whether the sandbox saw
+    # any is not known, which an empty list would deny. The same for a place.
+    unavailable_set.update(c for c in CHANNELS if stats[c].error)
+    unavailable_set.update(
+        name for name in compiled.place_paths if stats.get(f"places.{name}", ChannelStats()).error
+    )
     if "calls" in unavailable_set:
         unavailable_set.add("apistats")
     # Named by the platform's own section ids, not the mapping's channel words.

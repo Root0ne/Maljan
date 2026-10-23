@@ -14,6 +14,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import get_settings, settings
 from app.logging_config import get_logger, setup_logging
+from app.logsafe import log_safe
 
 # Initialize logging before anything else
 setup_logging()
@@ -45,23 +46,10 @@ async def _probe_redis() -> None:
 
 
 async def _probe_minio() -> None:
-    from minio import Minio
-    from pydantic import SecretStr
+    from app.services import object_store
 
-    secret = settings.minio_secret_key
-    secret_value = secret.get_secret_value() if isinstance(secret, SecretStr) else str(secret)
-
-    def _check() -> None:
-        # The MinIO SDK is synchronous — keep it off the event loop.
-        client = Minio(
-            settings.minio_endpoint,
-            access_key=settings.minio_access_key,
-            secret_key=secret_value,
-            secure=settings.minio_secure,
-        )
-        client.bucket_exists(settings.minio_bucket)
-
-    await asyncio.to_thread(_check)
+    # The MinIO SDK is synchronous — keep it off the event loop.
+    await asyncio.to_thread(object_store.probe)
 
 
 async def _probe_memory() -> dict[str, Any]:
@@ -72,7 +60,8 @@ async def _probe_memory() -> dict[str, Any]:
     answered. A backend id the factory does not know is reported as not
     configured rather than as a failure; every answer names the backend.
     """
-    from maljan.core.settings_overrides import redact_url
+    from maljan.core.plugins import ALLOW_LIST_KEY
+    from maljan.core.settings_overrides import StoredValueRefused, redact_url
     from maljan.memory.store_factory import (
         MemoryBackendNotConfiguredError,
         build_memory_store,
@@ -80,8 +69,25 @@ async def _probe_memory() -> dict[str, Any]:
     )
 
     from app.runtime_config import runtime_config
+    from app.services.plugins import load_in_background
 
-    core = await runtime_config.core()
+    try:
+        # The selected backend, when it is an allowed plugin, is the code this
+        # check runs: that plugin alone, loaded off the event loop within the
+        # check's own budget.
+        allowed = await runtime_config.stored_value(ALLOW_LIST_KEY)
+        selected = str(await runtime_config.stored_value("core.memory.backend") or "")
+        await load_in_background(
+            allowed, [f"memory:{selected.strip().lower()}"], _PROBE_TIMEOUT_SECONDS
+        )
+        core = await runtime_config.core()
+    except StoredValueRefused:
+        # Unauthenticated: the fact, never the key or the reason.
+        return {
+            "ok": False,
+            "error": "a stored setting is refused; see the settings page",
+            "backend": None,
+        }
     backend = configured_backend(core)
     try:
         store = await asyncio.to_thread(build_memory_store, core)
@@ -136,8 +142,19 @@ async def _probe_components() -> dict[str, dict[str, Any]]:
         except TimeoutError:
             return name, {"ok": False, "error": f"timeout after {_PROBE_TIMEOUT_SECONDS:g}s"}
         except Exception as exc:  # noqa: BLE001 — a probe failure is a result
-            detail = str(exc).strip() or type(exc).__name__
-            return name, {"ok": False, "error": detail[:200]}
+            # Unauthenticated: a driver's own text names the host, the port,
+            # the database and the role it was refused for. The class says
+            # what kind of failure it was; the text goes to the log, where an
+            # operator reads it.
+            from maljan.core.settings_overrides import redact_url
+
+            logger.warning(
+                "health probe %s failed: %s: %s",
+                log_safe(name),
+                type(exc).__name__,
+                log_safe(redact_url(str(exc))),
+            )
+            return name, {"ok": False, "error": type(exc).__name__}
 
     results = await asyncio.gather(*(_run(n, f) for n, f in probes.items()))
     return dict(results)
@@ -302,27 +319,51 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
     from app.database import async_session_factory
     from app.services.composite_secrets import (
+        mask_audited_settings,
         repair_frontier_arm_keys,
         repair_server_auth_tokens,
+        repair_server_env,
     )
 
     try:
         async with async_session_factory() as _repair_session:
             # A composite leaf must never keep a credential inside its own
-            # row. Both repairs are idempotent and a no-op on a store that
+            # row. Every repair is idempotent and a no-op on a store that
             # already satisfies that invariant.
             _moved_arm_keys = await repair_frontier_arm_keys(_repair_session)
             _moved_server_tokens = await repair_server_auth_tokens(_repair_session)
+            _moved_server_envs = await repair_server_env(_repair_session)
+            # And what older settings audit rows kept of any stored value is
+            # masked the way a new row is, once.
+            _masked_audit_rows = await mask_audited_settings(_repair_session)
         logger.info(
-            "Composite-secret repair: %d arm key(s), %d server token(s) moved",
+            "Composite-secret repair: %d arm key(s), %d server token(s), %d server env map(s) "
+            "moved, %d settings audit row(s) masked",
             _moved_arm_keys,
             _moved_server_tokens,
+            _moved_server_envs,
+            _masked_audit_rows,
         )
     except Exception:
         # Best effort, like the audit trail: a failure here just means the
         # next start tries again -- it must never take an otherwise-healthy
         # API down.
         logger.exception("Composite-secret repair failed")
+
+    # The stored plugin allow-list, read so a job naming an allowed plugin is
+    # judged by it from the first request. No plugin is imported at start:
+    # the API loads one only where it runs that plugin's own code.
+    try:
+        from app.services.settings_service import SettingsService
+
+        async with async_session_factory() as _plugins_session:
+            await SettingsService(_plugins_session).load_overrides()
+    except Exception as exc:  # noqa: BLE001 — a start never stops on a plugin
+        logger.warning(
+            "The stored plugin allow-list was not read at start (%s); the first settings "
+            "read reads it.",
+            type(exc).__name__,
+        )
 
     if settings.auth_disabled:
         try:
@@ -370,6 +411,12 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # the middle of it is not a wait nobody is reminded of.
     log_jwt_rotation()
 
+    # An empty audit anchor is given the current head, beside the start
+    # rather than in it (``audit_anchor.start_anchoring``).
+    from app.services import audit_anchor
+
+    audit_anchor.start_anchoring(async_engine)
+
     logger.info(
         f"Maljan API v{settings.app_version} started successfully",
         extra={"component": "lifecycle"},
@@ -379,8 +426,22 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
     # ── Shutdown ─────────────────────────────────────────────
     logger.info("Shutting down Maljan API...")
+    # Anchor writes already scheduled finish (bounded) before their engine goes.
+    await audit_anchor.drain()
     await async_engine.dispose()
     logger.info("Database connections closed")
+
+
+async def stored_value_refused_response(_request: Any, exc: Exception) -> Any:
+    """409 for a request that read the settings while a stored value is refused.
+
+    The key, the reason and the remedy, never a bare 500 and never a default
+    in the value's place (``settings_overrides.StoredValueRefused``).
+    """
+    from fastapi.responses import JSONResponse
+
+    refused = getattr(exc, "refused", {})
+    return JSONResponse(status_code=409, content={"detail": str(exc), "refused": refused})
 
 
 def create_app() -> FastAPI:
@@ -400,7 +461,16 @@ def create_app() -> FastAPI:
         lifespan=lifespan,
     )
 
-    # ── Logging Middleware (must be added first) ─────────────
+    # ── Upload bounds ────────────────────────────────────────
+    # Added first, so it is the innermost layer: logging, the rate limiter,
+    # CORS and the security headers all wrap its refusals (a browser reads a
+    # 413 only with its CORS headers), and none of them reads a body, so the
+    # bound is still held before Starlette spools the file to disk.
+    from app.middleware.upload_bound_middleware import UploadBoundMiddleware
+
+    app.add_middleware(UploadBoundMiddleware)
+
+    # ── Logging Middleware ───────────────────────────────────
     from app.middleware.logging_middleware import RequestLoggingMiddleware
 
     app.add_middleware(RequestLoggingMiddleware)
@@ -435,6 +505,14 @@ def create_app() -> FastAPI:
         SecurityHeadersMiddleware,
         enable_hsts=not settings.debug,
     )
+
+    # ── A refused stored setting ─────────────────────────────
+    # Any route that reads the core settings while a stored value is refused
+    # answers 409 with the key, the reason and the remedy, rather than a bare
+    # 500 or a default in its place. The settings page itself reads past it.
+    from maljan.core.settings_overrides import StoredValueRefused
+
+    app.add_exception_handler(StoredValueRefused, stored_value_refused_response)
 
     # ── Routes ───────────────────────────────────────────────
     from app.api.v1.audit import router as audit_router

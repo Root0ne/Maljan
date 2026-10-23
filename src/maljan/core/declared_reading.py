@@ -11,9 +11,11 @@ source, as the run's settings hold it, is resolved once and stored on the
 entry (``LedgerEntry.facts``), versioned and small: ``{"v": 1, "kind": ...}``
 and, where set, ``reader``, ``asserts_techniques``, ``source``,
 ``display_name``, ``rows``, ``places``, ``values``, ``techniques``,
-``reputation``, ``words``, ``report_sections``, ``arguments``, ``holds_strings`` and
-``function_starts``. ``{"v": 1}`` alone records
-that the source declares nothing for the tool.
+``reputation``, ``words``, ``report_sections``, ``arguments``, ``holds_strings``,
+``reads_delay_imports``, ``function_starts``, ``discloses_sample`` and ``effects``.
+``{"v": 1}`` alone records that the source declares nothing for the tool. Beside them, under
+``hints``, the hints the tool's own MCP server gave it when it was attached
+(:func:`with_hints`), which are not a declaration.
 
 **The reader** (:func:`facts_of`, :func:`kind_of`, :func:`reads_as`). It reads
 the facts the entry stored, never the reading process's settings, so a run
@@ -89,7 +91,34 @@ STORED_FACT_FIELDS: tuple[str, ...] = (
     "report_sections",
     "arguments",
     "holds_strings",
+    # Whether the tool's import rows cover the late-bound imports, read by the
+    # report's binary facts before it calls an import list complete.
+    "reads_delay_imports",
     "function_starts",
+    # Whether the tool sends the sample out of the deployment, read by the
+    # run's disclosure block (``analysis.disclosure``) whatever the kind.
+    "discloses_sample",
+    # What a call does beyond answering (``ToolEffects``), read by the run's
+    # tool-effects part (``analysis.tool_effects``) whatever the kind.
+    "effects",
+)
+
+# The key of the stored record that keeps what the tool's own MCP server said
+# of it when the tool was attached (its ``annotations``: the hints of
+# :data:`SERVER_HINTS`), beside what its source declares. Not a declaration:
+# read only by the tool-effects part, for what no declaration says.
+HINTS_KEY = "hints"
+# The key of the stored record that keeps the name the tool's source declares
+# it under, where the request offered it under another (a registry's
+# ``<server>__<tool>``). Written only for a call made through that server's own
+# handle, which knew the original name; never inferred from the offered name.
+DECLARED_NAME_KEY = "declared_name"
+# The MCP tool annotations a server may give, each a yes or no.
+SERVER_HINTS: tuple[str, ...] = (
+    "readOnlyHint",
+    "destructiveHint",
+    "idempotentHint",
+    "openWorldHint",
 )
 
 # The stored fields read without a kind (``tool_declarations.KIND_FREE_FIELDS``),
@@ -188,25 +217,107 @@ def _in_process_facts(source: str, tool: str) -> dict[str, Any] | None:
 
 
 def facts_record(
-    source: str, tool: str, *, declared: ToolDeclarations | None = None
+    source: str,
+    tool: str,
+    *,
+    declared: ToolDeclarations | None = None,
+    declared_name: str | None = None,
 ) -> dict[str, Any] | None:
     """What ``tool`` declares under ``source`` now, in its stored form; ``None`` when unreadable.
+
+    With ``declared_name``, the name the source declares the tool under as
+    the request offered it (a renamed tool's own name): that name is looked
+    up exactly, no prefix taken off it. Without it, ``tool`` is read as an
+    entry's stored name is, a renamed tool's prefix off.
 
     Called once, when the entry is written. Settings that cannot be read store
     nothing, and the entry is then read by the legacy reading.
     """
     try:
         if declared is None:
-            shipped = _in_process_facts(source, tool)
+            shipped = _in_process_facts(source, declared_name or tool)
             if shipped is not None:
                 return shipped
         held = declared or declarations()
+        if declared_name:
+            return stored_record(held.declaration_for((source, declared_name), exact=True))
         return stored_record(held.declaration_for((source, tool)))
     except Exception as exc:  # noqa: BLE001 — a record is never worth a lost entry
         from maljan.core.logger import logger
 
         logger.debug("declared facts of %s under %s not recorded (%s).", tool, source, exc)
         return None
+
+
+def hints_of_annotations(annotations: Any) -> dict[str, bool]:
+    """The hints of :data:`SERVER_HINTS` an MCP tool's ``annotations`` give, as yes or no.
+
+    ``annotations`` is the SDK's object or a mapping; a hint absent, or not a
+    yes or no, is not given. ``{}`` for none.
+    """
+    out: dict[str, bool] = {}
+    if annotations is None:
+        return out
+    for name in SERVER_HINTS:
+        value = (
+            annotations.get(name)
+            if isinstance(annotations, Mapping)
+            else getattr(annotations, name, None)
+        )
+        if isinstance(value, bool):
+            out[name] = value
+    return out
+
+
+def with_hints(record: dict[str, Any] | None, hints: Any) -> dict[str, Any] | None:
+    """``record`` with the server's hints kept under :data:`HINTS_KEY`; as it was with none.
+
+    A record that could not be written (``None``) keeps no hints: the entry is
+    then read as an undeclared tool, which is all the hints could have
+    narrowed.
+    """
+    given = hints_of_annotations(hints)
+    if record is None or not given:
+        return record
+    return {**record, HINTS_KEY: given}
+
+
+def with_declared_name(
+    record: dict[str, Any] | None, tool: str, declared_name: str | None
+) -> dict[str, Any] | None:
+    """``record`` with the name its source declares ``tool`` under, where that is another one.
+
+    Kept under :data:`DECLARED_NAME_KEY` only for a tool the request offered
+    renamed; a record of a tool offered under its own name, and one that could
+    not be written (``None``), are as they were.
+    """
+    if record is None or not declared_name or declared_name == tool:
+        return record
+    return {**record, DECLARED_NAME_KEY: declared_name}
+
+
+def declared_name(entry: Any) -> str:
+    """The name an entry's tool is declared under by the source it recorded.
+
+    The name its call recorded as the original (:func:`with_declared_name`),
+    else the name it was called by. No ``<server>__`` prefix is ever taken off
+    the called name: a tool a server natively spells ``<its key>__x``, or one
+    nothing declared, is read as itself.
+    """
+    held = _field(entry, "facts")
+    if isinstance(held, Mapping):
+        original = held.get(DECLARED_NAME_KEY)
+        if isinstance(original, str) and original:
+            return original
+    return str(_field(entry, "tool") or _field(entry, "tool_name") or "")
+
+
+def server_hints(entry: Any) -> dict[str, bool]:
+    """The hints the entry's tool's own server gave it when attached, as the entry stored them."""
+    held = _field(entry, "facts")
+    if not isinstance(held, Mapping):
+        return {}
+    return hints_of_annotations(held.get(HINTS_KEY))
 
 
 # ---------------------------------------------------------------------------
@@ -283,8 +394,8 @@ def _shipped_tools_by_source() -> Mapping[str, frozenset[str]]:
 def shipped_under_its_source(entry: Any) -> bool:
     """Whether ``entry``'s tool is one a built-in source ships, under the source it recorded.
 
-    The platform's own name tables (which format a parser reads, which tool
-    opens which container) describe the platform's own tools only: an entry
+    The platform's own name tables (``sample_identity._FORMAT_TOOL_FOR``: which
+    of its tools reads a routed format) describe the platform's own tools only: an entry
     is read by one when the source it recorded is a built-in source that
     ships a declaration for its tool (its bare name, the collision prefix
     taken off). An operator's tool of the same name, recorded under the
@@ -306,6 +417,38 @@ def ships_tool(source: str, tool: Any) -> bool:
     """
     held = _shipped_tools_by_source().get(str(source))
     return held is not None and bare_name(tool) in held
+
+
+@cache
+def _shipped_routed_formats() -> Mapping[tuple[str, str], frozenset[str]]:
+    """``(mcp:<key>, tool)`` → the routed formats the platform ships for a built-in's tool."""
+    from maljan.core import builtin_declarations as shipped
+
+    out: dict[tuple[str, str], frozenset[str]] = {}
+    for key in shipped.builtin_server_names():
+        for tool, facts in (shipped.server_declaration(key).get("tool_facts") or {}).items():
+            formats = facts.get("routed_formats") if isinstance(facts, Mapping) else None
+            if formats:
+                out[(f"mcp:{key}", str(tool))] = frozenset(str(f) for f in formats)
+    return out
+
+
+def routed_formats_of(source: str, tool: str) -> frozenset[str]:
+    """The routed formats ``source``'s ``tool`` declares it serves; empty when it declares none.
+
+    Read from the live declaration (``ToolFacts.routed_formats``), so an
+    operator's server declares them as a built-in does, and an operator's edit
+    of a built-in tool's formats, even to none, is in force. A built-in
+    server's tool whose live declaration does not set the field (a map an
+    earlier release stored whole, before the field existed, or one that leaves
+    the tool out) is read with the formats the platform ships for it. The tool
+    is the name its server gives it.
+    """
+    held = declarations().source(str(source))
+    facts = held.tools.get(tool) if held is not None else None
+    if facts is not None and "routed_formats" in facts.model_fields_set:
+        return frozenset(facts.routed_formats)
+    return _shipped_routed_formats().get((str(source), tool), frozenset())
 
 
 @lru_cache(maxsize=4096)

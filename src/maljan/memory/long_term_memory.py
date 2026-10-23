@@ -32,10 +32,15 @@ Helper build_stored_case():
 
 from __future__ import annotations
 
+import functools
+import re
+import unicodedata
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
+
+from maljan.analysis.technique_ids import TECHNIQUE_ID_EXACT_RE
 
 if TYPE_CHECKING:
     from maljan.memory.function_hash_store import FunctionMatch
@@ -69,6 +74,10 @@ class StoredCase:
         has_analyst_errors: Whether any analyst returned an ``[ERROR]`` prefix
                             during this analysis. Strong indicator of a
                             degraded pipeline pass.
+        owner:              Whose job wrote the case (``memory_owner``), or
+                            ``None`` for an unscoped write: a run with no
+                            owner, and every case stored before owners were
+                            recorded. See :func:`recall` for who reads it.
     """
 
     sample_id: str
@@ -80,6 +89,7 @@ class StoredCase:
     corroborated_count: int = 0
     total_techniques: int = 0
     has_analyst_errors: bool = False
+    owner: str | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -116,6 +126,10 @@ class MemoryStore(Protocol):
         exclude_sample_id: str | None = None,
     ) -> list[StoredCase]:
         """Return the top_k most similar stored cases for the given query.
+
+        A backend that keeps owners (``keeps_owners``) also takes ``owner``
+        and answers only that owner's cases; called without it, only the
+        unscoped ones. Callers go through :func:`recall`.
 
         Args:
             query:  Free-text search query (typically the ISR summary text).
@@ -194,10 +208,15 @@ class MemoryStoreDefaults:
     """The interface's optional capabilities, answered as "not offered".
 
     A backend derives from this and implements what it can: a store with no
-    server answers ``readiness`` without I/O, keeps no function hashes and has
-    nothing to close. Every caller then degrades the same way for it as for
-    any backend without the capability.
+    server answers ``readiness`` without I/O, keeps no function hashes, keeps
+    no owners and has nothing to close. Every caller then degrades the same
+    way for it as for any backend without the capability.
     """
+
+    # Whether the backend files a case under its owner and answers an owner's
+    # reads with that owner's cases alone. A backend that does not is never
+    # written to nor read from for an owned job (:func:`recall`).
+    keeps_owners: bool = False
 
     def readiness(self) -> str:
         return "in process"
@@ -206,6 +225,14 @@ class MemoryStoreDefaults:
         return None
 
     def close(self) -> None:
+        return None
+
+    def case_of(self, sample_id: str, owner: str | None = None) -> StoredCase | None:
+        """The case stored for ``sample_id`` (``owner``'s, or the unscoped one), or ``None``.
+
+        Optional: a backend that offers no read by id answers ``None``, and
+        no earlier run is shown (:func:`earlier_case`).
+        """
         return None
 
 
@@ -219,16 +246,332 @@ class FunctionHashIndex(Protocol):
     """
 
     def upsert_sample(self, sample_id: str, family: str, functions: list[tuple[str, str]]) -> int:
-        """Write ``(func_hash, func_name)`` pairs for ``sample_id``; the number written."""
+        """Write ``(func_hash, func_name)`` pairs for ``sample_id``; the number written.
+
+        An index that keeps owners (``keeps_owners``) also takes ``owner``.
+        """
         ...
 
     def match(self, hashes: list[str], exclude_sample_id: str | None = None) -> list[FunctionMatch]:
-        """Stored functions whose hash is in ``hashes``, other than ``exclude_sample_id``'s."""
+        """Stored functions whose hash is in ``hashes``, other than ``exclude_sample_id``'s.
+
+        An index that keeps owners also takes ``owner``; callers go through
+        :func:`match_functions`.
+        """
         ...
 
     def count(self) -> int:
         """The number of stored function hashes."""
         ...
+
+
+# ---------------------------------------------------------------------------
+# Owners: whose memory a job reads and writes
+# ---------------------------------------------------------------------------
+#
+# The rule, for cases and for function hashes alike:
+#
+# - A job with an owner (``ServiceContainer.memory_owner``) writes under that
+#   owner and reads that owner's entries, nobody else's.
+# - A job with no owner (the command line, a caller that names none) writes
+#   unscoped entries and reads the unscoped ones.
+# - An entry stored before owners were recorded carries none, so it cannot be
+#   attributed to anyone: it stays in the unscoped pool, readable by unscoped
+#   jobs as it always was, and never reaches a job with an owner. A cross-owner
+#   read fails closed.
+# - A backend that cannot keep owners (``keeps_owners`` false) is neither
+#   written to nor read from by a job with an owner.
+# - A read with no job behind it (no container) reads nothing (``NO_MEMORY``).
+
+
+def owner_key(owner: Any) -> str | None:
+    """The owner as entries are filed under it, or ``None`` for unscoped."""
+    text = str(owner).strip() if owner is not None else ""
+    return text or None
+
+
+def keeps_owners(store: Any) -> bool:
+    """Whether ``store`` files entries under their owner and scopes its reads by it."""
+    return getattr(store, "keeps_owners", False) is True
+
+
+class _NoMemory:
+    """The owner of a read that has no job to read for: it reads nothing."""
+
+    def __repr__(self) -> str:
+        return "NO_MEMORY"
+
+
+# What ``memory_owner_of`` answers for no container, or one that states no
+# owner it can be read as: neither an owner's memory nor the unscoped pool.
+NO_MEMORY: Any = _NoMemory()
+
+
+def memory_owner_of(container: Any) -> Any:
+    """The owner whose memory ``container``'s job reads and writes.
+
+    ``None`` for a job that is unscoped (a container whose ``memory_owner``
+    is ``None``), and :data:`NO_MEMORY` for no container at all or one whose
+    owner is not text: :func:`recall` and :func:`match_functions` read nothing
+    for it.
+    """
+    if container is None:
+        return NO_MEMORY
+    value = getattr(container, "memory_owner", NO_MEMORY)
+    if value is None:
+        return None
+    return owner_key(value) if isinstance(value, str) else NO_MEMORY
+
+
+def recall(
+    store: Any,
+    query: str,
+    *,
+    top_k: int = 3,
+    exclude_sample_id: str | None = None,
+    owner: Any = None,
+) -> list[StoredCase]:
+    """``store.retrieve`` for the job's owner, under the rule above."""
+    if owner is NO_MEMORY:
+        return []
+    scoped = owner_key(owner)
+    if scoped is None:
+        try:
+            cases = store.retrieve(query, top_k=top_k, exclude_sample_id=exclude_sample_id)
+        except TypeError:
+            # A backend older than ``exclude_sample_id``.
+            cases = store.retrieve(query, top_k=top_k)
+            if exclude_sample_id:
+                cases = [c for c in cases if c.sample_id != exclude_sample_id]
+        return [c for c in cases if owner_key(getattr(c, "owner", None)) is None]
+    if not keeps_owners(store):
+        return []
+    cases = store.retrieve(query, top_k=top_k, exclude_sample_id=exclude_sample_id, owner=scoped)
+    return [c for c in cases if owner_key(getattr(c, "owner", None)) == scoped]
+
+
+def match_functions(
+    index: Any,
+    hashes: list[str],
+    *,
+    exclude_sample_id: str | None = None,
+    owner: Any = None,
+) -> list[FunctionMatch]:
+    """``index.match`` for the job's owner, under the rule above."""
+    if owner is NO_MEMORY:
+        return []
+    scoped = owner_key(owner)
+    if scoped is None:
+        return list(index.match(hashes, exclude_sample_id=exclude_sample_id))
+    if not keeps_owners(index):
+        return []
+    return list(index.match(hashes, exclude_sample_id=exclude_sample_id, owner=scoped))
+
+
+# ---------------------------------------------------------------------------
+# An earlier run on this sample: hypotheses, never evidence
+# ---------------------------------------------------------------------------
+#
+# Every similarity read above leaves the sample's own case out
+# (``exclude_sample_id``): an earlier run is not prior art for itself. What
+# that run reported is still worth checking, so it is read here by the sample's
+# sha256, under the same owner rule, and shown to the run's agents as
+# hypotheses (:func:`earlier_run_block`). It has no evidence id, so nothing
+# cites it and nothing corroborates with it, and the publish rules read this
+# run alone: a technique it reported that no source of this run stands behind
+# is published or not as it would be without it, with a note saying so
+# (``capability_matrix.EARLIER_RUN_UNSUPPORTED_NOTE``).
+
+EARLIER_RUN_HEADING = "=== AN EARLIER RUN ON THIS SAMPLE: hypotheses, not evidence ==="
+EARLIER_RUN_END = "=== END EARLIER RUN ==="
+EARLIER_RUN_STATEMENT = (
+    "An earlier run on this sample (the same sha256) reported what follows. Treat each item "
+    "as a hypothesis to check with this run's tools, not as evidence: it has no evidence id, "
+    "it cannot be cited, and it corroborates nothing."
+)
+
+
+def earlier_case(store: Any, sample_id: str, *, owner: Any = None) -> StoredCase | None:
+    """The case an earlier run stored for ``sample_id``, under the owner rule above, or ``None``.
+
+    Read by the sample's id (``case_of``), never by similarity. ``None`` as
+    well for a backend that offers no such read, and for an answer that is not
+    the sample's own case of this owner.
+    """
+    sha = str(sample_id or "").strip()
+    if owner is NO_MEMORY or not sha:
+        return None
+    read = getattr(store, "case_of", None)
+    if not callable(read):
+        return None
+    scoped = owner_key(owner)
+    if scoped is None:
+        case = read(sha)
+    elif keeps_owners(store):
+        case = read(sha, owner=scoped)
+    else:
+        return None
+    if not isinstance(case, StoredCase) or case.sample_id != sha:
+        return None
+    return case if owner_key(case.owner) == scoped else None
+
+
+def earlier_case_of(container: Any, sample_id: str) -> StoredCase | None:
+    """:func:`earlier_case` for ``container``'s job, read once per sample. Never raises.
+
+    Kept on the container (``earlier_cases``) for the length of the job, so
+    every agent briefed in it is shown the same case and the store is asked
+    once. A store that cannot be built or read is no earlier case.
+    """
+    sha = str(sample_id or "").strip()
+    if container is None or not sha:
+        return None
+    kept = getattr(container, "earlier_cases", None)
+    if isinstance(kept, dict) and sha in kept:
+        held = kept[sha]
+        return held if isinstance(held, StoredCase) else None
+    case: StoredCase | None = None
+    try:
+        case = earlier_case(container.get_memory_store(), sha, owner=memory_owner_of(container))
+    except Exception as exc:  # noqa: BLE001 — memory never costs a run
+        from maljan.core.logger import logger
+
+        logger.debug("LTM: the earlier run on this sample was not read (%s).", exc)
+    if isinstance(kept, dict):
+        kept[sha] = case
+    return case
+
+
+def earlier_techniques(case: StoredCase | None) -> list[str]:
+    """The technique ids ``case`` reported, each once, upper-cased, and only technique ids."""
+    out: list[str] = []
+    for raw in getattr(case, "technique_ids", None) or []:
+        tid = str(raw or "").strip().upper()
+        if TECHNIQUE_ID_EXACT_RE.fullmatch(tid) and tid not in out:
+            out.append(tid)
+    return out
+
+
+def earlier_run_block(case: StoredCase | None) -> str:
+    """The earlier run on this sample as its agents are shown it, or ``""`` for none.
+
+    The day it was stored and its technique ids, under a heading that says
+    they are hypotheses. Not its summary: that is the earlier run's claims,
+    whose evidence ids name that run's ledger, not this one's. Not its
+    category: an earlier verdict's word is no hypothesis a tool can check.
+    """
+    if case is None:
+        return ""
+    techniques = earlier_techniques(case)
+    stored = case.created_at.astimezone(UTC).strftime("%Y-%m-%d")
+    return "\n".join(
+        [
+            EARLIER_RUN_HEADING,
+            EARLIER_RUN_STATEMENT,
+            f"  Stored: {stored}",
+            f"  Earlier techniques: {', '.join(techniques) if techniques else 'none'}",
+            EARLIER_RUN_END,
+        ]
+    )
+
+
+def earlier_run_text(container: Any, sample_id: str) -> str:
+    """:func:`earlier_run_block` of the earlier run on ``container``'s sample. Never raises."""
+    return earlier_run_block(earlier_case_of(container, sample_id))
+
+
+def earlier_run_of(container: Any, sample_id: str) -> Any:
+    """The ``EarlierRun`` record of what the agents were shown, or ``None``. Never raises.
+
+    The record the judge's bundle carries (``stix_models.EARLIER_RUN_PROPERTY``),
+    from the same case :func:`earlier_run_text` showed.
+    """
+    case = earlier_case_of(container, sample_id)
+    if case is None:
+        return None
+    from maljan.schemas.stix_models import EarlierRun
+
+    return EarlierRun(
+        sample_id=case.sample_id,
+        techniques=earlier_techniques(case),
+        stored=case.created_at.astimezone(UTC).strftime("%Y-%m-%d"),
+    )
+
+
+# ---------------------------------------------------------------------------
+# Another run's ids: never in this run's form
+# ---------------------------------------------------------------------------
+#
+# A stored case's text was written by another run, and its ledger ids
+# (``ev_0007``) and sandbox item ids (``net:4``) are that run's sequence
+# numbers. This run issues the same numbers, so a past case's ``ev_0007``
+# names a real entry of this run that says something else: a judge that
+# copies it cites that entry, and every id check passes. Every text that
+# carries a stored case into this run goes through
+# :func:`foreign_ids_written_out` first.
+
+# What another run's ledger id and item id are written as. Each starts and
+# ends with a word character and holds no digit, underscore or colon: no
+# reader of an entry id (any ``ev_<digits>``, in any case, at any boundary)
+# or of an item id (``sandbox_sections.ITEM_ID_RE``) finds one in it, nor
+# in it and the text either side of it. It starts with no hex digit, so it
+# cannot complete an escape the text left open before it.
+FOREIGN_ENTRY_ID = "other-run-entry"
+FOREIGN_ITEM_ID = "other-run-item"
+
+
+@functools.lru_cache(maxsize=1)
+def _foreign_id_re() -> re.Pattern[str]:
+    """Either id shape: an entry id as the widest reader takes it, or an item id."""
+    from maljan.analysis.sandbox_sections import ITEM_ID_RE
+
+    return re.compile(rf"(?P<entry>ev_\d++)|(?P<item>{ITEM_ID_RE.pattern})", re.IGNORECASE)
+
+
+def _foreign_id(match: re.Match[str]) -> str:
+    return FOREIGN_ENTRY_ID if match.group("entry") is not None else FOREIGN_ITEM_ID
+
+
+def foreign_ids_written_out(text: str) -> str:
+    """``text`` of another run with each of its ledger and item ids renamed.
+
+    An entry id becomes :data:`FOREIGN_ENTRY_ID` and an item id
+    :data:`FOREIGN_ITEM_ID`, so nothing of it reads as an id of this run. One
+    pass, linear in the text; a text with no id comes back as it was. Safe on
+    raw text and on text already quoted: an id the quoting left right after an
+    escape (``\\x0e`` then ``v_0003``) is still matched.
+    """
+    return _foreign_id_re().sub(_foreign_id, text)
+
+
+def foreign_quoted_value(text: str) -> str:
+    """Another run's text as one quoted value of a prompt (``tool_fence.quoted_value``).
+
+    Its ids are renamed before the quoting, where an item id after a control
+    character is still one, and again after it, where a written-out control
+    can have brought the ``e`` of an entry id.
+    """
+    from maljan.agents.tool_fence import quoted_value
+
+    return foreign_ids_written_out(quoted_value(foreign_ids_written_out(str(text or ""))))
+
+
+# ---------------------------------------------------------------------------
+# Family names, as the function-hash corpus files them
+# ---------------------------------------------------------------------------
+
+_FAMILY_SEPARATORS = re.compile(r"[\s_\-.]+")
+
+
+def family_key(name: Any) -> str:
+    """One spelling of a family name, for filing and grouping: ``""`` for none.
+
+    The judge writes the family as free text, so one family arrives as
+    ``AgentTesla``, ``Agent Tesla`` and ``agent-tesla``. Compatibility-folded,
+    case-folded, with spaces, hyphens, underscores and dots taken out.
+    """
+    text = unicodedata.normalize("NFKC", str(name or "")).casefold().strip()
+    return _FAMILY_SEPARATORS.sub("", text)
 
 
 # ---------------------------------------------------------------------------
@@ -362,7 +705,11 @@ def with_published_techniques(
     kept: list[str] = []
     for raw in published:
         tid = str(raw or "").strip().upper()
-        if tid and tid not in kept and not (tid in withheld and tid not in remembered):
+        if not TECHNIQUE_ID_EXACT_RE.fullmatch(tid):
+            # A tactic id (``TA0005``) or a malformed one is no technique, and
+            # a later run must not be shown it as one this case found.
+            continue
+        if tid not in kept and not (tid in withheld and tid not in remembered):
             kept.append(tid)
     agreed = {str(tid or "").strip().upper() for tid in corroborated}
     return replace(

@@ -843,10 +843,9 @@ class TestTheSpanPath:
         from maljan.tools.strings import iter_string_iocs
 
         for blob in self._corpus():
-            rows, stopped = string_iocs_with_spans(blob)
+            rows = string_iocs_with_spans(blob)
             plain = [{k: r[k] for k in ("kind", "value", "notes", "source")} for r in rows]
             assert plain == iter_string_iocs(blob)
-            assert stopped is None
             for row in rows:
                 held = blob[row["start"] : row["end"]][:: row["width"]]
                 assert held.decode("latin-1") == row["value"], (blob, row)

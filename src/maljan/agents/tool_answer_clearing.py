@@ -46,7 +46,9 @@ import json
 import re
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Annotated, Any, ClassVar
+
+from pydantic import Field
 
 from maljan.schemas.evidence import ENTRY_ID_RE
 
@@ -63,7 +65,9 @@ READ_EVIDENCE_DESCRIPTION = (
     "evidence id it was filed under (evidence_id, for example ev_0001). For an answer "
     "the conversation shows as [cleared …]: the answer comes back whole under its own "
     "id, as the ledger keeps it, shortened only where the room left for a tool answer "
-    "requires."
+    "requires. For an answer longer than one read, pass offset (a byte position, 0 for the "
+    "start) and optionally limit (how many bytes) to read it page by page: each page names "
+    "the offset the next one starts at. Without them the call is the one above."
 )
 
 # What an id the ledger does not hold is answered with.
@@ -323,9 +327,136 @@ def _with_content(message: Any, content: str) -> Any:
     return message
 
 
+@dataclass(frozen=True)
+class StoredCopy:
+    """The full copy of an answer kept in the job's store: its size and a reader of a byte range.
+
+    ``read(offset, length)`` answers the bytes from ``offset`` (``length`` of
+    them, or to the end for ``None``), or ``None`` when the store cannot be
+    read now.
+    """
+
+    total: int
+    read: Callable[[int, int | None], bytes | None]
+
+
+def _whole_characters(data: bytes, *, more: bool) -> tuple[int, bytes]:
+    """``data`` cut to whole UTF-8 characters: how many leading bytes were left out, and the rest.
+
+    A page starts and ends at byte positions, which may fall inside a
+    character. The partial one at the front is left out (the page before ends
+    before it) and, where more follows, the partial one at the end too.
+    """
+    head = 0
+    while head < min(3, len(data)) and data[head] & 0xC0 == 0x80:
+        head += 1
+    end = len(data)
+    if more:
+        for back in range(1, min(4, end - head) + 1):
+            byte = data[end - back]
+            if byte & 0xC0 == 0x80:
+                continue
+            need = 4 if byte >= 0xF0 else 3 if byte >= 0xE0 else 2 if byte >= 0xC0 else 1
+            if need > back:
+                end -= back
+            break
+    return head, data[head:end]
+
+
+def _first_character(data: bytes) -> bytes:
+    """The bytes of the first whole character of ``data`` (``data`` itself when it holds less)."""
+    if not data:
+        return data
+    lead = data[0]
+    width = 4 if lead >= 0xF0 else 3 if lead >= 0xE0 else 2 if lead >= 0xC0 else 1
+    return data[:width]
+
+
+def paged_answer(
+    stored: str,
+    copy: StoredCopy | None,
+    offset: int,
+    limit: int | None,
+    *,
+    room: int | None = None,
+    shown: Callable[[str], int] | None = None,
+) -> str:
+    """One page of an answer by byte position, led by a line saying which bytes it holds.
+
+    The page is read from ``copy``, the whole answer the job's store holds,
+    where there is one and it can be read; otherwise from ``stored``, the
+    answer as the ledger keeps it, and the line says which. Positions are
+    bytes of the UTF-8 text; a character a position falls inside is left out
+    of the page it is cut by and read whole in the next. A ``limit`` shorter
+    than the character at the position still reads that character, so a walk
+    by any limit reaches the end.
+
+    ``room`` is how many characters of a tool answer the conversation can
+    take now and ``shown(page)`` how many characters the page takes once
+    shown (its line, the fence and the line under it): a page is never read
+    longer than the room, and is shortened until it is inside it, so the
+    guardrail never cuts a page. ``None`` reads as many bytes as asked.
+    """
+    stored_bytes = stored.encode("utf-8", errors="surrogatepass")
+    state: dict[str, Any] = {
+        "copy": copy,
+        "what": "the stored full copy of the answer" if copy else "the stored answer",
+    }
+
+    def read(at: int, length: int | None) -> bytes:
+        held = state["copy"]
+        if held is not None:
+            data = held.read(at, length)
+            if data is not None:
+                return bytes(data)
+            # The copy cannot be read now: the stored answer is paged, and said so.
+            state["copy"] = None
+            state["what"] = "the stored answer (the full copy could not be read)"
+        return stored_bytes[at : at + length] if length is not None else stored_bytes[at:]
+
+    def size() -> int:
+        held = state["copy"]
+        return held.total if held is not None else len(stored_bytes)
+
+    want = limit
+    if room is not None:
+        want = min(limit, room) if limit is not None else room
+    if copy is not None and offset >= copy.total:
+        return (
+            f"[{READ_EVIDENCE_TOOL}: offset {offset} is at or past the end of "
+            f"{state['what']} ({copy.total} bytes)]"
+        )
+    while True:
+        data = read(offset, want)
+        total = size()
+        what = state["what"]
+        if offset >= total:
+            return (
+                f"[{READ_EVIDENCE_TOOL}: offset {offset} is at or past the end of {what} "
+                f"({total} bytes)]"
+            )
+        more = offset + len(data) < total
+        head, page = _whole_characters(data, more=more)
+        if not page and more:
+            raw = read(offset, 7)
+            head = 0
+            while head < min(3, len(raw)) and raw[head] & 0xC0 == 0x80:
+                head += 1
+            page = _first_character(raw[head:])
+        start = offset + head
+        end = start + len(page)
+        place = f"bytes {start}-{end} of {total} of {what}"
+        note = f"; the next page starts at offset {end}" if end < total else "; this is the end"
+        text = f"[{READ_EVIDENCE_TOOL}: {place}{note}]\n" + page.decode("utf-8", errors="replace")
+        if shown is None or room is None or shown(text) <= room or len(data) <= 4:
+            return text
+        want = max(4, int(len(data) * 0.8))
+
+
 def read_evidence_tool(
     lookup: Callable[[str], str | None],
     sizer: Any = None,
+    stored_copy: Callable[[str], StoredCopy | None] | None = None,
 ) -> Any:
     """The read-again tool: a stored answer by its evidence id, sized like any tool answer.
 
@@ -335,12 +466,37 @@ def read_evidence_tool(
     against the room the conversation has and shortened as every tool answer
     is. The recorder files a found answer as a repeat of the entry it reads and
     fences it under that entry's id (``evidence_recorder``, :data:`READS_EVIDENCE`).
+
+    ``offset`` and ``limit`` are optional: a call that passes neither is the
+    read above, byte for byte. With either, the answer is read page by page
+    (:func:`paged_answer`) from the full copy the job's store holds
+    (``stored_copy``, by the id; ``None`` for an entry with none), else from
+    the stored answer.
     """
     from langchain_core.tools import StructuredTool
 
     from maljan.tools.errors import BAD_ARGUMENT, tool_error
 
-    def _read(evidence_id: str) -> str:
+    class _ReadAgain(StructuredTool):
+        """The tool keeping to the arguments the call named: an optional one left out is not filled.
+
+        The ledger records a call's arguments as made, so a plain read stays
+        ``{"evidence_id": ...}``, the record it always was.
+        """
+
+        keeps_named_args: ClassVar[bool] = True
+
+        def _parse_input(self, tool_input: Any, tool_call_id: str | None) -> Any:
+            parsed = super()._parse_input(tool_input, tool_call_id)
+            if isinstance(tool_input, dict) and isinstance(parsed, dict):
+                return {key: value for key, value in parsed.items() if key in tool_input}
+            return parsed
+
+    def _read(
+        evidence_id: str,
+        offset: Annotated[int, Field(ge=0)] = 0,
+        limit: Annotated[int | None, Field(gt=0)] = None,
+    ) -> str:
         wanted = str(evidence_id or "").strip().lower()
         found = lookup(wanted) if ENTRY_ID_RE.fullmatch(wanted) else None
         if found is None:
@@ -352,12 +508,33 @@ def read_evidence_tool(
                     remediation=UNKNOWN_EVIDENCE_REMEDIATION,
                 )
             )
+        if offset or limit is not None:
+            from maljan.agents.tool_fence import fenced
+            from maljan.llm.context_window import output_limit
+            from maljan.schemas.answer_completeness import cut_line_room
+
+            copy = stored_copy(wanted) if stored_copy is not None else None
+            room = None
+            if sizer is not None:
+                room = output_limit(
+                    getattr(sizer, "_max_output_chars", 0), getattr(sizer, "_context_budget", None)
+                )
+
+            def shown(page: str) -> int:
+                # What the page takes once the recorder shows it: its id and the
+                # fence, and the line a cut answer carries under it.
+                return len(f"[{wanted}]\n{fenced(wanted, page)}") + cut_line_room(room or 0)
+
+            found = paged_answer(found, copy, offset, limit, room=room, shown=shown)
+            if sizer is None:
+                return found
+            return str(sizer._apply_output_guardrail(found, ()))
         if sizer is None:
             return found
         return str(sizer._apply_output_guardrail(found, ()))
 
     _read.__doc__ = READ_EVIDENCE_DESCRIPTION
-    return StructuredTool.from_function(
+    return _ReadAgain.from_function(
         func=_read,
         name=READ_EVIDENCE_TOOL,
         description=READ_EVIDENCE_DESCRIPTION,

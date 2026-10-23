@@ -55,13 +55,29 @@ def stopped_state(app: Any) -> dict[str, Any]:
     """The pipeline state a stopped run had produced, or an empty dict.
 
     The report node's state when it had returned (a superset of every step
-    before it), otherwise the state after the last complete step.
+    before it), otherwise the state after the last complete step, with every
+    ledger entry no node wrote added (``pipeline.state.with_undrained_evidence``).
     """
+    from maljan.pipeline.state import with_undrained_evidence
+
     built = getattr(app, "built_report", None)
     if isinstance(built, dict) and built:
-        return dict(built)
-    latest = getattr(app, "latest_state", None)
-    return dict(latest) if isinstance(latest, dict) else {}
+        state = dict(built)
+    else:
+        latest = getattr(app, "latest_state", None)
+        state = dict(latest) if isinstance(latest, dict) else {}
+    # The questions the run was asked, which a run stopped before its first
+    # graph step has no state to carry.
+    asked = getattr(app, "questions", None)
+    if not state.get("analyst_questions") and isinstance(asked, list) and asked:
+        state["analyst_questions"] = list(asked)
+    # What the run's agents held when it stopped is on its ledger too: a stage
+    # node that was cancelled never ran its drain.
+    try:
+        return with_undrained_evidence(state, getattr(app, "container", None))
+    except Exception as exc:  # noqa: BLE001 — every function here is total
+        logger.warning("stopped run: undrained evidence not collected (%s).", exc)
+        return state
 
 
 def judge_ran(state: dict[str, Any]) -> bool:
@@ -69,22 +85,32 @@ def judge_ran(state: dict[str, Any]) -> bool:
     return bool(state.get("final_decision"))
 
 
-def _degraded(summary: dict[str, Any], note: str) -> dict[str, Any]:
+def _degraded(summary: dict[str, Any], *notes: str) -> dict[str, Any]:
     out = dict(summary)
     out["degraded_mode"] = True
     reasons = out.get("degradation_reasons")
-    out["degradation_reasons"] = [
-        *(reasons if isinstance(reasons, list) else []),
-        note,
-    ]
+    held = list(reasons if isinstance(reasons, list) else [])
+    out["degradation_reasons"] = [*held, *(n for n in dict.fromkeys(notes) if n and n not in held)]
     return out
 
 
-def _built_summary(state: dict[str, Any], container: Any) -> dict[str, Any]:
+def _missing_sentence(missing: list[str]) -> str:
+    """The one degradation sentence naming each part of the run summary that is not in it."""
+    return (
+        "the run summary of this stopped run lacks "
+        + ", ".join(dict.fromkeys(missing))
+        + ": they could not be read at the stop"
+    )
+
+
+def _built_summary(
+    state: dict[str, Any], container: Any, missing: list[str] | None = None
+) -> dict[str, Any]:
     """A run summary from the state, for a run stopped before its judge built one.
 
     The judge node's own builder, given what the state holds; a part the state
-    has nothing for is left as the builder leaves it.
+    has nothing for is left as the builder leaves it. A part that could not be
+    recorded is named in ``missing``, for the one sentence that says so.
     """
     from maljan.analysis.run_summary import RunSummaryBuilder, tool_asks_of
     from maljan.pipeline import nodes
@@ -99,9 +125,11 @@ def _built_summary(state: dict[str, Any], container: Any) -> dict[str, Any]:
         try:
             apply()
         except Exception as exc:  # noqa: BLE001 — one part is never worth the summary
-            logger.debug(
+            logger.warning(
                 "stopped run: the run summary's %s was not recorded (%s).", name, type(exc).__name__
             )
+            if missing is not None:
+                missing.append(name)
 
     def _negotiation() -> None:
         max_iters, sycophancy_check = nodes.debate_options(container)
@@ -187,26 +215,29 @@ def stopped_run_summary(state: dict[str, Any], container: Any, *, note: str) -> 
     from maljan.analysis.run_summary import spend_blocks
     from maljan.pipeline import nodes
 
+    missing: list[str] = []
     try:
         existing = state.get("run_summary")
         summary = (
             dict(existing)
             if isinstance(existing, dict) and existing
-            else _built_summary(state, container)
+            else _built_summary(state, container, missing)
         )
     except Exception as exc:  # noqa: BLE001 — a stopped run is recorded whatever happens
         logger.warning("stopped run: the run summary could not be built (%s).", type(exc).__name__)
         summary = {}
+        missing.append("every part")
 
     def _part(name: str, apply: Any) -> None:
         try:
             apply()
         except Exception as exc:  # noqa: BLE001 — one part is never worth the summary
-            logger.debug(
+            logger.warning(
                 "stopped run: the run summary's %s was not read again (%s).",
                 name,
                 type(exc).__name__,
             )
+            missing.append(name)
 
     def _spent() -> None:
         summary.update(spend_blocks(container.get_token_ledger().snapshot()))
@@ -224,6 +255,16 @@ def stopped_run_summary(state: dict[str, Any], container: Any, *, note: str) -> 
         if started:
             summary["elapsed_seconds"] = round(max(0.0, time.time() - started), 3)
 
+    def _disclosure() -> None:
+        # A record the report node built at the end of the run is complete and
+        # kept; otherwise the record as of the stop, which says it may miss a
+        # call of the step the run stopped in.
+        if isinstance(summary.get("disclosure"), dict):
+            return
+        record = stopped_disclosure(state, container, summary)
+        if record is not None:
+            summary["disclosure"] = record
+
     _part("spend", _spent)
     _part("generation", _generation)
     _part(
@@ -232,8 +273,92 @@ def stopped_run_summary(state: dict[str, Any], container: Any, *, note: str) -> 
             {"stages": nodes.stage_rollup(container, cast("AnalysisState", state))}
         ),
     )
+
+    def _efficiency() -> None:
+        # A record the report node built at the end of the run is complete and
+        # kept; otherwise the counts as of the stop.
+        if _is_built(summary.get("efficiency")):
+            return
+        record = stopped_efficiency(state, container, summary.get("tokens"))
+        if record is not None:
+            summary["efficiency"] = record
+
+    def _coverage() -> None:
+        # Kept where the report node built it; otherwise as of the stop.
+        if _is_built(summary.get("coverage")):
+            return
+        record = stopped_coverage(state, container, summary)
+        if record is not None:
+            summary["coverage"] = record
+
     _part("elapsed time", _elapsed)
-    return _degraded(summary, note)
+    if summary:
+        _part("disclosure", _disclosure)
+        _part("efficiency", _efficiency)
+        _part("coverage", _coverage)
+    return _degraded(
+        summary,
+        _missing_sentence(missing) if missing else "",
+        # What the report built here says too: no judge ran, so no verdict.
+        NO_VERDICT_REASON if not judge_ran(state) else "",
+        # The stop note stays last, as on the report: it is why the run ended.
+        note,
+    )
+
+
+def _is_built(record: Any) -> bool:
+    """Whether ``record`` is a block built from the run, not a ``not_built`` note."""
+    return isinstance(record, dict) and "v" in record
+
+
+def stopped_efficiency(
+    state: dict[str, Any], container: Any, tokens: Any = None
+) -> dict[str, Any] | None:
+    """What a stopped run had counted by the stop (``analysis.efficiency``), marked as such."""
+    from maljan.analysis.disclosure import STOPPED_PART_WAY
+    from maljan.analysis.efficiency import efficiency_record
+
+    return efficiency_record(
+        container,
+        entries=state.get("evidence_ledger") or [],
+        isr_reports=state.get("isr_reports") or {},
+        tokens=tokens if isinstance(tokens, dict) else None,
+        partial_reason=STOPPED_PART_WAY,
+    )
+
+
+def stopped_coverage(
+    state: dict[str, Any], container: Any, summary: Any = None
+) -> dict[str, Any] | None:
+    """What looked and what could not be established by the stop (``analysis.coverage``)."""
+    from maljan.analysis.disclosure import STOPPED_PART_WAY
+    from maljan.pipeline import nodes
+
+    return nodes.run_coverage(
+        state,
+        container,
+        summary if isinstance(summary, dict) else {},
+        partial_reason=STOPPED_PART_WAY,
+    )
+
+
+def stopped_disclosure(
+    state: dict[str, Any], container: Any, summary: dict[str, Any]
+) -> dict[str, Any] | None:
+    """What a stopped run had sent beyond this machine by the stop, marked as possibly incomplete.
+
+    The ledger is the state's, which holds the steps that completed; the token
+    counts and the stage rollup are ``summary``'s, read again at the stop.
+    """
+    from maljan.analysis.disclosure import STOPPED_PART_WAY, run_disclosure
+
+    return run_disclosure(
+        container,
+        entries=state.get("evidence_ledger") or [],
+        tokens=summary.get("tokens"),
+        stages=summary.get("stages"),
+        partial_reason=STOPPED_PART_WAY,
+    )
 
 
 def _report_dump(report: Any) -> dict[str, Any] | None:
@@ -277,11 +402,12 @@ def _deterministic_report(state: dict[str, Any], container: Any) -> dict[str, An
             )
     fallback = state.get("verdict_fallback") or None
     ledger: list[Any] = []
+    unreadable_rows = 0
     for row in state.get("evidence_ledger") or []:
         try:
             ledger.append(LedgerEntry.model_validate(row))
         except Exception:  # noqa: BLE001 — one bad row is not a lost report
-            continue
+            unreadable_rows += 1
     ledger.sort(key=lambda entry: entry.seq)
     # The last pass before the report is built from it (``schemas.evidence``).
     from maljan.core.config import get_settings
@@ -291,6 +417,16 @@ def _deterministic_report(state: dict[str, Any], container: Any) -> dict[str, An
         ledger, int(getattr(get_settings().reporting, "evidence_budget_bytes", 0) or 0)
     )
     reasons = corrected_reasons(state.get("degradation_reasons"), ledger)
+    if unreadable_rows:
+        logger.warning(
+            "stopped run: %d evidence ledger row(s) could not be read for the report.",
+            unreadable_rows,
+        )
+        reasons = [
+            *reasons,
+            f"{unreadable_rows} evidence ledger row(s) could not be read and are not in this "
+            "report",
+        ]
     if not judge_ran(state):
         reasons = [*reasons, NO_VERDICT_REASON]
     builder = MalwareReportBuilder(
@@ -446,4 +582,92 @@ def partial_report(state: dict[str, Any], container: Any, *, note: str) -> dict[
     report["degraded_mode"] = True
     reasons = report.get("degradation_reasons")
     report["degradation_reasons"] = [*(reasons if isinstance(reasons, list) else []), note]
+    _with_questions(report, state)
+    _with_disclosure(report, state, container)
+    _with_efficiency(report, state, container)
+    _with_coverage(report, state, container)
     return report
+
+
+# Why a stopped run's questions carry no answer of the report model's.
+QUESTIONS_STOPPED = "the run was stopped before the report's question round answered"
+
+
+def _with_questions(report: dict[str, Any], state: dict[str, Any]) -> None:
+    """The job's questions on ``report`` as not determinable, where it answers none yet.
+
+    A question the analyst asked is never dropped because the run stopped:
+    each is printed "not determinable from this run" with the reason.
+    """
+    if report.get("question_answers"):
+        return
+    try:
+        from maljan.reporting.question_round import asked_questions, unanswered
+
+        questions = asked_questions(state.get("analyst_questions"))
+        if questions:
+            report["question_answers"] = [
+                answer.model_dump(mode="json")
+                for answer in unanswered(questions, QUESTIONS_STOPPED)
+            ]
+    except Exception as exc:  # noqa: BLE001 — every function here is total
+        logger.debug("stopped run: the questions were not kept (%s).", type(exc).__name__)
+
+
+def _with_coverage(report: dict[str, Any], state: dict[str, Any], container: Any) -> None:
+    """The stopped run's coverage on ``report``'s run summary, where it carries none yet."""
+    summary = report.get("run_summary")
+    if not isinstance(summary, dict) or not summary or _is_built(summary.get("coverage")):
+        return
+    try:
+        record = stopped_coverage(state, container, summary)
+    except Exception as exc:  # noqa: BLE001 — every function here is total
+        logger.debug("stopped run: the coverage was not read (%s).", type(exc).__name__)
+        return
+    if record is not None:
+        report["run_summary"] = {**summary, "coverage": record}
+
+
+def _with_efficiency(report: dict[str, Any], state: dict[str, Any], container: Any) -> None:
+    """The stopped run's efficiency counts on ``report``'s run summary, where it carries none yet.
+
+    A report the report node returned already carries the run's complete
+    record; a report with no run summary is left without one. Never raises.
+    """
+    summary = report.get("run_summary")
+    if not isinstance(summary, dict) or not summary or _is_built(summary.get("efficiency")):
+        return
+    try:
+        record = stopped_efficiency(state, container, summary.get("tokens"))
+    except Exception as exc:  # noqa: BLE001 — every function here is total
+        logger.debug("stopped run: the efficiency counts were not read (%s).", type(exc).__name__)
+        return
+    if record is not None:
+        report["run_summary"] = {**summary, "efficiency": record}
+
+
+def _with_disclosure(report: dict[str, Any], state: dict[str, Any], container: Any) -> None:
+    """The stopped run's disclosure on ``report``'s run summary, where it carries none yet.
+
+    A report the report node returned already carries the run's complete
+    record. Any other is given the record as of the stop, read from the
+    token counts and the stage rollup taken again now. A report with no run
+    summary is left without one. Never raises.
+    """
+    summary = report.get("run_summary")
+    if not isinstance(summary, dict) or not summary or isinstance(summary.get("disclosure"), dict):
+        return
+    from maljan.analysis.run_summary import spend_blocks
+    from maljan.pipeline import nodes
+
+    closing = dict(summary)
+    try:
+        closing.update(spend_blocks(container.get_token_ledger().snapshot()))
+        closing["stages"] = nodes.stage_rollup(container, cast("AnalysisState", state))
+    except Exception as exc:  # noqa: BLE001 — the record then reads what the summary holds
+        logger.debug(
+            "stopped run: the closing counts were not read again (%s).", type(exc).__name__
+        )
+    record = stopped_disclosure(state, container, closing)
+    if record is not None:
+        report["run_summary"] = {**summary, "disclosure": record}

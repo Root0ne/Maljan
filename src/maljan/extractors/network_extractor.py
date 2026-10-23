@@ -18,11 +18,13 @@ import ipaddress
 import math
 import re
 import unicodedata
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any
 
 # Domains we never want to flag as suspicious — common SaaS / OS update
-# infrastructure. Extend rather than replace.
+# infrastructure, whose content is the provider's own. Extend rather than
+# replace; a name under which tenants publish their own content belongs in
+# ``_SHARED_HOSTING_DOMAINS`` instead, never here.
 _BENIGN_DOMAINS: frozenset[str] = frozenset(
     {
         "microsoft.com",
@@ -32,17 +34,9 @@ _BENIGN_DOMAINS: frozenset[str] = frozenset(
         "msftconnecttest.com",
         "apple.com",
         "icloud.com",
-        "googleapis.com",
         "google.com",
         "gstatic.com",
-        "cloudfront.net",
-        "akamai.net",
-        "akamaiedge.net",
-        # CDN / cloud / infra commonly seen in benign traffic (FP sources).
-        "fastly.net",
         "cloudflare.com",
-        "amazonaws.com",
-        "jsdelivr.net",
         "gvt1.com",
         "ntp.org",
         "pool.ntp.org",
@@ -51,6 +45,64 @@ _BENIGN_DOMAINS: frozenset[str] = frozenset(
         "archlinux.org",
     }
 )
+
+
+# Multi-tenant hosting: cloud storage, CDN edges and package CDNs, where anyone
+# publishes their own content under the provider's name. Two tiers, as data:
+#
+# - a provider service host, the provider's own endpoint (``storage.``
+#   ``googleapis.com``, ``s3.us-east-1.amazonaws.com``, ``cdn.jsdelivr.net``),
+#   is well-known benign as before: published only as itself, never through a
+#   URL on it. ``service`` fully matches the part of such a host left of the
+#   registered name (``""`` is the bare registered name);
+# - every other name under it is a tenant's (a bucket, a CloudFront
+#   distribution, a Fastly customer name, an Akamai edge label): assessed like
+#   any other name, marked shared hosting, and published only on evidence of
+#   its own, never because a URL on it is. Where the provider, not the tenant,
+#   assigns those labels (``assigned`` fully matches the part left of the
+#   registered name), no DGA score is taken from them: a distribution id is
+#   random by construction.
+@dataclass(frozen=True)
+class _SharedHosting:
+    service: re.Pattern[str]
+    assigned: re.Pattern[str] | None = None
+
+
+_AWS_REGION = r"[a-z]{2}(?:-gov|-iso[a-z]?)?-[a-z]+-\d"
+_SHARED_HOSTING: dict[str, _SharedHosting] = {
+    # One label under googleapis.com is a Google API endpoint (www, storage,
+    # fonts, update, safebrowsing); a bucket is ``<bucket>.storage...``.
+    "googleapis.com": _SharedHosting(re.compile(r"[a-z0-9-]*")),
+    # S3's and every service's own endpoints, global or regional, dual-stack
+    # or not; buckets, EC2 instance names and API ids sit left of them.
+    "amazonaws.com": _SharedHosting(
+        re.compile(
+            rf"(?:[a-z0-9-]+(?:\.dualstack)?(?:\.{_AWS_REGION})?"
+            rf"|s3[.-](?:dualstack\.)?{_AWS_REGION})?"
+        ),
+        assigned=re.compile(
+            r"ec2-\d{1,3}(?:-\d{1,3}){3}\..+|[a-z0-9]{10}\.execute-api\..+"
+            r"|[a-z0-9]{32}\.lambda-url\..+"
+        ),
+    ),
+    "cloudfront.net": _SharedHosting(re.compile(r""), assigned=re.compile(r".+")),
+    "akamaiedge.net": _SharedHosting(re.compile(r""), assigned=re.compile(r".+")),
+    "akamai.net": _SharedHosting(re.compile(r""), assigned=re.compile(r".+")),
+    # Fastly's own map and SNI names; ``<customer>.global.ssl.fastly.net`` is
+    # a name the customer chose.
+    "fastly.net": _SharedHosting(
+        re.compile(
+            r"(?:(?:[a-z0-9-]+\.)?(?:sni\.)?global(?:\.prod)?|global\.ssl"
+            r"|(?:dualstack\.)?(?:[a-z0-9-]+\.)*map|freetls|prod)?"
+        )
+    ),
+    # jsDelivr's own CDN endpoints; it gives no tenant a name of its own.
+    "jsdelivr.net": _SharedHosting(
+        re.compile(r"(?:cdn|fastly|gcore|testingcf|quantil|originfastly|data|purge|www)?")
+    ),
+}
+SHARED_HOSTING_REASON = "shared hosting: its tenants publish their own content under it"
+SHARED_HOSTING_MARK = "(shared hosting)"
 
 
 # Public resolvers a sample asks to test its connectivity: an address on
@@ -89,13 +141,63 @@ def is_well_known_benign_host(host: str) -> bool:
     text = str(host or "").strip().lower().rstrip(".")
     if text in _PUBLIC_RESOLVERS:
         return True
+    return _registered_name(text) in _BENIGN_DOMAINS or _shared_tier(text) == "service"
+
+
+def _shared_tier(text: str) -> str:
+    """``"service"``, ``"tenant"`` or ``"assigned"`` (a tenant's provider-assigned
+    name) for a lowercased host on shared hosting; ``""`` for any other host."""
+    registered = _registered_name(text)
+    hosting = _SHARED_HOSTING.get(registered)
+    if hosting is None:
+        return ""
+    left = text[: -len(registered)].rstrip(".")
+    if hosting.service.fullmatch(left):
+        return "service"
+    if hosting.assigned is not None and hosting.assigned.fullmatch(left):
+        return "assigned"
+    return "tenant"
+
+
+def _host_text(host: Any) -> str:
+    return str(host or "").strip().lower().rstrip(".")
+
+
+def _registered_name(text: str) -> str:
+    """The registered name of a lowercased host: the last two labels, or three
+    under a country code's second level; ``""`` for a single label."""
     parts = text.split(".")
     if len(parts) < 2:
-        return False
+        return ""
     registered = ".".join(parts[-2:])
     if len(parts) >= 3 and len(parts[-1]) == 2 and parts[-2] in _SECOND_LEVEL_LABELS:
         registered = ".".join(parts[-3:])
-    return registered in _BENIGN_DOMAINS
+    return registered
+
+
+def is_shared_hosting(host: str) -> bool:
+    """Whether ``host`` sits under a multi-tenant hosting name (``_SHARED_HOSTING``)."""
+    return bool(_shared_tier(_host_text(host)))
+
+
+def is_shared_hosting_tenant(host: str) -> bool:
+    """Whether ``host`` is a tenant's name on shared hosting, not the provider's endpoint.
+
+    Such a name is published on evidence of its own (a model or the judge
+    keeping it, the sample's own resolution or connection, a recovery), never
+    because a published URL carries it.
+    """
+    return _shared_tier(_host_text(host)) in ("tenant", "assigned")
+
+
+def host_rides_a_url(host: str) -> bool:
+    """Whether a published URL on ``host`` publishes ``host`` too.
+
+    Not for a well-known benign host (a CDN's or a cloud API's endpoint is
+    not the sample's C2 because a URL on it is), nor for a tenant's name on
+    shared hosting, which needs evidence of its own.
+    """
+    return not is_well_known_benign_host(host) and not is_shared_hosting_tenant(host)
 
 
 # RFC 6761/6762 reserved suffixes that must never be emitted as network IOCs.
@@ -153,9 +255,8 @@ def host_is_private_use(host: Any) -> bool:
     )
 
 
-# Substrings that strongly suggest C2 / commodity-malware infra.
+# Substrings that strongly suggest C2 / commodity-malware infra (``.bit`` is a TLD, tested apart).
 _SUSPICIOUS_DOMAIN_TOKENS: tuple[str, ...] = (
-    ".bit",
     ".onion",
     "duckdns",
     "no-ip",
@@ -387,16 +488,41 @@ class _DomainVerdict:
 
 
 def _assess_domain(fqdn: str) -> _DomainVerdict:
+    """``_scored_domain``, with shared hosting read by its tier (``_SHARED_HOSTING``).
+
+    A provider's service host is benign, as a listed name is. A tenant's name
+    is scored on its own labels only, and on none the provider assigned (no
+    DGA score from a distribution id); the homograph and token checks read
+    the whole name as for any other. A suspicious one keeps its reason with
+    ``(shared hosting)`` after it; one found not suspicious carries
+    ``SHARED_HOSTING_REASON``.
+    """
+    text = _host_text(fqdn)
+    tier = _shared_tier(text)
+    if not tier:
+        return _scored_domain(fqdn)
+    if tier == "service":
+        return _DomainVerdict(suspicious=False)
+    left = text[: -len(_registered_name(text))].rstrip(".")
+    verdict = _scored_domain(fqdn, dga_labels=[] if tier == "assigned" else left.split("."))
+    reason = (
+        f"{verdict.reason} {SHARED_HOSTING_MARK}" if verdict.suspicious else SHARED_HOSTING_REASON
+    )
+    return replace(verdict, reason=reason)
+
+
+def _scored_domain(fqdn: str, dga_labels: list[str] | None = None) -> _DomainVerdict:
     """Score an FQDN for suspicion. Order: benign allowlist -> IDN/punycode
     homograph -> C2/commodity tokens -> DGA score.
 
     Homograph and DGA checks scan every label except the trailing TLD (not
     just the leftmost), so a look-alike or algorithmic label that sits in a
     subdomain — ``login.pаypal.com`` — or under a multi-level public suffix —
-    ``xjqz8frandom.co.uk`` — is still caught.
+    ``xjqz8frandom.co.uk`` — is still caught. ``dga_labels``, when given, are
+    the only labels the DGA score reads (none: no score, ``dga_score`` None).
     """
     lower = fqdn.lower()
-    parts = lower.split(".")
+    parts = lower.rstrip(".").split(".")
     # Strip subdomains for the benign check.
     if len(parts) >= 2:
         registered = ".".join(parts[-2:])
@@ -421,6 +547,10 @@ def _assess_domain(fqdn: str) -> _DomainVerdict:
                 homograph_target=homograph,
             )
 
+    # ``.bit`` is a TLD (Namecoin), so it is read as the last label: as a
+    # substring it also flagged bitdefender.com and bitbucket.org.
+    if parts[-1] == "bit" and len(parts) >= 2:
+        return _DomainVerdict(suspicious=True, reason="contains '.bit'", is_punycode=is_puny_any)
     for token in _SUSPICIOUS_DOMAIN_TOKENS:
         if token in lower:
             return _DomainVerdict(
@@ -429,7 +559,10 @@ def _assess_domain(fqdn: str) -> _DomainVerdict:
 
     # DGA — score each inspected label and keep the most suspicious one.
     best_label, best_score = "", 0.0
-    for label in labels:
+    scored = labels if dga_labels is None else dga_labels
+    if not scored:
+        return _DomainVerdict(suspicious=False, is_punycode=is_puny_any)
+    for label in scored:
         s = _dga_score(label)
         if s > best_score:
             best_score, best_label = s, label
@@ -579,14 +712,6 @@ def _is_latin(ch: str) -> bool:
 # ---------------------------------------------------------------------------
 
 
-def _is_valid_ip(ip: str) -> bool:
-    try:
-        ipaddress.ip_address(ip)
-        return True
-    except ValueError:
-        return False
-
-
 def _is_emittable_ip(ip: str) -> bool:
     """True only for routable public addresses worth emitting as an IOC.
 
@@ -608,6 +733,23 @@ def _is_emittable_ip(ip: str) -> bool:
     ):
         return False
     return str(addr) != "255.255.255.255"
+
+
+def is_private_flow_address(ip: str) -> bool:
+    """Whether ``ip`` is a private, loopback or link-local unicast address.
+
+    Not an indicator — ``_is_emittable_ip`` keeps those out of every export —
+    but a flow to one is a fact about the run: lateral movement and a local
+    C2 or proxy live there. Multicast, broadcast, unspecified and reserved
+    addresses are none of these.
+    """
+    try:
+        addr = ipaddress.ip_address(ip)
+    except ValueError:
+        return False
+    if addr.is_multicast or addr.is_unspecified or addr.is_reserved:
+        return False
+    return addr.is_private or addr.is_loopback or addr.is_link_local
 
 
 # A v3 onion address is the base32 of a 32-byte key, a 2-byte checksum over
@@ -686,6 +828,39 @@ def url_host(raw_url: Any) -> str:
         return (urlparse(str(raw_url or "")).hostname or "").strip().lower().rstrip(".")
     except (ValueError, TypeError):
         return ""
+
+
+def host_form(value: Any) -> str:
+    """One host in the form two writers of it share, ``""`` for none.
+
+    A host as a sandbox or a URL writes it: a port is split off (``host:443``,
+    ``[2001:db8::1]:443``), IPv6 brackets are taken off, a trailing dot is
+    dropped, an address is written in its canonical form (``2001:DB8:0::1`` is
+    ``2001:db8::1``), an internationalised name in its IDNA (punycode) form and
+    every name in lower case. Read the same way on both sides of a comparison,
+    so a name in DNS and the host of a URL are one value when they are one host.
+    """
+    text = str(value or "").strip()
+    if text.startswith("["):
+        inner, bracket, _rest = text[1:].partition("]")
+        text = inner if bracket else text
+    else:
+        try:
+            return str(ipaddress.ip_address(text.rstrip(".")))
+        except ValueError:
+            pass
+        name, colon, port = text.rpartition(":")
+        if colon and port.isdigit() and ":" not in name:
+            text = name
+    text = text.rstrip(".")
+    try:
+        return str(ipaddress.ip_address(text))
+    except ValueError:
+        pass
+    try:
+        return text.encode("idna").decode("ascii").lower()
+    except UnicodeError:
+        return text.lower()
 
 
 # One DNS label: letters, digits and hyphens, not starting or ending with a

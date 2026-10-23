@@ -1,0 +1,18 @@
+{
+  "about": "The calibration set: one case per seed, built by scripts/calibration/cases.py. The split seed fixes the stratified tuning/held-out split; changing any value here changes the set.",
+  "split_seed": 7193,
+  "cases": [
+    {"seed": 1101, "format": "pe64"},
+    {"seed": 1102, "format": "pe64"},
+    {"seed": 1103, "format": "pe64"},
+    {"seed": 1104, "format": "pe64"},
+    {"seed": 2101, "format": "pe32"},
+    {"seed": 2102, "format": "pe32"},
+    {"seed": 2103, "format": "pe32"},
+    {"seed": 2104, "format": "pe32"},
+    {"seed": 3101, "format": "upx"},
+    {"seed": 3102, "format": "upx"},
+    {"seed": 3103, "format": "upx"},
+    {"seed": 3104, "format": "upx"}
+  ]
+}

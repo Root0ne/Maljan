@@ -545,7 +545,7 @@ def test_without_acceptance_the_tool_stays_undeclared(installed: Any) -> None:
     before = _scan_entry(settings)
     _probe(confirmed=["scan_rules", "query_hash", "section_list"])
     after = _scan_entry(settings)
-    assert before.facts == after.facts == {"v": 1}
+    assert before.facts == after.facts == {"v": 1, "hints": {"readOnlyHint": True}}
     assert asserted_techniques(after) == set()
     assert settings.mcp.servers[SERVER].tool_facts == {}
 

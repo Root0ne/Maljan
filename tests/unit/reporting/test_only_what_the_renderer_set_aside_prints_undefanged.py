@@ -1,9 +1,11 @@
 """Only what the renderer itself set aside prints undefanged, whatever the text says.
 
 The closing defang pass reads every section of the report. It leaves exactly
-two things as written, both set aside by the renderer when it wrote them: each
-draft rule's body, which is the rule to deploy, and the configured model
-endpoints in the run summary's appendix. A heading or a fence written in the
+three things as written, each set aside by the renderer when it wrote them:
+each draft rule's body, which is the rule to deploy, the configured model
+endpoints in the run summary's appendix, and the hosts of the appendix's
+disclosure block that the settings address
+(``test_the_report_says_what_left_the_machine``). A heading or a fence written in the
 sample's text (a ransom note faking the draft-rules heading) creates no such
 region, and everything else in the appendix — the sandbox statement, the
 mediator's notes and marks, a fallback's reason — is defanged.

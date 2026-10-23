@@ -18,6 +18,7 @@ from __future__ import annotations
 from html import escape
 from typing import Any
 
+from maljan.core.logger import logger
 from maljan.core.undeclared_tools import address_arguments, code_listing
 from maljan.reporting import tool_kinds
 from maljan.reporting.dedupe import distinct_processes
@@ -60,6 +61,8 @@ def _svg(width: int, height: int, body: str) -> str:
 # out its legend counts, and the report's tables and its JSON form carry.
 _TREE_ROWS = 40
 _NETWORK_ENDPOINTS = 12
+_MATRIX_CELLS = 8
+_ENTROPY_SECTIONS = 12
 _LISTING_CHARS = 4000
 _LISTINGS = 4
 
@@ -161,6 +164,10 @@ def build_attack_matrix(report: MalwareReport) -> Figure | None:
     cols = [(tid, name) for tid, name in _TACTIC_ORDER if tid in by_tactic]
     if not cols:
         return None
+    # A mapping whose tactic is not one of the twelve columns, or one past a
+    # column's eight cells, is not drawn; the legend counts it.
+    mapped = sum(len(techniques) for techniques in by_tactic.values())
+    drawn = sum(min(len(by_tactic[t]), _MATRIX_CELLS) for t, _ in cols)
     col_w = 118
     gap = 8
     width = len(cols) * (col_w + gap) + gap
@@ -171,7 +178,7 @@ def build_attack_matrix(report: MalwareReport) -> Figure | None:
         x = gap + i * (col_w + gap)
         parts.append(_rect(x, 12, col_w, 34, fill="#f6f8fa"))
         parts.append(_text(x + 8, 32, name, fill=_INK, size=11, weight="bold"))
-        for j, tech in enumerate(by_tactic[tid][:8]):
+        for j, tech in enumerate(by_tactic[tid][:_MATRIX_CELLS]):
             ty = 52 + j * 22
             parts.append(_rect(x, ty, col_w, 18, fill="#ddf4ff", stroke=_ACCENT))
             parts.append(_text(x + 6, ty + 13, tech, fill=_ACCENT, size=10))
@@ -180,7 +187,7 @@ def build_attack_matrix(report: MalwareReport) -> Figure | None:
         caption="MITRE ATT&CK tactic coverage",
         kind="attack_matrix",
         content=_svg(width, height, "".join(parts)),
-        legend=None,
+        legend=_figure_left_out(mapped, drawn, "techniques").strip() or None,
     )
 
 
@@ -192,7 +199,8 @@ def build_attack_matrix(report: MalwareReport) -> Figure | None:
 def build_entropy_chart(report: MalwareReport) -> Figure | None:
     if not report.static or not report.static.sections:
         return None
-    sections = report.static.sections[:12]
+    every = report.static.sections
+    sections = every[:_ENTROPY_SECTIONS]
     bar_h = 22
     height = 40 + len(sections) * (bar_h + 8)
     width = 620
@@ -204,16 +212,17 @@ def build_entropy_chart(report: MalwareReport) -> Figure | None:
         ent = max(0.0, min(8.0, float(sec.entropy or 0.0)))
         w = int(max_w * ent / 8.0)
         color = _DANGER if ent >= 7.0 else (_WARN if ent >= 6.0 else _ACCENT)
-        parts.append(_text(12, y + 15, (sec.name or "?")[:16], fill=_INK, size=11))
+        parts.append(_text(12, y + 15, marked_cut(sec.name or "?", 16), fill=_INK, size=11))
         parts.append(_rect(axis_x, y, max_w, bar_h, fill="#f6f8fa", stroke=_LINE))
         parts.append(_rect(axis_x, y, max(2, w), bar_h, fill=color, stroke="none", rx=0))
         parts.append(_text(axis_x + max_w + 8, y + 15, f"{ent:.2f}", fill=_MUTED, size=11))
     return Figure(
         id="fig-entropy",
-        caption="PE section entropy",
+        caption="Section entropy",
         kind="entropy_chart",
         content=_svg(width, height, "".join(parts)),
-        legend="Red ≥ 7.0 (packed/encrypted), orange ≥ 6.0.",
+        legend="Red ≥ 7.0 (packed/encrypted), orange ≥ 6.0. A name ending in … is cut to fit."
+        + _figure_left_out(len(every), len(sections), "sections"),
     )
 
 
@@ -222,16 +231,32 @@ def build_entropy_chart(report: MalwareReport) -> Figure | None:
 # ---------------------------------------------------------------------------
 
 
+def _published_addresses(report: MalwareReport) -> set[str]:
+    """The addresses the report publishes as network indicators (the IOC section's set)."""
+    from maljan.reporting.detection_signatures import _published_rows
+    from maljan.reporting.ledger_projection import value_key
+
+    try:
+        return {value_key("ip", row.value) for row in _published_rows(report) if row.kind == "ip"}
+    except Exception as exc:  # noqa: BLE001 — a figure is never worth a report
+        logger.warning("The published addresses were not read (%s).", type(exc).__name__)
+        return set()
+
+
 def build_network_graph(report: MalwareReport) -> Figure | None:
+    from maljan.reporting.ledger_projection import value_key
+
     net = report.network
     if not net or not (net.domains or net.ips):
         return None
+    held = _published_addresses(report) if net.ips else set()
     every: list[tuple[str, bool]] = []
     for d in net.domains:
         every.append((defang(d.fqdn, "domain"), bool(getattr(d, "is_suspicious", False))))
     for ip in net.ips:
         address = defang(ip.address, "ip")
-        every.append((f"{address}:{ip.port}" if ip.port else address, True))
+        flagged = bool(getattr(ip, "is_suspicious", False)) or value_key("ip", ip.address) in held
+        every.append((f"{address}:{ip.port}" if ip.port else address, flagged))
     # A figure holds twelve endpoints; the rest are counted in its legend.
     endpoints = every[:_NETWORK_ENDPOINTS]
     if not endpoints:
@@ -253,10 +278,10 @@ def build_network_graph(report: MalwareReport) -> Figure | None:
         parts.append(_text(bx + 8, y + 15, marked_cut(label, 44), fill=_INK, size=11))
     return Figure(
         id="fig-network",
-        caption="Network endpoints (C2 / resolved)",
+        caption="Network endpoints (observed)",
         kind="network_graph",
         content=_svg(width, height, "".join(parts)),
-        legend="Red border = flagged suspicious. A label ending in … is cut to fit."
+        legend="Red border = flagged suspicious or published. A label ending in … is cut to fit."
         + _figure_left_out(len(every), len(endpoints), "endpoints"),
     )
 
@@ -295,10 +320,10 @@ def build_infection_chain(report: MalwareReport) -> Figure | None:
     )
     return Figure(
         id="fig-infection-chain",
-        caption="Kill-chain progression (observed tactics)",
+        caption="Observed tactics in kill-chain order",
         kind="infection_chain",
         content=_svg(width, height, defs + "".join(parts)),
-        legend=None,
+        legend="Tactics are drawn in ATT&CK order, not the order the run observed them.",
     )
 
 
@@ -385,24 +410,39 @@ def build_code_listings(report: MalwareReport) -> list[Figure]:
     return figs
 
 
+def _not_drawn(kind: str, exc: Exception) -> Figure:
+    """The line a reader sees where a figure failed to draw, so its absence is explained."""
+    said = f"Figure not drawn: {kind} ({type(exc).__name__})"
+    return Figure(
+        id=f"fig-not-drawn-{kind.replace('_', '-')}",
+        caption=said,
+        kind="not_drawn",
+        content=f'<p class="figure-not-drawn">{escape(said)}</p>',
+        legend=None,
+    )
+
+
 def build_figures(report: MalwareReport) -> list[Figure]:
-    """Assemble every applicable figure in report order. Never raises."""
+    """Assemble every applicable figure in report order. A failure is said, never raised."""
     figs: list[Figure] = []
-    for builder in (
-        build_infection_chain,
-        build_attack_matrix,
-        build_process_tree,
-        build_entropy_chart,
-        build_network_graph,
+    for builder, kind in (
+        (build_infection_chain, "infection_chain"),
+        (build_attack_matrix, "attack_matrix"),
+        (build_process_tree, "process_tree"),
+        (build_entropy_chart, "entropy_chart"),
+        (build_network_graph, "network_graph"),
     ):
         try:
             fig = builder(report)
-        except Exception:  # noqa: BLE001
-            fig = None
+        except Exception as exc:  # noqa: BLE001
+            # One figure's failure never costs the report, and is never silent.
+            logger.warning("A figure was not drawn (%s: %s).", kind, type(exc).__name__)
+            fig = _not_drawn(kind, exc)
         if fig is not None:
             figs.append(fig)
     try:
         figs.extend(build_code_listings(report))
-    except Exception:  # noqa: BLE001
-        pass
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("The code listings were not drawn (%s).", type(exc).__name__)
+        figs.append(_not_drawn("code_listing", exc))
     return figs

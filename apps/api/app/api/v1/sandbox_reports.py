@@ -48,14 +48,16 @@ from maljan.core.report_formats import (
 )
 from maljan.core.safe_json import loads
 from maljan.providers.sandbox.readers import mapping_refusal, report_reader, sandbox_formats
-from pydantic import SecretStr, ValidationError
-from sqlalchemy import delete, select
+from pydantic import ValidationError
+from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.config import settings
 from app.database import get_db
-from app.deps import get_current_user, require_active_user, require_admin
+from app.deps import get_current_user, require_active_user, require_admin_session
 from app.logging_config import get_logger
+from app.logsafe import log_safe
+from app.middleware.upload_bound_middleware import too_large_detail, upload_bound
+from app.models.job import AnalysisJob
 from app.models.sample import Sample
 from app.models.sandbox_report import SandboxReportRow
 from app.models.user import User
@@ -67,7 +69,7 @@ from app.schemas.job import (
     SandboxReportResponse,
     SignatureScaleResponse,
 )
-from app.services import audit
+from app.services import audit, object_store
 from app.services.report_formats_lock import (
     ALLOWED_FORMATS_KEY,
     REPORT_FORMATS_KEY,
@@ -101,6 +103,14 @@ async def _max_report_bytes(db: AsyncSession) -> int:
     return int((await _sandbox_settings(db)).upload.max_report_bytes)
 
 
+async def _report_upload_max_bytes() -> int:
+    """``sandbox.upload.max_report_bytes`` as stored now: the bound of one report upload."""
+    from app.database import async_session_factory
+
+    async with async_session_factory() as db:
+        return await _max_report_bytes(db)
+
+
 async def _maybe_await(value: Any) -> Any:
     """Await ``value`` when it is awaitable, otherwise return it unchanged.
 
@@ -117,26 +127,14 @@ async def _maybe_await(value: Any) -> Any:
 
 
 def _minio_client() -> Any:
-    from minio import Minio
-
-    raw = settings.minio_secret_key
-    return Minio(
-        settings.minio_endpoint,
-        access_key=settings.minio_access_key,
-        secret_key=raw.get_secret_value() if isinstance(raw, SecretStr) else str(raw),
-        secure=settings.minio_secure,
-    )
+    """The object store's client (``app.services.object_store``)."""
+    return object_store.client()
 
 
 def _put_object_blocking(path: str, blob: bytes, *, content_type: str = "application/json") -> None:
-    import io as _io
-
-    client = _minio_client()
-    if not client.bucket_exists(settings.minio_bucket):
-        client.make_bucket(settings.minio_bucket)
-    client.put_object(
-        settings.minio_bucket, path, _io.BytesIO(blob), length=len(blob), content_type=content_type
-    )
+    # The bucket is created the one way every path creates it, with the
+    # anonymous-deny policy (``object_store.ensure_bucket``).
+    object_store.put_bytes(_minio_client(), path, blob, content_type=content_type)
 
 
 async def put_object(path: str, blob: bytes, *, content_type: str = "application/json") -> None:
@@ -157,12 +155,7 @@ def get_object(path: str) -> bytes:
     and needs the bytes before the sandbox provider is built — hence the public
     name and the synchronous shape. Inside the API, call ``get_object_async``.
     """
-    response = _minio_client().get_object(settings.minio_bucket, path)
-    try:
-        return bytes(response.read())
-    finally:
-        response.close()
-        response.release_conn()
+    return object_store.read_bytes(_minio_client(), path)
 
 
 async def get_object_async(path: str) -> bytes:
@@ -178,8 +171,27 @@ async def _read_payload(file: UploadFile, db: AsyncSession) -> tuple[bytes, dict
     body, never the extension, so there was nothing left for a filename to
     do here. Dropped rather than wired up to avoid a second, redundant way
     to decide the same thing.
+
+    The read and the inflate are seconds of work for a large report, so both
+    run in a worker thread, like the parse, and never hold the event loop.
     """
     limit = await _max_report_bytes(db)
+    body = await asyncio.to_thread(_read_capped, file, limit)
+    try:
+        # Read at any nesting depth: a report nested past ``json.loads``'s
+        # recursion is read again iteratively (``core.safe_json``). Linear in
+        # the body, but a large body is still seconds of work, so it is read in
+        # a worker thread and never holds the event loop.
+        payload = await asyncio.to_thread(_parsed, body)
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "File is not valid JSON") from exc
+    if not isinstance(payload, dict):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "A sandbox report must be a JSON object")
+    return body, payload
+
+
+def _read_capped(file: UploadFile, limit: int) -> bytes:
+    """The upload's bytes, inflated when gzipped, each refused past ``limit`` (blocking)."""
     raw = bytearray()
     while True:
         chunk = file.file.read(_CHUNK)
@@ -188,8 +200,7 @@ async def _read_payload(file: UploadFile, db: AsyncSession) -> tuple[bytes, dict
         raw.extend(chunk)
         if len(raw) > limit:
             raise HTTPException(
-                status.HTTP_413_CONTENT_TOO_LARGE,
-                f"Report too large. Maximum: {limit // (1024 * 1024)} MB",
+                status.HTTP_413_CONTENT_TOO_LARGE, too_large_detail(limit, "Report")
             )
     body = bytes(raw)
     if body[:2] == b"\x1f\x8b":
@@ -210,17 +221,7 @@ async def _read_payload(file: UploadFile, db: AsyncSession) -> tuple[bytes, dict
             raise HTTPException(
                 status.HTTP_400_BAD_REQUEST, "File looks gzipped but could not be decompressed"
             ) from exc
-    try:
-        # Read at any nesting depth: a report nested past ``json.loads``'s
-        # recursion is read again iteratively (``core.safe_json``). Linear in
-        # the body, but a large body is still seconds of work, so it is read in
-        # a worker thread and never holds the event loop.
-        payload = await asyncio.to_thread(_parsed, body)
-    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, "File is not valid JSON") from exc
-    if not isinstance(payload, dict):
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, "A sandbox report must be a JSON object")
-    return body, payload
+    return body
 
 
 def _parsed(body: bytes) -> Any:
@@ -317,6 +318,7 @@ async def _persist(db: AsyncSession, row: SandboxReportRow) -> SandboxReportRow:
     response_model=SandboxReportResponse,
     status_code=status.HTTP_201_CREATED,
 )
+@upload_bound(_report_upload_max_bytes)
 async def upload_sandbox_report(
     request: Request,
     sample_id: uuid.UUID,
@@ -464,20 +466,51 @@ async def delete_sandbox_report(
     sample = await _maybe_await(_load_sample(db, sample_id, user))
     row = (
         await db.execute(
-            select(SandboxReportRow).where(
-                SandboxReportRow.id == report_id, SandboxReportRow.sample_id == sample.id
-            )
+            select(SandboxReportRow)
+            .where(SandboxReportRow.id == report_id, SandboxReportRow.sample_id == sample.id)
+            # Held until the commit below: a job submitted against this report
+            # takes the same lock before it is created, so it either exists
+            # when the in-flight count is read or finds the report gone.
+            .with_for_update()
         )
     ).scalar_one_or_none()
     if row is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Sandbox report not found")
-    try:
-        await asyncio.to_thread(
-            _minio_client().remove_object, settings.minio_bucket, row.storage_path
+    # A run that names this report reads it from the store when it starts and
+    # again as it goes; taking the bytes from under it fails the run on a file
+    # that was there when it was submitted. Refused while one is queued or
+    # running, as the sample's own delete is.
+    in_flight = (
+        await db.execute(
+            select(func.count())
+            .select_from(AnalysisJob)
+            .where(
+                AnalysisJob.sample_id == sample.id,
+                AnalysisJob.status.in_(("pending", "running")),
+                AnalysisJob.config["sandbox_report_id"].astext == str(row.id),
+            )
         )
-    except Exception as exc:  # noqa: BLE001 — an orphaned object is not a failed delete
-        logger.warning("Could not remove %s from storage: %s", row.storage_path, exc)
+    ).scalar() or 0
+    if in_flight:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            "A pending or running analysis uses this sandbox report; cancel it before deleting.",
+        )
+    storage_path = row.storage_path
+    # The row goes first and is committed, then the object: the other order
+    # left a row that lists a report whose bytes are gone (a download of it a
+    # 500) whenever the removal succeeded and the row delete did not. An
+    # object that outlives its row is only unreachable bytes, and is said.
     await db.execute(delete(SandboxReportRow).where(SandboxReportRow.id == row.id))
+    await db.commit()
+    try:
+        await asyncio.to_thread(object_store.remove, _minio_client(), storage_path)
+    except Exception as exc:  # noqa: BLE001 — an orphaned object is not a failed delete
+        logger.warning(
+            "Could not remove %s from storage: %s",
+            log_safe(storage_path),
+            log_safe(f"{type(exc).__name__}: {exc}"),
+        )
     await audit.record(
         "sandbox_report.delete",
         resource_type="sandbox_report",
@@ -657,7 +690,7 @@ def _trial_read(payload: dict[str, Any], declaration: ReportFormat, fallback: An
 async def accept_report_format(
     body: AcceptReportFormatRequest,
     request: Request,
-    user: User = Depends(require_admin),
+    user: User = Depends(require_admin_session),
     db: AsyncSession = Depends(get_db),
 ) -> SandboxReportResponse | Any:
     """Save an operator-accepted format declaration and read the unread upload as it.

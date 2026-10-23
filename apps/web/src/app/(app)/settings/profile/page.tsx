@@ -3,6 +3,12 @@
 import { useEffect, useState } from "react";
 import { api } from "@/lib/api";
 import { getErrorMessage } from "@/lib/errors";
+import {
+  PASSWORD_MIN_LENGTH,
+  buildProfileUpdate,
+  profileFormState,
+  profileSavedMessage,
+} from "@/lib/profileUpdate";
 
 export default function SettingsProfilePage() {
   const [user, setUser] = useState<{ full_name: string; email: string } | null>(null);
@@ -12,6 +18,7 @@ export default function SettingsProfilePage() {
   const [fullName, setFullName] = useState("");
   const [password, setPassword] = useState("");
   const [passwordConfirm, setPasswordConfirm] = useState("");
+  const [currentPassword, setCurrentPassword] = useState("");
   const [saving, setSaving] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState<string | null>(null);
   const [saveError, setSaveError] = useState<string | null>(null);
@@ -35,31 +42,29 @@ export default function SettingsProfilePage() {
       .finally(() => setUserLoading(false));
   }, []);
 
-  const passwordsMatch = password === passwordConfirm;
-  const passwordRequested = password.length > 0 || passwordConfirm.length > 0;
-  const passwordValid = !passwordRequested || (password.length >= 8 && passwordsMatch);
+  const form = {
+    fullName,
+    savedFullName: user?.full_name ?? "",
+    password,
+    passwordConfirm,
+    currentPassword,
+  };
   // Hoisted so the inputs can point `aria-describedby` at the messages only
   // while they are actually rendered.
-  const passwordTooShort = passwordRequested && password.length > 0 && password.length < 8;
-  const passwordMismatch = passwordRequested && !passwordsMatch;
-  const canSave = !saving && !!user && passwordValid;
+  const { passwordRequested, passwordTooShort, passwordMismatch, currentPasswordMissing, valid } =
+    profileFormState(form);
+  const canSave = !saving && !!user && valid;
 
   async function handleSaveProfile(e: React.FormEvent) {
     e.preventDefault();
     if (!user) return;
-    if (passwordRequested && !passwordsMatch) return;
+    if (!valid) return;
 
     setSaving(true);
     setSaveSuccess(null);
     setSaveError(null);
 
-    const body: { full_name?: string; password?: string } = {};
-    if (fullName !== user.full_name) {
-      body.full_name = fullName;
-    }
-    if (passwordRequested) {
-      body.password = password;
-    }
+    const body = buildProfileUpdate(form);
 
     if (Object.keys(body).length === 0) {
       setSaving(false);
@@ -73,7 +78,8 @@ export default function SettingsProfilePage() {
       setFullName(updated.full_name);
       setPassword("");
       setPasswordConfirm("");
-      setSaveSuccess("Profile updated successfully.");
+      setCurrentPassword("");
+      setSaveSuccess(profileSavedMessage(updated));
     } catch (err: unknown) {
       setSaveError(getErrorMessage(err) || "Failed to update profile.");
     } finally {
@@ -125,7 +131,31 @@ export default function SettingsProfilePage() {
                 <h3 className="text-xs font-medium text-text-primary uppercase tracking-wider mb-3">
                   Change password (optional)
                 </h3>
+                <p id="settings-password-revokes" className="mb-3 text-xs text-text-muted">
+                  Changing the password signs out every other session and revokes every API key.
+                </p>
                 <div className="space-y-3">
+                  <div>
+                    <label htmlFor="settings-current-password" className="block text-xs text-text-secondary mb-1.5">Current password</label>
+                    <input
+                      id="settings-current-password"
+                      name="current_password"
+                      type="password"
+                      value={currentPassword}
+                      onChange={(e) => setCurrentPassword(e.target.value)}
+                      autoComplete="current-password"
+                      required={passwordRequested}
+                      aria-describedby={
+                        currentPasswordMissing
+                          ? "settings-current-password-error settings-password-revokes"
+                          : "settings-password-revokes"
+                      }
+                      className="w-full h-9 px-3 text-sm bg-bg-deep border border-border rounded text-text-primary focus:border-accent focus:outline-none"
+                    />
+                    {currentPasswordMissing && (
+                      <p id="settings-current-password-error" className="mt-1 text-xs text-status-red">Enter your current password to change it.</p>
+                    )}
+                  </div>
                   <div>
                     <label htmlFor="settings-new-password" className="block text-xs text-text-secondary mb-1.5">New password</label>
                     <input
@@ -135,7 +165,7 @@ export default function SettingsProfilePage() {
                       value={password}
                       onChange={(e) => setPassword(e.target.value)}
                       autoComplete="new-password"
-                      minLength={8}
+                      minLength={PASSWORD_MIN_LENGTH}
                       aria-describedby={
                         passwordTooShort
                           ? "settings-new-password-error settings-new-password-rule"
@@ -146,10 +176,10 @@ export default function SettingsProfilePage() {
                     {/* The rule the field enforces, said before it is broken
                         rather than only after (WCAG 3.3.2). */}
                     <p id="settings-new-password-rule" className="mt-1 text-xs text-text-muted">
-                      At least 8 characters.
+                      At least {PASSWORD_MIN_LENGTH} characters.
                     </p>
                     {passwordTooShort && (
-                      <p id="settings-new-password-error" className="mt-1 text-xs text-status-red">Must be at least 8 characters.</p>
+                      <p id="settings-new-password-error" className="mt-1 text-xs text-status-red">Must be at least {PASSWORD_MIN_LENGTH} characters.</p>
                     )}
                   </div>
                   <div>

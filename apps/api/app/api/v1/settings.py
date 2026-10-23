@@ -9,27 +9,35 @@ from contextlib import suppress
 from datetime import UTC, datetime
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
+from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request, Response, status
 from fastapi.responses import JSONResponse
 from maljan.core.model_assignments import endpoint_label
+from maljan.core.plugins import ALLOW_LIST_KEY
 from maljan.core.settings_annotations import (
     GROUP_DESCRIPTIONS,
     GROUP_ORDER,
+    RENAMED_SETTING_VALUES,
     RENAMED_SETTINGS,
     RETIRED_SETTINGS,
 )
+from maljan.core.settings_masking import mask_left_in
 from maljan.core.settings_overrides import redact_url
 from maljan.pipeline.conditions import validate_condition
-from pydantic import ValidationError
+from pydantic import BaseModel, ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.auth.step_up import check_current_password
 from app.database import end_read_transaction, get_db
-from app.deps import require_admin
+from app.deps import require_admin, require_admin_session
 from app.logging_config import get_logger
 from app.logsafe import log_safe
 from app.models.user import User
 from app.runtime_config import runtime_config
 from app.schemas.settings import (
+    AttckCheckResponse,
+    AttckStatusResponse,
+    AttckUpdateProgress,
+    AttckUpdateStarted,
     CatalogEntryDTO,
     ConditionValidateRequest,
     ConditionValidateResponse,
@@ -43,8 +51,10 @@ from app.schemas.settings import (
     MappingPreviewResponse,
     PatchRequest,
     PatchResponse,
+    PluginsResponse,
     ProbeRequest,
     ProbeResponse,
+    ResetRequest,
     ResetResponse,
     SchemaResponse,
     TeamFindingDTO,
@@ -54,9 +64,16 @@ from app.schemas.settings import (
     ValueDTO,
     ValuesResponse,
 )
-from app.services import credential_bootstrap
+from app.services import attck_cache, credential_bootstrap
 from app.services.audit import record as audit_record
 from app.services.mapping_preview import PREVIEW_MAX_BYTES, preview_mapping
+from app.services.plugins import (
+    load_written_blocks,
+    plugins_listing,
+    stored_block_entries,
+    unchanged_block_keys,
+    writes_a_plugin_block,
+)
 from app.services.report_formats_lock import (
     report_formats_serialised,
     touches_report_formats,
@@ -73,17 +90,22 @@ from app.services.settings_probes import (
     with_staged_sources,
 )
 from app.services.settings_service import (
+    NESTED_SECRET_KEYS,
     SettingsService,
     SettingsValidationError,
+    cleared_plugin_block_keys,
     core_settings_cache,
     effective_core_settings,
     lenient_imported_declarations,
+    shown_setting,
+    unknown_key_reason,
 )
 
 # The settings document an export writes and an import reads. In ``/2`` a
 # block's tool declarations are its changes over what the block ships, one
 # tool at a time, as they are stored; an import also reads ``/1``, written
-# before that, where a block's tool declarations are its whole map.
+# before that, where a block's tool declarations are its whole map (a map
+# marked as changes, which only ``/2`` writes, reads as it does there).
 EXPORT_FORMAT = "maljan-settings/2"
 WHOLE_MAP_FORMAT = "maljan-settings/1"
 IMPORT_FORMATS = (EXPORT_FORMAT, WHOLE_MAP_FORMAT)
@@ -124,6 +146,7 @@ async def get_schema(
         build_settings,
         pack_steps_left_out,
         refused_tool_changes,
+        stored_settings,
     )
 
     from app.services.enrichment_sources import ENRICHMENT_SOURCES_KEY
@@ -131,9 +154,14 @@ async def get_schema(
 
     profiles, agents = await _effective_agents(db)
     stored = await SettingsService(db).load_overrides()
+    # No plugin is loaded to serve the page: a plugin block this process has
+    # not read with its model is shown from its stored rows.
+    extra = await stored_block_entries(db)
     core = await load_core_overrides(db)
+    refused: dict[str, str] = {}
     try:
-        configs = build_settings(core).mcp.servers
+        built, refused = stored_settings(core)
+        configs = built.mcp.servers
     except (ValueError, ValidationError):
         configs = build_settings({}).mcp.servers
     try:
@@ -150,6 +178,9 @@ async def get_schema(
         server_configs=configs,
         tool_facts_conflicts=refused_tool_changes(core),
         pack_steps_left_out=left_out,
+        stored_values_refused={f"core.{key}": reason for key, reason in refused.items()},
+        plugins_allowed=stored.get(ALLOW_LIST_KEY),
+        extra_entries=extra,
     )
 
 
@@ -162,6 +193,9 @@ def served_schema(
     server_configs: dict[str, Any] | None = None,
     tool_facts_conflicts: dict[str, list[str]] | None = None,
     pack_steps_left_out: dict[str, str] | None = None,
+    stored_values_refused: dict[str, str] | None = None,
+    plugins_allowed: Any = None,
+    extra_entries: list[Any] | None = None,
 ) -> SchemaResponse:
     """The settings schema as ``GET /settings/schema`` serves it for these choices.
 
@@ -173,13 +207,23 @@ def served_schema(
     ``tool_facts_conflicts`` names, per block, the tools whose stored change
     is refused over what ships now (``refused_tool_changes``), and
     ``pack_steps_left_out`` each stored triage pack step left out, with why
-    (``pack_steps_left_out``).
+    (``pack_steps_left_out``), and ``stored_values_refused`` each stored
+    value the model refuses, with why (``stored_settings``).
+    ``plugins_allowed`` is the stored plugin allow-list: each provider
+    selector offers the installed plugins it names, read from metadata.
+    ``extra_entries`` are the stored rows of plugin blocks this process has
+    not read with their models, shown as stored (``plugins.raw_block_entries``).
     """
     from app.services.credential_bootstrap import bootstrap_facts
     from app.services.enrichment_sources import source_facts
 
     by_group: dict[str, list[CatalogEntryDTO]] = {}
-    for e in resolved_catalog(servers, profiles=profiles, agents=agents):
+    for e in [
+        *resolved_catalog(
+            servers, profiles=profiles, agents=agents, plugins_allowed=plugins_allowed
+        ),
+        *(extra_entries or []),
+    ]:
         by_group.setdefault(e.group, []).append(CatalogEntryDTO(**e.to_dict()))
     groups = [
         GroupDTO(key=g, title=t, description=GROUP_DESCRIPTIONS.get(g, ""), entries=by_group[g])
@@ -202,6 +246,7 @@ def served_schema(
         tool_declaration_fields=declaration_fields(),
         tool_facts_conflicts=tool_facts_conflicts or {},
         pack_steps_left_out=pack_steps_left_out or {},
+        stored_values_refused=stored_values_refused or {},
     )
 
 
@@ -218,12 +263,105 @@ def default_served_schema() -> SchemaResponse:
     )
 
 
+def unwritable_reason(answer: BaseModel) -> str | None:
+    """Why ``answer`` cannot be written as a response body, or ``None`` when it can.
+
+    It is written the way the response is (the model's dump, then
+    ``json.dumps``), so the bound is the writers' own (pydantic-core's nesting
+    guard, the interpreter's recursion limit), not a depth of ours. One more
+    write of the answer: time linear in its size.
+    """
+    try:
+        json.dumps(answer.model_dump(mode="json"))
+    except (ValueError, RecursionError) as exc:
+        return unwritable_reason_of(exc)
+    return None
+
+
+def unwritable_reason_of(exc: BaseException) -> str:
+    """What :func:`unwritable_reason` says for the writer's refusal ``exc``."""
+    return (
+        "the stored value is not served: the answer's writer refused it "
+        f"({type(exc).__name__}: {exc}); reset this key or save it again"
+    )
+
+
+def _say_unwritable(where: str, key: str, reason: str) -> None:
+    logger.warning("Stored setting %s left out of %s: %s", log_safe(key), where, reason)
+
+
+def served_values(vals: dict[str, Any]) -> tuple[dict[str, ValueDTO], dict[str, str]]:
+    """Each value as ``GET /settings`` serves it, and the keys left unserved with why.
+
+    A stored row an answer cannot be written with (:func:`unwritable_reason`)
+    is served with no value and its reason, so one row never fails the page.
+    """
+    served: dict[str, ValueDTO] = {}
+    unreadable: dict[str, str] = {}
+    for key, info in vals.items():
+        dto = ValueDTO(**vars(info))
+        reason = unwritable_reason(ValuesResponse(values={key: dto}))
+        if reason is not None:
+            dto = ValueDTO(**{**vars(info), "value": None, "unreadable": reason})
+            unreadable[key] = reason
+        served[key] = dto
+    return served, unreadable
+
+
 @router.get("", response_model=ValuesResponse)
 async def get_values(
-    _: User = Depends(require_admin), db: AsyncSession = Depends(get_db)
+    _: User = Depends(require_admin_session), db: AsyncSession = Depends(get_db)
 ) -> ValuesResponse:
-    vals = await SettingsService(db).values()
-    return ValuesResponse(values={k: ValueDTO(**vars(v)) for k, v in vals.items()})
+    vals = await SettingsService(db).values(extra=await stored_block_entries(db))
+    served, unreadable = served_values(vals)
+    for key, reason in unreadable.items():
+        _say_unwritable("the settings answer", key, reason)
+    return ValuesResponse(values=served)
+
+
+@router.get("/plugins", response_model=PluginsResponse)
+async def list_plugins(
+    _: User = Depends(require_admin), db: AsyncSession = Depends(get_db)
+) -> PluginsResponse:
+    """Every installed provider plugin per kind, read from package metadata.
+
+    No plugin is imported to be listed, and nothing is loaded. Each names its
+    package and version, whether the stored allow-list names it, what its
+    metadata says of it, and the API process's own load result where the API
+    loaded it for itself; the worker logs its own.
+    """
+    return PluginsResponse(**await plugins_listing(db))
+
+
+async def _plugin_block_writes(
+    db: AsyncSession, changes: dict[str, Any]
+) -> tuple[dict[str, Any], dict[str, Any] | None]:
+    """Before a save or import: ``changes`` as it writes plugin blocks, and the plain rows read.
+
+    A key of an installed plugin's own block sent with the value stored for it
+    writes nothing, so it is left out, quietly, and no plugin is loaded for it
+    (``plugins.unchanged_block_keys``); a secret is never taken as sent back,
+    and no stored secret is decrypted here. A plugin whose block keys the
+    change does alter is loaded to read them with its own model: that plugin
+    alone, and never one the same change drops from the allow-list, nor for a
+    clear (``plugins.block_writes``). A change that touches no plugin block
+    reads nothing and loads nothing. Answers the stored rows that are not
+    secrets, ``None`` when it read none. Never fails the request: a store that
+    cannot be read here is read, and said, by the save.
+    """
+    if not writes_a_plugin_block(changes):
+        return changes, None
+    try:
+        rows = await SettingsService(db)._rows()
+    except Exception as exc:  # noqa: BLE001 — the save reads the store itself
+        logger.debug("The plugin allow-list was not read before the save (%s).", exc)
+        return changes, None
+    held = [(str(row.key), row.value, bool(row.is_secret)) for row in rows]
+    plain = {key: value for key, value, secret in held if not secret}
+    unchanged = unchanged_block_keys(changes, held)
+    written = {key: value for key, value in changes.items() if key not in unchanged}
+    await load_written_blocks(written, plain.get(ALLOW_LIST_KEY))
+    return written, plain
 
 
 @router.get("/context-window", response_model=ContextWindowResponse)
@@ -284,15 +422,27 @@ async def _agent_warnings(db: AsyncSession) -> dict[str, str]:
     this runs, so a failure here must cost the operator an advisory note, not
     turn a saved change into a 500 that says it was not saved.
     """
-    from app.services.agent_map import effective_definitions, effective_profiles, profile_warnings
+    from maljan.core.settings_overrides import build_settings
+
+    from app.services.agent_map import (
+        effective_definitions,
+        effective_profiles,
+        profile_warnings,
+        prompt_tool_warnings,
+    )
+    from app.services.settings_service import load_core_overrides
 
     try:
         stored = await SettingsService(db).load_overrides()
-        return profile_warnings(
+        found = profile_warnings(
             effective_profiles(stored),
             definitions=effective_definitions(stored),
             overrides=stored,
         )
+        # An agent's own prompt that names a tool it no longer holds: the
+        # same advisory shape, never a refusal.
+        found.update(prompt_tool_warnings(build_settings(await load_core_overrides(db))))
+        return found
     except Exception as exc:  # noqa: BLE001 — advisory, and the write is done
         logger.debug("Could not compute settings warnings (%s); continuing.", log_safe(str(exc)))
         return {}
@@ -414,11 +564,49 @@ async def _unprobed_models_in(db: AsyncSession, changes: dict[str, Any]) -> list
     return await unprobed_models_being_saved(db, settings, changes, stored)
 
 
+async def _sign_in_policy_confirmed(
+    keys: Any, current_password: str | None, user: User, request: Request
+) -> JSONResponse | None:
+    """``None`` when the write may go on; the refusal when it changes the sign-in policy unasked.
+
+    A setting marked ``needs_current_password`` (the login lockout, the
+    trusted proxies, the token lifetimes) is changed only with the admin's
+    current password beside it: the same step-up, lock and audit as a password
+    change (``auth.step_up``), so a stolen session cannot weaken how every
+    other account signs in. Without one the answer names the settings that
+    asked for it; a wrong one is refused there, counted against the lock.
+    """
+    index = catalog_index()
+    policy = sorted(
+        key
+        for key in keys
+        if (entry := index.get(key)) is not None and entry.needs_current_password
+    )
+    if not policy:
+        return None
+    if not current_password:
+        return JSONResponse(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            content={
+                "errors": {
+                    "current_password": (
+                        f"{', '.join(policy)} change how accounts sign in: confirm the "
+                        "change with your current password."
+                    )
+                }
+            },
+        )
+    await check_current_password(
+        user, current_password, request=request, action="settings.sign_in_policy"
+    )
+    return None
+
+
 @router.patch("", response_model=PatchResponse)
 async def patch_values(
     body: PatchRequest,
     request: Request,
-    user: User = Depends(require_admin),
+    user: User = Depends(require_admin_session),
     db: AsyncSession = Depends(get_db),
 ) -> PatchResponse | JSONResponse:
     """Save a set of staged values at once.
@@ -433,6 +621,9 @@ async def patch_values(
     stored map marked.
     """
     changes = _current_keys(body.changes)
+    refused = await _sign_in_policy_confirmed(changes, body.current_password, user, request)
+    if refused is not None:
+        return refused
     unprobed = await _unprobed_models_in(db, changes)
     if unprobed:
         from app.services.model_probes import AGENT_MODELS_KEY, refusal_sentence
@@ -441,15 +632,26 @@ async def patch_values(
         # saved here is one a run will call, and finding out at submit time
         # means finding out somewhere else.
         return JSONResponse(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             content={"errors": {AGENT_MODELS_KEY: refusal_sentence(unprobed)}},
         )
+    # A plugin whose own block this save changes is loaded to read it; a block
+    # key sent back unchanged is no write, and the allow-list loads nothing.
+    changes, _stored = await _plugin_block_writes(db, changes)
     formats_written = touches_report_formats(changes)
     detects_before: dict[str, Any] | None = None
     try:
         # A write of the declared report formats waits for an accept that is
         # rewriting them, and an accept for it (``services.report_formats_lock``).
         async with report_formats_serialised(db, needed=formats_written):
+            # Under the lock too, so a key the page loaded before another
+            # writer changed it (an accepted report format, say) is refused
+            # rather than saved over it.
+            stale = await SettingsService(db).changed_since(
+                {key: loaded for key, loaded in body.versions.items() if key in changes}
+            )
+            if stale:
+                return JSONResponse(status_code=status.HTTP_409_CONFLICT, content={"errors": stale})
             if formats_written:
                 # Under the lock, so an accept between the read and the save
                 # is never taken for this save's change.
@@ -457,7 +659,7 @@ async def patch_values(
             res = await SettingsService(db).save(changes, user_id=user.id, ip=_client_ip(request))
     except SettingsValidationError as exc:
         return JSONResponse(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, content={"errors": exc.errors}
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, content={"errors": exc.errors}
         )
     runtime_config.invalidate()
     core_settings_cache.invalidate()
@@ -471,18 +673,60 @@ async def patch_values(
     )
 
 
+async def _reset_confirmed(
+    db: AsyncSession, keys: list[str], body: ResetRequest | None, user: User, request: Request
+) -> JSONResponse | None:
+    """A reset of a stored sign-in policy setting asks for the password as a save does.
+
+    Putting the login lockout or a token lifetime back to its default changes
+    how accounts sign in as much as saving a value does
+    (:func:`_sign_in_policy_confirmed`). A key with nothing stored is no
+    change, so it asks for nothing.
+    """
+    index = catalog_index()
+    policy = [
+        key
+        for key in keys
+        if (entry := index.get(key)) is not None and entry.needs_current_password
+    ]
+    if not policy:
+        return None
+    stored = await SettingsService(db).load_overrides()
+    return await _sign_in_policy_confirmed(
+        [key for key in policy if key in stored],
+        body.current_password if body is not None else None,
+        user,
+        request,
+    )
+
+
 @router.delete("", response_model=ResetResponse)
 async def reset_group(
     request: Request,
     group: str = Query(...),
-    user: User = Depends(require_admin),
+    body: ResetRequest | None = Body(None),
+    user: User = Depends(require_admin_session),
     db: AsyncSession = Depends(get_db),
-) -> ResetResponse:
-    keys = [e.key for e in full_catalog() if e.group == group and e.editable]
+) -> ResetResponse | JSONResponse:
+    # A plugin block's stored rows go with their group, read as stored: a
+    # reset loads no plugin.
+    keys = [
+        e.key
+        for e in [*full_catalog(), *await stored_block_entries(db)]
+        if e.group == group and e.editable
+    ]
     if not keys:
         raise HTTPException(status.HTTP_404_NOT_FOUND, f"unknown group: {group}")
-    async with report_formats_serialised(db, needed=touches_report_formats(keys)):
-        removed = await SettingsService(db).reset(keys, user_id=user.id, ip=_client_ip(request))
+    refused = await _reset_confirmed(db, keys, body, user, request)
+    if refused is not None:
+        return refused
+    try:
+        async with report_formats_serialised(db, needed=touches_report_formats(keys)):
+            removed = await SettingsService(db).reset(keys, user_id=user.id, ip=_client_ip(request))
+    except SettingsValidationError as exc:
+        return JSONResponse(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, content={"errors": exc.errors}
+        )
     runtime_config.invalidate()
     core_settings_cache.invalidate()
     return ResetResponse(reset=removed)
@@ -492,14 +736,25 @@ async def reset_group(
 async def reset_key(
     key: str,
     request: Request,
-    user: User = Depends(require_admin),
+    body: ResetRequest | None = Body(None),
+    user: User = Depends(require_admin_session),
     db: AsyncSession = Depends(get_db),
-) -> ResetResponse:
+) -> ResetResponse | JSONResponse:
     # A row whose key left the catalog (a later deploy renamed the field) must
     # still be removable, so the catalog check only decides between 404 and
     # an empty reset when nothing is stored either.
-    async with report_formats_serialised(db, needed=touches_report_formats([key])):
-        removed = await SettingsService(db).reset([key], user_id=user.id, ip=_client_ip(request))
+    refused = await _reset_confirmed(db, [key], body, user, request)
+    if refused is not None:
+        return refused
+    try:
+        async with report_formats_serialised(db, needed=touches_report_formats([key])):
+            removed = await SettingsService(db).reset(
+                [key], user_id=user.id, ip=_client_ip(request)
+            )
+    except SettingsValidationError as exc:
+        return JSONResponse(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, content={"errors": exc.errors}
+        )
     if not removed and key not in catalog_index():
         raise HTTPException(status.HTTP_404_NOT_FOUND, f"unknown setting: {key}")
     runtime_config.invalidate()
@@ -546,74 +801,71 @@ def _strip_masks(value: Any, path: str) -> tuple[Any, list[str]]:
     return value, []
 
 
-def _export_value(key: str, value: Any) -> tuple[Any, list[str]]:
-    """The value as it goes into the export document, plus any paths it cost.
+def _export_value(key: str, value: Any, entry: Any) -> tuple[Any, list[str]]:
+    """The value as it goes into the export document, plus the paths it masks or omits.
 
-    Two composite leaves carry credentials inside them: ``core.mcp.servers``
-    (one ``auth_token`` per server) and ``core.llm.frontier.arms`` (one
-    ``api_key`` per arm). Both reach here as the mask, and both are stripped by
-    ``_strip_masks`` above, together with anything else masked at any depth.
-    The server map additionally carries the synthetic ``auth_token_source``
-    (not an ``MCPServerConfig`` field, so it would not import back), which is
-    dropped without being listed.
+    Masked as ``values()`` serves it and as the run settings snapshot masks it
+    (``settings_service.shown_setting``, applied again here so the document
+    never depends on the read having done it): a server's ``env`` values, a
+    credential a flag of its arguments names, every URL's user name, password,
+    query values and fragment, and an open mapping's credential-named entries.
+    Those masks stay in the document and are listed in ``secrets_omitted``; an
+    import back reads each one as the stored value it stands for, and refuses
+    one with nothing stored behind it (``settings_service.unmasked_changes``).
 
-    The paths returned name every credential the export did not carry, e.g.
-    ``core.mcp.servers.<name>.auth_token`` or
-    ``core.llm.frontier.arms.<arm>.api_key``. They are informational only, not
-    catalog keys: importing a document that includes one back as a top-level
-    key is rejected as ``unknown key``, the same as any other stray field.
-    They exist so an operator reading the export can see which servers and
-    arms lost their credential, rather than silently ending up with none on
-    the next import.
+    A value that is exactly the mask inside a server entry (outside its
+    ``env`` and ``args``, where the name or the position is part of the value)
+    or inside a composite whose credentials are rows of their own is such a
+    credential (a server's ``auth_token``, a frontier arm's ``api_key``, an
+    enrichment source's key, or a field a composite grows later) and is left
+    out, at any depth (``_strip_masks``). The server
+    map's synthetic ``auth_token_source`` (not an ``MCPServerConfig`` field, so
+    it would not import back) is dropped without being listed.
+
+    The paths returned are informational only, not catalog keys: importing a
+    document that includes one back as a top-level key is rejected as
+    ``unknown key``, the same as any other stray field.
     """
+    value = shown_setting(entry, value)
     if key != SERVER_MAP_KEY or not isinstance(value, dict):
-        return _strip_masks(value, key)
-    value = {
-        name: (
-            {k: v for k, v in entry.items() if k != "auth_token_source"}
-            if isinstance(entry, dict)
-            else entry
-        )
-        for name, entry in value.items()
-    }
-    sanitized, omitted = _strip_masks(value, key)
-    return _mask_server_env(sanitized, omitted)
-
-
-def _mask_server_env(servers: Any, omitted: list[str]) -> tuple[Any, list[str]]:
-    """Every ``env`` value masked, and its variable named in ``omitted``.
-
-    A server's ``env`` map is the one place a credential can live without
-    being typed as one, which is why
-    ``public_snapshot`` masks it in run summaries. An export is a file on an
-    operator's disk and the weaker of the two paths, so it masks them too. The
-    variable names stay -- an operator reading the document needs to see what
-    the server was handed -- and only the values go; a masked value coming
-    back on import means "keep the stored one" (``split_server_secrets``).
-    """
-    if not isinstance(servers, dict):
-        return servers, omitted
-    out: dict[str, Any] = {}
-    for name, entry in servers.items():
-        if not isinstance(entry, dict) or not isinstance(entry.get("env"), dict):
-            out[name] = entry
+        # An open mapping's credential-named entry is masked in place and
+        # comes back on import as the stored value; only a composite whose
+        # credentials are rows of their own drops its masks.
+        stripped, omitted = _strip_masks(value, key) if key in NESTED_SECRET_KEYS else (value, [])
+        return stripped, omitted + [
+            f"{key}.{path}" if path else key for path in mask_left_in(stripped, TOKEN_MASK)
+        ]
+    servers: dict[str, Any] = {}
+    omitted = []
+    for name, server in value.items():
+        if not isinstance(server, dict):
+            servers[name] = server
             continue
-        env = entry["env"]
-        out[name] = {**entry, "env": {var: TOKEN_MASK for var in env}}
-        omitted.extend(f"{SERVER_MAP_KEY}.{name}.env.{var}" for var in env)
-    return out, omitted
+        kept = {k: v for k, v in server.items() if k not in ("auth_token_source", "env", "args")}
+        stripped, paths = _strip_masks(kept, f"{key}.{name}")
+        omitted.extend(paths)
+        for field in ("env", "args"):
+            if field in server:
+                stripped[field] = server[field]
+        servers[name] = {k: stripped[k] for k in server if k in stripped}
+    omitted.extend(f"{key}.{path}" for path in mask_left_in(servers, TOKEN_MASK))
+    return servers, sorted(set(omitted))
 
 
 @router.get("/export", response_model=ExportResponse)
 async def export_values(
     response: Response,
-    _: User = Depends(require_admin),
+    _: User = Depends(require_admin_session),
     db: AsyncSession = Depends(get_db),
 ) -> ExportResponse:
-    index = catalog_index()
+    # A plugin block this process has not read is exported as stored; an
+    # export loads no plugin.
+    extra = await stored_block_entries(db)
+    index = {**catalog_index(), **{entry.key: entry for entry in extra}}
     values: dict[str, Any] = {}
     secrets_omitted: list[str] = []
-    for key, info in (await SettingsService(db).values()).items():
+    unreadable: dict[str, str] = {}
+    for key, info in (await SettingsService(db).values(extra=extra)).items():
         if info.source != "ui":
             continue
         entry = index[key]
@@ -622,7 +874,25 @@ async def export_values(
         if entry.secret:
             secrets_omitted.append(key)
             continue
-        sanitized, omitted_paths = _export_value(key, info.value)
+        try:
+            sanitized, omitted_paths = _export_value(key, info.value, entry)
+        except RecursionError as exc:
+            # Too deep for the walk that strips its masks: the same bound the
+            # answer's writer has (:func:`unwritable_reason`).
+            reason: str | None = unwritable_reason_of(exc)
+        else:
+            reason = unwritable_reason(
+                ExportResponse(
+                    format=EXPORT_FORMAT,
+                    exported_at=datetime.now(UTC),
+                    values={key: sanitized},
+                    secrets_omitted=omitted_paths,
+                )
+            )
+        if reason is not None:
+            _say_unwritable("the export", key, reason)
+            unreadable[key] = reason
+            continue
         values[key] = sanitized
         secrets_omitted.extend(omitted_paths)
     response.headers["Content-Disposition"] = "attachment; filename=maljan-settings.json"
@@ -631,6 +901,7 @@ async def export_values(
         exported_at=datetime.now(UTC),
         values=values,
         secrets_omitted=sorted(secrets_omitted),
+        unreadable=unreadable,
     )
 
 
@@ -638,13 +909,14 @@ def _current_keys(values: dict[str, Any]) -> dict[str, Any]:
     """``values`` with each moved key read as the key that now holds it.
 
     An export written before a setting moved carries the old key; it is
-    imported as the new one, and a file carrying both keeps the new one's
+    imported as the new one (its value read as the new key holds it, where the
+    form changed with the move), and a file carrying both keeps the new one's
     value.
     """
     out = {key: value for key, value in values.items() if key not in RENAMED_SETTINGS}
     for old, new in RENAMED_SETTINGS.items():
         if old in values and new not in out:
-            out[new] = values[old]
+            out[new] = RENAMED_SETTING_VALUES.get(old, lambda value: value)(values[old])
     return out
 
 
@@ -652,16 +924,25 @@ def _current_keys(values: dict[str, Any]) -> dict[str, Any]:
 async def import_values(
     body: ImportRequest,
     request: Request,
-    user: User = Depends(require_admin),
+    user: User = Depends(require_admin_session),
     db: AsyncSession = Depends(get_db),
 ) -> PatchResponse | JSONResponse:
     if body.format not in IMPORT_FORMATS:
         return JSONResponse(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             content={"errors": {"format": "unsupported format"}},
         )
+    # A plugin whose own block the document changes is loaded to read it,
+    # unless the document drops it from the allow-list. A block key sent back
+    # as stored, as an export writes it, is no write and loads nothing, so an
+    # unedited or list-edited export imports without loading a plugin.
+    values, stored = await _plugin_block_writes(db, _current_keys(body.values))
+    stored_allowed = stored.get(ALLOW_LIST_KEY) if stored is not None else None
+    leaves = values[ALLOW_LIST_KEY] if ALLOW_LIST_KEY in values else stored_allowed
     index = catalog_index()
-    values = _current_keys(body.values)
+    # A clear of a key in an unloaded plugin's block deletes its stored row,
+    # which the save does without the plugin's model.
+    cleared = set(cleared_plugin_block_keys(values, index))
     errors: dict[str, str] = {}
     for key in values:
         entry = index.get(key)
@@ -670,25 +951,30 @@ async def import_values(
                 f"retired setting with no effect ({RETIRED_SETTINGS[key]}); "
                 "delete this key from the file and import again"
             )
+        elif entry is None and key in cleared:
+            continue
         elif entry is None:
-            errors[key] = "unknown key"
+            errors[key] = unknown_key_reason(key, stored_allowed, "unknown key", leaves=leaves)
         elif not entry.editable:
             errors[key] = "read-only"
     if errors:
         return JSONResponse(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, content={"errors": errors}
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, content={"errors": errors}
         )
     # A declaration another version wrote may hold what this one does not
-    # read: it is left out with a warning, never a refusal of the file.
-    values, left_out = lenient_imported_declarations(
-        values, whole_maps=body.format == WHOLE_MAP_FORMAT
-    )
+    # read: it is left out with a warning, never a refusal of the file. Both
+    # formats are read alike: a map marked as changes is its changes, one
+    # without the mark its whole map.
+    values, left_out = lenient_imported_declarations(values)
+    refused = await _sign_in_policy_confirmed(values, body.current_password, user, request)
+    if refused is not None:
+        return refused
     try:
         async with report_formats_serialised(db, needed=touches_report_formats(values)):
             res = await SettingsService(db).save(values, user_id=user.id, ip=_client_ip(request))
     except SettingsValidationError as exc:
         return JSONResponse(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, content={"errors": exc.errors}
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, content={"errors": exc.errors}
         )
     if res.applied:
         await audit_record(
@@ -795,7 +1081,7 @@ async def test_mcp_server(
     body: ProbeRequest,
     request: Request,
     server: str = Query(..., description="key in mcp.servers"),
-    user: User = Depends(require_admin),
+    user: User = Depends(require_admin_session),
     db: AsyncSession = Depends(get_db),
 ) -> ProbeResponse:
     """Launch one configured MCP server, report the tools it offers and propose declarations.
@@ -832,7 +1118,7 @@ async def test_mcp_server(
 async def obtain_server_credential(
     key: str,
     request: Request,
-    user: User = Depends(require_admin),
+    user: User = Depends(require_admin_session),
     db: AsyncSession = Depends(get_db),
 ) -> CredentialBootstrapResponse | JSONResponse:
     """Obtain server ``key``'s credential by its declared request, store it and enable it.
@@ -887,7 +1173,7 @@ async def obtain_server_credential(
         await service.save({SERVER_MAP_KEY: updated}, user_id=user.id, ip=_client_ip(request))
     except SettingsValidationError as exc:
         return JSONResponse(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, content={"errors": exc.errors}
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, content={"errors": exc.errors}
         )
     await audit_record(
         "settings.servers.credential",
@@ -946,7 +1232,7 @@ async def test_agent(
     body: ProbeRequest,
     request: Request,
     name: str = Query(..., description="key in agents.definitions"),
-    user: User = Depends(require_admin),
+    user: User = Depends(require_admin_session),
     db: AsyncSession = Depends(get_db),
 ) -> ProbeResponse:
     """Resolve one agent definition and report what it would get.
@@ -965,6 +1251,22 @@ async def test_agent(
     # The definition is resolved; the call to the model is not this
     # transaction's business and may take the whole probe budget.
     await end_read_transaction(db)
+    # The allowed model, static and sandbox plugins this agent runs on run
+    # their own code here: those alone, loaded off the event loop, waited for
+    # at most a connection test's budget.
+    from maljan.core.settings_overrides import split_key
+
+    from app.services.plugins import load_in_background, selected_plugins
+    from app.services.settings_probes import TIMEOUT
+
+    candidate = {
+        split_key(key)[1]: value
+        for key, value in {**stored, **body.values}.items()
+        if key.startswith("core.")
+    }
+    allowed = stored.get(ALLOW_LIST_KEY)
+    running = selected_plugins(candidate, allowed, ("llm", "static", "sandbox"), name)
+    await load_in_background(allowed, running, TIMEOUT)
     response = await _probe_response(run_agent_probe(name, body.values, stored))
     await _write_down_what_was_reached(db, (response.details or {}).get("completions") or [])
     await _record_the_probe(request, user, "agent", body, response, agent=name)
@@ -976,7 +1278,7 @@ async def test_probe(
     probe: str,
     body: ProbeRequest,
     request: Request,
-    user: User = Depends(require_admin),
+    user: User = Depends(require_admin_session),
     db: AsyncSession = Depends(get_db),
 ) -> ProbeResponse:
     stored = await SettingsService(db).load_overrides()
@@ -1099,3 +1401,107 @@ async def preview_sandbox_mapping(
     payload = await _capped_body(request)
     body = MappingPreviewRequest.model_validate(payload)
     return MappingPreviewResponse(**preview_mapping(body.sample, body.mapping))
+
+
+# ── The ATT&CK cache ────────────────────────────────────────────────────────
+# The cached ATT&CK bundles live on the analysis worker, which is their one
+# writer; these routes ask it (``app.services.attck_cache``) and never touch
+# the files. The upstream address is the platform's constant: nothing a caller
+# sends names a host.
+
+
+async def _attck_refresh_days(db: AsyncSession) -> int:
+    """The saved ``validation.attck_refresh_days``; the read transaction ends here."""
+    core = await core_settings_cache.get(db)
+    await end_read_transaction(db)
+    return int(core.validation.attck_refresh_days)
+
+
+def _attck_caller(user: User) -> dict[str, Any]:
+    """Who asked, as the worker records it and the console shows it."""
+    return {"user_id": str(user.id), "name": str(getattr(user, "full_name", "") or "")}
+
+
+def _worker_silent(exc: attck_cache.WorkerDidNotAnswer) -> HTTPException:
+    return HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc))
+
+
+@router.get("/attck", response_model=AttckStatusResponse)
+async def attck_status(
+    _: User = Depends(require_admin), db: AsyncSession = Depends(get_db)
+) -> AttckStatusResponse:
+    """Per ATT&CK domain: the cached release, its date and age, the next automatic check."""
+    days = await _attck_refresh_days(db)
+    try:
+        answer = await attck_cache.status(days)
+    except attck_cache.WorkerDidNotAnswer as exc:
+        raise _worker_silent(exc) from exc
+    if answer.get("outcome") == "failed":
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=answer.get("reason"))
+    return AttckStatusResponse(**answer)
+
+
+@router.post("/attck/check", response_model=AttckCheckResponse)
+async def attck_check(
+    request: Request,
+    user: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+) -> AttckCheckResponse:
+    """Compare the cache with MITRE's release index now. Downloads and changes nothing."""
+    days = await _attck_refresh_days(db)
+    try:
+        answer = await attck_cache.check(_attck_caller(user), days)
+    except attck_cache.WorkerDidNotAnswer as exc:
+        raise _worker_silent(exc) from exc
+    await audit_record(
+        "settings.attck_check",
+        resource_type="settings",
+        resource_id="attck",
+        user_id=user.id,
+        details={"outcome": answer.get("outcome"), "reason": answer.get("reason") or ""},
+        ip=_client_ip(request),
+    )
+    return AttckCheckResponse(**answer)
+
+
+@router.post(
+    "/attck/update", response_model=AttckUpdateStarted, status_code=status.HTTP_202_ACCEPTED
+)
+async def attck_update(
+    request: Request,
+    user: User = Depends(require_admin),
+) -> AttckUpdateStarted:
+    """Queue the update: download every outdated domain, check it, then swap it in.
+
+    The worker keeps the previous files as a backup and refuses a second
+    update while one runs. Poll ``/attck/update/{job_id}`` for the result.
+    """
+    try:
+        job_id = await attck_cache.start_update(_attck_caller(user))
+    except attck_cache.WorkerDidNotAnswer as exc:
+        raise _worker_silent(exc) from exc
+    logger.info("ATT&CK update queued by user %s as job %s", user.id, job_id)
+    await audit_record(
+        "settings.attck_update",
+        resource_type="settings",
+        resource_id="attck",
+        user_id=user.id,
+        details={"job_id": job_id},
+        ip=_client_ip(request),
+    )
+    return AttckUpdateStarted(job_id=job_id)
+
+
+@router.get("/attck/update/{job_id}", response_model=AttckUpdateProgress)
+async def attck_update_progress(
+    job_id: str,
+    _: User = Depends(require_admin),
+) -> AttckUpdateProgress:
+    """Where one update is, and its result once it is done."""
+    if not attck_cache.is_job_id(job_id):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No such ATT&CK update.")
+    try:
+        progress = await attck_cache.update_progress(job_id)
+    except Exception as exc:  # noqa: BLE001 — Redis down reads as no answer
+        raise _worker_silent(attck_cache.WorkerDidNotAnswer(str(exc))) from exc
+    return AttckUpdateProgress(**progress)

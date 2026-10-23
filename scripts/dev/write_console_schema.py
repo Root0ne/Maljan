@@ -14,7 +14,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-FIXTURE = Path("apps/web/src/test-fixtures/settings-schema.json")
+# Anchored on this file, not on the working directory the script is run from.
+FIXTURE = Path(__file__).resolve().parents[2] / "apps/web/src/test-fixtures/settings-schema.json"
 
 
 # Left out of the fixture: the long texts no console decision reads. Every

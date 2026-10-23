@@ -16,6 +16,7 @@ name captures that seeded team to ``graph_<profile>.json``, which is how the
 from __future__ import annotations
 
 import json
+import re
 import sys
 from pathlib import Path
 from typing import Any
@@ -25,16 +26,18 @@ GOLDEN = ROOT / "tests" / "fixtures" / "golden" / "graph_default.json"
 
 
 def golden_path(profile: str) -> Path:
+    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]*", profile) or ".." in profile:
+        raise SystemExit(f"{profile!r} is not a profile name usable in a file name")
     return GOLDEN.with_name(f"graph_{profile}.json")
 
 
 def graph_shape(parallel: bool, profile: str = "default") -> dict[str, Any]:
     """The node set, edge set, conditional path map and analyst order."""
-    from maljan.core.config import Settings
     from maljan.core.container import ServiceContainer
+    from maljan.core.settings_overrides import build_settings
     from maljan.pipeline.builder import build_graph
 
-    cfg = Settings(_env_file=None, llm={"parallel_analysts": parallel})
+    cfg = build_settings({"llm.parallel_analysts": parallel})
     cfg.agents.profile = profile
     container = ServiceContainer(cfg, mock=True)
     compiled = build_graph(container)

@@ -668,6 +668,35 @@ class TestCaseRule:
         assert section["counts"][REMOVED] == section["counts"][ADDED] == 1
 
 
+class TestADraftBundleIsNotCompared:
+    @staticmethod
+    def _run(name: str, *, draft: bool) -> RunRecord:
+        bundle: dict[str, Any] = {
+            "objects": [{"type": "malware", "id": "m--1", "name": name, "is_family": True}]
+        }
+        if draft:
+            bundle["x_maljan_published"] = False
+        return RunRecord(report_id="r", job_id="j", stix_bundle=bundle)
+
+    def test_a_draft_side_is_stated_and_keeps_its_items_out(self) -> None:
+        section = _section(
+            diff_runs(self._run("Emotet", draft=True), self._run("Emotet", draft=False)), "stix"
+        )
+
+        assert section["recorded"] == {"a": False, "b": True}
+        assert any("Run A" in n and "draft, not compared" in n for n in section["notes"])
+        assert section["counts"][UNCHANGED] == 0
+        assert section["counts"][ADDED] + section["counts"][REMOVED] == 1
+
+    def test_two_published_bundles_are_compared_as_before(self) -> None:
+        section = _section(
+            diff_runs(self._run("Emotet", draft=False), self._run("Emotet", draft=False)), "stix"
+        )
+
+        assert section["counts"][UNCHANGED] == 1
+        assert not any("draft" in n for n in section["notes"])
+
+
 def _sigma_run(rows: list[list[str]]) -> RunRecord:
     section = {
         "key": "sigma_matches",

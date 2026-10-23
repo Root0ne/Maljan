@@ -68,6 +68,17 @@ class AgentArgument(BaseModel):
             "platform put them to the analysts the line names."
         ),
     )
+    ledger_stated: list[str] = Field(
+        default_factory=list,
+        repr=False,
+        description=(
+            "For the mediator: the blocking lines every count of which the evidence ledger "
+            "states and whose facts an earlier mediation told the analysts "
+            "(``debate_facts.ledger_stated``), each with its facts. They stay blocking lines; "
+            "the next mediation is shown them, and when every blocking line is one the debate "
+            "ends as ``ledger_stated``."
+        ),
+    )
     converged: list[dict[str, Any]] = Field(
         default_factory=list,
         repr=False,
@@ -75,6 +86,16 @@ class AgentArgument(BaseModel):
             "For the mediator: the revisions of the round before it that moved towards a peer "
             "beyond the sources both cite, with no citation added and no tool call "
             "(``sycophancy_detector.convergence_flags``), as it was told them."
+        ),
+    )
+    sycophancy_flagged: bool | None = Field(
+        default=None,
+        repr=False,
+        description=(
+            "For the mediator: whether the platform's sycophancy check flagged the round this "
+            "mediation closed, whatever flagged it (the convergence flags or the cosine check) "
+            "and even when the mediation itself failed. ``None`` on state written before the "
+            "flag was kept, where only ``converged`` says."
         ),
     )
     revise: list[str] | None = Field(
@@ -176,6 +197,13 @@ def _merge_stage_results(
             **existing,
             **entry,
             "ran": bool(existing.get("ran")) or bool(entry.get("ran")),
+            # A failure stays recorded: a later round of the stage that
+            # succeeded does not undo an earlier one that failed.
+            **(
+                {"failure": bool(existing.get("failure")) or bool(entry.get("failure"))}
+                if "failure" in existing or "failure" in entry
+                else {}
+            ),
             "reason": entry.get("reason") or existing.get("reason") or "",
             "claim_count": int(existing.get("claim_count") or 0)
             + int(entry.get("claim_count") or 0),
@@ -279,8 +307,14 @@ class AnalysisState(TypedDict):
     # Per-round mean-confidence values for adaptive termination
     confidence_history: Annotated[list[float], operator.add]
 
-    # Iteration tracking
+    # Iteration tracking: every mediation of the run, whichever debate held it.
     iteration_count: int
+    # Where each debate stage began, by stage key: the run's mediation count,
+    # confidence series length and discussion length when its first mediation
+    # was held (``routing.debate_start``). The router counts a debate's rounds
+    # and reads its confidence series from there, so a second debate is not
+    # ended by the rounds and the numbers of the first. Written once per stage.
+    debate_starts: Annotated[dict[str, dict[str, int]], _merge_dicts]
     # ``None`` when consensus did not apply (see ``consensus_applicable``).
     is_consensus: bool | None
     # ``False`` when the debate had fewer than two analysts that produced
@@ -366,6 +400,12 @@ class AnalysisState(TypedDict):
     # triage node; empty on a run whose team has no triage stage.
     triage_facts: dict[str, Any]
 
+    # The questions the analyst asked of the job when submitting it
+    # (``config.questions``), each answered by the report's question round
+    # (``reporting.question_round``). Written once at the start; empty on a
+    # job asked none, whose report carries no answers.
+    analyst_questions: list[str]
+
     # Which analysts had their final-answer nudge sent another way than the
     # plain one, and which way. Written by the analyst nodes, merged per agent,
     # read by the judge into ``run_summary.nudge``.
@@ -415,3 +455,25 @@ class AnalysisState(TypedDict):
     # per analyst, round and claim (``pipeline.claim_drops``), with the run
     # summary's sentence. Recorded, never asked. Append-only.
     dropped_claims: Annotated[list[dict[str, Any]], operator.add]
+
+
+def with_undrained_evidence(state: dict[str, Any], container: Any) -> dict[str, Any]:
+    """``state`` with every ledger entry no node wrote added to ``evidence_ledger``.
+
+    Each path that persists a ledger — a completed run, a stopped one and a
+    report kept from a failed run — calls this before it stores the state, so
+    the ledger it stores holds every id the job's counter issued
+    (``ServiceContainer.collect_undrained_evidence``). A container that cannot
+    say, or a state with nothing left out, comes back as it was.
+    """
+    collect = getattr(container, "collect_undrained_evidence", None)
+    if not callable(collect):
+        return state
+    ledger = list(state.get("evidence_ledger") or [])
+    known = [str(row.get("id")) for row in ledger if isinstance(row, dict) and row.get("id")]
+    late = collect(known)
+    if not late:
+        return state
+    out = dict(state)
+    out["evidence_ledger"] = [*ledger, *(entry.model_dump(mode="json") for entry in late)]
+    return out

@@ -134,6 +134,54 @@ class TestOnTheStructuredPath:
         assert order.index("introduction") < order.index("string_resolution")
 
 
+class TestTheManualPathAfterAStructuredAttempt:
+    """A structured answer that holds nothing to read is asked again on the manual path.
+
+    No section sends a tool there, so every section shares one prefix up to the
+    end of its head whatever schema its structured attempt sent: each manual
+    request carries the head as one cached block, the non-prose sections too.
+    A structured answer written as text is the section's answer, and is never
+    asked again (``test_a_structured_answer_in_text_is_kept``).
+    """
+
+    def _bodies(self, monkeypatch: pytest.MonkeyPatch) -> list[dict[str, Any]]:
+        def text_only(body: dict[str, Any]) -> dict[str, Any]:
+            if body.get("tools"):
+                return message([], stop="end_turn", usage=USAGE)
+            answer = _answer(_section(body)) if _LEAD in _text_of(body) else {}
+            return message(
+                [{"type": "text", "text": json.dumps(answer)}], stop="end_turn", usage=USAGE
+            )
+
+        found = Wire(text_only)
+        install(monkeypatch, found)
+        composer = ReportComposer(llm=_model(), per_section_timeout=60)
+        with patch(
+            "maljan.reporting.composer.structured_output_supported_for_llm", return_value=True
+        ):
+            asyncio.run(composer.compose(_report(), _isr(), facts_block=FACTS, concurrent=True))
+        return found.bodies
+
+    def test_every_manual_request_sends_the_head_as_one_cached_block(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        bodies = self._bodies(monkeypatch)
+        manual = [b for b in bodies if len(b["messages"]) == 1 and not b.get("tools")]
+        assert {_section(b) for b in manual} == set(COMPOSED_SECTIONS)
+        prefixes = {_prefix(b) for b in manual}
+        assert len(prefixes) == 1 and "" not in prefixes, "one byte-identical prefix"
+
+    def test_the_structured_attempts_are_marked_as_before(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        bodies = self._bodies(monkeypatch)
+        tooled = {_section(b): b for b in bodies if len(b["messages"]) == 1 and b.get("tools")}
+        assert set(tooled) == set(COMPOSED_SECTIONS)
+        for name in set(COMPOSED_SECTIONS) - set(PROSE):
+            assert isinstance(tooled[name]["messages"][0]["content"], str), name
+        assert len({_prefix(tooled[name]) for name in PROSE}) == 1
+
+
 class TestTheHeadIsCachedOnce:
     def test_every_section_sends_the_head_as_one_cached_block(self, wire: Wire) -> None:
         _compose(_model())
@@ -189,3 +237,39 @@ class TestTheHeadIsCachedOnce:
         )
         model.invoke([SystemMessage(content="S"), turn])
         assert anthropic_history.SHARED_HEAD not in json.dumps(wire.bodies[-1])
+
+
+class TestTheLastRequestOfAConversation:
+    """A request no later one sends again writes no entry nothing would read."""
+
+    @staticmethod
+    def _turns(**noted: Any) -> list[Any]:
+        from langchain_core.messages import AIMessage
+
+        head = {anthropic_history.SHARED_HEAD: 6}
+        question = [{"type": "text", "text": "the question"}]
+        return [
+            SystemMessage(content="S"),
+            HumanMessage(content="HEAD\n\nrest", response_metadata=head),
+            AIMessage(content="first answer"),
+            HumanMessage(content=question, response_metadata=noted),
+        ]
+
+    @staticmethod
+    def _marked(body: dict[str, Any]) -> list[tuple[int, int]]:
+        return [
+            (m, b)
+            for m, turn in enumerate(body["messages"])
+            if isinstance(turn["content"], list)
+            for b, block in enumerate(turn["content"])
+            if "cache_control" in block
+        ]
+
+    def test_a_conversation_sent_again_keeps_its_breakpoints(self, wire: Wire) -> None:
+        _model().invoke(self._turns())
+        assert self._marked(wire.bodies[-1]) == [(0, 0), (0, 1), (2, 0)]
+
+    def test_the_last_request_carries_only_the_head_it_reads(self, wire: Wire) -> None:
+        _model().invoke(self._turns(**{anthropic_history.LAST_REQUEST: True}))
+        assert self._marked(wire.bodies[-1]) == [(0, 0)]
+        assert anthropic_history.LAST_REQUEST not in json.dumps(wire.bodies[-1])

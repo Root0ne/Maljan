@@ -154,11 +154,15 @@ def test_the_registry_attaches_exactly_the_pinned_tools(monkeypatch):
 
     The point of the fixture: ``for_agent`` must hand the network analyst the
     same names ``NetworkAnalyst._initialize_mcp_client`` handed it before, and
-    the judge the same names the judge had. Names, not schemas.
+    the judge the same names the judge had. Names, not schemas. The
+    threat-intel lookups are offered only with their keys (without one the
+    manifest withholds them), so the keys are set: attaching asks no service.
     """
     from maljan.core.config import Settings
     from maljan.providers.servers import ServerRegistry
 
+    monkeypatch.setenv("VIRUSTOTAL_API_KEY", "attach-only")
+    monkeypatch.setenv("ABUSEIPDB_API_KEY", "attach-only")
     registry = ServerRegistry(Settings(_env_file=None))
     for role, key in (("network", "network"), ("judge", "threatintel")):
         handles = registry.for_agent(role)

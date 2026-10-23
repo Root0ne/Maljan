@@ -113,6 +113,454 @@ image path only when the table publishes it or a sandbox recorded it. A Benign
 verdict publishes no malicious indicator, so it gets no draft, and the report
 says so. They are drafts: review them before deploying them.
 
+## What left this machine
+
+Every report a run finishes carries a **Disclosure** block at the end of its
+run summary appendix (Appendix B, in the Markdown and in the HTML and PDF made
+from it), and the run summary stores the same record under `disclosure`. It
+says what the run sent beyond the machine it ran on:
+
+- **Model prompts**: every model endpoint that answered a call, by host, with
+  the agents that called it and how many calls each made. A local endpoint is
+  stated as local, and says whether it answered the context-window probe as a
+  model runtime in this run (llama.cpp's `/props`, Ollama's `/api/show`, Text
+  Generation Inference's `/info`); a local address that did not may be a
+  gateway forwarding the prompts to a hosted API. A provider reached through
+  its own API with no address configured is named as that API. Every endpoint
+  in every agent's model list, fallbacks included, and the global model's are
+  named too, called or not, because a request that failed is not always
+  recorded.
+- **Lookups**: every call of a tool declared as a lookup — a reputation lookup
+  (`kind: reputation`), a report or reputation of an indicator
+  (`indicator_report`, `indicator_reputation`), or a tool declaring an argument
+  role that carries an indicator (`hash`, `domain`, `ip`, `url`) — by host,
+  with the indicator kinds the calls gave.
+- **Sample uploads**: every submission of the sample to the sandbox provider,
+  with the provider and the host its submission URL resolves to
+  (`SandboxProvider.submission_address`), every staging of the sample to a
+  tool server over its `put_sample` tools (server and host, recorded before
+  the first byte is sent), and every call of a tool declared with
+  `discloses_sample`. An attempt that failed or did not finish is still listed.
+- **Tool calls**: every call of a tool server reached over `http`,
+  `streamable-http` or `sse` at an address outside this machine, by host; every
+  call through a local tool server that is a gateway (its block declares the
+  `reputation` or `sandbox` role, or any of its tools declares
+  `discloses_sample` or a kind that reaches outside by its meaning: the lookup
+  kinds, `submission` and `submission_status`); every call of a tool of such a
+  kind through a local server; and the calls of tools that name no kind, which
+  the platform reads as undeclared however many other facts they state.
+- **Case memory**, **tracing** and the ledger: the long-term memory store,
+  placed by what its backend declares (kept in the process, or the settings
+  leaf that holds its address); tracing when it is on in the settings
+  (`langchain_tracing_v2`) or in the process environment; and the ledger rows
+  the report could not read.
+- **Enrichment**: when enrichment is on, the follow-up job queued after the
+  report and what it may reach — RDAP, which needs no key (from the ARIN
+  bootstrap `rdap.arin.net`, whose referral to a regional registry the job's
+  client does not follow; where the optional `ipwhois` package is installed,
+  its own RDAP path, which may follow that referral, and its ASN lookup by DNS
+  to `origin.asn.cymru.com` with the fallbacks it may take, each its own row),
+  and every
+  configured source with the hosts its requests name or the tool server it is
+  asked through. The job then adds what it asked (service host, indicator
+  kinds, counts) to the stored record, and the served report shows it. Each
+  question is counted as attempted before it is sent, and before the first
+  one the stored record is marked, so an enrichment run on demand
+  (`POST /reports/{id}/enrich`) clears "nothing" the moment it begins asking,
+  whatever happens to it after. A job that fails or is stopped part-way leaves
+  what it asked until then, each question that failed in transport or never
+  finished counted as one that may have arrived.
+
+The block is built from the run's own records and nothing else: the settings
+the run ran with, the source each ledger entry recorded with the transport and
+address that source's settings block names, the token ledger's model labels
+(which carry the endpoint each call was sent to), the runtime answers the
+window probe recorded, and the sample's submissions and stagings. A tool's
+name decides nothing.
+
+**This machine** covers its loopback addresses, the private (RFC 1918 and
+`fc00::/7`), link-local and shared (`100.64.0.0/10`) ranges and the
+unspecified addresses; an address of a transition range (IPv4-mapped, 6to4,
+Teredo, NAT64) is read as the IPv4 address it carries. A name only a local
+resolver answers (`localhost`, `host.docker.internal`, anything under
+`.local`, `.internal` or `.localhost`) is local, and a single label is taken
+as a compose service's name, which the block says. Any other host, an
+absolute name such as `ai.` included, counts as outside this machine. Nothing
+is resolved, so a stored record reads the same wherever it is opened. The
+block's footnote says this once.
+
+The block says **Nothing left this machine** only with positive knowledge of
+every path, and then says what that rests on: every model endpoint is local
+and answered as a model runtime (taken as running here: a tunnel, port forward
+or proxy to a remote runtime answers the probe the same way and cannot be told
+apart, and the block says so), the local tool servers called are taken as
+local by their tools' declarations, where the case-memory store is, that the
+sample went only to local addresses, that no lookup was asked and that tracing
+is off. Wherever it cannot tell, it says what and why instead: a call it
+cannot place, a lookup or an upload through a local tool server, a call
+through a local gateway, a call through a local tool server to a tool that
+declares that it reaches the network, a call to a
+tool that declares no effects, a local
+model endpoint that did not answer as a runtime, a configured endpoint with
+no answered call, tracing on, a queued enrichment, an unread ledger row, or a
+run stopped part-way, whose last step may have made calls its record does not
+hold.
+
+### Where the sample was read
+
+Inside the same block, under its own **Isolation** lead, the report says where
+the run read the sample's bytes and what kept each reader from the worker. The
+run summary stores this as `disclosure.isolation`, in records of version 2.
+
+**Which sources read the sample.** These are read from the run's records,
+never from a tool's name:
+
+- every call of a tool that declares an argument as the sample or a payload
+  carved from it (argument role `path` or `carved`);
+- every call through a block that declares where its server sees the sample
+  (`sample_mount`, `work_dir` or `sample_open.open_tool`);
+- every call handed one of the job's paths to the sample as an argument (the
+  worker's copy, the path a server that declares a mount sees it at, a static
+  provider's mirror), so a tool that declares nothing is counted too;
+- the worker's own reads that write no ledger entry. These are the sample's
+  routing, which every run with a readable sample does before any tool is
+  called, and the report step's check of its drafted YARA rule.
+
+**How each reader is told**:
+
+- **A read in the worker process.** This covers the triage pack, the capa and
+  YARA provider, the routing and the report step. It is not isolated, by
+  construction. The block names the worker's user and, by name only, the
+  platform's own variables in its environment.
+- **A tool server started over stdio.** The worker measures the process it
+  started, once the server has initialised and before its first tool call:
+  - its user, and whether that is the worker's own;
+  - whether it has its own process table, network and mount namespace;
+  - whether it holds any effective capability;
+  - whether it can gain privileges;
+  - which of the platform's own variables its environment held, read off the
+    environment the platform handed it.
+
+  Such a reader is isolated only when every check holds. The network check is
+  lifted for a block that declares it needs the network: a lookup or sandbox
+  role, a kind that reaches outside, an indicator argument, or
+  `discloses_sample`. A field that could not be read never counts as passing.
+  A launcher (a sandbox's monitor, `uv run`, a container client) starts the
+  real server as its own child, so every process under the started one is
+  measured too, up to 64 processes. Which of them reads the sample cannot be
+  told, so every one is held to the checks. A tree that could not be read
+  whole, or is wider than that, is said not to be judged, and is not isolated.
+  A launcher that separates its child runs as the worker's user, so its row
+  stays "not isolated" unless its block declares it: `launcher_depth` names
+  how many levels at the top of the tree are the launcher's (1: the started
+  process alone). Those levels are then held only to carrying none of the
+  platform's own variables, every process under them to every check, and the
+  row is isolated only when at least one process under them was measured; a
+  container client, whose server runs where the run cannot see it, stays not
+  isolated. The line says the launcher is the block's word, not measured, and
+  ends "So: isolated by its block's declaration."; the row records
+  `isolated_by` (`declaration` or `measurement`), and the block's first line
+  and the tool-effects line name the declaration whenever a verdict rests on
+  one.
+- **A server reached at an address.** One at a local address is "not verified
+  by this run". A remote one is a host whose isolation this run cannot tell.
+
+**The verdict.** The block says every reader was kept from the worker only
+when at least one reader exists and every one was measured and passed. A run
+that recorded no read of the sample says so, and claims nothing. A version-1
+record has no isolation part and renders as before.
+
+**Whether the copies stayed the sample.** The worker hashes every copy of the
+sample it hands out (its download, which the sample path names, and each
+mirror it wrote for a server that reads a mount) once after the copies are
+made and before the pipeline starts, and once more when the run ends, before
+the report is stored and the copies are removed. Each reading is compared with
+the SHA-256 taken at upload:
+
+- The copy's directory is opened without following a link, and the copy is
+  opened through it without following a link; only a regular file is read. A
+  link or a pipe put in place of the copy or its directory is a reading that
+  failed. A hard link put in its place is read, and shows as the bytes it
+  holds.
+- A copy whose size is not the size taken at upload is a change and is not
+  read at all. Otherwise one streaming pass reads no more than that size, so a
+  copy grown during the run costs no more than the sample does.
+
+When every reading matches, the isolation part ends with one line saying so.
+When one does not (a store that answered with other bytes, a tool server that
+wrote into its mount, a copy put in another's place), the part names each copy
+that differed, what it read or why it was not hashed, and whether that was
+seen when the job started or when the run ended, with the time. The run is not
+failed or marked degraded for it: which findings it touches is the analyst's
+call.
+
+The run summary stores the readings as `sample_integrity` (`expected_sha256`,
+`readings`, `changed`). The same record is put in the disclosure record's
+isolation part, and the line is printed, only when the run's disclosure record
+has an isolation part (its `rows` present, even empty); otherwise the record is kept at
+`sample_integrity` in the run summary alone and nothing is printed. A copy a
+server holds at an address (a staged upload) or a sandbox's own copy is not
+read by the worker and is not in the record. A run stored without the record
+renders as before.
+
+### What each tool did beyond answering
+
+Inside the same block, after the isolation part and under its own **Tool
+effects** lead, the report says, for every tool the run called (a repeat and
+a guard's answer are not calls), whether it ran the sample's code (natively,
+under emulation or in a sandbox), whether it reached the network, and what of
+the sample it sent to a third party (its hash or its bytes). A tool that reaches
+a network only in a named way says which: only to refresh reference data it
+keeps, the configured case store, or the sandbox service its server fronts.
+For the last, the line says where the disclosure placed that call: the
+operator's own and not a third party only where it is placed on this machine,
+the host the settings name where it is outside, and that it cannot be told,
+with the disclosure's own reason, where the disclosure cannot place it. A
+submission to VirusTotal is said to hand the sample to a third party's
+sandbox, which may run what it is sent.
+
+Only a call that completed had an effect. Each tool's calls are counted by how
+they ended: completed, failed (made, and broke), not run (the pipeline wrote
+that it never made it, as the triage pack does for a step its budget stopped
+or a tool that is not installed) and refused (a guard answered it with no tool
+run). A tool with no completed call is said to have failed ("whether its
+declared effects happened cannot be told"), not to have been run ("none of its
+declared effects happened") or to have been refused ("nothing was sent"),
+never to have run or sent anything. The platform's own in-process tools, such
+as `read_evidence`, are left out by the disclosure's rule (no source and no
+server). A server's own hint never moves a call to another row of the
+disclosure: a tool that declares nothing stays an undeclared call, and the
+hint is added to what that row says. The run summary
+stores this as `disclosure.effects`, in records of version 3. Each answer is
+read, in this order:
+
+1. from the tool's declaration (`effects` and `discloses_sample` in its
+   `tool_facts`, the built-ins' shipped declarations and an operator's alike),
+   as its ledger entry stored it when the call was made;
+2. for the network only, from the `openWorldHint` the tool's own MCP server
+   gave it when it was attached, said to be the server's own hint;
+3. otherwise the tool is listed as **undeclared** for that answer, and is not
+   taken as safe, with the reason its declaration gives (only the built-in
+   tools that run whatever script or command they are given are undeclared). An entry that recorded no source is undeclared on every
+   count; it is never read by its tool's name.
+
+The part shares its facts with the rest of the block rather than repeating
+them. A tool said to send the sample's bytes is an upload row of the
+disclosure, by the same rule. A tool that ran the sample's code natively or
+under emulation is told with where its source read the sample, as the
+isolation part placed it (in the worker process, in a process the worker
+started and whether it was kept from the worker, at a local server, outside
+this machine). A tool through a local tool server that declares that it
+reaches the network cannot be placed in the disclosure,
+and a tool of no kind that declares it reaches no network is placed by its
+server. A stopped run's part says it may be incomplete. A record of an
+earlier version has no effects part and renders as before.
+
+A run whose block was not built stores why (`{"not_built": …}`: reporting
+off, no run summary as in a mock run, or a build that failed), so it is told
+apart from a report stored before the block existed, which shows none. The
+console's summary tab does not draw the block yet; the record is in the stored
+run summary.
+
+## What the run spent its input on
+
+After the disclosure, Appendix B carries an **Efficiency** block, and the run
+summary stores the same record under `efficiency`. Every figure in it is
+counted by code from what the run already recorded; no model is asked and
+nothing a model reads changes.
+
+- **Input by part** (`inputs`): what each agent loop's requests were made of.
+  Every request is measured as it is sent — each turn of an analyst's or the
+  judge's tool loop, and each single analyst call (a revision, a validation
+  retry, a drops question, a salvage) — and split into the system prompt, the
+  task and its data, the triage pack, the run-state block, the tool answers,
+  the peer reports a revision carries, every turn after the first answer
+  (retries, questions and the platform's notices), the agent's own earlier turns, and the tool definitions. The parts
+  are **character counts**: no provider reports the tokens of each part of a
+  prompt. Beside them stand the input tokens the provider reported for the
+  same requests, and how many reported. One row per tool loop, and one per
+  agent, stage and kind of single call; an agent whose model calls were not
+  measured by part (the report's writers, for one) is named with its calls.
+- **Evidence nothing cites** (`uncited`): of the ledger entries whose tool
+  answered, the ones no analyst's final answer names — no claim in its text or
+  its evidence field, no finding or artifact in its `evidence_ids` — by maker
+  and by tool, with their ids. A repeat and a guard's answer are not evidence
+  of their own; a cited repeat counts for the entry holding its answer. A
+  failed call is not evidence: it is counted apart (`failed`) and said.
+- **Tool calls that found nothing new** (`calls`): the calls the repeat guard
+  answered from an earlier identical call without running, the calls a guard
+  refused with no tool run, the calls that ran again with the tool, server and
+  arguments of an earlier call the same maker ran, and the calls identical to
+  one another maker ran first, each filed under who made it: the agent, the
+  triage pack or the pipeline. A re-run the guard serves because the maker's
+  earlier identical call failed is counted apart, as a retry after a failure,
+  so neither count overstates the other, and no agent is charged with a call
+  only another agent made.
+- **Rows read back** (`rows_read`): the ledger and pack rows each agent read
+  again by id through `read_evidence`, how often, each row's tool and whether
+  the triage pack wrote it.
+- **Retries' share of the output** (`output`): per agent, its reported output
+  tokens and the share its validation retries and its drops questions took,
+  with the calls that reported no usage counted beside them.
+- **Run fingerprint** (`fingerprint`): one sha256 over how the job was set
+  up, never over what its run sent. Every system prompt the platform can send
+  for the job is rendered by the code that builds it for one fixed placeholder
+  job (a placeholder sample hash, path and name, and the neutral format): each
+  analyst of the active profile for the tools its loop binds and for a
+  tools-free call, its revision prompt, every case of the mediator's prompt,
+  the mediator's extraction prompt, the judge's verdict and technique-question
+  prompts, the composer's, the narrative's, the summariser's, the view prompts
+  and every format fragment. The hash is the text each builder produces, so an
+  edit to any sentence a builder writes moves it, and no real value is masked
+  out of anything. Beside the prompts: the tool definitions each analyst's loop
+  binds and the judge and the mediator bind, the name and version each of
+  their servers gave for itself (no server is ever attached for the
+  fingerprint: where the run never bound the judge's servers, as on the
+  mediator's fast path, they are recorded as digests of their declared
+  settings, one for the whole and one per field, never the values, and marked
+  not attached in this run, with no version or tool definitions), and the settings the run ran with, masked as the stored settings
+  snapshot masks them, with this host's repository paths (the checkout, the
+  repository it is a worktree of, the virtual environment) replaced, so the
+  same setup on two hosts or worktrees hashes equal; a path such as
+  `/usr/bin/python3` stays as written. A validation retry, a revision round, a
+  cleared tool answer, the mediator's fast path and the sample do not move it.
+  A definition that is no analyst of the active profile, reached only when an
+  agent delegates to it, is not resolved for it and is named (its definition is
+  in the settings). Each component and each part keeps its own hash, and
+  `texts` keeps each rendered prompt's digest, so two fingerprints that differ
+  name what changed. A secret enters only as set or unset. A tool's own version
+  is not reported over MCP and is not in the fingerprint.
+
+A run stopped part-way stores the counts as of the stop and says so. A report
+stored before the block existed shows none.
+
+## What looked, and what the run could not establish
+
+After the efficiency counts, Appendix B carries three coverage blocks, and the
+run summary stores them under `coverage`. Code builds them from what the run
+already recorded: the evidence ledger, the analysts' final answers, the sandbox
+report, the tool servers the job could not attach and the inputs the run
+shortened. No model writes them or reads them. The rule is that coverage never
+overstates: where the record cannot tell, the value is `partial` or `unknown`,
+and the block says why.
+
+- **What this run could not establish** (`not_established`): the tool calls
+  that failed, were not run (a missing server or input, a packed layer that was
+  never unpacked) or were refused by a guard, grouped by tool and reason. It
+  also lists the answers that were cut or not shown, each layer that no call
+  examined, a missing sandbox report or packet capture, each server that was
+  not attached, how many server rests the appendix lists above, the ledger
+  rows that could not be read and each input that was shortened. The analysts
+  that failed, were skipped or made no claims are taken from the report's own
+  analyst record, so this block and the rest of the report agree. A run that
+  recorded none of these says so.
+- **What each tool looked at, and over which input** (`tools`): one line per
+  tool on each server, with its declared kind, its calls by state and the
+  inputs it read. A path input is named; any other is counted by its declared
+  role. A guard's answer is counted apart from the calls, as the evidence
+  counts are.
+- **Negative findings and what looked** (`negatives`): each analyst claim
+  that says something was not found. No structured field marks a claim as
+  negative, so the claim is read from its wording and the block says so. The
+  claim is split at clause boundaries (a sentence mark, or "but", "however",
+  "while" and the like; "not yet" stays whole). A clause counts when a
+  negation stands over the word after it ("not packed", "no network
+  activity", "did not beacon"), when "without" or "zero" stands beside a word
+  of finding, or when it says "absent", "lacks" or "missing". A clause that
+  claims evasion ("cannot be detected by", "it is not detected") does not
+  count. A claim its analyst kept after the absence question also counts.
+  One row is written per negative clause, and only the entries cited in that
+  clause count. A claim whose every clause is negative also counts its
+  evidence field. Each call is named by its ledger entry id, which holds the
+  full arguments, with tool, server, kind and the input read. Its coverage is
+  one of these:
+  - `full`: granted, never assumed. Every cited call must meet all of these:
+    1. Its tool is declared to read its whole input. Today one declaration
+       says so: the identity and signing kinds, which state a fact about the
+       file as a whole.
+    2. It was passed only its declared input arguments. No declaration marks
+       any other argument as not narrowing.
+    3. Its answer was not cut, and has no marker at any depth that it holds
+       part of its rows (`truncated`, `more`, `has_more`, a `next_offset`,
+       `total`, `totals` or the platform's shortening note).
+    4. It read the sample.
+    5. The input's own record is complete.
+  - `input_unknown`: a cited call is of a tool that declares nothing, so the
+    record cannot tell how much it read.
+  - `partial`: one of these holds, and the block names each gap:
+    - a cited call failed, was cut or capped;
+    - a cited call was passed an argument outside its input roles;
+    - a cited call is not declared to read its whole input;
+    - a call of the same declared kind over the same input did not answer
+      (listed once under the first block, counted here);
+    - a layer of that input was never examined, or was examined by no call
+      the clause cites;
+    - an observed sandbox report names no packet capture;
+    - the calls read a layer, another file or an argument instead of the
+      sample.
+  - `failed`: no cited call answered, or the sandbox report they read was not
+    observed (a timeout, an error, no report).
+  - `unknown`: the negative clause cites no entry the ledger holds, or an
+    answer has no shape the record can read its markers from.
+
+  Expect most negatives to read `partial` or `input_unknown` today. That is
+  the honest value until more tools declare that they read their whole input.
+
+A call's input is read from its arguments by the roles its tool declares,
+never by its name. A value under a file role (`path`, `carved`) is named for
+what it is:
+
+- **the sample**: its path, or a path that ends in its file name;
+- **the packet capture**;
+- **a layer**: a file an earlier answer says it produced, under the argument
+  name file tools declare for reading one (`carved_path`), together with the
+  entry that produced it. A tool that answers its output under any other key
+  (an `output_path`, say) produces no layer the record can see. This is by
+  design: what counts is declared, never guessed from a name. No layer is
+  inferred from any other value;
+- otherwise the file, by its path.
+
+A value under any other role is kept as its role and a short digest, never the
+value. When a call leaves out a declared sample or capture argument, the
+platform fills it in if the tool's server reads the staged sample, and the
+block says so. A call under the platform's sandbox report source reads the
+sandbox report. A tool that declares nothing, such as a new MCP tool, is read
+by value. If none of its arguments holds a known input, its input is recorded
+as undeclared.
+
+Each capability subsection's "Nothing recorded" line then points to these
+blocks. A run stopped part-way stores the record as of the stop and says so. A
+report stored before the record existed shows none of this and renders as
+before.
+
+## Observed behaviour linked to code
+
+Where a sandbox produced a report, the evidence appendix carries the table
+**Observed behaviour linked to code**, built from the pack's
+`behaviour_code_links` entry. Each value the sandbox observed (a mutex, a
+registry key or value, a file path or named pipe, a domain, an address, a URL,
+a user agent, a service or a command line) is one row per static place that
+holds it: the entry, the source (`strings`, `recovered string`, `decoded
+blob`, `decoded blob layer` or `function index`), the file offset, the
+section, the scheme and the encoding, and the function, or why no function is
+stated (no function index was made). A value held nowhere reads `observed
+only`, or `observed; static side partly read` where part of the static side
+was not compared. A network value no row of which the sandbox attributes to
+the sample's process tree is marked `process not attributed` beside its items,
+and one only other processes made is not listed. The match is exact after the
+platform's normalisation for the value's
+kind: a registry key or a Windows path differing only in case or separators
+is held, a mutex differing in case is not, and a text that only contains the
+value is not a match. The **Match** column says how a row matched: `exact`,
+`host of a held URL` (an observed domain or address that is the host of a URL
+the sample holds; the held URL is shown beside the place) or `held without its
+hive` (an observed registry key whose path after `HKCU`, `HKEY_CURRENT_USER`
+or another spelling of its hive is held with no hive). The text above the table names each static answer
+compared and how much of it (the strings head is a page and says so). Every
+value and place is written as a code span. The analysts read the same links
+as the pack's `behaviour to code` line. A report stored before the step
+existed shows no such table.
+
 ## Comparing two runs
 
 `GET /api/v1/reports/diff?a=<id>&b=<id>` compares two stored runs (`by=job`

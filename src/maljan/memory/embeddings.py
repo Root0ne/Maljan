@@ -160,8 +160,20 @@ def encode(text: str) -> list[float]:
     Uses fastembed when available, falls back to BoW projection otherwise.
     Always returns a list (never None) so callers can index it directly.
     """
+    return encode_with_backend(text)[0]
+
+
+def encode_with_backend(text: str) -> tuple[list[float], str]:
+    """The vector :func:`encode` returns, and the name of what produced it.
+
+    The model's name only when the model produced this very vector: a call
+    whose model failed and fell back to the bag-of-words projection says
+    ``FALLBACK_BACKEND``, so a store never files that vector beside the
+    model's (the two are not comparable). A blank text's zero vector is
+    named by the backend a call would use now.
+    """
     if not text or not text.strip():
-        return [0.0] * EMBED_DIM
+        return [0.0] * EMBED_DIM, active_backend()
 
     model = _try_load_fastembed()
     if model and model is not False:
@@ -176,17 +188,17 @@ def encode(text: str) -> list[float]:
                 # defensively if a future model changes the contract.
                 norm = math.sqrt(sum(v * v for v in vec))
                 if norm == 0.0:
-                    return vec
+                    return vec, _MODEL_NAME
                 if abs(norm - 1.0) > 1e-3:
                     vec = [v / norm for v in vec]
-                return vec
+                return vec, _MODEL_NAME
         except Exception as exc:  # noqa: BLE001
             logger.warning(
                 "Embeddings: fastembed.embed() failed (%s). Falling back to BoW for this call.",
                 exc,
             )
 
-    return _bow_projection(text, dim=EMBED_DIM)
+    return _bow_projection(text, dim=EMBED_DIM), FALLBACK_BACKEND
 
 
 def encode_batch(texts: list[str]) -> list[list[float]]:

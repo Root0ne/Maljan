@@ -17,9 +17,9 @@ Two halves of an agent's tools live in two places on purpose:
   Ghidra is a per-sample act with a job context, and pulling it into
   resolution would make the settings probe launch a decompiler.
 
-A ``generic`` agent has no class of its own to open a provider, so an explicit
-``ToolRef(kind="provider")`` is the one way it gets provider tools, and that
-path *is* resolved here.
+A ``generic`` or ``lead`` agent has no class of its own to open a provider, so
+an explicit ``ToolRef(kind="provider")`` is the one way it gets provider tools,
+and that path *is* resolved here (``opens_provider_by_reference``).
 
 ``ToolRef(kind="sandbox")`` is the third half and the simplest: the job's
 sandbox report is already on the container, so the tools over it are closures
@@ -39,7 +39,8 @@ from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
-from maljan.core.config import AgentDefinition, ProfileDefinition, Settings, ToolRef
+from maljan.agents.prompt_tools import note_for_resolved
+from maljan.core.config import PROMPT_ROLES, AgentDefinition, ProfileDefinition, Settings, ToolRef
 from maljan.core.logger import logger
 
 if TYPE_CHECKING:
@@ -75,6 +76,10 @@ class ResolvedAgent:
     # its own provider and its own list, so a copy never carries either for a
     # provider or tools that are not its own.
     authored_prompt: str = ""
+    # Whether the agent is asked for an ATT&CK technique line on each claim
+    # (``AgentDefinition.attck_techniques``). Read by the configurable analyst
+    # only; a built-in role keeps its own claim format.
+    attck_techniques: bool = True
 
 
 def active_profile(settings: Settings) -> ProfileDefinition:
@@ -228,19 +233,34 @@ def static_provider_id_for(
     return str(global_provider or settings.static.provider)
 
 
+def opens_provider_by_reference(definition: AgentDefinition) -> bool:
+    """Whether resolution opens the agent's static provider from a ``provider`` reference.
+
+    The one gate for every role that is a prompt rather than a class
+    (``PROMPT_ROLES``: ``generic`` and ``lead``), the same roles the settings
+    validator lets carry a provider reference. The prompt's provider text, the
+    provider's tools and the mirror the worker stages all read this, so an
+    agent is never told about tools it does not get.
+    """
+    return definition.role in PROMPT_ROLES and any(
+        ref.kind == "provider" for ref in definition.tools
+    )
+
+
 def reads_static_provider(definition: AgentDefinition | None) -> bool:
     """Whether a run opens a static provider for this definition.
 
     Two ways, and only two. The ``static`` role opens its provider itself,
-    inside its own class; a ``generic`` agent opens one when its tool list
-    holds a ``provider`` reference, at resolution (``_provider_tools``). Every
-    other role reads no static provider, whatever its tool list says.
+    inside its own class; a ``generic`` or ``lead`` agent opens one when its
+    tool list holds a ``provider`` reference, at resolution
+    (``_provider_tools``). Every other role reads no static provider, whatever
+    its tool list says.
     """
     if definition is None:
         return False
     if definition.role == "static":
         return True
-    return definition.role == "generic" and any(ref.kind == "provider" for ref in definition.tools)
+    return opens_provider_by_reference(definition)
 
 
 NOT_MIRRORED_REASON = "sample not mirrored for {provider}"
@@ -249,8 +269,8 @@ NOT_MIRRORED_REASON = "sample not mirrored for {provider}"
 def pin_provider_sample(agent: Any, mirrored: Mapping[str, str] | None) -> None:
     """Hand the agent's static provider its own mirror of the sample, or clear the pin.
 
-    For an agent whose tools include its provider's (a generic agent with a
-    ``provider`` reference): the provider was opened at resolution, before the
+    For an agent whose tools include its provider's (a generic or lead agent
+    with a ``provider`` reference): the provider was opened at resolution, before the
     sample's path was known, so its own guard on the path argument — Ghidra's
     ``load_program`` override — had nothing to hold a model to. ``mirrored``
     is the job's mirror per provider id (``state["static_sample_paths"]``);
@@ -480,19 +500,23 @@ def _provider_parts(
     """
     from maljan.agents.prompt_fragments import tools_statement
 
-    if definition.role == "static" or (
-        definition.role in ("generic", "lead")
-        and any(ref.kind == "provider" for ref in definition.tools)
-    ):
+    if definition.role == "static" or opens_provider_by_reference(definition):
         from maljan.agents.static_analyst import static_provider_parts
 
         provider = container.get_static_provider(provider_id)
         offers = bool(getattr(getattr(provider, "capabilities", None), "provides_tools", False))
-        return static_provider_parts(
+        text, statement = static_provider_parts(
             provider,
             tools,
             provider_expected=provider_expected and definition.role == "static" and offers,
         )
+        if not definition.attck_techniques:
+            # An agent not asked for techniques is not told which ones to look
+            # for either; the provider's text is otherwise sent as it is.
+            from maljan.providers.base import without_attck_focus
+
+            text = without_attck_focus(text)
+        return text, statement
     if definition.role == "dynamic":
         from maljan.agents.dynamic_analyst import sandbox_provider_parts, sandbox_server_label
 
@@ -562,17 +586,16 @@ def _dedupe(tools: list[BaseTool]) -> list[BaseTool]:
 def _provider_tools(container: Any, definition: AgentDefinition, provider_id: str) -> list[Any]:
     """The agent's static provider's tools, for a definition that asked for them.
 
-    Gated on ``role == "generic"`` in addition to the ``AgentsConfig``
-    validator that already refuses a provider reference on a built-in role:
+    Gated on ``opens_provider_by_reference`` (a ``generic`` or ``lead``
+    definition) in addition to the ``AgentsConfig`` validator that already
+    refuses a provider reference on a built-in role:
     a built-in role opens its own provider lazily, inside its own class
     (``StaticAnalyst._initialize_mcp_client`` and friends), so resolution
     must never open one itself — spec §4. The validator is the primary
     defence; this is defence in depth for a definition that reached here by
     some other path than validated ``Settings``.
     """
-    if definition.role != "generic":
-        return []
-    if not any(ref.kind == "provider" for ref in definition.tools):
+    if not opens_provider_by_reference(definition):
         return []
     from maljan.providers.base import StaticJobContext
 
@@ -584,17 +607,30 @@ def _provider_tools(container: Any, definition: AgentDefinition, provider_id: st
     # as they do for a built-in role's own provider: a toolkit opened without
     # them records nowhere and cuts at the signature's default rather than at
     # the number the operator set.
+    try:
+        rest_hook = container.get_server_registry().rest_hook()
+    except Exception:  # noqa: BLE001 - a rest is then logged, not recorded
+        rest_hook = None
     provider.open(
         StaticJobContext(
             job_key=container.job_key(),
             max_output_chars=int(container.config.preprocessing.max_tool_output_chars),
             truncation_ledger=container.get_truncation_ledger(),
             context_budget=container.get_context_budget(),
+            on_server_rest=rest_hook,
         )
     )
     from maljan.agents.prompt_fragments import PROVIDER_FAMILY, provider_source, stamp_source
+    from maljan.providers.base import record_provider_withheld
 
-    return stamp_source(provider.get_tools(), PROVIDER_FAMILY, declared=provider_source(provider))
+    tools = provider.get_tools()
+    # A tool the provider withholds is said where it is withheld.
+    try:
+        registry = container.get_server_registry()
+    except Exception:  # noqa: BLE001 - the reasons are still logged where withheld
+        registry = None
+    record_provider_withheld(provider, registry)
+    return stamp_source(tools, PROVIDER_FAMILY, declared=provider_source(provider))
 
 
 def _sandbox_tools(container: Any, definition: AgentDefinition) -> list[Any]:
@@ -900,8 +936,17 @@ async def _astage(
     from maljan.agents.sample_staging import stage_for_agent
 
     before = len(registry.degradation_reasons)
+    # The job's record of every upload, for the run's disclosure block.
+    stagings = getattr(container, "sample_stagings", None)
     try:
-        staged = await stage_for_agent(registry, tools, sample_path, sha256=digest, job_id=job_key)
+        staged = await stage_for_agent(
+            registry,
+            tools,
+            sample_path,
+            sha256=digest,
+            job_id=job_key,
+            stagings=stagings if isinstance(stagings, list) else None,
+        )
     except Exception as exc:  # noqa: BLE001 — staging never fails a run
         logger.warning("sample staging skipped for job %s: %s", job_key, exc)
         return {}, []
@@ -953,6 +998,37 @@ def _mounted(container: Any, tools: list[Any], staged: dict[str, str]) -> dict[s
     return out
 
 
+def hold_sample_paths(
+    registry: Any,
+    tools: list[Any],
+    path_by_server: dict[str, str] | None,
+    default_path: str | None = None,
+) -> None:
+    """Note on the job's registry where each server behind ``tools`` holds the job's sample.
+
+    The server's own path (``path_by_server``: its mirror under the declared
+    mount, or where the sample was staged to it), else ``default_path``, the
+    agent's own, which never replaces a server's own path another agent
+    noted: on a server other jobs share, the only path an open may name
+    (``ServerRegistry.hold_sample_path``). With neither, nothing is noted and
+    every open there stays refused.
+    """
+    hold = getattr(registry, "hold_sample_path", None)
+    if not callable(hold):
+        return
+    from maljan.agents.tool_pinning import server_of
+
+    paths = dict(path_by_server or {})
+    for key in dict.fromkeys(server_of(tool) for tool in tools):
+        if not key:
+            continue
+        if paths.get(key):
+            hold(key, paths[key])
+        elif default_path:
+            # The agent's own path: never in the place of a server's own.
+            hold(key, default_path, fallback=True)
+
+
 def _stage(container: Any, tools: list[Any], job_key: str) -> tuple[dict[str, str], list[str]]:
     """``_astage`` for the synchronous resolver, on the shared agent loop.
 
@@ -964,24 +1040,145 @@ def _stage(container: Any, tools: list[Any], job_key: str) -> tuple[dict[str, st
     first, on this thread: a job with no sample stages nothing, and neither
     does a deployment whose servers are all local.
     """
-    sample_path, _ = _staging_inputs(container)
+    sample_path, digest = _staging_inputs(container)
     if not sample_path:
         return {}, []
     registry = container.get_server_registry()
     if not _has_remote_server(registry, tools):
         return {}, []
-    from maljan.agents.base_agent import run_coro_blocking
+    import threading
 
+    from maljan.agents.base_agent import run_coro_blocking
+    from maljan.agents.sample_staging import (
+        cached_path,
+        mark_unfinished_failed,
+        record_failure,
+        staged_servers,
+    )
+    from maljan.pipeline.events import describe_exception
+
+    bound, servers, unlimited = _staging_bound(registry, tools, sample_path)
+    before = len(registry.degradation_reasons)
+    stagings = getattr(container, "sample_stagings", None)
+    noted = len(stagings) if isinstance(stagings, list) else 0
+    # The calls themselves are bounded, each by its own server's deadline
+    # (``ServerGuard.call_timeout``, sent with the call). Waiting for a
+    # server's slot is not: there is no default limit, so the wait is never
+    # cut. It is stated once it outlasts the calls' deadlines together.
+    logger.info(
+        "sample staging for job %s to %s: its calls' deadlines sum to %s; a wait for a "
+        "server's slot is not limited.",
+        job_key,
+        ", ".join(servers) or "no server",
+        "no time limit" if bound is None else f"{bound:g} s",
+    )
+    if unlimited:
+        logger.warning(
+            "sample staging for job %s has no time limit: these calls have no deadline (%s), "
+            "so staging waits for them as their servers do.",
+            job_key,
+            ", ".join(unlimited),
+        )
+    long_wait = (
+        threading.Timer(
+            bound,
+            lambda: logger.warning(
+                "sample staging for job %s has run past its calls' deadlines (%g s): "
+                "it is waiting for a server's slot, and goes on waiting.",
+                job_key,
+                bound,
+            ),
+        )
+        if bound is not None
+        else None
+    )
+    if long_wait is not None:
+        long_wait.daemon = True
+        long_wait.start()
     try:
         staged, reasons = run_coro_blocking(
             _astage(registry, container, tools, job_key),
-            hard_timeout=120.0,
+            hard_timeout=None,
             label="sample-staging",
         )
     except Exception as exc:  # noqa: BLE001 — staging never fails a run
         logger.warning("sample staging skipped for job %s: %s", job_key, exc)
-        return {}, []
+        # Said, not swallowed: an upload still written down as attempted is
+        # marked failed and its server named; a path already staged is kept,
+        # and one staged whose path cannot be read back is said to be so.
+        stopped = f"the uploads stopped ({describe_exception(exc)})"
+        unfinished = mark_unfinished_failed(stagings, noted)
+        finished = staged_servers(stagings, noted)
+        kept: dict[str, str] = {}
+        for key in servers:
+            path = cached_path(job_key, key, digest)
+            if path:
+                kept[key] = path
+            elif key in finished:
+                record_failure(registry, key, "staged, path not recovered")
+            elif key in unfinished or not isinstance(stagings, list):
+                record_failure(registry, key, stopped)
+        return kept, list(registry.degradation_reasons[before:])
+    finally:
+        if long_wait is not None:
+            long_wait.cancel()
     return dict(staged or {}), list(reasons or [])
+
+
+def _staging_bound(
+    registry: Any, tools: list[Any], sample_path: str
+) -> tuple[float | None, list[str], list[str]]:
+    """How long the uploads' calls to the remote servers behind ``tools`` may take.
+
+    ``(bound, servers, calls with no deadline)``: the servers staged to, and
+    each ``server.tool`` whose call has no deadline, which leaves the bound
+    ``None``.
+
+    Derived, never a default: the sum, over every call each upload makes
+    (``sample_staging.planned_calls``), of the deadline that server's guard
+    gives the call (``ServerGuard.call_timeout``), which each call is held to
+    on its own. ``None``, no limit, when a call has none. A wait for a
+    server's slot is not in it, and no wait is cut by it: past it the
+    resolver says that it is still waiting.
+    """
+    import os
+
+    from maljan.agents.sample_staging import REMOTE_TRANSPORTS, planned_calls
+    from maljan.agents.tool_pinning import server_of
+
+    try:
+        size = os.path.getsize(sample_path)
+    except OSError:
+        size = 0
+    total = 0.0
+    servers: list[str] = []
+    unlimited: list[str] = []
+    for key in dict.fromkeys(server_of(tool) for tool in tools):
+        if not key:
+            continue
+        try:
+            handle = registry.get(key)
+        except Exception:  # noqa: BLE001 — a tool from a server that is gone
+            continue
+        transport = str(getattr(handle.config, "transport", "stdio") or "stdio").lower()
+        if transport not in REMOTE_TRANSPORTS or not getattr(handle, "is_open", False):
+            continue
+        try:
+            calls = planned_calls(size, set(handle.all_tool_names()))
+        except Exception:  # noqa: BLE001 — a manifest that cannot be read stages nothing
+            continue
+        if not calls:
+            continue
+        servers.append(str(key))
+        guard = getattr(handle, "guard", None)
+        timeout_of = getattr(guard, "call_timeout", None)
+        for name, count in calls.items():
+            deadline = timeout_of(name) if callable(timeout_of) else None
+            if deadline is None:
+                unlimited.append(f"{key}.{name}")
+            else:
+                total += float(deadline) * count
+    return (total if servers and not unlimited else None), servers, unlimited
 
 
 def resolve_agent(key: str, container: Any, job_key: str = "job") -> ResolvedAgent:
@@ -1023,10 +1220,16 @@ def resolve_agent(key: str, container: Any, job_key: str = "job") -> ResolvedAge
     tools.extend(served)
     reasons.extend(served_reasons)
 
-    deduped = _dedupe(tools)
+    # The notes after each description, settled over the whole list: the
+    # provider's tools as the agent is offered them, beside the servers'.
+    from maljan.providers.servers import settle_tool_notes
+
+    deduped = settle_tool_notes(_dedupe(tools), settings)
     staged, staging_reasons = _stage(container, deduped, job_key)
     staged = _mounted(container, deduped, staged)
+    hold_sample_paths(registry, deduped, staged)
     reasons.extend(staging_reasons)
+    note_for_resolved(settings, definition, key, deduped)
     return ResolvedAgent(
         key=key,
         role=definition.role,
@@ -1044,6 +1247,7 @@ def resolve_agent(key: str, container: Any, job_key: str = "job") -> ResolvedAge
         llm=_agent_llm(container, key),
         degradation_reasons=tuple(dict.fromkeys(reasons)),
         path_by_server=staged,
+        attck_techniques=definition.attck_techniques,
     )
 
 
@@ -1096,12 +1300,18 @@ async def aresolve_agent(key: str, container: Any, job_key: str = "job") -> Reso
     tools.extend(served)
     reasons.extend(served_reasons)
 
-    deduped = _dedupe(tools)
+    # The notes after each description, settled over the whole list: the
+    # provider's tools as the agent is offered them, beside the servers'.
+    from maljan.providers.servers import settle_tool_notes
+
+    deduped = settle_tool_notes(_dedupe(tools), settings)
     staged, staging_reasons = await _astage(
         container.get_server_registry(), container, deduped, job_key
     )
     staged = _mounted(container, deduped, staged)
+    hold_sample_paths(registry, deduped, staged)
     reasons.extend(staging_reasons)
+    note_for_resolved(settings, definition, key, deduped)
     return ResolvedAgent(
         key=key,
         role=definition.role,
@@ -1119,4 +1329,90 @@ async def aresolve_agent(key: str, container: Any, job_key: str = "job") -> Reso
         llm=_agent_llm(container, key),
         degradation_reasons=tuple(dict.fromkeys(reasons)),
         path_by_server=staged,
+        attck_techniques=definition.attck_techniques,
     )
+
+
+def servers_a_job_calls(settings: Settings, *, global_provider: str | None = None) -> set[str]:
+    """Every tool server a job under ``settings`` can call, by key.
+
+    The one answer for "does this job use this server", read by the submit
+    check, the worker's check of a stored secret and the sample mirroring. It
+    covers what the run can reach, never less:
+
+    * the servers bound (``servers_bound_to``) to every agent the profile's
+      stages run, every agent those ask in turn, every enabled judge- or
+      report-role definition, the mediator when a debate stage exists and the
+      summariser while it is on, each followed through its references;
+    * the reputation lookups of the triage pack, unless ``core.triage.reputation``
+      is off (``pipeline.nodes`` chooses them the same way, from ``pack_lookups``);
+    * ``static.generic.server`` when the global static provider, the team's or
+      any reached agent's is ``generic_mcp`` (``global_provider`` is the one
+      a submitted job names).
+    """
+    from maljan.core.config import MEDIATOR_AGENT_KEY, SUMMARIZER_AGENT_KEY
+    from maljan.core.declared_reading import declarations
+    from maljan.core.reputation import pack_lookups
+
+    team = active_profile(settings)
+    named = [str(agent) for stage in team.stages for agent in stage.agents]
+    named += [
+        key
+        for key, definition in settings.agents.definitions.items()
+        if definition.enabled and definition.role in ("judge", "report") and key not in named
+    ]
+    if any(getattr(stage, "kind", "") == "debate" for stage in team.stages):
+        named.append(MEDIATOR_AGENT_KEY)
+    if settings.preprocessing.use_function_summarizer:
+        named.append(SUMMARIZER_AGENT_KEY)
+    agents = [
+        key for key in reachable_agents(settings, named) if key in settings.agents.definitions
+    ]
+    used: set[str] = set()
+    for key in agents:
+        used |= servers_bound_to(settings, key)
+    if str(settings.triage.reputation) != "off":
+        used |= {
+            lookup.server
+            for lookup in pack_lookups(settings.mcp.servers, declarations(settings))
+            if lookup.enabled
+        }
+    # The triage pack: a step an operator declared calls its own server, and
+    # the capa, decoder and carve steps run in process on the env of the server
+    # declaring their tool.
+    from maljan.core.pack_servers import (
+        _CAPA_RENDERER,
+        _carve_server_key,
+        _decoder_server_key,
+        _step_server_key,
+    )
+    from maljan.core.pack_steps import effective_steps, steps_on_servers
+
+    # A shipped step whose server is off calls nothing (``steps_on_servers``).
+    steps, _off = steps_on_servers(
+        effective_steps(getattr(settings.triage, "steps", None) or ()), settings.mcp.servers
+    )
+    used |= {
+        str(step.server) for step in steps if step.enabled and not step.builtin and step.server
+    }
+    servers = settings.mcp.servers
+    used |= {
+        key
+        for key in (
+            _decoder_server_key(servers, steps),
+            _step_server_key(servers, steps, _CAPA_RENDERER, purpose="capa"),
+            _carve_server_key(servers),
+        )
+        if key
+    }
+    # The registry servers each static provider the job runs calls, as the
+    # provider itself names them.
+    from maljan.providers.registry import static_provider_servers
+
+    providers = {str(global_provider or settings.static.provider)} | {
+        str(static_provider_id_for(settings, key, global_provider=global_provider))
+        for key in agents
+    }
+    for provider in providers:
+        used |= static_provider_servers(provider, settings)
+    return used

@@ -314,6 +314,69 @@ class TestTheRetryIsShownTheAnswerAsWritten:
         assert "T9999" in _replayed(analyst)[0]
 
 
+def _asked(*questions: str) -> str:
+    """A findings block carrying one open question per text."""
+    import json
+
+    body = json.dumps(
+        {"open_questions": [{"question": q, "why_open": "obfuscated"} for q in questions]}
+    )
+    return f"```maljan-findings\n{body}\n```"
+
+
+class TestOpenQuestionsFollowTheKeptAnswer:
+    def test_a_kept_retry_carries_its_own_and_the_first_answer_s_it_did_not_repeat(
+        self,
+    ) -> None:
+        written = f"{_BLOCK_ANSWER}\n{_asked('first question', 'shared question')}"
+        retry = (
+            f"{_BLOCK_ANSWER.replace('T9999', 'T1055')}\n"
+            f"{_asked('retry question', 'shared question')}"
+        )
+        analyst = _WrittenAnalyst(written, [retry])
+
+        result = analyst.safe_analyze_isr("raw data")
+
+        assert [c.technique_id for c in result.claims] == ["T1055", "T1055"]
+        assert [q.question for q in result.open_questions] == [
+            "retry question",
+            "shared question",
+            "first question",
+        ]
+        assert analyst._open_questions_buffer == []
+
+    def test_a_kept_retry_rewritten_whole_without_questions_keeps_the_first_answer_s(
+        self,
+    ) -> None:
+        written = f"{_BLOCK_ANSWER}\n{_asked('first question')}"
+        retry = _BLOCK_ANSWER.replace("T9999", "T1055")
+        analyst = _WrittenAnalyst(written, [retry])
+
+        result = analyst.safe_analyze_isr("raw data")
+
+        assert [c.technique_id for c in result.claims] == ["T1055", "T1055"]
+        assert [q.question for q in result.open_questions] == ["first question"]
+        assert analyst._open_questions_buffer == []
+
+    def test_a_discarded_retry_leaves_the_first_answer_s_questions(self) -> None:
+        written = f"{_BLOCK_ANSWER}\n{_asked('first question')}"
+        # The retry loses a claim, so the first answer is kept.
+        retry = (
+            "CLAIM: allocates memory in another process\n"
+            "EVIDENCE: API call: VirtualAllocEx @ 0x401234\n"
+            "CONFIDENCE: 0.8\n"
+            "TECHNIQUE: T1055\n"
+            f"{_asked('retry question')}"
+        )
+        analyst = _WrittenAnalyst(written, [retry])
+
+        result = analyst.safe_analyze_isr("raw data")
+
+        assert len(result.claims) == 2
+        assert [q.question for q in result.open_questions] == ["first question"]
+        assert analyst._open_questions_buffer == []
+
+
 class TestFindingsFollowTheKeptAnswer:
     def test_a_discarded_retry_s_findings_are_not_published(self) -> None:
         written = f"{_BLOCK_ANSWER}\n{_fenced('first finding')}"

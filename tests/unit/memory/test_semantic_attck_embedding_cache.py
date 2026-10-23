@@ -84,7 +84,7 @@ class TestTheCacheRoundTripsExactly:
 
 
 class TestTheCacheCannotOutliveItsCorpus:
-    """The ATT&CK bundle auto-refreshes every 30 days. A cache keyed on
+    """The ATT&CK bundle auto-refreshes every 7 days. A cache keyed on
     anything looser than the corpus itself would silently serve the previous
     release's vectors, and search would keep answering — wrongly."""
 

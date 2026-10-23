@@ -12,9 +12,9 @@ Literature basis:
 
 from __future__ import annotations
 
-from typing import Any, Literal
+from typing import Any, Literal, get_args
 
-from pydantic import BaseModel, Field, PrivateAttr
+from pydantic import BaseModel, Field, PrivateAttr, model_validator
 
 # What a claim carrying an id the catalogue does not have is labelled with,
 # wherever it is printed. One string so the ISR summary the judge reads, the
@@ -178,11 +178,11 @@ class ClaimEvidence(BaseModel):
         """Record the ordinal of the block this claim was read from."""
         self._block = int(ordinal)
 
-    # The number the claim's heading wrote (``CLAIM 7:`` is ``"7"``), as
-    # digits, or ``None`` for a heading that wrote none and a claim built any
-    # other way (``claim_headings.heading_number``). Recorded where the claim
-    # is read, never serialised: a validation retry names the claims it
-    # changes by it (``pipeline.retry_merge``).
+    # The number the claim's heading wrote (``CLAIM 7:`` is ``"7"``, ``CLAIM
+    # R7:`` is ``"R7"``), as written, or ``None`` for a heading that wrote
+    # none and a claim built any other way (``claim_headings.heading_number``).
+    # Recorded where the claim is read, never serialised: a validation retry
+    # names the claims it changes by it (``pipeline.retry_merge``).
     _number: str | None = PrivateAttr(default=None)
 
     @property
@@ -251,6 +251,111 @@ class Finding(BaseModel):
     )
 
 
+# Why a question stays open, in the words an analyst picks from. A fixed set,
+# so the report can group the run's unknowns by cause and a later run can be
+# compared against this one; ``other`` keeps a cause the set has no word for,
+# said in the question's ``detail``.
+OpenQuestionReason = Literal[
+    "no_capable_tool",
+    "tool_failed",
+    "obfuscated",
+    "out_of_turns",
+    "needs_sandbox_run",
+    "other",
+]
+OPEN_QUESTION_REASONS: tuple[str, ...] = get_args(OpenQuestionReason)
+
+
+class OpenQuestion(BaseModel):
+    """One thing an analyst knows it did not establish, and what would answer it.
+
+    Not a claim and not a finding: an open question names an unknown, and it
+    is never read as an absence. "Whether the beacon interval is fixed" left
+    open says nothing about whether the sample beacons. Nothing that reads
+    claims, findings or artifacts reads it; the report prints it in its own
+    section and the analysts' summaries carry it to whoever can answer it.
+    """
+
+    question: str = Field(..., min_length=1, description="The question left open, in one line.")
+    why_open: OpenQuestionReason = Field(..., description="Why the analyst could not answer it.")
+    detail: str = Field("", description="What the analyst tried or saw, in its own words.")
+    would_answer: str = Field(
+        "", description="What would answer it: a kind of tool, another agent, a run."
+    )
+    # The declared tool kind that would answer it (``core.tool_declarations``),
+    # when the analyst names one: what the report's routing column reads.
+    tool_kind: str = Field("", description="The kind of tool that would answer it, if named.")
+    agent: str = Field("", description="The team agent that could answer it, if named.")
+    evidence_ids: list[str] = Field(
+        default_factory=list, description="Ledger entry ids the question rests on, if any."
+    )
+    # Which agent left it open, when it is not the agent whose ISR carries it:
+    # a specialist's question handed to the lead that asked it
+    # (``agents.delegation``). Empty for an agent's own question.
+    source: str = Field("", description="The agent that left the question open, if not this one.")
+
+    @model_validator(mode="before")
+    @classmethod
+    def _a_reason_outside_the_set_is_other(cls, data: Any) -> Any:
+        """A ``why_open`` outside the set, or none, is ``other``, its word kept in ``detail``.
+
+        The question is what matters; a cause written in a word of the model's
+        own is kept, not a reason to lose the question.
+        """
+        if not isinstance(data, dict):
+            return data
+        said = data.get("why_open")
+        if isinstance(said, str) and said in OPEN_QUESTION_REASONS:
+            return data
+        word = "" if said is None else " ".join(str(said).split())
+        detail = " ".join(str(data.get("detail") or "").split())
+        noted = f"why open, as written: {word}" if word else ""
+        return {
+            **data,
+            "why_open": "other",
+            "detail": "; ".join(part for part in (detail, noted) if part),
+        }
+
+
+def _one_line(value: Any) -> str:
+    """``value`` with every run of whitespace one space: a model's text keeps no line of its own."""
+    return " ".join(str(value or "").split())
+
+
+def would_answer_text(question: OpenQuestion) -> str:
+    """What would answer ``question``, in its own words, with the kind and agent it names."""
+    named = ", ".join(
+        part
+        for part in (
+            f"tool kind {_one_line(question.tool_kind)}" if question.tool_kind.strip() else "",
+            f"agent {_one_line(question.agent)}" if question.agent.strip() else "",
+        )
+        if part
+    )
+    said = _one_line(question.would_answer)
+    if not named:
+        return said
+    return f"{said} ({named})" if said else named
+
+
+def open_question_line(question: OpenQuestion) -> str:
+    """One open question as an ISR summary shows it to a model, on one line.
+
+    Every field is the model's text with its whitespace collapsed, so nothing
+    in a question can open a line the summary reads as its own (a claim, a
+    convergence signal).
+    """
+    parts = [f"{_one_line(question.question)} | Why open: {question.why_open}"]
+    if question.detail.strip():
+        parts.append(f"Detail: {_one_line(question.detail)}")
+    answer = would_answer_text(question)
+    if answer:
+        parts.append(f"Would answer it: {answer}")
+    if question.evidence_ids:
+        parts.append(f"Evidence: {_one_line(', '.join(question.evidence_ids))}")
+    return " | ".join(parts)
+
+
 def claim_summary_line(number: int, claim: ClaimEvidence) -> str:
     """One claim as an ISR summary shows it to a model (``AgentISR.to_text_summary``).
 
@@ -309,6 +414,14 @@ class AgentISR(BaseModel):
     artifacts: list[Artifact] = Field(
         default_factory=list,
         description="Concrete artifacts this agent established, for the report's sections.",
+    )
+    # What the analyst knows it left unanswered (``OpenQuestion``), from the
+    # same optional block. Left out of the serialised ISR when empty, so an
+    # ISR stored before the channel existed reads and dumps the same.
+    open_questions: list[OpenQuestion] = Field(
+        default_factory=list,
+        description="Questions this agent left open, why, and what would answer them.",
+        exclude_if=lambda value: not value,
     )
     # Why this ISR looks the way it does, when the analyst knows something the
     # claim list cannot say. An analyst that ended its loop on an intention
@@ -454,6 +567,14 @@ class AgentISR(BaseModel):
 
         for i, claim in enumerate(self.claims, 1):
             lines.append(f"  {claim_summary_line(i, claim)}")
+
+        # An unknown the analyst names, for a peer, the mediator, the judge
+        # or the lead that asked to route: never an absence, and absent from
+        # the summary when the analyst named none.
+        if self.open_questions:
+            lines.append("  Open questions (unknowns, not absences):")
+            for question in self.open_questions:
+                lines.append(f"    - {open_question_line(question)}")
 
         if self.dissent_items:
             lines.append("  Disputes:")

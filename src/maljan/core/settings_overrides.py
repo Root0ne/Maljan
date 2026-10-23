@@ -92,12 +92,126 @@ def build_settings(core_overrides: Mapping[str, Any]) -> Settings:
     return _built(core_overrides)[0]
 
 
+class StoredValueRefused(ValueError):
+    """A stored setting value the model refuses: named, with why and the remedy.
+
+    Raised by every read that runs something (a job, an API read, the ATT&CK
+    cron) instead of falling back to a default: a refused spend cap, server
+    map, allow-list or timeout must never quietly become a less safe one.
+    """
+
+    def __init__(self, refused: Mapping[str, str]) -> None:
+        self.refused = {f"core.{key}": reason for key, reason in refused.items()}
+        named = "; ".join(f"{key}: {reason}" for key, reason in self.refused.items())
+        super().__init__(
+            f"A stored setting value is refused ({named}). Fix it or reset it in the "
+            "console (Settings, Configuration); nothing runs on a default in its place."
+        )
+
+
+def settings_from_store(
+    core_overrides: Mapping[str, Any], *, stored_keys: Iterable[str] | None = None
+) -> Settings:
+    """:func:`build_settings` for a read that runs something: a refused stored value
+    fails it loudly, naming the key, the reason and the remedy.
+
+    A refusal not about a key in ``stored_keys`` (all of ``core_overrides``
+    when ``None``), such as a value a job brought itself, is raised as the
+    model raised it.
+    """
+    from pydantic import ValidationError
+
+    try:
+        return build_settings(core_overrides)
+    except ValidationError as exc:
+        eligible = set(core_overrides if stored_keys is None else stored_keys)
+        found = _refused_stored_keys(exc, core_overrides, eligible)
+        if not found:
+            raise
+        refused = StoredValueRefused(found)
+        from maljan.core.logger import logger
+
+        logger.error("%s", refused)
+        # ``from None``: the model's error, whose text holds the refused input
+        # (a secret, possibly), never travels with this one.
+        raise refused from None
+
+
+def stored_settings(
+    core_overrides: Mapping[str, Any], *, stored_keys: Iterable[str] | None = None
+) -> tuple[Settings, dict[str, str]]:
+    """The settings page's read alone: the stored values the model refuses, read past.
+
+    Only so the console can open while a stored value is refused and the admin
+    can repair it there: that key is left out (its default shown), and it is
+    returned with the reason, for the page's banner and the row's notice.
+    Nothing that runs reads settings this way (:func:`settings_from_store`
+    refuses); a save validates with :func:`build_settings`, which refuses.
+    """
+    from pydantic import ValidationError
+
+    remaining = dict(core_overrides)
+    eligible = set(remaining if stored_keys is None else stored_keys)
+    refused: dict[str, str] = {}
+    while True:
+        try:
+            built = build_settings(remaining)
+        except ValidationError as exc:
+            found = _refused_stored_keys(exc, remaining, eligible)
+            if not found:
+                raise
+            for key, reason in found.items():
+                remaining.pop(key, None)
+                refused[key] = reason
+            continue
+        if refused:
+            _warn_refused_values(refused)
+        return built, refused
+
+
+def _refused_stored_keys(
+    exc: Any, remaining: Mapping[str, Any], eligible: set[str]
+) -> dict[str, str]:
+    """Each stored key a validation error is about, with its message."""
+    found: dict[str, str] = {}
+    for error in exc.errors():
+        path = ".".join(str(part) for part in error.get("loc", ()))
+        owners = [
+            key
+            for key in remaining
+            if key in eligible and (path == key or path.startswith(key + "."))
+        ]
+        if owners:
+            found[max(owners, key=len)] = str(error.get("msg") or "refused")
+    return found
+
+
+_WARNED_VALUES: set[tuple[tuple[str, str], ...]] = set()
+
+
+def _warn_refused_values(refused: Mapping[str, str]) -> None:
+    from maljan.core.logger import logger
+
+    marker = tuple(sorted(refused.items()))
+    if marker in _WARNED_VALUES:
+        return
+    if len(_WARNED_VALUES) < _WARNED_STEPS_MAX:
+        _WARNED_VALUES.add(marker)
+    for key, reason in refused.items():
+        logger.warning(
+            "The stored value of %s is not in force (%s); its default is used until it is "
+            "saved again or reset.",
+            key,
+            reason,
+        )
+
+
 # The stored leaf of the triage pack's steps (``core.pack_steps``).
 PACK_STEPS_PATH = "triage.steps"
 
 
 def _built(
-    core_overrides: Mapping[str, Any], excused: Callable[[PackStep], bool] | None = None
+    core_overrides: Mapping[str, Any], set_aside: Callable[[PackStep], str | None] | None = None
 ) -> tuple[Settings, list[LeftOutStep]]:
     """The settings :func:`build_settings` builds, and the stored pack steps it left out.
 
@@ -106,8 +220,9 @@ def _built(
     step it changed in force again, so one stale step never costs a job every
     setting. A save holds the steps it changes to the strict rules
     (:func:`pack_step_refusals`); the console names each step left out and
-    why (:func:`pack_steps_left_out`). A step ``excused`` names is not held
-    to the settings' own check (:func:`_left_out_checked`).
+    why (:func:`pack_steps_left_out`). A step ``set_aside`` answers for
+    (anything but ``None``) is not held to the settings' own check: its
+    answer is its problem, ``""`` for none (:func:`_left_out_checked`).
     """
     token = STORE_ONLY.set(True)
     try:
@@ -119,11 +234,12 @@ def _built(
     finally:
         STORE_ONLY.reset(token)
     problem = built.pack_step_problem
-    if excused is not None:
-        held = excused
+    if set_aside is not None:
+        held = set_aside
 
         def problem(step: PackStep) -> str:
-            return "" if held(step) else built.pack_step_problem(step)
+            said = held(step)
+            return built.pack_step_problem(step) if said is None else said
 
     kept, left = steps_left_out(stored, problem)
     if left:
@@ -159,7 +275,7 @@ def _warn_left_out_steps(left: list[str]) -> None:
 
 def left_out_pack_steps(core_overrides: Mapping[str, Any]) -> list[str]:
     """The stored pack steps :func:`build_settings` leaves out, by id (else position), once each."""
-    return _names_once(_left_out_checked(core_overrides))
+    return _names_once(_left_out_checked(core_overrides, list_set_aside=True))
 
 
 def pack_steps_left_out(core_overrides: Mapping[str, Any]) -> dict[str, str]:
@@ -175,12 +291,88 @@ def pack_steps_left_out(core_overrides: Mapping[str, Any]) -> dict[str, str]:
     from maljan.core.tool_declarations import loggable_text
 
     out: dict[str, list[str]] = {}
-    for entry in _left_out_checked(core_overrides):
+    for entry in _left_out_checked(core_overrides, list_set_aside=True):
         reasons = out.setdefault(loggable_text(entry.name), [])
         reason = loggable_text(entry.reason)
         if reason not in reasons:
             reasons.append(reason)
     return {name: "; ".join(reasons) for name, reasons in out.items()}
+
+
+UNKNOWN_KEY_MAPS: tuple[str, ...] = (
+    "llm.agents",
+    "react_agent_timeout_overrides",
+    "react_agent_max_steps_overrides",
+)
+DEFINITIONS_PATH = "agents.definitions"
+
+
+def unknown_reference_refusals(
+    merged: Mapping[str, Any], current: Mapping[str, Any]
+) -> dict[str, str]:
+    """The refusal of a save that brings a reference to nothing the settings hold.
+
+    ``merged`` and ``current`` are core overrides (no ``core.`` prefix) after
+    and before the save. Refused: a key of ``llm.agents`` or of a
+    ``react_agent_*_overrides`` map that names no agent definition and no
+    model-calling role (nothing would read it), and a ``capability`` tool
+    reference no server declares a tool of (it would resolve to no server).
+    Each is named, with what is available. What is already stored, sent back
+    as stored, is never refused, so stored settings stay readable and no
+    unrelated save is blocked; where the merged values do not build, the model
+    refuses them itself.
+    """
+    from pydantic import ValidationError
+
+    from maljan.agents.composition import servers_of_capability
+    from maljan.core.config import ROLE_ENTRY_KEYS
+
+    try:
+        built = build_settings(merged)
+    except ValidationError:
+        return {}
+    roster = {*built.agents.definitions, *ROLE_ENTRY_KEYS}
+    available = ", ".join(sorted(roster))
+    refused: dict[str, str] = {}
+    for path in UNKNOWN_KEY_MAPS:
+        held = merged.get(path)
+        stored = current.get(path)
+        stored_keys = set(stored) if isinstance(stored, Mapping) else set()
+        unknown = [
+            str(key)
+            for key in (held if isinstance(held, Mapping) else {})
+            if key not in roster and key not in stored_keys
+        ]
+        if unknown:
+            refused[f"{CORE_NS}.{path}"] = (
+                f"{', '.join(unknown)}: names no agent, so nothing would read it. "
+                f"Available: {available}"
+            )
+    stored_defs = current.get(DEFINITIONS_PATH)
+    stored_defs = stored_defs if isinstance(stored_defs, Mapping) else {}
+    problems: list[str] = []
+    for key, definition in built.agents.definitions.items():
+        stored_refs = stored_defs.get(key)
+        stored_refs = stored_refs.get("tools") if isinstance(stored_refs, Mapping) else None
+        stored_caps = {
+            ref.get("capability")
+            for ref in (stored_refs if isinstance(stored_refs, list) else [])
+            if isinstance(ref, Mapping)
+        }
+        for ref in definition.tools:
+            capability = str(ref.capability)
+            if (
+                ref.kind == "capability"
+                and capability not in stored_caps
+                and not servers_of_capability(built.mcp.servers, capability)
+            ):
+                problems.append(
+                    f"{key!r} references capability {capability!r}, which no tool server "
+                    "declares a tool of, so it would resolve to no server"
+                )
+    if problems:
+        refused[f"{CORE_NS}.{DEFINITIONS_PATH}"] = "; ".join(problems)
+    return refused
 
 
 def pack_step_refusals(merged: Mapping[str, Any], current: Mapping[str, Any]) -> dict[str, str]:
@@ -215,16 +407,21 @@ def pack_step_refusals(merged: Mapping[str, Any], current: Mapping[str, Any]) ->
     }
 
 
-def _left_out_checked(core_overrides: Mapping[str, Any]) -> list[LeftOutStep]:
+def _left_out_checked(
+    core_overrides: Mapping[str, Any], *, list_set_aside: bool = False
+) -> list[LeftOutStep]:
     """The stored steps left out of ``core_overrides``, also where other settings do not build.
 
     What the model refuses is set aside, a refused entry of a map setting
     alone where the refusal names one, the rest kept, and the steps are
-    checked against what is left; a step naming a set-aside entry (any of its
-    values is that entry's name) is not held to the settings' own check, so
+    checked against what is left. A step whose ``server`` is a set-aside
+    entry of the tool-server map is not held to the settings' own check, so
     a server present in a refused map is never called unknown, its own
-    refusal standing for it. Where even that does not build, the steps are
-    checked on their own, without the checks that need the built settings.
+    refusal standing for it: a save's refusal leaves it to that refusal,
+    and with ``list_set_aside`` (the console's listing) it is listed, saying
+    its server's stored entry is refused. Only the step's server is matched,
+    never another value it holds. Where even that does not build, the steps
+    are checked on their own, without the checks that need the built settings.
     """
     try:
         return _built(core_overrides)[1]
@@ -252,33 +449,35 @@ def _left_out_checked(core_overrides: Mapping[str, Any]) -> list[LeftOutStep]:
             whole.update(key for parts, key in keys.items() if parts[: len(loc)] == loc and loc)
     if not whole and not entries:
         return steps_left_out(core_overrides.get(PACK_STEPS_PATH))[1]
-    excused: set[str] = set()
+    servers: set[str] = set()
     rest: dict[str, Any] = {}
     for key, value in core_overrides.items():
         if key in whole:
-            if isinstance(value, Mapping):
-                excused.update(str(name) for name in value)
+            if key == SERVER_MAP_PATH and isinstance(value, Mapping):
+                servers.update(str(name) for name in value)
         elif key in entries:
             dropped = entries[key]
-            excused.update(dropped)
+            if key == SERVER_MAP_PATH:
+                servers.update(dropped)
             rest[key] = {name: item for name, item in value.items() if name not in dropped}
         else:
             rest[key] = value
+
+    def on_a_refused_server(step: PackStep) -> str | None:
+        if not step.server or step.server not in servers:
+            return None
+        if not list_set_aside:
+            return ""
+        return (
+            f"triage step {step.id!r}: the stored entry of its server {step.server!r} is "
+            "refused (see the refused stored values), so the step is not checked or run "
+            "until that entry is fixed or reset"
+        )
+
     try:
-        return _built(rest, lambda step: _names_any(step, excused))[1]
+        return _built(rest, on_a_refused_server)[1]
     except ValueError:
         return steps_left_out(core_overrides.get(PACK_STEPS_PATH))[1]
-
-
-def _names_any(step: PackStep, names: set[str]) -> bool:
-    """Whether any value ``step`` holds, or holds in a list, is one of ``names``."""
-    if not names:
-        return False
-    for value in step.model_dump(mode="json").values():
-        for item in value if isinstance(value, list) else [value]:
-            if isinstance(item, str) and item in names:
-                return True
-    return False
 
 
 def _left_out_items(core_overrides: Mapping[str, Any], left: Iterable[LeftOutStep]) -> list[str]:
@@ -324,6 +523,21 @@ def shipped_tool_facts(block: str) -> dict[str, Any]:
     held = node.get(TOOL_FACTS_FIELD) if isinstance(node, Mapping) else None
     # A copy all the way down: the dump is cached for the process.
     return copy.deepcopy(dict(held)) if isinstance(held, Mapping) else {}
+
+
+def shipped_tools(block: str) -> list[str] | None:
+    """The tool allow-list the block at dotted path ``block`` ships; ``None`` for every tool.
+
+    Read as :func:`shipped_tool_facts` reads its block; a block that is not in
+    the shipped settings ships no allow-list.
+    """
+    node: Any = _shipped_dump()
+    for part in block.split("."):
+        if not isinstance(node, Mapping) or part not in node:
+            return None
+        node = node[part]
+    held = node.get("tools") if isinstance(node, Mapping) else None
+    return [str(name) for name in held] if isinstance(held, list) else None
 
 
 _SERVER_PREFIX = f"{SERVER_MAP_PATH}."
@@ -417,27 +631,71 @@ def effective_source(*, overridden: bool) -> Source:
     return "ui" if overridden else "default"
 
 
-# ``mcp.servers.<key>.env.<VAR>`` after flattening: an open-ended mapping an
-# admin fills in, and the natural place for a server's own credential (a token
-# a sidecar reads from its environment).
-_SERVER_ENV_VALUE = re.compile(r"^mcp\.servers\.[^.]+\.env\.")
+def _scrubbed(value: Any, secrets: list[str]) -> Any:
+    """``value`` with no configured secret value left in it."""
+    from maljan.core.settings_masking import SNAPSHOT_MASK
+
+    if isinstance(value, str):
+        if value in secrets:
+            return SNAPSHOT_MASK
+        for secret in secrets:
+            value = value.replace(secret, SNAPSHOT_MASK)
+        return value
+    if isinstance(value, list):
+        return [_scrubbed(item, secrets) for item in value]
+    if isinstance(value, dict):
+        return {key: _scrubbed(item, secrets) for key, item in value.items()}
+    return value
 
 
-def public_snapshot(settings: Settings, secret_keys: Iterable[str]) -> dict[str, Any]:
+def masked_settings_tree(settings: Settings) -> tuple[dict[str, Any], list[str]]:
+    """``(the settings dump masked for a record, the secret leaf paths)``.
+
+    The one masking of a settings instance for a record (``public_snapshot``,
+    and through it the efficiency fingerprint): ``settings_masking.masked_dump``
+    (each tool-server block's env values with their names kept, credential
+    flags in its arguments, every URL, every open-mapping entry whose key names
+    a credential).
+    """
+    from maljan.core.settings_catalog import snapshot_hidden_paths
+    from maljan.core.settings_masking import masked_dump
+
+    typed, _servers = snapshot_hidden_paths(settings)
+    return masked_dump(settings, settings.model_dump(mode="json")), typed
+
+
+def public_snapshot(settings: Settings, secret_keys: Iterable[str] = ()) -> dict[str, Any]:
     """The settings as they ran, with nothing in them a reader may not see.
 
-    ``secret_keys`` names the leaves typed as secrets. To those this adds
-    the one place a credential can live without being typed as one: a
-    server's ``env`` map. This snapshot reaches the job owner
-    through ``run_summary.settings_snapshot``, so every value under such a map
-    is masked. The variable names stay -- an operator debugging a server needs
-    to see what it was handed -- and only the values go.
+    This snapshot reaches everyone who may read the report, through
+    ``run_summary.settings_snapshot`` and the disclosure record, so it carries
+    no secret:
+
+    * every leaf the catalogue types as a secret, wherever it sits
+      (``settings_catalog.snapshot_hidden_paths``), and each of
+      ``secret_keys``, is ``"***"`` when set and ``None`` when not;
+    * every tool server's ``env`` value is ``"***"``, its names kept; a
+      credential a flag of its arguments names is ``"***"``
+      (``settings_masking.masked_server``);
+    * every URL keeps no user name, password, query value or fragment, and
+      every entry whose key names a credential is ``"***"``
+      (``settings_masking.masked_value``);
+    * every value the settings hold as a secret by the event scrub's rules
+      (``settings_catalog.configured_secret_values``) is masked wherever it
+      still appears.
     """
-    secrets = set(secret_keys)
-    snap = flatten(settings.model_dump(mode="json"))
-    for key in list(snap):
-        if key in secrets or _SERVER_ENV_VALUE.match(key):
-            snap[key] = "***" if snap[key] else None
+    from maljan.core.settings_catalog import configured_secret_values
+    from maljan.core.settings_masking import SNAPSHOT_MASK
+
+    tree, typed = masked_settings_tree(settings)
+    secrets = set(secret_keys) | set(typed)
+    values = sorted(configured_secret_values(settings), key=len, reverse=True)
+    snap: dict[str, Any] = {}
+    for key, value in flatten(tree).items():
+        if key in secrets:
+            snap[key] = SNAPSHOT_MASK if value else None
+        else:
+            snap[key] = _scrubbed(value, values)
     return snap
 
 
@@ -501,10 +759,39 @@ def trim_declarations(
 _CREDENTIAL_IN_URL = re.compile(r"(://)[^\s/@]*(?:@[^\s/@]*)*@")
 
 
+# The words that make a parameter name a secret's, read as whole tokens: the
+# name is split at ``_``, ``.``, ``-`` and camelCase humps, so ``clientSecret``
+# and ``x-sig`` are caught and ``design``, ``keyword`` and ``author`` are not.
+_SECRET_WORDS = frozenset(
+    {
+        "key", "apikey", "token", "secret", "password", "passwd", "pwd", "auth",
+        "credential", "sig", "signature", "sas", "code",
+    }
+)  # fmt: skip
+_QUERY_PARAM = re.compile(r"([?&#])([\w.-]+)=([^\s&#\"'<>]*)")
+# A URL: from its scheme to the next space or quote.
+_URL_SPAN = re.compile(r"[a-zA-Z][a-zA-Z0-9+.-]*://[^\s\"'<>]*")
+
+
+def _secret_name(name: str) -> bool:
+    spaced = re.sub(r"(?<=[a-z0-9])(?=[A-Z])", "_", name).lower()
+    return any(token in _SECRET_WORDS for token in re.split(r"[_.-]+", spaced))
+
+
+def _mask_param(param: re.Match[str]) -> str:
+    if _secret_name(param.group(2)):
+        return f"{param.group(1)}{param.group(2)}=***"
+    return param.group(0)
+
+
+def _mask_secret_params(url: re.Match[str]) -> str:
+    return _QUERY_PARAM.sub(_mask_param, url.group(0))
+
+
 def redact_url(text: str) -> str:
-    """Mask any ``scheme://user:pass@`` credential in ``text`` before it is shown.
+    """Mask any ``scheme://user:pass@`` credential, and any secret-named query parameter.
 
     Applied to free text (a driver's error message, a config value echoed
     back), not only to values known to be URLs.
     """
-    return _CREDENTIAL_IN_URL.sub(r"\1***@", text)
+    return _URL_SPAN.sub(_mask_secret_params, _CREDENTIAL_IN_URL.sub(r"\1***@", text))

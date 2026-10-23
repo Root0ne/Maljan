@@ -64,10 +64,14 @@ def resolve_data(path_like: str | Path) -> Path:
 def resolve_mcp_args(args: list[str]) -> list[str]:
     """Resolve relative paths inside MCP ``args`` against the project root.
 
-    Any argument that looks like a relative file or directory path (contains
-    ``/`` or ``\\`` but does *not* start with a drive letter on Windows or
-    a leading ``/`` on Unix) is expanded to an absolute path rooted at the
-    project directory.  CLI flags and already-absolute paths are left untouched.
+    An argument is rooted at the project directory only when it is a relative
+    path into it: it contains ``/`` or ``\\``, is not absolute, carries no
+    scheme or other colon (``https://…``, ``git+https://…``, an image
+    reference's ``:tag``), does not start with ``@`` (an npm ``@scope/pkg``)
+    and holds no ``=``, and its first component exists under the project root
+    (``scripts/dev/ghidra_manager.py``, ``./tools/x``, ``data/out/new.json``).
+    Anything else — a package or image name, a URL, ``owner/repo``, a CLI
+    flag — reaches the child exactly as written.
 
     This allows ``.env`` files to store portable relative paths such as
     ``scripts/dev/ghidra_manager.py`` instead of hard-coding host-specific
@@ -77,28 +81,23 @@ def resolve_mcp_args(args: list[str]) -> list[str]:
         args: Raw argument list from :class:`~maljan.core.config.MCPServerConfig`.
 
     Returns:
-        A new list with relative paths resolved to absolute paths.
+        A new list with relative project paths resolved to absolute paths.
     """
     project_root = get_project_root()
-    resolved: list[str] = []
-    for arg in args:
-        # Skip CLI flags
-        if arg.startswith("-"):
-            resolved.append(arg)
-            continue
+    return [_rooted(arg, project_root) for arg in args]
 
-        p = Path(arg)
-        # Already absolute -> keep as-is
-        if p.is_absolute():
-            resolved.append(arg)
-            continue
 
-        # Contains a separator -> treat as a relative path to resolve
-        if "/" in arg or "\\" in arg:
-            resolved.append(str(project_root / p))
-            continue
-
-        # Plain value (e.g. "stdio", "root", "Ubuntu")
-        resolved.append(arg)
-
-    return resolved
+def _rooted(arg: str, project_root: Path) -> str:
+    """``arg`` rooted at ``project_root`` when it is a relative path into it, else as written."""
+    if arg.startswith(("-", "@")) or ":" in arg or "=" in arg:
+        return arg
+    if "/" not in arg and "\\" not in arg:
+        # Plain value (e.g. "stdio", "root", "Ubuntu").
+        return arg
+    p = Path(arg)
+    if p.is_absolute():
+        return arg
+    first = arg.replace("\\", "/").split("/", 1)[0]
+    if not first or not (project_root / first).exists():
+        return arg
+    return str(project_root / p)

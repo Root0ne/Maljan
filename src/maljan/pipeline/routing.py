@@ -18,9 +18,20 @@ Decision priority (highest to lowest), in ``debate_route``:
      mediation's (``debate_facts.same_points``: none resolved, none new):
      another round would argue the same points. Judge
      (``contested_points_unchanged``); no consensus is claimed.
+     Ledger stated — every blocking line of this mediation states only counts
+     the ledger states, and an earlier mediation told the analysts those
+     counts (``debate_facts.ledger_stated``): another round would argue
+     counts already told. Judge (``ledger_stated``); no consensus is claimed,
+     and the lines stay standing disagreements for the judge and the report.
   4. Sycophancy is a fact told to the mediator, never a route of its own.
   5. Genuine LLM consensus (no listed line the mediator marked blocking, or
      left unmarked) — judge.
+     Reworded — no consensus, and every revision of the round right before
+     this mediation states the claims in force again, wording aside (the same
+     values, entry ids, techniques, negators, confidence step and technical
+     terms, ``claim_drops.unchanged_in_substance``):
+     another round would argue over wording. Judge (``reworded``); no
+     consensus is claimed.
   6. Adaptive termination — statistical confidence convergence, with no
      contradiction standing → judge.
      No contested point — the mediator's final block was read and lists no
@@ -50,7 +61,7 @@ from __future__ import annotations
 import math
 from typing import Any
 
-from maljan.core.config import Settings
+from maljan.core.config import MEDIATOR_AGENT_NAME, Settings
 from maljan.core.logger import logger
 from maljan.pipeline.state import AnalysisState
 
@@ -133,6 +144,13 @@ NO_CONTESTED_POINT = "no_contested_point"
 # blocking lines are the last mediation's contested points, none resolved and
 # none new: the round changed none of them.
 POINTS_UNCHANGED = "contested_points_unchanged"
+# Every revision of the round before this mediation states the claims in
+# force again, wording aside: the round changed no value, entry id, technique,
+# negation, confidence step or technical term.
+REWORDED = "reworded"
+# Every blocking line of this mediation states only counts the ledger states,
+# and the analysts were told them by an earlier mediation.
+LEDGER_STATED = "ledger_stated"
 # Why a revision round opens.
 NO_CONSENSUS = "no_consensus"
 
@@ -141,14 +159,97 @@ def _quiet(*_args: Any, **_kwargs: Any) -> None:
     """A log call that says nothing."""
 
 
-def revision_round_before(state: Any, *, mediations: int | None = None) -> dict[str, Any] | None:
+def debate_start(state: Any, stage: str | None = None) -> tuple[str, dict[str, int]]:
+    """``(stage key, where it began)`` for debate ``stage``, or ``("", {})`` when unrecorded.
+
+    ``stage`` ``None`` is the debate the state was last in: the one whose first
+    mediation came latest. A state written before debates recorded their start
+    has none, and is read as one debate from the run's first mediation, as it
+    always was.
+    """
+    starts = state.get("debate_starts") or {}
+    if not isinstance(starts, dict):
+        return "", {}
+    if stage is not None:
+        row = starts.get(stage)
+        return (stage, row) if isinstance(row, dict) else ("", {})
+    rows = [(key, row) for key, row in starts.items() if isinstance(row, dict)]
+    if not rows:
+        return "", {}
+    return max(rows, key=lambda item: int(item[1].get("mediations") or 0))
+
+
+def with_debate_start(state: Any, stage: str | None, update: dict[str, Any]) -> dict[str, Any]:
+    """``update`` with where debate ``stage`` began, on the first mediation it holds.
+
+    Recorded once per stage, from the state the mediation read: the run's
+    mediation count, the length of its confidence series and of its
+    discussion. A node output that held no mediation (no ``iteration_count``)
+    records nothing.
+    """
+    if not stage or "iteration_count" not in update:
+        return update
+    if stage in (state.get("debate_starts") or {}):
+        return update
+    start = {
+        "mediations": int(state.get("iteration_count") or 0),
+        "confidences": len(state.get("confidence_history") or []),
+        "arguments": len(state.get("discussion_history") or []),
+    }
+    return {**update, "debate_starts": {stage: start}}
+
+
+def debate_rounds(state: Any, stage: str | None = None) -> int:
+    """The mediations debate ``stage`` has held: the run's count less where it began."""
+    _key, start = debate_start(state, stage)
+    held = int(state.get("iteration_count", 0) or 0)
+    return max(0, held - int(start.get("mediations") or 0))
+
+
+def rounds_held_before(state: Any, stage: str | None) -> int:
+    """The mediations debate ``stage`` held before the one now being held.
+
+    A stage with no recorded start, in a state where another debate recorded
+    its own, is opening: it has held none, whatever the run's count. A state
+    where no debate recorded a start reads the run's count, as it always did.
+    """
+    starts = state.get("debate_starts") or {}
+    if stage and isinstance(starts, dict) and starts and stage not in starts:
+        return 0
+    return debate_rounds(state, stage) if stage else int(state.get("iteration_count", 0) or 0)
+
+
+def debate_view(state: Any, stage: str | None = None) -> Any:
+    """``state`` as debate ``stage`` reads it: its own confidence series and discussion.
+
+    An earlier debate's numbers and mediations are not this debate's: read
+    with them, a second debate ended on the first one's stable confidence or
+    paired its first mediation with the first debate's last.
+    """
+    _key, start = debate_start(state, stage)
+    if not start:
+        return state
+    view = dict(state)
+    view["confidence_history"] = list(state.get("confidence_history") or [])[
+        int(start.get("confidences") or 0) :
+    ]
+    view["discussion_history"] = list(state.get("discussion_history") or [])[
+        int(start.get("arguments") or 0) :
+    ]
+    return view
+
+
+def revision_round_before(
+    state: Any, *, mediations: int | None = None, stage: str | None = None
+) -> dict[str, Any] | None:
     """The record of the revision round right before mediation ``mediations``, or ``None``.
 
     ``mediations`` counts the mediations held with that one included; it is
     the state's ``iteration_count`` once the mediation has run, which is what
     the router reads. That round recorded the mediation count it followed, one
     less. A record of any other round (the last round of an earlier debate
-    stage of the same run) is not this debate's.
+    stage of the same run) is not this debate's, and neither is one another
+    debate ``stage`` recorded.
     """
     held = int(state.get("iteration_count", 0)) if mediations is None else int(mediations)
     rounds = state.get("revision_rounds") or []
@@ -156,6 +257,8 @@ def revision_round_before(state: Any, *, mediations: int | None = None) -> dict[
     if not isinstance(last, dict):
         return None
     if int(last.get("round", -1)) != held - 1:
+        return None
+    if stage and last.get("stage") and str(last.get("stage")) != stage:
         return None
     return last
 
@@ -179,7 +282,7 @@ def last_two_mediations(history: Any) -> tuple[Any, Any] | None:
     """The two latest mediator contributions of ``history``, earlier first, or ``None``."""
     found: list[Any] = []
     for argument in reversed(list(history or [])):
-        if getattr(argument, "agent_name", "") == "Mediator":
+        if getattr(argument, "agent_name", "") == MEDIATOR_AGENT_NAME:
             found.append(argument)
             if len(found) == 2:
                 return found[1], found[0]
@@ -207,8 +310,26 @@ def points_unchanged(state: Any) -> bool:
     )
 
 
+def only_ledger_stated(state: Any) -> bool:
+    """Whether every blocking line of the last mediation is one the ledger states, told before.
+
+    Read from the mediation's own record (``AgentArgument.ledger_stated``,
+    one sentence per distinct blocking line it holds), and only where the
+    mediation was made (``status`` complete) and lists a blocking line.
+    """
+    history = state.get("discussion_history") or []
+    last = history[-1] if history else None
+    if last is None or getattr(last, "agent_name", "") != MEDIATOR_AGENT_NAME:
+        return False
+    if getattr(last, "status", "complete") != "complete":
+        return False
+    lines = {str(line) for line in getattr(last, "contradictions", None) or []}
+    stated = list(getattr(last, "ledger_stated", None) or [])
+    return bool(lines) and len(stated) == len(lines)
+
+
 def route_within_limit(
-    state: Any, *, sycophancy_check: bool = True, log: bool = True
+    state: Any, *, sycophancy_check: bool = True, log: bool = True, stage: str | None = None
 ) -> tuple[str, str]:
     """The decision with the round limit left aside: ``(route, reason)``.
 
@@ -217,9 +338,16 @@ def route_within_limit(
 
     ``log=False`` is the run summary reading the reason after the fact: the
     decision was logged when the router made it.
+
+    ``stage`` is the debate stage deciding (``None``: the debate the state was
+    last in). Its rounds, confidence series and mediations are its own; an
+    earlier debate's are not read.
     """
     say = logger.info if log else _quiet
-    iteration = state.get("iteration_count", 0)
+    key, _start = debate_start(state, stage)
+    iteration = debate_rounds(state, stage)
+    revised = revision_round_before(state, stage=key or None)
+    state = debate_view(state, stage)
     consensus = state.get("is_consensus", False)
     confidence_history: list[float] = state.get("confidence_history") or []
 
@@ -264,7 +392,6 @@ def route_within_limit(
     # whitespace aside: the answers the next mediation would read are the
     # ones this one read. A fact, not a reading of meaning. A round in which
     # no revision stood (every one failed or was not made) is not convergence.
-    revised = revision_round_before(state)
     if revised is not None and int(revised.get("made") or 0) > 0 and revised.get("identical"):
         say(
             "Debate converged at round %d: every revision of the last round is the "
@@ -302,6 +429,18 @@ def route_within_limit(
         )
         return "judge", POINTS_UNCHANGED
 
+    # Every blocking line of this mediation states only counts the ledger
+    # states, and the analysts it names were told them by an earlier
+    # mediation: another round would argue counts already told. The lines
+    # stand as disagreements; no agreement is claimed.
+    if only_ledger_stated(state):
+        say(
+            "Every blocking line of round %d states only counts the ledger states and the "
+            "analysts were told; routing to judge with the answers in force.",
+            iteration,
+        )
+        return "judge", LEDGER_STATED
+
     # Sycophancy is a fact told to the mediator (``sycophancy_detector``); it
     # never overrides the mediator's consensus or a block with no contested
     # point, and never opens a round of its own.
@@ -309,12 +448,23 @@ def route_within_limit(
         say("Genuine consensus reached at round %d.", iteration)
         return "judge", CONSENSUS
 
+    # Every revision of the round before states the claims in force again,
+    # wording aside: what the analysts claim, cite and map did not move, and a
+    # round more would argue over words. The answers in force go to the judge.
+    if revised is not None and int(revised.get("made") or 0) > 0 and revised.get("reworded"):
+        say(
+            "Every revision of the round before round %d states the claims in force again, "
+            "wording aside; routing to judge with the answers in force.",
+            iteration,
+        )
+        return "judge", REWORDED
+
     # Adaptive termination on the confidence series, unless the last
     # mediation lists contradictions still standing: a number that stopped
     # moving is not agreement while the mediator says what is disputed. The
     # round limit still bounds the debate.
     standing = bool(getattr(last, "contradictions", None)) and (
-        getattr(last, "agent_name", "") == "Mediator"
+        getattr(last, "agent_name", "") == MEDIATOR_AGENT_NAME
     )
     if not standing and is_confidence_stable(confidence_history):
         say("Adaptive termination triggered at round %d (stable confidence).", iteration)
@@ -325,7 +475,7 @@ def route_within_limit(
     # it names, so it would ask nobody. Not read (``None``) is not this.
     if (
         bool(last)
-        and getattr(last, "agent_name", "") == "Mediator"
+        and getattr(last, "agent_name", "") == MEDIATOR_AGENT_NAME
         and getattr(last, "revise", None) == []
     ):
         say(
@@ -338,17 +488,21 @@ def route_within_limit(
     return "revision", NO_CONSENSUS
 
 
-def debate_route(state: Any, *, max_rounds: int, sycophancy_check: bool = True) -> tuple[str, str]:
+def debate_route(
+    state: Any, *, max_rounds: int, sycophancy_check: bool = True, stage: str | None = None
+) -> tuple[str, str]:
     """``(route, reason)`` for the state a mediation round left.
 
     ``route`` is ``"judge"`` or ``"revision"``. For ``"judge"`` the reason is
     what ended the debate; at the round limit it is the rule that would have
     ended the debate there anyway, and ``hard_limit`` when it would have gone
-    on.
+    on. The limit counts the rounds of debate ``stage`` alone.
     """
-    at_limit = state.get("iteration_count", 0) >= max_rounds
+    at_limit = debate_rounds(state, stage) >= max_rounds
     # At the limit the decision is read quietly: the limit is what is logged.
-    route, reason = route_within_limit(state, sycophancy_check=sycophancy_check, log=not at_limit)
+    route, reason = route_within_limit(
+        state, sycophancy_check=sycophancy_check, log=not at_limit, stage=stage
+    )
     if at_limit:
         logger.info("Hard iteration limit (%d) reached. Proceeding to judge.", max_rounds)
         return "judge", reason if route == "judge" else HARD_LIMIT
@@ -403,6 +557,9 @@ class ConsensusRouter:
             "judge" to finalize, "revision" to continue negotiating.
         """
         route, _reason = debate_route(
-            state, max_rounds=self._max_rounds, sycophancy_check=self._sycophancy_check
+            state,
+            max_rounds=self._max_rounds,
+            sycophancy_check=self._sycophancy_check,
+            stage=getattr(self._stage, "key", None),
         )
         return route

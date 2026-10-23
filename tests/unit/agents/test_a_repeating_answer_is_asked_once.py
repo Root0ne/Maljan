@@ -18,7 +18,6 @@ from unittest.mock import MagicMock, patch
 from langchain_core.messages import AIMessage
 
 from maljan.agents.base_agent import BaseAnalyst
-from maljan.agents.claim_headings import claim_heading_counts
 from maljan.core.config import Settings, ValidationConfig
 from maljan.pipeline.validation import (
     ANALYST_CUT_CODE,
@@ -27,6 +26,7 @@ from maljan.pipeline.validation import (
     claims_repeated,
 )
 from maljan.schemas.isr_models import AgentISR
+from tests.claim_block_counts import begun_and_distinct
 
 
 def _block(n: int, heading: str = "CLAIM") -> str:
@@ -49,23 +49,23 @@ WHOLE = DISTINCT
 
 class TestTheCount:
     def test_headings_begun_and_distinct_are_read_off_the_answer(self) -> None:
-        assert claim_heading_counts(RUNAWAY) == (15, 3)
+        assert begun_and_distinct(RUNAWAY) == (15, 3)
 
     def test_a_heading_with_nothing_after_its_label_is_named_by_its_next_line(self) -> None:
         text = "CLAIM 1:\nThe sample writes a file.\nCLAIM 2:\nThe sample opens a key.\n"
-        assert claim_heading_counts(text) == (2, 2)
+        assert begun_and_distinct(text) == (2, 2)
 
     def test_marks_numbering_and_case_do_not_make_a_heading_new(self) -> None:
         text = "**CLAIM 1:** The sample Writes a file.\n- CLAIM 7: the sample writes a file\n"
-        assert claim_heading_counts(text) == (2, 1)
+        assert begun_and_distinct(text) == (2, 1)
 
     def test_a_peer_s_claims_under_disputes_are_not_counted(self) -> None:
-        assert claim_heading_counts(DISTINCT + "DISPUTES:\n" + DISTINCT) == (3, 3)
+        assert begun_and_distinct(DISTINCT + "DISPUTES:\n" + DISTINCT) == (3, 3)
 
     def test_prose_after_the_last_claim_is_not_part_of_it(self) -> None:
         text = (DISTINCT * 3).rstrip("-\n") + "\n\nSummary: the sample is a loader.\n"
 
-        assert claim_heading_counts(text) == (9, 3)
+        assert begun_and_distinct(text) == (9, 3)
 
     def test_label_only_headings_with_different_evidence_are_different_claims(self) -> None:
         text = "".join(
@@ -73,7 +73,7 @@ class TestTheCount:
             for n in (1, 2, 3)
         )
 
-        assert claim_heading_counts(text) == (3, 3)
+        assert begun_and_distinct(text) == (3, 3)
         assert claims_repeated(text, margin=0) is None
 
     def test_claims_under_one_category_label_are_told_apart_by_their_sentences(self) -> None:
@@ -91,7 +91,7 @@ class TestTheCount:
             for n, (label, sentence) in enumerate(sentences, start=1)
         )
 
-        assert claim_heading_counts(text) == (7, 7)
+        assert begun_and_distinct(text) == (7, 7)
         assert claims_repeated(text, margin=0) is None
 
 

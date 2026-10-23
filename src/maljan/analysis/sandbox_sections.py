@@ -55,7 +55,13 @@ from collections.abc import Collection, Iterable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
-from maljan.schemas.sandbox_document import channel_rows, place, place_path
+from maljan.schemas.sandbox_document import (
+    PROCESS_ID_KEYS,
+    PROCESS_PARENT_KEYS,
+    channel_rows,
+    place,
+    place_path,
+)
 from maljan.schemas.sandbox_report import SECTION_IDS, section_id, stored_place
 
 # The tool name of the pack's index entry, and of the query tool beside it.
@@ -129,8 +135,8 @@ _SUMMARY_LISTS: dict[str, tuple[str, ...]] = {
 NETWORK_KINDS: tuple[str, ...] = ("dns", "hosts", "http", "tcp", "udp", "domains", "icmp", "tls")
 
 # The fields a process's own id and its parent's are read from.
-_PID_KEYS = ("pid", "process_id")
-_PPID_KEYS = ("ppid", "parent_id")
+_PID_KEYS = PROCESS_ID_KEYS
+_PPID_KEYS = PROCESS_PARENT_KEYS
 # The fields an item of each section names its process by, for the pid filter.
 _PID_FIELDS: dict[str, tuple[str, ...]] = {
     "processes": _PID_KEYS,

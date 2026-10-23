@@ -99,3 +99,33 @@ class TestLoadFamilyIndex:
         assert idx is not None and len(idx) == 2
         # Cached: a second load returns the same object.
         assert load_family_index(str(p)) is idx
+
+
+class TestTheCatalogueWithNoBuildRecord:
+    def _catalogue(self, tmp_path):  # noqa: ANN001, ANN202
+        path = tmp_path / "fam.json"
+        path.write_text(
+            json.dumps({"families": [{"family_id": "A", "description": "imports: Create"}]}),
+            encoding="utf-8",
+        )
+        return path
+
+    def test_it_is_warned_about_while_no_record_sits_beside_it(self, tmp_path, monkeypatch) -> None:  # noqa: ANN001
+        from maljan.memory import family_fingerprint_index as fpi
+
+        warned: list[str] = []
+        monkeypatch.setattr(fpi.logger, "warning", lambda msg, *a: warned.append(msg % a))
+        fpi.reset_cache()
+        assert fpi.load_family_index(str(self._catalogue(tmp_path))) is not None
+        assert any("no build record" in w and "fam.build.json" in w for w in warned)
+
+    def test_it_is_not_warned_about_with_its_record(self, tmp_path, monkeypatch) -> None:  # noqa: ANN001
+        from maljan.memory import family_fingerprint_index as fpi
+
+        warned: list[str] = []
+        monkeypatch.setattr(fpi.logger, "warning", lambda msg, *a: warned.append(msg % a))
+        path = self._catalogue(tmp_path)
+        fpi.build_record_path(path).write_text("{}", encoding="utf-8")
+        fpi.reset_cache()
+        assert fpi.load_family_index(str(path)) is not None
+        assert not any("no build record" in w for w in warned)

@@ -109,6 +109,304 @@ admin callers on `GET /api/v1/system/status`.
 Admins read the trail through `GET /api/v1/audit/logs` and one row at
 `/audit/logs/{log_id}`.
 
+## Sealed evidence ledger
+
+When a run is stored, the worker seals its evidence ledger
+(`apps/api/app/services/ledger_chain.py`):
+
+- each `evidence_entries` row carries `digest`, the SHA-256 of every column it
+  persists in one canonical form (the `spilled` references, with the SHA-256 of
+  each kept part, included), and `chain`, the HMAC-SHA256 of the previous row's
+  chain value and its digest in `seq` order, from a genesis value bound to the
+  job;
+- the core seal (chain head, entries and `seq` span, key id, the id of the
+  report row it describes, the digest of that row, and its own keyed digest)
+  is written onto the audit chain as a `ledger.seal` row. The append's own
+  result, known before the transaction commits, goes into the seal the report
+  carries as `audit_anchored`, beside `core_digest`, both under the seal's
+  keyed digest; that seal is written in the same transaction into
+  `analysis_reports.ledger_seal`, the report payload and the run summary as
+  `ledger_seal`. The report digest covers every column of the report row except its
+  random key, its two timestamps and the seal itself: verdict, confidence,
+  category, both STIX bundles, techniques, the analysts' reports, the
+  negotiation log, the run summary, the report payload and the incomplete
+  reason. The per-agent findings and the transcript are rows of other tables
+  and are **not** covered;
+- an enrichment that changes a sealed report afterwards appends an amendment
+  to `ledger_amendments` in the payload and the run summary (what changed it,
+  the report digest before and after, chained onto the seal or the last
+  amendment) and a `report.amend` row on the audit chain. Sealed rows are never
+  rewritten;
+- every path that deletes a stored report (the owner's `DELETE /reports/{id}`,
+  a re-run superseding its report) writes a `report.delete` row on the audit
+  chain in the same transaction, naming the report and its seal's digest. When
+  that row does not land, the owner's delete is refused with 503 and nothing
+  is deleted; a re-run still stores its result and logs that the superseded
+  report went without its record.
+- a follow-up question asked of a finished job (`POST /jobs/{id}/follow-ups`)
+  never changes the report: it is a row of its own (`job_follow_ups`) holding
+  a keyed record of the report digest it was answered from, the digests of the
+  seal and of the last amendment and the SHA-256 of the question and answer,
+  and a `report.follow_up` row on the audit chain carries the same record, in
+  the same transaction. Verifying the job checks each follow-up too: its
+  question, answer and model are digested again and compared with the record,
+  the record must verify under its key, and the chained row must hold the same
+  record; a follow-up edited afterwards reads `broken`.
+
+The key is derived with HKDF from `SETTINGS_ENCRYPTION_KEY` (label
+`maljan-ledger-chain-v1`); no new secret exists, and the key is never logged or
+served. Its id (16 hex characters of a hash of the derived key) is kept beside
+the seal. A platform without a settings key seals nothing: the rows are stored
+as before, and the worker's warning names why (the variable is not set, or
+the bootstrap settings could not be read).
+
+The audit chain covers the chained rows only (`ledger.seal`, `report.amend`,
+`report.delete`, `report.follow_up`): each takes the next `chain_seq` (unique),
+a digest of its columns and a keyed chain value linking it to the one before.
+The head record (`audit_chain_head`: last `chain_seq`, chain value,
+`rotated_at_seq` and a MAC over them) is rewritten by the same append. Appends
+are serialised by a PostgreSQL advisory lock inside a savepoint. An append
+carries the head forward only when the head's MAC verifies under the current
+key and it points at the last row; it accepts a rotation (a head under another
+key) only when no row yet carries the current key, the head points at the last
+row by seq and chain, the last row was chained under the head's key, and the
+head verifies under that key when the platform can derive it. Anything else
+refuses the append: it is logged and counted like a failed audit write, the
+stored report is kept, and nothing is re-signed.
+
+Verify a job with `GET /api/v1/jobs/{job_id}/evidence/verify` (owner only) or
+`python -m scripts.ledger.verify --job <id>` (read-only transaction; `--run
+<dir>` checks an exported stored-run directory with no database). A job's
+verification reads only its own ledger rows, its report row, its own chained
+audit rows with the chain value of the row before each, and the head record:
+its cost follows the job, a break elsewhere in the chain does not touch it, and
+its answer names no position in the platform's chain. The answer is:
+
+| Status | When |
+|---|---|
+| `verified` | the rows, the seal, every column the seal covers (through the amendments) and the job's own audit rows all verify, and the payload's amendments are exactly the ones the audit chain records for this seal, in order |
+| `broken` | the first thing that failed, with the first broken `seq` where a ledger row is to blame: a NULL digest, a missing, extra or reordered row, a changed row count, a changed report column with no amendment, an amendment the audit chain records but the report lacks, a seal copy that disagrees, a report row gone with no `report.delete` row |
+| `deleted` | the report row is gone and a verified `report.delete` row for its seal records the deletion; the ledger still verifies |
+| `other_key` | the seal names a key the platform's settings cannot derive (after a key rotation, or a relabelled seal); the rows' digests are still checked |
+| `unverifiable` | nothing failed, but something could not be checked: the audit append for the seal (its seal says `audit_anchored: false`) or an amendment did not land, the job's own audit rows lie before a rotation under a key the platform cannot derive, or the audit head is still under the old key |
+| `not_sealed` | a run stored before sealing, or a job that stored nothing |
+
+The command exits 0, 1, 6, 4, 5 and 3 for these, and 2 on a usage or read
+error. `python -m scripts.ledger.verify --audit-chain` walks the whole audit
+chain from its first row to its head, for the operator: it is the walk that
+finds rows cut off the end of the chain. A job's verification reads the head
+first and nothing past it, so a row another job appends while it runs does not
+disturb it.
+
+Once a head fails its check, every later append is refused (logged and counted)
+and each new seal says `audit_anchored: false`; a verification names the
+refused head and the repair. The repair is
+`python -m scripts.ledger.verify --repair-head`: it walks the whole chain under
+the chain's lock with a verification's rules (rows before the rotation boundary
+under a key the platform cannot derive are reported as an unverifiable span;
+every row from the boundary on must carry the current key and verify) and
+otherwise refuses with the first break. A repair can hide rows cut off the end
+of the chain, so check the chain first: when the old head names a seq past the
+last row, or another chain at its seq, the repair is refused unless
+`--accept-truncation-at N` names exactly the old head's seq. The boundary never
+comes from the rows' labels alone: an old head under the current key whose MAC
+verifies vouches for its `rotated_at_seq`, and every row from it on must carry
+the current key and verify; an old head that cannot vouch (missing, failing
+its MAC, or under another key) leaves the boundary the rows suggest, and the
+repair is refused unless `--accept-boundary-at N` names exactly that seq. The
+repair is written as a chained `audit.head_repair` row (the old head, the
+walked head, any acknowledged truncation and boundary), and the new head, keyed
+under the current key with that `rotated_at_seq`, points at that row.
+
+The rotation boundary is anchored in the head: `rotated_at_seq`, covered by its
+MAC, read only from a head that verifies under the current key, never from a
+row's own key id. Every row at or after it must carry the current key and
+verify; a row before it that claims the current key is broken; a row before it
+under a key the settings can derive is verified with it, and one under a key
+they cannot derive is unverifiable. A head that fails its MAC is broken, and a
+head not under the current key while some row is, is broken too.
+
+**What it proves, and what it does not.** The chain proves integrity against
+anyone who can write the database but does not hold `SETTINGS_ENCRYPTION_KEY`.
+Someone who holds that secret can rewrite the rows, the chain, the seal and
+the audit chain consistently, and a writer who kept an earlier audit head
+record can put it back after cutting the rows that followed it (the full
+`--audit-chain` walk then still ends at that head). The audit chain's anchor
+(below) rules both out up to the last anchored head; without one, every
+verification says the chain was checked against the database head only. A writer without the key
+who relabels every key id can push history to `unverifiable` or `other_key`,
+never to `verified`; in particular a forged rotation (a job's rows and the head
+relabelled to an invented key) cannot be told apart from a real one and reads
+`unverifiable`, never `verified`, and the next legitimate append is then
+refused. Rotating the settings key leaves older seals reading as
+`other_key` and older audit rows unverifiable; until the first append after a
+rotation every sealed job reads `unverifiable`. Rotating back to an earlier key
+makes the rows already under it, now before the new boundary, read as broken.
+A failed audit append leaves its seal or amendment `unverifiable` for good. A seal
+whose row landed (`audit_anchored: true`) and is gone reads `broken`, and so
+does a seal moved onto another report row. Each of the job's own audit rows is
+checked against the row before it and the row after it (or the head), so a
+deleted row next to one of the job's rows leaves a gap that reads `broken`; a
+deleted amendment row with no row of the job beside it is found only by the
+full `--audit-chain` walk.
+
+**The audit chain's anchor.** `AUDIT_ANCHOR` keeps each committed head of the
+audit chain outside the database, and every verification compares the chain
+with the latest anchored head:
+
+| `AUDIT_ANCHOR` | Where a head is kept | What protects it |
+|---|---|---|
+| `database` (the default when `AUDIT_ANCHOR_DATABASE_URL` is set) | a row of `audit_chain_anchor`, written through `AUDIT_ANCHOR_DATABASE_URL` | a role that may only INSERT and SELECT the table, which is owned by a role the application does not hold; on PostgreSQL a trigger refuses UPDATE, DELETE and TRUNCATE (its owner can drop it) |
+| `object_store` | one object per head under `audit-chain/head/` in `MINIO_BUCKET` | the bucket's object lock when it has one (a COMPLIANCE default retention holds against the root user too; a lock without a default retention puts each head under a legal hold); a bucket without a lock holds against a database-only writer alone |
+| `none`, or unset with no URL | nowhere | nothing beyond the database head, as before |
+
+A database anchor takes this, run once as a database owner:
+`CREATE ROLE maljan_anchor LOGIN PASSWORD '...'`,
+`GRANT SELECT, INSERT ON audit_chain_anchor TO maljan_anchor` and
+`ALTER TABLE audit_chain_anchor OWNER TO <a role the application is not>`. An
+object lock can only be set when a bucket is created. What protects the anchor
+is read from its store (the roles' privileges, the table's owner and trigger,
+and whether the application's role may INSERT, UPDATE, DELETE or TRUNCATE it;
+the bucket's lock mode and period) and stated by the operator's commands
+(`--job` and `--audit-chain`, in `anchor.protection` and the notes), so a weak
+setup says so; a job's owner is told the anchor's kind and state only. With
+object lock every version is listed and a head is read from the first version
+written under its name; a head hidden behind a delete marker, or one this
+process saw that is gone, reads `broken`.
+
+A head is anchored after the transaction that wrote it commits, in a task of
+its own: the value is the head the append computed, written once the committed
+database agrees with it (its MAC verifies under a key the platform holds, the
+chain holds its value at its seq, and the database is neither behind the
+latest anchored head nor different at its seq). The anchor is read before the
+database. A store that is down or slower than 10 s is logged at ERROR and
+counted (`audit_anchor_failures`): the append and the job go on, and later
+appends catch the anchor up. The API and the analysis worker give an empty
+anchor the current head at startup, and the API and both workers wait (bounded)
+for scheduled anchor writes at shutdown.
+
+A chain rewritten under the key, or cut back to an earlier head record, reads
+`broken` ("does not match its anchor outside the database") in a job's
+verification and in the `--audit-chain` walk, which also names both seqs. The
+anchor is read before the database; a database head that still reads behind
+the anchor, or the anchored row missing, is read again on a connection of its
+own before it is called a break. Once an anchor is configured, a verification
+that could not read it, found it empty beside a head, or found the anchored
+head under a key the settings cannot derive reads `unverifiable`, never
+`verified` or `deleted`. Rows past the last anchored head (a write that has
+not landed) are checked against the database head only, and a job whose rows
+lie there is told so. After a truncation acknowledged with
+`--repair-head --accept-truncation-at`, the anchor goes on reporting it and
+nothing further is anchored.
+
+The seal's `digest` is the value a per-run external anchor would take (an
+RFC 3161 timestamping service, or a receipt kept beside the seal); that is not
+built.
+
+## Job package
+
+A job's package is one file that carries the job's evidence and can be checked
+on its own. Download it with `GET /api/v1/jobs/{job_id}/package` (owner only),
+or build it offline from an exported run directory with
+`python -m scripts.package.build --run <dir> --out <file> [--unsigned]
+[--upload-max-bytes N]` (the directory
+`python -m scripts.replay.run --job <id> --job-dir <dir>` writes). Both use the
+same builder (`services.job_package`), so the same run gives the same bytes on
+the same build of zlib: `manifest.json` first, `manifest.sig` second, every
+other entry sorted by path, plain USTAR regular files only, every timestamp 0,
+mode 0644, owner 0:0, and a gzip header with no name and no time. Another zlib
+build may compress the same tar differently; the uncompressed tar is the same
+everywhere. Every row set is read in a fixed order, and a report stored
+without a generation time is dated with the job's stored completion time,
+never the build's clock (with neither, the Markdown is listed as absent).
+
+| Path | What it holds |
+|---|---|
+| `manifest.json` | every other file's SHA-256 and size, each part's path, each absent part with why, the sample's hashes |
+| `manifest.sig` | optional: the manifest's HMAC-SHA256 |
+| `run/` | the stored run as exported: `job.json` (with the sample's hash and name), `report-byjob.json`, `report.json`, `evidence.json`, `run-summary.json`, `stix-judge.json`, `events.json`, as present |
+| `report/report.md` | the report rendered by the Markdown exporter |
+| `export/stix-bundle.json` | the STIX bundle the report row serves |
+| `ledger/spilled.json`, `ledger/objects/<sha256>` | every part an entry spilled, with its digest; its bytes where the build read them back and they matched |
+| `seal.json` | the ledger seal and its verification at build time |
+
+A part the job lacks is listed in the manifest's `absent` with the reason: no
+run summary, no judge's bundle, no sandbox behaviour in the report, and the
+MISP event, which the platform has no exporter for. The sample file itself is
+not included; spilled tool answers may contain bytes from it.
+
+A spilled part is packaged only when its bytes verify against the digest its
+entry recorded. The API reads each from the object store under the job's own
+prefix, and the read stops as soon as more bytes arrive than the reference
+records, which must itself lie within `upload_max_bytes` (the bound the part
+was kept under). A part with no recorded length, or a build with no valid
+bound, is listed as absent with why. An offline build reads no store, so it
+lists each part with its digest and why the bytes are absent.
+
+Every file is bounded by `upload_max_bytes`, as a verification bounds it. A
+file above it is still packaged as far as it can be: it is hashed as it
+streams, left out of the archive, and listed in the manifest's `oversized`
+and `absent` with its SHA-256, its size and the reason "larger than the
+package bound". Such a file is never parsed by the build. The manifest
+records the bound (`package_bound`); a verification refuses a manifest that
+lists a file above it, or declares one left out that is not larger than it.
+A verification reports a left-out file there, not as `broken`; when it is a
+run file the seal check reads (any but `events.json`), the seal is not
+checked and the answer is `seal_unverifiable`, but only after every failure
+(`other_key`, an unsigned package where the key is held) has been ruled out. Only a manifest above the bound makes a build refuse (the
+API answers 422). An offline build and verification read no runtime
+settings and take `--upload-max-bytes`, by default the setting's default.
+
+The API reads the job's rows and verifies the seal in one snapshot (a
+`REPEATABLE READ READ ONLY` transaction, rolled back), with the job's audit
+rows; an offline build verifies the seal from the directory
+(`scripts.ledger.verify --run`, no audit log). The archive is staged on disk
+file by file, hashed as it is written, and streamed into an anonymous
+temporary file the download is served from. The API holds the job's ledger
+rows once, shared by the seal verification and the written run, and drops
+them once written; an offline build loads `evidence.json` once to find the
+spilled references, and the seal verification of the directory loads it
+again. Building uses about three times the package size of temporary disk (the
+run, the staged files, the spool). No limit of its own bounds concurrent
+builds: the per-client request rate limit (`rate_limit_requests` per
+`rate_limit_window_seconds`) applies, as to every route.
+
+`python -m scripts.package.verify <file> [--allow-unsigned]
+[--upload-max-bytes N]` reads the archive in one pass, to the gzip end (its
+CRC is checked) with nothing after the tar end marker but its zero padding.
+Every entry must be a plain USTAR regular file (no link, device, sparse file,
+or PAX or GNU extended header) under a safe relative name (no absolute path, no
+`..`, no duplicate). The manifest must come first and be no larger than
+`upload_max_bytes`, and every size it lists must be within that bound; every
+later entry must be listed, and its header's size must equal the listed size
+before a byte of it is read, so the whole read is bounded by the manifest. The
+signature, when present, comes second and is checked. The `run/` files are
+written into a temporary directory under names checked first, and the seal is
+checked there with the ledger verification of a run directory; nothing is
+extracted anywhere else. Corrupt or malformed input (bad gzip data, a bad CRC,
+an over-deep JSON nesting, a malformed signature) reads `broken`, never an
+error. Every reason is fixed platform text; what a manifest says of its
+missing signature is quoted apart as `manifest_says`. It prints JSON and
+exits:
+
+| Status | Exit | When |
+|---|---|---|
+| `verified` | 0 | every file matches the signed manifest, the signature verifies and the seal verifies |
+| `broken` | 1 | `file` names what failed: an unsafe, unplain or unlisted entry, a missing file, a size or digest that differs, a manifest that fails its signature, a signature file removed from a manifest that says it is signed, data after the end marker, a seal that does not verify, or an unsigned package where this environment holds the package key and `--allow-unsigned` was not given |
+| `unsigned` | 3 | every file matches and the seal verifies, but the package carries no signature, and either no package key is held or `--allow-unsigned` was given; the files outside `run/` are then not authenticated by a key |
+| `seal_unverifiable` | 4 | every file matches, but the seal cannot be verified (`other_key`, `not_sealed`, `unverifiable`, or a run file it reads was left out for its size) |
+| `other_key` | 5 | the manifest is signed under a key this environment cannot derive, named in the reason (a package signed before a settings key rotation) |
+
+**What the signature proves.** It is an HMAC under a key derived with HKDF
+from `SETTINGS_ENCRYPTION_KEY` under its own purpose label
+(`maljan-job-package-v1`), so it is not the ledger chain's key and no new
+secret exists. It proves the manifest, and through its digests every file,
+unchanged only to a holder of that key; a holder can also sign another
+manifest, and anyone without the key cannot check it. The manifest's digests
+cover every file whether or not it is signed: a file changed without its
+manifest entry reads `broken`. Rotating the settings key leaves older packages
+reading `other_key`, as the ledger's own seals do.
+
 ## Rate limits and login protection
 
 `RateLimitMiddleware` applies a Redis-backed sliding window per client address
@@ -126,14 +424,52 @@ same state.
 ## Sample storage
 
 Sample bytes live in MinIO, in the bucket named by `MINIO_BUCKET`
-(`maljan-samples` by default); metadata, jobs and reports live in Postgres.
-Uploads are streamed through `UPLOAD_TEMP_DIR` rather than the system temp
+(`maljan-samples` by default), beside the uploaded sandbox reports; metadata,
+jobs, reports and the evidence ledger live in Postgres. One module builds every
+client and creates the bucket (`app/services/object_store.py`): the API's
+upload, read and delete paths, the health probe and the worker's download all
+use it. Nothing creates the bucket in advance: the first write that finds it
+missing creates it and gives it an explicit policy that denies an anonymous
+principal every read, write and listing, whichever write came first. A policy
+the server refuses is logged as a warning; verify then that the bucket is not
+anonymously readable. Uploads are streamed through `UPLOAD_TEMP_DIR` rather than the system temp
 directory, and the worker mirrors each downloaded sample into `SAMPLES_DIR`
 so the Ghidra container can read it through its read-only bind mount. Both
 directories hold live malware: exclude them from any on-access scanner and
 keep them off shared storage.
 
 `upload_max_bytes` and `upload_allowed_mime_types` bound what the API accepts.
+
+The same bucket keeps, per job, the parts of the evidence ledger's answers the
+run did not keep whole: an answer the tool-output guardrail shortened,
+summarised or cut, or had no room for; a structured answer a tool server
+returned that the entry could not keep; an output or structure the per-agent
+byte budget blanked or the structure eviction dropped. Each is written by the
+analysis worker under `evidence/<job_id>/<sha256>` (the same bytes once per
+job), and the ledger entry references it with the part, the object key, the
+byte length and the SHA-256. One object is bounded by `upload_max_bytes`, read
+as each job starts; a larger part is referenced with
+`exceeds upload_max_bytes (<n> bytes)` and not written, so one job stores at
+most its number of entries times that bound (four parts at most per entry).
+Parts are written in the background by two writers per job with their own
+client (3 s to connect, 60 s of silence mid-write, one retry), so no analyst
+waits on the store; at most one part per writer waits to be written (twice
+`upload_max_bytes`), and a part past that is referenced as
+`upload_failed (store busy)`. The first failure to reach the store marks it
+down for the job: every later part is referenced at once as
+`upload_failed (store unreachable)`. Before it stores the ledger the worker
+waits up to 5 s for the writes still running and sets every reference to how
+its write ended: a write that failed is referenced as `upload_failed (<class>)`
+(the failure is logged whole on the worker), one not finished by then as
+`upload_failed (not finished)`, and an object such a write leaves afterwards is
+removed again. A slow store given large parts can therefore leave parts
+`not finished` at that 5 s wait, and those parts are then deleted rather than
+kept. A store that answers with server errors fails only that write; only a
+failed connection or a timeout marks it down. The run goes on in every case. The same bytes are written once
+per job. Deleting a sample removes the objects of every job it removes, after
+the delete is committed, best effort and logged, as it does the sandbox-report
+objects; deleting a report keeps them with the ledger. Back them up with the
+MinIO volume.
 
 ## Backups
 

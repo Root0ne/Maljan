@@ -46,19 +46,30 @@ from urllib.parse import urlsplit
 from maljan.core.logger import logger
 
 __all__ = [
+    "ANALYSIS_REFUSED_AFTER_OPEN",
+    "FOREIGN_PROGRAM",
+    "NO_JOB_PROGRAM",
     "REMOTE_TRANSPORTS",
+    "is_shared_address",
     "SELECT_REFUSED_AFTER_OPEN",
     "OpenedSample",
     "SampleNotes",
     "SampleOpener",
     "answer_field",
+    "aclose_job_programs",
     "answer_object",
+    "close_job_programs",
     "declared",
     "is_refusal",
     "long_running_tools",
     "new_instance",
     "open_key",
+    "open_path_arguments",
     "path_refusal",
+    "pin_program_argument",
+    "program_argument",
+    "program_arguments",
+    "refused_after_open",
     "server_note_key",
     "wrap_open_tool",
 ]
@@ -71,6 +82,15 @@ LOCK_POLL_SECONDS = 0.05
 
 # The marker of a select the server refused right after a fresh open.
 SELECT_REFUSED_AFTER_OPEN = "select_refused_after_open"
+
+# The marker of a declared analysis step the server refused right after a fresh open.
+ANALYSIS_REFUSED_AFTER_OPEN = "analysis_refused_after_open"
+
+# The code of a call that named a program this job did not open on the server.
+FOREIGN_PROGRAM = "foreign_program"
+
+# The code of a call that names no program, on a shared server, before the job opened one.
+NO_JOB_PROGRAM = "no_job_program"
 
 # Said in the log when an open is answered from the note.
 ANSWERED_FROM_NOTE = (
@@ -103,7 +123,48 @@ class SampleNotes:
     def __init__(self) -> None:
         self._opened: dict[tuple[str, str, str], OpenedSample] = {}
         self._locks: dict[tuple[str, str, str], threading.Lock] = {}
+        # Per server: every program name this job opened there, and the one it
+        # opened or selected last (the job's own current program).
+        self._owned: dict[str, set[str]] = {}
+        self._current: dict[str, str] = {}
         self._guard = threading.Lock()
+
+    def make_current(self, server: str, name: str | None) -> None:
+        """Note ``name`` as the program this job opened or selected last on ``server``."""
+        if not name:
+            return
+        with self._guard:
+            self._owned.setdefault(server, set()).add(name)
+            self._current[server] = name
+
+    def own(self, server: str, name: str | None) -> None:
+        """Note ``name`` as a program this job opened on ``server``, not as its current one.
+
+        For an open whose select or analysis did not follow: the program is
+        open on the server all the same, and the job's teardown closes it.
+        """
+        if not name:
+            return
+        with self._guard:
+            self._owned.setdefault(server, set()).add(name)
+
+    def take_owned(self, server: str) -> list[str]:
+        """Every program name this job opened on ``server``, sorted, forgotten as they are taken."""
+        with self._guard:
+            names = sorted(self._owned.pop(server, set()))
+            self._current.pop(server, None)
+        self.drop_named(server, None)
+        return names
+
+    def current(self, server: str) -> str | None:
+        """The program this job opened or selected last on ``server``, or ``None``."""
+        with self._guard:
+            return self._current.get(server)
+
+    def owns(self, server: str, name: Any) -> bool:
+        """Whether this job opened a program named ``name`` on ``server``."""
+        with self._guard:
+            return isinstance(name, str) and name in self._owned.get(server, set())
 
     def get(
         self, server: str, path: str, arguments: dict[str, Any] | None = None
@@ -137,6 +198,7 @@ class SampleNotes:
             ]:
                 del self._opened[other]
             self._opened[key] = OpenedSample(name=named, answer=answer)
+        self.make_current(server, named)
 
     def drop_named(self, server: str, name: str | None) -> None:
         """Drop the server's notes under ``name``, or all of its notes when ``name`` is ``None``.
@@ -170,6 +232,16 @@ class SampleNotes:
 REMOTE_TRANSPORTS = frozenset({"http", "streamable-http", "sse"})
 
 _DEFAULT_PORTS = {"http": 80, "https": 443}
+
+
+def is_shared_address(config: Any) -> bool:
+    """Whether a server's block reaches it at an address, where other jobs share its programs.
+
+    The one reading of that fact, used by the runtime pins (``pin_program_argument``'s
+    ``shared``) and by the declaration proposals alike.
+    """
+    return str(getattr(config, "transport", "") or "") in REMOTE_TRANSPORTS
+
 
 # Each handle or provider that starts a local server process gets one of these:
 # a process holds only what it opened, and a number never reused names it.
@@ -340,13 +412,35 @@ def _opened_name(answer: str, field: str, path: str) -> str:
     return answer_field(answer, field) or path
 
 
+def refused_after_open(
+    marker: str, step_tool: str, open_tool: str, refusal: Any, opened: Any
+) -> str:
+    """The answer for a declared step the server refused right after a fresh open.
+
+    The open is handed on as failed, under ``marker``: the step's refusal
+    with the open's own answer beside it, so the ledger and the model see
+    that the open did not take as declared.
+    """
+    return json.dumps(
+        {
+            "tool_error": marker,
+            "tool": step_tool,
+            "detail": f"{step_tool} refused what {open_tool} opened: "
+            f"{str(refusal)[:SAID_LIMIT]}; {open_tool} answered: {str(opened)[:SAID_LIMIT]}",
+        }
+    )
+
+
 class SampleOpener:
     """Opens one server's sample through its declared tools, once per path per job."""
 
-    def __init__(self, server: str, spec: Any, notes: SampleNotes) -> None:
+    def __init__(self, server: str, spec: Any, notes: SampleNotes, *, shared: bool = False) -> None:
         self.server = server
         self.spec = spec
         self.notes = notes
+        # A server other jobs share: a forwarded open's name is never taken as
+        # this job's, since the path it opened may be another job's.
+        self.shared = shared
 
     def _select_args(self, name: str) -> dict[str, Any]:
         argument = self.spec.select_argument
@@ -373,10 +467,13 @@ class SampleOpener:
         if not is_refusal(answer):
             name = answer_field(answer, self.spec.name_field) if self.spec.name_field else None
             self.notes.drop_named(self.server, name)
+            if not self.shared:
+                self.notes.make_current(self.server, name)
         return answer
 
     def _from_note(self, path: str, noted: OpenedSample) -> str:
         logger.info(ANSWERED_FROM_NOTE, self.server, self.spec.open_tool, path, noted.name)
+        self.notes.make_current(self.server, noted.name)
         return noted.answer
 
     def _refused_select(self, path: str, answer: Any, arguments: dict[str, Any] | None) -> None:
@@ -406,14 +503,8 @@ class SampleOpener:
             name,
             str(selected)[:160],
         )
-        return json.dumps(
-            {
-                "tool_error": SELECT_REFUSED_AFTER_OPEN,
-                "tool": self.spec.select_tool,
-                "detail": f"{self.spec.select_tool} refused what {self.spec.open_tool} opened: "
-                f"{str(selected)[:SAID_LIMIT]}; {self.spec.open_tool} answered: "
-                f"{str(opened)[:SAID_LIMIT]}",
-            }
+        return refused_after_open(
+            SELECT_REFUSED_AFTER_OPEN, self.spec.select_tool, self.spec.open_tool, selected, opened
         )
 
     def _after_analysis(
@@ -425,6 +516,9 @@ class SampleOpener:
         arguments: dict[str, Any] | None,
     ) -> str:
         if analysed is not None and is_refusal(analysed):
+            # The declared analysis did not run on what was opened, so the
+            # open did not take as declared: handed on as failed, never as the
+            # open's own success, and not noted.
             logger.warning(
                 "%s: %s of %s was not confirmed (%s); the open is not noted",
                 self.server,
@@ -432,7 +526,13 @@ class SampleOpener:
                 name,
                 str(analysed)[:160],
             )
-            return opened
+            return refused_after_open(
+                ANALYSIS_REFUSED_AFTER_OPEN,
+                self.spec.analyse_tool,
+                self.spec.open_tool,
+                analysed,
+                opened,
+            )
         self.notes.note(self.server, path, name, opened, arguments)
         return opened
 
@@ -543,6 +643,7 @@ def wrap_open_tool(
     spec: Any,
     notes: SampleNotes | None,
     held_path: Callable[[], str | None] | None = None,
+    shared: bool = False,
 ) -> list[Any]:
     """``tools`` with the declared open tool answered through the job's note.
 
@@ -571,7 +672,7 @@ def wrap_open_tool(
             spec.open_tool,
         )
         return list(tools)
-    opener = SampleOpener(server, spec, notes)
+    opener = SampleOpener(server, spec, notes, shared=shared)
 
     async def call(tool: str, arguments: dict[str, Any]) -> Any:
         found = by_name.get(tool)
@@ -598,6 +699,290 @@ def wrap_open_tool(
         logger.warning("%s: %s offered as it is (%s).", server, spec.open_tool, exc)
         return list(tools)
     return [wrapped if getattr(t, "name", "") == spec.open_tool else t for t in tools]
+
+
+def _names_to_close(server: str, spec: Any, notes: SampleNotes | None) -> list[str]:
+    """The programs this job opened on ``server``, when its block declares how to close one."""
+    if not declared(spec) or not spec.close_tool or not spec.close_argument or notes is None:
+        return []
+    return notes.take_owned(server)
+
+
+def _close_answered(server: str, spec: Any, name: str, answer: Any) -> bool:
+    if is_refusal(answer):
+        logger.warning("%s: %s of %r was refused", server, spec.close_tool, name)
+        return False
+    return True
+
+
+def close_job_programs(
+    server: str, spec: Any, notes: SampleNotes | None, call: Callable[[str, dict[str, Any]], Any]
+) -> list[str]:
+    """Close each program this job opened on ``server``, through the tool its block declares.
+
+    ``call(tool, arguments)`` makes one call in the caller's own way. Only a
+    block that declares ``close_tool`` and ``close_argument`` is closed through;
+    with none, nothing is called and the programs stay where they are. A close
+    the server refuses or that raises is logged and the rest go on. Returns the
+    names whose close was answered without a refusal.
+    """
+    closed: list[str] = []
+    for name in _names_to_close(server, spec, notes):
+        try:
+            answer = call(spec.close_tool, {spec.close_argument: name})
+        except Exception as exc:  # noqa: BLE001 - a close never fails the job
+            logger.warning("%s: closing %r failed (%s)", server, name, type(exc).__name__)
+            continue
+        if _close_answered(server, spec, name, answer):
+            closed.append(name)
+    return closed
+
+
+async def aclose_job_programs(
+    server: str,
+    spec: Any,
+    notes: SampleNotes | None,
+    call: Callable[[str, dict[str, Any]], Awaitable[Any]],
+) -> list[str]:
+    """:func:`close_job_programs` with a ``call`` that is awaited."""
+    closed: list[str] = []
+    for name in _names_to_close(server, spec, notes):
+        try:
+            answer = await call(spec.close_tool, {spec.close_argument: name})
+        except Exception as exc:  # noqa: BLE001 - a close never fails the job
+            logger.warning("%s: closing %r failed (%s)", server, name, type(exc).__name__)
+            continue
+        if _close_answered(server, spec, name, answer):
+            closed.append(name)
+    return closed
+
+
+def program_argument(spec: Any) -> str:
+    """The argument a server's tools name the job's opened program by, as declared.
+
+    The argument its select tool is given the opened program's name in, else
+    its analysis tool's; ``""`` when the server declares neither. It is the
+    one a call that names no program is given the job's program in.
+    """
+    if not declared(spec):
+        return ""
+    return str(spec.select_argument or spec.analyse_argument or "")
+
+
+def program_arguments(spec: Any) -> frozenset[str]:
+    """Every argument the declaration says names an opened program (``program_arguments``)."""
+    if not declared(spec):
+        return frozenset()
+    named = (spec.select_argument, spec.analyse_argument, *spec.program_arguments)
+    return frozenset(str(a) for a in named if a)
+
+
+def open_path_arguments(spec: Any) -> frozenset[str]:
+    """Every argument the declaration says names a file a tool opens (``open_path_arguments``)."""
+    if not declared(spec):
+        return frozenset()
+    return frozenset(str(a) for a in (spec.path_argument, *spec.open_path_arguments) if a)
+
+
+def _input_names(tool: Any) -> set[str] | None:
+    """The argument names ``tool``'s own input schema declares; ``None`` when it cannot be read."""
+    try:
+        args = getattr(tool, "args", None)
+    except Exception:  # noqa: BLE001 - a schema not read is said by the caller
+        return None
+    return {str(name) for name in args} if isinstance(args, dict) else None
+
+
+def _program_refusal(code: str, message: str, tool: str, remediation: str) -> str:
+    from maljan.tools.errors import tool_error
+
+    logger.warning("%s: %s", tool, message)
+    return json.dumps(tool_error(code, message, tool=tool, remediation=remediation))
+
+
+def withheld_unpinned(server: str, tool: str, why: str) -> str:
+    """Why ``tool`` is withheld on a shared server: ``why`` it cannot be held to the job."""
+    return (
+        f"{server}: {tool} is withheld: {why}, and on this server other jobs share it "
+        "could read or change another job's program"
+    )
+
+
+# Why a tool is withheld, by what its schema declares.
+UNCOVERED = (
+    "its input schema declares no program or path argument the server's sample_open names, "
+    "and sample_open.job_safe_tools does not list it"
+)
+UNREAD_SCHEMA = "its input schema could not be read"
+NO_NOTE = "the job keeps no note of the programs it opened on this server"
+LISTED_SHARED_WITHHELD = (
+    "sample_open.shared_withheld_tools lists it: what it runs or changes reaches past "
+    "the job's own program"
+)
+
+
+def pin_program_argument(
+    tools: Sequence[Any],
+    *,
+    server: str,
+    spec: Any,
+    notes: SampleNotes | None,
+    shared: bool,
+    held_path: Callable[[], str | None] | None = None,
+    withheld: dict[str, str] | None = None,
+) -> list[Any]:
+    """``tools`` held to the job's own programs and path, on a server other jobs share.
+
+    A server that holds programs keeps one current program for every client,
+    so on a shared server (``shared``: one reached at an address) a call that
+    names no program reads whichever sample was opened last, by any job, and
+    a call that names another job's program or path reads or replaces it.
+    Every rule comes from the server's ``sample_open``:
+
+    * every declared program argument (:func:`program_arguments`) a call
+      carries must name a program this job opened there, and one the tool's
+      schema takes that the call leaves out is given the program the job
+      opened or selected last (``SampleNotes.current``); a call before the
+      job opened anything is refused;
+    * every declared path argument (:func:`open_path_arguments`) a call
+      carries must be the job's own copy of the sample (``held_path``);
+    * a tool whose schema takes none of these, or whose schema cannot be
+      read, is withheld unless ``job_safe_tools`` lists it, and a tool
+      ``shared_withheld_tools`` lists is withheld whatever it takes.
+
+    The arguments checked are the ones the call carries, not the ones the
+    schema names, so an argument the schema does not declare is checked too,
+    on a job-safe tool as on any other.
+
+    A refusal is answered before the server is asked, with a sentence naming
+    what was refused and the job's own. A withheld tool's reason goes in
+    ``withheld`` (tool name to reason) and the log; so does a tool that could
+    not be wrapped. A path that passes is sent as the held path itself. On a
+    server no other job shares, or one that declares no ``sample_open``,
+    ``tools`` come back as they were; a shared, declared server with no note
+    store (``notes``) has every tool withheld.
+    """
+    from langchain_core.tools import StructuredTool
+
+    if not shared or not declared(spec):
+        return list(tools)
+    programs = program_arguments(spec)
+    fill = program_argument(spec)
+    # Read by the wrappers; with no note store every tool is withheld below.
+    ledger = notes if notes is not None else SampleNotes()
+    paths = open_path_arguments(spec)
+    safe = frozenset(str(t) for t in spec.job_safe_tools)
+    barred = frozenset(str(t) for t in spec.shared_withheld_tools)
+
+    def refuse_path(name: str, argument: str, given: Any) -> tuple[str | None, str | None]:
+        """The held path ``given`` names, or the refusal of a path that is not it."""
+        held = held_path() if held_path is not None else None
+        if held and open_key(given, held) == held:
+            return held, None
+        return None, _program_refusal(
+            FOREIGN_PROGRAM,
+            f"{argument}={given!r} is not this job's sample on {server}, which other jobs "
+            "share; the call was not sent",
+            name,
+            f"call {name} with {argument}={held!r}, the job's own sample"
+            if held
+            else "this job holds no copy of its sample on this server",
+        )
+
+    def guarded(tool: Any, takes: set[str]) -> Any:
+        name = str(getattr(tool, "name", ""))
+        # The program arguments the schema takes: given the job's program when
+        # a call leaves them out.
+        filled = programs & takes
+
+        async def call(**kwargs: Any) -> Any:
+            own = ledger.current(server)
+            # Every declared argument the call carries, whether or not its
+            # schema names it.
+            sent = dict(kwargs)
+            for argument in sorted(paths & set(kwargs)):
+                given = kwargs.get(argument)
+                if given not in (None, ""):
+                    held, refused = refuse_path(name, argument, given)
+                    if refused is not None:
+                        return refused
+                    # Sent as the one spelling the job holds, never a
+                    # relative name the server might read another way.
+                    sent[argument] = held
+            for argument in sorted(filled | (programs & set(kwargs))):
+                given = kwargs.get(argument)
+                if given not in (None, ""):
+                    if not ledger.owns(server, given):
+                        return _program_refusal(
+                            FOREIGN_PROGRAM,
+                            f"{argument}={given!r} is not a program this job opened on "
+                            f"{server}; the call was not sent",
+                            name,
+                            f"call {name} with {argument}={own!r}, the job's own program, "
+                            f"or without {argument}"
+                            if own
+                            else f"open the job's sample with {spec.open_tool} first",
+                        )
+                elif own is not None:
+                    sent[argument] = own
+                else:
+                    return _program_refusal(
+                        NO_JOB_PROGRAM,
+                        f"{name} names no {argument}, and this job has opened no program on "
+                        f"{server}, which other jobs share: its current program may be "
+                        "another job's; the call was not sent",
+                        name,
+                        f"open the job's sample with {spec.open_tool} first",
+                    )
+            answer = await tool.ainvoke(sent)
+            if name == spec.select_tool and fill and not is_refusal(answer):
+                ledger.make_current(server, sent.get(fill))
+            return answer
+
+        return StructuredTool.from_function(
+            func=None,
+            coroutine=call,
+            name=name,
+            description=getattr(tool, "description", ""),
+            args_schema=tool.args_schema,
+            infer_schema=False,
+            metadata=dict(getattr(tool, "metadata", None) or {}),
+        )
+
+    def withhold(name: str, why: str) -> None:
+        reason = withheld_unpinned(server, name, why)
+        logger.error("%s", reason)
+        if withheld is not None:
+            withheld[name] = reason
+
+    if notes is None:
+        # No note of what this job opened: nothing can be held to it.
+        for tool in tools:
+            withhold(str(getattr(tool, "name", "")), NO_NOTE)
+        return []
+    out: list[Any] = []
+    for tool in tools:
+        name = str(getattr(tool, "name", ""))
+        if name in barred:
+            withhold(name, LISTED_SHARED_WITHHELD)
+            continue
+        takes = _input_names(tool)
+        if name in safe:
+            # Job-safe: offered, with any declared argument a call carries
+            # still held to the job.
+            takes = set() if takes is None else takes - programs
+        elif takes is None:
+            withhold(name, UNREAD_SCHEMA)
+            continue
+        elif not (takes & (programs | paths)):
+            withhold(name, UNCOVERED)
+            continue
+        try:
+            out.append(guarded(tool, takes))
+        except Exception as exc:  # noqa: BLE001 - withheld, and said
+            why = f"it could not be wrapped to carry the job's program ({type(exc).__name__})"
+            withhold(name, why)
+    return out
 
 
 def long_running_tools(spec: Any) -> frozenset[str]:

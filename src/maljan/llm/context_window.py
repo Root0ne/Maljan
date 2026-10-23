@@ -116,6 +116,7 @@ __all__ = [
     "unknown_window_remedy",
     "UNKNOWN_WINDOW_TOOL_OUTPUT_CHARS",
     "believable",
+    "chars_for_tokens",
     "declared_window",
     "derive_tool_output_chars",
     "forget_learned_windows",
@@ -124,7 +125,11 @@ __all__ = [
     "model_family",
     "no_room_sentence",
     "note_answer_cut",
+    "note_answer_line_room",
     "note_answer_not_shown",
+    "note_answer_structure",
+    "note_answer_whole",
+    "note_call_began",
     "CallAnswer",
     "output_limit",
     "probe_plan",
@@ -136,6 +141,7 @@ __all__ = [
     "built_output_cap",
     "table_window",
     "tool_definition_chars",
+    "tokens_for_chars",
     "window_full_error",
     "unknown_window",
     "window_for_settings",
@@ -163,6 +169,23 @@ __all__ = [
 # JSON from a tool server and decompiled C, and both tokenise denser than prose
 # — which is exactly what the measurement above says.
 CHARS_PER_TOKEN = 3
+
+
+def tokens_for_chars(chars: int, per_token: int = CHARS_PER_TOKEN, *, ceil: bool = True) -> int:
+    """The tokens ``chars`` characters take at ``per_token`` characters a token.
+
+    Rounded up unless ``ceil`` is false, then rounded down; a count below zero
+    is zero. The figure is the caller's to choose: :data:`CHARS_PER_TOKEN` for
+    tool output and prompts, four for the prose estimates that use it.
+    """
+    count = max(0, int(chars))
+    return -(-count // per_token) if ceil else count // per_token
+
+
+def chars_for_tokens(tokens: int, per_token: int = CHARS_PER_TOKEN) -> int:
+    """The characters ``tokens`` tokens hold at ``per_token`` characters a token."""
+    return int(tokens) * per_token
+
 
 # What one tool answer may take of the room that is left when it arrives.
 #
@@ -260,7 +283,8 @@ UNKNOWN_WINDOW_TOOL_OUTPUT_CHARS = 6000
 # constant above: nothing is derived from a window nobody measured, so the
 # chunk size this platform shipped with applies, and sources are joined only
 # within it. Sending the input whole instead would risk a first request past
-# the window, which loses the analyst before any tool has run.
+# the window, which loses the analyst before any tool has run. A run whose
+# input it split says so, with :func:`unknown_window_remedy`.
 UNKNOWN_WINDOW_CHUNK_TOKENS = 20000
 
 
@@ -385,7 +409,7 @@ def derive_tool_output_chars(
     # round trip through integer division loses up to two characters a call,
     # and those add up to a loop that finishes a character past the room it
     # was measuring itself against.
-    free_chars = max(0, (window - reserve) * per_token - max(0, int(held_chars)))
+    free_chars = max(0, chars_for_tokens(window - reserve, per_token) - max(0, int(held_chars)))
     share_of_it = int(free_chars * max(0.0, float(share)))
     cap = share_of_it if share_of_it >= floor else min(floor, free_chars)
     return cap if cap >= NO_ROOM_BELOW_CHARS else 0
@@ -1364,6 +1388,44 @@ _LOCAL_SERVER_ANSWERS = (
 )
 
 
+def runtime_answer(provider: object, endpoint: object, model: object = "") -> str:
+    """What answered one model's window probe at one endpoint as a model runtime, or ``""``.
+
+    Read from what the probe already learned (the cache :func:`learn_window`
+    fills), never by asking: llama.cpp's ``/props``, Ollama's model
+    description or the server description of Text Generation Inference, as
+    :func:`serves_locally` reads them. ``""`` for any other answer, for no
+    answer, and for a question not asked recently.
+    """
+    asked, learned = _cached((str(provider), str(endpoint or ""), str(model or "")))
+    if not asked or learned is None or learned.source != PROBED:
+        return ""
+    detail = str(learned.detail)
+    return next((what for what in _LOCAL_SERVER_ANSWERS if detail.startswith(what)), "")
+
+
+def runtime_answers(assignments: Iterable[Any]) -> dict[str, str]:
+    """``{endpoint label: what answered}`` for each model whose probe answered as a runtime.
+
+    For the run's record of where its prompts went (``analysis.disclosure``):
+    read from the cache right after the job's windows were learned, so it is
+    the answer this run used, and no request is made.
+    """
+    from maljan.core.model_assignments import endpoint_label
+
+    out: dict[str, str] = {}
+    for assignment in assignments:
+        what = runtime_answer(
+            getattr(assignment, "provider", ""),
+            getattr(assignment, "endpoint", ""),
+            getattr(assignment, "model", ""),
+        )
+        endpoint = str(getattr(assignment, "endpoint", "") or "")
+        if what and "://" in endpoint:
+            out[endpoint_label(endpoint)] = what
+    return out
+
+
 def serves_locally(assignment: Any, window: WindowFact) -> bool:
     """Whether the model is served by a runtime we run rather than a hosted API.
 
@@ -1486,7 +1548,7 @@ def call_output_bound(cap: int, window_tokens: int, prompt_chars: int) -> int | 
     """
     if int(window_tokens) <= 0 or int(cap) <= 0:
         return None
-    left = int(window_tokens) - -(-max(0, int(prompt_chars)) // CHARS_PER_TOKEN)
+    left = int(window_tokens) - tokens_for_chars(prompt_chars)
     if int(cap) <= left:
         return None
     return max(1, left)
@@ -1535,7 +1597,7 @@ def prompt_overflow_sentence(what: str, prompt_chars: int, window_tokens: int) -
     """
     if int(window_tokens) <= 0:
         return None
-    tokens = -(-max(0, int(prompt_chars)) // CHARS_PER_TOKEN)
+    tokens = tokens_for_chars(prompt_chars)
     if tokens <= int(window_tokens):
         return None
     return (
@@ -1831,10 +1893,25 @@ class CallAnswer:
     ``cut`` is how many characters the guardrail dropped from an answer it
     cut, shortened or summarised to fit (:func:`note_answer_cut`); ``None``
     for an answer handed over whole.
+    ``whole`` is the answer as the tool gave it, noted by the guardrail when
+    the answer was longer than the call's limit (:func:`note_answer_whole`),
+    and ``structure`` the structured answer the tool's server returned beside
+    its text (:func:`note_answer_structure`): what the recorder keeps whole
+    for an entry that does not hold them (``schemas.evidence_spill``). Neither
+    reaches the conversation.
+    ``line_room`` says the guardrail kept back, or charged, the room of the
+    completeness line the recorder appends to a cut answer
+    (:func:`note_answer_line_room`); the recorder charges the line otherwise.
+    ``began`` is the monotonic time the call left for its server, after any wait
+    for a slot (:func:`note_call_began`); ``None`` where nothing noted it.
     """
 
     not_shown: int | None = None
     cut: int | None = None
+    whole: str | None = None
+    structure: dict[str, Any] | None = None
+    line_room: bool = False
+    began: float | None = None
 
 
 _CALL_ANSWER: ContextVar[CallAnswer | None] = ContextVar("maljan_call_answer", default=None)
@@ -1863,6 +1940,34 @@ def note_answer_not_shown(chars: int) -> None:
     answer = _CALL_ANSWER.get()
     if answer is not None:
         answer.not_shown = max(0, int(chars))
+
+
+def note_answer_whole(text: str) -> None:
+    """Note, for the call being answered, the answer as the tool gave it, before any cut."""
+    answer = _CALL_ANSWER.get()
+    if answer is not None:
+        answer.whole = str(text)
+
+
+def note_answer_structure(content: Any) -> None:
+    """Note, for the call being answered, the structured answer the server returned beside it."""
+    answer = _CALL_ANSWER.get()
+    if answer is not None and isinstance(content, dict) and content:
+        answer.structure = content
+
+
+def note_answer_line_room() -> None:
+    """Say, for the call being answered, that the guardrail kept the completeness line's room."""
+    answer = _CALL_ANSWER.get()
+    if answer is not None:
+        answer.line_room = True
+
+
+def note_call_began() -> None:
+    """Say, for the call being answered, that it is now being sent, past any queue."""
+    answer = _CALL_ANSWER.get()
+    if answer is not None and answer.began is None:
+        answer.began = time.monotonic()
 
 
 def note_answer_cut(chars: int) -> None:
@@ -2068,7 +2173,9 @@ class ContextBudget:
 
     def tool_budget_chars(self) -> int:
         """Everything a conversation may hold before the reply reserve begins."""
-        return max(0, self.window.tokens - self.reply_tokens) * self.chars_per_token
+        return chars_for_tokens(
+            max(0, self.window.tokens - self.reply_tokens), self.chars_per_token
+        )
 
     def room_for(self, chars: int, agent: str = "") -> bool:
         """Whether ``chars`` of the platform's own text still fits the tool budget.

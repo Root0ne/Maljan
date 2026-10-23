@@ -32,6 +32,19 @@ def test_a_reserved_key_cannot_be_claimed_by_a_new_server():
     assert "reserved" in exc.value.errors["ghidra"]
 
 
+@pytest.mark.parametrize("key", ["pipeline", "sandbox"])
+def test_the_ledger_s_in_process_sources_cannot_be_claimed_by_a_new_server(key):
+    with pytest.raises(ServerMapError) as exc:
+        validate_server_map({key: _entry()})
+    assert "reserved" in exc.value.errors[key]
+
+
+@pytest.mark.parametrize("key", ["pipeline", "sandbox"])
+def test_a_server_stored_under_such_a_key_before_it_was_reserved_is_kept(key):
+    out = validate_server_map({key: _entry()}, stored={key: _entry()})
+    assert key in out
+
+
 def test_a_built_in_may_be_disabled_but_not_deleted():
     out = validate_server_map({"network": _entry(enabled=False, agents=["network"])})
     assert out["network"]["enabled"] is False

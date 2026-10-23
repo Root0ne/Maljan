@@ -16,12 +16,394 @@
   ],
   "budget": "<data-keyed map>",
   "corroboration": "<data-keyed map>",
+  "coverage": {
+    "negatives": [
+      {
+        "agent": null,
+        "claim": null,
+        "coverage": null,
+        "gaps": [
+          {
+            "by": [
+              null
+            ],
+            "entries": [
+              null
+            ],
+            "entry": null,
+            "from": null,
+            "gap": null,
+            "over": [
+              {
+                "digest": null,
+                "input": null,
+                "path": null,
+                "role": null
+              }
+            ],
+            "path": null,
+            "state": null
+          }
+        ],
+        "looked": [
+          {
+            "capped": null,
+            "dropped": null,
+            "entry": null,
+            "kind": null,
+            "limits": [
+              null
+            ],
+            "narrowed_by": [
+              null
+            ],
+            "over": [
+              {
+                "digest": null,
+                "filled": null,
+                "from": null,
+                "from_tool": null,
+                "input": null,
+                "path": null,
+                "role": null,
+                "server_reads_staged_sample": null
+              }
+            ],
+            "read": null,
+            "reason": null,
+            "server": null,
+            "state": null,
+            "tool": null
+          }
+        ],
+        "negative": null,
+        "not_in_ledger": [
+          null
+        ],
+        "read_by": null,
+        "why": {
+          "answer_shape": [
+            null
+          ],
+          "input": null,
+          "statement": null
+        }
+      }
+    ],
+    "not_established": [
+      {
+        "count": null,
+        "dropped": null,
+        "entries": [
+          null
+        ],
+        "from": null,
+        "from_tool": null,
+        "input": null,
+        "kind": null,
+        "over": [
+          {
+            "digest": null,
+            "input": null,
+            "role": null
+          }
+        ],
+        "path": null,
+        "reason": null,
+        "server": null,
+        "state": null,
+        "tool": null,
+        "what": null
+      }
+    ],
+    "partial_reason": null,
+    "tools": [
+      {
+        "calls": null,
+        "guard_answers": null,
+        "kind": null,
+        "over": [
+          {
+            "filled": null,
+            "from": null,
+            "from_tool": null,
+            "input": null,
+            "path": null,
+            "server_reads_staged_sample": null
+          }
+        ],
+        "roles": "<data-keyed map>",
+        "server": null,
+        "states": "<data-keyed map>",
+        "tool": null
+      }
+    ],
+    "v": null
+  },
   "dedupe": {
     "findings_merged": null,
     "indicators_merged": null
   },
   "degradation_reasons": [],
   "degraded_mode": null,
+  "disclosure": {
+    "addressed": [
+      null
+    ],
+    "effects": {
+      "partial_reason": null,
+      "tools": [
+        {
+          "calls": null,
+          "completed": null,
+          "executes": null,
+          "failed": null,
+          "hints": {},
+          "network": null,
+          "network_by": null,
+          "not_run": null,
+          "refused": null,
+          "server": null,
+          "source": null,
+          "third_party": null,
+          "tool": null,
+          "when": null,
+          "why_undeclared": null
+        }
+      ],
+      "v": null
+    },
+    "enrichment": {
+      "asked": [
+        {
+          "errored": null,
+          "failed": null,
+          "host": null,
+          "kinds": "<data-keyed map>",
+          "source": null,
+          "where": null,
+          "why": null
+        }
+      ],
+      "may_reach": [
+        {
+          "hosts": [
+            null
+          ],
+          "kinds": [
+            null
+          ],
+          "server": null,
+          "source": null,
+          "transport": null,
+          "where": null,
+          "why": null
+        }
+      ],
+      "state": null
+    },
+    "isolation": {
+      "isolated": null,
+      "isolated_by": null,
+      "rows": [
+        {
+          "attaches": null,
+          "calls": null,
+          "cap_amb_zero": null,
+          "cap_eff_zero": null,
+          "cap_prm_zero": null,
+          "descendants": null,
+          "descendants_failing": null,
+          "descendants_judged": null,
+          "descendants_why": null,
+          "host": null,
+          "isolated": null,
+          "isolated_by": null,
+          "label": null,
+          "launcher_depth": null,
+          "measured_by": null,
+          "needs_network": null,
+          "no_new_privs": null,
+          "own_mount_namespace": null,
+          "own_net_namespace": null,
+          "own_pid_namespace": null,
+          "platform_names_in_env": [
+            null
+          ],
+          "same_uid_as_worker": null,
+          "shares_group_with_worker": null,
+          "source": null,
+          "transport": null,
+          "uid": null,
+          "under_launcher": null,
+          "where": null,
+          "why_not_measured": null
+        }
+      ],
+      "unsourced_reads": null,
+      "worker": {
+        "cap_amb_zero": null,
+        "cap_eff_zero": null,
+        "cap_prm_zero": null,
+        "no_new_privs": null,
+        "platform_names_in_env": [
+          null
+        ],
+        "uid": null
+      }
+    },
+    "local_servers": [
+      null
+    ],
+    "lookups": [
+      {
+        "calls": null,
+        "host": null,
+        "kinds": "<data-keyed map>",
+        "source": null,
+        "transport": null,
+        "where": null,
+        "why": null,
+        "without_indicator": null
+      }
+    ],
+    "models": [
+      {
+        "agents": "<data-keyed map>",
+        "calls": null,
+        "configured_for": [],
+        "global": null,
+        "host": null,
+        "runtime": null,
+        "service": null,
+        "where": null,
+        "why": null
+      }
+    ],
+    "nothing_left": null,
+    "partial_reason": null,
+    "servers": [
+      {
+        "calls": null,
+        "host": null,
+        "source": null,
+        "transport": null,
+        "where": null,
+        "why": null
+      }
+    ],
+    "stores": [
+      {
+        "backend": null,
+        "host": null,
+        "where": null,
+        "why": null
+      }
+    ],
+    "tracing": null,
+    "undeclared": [
+      {
+        "calls": null,
+        "host": null,
+        "source": null,
+        "transport": null,
+        "where": null,
+        "why": null
+      }
+    ],
+    "unreadable_entries": null,
+    "uploads": [
+      {
+        "by": null,
+        "calls": null,
+        "failed": null,
+        "host": null,
+        "source": null,
+        "transport": null,
+        "where": null,
+        "why": null
+      }
+    ],
+    "v": null
+  },
+  "efficiency": {
+    "calls": {
+      "by_agent": "<data-keyed map>",
+      "by_tool": "<data-keyed map>",
+      "refused": null,
+      "repeated": null,
+      "retried_after_failure": null,
+      "run_again": null,
+      "same_call_elsewhere": null
+    },
+    "fingerprint": {
+      "components": {
+        "prompts": null,
+        "servers": null,
+        "settings": null,
+        "tools": null
+      },
+      "not_resolved": [
+        null
+      ],
+      "parts": {
+        "prompts": "<data-keyed map>",
+        "servers": "<data-keyed map>",
+        "settings": "<data-keyed map>",
+        "tools": "<data-keyed map>"
+      },
+      "sha256": null,
+      "texts": "<data-keyed map>"
+    },
+    "inputs": {
+      "calls": "<data-keyed map>",
+      "loops": [
+        {
+          "agent": null,
+          "input_tokens": null,
+          "kind": null,
+          "parts": {
+            "own_turns": null,
+            "pack": null,
+            "peer_reports": null,
+            "retries": null,
+            "run_state": null,
+            "system_prompt": null,
+            "task": null,
+            "tool_answers": null,
+            "tool_definitions": null
+          },
+          "reported_requests": null,
+          "requests": null,
+          "stage": null
+        }
+      ],
+      "unit": null
+    },
+    "output": "<data-keyed map>",
+    "rows_read": {
+      "by_agent": "<data-keyed map>",
+      "reads": null,
+      "rows": [
+        {
+          "by": "<data-keyed map>",
+          "id": null,
+          "pack": null,
+          "tool": null
+        }
+      ]
+    },
+    "uncited": {
+      "by_agent": "<data-keyed map>",
+      "by_tool": "<data-keyed map>",
+      "cited": null,
+      "entries": null,
+      "failed": null,
+      "ids": [],
+      "uncited": null
+    },
+    "v": null
+  },
   "elapsed_seconds": null,
   "evidence": {
     "by_tool": "<data-keyed map>",
@@ -146,6 +528,7 @@
     "evidence_corpus_partial_reason": null,
     "indicator_cap_invocations": null,
     "indicator_cap_removed": null,
+    "input_split_unknown_window": [],
     "integrity_dropped": "<data-keyed map>",
     "integrity_invocations": null,
     "integrity_objects_removed": null,

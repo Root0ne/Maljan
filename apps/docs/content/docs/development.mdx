@@ -96,8 +96,35 @@ on loopback port 8080.
   started yourself first — the browsers are memory-hungry, which is why the
   local worker count and the timeouts are raised deliberately.
 
+- **Replay** — `python scripts/replay/run.py <stored run>` re-runs the
+  platform's deterministic rules over a stored run with no model call, and
+  `--compare REF_A REF_B` names every difference a rule change makes between
+  two refs. Run it before and after a change to a check, the report builder or
+  a publish rule; see [Replaying a stored run](/replay/).
+
 The evaluation harness behind the published measurements is no longer part of
 this tree; see [paper.md](/paper/).
+
+### Native runs pin `LC_CTYPE`
+
+C code folds case with the C library's `tolower`, by the process's `LC_CTYPE`.
+Under a Turkish or Azerbaijani locale a capital I does not fold, so the YARA
+engine's `nocase` misses every I it should match and its `pe.imphash()`
+differs. Each of the platform's own processes therefore sets `LC_CTYPE`, and
+nothing else, to `C.UTF-8` (or `C.utf8`) when it starts, before any thread or
+the YARA engine loads, and keeps it only when the C library then folds `I` to
+`i` (`core.ctype_locale.pin_character_classification`). This covers the analysis
+worker, the `maljan` CLI, `scripts/validation/run.py`, `scripts/rehearsal/run.py`
+and the analysis and network sidecars, whose line goes to standard error
+because standard output is their protocol. The test session pins the same way
+in `tests/conftest.py`, and a test that changes the locale itself runs in a
+subprocess. Messages, times and collation stay the operator's. On a host whose
+locale is not UTF-8 (a legacy 8-bit one such as `tr_TR.ISO-8859-9`), the pin
+also makes UTF-8 Python's preferred encoding, which matches the image; the
+INFO line says so when the encoding changes. An operator's own tool server
+keeps the environment it was started with, and so the operator's locale: a
+YARA engine inside one can still mishandle I and i on such a host. The
+backend image already runs under `LANG=C.UTF-8`.
 
 ## Documentation site
 
@@ -108,6 +135,26 @@ The sidebar's order and groups are `content/docs/meta.json`. Preview it locally
 from `apps/docs` with `npm ci` and `npm run dev`; `npm run build` writes the
 static site to `apps/docs/out/` and fails if any address the site has served
 before no longer leads to a page (`scripts/old-urls.mjs`).
+
+[Validation codes](/validation-codes/) is generated, not written. Run
+`uv run python scripts/validation_codes/run.py` and commit the page after any of
+these edits:
+
+- adding, removing or renaming a code, or the constant that names it;
+- adding, moving or removing a place that raises a code or passes one on,
+  renaming the function it is in included;
+- changing a code constant's comment, the comment over a group of code
+  constants, or the message a raise site passes;
+- adding or removing a mention of a code on a docs page, or renaming or moving
+  such a page;
+- adding or changing a code position the register cannot follow.
+
+Adding, changing or removing a test does not change the page: the tests are not
+listed on it, and `run.py --tests` prints which tests name each code. The
+register reads only the files git tracks, so add a new file before
+regenerating. `tests/unit/test_the_validation_code_register_is_current.py` fails
+when the committed page is not what the source gives, naming the command, when
+nothing raises a code, and when no test names one.
 
 ## Continuous integration
 

@@ -106,3 +106,35 @@ export function moveChoice(list: ModelChoice[], index: number, by: number): Mode
   next.splice(target, 0, row!);
   return next;
 }
+
+/** An agent's own ceiling as typed into its field: a positive number, `null`
+ *  for a blank field (no ceiling), or `undefined` for text that is neither,
+ *  which is not staged. `whole` takes integers only (the token ceiling). */
+export function ceilingValue(raw: string, whole = false): number | null | undefined {
+  const text = raw.trim();
+  if (text === "") return null;
+  const parsed = Number(text);
+  if (!Number.isFinite(parsed) || parsed <= 0) return undefined;
+  if (whole && !Number.isInteger(parsed)) return undefined;
+  return parsed;
+}
+
+/** An agent's own ceilings, mirroring `AgentLLMConfig.max_spend_usd` and
+ *  `max_unpriced_tokens`. Absent is no ceiling. */
+export interface AgentCeilings {
+  max_spend_usd?: number | null;
+  max_unpriced_tokens?: number | null;
+}
+
+/** The ceilings an entry stores: each one set, and none left as `null`, so
+ *  an entry with no ceiling is staged exactly as it was before they existed. */
+export function storedCeilings(entry: AgentCeilings): AgentCeilings {
+  const out: AgentCeilings = {};
+  if (typeof entry.max_spend_usd === "number" && entry.max_spend_usd > 0) {
+    out.max_spend_usd = entry.max_spend_usd;
+  }
+  if (typeof entry.max_unpriced_tokens === "number" && entry.max_unpriced_tokens > 0) {
+    out.max_unpriced_tokens = entry.max_unpriced_tokens;
+  }
+  return out;
+}

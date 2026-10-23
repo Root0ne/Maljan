@@ -119,13 +119,20 @@ function linkOf(structured: unknown): string | null {
 
 /** "42/71 malicious" as the sidecar writes it, when it writes it. */
 function countsFromProse(text: string): Pick<Reputation, "engines" | "malicious" | "suspicious"> {
-  const match = /(\d+)\s*\/\s*(\d+)\s+malicious/i.exec(text);
+  // The sidecar's whole sentence, anchored at both ends as its declaration's
+  // text pattern is: `Hash <hex> (<name>): <verdict> — M/T malicious[, S/T
+  // suspicious].` The name inside the parentheses is chosen by the sample and
+  // may hold anything, so a figure is read only from the tail after the last
+  // `): `, never from the first one that looks like a count.
+  const match =
+    /^\s*Hash [0-9A-Fa-f]+ \([\s\S]*\): (?:clean|suspicious|malicious) \u2014 (\d+)\/(\d+) malicious(?:, (\d+)\/\d+ suspicious)?\.\s*$/.exec(
+      text,
+    );
   if (!match) return { engines: null, malicious: null, suspicious: null };
-  const suspicious = /(\d+)\s*\/\s*\d+\s+suspicious/i.exec(text);
   return {
     engines: Number(match[2]),
     malicious: Number(match[1]),
-    suspicious: suspicious ? Number(suspicious[1]) : null,
+    suspicious: match[3] !== undefined ? Number(match[3]) : null,
   };
 }
 

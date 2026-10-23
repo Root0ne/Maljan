@@ -44,6 +44,7 @@ from __future__ import annotations
 import json
 import re
 from collections import Counter
+from collections.abc import Callable
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
 from typing import Any
@@ -474,7 +475,7 @@ def _check_narrative(record: RunRecord) -> Check:
 def _price_rows() -> dict[str, Any]:
     from maljan.core.spend import table_prices
 
-    return table_prices()
+    return dict(table_prices())
 
 
 def _billed(record: RunRecord) -> list[dict[str, Any]]:
@@ -497,15 +498,19 @@ def _stub_cost(
     *,
     prompt_only: bool = False,
     output: int | None = None,
+    sent: float | None = None,
 ) -> float:
     """What one stub call's reported usage costs at the vendored prices; ``-1`` when unpriced.
 
     ``output`` prices that many output tokens in place of the reported ones.
+    ``sent`` is when the call was sent (seconds since the epoch), the instant
+    whose rates apply; without it, when the stub received the call.
     """
     price = rows.get(str(entry.get("model") or "").lower())
     if price is None:
         return -1.0
-    when = datetime.fromtimestamp(float(entry.get("at") or 0), tz=UTC)
+    instant = float(entry.get("at") or 0) if sent is None else float(sent)
+    when = datetime.fromtimestamp(instant, tz=UTC)
     usage = {
         "input_tokens": int(entry.get("input_tokens") or 0),
         "cached_input_tokens": int(entry.get("cache_read_tokens") or 0),
@@ -527,14 +532,18 @@ def priced_usage(record: RunRecord) -> tuple[float, list[str]]:
     Every call answered whole, at its whole usage, and every broken stream
     that reported its prompt's usage, at that prompt alone: the output part
     of a broken stream is the product's estimate and is added from its record.
+    Each at the rates in force when its record says the product sent it
+    (where it says), as the spend meter prices a call.
     """
     rows = _price_rows()
+    paired = _paired_records(record)
     total = 0.0
     unpriced: list[str] = []
     for entry, prompt_only in [(e, False) for e in _billed(record)] + [
         (e, True) for e in _broken_and_reported(record)
     ]:
-        cost = _stub_cost(entry, rows, prompt_only=prompt_only)
+        sent = _sent_at(paired.rows.get(id(entry)))
+        cost = _stub_cost(entry, rows, prompt_only=prompt_only, sent=sent)
         if cost < 0:
             model = str(entry.get("model") or "").lower()
             if model not in unpriced:
@@ -569,11 +578,84 @@ def _close(a: float, b: float) -> bool:
     return abs(a - b) <= 1e-9 + _PRICE_TOLERANCE * max(abs(a), abs(b))
 
 
-def _take(rows: list[dict[str, Any]], key: tuple[int, ...], key_of: Any) -> dict[str, Any] | None:
-    for index, row in enumerate(rows):
-        if key_of(row) == key:
-            return rows.pop(index)
-    return None
+def _sent_at(row: dict[str, Any] | None) -> float | None:
+    """When the product sent the call a usage record records (``sent_at``), where it says."""
+    return None if row is None else _figure(row.get("sent_at"))
+
+
+def _call_key(row: dict[str, Any]) -> tuple[int, ...]:
+    return (
+        int(row.get("input_tokens") or 0),
+        int(row.get("output_tokens") or 0),
+        int(row.get("cached_input_tokens") or 0),
+    )
+
+
+def _prompt_key(row: dict[str, Any]) -> tuple[int, ...]:
+    return (int(row.get("input_tokens") or 0), int(row.get("cached_input_tokens") or 0))
+
+
+@dataclass
+class _Pairing:
+    """Each stub call's usage record (by the entry's ``id``), and the records left unpaired."""
+
+    rows: dict[int, dict[str, Any]]
+    calls_left: list[dict[str, Any]]
+    failed_left: list[dict[str, Any]]
+
+
+def _pair(
+    entries: list[dict[str, Any]],
+    pool: list[dict[str, Any]],
+    key_of_entry: Callable[[dict[str, Any]], tuple[int, ...]],
+    key_of_row: Callable[[dict[str, Any]], tuple[int, ...]],
+    rows: dict[int, dict[str, Any]],
+) -> None:
+    """Pair each entry with a record of its usage, taking records out of ``pool``.
+
+    Calls are taken in the order the stub received them, each given the
+    record of its usage sent earliest among those sent no later than it was
+    received: a record sent after the stub received a call cannot be that
+    call's. Where every record of its usage was sent later, or none says when
+    it was sent, the first is taken.
+    """
+    for entry in sorted(entries, key=lambda e: float(e.get("at") or 0)):
+        key = key_of_entry(entry)
+        candidates = [i for i, row in enumerate(pool) if key_of_row(row) == key]
+        if not candidates:
+            continue
+        at = float(entry.get("at") or 0)
+        before = [i for i in candidates if (_sent_at(pool[i]) or at) <= at]
+        index = min(before, key=lambda i: _sent_at(pool[i]) or at) if before else candidates[0]
+        rows[id(entry)] = pool.pop(index)
+
+
+def _paired_records(record: RunRecord) -> _Pairing:
+    """Every answered call and every broken stream that reported its prompt, with its record.
+
+    A call answered whole is paired by its whole usage with a per-call record,
+    a broken stream by its prompt's with a failed-attempt record.
+    """
+    from maljan.llm.transient import FAILED_ATTEMPT_CALL
+
+    records = usage_records(record)
+    calls = [r for r in records if str(r.get("call") or "") != FAILED_ATTEMPT_CALL]
+    failed = [r for r in records if str(r.get("call") or "") == FAILED_ATTEMPT_CALL]
+    rows: dict[int, dict[str, Any]] = {}
+
+    def stub_call(entry: dict[str, Any]) -> tuple[int, ...]:
+        return (
+            int(entry.get("input_tokens") or 0),
+            int(entry.get("output_tokens") or 0),
+            int(entry.get("cache_read_tokens") or 0),
+        )
+
+    def stub_prompt(entry: dict[str, Any]) -> tuple[int, ...]:
+        return (int(entry.get("input_tokens") or 0), int(entry.get("cache_read_tokens") or 0))
+
+    _pair(_billed(record), calls, stub_call, _call_key, rows)
+    _pair(_broken_and_reported(record), failed, stub_prompt, _prompt_key, rows)
+    return _Pairing(rows=rows, calls_left=calls, failed_left=failed)
 
 
 def _record_problems(record: RunRecord) -> tuple[list[str], float]:
@@ -584,7 +666,8 @@ def _record_problems(record: RunRecord) -> tuple[list[str], float]:
     record for every broken stream whose prompt usage was reported, carrying
     that prompt's usage and a charge whose part beyond the prompt priced is
     its stated output estimate (``estimated_part`` ``output``) and nothing
-    else. No other record, and no record without a charge.
+    else. No other record, no record without a charge, and no record sent
+    after the stub received the call it records.
     """
     from maljan.core.spend import ESTIMATED_OUTPUT
     from maljan.llm.transient import FAILED_ATTEMPT_CALL
@@ -607,30 +690,32 @@ def _record_problems(record: RunRecord) -> tuple[list[str], float]:
             "reported their prompt's usage"
         )
 
-    def record_key(row: dict[str, Any]) -> tuple[int, ...]:
-        return (
-            int(row.get("input_tokens") or 0),
-            int(row.get("output_tokens") or 0),
-            int(row.get("cached_input_tokens") or 0),
-        )
+    paired = _paired_records(record)
 
-    def prompt_key(row: dict[str, Any]) -> tuple[int, ...]:
-        return (int(row.get("input_tokens") or 0), int(row.get("cached_input_tokens") or 0))
+    def sent_problem(label: str, entry: dict[str, Any], row: dict[str, Any]) -> None:
+        sent, at = _sent_at(row), float(entry.get("at") or 0)
+        if sent is not None and sent > at:
+            problems.append(
+                f"{label}: its record was sent {sent - at:.3f}s after the stub received it"
+            )
 
-    unmatched = list(calls)
     for entry in billed:
         key = (
             int(entry.get("input_tokens") or 0),
             int(entry.get("output_tokens") or 0),
             int(entry.get("cache_read_tokens") or 0),
         )
-        row = _take(unmatched, key, record_key)
+        row = paired.rows.get(id(entry))
         label = f"call {entry.get('n', '?')} ({entry.get('role', '')})"
         if row is None:
             problems.append(f"{label}: no usage record carries its reported usage {key}")
             continue
+        sent_problem(label, entry, row)
         charged = _figure(row.get("priced_usd"))
-        cost = _stub_cost(entry, rows)
+        # At the rates in force when the product sent it, as the spend meter
+        # prices a call: a call sent just before a rate window's edge reaches
+        # the stub after it.
+        cost = _stub_cost(entry, rows, sent=_sent_at(row))
         if charged is None:
             problems.append(f"{label}: its usage record carries no charge")
         elif cost >= 0 and not _close(charged, cost):
@@ -639,19 +724,20 @@ def _record_problems(record: RunRecord) -> tuple[list[str], float]:
             )
         if row.get("estimated_part") or _figure(row.get("estimated_usd")):
             problems.append(f"{label}: charged by estimate though its usage was reported")
-    unmatched_failed = list(failed)
     for entry in broken:
         prompt_of = (int(entry.get("input_tokens") or 0), int(entry.get("cache_read_tokens") or 0))
-        row = _take(unmatched_failed, prompt_of, prompt_key)
+        row = paired.rows.get(id(entry))
         label = f"broken call {entry.get('n', '?')} ({entry.get('role', '')})"
         if row is None:
             problems.append(
                 f"{label}: no failed-attempt record carries its reported prompt {prompt_of}"
             )
             continue
+        sent_problem(label, entry, row)
+        sent = _sent_at(row)
         charged = _figure(row.get("priced_usd"))
         by_estimate = _figure(row.get("estimated_usd"))
-        prompt = _stub_cost(entry, rows, prompt_only=True)
+        prompt = _stub_cost(entry, rows, prompt_only=True, sent=sent)
         if charged is None or by_estimate is None:
             problems.append(f"{label}: its record carries no charge or no estimated part")
             continue
@@ -663,7 +749,7 @@ def _record_problems(record: RunRecord) -> tuple[list[str], float]:
         # The most an output can cost: the request's own cap, at the output rate
         # of the prompt's tier.
         cap = int(entry.get("max_tokens") or 0)
-        whole = _stub_cost(entry, rows, output=cap) if cap > 0 else -1.0
+        whole = _stub_cost(entry, rows, output=cap, sent=sent) if cap > 0 else -1.0
         ceiling = whole - prompt if whole >= 0 and prompt >= 0 else None
         if by_estimate < 0 or by_estimate > charged:
             problems.append(f"{label}: estimated {by_estimate:.8f} of {charged:.8f} USD")
@@ -680,10 +766,10 @@ def _record_problems(record: RunRecord) -> tuple[list[str], float]:
                 f"its reported prompt priced {prompt:.8f} USD"
             )
         estimated += by_estimate
-    for row in unmatched + unmatched_failed:
+    for row in paired.calls_left + paired.failed_left:
         problems.append(
             f"a usage record no answered or charged call accounts for: {row.get('call')!r} "
-            f"by {row.get('agent')!r}, {record_key(row)}"
+            f"by {row.get('agent')!r}, {_call_key(row)}"
         )
     return problems, estimated
 
@@ -1193,7 +1279,9 @@ def _check_settings(record: RunRecord) -> Check:
         elif key == "effort":
             efforts = {e.get("effort") for e in log}
             if efforts != {want}:
-                problems.append(f"effort: expected {want!r}, requests carried {sorted(efforts)}")
+                problems.append(
+                    f"effort: expected {want!r}, requests carried {sorted(efforts, key=str)}"
+                )
             else:
                 seen.append(key)
         elif key in ("max_steps", "timeout_s"):
@@ -1334,7 +1422,7 @@ def _check_deadline_in(record: RunRecord, name: str, stage: str) -> Check:
     return Check(name, not problems, detail)
 
 
-CHECKS = (
+CHECKS: tuple[Callable[[RunRecord], Check], ...] = (
     _check_job,
     _check_refusals,
     _check_recognised,
@@ -1479,6 +1567,8 @@ def as_markdown(record: RunRecord, checks: list[Check]) -> str:
             lines.append(f"- tool server {key}: disabled (its tool definitions were not sent)")
         for key in record.gate.get("servers_with_keys_withheld") or []:
             lines.append(f"- tool server {key}: reputation keys withheld (offline answers)")
+        for key, why in (record.gate.get("servers_kept") or {}).items():
+            lines.append(f"- tool server {key}: {why}")
     lines += ["", "## Observed", ""]
     for key, value in observations(record).items():
         lines.append(f"- {key}: {json.dumps(value, ensure_ascii=False)}")

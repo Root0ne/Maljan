@@ -22,6 +22,17 @@ from langchain_core.language_models.chat_models import BaseChatModel
 from maljan.core.config import Settings
 from maljan.core.exceptions import LLMError
 from maljan.core.logger import logger
+from maljan.core.plugins import (
+    InstalledPlugin,
+    PluginRefused,
+    PluginRegistry,
+    describe,
+    reconcile,
+    registration_refusal,
+    unavailable_reason,
+    usable_list,
+)
+from maljan.core.settings_overrides import redact_url
 
 # The request timeout every provider's HTTP client is built with, unless the
 # caller names one. It has to outlast the longest agent loop budget (the
@@ -40,9 +51,18 @@ _PROVIDER_REGISTRY: dict[str, type] = {}
 
 
 def register_provider(name: str):  # type: ignore[no-untyped-def]
-    """Decorator that registers an LLM provider class under the given name."""
+    """Decorator that registers an LLM provider class under the given name.
+
+    While a plugin loads, it may register only the provider its entry point
+    names, never a built-in one (``maljan.core.plugins``).
+    """
 
     def decorator(cls: type) -> type:
+        refusal = registration_refusal(
+            "llm", name, cls, _PROVIDER_REGISTRY.get(name), lambda: BUILT_IN_PROVIDERS
+        )
+        if refusal:
+            raise PluginRefused(refusal)
         if name in _PROVIDER_REGISTRY:
             logger.warning(f"LLM provider '{name}' is being re-registered (overwriting).")
         _PROVIDER_REGISTRY[name] = cls
@@ -64,12 +84,94 @@ _BUILTIN_MODULES: tuple[str, ...] = (
 )
 
 
-def discover_providers() -> None:
-    """Import all built-in provider modules to trigger @register_provider decorators."""
+# The ids the built-in adapters register, each named after its module.
+BUILT_IN_PROVIDERS: frozenset[str] = frozenset(
+    module.rsplit(".", 1)[1].removesuffix("_provider") for module in _BUILTIN_MODULES
+)
+
+
+def _import_built_ins() -> None:
     import importlib
 
     for module in _BUILTIN_MODULES:
         importlib.import_module(module)
+
+
+def discover_providers() -> None:
+    """Import all built-in provider modules to trigger @register_provider decorators.
+
+    No plugin is loaded here: a process loads the allowed plugins when it is
+    told to, with the list to load by (``load_plugins``).
+    """
+    _import_built_ins()
+
+
+def load_plugins(allowed: Any) -> None:
+    """Bring the LLM provider plugins in line with the allow-list ``allowed``.
+
+    The plugins of the ``maljan.llm_providers`` entry-point group it names
+    are loaded once each, and one it no longer names is withdrawn
+    (``maljan.core.plugins.load_allowed``).
+    """
+    reconcile(PLUGINS, usable_list(allowed))
+
+
+def _built_ins() -> frozenset[str]:
+    _import_built_ins()
+    return BUILT_IN_PROVIDERS
+
+
+def _registered() -> list[str]:
+    from maljan.llm.provider_base import provider_names
+
+    return provider_names()
+
+
+def _register_plugin(plugin: InstalledPlugin, loaded: object) -> None:
+    """Register the class an LLM plugin's entry point named, under the plugin's name."""
+    from maljan.llm.provider_base import LLMProvider
+
+    if not (isinstance(loaded, type) and issubclass(loaded, LLMProvider)):
+        raise PluginRefused(
+            f"its entry point names {describe(loaded)}, which is not a subclass of "
+            "maljan.llm.provider_base.LLMProvider"
+        )
+    if not callable(getattr(loaded, "build_model", None)):
+        raise PluginRefused(f"{describe(loaded)} has no build_model method")
+    declared = str(getattr(loaded, "name", "") or "")
+    if declared and declared != plugin.name:
+        raise PluginRefused(
+            f"{describe(loaded)} names itself {declared!r} and its entry point "
+            f"{plugin.name!r}; the two must be the same"
+        )
+    if not declared:
+        loaded.name = plugin.name
+    if _PROVIDER_REGISTRY.get(plugin.name) is not loaded:
+        register_provider(plugin.name)(loaded)
+
+
+def _withdraw_plugin(name: str) -> None:
+    from maljan.llm.provider_base import forget_facts
+
+    _PROVIDER_REGISTRY.pop(name, None)
+    forget_facts(name)
+
+
+PLUGINS = PluginRegistry(
+    kind="llm",
+    builtin=_built_ins,
+    registered=_registered,
+    register=_register_plugin,
+    withdraw=_withdraw_plugin,
+)
+
+
+def unknown_provider(name: object) -> str:
+    """Why ``name`` names no registered LLM provider, with the registered names."""
+    available = ", ".join(_PROVIDER_REGISTRY.keys()) or "(none)"
+    said = f"Unknown LLM provider: '{name}'. Available: {available}"
+    reason = unavailable_reason("llm", str(name or ""))
+    return f"{said}; {reason}" if reason else said
 
 
 def discover_provider(name: str) -> None:
@@ -112,8 +214,7 @@ class LLMProviderRegistry:
         provider_cls = _PROVIDER_REGISTRY.get(provider_name)
 
         if provider_cls is None:
-            available = ", ".join(_PROVIDER_REGISTRY.keys()) or "(none)"
-            raise LLMError(f"Unknown LLM provider: '{provider_name}'. Available: {available}")
+            raise LLMError(unknown_provider(provider_name))
 
         # Select model name based on role
         if role == "judge":
@@ -159,13 +260,18 @@ class LLMProviderRegistry:
             agent_name: The agent registry key (e.g. "static", "dynamic",
                         "network"). Case-insensitive lookup.
             fallback_role: Role passed to ``build_model`` when the agent has
-                        no usable override.
+                        no override. An override naming a provider that is
+                        not registered raises ``LLMError``.
             **kwargs:   Extra kwargs forwarded to the provider.
 
         Returns:
             A configured LangChain BaseChatModel instance.
         """
-        agent_cfg = self._config.llm.agents.get(agent_name.lower())
+        from maljan.core.config import model_entry
+
+        # An entry holding only ceilings chooses no model: the agent's model is
+        # built as it is with no entry, and the job holds it to the ceiling.
+        agent_cfg = model_entry(self._config.llm.agents, agent_name.lower())
 
         if agent_cfg is None:
             # No per-agent override — fall back to global expert LLM
@@ -179,16 +285,12 @@ class LLMProviderRegistry:
         # Per-agent override found
         provider_cls = _PROVIDER_REGISTRY.get(agent_cfg.provider)
         if provider_cls is None:
-            available = ", ".join(_PROVIDER_REGISTRY.keys()) or "(none)"
-            logger.warning(
-                "Agent '%s' specifies unknown provider '%s' (available: %s). "
-                "Falling back to the %s role's model.",
-                agent_name,
-                agent_cfg.provider,
-                available,
-                fallback_role,
+            # Never the role's global model in its place: the agent would run a
+            # model nobody chose for it, which is what its entry exists to stop.
+            raise LLMError(
+                f"Agent '{agent_name}' names a provider that is not registered: "
+                f"{unknown_provider(agent_cfg.provider)}."
             )
-            return self.build_model(role=fallback_role, **kwargs)
 
         fallbacks = list(getattr(agent_cfg, "fallbacks", None) or [])
         primary = self._build_choice(agent_name, agent_cfg, None, 0, **kwargs)
@@ -204,10 +306,9 @@ class LLMProviderRegistry:
         models: list[Any] = [primary]
         for position, choice in enumerate(fallbacks, 1):
             if choice.provider not in _PROVIDER_REGISTRY:
-                available = ", ".join(_PROVIDER_REGISTRY.keys()) or "(none)"
                 raise LLMError(
-                    f"Agent '{agent_name}' falls back to unknown provider "
-                    f"'{choice.provider}' (available: {available})."
+                    f"Agent '{agent_name}' falls back to a provider that is not registered: "
+                    f"{unknown_provider(choice.provider)}."
                 )
             models.append(
                 self._build_choice(
@@ -261,7 +362,7 @@ class LLMProviderRegistry:
             choice.provider,
             choice.model,
             temp,
-            agent_base_url or "(global)",
+            redact_url(str(agent_base_url)) if agent_base_url else "(global)",
             effort_said,
         )
         from maljan.llm.provider_base import facts_of

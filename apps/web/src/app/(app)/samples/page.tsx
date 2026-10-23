@@ -3,7 +3,12 @@
 import { Suspense, useState, useRef, useCallback, useEffect } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Upload, X } from "lucide-react";
+import { questionsFromText } from "./jobQuestions";
+import { canStartAnalysis } from "./submitGate";
 import { api } from "@/lib/api";
+import { fetchAllPages } from "@/lib/pages";
+import ShowMoreRows from "@/components/ui/ShowMoreRows";
+import { ROWS_PER_STEP, visibleRows } from "@/lib/pagedRows";
 import type { SampleDTO, SandboxReportDTO } from "@/lib/api";
 import ReportFormatProposal from "./ReportFormatProposal";
 import { isUnread, readProposal } from "./reportFormatProposal";
@@ -47,6 +52,8 @@ function SamplesPageContent() {
   const { staticProviders, sandboxProviders, profiles, staticTitles, sandboxTitles } =
     useProviderChoices();
   const [samples, setSamples] = useState<SampleRow[]>([]);
+  /* Every sample is read; a long list is drawn a step at a time (`lib/pagedRows`). */
+  const [shown, setShown] = useState(ROWS_PER_STEP);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
@@ -65,6 +72,7 @@ function SamplesPageContent() {
   const [staticProvider, setStaticProvider] = useState("");
   const [sandboxProvider, setSandboxProvider] = useState("");
   const [profile, setProfile] = useState("");
+  const [questionsText, setQuestionsText] = useState("");
   const [attachedReport, setAttachedReport] = useState<SandboxReportDTO | null>(null);
   const [reportUploading, setReportUploading] = useState(false);
   const [reportError, setReportError] = useState<string | null>(null);
@@ -87,6 +95,7 @@ function SamplesPageContent() {
     setStaticProvider("");
     setSandboxProvider("");
     setProfile("");
+    setQuestionsText("");
     setAttachedReport(null);
     setReportError(null);
     setAcceptError(null);
@@ -175,6 +184,7 @@ function SamplesPageContent() {
   }
 
   async function startAnalysis(sampleId: string) {
+    if (!canStartAnalysis({ submitting, reportUploading })) return;
     setSubmitting(true);
     setSubmitError(null);
     try {
@@ -183,6 +193,9 @@ function SamplesPageContent() {
       const config: Record<string, unknown> = {};
       if (staticProvider) config.static_provider = staticProvider;
       if (profile) config.profile = profile;
+      // What the analyst asks of the run, answered in the report; none sends nothing.
+      const questions = questionsFromText(questionsText);
+      if (questions.length > 0) config.questions = questions;
       if (attachedReport) {
         config.sandbox_report_id = attachedReport.id;
         config.sandbox_provider = "upload";
@@ -212,7 +225,7 @@ function SamplesPageContent() {
   useEffect(() => {
     (async () => {
       try {
-        const res = await api.getSamples();
+        const res = await fetchAllPages((page, size) => api.getSamples(page, size));
         setSamples(res.items.map(mapSample));
       } catch (err) {
         setError(getErrorMessage(err) || "Failed to load samples.");
@@ -254,7 +267,7 @@ function SamplesPageContent() {
     setActionError(null);
     try {
       await api.uploadSample(file);
-      const res = await api.getSamples();
+      const res = await fetchAllPages((page, size) => api.getSamples(page, size));
       setSamples(res.items.map(mapSample));
       setToast(`Uploaded ${file.name}.`);
     } catch (err) {
@@ -403,7 +416,7 @@ function SamplesPageContent() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-border-light">
-                {samples.map((s) => (
+                {visibleRows(samples, shown).visible.map((s) => (
                   <tr key={s.id} className="hover:bg-bg-hover">
                     <td className="px-4 py-2.5">
                       <span className="text-sm text-text-primary">{s.filename}</span>
@@ -460,6 +473,7 @@ function SamplesPageContent() {
                 ))}
               </tbody>
             </table>
+            <ShowMoreRows shown={Math.min(shown, samples.length)} total={samples.length} onShow={setShown} />
           </div>
         )}
       </div>
@@ -620,6 +634,24 @@ function SamplesPageContent() {
               </div>
 
               <div>
+                <label htmlFor="job-questions" className="block text-text-muted uppercase tracking-wider mb-1">
+                  Questions for this run
+                </label>
+                <textarea
+                  id="job-questions"
+                  value={questionsText}
+                  onChange={(e) => setQuestionsText(e.target.value)}
+                  rows={3}
+                  placeholder="One question per line, e.g. What is the C2 address?"
+                  className="w-full border border-border rounded px-2 py-1.5 bg-bg-surface text-text-primary"
+                />
+                <p className="text-text-muted mt-1">
+                  The report answers each: established, partial, limited negative, not
+                  determinable from this run, or out of scope.
+                </p>
+              </div>
+
+              <div>
                 <label htmlFor="sandbox-report" className="block text-text-muted uppercase tracking-wider mb-1">
                   Attach sandbox report
                 </label>
@@ -696,7 +728,7 @@ function SamplesPageContent() {
                 </button>
                 <button
                   type="button"
-                  disabled={submitting}
+                  disabled={!canStartAnalysis({ submitting, reportUploading })}
                   onClick={() => startAnalysis(submitFor.id)}
                   className="px-2.5 py-1 text-xs bg-accent-fill text-white rounded hover:bg-accent-fill-hover disabled:opacity-50"
                 >

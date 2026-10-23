@@ -36,6 +36,39 @@ def _trusted_networks(
     return tuple(ipaddress.ip_network(e, strict=False) for e in entries)
 
 
+async def request_client_ip(request: Request) -> str:
+    """Return the client IP, honouring X-Forwarded-For from trusted proxies.
+
+    The rate limiter and the refresh-token client fingerprint read the
+    address the same way, so ``trusted_proxy_ips`` means one thing.
+
+    Only a trusted peer's X-Forwarded-For is read, and it is read from the
+    right: each trusted proxy appends the address it received from, so the
+    right-most entry that is not itself a trusted proxy is the client. The
+    left-most entries are whatever the client chose to send and are never
+    believed. A list of trusted proxies only answers its left-most entry.
+    """
+    trusted = _trusted_networks(tuple(await runtime_config.get("trusted_proxy_ips") or ()))
+    peer = getattr(request.client, "host", "") or "unknown"
+    if not _is_trusted(peer, trusted):
+        return peer
+    hops = [h.strip() for h in request.headers.get("x-forwarded-for", "").split(",") if h.strip()]
+    for hop in reversed(hops):
+        if not _is_trusted(hop, trusted):
+            return hop
+    return hops[0] if hops else peer
+
+
+def _is_trusted(
+    address: str, trusted: tuple[ipaddress.IPv4Network | ipaddress.IPv6Network, ...]
+) -> bool:
+    try:
+        parsed = ipaddress.ip_address(address)
+    except ValueError:
+        return False
+    return any(parsed in net for net in trusted)
+
+
 class RateLimitMiddleware(BaseHTTPMiddleware):
     """Middleware that limits requests per IP using Redis-backed counters.
 
@@ -72,17 +105,7 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
     @staticmethod
     async def _extract_client_ip(request: Request) -> str:
         """Return the client IP, honouring X-Forwarded-For from trusted proxies."""
-        entries = tuple(await runtime_config.get("trusted_proxy_ips") or ())
-        peer = getattr(request.client, "host", "") or "unknown"
-        try:
-            peer_addr = ipaddress.ip_address(peer)
-        except ValueError:
-            return peer
-        if any(peer_addr in net for net in _trusted_networks(entries)):
-            xff = request.headers.get("x-forwarded-for", "")
-            if xff:
-                return xff.split(",")[0].strip() or peer
-        return peer
+        return await request_client_ip(request)
 
     async def _incr_with_ttl(
         self,

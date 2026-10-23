@@ -129,10 +129,11 @@ def test_a_schemeless_or_image_target_is_no_anchor_and_no_image(markdown: str) -
     assert "<img" not in html
 
 
-def test_an_in_page_target_and_a_relative_path_stay_links() -> None:
+def test_an_in_page_target_stays_a_link_and_a_relative_path_does_not() -> None:
+    # A path beside the page names a file no reader of an exported report has.
     html = HtmlRenderer()._markdown_to_html("[a](#section-8) and [b](appendix/figures.html)")
 
-    assert _hrefs(html) == ["#section-8", "appendix/figures.html"]
+    assert _hrefs(html) == ["#section-8"]
 
 
 @pytest.mark.parametrize("cell", ["[x](//eViL.com/a)", "![i](//eViL.com/p.png)"])

@@ -26,7 +26,16 @@ export type ChoicesFrom =
   | "memory_backends"
   | "sandbox_report_readers";
 
-export type Editor = "server_map" | "rest_sandbox" | "agent_definitions" | "stages" | "tool_facts";
+export type Editor =
+  | "server_map"
+  | "rest_sandbox"
+  | "agent_definitions"
+  | "stages"
+  | "tool_facts"
+  | "pack_steps"
+  | "plugin_allow_list"
+  | "enrichment_sources"
+  | "report_formats";
 
 export interface CatalogEntry {
   key: string;
@@ -89,6 +98,86 @@ export interface CatalogEntry {
    *  them. Absent from an API older than the field: a capability row is then
    *  drawn without the servers it reaches. */
   capability_servers?: Record<string, readonly string[]> | null;
+  /** For the agent definitions: the input slices a definition may name in
+   *  its `data_sources`, as the settings model accepts them. Absent from an
+   *  API older than the field: only the stored slices are then drawn. */
+  data_source_choices?: string[] | null;
+  /** For the tool-server map: the agent keys a server may be bound to, the
+   *  effective definition map's keys. */
+  agent_keys?: string[] | null;
+  /** For the tool-server map and the agent definitions: the seeded
+   *  definition keys, known whatever a save does to the stored map. Every one
+   *  is built in; the settings model refuses an edit to any of them but its
+   *  `enabled` switch. Absent from an API older than the field. */
+  builtin_agent_keys?: string[] | null;
+  /** For the agent definitions: the built-ins whose `enabled` switch the
+   *  settings model refuses to change. Absent from an API older than the
+   *  field: every switch is then offered. */
+  always_enabled_agent_keys?: string[] | null;
+  /** For the triage pack's steps: what a declared step may say, read from
+   *  the settings model (`core.pack_steps.step_vocabulary`). Absent from an
+   *  API older than the field: the steps are then edited as JSON only. */
+  pack_step_vocabulary?: PackStepVocabulary | null;
+  /** A change to this setting is saved only with the admin's current
+   *  password beside it (the sign-in policy). Absent from an API older than
+   *  the field: nothing is asked. */
+  needs_current_password?: boolean;
+}
+
+/** One field a declared pack step may set, as the model's JSON schema states
+ *  it. `type` is `""` for a field of more than one JSON type; `bounds` holds
+ *  the JSON schema keywords that bound a number. */
+export interface PackStepField {
+  name: string;
+  type: string;
+  items: string;
+  nullable: boolean;
+  required: boolean;
+  default: unknown;
+  bounds: Partial<
+    Record<"minimum" | "maximum" | "exclusiveMinimum" | "exclusiveMaximum", number>
+  >;
+}
+
+/** A name with what it stands for: a placeholder, a renderer. */
+export interface PackStepTerm {
+  name: string;
+  meaning: string;
+}
+
+/** A field whose value, set on a declaration under a shipped id, decides
+ *  whether the declaration replaces that step: it does where the value differs
+ *  from the shipped step's `compared_with`, an empty value only where
+ *  `empty_counts`. */
+export interface PackStepReplacingField {
+  field: string;
+  compared_with: string;
+  empty_counts: boolean;
+}
+
+/** What a declared pack step may say, each list in the API's own order. */
+export interface PackStepVocabulary {
+  fields: PackStepField[];
+  /** The pattern a whole step id is read by. */
+  id_pattern: string;
+  /** The keys of the pack's own state a step id can take. A step so named runs
+   *  as any other; when it starts beside the pack, its schedule is recorded
+   *  apart from that key. */
+  state_keys: string[];
+  placeholders: PackStepTerm[];
+  /** The pattern a template string is read for placeholders by: a match's
+   *  first group is the name. */
+  placeholder_pattern: string;
+  /** Every format the router can give a sample. */
+  formats: string[];
+  renderers: PackStepTerm[];
+  /** The shipped steps, each as it dumps: only the fields it sets. */
+  shipped: Record<string, unknown>[];
+  /** What makes a declaration replace its shipped step at its place, keeping
+   *  only the id, instead of changing it field by field. */
+  replacing_fields: PackStepReplacingField[];
+  /** Per shipped id, the values `replacing_fields` are compared with. */
+  shipped_compared: Record<string, Record<string, unknown>>;
 }
 
 /** What a provider declares about itself, served on its selector's entry.
@@ -168,6 +257,21 @@ export interface McpServerEntry {
   /** How the server's credential is obtained by one request, or null when its
    *  token is typed in (`core.tool_declarations.CredentialBootstrap`). */
   credential_bootstrap?: CredentialBootstrapEntry | null;
+  /** How many levels at the top of the process tree the worker starts for
+   *  the server are a launcher that does not read the sample, or null when
+   *  none is declared (`MCPServerConfig.launcher_depth`). */
+  launcher_depth?: number | null;
+  /** Which of the server's tools the platform calls itself before a model
+   *  turn, or null when none is declared (`MCPServerConfig.prepass_tools`). */
+  prepass_tools?: PrepassToolsEntry | null;
+}
+
+/** The tools a server declares for the passes the platform makes itself; an
+ *  empty name declares nothing for that pass. */
+export interface PrepassToolsEntry {
+  call_graph: string;
+  function_hashes: string;
+  anti_analysis: string;
 }
 
 /** A server's declared credential bootstrap, as the API stores it. */
@@ -190,6 +294,12 @@ export interface SampleOpenEntry {
   select_argument: string;
   analyse_tool: string;
   analyse_argument: string;
+  program_arguments?: string[];
+  open_path_arguments?: string[];
+  job_safe_tools?: string[];
+  shared_withheld_tools?: string[];
+  close_tool?: string;
+  close_argument?: string;
 }
 
 /** One way a server's plain-text answer says "error". */
@@ -261,15 +371,29 @@ export interface AgentDefinitionEntry {
    *  on when the tool's kind places none (`AgentDefinition.tab`); `null`
    *  places nothing. Optional because an API older than the field sends none. */
   tab?: string | null;
+  /** Which slices of the job this agent is handed as its input text
+   *  (`AgentDefinition.data_sources`); empty or absent is the role's own
+   *  default. Optional because an API older than the field sends none. */
+  data_sources?: string[];
+  /** Where a source in `data_sources` is cut into chunks: a pattern for the
+   *  start of a unit, by source name (`AgentDefinition.chunk_boundary`).
+   *  Absent is the built-in boundary of the source's domain. */
+  chunk_boundary?: Record<string, string>;
+  /** Whether the agent is asked for an ATT&CK technique line on each claim
+   *  (`AgentDefinition.attck_techniques`). Absent is on: the API leaves the
+   *  field out of a definition that keeps it on. Only a generic or lead
+   *  definition may turn it off. */
+  attck_techniques?: boolean;
 }
 
 /** How hard one debate stage argues before it hands over, mirroring
  *  `maljan.core.config.DebateOptions`. `null` on a stage means the global
  *  negotiation settings it was seeded from. */
 export interface DebateOptionsEntry {
-  max_rounds: number;
-  consensus_threshold: number;
-  sycophancy_check: boolean;
+  /** A field left out takes the value the API gives it. */
+  max_rounds?: number;
+  consensus_threshold?: number;
+  sycophancy_check?: boolean;
 }
 
 export type StageKind = "triage" | "analysis" | "debate" | "verdict" | "report";
@@ -414,6 +538,10 @@ export interface SettingsSchema {
    *  `#<position>`), with why; the shipped step it changed, if any, runs
    *  instead. */
   pack_steps_left_out?: Record<string, string>;
+  /** Each stored value the settings model refuses, by catalog key, with why:
+   *  only this page reads past it; analyses and the routes that read the
+   *  settings fail until it is saved again or reset. */
+  stored_values_refused?: Record<string, string>;
 }
 
 /** The word naming no kind, and each kind-free and kind-dependent field of a
@@ -457,6 +585,10 @@ export interface SettingValue {
   source: "default" | "ui";
   updated_at: string | null;
   updated_by: string | null;
+  /** Why a stored row is not served (`value` is then `null`): the answer
+   *  could not be written with it in. The schema lists the same reason under
+   *  `stored_values_refused`. */
+  unreadable?: string | null;
 }
 
 export interface SettingsValues {
@@ -489,11 +621,16 @@ export interface ExportResponse {
    *  today; kept on the type so a caller that wants it does not have to
    *  guess the shape. */
   secrets_omitted: string[];
+  /** Catalog keys whose stored value the export could not write, with why;
+   *  left out of `values`. */
+  unreadable?: Record<string, string>;
 }
 
 export interface ImportRequest {
   format: string;
   values: Record<string, unknown>;
+  /** Sent when `values` changes a setting marked `needs_current_password`. */
+  current_password?: string;
 }
 
 /** One tool of a server's capability manifest: what it needs on the server's
@@ -616,8 +753,147 @@ export interface MappingPreview {
   channels: Record<string, ChannelPreview>;
 }
 
+/* ── The ATT&CK cache (`/settings/attck*`) ─────────────────────────────── */
+
+export type AttckDomain = "enterprise" | "mobile" | "ics";
+
+/** What the cache holds for one domain, as the worker that holds it reads it. */
+export interface AttckCached {
+  present: boolean;
+  /** False when a file is there and does not parse; null when what it holds is
+   *  not known right now (its parse did not finish); `reason` says why. */
+  readable?: boolean | null;
+  reason?: string;
+  version?: string;
+  /** The release's own date (its collection's `modified`). */
+  released?: string;
+  techniques?: number;
+  /** When the file was written or last confirmed current. */
+  cached_at?: string;
+  age_days?: number;
+  written_by?: string;
+}
+
+export interface AttckDomainStatus extends AttckCached {
+  domain: AttckDomain;
+  label: string;
+  next_check_at: string | null;
+}
+
+export interface AttckRelease {
+  version: string;
+  released: string;
+}
+
+export interface AttckCaller {
+  user_id?: string;
+  name?: string;
+}
+
+export interface AttckChange {
+  domain: AttckDomain;
+  label: string;
+  from: string;
+  to: string;
+  released: string;
+  techniques: number;
+}
+
+export interface AttckUpdateResult {
+  ok: boolean;
+  /** `updated`, `up_to_date`, `failed` or `busy`. */
+  outcome: string;
+  reason: string;
+  started_at?: string;
+  finished_at?: string;
+  trigger?: string;
+  triggered_by?: AttckCaller;
+  changes: AttckChange[];
+  /** True: nothing changed; false: `changes` were made; null: not known (see the status). */
+  kept_previous?: boolean | null;
+}
+
+export interface AttckCheckRow {
+  domain: AttckDomain;
+  label: string;
+  cached: AttckCached;
+  latest: AttckRelease | null;
+  /** `current`, `outdated`, `missing` or `unlisted`; absent when the check failed. */
+  state?: string;
+}
+
+export interface AttckCheckResult {
+  ok: boolean;
+  /** `up_to_date`, `outdated` or `failed`. A failed check is never up to date. */
+  outcome: string;
+  reason: string;
+  checked_at: string | null;
+  triggered_by?: AttckCaller;
+  refresh_days: number | null;
+  next_check_at: string | null;
+  domains: AttckCheckRow[];
+}
+
+export interface AttckStatus {
+  refresh_days: number;
+  next_check_at: string | null;
+  domains: AttckDomainStatus[];
+  last_check: AttckCheckResult | null;
+  last_update: AttckUpdateResult | null;
+  running: { started_at?: string; trigger?: string; triggered_by?: AttckCaller } | null;
+}
+
+export interface AttckUpdateProgress {
+  job_id: string;
+  state: "queued" | "running" | "done" | "unknown";
+  result: AttckUpdateResult | null;
+}
+
+/** What the metadata says of one installed plugin in every process: refused
+ *  (with `error`), allowed by the stored list, or not allowed. */
+export type PluginState = "refused" | "allowed" | "not_allowed";
+
+/** The API process's own load of a plugin, where it ran the plugin's code;
+ *  empty when it never loaded it. A worker's load is in that worker's log. */
+export type PluginApiState = "" | "loaded" | "failed" | "refused" | "absent";
+
+/** One installed provider plugin, read from its package's metadata. */
+export interface InstalledPlugin {
+  name: string;
+  /** The plugin as the allow-list writes it: `<kind>:<name>`. */
+  entry: string;
+  distribution: string;
+  version: string;
+  /** Whether the stored allow-list names it. */
+  allowed: boolean;
+  state: PluginState;
+  error: string;
+  api_state: PluginApiState;
+  api_error: string;
+}
+
+export interface PluginKind {
+  kind: "llm" | "static" | "sandbox" | "memory";
+  group: string;
+  title: string;
+  plugins: InstalledPlugin[];
+  /** Names the stored allow-list holds for this kind that no installed package declares. */
+  allowed_absent: string[];
+}
+
+/** `GET /settings/plugins`: every installed provider plugin per kind. */
+export interface PluginsListing {
+  allow_list_key: string;
+  kinds: PluginKind[];
+}
+
 export class SettingsValidationError extends Error {
   constructor(public errors: Record<string, string>) {
     super("validation failed");
   }
 }
+
+/** A 409 from `PATCH /settings`: each key was changed since the page loaded
+ *  it (saved, accepted or reset by another writer), with why; nothing was
+ *  saved. */
+export class SettingsConflictError extends SettingsValidationError {}

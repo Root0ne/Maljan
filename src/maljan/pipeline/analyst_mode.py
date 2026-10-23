@@ -9,7 +9,8 @@ models the analysts call:
   link-local or shared-range (``100.64.0.0/10``) address — written as a
   literal, or what the name resolves to — and a name that only a local
   resolver answers (``localhost``, ``*.local``, ``host.docker.internal`` and
-  its kin) is a local server. A local server's ``/props`` is asked for its
+  its kin) is a local server, by the address and name rules of
+  ``core.host_locality``. A local server's ``/props`` is asked for its
   slot count (the window probe's own request): more than one slot runs the
   analysts in parallel, one slot or no answer runs them one after another.
 * A host that resolves only to public addresses is a hosted API and runs them
@@ -45,22 +46,10 @@ from typing import Any
 from urllib.parse import urlparse
 
 from maljan.core.config import explicit_parallel
+from maljan.core.host_locality import local_address, named_locally
 from maljan.core.logger import logger
 
 SETTING = "llm.parallel_analysts"
-
-# Names only a local resolver answers: a container runtime's name for the host
-# it runs on, and the machine's own.
-LOCAL_NAMES = frozenset(
-    {
-        "localhost",
-        "localhost.localdomain",
-        "host.docker.internal",
-        "gateway.docker.internal",
-        "host.containers.internal",
-        "host.lima.internal",
-    }
-)
 
 # How long one name may take to resolve before it is taken as unresolvable.
 RESOLVE_SECONDS = 3.0
@@ -70,8 +59,6 @@ FROM_STAGE = "stage"
 FROM_JOB = "job"
 FROM_HANDOVER = "debate handover"
 FROM_REVISED = "the stages it revises"
-
-_SHARED_RANGE = ipaddress.ip_network("100.64.0.0/10")
 
 
 @dataclass(frozen=True)
@@ -106,17 +93,6 @@ def _setting_of(settings: Any) -> tuple[bool | None, str]:
     return explicit, "true" if explicit else "false"
 
 
-def _local_address(address: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
-    if isinstance(address, ipaddress.IPv6Address) and address.ipv4_mapped is not None:
-        address = address.ipv4_mapped
-    return bool(
-        address.is_loopback
-        or address.is_private
-        or address.is_link_local
-        or (isinstance(address, ipaddress.IPv4Address) and address in _SHARED_RANGE)
-    )
-
-
 def _addresses(host: str) -> list[str]:
     """Every address ``host`` resolves to, or ``[]`` when it does not resolve in time."""
     found: list[str] = []
@@ -144,10 +120,10 @@ def locality(endpoint: str) -> tuple[str, str]:
     except ValueError:
         literal = None
     if literal is not None:
-        if _local_address(literal):
+        if local_address(literal):
             return "local", f"{host} is a loopback, private, link-local or shared-range address"
         return "hosted", f"{host} is a public address"
-    if host in LOCAL_NAMES or host.endswith((".localhost", ".local", ".internal")):
+    if named_locally(host):
         return "local", f"{host} is a name only a local resolver answers"
     resolved = _addresses(host)
     if not resolved:
@@ -160,7 +136,7 @@ def locality(endpoint: str) -> tuple[str, str]:
             continue
     if not parsed:
         return "unknown", f"{host} did not resolve, so it could not be told whether it is hosted"
-    local = [str(a) for a in parsed if _local_address(a)]
+    local = [str(a) for a in parsed if local_address(a)]
     if local:
         return "local", (
             f"{host} resolves to {', '.join(local)}, a loopback, private, link-local or "

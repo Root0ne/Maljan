@@ -311,6 +311,18 @@ class TestThePublishedGateDecides:
         assert case.technique_ids == ["T1055", "T1027"]
         assert case.total_techniques == 2
 
+    def test_without_a_report_node_a_tactic_reference_is_no_published_technique(self) -> None:
+        tactic = {**_technique("TA0005"), "id": "attack-pattern--tactic", "name": "Evasion"}
+
+        case = _judged(
+            _thin_in_claims(),
+            reporting=False,
+            objects=[_technique("T1055"), tactic, _technique("T1027")],
+        )
+
+        assert case is not None
+        assert case.technique_ids == ["T1055", "T1027"]
+
     def test_without_a_report_node_a_thin_publication_is_not_stored(self) -> None:
         case = _judged(_thin_in_claims(), reporting=False, objects=[_technique("T1055")])
 

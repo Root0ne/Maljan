@@ -14,6 +14,7 @@ from typing import Any
 
 from maljan.core.config import (
     AGENT_KEY_PATTERN,
+    ALWAYS_ENABLED_AGENTS,
     PROMPT_ROLES,
     PROVIDER_REFERENCE_RULE,
     AgentDefinition,
@@ -100,11 +101,35 @@ def _server_allow_lists(overrides: dict[str, Any]) -> dict[str, list[str] | None
     return out
 
 
+def _staged_over_stored(changes: dict[str, Any], stored: dict[str, Any]) -> dict[str, Any]:
+    """The settings this save leaves in force: the staged values over the stored ones.
+
+    A ``null`` drops the override, as it does everywhere in the settings
+    system, so the key falls back to the built-ins.
+    """
+    merged = dict(stored)
+    for key, value in changes.items():
+        if value is None:
+            merged.pop(key, None)
+        else:
+            merged[key] = value
+    return merged
+
+
 def validate_definitions(
-    value: Any, *, servers: dict[str, list[str] | None] | None = None
+    value: Any,
+    *,
+    servers: dict[str, list[str] | None] | None = None,
+    plugins_allowed: list[Any] | None = None,
 ) -> dict[str, Any]:
-    """Return the definition map to store, or raise with one message per offender."""
-    from maljan.providers.registry import static_provider_ids
+    """Return the definition map to store, or raise with one message per offender.
+
+    ``plugins_allowed`` is the plugin allow-list the save leaves in force: a
+    static provider id is a shipped one or an installed plugin it names, read
+    from package metadata (``maljan.core.plugins.id_refusal``), never what
+    the API process has loaded.
+    """
+    from maljan.core.plugins import id_refusal, shipped_ids
 
     if not isinstance(value, dict):
         raise AgentMapError(
@@ -115,7 +140,6 @@ def validate_definitions(
         )
 
     allow_lists = servers if servers is not None else {}
-    provider_ids = set(static_provider_ids())
     errors: dict[str, str] = {}
     out: dict[str, Any] = {}
     seeds = {name: d.model_dump(mode="json") for name, d in _builtin_definitions().items()}
@@ -165,7 +189,7 @@ def validate_definitions(
 
         if seed is not None:
             comparable, expected = dict(dumped), dict(seed)
-            if name != "judge":
+            if name not in ALWAYS_ENABLED_AGENTS:
                 comparable.pop("enabled", None)
                 expected.pop("enabled", None)
             if comparable != expected:
@@ -179,10 +203,15 @@ def validate_definitions(
             continue
         if model.role in PROMPT_ROLES and not (model.prompt or "").strip():
             errors[f"{name}.prompt"] = f"a {model.role} agent needs a prompt"
-        if model.static_provider and model.static_provider not in provider_ids:
+        refused = (
+            id_refusal("static", model.static_provider, plugins_allowed or [])
+            if model.static_provider
+            else ""
+        )
+        if refused:
             errors[f"{name}.static_provider"] = (
                 f"unknown static provider {model.static_provider!r}. "
-                f"Available: {', '.join(sorted(provider_ids))}"
+                f"Available: {', '.join(sorted(shipped_ids('static')))}; {refused}"
             )
         has_provider_ref = any(ref.kind == "provider" for ref in model.tools)
         if has_provider_ref and model.role not in PROMPT_ROLES:
@@ -243,7 +272,11 @@ def finding_path(finding: TeamFinding) -> str:
 
 
 def validate_profiles(
-    value: Any, *, definitions: dict[str, Any], active: str = "default"
+    value: Any,
+    *,
+    definitions: dict[str, Any],
+    active: str = "default",
+    plugins_allowed: list[Any] | None = None,
 ) -> dict[str, Any]:
     """Return the profile map to store, or raise with one message per offender.
 
@@ -258,7 +291,13 @@ def validate_profiles(
     keep a disabled member while some other profile is the one selected,
     exactly as ``AgentsConfig`` allows: disabling a member of ``default`` is
     harmless as long as ``default`` itself is not the profile that will run.
+
+    ``plugins_allowed`` is the plugin allow-list the save leaves in force: a
+    team's static provider is judged as a definition's is
+    (:func:`validate_definitions`).
     """
+    from maljan.core.plugins import id_refusal, shipped_ids
+
     if not isinstance(value, dict):
         raise AgentMapError(
             _qualified(
@@ -298,6 +337,17 @@ def validate_profiles(
         # dump is what gets stored and a PATCH that edits a migrated team's
         # stages stops it being re-derived over — whether it came from the
         # console, a script or an imported document.
+        refused = (
+            id_refusal("static", model.static_provider, plugins_allowed or [])
+            if model.static_provider is not None
+            else ""
+        )
+        if refused:
+            errors[f"{AGENT_PROFILES_KEY}.{name}.static_provider"] = (
+                f"unknown static provider {model.static_provider!r}. "
+                f"Available: {', '.join(sorted(shipped_ids('static')))}; {refused}"
+            )
+            continue
         out[name] = model.model_dump(mode="json")
 
     if errors:
@@ -491,7 +541,68 @@ def lint_team_map(
     return findings, graphs
 
 
+_SERVER_MAP_KEY = "core.mcp.servers"
+
+
 def validate_agent_map(changes: dict[str, Any], stored: dict[str, Any]) -> dict[str, Any]:
+    """Validate the agent keys a PATCH touches; a server-map-only save is held to what it withdraws.
+
+    A save that touches only the server map leaves the stored agent map as it
+    was, so a stale entry in it (a plugin since dropped, a reference to a server
+    long gone) is not this save's doing and must not block it. Only the
+    references this save takes away are checked: a stored definition's mcp
+    reference to a server the save removes, or to a tool the save no longer
+    allows on a server that had allowed it. Any hit refuses the save at that
+    definition.
+    """
+    agent_keys = {AGENT_DEFINITIONS_KEY, AGENT_PROFILES_KEY, AGENT_PROFILE_KEY}
+    if _SERVER_MAP_KEY not in changes or agent_keys & set(changes):
+        return _validate_agent_map(changes, stored)
+    before = _server_allow_lists(stored)
+    after = _server_allow_lists(_staged_over_stored(changes, stored))
+    errors: dict[str, str] = {}
+    for name, refs in _stored_mcp_refs(stored).items():
+        for server, tool in refs:
+            if server in before and server not in after:
+                errors[f"{AGENT_DEFINITIONS_KEY}.{name}.tools"] = f"unknown mcp server {server!r}"
+                break
+            allowed_before, allowed_after = before.get(server), after.get(server)
+            if (
+                server in after
+                and tool is not None
+                and allowed_after is not None
+                and tool not in allowed_after
+                and (allowed_before is None or tool in allowed_before)
+            ):
+                errors[f"{AGENT_DEFINITIONS_KEY}.{name}.tools"] = (
+                    f"{tool!r} is not allowed on server {server!r}; tick it there first"
+                )
+                break
+    if errors:
+        raise AgentMapError(errors)
+    return {key: changes[key] for key in changes}
+
+
+def _stored_mcp_refs(stored: dict[str, Any]) -> dict[str, list[tuple[str, str | None]]]:
+    """Each stored definition's mcp references as ``(server, tool or None)``, seeds included."""
+    refs: dict[str, list[tuple[str, str | None]]] = {
+        name: [(str(ref.server), ref.name) for ref in definition.tools if ref.kind == "mcp"]
+        for name, definition in _builtin_definitions().items()
+    }
+    raw = stored.get(AGENT_DEFINITIONS_KEY)
+    for name, entry in raw.items() if isinstance(raw, dict) else ():
+        tools = entry.get("tools") if isinstance(entry, dict) else None
+        if not isinstance(tools, list):
+            continue
+        refs[str(name)] = [
+            (str(ref["server"]), ref.get("name"))
+            for ref in tools
+            if isinstance(ref, dict) and ref.get("kind") == "mcp" and ref.get("server")
+        ]
+    return refs
+
+
+def _validate_agent_map(changes: dict[str, Any], stored: dict[str, Any]) -> dict[str, Any]:
     """Validate whichever of the three agent keys this PATCH touches, together.
 
     Together, because they are three views of one decision: a PATCH that adds a
@@ -513,7 +624,13 @@ def validate_agent_map(changes: dict[str, Any], stored: dict[str, Any]) -> dict[
         definitions_raw = stored.get(AGENT_DEFINITIONS_KEY) or {}
     elif definitions_raw is None:
         definitions_raw = {}
-    definitions = validate_definitions(definitions_raw, servers=_server_allow_lists(stored))
+    from app.services.settings_service import merged_allow_list
+
+    definitions = validate_definitions(
+        definitions_raw,
+        servers=_server_allow_lists(_staged_over_stored(changes, stored)),
+        plugins_allowed=merged_allow_list(changes, stored),
+    )
     if AGENT_DEFINITIONS_KEY in changes and changes[AGENT_DEFINITIONS_KEY] is not None:
         out[AGENT_DEFINITIONS_KEY] = definitions
 
@@ -533,7 +650,12 @@ def validate_agent_map(changes: dict[str, Any], stored: dict[str, Any]) -> dict[
         active = stored.get(AGENT_PROFILE_KEY) or "default"
     active = str(active)
 
-    profiles = validate_profiles(profiles_raw, definitions=definitions, active=active)
+    profiles = validate_profiles(
+        profiles_raw,
+        definitions=definitions,
+        active=active,
+        plugins_allowed=merged_allow_list(changes, stored),
+    )
     if AGENT_PROFILES_KEY in changes and changes[AGENT_PROFILES_KEY] is not None:
         out[AGENT_PROFILES_KEY] = profiles
 
@@ -546,3 +668,21 @@ def validate_agent_map(changes: dict[str, Any], stored: dict[str, Any]) -> dict[
             }
         )
     return out
+
+
+def prompt_tool_warnings(settings: Any) -> dict[str, str]:
+    """Agents whose own prompt names a tool they do not hold, keyed by definition path.
+
+    Advisory only (`maljan.agents.prompt_tools`): a prompt written against
+    last week's tool servers is still a legal thing to save. Read from the
+    declarations, so no server is opened. Never raises.
+    """
+    from maljan.agents.prompt_tools import warnings_for_settings
+
+    try:
+        return {
+            f"{AGENT_DEFINITIONS_KEY}.{key}": message
+            for key, message in warnings_for_settings(settings).items()
+        }
+    except Exception:  # noqa: BLE001 - advisory, the write is done
+        return {}

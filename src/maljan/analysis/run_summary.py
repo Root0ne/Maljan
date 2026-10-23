@@ -25,7 +25,7 @@ Design:
 from __future__ import annotations
 
 import time
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -35,6 +35,7 @@ from maljan.analysis.corroboration import (
     published_count,
     technique_label,
 )
+from maljan.core.config import MEDIATOR_AGENT_NAME
 from maljan.core.token_ledger import CALL_PARTS
 from maljan.pipeline.mediation_models import (
     CONTRADICTIONS_BLOCK_MISSING_NOTE,
@@ -71,7 +72,8 @@ class NegotiationMetrics:
         termination_reason:  Why the loop stopped (consensus / hard_limit /
                              converged / convergence / not_applicable /
                              mediation_failed / not_mediated / not_revised /
-                             no_contested_point / contested_points_unchanged),
+                             no_contested_point / contested_points_unchanged /
+                             ledger_stated / reworded),
                              read
                              from the router's own rules
                              (``pipeline.routing.debate_route``).
@@ -115,6 +117,10 @@ class NegotiationMetrics:
     unread_marks: list[str] = field(default_factory=list)
     # How many lines the last mediation marked not blocking.
     not_blocking_at_end: int = 0
+    # The blocking lines every count of which the ledger states, after the
+    # analysts were told those facts, each with them (``debate_facts.ledger_stated``).
+    # They stayed blocking lines.
+    ledger_stated: list[str] = field(default_factory=list)
 
     @property
     def consensus_applicable(self) -> bool:
@@ -477,6 +483,7 @@ def usage_totals(calls: Iterable[Any], meter: Callable[[], Any]) -> dict[str, An
     the run is going and after a worker that died before its summary: the
     records are committed call by call.
     """
+    from maljan.core.spend import AGENT_CEILING_RECORD
     from maljan.core.token_ledger import RETRY_RECORD, TokenLedger
     from maljan.llm.transient import FAILED_ATTEMPT_CALL
 
@@ -493,6 +500,9 @@ def usage_totals(calls: Iterable[Any], meter: Callable[[], Any]) -> dict[str, An
         if call == RETRY_RECORD:
             retries += 1
             ledger.add_retry(agent=agent, model=model, reason=str(record.get("reason") or ""))
+            continue
+        if call == AGENT_CEILING_RECORD:
+            # An agent stopped at its own ceiling: a statement, not a call.
             continue
         usage: dict[str, Any] | None = None
         if record.get("reported"):
@@ -616,6 +626,11 @@ class TruncationMetrics:
     # Empty on a run whose cap was an operator's own number, because no window
     # was consulted then.
     context_window: dict[str, Any] = field(default_factory=dict)
+    # An analyst's input split at the shipped chunk size because no window was
+    # learned: one row per agent (``agent``, ``chunks``, ``chunk_chars``,
+    # ``remedy``). Empty where every input was sized from a window, an
+    # operator's figure, or fitted whole.
+    input_split_unknown_window: list[dict[str, Any]] = field(default_factory=list)
 
     @property
     def any_bound_hit(self) -> bool:
@@ -755,6 +770,33 @@ def cap_in_force_sentence(truncation: Any) -> str:
         f"{int(window.get('chars_per_token', 0) or 0)} characters per token, with "
         f"{int(window.get('reply_tokens', 0) or 0):,} tokens held back for the model's reply."
     )
+
+
+def unknown_window_split_sentence(truncation: Any) -> str:
+    """The analysts whose input the shipped size split, no window learned; ``""`` for none.
+
+    Each chunk is a full tool loop, so a split at a size nobody measured is a
+    number of loops the run chose without a window; the run says so, and what
+    would size them from the window instead.
+    """
+    rows = [
+        row
+        for row in getattr(truncation, "input_split_unknown_window", None) or []
+        if isinstance(row, dict) and row.get("agent")
+    ]
+    if not rows:
+        return ""
+    agents = [
+        f"{row['agent']} ({count_label(int(row.get('chunks', 0) or 0), 'chunk')})" for row in rows
+    ]
+    listed = agents[0] if len(agents) == 1 else f"{', '.join(agents[:-1])} and {agents[-1]}"
+    chars = int(rows[0].get("chunk_chars", 0) or 0)
+    remedy = str(rows[0].get("remedy", "") or "")
+    said = (
+        f"No context window was learned, so the input of {listed} was split at the shipped "
+        f"{chars:,} characters rather than at the room a window leaves."
+    )
+    return f"{said} To size chunks from the window, {remedy}." if remedy else said
 
 
 def count_label(count: int, singular: str, plural: str = "") -> str:
@@ -898,9 +940,44 @@ def generation_lines(generation: Any, model_name: Callable[[str], str] | None = 
 
 
 def spend_lines(spend: Any) -> list[str]:
-    """The spend ceiling, what the run spent against it, and every model it could not price."""
-    if not isinstance(spend, dict) or spend.get("ceiling_usd") is None:
+    """The spend ceiling, what the run spent against it, and every model it could not price.
+
+    One line more per agent that sets a ceiling of its own (``agent_ceilings``).
+    """
+    if not isinstance(spend, dict):
         return []
+    if spend.get("ceiling_usd") is None:
+        return agent_ceiling_lines(spend)
+    return _job_spend_lines(spend) + agent_ceiling_lines(spend)
+
+
+def agent_ceiling_lines(spend: Mapping[str, Any]) -> list[str]:
+    """One line per agent's own ceiling: the ceiling, what it used, and whether it stopped."""
+    from maljan.core.spend import usd_said
+
+    lines: list[str] = []
+    rows = spend.get("agent_ceilings")
+    for agent, row in sorted((rows if isinstance(rows, dict) else {}).items()):
+        if not isinstance(row, dict):
+            continue
+        limits = []
+        if row.get("max_spend_usd") is not None:
+            limits.append(f"{usd_said(row['max_spend_usd'])} USD")
+        if row.get("max_unpriced_tokens") is not None:
+            limits.append(f"{int(row['max_unpriced_tokens']):,} unpriced tokens")
+        used = (
+            f"{usd_said(row.get('spent_usd') or 0.0)} USD and "
+            f"{int(row.get('unpriced_tokens') or 0):,} unpriced tokens used"
+        )
+        lines.append(
+            f"Agent {agent}'s own ceiling of {' and '.join(limits)}: {used}"
+            + (f" — stopped: {row.get('stopped_because')}" if row.get("stopped") else "")
+        )
+    return lines
+
+
+def _job_spend_lines(spend: dict[str, Any]) -> list[str]:
+    """The job's ceiling lines of :func:`spend_lines`."""
     ceiling = float(spend.get("ceiling_usd") or 0.0)
     spent = float(spend.get("spent_usd") or 0.0)
     unreported = int(spend.get("unreported_calls") or 0)
@@ -974,6 +1051,34 @@ def _sandbox_name(provider: str) -> str:
     return (declared.display_name or provider) if declared is not None else provider
 
 
+def nearest_rank(values: list[int], percent: int) -> int:
+    """The nearest-rank ``percent`` percentile of ``values``: an element of the list.
+
+    The element at 1-based rank ``ceil(percent / 100 * n)`` of the sorted list,
+    found by selection in linear time instead of a sort. ``values`` is
+    reordered; it must not be empty.
+    """
+    rank = max(1, -(-percent * len(values) // 100)) - 1
+    low, high = 0, len(values) - 1
+    while low < high:
+        # Median of three, and a three-way split so equal durations (a tool
+        # that answers in the same millisecond every time) cannot make a pass
+        # useless.
+        a, b, c = values[low], values[(low + high) // 2], values[high]
+        pivot = max(min(a, b), min(max(a, b), c))
+        below = [v for v in values[low : high + 1] if v < pivot]
+        equal = sum(1 for v in values[low : high + 1] if v == pivot)
+        above = [v for v in values[low : high + 1] if v > pivot]
+        values[low : high + 1] = below + [pivot] * equal + above
+        if rank < low + len(below):
+            high = low + len(below) - 1
+        elif rank < low + len(below) + equal:
+            return pivot
+        else:
+            low = low + len(below) + equal
+    return values[rank]
+
+
 def tool_latency_lines(latency: Any) -> list[str]:
     """What each agent's tool calls cost, and which single call cost the most.
 
@@ -990,9 +1095,16 @@ def tool_latency_lines(latency: Any) -> list[str]:
         if not isinstance(slowest, dict):
             continue
         total = float(row.get("total_ms") or 0) / 1000.0
+        spread = ""
+        if "p50_ms" in row and "p95_ms" in row:
+            # Only a run that measured them draws them; a stored run's row
+            # has neither and reads exactly as it did.
+            p50, p95 = float(row["p50_ms"]) / 1000.0, float(row["p95_ms"]) / 1000.0
+            spread = f", p50 {p50:.1f}s, p95 {p95:.1f}s, {int(row.get('over_10s') or 0)} over 10s"
         rows.append(
             f"{agent} {int(row.get('calls') or 0)} calls in {total:.1f}s, "
             f"slowest `{slowest.get('tool')}` {float(slowest.get('ms') or 0) / 1000.0:.1f}s"
+            f"{spread}"
         )
     return [f"**Tool calls**: {'; '.join(rows)}  "] if rows else []
 
@@ -1096,9 +1208,12 @@ class RunSummary:
     # a skipped row mean different things and a reader has to be able to tell
     # them apart.
     stages: list[dict[str, Any]] = field(default_factory=list)
-    # What the triage pack did: ``{entries, failed, duration_ms}``. ``None``
-    # on a run whose team has no triage stage or whose pack declined to run,
-    # which a reader has to be able to tell from a pack that wrote nothing.
+    # What the triage pack did: ``{entries, failed, duration_ms}``, how each
+    # step that may run beside it ran under the step's id, and under
+    # ``_held_schedules`` that of each step named as one of the pack state's
+    # own keys. ``None`` on a run whose team has no triage stage or whose pack
+    # declined to run, which a reader has to be able to tell from a pack that
+    # wrote nothing.
     triage: dict[str, Any] | None = None
     # How the final-answer nudge had to be sent, per analyst, when the plain
     # way failed: ``{"retry_mode": {"static": "invalid_tool_calls_dropped"}}``;
@@ -1115,10 +1230,11 @@ class RunSummary:
     # recorded no loop.
     budget: dict[str, Any] | None = None
     # What each agent's tool calls cost, from the ledger's own per-call clock:
-    # ``{calls, total_ms, slowest: {tool, ms, id}}`` per agent. A run that
-    # overran used to leave a reader deriving latency from raw timestamps, and
-    # a slow tool could not be told from a slow model. ``None`` on a run whose
-    # ledger holds no timed call.
+    # ``{calls, total_ms, slowest: {tool, ms, id}, p50_ms, p95_ms, over_10s}``
+    # per agent (the last three absent from a run stored before they existed).
+    # A run that overran used to leave a reader deriving latency from raw
+    # timestamps, and a slow tool could not be told from a slow model. ``None``
+    # on a run whose ledger holds no timed call.
     tool_latency: dict[str, Any] | None = None
     # Which model answered each agent's turns: ``{agent: {turns: {model:
     # count}, fallbacks: [{model, reason}]}}``. A fallback row is a turn
@@ -1254,6 +1370,10 @@ class RunSummary:
         if n.ledger_facts:
             lines += ["**Ledger counts put to the mediator:**", ""]
             lines += [f"- {sentence}" for sentence in n.ledger_facts]
+            lines.append("")
+        if n.ledger_stated:
+            lines += ["**Blocking lines the ledger states, told before:**", ""]
+            lines += [f"- {sentence}" for sentence in n.ledger_stated]
             lines.append("")
         if n.mediation_notes:
             lines += [f"- {sentence}" for sentence in n.mediation_notes]
@@ -1463,6 +1583,9 @@ class RunSummary:
             cap = cap_in_force_sentence(trunc)
             if cap:
                 lines += [cap, ""]
+            split = unknown_window_split_sentence(trunc)
+            if split:
+                lines += [split, ""]
             # Said only where the two counts could be read against each other
             # and disagree, or where something was actually cut. On a run that
             # hit no bound and counted the same calls twice it is a paragraph
@@ -1576,6 +1699,7 @@ class RunSummary:
                 ),
                 **({"unread_marks": list(n.unread_marks)} if n.unread_marks else {}),
                 **({"not_blocking_at_end": n.not_blocking_at_end} if n.not_blocking_at_end else {}),
+                **({"ledger_stated": list(n.ledger_stated)} if n.ledger_stated else {}),
             },
             "agent_stats": [
                 {
@@ -1666,6 +1790,7 @@ class RunSummary:
                 "tool_output_limit_smallest": t.tool_output_limit_smallest,
                 "tool_output_limit_largest": t.tool_output_limit_largest,
                 "context_window": dict(t.context_window),
+                "input_split_unknown_window": [dict(row) for row in t.input_split_unknown_window],
                 "any_bound_hit": t.any_bound_hit,
             }
             # Absent rather than zero when this run recorded nothing about
@@ -1828,10 +1953,16 @@ class RunSummaryBuilder:
         what an operator looks for first when a run overran and a list of
         every call is the ledger, which is already there.
 
+        Beside the slowest, the median and the 95th percentile of the agent's
+        timed calls (nearest rank, so each is a duration that happened) and how
+        many ran longer than ten seconds: one stalled call is the slowest, and
+        these say whether it was one call or the agent's usual.
+
         A call with no measured duration contributes to the count and to
         nothing else: a zero is not a measurement.
         """
         rows: dict[str, dict[str, Any]] = {}
+        timed: dict[str, list[int]] = {}
         for entry in entries or []:
             row = entry if isinstance(entry, dict) else getattr(entry, "__dict__", None)
             if not isinstance(row, dict):
@@ -1849,9 +1980,14 @@ class RunSummaryBuilder:
             if ms <= 0:
                 continue
             seen["total_ms"] += ms
+            timed.setdefault(agent, []).append(ms)
             slowest = seen["slowest"]
             if slowest is None or ms > int(slowest["ms"]):
                 seen["slowest"] = {"tool": tool, "ms": ms, "id": str(row.get("id") or "")}
+        for agent, durations in timed.items():
+            rows[agent]["over_10s"] = sum(1 for ms in durations if ms > 10_000)
+            rows[agent]["p50_ms"] = nearest_rank(durations, 50)
+            rows[agent]["p95_ms"] = nearest_rank(durations, 95)
         self._tool_latency = rows or None
         return self
 
@@ -1884,7 +2020,8 @@ class RunSummaryBuilder:
         prompts, and the ledger holds the entries themselves.
         """
         if facts and "entries" in facts:
-            from maljan.core.pack_steps import step_schedules
+            from maljan.core.pack_steps import held_schedules, step_schedules
+            from maljan.pipeline.conditions import HELD_SCHEDULES
 
             self._triage = {
                 "entries": int(facts.get("entries") or 0),
@@ -1894,6 +2031,11 @@ class RunSummaryBuilder:
                 # beside which steps, or in turn and why.
                 **step_schedules(facts),
             }
+            # A step named as one of the state's own keys has its schedule
+            # held apart there, and here too, beside the counts it would replace.
+            held = held_schedules(facts)
+            if held:
+                self._triage[HELD_SCHEDULES] = held
         return self
 
     def set_sandbox(self, report: Any) -> RunSummaryBuilder:
@@ -2082,6 +2224,11 @@ class RunSummaryBuilder:
             context_window=(
                 dict(window) if isinstance(window := snapshot.get("context_window"), dict) else {}
             ),
+            input_split_unknown_window=[
+                dict(row)
+                for row in snapshot.get("input_split_unknown_window") or []
+                if isinstance(row, dict)
+            ],
         )
         return self
 
@@ -2155,14 +2302,26 @@ class RunSummaryBuilder:
         sycophancy_detected: bool = state.get("sycophancy_detected", False)
         discussion_history = state.get("discussion_history") or []
 
-        sycophancy_events = sum(
-            1
+        # A round counts when the platform flagged it: the convergence flags
+        # its mediation was told (``AgentArgument.converged``), and the latest
+        # round's ``sycophancy_detected`` when its mediation carries none. A
+        # finding's words are the mediator's, never the count: "no sycophancy
+        # is evident" is no event.
+        mediations = [
+            arg
             for arg in discussion_history
-            if getattr(arg, "agent_name", "") == "Mediator"
-            and "sycophancy" in getattr(arg, "finding", "").lower()
-        )
-        if sycophancy_detected and sycophancy_events == 0:
-            sycophancy_events = 1
+            if getattr(arg, "agent_name", "") == MEDIATOR_AGENT_NAME
+        ]
+
+        def _flagged(arg: Any) -> bool:
+            # The flag the round kept, whatever flagged it; state written
+            # before it was kept says only through the convergence flags.
+            kept = getattr(arg, "sycophancy_flagged", None)
+            return bool(kept) if kept is not None else bool(getattr(arg, "converged", None))
+
+        sycophancy_events = sum(1 for arg in mediations if _flagged(arg))
+        if sycophancy_detected and not (mediations and _flagged(mediations[-1])):
+            sycophancy_events += 1
 
         applicable = state.get("consensus_applicable", True) is not False
 
@@ -2204,7 +2363,7 @@ class RunSummaryBuilder:
                 dict.fromkeys(
                     str(getattr(arg, "note", ""))
                     for arg in discussion_history
-                    if getattr(arg, "agent_name", "") == "Mediator"
+                    if getattr(arg, "agent_name", "") == MEDIATOR_AGENT_NAME
                     and getattr(arg, "note", "")
                     and (
                         getattr(arg, "note", "")
@@ -2216,14 +2375,14 @@ class RunSummaryBuilder:
             not_blocking=[
                 defanged(str(line))
                 for arg in discussion_history
-                if getattr(arg, "agent_name", "") == "Mediator"
+                if getattr(arg, "agent_name", "") == MEDIATOR_AGENT_NAME
                 for line in getattr(arg, "not_blocking", None) or []
             ],
             ledger_facts=list(
                 dict.fromkeys(
                     defanged(str(fact))
                     for arg in discussion_history
-                    if getattr(arg, "agent_name", "") == "Mediator"
+                    if getattr(arg, "agent_name", "") == MEDIATOR_AGENT_NAME
                     for fact in getattr(arg, "ledger_facts", None) or []
                 )
             ),
@@ -2236,17 +2395,23 @@ class RunSummaryBuilder:
             unread_marks=[
                 defanged(str(line))
                 for arg in discussion_history
-                if getattr(arg, "agent_name", "") == "Mediator"
+                if getattr(arg, "agent_name", "") == MEDIATOR_AGENT_NAME
                 for line in getattr(arg, "unread_marks", None) or []
             ],
             not_blocking_at_end=next(
                 (
                     len(getattr(arg, "not_blocking", None) or [])
                     for arg in reversed(discussion_history)
-                    if getattr(arg, "agent_name", "") == "Mediator"
+                    if getattr(arg, "agent_name", "") == MEDIATOR_AGENT_NAME
                 ),
                 0,
             ),
+            ledger_stated=[
+                defanged(str(sentence))
+                for arg in discussion_history
+                if getattr(arg, "agent_name", "") == MEDIATOR_AGENT_NAME
+                for sentence in getattr(arg, "ledger_stated", None) or []
+            ],
         )
         return self
 
@@ -2326,7 +2491,9 @@ class RunSummaryBuilder:
                 termination_reason="unknown",
                 sycophancy_events=0,
                 confidence_history=[],
-                final_confidence=0.0,
+                # Nothing was recorded, so no agreement was measured: none is
+                # stated, and 0.0 would say one was.
+                final_confidence=None,
             )
 
         return RunSummary(

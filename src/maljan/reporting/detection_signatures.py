@@ -15,18 +15,30 @@ Suricata rule). Rules are validated when feasible:
 
 Validation failure does NOT drop the rule body — it sets
 ``DetectionRule.compile_error`` so the operator can edit and re-validate.
+
+A YARA draft that compiles is then checked against the sample it was drafted
+from (:class:`OwnSample`), through a probe ruleset written from the same
+declarations, and its record says whether it matched, by which clause, where
+each of its strings was found, or why it was not checked. A draft that does not
+match its own sample is kept and said to be one.
 """
 
 from __future__ import annotations
 
+import errno
 import hashlib
+import os
 import re
+import stat
 import uuid
+from collections.abc import Callable
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
 
 import yaml
 
+from maljan.core import ctype_locale
 from maljan.core.logger import logger
 from maljan.reporting.models import (
     DetectionRule,
@@ -36,6 +48,8 @@ from maljan.reporting.models import (
     NetworkURL,
     PersistenceMechanism,
     RegistryMod,
+    RuleClause,
+    SampleString,
     SandboxSignature,
 )
 from maljan.utils.marked_cut import marked_cut
@@ -64,12 +78,94 @@ LEFT_OUT_COMMENT = (
 _SAFE_RULE_NAME_RE = re.compile(r"[^A-Za-z0-9_]+")
 
 
+@dataclass(frozen=True)
+class OwnSample:
+    """The sample a drafted YARA rule is checked against, and the budget of that check.
+
+    ``path`` is the file the run analysed: the engine maps it read-only where
+    it lies, and it is never copied. ``budget_seconds`` is the operator's wall
+    clock for the check (``core.static.yara.timeout_seconds``), ``None`` when it
+    could not be read, and then the rule is not checked rather than run
+    unbounded. ``on_open`` is called once, just before the engine is handed
+    the file, so the run can say where the sample's bytes were read
+    (``analysis.isolation``).
+    """
+
+    path: str | None
+    budget_seconds: int | None
+    on_open: Callable[[], None] | None = field(default=None, compare=False)
+
+
+# Why a drafted YARA rule was not checked against its sample, said on the rule.
+# None of them names a path.
+NOT_CHECKED_NO_ENGINE = "yara-python is not installed"
+NOT_CHECKED_UNCOMPILED = "the rule did not compile"
+NOT_CHECKED_NO_SAMPLE = "no sample was handed to the rule drafter"
+NOT_CHECKED_NO_PATH = "the run recorded no path for the sample"
+NOT_CHECKED_NO_BUDGET = "the check's budget (core.static.yara.timeout_seconds) could not be read"
+NOT_CHECKED_UNREAD = "the sample could not be read ({why})"
+NOT_CHECKED_PROBE = "the check's probe rules did not compile ({why})"
+NOT_CHECKED_TIMED_OUT = (
+    "the scan ran past its budget of {seconds} s (core.static.yara.timeout_seconds)"
+)
+NOT_CHECKED_REFUSED = "the engine could not scan the sample ({why})"
+NOT_CHECKED_NO_ANSWER = "the engine gave no answer for the rule"
+# The engine's two refusals that name the file it was handed, said without it.
+_ENGINE_FILE_REFUSALS = {
+    "could not open file": "the engine could not open it",
+    "could not map file": "the engine could not map it into memory",
+}
+
+# The modifiers every drafted string carries, in the draft and in its probe alike.
+_YARA_STRING_MODIFIERS = "ascii wide nocase"
+# The probe ruleset's rule names: one per drafted string, one per clause of the
+# draft's condition and one for the whole condition. Lower case and prefixed,
+# none is a YARA keyword, and none can be a drafted rule's name, which always
+# begins ``Maljan_AutoGen_``.
+_PROBE_STRING = "probe_string_"
+_PROBE_PART = "probe_part_"
+_PROBE_WHOLE = "probe_whole"
+
+
+@dataclass(frozen=True)
+class _YaraSources:
+    """A drafted YARA rule and the probe ruleset its check scans, from one set of declarations.
+
+    ``draft`` is the rule the report publishes. ``probe`` declares each of the
+    draft's strings, with the same text and modifiers, as a rule of its own
+    whose condition is that string alone (``string_rules``, in the draft's
+    order), then one reporter rule per clause of the draft's condition
+    (``parts``, in the draft's order) and one for the whole condition over
+    those parts. The engine answers the draft's question and says which clause
+    held; and a string its rule names alone stops at its first match in the
+    engine's fast mode, where the draft's ``N of them`` lists every match up to
+    the engine's own limit of a million per string.
+    """
+
+    draft: str
+    probe: str
+    string_rules: tuple[str, ...]
+    parts: tuple[RuleClause, ...]
+
+
+@dataclass(frozen=True)
+class _SampleCheck:
+    """A drafted rule checked against its own sample: the four fields its record carries."""
+
+    matches: bool | None = None
+    matched_by: list[RuleClause] | None = None
+    strings: list[SampleString] | None = None
+    not_checked: str | None = None
+
+
 # ---------------------------------------------------------------------------
 # Public entry point
 # ---------------------------------------------------------------------------
 
 
-def build_detection_rules(report: MalwareReport) -> list[DetectionRule]:
+def build_detection_rules(
+    report: MalwareReport, sample: OwnSample | None = None
+) -> list[DetectionRule]:
     """Return the YARA / Sigma / Suricata rules derivable from ``report``.
 
     Each format may return ``None`` (no usable evidence); the orchestrator
@@ -96,6 +192,9 @@ def build_detection_rules(report: MalwareReport) -> list[DetectionRule]:
     Twenty ``trojan-activity`` rules were drafted for a signed benign tool —
     certificate hosts, the vendor's home page and a version number read as an
     address — because the drafts read every row the string sweep produced.
+
+    ``sample`` is the file the YARA draft is run against once it compiles
+    (:func:`_run_on_sample`). Without one the draft says it was not run, and why.
     """
     if is_benign(report):
         logger.info("detection_signatures: the verdict is Benign; no draft rule is generated.")
@@ -109,21 +208,21 @@ def build_detection_rules(report: MalwareReport) -> list[DetectionRule]:
 
     rules: list[DetectionRule] = []
     builders: list[tuple[str, Any]] = [
-        ("yara", _build_yara),
-        ("sigma", _build_sigma),
-        ("suricata", _build_suricata),
+        ("yara", lambda: _build_yara(report, sample)),
+        ("sigma", lambda: _build_sigma(report)),
+        ("suricata", lambda: _build_suricata(report)),
     ]
-    for kind, builder in builders:
+    for kind, build in builders:
         if kind == "sigma" and sigma_skip:
             continue
         if kind == "yara" and yara_skip:
             continue
         try:
-            rule = builder(report)
+            rule = build()
         except Exception as exc:  # noqa: BLE001
             logger.warning(
-                "detection_signatures: %s raised (%s); skipping.",
-                builder.__name__,
+                "detection_signatures: the %s draft raised (%s); skipping.",
+                kind,
                 exc,
             )
             continue
@@ -282,7 +381,7 @@ def _yara_gate_reason(report: MalwareReport) -> str | None:
 # ---------------------------------------------------------------------------
 
 
-def _build_yara(report: MalwareReport) -> DetectionRule | None:
+def _build_yara(report: MalwareReport, sample: OwnSample | None = None) -> DetectionRule | None:
     """Build a single YARA rule that matches the sample by hash and IOC strings.
 
     Conditions chained with ``or`` so any one fingerprint triggers the rule:
@@ -294,6 +393,11 @@ def _build_yara(report: MalwareReport) -> DetectionRule | None:
     import names the pack's technique rules fired on used to be strings here
     too, and ``8 of them`` over common API names matches a great deal of
     ordinary software: an import name is not an indicator this run publishes.
+
+    The rule that compiles is checked against ``sample``, the file it was
+    drafted from, through the probe ruleset rendered beside it
+    (:func:`_render_yara`), and the record carries what that found or why the
+    rule was not checked.
     """
     sha256 = report.identity.hashes.sha256
     if not sha256:
@@ -316,7 +420,7 @@ def _build_yara(report: MalwareReport) -> DetectionRule | None:
     # ever be relaxed.
     rule_name = f"Maljan_AutoGen_{_rule_name_component(report)}"
 
-    body = _render_yara(
+    rendered = _render_yara(
         rule_name=rule_name,
         sha256=sha256,
         imphash=imphash,
@@ -326,18 +430,34 @@ def _build_yara(report: MalwareReport) -> DetectionRule | None:
         generated_at_iso=report.generated_at.isoformat(),
         reasons=reasons,
     )
+    body = rendered.draft
 
     if len(eligible) > _MAX_YARA_STRINGS:
         body += "\n// " + LEFT_OUT_COMMENT.format(
             rest=len(eligible) - _MAX_YARA_STRINGS, what="strings"
         )
-    compile_error = _validate_yara(body)
+    compiled, compile_error = _compile_yara(body)
+    if compiled is None:
+        check = _SampleCheck(
+            not_checked=NOT_CHECKED_UNCOMPILED if _YARA_AVAILABLE else NOT_CHECKED_NO_ENGINE
+        )
+    else:
+        check = _run_on_sample(rendered, [slot for slot, _value in strings], sample)
+    if check.not_checked:
+        logger.info(
+            "detection_signatures: the YARA draft was not checked against its sample: %s.",
+            check.not_checked,
+        )
     return DetectionRule(
         kind="yara",
         name=rule_name,
         body=body,
         source_evidence=sources,
         compile_error=compile_error,
+        matches_sample=check.matches,
+        matched_by=check.matched_by,
+        sample_strings=check.strings,
+        sample_not_checked=check.not_checked,
     )
 
 
@@ -351,13 +471,31 @@ def _render_yara(
     verdict: str,
     generated_at_iso: str,
     reasons: dict[str, str] | None = None,
-) -> str:
-    lines: list[str] = []
+) -> _YaraSources:
+    """The drafted rule and its probe ruleset, written from the same declarations.
+
+    Each string is declared once, text and modifiers, and each clause of the
+    condition once; the draft and the probe are both written from those, so
+    the rule the report publishes and the rules its check scans cannot drift
+    apart. The probe's strings clause is the draft's quantifier over the probe
+    string rules where the draft has it over ``them``.
+    """
     imports = ['import "hash"']
     if imphash:
         imports.append('import "pe"')
-    lines.extend(imports)
-    lines.append("")
+    declared = [
+        (slot, f'"{_escape_yara(value)}" {_YARA_STRING_MODIFIERS}') for slot, value in strings
+    ]
+    quantifier = str(max(2, len(strings) // 3)) if len(strings) >= 2 else "any"
+    clauses: list[tuple[RuleClause, str]] = [
+        ("sha256", f'hash.sha256(0, filesize) == "{_escape_yara(sha256)}"')
+    ]
+    if imphash:
+        clauses.append(("imphash", f'pe.imphash() == "{_escape_yara(imphash)}"'))
+    if strings:
+        clauses.append(("strings", f"{quantifier} of them"))
+
+    lines: list[str] = [*imports, ""]
     lines.append(f"rule {rule_name}")
     lines.append("{")
     lines.append("    meta:")
@@ -369,28 +507,33 @@ def _render_yara(
     )
     lines.append(f'        sha256 = "{_escape_yara(sha256)}"')
     lines.append(f'        generated_at = "{_escape_yara(generated_at_iso)}"')
-    if strings:
+    if declared:
         lines.append("    strings:")
-        for slot, value in strings:
+        for slot, text in declared:
             why = (reasons or {}).get(slot)
-            lines.append(
-                f'        {slot} = "{_escape_yara(value)}" ascii wide nocase'
-                + (f"  // {why}" if why else "")
-            )
+            lines.append(f"        {slot} = {text}" + (f"  // {why}" if why else ""))
     lines.append("    condition:")
-
-    conditions: list[str] = [f'hash.sha256(0, filesize) == "{_escape_yara(sha256)}"']
-    if imphash:
-        conditions.append(f'pe.imphash() == "{_escape_yara(imphash)}"')
-    if len(strings) >= 2:
-        threshold = max(2, len(strings) // 3)
-        conditions.append(f"{threshold} of them")
-    elif len(strings) == 1:
-        conditions.append("any of them")
-
-    lines.append("        " + " or ".join(f"({c})" for c in conditions))
+    lines.append("        " + " or ".join(f"({condition})" for _part, condition in clauses))
     lines.append("}")
-    return "\n".join(lines) + "\n"
+
+    string_rules = tuple(f"{_PROBE_STRING}{index}" for index in range(len(declared)))
+    probe: list[str] = [*imports, ""]
+    probe.extend(
+        f"rule {name} {{ strings: $a = {text} condition: $a }}"
+        for name, (_slot, text) in zip(string_rules, declared, strict=True)
+    )
+    over_probes = f"{quantifier} of ({', '.join(string_rules)})"
+    for part, condition in clauses:
+        written = over_probes if part == "strings" else condition
+        probe.append(f"rule {_PROBE_PART}{part} {{ condition: {written} }}")
+    whole = " or ".join(f"({_PROBE_PART}{part})" for part, _condition in clauses)
+    probe.append(f"rule {_PROBE_WHOLE} {{ condition: {whole} }}")
+    return _YaraSources(
+        draft="\n".join(lines) + "\n",
+        probe="\n".join(probe) + "\n",
+        string_rules=string_rules,
+        parts=tuple(part for part, _condition in clauses),
+    )
 
 
 def _yara_string_eligible(ioc: Any) -> bool:
@@ -416,14 +559,145 @@ def _safe_rule_name(value: str) -> str:
     return safe[:64]
 
 
-def _validate_yara(body: str) -> str | None:
+def _compile_yara(body: str) -> tuple[Any, str | None]:
+    """The compiled rules and no error, or none and why they did not compile.
+
+    The engine itself refuses an include, not only the way the template is
+    written: an include opens a file at compile time, and its error names it.
+    """
     if not _YARA_AVAILABLE or yara is None:
-        return "yara-python not installed; rule body not validated"
+        return None, "yara-python not installed; rule body not validated"
     try:
-        yara.compile(source=body)
+        return yara.compile(source=body, includes=False), None
     except Exception as exc:  # noqa: BLE001 - yara.Error not always importable
-        return f"yara.compile failed: {exc}"
+        return None, f"yara.compile failed: {exc}"
+
+
+def _unreadable(path: str) -> str | None:
+    """Why the engine could not read the file at ``path``, without the path, or ``None``.
+
+    Asked before the engine maps the file, so a directory or a device is never
+    handed to it, and each answer is the system's own word for the error.
+    """
+    try:
+        status = os.stat(path)
+    except OSError as exc:
+        return exc.strerror or type(exc).__name__
+    except ValueError as exc:  # a path the system refuses to look up, such as one holding a NUL
+        return str(exc) or type(exc).__name__
+    if stat.S_ISDIR(status.st_mode):
+        return os.strerror(errno.EISDIR)
+    if not stat.S_ISREG(status.st_mode):
+        return "not a regular file"
+    if not os.access(path, os.R_OK):
+        return os.strerror(errno.EACCES)
     return None
+
+
+def _refused(exc: Exception, path: str, seconds: int) -> str:
+    """Why the engine stopped the check's scan, never naming the sample's path."""
+    if isinstance(exc, getattr(yara, "TimeoutError", ())):
+        return NOT_CHECKED_TIMED_OUT.format(seconds=seconds)
+    message = str(exc)
+    for opening, said in _ENGINE_FILE_REFUSALS.items():
+        if message.startswith(opening):
+            return NOT_CHECKED_UNREAD.format(why=said)
+    # Any other message that names the path, quoted as the engine writes it
+    # today or bare, is said with "the sample" in its place.
+    message = message.replace(f'"{path}"', "the sample").replace(path, "the sample")
+    return NOT_CHECKED_REFUSED.format(why=f"{type(exc).__name__}: {message}")
+
+
+def _run_on_sample(
+    rendered: _YaraSources, slots: list[str], sample: OwnSample | None
+) -> _SampleCheck:
+    """The draft checked against the sample it was drafted from, or why it was not.
+
+    The probe ruleset rendered beside the draft is compiled by the same engine
+    and scanned, in the engine's fast mode and within the check's budget, over
+    the file the run analysed, which the engine maps read-only where it lies.
+    ``matches`` is the whole-condition reporter's answer and ``matched_by`` the
+    clauses whose reporters held: both are the engine's, and nothing here
+    recomputes the draft's threshold. Every string the draft declares is listed
+    with the offset of its probe rule's match, or none, whether the condition
+    held or not.
+
+    A probe string's rule names it alone, so the fast mode stops it at its
+    first match: the engine lists one match per string however often a hostile
+    sample repeats it, and the scan stays linear in the sample. The draft,
+    whose ``N of them`` the fast mode cannot cut short, is never scanned.
+
+    The engine is asked first whether it folds case
+    (``core.ctype_locale.yara_case_folding_problem``). Where it does not, as
+    under a locale whose ``tolower`` leaves a capital I alone, its ``nocase``
+    and import-hash answers would be wrong, and the draft is not checked
+    rather than said to miss its sample.
+    """
+    folding = ctype_locale.yara_case_folding_problem()
+    if folding is not None:
+        return _SampleCheck(not_checked=folding)
+    if sample is None:
+        return _SampleCheck(not_checked=NOT_CHECKED_NO_SAMPLE)
+    path = str(sample.path or "").strip()
+    if not path:
+        return _SampleCheck(not_checked=NOT_CHECKED_NO_PATH)
+    budget = sample.budget_seconds
+    if budget is None:
+        return _SampleCheck(not_checked=NOT_CHECKED_NO_BUDGET)
+    unreadable = _unreadable(path)
+    if unreadable is not None:
+        return _SampleCheck(not_checked=NOT_CHECKED_UNREAD.format(why=unreadable))
+    probe, error = _compile_yara(rendered.probe)
+    if probe is None:
+        return _SampleCheck(not_checked=NOT_CHECKED_PROBE.format(why=error))
+
+    held: dict[str, bool] = {}
+    first: dict[str, int] = {}
+    slot_of = dict(zip(rendered.string_rules, slots, strict=True))
+
+    def _answer(rule: dict[str, Any]) -> int:
+        name = str(rule.get("rule") or "")
+        held[name] = bool(rule.get("matches"))
+        slot = slot_of.get(name)
+        if slot is not None:
+            low = min(
+                (
+                    int(instance.offset)
+                    for string in rule.get("strings") or []
+                    for instance in string.instances
+                ),
+                default=None,
+            )
+            if low is not None:
+                first[slot] = low
+        return int(yara.CALLBACK_CONTINUE)
+
+    seconds = max(1, int(budget))
+    if sample.on_open is not None:
+        sample.on_open()
+    try:
+        probe.match(
+            filepath=path,
+            timeout=seconds,
+            fast=True,
+            callback=_answer,
+            which_callbacks=yara.CALLBACK_ALL,
+        )
+    except Exception as exc:  # noqa: BLE001 - the engine's refusal is the reason said
+        return _SampleCheck(not_checked=_refused(exc, path, seconds))
+    if _PROBE_WHOLE not in held:
+        return _SampleCheck(not_checked=NOT_CHECKED_NO_ANSWER)
+    matched_by = [part for part in rendered.parts if held.get(f"{_PROBE_PART}{part}")]
+    strings = [SampleString(identifier=slot, offset=first.get(slot)) for slot in slots]
+    logger.info(
+        "detection_signatures: the YARA draft checked against its sample: matches=%s, "
+        "by=%s, %d of %d string(s) found.",
+        "yes" if held[_PROBE_WHOLE] else "no",
+        ",".join(matched_by) or "nothing",
+        sum(1 for item in strings if item.offset is not None),
+        len(strings),
+    )
+    return _SampleCheck(matches=held[_PROBE_WHOLE], matched_by=matched_by, strings=strings)
 
 
 # ---------------------------------------------------------------------------
@@ -444,13 +718,7 @@ def _build_sigma(report: MalwareReport) -> DetectionRule | None:
     """
     admitted = frozenset(_registry_form(item) for item in sigma_admits(report))
     registry_targets = _collect_registry_targets(report, admitted)
-    persistence_images = _collect_persistence_images(
-        [
-            mech
-            for mech in report.persistence
-            if _admitted_value(mech.target, admitted) or _admitted_value(mech.payload, admitted)
-        ]
-    )
+    persistence_images = _collect_persistence_images(report.persistence, admitted)
     signatures = _collect_signature_names(report)
 
     if not (registry_targets or persistence_images or signatures):
@@ -553,7 +821,9 @@ def sigma_admits(report: MalwareReport) -> frozenset[str]:
 
 # The spellings of a registry hive a run writes: a sandbox's short name, the
 # long name, the kernel path (a user hive with its SID), and the placeholder
-# of an unread hive.
+# of an unread hive (``UNKNOWN``, written by ``_registry_full_path``; a text
+# cannot tell it from a key whose first step is literally ``Unknown``, a
+# stated and theoretical residual, since a real key opens with a hive).
 _USER_SID = r"(?:\\(?:s-1-[0-9-]+(?:_classes)?|\.default))?"
 _HIVE_PREFIX_RE = re.compile(
     r"^\\*(?:registry\\machine"
@@ -567,20 +837,30 @@ _HIVE_PREFIX_RE = re.compile(
 _VALUE_NAME_SUFFIX_RE = re.compile(r" \([^()]*\)$")
 
 
-def _hiveless_key(value: Any) -> str:
-    """A registry path without its hive or a trailing value name, in the case written.
+# Every hive prefix a key opens with, as one anchored match of the repeated
+# prefix: read in one pass, so a text of many prefixes costs its length once.
+_HIVE_PREFIXES_RE = re.compile(r"^(?:" + _HIVE_PREFIX_RE.pattern.removeprefix("^") + r")+", re.I)
 
-    Hive prefixes are stripped until the text stops changing, so a key a
-    sandbox wrote in long form under a short-name prefix
-    (``HKCU\\HKEY_CURRENT_USER\\...``) reads as the key. A value that is not
-    a registry path passes through.
+
+def hiveless_key(value: Any, *, value_suffix: bool = True) -> str:
+    """A registry path without its hive, in the case written; the IOC table's suffix too.
+
+    Every hive prefix the key opens with is stripped, so a key a sandbox
+    wrote in long form under a short-name prefix (``HKCU\\HKEY_CURRENT_USER\\...``)
+    reads as the key; the prefixes are read by one anchored match, in time
+    linear in the text. ``value_suffix`` also strips the trailing
+    `` (<value name>)`` the IOC table writes after a key: true for a row of
+    that table, false for a key read as written (``Vendor App (x86)`` is a key
+    name). A value that is not a registry path passes through.
     """
-    text = _VALUE_NAME_SUFFIX_RE.sub("", str(value or "").strip().replace("/", "\\"))
-    while True:
-        stripped = _HIVE_PREFIX_RE.sub("", text, count=1)
-        if stripped == text:
-            return text.strip("\\")
-        text = stripped
+    text = str(value or "").strip().replace("/", "\\")
+    if value_suffix:
+        text = _VALUE_NAME_SUFFIX_RE.sub("", text)
+    return _HIVE_PREFIXES_RE.sub("", text, count=1).strip("\\")
+
+
+# The name this module's own callers read it by.
+_hiveless_key = hiveless_key
 
 
 def _registry_form(value: Any) -> str:
@@ -627,7 +907,7 @@ def _collect_registry_targets(report: MalwareReport, admitted: frozenset[str]) -
         for reg in report.dynamic.registry_mods:
             _add(_registry_full_path(reg))
     for mech in report.persistence:
-        if mech.kind in {"registry_run", "image_hijack", "appinit_dll", "winlogon_helper"}:
+        if mech.kind in _REGISTRY_PERSISTENCE_KINDS:
             _add(mech.target)
     return out
 
@@ -641,11 +921,40 @@ def _registry_full_path(reg: RegistryMod) -> str:
     return f"{reg.hive}\\{reg.key}"
 
 
-def _collect_persistence_images(persistence: list[PersistenceMechanism]) -> list[str]:
+# The persistence kinds whose target is a registry key, never an image.
+_REGISTRY_PERSISTENCE_KINDS = frozenset(
+    {"registry_run", "image_hijack", "appinit_dll", "winlogon_helper"}
+)
+
+
+def _persistence_image_source(mech: PersistenceMechanism, admitted: frozenset[str]) -> str:
+    """The admitted value an image is read from: the payload, else a target that is a file.
+
+    The payload is what runs (``models.PersistenceMechanism``). A registry
+    key is where it is registered, and a key's last component selected as an
+    image matches no process event; so a registry target, by its kind or by
+    its hive, is never one.
+    """
+    if mech.payload and _admitted_value(mech.payload, admitted):
+        return mech.payload
+    target = mech.target or ""
+    if (
+        target
+        and mech.kind not in _REGISTRY_PERSISTENCE_KINDS
+        and not _HIVE_PREFIX_RE.match(target.strip().replace("/", "\\"))
+        and _admitted_value(target, admitted)
+    ):
+        return target
+    return ""
+
+
+def _collect_persistence_images(
+    persistence: list[PersistenceMechanism], admitted: frozenset[str]
+) -> list[str]:
     out: list[str] = []
     seen: set[str] = set()
     for mech in persistence:
-        target = mech.target or mech.payload or ""
+        target = _persistence_image_source(mech, admitted)
         if not target:
             continue
         # Pull a trailing executable name if present.
@@ -667,7 +976,9 @@ def _collect_signature_names(report: MalwareReport) -> list[str]:
     out: list[str] = []
     seen: set[str] = set()
     sigs: list[SandboxSignature] = sorted(
-        report.dynamic.sandbox_signatures, key=lambda s: s.severity, reverse=True
+        report.dynamic.sandbox_signatures,
+        key=lambda s: -1 if s.severity is None else s.severity,
+        reverse=True,
     )
     for sig in sigs:
         text = (sig.description or sig.name).strip()
@@ -690,6 +1001,10 @@ def _sigma_tags(report: MalwareReport) -> list[str]:
             seen.add(tag)
             tags.append(tag)
     for cell in report.capability_matrix:
+        # A cell the report did not publish (an id the catalogue lacks, or one
+        # the sample cannot host) is no tactic a deployed rule should claim.
+        if cell.not_published:
+            continue
         name = cell.tactic_name.lower().replace(" ", "_").replace("&", "and")
         tag = f"attack.{name}" if name else ""
         if tag and tag not in seen:
@@ -743,8 +1058,10 @@ def _build_suricata(report: MalwareReport) -> DetectionRule | None:
     sources: list[str] = []
     lines: list[str] = [
         f"# Auto-generated by Maljan for sha256 {sha256}",
-        f"# Family: {family}; verdict: {report.verdict}; "
-        f"generated_at: {report.generated_at.isoformat()}",
+        _comment(
+            f"Family: {family}; verdict: {report.verdict}; "
+            f"generated_at: {report.generated_at.isoformat()}"
+        ),
         "# Review and renumber SIDs before deploying to production.",
     ]
 
@@ -753,7 +1070,7 @@ def _build_suricata(report: MalwareReport) -> DetectionRule | None:
     for domain in domains[:_MAX_SURICATA_RULES]:
         rule = _suricata_dns_rule(domain, sid, sha256, family)
         if rule is not None:
-            lines.append(f"# {why.get(('domain', domain.fqdn), domain.fqdn)}")
+            lines.append(_comment(why.get(("domain", domain.fqdn), domain.fqdn)))
             lines.append(rule)
             sources.append(f"domain:{domain.fqdn}")
             sid += 1
@@ -762,7 +1079,8 @@ def _build_suricata(report: MalwareReport) -> DetectionRule | None:
         rule = _suricata_ip_rule(ips[:_MAX_SURICATA_RULES], sid, sha256, family)
         if rule is not None:
             lines.extend(
-                f"# {why.get(('ip', ip.address), ip.address)}" for ip in ips[:_MAX_SURICATA_RULES]
+                _comment(why.get(("ip", ip.address), ip.address))
+                for ip in ips[:_MAX_SURICATA_RULES]
             )
             lines.append(rule)
             sources.append("ips:" + ",".join(ip.address for ip in ips[:_MAX_SURICATA_RULES]))
@@ -771,7 +1089,7 @@ def _build_suricata(report: MalwareReport) -> DetectionRule | None:
     for url in urls[:_MAX_SURICATA_RULES]:
         rule = _suricata_http_rule(url, sid, sha256, family)
         if rule is not None:
-            lines.append(f"# {why.get(('url', url.url), url.url)}")
+            lines.append(_comment(why.get(("url", url.url), url.url)))
             lines.append(rule)
             sources.append(f"url:{url.url}")
             sid += 1
@@ -782,12 +1100,8 @@ def _build_suricata(report: MalwareReport) -> DetectionRule | None:
                 "# " + LEFT_OUT_COMMENT.format(rest=len(rows) - _MAX_SURICATA_RULES, what=what)
             )
 
-    body = "\n".join(lines)
-    if len(body.encode("utf-8")) > _SURICATA_MAX_BODY_BYTES:
-        body = (
-            body[:_SURICATA_MAX_BODY_BYTES]
-            + "\n# (cut at the draft's size; the report's IOC table carries every indicator)"
-        )
+    capped = sum(max(0, len(rows) - _MAX_SURICATA_RULES) for rows in (domains, ips, urls))
+    body = _suricata_body_within(lines, header=3, capped=capped)
 
     compile_error = _validate_suricata(body)
     return DetectionRule(
@@ -797,6 +1111,37 @@ def _build_suricata(report: MalwareReport) -> DetectionRule | None:
         source_evidence=sources,
         compile_error=compile_error,
     )
+
+
+def _suricata_body_within(lines: list[str], header: int = 0, capped: int = 0) -> str:
+    """The draft's lines, cut at a rule's end when they pass the draft's size.
+
+    A rule is one line, so the cut falls between lines: a rule is kept whole
+    or left out whole, with the comment written above it, and the closing
+    note counts the rules left out, those cut here and the ``capped`` ones the
+    per-kind cap left out before. The first ``header`` lines are the draft's own
+    and are never taken for a rule's comment. Cutting the text itself left half a rule
+    that a sensor would refuse or, worse, read differently.
+    """
+    body = "\n".join(lines)
+    if len(body.encode("utf-8")) <= _SURICATA_MAX_BODY_BYTES:
+        return body
+    kept: list[str] = []
+    used = 0
+    for line in lines:
+        used += len(line.encode("utf-8")) + 1
+        if used > _SURICATA_MAX_BODY_BYTES:
+            break
+        kept.append(line)
+    # The comments above the first rule left out belong to it.
+    while len(kept) > header and kept[-1].startswith("#"):
+        kept.pop()
+    left_out = capped + sum(1 for line in lines[len(kept) :] if line.startswith("alert"))
+    kept.append(
+        f"# (cut at the draft's size: {left_out:,} more indicators are not included; "
+        "the report's IOC table carries every indicator)"
+    )
+    return "\n".join(kept)
 
 
 _SURICATA_CONTENT_RE = re.compile(r"[^A-Za-z0-9._:/\-?=& ]")
@@ -877,7 +1222,21 @@ def _suricata_http_rule(url: NetworkURL, sid: int, sha256: str, family: str) -> 
 
 
 def _suricata_msg_escape(value: str) -> str:
-    return value.replace('"', "'").replace("\n", " ").replace(";", ",")
+    return _one_line(value).replace('"', "'").replace(";", ",")
+
+
+def _one_line(value: str) -> str:
+    """``value`` on one line: each line break, as any line reader splits on, a space."""
+    return " ".join(str(value).splitlines())
+
+
+def _comment(text: str) -> str:
+    """One comment line of a draft: text the sample can write (a family, a value) stays on it.
+
+    A line break in a family name ended the comment and wrote what followed
+    as a rule of its own, a ``pass`` rule included.
+    """
+    return f"# {_one_line(text)}"
 
 
 _SURICATA_HEAD_RE = re.compile(r"^alert\s+\S+\s+")

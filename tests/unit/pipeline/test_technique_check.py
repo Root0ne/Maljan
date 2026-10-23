@@ -534,7 +534,6 @@ class TestValidityAvailability:
         assert validation_metrics(0, [], None)["not_run"] == []
 
     def test_the_analyst_records_it_once_and_hands_it_over_once(self, monkeypatch) -> None:
-        from maljan.agents import base_agent
 
         monkeypatch.setattr(knowledge, "catalogue_available", lambda: False)
         agent = BaseAnalyst.__new__(_Analyst)
@@ -545,8 +544,7 @@ class TestValidityAvailability:
         agent.pack_ledger_ids = []
         agent.sample_format = ("pe", "windows")
         monkeypatch.setattr(
-            base_agent,
-            "validate_isr",
+            "maljan.pipeline.validation.validate_isr",
             lambda *_a, **_k: [],
         )
         agent._validate_isr(_isr(_claim("T1055")), "evidence")

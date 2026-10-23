@@ -15,10 +15,11 @@ import re
 # What may stand before a label at the start of a line: quote and emphasis
 # marks, and one list marker (``-``, ``+``, ``1.``, ``2)``; ``*`` is an
 # emphasis mark already).
-LINE_PREFIX = r"[ \t>*_#]*(?:(?:[-+]|\d+[.)])[ \t]+)?[ \t>*_#]*"
+LINE_PREFIX = r"[ \t>*_#]*+(?:(?:[-+]|\d++[.)])[ \t]++)?[ \t>*_#]*+"
 
 # A claim's heading at the start of a line, as models number and mark it:
-# ``CLAIM:``, ``CLAIM 3:``, ``CLAIM 3 —``, ``**CLAIM 4 (REVISED):**``,
+# ``CLAIM:``, ``CLAIM 3:``, ``CLAIM R3:`` (a label of letters before its
+# number, after a space or ``#``), ``CLAIM 3 —``, ``**CLAIM 4 (REVISED):**``,
 # ``CLAIM 2 [REVISED — retracts claim 5]:``, ``- CLAIM:``, ``1. CLAIM:``, and a
 # heading whose note is all its line holds (``CLAIM 1 (REVISED — not
 # observed)``, fields on the lines after it). Each one opens a block of its
@@ -28,11 +29,12 @@ LINE_PREFIX = r"[ \t>*_#]*(?:(?:[-+]|\d+[.)])[ \t]+)?[ \t>*_#]*"
 # beside the claim (``heading_note``) and the sentence is what follows the
 # delimiter; a heading that is its note alone has that note as its sentence. A
 # bracket is closed on its own line or the line is no heading, and a bracket
-# that never closes is given up once, so a line costs time linear in its length.
+# that never closes is given up once, and every run of spaces and marks is read
+# possessively, so a line costs time linear in its length.
 CLAIM_HEAD_RE = re.compile(
-    r"^" + LINE_PREFIX + r"CLAIM(?:[ \t]*#?(?P<number>\d+))?"
-    r"(?:[ \t]*(?P<note>\([^)\n]*\)|\[[^\]\n]*\]))?[ \t]*(?:\*\*)?[ \t]*"
-    r"(?:(?P<delim>:|—|–|-(?=\s))[ \t]*(?:\*\*)?[ \t]*|(?(note)$|(?!)))"
+    r"^" + LINE_PREFIX + r"CLAIM(?:(?:[ \t]++#?(?P<label>[A-Za-z]++)|[ \t]*+#?)(?P<number>\d++))?"
+    r"(?:[ \t]*+(?P<note>\([^)\n]*+\)|\[[^\]\n]*+\]))?[ \t]*+(?:\*\*)?[ \t]*+"
+    r"(?:(?P<delim>:|—|–|-(?=\s))[ \t]*+(?:\*\*)?[ \t]*+|(?(note)$|(?!)))"
 )
 
 
@@ -47,12 +49,15 @@ def heading_number(heading: re.Match[str]) -> str | None:
     """The number a heading writes after ``CLAIM`` (``CLAIM 7:``), leading zeros aside, or ``None``.
 
     Kept as the digits written, never converted: the number names a claim, it
-    is not a quantity, and digits of any length compare as written.
+    is not a quantity, and digits of any length compare as written. A label
+    written before the digits stays in front of them (``CLAIM R7:`` is
+    ``"R7"``): it is part of the name, so ``R7`` is never read as claim 7.
     """
-    digits = heading.groupdict().get("number")
+    groups = heading.groupdict()
+    digits = groups.get("number")
     if digits is None:
         return None
-    return digits.lstrip("0") or "0"
+    return f"{groups.get('label') or ''}{digits.lstrip('0') or '0'}"
 
 
 def heading_note(heading: re.Match[str]) -> str | None:
@@ -98,6 +103,80 @@ def _split_at_disputes(text: str) -> tuple[list[str], list[str]]:
         if _opens_disputes(line):
             return lines[:index], lines[index:]
     return lines, []
+
+
+# What ends the DISPUTES section: a label of a section an answer writes after
+# it, at the start of a line, its emphasis and heading marks aside
+# (``SUMMARY:``, ``**FINAL VERDICT:**``, ``## CONCLUSION:``). Only these, and
+# case-sensitive: a dispute written as prose that names an analyst or a
+# domain before a colon (``NETWORK: I disagree ...``, ``Network analyst:
+# ...``) is a dispute, not the end of the section.
+SECTION_END_LABELS = (
+    "SUMMARY",
+    "CONCLUSION",
+    "CONCLUSIONS",
+    "FINAL VERDICT",
+    "VERDICT",
+    "FINAL ASSESSMENT",
+    "ASSESSMENT",
+    "RECOMMENDATIONS",
+    "NOTES",
+    "REVISED CLAIMS",
+)
+_SECTION_END_RE = re.compile(
+    r"^[ \t>*_#]*+(?:"
+    + "|".join(re.escape(label) for label in SECTION_END_LABELS)
+    + r")[ \t]*+(?:\*\*|__)?[ \t]*+:"
+)
+
+
+def disputes_section(text: str) -> str | None:
+    """What ``text`` writes under its DISPUTES label, up to the next section; ``None`` without one.
+
+    The section opens only at the label (:func:`_opens_disputes`): the word
+    in a sentence, in any case, opens nothing, and a label saying there is no
+    dispute opens no section. What the label's own line holds after it is the
+    section's first line; the section ends at a known section label or at a
+    claim block written after it (an unbulleted ``CLAIM_HEAD_RE`` heading
+    followed by its EVIDENCE or CONFIDENCE line). Linear in ``text``.
+    """
+    _, section = _split_at_disputes(text)
+    if not section:
+        return None
+    match = _DISPUTES_LABEL_RE.match(section[0])
+    rest = "" if match is None else (match.group("rest") or match.group("heading_rest") or "")
+    body = [rest.strip().lstrip(":").lstrip("*_` ")]
+    lines = section[1:]
+    for index, line in enumerate(lines):
+        # A known section label ends it, and so does a claim block written
+        # after it: an unbulleted claim heading (the claim reader's own test)
+        # whose next line is its EVIDENCE or CONFIDENCE. A bulleted heading is
+        # a dispute quoting a peer's claim, and stays one.
+        if _SECTION_END_RE.match(line) or _opens_a_claim_block(lines, index):
+            break
+        body.append(line)
+    return "\n".join(body)
+
+
+# A list marker at the start of a line, after any quote or emphasis marks.
+_BULLETED_RE = re.compile(r"[ \t>*_#]*+(?:[-+•]|\d++[.)])[ \t]")
+# A claim block's first field line under its heading.
+_CLAIM_FIELD_RE = re.compile(r"^" + LINE_PREFIX + r"(?:EVIDENCE|CONFIDENCE)\b", re.IGNORECASE)
+
+
+def _opens_a_claim_block(lines: list[str], index: int) -> bool:
+    """Whether ``lines[index]`` is an unbulleted claim heading whose next written line is a field.
+
+    The blank lines between are read once more at most, so a section costs
+    time linear in its length.
+    """
+    line = lines[index]
+    if _BULLETED_RE.match(line) or not CLAIM_HEAD_RE.match(line):
+        return False
+    for after in lines[index + 1 :]:
+        if after.strip():
+            return bool(_CLAIM_FIELD_RE.match(after))
+    return False
 
 
 def before_disputes(text: str) -> str:
@@ -215,9 +294,3 @@ def claim_blocks(text: str) -> list[tuple[int, str]]:
                 current.append(bare)
         offset += len(line)
     return [(start, _block_key(lines)) for start, lines in blocks]
-
-
-def claim_heading_counts(text: str) -> tuple[int, int]:
-    """``(claims begun, distinct claims)`` of an answer, each claim keyed by its block."""
-    blocks = claim_blocks(text)
-    return len(blocks), len({key for _start, key in blocks})

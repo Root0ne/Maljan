@@ -99,16 +99,28 @@ class TestAggregate:
 
 class TestConfidence:
     def test_single_function_is_weak(self) -> None:
-        assert FamilyHashAttribution("X", shared_functions=1).confidence == 0.6
+        assert (
+            FamilyHashAttribution("X", shared_functions=1, distinctive_functions=1).confidence
+            == 0.6
+        )
 
     def test_grows_monotonically(self) -> None:
-        c1 = FamilyHashAttribution("X", shared_functions=1).confidence
-        c3 = FamilyHashAttribution("X", shared_functions=3).confidence
+        c1 = FamilyHashAttribution("X", shared_functions=1, distinctive_functions=1).confidence
+        c3 = FamilyHashAttribution("X", shared_functions=3, distinctive_functions=3).confidence
         assert c3 > c1
         assert c3 == 0.8
 
     def test_capped_below_one(self) -> None:
-        assert FamilyHashAttribution("X", shared_functions=50).confidence == 0.95
+        assert (
+            FamilyHashAttribution("X", shared_functions=50, distinctive_functions=50).confidence
+            == 0.95
+        )
+
+    def test_functions_other_families_share_add_nothing(self) -> None:
+        assert (
+            FamilyHashAttribution("X", shared_functions=5, distinctive_functions=0).confidence
+            == 0.0
+        )
 
 
 class TestBuildHint:

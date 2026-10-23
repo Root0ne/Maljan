@@ -4,7 +4,7 @@ The pack (``pipeline.triage_pack``) runs a list of steps over every sample
 before any analyst starts. Each step is declared here as a :class:`PackStep`:
 
 * ``id``: the step's name, unique in the list. A later step names an earlier
-  one by it (``after``, ``starts_after``, ``beside``).
+  one by it (``after``, ``starts_after``, ``beside``, ``when``, ``reads``).
 * ``tool`` and ``server``: what the step calls. With no ``server`` the step is
   one of the platform's own, run in-process, named by its shipped id; with
   a ``server`` it is that tool server's tool, called through the tool server
@@ -13,11 +13,29 @@ before any analyst starts. Each step is declared here as a :class:`PackStep`:
   to a model.
 * ``arguments``: a server step's argument template. A string value may hold
   ``{sample_path}`` (the path that server opens the sample at), ``{sha256}``
-  and ``{file_type}`` (the routed format). With no template, the arguments
-  are read from the tool's declaration: the argument it declares for the
-  ``path`` role takes the sample's path, the one for ``hash`` the sample's
-  sha256. The platform's own steps compute their own arguments.
+  and ``{file_type}`` (the routed format), and files of the job's artefact
+  store (``pipeline.artefacts``), each at the path that server opens it at:
+  ``{capture_path}`` (the sandbox's packet capture) and
+  ``{sandbox_report_path}`` (the sandbox report as JSON), which a step names
+  only to run where the job has them, and, on a step that ``reads``,
+  ``{artefact_path}`` with ``{artefact_sha256}``. With no template, the
+  arguments are read from the tool's declaration: the argument it declares
+  for the ``path`` role takes the sample's path (on a step that ``reads``,
+  the file's), the one for ``hash`` the sample's sha256 (the file's). The
+  platform's own steps compute their own arguments.
 * ``formats``: the routed formats the step runs for; empty is every format.
+* ``when``: the values earlier steps' answers must hold for the step to run,
+  each a :class:`StepCondition`: the ``step``, a ``value`` its tool declares
+  (``ToolFacts.values``) and the texts any one of which that value must be
+  (``equals``). Read by code from the answer's declared rows, whatever the
+  tool; a step whose condition does not hold is recorded as not run, with
+  why, and is no failure.
+* ``outputs``: the path of a server step's answer that names each file its
+  tool wrote, as that server names it; each is taken into the job's artefact
+  store, and the step's entry names what was taken in and what was not.
+* ``reads``: an earlier step with ``outputs``; this server step runs once for
+  each file that step wrote, in the order it named them, ``{artefact_path}``
+  naming it. With none written the step is recorded as not run, with why.
 * ``budget_seconds``: the step's wall clock; ``None`` takes the tool's
   declared ``timeout_seconds``, else, for a long step, what is left of the
   pack's budget. A step of the platform's own takes one only where its
@@ -41,7 +59,12 @@ before any analyst starts. Each step is declared here as a :class:`PackStep`:
 * ``after``: where a step not in the shipped list goes: after the step it
   names, else after every shipped step.
 
-:func:`default_steps` is the shipped list. ``triage.steps`` holds the
+:func:`default_steps` is the shipped list. Three of its steps, after the
+format readers, call servers' tools (the identification servers); each is
+off, with why, while its server
+is not configured, switched off or does not offer the tool
+(:func:`steps_on_servers`), so a deployment without the server runs the list
+as it was. ``triage.steps`` holds the
 operator's declarations (:func:`effective_steps`): one under a shipped step's
 id is laid over that step field by field, in its place (``enabled: false``
 drops it); one that changes the step's ``tool`` or ``server`` replaces it at
@@ -53,6 +76,7 @@ the same kind.
 from __future__ import annotations
 
 import re
+from collections import deque
 from collections.abc import Callable, Iterable, Iterator, Mapping
 from typing import Any, NamedTuple
 
@@ -71,21 +95,29 @@ from maljan.core.tool_declarations import check_tool_name
 
 __all__ = [
     "ARGUMENT_PLACEHOLDERS",
+    "ARTEFACT_PLACEHOLDERS",
     "DECLARED_FACT_RENDERERS",
+    "FILE_PLACEHOLDERS",
     "answer_field",
     "answer_fields",
     "default_steps",
     "PACK_RENDERERS",
     "PackStep",
+    "StepCondition",
     "check_steps",
     "effective_steps",
     "lenient_steps",
     "LeftOutStep",
     "steps_left_out",
+    "held_schedules",
+    "on_its_shipped_server",
+    "steps_on_servers",
     "read_answer_field",
     "runs_shipped",
     "shipped_step",
     "shipped_tools_of",
+    "step_vocabulary",
+    "template_placeholders",
     "written_for",
 ]
 
@@ -97,7 +129,29 @@ ARGUMENT_PLACEHOLDERS: dict[str, str] = {
     "sample_path": "the path the step's server opens the sample at",
     "sha256": "the sample's sha256",
     "file_type": "the format the run routed the sample as",
+    "capture_path": (
+        "the sandbox's packet capture, at the path the step's server opens it; a step "
+        "naming it runs only where the job has one"
+    ),
+    "sandbox_report_path": (
+        "the run's sandbox report as JSON, at the path the step's server opens it; a step "
+        "naming it runs only where the job has one"
+    ),
+    "artefact_path": (
+        "a file the step named in reads wrote, at the path the step's server opens it; the "
+        "step runs once for each"
+    ),
+    "artefact_sha256": "the sha256 of the file the step named in reads wrote",
 }
+
+# The placeholders that stand for a file of the job's artefact store
+# (``pipeline.artefacts``). The pack hands the step's call each one's artefact
+# id, and the call hands the server the path it opens that file at.
+FILE_PLACEHOLDERS: tuple[str, ...] = ("capture_path", "sandbox_report_path", "artefact_path")
+
+# The placeholders that stand for a file an earlier step wrote: named only on a
+# step that ``reads`` that step.
+ARTEFACT_PLACEHOLDERS: frozenset[str] = frozenset({"artefact_path", "artefact_sha256"})
 
 # The kind of the catalogue's answer about the APIs a sandbox recorded the
 # sample calling (the pack's ``sandbox_api_capability`` step): an
@@ -138,11 +192,38 @@ PACK_RENDERERS: dict[str, str] = {
     "anti_analysis_scan": "the exact part of an anti-analysis scan",
     "unpacked_image": "an unpacked program and where it now is",
     "function_table": "a function index, placed in the room the rest of the pack leaves",
+    "directed_text": "phrases of the directed-text families, counted and quoted by group",
+    "behaviour_code": "values a sandbox observed, each with the static places that hold it exactly",
 }
 
 # The validation context under which a step is one of the shipped list's:
 # only there may it say it takes a wall clock (``PackStep.wall_clock``).
 _SHIPPED_CONTEXT = {"shipped": True}
+
+# Shipped steps that were renamed, by their old name. The pack's scan was
+# recorded under Ghidra's own tool name, though any static provider's scan
+# answers it; it is ``anti_analysis_scan`` now, like its renderer and the kind
+# of its answer. The old name is still read: a stored run's entry keeps the
+# tool it was recorded under, and an operator's ``triage.steps`` may name the
+# step by its old id (and place another after it). Nothing is written under it.
+LEGACY_STEP_NAMES: Mapping[str, str] = {"find_anti_analysis_techniques": "anti_analysis_scan"}
+
+# The fields of a declared step that name another step.
+_STEP_REFERENCES = ("id", "after", "starts_after", "reads")
+
+# The shipped identification step, and the names its tool (Detect It Easy's
+# ``die_scan``) gives the runtimes a later step runs on, as Detect It Easy's
+# own signatures write them: the library of a managed .NET assembly, and the
+# Go compiler.
+IDENTIFY_STEP = "die_scan"
+DOTNET_RUNTIMES: tuple[str, ...] = (".NET Framework", ".NET Core")
+GO_COMPILERS: tuple[str, ...] = ("Go",)
+
+# Why a shipped step of a server's tool is off (:func:`steps_on_servers`).
+SERVER_NOT_CONFIGURED = "no tool server is configured as {server}"
+SERVER_SWITCHED_OFF = "{server} is switched off"
+TOOL_NOT_TICKED = "{tool} is not among the tools {server} offers"
+NO_SERVER_CALLS_OFF = "this run calls no tool server"
 
 # The renderers that read an answer through its tool's declared facts (its
 # rows, their values and places, its techniques) as well as in the shape of
@@ -151,6 +232,66 @@ _SHIPPED_CONTEXT = {"shipped": True}
 # shipped step calls, and is refused on any other step: on another tool's
 # answer it would state what that answer does not say.
 DECLARED_FACT_RENDERERS = frozenset({"capability_rules"})
+
+
+def _under_current_names(data: Any) -> Any:
+    """A declared step with the shipped steps it names by an old name read by the new one.
+
+    The step's own ``id``, the step it comes ``after``, the one it
+    ``starts_after`` and the ones it runs ``beside``; its ``tool`` too, but only
+    for a step of the platform's own (no ``server``): on a server's step the
+    tool is that server's own, whose name is not ours to change.
+    """
+    if not isinstance(data, Mapping) or not LEGACY_STEP_NAMES:
+        return data
+    changed: dict[str, Any] = {}
+    for name in _STEP_REFERENCES:
+        value = data.get(name)
+        if isinstance(value, str) and value in LEGACY_STEP_NAMES:
+            changed[name] = LEGACY_STEP_NAMES[value]
+    beside = data.get("beside")
+    if isinstance(beside, (list, tuple)) and any(v in LEGACY_STEP_NAMES for v in beside):
+        changed["beside"] = type(beside)(LEGACY_STEP_NAMES.get(v, v) for v in beside)
+    tool = data.get("tool")
+    if isinstance(tool, str) and tool in LEGACY_STEP_NAMES and not data.get("server"):
+        changed["tool"] = LEGACY_STEP_NAMES[tool]
+    return {**data, **changed} if changed else data
+
+
+class StepCondition(BaseModel):
+    """One value an earlier step's answer must hold for a step to run (``PackStep.when``).
+
+    ``step`` is the earlier step's id, ``value`` the name of a value its tool
+    declares in its answer's rows (``ToolFacts.values``), and ``equals`` the
+    texts any one of which a row's value must be, compared whole: a text value
+    as it stands, any other as JSON writes it (``true``, ``3``, ``null``).
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    step: str
+    value: str
+    equals: tuple[str, ...] = Field(min_length=1)
+
+    @field_validator("step")
+    @classmethod
+    def _step_is_a_step_name(cls, value: str) -> str:
+        if not _ID_RE.fullmatch(value or ""):
+            raise ValueError(f"condition step {value!r} is not a step name")
+        # A shipped step named by its old name is read by the new one.
+        return LEGACY_STEP_NAMES.get(value, value)
+
+    @field_validator("value")
+    @classmethod
+    def _value_is_a_declared_name(cls, value: str) -> str:
+        # A declared value's name is a vocabulary word (``ToolFacts.values``),
+        # which reads as a step name does.
+        if not _ID_RE.fullmatch(value or ""):
+            raise ValueError(
+                f"condition value {value!r} is not the name of a declared value: lowercase "
+                "letters, digits and underscores, starting with a letter"
+            )
+        return value
 
 
 class PackStep(BaseModel):
@@ -170,6 +311,9 @@ class PackStep(BaseModel):
     server: str = ""
     arguments: dict[str, Any] = Field(default_factory=dict)
     formats: tuple[str, ...] = ()
+    when: tuple[StepCondition, ...] = ()
+    outputs: str = ""
+    reads: str = ""
     budget_seconds: float | None = Field(default=None, gt=0)
     peak_mb: int | None = Field(default=None, gt=0)
     starts_after: str = ""
@@ -193,12 +337,14 @@ class PackStep(BaseModel):
                 "wall_clock is what a step of the platform's own does, not something a "
                 "declaration sets; give the step budget_seconds instead"
             )
-        return data
+        return _under_current_names(data)
 
     @field_validator("id")
     @classmethod
     def _id_is_a_word(cls, value: str) -> str:
-        if not _ID_RE.match(value or ""):
+        # The whole id is read: ``match`` would let ``$`` end it before a
+        # trailing newline.
+        if not _ID_RE.fullmatch(value or ""):
             raise ValueError(
                 f"step id {value!r} is not a step name: lowercase letters, digits and "
                 "underscores, starting with a letter, at most 64 characters"
@@ -252,10 +398,33 @@ class PackStep(BaseModel):
                     )
         return value
 
+    @field_validator("outputs")
+    @classmethod
+    def _outputs_is_a_path(cls, value: str) -> str:
+        if value:
+            from maljan.core.tool_declarations import parse_path
+
+            parse_path(value)
+        return value
+
+    @field_validator("reads")
+    @classmethod
+    def _reads_names_a_step(cls, value: str) -> str:
+        if value and not _ID_RE.fullmatch(value):
+            raise ValueError(f"reads {value!r} is not a step name")
+        return value
+
     @model_validator(mode="after")
     def _a_step_names_what_it_calls(self) -> PackStep:
         if self.server and not self.tool:
             raise ValueError(f"step {self.id!r} names a server and no tool to call on it")
+        named = template_placeholders(self.arguments) & ARTEFACT_PLACEHOLDERS
+        if named and not self.reads:
+            raise ValueError(
+                f"step {self.id!r} names "
+                + ", ".join(f"{{{p}}}" for p in sorted(named))
+                + ", which only a step that reads an earlier step's files can name; set reads"
+            )
         return self
 
     @model_serializer(mode="wrap")
@@ -291,6 +460,12 @@ def _builtin_problems(step: PackStep) -> list[str]:
             f"step {step.id!r} is one of the platform's own and computes its own arguments; "
             "to call the tool with arguments of your own, name the server that serves it"
         )
+    for name in ("outputs", "reads"):
+        if getattr(step, name):
+            problems.append(
+                f"step {step.id!r} is one of the platform's own and passes no file between "
+                f"servers; {name} applies to a server's tool"
+            )
     if step.budget_seconds is not None and not (shipped is not None and shipped.wall_clock):
         problems.append(
             f"step {step.id!r} runs in-process with no wall clock of its own to set; "
@@ -336,6 +511,31 @@ def _shipped() -> tuple[PackStep, ...]:
             formats=(*sorted(ARCHIVE_FILE_TYPES), "jar"),
             renderer="archive_listing",
             display_name="archive",
+        ),
+        # The identification servers' steps (``builtin_declarations``), beside
+        # the format readers. Each is off while its server is not switched on
+        # (:func:`steps_on_servers`), and an off step writes no entry, so
+        # every later id keeps its value. Detect It Easy reads any file; ILSpy
+        # lists a .NET assembly's types, and GoReSym recovers a Go binary's
+        # functions, each only where Detect It Easy's answer named the runtime:
+        # the .NET library, or the Go compiler it tells by the Go build id or
+        # the symbol table Go writes.
+        _o(id=IDENTIFY_STEP, server="die", tool="die_scan", display_name="Detect It Easy"),
+        _o(
+            id="dotnet_types",
+            server="ilspy",
+            tool="dotnet_types",
+            formats=("pe",),
+            when=(StepCondition(step=IDENTIFY_STEP, value="name", equals=DOTNET_RUNTIMES),),
+            display_name=".NET types",
+        ),
+        _o(
+            id="go_symbols",
+            server="goresym",
+            tool="go_symbols",
+            formats=("pe", "elf", "mach-o"),
+            when=(StepCondition(step=IDENTIFY_STEP, value="name", equals=GO_COMPILERS),),
+            display_name="Go symbols",
         ),
         _o(id="strings", renderer="string_runs", display_name="strings"),
         _o(id="iocs_from_file", renderer="file_iocs", display_name="iocs"),
@@ -385,7 +585,7 @@ def _shipped() -> tuple[PackStep, ...]:
             display_name="crypto constants",
         ),
         _o(
-            id="find_anti_analysis_techniques",
+            id="anti_analysis_scan",
             renderer="anti_analysis_scan",
             display_name="anti-analysis",
         ),
@@ -411,6 +611,18 @@ def _shipped() -> tuple[PackStep, ...]:
             kind=CALLED_API_CATALOGUE,
             display_name="sandbox-called api catalogue",
         ),
+        # Phrases of the directed-text families, in the file and in what the
+        # steps above recovered; after every other step but the behaviour
+        # links, so every earlier id keeps its value.
+        _o(
+            id="find_directed_text",
+            renderer="directed_text",
+            display_name="directed-text phrases",
+        ),
+        # The values the sandbox observed linked to the static places that
+        # hold them, read from the answers above: last, after the directed-text
+        # pass (which holds no text it compares), so every id issued before keeps its value.
+        _o(id="behaviour_code_links", renderer="behaviour_code", display_name="behaviour to code"),
     )
 
 
@@ -451,6 +663,11 @@ def _indexes() -> tuple[dict[str, PackStep], dict[str, PackStep], dict[str, froz
                 {renderer: frozenset(names) for renderer, names in tools.items()},
             )
         )
+        by_tool = _INDEXES[0][1]
+        # A stored entry recorded under a renamed step's old name reads as the step it became.
+        for old, new in LEGACY_STEP_NAMES.items():
+            if new in by_tool:
+                by_tool.setdefault(old, by_tool[new])
     return _INDEXES[0]
 
 
@@ -464,7 +681,9 @@ def written_for(renderer: str, tool: Any) -> bool:
 
     The reading of an entry the pack's own step wrote, as :func:`shipped_renderer` is.
     """
-    return str(tool or "") in shipped_tools_of(renderer)
+    name = str(tool or "")
+    held = shipped_tools_of(renderer)
+    return name in held or LEGACY_STEP_NAMES.get(name, "") in held
 
 
 def runs_shipped(renderer: str, steps: Iterable[PackStep] | None = None) -> bool:
@@ -519,9 +738,64 @@ def read_answer_field(
     return None
 
 
+def on_its_shipped_server(step: PackStep) -> bool:
+    """Whether ``step`` is a shipped step of a server's tool, still calling that tool there.
+
+    Such a step is in the shipped list for every deployment, whether or not
+    the server is there: it is off, never refused, where the server is not
+    configured, switched off or does not offer the tool (:func:`steps_on_servers`).
+    A declaration over it naming another tool is an operator's step, checked
+    as one.
+    """
+    shipped = shipped_step(step.id)
+    return bool(
+        shipped is not None
+        and shipped.server
+        and step.server == shipped.server
+        and step.called == shipped.called
+    )
+
+
+def steps_on_servers(
+    steps: Iterable[PackStep], servers: Mapping[str, Any] | None
+) -> tuple[tuple[PackStep, ...], dict[str, str]]:
+    """The steps that run, and each shipped server step left off, by id, with why.
+
+    A shipped step of a server's tool (:func:`on_its_shipped_server`) runs only
+    where ``servers`` (``mcp.servers``) holds its server, switched on, offering
+    its tool; otherwise it is off: no call and no entry, as a step of another
+    format is, and the reason is the pack's to say. ``None`` is a run that
+    calls no tool server. Every other step is kept as it is, an operator's
+    step on a server that is not there included: it is recorded as not run.
+    """
+    kept: list[PackStep] = []
+    off: dict[str, str] = {}
+    for step in steps:
+        why = _why_off(step, servers) if on_its_shipped_server(step) else ""
+        if why:
+            off[step.id] = why
+        else:
+            kept.append(step)
+    return tuple(kept), off
+
+
+def _why_off(step: PackStep, servers: Mapping[str, Any] | None) -> str:
+    if servers is None:
+        return NO_SERVER_CALLS_OFF
+    server = servers.get(step.server)
+    if server is None:
+        return SERVER_NOT_CONFIGURED.format(server=step.server)
+    if not getattr(server, "enabled", True):
+        return SERVER_SWITCHED_OFF.format(server=step.server)
+    offered = getattr(server, "tools", None)
+    if offered is not None and step.called not in offered:
+        return TOOL_NOT_TICKED.format(tool=step.called, server=step.server)
+    return ""
+
+
 def shipped_step(step_id: str) -> PackStep | None:
     """The shipped step of ``step_id``, or ``None``."""
-    return _indexes()[0].get(step_id)
+    return _indexes()[0].get(LEGACY_STEP_NAMES.get(step_id, step_id))
 
 
 def _by_tool() -> dict[str, PackStep]:
@@ -567,18 +841,38 @@ def _as_step(value: Any) -> PackStep:
     return value if isinstance(value, PackStep) else PackStep.model_validate(value)
 
 
+# What makes a declaration under a shipped id replace that step rather than
+# change it field by field (:func:`_laid_over`): a field it sets, the shipped
+# step's attribute that field is compared with, and whether an empty value
+# counts. Served as data (:func:`step_vocabulary`), so the console reads a
+# step's standing by this rule and keeps no copy of it.
+_REPLACING_FIELDS: tuple[tuple[str, str, bool], ...] = (
+    ("server", "server", True),
+    ("tool", "called", False),
+)
+
+
+def _replaces(shipped: PackStep, declared: PackStep) -> bool:
+    """Whether ``declared`` calls something other than ``shipped`` (:data:`_REPLACING_FIELDS`)."""
+    held = declared.model_fields_set
+    for name, compared_with, empty_counts in _REPLACING_FIELDS:
+        if name not in held:
+            continue
+        value = getattr(declared, name)
+        if (value or empty_counts) and value != getattr(shipped, compared_with):
+            return True
+    return False
+
+
 def _laid_over(shipped: PackStep, declared: PackStep) -> PackStep:
     """``declared`` over ``shipped``: each field it set, the shipped value elsewhere.
 
-    A declaration that changes what the step calls is a step of its own at that
-    place: of the shipped step it keeps only the id.
+    A declaration that changes what the step calls (:func:`_replaces`) is a
+    step of its own at that place: of the shipped step it keeps only the id.
     """
-    held = declared.model_fields_set
-    calls_other = ("server" in held and declared.server != shipped.server) or (
-        "tool" in held and declared.tool and declared.tool != shipped.called
-    )
-    if calls_other:
+    if _replaces(shipped, declared):
         return declared
+    held = declared.model_fields_set
     return shipped.model_copy(update={name: getattr(declared, name) for name in held})
 
 
@@ -657,7 +951,8 @@ def _effective(
     for step in default_steps():
         held[step.id] = step
         link(step.id, tail)
-    for step in declared:
+
+    def place(step: PackStep) -> None:
         if step.id in held:
             held[step.id] = _laid_over(held[step.id], step)
             anchor = unlink(step.id)
@@ -673,6 +968,59 @@ def _effective(
             else:
                 anchor = step.after
         link(step.id, anchor)
+
+    # A step that comes after one declared and not yet placed waits for it, so
+    # the order of the declarations decides nothing. Each step waits once and is
+    # released when its anchor is placed. What still waits at the end comes
+    # after each other in a cycle, which is named and refused.
+    pending: dict[str, int] = {}
+    for step in declared:
+        pending[step.id] = pending.get(step.id, 0) + 1
+    waiting: dict[str, list[tuple[int, PackStep]]] = {}
+    done: set[int] = set()
+
+    def place_with_followers(step: PackStep) -> None:
+        queue = deque([step])
+        while queue:
+            current = queue.popleft()
+            place(current)
+            done.add(id(current))
+            pending[current.id] -= 1
+            queue.extend(later for _, later in waiting.pop(current.id, []))
+
+    for position, step in enumerate(declared):
+        if (
+            step.after
+            and step.after != step.id
+            and step.after not in held
+            and pending.get(step.after, 0) > 0
+        ):
+            waiting.setdefault(step.after, []).append((position, step))
+        else:
+            place_with_followers(step)
+    if waiting:
+        stuck = sorted(
+            (entry for entries in waiting.values() for entry in entries), key=lambda e: e[0]
+        )
+        anchor_of = {step.id: step.after for _, step in stuck}
+        walk = stuck[0][1].id
+        seen: list[str] = []
+        while walk in anchor_of and walk not in seen:
+            seen.append(walk)
+            walk = anchor_of[walk]
+        cycle = seen[seen.index(walk) :] if walk in seen else seen
+        said = (
+            "steps " + ", ".join(repr(i) for i in cycle) + " each come after the next, "
+            "round in a cycle"
+        )
+        if found is None:
+            raise ValueError(said)
+        for _, step in stuck:
+            if id(step) in done:
+                continue
+            done.add(id(step))
+            found.setdefault(step.id, []).append(said)
+            place_with_followers(step.model_copy(update={"after": ""}))
     steps: list[PackStep] = []
     cursor = head
     while cursor:
@@ -680,6 +1028,7 @@ def _effective(
         cursor = after.get(cursor, "")
     problems: list[str] = []
     ids = {step.id for step in steps}
+    placed_at = {step.id: at for at, step in enumerate(steps)}
     named_beside = {other for step in steps for other in step.beside}
     set_by = {step.id: step.model_fields_set for step in declared}
     for step in steps:
@@ -687,6 +1036,7 @@ def _effective(
             *_builtin_problems(step),
             *_renderer_problems(step),
             *_schedule_problems(step, set_by.get(step.id, frozenset()), named_beside),
+            *_reading_problems(step, steps, placed_at),
         ]
         if step.starts_after and step.starts_after not in ids:
             own.append(f"step {step.id!r} starts after {step.starts_after!r}, which no step is")
@@ -795,7 +1145,7 @@ def steps_left_out(
             return [], left
         naming: dict[str, list[str]] = {}
         for step in steps:
-            for other in {step.after, step.starts_after, *step.beside} - {""}:
+            for other in {step.after, *steps_named_at_run(step)} - {""}:
                 naming.setdefault(other, []).append(step.id)
         gone = [step_id for step_id in out if step_id not in shipped]
         while gone:
@@ -868,6 +1218,61 @@ def _schedule_problems(
             "pack (starts_after) or one another step runs beside, and this step is neither"
         )
     return problems
+
+
+def steps_named_at_run(step: PackStep) -> set[str]:
+    """The steps ``step`` names for its run: whom it starts after, runs beside, reads or asks."""
+    return {step.starts_after, *step.beside, step.reads, *(c.step for c in step.when)} - {""}
+
+
+def _reading_problems(
+    step: PackStep, steps: list[PackStep], position: Mapping[str, int]
+) -> list[str]:
+    """What ``step`` reads of other steps that no earlier step can give it.
+
+    A condition's step and the step it ``reads`` come before it, or there is
+    nothing to read when it starts; the step it reads declares ``outputs``,
+    or it names no file. A step that reads runs once per file, in turn, so it
+    starts after no step beside the pack.
+    """
+    problems: list[str] = []
+    at = position[step.id]
+    for condition in step.when:
+        if condition.step not in position:
+            problems.append(f"step {step.id!r} runs when {condition.step!r}, which no step is")
+        elif position[condition.step] >= at:
+            problems.append(
+                f"step {step.id!r} runs on what {condition.step!r} answers, which does not come "
+                "before it"
+            )
+    if step.reads:
+        if step.reads not in position:
+            problems.append(f"step {step.id!r} reads {step.reads!r}, which no step is")
+        elif position[step.reads] >= at:
+            problems.append(
+                f"step {step.id!r} reads the files {step.reads!r} writes, which does not come "
+                "before it"
+            )
+        elif not steps[position[step.reads]].outputs:
+            problems.append(
+                f"step {step.id!r} reads the files {step.reads!r} writes, and {step.reads!r} "
+                "declares no outputs"
+            )
+        if step.starts_after:
+            problems.append(
+                f"step {step.id!r} reads the files {step.reads!r} writes, once per file in turn, "
+                "so starts_after would be ignored"
+            )
+    return problems
+
+
+def template_placeholders(template: Mapping[str, Any]) -> frozenset[str]:
+    """Every placeholder a string of ``template`` names, at any depth."""
+    return frozenset(
+        found
+        for _name, text in _template_strings(template)
+        for found in _PLACEHOLDER_RE.findall(text)
+    )
 
 
 def _renderer_problems(step: PackStep) -> list[str]:
@@ -944,6 +1349,98 @@ def placeholder_values(template: Mapping[str, Any], values: Mapping[str, str]) -
     return {name: walk(held) for name, held in template.items()}
 
 
+# The JSON schema keywords that bound a number, served with a field that has them.
+_BOUND_KEYWORDS = ("minimum", "maximum", "exclusiveMinimum", "exclusiveMaximum")
+
+
+def _declared_fields() -> list[dict[str, Any]]:
+    """Each field a declaration may set, in the model's order, as its JSON schema states it.
+
+    Per field: its JSON ``type`` (``""`` for a field of more than one), the
+    type of a list's ``items``, whether ``null`` is a value, whether it is
+    required, its default as JSON (``None`` for a required field) and its
+    numeric ``bounds``. A field the model never dumps (``exclude``) is no
+    declaration's to set and is left out.
+    """
+    from pydantic_core import to_jsonable_python
+
+    properties = PackStep.model_json_schema()["properties"]
+    fields: list[dict[str, Any]] = []
+    for name, field in PackStep.model_fields.items():
+        if field.exclude:
+            continue
+        schema = properties[name]
+        variants = schema.get("anyOf", [schema])
+        typed = [variant for variant in variants if variant.get("type") != "null"]
+        held = typed[0] if len(typed) == 1 else {}
+        kind = str(held.get("type", ""))
+        items = held.get("items") if kind == "array" else None
+        fields.append(
+            {
+                "name": name,
+                "type": kind,
+                "items": str(items.get("type", "")) if isinstance(items, dict) else "",
+                "nullable": len(typed) < len(variants),
+                "required": field.is_required(),
+                "default": None
+                if field.is_required()
+                else to_jsonable_python(field.get_default(call_default_factory=True)),
+                "bounds": {key: held[key] for key in _BOUND_KEYWORDS if key in held},
+            }
+        )
+    return fields
+
+
+def step_vocabulary() -> dict[str, Any]:
+    """What a declared step may say, as the settings schema serves it to the console's step editor.
+
+    Every part is read from this module's own model and tables, so the editor
+    keeps no copy of a rule: ``fields`` (:func:`_declared_fields`), the
+    ``id_pattern`` a whole step id is read by and the ``state_keys``, the
+    names of the pack state's own keys a step id can take (a step so named that
+    starts beside the pack has its schedule held apart,
+    ``pipeline.conditions.pack_state``), the ``placeholders`` an argument
+    template may name with what each stands for (:data:`ARGUMENT_PLACEHOLDERS`)
+    and the ``placeholder_pattern`` a template's strings are read for them by,
+    the routed ``formats`` (``extractors.sample_identity.routed_formats``), the
+    pack's ``renderers`` (:data:`PACK_RENDERERS`), the ``shipped`` steps as
+    each dumps, the ids a declaration changes in place, and what makes a
+    declaration replace its shipped step instead: the ``replacing_fields``
+    (:data:`_REPLACING_FIELDS`) and, per shipped id, the values they are
+    compared with (``shipped_compared``). Lists, not maps, wherever order
+    matters, so it survives any serialisation.
+    """
+    from maljan.extractors.sample_identity import routed_formats
+    from maljan.pipeline.conditions import pack_state_keys
+
+    steps = default_steps()
+    return {
+        "fields": _declared_fields(),
+        "id_pattern": _ID_RE.pattern,
+        "state_keys": sorted(name for name in pack_state_keys() if _ID_RE.fullmatch(name)),
+        "placeholders": [
+            {"name": name, "meaning": meaning} for name, meaning in ARGUMENT_PLACEHOLDERS.items()
+        ],
+        "placeholder_pattern": _PLACEHOLDER_RE.pattern,
+        "formats": list(routed_formats()),
+        "renderers": [
+            {"name": name, "meaning": meaning} for name, meaning in PACK_RENDERERS.items()
+        ],
+        "shipped": [step.model_dump(mode="json") for step in steps],
+        "replacing_fields": [
+            {"field": name, "compared_with": compared_with, "empty_counts": empty_counts}
+            for name, compared_with, empty_counts in _REPLACING_FIELDS
+        ],
+        "shipped_compared": {
+            step.id: {
+                compared_with: getattr(step, compared_with)
+                for _name, compared_with, _empty in _REPLACING_FIELDS
+            }
+            for step in steps
+        },
+    }
+
+
 def step_schedules(facts: Mapping[str, Any] | None) -> dict[str, str]:
     """How each step that may run beside the pack ran, out of the pack's facts.
 
@@ -954,3 +1451,17 @@ def step_schedules(facts: Mapping[str, Any] | None) -> dict[str, str]:
     return {
         str(key): value for key, value in (facts or {}).items() if isinstance(value, str) and value
     }
+
+
+def held_schedules(facts: Mapping[str, Any] | None) -> dict[str, str]:
+    """The schedules the pack's state holds apart, by step id; ``{}`` for none.
+
+    A step named as one of the state's own keys keeps its schedule there
+    (``pipeline.conditions.pack_state``), so it never replaces a fact or count.
+    """
+    from maljan.pipeline.conditions import HELD_SCHEDULES
+
+    held = (facts or {}).get(HELD_SCHEDULES)
+    if not isinstance(held, Mapping):
+        return {}
+    return {str(step): said for step, said in held.items() if isinstance(said, str) and said}

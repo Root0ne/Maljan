@@ -21,11 +21,18 @@ from maljan.core.cancellation import bound
 from maljan.core.config import Settings
 from maljan.core.container import ServiceContainer
 from maljan.core.logger import logger
+from maljan.loaders.cape2_client import BODY_SHOWN
 from maljan.loaders.sandbox_client import SubmissionResult
 from maljan.pipeline.builder import build_graph
 from maljan.pipeline.events import EventSink
 from maljan.pipeline.state import AnalysisState
 from maljan.schemas.sandbox_document import sandbox_document
+
+# How much of a sandbox failure's words the degradation reason carries, the
+# cut mark included: room for the client's own prefix and the response body it
+# quotes (``loaders.cape2_client.BODY_SHOWN``) twice over, and no more of an
+# outside text in the judge's prompt and the report than that.
+SANDBOX_FAILURE_CHARS = 2 * BODY_SHOWN
 
 
 def _remember_the_secrets_of(config: Settings) -> None:
@@ -70,6 +77,7 @@ class MaljanApp:
         job_id: str = "",
         analyst_mode: Any = None,
         remember_secrets: bool = True,
+        memory_owner: str | None = None,
     ) -> None:
         self.config = config or Settings()
         # The secrets these settings hold are masked by value wherever the
@@ -88,6 +96,9 @@ class MaljanApp:
             # (``pipeline.analyst_mode.resolve_for``): resolving it names
             # hosts and asks a server for its slot count.
             resolved_mode=analyst_mode,
+            # Whose long-term memory the job reads and writes; ``None`` is the
+            # unscoped memory (``long_term_memory.recall``).
+            memory_owner=memory_owner,
         )
         self.graph = build_graph(self.container)
         # What the report node built, with the state it built it from, as soon
@@ -102,6 +113,10 @@ class MaljanApp:
         # cancel, the worker shutting down) had produced when it stopped. An
         # empty dict until the first step completes.
         self.latest_state: dict[str, Any] = {}
+        # The questions this run was asked (``arun``), kept here as well as on
+        # the state, so a run stopped before its first graph step still prints
+        # each of them (``stopped_run.stopped_state``).
+        self.questions: list[str] = []
 
     async def aclose(self) -> None:
         """Release the container's agents, toolkits and per-job caches.
@@ -196,6 +211,15 @@ class MaljanApp:
                 path = Path(sample_path)
                 if path.exists() and path.is_file():
                     blob = path.read_bytes()
+                    # The routing reads the sample in this process: the run's
+                    # isolation part names the worker's own readers.
+                    from maljan.analysis.isolation import (
+                        WORKER_LABEL,
+                        WORKER_SOURCE,
+                        note_read_in_worker,
+                    )
+
+                    note_read_in_worker(self.container, WORKER_SOURCE, WORKER_LABEL)
                     file_type = detect_file_type(path, blob)
             except OSError as exc:
                 logger.warning("_infer_sample_platform: could not read %s (%s)", sample_path, exc)
@@ -214,24 +238,53 @@ class MaljanApp:
         platform = infer_platform(file_type, mime_type, sandbox_report)
         return file_type, platform
 
-    def _poll_budget(self, provider: Any) -> tuple[int, int]:
-        """How long to wait for this provider, and how often to ask.
+    def _poll_budget(self, provider: Any) -> tuple[int | None, int | None]:
+        """The poll budget this provider's own config block sets, ``None`` where it sets none.
 
-        The provider layer used to thread ``sandbox.cape2.*`` into every provider's poll
-        loop, which was harmless while every provider that polled was CAPE.
-        A provider with its own configured budget reads it; everything else
-        keeps CAPE's values, so the cape2, mock, upload and triage paths are
-        byte-for-byte what they were.
+        Read from the block named by the provider's id (``sandbox.cape2`` for
+        CAPE, ``sandbox.triage`` for Triage). A provider with no such block
+        (a plugin's, the mock) gets ``None`` for each number, and is then
+        handed nothing, so it polls with its own defaults rather than with
+        CAPE's detonation timeout.
         """
         block = getattr(self.config.sandbox, str(provider.id), None)
         timeout = getattr(block, "timeout_seconds", None)
         interval = getattr(block, "poll_interval_seconds", None)
-        if timeout is None or interval is None:
-            return (
-                self.config.sandbox.cape2.timeout_seconds,
-                self.config.sandbox.cape2.poll_interval_seconds,
-            )
-        return int(timeout), int(interval)
+        return (
+            int(timeout) if timeout is not None else None,
+            int(interval) if interval is not None else None,
+        )
+
+    def _poll_arguments(self, provider: Any, task_id: str) -> dict[str, int]:
+        """The poll numbers to hand ``provider.wait_for_completion``.
+
+        The numbers its own block sets (``_poll_budget``). One it sets none
+        for is left out when the provider's method has a default of its own
+        for it, so the provider polls by its own rule; the base contract has
+        no default, and a provider written to it is given CAPE's number, the
+        one thing the call cannot go without.
+        """
+        import inspect
+
+        timeout, interval = self._poll_budget(provider)
+        cape = self.config.sandbox.cape2
+        wanted = {
+            "timeout_seconds": (timeout, cape.timeout_seconds),
+            "poll_interval_seconds": (interval, cape.poll_interval_seconds),
+        }
+        try:
+            params = inspect.signature(provider.wait_for_completion).parameters
+        except (TypeError, ValueError):
+            params = inspect.Signature().parameters
+        out: dict[str, int] = {}
+        for name, (own, fallback) in wanted.items():
+            if own is not None:
+                out[name] = own
+            elif name in params and params[name].default is inspect.Parameter.empty:
+                out[name] = int(fallback)
+            elif name not in params:
+                out[name] = int(fallback)
+        return out
 
     def _note_the_reader(self, provider: Any, run: Any) -> None:
         """Which reader produced this job's report, and the signature scale its provider gives."""
@@ -259,23 +312,32 @@ class MaljanApp:
         # cleared first so a job with no report never reads the last one's.
         self.container.sandbox_normalised = None
         self.container.sandbox_signature_scale = None
+        self.container.sample_uploads = []
+        self.container.sandbox_failure = None
         if not sample_path or self.container.is_mock:
             return None
 
         path = Path(sample_path)
         if not path.exists():
             logger.warning("Sample path does not exist: %s", sample_path)
+            self._sandbox_failed("the sample file to submit was not found")
             return None
 
+        # Where the submission was when it failed, so a failure says which step
+        # it was (an unreachable sandbox, a task that never finished, a report
+        # that could not be read) and not only that there was one.
+        stage = "choosing the sandbox"
         try:
             provider = self.container.get_sandbox_provider()
             caps = provider.capabilities
             if not caps.can_submit and caps.accepts_uploaded_report:
                 # No detonation: the evidence is already here.
+                stage = "reading the attached report"
                 try:
                     run = provider.fetch("uploaded")
                 except Exception as exc:  # noqa: BLE001 — same degrade contract as a failed submit
                     logger.error("Attached sandbox report unusable: %s", exc)
+                    self._sandbox_failed(f"the attached sandbox report is unusable: {exc}")
                     return None
                 self._note_the_reader(provider, run)
                 return sandbox_document(run.report)
@@ -287,7 +349,27 @@ class MaljanApp:
             # heartbeat — for the whole detonation. The provider
             # objects are plain HTTP clients with no loop affinity, so a
             # thread changes nothing but where the blocking happens.
+            #
+            # The submission is recorded before it is made, as one that did
+            # not complete, with the host the provider resolves its submission
+            # URL to, and marked submitted once the provider answers: a
+            # submission that raised may still have sent the sample, and the
+            # run's disclosure block says so rather than nothing. A provider
+            # whose submission never leaves the worker records none.
+            from maljan.analysis.disclosure import submission_host, upload_record
+
+            stage = "preparing the submission"
+            host = submission_host(provider)
+            if host is not None:
+                self.container.sample_uploads.append(
+                    upload_record(provider.id, submitted=False, host=host)
+                )
+            stage = "submitting the sample"
             task_id = await asyncio.to_thread(provider.submit, str(path))
+            if host is not None:
+                self.container.sample_uploads[-1] = upload_record(
+                    provider.id, submitted=True, host=host
+                )
             # Thread the active provider's own completion timeout + poll
             # interval into the poll loop (see ``_poll_budget``). Without
             # this the ABC's 300s default — or another provider's config read
@@ -295,14 +377,13 @@ class MaljanApp:
             # configured, and a real CAPE detonation (win10 guest run alone is
             # ~280s + processing) timed out before the report was ready —
             # silently degrading every run to static-only.
-            timeout_seconds, poll_interval_seconds = self._poll_budget(provider)
+            stage = "waiting for the analysis"
+            budget = self._poll_arguments(provider, task_id)
             status = await asyncio.to_thread(
-                provider.wait_for_completion,
-                task_id,
-                timeout_seconds=timeout_seconds,
-                poll_interval_seconds=poll_interval_seconds,
+                lambda: provider.wait_for_completion(task_id, **budget)
             )
             if status == "reported":
+                stage = "fetching the report"
                 run = await asyncio.to_thread(provider.fetch, task_id)
                 self._note_the_reader(provider, run)
                 result = SubmissionResult(
@@ -358,6 +439,9 @@ class MaljanApp:
                         "Treating as failure.",
                         type(result.report).__name__,
                     )
+                    self._sandbox_failed(
+                        f"the sandbox report is a {type(result.report).__name__}, not a document"
+                    )
                     return None
                 logger.info(
                     "Sandbox analysis complete: %d signatures, %d TTPs.",
@@ -366,10 +450,33 @@ class MaljanApp:
                 )
                 return result.report  # type: ignore[no-any-return]
             logger.warning("Sandbox task ended with status=%s: %s", result.status, result.error)
+            ended = f"sandbox task {result.task_id} ended with status {result.status!r}"
+            if result.status in ("reported", "partial"):
+                ended += " and no report"
+            elif result.error and result.error != f"Sandbox status: {result.status}":
+                ended += f": {result.error}"
+            self._sandbox_failed(ended)
             return None
         except Exception as exc:
             logger.error("Sandbox submission failed: %s", exc)
+            self._sandbox_failed(f"{stage}: {str(exc) or type(exc).__name__}")
             return None
+
+    def _sandbox_failed(self, reason: str) -> None:
+        """Keep why this job has no sandbox report, for its degradation reason.
+
+        The words are the sandbox's or an exception's, and they reach the
+        judge's prompt and the report: a URL loses its credentials
+        (``redact_url``), every line break becomes a space so the text cannot
+        start a line of its own, and it is cut to ``SANDBOX_FAILURE_CHARS``
+        with the cut mark. The degradation reason then quotes it as one value
+        (``pipeline.nodes.sandbox_degradation_reason``).
+        """
+        from maljan.core.settings_overrides import redact_url
+        from maljan.utils.marked_cut import marked_cut
+
+        one_line = " ".join(redact_url(str(reason)).splitlines())
+        self.container.sandbox_failure = marked_cut(one_line, SANDBOX_FAILURE_CHARS)
 
     async def arun(
         self,
@@ -380,6 +487,7 @@ class MaljanApp:
         static_sample_paths: dict[str, str] | None = None,
         started_at: float | None = None,
         server_sample_paths: dict[str, str] | None = None,
+        questions: list[str] | None = None,
     ) -> dict[str, Any]:
         """Execute the full analysis pipeline asynchronously.
 
@@ -409,12 +517,17 @@ class MaljanApp:
                 figure a reader compares against the job's duration, so the two
                 are measured from the same instant. Absent, this call's entry
                 is the start.
+            questions: The questions the analyst asked of this run, which the
+                report answers in a fixed vocabulary
+                (``reporting.question_round``). None or empty asks nothing,
+                and the report is the one a run without them has.
 
         This prevents the need for spinning up separate threads and manually
         managing event loops in async contexts (like ARQ workers), which
         solves the 'Event loop is closed' issue with google-genai.
         """
         start = float(started_at) if started_at else time.time()
+        self.questions = list(questions or [])
         logger.info("=" * 60)
         logger.info("MALJAN - Multi-Agent Malware Analysis Pipeline")
         logger.info("=" * 60)
@@ -453,6 +566,7 @@ class MaljanApp:
                 static_sample_path=static_sample_path,
                 static_sample_paths=static_sample_paths,
                 server_sample_paths=server_sample_paths,
+                questions=questions,
             )
 
         elapsed = time.time() - start
@@ -472,6 +586,7 @@ class MaljanApp:
         static_sample_path: str | None,
         static_sample_paths: dict[str, str] | None,
         server_sample_paths: dict[str, str] | None = None,
+        questions: list[str] | None = None,
     ) -> dict[str, Any]:
         """The sandbox submission and the graph, for ``arun``."""
         # Submit to sandbox if sample_path is provided
@@ -497,6 +612,12 @@ class MaljanApp:
         self.container.sample_path = sample_path
         self.container.sample_sha256 = file_hash
         self.container.server_sample_paths = dict(server_sample_paths or {})
+        self.container.static_sample_paths = {
+            **({"": static_sample_path} if static_sample_path else {}),
+            **dict(static_sample_paths or {}),
+        }
+        # The paths files were handed to servers at belong to one run.
+        self.container.artefact_paths = []
 
         initial_state: AnalysisState = {
             "file_hash": file_hash,
@@ -546,10 +667,12 @@ class MaljanApp:
             "validation_fed_back": {},
             "revision_replacements": [],
             "revision_rounds": [],
+            "debate_starts": {},
             "dropped_claims": [],
             "validation_not_run": [],
             "validation_unparsed_answers": [],
             "triage_facts": {},
+            "analyst_questions": list(questions or []),
             "nudge_retry_modes": {},
             "budget_records": {},
         }

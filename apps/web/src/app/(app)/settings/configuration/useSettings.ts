@@ -1,10 +1,11 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api } from "@/lib/api";
-import { getErrorMessage } from "@/lib/errors";
-import { SettingsValidationError } from "@/types/settings";
+import { getErrorMessage, isForbidden } from "@/lib/errors";
+import { SettingsConflictError, SettingsValidationError } from "@/types/settings";
 import { deepEqual } from "./deepEqual";
+import { keysNeedingPassword, passwordRefusal } from "./signInPolicy";
 import type {
   CatalogEntry,
   PatchResult,
@@ -15,6 +16,13 @@ import type {
 
 /** key -> staged value; `null` means "clear this secret". */
 export type Pending = Record<string, unknown>;
+
+/** A save or a reset of the sign-in policy waiting for the admin's current
+ *  password: the keys that asked for it, and the answer (`null`: cancelled). */
+export interface PasswordAsk {
+  keys: string[];
+  answer: (password: string | null) => void;
+}
 
 /**
  * The error map with everything the server said about one leaf taken out.
@@ -36,6 +44,86 @@ export function withoutErrorsFor(
   const next = { ...errors };
   for (const k of stale) delete next[k];
   return next;
+}
+
+/** Per staged key the page was served, the `updated_at` it was served with
+ *  (`null`: no stored row then), for the API to refuse a key changed since.
+ *  A key the page was never served is left out and not checked.
+ *
+ *  `base` is the version each key had when it was first staged
+ *  (`withBaseVersion`), and wins over `values`: the page reloads its values
+ *  after every reset, every conflict and every other save, and a version read
+ *  at apply time is whatever the last reload fetched — another writer's save
+ *  included — so the guard compared the edit against the very value it was
+ *  meant to protect and let it through. */
+export function loadedVersions(
+  pending: Pending,
+  values: Record<string, SettingValue>,
+  base: Record<string, string | null> = {}
+): Record<string, string | null> {
+  const out: Record<string, string | null> = {};
+  for (const key of Object.keys(pending)) {
+    if (key in base) out[key] = base[key];
+    else if (key in values) out[key] = values[key].updated_at ?? null;
+  }
+  return out;
+}
+
+/**
+ * The stage-time versions with `key`'s added, if it is not held yet.
+ *
+ * The first staging of a key records the version the edit was made over; a
+ * second edit of the same key before Apply keeps the first, because the edit
+ * is still made over that value. A key the page was never served is not
+ * recorded, the same rule `loadedVersions` applies.
+ */
+export function withBaseVersion(
+  base: Record<string, string | null>,
+  key: string,
+  values: Record<string, SettingValue>
+): Record<string, string | null> {
+  if (key in base || !(key in values)) return base;
+  return { ...base, [key]: values[key].updated_at ?? null };
+}
+
+/** The stage-time versions without `keys`: unstaged, saved or reset. */
+export function withoutBaseVersions(
+  base: Record<string, string | null>,
+  keys: Iterable<string>
+): Record<string, string | null> {
+  let next = base;
+  for (const key of keys) {
+    if (!(key in next)) continue;
+    if (next === base) next = { ...base };
+    delete next[key];
+  }
+  return next;
+}
+
+/**
+ * The action banner after a reset failed. A lone reset says its message as it
+ * is; one of a run of resets (`accumulate`) is added to what the earlier ones
+ * said, named by key, so a failure is not erased by the next key's attempt.
+ */
+export function mergeResetError(
+  previous: string | null,
+  key: string,
+  message: string,
+  accumulate: boolean,
+): string {
+  if (!accumulate) return message;
+  const line = `${key}: ${message}`;
+  return previous ? `${previous}; ${line}` : line;
+}
+
+/** What the page says when a save is refused over keys changed since it loaded them. */
+export function conflictMessage(keys: string[]): string {
+  const one = keys.length === 1;
+  return (
+    `${keys.join(", ")} ${one ? "was" : "were"} changed since this page loaded ` +
+    `${one ? "it" : "them"}, so nothing was saved. The stored ${one ? "value is" : "values are"} ` +
+    `shown again; make the change over ${one ? "it" : "them"} and apply.`
+  );
 }
 
 /**
@@ -60,6 +148,10 @@ export function useSettings() {
   const [actionError, setActionError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [lastResult, setLastResult] = useState<PatchResult | null>(null);
+  /* The version each staged key had when it was first staged, which is what
+   * Apply sends (`loadedVersions`). A ref: it is read at apply time and never
+   * drawn. */
+  const baseVersions = useRef<Record<string, string | null>>({});
 
   const reload = useCallback(async () => {
     setLoading(true);
@@ -72,9 +164,8 @@ export function useSettings() {
       setSchema(s);
       setValues(v.values);
     } catch (e) {
-      const msg = getErrorMessage(e);
-      if (/403|admin/i.test(msg)) setForbidden(true);
-      else setLoadError(msg);
+      if (isForbidden(e)) setForbidden(true);
+      else setLoadError(getErrorMessage(e));
     } finally {
       setLoading(false);
     }
@@ -135,6 +226,9 @@ export function useSettings() {
       const entry = entries.get(key);
       const saved = key in values ? values[key].value : entry?.default;
       const revert = !entry?.secret && deepEqual(value, saved);
+      baseVersions.current = revert
+        ? withoutBaseVersions(baseVersions.current, [key])
+        : withBaseVersion(baseVersions.current, key, values);
       setPending((p) => {
         if (!revert) return { ...p, [key]: value };
         if (!(key in p)) return p;
@@ -148,6 +242,7 @@ export function useSettings() {
   );
 
   const unstage = useCallback((key: string) => {
+    baseVersions.current = withoutBaseVersions(baseVersions.current, [key]);
     setPending((p) => {
       const n = { ...p };
       delete n[key];
@@ -156,18 +251,81 @@ export function useSettings() {
     setErrors((e) => withoutErrorsFor(e, key));
   }, []);
 
-  const apply = useCallback(async () => {
+  const [passwordAsk, setPasswordAsk] = useState<PasswordAsk | null>(null);
+  /** Asks for the current password (`CurrentPasswordDialog`); `null` when cancelled. */
+  const askPassword = useCallback(
+    (keys: string[]) =>
+      new Promise<string | null>((resolve) =>
+        setPasswordAsk({
+          keys,
+          answer: (password) => {
+            setPasswordAsk(null);
+            resolve(password);
+          },
+        })
+      ),
+    []
+  );
+  /** The keys among `keys` a reset would remove from the store that ask for the password. */
+  const storedPolicyKeys = useCallback(
+    (keys: string[]) =>
+      keysNeedingPassword(
+        keys.filter((key) => values[key]?.source === "ui"),
+        entriesByKey
+      ),
+    [values, entriesByKey]
+  );
+
+  /** `currentPassword` goes with the save when a staged key is marked
+   *  `needs_current_password` (`keysNeedingPassword`); a caller that has none
+   *  (a guide) is asked for it here. */
+  const apply = useCallback(async (currentPassword?: string) => {
+    let password = currentPassword;
+    const policy = keysNeedingPassword(Object.keys(pending), entriesByKey);
+    if (policy.length > 0 && password === undefined) {
+      const answer = await askPassword(policy);
+      if (answer === null) return null;
+      password = answer;
+    }
     setSaving(true);
     setErrors({});
     setActionError(null);
     try {
-      const res = await api.patchSettings(pending);
+      const res = await api.patchSettings(
+        pending,
+        loadedVersions(pending, values, baseVersions.current),
+        password
+      );
       setLastResult(res);
+      baseVersions.current = withoutBaseVersions(baseVersions.current, Object.keys(pending));
       setPending({});
       await reload();
       return res;
     } catch (e) {
+      if (e instanceof SettingsConflictError) {
+        // Saved over, the change would drop what another writer stored since
+        // this page loaded the key: its edit is dropped, the key reloaded,
+        // and the row says why. Every other staged edit stays staged.
+        const stale = Object.keys(e.errors);
+        baseVersions.current = withoutBaseVersions(baseVersions.current, stale);
+        setErrors(e.errors);
+        setPending((p) => {
+          const n = { ...p };
+          for (const k of stale) delete n[k];
+          return n;
+        });
+        setActionError(conflictMessage(stale));
+        await reload();
+        return null;
+      }
       if (e instanceof SettingsValidationError) {
+        const refusal = passwordRefusal(e.errors);
+        if (refusal !== null) {
+          // The sign-in policy asked for the current password: said as that,
+          // never as a stored override gone invalid.
+          setActionError(refusal);
+          return null;
+        }
         setErrors(e.errors);
         // The server validates the whole merged set, so a stored override
         // that stopped validating (a later deploy narrowed its field) blocks
@@ -193,7 +351,7 @@ export function useSettings() {
     } finally {
       setSaving(false);
     }
-  }, [pending, reload]);
+  }, [pending, reload, values, entriesByKey, askPassword]);
 
   // Callers fire-and-forget these (`void s.reset(key)`), so a rejected
   // promise here would surface only as an unhandled-rejection console entry
@@ -202,29 +360,55 @@ export function useSettings() {
   // "the schema could not be loaded" but was wrong here: a failed DELETE was
   // tearing down the entire form (search box, rail, every row, any other
   // pending edits) over one row's reset failing.
+  /** `accumulate`: one of a run of resets, which keeps the failures of the
+   *  ones before it and leaves clearing the banner to the caller. Resolves
+   *  `"cancelled"` when the password was declined, so a run can stop. */
   const reset = useCallback(
-    async (key: string) => {
-      setActionError(null);
+    async (key: string, opts: { accumulate?: boolean } = {}): Promise<"done" | "failed" | "cancelled"> => {
+      const accumulate = opts.accumulate === true;
+      if (!accumulate) setActionError(null);
+      let password: string | undefined;
+      const policy = storedPolicyKeys([key]);
+      if (policy.length > 0) {
+        const answer = await askPassword(policy);
+        if (answer === null) return "cancelled";
+        password = answer;
+      }
       try {
-        await api.resetSetting(key);
+        await api.resetSetting(key, password);
         unstage(key);
         await reload();
+        return "done";
       } catch (e) {
-        setActionError(getErrorMessage(e));
+        const refusal =
+          e instanceof SettingsValidationError ? passwordRefusal(e.errors) : null;
+        const message = refusal ?? getErrorMessage(e);
+        setActionError((prev) => mergeResetError(prev, key, message, accumulate));
+        return "failed";
       }
     },
-    [reload, unstage]
+    [reload, unstage, storedPolicyKeys, askPassword]
   );
 
   const resetGroup = useCallback(
     async (group: string) => {
       setActionError(null);
+      const groupKeys =
+        schema?.groups.find((g) => g.key === group)?.entries.map((e) => e.key) ?? [];
+      let password: string | undefined;
+      const policy = storedPolicyKeys(groupKeys);
+      if (policy.length > 0) {
+        const answer = await askPassword(policy);
+        if (answer === null) return;
+        password = answer;
+      }
       try {
-        await api.resetSettingsGroup(group);
+        await api.resetSettingsGroup(group, password);
         // Only unstage the keys that belong to *this* group — `setPending({})`
         // used to wipe every group's pending edits, so resetting one group's
         // overrides silently discarded unrelated in-flight edits elsewhere.
         const keys = schema?.groups.find((g) => g.key === group)?.entries.map((e) => e.key) ?? [];
+        baseVersions.current = withoutBaseVersions(baseVersions.current, keys);
         setPending((p) => {
           const n = { ...p };
           for (const k of keys) delete n[k];
@@ -237,10 +421,12 @@ export function useSettings() {
         });
         await reload();
       } catch (e) {
-        setActionError(getErrorMessage(e));
+        const refusal =
+          e instanceof SettingsValidationError ? passwordRefusal(e.errors) : null;
+        setActionError(refusal ?? getErrorMessage(e));
       }
     },
-    [reload, schema]
+    [reload, schema, storedPolicyKeys, askPassword]
   );
 
   const probe = useCallback(
@@ -272,6 +458,7 @@ export function useSettings() {
     apply,
     reset,
     resetGroup,
+    passwordAsk,
     probe,
     reload,
   };

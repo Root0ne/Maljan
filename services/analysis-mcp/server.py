@@ -16,6 +16,7 @@ and gets back the path to pass to every other tool here.
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import contextlib
 import copy
@@ -30,6 +31,14 @@ from typing import Any
 
 from mcp.server.fastmcp import FastMCP
 
+from maljan.core.stdio_safe import route_logging_to_stderr
+
+# Only when run as the stdio server: a test or tool that imports this module
+# in-process keeps its own logging.
+if __name__ == "__main__":
+    route_logging_to_stderr()
+
+from maljan.core.ctype_locale import pin_character_classification, say_on_stderr
 from maljan.core.paths import resolve_data
 from maljan.tools import (
     api_hashes,
@@ -59,6 +68,11 @@ from maljan.tools.errors import (
 )
 from maljan.tools.roots import PathOutsideRoots, resolve_under, resolve_under_roots
 from maljan.tools.strings import DEFAULT_STRINGS_LIMIT
+
+# Pinned before the manifest below loads the YARA engine, whose ``nocase`` table
+# is built by the LC_CTYPE in force when it loads (``core.ctype_locale``). The
+# one line goes to standard error: standard output is this server's protocol.
+pin_character_classification(say=say_on_stderr)
 
 mcp = FastMCP("AnalysisMCP")
 
@@ -157,11 +171,6 @@ def _too_long_to_decode(encoded: str, limit: int) -> bool:
     nothing: what is being prevented is the order of magnitude.
     """
     return (len(encoded) // 4) * 3 > limit
-
-
-# How long a staged sample is kept. Every ``put_sample*`` call prunes, so a
-# long-lived server does not accumulate malware bytes without bound.
-_DEFAULT_STAGING_TTL_HOURS = 24.0
 
 
 # What a model writes when it means "I am not passing this one". A local model
@@ -1070,34 +1079,66 @@ async def floss(
     ``kinds`` keeps some of "decoded", "stack", "tight"; ``pattern`` keeps the
     rows containing a marker (case-insensitive substring, or ``re:<expression>``).
     """
-    run = (
-        "floss",
-        path,
-        carved_path,
-        min_len,
-        tuple(kinds or ()),
-        limit,
-        offset,
-        pattern,
-        timeout_s,
-    )
-    return dict(
-        await children.joined(
-            run,
-            lambda: _guard(
-                "floss",
-                emulated_strings.floss,
-                path=path,
-                carved_path=carved_path,
-                min_len=min_len,
-                kinds=kinds,
-                limit=limit,
-                offset=offset,
-                pattern=pattern,
-                timeout_s=_within(timeout_s, FLOSS_TIMEOUT_S),
-            ),
+    # One run per remembered result, whatever page or filter a caller asks
+    # for: the emulation is joined (``tools.children``) under the key its
+    # result is remembered by (``emulated_strings.remembered_key``: the file,
+    # its size and mtime, the length as read), and the run hands its result
+    # to every caller waiting on it, each of which pages its own answer from
+    # it. Keyed by the paging too, two pages asked at once were two runs, and
+    # the run a caller abandoned killed the child the other was waiting on.
+    clock = _within(timeout_s, FLOSS_TIMEOUT_S)
+
+    def _page(found: dict[str, Any] | None = None) -> dict[str, Any]:
+        # Never emulates: the page of the result handed in, or of a
+        # remembered one, or why there is none. The arguments are checked
+        # first, so a bad kind or pattern is refused before any emulation.
+        return _guard(
+            "floss",
+            emulated_strings.floss,
+            path=path,
+            carved_path=carved_path,
+            min_len=min_len,
+            kinds=kinds,
+            limit=limit,
+            offset=offset,
+            pattern=pattern,
+            timeout_s=clock,
+            emulate=False,
+            found=found,
         )
-    )
+
+    def _emulated() -> dict[str, Any]:
+        return _guard(
+            "floss",
+            emulated_strings.recovered,
+            path=path,
+            carved_path=carved_path,
+            min_len=min_len,
+            timeout_s=clock,
+        )
+
+    answer = await asyncio.to_thread(_page)
+    if not _floss_not_remembered(answer):
+        return answer
+    # The page above already held the path to the roots, so this reads the
+    # file the tool reads.
+    try:
+        target = _confined({"path": path, CARVED_ARGUMENT: carved_path})["path"]
+        run = ("floss", *emulated_strings.remembered_key(target, min_len))
+    except Exception:  # noqa: BLE001 — the file changed since: the guarded call says how
+        emulated = await asyncio.to_thread(_emulated)
+    else:
+        emulated = dict(await children.joined(run, _emulated))
+    if "error" in emulated:
+        return emulated
+    return await asyncio.to_thread(_page, emulated)
+
+
+def _floss_not_remembered(answer: dict[str, Any]) -> bool:
+    """Whether a page-only ``floss`` answer says no result is remembered yet."""
+    error = answer.get("error")
+    message = error.get("message") if isinstance(error, dict) else error
+    return message == emulated_strings.NOT_REMEMBERED
 
 
 @mcp.tool()
@@ -1333,13 +1374,12 @@ def transform_bytes(
 
 
 def _staging_ttl_seconds() -> float:
-    """``MALJAN_STAGING_TTL_HOURS``, or a day. Zero or less disables pruning."""
-    raw = os.environ.get(staging.STAGING_TTL_ENV, "").strip()
-    try:
-        hours = float(raw) if raw else _DEFAULT_STAGING_TTL_HOURS
-    except ValueError:
-        hours = _DEFAULT_STAGING_TTL_HOURS
-    return hours * 3600.0
+    """``MALJAN_STAGING_TTL_HOURS``, or a day (``staging.staging_ttl_seconds``).
+
+    How long a staged sample is kept. Every ``put_sample*`` call prunes, so a
+    long-lived server does not accumulate malware bytes without bound.
+    """
+    return staging.staging_ttl_seconds()
 
 
 def _staging_base() -> Path:
@@ -1457,23 +1497,7 @@ def _prune_legacy_captures(cutoff: float) -> int:
     return removed
 
 
-def _newest_mtime(root: Path) -> float:
-    """The most recent mtime in this tree, the directory itself included.
-
-    Read with ``lstat`` throughout: a symlink's own timestamp is what counts,
-    never the timestamp of whatever it points at, which may be a file somebody
-    else is still writing.
-    """
-    try:
-        newest = root.lstat().st_mtime
-    except OSError:
-        return 0.0
-    for entry in root.rglob("*"):
-        try:
-            newest = max(newest, entry.lstat().st_mtime)
-        except OSError:  # an entry another call removed while this walked
-            continue
-    return newest
+_newest_mtime = staging.newest_mtime
 
 
 def _prune_job_directory(directory: Path, cutoff: float) -> int:
@@ -1684,4 +1708,11 @@ def put_sample_finish(upload_id: str) -> dict[str, Any]:
 
 
 if __name__ == "__main__":
-    mcp.run(transport="stdio")
+    # A child a tool started runs in a session of its own, so it does not die
+    # with this server: every one still running is killed when the server
+    # ends, on end of input or on a termination signal.
+    children.kill_all_on_exit()
+    try:
+        mcp.run(transport="stdio")
+    finally:
+        children.kill_all()

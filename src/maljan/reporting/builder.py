@@ -21,14 +21,15 @@ after this deterministic phase.
 
 from __future__ import annotations
 
-import re
 from typing import TYPE_CHECKING, Any
 
 from maljan.analysis.run_summary import NOT_APPLICABLE
+from maljan.analysis.technique_ids import TECHNIQUE_WORD_RE
 from maljan.core.logger import logger
 from maljan.core.reputation import reputation_of
 from maljan.extractors.attribution import build_family_attribution
 from maljan.extractors.capability_matrix import build_capability_matrix, unmapped_behaviours
+from maljan.memory.attck_defense import defense_for, release_for
 from maljan.pipeline.outcome import (
     INCONCLUSIVE_VERDICT,
     normalise_verdict,
@@ -36,6 +37,7 @@ from maljan.pipeline.outcome import (
 from maljan.reporting.dedupe import MergeTally
 from maljan.reporting.ledger_projection import (
     analyst_listed_values,
+    directed_text_from_ledger,
     dynamic_from_ledger,
     identity_from_ledger,
     network_from_ledger,
@@ -45,6 +47,8 @@ from maljan.reporting.ledger_projection import (
 )
 from maljan.reporting.ledger_report import build_sections
 from maljan.reporting.models import (
+    AttckDefenseRow,
+    AttckLink,
     ConsolidatedIOC,
     DefensiveRecommendation,
     EvidenceIndexRow,
@@ -57,14 +61,29 @@ from maljan.reporting.models import (
     SeverityAssessment,
     VersionHistoryEntry,
 )
+from maljan.reporting.section_servers import index_of, source_server
 from maljan.schemas.judgement import SEVERITY_RATINGS
 
 if TYPE_CHECKING:
+    from maljan.reporting.detection_signatures import OwnSample
     from maljan.schemas.evidence import LedgerEntry
 
 # How the reason for an absent summary begins, so the key-findings section can
 # find it among the degradation reasons and print it where the summary would be.
 NO_SUMMARY_REASON = "the report model wrote no summary"
+
+
+# Words a family field holds when no family was resolved, beside the rule-name placeholders.
+_FAMILY_PLACEHOLDERS = frozenset({"generic", "unknown family", "-"})
+
+# The label the report prints for each platform a sample's identity can record.
+_PLATFORM_LABELS = {
+    "windows": "Windows",
+    "linux": "Linux",
+    "macos": "macOS",
+    "android": "Android",
+    "ios": "iOS",
+}
 
 
 class MalwareReportBuilder:
@@ -78,7 +97,7 @@ class MalwareReportBuilder:
             report = builder.apply_narrative(narrative_output)
         builder.render_extended_stix(report)  # mutates report.stix_bundle_extended
         report.consolidated_iocs = build_consolidated_iocs(report)  # reads the export
-        report = builder.attach_detection_signatures(report)  # published rows only
+        report = builder.attach_detection_signatures(report, sample)  # published rows only
     """
 
     def __init__(
@@ -159,6 +178,7 @@ class MalwareReportBuilder:
         # empty otherwise. The network block also reads which values the
         # analysts listed, which it states and never publishes on alone.
         static = static_from_ledger(ledger)
+        directed = directed_text_from_ledger(ledger)
         dynamic = dynamic_from_ledger(ledger)
         # What only a recovering tool read. Each domain, address and URL in it
         # is a candidate row of its own, whether or not a model named it: a
@@ -210,6 +230,7 @@ class MalwareReportBuilder:
 
         references = self._build_references(mappings, identity.hashes)
 
+        defense = attck_defense_rows(mappings)
         report = MalwareReport(
             verdict=verdict,
             overall_confidence=self.overall_confidence,
@@ -219,12 +240,15 @@ class MalwareReportBuilder:
             degradation_reasons=self.degradation_reasons,
             identity=identity,
             static=static,
+            directed_text=directed,
             dynamic=dynamic,
             network=network,
             persistence=persistence,
             capability_matrix=cells,
             ttp_mappings=mappings,
             unmapped_behaviours=unmapped_behaviours(self.stix_output),
+            attck_defense=defense,
+            attck_defense_version=release_for(r.technique_id for r in defense),
             attribution=attribution,
             executive_summary="",  # filled by NarrativeAgent
             defensive_recommendations=[],  # filled by NarrativeAgent
@@ -286,6 +310,9 @@ class MalwareReportBuilder:
             )
             for entry in self.evidence_ledger
         ]
+        index = index_of(report.evidence_index)
+        for section in report.sections:
+            section.source_server = source_server(section, index)
         report.reputation = _reputation_answers(self.evidence_ledger)
 
         # Deterministic front-matter, version history,
@@ -383,18 +410,21 @@ class MalwareReportBuilder:
         return report
 
     @staticmethod
-    def attach_detection_signatures(report: MalwareReport) -> MalwareReport:
+    def attach_detection_signatures(
+        report: MalwareReport, sample: OwnSample | None = None
+    ) -> MalwareReport:
         """Populate ``report.detection_signatures`` with template-generated rules.
 
         Calls into :mod:`maljan.reporting.detection_signatures` which produces
         up to three rules (YARA / Sigma / Suricata) keyed by the report's
         IOCs. Missing evidence in any of the three input domains results in
         that format being skipped (never an empty rule). Generation is
-        deterministic — no LLM involvement.
+        deterministic — no LLM involvement. ``sample`` is the file the YARA
+        draft is run against once it compiles.
         """
         from maljan.reporting.detection_signatures import build_detection_rules
 
-        report.detection_signatures = build_detection_rules(report)
+        report.detection_signatures = build_detection_rules(report, sample)
         return report
 
     @staticmethod
@@ -467,25 +497,28 @@ class MalwareReportBuilder:
     def _guess_platforms(
         self, static: Any | None, dynamic: Any | None, identity: Any | None = None
     ) -> list[str]:
+        # What the sample says it was built for comes first: its recorded
+        # platform, its PE header, an ELF section. A sandbox process tree names
+        # Windows only for a sample that says nothing of its own, so an ELF or
+        # an APK that ran is not reported as a Windows threat.
         platforms: list[str] = []
-        if dynamic is not None and dynamic.process_tree:
-            platforms.append("Windows")  # behavior almost always Windows sandbox
+        recorded = str(getattr(identity, "platform", "") or "").lower()
+        if recorded in _PLATFORM_LABELS:
+            platforms.append(_PLATFORM_LABELS[recorded])
 
-        # Infer Windows from the PE format itself so a
-        # Windows PE with no dynamic run no longer falls through to "Unknown".
         # file_type "PE" or the MS-download MIME is a definitive Windows signal.
-        if identity is not None and "Windows" not in platforms:
+        if identity is not None and not platforms:
             file_type = str(getattr(identity, "file_type", "") or "").upper()
             mime = str(getattr(identity, "mime_type", "") or "").lower()
             if file_type == "PE" or "msdownload" in mime or "x-dosexec" in mime:
                 platforms.append("Windows")
 
-        if static is not None and static.sections:
-            first = static.sections[0]
-            char = first.characteristics or ""
-            if char == "ELF" or any(s.characteristics == "ELF" for s in static.sections):
-                if "Windows" not in platforms:
-                    platforms.append("Linux")
+        if not platforms and static is not None and static.sections:
+            if any(s.characteristics == "ELF" for s in static.sections):
+                platforms.append("Linux")
+
+        if not platforms and dynamic is not None and dynamic.process_tree:
+            platforms.append("Windows")  # the sandbox guest is Windows
         if not platforms:
             platforms.append("Unknown")
         return platforms
@@ -560,9 +593,20 @@ class MalwareReportBuilder:
         if has_live_c2 and tlp == "CLEAR":
             tlp = "AMBER"
 
-        name = report.malware_category or (
-            report.attribution.family if report.attribution else None
+        # The family the run resolved names the malware, when the verdict is not
+        # benign and the family has a source behind it; otherwise the category.
+        # "Unknown", "generic" and the like are no name.
+        from maljan.reporting.detection_signatures import _PLACEHOLDER_NAMES, is_benign
+
+        family = report.attribution.family if report.attribution else None
+        family = family.strip() if isinstance(family, str) else ""
+        family_named = bool(
+            family
+            and family.lower() not in _PLACEHOLDER_NAMES | _FAMILY_PLACEHOLDERS
+            and not is_benign(report)
+            and report.attribution.family_grounded
         )
+        name = family if family_named else report.malware_category
         subtitle = None
         if report.identity.platform and report.malware_category:
             subtitle = f"{report.malware_category} targeting {report.identity.platform.title()}"
@@ -570,7 +614,9 @@ class MalwareReportBuilder:
         return ReportFrontMatter(
             publisher=rc.publisher,
             product_type=rc.product_type,
-            malware_name=(name.title() if isinstance(name, str) and name else None),
+            malware_name=(
+                (name if family_named else name.title()) if isinstance(name, str) and name else None
+            ),
             subtitle=subtitle,
             version="1.0",
             report_date=f"{now:%Y-%m-%d}",
@@ -664,7 +710,7 @@ def ioc_table(report: MalwareReport, *, raise_unread: bool = False) -> list[Cons
 def _build_consolidated_iocs(report: MalwareReport) -> list[ConsolidatedIOC]:
     from maljan.extractors.network_extractor import url_host
     from maljan.reporting.ledger_projection import listed_non_network_values
-    from maljan.reporting.ledger_report import artifact_sections, listed_rows
+    from maljan.reporting.ledger_report import artifact_sections, listed_headings, listed_rows
     from maljan.reporting.renderers.stix_renderer import (
         corroborating_values,
         emulation_kwargs,
@@ -823,8 +869,9 @@ def _build_consolidated_iocs(report: MalwareReport) -> list[ConsolidatedIOC]:
     # so a value a tool recorded keeps the tool's row. A value the judge names
     # is the judge's row.
     for kind, section in artifact_sections(report.sections):
+        headings = listed_headings(section)
         for analyst, _cited, cells in listed_rows(section):
-            for ioc_kind, value, _payload in listed_non_network_values(kind, [cells]):
+            for ioc_kind, value, _payload in listed_non_network_values(kind, [cells], headings):
                 if (ioc_kind, value.strip().lower()) in judged:
                     continue
                 listed = f"an artifact of the {analyst} analyst" if analyst else ""
@@ -1140,19 +1187,44 @@ def _domain_context(d: Any) -> str:
     return "; ".join(notes)
 
 
-_TECHNIQUE_RE = re.compile(r"\bT\d{4}(?:\.\d{3})?\b")
+def attck_defense_rows(mappings: list[Any]) -> list[AttckDefenseRow]:
+    """ATT&CK's own defence for each published technique, in the report's technique order.
+
+    Deterministic and offline: read from the cached bundles
+    (``memory.attck_defense``). A technique ATT&CK lists nothing for, and a
+    run with no cached bundle, add no row.
+    """
+    published = [m for m in mappings if str(m.technique_id or "").strip()]
+    found = defense_for(m.technique_id for m in published)
+    rows: list[AttckDefenseRow] = []
+    for mapping in published:
+        defense = found.get(str(mapping.technique_id).strip().upper())
+        if defense is None:
+            continue
+        rows.append(
+            AttckDefenseRow(
+                technique_id=mapping.technique_id,
+                technique_name=mapping.technique_name,
+                mitigations=[AttckLink(**vars(o)) for o in defense.mitigations],
+                detection_strategies=[AttckLink(**vars(o)) for o in defense.detection_strategies],
+                data_components=[AttckLink(**vars(o)) for o in defense.data_components],
+                evidence_ids=list(mapping.sources),
+            )
+        )
+    return rows
 
 
 def _first_report_technique(text: str, valid_tids: set[str]) -> str | None:
-    """Return the first T#### in ``text`` that is mapped in the report, else the
-    first T#### found, else ``None``."""
-    found: list[str] = _TECHNIQUE_RE.findall(text or "")
-    if not found:
-        return None
-    for tid in found:
+    """Return the first T#### in ``text`` that the report publishes, else ``None``.
+
+    An id the prose names and the report's ATT&CK table does not carry is not
+    moved into the technique column: it would print as the technique the
+    action acts on, with nothing behind it.
+    """
+    for tid in TECHNIQUE_WORD_RE.findall(text or ""):
         if tid in valid_tids:
             return str(tid)
-    return str(found[0])
+    return None
 
 
 def _ioc_count(report: MalwareReport) -> int:

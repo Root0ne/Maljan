@@ -1,0 +1,11 @@
+{
+ "settings_snapshot": {
+  "preprocessing.use_claim_consistency_gate": false,
+  "validation.weak_alignment": false,
+  "validation.claim_repeat_margin": null
+ },
+ "truncation": {
+  "evidence_corpus_missing_answers": 0,
+  "evidence_corpus_partial_reason": ""
+ }
+}

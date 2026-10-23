@@ -18,6 +18,7 @@ import { ArrowDown, ListFilter, Radio } from "lucide-react";
 
 import {
   buildConversation,
+  emptyConversationText,
   filterConversation,
   groupOf,
   type ConversationItem,
@@ -47,6 +48,7 @@ const CONNECTION_LABEL: Record<RunConnection, string> = {
   reconnecting: "Reconnecting",
   closed: "Feed closed",
   unauthorized: "Sign in again to follow this run",
+  refused: "The server refused to stream this run",
 };
 
 /** How far from the bottom still counts as following the conversation. */
@@ -89,7 +91,7 @@ export default function ConversationPanel({
     [conversation.participants],
   );
 
-  const { counts, partial } = useToolCounts(jobId, events, jobStatus);
+  const { counts, partial, unavailable } = useToolCounts(jobId, events, jobStatus);
 
   const count = (list: typeof stages) =>
     list.reduce(
@@ -148,6 +150,7 @@ export default function ConversationPanel({
         participants={conversation.participants}
         toolCounts={counts}
         countsArePartial={partial}
+        countsUnavailable={unavailable}
         selected={agents}
         onToggle={(key) => setAgents((current) => toggle(current, key))}
       />
@@ -231,11 +234,7 @@ export default function ConversationPanel({
         >
           {shown === 0 ? (
             <p className="p-6 text-center text-xs text-text-muted">
-              {live
-                ? "Waiting for the first agent to speak."
-                : events.length === 0
-                  ? "This run kept no conversation. Its feed has passed the retention window."
-                  : "No message matches the current filters."}
+              {emptyConversationText({ live, eventCount: events.length, feedError })}
             </p>
           ) : (
             /* Keyed by what the section is, never by where it sits: a filter

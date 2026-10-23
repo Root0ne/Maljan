@@ -23,7 +23,7 @@ from typing import TYPE_CHECKING, Any
 
 from maljan.core.report_formats import UNREAD_FORMAT, ReportFormat, sniff
 from maljan.providers.base import SandboxCapabilities, SandboxProvider
-from maljan.providers.errors import ProviderError
+from maljan.providers.errors import AttachedReportRefused, ProviderError
 from maljan.providers.registry import register_sandbox_provider
 from maljan.providers.sandbox.readers import (
     ReaderFormat,
@@ -145,7 +145,7 @@ class UploadSandboxProvider(SandboxProvider):
         if name == UNREAD_FORMAT:
             unread = self._unread()
             if unread is None:
-                raise ProviderError(
+                raise AttachedReportRefused(
                     "The attached sandbox report was accepted unread, which "
                     "sandbox.upload.allowed_formats no longer allows; add 'unread' again "
                     "to read it, or accept a declaration that recognises it."
@@ -153,31 +153,35 @@ class UploadSandboxProvider(SandboxProvider):
             return unread
         found = sandbox_format_named(name, self._formats)
         if found is None:
-            raise ProviderError(
+            raise AttachedReportRefused(
                 f"The attached sandbox report was accepted as format {name!r}, which is no "
                 "longer declared in sandbox.report_formats nor registered as a reader; "
                 "declare it again to read it."
             )
         if name not in set(self._cfg.allowed_formats):
-            raise ProviderError(
+            raise AttachedReportRefused(
                 f"The attached sandbox report was accepted as format {name!r}, which "
                 "sandbox.upload.allowed_formats no longer accepts "
                 f"({', '.join(sorted(self._cfg.allowed_formats))}); add it again to read it."
             )
         if report_reader(found.reader) is None:
-            raise ProviderError(
+            raise AttachedReportRefused(
                 f"The attached sandbox report's format {name!r} names no registered "
                 "reader; no analysis can read it yet."
             )
         refusal = mapping_refusal(found)
         if refusal:
-            raise ProviderError(refusal)
+            raise AttachedReportRefused(refusal)
         return found
 
     def submit(self, sample_path: str | Path) -> str:
         raise ProviderError(
             "The upload sandbox does not detonate samples; attach a report to the job instead."
         )
+
+    def submission_address(self) -> str | None:
+        """None: this provider submits nothing, and the sample goes nowhere."""
+        return None
 
     def wait_for_completion(
         self,

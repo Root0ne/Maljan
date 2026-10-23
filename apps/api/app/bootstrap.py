@@ -141,6 +141,12 @@ def validate_bootstrap(s: APISettings) -> BootstrapReport:
         except (ValueError, TypeError):
             problems.append("SETTINGS_ENCRYPTION_KEY is not a valid Fernet key")
 
+    from app.services.audit_anchor import bootstrap_findings
+
+    anchor_problems, anchor_warnings = bootstrap_findings(s)
+    problems.extend(anchor_problems)
+    warnings.extend(anchor_warnings)
+
     if not s.debug and not s.auth_disabled and not s.cookie_secure:
         warnings.append(
             "COOKIE_SECURE is false outside debug mode; the refresh cookie will "

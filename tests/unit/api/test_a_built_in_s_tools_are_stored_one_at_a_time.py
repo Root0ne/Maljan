@@ -282,16 +282,16 @@ def _every_path_in_force(server_facts: dict[str, Any], leaf_facts: dict[str, Any
         )
     )
 
-    for whole_maps in (False, True):
+    for label in ("import /2", "import /1"):
         imported, _warnings = svc.lenient_imported_declarations(
-            {"core.mcp.servers": sent, LEAF: leaf_facts}, whole_maps=whole_maps
+            {"core.mcp.servers": sent, LEAF: leaf_facts}
         )
         saved = validate_server_map(imported["core.mcp.servers"], stored=stored)
         leaf = svc.stored_declaration_leaves({LEAF: imported[LEAF]}, {})[LEAF]
         built = so.build_settings({"mcp.servers": saved, "static.ghidra.tool_facts": leaf})
         out.append(
             (
-                "import /1" if whole_maps else "import /2",
+                label,
                 set(built.mcp.servers["analysis"].tool_facts),
                 set(built.static.ghidra.tool_facts),
             )
@@ -313,18 +313,17 @@ def test_an_unmarked_map_is_read_whole_on_every_path() -> None:
         assert leaf_tools == (set() if path == "probe" else {leaf_tool}), path
 
 
-def test_a_marked_map_is_read_as_changes_on_every_path_but_a_whole_import() -> None:
+def test_a_marked_map_is_read_as_changes_on_every_path() -> None:
     """A marked map holds changes: a shipped tool it does not name stays as
-    shipped and ``null`` removes one, on every path; a ``/1`` document was
-    written before the mark and is read whole, mark or not."""
+    shipped and ``null`` removes one, on every path, a ``/1`` import too (only
+    ``/2`` writes the mark, so such a document was relabelled from one)."""
     shipped = so.shipped_tool_facts("mcp.servers.analysis")
     ghidra = so.shipped_tool_facts("static.ghidra")
     first = next(iter(shipped))
     leaf_tool = next(iter(ghidra))
     held = _every_path_in_force(with_mark({first: None}), with_mark({leaf_tool: None}))
+    assert [path for path, *_ in held] == ["patch", "probe", "candidate", "import /2", "import /1"]
     for path, server_tools, leaf_tools in held:
-        if path == "import /1":
-            continue
         assert server_tools == set(shipped) - {first}, path
         assert leaf_tools == (set() if path == "probe" else set(ghidra) - {leaf_tool}), path
 

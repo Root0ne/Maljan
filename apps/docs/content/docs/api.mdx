@@ -24,9 +24,15 @@ Authorization: Bearer <access token>
 X-API-Key: <key>
 ```
 
-A request carrying `X-API-Key` is judged on that key. The refresh token is an
-HttpOnly cookie scoped to `/api/v1/auth` and is never sent by hand. See
-[security.md](/security/).
+A request carrying `X-API-Key` is judged on that key, except that changing the
+password, minting or revoking API keys, reading or exporting the settings, and
+every settings write (a save, a reset, an import, a server credential's
+bootstrap, a connection test, accepting a sandbox report format) take a bearer
+session and refuse a key with 403. A save, import or reset that changes the
+sign-in policy (the rate limiter, the login lockout, the trusted proxies, the
+token lifetimes)
+also needs `current_password`. The refresh token is an HttpOnly cookie scoped to `/api/v1/auth`
+and is never sent by hand. See [security.md](/security/).
 
 ## Router groups
 
@@ -36,7 +42,7 @@ HttpOnly cookie scoped to `/api/v1/auth` and is never sent by hand. See
 | `/samples` | Upload a sample, list and read sample metadata, delete a sample. |
 | `/samples/{sample_id}/sandbox-reports` | Attach, list and delete sandbox reports produced elsewhere, for the `upload` sandbox provider. With `unread` in `sandbox.upload.allowed_formats`, a report no format recognises is accepted as `unread`, and the answer carries a `proposal` (a format declaration with each field's evidence and confidence); `.../{report_id}/proposal` reads it again. |
 | `/sandbox-report-formats` | Every declared sandbox report format, built-in and your own, in the order a report is tried against them: how each is recognised, where its task id and target hash sit, its reader, its signature scale and whether uploads accept it. `POST /sandbox-report-formats/accept` (admin) saves an accepted declaration for an unread upload, only where it recognises that report, and reads the upload as it. |
-| `/jobs` | Create an analysis job, list and read jobs, read a job's event history and its evidence ledger, cancel a job. |
+| `/jobs` | Create an analysis job, list and read jobs, read a job's event history and its evidence ledger, ask a finished job a follow-up question, cancel a job. |
 | `/reports` | Everything a finished analysis produces: the report itself, its renderings, its indicators, its signatures, its timeline, and post-hoc enrichment. |
 | `/dashboard` | Aggregate counts for the console's landing page, and `GET /dashboard/tools?limit=` — the per-tool call counts of the caller's last `limit` completed runs (default 20, at most 100), read from each run's `run_summary.evidence.by_tool`. |
 | `/audit` | The audit trail, admin only (`/audit/logs`), and API keys (`/audit/api-keys`): any signed-in user mints, lists and revokes their own keys, and a key acts as the account that minted it. |
@@ -55,7 +61,15 @@ tool call, in the order the calls were made. An entry carries the citation id
 the report quotes (`entry_id`, e.g. `ev_0007`), the stage, the agent, the tool
 server (null for an in-process tool), the tool, the arguments, whether the call
 succeeded, its duration, the result text and the parsed result when the tool
-answered JSON. `stage`, `agent` and `tool` narrow it — the three grains the
+answered JSON. Beside those it carries every other field the run recorded on
+the entry: where the tool's declaration lives (`source`), what that
+declaration said about the answer (`facts`), the reputation record
+(`reputation`), the operator's triage pack step (`pack_step`), whether
+`structured` is the server's own structured answer (`structured_from_server`,
+present only when true), and the calling agent's declared role and console
+tab (`agent_role`, `agent_tab`). Each of these seven is left out where the
+entry carried none, and on every entry stored before they were kept: absent,
+never false or empty. `stage`, `agent` and `tool` narrow it — the three grains the
 console groups by — and `page` and `page_size` (up to 200) page it. Ordering is
 by the sequence the ids were issued in across the whole run, so paging walks
 the analysis rather than one agent at a time, and the page an id is on is
@@ -65,6 +79,64 @@ page size.
 Ownership is the job's own — the same rule the job's report endpoint applies —
 and an entry whose output was dropped to the per-agent byte budget comes back
 with an empty `output` and the rest of its record intact.
+
+An entry the run took a part of its answer from also carries `spilled`: one
+reference per part kept whole in object storage — `answer` (the tool's answer
+before the output guardrail cut it), `structured_content` (the server's
+structured answer the entry did not keep), `output` and `structured` (what the
+byte budget or the structure eviction took) — each with `key`, `bytes` and
+`sha256`, or with `error` and no key when the part was not written
+(`upload_failed (<class>)`, `upload_failed (store unreachable)`,
+`upload_failed (store busy)`, `upload_failed (not finished)`, or
+`exceeds upload_max_bytes (<n> bytes)`). It is absent where nothing was taken
+and on entries stored before it was kept.
+`GET /jobs/{job_id}/evidence/{entry_id}/objects/{part}` streams the part's
+bytes (`text/plain` for a text, `application/json` for a structure), with the
+recorded SHA-256 in `X-Content-SHA256` and the recorded length in
+`Content-Length`, under the same ownership rule. The bytes are hashed as they
+go and the last chunk is sent only once the whole object matches the recorded
+digest, so the body is complete only when it matches; a mismatch ends the
+answer short. It is a 404 when the part was never kept, stating the reason its
+reference records, and a 502 when the store cannot hand it back.
+
+Each entry of a sealed run also carries `digest`, the SHA-256 of every column
+its row persists in canonical form, and `chain`, the job's keyed chain value
+after it in `seq` order; both are absent on entries stored before sealing.
+`GET /jobs/{job_id}/evidence/verify` recomputes the chain from the rows and
+checks it against the seal, under the same ownership rule, and writes nothing.
+It reads only that job's rows and its own audit rows, so its cost follows the
+job. It answers `status` (`verified`; `broken`; `deleted` when the report was
+deleted by its owner and the ledger still verifies; `other_key` when the seal
+names a key the platform cannot derive; `unverifiable` when something it needs
+could not be checked, such as an audit append that did not land or a key
+rotation the audit chain cannot yet vouch for; `not_sealed` for a run stored
+before sealing),
+`reason`, `first_broken_seq`, `entries`, the recomputed `head`, the `seal`,
+the number of `amendments`, and the `checks` that held and `notes` on what was
+not checked. The seal is also served in the run summary and the full report as
+`ledger_seal`, with any `ledger_amendments` an enrichment chained onto it
+(see Operations, Sealed evidence ledger).
+
+`GET /jobs/{job_id}/package` downloads the job's verifiable package, a
+deterministic `.tar.gz` (`application/gzip`, served as
+`maljan-job-<job_id>.tar.gz`), under the same ownership rule: another
+account's job is not found. It holds the stored run in the replay export's
+layout under `run/` (the report row and document, the evidence ledger, the run
+summary, the judge's bundle, the events, the job row with the sample's hash
+and name), `report/report.md`, `export/stix-bundle.json`,
+`ledger/spilled.json` with each spilled part's bytes under
+`ledger/objects/<sha256>` where they were read back and verified, `seal.json`
+(the seal and its verification at build time) and `manifest.json` (every
+file's SHA-256 and size, each part's path, and each absent part with why),
+plus `manifest.sig` when the platform holds a settings encryption key. The
+`X-Package-Seal-Status` header is the build-time verification's status and
+`X-Package-Signed` says whether the manifest is signed. The rows and the
+seal's verification are read in one snapshot. The sample file itself is not
+included; spilled tool answers may contain bytes from it. A file above
+`upload_max_bytes` is left out and listed in the manifest's `oversized` and
+`absent` with its SHA-256, its size and the reason "larger than the package
+bound". Check one with `python -m scripts.package.verify <file>` (see
+Operations, Job package).
 
 `GET /jobs/{job_id}/usage` is what the job's model calls used and cost so far,
 totalled from its `model_usage` events (one per call, committed as the call is
@@ -83,6 +155,53 @@ records carried their charge is priced again by the meter's code at the current
 `spent_is_at_least` where a call could not be priced, and `per_agent`. It
 answers during a run and after a worker that died before its run summary. Only the job's owner reads it, as for the events endpoint: another
 account's job is not found, to an admin as to anyone else.
+
+`POST /jobs/{job_id}/follow-ups` (`{"question": "..."}`) asks a finished job
+a new question. The report's question round answers it from what the job
+stored: its report, its evidence ledger and the run state rebuilt from both,
+with the same prompt and the same checks as a question asked at submit time
+(every cited id must be one the run issued, `established` needs an entry of a
+call that answered, `limited_negative` needs the calls that looked and never
+rests on an analyst's open question) and its one retry. No tool is called and
+nothing is analysed again, so a question the stored evidence cannot settle is
+`not_determinable` with the reason. The model is the reporter's model the
+run's settings snapshot recorded (the provider, model, effort and temperature
+of its `llm.agents.reporter` entry and of each model it falls back to, else the
+judge role's provider and model). No endpoint is taken from the snapshot: each
+model is served where its provider is served now (the current reporter entry's
+own address for that provider, else the provider's configured one), with the
+current credential, and the current entry's ceilings are kept. A model the run
+called at another place than its provider is served now, whose provider is no
+longer registered, that the snapshot hides, or that no longer builds settings
+is not asked; the current report model is, and `model_source` says why. A job
+that ran as a mock is answered as one: it had no report model, so the answer
+is `not_determinable`. It is built as the report stage builds it, with the
+same output cap and the job's spend ceiling, and its calls are recorded as
+`model_usage` events of the job under the call name `follow-up`, numbered from
+the job's event counter like every event of its feed (from the table, and said
+in `notes`, when Redis cannot be reached), so `GET /jobs/{job_id}/usage`
+counts them. A stored ledger row that keeps part of its answer in object
+storage is read as the row holds it, and `notes` says so. The answer comes back once the model has answered (201): `question`,
+`outcome`, `answer` (the question round's answer: the model's words,
+`evidence_ids`, `looked_at`, `open_questions`, `answered` and `checks` where a
+check refused its word), `model`, `model_source`, `report_sha256` (the digest
+of the stored report it was answered from), `record` and `notes` (what could
+not be read back or recorded). The stored report is never changed: the answer
+is a record of its own, and with a settings encryption key a keyed record of
+it (the report digest, the digest of the report's seal and of its last
+amendment, the SHA-256 of the question and answer) is written onto the audit
+chain as a `report.follow_up` row in the same transaction; without one `record`
+is null and `notes` says so. `GET /jobs/{job_id}/evidence/verify` checks each
+follow-up against that record: its question, answer and model are digested
+again, the record must verify under its key and name the row, and the chained
+audit row must hold the same record; a follow-up that does not match makes the
+answer `broken`, as does a chained follow-up whose row is gone while the report
+it names is stored (one gone with its report is noted). No transaction is held while the model answers. A
+job still `pending` or `running`, or one that stored no report, is a 409; a
+report that predates the structured payload or does not read is a 422.
+`GET /jobs/{job_id}/follow-ups` lists the job's follow-ups, oldest first. Both
+are the job owner's alone, checked as the evidence page checks it: another
+account's job is not found.
 
 ### The run summary
 
@@ -313,6 +432,33 @@ would be keyed by, errors first, and each team laid out as nodes with a row
 and a column and edges between them. It stores nothing; its errors are the
 refusals `PATCH /settings` makes, in the same words. See
 [configuration.md](/configuration/).
+`GET /settings/plugins` (admin) answers every installed provider plugin per
+kind (`llm`, `static`, `sandbox`, `memory`) with its entry-point group: each
+plugin's name, its `entry` as the allow-list writes it, its distribution and
+version, whether the stored `core.plugins.allowed` names it, its `state` from
+the metadata (`refused` with the `error`, else `allowed` or `not_allowed`),
+and the API process's own load result where the API loaded it to run its code
+(`api_state`: `loaded`, `failed` or `refused`, with `api_error`; empty when it
+never did; a worker's own result is in that worker's log), and per kind the
+allowed names no installed package declares (`allowed_absent`). It reads
+package metadata only; no plugin is imported to be listed.
+
+The ATT&CK cache is asked through the worker that holds it (admin):
+`GET /settings/attck` answers, per domain (`enterprise`, `mobile`, `ics`), the
+cached release, its date, when the file was written and how old it is, the
+next automatic check, and the last check and update with who ran them.
+`POST /settings/attck/check` compares the cache with MITRE's release index and
+downloads nothing; its `outcome` is `up_to_date`, `outdated` (each domain with
+its cached and latest release and the release date, and the next automatic
+check) or `failed` with the reason, never up to date when the index could not
+be read. `POST /settings/attck/update` queues the update and answers `202`
+with a `job_id`; `GET /settings/attck/update/{job_id}` answers `queued`,
+`running`, `done` with the result, or `unknown`; a result's `outcome` is
+`updated`, `up_to_date`, `failed`, `busy` (with who holds the cache), or
+`stopped` (the worker gave up on it; `kept_previous` is then `null` and the
+status says what the cache holds). Each answers `503` when the
+worker does not answer in time. Neither takes an address: the upstream URL is
+the platform's.
 
 ## Conventions
 

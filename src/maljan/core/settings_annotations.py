@@ -16,7 +16,9 @@ into the group's closed "Advanced" disclosure.
 
 from __future__ import annotations
 
-from typing import Literal, NotRequired, TypedDict
+from collections.abc import Callable
+from pathlib import PurePosixPath
+from typing import Any, Literal, NotRequired, TypedDict
 
 
 class Annotation(TypedDict):
@@ -40,7 +42,17 @@ class Annotation(TypedDict):
         ]
     ]
     editor: NotRequired[
-        Literal["server_map", "rest_sandbox", "agent_definitions", "stages", "tool_facts"]
+        Literal[
+            "server_map",
+            "rest_sandbox",
+            "agent_definitions",
+            "stages",
+            "tool_facts",
+            "pack_steps",
+            "plugin_allow_list",
+            "enrichment_sources",
+            "report_formats",
+        ]
     ]
     subgroup: NotRequired[str]  # heading inside the group; absent = top of the group
     advanced: NotRequired[bool]  # folded into the group's closed "Advanced" disclosure
@@ -54,6 +66,19 @@ RENAMED_SETTINGS: dict[str, str] = {
     "core.memory.qdrant_collection": "core.memory.qdrant.collection",
     "core.memory.qdrant_function_hash_collection": "core.memory.qdrant.function_hash_collection",
     "core.memory.qdrant_api_key": "core.memory.qdrant.api_key",
+    "core.static.r2.mirror_dir": "core.static.r2.work_dir",
+}
+
+
+def last_segment(value: Any) -> Any:
+    """A path's last segment; a value that is not text as it is."""
+    return PurePosixPath(value.replace("\\", "/")).name if isinstance(value, str) else value
+
+
+# The moved settings whose value changed form with the move, each with how the
+# old key's value is read as the new key's. The others keep their values.
+RENAMED_SETTING_VALUES: dict[str, Callable[[Any], Any]] = {
+    "core.static.r2.mirror_dir": last_segment,
 }
 
 
@@ -63,6 +88,7 @@ RENAMED_SETTINGS: dict[str, str] = {
 # one set says at start which key holds it now, and reads it no more.
 RETIRED_ENVIRONMENT: dict[str, str] = {
     "GHIDRA_CONTAINER_SAMPLES_PATH": "core.static.ghidra.sample_mount",
+    "MALJAN_ATTCK_MAX_AGE_DAYS": "core.validation.attck_refresh_days",
 }
 
 
@@ -99,6 +125,7 @@ GROUP_ORDER: list[tuple[str, str]] = [
     ("events", "Live events"),
     ("tracing", "Tracing"),
     ("enrichment", "Enrichment / threat intelligence"),
+    ("plugins", "Provider plugins"),
     ("api", "API"),
     ("system", "Deployment (read-only)"),
 ]
@@ -134,6 +161,10 @@ GROUP_DESCRIPTIONS: dict[str, str] = {
     ),
     "tracing": "LangSmith tracing of every model call.",
     "enrichment": "Threat-intelligence lookups for the indicators a report names.",
+    "plugins": (
+        "Providers that installed packages add, and which of them this deployment loads; "
+        "none is loaded until it is allowed here."
+    ),
     "api": "Request limits and login protection of the HTTP API; changes take effect immediately.",
     "system": "Set in the process environment when the service starts; changed by redeploying.",
 }
@@ -154,6 +185,7 @@ _PREFIX_GROUPS: list[tuple[str, str]] = [
     ("triage", "analysis"),
     ("validation", "analysis"),
     ("events", "events"),
+    ("plugins", "plugins"),
     ("static", "static"),
     ("mcp", "mcp"),
     ("reporting", "reporting"),
@@ -269,6 +301,16 @@ ANNOTATIONS: dict[str, Annotation] = {
             "before fails as a provider (a refused connection, a timeout, a server "
             "error, a model the server does not have) and never because of what a "
             "model answered; each is probed like the first. "
+            "An entry may set a ceiling of its own: max_spend_usd, what its priced calls "
+            "may cost, and max_unpriced_tokens, the input and output tokens its calls of a "
+            "model with no known price (a local or unpriced one) may use. Every model of "
+            "the list counts toward it, fallbacks included. It is checked before each "
+            "call, not reserved: the call that crosses it still runs. Once either is "
+            "reached the agent makes no further model call, the verdict included, what it "
+            "produced is kept, the run summary names the agent and the ceiling, and no "
+            "other agent is affected. An entry may hold only ceilings, with no provider or "
+            "model: the agent keeps the model it runs on. Empty, the default, is no "
+            "ceiling. "
             "Ordinarily edited from "
             "the Agents page; this raw view is for bulk edits."
         ),
@@ -676,10 +718,26 @@ ANNOTATIONS: dict[str, Annotation] = {
             "Overrides the OpenAI API endpoint to target an OpenAI-compatible server "
             "instead of api.openai.com — a local llama.cpp/ik_llama.cpp server, Kimi "
             "(Moonshot), DeepSeek, or Azure OpenAI. Leave empty to use OpenAI's own "
-            "endpoint."
+            "endpoint. With an API key set, plain http is taken only for a host inside this "
+            "deployment (loopback, a private or link-local address, a container host name, a "
+            ".local or .internal name, a single-label service name) unless "
+            "llm.openai.allow_plain_http is set; an agent's own base_url on this provider "
+            "follows the same rule."
         ),
         "probe": "llm",
         "subgroup": "OpenAI",
+    },
+    "llm.openai.allow_plain_http": {
+        "title": "Plain http to any host",
+        "description": (
+            "Off by default: with an API key set, a plain-http OpenAI base URL (or an agent's "
+            "own base_url on this provider) is taken only for a host inside this deployment. "
+            "On, it is taken for any host, and the API key is then sent in clear text to that "
+            "address with every request, readable by anything on the network between. Turn "
+            "it on only for a keyed server on a network you trust; prefer https."
+        ),
+        "subgroup": "OpenAI",
+        "advanced": True,
     },
     "llm.openai.compat": {
         "title": "OpenAI endpoint dialect",
@@ -868,40 +926,6 @@ ANNOTATIONS: dict[str, Annotation] = {
         "order": -1,
         "choices_from": "memory_backends",
     },
-    "memory.qdrant.collection": {
-        "title": "Qdrant case collection",
-        "description": (
-            "Qdrant collection name storing semantic case embeddings for few-shot "
-            "retrieval into the judge prompt. Bump this when migrating to a new "
-            "embedding scheme (e.g. a dimension change) rather than reusing an "
-            "incompatible old collection."
-        ),
-        "probe": "qdrant",
-        "applies_when": {"core.memory.backend": ["qdrant"]},
-    },
-    "memory.qdrant.function_hash_collection": {
-        "title": "Qdrant function-hash collection",
-        "description": (
-            "Separate Qdrant collection storing per-function normalized-opcode hashes "
-            "for the exact-match function-hash attribution tier, independent of the "
-            "fuzzy semantic case collection above."
-        ),
-        "applies_when": {"core.memory.backend": ["qdrant"]},
-    },
-    "memory.qdrant.url": {
-        "title": "Qdrant URL",
-        "description": ("URL of the Qdrant server backing long-term memory."),
-        "probe": "qdrant",
-        "applies_when": {"core.memory.backend": ["qdrant"]},
-    },
-    "memory.qdrant.api_key": {
-        "title": "Qdrant API key",
-        "description": (
-            "API key sent with every Qdrant request when the server enforces one (compose "
-            "does); empty means no authentication, which is fine for a loopback-only server."
-        ),
-        "applies_when": {"core.memory.backend": ["qdrant"]},
-    },
     "memory.top_k": {
         "title": "Memory top-K",
         "description": (
@@ -934,6 +958,19 @@ ANNOTATIONS: dict[str, Annotation] = {
             "existing setups using the flat env var keep working."
         ),
         "advanced": True,
+    },
+    "plugins.allowed": {
+        "title": "Allowed plugins",
+        "description": (
+            "The installed provider plugins this deployment loads, each named <kind>:<name>: "
+            "the kind (llm, static, sandbox or memory) and the name of the plugin's entry "
+            "point, which is the provider id it adds. Empty, the default, loads none, whatever "
+            "is installed. Allowing a plugin runs its package's code in the API and the "
+            "workers, with their access to the settings, the samples and the network. The "
+            "list names every installed plugin with its package, its version and whether it "
+            "loaded; a plugin that fails to load is left out with the reason."
+        ),
+        "editor": "plugin_allow_list",
     },
     "preprocessing.api_attck_map_path": {
         "title": "API-to-ATT&CK map path",
@@ -1202,7 +1239,7 @@ ANNOTATIONS: dict[str, Annotation] = {
     "triage.steps": {
         "title": "Triage pack steps",
         "description": (
-            "Your own steps, as JSON, laid over the shipped list: each one's id, the "
+            "Your own steps, laid over the shipped list: each one's id, the "
             "tool and server it calls (no server: one of the platform's own steps, "
             "named by its shipped id), its argument template ({sample_path}, {sha256}, "
             "{file_type}; none: the arguments its tool declares for the path and hash "
@@ -1215,6 +1252,7 @@ ANNOTATIONS: dict[str, Annotation] = {
             "list."
         ),
         "subgroup": "Triage pack",
+        "editor": "pack_steps",
     },
     "events.stream_deltas": {
         "title": "Stream partial answers",
@@ -1266,6 +1304,18 @@ ANNOTATIONS: dict[str, Annotation] = {
             "every later job in that worker without the index. 0 never re-attempts."
         ),
         "subgroup": "Technique check",
+    },
+    "validation.attck_refresh_days": {
+        "title": "Check for a new ATT&CK release every (days)",
+        "description": (
+            "How many days the cached ATT&CK bundles may age before they are compared with "
+            "MITRE's latest release and replaced by it when it is newer: downloaded, read back "
+            "whole, then swapped in with the previous files kept as a backup. 0 never checks "
+            "on its own; Check now and Update now below work either way. Applies to the worker "
+            "and to the knowledge tool server that builds the ATT&CK index. The longest "
+            "interval accepted is the longest that still has a calendar date to be due on."
+        ),
+        "subgroup": "ATT&CK data",
     },
     "validation.alignment_threshold": {
         "title": "Alignment gate threshold",
@@ -1615,6 +1665,25 @@ DECLARATION_LEAVES: tuple[tuple[str, str, str], ...] = (
         "the token sits in the answer), token_prefix, facts (the answer's other values "
         "shown to the operator, by path) and note. Empty when the token is typed in.",
     ),
+    (
+        "launcher_depth",
+        "launcher levels",
+        "How many levels at the top of the process tree the worker starts for this server "
+        "belong to a launcher that does not read the sample (1: the started process alone). "
+        "The report's isolation part holds them only to carrying none of the platform's own "
+        "variables and every process under them to every check, and says the launcher is "
+        "this block's word. Empty declares no launcher.",
+    ),
+    (
+        "prepass_tools",
+        "tools the platform calls",
+        "Which of the server's tools the platform calls itself, once per job, when this is "
+        "the server the generic static provider drives, as JSON: call_graph (the program's "
+        "whole call graph, for the priority-functions pre-pass), function_hashes (a hash per "
+        "function, for function-hash attribution) and anti_analysis (the triage pack's "
+        "anti-analysis scan). Each answer is read by that tool's own declaration (its rows, "
+        "values, places and arguments). Empty declares none, and those passes are not made.",
+    ),
 )
 
 
@@ -1627,12 +1696,12 @@ def mcp_server_annotations(
     order: int = 0,
     provider_owned: bool = False,
 ) -> dict[str, Annotation]:
-    """The thirty-five leaves of an ``MCPServerConfig`` block, described for ``label``.
+    """The thirty-seven leaves of an ``MCPServerConfig`` block, described for ``label``.
 
     Every MCP server in the settings has the same nine transport/tool-selection
     knobs, plus six tool-server fields (``cwd``, ``env_allow``, ``tools``,
     ``agents``, ``label``, ``call_timeout_seconds``), the seven of
-    ``sample_open`` and the thirteen other declaration fields
+    ``sample_open`` and the fifteen other declaration fields
     (``DECLARATION_LEAVES``); writing them out six times invites drift between
     blocks that must behave identically. The per-field wording is fixed, the
     server's name is the only variable.
@@ -1704,7 +1773,9 @@ def mcp_server_annotations(
         f"{prefix}.env": ann(
             f"{label} environment",
             "Extra environment variables for the stdio subprocess. The child gets "
-            "these plus a fixed base set, and no credentials of its own.",
+            "these plus a fixed base set, and no credentials of its own. A name of the "
+            "platform's own bootstrap variables (its database and Redis URLs, object-store "
+            "keys, settings key and JWT signing keys) is refused.",
             advanced=True,
         ),
         f"{prefix}.url": ann(
@@ -1741,7 +1812,8 @@ def mcp_server_annotations(
             f"{label} inherited environment names",
             "Names copied out of the API process's own environment into the "
             "stdio subprocess — the only way a credential reaches this sidecar, "
-            "since the environment field above is visible in the UI.",
+            "since the environment field above is visible in the UI. The platform's "
+            "own bootstrap variables are refused here too.",
             advanced=True,
         ),
     }
@@ -1781,6 +1853,44 @@ def mcp_server_annotations(
             "analyse_argument",
             "analysis tool's argument",
             "The argument the opened name goes in; empty calls the tool with none.",
+        ),
+        (
+            "program_arguments",
+            "further program arguments",
+            "Further arguments a tool names an opened program by (a diff's two programs, "
+            "say). On a server other jobs share, each one a call carries must name a "
+            "program this job opened, and one it leaves out is given the job's program.",
+        ),
+        (
+            "open_path_arguments",
+            "further open path arguments",
+            "Further arguments that name a file a tool opens, beside the open tool's. On "
+            "a server other jobs share, each may only name the job's own copy of the sample.",
+        ),
+        (
+            "job_safe_tools",
+            "job-safe tools",
+            "Tools that take no program or path argument and read nothing a job opened (a "
+            "number converter, a lookup). On a server other jobs share, any other tool "
+            "whose schema takes no declared program or path argument is withheld.",
+        ),
+        (
+            "shared_withheld_tools",
+            "tools withheld when shared",
+            "Tools withheld on a server other jobs share whatever arguments they take: "
+            "ones that run code or change the whole project, past the job's own program.",
+        ),
+        (
+            "close_tool",
+            "close tool",
+            "The tool that closes or deletes an opened program. Declared, each program a "
+            "job opened on this server is closed when the job ends; empty, the programs "
+            "stay on the server.",
+        ),
+        (
+            "close_argument",
+            "close tool's argument",
+            "The argument the opened program's name goes in (required with close tool).",
         ),
     ):
         entries[f"{sample_open}.{leaf}"] = ann(
@@ -1894,18 +2004,6 @@ ANNOTATIONS.update(
             "probe": "r2",
             "subgroup": "Connection",
         },
-        "static.r2.mirror_dir": {
-            "title": "radare2 sample directory",
-            "description": (
-                "Host directory the sample is copied into so radare2 can open it by "
-                "path, hardened the way every mirror is: owner-only, and removed when "
-                "the job ends. It may not be hidden. radare2 rejects any path with a "
-                "'/.' segment, so a sample under one makes every r2 tool call answer "
-                "'Failed to open file.'"
-            ),
-            "applies_when": _STATIC_R2,
-            "subgroup": "Connection",
-        },
         "static.capa.rules_dir": {
             "title": "capa rules directory",
             "description": (
@@ -1956,10 +2054,18 @@ ANNOTATIONS.update(
             "probe": "capa_yara",
             "subgroup": "Rules",
         },
+        # Shown under every provider: the check it bounds runs on every job that
+        # drafts detection rules, whichever static provider is selected.
         "static.yara.timeout_seconds": {
             "title": "YARA timeout (s)",
-            "description": "Wall-clock budget for one YARA scan of the sample.",
-            "applies_when": _STATIC_CAPA_YARA,
+            "description": (
+                "Wall-clock budget for checking the drafted YARA rule against the sample "
+                "it was drafted from (report §10.2); a check that runs past it is reported "
+                "as not checked. It is also one of the two values whose longer is the "
+                "per-call budget of a tool server that declares none, when "
+                "core.mcp.breaker.call_timeout_seconds is unset. The capa_yara provider's "
+                "own scan does not read it."
+            ),
             "subgroup": "Rules",
         },
         "sandbox.cape2.base_url": {
@@ -2113,6 +2219,7 @@ ANNOTATIONS.update(
             "applies_when": _SANDBOX_UPLOAD,
         },
         "sandbox.report_formats": {
+            "editor": "report_formats",
             "title": "Declared report formats",
             "description": (
                 "Your own sandbox report formats, as JSON, read by every sandbox "
@@ -2122,7 +2229,8 @@ ANNOTATIONS.update(
                 "reads it (cape2, cuckoo, triage, generic, or empty), its own "
                 "JSONPath mapping for the generic reader (mapping, as "
                 "sandbox.rest.mapping; absent, that one is read), and its signature "
-                "severity scale. A new name is tried before the built-ins; a "
+                "severity scale, and the display_name published text gives the sandbox "
+                "(empty, the format's name). A new name is tried before the built-ins; a "
                 "built-in's name is merged over that built-in, field by field."
             ),
         },
@@ -2143,6 +2251,16 @@ ANNOTATIONS.update(
         "static.r2", "radare2 MCP", probe="r2", applies_when=_STATIC_R2, provider_owned=True
     )
 )
+ANNOTATIONS["static.r2.work_dir"] = {
+    **ANNOTATIONS["static.r2.work_dir"],
+    "description": (
+        "Directory under the worker's samples directory the sample is copied into so "
+        "radare2 can open it by path, hardened the way every mirror is: owner-only, and "
+        "removed when the job ends. It may not be hidden. radare2 rejects any path with a "
+        "'/.' segment, so a sample under one makes every r2 tool call answer 'Failed to "
+        "open file.'"
+    ),
+}
 ANNOTATIONS.update(
     mcp_server_annotations(
         "sandbox.cape2.mcp", "CAPE MCP", applies_when=_SANDBOX_CAPE2, provider_owned=True
@@ -2223,6 +2341,19 @@ ANNOTATIONS.update(
                 "team that fans out."
             ),
             "subgroup": "Resilience",
+            "advanced": True,
+        },
+        "mcp.answer_scope_notes": {
+            "title": "Tell the model what each tool's answer shows",
+            "description": (
+                "On, a tool whose declaration says what its answer shows and what it does "
+                "not show (its shows and does_not_show) is shown to the model with that "
+                "after its description: 'This answer shows: … It does not show: …'. "
+                "Off, the default, the declarations are shown in the console and the docs "
+                "only, and every prompt is as it was; a tool that declares neither is "
+                "shown as before either way. Off until an A/B measures what it changes."
+            ),
+            "subgroup": "Tool descriptions",
             "advanced": True,
         },
         "static.generic.server": {

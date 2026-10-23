@@ -1,17 +1,28 @@
 {
   "sandbox_api_calls": {
-    "apis": [],
-    "total": 0
+    "absent": [
+      "apistats",
+      "calls"
+    ],
+    "statement": "The report does not hold this part, so whether there was any is not known. This is not the same as none."
   },
   "sandbox_dropped_files": {
-    "dropped": [],
-    "total": 0
+    "absent": [
+      "dropped_files"
+    ],
+    "statement": "The report does not hold this part, so whether there was any is not known. This is not the same as none."
   },
   "sandbox_mutexes": {
-    "mutexes": [],
-    "total": 0
+    "absent": [
+      "summary.mutexes",
+      "calls"
+    ],
+    "statement": "The report does not hold this part, so whether there was any is not known. This is not the same as none."
   },
   "sandbox_network": {
+    "absent": [
+      "network.tls"
+    ],
     "dns": [
       {
         "answers": [],
@@ -1060,6 +1071,7 @@
     ],
     "http": [],
     "icmp": [],
+    "statement": "The report does not hold this part, so whether there was any is not known. This is not the same as none.",
     "tcp": [
       {
         "dport": 443,
@@ -2078,14 +2090,20 @@
     "total": 0
   },
   "sandbox_registry_ops": {
-    "registry": [],
-    "total": 0
+    "absent": [
+      "registry",
+      "calls"
+    ],
+    "statement": "The report does not hold this part, so whether there was any is not known. This is not the same as none."
   },
   "sandbox_services_and_tasks": {
-    "commands": [],
-    "services": [],
-    "tasks": [],
-    "total": 0
+    "absent": [
+      "summary.created_services",
+      "summary.started_services",
+      "summary.executed_commands",
+      "calls"
+    ],
+    "statement": "The report does not hold this part, so whether there was any is not known. This is not the same as none."
   },
   "sandbox_signatures": {
     "signatures": [

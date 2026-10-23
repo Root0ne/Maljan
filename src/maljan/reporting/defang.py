@@ -9,7 +9,7 @@ it needs the real one.
 
 The rule is decided by the indicator's **kind**, never by the shape of the
 string. The earlier rule defanged anything with a dot and no backslash, which
-turned the file name ``update_data.dat`` into ``update_data[.]dat`` and wrote
+turned the file name ``state_cache.dat`` into ``state_cache[.]dat`` and wrote
 URLs as ``hxxp[://]``, a form nobody else uses. A hash, a path, a registry key,
 a mutex, a pipe, a user agent or a command is returned exactly as given.
 """

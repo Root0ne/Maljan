@@ -1,5 +1,9 @@
 "use client";
 
+import { patchStageAt, removeStageAt } from "./stageRename";
+import { carryUid, uidOf } from "./stageUids";
+import { seededProfiles } from "./seededProfiles";
+import { boxNumber, debatePlaceholder, patchDebate } from "./debateOptions";
 import { humaniseKey } from "@/lib/humanise";
 import { useEffect, useRef, useState } from "react";
 import { api } from "@/lib/api";
@@ -30,15 +34,6 @@ const LINT_DELAY_MS = 400;
 
 const input =
   "w-full bg-bg-deep border border-border rounded px-2 py-1.5 text-sm text-text-primary focus:outline-none focus:border-accent";
-
-/** Seeded by the settings model, so they lock rather than delete. */
-const BUILTIN_PROFILES = new Set([
-  "default",
-  "measurement",
-  "mobile",
-  "deep_static",
-  "team_lead",
-]);
 
 const KINDS: StageKind[] = ["triage", "analysis", "debate", "verdict", "report"];
 
@@ -117,6 +112,8 @@ export default function StagesEditor({
   onSetActive: (name: string) => void;
 }) {
   const value = (staged ?? current?.value ?? entry.default ?? {}) as Record<string, ProfileEntry>;
+  /** Seeded teams lock rather than delete; the catalog default names them. */
+  const seeded = seededProfiles(entry.default);
   const [newKey, setNewKey] = useState("");
   const [keyError, setKeyError] = useState<KeyError | null>(null);
   const newKeyRef = useRef<HTMLInputElement | null>(null);
@@ -192,9 +189,7 @@ export default function StagesEditor({
     put(profile, { stages, derived_from_analysts: false });
 
   const putStage = (profile: string, index: number, next: Partial<StageEntry>) => {
-    const stages = [...value[profile].stages];
-    stages[index] = { ...stages[index], ...next };
-    putStages(profile, stages);
+    putStages(profile, patchStageAt(value[profile].stages, index, next));
   };
 
   const moveStage = (profile: string, index: number, by: number) => {
@@ -229,20 +224,14 @@ export default function StagesEditor({
         : [
             ...stages.slice(0, reportIndex),
             { ...fresh, depends_on: stages[reportIndex].depends_on },
-            { ...stages[reportIndex], depends_on: [fresh.key] },
+            carryUid(stages[reportIndex], { ...stages[reportIndex], depends_on: [fresh.key] }),
           ];
     putStages(profile, next);
   };
 
   const removeStage = (profile: string, index: number) => {
     const stages = value[profile].stages;
-    const gone = stages[index].key;
-    putStages(
-      profile,
-      stages
-        .filter((_, i) => i !== index)
-        .map((s) => ({ ...s, depends_on: s.depends_on.filter((d) => d !== gone) }))
-    );
+    putStages(profile, removeStageAt(stages, index));
   };
 
   const add = (from?: string) => {
@@ -291,7 +280,7 @@ export default function StagesEditor({
   return (
     <div className="space-y-3" data-testid="stages-editor">
       {Object.entries(value).map(([key, profile]) => {
-        const locked = BUILTIN_PROFILES.has(key);
+        const locked = seeded.has(key);
         const stages = profile.stages ?? [];
         const cardError = errorFor(`${entry.key}.${key}`, true);
         const { byStage } = teamFindings(findings, key);
@@ -353,7 +342,8 @@ export default function StagesEditor({
             <ol className="space-y-2">
               {stages.map((stage, index) => (
                 <StageCard
-                  key={stage.key}
+                  // A uid that survives key edits, removals and moves (`stageUids`).
+                  key={uidOf(stage)}
                   profile={key}
                   stage={stage}
                   index={index}
@@ -757,15 +747,9 @@ function StageCard({
               min={1}
               aria-label={`${label} max rounds`}
               value={debate?.max_rounds ?? ""}
-              placeholder="global"
+              placeholder={debatePlaceholder(debate, "max_rounds")}
               onChange={(e) =>
-                onPatch({
-                  debate: {
-                    max_rounds: Number(e.target.value),
-                    consensus_threshold: debate?.consensus_threshold ?? 0.8,
-                    sycophancy_check: debate?.sycophancy_check ?? true,
-                  },
-                })
+                onPatch({ debate: patchDebate(debate, "max_rounds", boxNumber(e.target.value)) })
               }
             />
           </label>
@@ -779,14 +763,10 @@ function StageCard({
               max={1}
               aria-label={`${label} consensus threshold`}
               value={debate?.consensus_threshold ?? ""}
-              placeholder="global"
+              placeholder={debatePlaceholder(debate, "consensus_threshold")}
               onChange={(e) =>
                 onPatch({
-                  debate: {
-                    max_rounds: debate?.max_rounds ?? 3,
-                    consensus_threshold: Number(e.target.value),
-                    sycophancy_check: debate?.sycophancy_check ?? true,
-                  },
+                  debate: patchDebate(debate, "consensus_threshold", boxNumber(e.target.value)),
                 })
               }
             />
@@ -797,13 +777,7 @@ function StageCard({
               aria-label={`${label} sycophancy check`}
               checked={debate?.sycophancy_check ?? true}
               onChange={(e) =>
-                onPatch({
-                  debate: {
-                    max_rounds: debate?.max_rounds ?? 3,
-                    consensus_threshold: debate?.consensus_threshold ?? 0.8,
-                    sycophancy_check: e.target.checked,
-                  },
-                })
+                onPatch({ debate: patchDebate(debate, "sycophancy_check", e.target.checked) })
               }
             />
             <span className="text-text-muted">Sycophancy check</span>

@@ -7,7 +7,8 @@ import time
 import uuid
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request, status
+from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
@@ -15,8 +16,20 @@ from app.deps import get_current_user
 from app.logging_config import get_logger
 from app.logsafe import log_safe
 from app.models.user import User
-from app.schemas.evidence import EvidenceEntryResponse, EvidenceListResponse
-from app.schemas.job import JobCreateRequest, JobListResponse, JobResponse, JobRoster
+from app.schemas.evidence import (
+    EvidenceEntryResponse,
+    EvidenceListResponse,
+    LedgerVerificationResponse,
+)
+from app.schemas.job import (
+    FollowUpListResponse,
+    FollowUpRequest,
+    FollowUpResponse,
+    JobCreateRequest,
+    JobListResponse,
+    JobResponse,
+    JobRoster,
+)
 from app.services import audit
 from app.services.analysis_service import AnalysisService
 from app.services.settings_service import SettingsService
@@ -97,6 +110,30 @@ async def _unprobed_models_for(db: AsyncSession, config: dict[str, Any]) -> list
     return await unprobed_models(db, settings, called_assignments(settings, team.stages))
 
 
+async def _undecryptable_secrets(
+    db: AsyncSession, config: dict[str, Any] | None = None
+) -> dict[str, str]:
+    """The stored core secrets this job would read that this API cannot decrypt.
+
+    Keyed by setting key. A secret the job never uses (a server its team does not
+    bind, an evaluation arm's key) is not named: it is no reason to refuse.
+    """
+    from maljan.core.settings_overrides import StoredValueRefused
+
+    from app.services.settings_service import (
+        load_core_overrides,
+        refused_secrets_a_job_uses,
+        refusing_undecryptable_secrets,
+    )
+
+    try:
+        with refusing_undecryptable_secrets():
+            await load_core_overrides(db)
+    except StoredValueRefused as exc:
+        return await refused_secrets_a_job_uses(db, exc.refused, config)
+    return {}
+
+
 async def _unready_providers_for(db: AsyncSession, config: dict[str, Any]) -> list[str]:
     """Every agent of this job's team whose non-degrading static provider is not ready.
 
@@ -152,6 +189,26 @@ async def create_job(
         f"Creating analysis job for sample={log_safe(body.sample_id)}",
         extra={"sample_id": log_safe(body.sample_id), "user_id": log_safe(user.id)},
     )
+    undecryptable = await _undecryptable_secrets(db, body.config)
+    if undecryptable:
+        # The worker would refuse the run for the same keys; said now, the job
+        # is never accepted only to fail when it starts. The setting keys are
+        # an operator's detail: a non-admin is told only that one needs entering.
+        named = (
+            " (" + "; ".join(f"{k}: {why}" for k, why in sorted(undecryptable.items())) + ")"
+            if user.role == "admin"
+            else ""
+        )
+        remedy = (
+            "Enter it again in the console (Settings, Configuration)"
+            if user.role == "admin"
+            else "Ask an administrator to enter it again"
+        )
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"A stored secret cannot be decrypted{named}. {remedy}; nothing runs on "
+            "a default in its place.",
+        )
     unprobed = await _unprobed_models_for(db, body.config or {})
     if unprobed:
         from app.services.model_probes import refusal_sentence
@@ -575,6 +632,304 @@ async def get_job_evidence(
         total=int(total),
         page=page,
         page_size=page_size,
+    )
+
+
+@router.get("/{job_id}/evidence/verify", response_model=LedgerVerificationResponse)
+async def verify_job_evidence(
+    job_id: uuid.UUID,
+    user: User = Depends(get_current_user),
+    svc: AnalysisService = Depends(_get_service),
+    db: AsyncSession = Depends(get_db),
+) -> Any:
+    """Recompute the job's ledger chain from its rows and check it against the seal.
+
+    Ownership is the job's, checked exactly the way the evidence page checks
+    it. The answer always says what it found (``services.ledger_verify``):
+    ``verified``; ``broken`` with the reason and the first broken ``seq``;
+    ``other_key`` when the seal names a key the platform cannot derive;
+    ``unverifiable`` when the audit head or the job's own audit rows are under a key
+    the platform cannot derive (after a key rotation); or
+    ``not_sealed`` when the run predates sealing. Nothing is written.
+    """
+    from app.services.ledger_verify import verify_job
+
+    job = await svc.get_job(job_id, user)
+    if not job:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Job not found")
+    verdict = await verify_job(db, job_id)
+    if verdict["status"] not in ("verified", "not_sealed"):
+        logger.warning(
+            f"Ledger of job {log_safe(job_id)} did not verify: {log_safe(verdict['status'])} "
+            f"at seq {log_safe(verdict['first_broken_seq'])}",
+            extra={"job_id": log_safe(job_id), "user_id": log_safe(user.id)},
+        )
+    return LedgerVerificationResponse(**verdict)
+
+
+@router.get("/{job_id}/package")
+async def get_job_package(
+    job_id: uuid.UUID,
+    user: User = Depends(get_current_user),
+    svc: AnalysisService = Depends(_get_service),
+    db: AsyncSession = Depends(get_db),
+) -> StreamingResponse:
+    """The job's verifiable package: a deterministic ``.tar.gz`` (``services.job_package``).
+
+    It holds the stored run (report, evidence ledger, run summary, the judge's
+    bundle), the Markdown report, the STIX bundle, the spilled parts with
+    their digests, the ledger seal with its verification at build time and a
+    manifest of every file's SHA-256 and size, signed with an HMAC under a key
+    derived from the settings encryption key when the platform holds one. A
+    part the job lacks is listed in the manifest as absent, with why. The
+    sample file itself is not included; spilled tool answers may contain bytes
+    from it. Ownership is the job's, checked exactly the way the evidence page
+    checks it: 404 for anyone else. The rows and the seal's verification are
+    read in one snapshot; the package is built into an anonymous temporary
+    file and streamed from it. A file above ``upload_max_bytes`` is left out
+    and listed in the manifest as absent with its SHA-256 and size; 422 only
+    when the manifest itself would be above it. No limit
+    of its own bounds concurrent builds: the platform's per-client request
+    rate limit (``rate_limit_requests``) applies, as to every route.
+    """
+    import tempfile
+
+    from app.services import job_package
+
+    job = await svc.get_job(job_id, user)
+    if not job:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Job not found")
+    spool = tempfile.TemporaryFile()  # noqa: SIM115 — closed by the stream it feeds
+    try:
+        manifest = await job_package.build_for_job(db.bind, job_id, spool)
+    except job_package.PackageError as exc:
+        spool.close()
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)
+        ) from None
+    except BaseException:
+        spool.close()
+        raise
+    if manifest is None:
+        spool.close()
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Job not found")
+    seal_status = str((manifest.get("seal") or {}).get("status") or "")
+    if seal_status not in ("verified", "not_sealed"):
+        logger.warning(
+            f"Package of job {log_safe(job_id)} built with a ledger seal that reads "
+            f"{log_safe(seal_status)}",
+            extra={"job_id": log_safe(job_id), "user_id": log_safe(user.id)},
+        )
+    headers = {
+        "Content-Disposition": f'attachment; filename="maljan-job-{job_id}.tar.gz"',
+        "X-Package-Seal-Status": seal_status,
+        "X-Package-Signed": "true" if "key_id" in (manifest.get("signature") or {}) else "false",
+    }
+    return StreamingResponse(
+        job_package.copy_chunks(spool), media_type="application/gzip", headers=headers
+    )
+
+
+@router.get("/{job_id}/evidence/{entry_id}/objects/{part}")
+async def get_job_evidence_object(
+    job_id: uuid.UUID,
+    entry_id: str = Path(..., max_length=32),
+    part: str = Path(..., max_length=32),
+    user: User = Depends(get_current_user),
+    svc: AnalysisService = Depends(_get_service),
+    db: AsyncSession = Depends(get_db),
+) -> StreamingResponse:
+    """One part of a ledger entry's answer the entry does not keep whole, as it was kept.
+
+    The entry's ``spilled`` reference names the part, its object key, byte
+    length and SHA-256 (``maljan.schemas.evidence_spill``). Ownership is the
+    job's, checked exactly the way the evidence page checks it. 404 when the
+    job, the entry or the reference is not there, or the part was never kept
+    (its reference states why); 502 when the store cannot hand the object
+    back. The bytes are streamed with the recorded digest and length in the
+    headers and hashed as they go (:func:`verified_chunks`); the last chunk is
+    sent only once the digest matches, so the body is complete only when it
+    does.
+    """
+    import asyncio
+
+    from maljan.schemas.evidence_spill import CONTENT_TYPES, JSON
+    from sqlalchemy import select as sa_select
+
+    from app.models.evidence import EvidenceEntry
+    from app.services import object_store
+
+    job = await svc.get_job(job_id, user)
+    if not job:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Job not found")
+    row = (
+        await db.execute(
+            sa_select(EvidenceEntry).where(
+                EvidenceEntry.job_id == job_id, EvidenceEntry.entry_id == entry_id
+            )
+        )
+    ).scalar_one_or_none()
+    if row is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Entry not found")
+    ref = next(
+        (held for held in row.spilled or () if isinstance(held, dict) and held.get("part") == part),
+        None,
+    )
+    if ref is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="The entry keeps no such part"
+        )
+    key = ref.get("key")
+    if not key:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"The part was not kept: {ref.get('error') or 'no key recorded'}",
+        )
+    # Only a key under this job's own prefix is read, whatever the row says.
+    if not str(key).startswith(object_store.evidence_prefix(job_id)):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="The part was not kept for this job"
+        )
+    try:
+        response = await asyncio.to_thread(object_store.open_object, object_store.client(), key)
+    except Exception as exc:  # noqa: BLE001 — the store's failure is logged, not served
+        logger.warning(
+            f"Evidence object {log_safe(key)} could not be read: {log_safe(type(exc).__name__)}",
+            extra={"job_id": log_safe(job_id), "user_id": log_safe(user.id)},
+        )
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY, detail="The object store did not hand it back"
+        ) from None
+    expected = str(ref.get("sha256") or "")
+
+    media = CONTENT_TYPES.get(part, "application/octet-stream")
+    suffix = "json" if media == JSON else "txt"
+    headers = {
+        "Content-Disposition": f'attachment; filename="{row.entry_id}-{part}.{suffix}"',
+        "X-Content-SHA256": expected,
+    }
+    if isinstance(ref.get("bytes"), int):
+        headers["Content-Length"] = str(ref["bytes"])
+    return StreamingResponse(
+        verified_chunks(response, expected, key), media_type=media, headers=headers
+    )
+
+
+class EvidenceDigestMismatch(RuntimeError):
+    """A kept part whose bytes end on another digest than its entry recorded."""
+
+
+def verified_chunks(response: Any, expected: str, key: str) -> Any:
+    """The object ``response`` streams, chunk by chunk, its last chunk only once it verifies.
+
+    Read in ``EVIDENCE_CHUNK_BYTES`` and hashed as it goes, so no part is
+    held whole; one chunk is always held back, and the last is handed over
+    only after the whole object's digest matches ``expected``. Bytes that end
+    on another digest raise :class:`EvidenceDigestMismatch` before the held
+    chunk goes out: with ``Content-Length`` set, the client sees a short body
+    and fails, and the body is complete only when it matches.
+    """
+    import hashlib
+
+    from app.services import object_store
+
+    digest = hashlib.sha256()
+    held: bytes | None = None
+    try:
+        for chunk in response.stream(object_store.EVIDENCE_CHUNK_BYTES):
+            digest.update(chunk)
+            if held is not None:
+                yield held
+            held = chunk
+    finally:
+        response.close()
+        response.release_conn()
+    if digest.hexdigest() != expected:
+        logger.warning(f"Evidence object {log_safe(key)} does not match its recorded digest")
+        raise EvidenceDigestMismatch(key)
+    if held is not None:
+        yield held
+
+
+@router.post(
+    "/{job_id}/follow-ups",
+    response_model=FollowUpResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def ask_follow_up(
+    job_id: uuid.UUID,
+    body: FollowUpRequest,
+    user: User = Depends(get_current_user),
+    svc: AnalysisService = Depends(_get_service),
+    db: AsyncSession = Depends(get_db),
+) -> Any:
+    """Ask a finished job a new question, answered from what the run stored.
+
+    The report's question round answers it from the job's stored report,
+    ledger and run state (``services.follow_up``): no tool is called and
+    nothing is analysed again, so a question the stored evidence cannot
+    settle is "not determinable from this run" with the reason. The answer is
+    kept as a record of its own beside the report, which is never changed, and
+    goes onto the audit chain naming the report digest it was answered from.
+    Ownership is the job's, checked exactly the way the evidence page checks
+    it: 404 for anyone else. 409 for a job still pending or running, or one
+    that stored no report; 422 for a report that cannot be read. No database
+    transaction is held while the model answers.
+    """
+    from app.services import follow_up
+
+    job = await svc.get_job(job_id, user)
+    if not job:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Job not found")
+    try:
+        prepared = await follow_up.prepare(db, job)
+    except follow_up.FollowUpRefused as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from None
+    # The reads end here: the model's answer can take minutes.
+    await db.commit()
+    answered = await follow_up.answer(prepared, body.question)
+    # The usage numbers are taken from the job's event counter before the job
+    # row is locked: no Redis call waits under the lock.
+    first = (
+        await follow_up.reserve_seqs(prepared.job_id, len(answered.usage))
+        if answered.usage
+        else None
+    )
+    try:
+        row = await follow_up.store(
+            db, prepared, answered, body.question, user_id=user.id, first=first
+        )
+    except follow_up.FollowUpRefused as exc:
+        await db.rollback()
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from None
+    await db.commit()
+    logger.info(
+        f"Follow-up {log_safe(row.id)} on job {log_safe(job_id)} answered: {log_safe(row.outcome)}",
+        extra={"job_id": log_safe(job_id), "user_id": log_safe(user.id)},
+    )
+    return FollowUpResponse.model_validate(follow_up.as_mapping(row))
+
+
+@router.get("/{job_id}/follow-ups", response_model=FollowUpListResponse)
+async def list_follow_ups(
+    job_id: uuid.UUID,
+    user: User = Depends(get_current_user),
+    svc: AnalysisService = Depends(_get_service),
+    db: AsyncSession = Depends(get_db),
+) -> Any:
+    """The follow-up questions asked of the job and their answers, oldest first.
+
+    Ownership is the job's, checked exactly the way the evidence page checks it.
+    """
+    from app.services import follow_up
+
+    job = await svc.get_job(job_id, user)
+    if not job:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Job not found")
+    rows = await follow_up.list_for(db, job_id)
+    return FollowUpListResponse(
+        job_id=job_id,
+        follow_ups=[FollowUpResponse.model_validate(follow_up.as_mapping(r)) for r in rows],
     )
 
 

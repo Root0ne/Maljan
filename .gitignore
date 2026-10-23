@@ -63,6 +63,7 @@ data/uploads/
 external/
 data/sigma_rules/
 data/capa-rules/
+data/capa-signatures/
 data/external/
 # CAPE analysis reports: ~7 MB each and reproducible from the instance. No
 # trailing slash, so a symlink to the reports (a worktree borrowing them) is
@@ -89,6 +90,16 @@ logs/
 .claude/settings.local.json
 # Ephemeral cron lock, written per session by Claude /schedule.
 .claude/scheduled_tasks.lock
+# scripts/dev/ghidra_manager.py build state.
+.ghidra_mcp_state.json
 
 # Rehearsal outputs (scripts/rehearsal/run.py --out default) and its in-process work files.
 rehearsal-results/
+
+# Calibration set outputs (scripts/calibration/run.py build --out default): the
+# synthetic cases' bytes are rebuilt from scripts/calibration/seeds.json, never kept.
+calibration-set/
+# The private answer-key term list the leak check reads (scripts/calibration/leak_check.py).
+/answer-key-terms.txt
+# Its allow-list: digests of the private terms, kept beside them.
+/answer-key-allow.json

@@ -13,9 +13,14 @@ import AgentDefinitionsEditor, {
   type LlmGlobalFallback,
 } from "./AgentDefinitionsEditor";
 import StagesEditor from "./StagesEditor";
+import PluginAllowListEditor from "./PluginAllowListEditor";
 import ServerMapEditor from "./ServerMapEditor";
 import ToolFactsLeafEditor from "./ToolFactsLeafEditor";
+import PackStepsEditor from "./PackStepsEditor";
+import RecordRowsEditor from "./RecordRowsEditor";
+import { ENRICHMENT_SOURCES_SPEC, REPORT_FORMATS_SPEC } from "./recordRows";
 import PackStepsLeftOutNote from "./PackStepsLeftOutNote";
+import StoredValueRefusedNote from "./StoredValueRefusedNote";
 import { PACK_STEPS_KEY } from "./packStepsLeftOut";
 import { APPLIES_LABEL, SOURCE_LABEL } from "./vocabulary";
 import { Widget } from "./widgets";
@@ -117,6 +122,7 @@ export default function FieldRow({
   llmGlobal,
   onChangeLlmAgents,
   definitions,
+  agentRoster,
   activeProfile,
   onSetActive,
   errors,
@@ -141,6 +147,9 @@ export default function FieldRow({
   /** `core.agents.definitions`'s effective value, read-only here — the
    *  profiles editor only offers enabled, non-judge definitions. */
   definitions?: Record<string, AgentDefinitionEntry>;
+  /** For the server map: the agents a server may be bound to, as the next
+   *  apply will judge them (`serverAgentRoster`). */
+  agentRoster?: string[];
   /** `core.agents.profile`'s effective value, for the "active" badge. */
   activeProfile?: string;
   /** Stages `core.agents.profile` — a "Set active" click, distinct from this
@@ -184,6 +193,7 @@ export default function FieldRow({
             current={current}
             staged={staged}
             errors={errors ?? {}}
+            agentRoster={agentRoster ?? []}
             onChange={onChange}
           />
         ) : entry.editor === "agent_definitions" ? (
@@ -206,6 +216,45 @@ export default function FieldRow({
             current={current}
             staged={staged}
             onChange={onChange}
+          />
+        ) : entry.editor === "pack_steps" ? (
+          <PackStepsEditor
+            entry={entry}
+            current={current}
+            staged={staged}
+            errors={errors ?? {}}
+            servers={servers ?? {}}
+            onChange={onChange}
+          />
+        ) : entry.editor === "plugin_allow_list" ? (
+          <PluginAllowListEditor
+            entry={entry}
+            current={current}
+            staged={staged}
+            onChange={onChange}
+          />
+        ) : entry.editor === "enrichment_sources" || entry.editor === "report_formats" ? (
+          <RecordRowsEditor
+            entry={entry}
+            current={current}
+            staged={staged}
+            spec={
+              entry.editor === "enrichment_sources"
+                ? ENRICHMENT_SOURCES_SPEC
+                : REPORT_FORMATS_SPEC
+            }
+            onChange={onChange}
+            jsonView={
+              <Widget
+                entry={entry}
+                current={current}
+                staged={staged}
+                onChange={onChange}
+                onUnstage={onUnstage}
+                models={models}
+                inputId={inputId}
+              />
+            }
           />
         ) : entry.editor === "stages" ? (
           <StagesEditor
@@ -318,6 +367,9 @@ export default function FieldRow({
       {/* The stored steps the API leaves out run nowhere; the mark says so
           beside the value the row shows. */}
       {entry.key === PACK_STEPS_KEY && <PackStepsLeftOutNote />}
+      {/* A stored value the API reads past is not in force; its default is.
+          One it could not serve says why. */}
+      <StoredValueRefusedNote settingKey={entry.key} current={current} />
       {!entry.editable && entry.reason && (
         <p className="text-[11px] text-text-muted mt-1">{entry.reason}</p>
       )}

@@ -160,6 +160,8 @@ def collect(
         seen[tid].add(source)
         rows.setdefault(tid, []).append((source, confidence))
 
+    invalid = invalid_technique_ids(ledger)
+    refused = refused_technique_ids(isrs, invalid)
     for name, isr in (isrs or {}).items():
         source = str(getattr(isr, "agent_id", "") or name)
         for claim in getattr(isr, "claims", None) or []:
@@ -171,9 +173,10 @@ def collect(
         for finding in getattr(isr, "findings", None) or []:
             confidence = _as_confidence(getattr(finding, "confidence", None))
             for raw in getattr(finding, "technique_ids", None) or []:
-                add(str(raw).strip().upper(), source, confidence)
+                tid = str(raw).strip().upper()
+                if tid not in refused:
+                    add(tid, source, confidence)
 
-    invalid = invalid_technique_ids(ledger)
     for entry in ledger or []:
         if asserting_source(entry) is None:
             continue
@@ -192,6 +195,9 @@ EVIDENCE_ID_RE = re.compile(r"^ev_[0-9]+$")
 # catalogue, whose rows are associations.
 _SIGNATURE_RULES = "evidence_summary.yara_rule_strings"
 _API_CATALOGUE = "evidence_summary.catalogue_associations"
+# An answer that says what something is rather than reading the sample
+# (``evidence_roots``'s reference tools): the kind that says an id is no technique.
+_ID_REFERENCE = "evidence_roots._REFERENCE_TOOLS"
 
 
 def yara_rule_strings(ledger: Sequence[Any] | None) -> dict[str, list[dict[str, Any]]]:
@@ -279,14 +285,17 @@ def technique_evidence(
             return
         found.setdefault(tid, set()).add(eid)
 
+    invalid = invalid_technique_ids(ledger)
+    refused = refused_technique_ids(isrs, invalid)
     for isr in (isrs or {}).values():
         for finding in getattr(isr, "findings", None) or []:
             cited = list(getattr(finding, "evidence_ids", None) or [])
             for tid in getattr(finding, "technique_ids", None) or []:
+                if str(tid or "").strip().upper() in refused:
+                    continue
                 for eid in cited:
                     add(tid, eid)
 
-    invalid = invalid_technique_ids(ledger)
     for entry in ledger or []:
         if asserting_source(entry) is None:
             continue
@@ -302,17 +311,50 @@ def _entry_id(entry: Any) -> str:
     return str(getattr(entry, "id", None) or getattr(entry, "entry_id", None) or "").strip()
 
 
+def unverified_claim_ids(isr: Any) -> set[str]:
+    """The technique ids ``isr``'s own claims carry flagged as not in the catalogue.
+
+    The analyst was told the id is not a technique and kept it
+    (``technique_id_valid=False``); the same id named in a finding is the
+    same unverified id (``refused_technique_ids``).
+    """
+    return {
+        str(getattr(claim, "technique_id", "") or "").strip().upper()
+        for claim in getattr(isr, "claims", None) or []
+        if getattr(claim, "technique_id", None) and not getattr(claim, "technique_id_valid", True)
+    }
+
+
+def refused_technique_ids(isrs: dict[str, Any] | None, invalid: set[str]) -> set[str]:
+    """The ids no finding is counted under: ``invalid``, and every id any claim flagged.
+
+    Whether an id is a technique is a fact about the id, not about the analyst
+    who wrote it: one analyst's claim flagged as not in the catalogue makes the
+    id unverified in every finding of the run.
+    """
+    refused = set(invalid)
+    for isr in (isrs or {}).values():
+        refused |= unverified_claim_ids(isr)
+    return refused
+
+
 def invalid_technique_ids(ledger: Sequence[Any] | None) -> set[str]:
     """Every id a ledger entry of this run answered as not a technique.
 
-    ``attck_lookup`` says ``valid: false`` beside the id, ``attck_validate``
-    lists the id under ``invalid``. An id any source marks invalid is never
-    counted as asserted, whichever rule named it.
+    A reference tool's answer says ``valid: false`` beside the id or lists the
+    id under ``invalid`` (read for entries of a tool declared as a reference
+    only). An id any such source marks invalid is never counted as asserted,
+    whichever rule named it.
     """
     found: set[str] = set()
     for entry in ledger or []:
         structured = getattr(entry, "structured", None)
         if not isinstance(structured, dict):
+            continue
+        # Only a tool declared as a reference answers what an id is. Any other
+        # entry's ``valid`` or ``invalid`` key is a field of its own answer (a
+        # sample's data, a signature check), not a verdict on a technique id.
+        if not reads_as(entry, _ID_REFERENCE):
             continue
         if structured.get("valid") is False:
             tid = str(structured.get("technique_id") or "").strip().upper()

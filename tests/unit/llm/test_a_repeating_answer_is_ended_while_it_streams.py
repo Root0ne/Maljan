@@ -15,6 +15,8 @@ from __future__ import annotations
 
 import asyncio
 import json
+import threading
+import time
 from collections.abc import AsyncIterator, Iterator
 from typing import Any
 
@@ -95,6 +97,20 @@ def _chunk(delta: dict[str, Any], **extra: Any) -> bytes:
     )
 
 
+class _Body(httpx.SyncByteStream):
+    """A response body that records that the client closed it."""
+
+    def __init__(self, server: _Server) -> None:
+        self._server = server
+        self._parts = server._parts()
+
+    def __iter__(self) -> Iterator[bytes]:
+        return self._parts
+
+    def close(self) -> None:
+        self._server.stream_closed = True
+
+
 class _Server:
     """An OpenAI-compatible server streaming the runaway answer, counting what was read."""
 
@@ -104,6 +120,7 @@ class _Server:
         self.reasoning = reasoning
         self.limit = limit
         self.closed = False
+        self.stream_closed = False
 
     def _parts(self) -> Iterator[bytes]:
         opening: dict[str, Any] = {"role": "assistant", "content": ""}
@@ -131,7 +148,7 @@ class _Server:
     def sync(self, request: httpx.Request) -> httpx.Response:
         self.bodies.append(json.loads(request.content))
         return httpx.Response(
-            200, content=self._parts(), headers={"content-type": "text/event-stream"}
+            200, stream=_Body(self), headers={"content-type": "text/event-stream"}
         )
 
     def asynchronous(self, request: httpx.Request) -> httpx.Response:
@@ -168,16 +185,44 @@ def _model(server: _Server, base_url: str, compat: str) -> Any:
     )
 
 
-def _assert_ended_after_the_margin(content: str, server: _Server) -> None:
+def _stream_threads() -> set[threading.Thread]:
+    return {t for t in threading.enumerate() if t.name == "model-stream"}
+
+
+def _wait_for_the_stream_to_stop(before: set[threading.Thread]) -> None:
+    """Wait for the reader thread this call started to end, or fail after a liveness deadline.
+
+    A synchronous call reads its stream in a thread of its own, which stops at
+    the next chunk once the caller is done and closes the stream. Until then
+    the count of lines read is still moving, so nothing can be said of it.
+    """
+    deadline = time.monotonic() + 60
+    for thread in _stream_threads() - before:
+        thread.join(max(deadline - time.monotonic(), 0.001))
+        if thread.is_alive():
+            pytest.fail("the stream was still being read 60 s after the call returned")
+
+
+def _assert_ended_after_the_margin(
+    content: str, server: _Server, *, threads_before: set[threading.Thread] | None = None
+) -> None:
     # Everything written before the repetition is in the answer, and the
     # answer goes on only to the line on which the margin was crossed.
     assert content.startswith(WRITTEN)
     found = claims_repeated(content)
     assert found is not None
     assert claims_repeated(content[: content.rstrip("\n").rfind("\n") + 1]) is None
-    # The call was ended: the transport reads a little ahead of the answer
-    # (its buffer, the reader thread's queue), never the whole runaway.
-    assert server.read < RUNAWAY_LINES // 10
+    # The call was ended: the transport reads some way ahead of the answer, and
+    # how far varies from run to run with scheduling (a loaded machine read
+    # more than 200 lines), so no bound is set on the lead. What is counted is
+    # that the runaway was not read to its end: the answer stops at the margin
+    # (above), and the server still had lines to give. A call that reads in a
+    # thread of its own is waited for first, so the count is the final one.
+    if threads_before is not None:
+        _wait_for_the_stream_to_stop(threads_before)
+        # The reader closed the response, which ends the request.
+        assert server.stream_closed
+    assert server.read < RUNAWAY_LINES
 
 
 class TestTheOpenAICompatibleStreams:
@@ -186,10 +231,11 @@ class TestTheOpenAICompatibleStreams:
         self, base_url: str, compat: str
     ) -> None:
         server = _Server()
+        before = _stream_threads()
         with watching(_rule()):
             answer = _model(server, base_url, compat).invoke([HumanMessage(content="go")])
 
-        _assert_ended_after_the_margin(str(answer.content), server)
+        _assert_ended_after_the_margin(str(answer.content), server, threads_before=before)
 
     @pytest.mark.parametrize(("base_url", "compat"), _ENDPOINTS)
     @pytest.mark.asyncio
@@ -300,6 +346,13 @@ class _OllamaParts:
                 break
             self.read += 1
             yield {"model": "m", "message": {"role": "assistant", "content": line}, "done": False}
+        # A server's stream ends with the message that says it is finished.
+        yield {
+            "model": "m",
+            "message": {"role": "assistant", "content": ""},
+            "done": True,
+            "done_reason": "stop",
+        }
 
 
 def _ollama(parts: _OllamaParts) -> Any:
@@ -322,13 +375,16 @@ def _ollama(parts: _OllamaParts) -> Any:
 class TestOllamaStreams:
     def test_a_sync_call_is_ended_once_the_margin_is_crossed(self) -> None:
         parts = _OllamaParts()
+        before = _stream_threads()
         with watching(_rule()):
             answer = _ollama(parts).invoke([HumanMessage(content="go")])
 
         content = str(answer.content)
         assert content.startswith(WRITTEN)
         assert claims_repeated(content) is not None
-        assert parts.read < RUNAWAY_LINES // 10
+        # Read in a thread of its own: waited for, then counted (see above).
+        _wait_for_the_stream_to_stop(before)
+        assert parts.read < RUNAWAY_LINES
 
     @pytest.mark.asyncio
     async def test_an_async_call_is_ended_once_the_margin_is_crossed(self) -> None:

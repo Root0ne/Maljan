@@ -145,6 +145,15 @@ the team, which the console does in one click.
 - **Generic agents.** `triage`, `android_static` and `reverser` are seeded
   generic definitions: a prompt and a tool list, no class. Clone one as the
   starting point for an agent of your own.
+- **A prompt that names a tool the agent no longer has.** When an agent's own
+  prompt spells, exactly as declared, the name of a tool the platform knows
+  (any configured server's, or a shipped declaration's) that the agent's tool
+  set lacks, the settings answer carries a warning under
+  `core.agents.definitions.<agent>`, the job logs one WARNING line naming the
+  agent and the tools. The run summary has no advisory channel, so the run is
+  not marked degraded for it. A plain word such as `strings` counts only inside
+  backticks or quotes; a name with `_`, `.`, `-` or a digit counts anywhere. It
+  never refuses a save or a run, and built-in prompts are not checked.
 - **Checked as you type.** The team editor sends the staged teams to
   `POST /api/v1/settings/lint-teams` and draws each team's stage graph with
   its findings beside it. See [Checking a team before it is

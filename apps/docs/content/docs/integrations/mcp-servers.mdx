@@ -20,6 +20,28 @@ described in [Generic MCP servers](/tools/generic-mcp/).
 The transport decides, not the manifest: a stdio sidecar is never uploaded to,
 because it can already open the file.
 
+A stdio server's stdout carries protocol messages only; its logs, banners and
+progress output belong on stderr. Maljan's own sidecars route the root
+handler and the `maljan` logger to stderr first of all (`core.stdio_safe`), so
+none of their log lines reaches stdout. A UTF-8 text line on stdout that is not a
+protocol message (a log line, a JSON log record, a dependency's download
+progress bar) does not break the connection: the client leaves it out, warns at
+the first such line of each connection and states the count when the
+connection closes. During setup only, until the client has the server's tool
+list, a progress bar that ends without a newline can leave the server's answer
+after its last carriage return, and the client reads the answer out from there
+(or from after a byte-order mark): the answers to `initialize` and `tools/list`
+carry nothing from a sample, and no tool has been called yet. The client sets a
+connection up once and refuses a second setup while it is connected or still
+connecting, so this window never reopens. After setup every
+stray line is skipped, so an answer glued to other text is lost and its call
+fails, as before: a tool's answer can echo text a sample's author wrote, and an
+absent answer beats a forged one. A line that claims to be a protocol message
+(an object with a `jsonrpc` member) and is not a valid one is stated when it
+comes, with what failed its validation, since it is an answer the server got
+wrong. Bytes on stdout that are not UTF-8 still end the connection, as before:
+the SDK decodes stdout strictly before any line reaches the client.
+
 ## A server on another host
 
 Every path-taking tool assumes the server can open the path it is handed. For a
@@ -62,6 +84,40 @@ Staging never fails a run: an upload that goes wrong is recorded as a
 degradation reason, and the server is called with the local path. These
 primitives are never shown to the model. See [Tool servers on another
 host](/configuration/#tool-servers-on-another-host).
+
+## Files a server wrote
+
+A tool that writes a file (a carved payload, an unpacked member, a decoded
+script) names it in its answer, and a triage pack step that declares
+`outputs` has the platform take each such file into the job's artefact store,
+from which a later step's tool on any other server is handed it (see *Files
+passed between servers* in [the pack's steps](/configuration/#the-packs-steps)).
+A server on the worker's filesystem (stdio, no `sample_mount`) is read inside
+its own job staging directory and needs nothing more. Any other server, or one
+that would rather serve its files itself, offers one tool:
+
+| Tool | Arguments | Returns |
+| :-- | :-- | :-- |
+| `get_artefact` | `path` (the name its answer gave the file), `offset`, `length` (bytes) | `{"content_b64": ..., "size": <the whole file's bytes>, "sha256": <the whole file's, where known>}` |
+
+The platform asks for 4 MiB at a time until `size` is read, checks the
+`sha256` it was told against the bytes it got, and refuses a file whose digest
+disagrees. There is no size limit of the platform's own: the read ends where
+the server said the file ends, and the server is held to it. Every answer
+states `size`; the first fixes it, and an answer with none, an answer that
+states another, a chunk that would pass it, an empty chunk before it and a
+`sha256` that changes are each refused. A file handed to a server over
+`put_sample` is streamed from disk over the three chunked calls wherever the
+server offers them, its digest checked as it is read before the upload is
+finished; a server offering only `put_sample` is sent the file in that one
+call, whatever its size, as the sample is, and refuses it itself if it will.
+Each such upload is listed in the run's disclosure block with what it sent
+(a file a tool wrote, the capture or the sandbox report). A file the server
+will not serve is answered `{"error": "..."}`,
+and the step's entry names the file as not taken with those words. Serve only
+files the server wrote for the job it was started for, as `put_sample` stores
+only into that job's directory. Like `put_sample`, the tool is never shown to
+the model.
 
 ## The capability manifest
 

@@ -3,15 +3,22 @@
 import { useEffect, useState } from "react";
 import { X } from "lucide-react";
 import { api } from "@/lib/api";
+import { fetchAllPages } from "@/lib/pages";
+import ShowMoreRows from "@/components/ui/ShowMoreRows";
+import { ROWS_PER_STEP, visibleRows } from "@/lib/pagedRows";
 import type { ApiKeyDTO, ApiKeyCreateDTO } from "@/lib/api";
 import { getErrorMessage } from "@/lib/errors";
 import { formatDateTime } from "@/lib/report-utils";
+import { apiKeyState, lastUsedText } from "./keyState";
 
 export default function SettingsApiKeysPage() {
   const [apiKeys, setApiKeys] = useState<ApiKeyDTO[]>([]);
+  /* Every key is read; a long list is drawn a step at a time (`lib/pagedRows`). */
+  const [shown, setShown] = useState(ROWS_PER_STEP);
   const [apiKeysLoading, setApiKeysLoading] = useState(false);
   const [apiKeysError, setApiKeysError] = useState<string | null>(null);
   const [newKeyName, setNewKeyName] = useState("");
+  const [keyPassword, setKeyPassword] = useState("");
   const [createdKey, setCreatedKey] = useState<ApiKeyCreateDTO | null>(null);
   /* Native alert()/confirm() replaced by the in-page
    * banner + toast + confirm-modal pattern already used by jobs/page.tsx. */
@@ -54,7 +61,7 @@ export default function SettingsApiKeysPage() {
   function loadApiKeys() {
     setApiKeysLoading(true);
     setApiKeysError(null);
-    api.getApiKeys(1, 50)
+    fetchAllPages((page, size) => api.getApiKeys(page, size))
       .then((res) => setApiKeys(res.items))
       .catch((err: unknown) => {
         setApiKeysError(getErrorMessage(err) || "Failed to load API keys.");
@@ -64,13 +71,14 @@ export default function SettingsApiKeysPage() {
 
   async function handleCreateKey(e: React.FormEvent) {
     e.preventDefault();
-    if (!newKeyName.trim()) return;
+    if (!newKeyName.trim() || !keyPassword) return;
     setKeyActionError(null);
     try {
-      const key = await api.createApiKey(newKeyName.trim());
+      const key = await api.createApiKey(newKeyName.trim(), keyPassword);
       setCreatedKey(key);
       setCopyState("idle");
       setNewKeyName("");
+      setKeyPassword("");
       loadApiKeys();
     } catch (err: unknown) {
       setKeyActionError(getErrorMessage(err) || "Failed to create API key.");
@@ -130,13 +138,34 @@ export default function SettingsApiKeysPage() {
               className="w-full h-9 px-3 text-sm bg-bg-deep border border-border rounded text-text-primary focus:border-accent focus:outline-none"
             />
           </div>
+          <div className="flex-1">
+            <label htmlFor="settings-api-key-password" className="block text-xs text-text-secondary mb-1.5">
+              Current password
+            </label>
+            <input
+              id="settings-api-key-password"
+              name="current_password"
+              type="password"
+              autoComplete="current-password"
+              required
+              aria-describedby="settings-api-key-password-why"
+              value={keyPassword}
+              onChange={(e) => setKeyPassword(e.target.value)}
+              className="w-full h-9 px-3 text-sm bg-bg-deep border border-border rounded text-text-primary focus:border-accent focus:outline-none"
+            />
+          </div>
           <button
             type="submit"
+            disabled={!newKeyName.trim() || !keyPassword}
             className="h-9 px-4 text-xs bg-accent-fill text-white rounded hover:bg-accent-fill-hover"
           >
             Create
           </button>
         </form>
+        <p id="settings-api-key-password-why" className="mt-2 text-xs text-text-muted">
+          A key outlives your session, so creating one asks for your password. Changing the
+          password, or a sign-in found replayed, revokes every key.
+        </p>
         {createdKey && (
           <div className="mt-3 p-3 bg-status-green/10 border border-status-green/20 rounded">
             <p className="text-xs text-status-green font-medium mb-1">API key created successfully. Copy it now — it will not be shown again.</p>
@@ -205,7 +234,7 @@ export default function SettingsApiKeysPage() {
         <div className="text-xs text-text-muted">No API keys found.</div>
       ) : (
         <div className="space-y-3">
-          {apiKeys.map((key) => (
+          {visibleRows(apiKeys, shown).visible.map((key) => (
             <div key={key.id} className="bg-bg-surface border border-border rounded">
               <div className="flex items-center justify-between p-4">
                 <div className="flex-1 min-w-0">
@@ -213,13 +242,23 @@ export default function SettingsApiKeysPage() {
                     <span className="text-sm font-medium text-text-primary">{key.name}</span>
                     <span
                       className={`inline-flex items-center gap-1 px-1.5 py-0.5 text-xs rounded ${
-                        key.is_active
+                        apiKeyState(key) === "active"
                           ? "bg-status-green/10 text-status-green"
+                          : apiKeyState(key) === "expired"
+                          ? "bg-status-orange/10 text-status-orange"
                           : "bg-status-red/10 text-status-red"
                       }`}
                     >
-                      <span className={`w-1.5 h-1.5 rounded-full ${key.is_active ? "bg-status-green" : "bg-status-red"}`} />
-                      {key.is_active ? "Active" : "Revoked"}
+                      <span
+                        className={`w-1.5 h-1.5 rounded-full ${
+                          apiKeyState(key) === "active"
+                            ? "bg-status-green"
+                            : apiKeyState(key) === "expired"
+                            ? "bg-status-orange"
+                            : "bg-status-red"
+                        }`}
+                      />
+                      {apiKeyState(key) === "active" ? "Active" : apiKeyState(key) === "expired" ? "Expired" : "Revoked"}
                     </span>
                   </div>
                   <div className="flex items-center gap-2 mt-1">
@@ -228,8 +267,11 @@ export default function SettingsApiKeysPage() {
                     </span>
                     <span className="text-xs text-text-muted">Created {formatDateTime(key.created_at)}</span>
                     {key.expires_at && (
-                      <span className="text-xs text-status-orange">Expires {formatDateTime(key.expires_at)}</span>
+                      <span className="text-xs text-status-orange">
+                        {apiKeyState(key) === "expired" ? "Expired" : "Expires"} {formatDateTime(key.expires_at)}
+                      </span>
                     )}
+                    <span className="text-xs text-text-muted">{lastUsedText(key.last_used_at, formatDateTime)}</span>
                   </div>
                 </div>
                 <div className="flex gap-2 ml-4 shrink-0">
@@ -248,6 +290,7 @@ export default function SettingsApiKeysPage() {
               </div>
             </div>
           ))}
+          <ShowMoreRows shown={Math.min(shown, apiKeys.length)} total={apiKeys.length} onShow={setShown} />
         </div>
       )}
 

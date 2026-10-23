@@ -23,7 +23,7 @@ import asyncio
 import sys
 import threading
 import weakref
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -95,6 +95,23 @@ REAP_BUDGET = CHILD_TERM_GRACE + 2.0
 SYNC_CLOSE_TIMEOUT = 20.0
 
 
+def _start_time(pid: int) -> str | None:
+    """The start time of ``pid`` (field 22 of ``/proc/<pid>/stat``), ``None`` where unreadable.
+
+    With the pid it names one process for good: a pid the kernel hands out
+    again has a start time of its own.
+    """
+    try:
+        with open(f"/proc/{pid}/stat", "rb") as fh:
+            stat = fh.read().decode("ascii", "replace")
+    except OSError:
+        return None
+    # The command name is in parentheses and may hold spaces; fields from the
+    # third on follow the last parenthesis.
+    rest = stat[stat.rfind(")") + 2 :].split()
+    return rest[19] if len(rest) > 19 else None
+
+
 def _own_child_pids() -> set[int]:
     """The pids of this process's direct children, empty where /proc is absent.
 
@@ -117,6 +134,115 @@ def _own_child_pids() -> set[int]:
         return children
     except OSError:
         return set()
+
+
+# Child pids already attributed to a handle, by the handle that owns each. Two
+# handles of one server share an argv, so the argv check alone would give both
+# the other's child; a pid that is another handle's is never taken twice.
+_CLAIMED_PIDS: dict[tuple[int, str | None], int] = {}
+_CLAIMED_LOCK = threading.Lock()
+# One lock per launch argv, held from the snapshot of our children before an
+# attach until its child is claimed (not across the handshake): two handles
+# that launch the same argv and start together would otherwise each see both
+# children appear.
+_LAUNCH_LOCKS: dict[tuple[str, ...], threading.Lock] = {}
+
+
+def _launch_lock(argv: tuple[str, ...]) -> threading.Lock | None:
+    """The lock serialising attaches that launch ``argv``; ``None`` for no child."""
+    if not argv:
+        return None
+    with _CLAIMED_LOCK:
+        return _LAUNCH_LOCKS.setdefault(argv, threading.Lock())
+
+
+class _LaunchWindow:
+    """The launch lock of one attach, released once, by whoever gets there first."""
+
+    def __init__(self, lock: threading.Lock | None) -> None:
+        self._lock = lock
+        self.held = lock is not None
+        self._mutex = threading.Lock()
+
+    def release(self) -> None:
+        with self._mutex:
+            if self.held and self._lock is not None:
+                self.held = False
+                self._lock.release()
+
+
+def _refuse_on_the_agent_loop(name: str) -> None:
+    """Refuse a blocking attach from the agent loop's own thread, as the attach always has.
+
+    Its handshake runs on the agent loop and is waited for here, so the thread
+    serving that loop can never make it. Another loop's thread may block.
+    """
+    from maljan.agents.base_agent import _get_agent_loop, _on_agent_loop_thread
+
+    if _on_agent_loop_thread(_get_agent_loop()):
+        raise RuntimeError(
+            f"mcp server '{name}' was opened with a blocking call from the agent loop's own "
+            "thread, which cannot serve it: await aopen there, or call open from "
+            "asyncio.to_thread"
+        )
+
+
+async def _acquire_launch(lock: threading.Lock) -> None:
+    """Take ``lock`` off the event loop, leaving it free if the wait is cancelled.
+
+    The executor's ``acquire`` cannot be cancelled: it goes on and takes the
+    lock after the waiter is gone. So the future is shielded and, when the
+    waiter is cancelled, released as soon as it has been taken.
+    """
+    future = asyncio.get_running_loop().run_in_executor(None, lock.acquire)
+    try:
+        await asyncio.shield(future)
+    except asyncio.CancelledError:
+
+        def _give_back(done: Any) -> None:
+            if not done.cancelled() and done.exception() is None and done.result():
+                lock.release()
+
+        future.add_done_callback(_give_back)
+        raise
+
+
+class _Watch:
+    """The thread that watches for an attach's child; ``stop`` it, then join ``thread``."""
+
+    def __init__(self, thread: threading.Thread, halt: threading.Event) -> None:
+        self.thread = thread
+        self._halt = halt
+
+    def stop(self) -> None:
+        self._halt.set()
+
+
+def _watch_for_child(handle: ServerHandle, before: set[int], window: _LaunchWindow) -> _Watch:
+    """Free the launch window as soon as any child appears, claiming it when its argv is ours.
+
+    The child is spawned inside ``initialize``, which may take long; the
+    window closes at the spawn, not at the end of the handshake. A child that
+    appears is in the next attach's ``before``, so the window is released
+    whether or not its argv is this handle's (a launcher such as ``npx`` or
+    ``env`` runs another argv); the final note claims by argv afterwards.
+    Polling backs off from 5 ms, doubling up to 100 ms.
+    """
+    halt = threading.Event()
+
+    def _run() -> None:
+        delay = 0.005
+        while not halt.is_set():
+            handle._note_child_pids(before)
+            if handle._child_pids or (_own_child_pids() - before):
+                window.release()
+                return
+            halt.wait(delay)
+            delay = min(delay * 2, 0.1)
+
+    thread = threading.Thread(target=_run, name="child-watch", daemon=True)
+    thread.start()
+    return _Watch(thread, halt)
 
 
 def _run_async(coro: Any, label: str) -> None:
@@ -248,11 +374,16 @@ class ServerHandle:
     """One configured MCP server, attached for at most one job at a time."""
 
     def __init__(self, name: str, config: MCPServerConfig) -> None:
+        # The tools decided for the manifest this handle holds (``tools``),
+        # and how many times a manifest was attached: the key it is kept by.
+        self._tools_cache: tuple[Any, list[Any]] | None = None
+        self._attach_count = 0
         self.name = name
         self.config = config
         self._toolkit: Any = None
         self._all_tools: list[Any] = []
         self._job_id: str = ""
+        self._sample_sha256: str = ""
         # True once ``aopen`` has attached this handle: its exit stack was
         # wound on whichever loop called it, so it must be unwound there too
         # (see ``close``).
@@ -267,13 +398,37 @@ class ServerHandle:
         # The child this handle spawned, for the backstop reap when the
         # transport's own SIGTERM -> SIGKILL shutdown never gets to run.
         self._child_pids: tuple[int, ...] = ()
+        # When each of those started, read as it was claimed: with its pid it
+        # is the child's identity, so a reused pid is never the old child.
+        self._child_starts: dict[int, str | None] = {}
         # The argv that child was launched with, which is what makes the pid
         # above this handle's rather than merely contemporaneous.
         self._launch_argv: tuple[str, ...] = ()
+        # The names of the environment that child was handed, which the run's
+        # isolation part reads the platform's own variables from, by name.
+        self._launch_env_names: tuple[str, ...] = ()
+        # The source this server's calls are recorded under
+        # (``LedgerEntry.source``); a provider that drives the handle under a
+        # block of its own names that block instead.
+        self.declared_source = f"mcp:{name}"
+        # Whether an attach measures the process it started for the job's
+        # isolation part: set by the job's registry and by a provider that
+        # drives a handle for a job. A connection test is no job, and notes
+        # nothing.
+        self.measures_isolation = False
         # What the server said it can do on its host, read once per attach
         # from its ``capabilities`` tool when it offers one; ``None`` for a
         # server that does not, or whose answer could not be read.
-        self.capabilities: ServerCapabilities | None = None
+        self._capabilities: ServerCapabilities | None = None
+        # The tools withheld because they could not be made to carry the
+        # job's program on a shared server (``sample_open.pin_program_argument``),
+        # each with its reason; read with the manifest's in ``withheld_reasons``.
+        self._unpinned: dict[str, str] = {}
+        # The name and version the server gave for itself at its last attach
+        # (MCP ``serverInfo``), kept after the handle closes: the run
+        # fingerprint is read once the run's last tool call is made.
+        self.server_info: dict[str, str] = {}
+        self.attached_once = False
         # Whether the next attach keeps each tool's definition as the server
         # listed it (``tool_definitions``). Only the settings probe asks, to
         # propose declarations; a run's handle keeps none.
@@ -287,7 +442,7 @@ class ServerHandle:
         # (``providers.sample_open``), set by the registry that owns the
         # handle; a handle built outside one has none and offers its open tool
         # as it is.
-        self.sample_notes: Any = None
+        self._sample_notes: Any = None
         # How this server's answers say "error" is its declaration
         # (``error_patterns``), read by one function for every server
         # (``providers.declared_errors``). An adapter that reads them itself,
@@ -296,6 +451,11 @@ class ServerHandle:
         # job's sample, which a remediation may name.
         self.reads_own_errors = False
         self.error_sample_path: Callable[[], str | None] | None = None
+        # The job's own copy of the sample on this server, set by the job's
+        # registry once an agent's sample is mirrored or staged there
+        # (``ServerRegistry.hold_sample_path``): on a server other jobs share,
+        # the only path an open may name. ``None`` refuses every open there.
+        self.held_sample_path: str | None = None
         # This handle's own process, for a local server's note key; a number
         # never reused, unlike an object's id.
         from maljan.providers.sample_open import new_instance
@@ -303,6 +463,28 @@ class ServerHandle:
         self._note_instance = new_instance()
         _LIVE_HANDLES.add(self)
         _register_retirement_hook()
+
+    @property
+    def capabilities(self) -> ServerCapabilities | None:
+        """What the server said it can do on its host, read at its attach."""
+        return self._capabilities
+
+    @capabilities.setter
+    def capabilities(self, manifest: ServerCapabilities | None) -> None:
+        # Another host manifest withholds other tools.
+        self._capabilities = manifest
+        self._tools_cache = None
+
+    @property
+    def sample_notes(self) -> Any:
+        """The job's note of the paths this server opened (``providers.sample_open``)."""
+        return self._sample_notes
+
+    @sample_notes.setter
+    def sample_notes(self, notes: Any) -> None:
+        # Another job's note is another decision about the tools.
+        self._sample_notes = notes
+        self._tools_cache = None
 
     @property
     def is_open(self) -> bool:
@@ -404,6 +586,26 @@ class ServerHandle:
         env[staging.STAGING_JOB_ENV] = leaf
         staging.note_job_directory(self._job_id, staging.staging_base(env) / leaf)
 
+    def _name_the_sample(self, env: dict[str, str]) -> None:
+        """Give a server that asks for it the run's sample sha256.
+
+        Only a server that names ``MALJAN_SAMPLE_SHA256`` in its ``env_allow`` (or
+        its own ``env``) is told: a third party's tool server learns nothing of
+        the sample it was not set up to see. Cleared first and unconditionally,
+        as the staging leaf is: a stored ``env`` value is never the run's.
+        """
+        from maljan.core.config import REQUIRED_ENV_ALLOW
+        from maljan.tools.knowledge import SAMPLE_SHA256_ENV
+
+        env.pop(SAMPLE_SHA256_ENV, None)
+        wanted = (
+            SAMPLE_SHA256_ENV in REQUIRED_ENV_ALLOW.get(self.name, ())
+            or SAMPLE_SHA256_ENV in self.config.env_allow
+            or SAMPLE_SHA256_ENV in self.config.env
+        )
+        if wanted and self._sample_sha256:
+            env[SAMPLE_SHA256_ENV] = self._sample_sha256
+
     def _build_toolkit(
         self,
         output_guardrail: Callable[[str], str] | None,
@@ -429,8 +631,9 @@ class ServerHandle:
             from maljan.core.config import BUILTIN_SERVER_KEYS
             from maljan.core.paths import resolve_mcp_args
 
-            env = child_env(self.config.env, allow=tuple(self.config.env_allow))
+            env = child_env(self.config.env, allow=tuple(self.config.env_allow), server=self.name)
             self._name_the_job_staging(env)
+            self._name_the_sample(env)
             if self.name not in BUILTIN_SERVER_KEYS:
                 # Byte-for-byte with the pre-branch built-ins (spec S3.2): the
                 # in-repo network/threatintel sidecars were launched with a
@@ -444,6 +647,7 @@ class ServerHandle:
             # other subprocess that happened to start in the same window; see
             # ``_child_matches``.
             self._launch_argv = (self.config.command, *args)
+            self._launch_env_names = tuple(env)
             params = StdioServerParameters(
                 command=self.config.command,
                 args=args,
@@ -459,10 +663,14 @@ class ServerHandle:
                 guard=self.guard,
                 categories=categories_of(getattr(self.config, "tool_facts", None)),
                 keep_tool_definitions=self.keeps_tool_definitions,
+                label=self.label,
             )
         # An http/sse transport has no child of ours to reap.
         self._launch_argv = ()
-        token = self.config.auth_token.get_secret_value()
+        self._launch_env_names = ()
+        # A ``SecretStr`` as settings hold it, or a plain string a caller set.
+        raw = self.config.auth_token
+        token = raw.get_secret_value() if hasattr(raw, "get_secret_value") else str(raw or "")
         headers = {"Authorization": f"Bearer {token}"} if token else {}
         return MCPLangChainToolkit(
             transport=self.config.transport,
@@ -485,6 +693,7 @@ class ServerHandle:
         max_output_chars: int = 0,
         truncation_ledger: Any | None = None,
         context_budget: Any | None = None,
+        sample_sha256: str = "",
     ) -> None:
         """Attach for ``job_id``. Same id is a no-op; a different id reattaches."""
         if self._toolkit is not None:
@@ -496,6 +705,7 @@ class ServerHandle:
             )
             self.close()
         self._job_id = job_id
+        self._sample_sha256 = sample_sha256
         if not self.config.enabled:
             logger.info("mcp server '%s' is disabled.", self.name)
             return
@@ -504,7 +714,43 @@ class ServerHandle:
             output_guardrail, max_output_chars, truncation_ledger, context_budget
         )
 
-        before = _own_child_pids()
+        launch = _launch_lock(self._launch_argv)
+        if launch is not None:
+            _refuse_on_the_agent_loop(self.name)
+            launch.acquire()
+        window = _LaunchWindow(launch)
+        try:
+            before = _own_child_pids()
+            watch = _watch_for_child(self, before, window) if launch is not None else None
+            try:
+                self._init_sync(toolkit)
+            finally:
+                if watch is not None:
+                    watch.stop()
+                    watch.thread.join()
+            self._settle_children(before, window)
+        except BaseException:
+            self._release_claims()
+            raise
+        finally:
+            window.release()
+        self._finish_open_sync(toolkit)
+
+    def _settle_children(self, before: set[int], window: _LaunchWindow) -> None:
+        """Claim the child by its argv, if the watch did not."""
+        if not self._child_pids:
+            self._note_child_pids(before)
+
+    def _release_claims(self) -> None:
+        """Give back the pids this handle claimed."""
+        with _CLAIMED_LOCK:
+            for key in [k for k, owner in _CLAIMED_PIDS.items() if owner == id(self)]:
+                del _CLAIMED_PIDS[key]
+        self._child_pids = ()
+        self._child_starts = {}
+
+    def _init_sync(self, toolkit: Any) -> None:
+        """Initialise ``toolkit``, or tear it down and raise."""
         try:
             _run_async(toolkit.initialize(), label=f"{self.name}-mcp-init")
         except Exception:
@@ -523,6 +769,8 @@ class ServerHandle:
             self._teardown(toolkit)
             raise
         self._toolkit = toolkit
+        self.server_info = dict(getattr(toolkit, "server_info", None) or {})
+        self.attached_once = True
         _ATTACHED_HANDLES.add(self)
         self._opened_async = False
         # ``_run_async`` hands the coroutine to the shared agent loop, so that
@@ -530,9 +778,13 @@ class ServerHandle:
         from maljan.agents.base_agent import _get_agent_loop
 
         self._owner_loop = _get_agent_loop()
-        self._note_child_pids(before)
+
+    def _finish_open_sync(self, toolkit: Any) -> None:
+        """What an attach does once its child is noted."""
+        self._note_isolation()
         self._all_tools = list(toolkit.get_tools())
         self._read_capabilities()
+        self._attach_count += 1
         allowed = self.config.tools
         if allowed:
             manifest = {str(getattr(t, "name", "")) for t in self._all_tools}
@@ -568,6 +820,7 @@ class ServerHandle:
                 return
             await self.aclose()
         self._job_id = job_id
+        self._sample_sha256 = str(context.get("sample_sha256") or "")
         if not self.config.enabled:
             logger.info("mcp server '%s' is disabled.", self.name)
             return
@@ -580,7 +833,33 @@ class ServerHandle:
         # Recorded *before* ``initialize``, so the failure path below unwinds
         # on the loop that wound the partial attach too.
         self._owner_loop = asyncio.get_running_loop()
-        before = _own_child_pids()
+        launch = _launch_lock(self._launch_argv)
+        if launch is not None:
+            # Taken off the loop: a holder on another loop may be waiting on
+            # this thread's loop for something, and a blocked loop would never
+            # let it finish.
+            await _acquire_launch(launch)
+        window = _LaunchWindow(launch)
+        try:
+            before = _own_child_pids()
+            watch = _watch_for_child(self, before, window) if launch is not None else None
+            try:
+                await self._ainit(toolkit, before, window)
+            finally:
+                if watch is not None:
+                    watch.stop()
+                    # Joined off the loop: the thread may be mid-poll.
+                    await asyncio.get_running_loop().run_in_executor(None, watch.thread.join)
+            self._settle_children(before, window)
+        except BaseException:
+            self._release_claims()
+            raise
+        finally:
+            window.release()
+        await self._afinish_open(toolkit)
+
+    async def _ainit(self, toolkit: Any, before: set[int], window: _LaunchWindow) -> None:
+        """Initialise ``toolkit`` and note the child it started, or tear it down and raise."""
         try:
             await toolkit.initialize()
         except (Exception, asyncio.CancelledError):
@@ -590,17 +869,23 @@ class ServerHandle:
             )
             # The child a half-open transport already spawned is this handle's
             # too, and nothing else knows about it.
-            self._note_child_pids(before)
+            self._settle_children(before, window)
             if not await self._acleanup(toolkit):
                 await self._reap_after_abandon()
             self._child_pids = ()
             raise
         self._toolkit = toolkit
+        self.server_info = dict(getattr(toolkit, "server_info", None) or {})
+        self.attached_once = True
         _ATTACHED_HANDLES.add(self)
         self._opened_async = True
-        self._note_child_pids(before)
+
+    async def _afinish_open(self, toolkit: Any) -> None:
+        """What an async attach does once its child is noted."""
+        self._note_isolation()
         self._all_tools = list(toolkit.get_tools())
         await self._aread_capabilities()
+        self._attach_count += 1
 
     async def _acleanup(self, toolkit: Any) -> bool:
         """Best-effort async close of ``toolkit`` **on the caller's loop**.
@@ -770,6 +1055,8 @@ class ServerHandle:
         """
         if not self._launch_argv:
             return False
+        if pid in self._child_starts and _start_time(pid) != self._child_starts[pid]:
+            return False
         try:
             with open(f"/proc/{pid}/cmdline", "rb") as fh:
                 argv = fh.read().split(b"\0")
@@ -780,8 +1067,54 @@ class ServerHandle:
 
     def _note_child_pids(self, before: set[int]) -> None:
         """Record the children that appeared while ``initialize`` ran."""
-        appeared = _own_child_pids() - before
-        self._child_pids = tuple(sorted(pid for pid in appeared if self._child_matches(pid)))
+        now = _own_child_pids()
+        appeared = now - before
+        with _CLAIMED_LOCK:
+            # A claim on a pid that is no longer our child is stale (the pid
+            # may be reused), so it is dropped before it can exclude anyone.
+            live = {(pid, _start_time(pid)) for pid in now}
+            for key in [k for k in _CLAIMED_PIDS if k not in live]:
+                del _CLAIMED_PIDS[key]
+            starts = {pid: _start_time(pid) for pid in appeared}
+            mine = tuple(
+                sorted(
+                    pid
+                    for pid in appeared
+                    if _CLAIMED_PIDS.get((pid, starts[pid]), id(self)) == id(self)
+                    and self._child_matches(pid)
+                )
+            )
+            for pid in mine:
+                _CLAIMED_PIDS[(pid, starts[pid])] = id(self)
+        self._child_pids = mine
+        self._child_starts = {pid: starts[pid] for pid in mine}
+
+    def _note_isolation(self) -> None:
+        """Measure each process this attach started, for the run's isolation part.
+
+        Read once the server has initialised and before its first tool call,
+        with every process under it (``analysis.isolation.measure_tree``): a
+        launcher starts the real server as its own child. Noted under this
+        job's key and this server's source. A child that could not be
+        identified is not measured, and the run then says its isolation cannot
+        be told.
+        """
+        if not self.measures_isolation or not self._child_pids or not self._job_id:
+            return
+        from maljan.analysis.isolation import measure_tree, note_process
+
+        for pid in self._child_pids:
+            try:
+                measured = measure_tree(pid, self._launch_env_names)
+            except Exception as exc:  # noqa: BLE001 — an unmeasured child is said, never guessed
+                logger.warning(
+                    "mcp server '%s': its process was not measured (%s); the run says its "
+                    "isolation cannot be told.",
+                    self.name,
+                    type(exc).__name__,
+                )
+                continue
+            note_process(self._job_id, self.declared_source, measured)
 
     def _live_children(self) -> list[int]:
         """The pids this handle spawned that are still our children."""
@@ -901,7 +1234,7 @@ class ServerHandle:
         """Drop what only an attached handle carries. Call after the reap."""
         _ATTACHED_HANDLES.discard(self)
         self._owner_loop = None
-        self._child_pids = ()
+        self._release_claims()
         self._launch_argv = ()
 
     async def _reap_after_abandon(self) -> None:
@@ -922,6 +1255,8 @@ class ServerHandle:
 
     async def aclose(self) -> None:
         """Close on the loop that opened this handle. Bounded, and never raises."""
+        if self._toolkit is not None:
+            await self._aclose_job_programs()
         toolkit, self._toolkit = self._toolkit, None
         self._all_tools = []
         self._opened_async = False
@@ -935,6 +1270,26 @@ class ServerHandle:
             if not closed:
                 await self._reap_after_abandon()
             self._forget_attachment()
+
+    async def _aclose_job_programs(self) -> None:
+        """Close the programs this job opened on a server other jobs share, where declared.
+
+        Through the close tool the block's ``sample_open`` names, on the
+        server's own tool list. Without that declaration nothing is called.
+        """
+        from maljan.providers.sample_open import aclose_job_programs, is_shared_address
+
+        spec = getattr(self.config, "sample_open", None)
+        if spec is None or not is_shared_address(self.config) or not spec.close_tool:
+            return
+        tool = self.advertised_tool(spec.close_tool)
+        if tool is None:
+            return
+
+        async def call(_tool: str, arguments: dict[str, Any]) -> Any:
+            return await tool.ainvoke(arguments)
+
+        await aclose_job_programs(self.note_key, spec, self.sample_notes, call)
 
     def all_tool_names(self) -> list[str]:
         """Every tool the server advertises, allow-list ignored."""
@@ -1011,7 +1366,36 @@ class ServerHandle:
             return
         self._keep_capabilities(payload)
 
+    def _held_path(self) -> str | None:
+        """The job's own copy of the sample on this server: the path the job
+        holds there (``held_sample_path``), else the one its provider answers."""
+        if self.held_sample_path:
+            return self.held_sample_path
+        answer = self.error_sample_path() if self.error_sample_path is not None else None
+        return answer if isinstance(answer, str) and answer else None
+
     def tools(self) -> list[BaseTool]:
+        """The tools the model may call, decided once per manifest (:meth:`_build_tools`).
+
+        Every reader (an agent's merge, a reference, ``withheld_reasons``)
+        reads the same decision, so the wrappers are built once for each
+        manifest, allow-list, host manifest, declaration and job note this
+        handle holds, not once per reader.
+        """
+        allowed = self.config.tools
+        key = (
+            tuple(str(getattr(tool, "name", "")) for tool in self._all_tools),
+            self._attach_count,
+            None if allowed is None else tuple(allowed),
+            self.config.transport,
+            repr(getattr(self.config, "sample_open", None)),
+            self.reads_own_errors,
+        )
+        if self._tools_cache is None or self._tools_cache[0] != key:
+            self._tools_cache = (key, self._build_tools())
+        return list(self._tools_cache[1])
+
+    def _build_tools(self) -> list[BaseTool]:
         """The tools the model may call: the allow-list applied to the manifest.
 
         ``None`` is "everything the server offers" and is what the two
@@ -1027,7 +1411,12 @@ class ServerHandle:
         it, so the reason and the remedy reach the operator and the degraded
         block. A server that answered no manifest is offered whole, as before.
         """
-        from maljan.providers.sample_open import mark_open_tool, wrap_open_tool
+        from maljan.providers.sample_open import (
+            is_shared_address,
+            mark_open_tool,
+            pin_program_argument,
+            wrap_open_tool,
+        )
 
         allowed = self.config.tools
         withheld = self.capabilities.unusable() if self.capabilities else frozenset()
@@ -1059,31 +1448,73 @@ class ServerHandle:
         # A server that declares its open tool has that tool answered through
         # the job's note: a path opened once is not opened again.
         spec = getattr(self.config, "sample_open", None)
-        return mark_open_tool(
+        shared = is_shared_address(self.config)
+        marked = mark_open_tool(
             wrap_open_tool(
                 offered,
                 every_tool,
                 server=self.note_key,
                 spec=spec,
                 notes=self.sample_notes,
+                held_path=self._held_path,
+                shared=shared,
             ),
             spec,
             every_tool,
         )
+        # On a server other jobs share, every call is held to the job's own
+        # programs and sample: the server's current program is every client's.
+        unpinned: dict[str, str] = {}
+        offered = pin_program_argument(
+            marked,
+            server=self.note_key,
+            spec=spec,
+            notes=self.sample_notes,
+            shared=shared,
+            held_path=self._held_path,
+            withheld=unpinned,
+        )
+        self._unpinned = unpinned
+        return offered
+
+    def _decide_unpinned(self) -> None:
+        """Make the shared-server withholding decisions for the tools this handle holds."""
+        if self._all_tools:
+            self.tools()
 
     def withheld_reasons(self) -> list[str]:
         """The degradation reasons for the tools this host cannot run.
 
         Said where the tool is withheld rather than where it would have been
         bound, so dropping it from the model's list does not also drop the
-        sentence that explains the gap.
+        sentence that explains the gap. The tools withheld on a shared server
+        for want of the job's program (``pin_program_argument``) are decided
+        here afresh, so the answer does not depend on ``tools`` being read first.
         """
+        self._decide_unpinned()
+        unpinned = [self._unpinned[name] for name in sorted(self._unpinned)]
         if self.capabilities is None:
-            return []
+            return unpinned
         withheld = self.capabilities.unusable()
         if not withheld:
-            return []
-        return [u.degradation_reason for u in self.capabilities.unavailable(sorted(withheld))]
+            return unpinned
+        found = self.capabilities.unavailable(sorted(withheld))
+        return [u.degradation_reason for u in found] + unpinned
+
+    def withheld_reason(self, name: str) -> str | None:
+        """Why the tool ``name`` is withheld on this host, or ``None`` when it is not.
+
+        A caller asking for one tool by name is told the manifest's reason (a
+        credential not configured, a library not installed) and its remedy,
+        not only that the tool is missing.
+        """
+        self._decide_unpinned()
+        if name in self._unpinned:
+            return self._unpinned[name]
+        if self.capabilities is None or name not in self.capabilities.unusable():
+            return None
+        found = self.capabilities.unavailable([name])
+        return found[0].degradation_reason if found else None
 
     def _teardown(self, toolkit: Any) -> None:
         """Best-effort close of ``toolkit``, attached or abandoned mid-open. Never raises.
@@ -1179,6 +1610,107 @@ def _declared_fragment(handle: Any) -> str:
     return str(getattr(getattr(handle, "config", None), "prompt_fragment", "") or "")
 
 
+def _declared_aggregates(handle: Any) -> dict[str, tuple[str, ...]]:
+    """What a handle's server's tools declare themselves the aggregate form of; {} for none."""
+    from maljan.core.undeclared_tools import aggregates_of
+
+    return aggregates_of(getattr(getattr(handle, "config", None), "tool_facts", None))
+
+
+def _offered_names(server: str, incoming: Sequence[Any], seen: dict[str, str]) -> dict[str, str]:
+    """Each tool of ``server`` a request offers, by its own name, to the name it is offered under.
+
+    The tools arriving now, named by :func:`offered_name` over ``seen`` before
+    the merge claims anything, and the ones the server claimed earlier in the
+    same tool set.
+    """
+    prefix = f"{server}__"
+    out = {
+        name.removeprefix(prefix) if name.startswith(prefix) else name: name
+        for name, owner in seen.items()
+        if owner == server
+    }
+    claimed = dict(seen)
+    for tool in incoming:
+        name = str(getattr(tool, "name", "") or "")
+        if name:
+            out.setdefault(name, offered_name(server, name, claimed))
+    return out
+
+
+def settle_tool_notes(tools: Sequence[Any], settings: Any = None) -> list[Any]:
+    """An agent's whole tool list, each tool with the notes its declaration gives it.
+
+    The one place the notes after a tool's description are settled once every
+    name the agent is offered is known: ``aggregate_of`` (each aggregated tool
+    named as offered, ``<server>__<tool>`` after a collision, and left out when
+    it is not offered) and, while ``mcp.answer_scope_notes`` is on, what the
+    tool's answer shows and does not show (``ToolFacts.shows`` /
+    ``does_not_show``). Tools are grouped by the source they are declared under
+    (``mcp:<key>``, a provider's, the sandbox report's;
+    ``tool_pinning.declared_source_of``), so a server's tools merged in several
+    halves (bound by ``agents``, named by a ``ToolRef``) are read as one set,
+    whatever order they arrived in. A delivery tool, never offered to the model
+    (``tool_pinning.DELIVERY_TOOLS``), is not named. Each note is written from
+    the tool's own description (``undeclared_tools.with_declared_notes``), so
+    a note a provider or a merge wrote earlier is replaced, not repeated, and
+    one naming no offered tool is taken off. ``settings`` is the job's
+    (default: the process's). A tool with no declared source, or whose source
+    declares nothing it reads, is the same object.
+    """
+    from maljan.agents.tool_pinning import DELIVERY_TOOLS, declared_name_of, declared_source_of
+    from maljan.core.declared_reading import declarations
+    from maljan.core.undeclared_tools import (
+        OWN_DESCRIPTION_METADATA_KEY,
+        aggregates_of,
+        answer_scopes_of,
+        with_declared_notes,
+    )
+
+    if settings is None:
+        from maljan.core.config import get_settings
+
+        settings = get_settings()
+    offered: dict[str, dict[str, str]] = {}
+    for tool in tools:
+        source = declared_source_of(tool)
+        name = str(getattr(tool, "name", "") or "")
+        declared = declared_name_of(tool)
+        if source is None or not name or declared in DELIVERY_TOOLS:
+            continue
+        offered.setdefault(source, {}).setdefault(declared, name)
+    if not offered:
+        return list(tools)
+    try:
+        held = declarations(settings)
+    except Exception as exc:  # noqa: BLE001 — an unreadable declaration adds no note
+        logger.debug("tool notes not settled (%s).", type(exc).__name__)
+        return list(tools)
+    scoped = bool(getattr(getattr(settings, "mcp", None), "answer_scope_notes", False))
+    notes: dict[str, tuple[dict[str, tuple[str, ...]], dict[str, tuple[str, str]]]] = {}
+    for source in offered:
+        try:
+            facts = getattr(held.source(source), "tools", None) or {}
+        except ValueError:  # a source that does not parse declares nothing
+            facts = {}
+        notes[source] = (aggregates_of(facts), answer_scopes_of(facts) if scoped else {})
+    out: list[Any] = []
+    for tool in tools:
+        source = declared_source_of(tool)
+        aggregates, scopes = notes.get(source or "", ({}, {}))
+        noted = OWN_DESCRIPTION_METADATA_KEY in (getattr(tool, "metadata", None) or {})
+        if source is not None and (aggregates or scopes or noted):
+            tool = with_declared_notes(
+                [tool],
+                aggregates,
+                offered.get(source, {}),
+                scopes=scopes,
+                declared=declared_name_of,
+            )[0]
+        out.append(tool)
+    return out
+
+
 def offered_name(server: str, name: str, seen: dict[str, str]) -> str:
     """The name ``server``'s tool ``name`` is offered under, given the names ``seen`` claimed.
 
@@ -1237,6 +1769,7 @@ class ServerRegistry:
         context_budget: Any | None = None,
         event_sink: Any | None = None,
         sample_notes: Any | None = None,
+        sample_sha256: Callable[[], str] | None = None,
     ) -> None:
         from maljan.providers.sample_open import SampleNotes
         from maljan.providers.server_guard import guard_from_settings
@@ -1244,11 +1777,15 @@ class ServerRegistry:
         self._handles = {
             name: ServerHandle(name, config) for name, config in cfg.mcp.servers.items()
         }
+        # What an agent's merged tool list is settled against (``settle_tool_notes``).
+        self._settings = cfg
         # The job's note of the paths each server opened, for the servers
         # that declare their open tool; one per job, given to every handle.
         self.sample_notes = sample_notes if sample_notes is not None else SampleNotes()
         for handle in self._handles.values():
             handle.sample_notes = self.sample_notes
+            # A job's server: its process is measured for the run's isolation part.
+            handle.measures_isolation = True
         # Every rest this job gave a server, in the order the breakers opened;
         # the judge node reads it into the run summary. Written from whichever
         # loop's call tripped the breaker, so appended under the lock.
@@ -1279,6 +1816,9 @@ class ServerRegistry:
         # guardrail on a tool server's answer counted on nothing and cut at the
         # signature's own default rather than at the number the operator set.
         self._truncation_ledger = truncation_ledger
+        # The run's sample, read when a server is attached (it is known only
+        # once the job has started): the platform's fact, never the model's.
+        self._sample_sha256 = sample_sha256
         self._max_output_chars = int(getattr(cfg.preprocessing, "max_tool_output_chars", 0) or 0)
         # What that limit means when it is zero: the window the served model
         # was found to have, spent per call. The budget travels with the attach
@@ -1318,6 +1858,21 @@ class ServerRegistry:
             truncation_ledger=self._truncation_ledger,
             context_budget=self._context_budget,
         )
+
+    def rest_hook(self) -> Callable[[dict[str, Any]], None]:
+        """What a provider that guards its own server calls when its breaker opens.
+
+        Weak, like the registry's own guards: a context outliving the registry
+        must not keep it alive.
+        """
+        rested = weakref.WeakMethod(self._rested)
+
+        def hook(record: dict[str, Any]) -> None:
+            method = rested()
+            if method is not None:
+                method(record)
+
+        return hook
 
     def _rested(self, record: dict[str, Any]) -> None:
         """Keep one breaker opening for the run summary and announce it."""
@@ -1361,6 +1916,8 @@ class ServerRegistry:
         out["max_output_chars"] = self._max_output_chars
         if self._context_budget is not None:
             out["context_budget"] = self._context_budget
+        # Written unconditionally: a caller's own value is never the job's.
+        out["sample_sha256"] = (self._sample_sha256() if self._sample_sha256 else "") or ""
         return out
 
     def _handle_for(self, handle: ServerHandle, loop: asyncio.AbstractEventLoop) -> ServerHandle:
@@ -1393,6 +1950,10 @@ class ServerRegistry:
                 # The job's note: a remote server's opens are noted under its
                 # address, a local process's under its own handle.
                 replica.sample_notes = handle.sample_notes
+                # The job's own copy of the sample there, the same for every loop.
+                replica.held_sample_path = handle.held_sample_path
+                replica.declared_source = handle.declared_source
+                replica.measures_isolation = handle.measures_isolation
                 self._loop_handles[key] = replica
                 logger.info(
                     "mcp server '%s' is attached on another loop; the caller gets "
@@ -1400,6 +1961,26 @@ class ServerRegistry:
                     handle.name,
                 )
             return replica
+
+    def hold_sample_path(self, server: str, path: str | None, *, fallback: bool = False) -> None:
+        """Note ``path`` as the job's own copy of the sample on ``server``, on every handle.
+
+        The path the server opens for the job (its mirror under the declared
+        mount, or where the sample was staged to it): on a server other jobs
+        share, the only path an open may name (``pin_program_argument``). Set
+        on the handle and on each of its per-loop replicas; a replica made
+        later copies it. A ``fallback`` path (an agent's own, not the
+        server's) never replaces one already held.
+        """
+        if not path:
+            return
+        with self._lock:
+            handles = [h for h in (self._handles.get(server),) if h is not None]
+            handles += [h for (name, _loop), h in self._loop_handles.items() if name == server]
+        for handle in handles:
+            if fallback and handle.held_sample_path:
+                continue
+            handle.held_sample_path = path
 
     def _all_handles(self) -> list[ServerHandle]:
         """Every handle this registry has handed out, per-loop ones included."""
@@ -1474,6 +2055,7 @@ class ServerRegistry:
         *,
         fragment: str = "",
         own_words: str = "",
+        aggregates: Mapping[str, Sequence[str]] | None = None,
     ) -> int:
         """Append ``incoming`` to ``tools`` under the collision rule.
 
@@ -1497,11 +2079,21 @@ class ServerRegistry:
         list shows it only while the server's tools are there. ``own_words``
         is what a server that declares none says about itself
         (:func:`_own_words`), carried the same way
-        (``metadata["maljan_server_own_words"]``).
+        (``metadata["maljan_server_own_words"]``). ``aggregates`` is what the
+        server's tools declare themselves the aggregate form of
+        (``ToolFacts.aggregate_of``): such a tool's description gains a note
+        naming each aggregated tool this request offers, under the name it is
+        offered (``core.undeclared_tools.with_aggregate_notes``), the names
+        settled before anything is claimed, as :func:`_own_words` settles them.
 
         Returns how many tools were renamed, so the caller can log it once
         per server instead of per tool.
         """
+        if aggregates:
+            from maljan.core.undeclared_tools import with_aggregate_notes
+
+            offered_as = _offered_names(server, incoming, seen)
+            incoming = with_aggregate_notes(incoming, aggregates, offered_as)
         renamed = 0
         for tool in incoming:
             name = str(getattr(tool, "name", ""))
@@ -1516,10 +2108,14 @@ class ServerRegistry:
                 metadata["maljan_server_own_words"] = own_words
             update: dict[str, Any] = {"metadata": metadata}
             if offered != name:
-                name = offered
-                if seen.get(name) == server:
+                if seen.get(offered) == server:
                     continue
-                update["name"] = name
+                update["name"] = offered
+                # The server declares the tool under the name it gave it.
+                from maljan.agents.tool_pinning import DECLARED_NAME_METADATA_KEY
+
+                metadata[DECLARED_NAME_METADATA_KEY] = name
+                name = offered
                 renamed += 1
             tool = tool.model_copy(update=update)
             seen[name] = server
@@ -1531,8 +2127,8 @@ class ServerRegistry:
         # the stage that binds it can no longer be the thing that reports it.
         # It is reported here instead, where it is withheld, and reaches the
         # degraded block exactly as it did before.
-        self._record(handle.withheld_reasons())
         offered = handle.tools()
+        self._record(handle.withheld_reasons())
         return self.merge_tools(
             handle.name,
             offered,
@@ -1540,6 +2136,7 @@ class ServerRegistry:
             seen,
             fragment=_declared_fragment(handle),
             own_words=_own_words(handle, offered, seen),
+            aggregates=_declared_aggregates(handle),
         )
 
     def tools_for(
@@ -1651,13 +2248,22 @@ class ServerRegistry:
         collision prefixing happens later, in ``merge_tools``, so a manifest
         name reaching here is always raw.
         """
+        if not handle.config.enabled:
+            # A reference to a server the operator switched off is a stale
+            # reference, and says so, whether it named one tool or the set.
+            unavailable = AGENT_TOOL_UNAVAILABLE_REASON.format(
+                server=handle.name, name=ref.name or "*"
+            )
+            return [], [f"{unavailable}: server disabled"]
         available = handle.tools()
         if ref.name is None:
             return list(available), handle.withheld_reasons()
         wanted = str(ref.name)
         picked = [tool for tool in available if str(getattr(tool, "name", "")) == wanted]
         if not picked:
-            return [], [AGENT_TOOL_UNAVAILABLE_REASON.format(server=handle.name, name=wanted)]
+            unavailable = AGENT_TOOL_UNAVAILABLE_REASON.format(server=handle.name, name=wanted)
+            withheld = handle.withheld_reason(wanted)
+            return [], [f"{unavailable}: {withheld}" if withheld else unavailable]
         return picked, []
 
     def _record(self, reasons: list[str]) -> None:
@@ -1703,6 +2309,7 @@ class ServerRegistry:
             claimed,
             fragment=_declared_fragment(handle),
             own_words=_own_words(handle, picked, claimed),
+            aggregates=_declared_aggregates(handle),
         )
         if renamed:
             logger.info(
@@ -1745,6 +2352,7 @@ class ServerRegistry:
             claimed,
             fragment=_declared_fragment(handle),
             own_words=_own_words(handle, picked, claimed),
+            aggregates=_declared_aggregates(handle),
         )
         if renamed:
             logger.info(
@@ -1779,6 +2387,10 @@ class ServerRegistry:
         holding the names the agent's in-process tools claimed (its provider's,
         its sandbox's), which therefore never move either. A server both bound
         and named contributes one copy.
+
+        The notes after each tool's description are settled once over the
+        merged list (:func:`settle_tool_notes`), so a server's tool reached in
+        one half names the tools of the same server another half offered.
         """
         seen = {} if seen is None else seen
         tools, reasons = self.tools_for(
@@ -1793,7 +2405,7 @@ class ServerRegistry:
         )
         tools.extend(added)
         reasons.extend(added_reasons)
-        return tools, reasons
+        return settle_tool_notes(tools, getattr(self, "_settings", None)), reasons
 
     async def aagent_tools(
         self,
@@ -1819,7 +2431,23 @@ class ServerRegistry:
         )
         tools.extend(added)
         reasons.extend(added_reasons)
-        return tools, reasons
+        return settle_tool_notes(tools, getattr(self, "_settings", None)), reasons
+
+    def server_versions(self) -> dict[str, dict[str, str]]:
+        """Per configured server this job attached, the name and version it gave for itself.
+
+        A server attached on more than one loop gave the same answer each
+        time; the first handle's is kept. A server that gave neither is
+        listed with nothing, so it is told apart from one never attached.
+        """
+        out: dict[str, dict[str, str]] = {}
+        for handle in self._all_handles():
+            info = getattr(handle, "server_info", None) or {}
+            if handle.name in out:
+                continue
+            if info or handle.is_open or getattr(handle, "attached_once", False):
+                out[handle.name] = dict(info)
+        return dict(sorted(out.items()))
 
     def still_open(self) -> list[ServerHandle]:
         """Every handle still attached, per-loop ones included.

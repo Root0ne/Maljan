@@ -49,9 +49,11 @@ starts with the empty string of its opening chunk).
 of a tool loop (the loop's turns are noted, :data:`TOOL_LOOP_TURN`) or one that
 carries an earlier assistant turn. It gets explicit breakpoints on the last
 block of its newest user turn and on the user turn before its newest assistant
-turn. A tool loop's first user turn is sent as a one-block list on every
-request, so it can carry a breakpoint on the first request without changing
-shape on the next. A single-shot call carries none and pays no write premium
+turn, unless its newest turn says no later request sends the conversation
+again (:data:`LAST_REQUEST`): an entry written there would never be read. A
+tool loop's first user turn is sent as a one-block list on every request, so
+it can carry a breakpoint on the first request without changing shape on the
+next. A single-shot call carries none and pays no write premium
 (https://platform.claude.com/docs/en/build-with-claude/prompt-caching) — except
 where its first user turn is noted with a head that other requests repeat
 (:data:`SHARED_HEAD`, the report composer's sections): that turn is sent as two
@@ -87,6 +89,10 @@ TOOL_LOOP_TURN = "maljan_tool_loop_turn"
 # Where a user turn says how many of its leading characters are a head other
 # requests send too, in ``response_metadata``.
 SHARED_HEAD = "maljan_shared_head"
+# Where a request's newest turn says no later request sends its conversation
+# again, in ``response_metadata``: an entry written at a breakpoint there would
+# never be read, so the request carries none but a shared head's.
+LAST_REQUEST = "maljan_last_request"
 
 _THINKING_KINDS = ("thinking", "redacted_thinking")
 
@@ -337,8 +343,14 @@ def _keep_run_state_appended(memory: Memory, messages: list[Any], attached: str)
 # ── A tool loop's first user turn ─────────────────────────────────────────
 
 
-def _first_turn_listed(memory: Memory, messages: list[Any], loop: bool) -> list[Any]:
-    """A tool loop's first user turn as a one-block list, on every request of the loop."""
+def _first_turn_listed(
+    memory: Memory, messages: list[Any], loop: bool, attached: str = ""
+) -> list[Any]:
+    """A tool loop's first user turn as a one-block list, on every request of the loop.
+
+    ``attached`` is the exact run-state block the platform put on the newest
+    turn; only that block, and only on that turn, is left out of the key.
+    """
     users = _user_indexes(messages)
     if not users:
         return messages
@@ -349,8 +361,10 @@ def _first_turn_listed(memory: Memory, messages: list[Any], loop: bool) -> list[
     from maljan.pipeline.run_state import without_run_state_tail
 
     # Keyed as the turn reads without a run-state block, which the platform
-    # puts on it on the first request and takes off on the next.
-    key = _digest({**first, "content": without_run_state_tail(content)})
+    # puts on it on the first request and takes off on the next. Markers the
+    # turn's own text ends on are its own and stay in the key.
+    tail = attached if users[0] == len(messages) - 1 else ""
+    key = _digest({**first, "content": without_run_state_tail(content, tail)})
     with memory.lock:
         listed = key in memory.listed_first
         if loop and not listed:
@@ -509,10 +523,16 @@ def _shared_heads(messages: list[Any], heads: dict[str, int], marker: dict[str, 
     return out
 
 
-def _cache_breakpoints(messages: list[Any], marker: dict[str, str], loop: bool) -> list[Any]:
-    """Explicit breakpoints on a conversation that re-sends its prefix, none otherwise."""
+def _cache_breakpoints(
+    messages: list[Any], marker: dict[str, str], loop: bool, last: bool = False
+) -> list[Any]:
+    """Explicit breakpoints on a conversation that re-sends its prefix, none otherwise.
+
+    ``last``: no later request sends this conversation again (:data:`LAST_REQUEST`),
+    so a breakpoint here would write an entry nothing reads.
+    """
     roles = [m.get("role") if isinstance(m, dict) else None for m in messages]
-    if "assistant" not in roles and not loop:
+    if last or ("assistant" not in roles and not loop):
         return messages
     users = [i for i, role in enumerate(roles) if role == "user"]
     marks = {users[-1]} if users else set()
@@ -613,6 +633,7 @@ def prepared(
     attached: str = "",
     loop: bool = False,
     heads: dict[str, int] | None = None,
+    last: bool = False,
 ) -> dict[str, Any]:
     """The request ``payload`` built to keep its replayed thinking valid and cache what repeats.
 
@@ -620,11 +641,12 @@ def prepared(
     (:func:`binds_thinking_to_prefix`); only such a model's history is kept
     append-only and its blocks checked. ``attached`` is the exact run-state
     block the platform put on the newest turn, ``loop`` whether the request is
-    a tool loop's. ``heads`` maps the text of each user turn noted with a
-    shared head to the head's length (:data:`SHARED_HEAD`). On every model, a
-    text block that is empty or only whitespace is left out first
-    (:func:`_without_empty_text`). Never raises: a request this cannot read is
-    sent as built.
+    a tool loop's, ``last`` whether no later request sends the conversation
+    again (:data:`LAST_REQUEST`). ``heads`` maps the text of each user turn
+    noted with a shared head to the head's length (:data:`SHARED_HEAD`). On
+    every model, a text block that is empty or only whitespace is left out
+    first (:func:`_without_empty_text`). Never raises: a request this cannot
+    read is sent as built.
     """
     try:
         messages = payload.get("messages")
@@ -636,7 +658,7 @@ def prepared(
         messages = _without_empty_text(payload, messages)
         payload["messages"] = messages
         messages = _shared_heads(messages, dict(heads or {}), cache_marker)
-        messages = _first_turn_listed(memory, messages, loop)
+        messages = _first_turn_listed(memory, messages, loop, attached)
         if bound:
             messages = _keep_run_state_appended(memory, messages, attached)
             messages, ask_to_drop, whole = _settle_thinking(memory, payload, messages)
@@ -645,9 +667,9 @@ def prepared(
             pending = _PENDING.get()
             if pending is not None:
                 pending[:] = [whole]
-        payload["messages"] = _cache_breakpoints(messages, cache_marker, loop)
-        last = messages[-1] if messages else None
-        if isinstance(last, dict) and last.get("role") == "assistant":
+        payload["messages"] = _cache_breakpoints(messages, cache_marker, loop, last)
+        newest = messages[-1] if messages else None
+        if isinstance(newest, dict) and newest.get("role") == "assistant":
             logger.warning(
                 "anthropic provider: the request ends on an assistant turn, which a model that "
                 "thinks by default refuses as a prefill."
@@ -677,16 +699,20 @@ def note_answer(result: Any, prefix: str, memory: Memory) -> None:
         logger.debug("anthropic provider: thinking blocks not noted (%s).", exc)
 
 
-def _notes_of(model: Any, input_: Any) -> tuple[str, bool]:
-    """``(the run-state block the platform attached to the newest turn, a tool loop's turn)``."""
+def _notes_of(model: Any, input_: Any) -> tuple[str, bool, bool]:
+    """The newest turn's notes: ``(its run-state block, a loop's turn, the last request)``."""
     try:
         messages = model._convert_input(input_).to_messages()
     except Exception:  # noqa: BLE001 — a request whose turns cannot be read carries no note
-        return "", False
+        return "", False, False
     last = messages[-1] if messages else None
     noted = getattr(last, "response_metadata", None) or {}
     block = noted.get(RUN_STATE_ATTACHED)
-    return (block if isinstance(block, str) else ""), bool(noted.get(TOOL_LOOP_TURN))
+    return (
+        (block if isinstance(block, str) else ""),
+        bool(noted.get(TOOL_LOOP_TURN)),
+        noted.get(LAST_REQUEST) is True,
+    )
 
 
 def _heads_of(model: Any, input_: Any) -> dict[str, int]:
@@ -726,7 +752,7 @@ def with_preserved_thinking(chat_class: Any, cache_ttl: str = "5m") -> Any:
         payload = base._get_request_payload(self, input_, stop=stop, **kwargs)
         if not isinstance(payload, dict):
             return payload
-        attached, loop = _notes_of(self, input_)
+        attached, loop, last = _notes_of(self, input_)
         return prepared(
             payload,
             memory_of(self),
@@ -735,6 +761,7 @@ def with_preserved_thinking(chat_class: Any, cache_ttl: str = "5m") -> Any:
             attached=attached,
             loop=loop,
             heads=_heads_of(self, input_),
+            last=last,
         )
 
     def _generate_with_cache(self: Any, *args: Any, **kwargs: Any) -> Any:

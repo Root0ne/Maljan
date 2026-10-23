@@ -245,7 +245,7 @@ def test_an_accepted_sandbox_kind_gives_run_roots_and_a_sandbox_s_reading(instal
 def test_without_acceptance_the_sandbox_server_stays_undeclared(installed: Any) -> None:
     settings = installed(_settings(None))
     entry = _entry(settings, "run_processes")
-    assert entry.facts == {"v": 1}
+    assert entry.facts == {"v": 1, "hints": {"readOnlyHint": True, "openWorldHint": False}}
     assert not tool_kinds.is_of(entry, "evidence_bundles.SANDBOX_TOOL_PREFIXES")
     roots = run_roots([entry]).entries[entry.id.lower()].roots
     assert not any(str(root).startswith(PROCESS_ROOT.split("{", 1)[0]) for root in roots)

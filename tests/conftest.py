@@ -6,7 +6,19 @@ import pytest
 from app import observability
 from app.auth import throttle
 from maljan.app import MaljanApp
+from maljan.core.ctype_locale import pin_character_classification
 from tests.golden_fixtures import report_absent_fixture_skips
+
+
+def pytest_configure(config: pytest.Config) -> None:
+    """The test process pins its character classes at its start, as the platform's do.
+
+    Before any test module loads the YARA engine, whose ``nocase`` table is
+    built by the LC_CTYPE in force when it loads: every test then runs under
+    the locale the worker, the CLI and the sidecars run under. A test that
+    changes the locale itself does so in a subprocess.
+    """
+    pin_character_classification()
 
 
 @pytest.fixture(autouse=True)

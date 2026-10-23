@@ -20,8 +20,7 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, UploadFile, status
-from pydantic import SecretStr
-from sqlalchemy import delete, func, select
+from sqlalchemy import delete, func, select, text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -30,13 +29,14 @@ from app.database import get_db
 from app.deps import get_current_user, require_active_user
 from app.logging_config import get_logger
 from app.logsafe import log_safe
+from app.middleware.upload_bound_middleware import too_large_detail, upload_bound
 from app.models.job import AnalysisJob
 from app.models.sample import Sample
 from app.models.sandbox_report import SandboxReportRow
 from app.models.user import User
 from app.runtime_config import runtime_config
 from app.schemas.job import SampleListResponse, SampleResponse
-from app.services import audit
+from app.services import audit, object_store
 from app.services.settings_service import effective_core_settings
 
 logger = get_logger("api.samples")
@@ -44,71 +44,13 @@ logger = get_logger("api.samples")
 router = APIRouter(prefix="/samples", tags=["Samples"])
 
 
-def _minio_secret() -> str:
-    raw = settings.minio_secret_key
-    return raw.get_secret_value() if isinstance(raw, SecretStr) else str(raw)
-
-
 def _minio_client() -> Any:
-    """Build a MinIO client from settings.
-
-    Single construction point so the upload and delete paths cannot drift apart
-    (the client used to be hand-built inline at every site).
-    """
-    from minio import Minio
-
-    return Minio(
-        settings.minio_endpoint,
-        access_key=settings.minio_access_key,
-        secret_key=_minio_secret(),
-        secure=settings.minio_secure,
-    )
+    """The object store's client (``app.services.object_store``)."""
+    return object_store.client()
 
 
 def _store_sample_bytes_blocking(storage_path: str, source: str, content_type: str) -> None:
-    client = _minio_client()
-
-    if not client.bucket_exists(settings.minio_bucket):
-        client.make_bucket(settings.minio_bucket)
-        logger.info("MinIO bucket created: %s", settings.minio_bucket)
-        # MinIO defaults
-        # to private buckets, but an operator can mis-configure
-        # ``MINIO_BROWSER_ALLOW_PUBLIC_BUCKETS`` or a prior process
-        # could have left the bucket public. Set an explicit deny
-        # policy on every new bucket so a malware corpus is never
-        # served unauthenticated. We deny anonymous reads at the
-        # ``s3:GetObject`` level — the API path still works because
-        # it presigns via the configured access key.
-        _deny_anonymous_policy = (
-            '{"Version":"2012-10-17","Statement":[{'
-            '"Effect":"Deny","Principal":{"AWS":["*"]},'
-            '"Action":["s3:GetObject","s3:PutObject","s3:ListBucket"],'
-            f'"Resource":["arn:aws:s3:::{settings.minio_bucket}",'
-            f'"arn:aws:s3:::{settings.minio_bucket}/*"],'
-            '"Condition":{"StringEquals":{"aws:PrincipalType":"Anonymous"}}}]}'
-        )
-        try:
-            client.set_bucket_policy(settings.minio_bucket, _deny_anonymous_policy)
-            logger.info(
-                "MinIO bucket policy set (anonymous-deny): %s",
-                settings.minio_bucket,
-            )
-        except Exception as policy_exc:
-            # Failure to set the policy is non-fatal but loud —
-            # operators must verify bucket privacy out-of-band.
-            logger.warning(
-                "MinIO set_bucket_policy failed for '%s' (%s). "
-                "Verify the bucket is not anonymously readable.",
-                settings.minio_bucket,
-                policy_exc,
-            )
-
-    client.fput_object(
-        settings.minio_bucket,
-        storage_path,
-        source,
-        content_type=content_type,
-    )
+    object_store.put_file(_minio_client(), storage_path, source, content_type=content_type)
 
 
 async def store_sample_bytes(*, storage_path: str, source: Any, content_type: str) -> None:
@@ -148,7 +90,7 @@ def _streaming_hashes(file: UploadFile, dest: Path, max_bytes: int) -> tuple[str
             if total > max_bytes:
                 raise HTTPException(
                     status_code=status.HTTP_413_CONTENT_TOO_LARGE,
-                    detail=(f"File too large. Maximum: {max_bytes // (1024 * 1024)} MB"),
+                    detail=too_large_detail(max_bytes),
                 )
             sha256.update(chunk)
             sha1.update(chunk)
@@ -303,7 +245,29 @@ async def _audit_upload(
     )
 
 
+async def _upload_max_bytes() -> int:
+    """The operator's ``upload_max_bytes``, read now: the bound of one sample upload."""
+    return int(await runtime_config.get("upload_max_bytes"))
+
+
+async def lock_sample_bytes(db: AsyncSession, sha256: str) -> None:
+    """Serialise, until this transaction ends, everything that decides one sha's stored object.
+
+    An upload decides whether the object is already stored and a delete
+    decides whether it is still referenced; each reads the other's rows. Run
+    side by side, the upload could see the delete's row, skip the put, and
+    commit a row after the delete removed the object it relies on. A
+    transaction-scoped advisory lock keyed by the sha puts the two in order:
+    whichever comes second sees what the first committed. Different shas never
+    wait on each other.
+    """
+    await db.execute(
+        text("SELECT pg_advisory_xact_lock(hashtextextended(:sha, 0))"), {"sha": sha256}
+    )
+
+
 @router.post("/upload", response_model=SampleResponse, status_code=status.HTTP_201_CREATED)
+@upload_bound(_upload_max_bytes)
 async def upload_sample(
     request: Request,
     file: UploadFile,
@@ -311,7 +275,7 @@ async def upload_sample(
     db: AsyncSession = Depends(get_db),
 ) -> Sample:
     """Upload a malware sample for analysis (streaming)."""
-    upload_max_bytes = await runtime_config.get("upload_max_bytes")
+    upload_max_bytes = await _upload_max_bytes()
     safe_filename = _sanitise_filename(file.filename)
     logger.info(
         "Sample upload started: %s",
@@ -335,11 +299,15 @@ async def upload_sample(
         tmp_path = Path(tmp.name)
 
     try:
-        sha256, sha1, md5, size = _streaming_hashes(file, tmp_path, upload_max_bytes)
+        # Reading, hashing and writing a hundred megabytes is seconds of work:
+        # in a thread, so the loop keeps answering every other request.
+        sha256, sha1, md5, size = await asyncio.to_thread(
+            _streaming_hashes, file, tmp_path, upload_max_bytes
+        )
         if size == 0:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Empty file")
 
-        detected_mime = _detect_mime(tmp_path)
+        detected_mime = await asyncio.to_thread(_detect_mime, tmp_path)
         allowed_mime_types = await runtime_config.get("upload_allowed_mime_types")
         if allowed_mime_types:
             allowed = set(allowed_mime_types)
@@ -358,6 +326,9 @@ async def upload_sample(
         )
 
         storage_path = f"samples/{sha256[:2]}/{sha256}"
+        # Held until this request's transaction ends: a delete of the same sha
+        # waits for this row to be committed, or this waits for its removal.
+        await lock_sample_bytes(db, sha256)
 
         # Check whether the bytes are already in MinIO (any prior uploader's
         # row works — the storage path is sha256-derived). If yes, the new
@@ -508,6 +479,9 @@ async def delete_sample(
 ) -> None:
     """Delete a sample, its stored object and every analysis derived from it.
 
+    Every job's evidence objects (the parts of its ledger's answers kept
+    whole, ``object_store.evidence_prefix``) are removed with the job.
+
     There was no way to remove an uploaded sample through
     the API or the UI, so malware binaries accumulated forever with no retention
     or cleanup path.
@@ -517,8 +491,14 @@ async def delete_sample(
     The MinIO object is only removed when no OTHER user still references the same
     sha256 (uploads are deduplicated per user but share one object path).
     """
+    # The sample row is the first lock, held to the commit: a job create takes
+    # the same row (FOR SHARE) before the sandbox report's, so the two paths
+    # lock in one order and cannot deadlock, and a job being created either is
+    # counted below or waits until this delete is done.
     result = await db.execute(
-        select(Sample).where(Sample.id == sample_id, Sample.uploaded_by == user.id)
+        select(Sample)
+        .where(Sample.id == sample_id, Sample.uploaded_by == user.id)
+        .with_for_update()
     )
     sample = result.scalar_one_or_none()
     if not sample:
@@ -540,6 +520,9 @@ async def delete_sample(
 
     storage_path = sample.storage_path
     sha256 = sample.sha256
+    # An upload of the same sha deciding whether the object is stored waits
+    # for this delete, and this delete for that upload (``lock_sample_bytes``).
+    await lock_sample_bytes(db, sha256)
 
     # Every sandbox report's bytes live at a path unique to that one row — unlike
     # the sample's own bytes, no other user's row can point at it — so gather
@@ -557,16 +540,44 @@ async def delete_sample(
         .all()
     )
 
+    # Each job's ledger keeps the parts of its answers it does not hold whole
+    # under the job's own prefix (``object_store.evidence_prefix``); gather
+    # the job ids before the cascade removes the rows that name them.
+    job_ids = (
+        (await db.execute(select(AnalysisJob.id).where(AnalysisJob.sample_id == sample.id)))
+        .scalars()
+        .all()
+    )
+
     # Jobs (and their reports, via the report->job cascade) go with the sample.
     await db.execute(delete(AnalysisJob).where(AnalysisJob.sample_id == sample.id))
     await db.delete(sample)
     await db.flush()
 
+    if job_ids:
+        # Committed first: objects are removed only once no row can name them,
+        # so a delete that rolls back never leaves a ledger pointing at nothing.
+        await db.commit()
+        client = _minio_client()
+        for job_id in job_ids:
+            prefix = object_store.evidence_prefix(job_id)
+            try:
+                await asyncio.to_thread(object_store.remove_prefix, client, prefix)
+            except Exception as exc:  # noqa: BLE001 — object cleanup must not fail the delete
+                logger.warning(
+                    "Sample %s row deleted but the evidence objects under %s could not be "
+                    "removed: %s",
+                    log_safe(sample_id),
+                    log_safe(prefix),
+                    log_safe(f"{type(exc).__name__}: {exc}"),
+                    extra={"user_id": str(user.id), "component": "minio"},
+                )
+
     if sandbox_report_paths:
         client = _minio_client()
         for report_path in sandbox_report_paths:
             try:
-                await asyncio.to_thread(client.remove_object, settings.minio_bucket, report_path)
+                await asyncio.to_thread(object_store.remove, client, report_path)
             except Exception as exc:  # noqa: BLE001 — object cleanup must not fail the delete
                 logger.warning(
                     "Sample %s row deleted but sandbox-report object %s could not be removed: %s",
@@ -576,13 +587,16 @@ async def delete_sample(
                     extra={"user_id": str(user.id), "component": "minio"},
                 )
 
+    # Taken again: the commit above, when there were jobs, ended the
+    # transaction that held it, and the count below must not race an upload.
+    await lock_sample_bytes(db, sha256)
     others = await db.execute(
         select(func.count()).select_from(Sample).where(Sample.sha256 == sha256)
     )
     if (others.scalar() or 0) == 0:
         try:
             client = _minio_client()
-            await asyncio.to_thread(client.remove_object, settings.minio_bucket, storage_path)
+            await asyncio.to_thread(object_store.remove, client, storage_path)
         except Exception as exc:  # noqa: BLE001 — object cleanup must not fail the delete
             logger.warning(
                 "Sample %s row deleted but MinIO object %s could not be removed: %s",

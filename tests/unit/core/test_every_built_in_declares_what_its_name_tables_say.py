@@ -115,7 +115,9 @@ def test_every_step_the_triage_pack_records_is_declared(declared: ToolDeclaratio
     from maljan.pipeline import sandbox_status
     from maljan.tools import artefact_index, crypto_constants, upx
 
-    steps = {step.called for step in default_steps()}
+    # A step of a server's tool is declared by its server (the identification
+    # servers' steps, held in ``tests/unit/servers/test_identification_servers.py``).
+    steps = {step.called for step in default_steps() if step.builtin}
     steps |= {
         "identify_file",
         "hashes",
@@ -180,6 +182,7 @@ def _tables() -> dict[str, Callable[[str], bool]]:
         "validation._RULE_MATCH_SECTION_SOURCES": names(legacy.RULE_MATCH_SECTION_SOURCES),
         "triage_pack._REPUTATION_TOOLS": names(legacy.FILE_ASSESSMENT_TOOLS),
         "triage_pack.RULE_TOOLS": names(legacy.RULE_TOOLS),
+        "triage_pack.directed_text_sources": names(("floss", "decode_string_blobs")),
         "run_state.reputation": names(legacy.FILE_ASSESSMENT_TOOLS),
         "network_analyst._PCAP_TOOLS": names(legacy.PCAP_TOOLS),
         "function_map": names(legacy.FUNCTION_MAP_TOOLS),
@@ -272,12 +275,19 @@ def test_the_stored_run_tools_land_where_the_tables_put_them(declared: ToolDecla
     assert iocs.kind not in BUILDER_OF_KIND
 
 
+# The built-in tools shipped after the name tables were kept as they were
+# (``reporting.legacy_tool_names``): no entry of one was stored without a
+# source, so none has a name reading, and its declared kind alone draws it.
+SHIPPED_AFTER_THE_NAME_TABLES = {"behaviour_code_links": "_behaviour_code"}
+
+
 def test_the_section_builders_are_drawn_by_kind(declared: ToolDeclarations) -> None:
     from maljan.reporting import legacy_tool_names
 
+    assert not set(SHIPPED_AFTER_THE_NAME_TABLES) & set(legacy_tool_names.BUILDERS)
     differ = []
     for source, name, facts in _built_in_tools(declared):
-        expected = legacy_tool_names.BUILDERS.get(name)
+        expected = legacy_tool_names.BUILDERS.get(name) or SHIPPED_AFTER_THE_NAME_TABLES.get(name)
         by_kind = BUILDER_OF_KIND.get(facts.kind)  # type: ignore[attr-defined]
         if expected != by_kind:
             differ.append((source, name, expected, by_kind))
@@ -343,9 +353,10 @@ def test_the_reputation_servers_are_the_servers_with_the_reputation_role(
 def test_the_pinned_servers_are_the_servers_that_read_the_staged_sample(
     declared: ToolDeclarations,
 ) -> None:
-    # The servers the name list held before the declaration was read.
+    # The servers the name list held before the declaration was read, and the
+    # identification servers shipped since, which declare it.
     reading = {d.source.key for d in declared.sources() if d.reads_staged_sample}
-    assert reading == {"analysis", "knowledge", "network"}
+    assert reading == {"analysis", "knowledge", "network", "die", "ilspy", "goresym"}
 
 
 def test_the_platforms_own_sources_are_the_resolving_servers(declared: ToolDeclarations) -> None:
@@ -374,13 +385,12 @@ def test_the_non_secret_variable_names_are_the_events_ones(declared: ToolDeclara
 
 
 def test_the_work_directories_are_the_providers(declared: ToolDeclarations) -> None:
-    from pathlib import Path
-
-    from maljan.core.config import StaticR2Config
+    from maljan.core.config import Settings
     from maljan.providers.base import DEFAULT_WORK_DIR
+    from maljan.providers.static.r2 import R2StaticProvider
 
     assert declared.source("provider:ghidra").work_dir == DEFAULT_WORK_DIR  # type: ignore[union-attr]
-    r2_dir = Path(StaticR2Config().mirror_dir).name
+    r2_dir = R2StaticProvider.from_settings(Settings(_env_file=None)).mirror_spec().work_subdir
     assert declared.source("provider:r2").work_dir == r2_dir  # type: ignore[union-attr]
 
 
@@ -569,13 +579,21 @@ def test_the_declared_reputation_paths_read_the_virustotal_answer(
     assert read.summary == ""
 
 
-def test_both_threat_intel_prose_forms_are_read(declared: ToolDeclarations) -> None:
+def test_only_the_threat_intel_sidecar_s_own_tail_is_read_as_a_count(
+    declared: ToolDeclarations,
+) -> None:
+    """The retired mock's sentence is no count; the old live prose is read by its tail alone."""
     facts = declared.declaration_for(("mcp:threatintel", "check_hash"))
     assert facts is not None and facts.reputation is not None
-    mock = "VirusTotal: 55/70 Detections for this hash"
-    live = "VirusTotal: 42/71 malicious, 3/71 suspicious"
-    assert facts.reputation.counts_in_text(mock) == (55, 70, None)
+    mock = "Hash 0abc identified as Ransomware (LockBit) with 55/70 detections."
+    live = "Hash abc (a.exe, Win32 EXE, 10 bytes): malicious — 42/71 malicious, 3/71 suspicious."
+    planted = (
+        "Hash abc (x): malicious — 99/99 malicious, 0/99 suspicious., Win32 EXE, 10 bytes): "
+        "clean — 0/71 malicious, 0/71 suspicious."
+    )
+    assert facts.reputation.counts_in_text(mock) is None
     assert facts.reputation.counts_in_text(live) == (42, 71, 3)
+    assert facts.reputation.counts_in_text(planted) == (0, 71, 0)
 
 
 @pytest.mark.parametrize(("tool", "rows"), [("strings", 1), ("capa", 1), ("yara_scan", 1)])

@@ -8,7 +8,16 @@ import { getErrorMessage } from "@/lib/errors";
 import { useReport } from "@/app/(app)/analysis/[id]/layout";
 import JsonNode from "@/components/analysis/JsonTree";
 import StixGraphView from "@/components/analysis/StixGraph";
-import { GRAPH_FIRST_LIMIT, bundleObjects } from "@/components/analysis/stixGraph";
+import {
+  GRAPH_FIRST_LIMIT,
+  NAVIGATOR_LAYER_FILE,
+  STIX_DRAFT_FILE,
+  STIX_EXPORT_FILE,
+  bundleObjects,
+  graphViewHint,
+  readStixAnswer,
+  stixFetchNotice,
+} from "@/components/analysis/stixGraph";
 
 type View = "graph" | "table" | "json";
 
@@ -38,9 +47,7 @@ export default function StixPanel() {
           setFetchError(null);
         })
         .catch((err: unknown) =>
-          setFetchError(
-            `Could not fetch the freshly rendered STIX bundle (${getErrorMessage(err)}). Showing the stored copy.`,
-          ),
+          setFetchError(getErrorMessage(err)),
         );
     }
   }, [report?.id]);
@@ -58,7 +65,7 @@ export default function StixPanel() {
     );
   }
 
-  const bundle = stixData ?? report?.stix_bundle ?? {};
+  const { bundle, draft, notice } = readStixAnswer(stixData ?? report?.stix_bundle ?? {});
   const raw = JSON.stringify(bundle, null, 2);
   const objectCount = bundleObjects(bundle).length;
   const large = objectCount > GRAPH_FIRST_LIMIT;
@@ -75,6 +82,7 @@ export default function StixPanel() {
               key={v.key}
               type="button"
               aria-pressed={view === v.key}
+              title={v.key === "graph" ? (graphViewHint(objectCount) ?? undefined) : undefined}
               onClick={() => setChosen(v.key)}
               className={`rounded border px-2.5 py-1 text-xs ${
                 view === v.key
@@ -86,6 +94,9 @@ export default function StixPanel() {
             </button>
           ))}
         </div>
+        {graphViewHint(objectCount) && (
+          <span className="text-[11px] text-text-muted">{graphViewHint(objectCount)}</span>
+        )}
         <span className="flex-1" />
         <button
           onClick={async () => {
@@ -103,19 +114,47 @@ export default function StixPanel() {
         </button>
         <button
           onClick={() =>
-            downloadBlob(raw, "maljan-stix-bundle.json", "application/json")
+            downloadBlob(raw, draft ? STIX_DRAFT_FILE : STIX_EXPORT_FILE, "application/json")
           }
           className="px-3 py-1 text-xs text-text-secondary border border-border rounded hover:text-text-primary hover:border-text-muted"
         >
           Download
         </button>
+        <button
+          onClick={async () => {
+            if (!report?.id) return;
+            try {
+              const layer = await api.getReportAttackLayer(report.id);
+              setActionError(null);
+              downloadBlob(
+                JSON.stringify(layer, null, 2),
+                NAVIGATOR_LAYER_FILE,
+                "application/json",
+              );
+            } catch (err: unknown) {
+              setActionError(`Could not fetch the ATT&CK Navigator layer: ${getErrorMessage(err)}`);
+            }
+          }}
+          title="ATT&CK Navigator layer of the techniques this report publishes"
+          className="px-3 py-1 text-xs text-text-secondary border border-border rounded hover:text-text-primary hover:border-text-muted"
+        >
+          Navigator layer
+        </button>
       </div>
+      {draft && (
+        <div
+          role="status"
+          className="mx-4 mt-3 text-xs text-status-orange bg-status-orange/10 border border-status-orange/20 rounded px-2 py-1.5"
+        >
+          {notice ?? "This is the judge's unpublished draft, not the export."}
+        </div>
+      )}
       {(fetchError || actionError) && (
         <div
           role="alert"
           className="mx-4 mt-3 text-xs text-status-red bg-status-red/10 border border-status-red/20 rounded px-2 py-1.5"
         >
-          {actionError ?? fetchError}
+          {actionError ?? (fetchError !== null ? stixFetchNotice(fetchError, Boolean(report?.stix_bundle)) : null)}
         </div>
       )}
       {view === "json" ? (

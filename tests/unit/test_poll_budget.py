@@ -34,9 +34,11 @@ def _app(**sandbox_over) -> MaljanApp:
     return MaljanApp(config=cfg, mock=True)
 
 
-def test_mock_provider_keeps_capes_numbers():
+def test_a_provider_with_no_block_is_not_given_capes_numbers():
+    # PS-L5: CAPE's detonation timeout is CAPE's, not a plugin sandbox's.
     app = _app(provider="mock")
-    assert app._poll_budget(_Provider("mock")) == (CAPE_TIMEOUT_SECONDS, CAPE_POLL_INTERVAL_SECONDS)
+    assert app._poll_budget(_Provider("mock")) == (None, None)
+    assert app._poll_budget(_Provider("some_plugin")) == (None, None)
 
 
 def test_cape2_provider_is_unchanged():
@@ -82,7 +84,6 @@ def test_rest_override_is_honoured_and_not_confused_with_cape_or_triage():
     assert app._poll_budget(_Provider("rest")) == (333, 9)
 
 
-def test_upload_provider_keeps_capes_numbers():
+def test_upload_provider_polls_nothing():
     app = _app(provider="upload")
-    budget = app._poll_budget(_Provider("upload"))
-    assert budget == (CAPE_TIMEOUT_SECONDS, CAPE_POLL_INTERVAL_SECONDS)
+    assert app._poll_budget(_Provider("upload")) == (None, None)

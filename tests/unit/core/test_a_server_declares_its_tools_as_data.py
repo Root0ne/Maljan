@@ -10,11 +10,12 @@ written: never a bare tool name, an agent's name or today's settings.
 
 from __future__ import annotations
 
-import time
+from collections.abc import Callable
 from typing import Any
 
 import pytest
 from pydantic import ValidationError
+from tests.linear_cost import TIME_RATIO_LIMIT, calls, cpu_seconds
 
 from maljan.core.config import MCPServerConfig, Settings, StaticConfig
 from maljan.core.tool_declarations import (
@@ -54,6 +55,20 @@ def test_a_declaration_may_name_no_kind_and_state_kind_free_fields(kind: str) ->
     assert facts.kind == ""
     assert ToolFacts(display_name="Sections").kind == ""
     assert ToolFacts(timeout_seconds=30, arguments={"path": "path"}).kind == ""
+
+
+def test_effects_may_declare_a_tool_answers_offline_without_credentials() -> None:
+    from maljan.core.tool_declarations import ToolEffects
+
+    assert ToolEffects().offline_without_credentials is None
+    facts = ToolFacts.model_validate(
+        {"kind": "pseudo_code", "effects": {"network": True, "offline_without_credentials": True}}
+    )
+    assert facts.effects is not None and facts.effects.offline_without_credentials is True
+    with pytest.raises(ValidationError):
+        ToolEffects.model_validate({"offline_without_credentials": "sometimes"})
+    with pytest.raises(ValidationError):
+        ToolEffects.model_validate({"offline_witout_credentials": True})
 
 
 @pytest.mark.parametrize(
@@ -412,14 +427,16 @@ def test_a_hostile_answer_is_matched_in_linear_time() -> None:
     text = ReputationFacts(text_patterns=(r"(?P<malicious>(\d+)+)x",))
 
     def timed(n: int) -> float:
-        started = time.perf_counter()
-        assert not pattern.matches("t", "a" * n + "b")
-        assert text.counts_in_text("1" * n + "y") is None
-        return time.perf_counter() - started
+        def read() -> None:
+            assert not pattern.matches("t", "a" * n + "b")
+            assert text.counts_in_text("1" * n + "y") is None
 
-    timed(2_000)
-    small, large = timed(20_000), timed(200_000)
-    assert large < max(small, 0.002) * 30
+        return cpu_seconds(read, repeats=7)
+
+    # Four times the input, CPU time, best of seven; a quadratic reader would
+    # take sixteen times as long. The smaller run takes more than a millisecond.
+    timed(160_000)  # one-time costs are not the reader's
+    assert timed(2_560_000) < timed(640_000) * TIME_RATIO_LIMIT
 
 
 def test_reputation_text_patterns_are_searched_first_match_first() -> None:
@@ -501,17 +518,20 @@ def _hostile(width: int) -> dict:
 
 
 def test_reading_any_depth_stays_linear_on_a_hostile_answer() -> None:
-    small, large = _hostile(2_000), _hostile(20_000)
+    small, large = _hostile(2_000), _hostile(8_000)
 
-    def timed(doc: dict) -> float:
-        started = time.perf_counter()
-        found = select(doc, "/**/attck")
-        assert len(found) > 0
-        return time.perf_counter() - started
+    def read(doc: dict) -> Callable[[], None]:
+        def _read() -> None:
+            assert len(select(doc, "/**/attck")) > 0
 
-    timed(small)
-    small_s, large_s = timed(small), timed(large)
-    assert large_s < max(small_s, 0.005) * 30
+        return _read
+
+    # CPU time, not wall-clock: four times the depth must take under eight
+    # times as long, and a quadratic read takes sixteen times. The calls made
+    # are held to the same ratio too, which a load cannot move.
+    read(small)()  # one-time costs (caches, lazy imports) are not the read's
+    assert cpu_seconds(read(large)) < cpu_seconds(read(small)) * TIME_RATIO_LIMIT
+    assert calls(read(large)) <= calls(read(small)) * 4 * 1.2 + 100
 
 
 # ---------------------------------------------------------------------------
@@ -838,6 +858,15 @@ KIND_FREE_SAMPLES: dict[str, Any] = {
     "display_name": "Section scanner",
     "words": ["sectioner"],
     "arguments": {"report": "task_report", "address": "offset_va"},
+    "discloses_sample": True,
+    "effects": {
+        "executes": "emulation",
+        "network": False,
+        "third_party": "no",
+        "why_undeclared": "",
+        "when": "",
+        "offline_without_credentials": None,
+    },
 }
 
 

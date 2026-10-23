@@ -375,63 +375,80 @@ def _held(lock: Any, wait: float | None) -> bool:
     return bool(lock.acquire(timeout=max(0.0, float(wait))))
 
 
-# Which agent each waiting agent is waiting for, by object identity: the
-# agents of one job are one set of objects, and two jobs in one process never
-# share one. Read to refuse a wait that would never end — two agents of one
-# parallel stage asking each other, each holding what the other wants.
-_WAITING_FOR: dict[int, Any] = {}
+# Which agents each waiting agent is waiting for, by object identity, one
+# entry per thread it waits on: the agents of one job are one set of objects,
+# and two jobs in one process never share one. An agent may wait on two
+# threads at once (its own stage run and an ask it answers), and the first
+# wait to end must not take the other's entry with it. Read to refuse a wait
+# that would never end -- two agents of one parallel stage asking each other,
+# each holding what the other wants.
+_WAITING_FOR: dict[int, dict[int, Any]] = {}
 _WAITING_LOCK = threading.Lock()
-# How often a caller with no time limit looks again at whom a busy callee is
-# waiting for. A polling interval, not a limit: the wait itself has none.
+# How often a waiting caller looks again at whom a busy callee is waiting
+# for. A polling interval, not a limit: the wait itself has none of its own.
 _WAIT_POLL_SECONDS = 1.0
 
 
 def _waits_on(start: Any, target: Any) -> bool:
-    """Whether ``start`` is waiting, directly or down a chain of waits, on ``target``."""
+    """Whether ``start`` is ``target`` or waits on it, directly or down a chain of waits.
+
+    Every agent is visited once, so the walk is linear in the waits registered.
+    """
     seen: set[int] = set()
-    current = start
     with _WAITING_LOCK:
-        while current is not None and id(current) not in seen:
+        stack = [start]
+        while stack:
+            current = stack.pop()
             if current is target:
                 return True
+            if id(current) in seen:
+                continue
             seen.add(id(current))
-            current = _WAITING_FOR.get(id(current))
+            stack.extend((_WAITING_FOR.get(id(current)) or {}).values())
     return False
 
 
 def _held_unless_waiting_on_each_other(
     lock: Any, wait: float | None, caller: Any, callee: Any
 ) -> bool | None:
-    """Take ``lock`` as ``_held`` does; ``None`` when the callee is waiting on the caller.
+    """Take ``lock`` within ``wait`` seconds; ``None`` when the callee is waiting on the caller.
 
-    A caller with a clock waits what it can spare, as before. A caller with no
-    time limit waits until the callee frees up — unless the callee is itself
-    waiting, directly or through others, on this caller, which no wait ends.
+    ``wait`` is what the caller can spare (``None``: no time limit, it waits
+    until the callee frees up). Whichever it is, the caller is registered as
+    waiting on the callee for as long as it waits, and every poll asks whether
+    the callee is itself waiting, directly or through others, on this caller,
+    which no wait ends: two agents with a clock asking each other used to
+    each wait out the whole of what they could spare before either heard.
     """
-    if wait is not None:
-        return _held(lock, wait)
+    deadline = None if wait is None else time.monotonic() + max(0.0, float(wait))
+    thread = threading.get_ident()
     with _WAITING_LOCK:
-        _WAITING_FOR[id(caller)] = callee
+        _WAITING_FOR.setdefault(id(caller), {})[thread] = callee
     from maljan.core import cancellation
 
     job = cancellation.current()
     try:
-        while not lock.acquire(timeout=_WAIT_POLL_SECONDS):
+        while True:
+            if callee is not caller and _waits_on(callee, caller):
+                return None
+            step = _WAIT_POLL_SECONDS
+            if deadline is not None:
+                step = min(step, max(0.0, deadline - time.monotonic()))
+            if lock.acquire(timeout=step):
+                return True
+            if deadline is not None and time.monotonic() >= deadline:
+                return False
             # A cancelled job's waiter stops here rather than when the callee
             # frees up.
             if job is not None:
                 job.check("while an ask waited for a busy agent")
-            if _waits_on(_waiting_for(callee), caller):
-                return None
-        return True
     finally:
         with _WAITING_LOCK:
-            _WAITING_FOR.pop(id(caller), None)
-
-
-def _waiting_for(agent: Any) -> Any:
-    with _WAITING_LOCK:
-        return _WAITING_FOR.get(id(agent))
+            waits = _WAITING_FOR.get(id(caller))
+            if waits is not None:
+                waits.pop(thread, None)
+                if not waits:
+                    _WAITING_FOR.pop(id(caller), None)
 
 
 def _seconds_to_wait_for(caller: Any) -> float | None:
@@ -500,7 +517,9 @@ def _ask(container: Any, caller: Any, callee: Any, task: str, context: str) -> s
             time.monotonic() - started,
         )
 
-    _hand_over_the_structured_channel(caller, callee, isr)
+    _hand_over_the_structured_channel(
+        caller, callee, isr, still_running=getattr(caller, "loop_budget", None) is budget
+    )
     answer = _answer_text(isr, text)
     emit_agent_message(
         sink,
@@ -586,6 +605,7 @@ def _brief_callee(caller: Any, callee: Any, *, stage: str, round_index: int) -> 
     callee.facts_block = str(getattr(caller, "facts_block", "") or "")
     callee.pack_ledger_ids = list(getattr(caller, "pack_ledger_ids", None) or [])
     callee.run_state_block = str(getattr(caller, "run_state_block", "") or "")
+    callee.run_state_source = getattr(caller, "run_state_source", None)
     callee.pack_function_artefacts = getattr(caller, "pack_function_artefacts", None)
     callee.pack_entries = list(getattr(caller, "pack_entries", None) or [])
     callee.pack_image_bases = tuple(getattr(caller, "pack_image_bases", None) or ())
@@ -621,6 +641,7 @@ _BRIEFED_STATE = (
     "facts_block",
     "pack_ledger_ids",
     "run_state_block",
+    "run_state_source",
     "sample_format",
     "_analysis_file_path",
     "_path_by_server",
@@ -640,22 +661,47 @@ def _give_the_callee_back_what_it_had(callee: Any, its_own: dict[str, Any]) -> N
         setattr(callee, name, value)
 
 
-def _hand_over_the_structured_channel(caller: Any, callee: Any, isr: AgentISR) -> None:
-    """Move the callee's findings and artifacts onto the caller's own buffers.
+def _hand_over_the_structured_channel(
+    caller: Any, callee: Any, isr: AgentISR, *, still_running: bool = True
+) -> None:
+    """Move the callee's findings, artifacts and open questions onto the caller's buffers.
 
     ``answer_task`` drains them onto the ISR the delegation holds, and only
     the text of that ISR crosses back to the model — so without this a
     specialist's artifacts would reach no report. They travel unedited; an
-    artifact that did not say which agent established it is marked with the
-    callee's name, because on the caller's buffer it would otherwise read as
-    the caller's.
+    artifact that did not say which agent established it, and an open question
+    that did not say which agent left it open, is marked with the callee's
+    name, because on the caller's buffer it would otherwise read as the
+    caller's.
+
+    ``still_running`` is false when the caller's loop ended while this ask was
+    in flight (:func:`_hand_over_the_record`): its node has drained its
+    buffers, so what is appended now would be lost or re-emitted in a later
+    round, and is logged and dropped instead.
     """
+    if not still_running:
+        logger.warning(
+            "delegation %s -> %s: the caller's loop ended first; %d finding(s), %d "
+            "artifact(s) and %d open question(s) are dropped, and so is the answer.",
+            caller.name,
+            callee.name,
+            len(isr.findings or []),
+            len(isr.artifacts or []),
+            len(getattr(isr, "open_questions", None) or []),
+        )
+        return
     for artifact in list(isr.artifacts or []):
         if not str(getattr(artifact, "source", "") or "").strip():
             artifact.source = str(callee.name)
         caller._artifacts_buffer.append(artifact)
     for finding in list(isr.findings or []):
         caller._findings_buffer.append(finding)
+    questions = list(getattr(isr, "open_questions", None) or [])
+    for question in questions:
+        if not str(question.source or "").strip():
+            question.source = str(callee.name)
+    if questions:
+        vars(caller).setdefault("_open_questions_buffer", []).extend(questions)
     # And the answer itself, whole, under the callee's own agent id. The text
     # of it goes back to the model as a tool result and lives only in the
     # caller's conversation, so a caller whose loop died — the wall-clock cap
@@ -672,18 +718,40 @@ def _task_turn(caller_name: str, task: str, context: str, callee: Any) -> str:
     The pack is not here; ``frame_messages`` puts it at the head of this turn
     inside the loop, the same way it does for a stage agent's first turn.
     """
-    from maljan.agents.configurable_analyst import _ISR_FORMAT_INSTRUCTION, _PATH_HEADER
+    from maljan.agents.base_agent import asks_for_techniques
+    from maljan.agents.configurable_analyst import (
+        _ISR_FORMAT_INSTRUCTION,
+        _ISR_FORMAT_INSTRUCTION_WITHOUT_TECHNIQUES,
+        _PATH_HEADER,
+    )
+    from maljan.utils.written_forms import markers_written_out
 
     parts: list[str] = []
     path = getattr(callee, "_analysis_file_path", None)
     if path:
+        # The declared open tool the callee is offered, named as its
+        # own stage turn names it (``BaseAnalyst.load_line_for``).
+        load_line_for = getattr(callee, "load_line_for", None)
+        load = load_line_for(str(path)) if callable(load_line_for) else ""
+        if isinstance(load, str) and load.strip():
+            parts.append(load.rstrip())
         parts.append(_PATH_HEADER.format(path=path).rstrip())
-    parts.append(f"Task from {caller_name}:\n{task}")
+    # The task and the context are what the caller's model wrote: a run-state
+    # marker in them is written out, so the callee never reads it as the
+    # platform's block.
+    parts.append(f"Task from {caller_name}:\n{markers_written_out(task)}")
     if context:
-        parts.append(f"Context from {caller_name}:\n{context}")
+        parts.append(f"Context from {caller_name}:\n{markers_written_out(context)}")
+    # The claim format the callee is asked for everywhere else: a callee whose
+    # definition turns the technique line off is not asked for one here either.
+    instruction = (
+        _ISR_FORMAT_INSTRUCTION
+        if asks_for_techniques(callee)
+        else _ISR_FORMAT_INSTRUCTION_WITHOUT_TECHNIQUES
+    )
     parts.append(
         "Answer the task and nothing wider. Cite the ledger id of every tool call and "
-        "every fact you rely on.\n\n" + _ISR_FORMAT_INSTRUCTION.rstrip()
+        "every fact you rely on.\n\n" + instruction.rstrip()
     )
     return "\n\n".join(parts)
 
@@ -749,9 +817,12 @@ def _hand_over_the_record(caller: Any, callee: Any, *, still_running: bool = Tru
 
     ``still_running`` is false when the caller's loop ended while this ask was
     in flight. Its node has already failed it and drained it, so anything
-    appended now would either be lost or re-emitted in a later round. The
-    callee is drained all the same — its buffers must not carry into its next
-    run — and what could not be handed over is logged and counted.
+    appended to the caller now would either be lost or re-emitted in a later
+    round. The callee is drained all the same — its buffers must not carry
+    into its next run — and its ledger entries go to the job's ledger through
+    the container (``ServiceContainer.hand_over_evidence``): their ids were
+    issued and may already have been shown. The budget rows and the validation
+    state, which belong to the caller's finished round, are logged and dropped.
     """
     try:
         entries = callee.drain_evidence_entries()
@@ -760,12 +831,19 @@ def _hand_over_the_record(caller: Any, callee: Any, *, still_running: bool = Tru
         entries = []
     rows = _drain_budget_rows(callee)
     if not still_running:
+        container = getattr(caller, "_container", None) or getattr(callee, "_container", None)
+        hand_over = getattr(container, "hand_over_evidence", None)
+        handed = False
+        if entries and callable(hand_over):
+            hand_over(entries)
+            handed = True
         logger.warning(
-            "delegation %s -> %s: the caller's loop ended first; %d ledger entr(y/ies), "
+            "delegation %s -> %s: the caller's loop ended first; %d ledger entr(y/ies) %s, "
             "%d budget row(s) and the callee's validation state are dropped.",
             caller.name,
             callee.name,
             len(entries),
+            "go to the job's ledger" if handed or not entries else "are dropped (no container)",
             len(rows),
         )
         _drop_the_callee_s_validation_state(callee)

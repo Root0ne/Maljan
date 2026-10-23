@@ -8,6 +8,7 @@ import { downloadBlob } from "@/lib/report-utils";
 import CopyButton from "@/components/ui/CopyButton";
 import { getErrorMessage } from "@/lib/errors";
 import type { DetectionKind, DetectionRule } from "@/types/malware-report";
+import { sampleMatchBadge, type SampleMatchTone } from "./sampleMatch";
 
 const KIND_ORDER: DetectionKind[] = ["yara", "sigma", "suricata", "snort"];
 const KIND_EXT: Record<DetectionKind, string> = {
@@ -21,6 +22,21 @@ const KIND_MIME: Record<DetectionKind, string> = {
   sigma: "application/yaml",
   suricata: "text/plain",
   snort: "text/plain",
+};
+/* Green when the rule's strings match the sample it was drafted from, amber
+ * when only a hash clause does, the compile error's red when nothing does,
+ * muted when it was not checked. */
+const SAMPLE_TONE: Record<SampleMatchTone, string> = {
+  strings: "bg-status-green/10 text-status-green",
+  hash: "bg-status-orange/10 text-status-orange",
+  misses: "bg-status-red/10 text-status-red",
+  neutral: "bg-bg-active text-text-muted",
+};
+const SAMPLE_FOOTER: Record<SampleMatchTone, string> = {
+  strings: "text-text-secondary",
+  hash: "text-status-orange",
+  misses: "text-status-red bg-status-red/5",
+  neutral: "text-text-secondary",
 };
 
 export default function GeneratedRulesPanel() {
@@ -142,6 +158,7 @@ function KindButton({
 
 function RuleCard({ rule }: { rule: DetectionRule }) {
   const filename = `${rule.name}.${KIND_EXT[rule.kind]}`;
+  const sample = sampleMatchBadge(rule);
   return (
     <div className="bg-bg-surface border border-border rounded">
       <div className="px-4 py-3 border-b border-border flex items-center justify-between gap-3 flex-wrap">
@@ -173,6 +190,14 @@ function RuleCard({ rule }: { rule: DetectionRule }) {
               compile error
             </span>
           )}
+          {sample && (
+            <span
+              className={`text-[11px] px-1.5 py-0.5 rounded shrink-0 ${SAMPLE_TONE[sample.tone]}`}
+              title={sample.detail}
+            >
+              {sample.label}
+            </span>
+          )}
         </div>
         <div className="flex gap-2 shrink-0">
           <CopyButton
@@ -194,6 +219,11 @@ function RuleCard({ rule }: { rule: DetectionRule }) {
       {rule.compile_error && (
         <div className="px-4 py-2 border-t border-border text-[11px] text-status-red bg-status-red/5">
           {rule.compile_error}
+        </div>
+      )}
+      {sample && (
+        <div className={`px-4 py-2 border-t border-border text-[11px] ${SAMPLE_FOOTER[sample.tone]}`}>
+          {sample.detail}
         </div>
       )}
     </div>

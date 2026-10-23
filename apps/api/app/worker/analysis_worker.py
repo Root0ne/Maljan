@@ -9,6 +9,7 @@ pipeline, streaming progress events via Redis PubSub.
 """
 
 import asyncio
+import functools
 import gc
 import json
 import os
@@ -28,21 +29,31 @@ import redis.asyncio as aioredis
 from arq import cron
 from maljan.agents.base_agent import CANCEL_DELIVERY_GRACE
 from maljan.core.cancellation import Cancellation, JobCancelled
+from maljan.core.config import MEDIATOR_AGENT_NAME
 from maljan.core.config import Settings as _CoreSettings
 from maljan.core.report_formats import declarations_in_effect, recorded_signature_scale
 from maljan.core.settings_catalog import core_catalog
-from maljan.core.settings_overrides import build_settings, public_snapshot, trim_declarations
+from maljan.core.settings_overrides import (
+    StoredValueRefused,
+    build_settings,
+    public_snapshot,
+    settings_from_store,
+    trim_declarations,
+)
 from maljan.pipeline.events import MODEL_USAGE as MODEL_USAGE_EVENT
 from maljan.pipeline.outcome import absent_analysis_message
-from maljan.providers.errors import ProviderError
+from maljan.providers.errors import AttachedReportRefused, ProviderError
 from pydantic import ValidationError
 from sqlalchemy import Select, delete, func, select, update
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from app.config import get_settings, settings
 from app.logging_config import get_logger, setup_logging
 from app.runtime_config import runtime_config
+from app.services.job_events import STREAM_TTL_SECONDS, stream_key
 from app.worker.queues import ANALYSIS_QUEUE, build_redis_settings
+from app.worker.sample_integrity import SampleIntegrity, copies_of, ended_record, with_record
 
 logger = get_logger("worker")
 
@@ -151,14 +162,18 @@ def build_job_settings(
     """
     merged = dict(overrides)
     if job_config:
-        from app.schemas.job import _KnownJobConfig
+        from maljan.core.plugins import ALLOW_LIST_PATH
 
+        from app.schemas.job import PLUGINS_ALLOWED_CONTEXT, _KnownJobConfig
+
+        # Judged by the allow-list these settings carry, as the save was.
         _KnownJobConfig.model_validate(
             {
                 key: job_config[key]
                 for key in ("llm_provider", "static_provider", "sandbox_provider")
                 if job_config.get(key) is not None
-            }
+            },
+            context={PLUGINS_ALLOWED_CONTEXT: overrides.get(ALLOW_LIST_PATH) or []},
         )
         if job_config.get("max_iterations") is not None:
             merged["negotiation.max_iterations"] = job_config["max_iterations"]
@@ -174,15 +189,56 @@ def build_job_settings(
             merged["sandbox.provider"] = "upload"
         if job_config.get("profile") is not None:
             merged["agents.profile"] = job_config["profile"]
-    settings = build_settings(merged)
+    # A stored value the model refuses fails the job, naming the key and the
+    # remedy; a run never takes a default in its place.
+    settings = settings_from_store(merged, stored_keys=overrides)
     # The selected provider's role models come from its own block; a job never
     # runs with an empty model name borrowed from nowhere.
     from maljan.llm.provider_base import role_block_problem
 
     problem = role_block_problem(settings)
     if problem:
-        raise ValueError(f"llm.provider: {problem}")
+        raise JobSettingsRefused({"llm.provider": problem})
     return settings
+
+
+def job_questions(job_config: Mapping[str, Any] | None) -> list[str]:
+    """The questions a job was submitted with (``config.questions``), blanks left out.
+
+    Read by the report's question round; a job with none asks nothing.
+    """
+    from maljan.reporting.question_round import asked_questions
+
+    return asked_questions((job_config or {}).get("questions"))
+
+
+class JobSettingsRefused(ValueError):
+    """Settings a job would run with, refused here: each by its setting, with why.
+
+    Every reason is a sentence the platform composes from setting names and
+    the ids its provider registry issued (``provider_base.role_block_problem``),
+    never a value an operator typed or another component's words, so a job's
+    message states it whole. A plain ``ValueError`` from anywhere else is
+    stated by its class alone (``run_analysis``).
+    """
+
+    def __init__(self, refused: Mapping[str, str]) -> None:
+        self.refused = dict(refused)
+        super().__init__("; ".join(f"{key}: {why}" for key, why in self.refused.items()))
+
+
+def take_the_job_plugin_set(overrides: Mapping[str, Any]) -> None:
+    """Load the provider plugins the job's own stored settings allow, and withdraw the rest.
+
+    Run as a job starts, before its settings are built, so a plugin's own
+    settings block is read with its model; nothing after this changes the
+    registries until the next job starts. A store read while the job runs (a
+    runtime setting, an enrichment) loads and withdraws nothing, so a list
+    saved meanwhile applies to the next job, as every other setting does.
+    """
+    from maljan.core.plugins import ALLOW_LIST_PATH, load_allowed
+
+    load_allowed(overrides.get(ALLOW_LIST_PATH))
 
 
 def retired_environment_lines(environ: Mapping[str, str]) -> list[str]:
@@ -195,8 +251,8 @@ def retired_environment_lines(environ: Mapping[str, str]) -> list[str]:
 
     return [
         f"{variable} is set and no longer read; the setting {key} holds the value now "
-        "(the migration that retired it copied the variable there once only if it was a "
-        "mount other than the shipped one and the store held none)."
+        "(the migration that retired it copied the variable there once, only if the setting "
+        "accepts its value, it differs from the shipped one and the store held none)."
         for variable, key in RETIRED_ENVIRONMENT.items()
         if str(environ.get(variable, "")).strip()
     ]
@@ -239,6 +295,30 @@ def mirror_lines(core: Any) -> list[str]:
     return lines
 
 
+async def load_the_allowed_plugins(session_factory: Any) -> None:
+    """Load the provider plugins the stored allow-list names, saying each load or failure.
+
+    At start, off the event loop, so a plugin that fails is named in this
+    worker's log before any job; each job then loads by the list its own
+    settings carry (``take_the_job_plugin_set``). A store that cannot be read
+    leaves that to the first job, and the start goes on.
+    """
+    from maljan.core.plugins import ALLOW_LIST_PATH, load_allowed
+
+    from app.services.settings_service import load_core_overrides
+
+    try:
+        async with session_factory() as db:
+            overrides = await load_core_overrides(db)
+        await asyncio.to_thread(load_allowed, overrides.get(ALLOW_LIST_PATH))
+    except Exception as exc:  # noqa: BLE001 - the start never stops on a plugin
+        logger.warning(
+            "The allowed provider plugins were not loaded at start (%s); the first job loads them.",
+            type(exc).__name__,
+            extra={"component": "worker.lifecycle"},
+        )
+
+
 async def state_the_mirrors(session_factory: Any) -> None:
     """State each static provider's copy under the stored settings; sweep and export its dir.
 
@@ -278,7 +358,9 @@ async def state_the_mirrors(session_factory: Any) -> None:
         )
 
 
-def mirror_target_for(provider: Any, *, sha256: str, extension: str) -> tuple[Path, str] | None:
+def mirror_target_for(
+    provider: Any, *, sha256: str, extension: str, job_id: str = ""
+) -> tuple[Path, str] | None:
     """Where this sample has to be copied for the static provider to read it.
 
     Returns (host path, container-visible path), or None when the provider does
@@ -299,7 +381,11 @@ def mirror_target_for(provider: Any, *, sha256: str, extension: str) -> tuple[Pa
     # unconditionally, which put r2's copy in the hidden ``.work`` that radare2
     # refuses to open — BUG 10, every live r2 tool call answering "Failed to
     # open file."
-    host = sample_files.work_dir(spec.work_subdir) / f"{sha256}{extension}"
+    # Named by the job as well, so a server that names a program by its file
+    # holds one program per job, not one per sample.
+    host = sample_files.work_dir(spec.work_subdir) / sample_files.copy_name(
+        sha256, extension, job_id
+    )
     # The path the server opens is its own: under the mount its block
     # declares, or the host path for a server on this filesystem. One mount
     # for every server handed a second containerised server another one's.
@@ -307,31 +393,19 @@ def mirror_target_for(provider: Any, *, sha256: str, extension: str) -> tuple[Pa
 
 
 def servers_this_job_binds(container: Any) -> set[str] | None:
-    """The tool servers some agent of this job can reach, or ``None`` when the job cannot say.
+    """The tool servers this job can call, or ``None`` when the job cannot say.
 
-    Every agent the profile's analysts can reach (``composition.reachable_agents``)
-    and every enabled agent that judges or writes the report, each with the
-    servers bound to it by ``agents`` or by a tool reference
-    (``composition.servers_bound_to``). A container with no profile to read
-    answers ``None``.
+    One answer, ``composition.servers_a_job_calls``: the servers of every agent
+    the team runs or can ask, the judge and report agents, the triage pack's
+    reputation lookups and the generic static provider's server. A container
+    with no profile to read answers ``None``.
     """
     keys = getattr(container, "analyst_keys", None)
     if not callable(keys):
         return None
-    from maljan.agents.composition import reachable_agents, servers_bound_to
+    from maljan.agents.composition import servers_a_job_calls
 
-    settings = container.config
-    named = list(keys())
-    named += [
-        key
-        for key, definition in settings.agents.definitions.items()
-        if definition.enabled and definition.role in ("judge", "report") and key not in named
-    ]
-    return {
-        server
-        for key in reachable_agents(settings, named)
-        for server in servers_bound_to(settings, key)
-    }
+    return servers_a_job_calls(container.config)
 
 
 def mirror_server_samples(
@@ -376,7 +450,9 @@ def mirror_server_samples(
             continue
         try:
             spec = MirrorSpec.of(cfg)
-            host = sample_files.work_dir(spec.work_subdir) / f"{sha256}{extension}"
+            host = sample_files.work_dir(spec.work_subdir) / sample_files.copy_name(
+                sha256, extension, canonical_job_id(job_id)
+            )
             # A directory the sidecars may read a path in, named before any
             # server starts (see ``mirror_static_samples``).
             add_sample_root(host.parent)
@@ -400,6 +476,51 @@ def mirror_server_samples(
             extra={"job_id": job_id, "component": "sample-mirror"},
         )
     return written, paths
+
+
+def place_server_file(
+    container: Any,
+    server_key: str,
+    source: Path,
+    sha256: str,
+    name: str,
+    *,
+    job_id: str,
+    held: list[Path],
+) -> str | None:
+    """Copy a file of the job's artefact store for ``server_key``'s mount; the path it opens it at.
+
+    The file reaches a server that declares a ``sample_mount`` as the sample
+    does (:func:`mirror_server_samples`): a private copy under the server's
+    ``work_dir`` of the samples directory, named by its digest, this job and
+    its name's suffix, held by this job and released with the job's other
+    mirrors (``held``). The server's mount stays as the deployment made it
+    (read-only where it is). ``None`` for a server that declares no mount, or
+    a copy that failed, which is logged.
+    """
+    from maljan.providers.base import MirrorSpec, path_in_server
+
+    from app.worker import sample_files
+
+    servers = getattr(getattr(container.config, "mcp", None), "servers", None) or {}
+    cfg = servers.get(server_key)
+    if cfg is None or not str(getattr(cfg, "sample_mount", "") or ""):
+        return None
+    try:
+        spec = MirrorSpec.of(cfg)
+        host = sample_files.work_dir(spec.work_subdir) / sample_files.copy_name(
+            sha256, sample_files.safe_suffix(name), canonical_job_id(job_id)
+        )
+        sample_files.held_copy(Path(source), host, job_id=canonical_job_id(job_id))
+        held.append(host)
+    except Exception as exc:  # noqa: BLE001 - a file not placed is said by the step
+        logger.warning(
+            "Failed to place an artefact for a tool server's declared mount (%s).",
+            type(exc).__name__,
+            extra={"job_id": job_id, "component": "sample-mirror"},
+        )
+        return None
+    return path_in_server(spec, host)
 
 
 def global_mirror_path(paths: dict[str, str], static_settings: Any) -> str | None:
@@ -481,6 +602,7 @@ def mirror_static_samples(
                 container.get_static_provider(provider_id),
                 sha256=sha256,
                 extension=extension,
+                job_id=canonical_job_id(job_id),
             )
             if target is None:
                 logger.info(
@@ -595,14 +717,29 @@ class _JobEventBuffer:
         self._pending: list[dict[str, Any]] = []
         self._last_flush = time.monotonic()
         self._lock = asyncio.Lock()
+        # Characters written out of the queued events (``store_text``),
+        # reported with the batch that carried them. ``_publish_event`` writes
+        # them out before an event reaches any sink, so this is the table's
+        # own guarantee and counts only what reached it some other way.
+        self._nul_replaced = 0
 
     async def add(self, seq: int, event_type: str, data: dict[str, Any], ts: str) -> None:
-        """Queue one event, writing the batch when it is full or old enough."""
+        """Queue one event, writing the batch when it is full or old enough.
+
+        A NUL or a lone surrogate in the type or the payload is written out
+        first: PostgreSQL refuses both in text and jsonb, and one such event
+        would drop the whole batch it was queued in.
+        """
+        from app.services import store_text
+
+        event_type, in_type = store_text.without_nul(str(event_type))
+        data, in_data = store_text.without_nul(data)
         async with self._lock:
+            self._nul_replaced += in_type + in_data
             self._pending.append(
                 {
                     "seq": int(seq),
-                    "type": str(event_type)[:64],
+                    "type": event_type[:64],
                     "payload": data,
                     "ts": _parse_event_ts(ts),
                 }
@@ -618,9 +755,22 @@ class _JobEventBuffer:
         """Write what is queued. Never raises."""
         async with self._lock:
             rows, self._pending = self._pending, []
+            replaced, self._nul_replaced = self._nul_replaced, 0
             self._last_flush = time.monotonic()
         if not rows:
             return
+        if replaced:
+            from app.services import store_text
+
+            logger.warning(
+                "%d refused character(s) in %d event(s) of job %s are stored written out "
+                "(NUL as %s).",
+                replaced,
+                len(rows),
+                self.job_id,
+                store_text.NUL_WRITTEN,
+                extra={"job_id": self.job_id, "component": "pubsub"},
+            )
         try:
             from app.models.job_event import JobEvent
 
@@ -643,6 +793,11 @@ class _JobEventBuffer:
 # threaded through every call site.
 _EVENT_BUFFERS: dict[str, _JobEventBuffer] = {}
 
+# Per job, how many characters the publisher wrote out of its events
+# (``store_text``); read into the run summary when the report is stored and
+# forgotten with the feed.
+_EVENT_REPLACED: dict[str, int] = {}
+
 
 def _start_event_feed(job_id: str, db_session: async_sessionmaker) -> None:
     """Persist this job's feed from here on, in batches."""
@@ -659,6 +814,7 @@ async def _stop_event_feed(job_id: str) -> None:
     """
     buffer = _EVENT_BUFFERS.pop(job_id, None)
     _LAST_SEQ.pop(job_id, None)
+    _EVENT_REPLACED.pop(job_id, None)
     if buffer is not None:
         await buffer.flush()
 
@@ -721,7 +877,7 @@ async def seed_seq_from_the_table(
             await db.commit()
         if not highest:
             return None
-        await redis_conn.set(key, int(highest), nx=True, ex=86_400)
+        await redis_conn.set(key, int(highest), nx=True, ex=STREAM_TTL_SECONDS)
     except Exception as exc:  # noqa: BLE001 — numbering never costs an event
         logger.debug(
             "Could not continue the event numbering for job %s (%s).",
@@ -777,7 +933,7 @@ async def _next_seq(redis_conn: aioredis.Redis, job_id: str) -> int:
         # there is a stream to read alongside it, and the table keeps its own
         # copy of every number for the replay after that.
         try:
-            await redis_conn.expire(_seq_key(job_id), 86_400)
+            await redis_conn.expire(_seq_key(job_id), STREAM_TTL_SECONDS)
         except Exception as exc:  # noqa: BLE001 — a TTL never costs a number
             logger.debug(
                 "Event sequence TTL refresh failed (%s); the number stands.",
@@ -934,7 +1090,7 @@ async def _publish_event(
     data: dict[str, Any] | None = None,
     stamp: dict[str, Any] | None = None,
 ) -> None:
-    """Publish a pipeline progress event to Redis PubSub + Stream + the table.
+    """Publish a pipeline progress event to Redis PubSub + Stream + the table. Never raises.
 
     PubSub channel ``analysis:{job_id}`` is used by the live WebSocket
     fan-out. A parallel Redis Stream ``analysis:{job_id}:events`` keeps
@@ -965,76 +1121,111 @@ async def _publish_event(
     identity, and a console merging the two collapses them instead of drawing
     both.
     """
-    import json
-
-    seq = await _next_seq(redis_conn, job_id)
-    if stamp is not None:
-        stamp["seq"] = seq
-    # Scrubbed here, once, for all three sinks. Seven producers build these
-    # payloads and a new one cannot be relied on to remember; the publisher is
-    # where the wire begins, so it is where the guarantee belongs. Producers
-    # may still scrub, and this second pass changes nothing for two reasons:
-    # the scrub repeats its passes until they change nothing, so it is
-    # idempotent over its own output; and the producers that bound scrubbed
-    # text — the argument and result summaries — cut it with
-    # ``events._cut_whole``, which keeps a digest or an identifier whole and
-    # moves a cut that a scrub would change (inside a URL, after a scheme word)
-    # back to the start of its word. A producer that cuts scrubbed text any
-    # other way has no such guarantee. The recorder's copy is
-    # scrubbed where it is taken (``_make_event_sink``), not here: it is taken
-    # before this coroutine is even scheduled, and on the paths the recorder
-    # exists for this coroutine never runs.
-    stamped = {**scrubbed(data or {}), "seq": seq}
-    ts = datetime.now(UTC).isoformat()
-    payload = {
-        "type": event_type,
-        "data": stamped,
-        "ts": ts,
-    }
-    message = json.dumps(payload)
-    buffer = _EVENT_BUFFERS.get(job_id)
-    if buffer is not None:
-        await buffer.add(seq, event_type, stamped, ts)
-    if event_type == MODEL_USAGE_EVENT:
-        # A model call's usage is committed as soon as this publish runs,
-        # with whatever is queued before it: the run summary that would carry
-        # it is built only at the end of the run, and a process killed before
-        # then would otherwise take what the run spent with it. The publish
-        # is scheduled from the call's own thread rather than awaited by it,
-        # so the guarantee is "committed once the loop runs the publish",
-        # normally milliseconds after the call is recorded; a process killed
-        # inside that window loses that one call's row. One transaction per
-        # model call, which takes seconds anyway.
-        #
-        # It is a record, not progress: the console draws nothing from it,
-        # and the live socket and the 1,000-entry replay stream are left to
-        # the events a reader follows. ``job_events`` keeps it, for as long
-        # as it keeps the rest of the feed (``core.events.retention_days``).
-        if buffer is not None:
-            await buffer.flush()
-        return
-    await redis_conn.publish(f"analysis:{job_id}", message)
-    # Persist into the bounded Stream so the live page can replay missed
-    # events when it mounts after the worker already started publishing.
     try:
-        await redis_conn.xadd(
-            f"analysis:{job_id}:events",
-            {"payload": message},
-            maxlen=1000,
-            approximate=True,
-        )
-        # 24h TTL — every read keeps the key fresh; idle keys vanish.
-        await redis_conn.expire(f"analysis:{job_id}:events", 86_400)
-    except Exception as exc:  # noqa: BLE001
+        import json
+
+        seq = await _next_seq(redis_conn, job_id)
+        if stamp is not None:
+            stamp["seq"] = seq
+        # Scrubbed here, once, for all three sinks. Seven producers build these
+        # payloads and a new one cannot be relied on to remember; the publisher is
+        # where the wire begins, so it is where the guarantee belongs. Producers
+        # may still scrub, and this second pass changes nothing for two reasons:
+        # the scrub repeats its passes until they change nothing, so it is
+        # idempotent over its own output; and the producers that bound scrubbed
+        # text — the argument and result summaries — cut it with
+        # ``events._cut_whole``, which keeps a digest or an identifier whole and
+        # moves a cut that a scrub would change (inside a URL, after a scheme word)
+        # back to the start of its word. A producer that cuts scrubbed text any
+        # other way has no such guarantee. The recorder's copy is
+        # scrubbed where it is taken (``_make_event_sink``), not here: it is taken
+        # before this coroutine is even scheduled, and on the paths the recorder
+        # exists for this coroutine never runs.
+        stamped = {**scrubbed(data or {}), "seq": seq}
+        # Written out once, here, so the socket, the replay stream and the
+        # table carry one payload (``store_text``): the table refuses a NUL or
+        # a lone surrogate, and a live feed that differed from its replay
+        # would be two records of one event. Counted for the run summary.
+        from app.services import store_text
+
+        stamped, _in_data = store_text.storable(stamped)
+        event_type, _in_type = store_text.storable(str(event_type))
+        _replaced = _in_data.total + _in_type.total
+        if _replaced:
+            _EVENT_REPLACED[job_id] = _EVENT_REPLACED.get(job_id, 0) + _replaced
+            logger.warning(
+                "The %s event of job %s carried %d character(s) PostgreSQL refuses; they "
+                "are sent and stored written out (NUL as %s).",
+                event_type,
+                job_id,
+                _replaced,
+                store_text.NUL_WRITTEN,
+                extra={"job_id": job_id, "component": "pubsub"},
+            )
+        ts = datetime.now(UTC).isoformat()
+        payload = {
+            "type": event_type,
+            "data": stamped,
+            "ts": ts,
+        }
+        message = json.dumps(payload)
+        buffer = _EVENT_BUFFERS.get(job_id)
+        if buffer is not None:
+            await buffer.add(seq, event_type, stamped, ts)
+        if event_type == MODEL_USAGE_EVENT:
+            # A model call's usage is committed as soon as this publish runs,
+            # with whatever is queued before it: the run summary that would carry
+            # it is built only at the end of the run, and a process killed before
+            # then would otherwise take what the run spent with it. The publish
+            # is scheduled from the call's own thread rather than awaited by it,
+            # so the guarantee is "committed once the loop runs the publish",
+            # normally milliseconds after the call is recorded; a process killed
+            # inside that window loses that one call's row. One transaction per
+            # model call, which takes seconds anyway.
+            #
+            # It is a record, not progress: the console draws nothing from it,
+            # and the live socket and the 1,000-entry replay stream are left to
+            # the events a reader follows. ``job_events`` keeps it, for as long
+            # as it keeps the rest of the feed (``core.events.retention_days``).
+            if buffer is not None:
+                await buffer.flush()
+            return
+        await redis_conn.publish(f"analysis:{job_id}", message)
+        # Persist into the bounded Stream so the live page can replay missed
+        # events when it mounts after the worker already started publishing.
+        try:
+            await redis_conn.xadd(
+                stream_key(job_id),
+                {"payload": message},
+                maxlen=1000,
+                approximate=True,
+            )
+            # 24h TTL — every read keeps the key fresh; idle keys vanish.
+            await redis_conn.expire(stream_key(job_id), STREAM_TTL_SECONDS)
+        except Exception as exc:  # noqa: BLE001
+            logger.debug(
+                "Event stream xadd failed (%s); pubsub-only.",
+                exc,
+                extra={"job_id": job_id, "component": "pubsub"},
+            )
         logger.debug(
-            "Event stream xadd failed (%s); pubsub-only.",
+            f"Published event: type={event_type} job={job_id[:8]}...",
+            extra={"job_id": job_id, "component": "pubsub"},
+        )
+    except Exception as exc:  # noqa: BLE001 — a lost feed never costs a run
+        # Total, as every caller relies on: the run's own record is the
+        # report, the ledger and the transcript, and a Redis that dropped its
+        # connection must not take a finished report with it. Said, never
+        # swallowed: the event is named with the reason it did not go out.
+        logger.warning(
+            "Could not publish the %s event of job %s (%s: %s); the run continues "
+            "without it on the live feed.",
+            event_type,
+            job_id,
+            type(exc).__name__,
             exc,
             extra={"job_id": job_id, "component": "pubsub"},
         )
-    logger.debug(
-        f"Published event: type={event_type} job={job_id[:8]}...",
-        extra={"job_id": job_id, "component": "pubsub"},
-    )
 
 
 def _parse_event_ts(value: Any) -> datetime | None:
@@ -1057,7 +1248,8 @@ def _returned_at(entry: dict[str, Any]) -> datetime | None:
     """The moment this tool call came back, or ``None`` when it is not known.
 
     ``started_at`` is a Unix timestamp the recorder stamped when the call went
-    out, and ``duration_ms`` is what it measured; their sum is the only moment
+    out, ``waited_ms`` is how long it queued before it was sent and
+    ``duration_ms`` is what it measured from then; their sum is the only moment
     in the entry a reader can sort a ledger by. Absent, zero or nonsensical
     values give ``None``, because a 1970 timestamp on a tool call is not a fact
     about anything and the column's own default at least says "written then".
@@ -1070,19 +1262,31 @@ def _returned_at(entry: dict[str, Any]) -> datetime | None:
     if seconds <= 0:
         return None
     try:
+        waited = max(0.0, float(entry.get("waited_ms", 0) or 0) / 1000.0)
         duration = max(0.0, float(entry.get("duration_ms", 0) or 0) / 1000.0)
-        return datetime.fromtimestamp(seconds + duration, tz=UTC)
+        return datetime.fromtimestamp(seconds + waited + duration, tz=UTC)
     except (OverflowError, OSError, ValueError):
         return None
 
 
-def _evidence_row(entry: dict[str, Any], *, job_id: uuid.UUID) -> Any:
+def _job_spill(container: Any) -> Any:
+    """The job's store for whole answers, as its container holds it; ``None`` without one."""
+    getter = getattr(container, "get_evidence_spill", None)
+    return getter() if callable(getter) else None
+
+
+def _evidence_row(
+    entry: dict[str, Any], *, job_id: uuid.UUID, written_at: datetime | None = None
+) -> Any:
     """One ledger entry as the row that keeps it.
 
-    Every field ``maljan.schemas.evidence.LedgerEntry`` carries has a column
-    here, which is what lets a reader of the stored ledger say why an output
+    Every one of the 31 fields ``maljan.schemas.evidence.LedgerEntry`` carries
+    has a column here, which is what lets a reader of the stored ledger say why an output
     is empty instead of guessing. An absent value stays absent rather than
-    becoming a default, for the same reason.
+    becoming a default, for the same reason. ``written_at`` is the moment the
+    ledger is stored, the ``created_at`` of a call the recorder never stamped;
+    the stored ledger passes it so every column the row's digest covers is
+    known before the insert.
     """
     from app.models.evidence import EvidenceEntry
 
@@ -1093,9 +1297,9 @@ def _evidence_row(entry: dict[str, Any], *, job_id: uuid.UUID) -> Any:
         # measured run's thirty entries had one distinct ``created_at`` between
         # them. The entry knows: ``started_at`` is the call's own clock and
         # ``duration_ms`` is how long it took. A row whose entry was never
-        # stamped leaves the column to its server default rather than inventing
-        # a moment.
-        created_at=_returned_at(entry),
+        # stamped takes the moment the ledger is stored, which is what the
+        # server default gave, rather than inventing a moment.
+        created_at=_returned_at(entry) or written_at,
         job_id=job_id,
         entry_id=str(entry.get("id", ""))[:32],
         stage=str(entry.get("stage", "analysis"))[:32],
@@ -1106,6 +1310,7 @@ def _evidence_row(entry: dict[str, Any], *, job_id: uuid.UUID) -> Any:
         error=(str(entry["error"]) if entry.get("error") else None),
         remediation=(str(entry["remediation"]) if entry.get("remediation") else None),
         duration_ms=int(entry.get("duration_ms", 0) or 0),
+        waited_ms=int(entry.get("waited_ms", 0) or 0),
         seq=int(entry.get("seq", 0) or 0),
         args=entry.get("args") or {},
         args_repaired=bool(entry.get("args_repaired", False)),
@@ -1125,7 +1330,59 @@ def _evidence_row(entry: dict[str, Any], *, job_id: uuid.UUID) -> Any:
         repeated_of=(str(entry["repeated_of"])[:32] if entry.get("repeated_of") else None),
         symbol=(str(entry["symbol"])[:200] if entry.get("symbol") else None),
         started_at=(float(entry["started_at"]) if entry.get("started_at") else None),
+        # The seven fields the entry carries beside the call itself, whole and
+        # uncut. Each is absent where the entry has none, and
+        # ``structured_from_server`` is kept only when it is true, the rule
+        # ``LedgerEntry``'s dump keeps.
+        source=(str(entry["source"]) if entry.get("source") is not None else None),
+        facts=entry.get("facts"),
+        reputation=entry.get("reputation"),
+        pack_step=entry.get("pack_step"),
+        structured_from_server=(True if entry.get("structured_from_server") is True else None),
+        agent_role=(str(entry["agent_role"]) if entry.get("agent_role") is not None else None),
+        agent_tab=(str(entry["agent_tab"]) if entry.get("agent_tab") is not None else None),
+        # The references to the parts of the answer kept whole, as the entry
+        # carries them; absent where nothing was taken.
+        spilled=(list(entry["spilled"]) if entry.get("spilled") else None),
     )
+
+
+def rows_to_store(ledger: list[Any], *, job_id: str) -> list[dict[str, Any]]:
+    """The ledger's entries as they are written: one per id and per ``seq``, in ``seq`` order.
+
+    The table holds each ``entry_id`` and each ``seq`` once per job, and a
+    second row under either would refuse the whole stored report. The first
+    entry under an id or a position is kept, as the container's collection
+    keeps it, and every one left out is named in a warning. The state holds
+    the entries in node-completion order; written in ``seq`` order, the table's
+    row order is the order the ids were issued in.
+    """
+    ids: set[str] = set()
+    seqs: set[int] = set()
+    kept: list[dict[str, Any]] = []
+    repeated: list[str] = []
+    for entry in ledger:
+        if not isinstance(entry, dict):
+            continue
+        entry_id = str(entry.get("id", ""))[:32]
+        seq = int(entry.get("seq", 0) or 0)
+        if entry_id in ids or seq in seqs:
+            repeated.append(f"{entry_id or '?'}/seq {seq}")
+            continue
+        ids.add(entry_id)
+        seqs.add(seq)
+        kept.append(entry)
+    if repeated:
+        logger.warning(
+            "Evidence ledger of job=%s holds %d entr(y/ies) under an id or seq already "
+            "stored; the first is kept, these are not: %s",
+            job_id,
+            len(repeated),
+            ", ".join(repeated),
+            extra={"job_id": job_id},
+        )
+    kept.sort(key=lambda entry: int(entry.get("seq", 0) or 0))
+    return kept
 
 
 def _transcript_row(message: dict[str, Any], *, report_id: uuid.UUID, seq: int) -> Any:
@@ -1627,6 +1884,42 @@ async def live_owners(redis_conn: Any, job_ids: list[str]) -> set[str] | None:
     return {job_id for job_id, value in zip(job_ids, held, strict=False) if value is not None}
 
 
+async def queued_or_owned(redis_conn: Any, job_ids: list[str]) -> set[str] | None:
+    """Which of these pending jobs something will still start.
+
+    A job is held while arq keeps its queue entry (the job key, written under
+    the job's own id by ``analysis_service._enqueue_analysis``) or its claim on
+    that entry, or a worker writes an owner heartbeat for it. ``None`` when
+    Redis cannot answer, as for :func:`live_owners`. One read for all of them,
+    linear in their number.
+    """
+    if not job_ids:
+        return set()
+    from arq.constants import in_progress_key_prefix, job_key_prefix
+
+    global _QUEUE_UNREADABLE_SAID
+    keys = [
+        key
+        for job_id in job_ids
+        for key in (
+            job_owner_key(job_id),
+            job_key_prefix + job_id,
+            in_progress_key_prefix + job_id,
+        )
+    ]
+    try:
+        values = await redis_conn.mget(keys)
+    except Exception as exc:  # noqa: BLE001 — an unreadable queue is not a verdict
+        _log_unreadable_queue(type(exc).__name__)
+        return None
+    _QUEUE_UNREADABLE_SAID = False
+    return {
+        job_id
+        for index, job_id in enumerate(job_ids)
+        if any(value is not None for value in values[3 * index : 3 * index + 3])
+    }
+
+
 # Whether the "Redis cannot be read" line has been logged since the last time
 # it could be. The sweep runs every few minutes for the life of the worker, and
 # an outage that logged on every pass would bury everything else.
@@ -1780,6 +2073,106 @@ def kept_report_note(failed_step: str, exc: BaseException, error_id: str) -> str
     )
 
 
+# Where a run failed when the graph had returned and the worker then failed on
+# its way to the store, as a kept report's note names it.
+POST_GRAPH_STEP = "the worker storing the result the graph returned"
+
+
+def storable_after_graph(result: Mapping[str, Any] | None, core_settings: Any) -> bool:
+    """Whether ``result``, the graph's return, is a report the completed path would store.
+
+    Not an absent analysis (``absent_analysis_message``), not a report node
+    that raised (``report_error``), and carrying a report unless reporting is
+    off for the job, the same three checks the completed path makes.
+    """
+    if not isinstance(result, Mapping):
+        return False
+    if absent_analysis_message(dict(result)) or result.get("report_error"):
+        return False
+    reporting = getattr(getattr(core_settings, "reporting", None), "enabled", True)
+    return bool(result.get("malware_report")) or not reporting
+
+
+def swept_while_running() -> Any:
+    """A row the orphan sweep marked failed, which a finished run may still complete.
+
+    The sweep marks a running job failed when its owner heartbeat expired
+    (``_SWEPT_NO_OWNER``), which a Redis outage longer than the heartbeat's TTL
+    does to a job that is still running. Its result is still this run's to
+    record. A cancelled row, a completed one and one failed for any other
+    reason stand.
+    """
+    from app.models.job import AnalysisJob
+
+    return (AnalysisJob.status == "failed") & (AnalysisJob.error_message == _SWEPT_NO_OWNER)
+
+
+def stored_after_note(row_status: str | None) -> str:
+    """What a report stored under a job that was no longer running says about itself."""
+    return (
+        f"Stored after the job was {row_status or 'removed'}: the run finished and its "
+        "report is kept, but the job row's status stands and the run was not recorded "
+        "as completed."
+    )
+
+
+async def job_status_in(db: Any, job_uuid: uuid.UUID) -> str | None:
+    """The job row's status as ``db`` reads it; ``None`` when there is no row."""
+    from app.models.job import AnalysisJob
+
+    result = await db.execute(select(AnalysisJob.status).where(AnalysisJob.id == job_uuid))
+    value = result.scalar_one_or_none()
+    return value if isinstance(value, str) else None
+
+
+async def job_status_now(db_session: async_sessionmaker, job_uuid: uuid.UUID) -> str | None:
+    """The job row's status on a session of its own. Never raises; ``None`` when unread."""
+    try:
+        async with db_session() as db:
+            return await job_status_in(db, job_uuid)
+    except Exception as exc:  # noqa: BLE001 — a read that fails decides nothing
+        logger.warning(
+            "Could not read the status of job %s (%s).",
+            job_uuid,
+            type(exc).__name__,
+            extra={"job_id": str(job_uuid)},
+        )
+        return None
+
+
+async def report_row_exists(db_session: async_sessionmaker, report_id: uuid.UUID) -> bool:
+    """Whether the report row with ``report_id`` is stored.
+
+    Read on a session of its own, by the id of the report this run stored.
+    Never raises; a read that fails decides nothing (``False``).
+    """
+    try:
+        from app.models.report import AnalysisReport
+
+        async with db_session() as db:
+            result = await db.execute(
+                select(AnalysisReport.id).where(AnalysisReport.id == report_id)
+            )
+            return bool(result.scalar_one_or_none() == report_id)
+    except Exception as exc:  # noqa: BLE001 — a read that fails decides nothing
+        logger.warning(
+            "Could not read the stored report %s (%s).",
+            report_id,
+            type(exc).__name__,
+            extra={"report_id": str(report_id)},
+        )
+        return False
+
+
+def completion_missed(result: Any) -> bool:
+    """Whether a status update matched no row, as its driver result says.
+
+    A result that does not say (no integer ``rowcount``) is taken as matched.
+    """
+    count = getattr(result, "rowcount", None)
+    return isinstance(count, int) and count == 0
+
+
 async def keep_the_built_report(
     db_session: async_sessionmaker,
     *,
@@ -1792,6 +2185,8 @@ async def keep_the_built_report(
     override_keys: Any,
     hash_mismatch_reason: str | None,
     scale_record: Mapping[str, Any] | None = None,
+    container: Any = None,
+    sample_integrity: Any = None,
 ) -> bool:
     """Store a report a failed run built, marked incomplete. Never raises.
 
@@ -1801,10 +2196,13 @@ async def keep_the_built_report(
     with ``incomplete_reason`` set to ``note``, and the note is added to the
     degradation reasons the report and the run summary already carry, so every
     surface that shows a degraded run shows this one. The job row is not
-    touched: it stays ``failed``.
+    touched: it stays ``failed``. The ledger stored is the state's with every
+    entry ``container``'s agents still held added (``with_undrained_evidence``).
     """
     try:
-        state = dict(built)
+        from maljan.pipeline.state import with_undrained_evidence
+
+        state = with_undrained_evidence(dict(built), container)
         malware_report = state.get("malware_report")
         if isinstance(malware_report, dict):
             malware_report = dict(malware_report)
@@ -1820,7 +2218,9 @@ async def keep_the_built_report(
             override_keys=override_keys,
             hash_mismatch_reason=hash_mismatch_reason,
             scale_record=scale_record,
+            sample_integrity=await ended_record(sample_integrity),
         )
+        _end_the_token_ledger(container)
         run_summary["degraded_mode"] = True
         run_summary["degradation_reasons"] = [
             *(run_summary.get("degradation_reasons") or []),
@@ -1837,6 +2237,7 @@ async def keep_the_built_report(
                 transcript=transcript,
                 incomplete_reason=note,
                 core_settings=core_settings,
+                spill=_job_spill(container),
             )
             await db.commit()
             report_id = report.id
@@ -1919,6 +2320,7 @@ async def keep_the_stopped_run(
     core_settings: Any,
     override_keys: Any,
     hash_mismatch_reason: str | None,
+    sample_integrity: Any = None,
 ) -> bool:
     """Store what a stopped run produced: its run summary and a partial report. Never raises.
 
@@ -1956,7 +2358,9 @@ async def keep_the_stopped_run(
             override_keys=override_keys,
             hash_mismatch_reason=hash_mismatch_reason,
             scale_record=recorded_signature_scale(container),
+            sample_integrity=await ended_record(sample_integrity),
         )
+        _end_the_token_ledger(container)
         async with db_session() as db:
             report = await _store_the_report(
                 db,
@@ -1968,6 +2372,7 @@ async def keep_the_stopped_run(
                 transcript=transcript,
                 incomplete_reason=note,
                 core_settings=core_settings,
+                spill=_job_spill(container),
             )
             await db.commit()
             report_id = report.id
@@ -1990,6 +2395,11 @@ async def keep_the_stopped_run(
         return False
 
 
+# The statuses a failure never overwrites: the operator's cancel, and a
+# completion already recorded.
+_FAILURE_LEAVES_ALONE: tuple[str, ...] = ("cancelled", "completed")
+
+
 async def mark_job_failed(
     db_session: async_sessionmaker,
     job_uuid: uuid.UUID,
@@ -2007,15 +2417,20 @@ async def mark_job_failed(
     written even when the job's own connection is gone.
 
     A ``cancelled`` row is left alone: the operator's decision outranks
-    whatever the run raised on its way down.
+    whatever the run raised on its way down. A ``completed`` row is left alone
+    too: a report stored and recorded as complete is never turned into a
+    failure by a step after it. A row left alone is said in the log.
     """
     from app.models.job import AnalysisJob
 
     try:
         async with db_session() as db:
-            await db.execute(
+            result = await db.execute(
                 update(AnalysisJob)
-                .where(AnalysisJob.id == job_uuid, AnalysisJob.status != "cancelled")
+                .where(
+                    AnalysisJob.id == job_uuid,
+                    AnalysisJob.status.notin_(_FAILURE_LEAVES_ALONE),
+                )
                 .values(
                     status="failed",
                     error_message=reason[:2000],
@@ -2023,6 +2438,14 @@ async def mark_job_failed(
                 )
             )
             await db.commit()
+        if completion_missed(result):
+            logger.warning(
+                "Job %s was not marked failed: its row is %s or gone (error_id=%s).",
+                job_uuid,
+                " or ".join(_FAILURE_LEAVES_ALONE),
+                error_id,
+                extra={"job_id": str(job_uuid), "error_id": error_id},
+            )
         return True
     except Exception as exc:  # noqa: BLE001 — the run has already failed
         logger.error(
@@ -2142,6 +2565,11 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
         Summary dict with verdict and timing info.
     """
     logger.info(f"Analysis task started: job={job_id}", extra={"job_id": job_id})
+    # An ATT&CK update the console ran since the last analysis replaced the
+    # files a warm catalogue in this process was read from.
+    from app.worker.attck_worker import drop_a_replaced_catalogue
+
+    drop_a_replaced_catalogue()
 
     redis_conn: aioredis.Redis = ctx["redis"]
     db_session: async_sessionmaker = ctx["db_session"]
@@ -2159,6 +2587,8 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
     # below removes every one of them, symmetric with today's single-path
     # cleanup.
     host_mirrors: list[Path] = []
+    # The copies' readings against the intake digest (``sample_integrity``).
+    _integrity: SampleIntegrity | None = None
     # L2 (live-run finding): set below when an attached sandbox report's
     # own claimed hash disagreed with the sample at upload time, so the
     # degradation makes it into both run_summary and the report banner
@@ -2172,6 +2602,17 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
     # the pipeline — and a stop note's "seconds into the run" is read off the
     # same clock from the same instant, so the two numbers cannot disagree.
     job_started = job_clock()
+    # The graph's result once it returned, so a failure on the way to the
+    # store keeps the report rather than discarding it (``storable_after_graph``).
+    post_graph_result: dict[str, Any] | None = None
+    # Set once the completion is committed: from then on nothing may record
+    # this job as failed.
+    completion_recorded = False
+    # The id of a report being stored under a job that was no longer running
+    # (``stored_after_note``): set before that store's commit, so a commit
+    # whose acknowledgement is lost can be told from one that never landed,
+    # by that report's own row and never by what a report of the job says.
+    stored_report_id: uuid.UUID | None = None
     # Registered here rather than above the session: this is the statement
     # before the ``try`` whose ``finally`` unregisters it, so there is no
     # window in which a raise leaves a buffer in the module-global map for
@@ -2275,6 +2716,7 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
             sample = sample_result.scalar_one()
             sample_uuid = sample.id
             sample_sha256 = str(sample.sha256)
+            sample_size = sample.file_size_bytes
             sample_filename = str(sample.original_filename or "")
             sample_storage_path = str(sample.storage_path or "")
 
@@ -2302,22 +2744,70 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
             # Build this job's Settings from any stored UI overrides plus
             # model defaults (UI > default; see settings_overrides.
             # build_settings -- the environment is not a layer here), then
-            # the job's own config on top. A DB error loading overrides must
-            # not fail the job -- fall back to default-only settings and say
-            # so, without ever logging a secret value.
-            from app.services.settings_service import load_core_overrides
+            # the job's own config on top. Stored settings that cannot be read
+            # fail the job before any pipeline starts: running on the shipped
+            # defaults would drop the operator's spend cap, server map and
+            # timeout without the run saying so. The class of the error is
+            # logged, never its text (it can quote a connection string).
+            #
+            # Only an error of the database or of the connection to it is said
+            # to be the database's. Any other failure of the read (the merge of
+            # the stored rows, say) is no outage to wait out: it reaches the
+            # failure path below as itself, named by its class with its
+            # traceback in the log, and no pipeline starts either way.
+            from app.services.settings_service import (
+                load_core_overrides,
+                refused_secrets_a_job_uses,
+                refusing_undecryptable_secrets,
+            )
 
             try:
-                overrides = await load_core_overrides(db)
-            except Exception as exc:  # noqa: BLE001 — overrides are best-effort
-                logger.warning(
-                    "Failed to load runtime setting overrides (%s); "
-                    "running job %s on default settings only.",
+                try:
+                    with refusing_undecryptable_secrets():
+                        overrides = await load_core_overrides(db)
+                except StoredValueRefused as exc:
+                    # Only a secret this job reads refuses it: a server's token
+                    # the team never binds is dropped, as at submission.
+                    still = await refused_secrets_a_job_uses(db, exc.refused, job_config)
+                    if still:
+                        # A stored secret this worker cannot decrypt is the
+                        # operator's setting, unreadable: the run never takes the
+                        # shipped default in its place. Neither the log nor the
+                        # job's own message, which the owner reads, names the
+                        # setting: an administrator's submission names it.
+                        logger.error(
+                            "Job %s refused: %d stored setting(s) it uses could not be read.",
+                            job_id,
+                            len(still),
+                            extra={"job_id": job_id},
+                        )
+                        raise StatedFailure(
+                            "A stored secret this job reads cannot be decrypted, so the job "
+                            "did not run on a default in its place. An administrator can "
+                            "enter it again in the console (Settings, Configuration); an "
+                            "administrator's submission of the same job names the setting."
+                        ) from None
+                    overrides = await load_core_overrides(db)
+            except StoredValueRefused as exc:
+                raise StatedFailure(
+                    "A stored setting value is refused ("
+                    + "; ".join(f"{key}: {why}" for key, why in sorted(exc.refused.items()))
+                    + "). Fix it or reset it in the console (Settings, Configuration); "
+                    "the job did not run on a default in its place."
+                ) from None
+            except (SQLAlchemyError, OSError) as exc:
+                logger.error(
+                    "Failed to load the stored settings (%s); job %s fails rather than "
+                    "running on defaults.",
                     type(exc).__name__,
                     job_id,
                     extra={"job_id": job_id},
                 )
-                overrides = {}
+                raise StatedFailure(
+                    "The stored settings could not be read from the database "
+                    f"({type(exc).__name__}), so the job did not run on defaults in their "
+                    "place. Run it again once the database answers."
+                ) from None
 
             # A job that names an attached report is read here too, for the
             # same reason: the row is wanted before the pipeline starts and
@@ -2367,38 +2857,59 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
 
         from maljan.core.config import install_settings
 
+        # The plugin set this job runs with: the stored list read with its
+        # settings, loaded off the event loop before the settings are built.
+        await asyncio.to_thread(take_the_job_plugin_set, overrides)
+
+        # Settings the model refuses fail the job, loudly and before any
+        # pipeline starts. This used to retry on all shipped defaults, which
+        # put a less safe value (no spend cap, the shipped server map, no
+        # timeout) in place of the operator's without the run saying so; a
+        # job runs on the settings it was given, or not at all.
         try:
             core_settings = build_job_settings(overrides, job_config)
-        except (ValidationError, ValueError) as exc:
-            # Stored overrides that validated when saved can stop validating
-            # after a deploy narrows a field, and two orphan rows can nest
-            # into a conflict. One job must not take the queue down: run on
-            # default settings, name the fields.
-            bad = (
-                sorted({".".join(str(x) for x in e["loc"]) for e in exc.errors()})
-                if isinstance(exc, ValidationError)
-                else [type(exc).__name__]
-            )
-            logger.warning(
-                "Runtime settings rejected by the model (%s); "
-                "retrying job %s without the stored overrides.",
-                ", ".join(bad),
+        except StoredValueRefused as exc:
+            raise StatedFailure(
+                "A stored setting value is refused ("
+                + ", ".join(sorted(exc.refused))
+                + "). Fix it or reset it in the console (Settings, Configuration); "
+                "the job did not run on a default in its place."
+            ) from None
+        except ValidationError as exc:
+            # Not a stored key (``settings_from_store`` names those): the
+            # job's own options, or a conflict between stored rows. The fields,
+            # never the refused values.
+            fields = sorted({".".join(str(x) for x in e["loc"]) for e in exc.errors()})
+            raise StatedFailure(
+                "The settings this job would run with are refused ("
+                + ", ".join(fields)
+                + "). Fix them in the console or in the job's options; the job did "
+                "not run on defaults in their place."
+            ) from None
+        except JobSettingsRefused as exc:
+            # The refusals ``build_job_settings`` writes from setting names and
+            # registered ids: stated by setting, with why, as the arms above
+            # state the keys and fields they name.
+            stated = "; ".join(f"{key}: {why}" for key, why in sorted(exc.refused.items()))
+            raise StatedFailure(
+                f"The settings this job would run with are refused: {stated}. Fix them in "
+                "the console; the job did not run on defaults in their place."
+            ) from None
+        except ValueError as exc:
+            # Any other refusal: its class, never its text, which can quote the
+            # value refused (a stored secret among them). The rule the job's
+            # failure reason and the field-named arm above follow.
+            logger.error(
+                "The settings job %s would run with are refused (%s); it fails rather "
+                "than running on defaults.",
                 job_id,
+                type(exc).__name__,
                 extra={"job_id": job_id},
             )
-            overrides = {}
-            try:
-                core_settings = build_job_settings({}, job_config)
-            except (ValidationError, ValueError):
-                # The rejected value was the job's own config, not a
-                # stored override (the API validates it at submit time,
-                # but a row written another way still reaches here).
-                logger.warning(
-                    "Job %s config rejected by the model; running on default settings only.",
-                    job_id,
-                    extra={"job_id": job_id},
-                )
-                core_settings = build_job_settings({}, None)
+            raise StatedFailure(
+                f"The settings this job would run with are refused ({type(exc).__name__}). "
+                "Fix them in the console; the job did not run on defaults in their place."
+            ) from None
         # Agents, pipeline nodes and extractors read the process singleton
         # (``get_settings()``), not the config handed to MaljanApp. With
         # ``max_jobs = 1`` installing this job's Settings there is what
@@ -2487,6 +2998,8 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
             analyst_mode=_analyst_mode,
             # The job's secrets are registered above (``remember_configured_secrets``).
             remember_secrets=False,
+            # Long-term memory is the job owner's alone.
+            memory_owner=str(job.created_by),
             event_sink=_make_event_sink(
                 redis_conn,
                 job_id,
@@ -2494,6 +3007,12 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
                 recorder=transcript,
             ),
         )
+        # What the run shortens, blanks or drops from a ledger entry's answer
+        # is kept whole in object storage under this job's prefix, and the
+        # entry references it (``maljan.schemas.evidence_spill``).
+        from app.services import object_store
+
+        app.container.set_evidence_spill(await object_store.job_evidence_spill(job_id))
 
         # A job that names an attached report hands its bytes to the
         # sandbox provider before anything else runs: build_job_settings
@@ -2549,11 +3068,26 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
                     filename=f"{_attached_row_id}.json",
                     report_format=_attached_format,
                 )
-            except ProviderError as exc:
+            except AttachedReportRefused as exc:
                 # A recorded format no longer declared, or declared without a
                 # reader: the attached evidence cannot be read, and the run
-                # says so rather than going on without it.
-                raise StatedFailure(str(exc)) from exc
+                # says so rather than going on without it, in the sentence the
+                # platform composed from the format's name and its settings.
+                raise StatedFailure(str(exc)) from None
+            except ProviderError as exc:
+                # Any other provider's own words (a plug-in sandbox's): its
+                # class, never its text, which can carry a value; the rule the
+                # job's other messages follow.
+                logger.error(
+                    "The sandbox provider refused the attached report of job %s (%s).",
+                    job_id,
+                    type(exc).__name__,
+                    extra={"job_id": job_id},
+                )
+                raise StatedFailure(
+                    "The configured sandbox provider could not read the attached sandbox "
+                    f"report ({type(exc).__name__}); the job did not run without it."
+                ) from None
 
         # Announce which analysts are about to run so the frontend can show
         # them. The active profile, not the class registry: a job that runs
@@ -2594,19 +3128,9 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
         static_sample_paths: dict[str, str] = {}
         server_sample_paths: dict[str, str] = {}
         try:
-            from minio import Minio
-            from pydantic import SecretStr as _SecretStr
+            from app.services import object_store
 
-            secret = settings.minio_secret_key
-            secret_value = (
-                secret.get_secret_value() if isinstance(secret, _SecretStr) else str(secret)
-            )
-            minio_client = Minio(
-                settings.minio_endpoint,
-                access_key=settings.minio_access_key,
-                secret_key=secret_value,
-                secure=settings.minio_secure,
-            )
+            minio_client = object_store.client()
             # Re-derive the storage path from the sha256 instead of trusting
             # the value in the DB row (defence in depth against tampering).
             derived_path = f"samples/{sample_sha256[:2]}/{sample_sha256}"
@@ -2643,16 +3167,19 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
             # carrying the job's heartbeat, its cancellation poller and every
             # event the pipeline publishes. A slow store would stop all three
             # for the length of the download.
+            # 0o600 on the file (``object_store.download``); the parent dir
+            # is already 0o700 (owner-only) via ``sample_files.temp_dir()``,
+            # so this file is unreachable to anyone but the worker's own user
+            # either way.
+            # Held for this job (``sample_files.hold_copy``): the name is the
+            # sample's, so a second job on the same sample reaches it too, and
+            # neither job's end may take it from the other.
             await asyncio.to_thread(
-                minio_client.fget_object,
-                settings.minio_bucket,
-                derived_path,
-                temp_path,
+                sample_files.hold_copy,
+                Path(temp_path),
+                canonical_job_id(job_id),
+                lambda target: object_store.download(minio_client, derived_path, str(target)),
             )
-            # 0o600 on the file; the parent dir is already 0o700 (owner-
-            # only) via ``sample_files.temp_dir()``, so this file is
-            # unreachable to anyone but the worker's own user either way.
-            os.chmod(temp_path, 0o600)
             logger.info(
                 "Downloaded sample from MinIO: %s -> %s",
                 sample_storage_path,
@@ -2681,26 +3208,38 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
             # including the dedup that keeps two providers sharing one
             # host path (e.g. Ghidra and a co-located r2mcp) from copying
             # the sample twice — see test_worker_profile_mirror.py.
-            new_mirrors, new_sample_paths = mirror_static_samples(
-                app.container,
-                temp_path=temp_path,
-                sha256=sample_sha256,
-                extension=_orig_ext,
-                copy_fn=sample_files.private_copy,
-                job_id=job_id,
+            # Off the loop: a copy of a large sample onto a slow volume stopped
+            # the heartbeat and every other coroutine of this worker.
+            new_mirrors, new_sample_paths = await asyncio.to_thread(
+                functools.partial(
+                    mirror_static_samples,
+                    app.container,
+                    temp_path=temp_path,
+                    sha256=sample_sha256,
+                    extension=_orig_ext,
+                    copy_fn=functools.partial(
+                        sample_files.held_copy, job_id=canonical_job_id(job_id)
+                    ),
+                    job_id=job_id,
+                )
             )
             host_mirrors.extend(new_mirrors)
             static_sample_paths.update(new_sample_paths)
             # And for each tool server that declares a mount of its own, a
             # copy under it, whichever agent its tools are bound to.
-            server_mirrors, server_sample_paths = mirror_server_samples(
-                app.container,
-                temp_path=temp_path,
-                sha256=sample_sha256,
-                extension=_orig_ext,
-                copy_fn=sample_files.private_copy,
-                job_id=job_id,
-                already=host_mirrors,
+            server_mirrors, server_sample_paths = await asyncio.to_thread(
+                functools.partial(
+                    mirror_server_samples,
+                    app.container,
+                    temp_path=temp_path,
+                    sha256=sample_sha256,
+                    extension=_orig_ext,
+                    copy_fn=functools.partial(
+                        sample_files.held_copy, job_id=canonical_job_id(job_id)
+                    ),
+                    job_id=job_id,
+                    already=host_mirrors,
+                )
             )
             host_mirrors.extend(server_mirrors)
             static_sample_path = global_mirror_path(
@@ -2713,6 +3252,14 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
                 extra={"job_id": job_id, "component": "minio"},
             )
             temp_path = None
+        if temp_path:
+            _integrity = SampleIntegrity(
+                sample_sha256,
+                copies_of(temp_path, host_mirrors),
+                size=sample_size,
+                job_id=job_id,
+            )
+            await _integrity.started()
 
         # Execute the asynchronous pipeline natively to
         # avoid "Event loop is closed" errors caused by threading mismatches.
@@ -2790,6 +3337,12 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
         # working". Mid-pipeline phases would require LangGraph
         # callback wiring.
         await _publish_event(redis_conn, job_id, "phase_change", {"phase": "analyzing"})
+        # A file of the job's artefact store reaches a server that declares a
+        # mount as the sample does: the worker's copy under that mount, held by
+        # this job and released with its mirrors when it ends.
+        app.container.place_for_server = functools.partial(
+            place_server_file, app.container, job_id=job_id, held=host_mirrors
+        )
         try:
             # Run the pipeline as a task so the heartbeat poller can cancel
             # it when the user cancels the job.
@@ -2805,6 +3358,9 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
                     # from, so the report's elapsed time and the job row
                     # cannot disagree.
                     started_at=start_time,
+                    # What the analyst asked of the run, answered in the
+                    # report (``reporting.question_round``); none asks nothing.
+                    questions=job_questions(job_config),
                 )
             )
             pipeline_result = await await_the_pipeline(pipeline_task, app.container.cancellation)
@@ -2861,6 +3417,7 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
                     core_settings=core_settings,
                     override_keys=overrides,
                     hash_mismatch_reason=_report_hash_mismatch_reason,
+                    sample_integrity=_integrity,
                 )
                 if _kind == STOP_SHUTDOWN:
                     # A shutdown is waited on by ``docker stop``, whose grace
@@ -2933,6 +3490,7 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
                 await heartbeat_task
             except asyncio.CancelledError:
                 pass
+        post_graph_result = pipeline_result
 
         # Announce that all analysts have finished (pipeline -> negotiation phase)
         for agent_name in registered_agents:
@@ -2968,13 +3526,30 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
         await _publish_event(redis_conn, job_id, "phase_change", {"phase": "reporting"})
 
         # ── 4. Build the report ──────────────────────────────
+        # Every entry the job's counter issued is on the ledger that is
+        # stored, including what no node drained (``with_undrained_evidence``);
+        # gathered before the run summary below counts the ledger.
+        from maljan.pipeline.state import with_undrained_evidence
+
+        pipeline_result = with_undrained_evidence(pipeline_result, getattr(app, "container", None))
+        post_graph_result = pipeline_result
+        # The enrichment job queued after a stored report is named in its
+        # disclosure block, with what it may reach, so that block never says
+        # nothing left the machine while a lookup is still to come.
         stix_bundle_for_persist, _run_summary = _report_inputs(
             pipeline_result,
             core_settings=core_settings,
             override_keys=overrides,
             hash_mismatch_reason=_report_hash_mismatch_reason,
             scale_record=recorded_signature_scale(getattr(app, "container", None)),
+            sample_integrity=await ended_record(_integrity),
+            enrichment=(
+                await enrichment_plan(core_settings)
+                if pipeline_result.get("malware_report")
+                else None
+            ),
         )
+        _end_the_token_ledger(getattr(app, "container", None))
 
         # A pipeline that produced no report is a failed run, not a
         # completed one with nothing in it (L15, security hardening):
@@ -3013,18 +3588,11 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
         # a "completed" row with no report under it, is worse than one more
         # run of the analysis.
         async with db_session() as db:
-            report = await _store_the_report(
-                db,
-                job_uuid=job_uuid,
-                job_id=job_id,
-                pipeline_result=pipeline_result,
-                stix_bundle=stix_bundle_for_persist,
-                run_summary=_run_summary,
-                transcript=transcript,
-                core_settings=core_settings,
-            )
-
             # ── 5. Mark job complete ─────────────────────────────
+            # First in the transaction, so the row is held until the report
+            # under it commits: a cancel that arrives meanwhile waits for the
+            # commit and then finds the job completed, instead of the two
+            # overwriting each other.
             # Use Python ``datetime.now(UTC)`` instead of Postgres ``NOW()``.
             # ``func.now()`` resolves to ``transaction_timestamp()`` which is
             # the START of the current transaction — that equals
@@ -3034,19 +3602,67 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
             now = datetime.now(UTC)
             # The status travels in the statement rather than on a loaded
             # row: this session has never seen the job row, and the one that
-            # read it was closed before the pipeline started.
-            await db.execute(
-                update(AnalysisJob)
-                .where(AnalysisJob.id == job_uuid)
-                .values(
-                    status="completed",
-                    completed_at=now,
-                    # Round to one decimal so sub-second jobs (~0.7s) don't
-                    # collapse to zero; the column is ``Numeric(10,2)`` so
-                    # fractional values survive the round-trip.
-                    duration_seconds=round(float(elapsed), 1),
-                )
+            # read it was closed before the pipeline started. Only a row this
+            # run still owns is completed: its running row, or the one the
+            # orphan sweep took from it (``swept_while_running``). An
+            # operator's cancel that landed first stands.
+            done: dict[str, Any] = dict(
+                status="completed",
+                completed_at=now,
+                # Round to one decimal so sub-second jobs (~0.7s) don't
+                # collapse to zero; the column is ``Numeric(10,2)`` so
+                # fractional values survive the round-trip.
+                duration_seconds=round(float(elapsed), 1),
             )
+            completion = await db.execute(
+                update(AnalysisJob)
+                .where(AnalysisJob.id == job_uuid, AnalysisJob.status == "running")
+                .values(**done)
+            )
+            if completion_missed(completion):
+                # The sweep's message goes with its ``failed``.
+                completion = await db.execute(
+                    update(AnalysisJob)
+                    .where(AnalysisJob.id == job_uuid, swept_while_running())
+                    .values(**done, error_message=None)
+                )
+                if not completion_missed(completion):
+                    logger.warning(
+                        "Job %s had been marked failed by the orphan sweep while it ran "
+                        "(its owner heartbeat lapsed); its finished run completes it.",
+                        job_id,
+                        extra={"job_id": job_id, "component": "lifecycle"},
+                    )
+            row_status: str | None = None
+            stored_note: str | None = None
+            if completion_missed(completion):
+                # The row moved on while the report was being built: an
+                # operator's cancel, most likely. Its status stands, and the
+                # report the run finished is stored under it saying so.
+                row_status = await job_status_in(db, job_uuid)
+                stored_note = stored_after_note(row_status)
+                _run_summary = {
+                    **_run_summary,
+                    "degraded_mode": True,
+                    "degradation_reasons": [
+                        *(_run_summary.get("degradation_reasons") or []),
+                        stored_note,
+                    ],
+                }
+            report = await _store_the_report(
+                db,
+                job_uuid=job_uuid,
+                job_id=job_id,
+                pipeline_result=pipeline_result,
+                stix_bundle=stix_bundle_for_persist,
+                run_summary=_run_summary,
+                transcript=transcript,
+                incomplete_reason=stored_note,
+                core_settings=core_settings,
+                spill=_job_spill(app.container),
+            )
+            if stored_note is not None:
+                stored_report_id = report.id
             await db.commit()
             # Read off the report while its session is still open, so nothing
             # below can send this function back to the database for a value.
@@ -3054,6 +3670,31 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
             report_verdict = report.verdict
             report_confidence = report.overall_confidence
             report_has_malware_report = bool(report.malware_report)
+
+        if stored_note is not None:
+            # Not announced as completed, nor remembered, nor enriched: the
+            # job is what its row says. The feed is told where the report went.
+            logger.warning(
+                "Job %s was %s when its report was stored (report=%s); its status was "
+                "left as it was and the run is not announced as completed.",
+                job_id,
+                row_status or "gone",
+                report_uuid,
+                extra={"job_id": job_id, "component": "lifecycle"},
+            )
+            await _publish_event(
+                redis_conn,
+                job_id,
+                "status_change",
+                {"status": row_status, "report_id": str(report_uuid), "note": stored_note},
+            )
+            return {
+                "status": "not_running_at_completion",
+                "row_status": row_status,
+                "job_id": job_id,
+                "report_id": str(report_uuid),
+            }
+        completion_recorded = True
 
         await _publish_event(
             redis_conn,
@@ -3136,6 +3777,52 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
         )
 
         reason = failure_reason(exc, error_id)
+        if (
+            not completion_recorded
+            and post_graph_result is not None
+            and job_uuid is not None
+            and await job_status_now(db_session, job_uuid) == "completed"
+        ):
+            # The completion committed and only its acknowledgement was lost:
+            # the complete report is stored, and an incomplete copy kept now
+            # would supersede it.
+            completion_recorded = True
+        if (
+            not completion_recorded
+            and stored_report_id is not None
+            and job_uuid is not None
+            and await report_row_exists(db_session, stored_report_id)
+        ):
+            # The job was no longer running and its report was stored under
+            # that note; only the commit's acknowledgement was lost. The report
+            # stands: an incomplete copy kept now would supersede it, and the
+            # row's own status (the operator's cancel) is not a failure to mark.
+            row_now = await job_status_now(db_session, job_uuid)
+            logger.error(
+                "Job %s: the report stored under its %s row is committed and only the "
+                "acknowledgement was lost (error_id=%s); it is kept as it is.",
+                job_id,
+                row_now,
+                error_id,
+                extra={"job_id": job_id, "error_id": error_id},
+            )
+            return {
+                "status": "not_running_at_completion",
+                "row_status": row_now,
+                "job_id": job_id,
+                "error_after_store": reason,
+            }
+        if completion_recorded:
+            # The report is stored and the row says ``completed``; a step after
+            # that (remembering the run, say) failed. The completion stands.
+            logger.error(
+                "Job %s failed after its completion was recorded (error_id=%s); the job "
+                "stays completed.",
+                job_id,
+                error_id,
+                extra={"job_id": job_id, "error_id": error_id},
+            )
+            return {"status": "completed", "job_id": job_id, "error_after_completion": reason}
         if job_uuid is not None:
             # A session of its own, always. The session this job read through
             # was closed before the pipeline started, and the one that was
@@ -3155,18 +3842,29 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
             # never raises, so the row below is always marked.
             built = getattr(app, "built_report", None) if app is not None else None
             failed_step = getattr(app, "failed_step", None) if app is not None else None
+            # The graph returned and the worker failed on its way to the store:
+            # the result the graph returned is the report to keep, when it is
+            # one the completed path would have stored.
+            if (
+                not (built and failed_step)
+                and post_graph_result is not None
+                and storable_after_graph(post_graph_result, core_settings)
+            ):
+                built, failed_step = post_graph_result, POST_GRAPH_STEP
             if built and failed_step:
                 await keep_the_built_report(
                     db_session,
                     job_uuid=job_uuid,
                     job_id=job_id,
                     built=built,
+                    container=getattr(app, "container", None),
                     note=kept_report_note(failed_step, exc, error_id),
                     transcript=transcript,
                     core_settings=core_settings,
                     override_keys=overrides,
                     hash_mismatch_reason=_report_hash_mismatch_reason,
                     scale_record=recorded_signature_scale(getattr(app, "container", None)),
+                    sample_integrity=_integrity,
                 )
             await mark_job_failed(db_session, job_uuid, reason=reason, error_id=error_id)
         else:
@@ -3219,14 +3917,16 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
             await release_job(redis_conn, job_id)
 
             # The worker's own private copies of the sample never outlive the
-            # job that downloaded them, on success, failure or cancellation
-            # alike (H3, security hardening). ``remove_quietly`` is a no-op
-            # on ``None`` (nothing was ever downloaded) and never raises.
+            # jobs that use them, on success, failure or cancellation alike
+            # (H3, security hardening). Each copy goes with the last job
+            # holding it (``sample_files.release_copy``), so a second job on
+            # the same sample keeps its copies until it ends too. A no-op on
+            # ``None`` (nothing was ever downloaded); never raises.
             from app.worker import sample_files
 
-            sample_files.remove_quietly(temp_path, job_id=job_id)
+            sample_files.release_copy(temp_path, job_id=canonical_job_id(job_id))
             for _host_mirror in host_mirrors:
-                sample_files.remove_quietly(_host_mirror, job_id=job_id)
+                sample_files.release_copy(_host_mirror, job_id=canonical_job_id(job_id))
 
             # Release the agents' MCP toolkits, their stdio subprocesses and the
             # per-job caches. A ``finally`` rather than ``async with`` because
@@ -3481,6 +4181,14 @@ _SWEPT_NO_OWNER = (
     "re-submit the sample if needed."
 )
 
+# What a swept ``pending`` row says: nothing is left that would ever start it.
+_SWEPT_NEVER_STARTED = (
+    "This job was never started: its queue entry is gone (expired before a "
+    "worker reached it, or ended when the worker that took it stopped before "
+    "the run began) and no worker is holding it. Marked failed by the orphan "
+    "sweep — re-submit the sample if needed."
+)
+
 # When the sweep runs. Not at the instant of startup: a worker that crashed
 # leaves its last heartbeat behind for up to one TTL, and a sweep that ran
 # inside that window would read the dead worker's own claim as ownership and
@@ -3520,6 +4228,14 @@ async def _sweep_orphan_jobs(db_session: async_sessionmaker, redis_conn: Any = N
     Redis says. When Redis cannot be read at all, nothing is touched and the
     reason is logged once: ownership cannot be established without it, and
     guessing costs somebody else's run.
+
+    A ``pending`` row is repaired the same way, by what would still start it:
+    its arq queue entry (the job key, queued under the job's own id) or arq's
+    claim on it, or an owner heartbeat. A row with none of the three is one no
+    worker will ever reach — the entry expired before a worker got to it, or
+    the worker that took it stopped between taking it and starting the run —
+    and is marked failed with that reason. A row younger than one TTL is left
+    for the next pass, because the API commits it a moment before it queues it.
     """
     from datetime import UTC as _UTC
     from datetime import datetime as _datetime
@@ -3536,9 +4252,12 @@ async def _sweep_orphan_jobs(db_session: async_sessionmaker, redis_conn: Any = N
     async with db_session() as db:
         candidates = (
             await db.execute(
-                select(AnalysisJob.id, AnalysisJob.started_at, AnalysisJob.created_at).where(
-                    AnalysisJob.status == "running"
-                )
+                select(
+                    AnalysisJob.id,
+                    AnalysisJob.started_at,
+                    AnalysisJob.created_at,
+                    AnalysisJob.status,
+                ).where(AnalysisJob.status.in_(("running", "pending")))
             )
         ).all()
         await db.commit()
@@ -3546,32 +4265,55 @@ async def _sweep_orphan_jobs(db_session: async_sessionmaker, redis_conn: Any = N
     def _since(row: Any) -> Any:
         # ``started_at`` is written with the status change; ``created_at`` is
         # the fallback for a row that somehow carries none, so a job cannot
-        # stay ``running`` for ever by having no clock.
+        # stay ``running`` for ever by having no clock. A pending row has not
+        # started: its clock is when it was created.
+        if row[3] == "pending":
+            return row[2]
         return row[1] or row[2]
 
-    aged = [str(row[0]) for row in candidates if _since(row) is None or _since(row) < young_cutoff]
+    aged = [row for row in candidates if _since(row) is None or _since(row) < young_cutoff]
     if not aged:
         logger.debug("Orphan sweep: nothing old enough to judge.")
         return
+    running = [str(row[0]) for row in aged if row[3] == "running"]
+    pending = [str(row[0]) for row in aged if row[3] == "pending"]
 
-    owners = await live_owners(redis_conn, aged)
+    owners = await live_owners(redis_conn, running)
     if owners is None:
         return
-    orphans = [job_id for job_id in aged if job_id not in owners and job_id not in _OWNED_JOBS]
-    if not orphans:
-        logger.debug("Orphan sweep: every running job has an owner.")
+    orphans = [job_id for job_id in running if job_id not in owners and job_id not in _OWNED_JOBS]
+    held = await queued_or_owned(redis_conn, pending)
+    if held is None:
+        return
+    never_started = [
+        job_id for job_id in pending if job_id not in held and job_id not in _OWNED_JOBS
+    ]
+    if not orphans and not never_started:
+        logger.debug("Orphan sweep: every running job has an owner, every pending one a queue.")
         return
 
+    await _fail_swept(db_session, orphans, "running", _SWEPT_NO_OWNER)
+    await _fail_swept(db_session, never_started, "pending", _SWEPT_NEVER_STARTED)
+
+
+async def _fail_swept(
+    db_session: async_sessionmaker, job_ids: list[str], status: str, reason: str
+) -> None:
+    """Mark these jobs failed with ``reason``, each only while it still has ``status``."""
+    from app.models.job import AnalysisJob
+
+    if not job_ids:
+        return
     async with db_session() as db:
         result = await db.execute(
             update(AnalysisJob)
             .where(
-                AnalysisJob.id.in_([uuid.UUID(job_id) for job_id in orphans]),
-                # Re-checked in the statement: a worker may have finished one
-                # of these between the read above and this write.
-                AnalysisJob.status == "running",
+                AnalysisJob.id.in_([uuid.UUID(job_id) for job_id in job_ids]),
+                # Re-checked in the statement: a worker may have started or
+                # finished one of these between the read above and this write.
+                AnalysisJob.status == status,
             )
-            .values(status="failed", completed_at=func.now(), error_message=_SWEPT_NO_OWNER)
+            .values(status="failed", completed_at=func.now(), error_message=reason)
             .returning(AnalysisJob.id)
         )
         affected = [str(row[0]) for row in result.all()]
@@ -3579,8 +4321,9 @@ async def _sweep_orphan_jobs(db_session: async_sessionmaker, redis_conn: Any = N
 
     if affected:
         logger.warning(
-            "Orphan sweep: marked %d unowned 'running' job(s) as 'failed': %s",
+            "Orphan sweep: marked %d unowned '%s' job(s) as 'failed': %s",
             len(affected),
+            status,
             ", ".join(affected[:8]) + (" ..." if len(affected) > 8 else ""),
             extra={"component": "worker.lifecycle", "job_count": len(affected)},
         )
@@ -3660,6 +4403,52 @@ async def warn_if_enrichment_is_unmanned(ctx: dict, delay: float | None = None) 
         )
 
 
+# What a running analysis keeps for the whole process rather than for its job.
+# Each is right only while one analysis runs in the process at a time, which
+# ``WorkerSettings.max_jobs = 1`` is what guarantees.
+PROCESS_WIDE_JOB_STATE = (
+    "the job's settings, installed as the process's settings (install_settings)",
+    "the configured values the event scrub masks by value (pipeline.events, scope 'job')",
+    "the API names the job's hash resolution read (pipeline.events.remember_resolved_names)",
+)
+
+
+def concurrent_analyses_refusal(max_jobs: object) -> str | None:
+    """Why the worker refuses to start with ``max_jobs``, or ``None`` for one job at a time."""
+    if isinstance(max_jobs, bool) or not isinstance(max_jobs, int):
+        return f"max_jobs is {max_jobs!r}, which is not a number of jobs; set it to 1."
+    jobs = max_jobs
+    if jobs == 1:
+        return None
+    return (
+        f"max_jobs is {jobs}; the analysis worker runs one analysis at a time, because "
+        + "; ".join(PROCESS_WIDE_JOB_STATE)
+        + " are held for the whole process, and two analyses at once would read each "
+        "other's. Set max_jobs to 1 and run more worker processes for more analyses at once."
+    )
+
+
+async def repair_long_term_memory() -> str:
+    """The configured memory store's one-time repair, off the event loop; what was done.
+
+    Never raises: memory that could not be repaired is tried again at the next
+    start.
+    """
+    try:
+        from maljan.memory.memory_repair import repair_memory
+        from maljan.memory.store_factory import build_memory_store
+
+        store = await asyncio.to_thread(build_memory_store, await runtime_config.core())
+    except Exception as exc:  # noqa: BLE001 — a repair never costs a start
+        logger.warning("Long-term memory repair skipped: no store (%s).", type(exc).__name__)
+        return "skipped: no store"
+    try:
+        return await asyncio.to_thread(repair_memory, store)
+    finally:
+        with suppress(Exception):
+            store.close()
+
+
 async def startup(ctx: dict) -> None:
     """Called when the ARQ worker starts up."""
     # Initialize logging for the worker process first: the CRITICAL bootstrap
@@ -3667,6 +4456,20 @@ async def startup(ctx: dict) -> None:
     # not the ``logging.lastResort`` stderr handler a bare logger falls back
     # to before ``setup_logging()`` attaches one.
     setup_logging()
+
+    # Before any job, and so before any thread or the YARA engine loads: C code
+    # in this process folds case by LC_CTYPE, and a Turkish one leaves a capital
+    # I unfolded (``core.ctype_locale``).
+    from maljan.core.ctype_locale import pin_character_classification
+
+    pin_character_classification()
+
+    # Refused before any job is taken: the state an analysis keeps per
+    # process is not per job yet, so a second analysis at once is never run.
+    refusal = concurrent_analyses_refusal(WorkerSettings.max_jobs)
+    if refusal is not None:
+        logger.critical(refusal, extra={"component": "worker.lifecycle"})
+        raise RuntimeError(refusal)
 
     from app.bootstrap import BootstrapProblem, require_bootstrap
 
@@ -3714,6 +4517,11 @@ async def startup(ctx: dict) -> None:
         max_overflow=10,
     )
     ctx["db_session"] = async_sessionmaker(engine, expire_on_commit=False)
+    # An empty audit anchor is given the current head, beside the start.
+    from app.services import audit_anchor
+
+    audit_anchor.start_anchoring(engine)
+    await load_the_allowed_plugins(ctx["db_session"])
     await state_the_mirrors(ctx["db_session"])
 
     # Store a Redis connection for PubSub
@@ -3732,6 +4540,20 @@ async def startup(ctx: dict) -> None:
     # And one look at the other queue, once the process that reads it has had
     # a health interval to come up beside this one.
     ctx["enrichment_watch_task"] = asyncio.create_task(warn_if_enrichment_is_unmanned(ctx))
+    # One sweep of ``job_events`` as the worker starts, beside its slot rather
+    # than in it. The nightly cron fires only in a process alive at 03:17, and
+    # arq does not run a window it missed while no worker was up, so a worker
+    # started for a run and stopped after it (a local stack) never swept, and
+    # neither did a deployment whose worker restarted across the night's window.
+    ctx["events_sweep_task"] = asyncio.create_task(purge_old_job_events(ctx))
+    # Long-term memory kept before AUD-65, repaired once and beside the slot
+    # (``maljan.memory.memory_repair``).
+    ctx["memory_repair_task"] = asyncio.create_task(repair_long_term_memory())
+    # The console's ATT&CK cache jobs, read beside this worker's one analysis
+    # slot rather than in it: this is the process that holds the cache.
+    from app.worker.attck_worker import start_attck_worker
+
+    await start_attck_worker(ctx)
 
     logger.info(
         "Worker started: connected to DB and Redis",
@@ -3742,12 +4564,28 @@ async def startup(ctx: dict) -> None:
 async def shutdown(ctx: dict) -> None:
     """Called when the ARQ worker shuts down."""
     # Before the connections they use are closed under them.
-    for name in ("sweep_task", "enrichment_watch_task"):
+    from app.worker.attck_worker import stop_attck_worker
+
+    await stop_attck_worker(ctx, EXIT_GRACE)
+    for name in ("sweep_task", "enrichment_watch_task", "events_sweep_task", "memory_repair_task"):
         task: asyncio.Task | None = ctx.get(name)
-        if task is not None:
-            task.cancel()
-            with suppress(asyncio.CancelledError):
-                await task
+        if task is None:
+            continue
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+        except Exception as exc:  # noqa: BLE001 — a start task never stops the shutdown
+            # Logged, not raised: the Redis close, the engine dispose, the exit
+            # guard below and arq's own pool close run whatever a task did.
+            logger.error(
+                "Worker start task %s had ended with %s; the shutdown goes on.",
+                name,
+                type(exc).__name__,
+                exc_info=(type(exc), exc, exc.__traceback__),
+                extra={"component": "worker.lifecycle"},
+            )
 
     # Each close is bounded: a connection that does not close would otherwise
     # hold the shutdown open before the process ever reaches its exit.
@@ -3755,6 +4593,11 @@ async def shutdown(ctx: dict) -> None:
     if redis_conn:
         with suppress(TimeoutError):
             await asyncio.wait_for(redis_conn.aclose(), timeout=EXIT_GRACE)
+
+    # Anchor writes already scheduled finish, bounded, before their engine goes.
+    from app.services import audit_anchor
+
+    await audit_anchor.drain(EXIT_GRACE)
 
     db_session = ctx.get("db_session")
     if db_session:
@@ -3859,6 +4702,8 @@ class WorkerSettings:
     # The one scheduled task this worker runs: the nightly sweep that bounds
     # ``job_events`` to ``core.events.retention_days``. Off-hour and off-minute
     # so it does not land on top of whatever else a deployment runs at 03:00.
+    # ``startup`` runs the same sweep once more as the worker starts, outside
+    # the job slot, for the nights no worker was up at that minute.
     cron_jobs = [cron(purge_old_job_events, hour=3, minute=17)]
     on_startup = startup
     on_shutdown = shutdown
@@ -3882,7 +4727,9 @@ class WorkerSettings:
     #
     # ``max_jobs`` is arq's CONCURRENCY limit — how many jobs run at once — not
     # a "recycle the worker after N jobs" counter. arq has no such counter;
-    # ``after_job_end`` above is what bounds process lifetime here.
+    # ``after_job_end`` above is what bounds process lifetime here. Any other
+    # value is refused at startup (``concurrent_analyses_refusal``): the state
+    # ``PROCESS_WIDE_JOB_STATE`` names is held per process, not per job.
     max_jobs = 1
     # No job timeout at arq's level: a job's limit is the operator's
     # ``core.job_timeout``, empty by default, which ``run_analysis`` reads from
@@ -3930,10 +4777,38 @@ async def _supersede_previous_report(db: Any, job_id: Any) -> None:
             getattr(existing, "id", "<unknown>"),
             extra={"job_id": str(job_id), "component": "report"},
         )
+        # The superseded report's deletion on the audit chain, in this
+        # transaction, as every path that deletes a stored report writes it.
+        from app.services.audit_chain import DeletionNotChained, record_report_deletion
+
+        try:
+            await record_report_deletion(db, existing)
+        except DeletionNotChained:
+            # The re-run's own result must still be stored; the superseded
+            # report's verification will say its deletion was not recorded.
+            logger.warning(
+                "The superseded report of job %s is deleted without its audit record.",
+                job_id,
+                extra={"job_id": str(job_id), "component": "report"},
+            )
         await db.delete(existing)
         await db.flush()
     except Exception as exc:  # noqa: BLE001
         logger.warning("Could not check for a previous report on job %s (%s).", job_id, exc)
+
+
+def _end_the_token_ledger(container: Any) -> None:
+    """The run summary's token figures are final: a charge landing from now on is marked late.
+
+    Idempotent, and never raises; the container's close is the backstop
+    (``TokenLedger.end``).
+    """
+    try:
+        ledger = container.get_token_ledger() if container is not None else None
+        if ledger is not None:
+            ledger.end()
+    except Exception as exc:  # noqa: BLE001 — marking never fails a stored report
+        logger.debug("The usage ledger was not marked ended (%s).", type(exc).__name__)
 
 
 def _report_inputs(
@@ -3943,11 +4818,15 @@ def _report_inputs(
     override_keys: Any,
     hash_mismatch_reason: str | None,
     scale_record: Mapping[str, Any] | None = None,
+    enrichment: list[dict[str, Any]] | None = None,
+    sample_integrity: Mapping[str, Any] | None = None,
 ) -> tuple[dict | None, dict[str, Any]]:
     """The STIX bundle and the run summary a stored report carries.
 
     Read off the pipeline's state, whether the run completed or failed after
-    its report was built: both store the report the same way.
+    its report was built: both store the report the same way. ``enrichment``
+    is where the enrichment job queued after the report may send its
+    indicators (:func:`enrichment_plan`), ``None`` when none is queued.
     """
     # Prefer the rich extended bundle produced by ``report_node``
     # (54+ objects with Identity/Indicator/ObservedData/Note/Report
@@ -3964,6 +4843,16 @@ def _report_inputs(
             if isinstance(judge_bundle, dict) and judge_bundle
             else judge_bundle
         )
+        if isinstance(stix_bundle_for_persist, dict):
+            # The judge's draft, not the export: it did not pass the publish
+            # rule, and whoever reads the stored bundle is told.
+            from maljan.schemas.stix_models import UNPUBLISHED_NOTICE, UNPUBLISHED_PROPERTY
+
+            stix_bundle_for_persist = {
+                **stix_bundle_for_persist,
+                UNPUBLISHED_PROPERTY: False,
+                "x_maljan_notice": UNPUBLISHED_NOTICE,
+            }
     # Ensure STIX 2.1 ``spec_version`` is present on every bundle —
     # the OASIS spec requires it on top-level bundle objects, and
     # downstream tooling (OpenCTI / MISP / TAXII clients) silently
@@ -4001,7 +4890,87 @@ def _report_inputs(
                 *(_report_reasons if isinstance(_report_reasons, list) else []),
                 hash_mismatch_reason,
             ]
+    _disclosed(_run_summary, pipeline_result, core_settings=core_settings, enrichment=enrichment)
+    # The copies' readings at the job's start and end, said in the isolation
+    # part (``sample_integrity``); a job that handed out no copy adds nothing.
+    with_record(_run_summary, pipeline_result.get("malware_report"), sample_integrity)
     return stix_bundle_for_persist, _run_summary
+
+
+def _disclosed(
+    run_summary: dict[str, Any],
+    pipeline_result: dict[str, Any],
+    *,
+    core_settings: Any,
+    enrichment: list[dict[str, Any]] | None,
+) -> None:
+    """The run's disclosure record as the stored summary and report carry it, set in place.
+
+    A record the run built names the enrichment job queued after the report
+    and what it may reach, where ``enrichment`` holds that
+    (``analysis.disclosure.with_enrichment``): in the run summary, and in the
+    report payload every rendering of the report is made from. A summary
+    without a record says why none was built (``analysis.disclosure.not_built``),
+    so it is told apart from a run stored before the block existed.
+    """
+    from maljan.analysis.disclosure import not_built, not_built_reason, with_enrichment
+
+    record = run_summary.get("disclosure")
+    if not isinstance(record, dict) or "models" not in record:
+        reporting = getattr(getattr(core_settings, "reporting", None), "enabled", True)
+        run_summary["disclosure"] = not_built(
+            not_built_reason(
+                reporting=bool(reporting),
+                summary_written=bool(pipeline_result.get("run_summary")),
+            )
+        )
+        return
+    if enrichment is None:
+        return
+    run_summary["disclosure"] = with_enrichment(record, enrichment)
+    malware_report = pipeline_result.get("malware_report")
+    if not isinstance(malware_report, dict):
+        return
+    held = malware_report.get("run_summary")
+    if isinstance(held, dict) and isinstance(held.get("disclosure"), dict):
+        if "models" in held["disclosure"]:
+            malware_report["run_summary"] = {
+                **held,
+                "disclosure": with_enrichment(held["disclosure"], enrichment),
+            }
+
+
+async def enrichment_plan(core_settings: Any) -> list[dict[str, Any]] | None:
+    """Where the enrichment job queued after a report may send its indicators; ``None`` when off.
+
+    Read as that job reads it (``enrich_worker.enrich_threat_intel``): the
+    ``enrichment_enabled`` switch, then the sources in force with their
+    credentials, and the job's tool servers
+    (``services.enrichment_sources.enrichment_reach``). Never raises: sources
+    that cannot be read are named as such, never left out.
+    """
+    if not await runtime_config.get("enrichment_enabled"):
+        return None
+    from maljan.analysis.disclosure import registry_rows, unread_sources_row
+    from maljan.enrichment.declared import ASKED_KINDS
+
+    from app.services.enrichment_sources import (
+        ENRICHMENT_SOURCES_PATH,
+        enrichment_reach,
+        read_setting_secret,
+    )
+
+    try:
+        servers = getattr(getattr(core_settings, "mcp", None), "servers", None)
+        return await enrichment_reach(
+            await runtime_config.get(ENRICHMENT_SOURCES_PATH), read_setting_secret, servers
+        )
+    except Exception as exc:  # noqa: BLE001 — a plan that cannot be read still says so
+        logger.warning(
+            "enrich: the sources the follow-up job may ask could not be read (%s).",
+            type(exc).__name__,
+        )
+        return [*registry_rows(), unread_sources_row(ASKED_KINDS)]
 
 
 def evidence_budget_of(run_summary: Mapping[str, Any] | None, core_settings: Any = None) -> int:
@@ -4023,6 +4992,59 @@ def evidence_budget_of(run_summary: Mapping[str, Any] | None, core_settings: Any
         return 0
 
 
+async def _seal_the_ledger(
+    db: Any,
+    report: Any,
+    job_uuid: uuid.UUID,
+    rows: list[Any],
+    key: Any,
+    sealed_at: datetime,
+) -> dict[str, Any]:
+    """Chain ``rows``, seal them, write the seal into ``report`` and onto the audit chain.
+
+    Each row's digest over every column it persists and its place in the
+    job's hash chain in ``seq`` order (``ledger_chain``), taken from the rows
+    exactly as they are inserted: what a verifier reads back. The seal (chain
+    head, what it covers, key id, the stored report's digest) is written into
+    the report row (the mark that the job's ledger is sealed), the report
+    payload and the run summary column, and as a chained ``ledger.seal`` audit
+    row, all in ``db``'s transaction. Nothing the models saw is touched; the
+    run is over.
+    """
+    from app.services import audit_chain, ledger_chain
+
+    head = ledger_chain.chain_rows(job_uuid, rows, key)
+    # The rows and the report row go to the database first, so every column
+    # the seal's report digest covers holds what is stored, and a failure of
+    # theirs is never taken for the audit write's.
+    await db.flush()
+    core = ledger_chain.seal(
+        job_uuid,
+        rows,
+        head,
+        report_sha256=ledger_chain.report_digest(report),
+        sealed_at=sealed_at,
+        key=key,
+        report_id=report.id,
+    )
+    landed = await audit_chain.append(
+        db,
+        action=audit_chain.LEDGER_SEAL,
+        resource_type="job",
+        resource_id=str(job_uuid),
+        details={"report_id": str(report.id), "seal": core},
+        key=key,
+    )
+    # The append's own result, known before this transaction commits, goes
+    # into the keyed seal: a verifier then tells a deleted audit row from an
+    # append that never landed.
+    seal = ledger_chain.anchored(core, landed=landed is not None, key=key)
+    report.ledger_seal = seal
+    report.malware_report = ledger_chain.with_seal(report.malware_report, seal)
+    report.run_summary = ledger_chain.with_seal(report.run_summary, seal)
+    return seal
+
+
 async def _store_the_report(
     db: Any,
     *,
@@ -4034,6 +5056,7 @@ async def _store_the_report(
     transcript: list[dict[str, Any]],
     incomplete_reason: str | None = None,
     core_settings: Any = None,
+    spill: Any = None,
 ) -> Any:
     """Add the report and everything that cites it to ``db``, uncommitted.
 
@@ -4109,7 +5132,7 @@ async def _store_the_report(
             "mediation_failed": any(
                 getattr(a, "status", "complete") in ("failed", "timeout")
                 for a in (pipeline_result.get("discussion_history") or [])
-                if getattr(a, "agent_name", "") == "Mediator"
+                if getattr(a, "agent_name", "") == MEDIATOR_AGENT_NAME
             ),
             # Whether the last round's agreement was flagged as
             # sycophantic — agents converging without new evidence. It
@@ -4122,6 +5145,14 @@ async def _store_the_report(
         malware_report=pipeline_result.get("malware_report"),
         incomplete_reason=incomplete_reason,
     )
+    # Every NUL and lone surrogate in a sample-derived string is written out
+    # before anything is stored or digested (``store_text``): PostgreSQL
+    # refuses both in text and jsonb, and one refused value would refuse this
+    # whole transaction. Counted across every row below and recorded in the
+    # run summary.
+    from app.services import store_text
+
+    _nul_replaced = store_text.sanitise_row(report)
     # A re-run supersedes its predecessor. ``analysis_reports.job_id``
     # is unique and this path only ever inserted, so an arq retry --
     # which arq schedules on its own -- reached the end of a full
@@ -4204,6 +5235,7 @@ async def _store_the_report(
             status=status,
             status_reason=status_reason,
         )
+        _nul_replaced.add(store_text.sanitise_row(finding))
         db.add(finding)
 
     logger.info(
@@ -4222,14 +5254,105 @@ async def _store_the_report(
     # The last pass before it is saved: each agent's kept bytes within its
     # budget, structures dropped first, texts untouched (a no-op for a ledger
     # with no structure kept beside a prose text, every built-in's).
-    fit_structures_to_budget(
-        [_entry for _entry in _ledger if isinstance(_entry, dict)],
+    # A structure this pass drops is kept whole under the job's prefix first,
+    # by the job's own store (``spill``, the container's) or, for a caller
+    # without one, a store made now (``object_store.job_evidence_spill``).
+    from maljan.schemas.evidence_spill import settle_refs
+
+    from app.services import object_store
+
+    _spill = spill if spill is not None else await object_store.job_evidence_spill(job_id)
+    _dumps = [_entry for _entry in _ledger if isinstance(_entry, dict)]
+    await asyncio.to_thread(
+        fit_structures_to_budget,
+        _dumps,
         evidence_budget_of(run_summary, core_settings),
+        spill=_spill,
     )
-    for _entry in _ledger:
-        if not isinstance(_entry, dict):
-            continue
-        db.add(_evidence_row(_entry, job_id=job_uuid))
+    # The store writes in the background. Wait for it, off the loop and for a
+    # stated time (``object_store.EVIDENCE_DRAIN_SECONDS``), then set every
+    # reference to how its write ended: a write that failed, or had not
+    # finished by then, loses its key and states why.
+    _outcomes = await asyncio.to_thread(_spill.drain, object_store.EVIDENCE_DRAIN_SECONDS)
+    # The ledger is final from here: the store takes no more parts and lets
+    # its writers go, the fallback store made above included.
+    _spill.close()
+    _unkept = settle_refs(_dumps, _outcomes)
+    if _unkept:
+        logger.warning(
+            f"{_unkept} evidence part(s) of job={job_id} were not kept; their references say why",
+            extra={"job_id": job_id},
+        )
+    # Each row's digest over every column it persists, and its place in the
+    # job's hash chain in ``seq`` order (``ledger_chain``), taken from the rows
+    # exactly as they are inserted: what a verifier reads back.
+    from app.services import ledger_chain
+
+    # The chain is keyed by a key derived from the settings encryption key
+    # (``ledger_chain.platform_key_status``). Without one nothing is sealed:
+    # the rows are stored as before, and the warning names why.
+    _key, _no_key = ledger_chain.platform_key_status()
+    _written_at = datetime.now(UTC)
+    _rows = [
+        _evidence_row(_entry, job_id=job_uuid, written_at=_written_at)
+        for _entry in rows_to_store(_ledger, job_id=job_id)
+    ]
+    for _row in _rows:
+        _nul_replaced.add(store_text.sanitise_row(_row))
+        db.add(_row)
+    # The transcript rows are built here and added after the seal, as they
+    # always were, so their replacements are counted in the run summary the
+    # seal's report digest covers.
+    # Whether the publisher numbered this run at all. A run it never
+    # reached — one whose loop was already closing, or whose recorder
+    # raised — falls back to the position in the recording, which is
+    # the order the lines were said in and all this column ever meant.
+    # A run it numbered *partly* may not: the position and the
+    # publisher's count share the low integers, so a line that missed
+    # its stamp would borrow a number another line already owns and
+    # the console would draw the two as one. Those get ``0``, which is
+    # outside the publisher's range — it counts from 1 — and which
+    # every reader already treats as "no number".
+    _numbered = any(int(m.get("seq") or 0) > 0 for m in transcript)
+    _transcript_rows: list[Any] = []
+    for index, message in enumerate(transcript):
+        _stamped = int(message.get("seq") or 0)
+        _transcript_rows.append(
+            _transcript_row(
+                message,
+                report_id=report.id,
+                seq=_stamped or (0 if _numbered else index),
+            )
+        )
+    for _message_row in _transcript_rows:
+        _nul_replaced.add(store_text.sanitise_row(_message_row))
+    # What the live feed of this job had replaced by now, so the one count a
+    # reader of the report sees covers the events too.
+    _events_replaced = _EVENT_REPLACED.get(job_id, 0)
+    if _nul_replaced.total or _events_replaced:
+        report.run_summary = store_text.recorded(
+            report.run_summary, _nul_replaced, events=_events_replaced
+        )
+        logger.warning(
+            "Job=%s carried characters PostgreSQL refuses in what it stores (%s; events "
+            "%d); each is stored written out (NUL as %s) and the run summary records the "
+            "count under %s.",
+            job_id,
+            _nul_replaced.record(),
+            _events_replaced,
+            store_text.NUL_WRITTEN,
+            store_text.RUN_SUMMARY_KEY,
+            extra={"job_id": job_id, "component": "report"},
+        )
+    if _key is None:
+        logger.warning(
+            "The ledger of job=%s is not sealed: %s.",
+            job_id,
+            _no_key,
+            extra={"job_id": job_id},
+        )
+    else:
+        await _seal_the_ledger(db, report, job_uuid, _rows, _key, _written_at)
 
     logger.info(
         f"Saved {len(_ledger)} evidence entries for job={job_id}",
@@ -4242,27 +5365,10 @@ async def _store_the_report(
     # *ended up*; this records what was said and in what order, which
     # is the only place the per-round positions, the sycophancy
     # intervention and the revised prose survive past the 24 h Redis
-    # stream. See ``AgentMessage`` for the full rationale.
-    # Whether the publisher numbered this run at all. A run it never
-    # reached — one whose loop was already closing, or whose recorder
-    # raised — falls back to the position in the recording, which is
-    # the order the lines were said in and all this column ever meant.
-    # A run it numbered *partly* may not: the position and the
-    # publisher's count share the low integers, so a line that missed
-    # its stamp would borrow a number another line already owns and
-    # the console would draw the two as one. Those get ``0``, which is
-    # outside the publisher's range — it counts from 1 — and which
-    # every reader already treats as "no number".
-    _numbered = any(int(m.get("seq") or 0) > 0 for m in transcript)
-    for index, message in enumerate(transcript):
-        _stamped = int(message.get("seq") or 0)
-        db.add(
-            _transcript_row(
-                message,
-                report_id=report.id,
-                seq=_stamped or (0 if _numbered else index),
-            )
-        )
+    # stream. See ``AgentMessage`` for the full rationale. Built and
+    # numbered above, before the seal; added here.
+    for _message_row in _transcript_rows:
+        db.add(_message_row)
 
     logger.info(
         f"Saved {len(transcript)} transcript messages for report={report.id}",

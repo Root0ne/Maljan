@@ -18,6 +18,7 @@ from unittest.mock import AsyncMock, patch
 import pytest
 from pydantic import BaseModel, SecretStr
 
+from maljan.core import plugins
 from maljan.core.config import Settings
 from maljan.core.exceptions import MemoryStoreError
 from maljan.memory import store_factory
@@ -70,6 +71,16 @@ class _FakeQdrant:
         for point in points:
             self.collections[collection_name][point.id] = dict(point.payload)
 
+    def retrieve(
+        self,
+        collection_name: str,
+        ids: list[int],
+        with_payload: bool = True,
+        with_vectors: bool = False,
+    ) -> list[Any]:
+        held = self.collections[collection_name]
+        return [SimpleNamespace(id=i, payload=held[i]) for i in ids if i in held]
+
     def scroll(
         self,
         collection_name: str,
@@ -101,10 +112,20 @@ def _fake_qdrant(monkeypatch: pytest.MonkeyPatch) -> Iterator[type[_FakeQdrant]]
     _FakeQdrant.down = False
     _FakeQdrant.seed = {}
     monkeypatch.setattr("qdrant_client.QdrantClient", _FakeQdrant)
-    monkeypatch.setattr(store_factory, "_UNAVAILABLE", {})
+    # This process's plugin state, fresh: no plugin allowed, none tried.
+    monkeypatch.setattr(plugins, "_STATE", plugins._ProcessState())
     store_factory.forget_built_stores()
     yield _FakeQdrant
     store_factory.forget_built_stores()
+
+
+def _installed(monkeypatch: pytest.MonkeyPatch, *points: Any) -> None:
+    """``points`` are the installed memory plugins' entry points, as package metadata lists them."""
+    monkeypatch.setattr(
+        plugins,
+        "_entry_points",
+        lambda group: list(points) if group == store_factory.ENTRY_POINT_GROUP else [],
+    )
 
 
 class _ThirdSettings(BaseModel):
@@ -375,8 +396,11 @@ class TestHealthProbesTheConfiguredBackend:
         async def _ok() -> None:
             return None
 
+        # The stored plugin allow-list is the one the test put in force.
+        stored = sorted(plugins.allow_list())
         with (
             patch.object(runtime_config, "core", AsyncMock(return_value=settings)),
+            patch.object(runtime_config, "stored_value", AsyncMock(return_value=stored)),
             patch.object(main_mod, "_probe_database", _ok),
             patch.object(main_mod, "_probe_redis", _ok),
             patch.object(main_mod, "_probe_minio", _ok),
@@ -422,7 +446,10 @@ class TestTheFunctionMatchStepUsesTheConfiguredBackend:
             capabilities=SimpleNamespace(provides_function_hashes=True),
             function_hashes=lambda _job: [("f1", "h1"), ("f3", "h3")],
         )
-        container = SimpleNamespace(config=config, get_static_provider=lambda: provider)
+        # An unscoped job: no container at all reads no memory.
+        container = SimpleNamespace(
+            config=config, get_static_provider=lambda: provider, memory_owner=None
+        )
         state = {"static_sample_path": "/mirror/s.bin", "file_hash": "this"}
         return _function_matches_step(container, state)  # type: ignore[arg-type]
 
@@ -492,6 +519,8 @@ class TestTheStaticAnalystHintUsesTheConfiguredBackend:
         analyst = SimpleNamespace(
             _provider=lambda: provider,
             logger=SimpleNamespace(info=lambda *a: None, warning=lambda *a: None),
+            # An unscoped job: an analyst with no container reads no memory.
+            _container=SimpleNamespace(memory_owner=None),
         )
         settings = SimpleNamespace(
             memory=config.memory,
@@ -509,6 +538,26 @@ class TestTheStaticAnalystHintUsesTheConfiguredBackend:
     def test_a_registered_backend_gives_the_prior(self, third_backend: Any) -> None:
         hint, asked = self._hint(third_backend)
         assert "FamilyA" in hint and asked == ["/m/s.bin"]
+
+    def test_an_analyst_with_no_container_reads_no_memory(self, third_backend: Any) -> None:
+        from maljan.agents.static_analyst import StaticAnalyst
+
+        analyst = SimpleNamespace(
+            _provider=lambda: SimpleNamespace(
+                capabilities=SimpleNamespace(provides_function_hashes=True),
+                function_hashes=lambda _job: [("f1", "h1")],
+            ),
+            logger=SimpleNamespace(info=lambda *a: None, warning=lambda *a: None),
+        )
+        settings = SimpleNamespace(
+            memory=third_backend.memory,
+            preprocessing=SimpleNamespace(
+                use_function_hash_attribution=True, function_hash_max_matches=8
+            ),
+        )
+        with patch("maljan.core.config.get_settings", return_value=settings):
+            hint = StaticAnalyst._compute_function_hash_hint(analyst, "/m/s.bin", "this")  # type: ignore[arg-type]
+        assert hint == ""
 
 
 class TestTheCommandLineUsesTheFactory:
@@ -564,28 +613,31 @@ class TestABackendIsSelectedAndConfiguredThroughTheSettings:
         assert entry.type == "enum"
         assert entry.choices == list(store_factory.memory_backends())
 
-    def test_an_installed_package_registers_through_its_entry_point(self, monkeypatch: Any) -> None:
+    def test_an_installed_package_registers_through_its_entry_point_once_allowed(
+        self, monkeypatch: Any
+    ) -> None:
         def _register() -> None:
             store_factory.register_memory_backend("packaged", lambda _m: InMemoryStore())
 
-        point = SimpleNamespace(name="packaged", load=lambda: _register)
-        monkeypatch.setattr(store_factory, "entry_points", lambda group: [point])
-        monkeypatch.setattr(store_factory, "_entry_points_loaded", False)
+        _installed(monkeypatch, SimpleNamespace(name="packaged", load=lambda: _register))
         try:
+            assert "packaged" not in store_factory.memory_backends()
+            plugins.load_allowed(["memory:packaged"])
             assert "packaged" in store_factory.memory_backends()
             cfg = Settings(_env_file=None, memory={"backend": "packaged"})
             assert isinstance(store_factory.build_memory_store(cfg), InMemoryStore)
         finally:
-            store_factory._BACKENDS.pop("packaged", None)
+            plugins.load_allowed([])
+        assert "packaged" not in store_factory.memory_backends()
 
     def test_a_broken_entry_point_leaves_the_others_registered(self, monkeypatch: Any) -> None:
         def _boom() -> None:
             raise RuntimeError("broken package")
 
-        point = SimpleNamespace(name="broken", load=lambda: _boom)
-        monkeypatch.setattr(store_factory, "entry_points", lambda group: [point])
-        monkeypatch.setattr(store_factory, "_entry_points_loaded", False)
+        _installed(monkeypatch, SimpleNamespace(name="broken", load=lambda: _boom))
+        plugins.load_allowed(["memory:broken"])
         assert {"memory", "qdrant"} <= set(store_factory.memory_backends())
+        assert store_factory.unavailable_backends() == {"broken": "RuntimeError: broken package"}
 
 
 class TestTheOldFlatKeysAreStillRead:
@@ -703,7 +755,7 @@ class TestTheFunctionHashStoreIsBuiltOncePerSettings:
 
 class TestTheJudgeReadsAndHoldsThroughTheConfiguredBackend:
     @staticmethod
-    def _run(config: Any) -> tuple[list[dict[str, Any]], Any, list[str]]:
+    def _run(config: Any, decision: str = "Malware") -> tuple[list[dict[str, Any]], Any, list[str]]:
         from maljan.pipeline import nodes
 
         asked: list[str] = []
@@ -724,7 +776,9 @@ class TestTheJudgeReadsAndHoldsThroughTheConfiguredBackend:
             patch("maljan.core.config.get_settings", return_value=config),
             patch.object(nodes, "_assessed_family", return_value="FamilyB"),
         ):
-            report = nodes._function_hash_attribution(container, state, bundle=None)  # type: ignore[arg-type]
+            report = nodes._function_hash_attribution(  # type: ignore[arg-type]
+                container, state, bundle=None, decision=decision
+            )
         return report, container.pending_function_hashes, asked
 
     def test_a_backend_without_function_hashes_holds_nothing_and_asks_nothing(self) -> None:
@@ -744,6 +798,17 @@ class TestTheJudgeReadsAndHoldsThroughTheConfiguredBackend:
         assert store._collection == "maljan_function_hashes_v1"
         assert (sample_id, family, functions) == ("this", "FamilyB", [("f1", "h1"), ("f2", "h2")])
         assert asked == ["/mirror/s.bin"]
+
+    @pytest.mark.parametrize("decision", ["Suspicious", "Benign", ""])
+    def test_a_family_beside_a_softer_verdict_is_read_but_never_held(self, decision: str) -> None:
+        _FakeQdrant.seed = {
+            "maljan_function_hashes_v1": {
+                1: {"func_hash": "h1", "family": "FamilyA", "sample_id": "older", "func_name": "f1"}
+            }
+        }
+        report, held, _asked = self._run(_settings("qdrant"), decision)
+        assert [row["family"] for row in report] == ["FamilyA"]
+        assert held is None
 
 
 class TestTheContainerStoreIsTheFactorys:
@@ -793,10 +858,9 @@ class TestABrokenPackageBackendNeverStopsTheSettings:
         def _boom() -> None:
             raise ImportError("vectorhub_client is not installed")
 
-        point = SimpleNamespace(name="vectorhub", load=lambda: _boom)
-        monkeypatch.setattr(store_factory, "entry_points", lambda group: [point])
-        monkeypatch.setattr(store_factory, "_entry_points_loaded", False)
-        monkeypatch.setattr(store_factory, "_UNAVAILABLE", {})
+        _installed(monkeypatch, SimpleNamespace(name="vectorhub", load=lambda: _boom))
+        plugins.install_allow_list(["memory:vectorhub"])
+        plugins.load_allowed(["memory:vectorhub"])
         return Settings(_env_file=None, memory={"backend": "vectorhub", "top_k": 5})
 
     def test_the_settings_load_with_the_rest_intact(self, broken: Any) -> None:
@@ -887,7 +951,9 @@ class TestARunningJobKeepsTheStoreItHolds:
             patch("maljan.core.config.get_settings", return_value=config),
             patch.object(nodes, "_assessed_family", return_value="FamilyB"),
         ):
-            nodes._function_hash_attribution(container, state, bundle=None)  # type: ignore[arg-type]
+            nodes._function_hash_attribution(  # type: ignore[arg-type]
+                container, state, bundle=None, decision="Malware"
+            )
         assert container.pending_function_hashes is not None
         return container
 
@@ -988,18 +1054,29 @@ class TestHoldsAreNeverLost:
 
 
 class TestABrokenPackageWithAnotherEntryPointName:
-    def test_the_selected_id_is_unavailable_with_the_failure(self, monkeypatch: Any) -> None:
+    def test_its_failure_is_its_own_and_the_selected_id_names_the_installed_plugins(
+        self, monkeypatch: Any
+    ) -> None:
+        """A plugin is known by its entry point's name, the one id it may register."""
+
         def _boom() -> None:
             raise ImportError("vectorhub_client is not installed")
 
-        point = SimpleNamespace(name="vectorhub-plugin", load=lambda: _boom)
-        monkeypatch.setattr(store_factory, "entry_points", lambda group: [point])
-        monkeypatch.setattr(store_factory, "_entry_points_loaded", False)
-        monkeypatch.setattr(store_factory, "_UNAVAILABLE", {})
+        _installed(monkeypatch, SimpleNamespace(name="vectorhub-plugin", load=lambda: _boom))
+        plugins.install_allow_list(["memory:vectorhub-plugin"])
+        plugins.load_allowed(["memory:vectorhub-plugin"])
         cfg = Settings(_env_file=None, memory={"backend": "vectorhub"})
+        assert store_factory.unavailable_backends() == {
+            "vectorhub-plugin": "ImportError: vectorhub_client is not installed"
+        }
+        with pytest.raises(store_factory.MemoryBackendNotConfiguredError) as missing:
+            store_factory.build_memory_store(cfg)
+        assert missing.value.unavailable is True
+        assert "the installed memory plugins are vectorhub-plugin" in missing.value.reason
+        assert "must be the backend id it registers" in missing.value.reason
         component = TestHealthProbesTheConfiguredBackend._memory_component(cfg)
         assert component["ok"] is False and component["detail"] == "unavailable"
-        assert "vectorhub_client is not installed" in component["error"]
+        assert "vectorhub-plugin" in component["error"]
 
     def test_with_no_failed_package_an_unknown_id_is_not_configured(self) -> None:
         cfg = Settings(_env_file=None, memory={"backend": "vectorhub"})
@@ -1023,3 +1100,26 @@ class TestAnUnchangedStoredChoiceIsNotCheckedAgain:
             SettingsService(db=None).check_keys(  # type: ignore[arg-type]
                 {"core.memory.backend": "otherhub"}, {"core.memory.backend": "vectorhub"}
             )
+
+
+class TestQdrantDescribesItsOwnSettings:
+    """Qdrant's leaves are annotated by its registration, as a package backend's are."""
+
+    LEAVES = {"url", "collection", "function_hash_collection", "api_key"}
+
+    def test_the_registration_carries_the_annotations_and_the_shared_table_none(self) -> None:
+        from maljan.core.settings_annotations import ANNOTATIONS
+        from maljan.memory.store_factory import registered_backends
+
+        assert set(registered_backends()["qdrant"].annotations) == self.LEAVES
+        assert not [key for key in ANNOTATIONS if key.startswith("memory.qdrant.")]
+
+    def test_the_catalogue_still_shows_each_leaf_as_described(self) -> None:
+        from maljan.core.settings_catalog import core_catalog
+
+        entries = {e.path: e for e in core_catalog() if e.path.startswith("memory.qdrant.")}
+        assert set(entries) == {f"memory.qdrant.{leaf}" for leaf in self.LEAVES}
+        assert entries["memory.qdrant.url"].title == "Qdrant URL"
+        assert entries["memory.qdrant.url"].probe == "qdrant"
+        assert entries["memory.qdrant.url"].applies_when == {"core.memory.backend": ["qdrant"]}
+        assert all(e.description for e in entries.values())

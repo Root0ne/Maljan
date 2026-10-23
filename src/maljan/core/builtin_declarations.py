@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from collections.abc import Mapping
 from functools import cache
 from typing import TYPE_CHECKING, Any
 
@@ -93,8 +94,9 @@ GHIDRA_WORKFLOW: str = (
     "7. Call `list_imports` to confirm suspicious API imports raised above.\n"
     "8. Call `list_strings` for any encoded/hardcoded artefacts the IOC pass\n"
     "   missed.\n"
-    "9. For the 3–5 most suspicious functions: `decompile_function(address=<addr>)`\n"
-    "   then `get_xrefs_to(address=<addr>)` to confirm call-sites.\n\n"
+    "9. Decompile the functions that matter for the question: `batch_decompile`\n"
+    "   for several at once, `decompile_function(address=<addr>)` for one; then\n"
+    "   `get_xrefs_to(address=<addr>)` to confirm call-sites.\n\n"
     "=== ADVANCED TOOLS (reach for these when the triage signals call for them) ===\n"
     "- API names resolved by hash (a hashing loop, sparse imports): call\n"
     "  `emulate_hash_batch` to brute-force the obfuscated API names.\n"
@@ -115,7 +117,8 @@ GHIDRA_WORKFLOW: str = (
     "- Step 1 (load_program) MUST happen before any analysis tool call.\n"
     "- Always prefer the high-level malware analyzers (steps 3–6) before\n"
     "  decompiling individual functions — they are much cheaper.\n"
-    "- Focus decompilation on 3-5 most suspicious functions, not every function.\n"
+    "- Choose the functions to decompile by what the question needs; where a tool\n"
+    "  is the aggregate form of another, one call of it answers many of the other.\n"
     "- Large binaries may have 1000+ functions. Prioritize entry point, main,\n"
     "  and functions referencing crypto/network/process APIs.\n"
     "- Summarize assembly patterns instead of dumping raw hex."
@@ -126,8 +129,9 @@ R2_WORKFLOW: str = (
     "1. Call `open_file` with the path you are given, then `analyze` to run the\n"
     "   analysis pass.\n"
     "2. Call `list_imports` and `list_strings` to see what the binary can reach.\n"
-    "3. Call `list_functions` and pick the 3-5 that reference crypto, network or\n"
-    "   process APIs; `decompile_function` those and `xrefs_to` their addresses.\n"
+    "3. Call `list_functions` and pick the functions that matter for the question\n"
+    "   (those referencing crypto, network or process APIs first);\n"
+    "   `decompile_function` those and `xrefs_to` their addresses.\n"
     "4. Summarise assembly patterns instead of dumping raw hex, and prefer one\n"
     "   summarising call over many narrow ones.\n"
 )
@@ -355,12 +359,25 @@ _PCAP_SUMMARY: dict[str, Any] = {
 _ANALYSIS_TOOLS: dict[str, dict[str, Any]] = {
     "apk_info": _file("format_info"),
     "archive_list": _file("archive_listing"),
-    "capa": _CAPABILITY_RULES,
+    # capa reads the file, its code and its structure without running it (with
+    # the pefile backend, file-scope features only).
+    "capa": {
+        **_CAPABILITY_RULES,
+        "shows": (
+            "the capabilities whose capa rules match features of the file, its code and its "
+            "structure"
+        ),
+        "does_not_show": "whether the matched code runs, or a capability no rule describes",
+    },
     "capabilities": _CAPABILITIES,
     "carve_payloads": _file("carve"),
     "decode_string_blobs": _DECODED_STRINGS,
     "document_info": _file("document_info"),
-    "elf_info": _file("format_info"),
+    # The PE and ELF parsers' import rows cover the late-bound imports: the PE
+    # delay-load table, and the one import table ELF keeps them in. The Mach-O
+    # parser does not declare it: its lazily bound imports are not shown to
+    # be in the rows it answers.
+    "elf_info": {**_file("format_info"), "reads_delay_imports": True},
     "find_crypto_constants": _file("crypto_constants"),
     "floss": _EMULATED_STRINGS,
     "function_index": {**_file("function_index", "function_table")},
@@ -369,7 +386,7 @@ _ANALYSIS_TOOLS: dict[str, dict[str, Any]] = {
     "iocs_from_file": _file("file_iocs"),
     "iocs_from_text": {"kind": "text_iocs", "arguments": {"text": "text"}},
     "macho_info": _file("format_info"),
-    "pe_info": _file("format_info", "pe_header"),
+    "pe_info": {**_file("format_info", "pe_header"), "reads_delay_imports": True},
     "put_sample": {"kind": "sample_delivery"},
     "put_sample_begin": {"kind": "sample_delivery"},
     "put_sample_chunk": {"kind": "sample_delivery"},
@@ -378,7 +395,15 @@ _ANALYSIS_TOOLS: dict[str, dict[str, Any]] = {
     "sigma_match": _event_rules("events"),
     "sigma_match_sandbox": _event_rules("report"),
     "signing_info": _file("signing"),
-    "strings": _STRINGS,
+    # Runs read as they sit in the file (``string_tools.strings``).
+    "strings": {
+        **_STRINGS,
+        "shows": "printable ASCII and UTF-16LE runs as they sit in the file, with their offsets",
+        "does_not_show": (
+            "strings that are encoded, encrypted, compressed or built at run time; nor runs "
+            "shorter than min_len, or past this page (read next_offset)"
+        ),
+    },
     "transform_bytes": _file("transform", "byte_transform"),
     "unpack_upx": _file("unpack", "unpacked_image"),
     "yara_scan": {**_SIGNATURE_RULES, "timeout_seconds": 60},
@@ -407,31 +432,54 @@ _NETWORK_TOOLS: dict[str, dict[str, Any]] = {
     "read_pcap_summary": {**_PCAP_SUMMARY, "kind": "packet_overview", "reader": "packet_lines"},
 }
 
-# The threat-intel sidecar answers in prose. The live sidecar writes
-# "42/71 malicious, 0/71 suspicious" (``services/threatintel-mcp/server.py``);
-# its mock writes "55/70 detections". Both are declared. Its rank puts it
-# after VirusTotal's own server, which the triage pack asks first when both
-# are enabled.
+# The threat-intel sidecar's hash lookup answers JSON
+# (``services/threatintel-mcp/server.py``): the engine counts under
+# ``last_analysis_stats``, the sidecar's own sentence under ``summary``, and the
+# service's text about the file (a submitted name, which the sample's author
+# chooses) under ``file``, where no count is read. The one text pattern reads
+# an answer the sidecar wrote in prose before it answered JSON, and only that
+# answer's fixed head and tail, anchored to both ends of the text: a name inside
+# such an answer is always followed by the tail, so it is never where a count
+# is read.
+# Without a key the sidecar answers nothing in the service's place. Its rank
+# puts it after VirusTotal's own server, which the triage pack asks first when
+# both are enabled.
 _THREATINTEL_TOOLS: dict[str, dict[str, Any]] = {
     "capabilities": _CAPABILITIES,
     "check_domain_reputation": {
         "kind": "indicator_reputation",
         "arguments": {"domain": "domain"},
+        "shows": "what VirusTotal reports of the domain: its engine counts and categories",
+        "does_not_show": "whether the sample contacts the domain, or what it would send there",
     },
     "check_hash": {
         "kind": "reputation",
         "arguments": {"hash": "file_hash"},
         "display_name": "Threat intelligence",
+        "shows": "what VirusTotal reports of the hash: its engine counts and details of the file",
+        "does_not_show": (
+            "this run's own analysis of the sample; an unknown hash or no detections is no "
+            "evidence that the file is clean"
+        ),
         "reputation": {
+            "stats": "/last_analysis_stats",
+            "malicious": "/last_analysis_stats/malicious",
+            "suspicious": "/last_analysis_stats/suspicious",
+            "summary": "/summary",
             "text_patterns": [
-                r"(?i)\b(?P<malicious>\d+)\s*/\s*(?P<total>\d+)\s+detections?\b",
-                r"(?i)\b(?P<malicious>\d+)\s*/\s*(?P<total>\d+)\s+malicious\b"
-                r"(?:,\s*(?P<suspicious>\d+)\s*/\s*\d+\s+suspicious\b)?",
+                r"(?s)\AHash [0-9A-Fa-f]+ \(.*\): (?:clean|suspicious|malicious) — "
+                r"(?P<malicious>\d+)/(?P<total>\d+) malicious, (?P<suspicious>\d+)/\d+ "
+                r"suspicious\.\s*\z",
             ],
             "rank": 20,
         },
     },
-    "check_ip_reputation": {"kind": "indicator_reputation", "arguments": {"ip": "ip_address"}},
+    "check_ip_reputation": {
+        "kind": "indicator_reputation",
+        "arguments": {"ip": "ip_address"},
+        "shows": "what VirusTotal and AbuseIPDB report of the address",
+        "does_not_show": "whether the sample contacts the address, or what it would send there",
+    },
     "get_threatintel_status": {"kind": "status"},
 }
 
@@ -472,6 +520,11 @@ _VIRUSTOTAL_TOOLS: dict[str, dict[str, Any]] = {
         "arguments": {"hash": "hash"},
         "reputation": _VT_REPUTATION,
         "display_name": "VirusTotal",
+        "shows": "what VirusTotal holds for the hash: its engines' detections and file details",
+        "does_not_show": (
+            "this run's own analysis of the sample; an unknown hash or no detections is no "
+            "evidence that the file is clean"
+        ),
     },
     "get_ip_report": {"kind": "indicator_report"},
     "get_submission": {"kind": "submission_status"},
@@ -507,6 +560,133 @@ _SANDBOX_TOOLS: dict[str, dict[str, Any]] = {
     "sandbox_items": {"kind": "sandbox_items", "reader": "report_items"},
 }
 
+# The identification servers: one analysis program each, in an image of its
+# own (``services/die-mcp``, ``services/ilspy-mcp``, ``services/goresym-mcp``),
+# shipped switched off. Each tool reads the file its path names, as the
+# sidecar's own answer shapes say; none runs the sample. Their kinds are read
+# by kind alone: no entry of theirs was stored before declarations were.
+_SAMPLE_PATH = {"path": "path"}
+_EXECUTABLE_FORMATS = ["pe", "elf", "mach-o"]
+_DIE_TOOLS: dict[str, dict[str, Any]] = {
+    "capabilities": _CAPABILITIES,
+    "die_scan": {
+        "kind": "identification",
+        "rows": "/detections/*",
+        "values": {
+            "name": "/name",
+            "type": "/type",
+            "version": "/version",
+            "file_type": "/file_type",
+        },
+        "arguments": _SAMPLE_PATH,
+        "display_name": "Detect It Easy",
+        "shows": (
+            "the packers, compilers, linkers, protectors, installers and libraries Detect It "
+            "Easy's signatures name in the file, with the format each was found in"
+        ),
+        "does_not_show": (
+            "what the code does, or a packer or compiler no signature describes; a name is a "
+            "signature match, not a proof"
+        ),
+    },
+}
+# The report sections a decompiled function's writer is shown (Ghidra's
+# ``decompile_function``), for a decompiled .NET type or member.
+_DECOMPILED_CODE_SECTIONS = list(GHIDRA_TOOLS["decompile_function"]["report_sections"])
+_ILSPY_DECOMPILE: dict[str, Any] = {
+    "kind": "decompile",
+    "arguments": _SAMPLE_PATH,
+    "routed_formats": ["pe"],
+    "report_sections": _DECOMPILED_CODE_SECTIONS,
+    "display_name": "ILSpy",
+    "shows": "C# (or IL) that ILSpy decompiled from the assembly's metadata and IL",
+    "does_not_show": (
+        "what runs at run time: code loaded, decrypted or emitted while the assembly runs, or "
+        "native code beside the IL"
+    ),
+}
+_ILSPY_TOOLS: dict[str, dict[str, Any]] = {
+    "capabilities": _CAPABILITIES,
+    "dotnet_types": {
+        "kind": "type_list",
+        "rows": "/types/*",
+        "values": {"name": "/name", "type_kind": "/type_kind"},
+        "arguments": _SAMPLE_PATH,
+        "routed_formats": ["pe"],
+        "display_name": "ILSpy",
+        "shows": "the classes, interfaces, structs, delegates and enums the assembly defines",
+        "does_not_show": "what any of them does, or types built or loaded at run time",
+    },
+    "dotnet_decompile_type": _ILSPY_DECOMPILE,
+    "dotnet_decompile_member": _ILSPY_DECOMPILE,
+    "dotnet_decompile_assembly": {
+        **_ILSPY_DECOMPILE,
+        "kind": "decompile_batch",
+        "long_running": True,
+        "aggregate_of": ["dotnet_decompile_type", "dotnet_decompile_member"],
+    },
+    "dotnet_resources": {
+        "kind": "resource_listing",
+        "rows": "/resources/*",
+        "values": {"name": "/name"},
+        "arguments": _SAMPLE_PATH,
+        "routed_formats": ["pe"],
+        "display_name": "ILSpy",
+        "shows": "the names of the resources embedded in the assembly",
+        "does_not_show": "what a resource holds",
+    },
+    "dotnet_metadata_table": {
+        "kind": "metadata_table",
+        "rows": "/rows/*",
+        "arguments": _SAMPLE_PATH,
+        "routed_formats": ["pe"],
+        "display_name": "ILSpy",
+        "shows": "every row of one ECMA-335 metadata table as the assembly holds it",
+        "does_not_show": "how the rows are used by the code",
+    },
+}
+_GORESYM_TOOLS: dict[str, dict[str, Any]] = {
+    "capabilities": _CAPABILITIES,
+    "go_symbols": {
+        "kind": "function_list",
+        "long_running": True,
+        "rows": "/functions/*",
+        "places": {"address": "/start"},
+        "values": {"name": "/name", "package": "/package"},
+        "arguments": _SAMPLE_PATH,
+        "routed_formats": _EXECUTABLE_FORMATS,
+        "display_name": "GoReSym",
+        "shows": (
+            "the Go version, build id and build info, and each function's name, package and "
+            "address range, read from the Go runtime's own tables in the file"
+        ),
+        "does_not_show": "what a function does, or code that is not Go",
+    },
+    "go_types": {
+        "kind": "type_list",
+        "long_running": True,
+        "rows": "/types/*",
+        "values": {"name": "/Str", "type_kind": "/Kind"},
+        "arguments": _SAMPLE_PATH,
+        "routed_formats": _EXECUTABLE_FORMATS,
+        "display_name": "GoReSym",
+        "shows": "the Go type structures and interfaces the binary's moduledata lists",
+        "does_not_show": "how the types are used, or types of a Go version it misreads",
+    },
+    "go_strings": {
+        "kind": "embedded_strings",
+        "long_running": True,
+        "holds_strings": True,
+        "rows": "/strings/*",
+        "values": {"text": "/Str"},
+        "arguments": _SAMPLE_PATH,
+        "routed_formats": _EXECUTABLE_FORMATS,
+        "display_name": "GoReSym",
+        "shows": "the strings the binary's Go string table holds, each cut where Go cuts it",
+        "does_not_show": "strings built, decoded or decrypted at run time",
+    },
+}
+
 # The triage pack's steps (``pipeline.triage_pack``), each recorded under the
 # pack's own source. The in-process implementations answer as the sidecar's
 # tools of the same name do, so they declare the same facts.
@@ -538,17 +718,34 @@ _PACK_TOOLS: dict[str, dict[str, Any]] = {
     "yara_scan": _SIGNATURE_RULES,
     "api_capability": _API_CATALOGUE,
     "lolbin_lookup": _COMMAND_MATCH,
+    "anti_analysis_scan": {
+        "kind": "anti_analysis_scan",
+        "report_sections": ["packing_obfuscation", "evasion_antiforensics"],
+    },
+    # The pack's scan step was recorded under this name (Ghidra's own tool's)
+    # before it was renamed (``pack_steps.LEGACY_STEP_NAMES``): a stored run's
+    # entries still read as the kind they were.
     "find_anti_analysis_techniques": {
         "kind": "anti_analysis_scan",
         "report_sections": ["packing_obfuscation", "evasion_antiforensics"],
     },
     "function_matches": {"kind": "function_matches"},
+    # Phrases of the directed-text families (``analysis.directed_text``): one
+    # row per family and normalised phrase, with where it first stands.
+    "find_directed_text": {
+        "kind": "directed_text",
+        "rows": "/groups/*",
+        "places": {"offset": "/first/offset", "place": "/first/place"},
+        "values": {"text": "/phrase", "family": "/family"},
+        "arguments": {"path": "path"},
+    },
     # The pack's own entry for a reputation lookup that did not happen
     # (``triage_pack.REPUTATION_STEP``), which ``run_state`` shows beside a lookup.
     "reputation": {"kind": "reputation_not_asked"},
     "pcap_summary": _PCAP_SUMMARY,
     "sandbox_status": {"kind": "sandbox_status"},
     "sandbox_sections": {"kind": "sandbox_sections"},
+    "behaviour_code_links": {"kind": "behaviour_code_links"},
     **{
         name: _SANDBOX_TOOLS[name]
         for name in (
@@ -569,6 +766,19 @@ _PACK_TOOLS: dict[str, dict[str, Any]] = {
 # and the two kinds the built-in lookups declared before it, which facts
 # records stored then still carry (``core.legacy_reputation``).
 REPUTATION_KINDS: tuple[str, ...] = (REPUTATION_KIND, *STORED_REPUTATION_KINDS)
+
+# The kinds that reach a service outside the deployment by what they mean,
+# each with what it reaches it for. A tool of one of these kinds asks that
+# service whatever server it is called through, so the run's disclosure block
+# (``analysis.disclosure``) never takes a call of it, or any call through a
+# local server that declares one, as staying on the machine.
+OUTWARD_KINDS: dict[str, str] = {
+    **{kind: "asks a reputation service about the sample" for kind in REPUTATION_KINDS},
+    "indicator_report": "asks a service for its report on an indicator",
+    "indicator_reputation": "asks a service for an indicator's reputation",
+    "submission": "hands a service something to analyse",
+    "submission_status": "asks a service how a submission is going",
+}
 
 # Each name table the core reads tools by, as the set of kinds that is exactly
 # that table over every built-in tool (``tests/unit/core/
@@ -655,6 +865,8 @@ CONSUMER_KINDS: dict[str, dict[str, Any]] = {
     "markdown._SANDBOX_TOOLS": {"same_as": "evidence_bundles.SANDBOX_TOOL_PREFIXES"},
     "triage_pack._REPUTATION_TOOLS": {"kinds": [*REPUTATION_KINDS, "reputation_not_asked"]},
     "triage_pack.RULE_TOOLS": {"kinds": ["capability_rules", "signature_rules"]},
+    # The answers whose texts the directed-text pass reads beside the file.
+    "triage_pack.directed_text_sources": {"kinds": ["emulated_strings", "decoded_strings"]},
     "run_state.reputation": {"kinds": [*REPUTATION_KINDS, "reputation_not_asked"]},
     "network_analyst._PCAP_TOOLS": {"kinds": ["packet_overview", "dns", "http"]},
     "function_map": {
@@ -695,6 +907,7 @@ BUILDER_OF_KIND: dict[str, str] = {
     "sandbox_report_section": "_sandbox_section",
     "sandbox_items": "_sandbox_items",
     "sandbox_status": "_sandbox_status",
+    "behaviour_code_links": "_behaviour_code",
     "pcap": "_pcap",
     **{kind: "_reputation" for kind in REPUTATION_KINDS},
 }
@@ -725,6 +938,174 @@ _VIRUSTOTAL_BOOTSTRAP: dict[str, Any] = {
     ),
 }
 
+# The tools of each shipped server that only read the staged file or the
+# platform's own reference tables: an identical call answers the same, so
+# each is declared ``read_only`` (``ToolFacts.read_only``). A tool that
+# writes, carves, unpacks, transforms, delivers, analyses or runs rules over
+# the sample, polls a status, or asks an outside service whose answer moves
+# (a reputation, a submission) is not, nor one in doubt. The triage pack's
+# own steps keep their facts as they were.
+ANALYSIS_READ_ONLY: frozenset[str] = frozenset(
+    {
+        "apk_info",
+        "archive_list",
+        "capabilities",
+        "document_info",
+        "elf_info",
+        "find_crypto_constants",
+        "hashes",
+        "identify_file",
+        "iocs_from_file",
+        "iocs_from_text",
+        "macho_info",
+        "pe_info",
+        "resolve_api_hashes",
+        "signing_info",
+        "strings",
+    }
+)
+KNOWLEDGE_READ_ONLY: frozenset[str] = frozenset(
+    {
+        "api_capability",
+        "attck_lookup",
+        "attck_validate",
+        "capabilities",
+        "family_lookup",
+        "lolbin_lookup",
+        "resolve_technique",
+    }
+)
+NETWORK_READ_ONLY: frozenset[str] = frozenset({"capabilities"})
+
+# The routed formats each of the analysis server's format-specific parsers
+# serves (``ToolFacts.routed_formats``), as the router names them
+# (``extractors.sample_identity.routed_formats``). A parser the sample's format
+# never calls on is not something a run loses: a missing Mach-O library on a PE
+# sample is no degradation of that run. The table the pipeline read before also
+# named ``macho``, ``doc``, ``docx``, ``xls``, ``xlsx`` and ``rtf``, which the
+# router never gives a sample (it says ``mach-o``, ``ole2``, ``ooxml``), so no
+# sample read them. The triage pack's own steps keep their facts as they were:
+# they run only for their own format.
+ANALYSIS_ROUTED_FORMATS: dict[str, tuple[str, ...]] = {
+    "pe_info": ("pe",),
+    "elf_info": ("elf",),
+    "macho_info": ("mach-o",),
+    "apk_info": ("apk", "dex"),
+    "document_info": ("ole2", "ooxml", "pdf"),
+}
+
+
+def _marked_read_only(
+    tools: dict[str, dict[str, Any]], names: frozenset[str]
+) -> dict[str, dict[str, Any]]:
+    missing = sorted(names - set(tools))
+    if missing:
+        raise KeyError(f"read-only marks for undeclared tools: {missing}")
+    return {
+        name: {**facts, "read_only": True} if name in names else facts
+        for name, facts in tools.items()
+    }
+
+
+def _serving_formats(
+    tools: dict[str, dict[str, Any]], formats: Mapping[str, tuple[str, ...]]
+) -> dict[str, dict[str, Any]]:
+    missing = sorted(set(formats) - set(tools))
+    if missing:
+        raise KeyError(f"routed formats for undeclared tools: {missing}")
+    return {
+        name: {**facts, "routed_formats": list(formats[name])} if name in formats else facts
+        for name, facts in tools.items()
+    }
+
+
+# What each built-in tool's call does beyond answering (``ToolFacts.effects``):
+# whether it runs the sample's code, reaches a network service beyond its own
+# server, and what of the sample it sends to a third party. A tool that sends
+# the sample's bytes out says so by ``discloses_sample``, which the effects read
+# as bytes sent (``analysis.tool_effects.sends_sample_bytes``). Every built-in
+# tool declares all three, held so by
+# ``tests/unit/analysis/test_each_tool_s_effects_are_declared_and_reported.py``;
+# only a tool that runs whatever script or command it is given declares none,
+# and says why (``why_undeclared``).
+_NO_EFFECT: dict[str, Any] = {"executes": "no", "network": False, "third_party": "no"}
+_EMULATES: dict[str, Any] = {**_NO_EFFECT, "executes": "emulation"}
+# Reaches the network only to fetch or refresh the reference data it keeps:
+# the ATT&CK bundle once it is stale (``memory.attck_loader``) and the
+# embedding model's weights on first use (``memory.embeddings``).
+_REFRESHES: dict[str, Any] = {**_NO_EFFECT, "network": "on_refresh"}
+# Reads the configured case-memory store, wherever the disclosure places it.
+_READS_THE_CASE_STORE: dict[str, Any] = {**_NO_EFFECT, "network": "case_store"}
+# What the sandbox service the CAPE sidecar fronts (its API, at the address the
+# operator configured) is asked: its status, a search by the sample's hash, a
+# task's status, report, IOCs or extracted configuration. Whether that service
+# is the operator's own is not shipped: the report derives it from where the
+# disclosure places the call (``analysis.tool_effects``), and says it cannot be
+# told where the disclosure cannot place it.
+_ASKS_THE_OPERATOR_SANDBOX: dict[str, Any] = {**_NO_EFFECT, "network": "operator_sandbox"}
+# Hands the sample to that sandbox service, which runs it; the bytes going
+# out are the tool's ``discloses_sample``.
+_SUBMITS_TO_THE_OPERATOR_SANDBOX: dict[str, Any] = {
+    "executes": "sandbox",
+    "network": "operator_sandbox",
+}
+# A tool that runs whatever script or command it is given: what it does is
+# what it is told, so none of its effects can be declared.
+# radare2's analysis: at level 2 and above r2mcp runs ``aaa`` (the provider's
+# own account of the levels, ``providers.static.r2``), whose type matching
+# (``aaft``) emulates each function with ESIL; the levels below do not.
+_ANALYSES: dict[str, Any] = {
+    **_NO_EFFECT,
+    "executes": "emulation",
+    "when": "at analysis level 2 and above, where radare2's aaa type matching (aaft) emulates "
+    "each function with ESIL",
+}
+_RUNS_ANYTHING: dict[str, Any] = {
+    "why_undeclared": "it runs whatever script or command it is given, so what it does is "
+    "whatever that does"
+}
+# Asks an outside service about an indicator (a domain, an address, a URL).
+_ASKS_ABOUT_AN_INDICATOR: dict[str, Any] = {"executes": "no", "network": True, "third_party": "no"}
+# Asks an outside service about the sample by its hash, or by the id of its
+# submission there.
+_ASKS_ABOUT_THE_SAMPLE: dict[str, Any] = {**_ASKS_ABOUT_AN_INDICATOR, "third_party": "hash"}
+# Hands the sample to a third party's sandboxes (VirusTotal's), which may run
+# it; the bytes going out are the tool's ``discloses_sample``.
+_SUBMITS_THE_SAMPLE: dict[str, Any] = {"executes": "sandbox", "network": True}
+
+
+def _with_effects(
+    tools: Mapping[str, Mapping[str, Any]],
+    effects: Mapping[str, Mapping[str, Any]],
+    *,
+    default: Mapping[str, Any] | None = None,
+) -> dict[str, dict[str, Any]]:
+    """``tools`` with each one's ``effects``: its own in ``effects``, else ``default``.
+
+    Every name in ``effects`` is one of ``tools``.
+    """
+    missing = sorted(set(effects) - set(tools))
+    if missing:
+        raise KeyError(f"effects for undeclared tools: {missing}")
+    out: dict[str, dict[str, Any]] = {}
+    for name, facts in tools.items():
+        held = effects.get(name, default)
+        out[name] = {**facts, "effects": dict(held)} if held is not None else dict(facts)
+    return out
+
+
+def _identification_block(role: str, tools: dict[str, dict[str, Any]]) -> dict[str, Any]:
+    """An identification server's declaration: its role, its mount and its tools, read-only."""
+    return {
+        "roles": [role],
+        "sample_mount": "/data/samples",
+        "reads_staged_sample": True,
+        "tool_facts": _with_effects(
+            _marked_read_only(tools, frozenset(tools)), {}, default=_NO_EFFECT
+        ),
+    }
+
+
 # Each built-in server's declaration. ``roles``: ``reputation`` on the two
 # servers that declare a reputation lookup. ``reads_staged_sample`` on the
 # three servers whose path-taking tools read the sample the platform staged
@@ -743,27 +1124,81 @@ _SERVER_BLOCKS: dict[str, dict[str, Any]] = {
         ],
         "reads_staged_sample": True,
         "platform_owned": True,
-        "tool_facts": _ANALYSIS_TOOLS,
+        "tool_facts": _with_effects(
+            _serving_formats(
+                _marked_read_only(_ANALYSIS_TOOLS, ANALYSIS_READ_ONLY), ANALYSIS_ROUTED_FORMATS
+            ),
+            {"floss": _EMULATES},
+            default=_NO_EFFECT,
+        ),
     },
     "knowledge": {
         "roles": ["reference"],
-        "required_env_allow": ["MALJAN_INDEX_RETRY_SECONDS"],
+        "required_env_allow": [
+            "MALJAN_INDEX_RETRY_SECONDS",
+            "MALJAN_ATTCK_REFRESH_DAYS",
+            "MALJAN_SAMPLE_SHA256",
+        ],
         "reads_staged_sample": True,
-        "tool_facts": _KNOWLEDGE_TOOLS,
+        "tool_facts": _with_effects(
+            _marked_read_only(_KNOWLEDGE_TOOLS, KNOWLEDGE_READ_ONLY),
+            dict.fromkeys(
+                (
+                    "attck_lookup",
+                    "attck_validate",
+                    "family_lookup",
+                    "resolve_technique",
+                    "similar_cases",
+                ),
+                _REFRESHES,
+            ),
+            default=_NO_EFFECT,
+        ),
     },
     "network": {
         "roles": ["capture"],
         "required_env_allow": ["MALJAN_STAGING_DIR", "MALJAN_SAMPLE_ROOTS"],
         "reads_staged_sample": True,
-        "tool_facts": _NETWORK_TOOLS,
+        "tool_facts": _with_effects(
+            _marked_read_only(_NETWORK_TOOLS, NETWORK_READ_ONLY), {}, default=_NO_EFFECT
+        ),
     },
-    "threatintel": {"roles": ["reputation"], "tool_facts": _THREATINTEL_TOOLS},
+    "threatintel": {
+        "roles": ["reputation"],
+        "tool_facts": _with_effects(
+            _THREATINTEL_TOOLS,
+            {
+                "check_domain_reputation": _ASKS_ABOUT_AN_INDICATOR,
+                "check_hash": _ASKS_ABOUT_THE_SAMPLE,
+                "check_ip_reputation": _ASKS_ABOUT_AN_INDICATOR,
+            },
+            default=_NO_EFFECT,
+        ),
+    },
     "virustotal": {
         "roles": ["reputation"],
         "reference_urls": ["https://www.virustotal.com/gui/file/{sha256}"],
-        "tool_facts": _VIRUSTOTAL_TOOLS,
+        "tool_facts": _with_effects(
+            _VIRUSTOTAL_TOOLS,
+            {
+                "get_analysis": _ASKS_ABOUT_THE_SAMPLE,
+                "get_domain_report": _ASKS_ABOUT_AN_INDICATOR,
+                "get_file_report": _ASKS_ABOUT_THE_SAMPLE,
+                "get_ip_report": _ASKS_ABOUT_AN_INDICATOR,
+                "get_submission": _ASKS_ABOUT_THE_SAMPLE,
+                "get_url_report": _ASKS_ABOUT_AN_INDICATOR,
+                "submit_file": _SUBMITS_THE_SAMPLE,
+                "submit_local_file": _SUBMITS_THE_SAMPLE,
+            },
+        ),
         "credential_bootstrap": _VIRUSTOTAL_BOOTSTRAP,
     },
+    # The identification servers: each reads the sample the worker mirrors
+    # under the samples directory its container mounts read-only at
+    # /data/samples (``docker/docker-compose.yml``), and none runs it.
+    "die": _identification_block("identifier", _DIE_TOOLS),
+    "ilspy": _identification_block("decompiler", _ILSPY_TOOLS),
+    "goresym": _identification_block("symbol_recovery", _GORESYM_TOOLS),
 }
 
 # The static providers' own blocks (``static.ghidra``, ``static.r2``) and the
@@ -772,7 +1207,7 @@ _SERVER_BLOCKS: dict[str, dict[str, Any]] = {
 # provider's ``mirror_spec`` reads; its ``sample_open`` is
 # ``config.GHIDRA_SAMPLE_OPEN``, set where it has always been set; its work
 # directory is the shared default (``providers.base.DEFAULT_WORK_DIR``) and
-# radare2's is its ``mirror_dir``'s own default; its non-secret variable, which
+# radare2's is ``r2-work``, which may not be hidden; its non-secret variable, which
 # texts written before the variable was retired still name, is kept whole by
 # the redaction of published text (``shipped_variable_names``). The
 # auto-name prefixes together are ``pipeline.validation._GENERIC_FUNCTION_NAME``'s.
@@ -784,7 +1219,16 @@ _PROVIDER_BLOCKS: dict[str, dict[str, Any]] = {
         "prompt_fragment": GHIDRA_WORKFLOW,
         "variable_names": ["GHIDRA_CONTAINER_SAMPLES_PATH"],
         "auto_name_prefixes": ["FUN_", "LAB_", "SUB_"],
-        "tool_facts": GHIDRA_TOOLS,
+        "tool_facts": _with_effects(
+            GHIDRA_TOOLS,
+            {
+                "emulate_function": _EMULATES,
+                "emulate_hash_batch": _EMULATES,
+                "run_ghidra_script": _RUNS_ANYTHING,
+                "run_script_inline": _RUNS_ANYTHING,
+            },
+            default=_NO_EFFECT,
+        ),
     },
     "r2": {
         "work_dir": "r2-work",
@@ -792,19 +1236,66 @@ _PROVIDER_BLOCKS: dict[str, dict[str, Any]] = {
         "prompt_fragment": R2_WORKFLOW,
         "error_patterns": list(R2_ERROR_PATTERNS),
         "auto_name_prefixes": ["fcn.", "loc.", "sub.", "func."],
-        "tool_facts": R2_TOOLS,
+        "tool_facts": _with_effects(
+            R2_TOOLS,
+            {"analyze": _ANALYSES, "run_command": _RUNS_ANYTHING},
+            default=_NO_EFFECT,
+        ),
     },
-    "cape2_mcp": {"roles": ["sandbox"], "prompt_fragment": CAPE_WORKFLOW},
+    # The workflow's ``submit_file`` sends the sample to the sandbox: declared
+    # so the run's disclosure block names the upload. It names no kind on
+    # purpose. The server answers a failure in one line of prose ("Error: CAPE
+    # API unreachable"), and such an answer is filed as a failure only for a
+    # tool that declares no kind (``schemas.evidence.build_entry``); a kind
+    # would file every failed submission as an answer. A declaration with no
+    # kind gives no reading, so it reads the name no other way than the
+    # VirusTotal server's ``submit_file``, which the legacy reading by name
+    # takes first. Each tool of its workflow declares its effects, and no kind,
+    # so every other reading of them is as it was.
+    "cape2_mcp": {
+        "roles": ["sandbox"],
+        "prompt_fragment": CAPE_WORKFLOW,
+        "tool_facts": _with_effects(
+            {
+                "get_cuckoo_status": {},
+                "get_task_config": {},
+                "get_task_iocs": {},
+                "get_task_report": {},
+                "get_task_status": {},
+                "search_task": {},
+                "submit_file": {"discloses_sample": True},
+            },
+            {"submit_file": _SUBMITS_TO_THE_OPERATOR_SANDBOX},
+            default=_ASKS_THE_OPERATOR_SANDBOX,
+        ),
+    },
 }
 
 # The platform's own in-process sources, declared like any server.
 _IN_PROCESS_BLOCKS: dict[str, dict[str, Any]] = {
-    "pack": {"label": "Triage pack", "platform_owned": True, "tool_facts": _PACK_TOOLS},
-    "sandbox": {"label": "Sandbox report", "roles": ["sandbox"], "tool_facts": _SANDBOX_TOOLS},
+    # The pack's FLOSS step emulates the sample's code in the worker; its
+    # function matches read the configured case store, which may be at an
+    # address.
+    "pack": {
+        "label": "Triage pack",
+        "platform_owned": True,
+        "tool_facts": _with_effects(
+            _PACK_TOOLS,
+            {"floss": _EMULATES, "function_matches": _READS_THE_CASE_STORE},
+            default=_NO_EFFECT,
+        ),
+    },
+    "sandbox": {
+        "label": "Sandbox report",
+        "roles": ["sandbox"],
+        "tool_facts": _with_effects(_SANDBOX_TOOLS, {}, default=_NO_EFFECT),
+    },
     "provider:capa_yara": {
         "label": "capa and YARA",
         "roles": ["rule_scanner"],
-        "tool_facts": {"capa": _CAPABILITY_RULES, "yara_scan": _SIGNATURE_RULES},
+        "tool_facts": _with_effects(
+            {"capa": _CAPABILITY_RULES, "yara_scan": _SIGNATURE_RULES}, {}, default=_NO_EFFECT
+        ),
     },
 }
 

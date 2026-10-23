@@ -155,11 +155,24 @@ class TestTheModelsLoad:
         assert ghidra.paths().count("/load_program") == 1
         assert said == [LOADED] * 5
 
-    def test_an_analysis_ghidra_did_not_confirm_is_not_noted(self) -> None:
+    def test_an_analysis_ghidra_did_not_confirm_stops_unremembered_and_is_not_noted(
+        self,
+    ) -> None:
+        """PS-M6: a refused analysis is the load failing, never its success."""
+        import pytest
+
+        from maljan.core.exceptions import SampleNotOpened
+
         ghidra = _Ghidra(run_analysis=json.dumps({"error": "Analysis failed: x"}))
         provider, load = _provider(ghidra)
-        _loads(load, 2)
+        for _ in range(2):
+            with pytest.raises(SampleNotOpened) as stopped:
+                _loads(load, 1)
+            said = str(stopped.value)
+            assert "refused to analyse it" in said and "Analysis failed: x" in said
+        # Each loop loads again: nothing about the file is remembered.
         assert ghidra.paths().count("/load_program") == 2
+        assert provider.sample_failure(HELD) is None
         assert provider.sample_notes.get(KEY, HELD) is None
 
     def test_a_switch_refused_after_the_load_stops_with_its_own_sentence_unremembered(

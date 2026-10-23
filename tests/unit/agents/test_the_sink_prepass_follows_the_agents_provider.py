@@ -24,6 +24,7 @@ from maljan.agents.composition import ResolvedAgent
 from maljan.agents.configurable_analyst import ConfigurableAnalyst
 from maljan.agents.prompt_fragments import PROVIDER_FAMILY, stamp_source
 from maljan.agents.static_analyst import StaticAnalyst
+from maljan.core.config import GHIDRA_SAMPLE_OPEN
 
 
 class _Resp:
@@ -78,7 +79,9 @@ def _settings(global_provider: str) -> Any:
         transport = "http"
         url = "http://ghidra.invalid"
         auth_token = SecretStr("")
-        sample_open = None
+        # Declared, as Ghidra ships: on a Ghidra other jobs share (http), the
+        # graph is read only for the program the job opened.
+        sample_open = GHIDRA_SAMPLE_OPEN
 
     class _P:
         use_sink_reachability = True
@@ -129,7 +132,7 @@ class TestTheStaticRole:
         assert client.paths[0] == "load_program", client.paths
         assert client.paths[-1] == "get_full_call_graph", client.paths
         # The whole graph in the server's edge text: no limit (0), no pages.
-        assert client.params == [{"format": "edges", "limit": 0}]
+        assert client.params == [{"format": "edges", "limit": 0, "program": "x.exe"}]
 
     def test_an_analyst_on_r2_never_calls_ghidra(self, client: _Client) -> None:
         assert _static_analyst(_shipped("r2"))._compute_sink_priority_hint("/s/x.exe") == ""

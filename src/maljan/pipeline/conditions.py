@@ -28,11 +28,15 @@ from dataclasses import dataclass, field, replace
 from typing import Any
 
 __all__ = [
+    "HELD_SCHEDULES",
+    "PACK_LEFT_OUT",
     "ConditionError",
     "StageContext",
     "StageResult",
     "TriageFacts",
     "constant_truth",
+    "pack_state",
+    "pack_state_keys",
     "rule_match_hits",
     "evaluate",
     "stage_references",
@@ -159,6 +163,68 @@ class TriageFacts:
     def with_hits(self, counted: Mapping[str, int], total: int) -> TriageFacts:
         """These facts with ``hits`` and ``rule_hits`` as counted over a ledger."""
         return replace(self, hits=dict(counted), rule_hits=int(total))
+
+
+# Where the pack's state holds the record of the pass entries the pack neither
+# shows nor counts (``pipeline.nodes._pack_left_out``), and where it holds the
+# schedules of steps named as one of its own keys (:func:`pack_state`). The
+# second starts with an underscore, which no step id may, so no step's
+# schedule can land on it.
+PACK_LEFT_OUT = "pack_left_out"
+HELD_SCHEDULES = "_held_schedules"
+
+
+def _own_keys(state: Mapping[str, Any]) -> frozenset[str]:
+    """The keys of the pack's state no schedule may take: its facts and counts, its
+    left-out record and the place schedules are held apart in."""
+    return frozenset(state) | {PACK_LEFT_OUT, HELD_SCHEDULES}
+
+
+def pack_state(
+    facts: TriageFacts,
+    *,
+    entries: int,
+    failed: int,
+    duration_ms: int,
+    degradation_reasons: list[str],
+    schedules: Mapping[str, str],
+) -> dict[str, Any]:
+    """The triage pack's state channel value: its facts and counts, then each schedule.
+
+    ``pipeline.triage_pack.PackResult.to_state`` writes it. A schedule says
+    how a step that may run beside the pack ran and sits under the step's id,
+    after every other key. A step named as one of the state's own keys
+    (:func:`pack_state_keys`) runs as any other, and its schedule is held apart
+    under :data:`HELD_SCHEDULES`, so no schedule replaces a fact, a count or
+    the left-out record. Without such a step the value is what it always was.
+    """
+    state: dict[str, Any] = {
+        **facts.to_dict(),
+        "entries": entries,
+        "failed": failed,
+        "duration_ms": duration_ms,
+        "degradation_reasons": degradation_reasons,
+    }
+    own = _own_keys(state)
+    state.update((step, said) for step, said in schedules.items() if step not in own)
+    held = {step: said for step, said in schedules.items() if step in own}
+    if held:
+        state[HELD_SCHEDULES] = held
+    return state
+
+
+def pack_state_keys() -> frozenset[str]:
+    """The keys the pack's state holds of its own: a step so named has its schedule held apart."""
+    return _own_keys(
+        pack_state(
+            TriageFacts(),
+            entries=0,
+            failed=0,
+            duration_ms=0,
+            degradation_reasons=[],
+            schedules={},
+        )
+    )
 
 
 def rule_match_hits(rows: Any) -> tuple[dict[str, int], int]:

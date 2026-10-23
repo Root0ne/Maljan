@@ -10,7 +10,7 @@ from typing import Any
 import redis.asyncio as aioredis
 from arq import ArqRedis
 from arq.jobs import Job as ArqJob
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -22,6 +22,9 @@ from app.models.sample import Sample
 from app.models.user import User
 
 logger = get_logger("service.analysis")
+
+# The statuses an operator's cancel may still change.
+_CANCELLABLE: tuple[str, ...] = ("pending", "running")
 
 # How many completed runs the dashboard's "Tools used" list reads by default,
 # and the most a caller may ask it to read.
@@ -70,15 +73,40 @@ class AnalysisService:
             ValueError: If the sample doesn't exist.
         """
         # Verify sample exists AND belongs to the requesting user (IDOR guard).
+        # Lock order, on every path: the sample row, then its sandbox report.
+        # A sample delete removes the sample and cascades to the report, so a
+        # create that took the report first and the sample second could
+        # deadlock against it. FOR SHARE keeps concurrent creates for one
+        # sample parallel and blocks only the delete.
         result = await self.db.execute(
-            select(Sample).where(
+            select(Sample)
+            .where(
                 Sample.id == sample_id,
                 Sample.uploaded_by == user.id,
             )
+            .with_for_update(read=True)
         )
         sample = result.scalar_one_or_none()
         if not sample:
             raise ValueError(f"Sample {sample_id} not found or access denied")
+
+        # A job that names a sandbox report takes the row's lock first, the
+        # lock a delete of that report holds, so the report cannot be removed
+        # between this check and the job row that names it.
+        report_id = (config or {}).get("sandbox_report_id")
+        if report_id:
+            from app.models.sandbox_report import SandboxReportRow
+
+            locked = await self.db.execute(
+                select(SandboxReportRow.id)
+                .where(
+                    SandboxReportRow.id == uuid.UUID(str(report_id)),
+                    SandboxReportRow.sample_id == sample_id,
+                )
+                .with_for_update()
+            )
+            if locked.scalar_one_or_none() is None:
+                raise ValueError("Sandbox report not found for this sample")
 
         # Create job record
         job = AnalysisJob(
@@ -115,7 +143,9 @@ class AnalysisService:
             await _enqueue_analysis(arq, job.id)
         except Exception as exc:
             job.status = "failed"
-            job.error_message = f"Failed to enqueue job: {exc}"
+            # The class, not the text: the message is served back to the owner,
+            # and a Redis error quotes the address it dialled.
+            job.error_message = f"Failed to enqueue job: {type(exc).__name__}"
             job.completed_at = datetime.now(UTC)
             await self.db.commit()
             raise JobEnqueueError(str(exc)) from exc
@@ -194,12 +224,34 @@ class AnalysisService:
         if not job:
             raise ValueError(f"Job {job_id} not found")
 
-        if job.status not in ("pending", "running"):
+        if job.status not in _CANCELLABLE:
             raise RuntimeError(f"Cannot cancel job with status '{job.status}'")
 
+        # Guarded in the statement, not on the row read above: the worker may
+        # complete the job between that read and this write, and a cancel
+        # written over ``completed`` would hide a finished report. The worker
+        # holds the row while it stores its report, so this waits for that
+        # commit and then matches nothing.
+        cancelled_at = datetime.now(UTC)
+        result = await self.db.execute(
+            update(AnalysisJob)
+            .where(AnalysisJob.id == job_id, AnalysisJob.status.in_(_CANCELLABLE))
+            .values(status="cancelled", completed_at=cancelled_at)
+            .execution_options(synchronize_session=False)
+        )
+        count = getattr(result, "rowcount", None)
+        if isinstance(count, int) and count == 0:
+            await self.db.refresh(job)
+            raise RuntimeError(
+                f"Cannot cancel job with status '{job.status}': it moved on before the "
+                "cancel landed"
+            )
         job.status = "cancelled"
-        job.completed_at = datetime.now(UTC)
-        await self.db.flush()
+        job.completed_at = cancelled_at
+        # Committed here, before any Redis call: the UPDATE holds the row lock
+        # until the transaction ends, and the Redis writes below have no bound
+        # on how long they take. A worker storing its report waits on this row.
+        await self.db.commit()
 
         # This used to ONLY publish to PubSub, which had
         # two consequences:
@@ -215,6 +267,8 @@ class AnalysisService:
             redis_conn = aioredis.from_url(settings.redis_url)
             import json
 
+            from app.services.job_events import STREAM_TTL_SECONDS, stream_key
+
             message = json.dumps(
                 {"type": "cancelled", "data": {}, "ts": datetime.now(UTC).isoformat()}
             )
@@ -227,15 +281,23 @@ class AnalysisService:
             # ``_abort_queued_analysis`` for the live evidence.
             await _abort_queued_analysis(redis_conn, job_id)
             await redis_conn.publish(f"analysis:{job_id}", message)
-            await redis_conn.xadd(
-                f"analysis:{job_id}:events",
-                {"payload": message},
-                maxlen=1000,
-                approximate=True,
-            )
+            # The event and the stream's lifetime, as the worker's publisher
+            # gives it, in one transaction (MULTI/EXEC). For a job cancelled
+            # before it started this write is the stream's only one, and a key
+            # written without its expiry would never be removed.
+            async with redis_conn.pipeline(transaction=True) as pipe:
+                pipe.xadd(stream_key(job_id), {"payload": message}, maxlen=1000, approximate=True)
+                pipe.expire(stream_key(job_id), STREAM_TTL_SECONDS)
+                await pipe.execute()
             await redis_conn.aclose()
-        except Exception:
-            pass  # Non-critical: client will see status change on next poll
+        except Exception as exc:  # noqa: BLE001 — the row is cancelled; Redis is best-effort
+            # A client sees the status change on its next poll either way.
+            logger.warning(
+                "Cancel of job %s: Redis was not fully written (%s); a client sees the "
+                "status on its next poll.",
+                log_safe(job_id),
+                type(exc).__name__,
+            )
 
         return job
 

@@ -36,6 +36,7 @@ from maljan.core.settings_overrides import redact_url
 
 from app.config import settings
 from app.logging_config import get_logger
+from app.logsafe import log_safe
 from app.models.report import AnalysisReport
 from app.runtime_config import runtime_config
 from app.worker.queues import ANALYSIS_QUEUE, ENRICHMENT_QUEUE, build_redis_settings
@@ -219,13 +220,37 @@ async def enqueue_enrichment(pool: Any, report_id: Any) -> str | None:
     # triggers for one report — and which would also refuse to re-queue a
     # report after the setting flipped, leaving it waiting on the queue it was
     # first put in. One id per queue keeps the coalescing and drops that.
+    job_id = f"enrich:{queue}:{report_id}"
+    await _forget_finished_enrichment(pool, job_id)
     job = await pool.enqueue_job(
         "enrich_threat_intel",
         str(report_id),
-        _job_id=f"enrich:{queue}:{report_id}",
+        _job_id=job_id,
         _queue_name=queue,
     )
     return str(job.job_id) if job is not None else None
+
+
+async def _forget_finished_enrichment(pool: Any, job_id: str) -> None:
+    """Drop the kept result of a finished enrichment under ``job_id``. Never raises.
+
+    arq refuses an id while its job key *or* its result key exists, and keeps
+    a result for an hour after the job ends. The job key is what makes a
+    second trigger coalesce with a queued or running enrichment, and it stays;
+    the result only says an earlier one finished, and refusing on it answered
+    "already queued" for an hour to an operator who asked for a fresh one
+    while nothing was queued at all. Nothing reads the result.
+    """
+    try:
+        from arq.constants import result_key_prefix
+
+        await pool.delete(result_key_prefix + job_id)
+    except Exception as exc:  # noqa: BLE001 — the enqueue says what Redis is doing
+        logger.debug(
+            "enrich: the kept result of %s was not dropped (%s).",
+            log_safe(job_id),
+            type(exc).__name__,
+        )
 
 
 # Process-wide singleton cache for the configured LTM store. Two flags so we
@@ -250,8 +275,18 @@ async def _get_memory_store() -> MemoryStore | None:
         return _memory_store
 
     try:
+        from maljan.core.plugins import ALLOW_LIST_KEY, load_allowed, registry_changes
         from maljan.memory.store_factory import build_memory_store, configured_backend
 
+        from app.services.settings_service import core_settings_cache
+
+        # An allowed memory plugin is loaded before the settings are read,
+        # off the event loop, so its own block is read with its model.
+        before = registry_changes()
+        allowed = await runtime_config.stored_value(ALLOW_LIST_KEY)
+        await asyncio.to_thread(load_allowed, allowed, ("memory",))
+        if registry_changes() != before:
+            core_settings_cache.invalidate()
         core = await runtime_config.core()
         _memory_store = build_memory_store(core)
         logger.info(
@@ -267,6 +302,20 @@ async def _get_memory_store() -> MemoryStore | None:
         _memory_store = None
     _memory_store_built = True
     return _memory_store
+
+
+async def _job_owner(db: Any, job_id: Any) -> str | None:
+    """Who queued the analysis job, as its long-term memory is filed; ``None`` when unread."""
+    try:
+        from sqlalchemy import select
+
+        from app.models.job import AnalysisJob
+
+        owner = await db.scalar(select(AnalysisJob.created_by).where(AnalysisJob.id == job_id))
+    except Exception as exc:  # noqa: BLE001 — no owner, no memory
+        logger.warning("enrich: the job's owner could not be read (%s).", type(exc).__name__)
+        return None
+    return str(owner) if isinstance(owner, (uuid.UUID, str)) and str(owner) else None
 
 
 async def enrich_threat_intel(
@@ -319,6 +368,7 @@ async def enrich_threat_intel(
             return {"status": "skipped"}
         payload = dict(report.malware_report)
         parent_job_id = str(report.job_id)
+        memory_owner = await _job_owner(db, report.job_id)
         await db.commit()
 
     # Lazy import keeps the API/worker startup graph free of optional
@@ -347,8 +397,44 @@ async def enrich_threat_intel(
     before_domain_reps = _count_reputations(payload, "domains")
     before_ip_reps = _count_reputations(payload, "ips")
 
-    memory_store = await _get_memory_store()
+    # Similar past cases are the job owner's alone; a job whose owner cannot
+    # be read gets none rather than the unscoped pool.
+    memory_store = await _get_memory_store() if memory_owner is not None else None
+    # Every question the enrichment sends, for the run's disclosure block:
+    # counted as attempted before it goes out, and before the first one the
+    # stored record is marked, so a job that dies after it never leaves
+    # "nothing" standing.
+    from maljan.analysis.disclosure import (
+        ENRICHMENT_DONE,
+        ENRICHMENT_STOPPED,
+        EnrichmentAsks,
+        with_enrichment_started,
+    )
 
+    asks = EnrichmentAsks()
+    marked: list[bool] = []
+
+    async def _asking(source: str, host: str, kind: str, server: str) -> Any:
+        settle = asks(source, host, kind, server)
+        if not marked:
+            marked.append(True)
+            try:
+                await write_under_lock(
+                    db_session_factory,
+                    report_uuid,
+                    lambda stored, column: disclosed(stored, column, with_enrichment_started),
+                    kind="enrichment_started",
+                )
+            except Exception as exc:  # noqa: BLE001 — the final write records it again
+                logger.warning("enrich: the disclosure could not be marked (%s).", exc)
+        return settle
+
+    def _servers() -> Any:
+        # A question through a server is placed by that server's block, the
+        # one the caller attached it with.
+        return tools.servers() if tools is not None else None
+
+    state = ENRICHMENT_STOPPED
     try:
         updated = await enrich_malware_report(
             payload,
@@ -357,27 +443,47 @@ async def enrich_threat_intel(
             tool_caller=tools,
             tool_arguments=tools.arguments if tools is not None else None,
             memory_store=memory_store,
+            on_ask=_asking,
+            memory_owner=memory_owner,
         )
+        state = ENRICHMENT_DONE
     except Exception as exc:  # noqa: BLE001
         logger.error("enrich: orchestrator failed (%s)", exc, exc_info=True)
         return {"status": "error", "error": str(exc)[:200]}
     finally:
         if tools is not None:
             await tools.aclose()
+        if state == ENRICHMENT_STOPPED and asks.asked_any:
+            # Failed, timed out or cancelled after it began asking: what it
+            # asked until then is recorded, each question not finished marked.
+            stopped = asks.rows(_servers())
+            withheld = tools.withheld_rows() if tools is not None else []
+            try:
+                await write_under_lock(
+                    db_session_factory,
+                    report_uuid,
+                    lambda stored, column: disclosed_enrichment(
+                        stored, column, stopped, state=ENRICHMENT_STOPPED, withheld=withheld
+                    ),
+                    kind="enrichment_stopped",
+                )
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("enrich: what the stopped job asked was not recorded (%s).", exc)
 
-    async with db_session_factory() as db:
-        report = await db.get(AnalysisReport, report_uuid)
-        if report is None:
-            # Superseded by a re-run while the lookups were in flight. The
-            # enrichment belongs to a report that no longer exists.
-            logger.warning("enrich: report %s went away during enrichment", report_id)
-            return {"status": "not_found"}
-        report.malware_report = updated
-        # SQLAlchemy needs an explicit flag for in-place JSONB mutation.
-        from sqlalchemy.orm.attributes import flag_modified
-
-        flag_modified(report, "malware_report")
-        await db.commit()
+    asked = asks.rows(_servers())
+    withheld = tools.withheld_rows() if tools is not None else []
+    written = await write_under_lock(
+        db_session_factory,
+        report_uuid,
+        lambda stored, column: disclosed_enrichment(
+            enrichment_laid_over(stored, updated), column, asked, withheld=withheld
+        ),
+    )
+    if not written:
+        # Superseded by a re-run while the lookups were in flight. The
+        # enrichment belongs to a report that no longer exists.
+        logger.warning("enrich: report %s went away during enrichment", report_id)
+        return {"status": "not_found"}
 
     after_domain_reps = _count_reputations(updated, "domains")
     after_ip_reps = _count_reputations(updated, "ips")
@@ -441,6 +547,232 @@ async def enrich_threat_intel(
     return {"status": "ok", **delta}
 
 
+async def write_under_lock(
+    db_session_factory: Any,
+    report_uuid: uuid.UUID,
+    change: Any,
+    *,
+    kind: str = "enrichment",
+) -> bool:
+    """Re-read the report row under a row lock, apply ``change``, write it. ``False`` if gone.
+
+    ``change(stored_payload, run_summary)`` answers the payload and the run
+    summary to write (``None`` leaves the summary as it is). Read and written
+    in one transaction holding the row, so two enrichments of one report merge
+    instead of the later one writing over the earlier one's record.
+
+    A report whose ledger is sealed is never rewritten in silence: a change to
+    its documents is recorded as an amendment (``ledger_chain.amend``) chained
+    onto the seal or the last amendment, in the payload and the run summary,
+    and as a chained ``report.amend`` audit row in this transaction. ``kind``
+    names what changed it. The ledger rows are not touched. A report stored
+    before sealing existed is written as before.
+    """
+    from datetime import UTC, datetime
+
+    from sqlalchemy.orm.attributes import flag_modified
+
+    from app.services import audit_chain, ledger_chain
+
+    async with db_session_factory() as db:
+        report = await db.get(
+            AnalysisReport, report_uuid, with_for_update=True, populate_existing=True
+        )
+        if report is None:
+            return False
+        stored = dict(report.malware_report) if isinstance(report.malware_report, dict) else {}
+        payload, column = change(stored, report.run_summary)
+        seal_record = getattr(report, "ledger_seal", None)
+        key, no_key = (
+            ledger_chain.platform_key_status() if isinstance(seal_record, dict) else (None, None)
+        )
+        record = None
+        if key is not None:
+            payload, column, record = ledger_chain.amend(
+                report,
+                payload,
+                column,
+                seal_record=seal_record,
+                kind=kind,
+                key=key,
+                at=datetime.now(UTC),
+            )
+        elif no_key is not None:
+            # Nothing can be chained without the key: the change is written,
+            # and a verification of this report says it changed after the seal.
+            logger.warning(
+                "enrich: report %s is sealed but changed without an amendment: %s.",
+                report_uuid,
+                no_key,
+            )
+        report.malware_report = payload
+        # SQLAlchemy needs an explicit flag for in-place JSONB mutation.
+        flag_modified(report, "malware_report")
+        if column is not None:
+            report.run_summary = column
+            flag_modified(report, "run_summary")
+        if record is not None and key is not None:
+            await db.flush()
+            await audit_chain.append(
+                db,
+                action=audit_chain.REPORT_AMEND,
+                resource_type="job",
+                resource_id=str(report.job_id),
+                details={"report_id": str(report_uuid), "amendment": record},
+                key=key,
+            )
+        await db.commit()
+    return True
+
+
+# What an enrichment writes into an indicator row of the report's network section.
+_ENRICHED_FIELDS = ("reputation", "asn", "geo")
+_NETWORK_KEYS = {"domains": "fqdn", "ips": "address"}
+
+
+def enrichment_laid_over(stored: dict[str, Any], enriched: dict[str, Any]) -> dict[str, Any]:
+    """The stored payload, as re-read under the row lock, with this enrichment's results on it.
+
+    ``enriched`` is the copy this job read before its lookups, with what they
+    found. Only what an enrichment writes is taken from it, row by row
+    (reputation, ASN, geography, the suspicion flag it raises, and the similar
+    samples), and only where the stored row has none by the orchestrator's own
+    test (a reputation without a successful record, as an older report's
+    sandbox-context shell, takes the live one, as dev stores it), so anything
+    written to the report during the lookups, another enrichment's results
+    included, is kept.
+    """
+    from maljan.enrichment.orchestrator import _has_successful_rep
+
+    out = dict(stored)
+    network = dict(out.get("network") or {})
+    found = enriched.get("network") or {}
+    for section, field_name in _NETWORK_KEYS.items():
+        theirs = {
+            str(row.get(field_name)): row
+            for row in found.get(section) or []
+            if isinstance(row, dict) and row.get(field_name)
+        }
+        rows = []
+        for row in network.get(section) or []:
+            if not isinstance(row, dict):
+                rows.append(row)
+                continue
+            mine = dict(row)
+            other = theirs.get(str(row.get(field_name)))
+            if other is not None:
+                # The orchestrator's own tests of what is already done: a
+                # reputation counts only as a successful record (an earlier
+                # shell holding sandbox context does not), and the ASN and
+                # the geography count when they hold a value.
+                if not _has_successful_rep(mine) and _has_successful_rep(other):
+                    mine["reputation"] = other["reputation"]
+                for name in _ENRICHED_FIELDS:
+                    if name != "reputation" and not mine.get(name) and other.get(name):
+                        mine[name] = other[name]
+                if other.get("is_suspicious"):
+                    mine["is_suspicious"] = True
+            rows.append(mine)
+        if section in network:
+            network[section] = rows
+    if network:
+        out["network"] = network
+    # What the cap left unasked is the last enrichment's statement: its rows
+    # replace an earlier one, and none left removes it.
+    # Each row's questions are read again against the laid-over stored row, by
+    # the same tests the orchestrator makes (a successful reputation, an ASN, a
+    # geography): a question the stored row already holds an answer to is not
+    # one that went unasked, and a row left with none is dropped.
+    stated = _questions_still_unasked(enriched.get("enrichment_not_asked"), network)
+    if stated:
+        out["enrichment_not_asked"] = stated
+    else:
+        out.pop("enrichment_not_asked", None)
+    attribution = dict(out.get("attribution") or {})
+    similar = (enriched.get("attribution") or {}).get("similar_samples")
+    if similar and not attribution.get("similar_samples"):
+        attribution["similar_samples"] = similar
+        out["attribution"] = attribution
+    return out
+
+
+_NOT_ASKED_SECTIONS = {"domain": "domains", "ip": "ips"}
+
+
+def _questions_still_unasked(rows: Any, network: dict[str, Any]) -> list[dict[str, Any]]:
+    """The not-asked rows, each with the questions its laid-over stored row still lacks."""
+    from maljan.enrichment.orchestrator import _has_successful_rep
+
+    if not isinstance(rows, list):
+        return []
+    stored: dict[tuple[str, str], dict[str, Any]] = {}
+    for kind, section in _NOT_ASKED_SECTIONS.items():
+        for row in network.get(section) or []:
+            if isinstance(row, dict) and row.get(_NETWORK_KEYS[section]):
+                stored[(kind, str(row[_NETWORK_KEYS[section]]))] = row
+    kept: list[dict[str, Any]] = []
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        mine = stored.get((str(row.get("kind")), str(row.get("value"))))
+        questions = [str(q) for q in row.get("questions") or []]
+        if mine is not None:
+            questions = [
+                q
+                for q in questions
+                if not (
+                    (q == "reputation" and _has_successful_rep(mine))
+                    or (q in ("asn", "geo") and mine.get(q))
+                )
+            ]
+        if questions:
+            kept.append({**row, "questions": questions})
+    return kept
+
+
+def disclosed(
+    payload: dict[str, Any], run_summary: Any, change: Any
+) -> tuple[dict[str, Any], dict[str, Any] | None]:
+    """The stored payload and run summary with ``change`` applied to their disclosure records.
+
+    Both carry the run's disclosure record (``analysis.disclosure``). A summary
+    without a record (a run stored before the block existed) is left as it is,
+    answered as ``None``; so is a payload without one.
+    """
+    from maljan.analysis.disclosure import in_payload
+
+    updated = in_payload(payload, change)
+    column = dict(run_summary) if isinstance(run_summary, dict) else None
+    record = column.get("disclosure") if column is not None else None
+    if column is None or not isinstance(record, dict) or "models" not in record:
+        return updated, None
+    column["disclosure"] = change(record)
+    return updated, column
+
+
+def disclosed_enrichment(
+    payload: dict[str, Any],
+    run_summary: Any,
+    asked: list[dict[str, Any]],
+    *,
+    state: str = "done",
+    withheld: list[dict[str, str]] | None = None,
+) -> tuple[dict[str, Any], dict[str, Any] | None]:
+    """The stored payload and run summary with the enrichment's questions in their disclosure.
+
+    Each gets the rows of what was asked, and of the source tools their host
+    withheld (never asked, with the reason), and neither then says that
+    nothing left the machine (:func:`disclosed`).
+    """
+    from maljan.analysis.disclosure import with_enrichment_asked
+
+    return disclosed(
+        payload,
+        run_summary,
+        lambda record: with_enrichment_asked(record, asked, state=state, withheld=withheld or ()),
+    )
+
+
 def _count_reputations(malware_report: dict[str, Any], key: str) -> int:
     network = malware_report.get("network") or {}
     rows = network.get(key) or []
@@ -450,6 +782,11 @@ def _count_reputations(malware_report: dict[str, Any], key: str) -> int:
 def _count_similar_samples(malware_report: dict[str, Any]) -> int:
     attribution = malware_report.get("attribution") or {}
     return len(attribution.get("similar_samples") or [])
+
+
+# The retentions this process found reaching past the earliest date there is,
+# each said once (``purge_old_job_events``).
+_RETENTIONS_PAST_THE_EARLIEST_DATE: set[int] = set()
 
 
 async def purge_old_job_events(ctx: dict) -> dict[str, Any]:
@@ -463,22 +800,47 @@ async def purge_old_job_events(ctx: dict) -> dict[str, Any]:
 
     Scheduled beside the enrichment task rather than as a worker of its own
     because it is one statement a night against the same database this process
-    already holds a session factory for.
+    already holds a session factory for. The analysis worker runs it nightly
+    and once as it starts (``analysis_worker.startup``): the nightly run fires
+    only in a process alive at that minute, and arq does not run a window it
+    missed while no worker was up.
+
+    The retention is the stored setting or nothing. A read that fails, or a
+    stored value the model refuses, skips the sweep rather than deleting by
+    the shipped default in place of the operator's value, which the shared
+    settings reader (``runtime_config.core``) would hand back on a failed read.
     """
     from datetime import UTC, datetime, timedelta
 
     from sqlalchemy import delete, or_
 
     from app.models.job_event import JobEvent
+    from app.services.settings_service import core_settings_cache
 
     db_session_factory = ctx["db_session"]
     try:
-        days = int((await runtime_config.core()).events.retention_days)
-    except Exception as exc:  # noqa: BLE001 — an unreadable setting skips the sweep
-        logger.warning("events sweep: retention not readable (%s); skipping.", exc)
+        async with db_session_factory() as db:
+            days = int((await core_settings_cache.get(db)).events.retention_days)
+    except Exception as exc:  # noqa: BLE001 — unreadable settings skip the sweep
+        logger.warning(
+            "events sweep: the stored settings were not read (%s); skipping.", type(exc).__name__
+        )
         return {"status": "skipped"}
 
-    cutoff = datetime.now(UTC) - timedelta(days=max(1, days))
+    try:
+        cutoff = datetime.now(UTC) - timedelta(days=max(1, days))
+    except OverflowError:
+        # A retention that reaches past the earliest date there is keeps every
+        # row: nothing is old enough to remove. Said once per value a process
+        # meets, not at every sweep.
+        if days not in _RETENTIONS_PAST_THE_EARLIEST_DATE:
+            _RETENTIONS_PAST_THE_EARLIEST_DATE.add(days)
+            logger.info(
+                "events sweep: a retention of %d day(s) reaches past the earliest date there "
+                "is; no row is old enough to remove.",
+                days,
+            )
+        return {"status": "ok", "removed": 0, "retention_days": days}
     try:
         async with db_session_factory() as db:
             result = await db.execute(
@@ -546,6 +908,11 @@ async def enrich_shutdown(ctx: dict) -> None:
     redis_conn: aioredis.Redis | None = ctx.get("redis")
     if redis_conn:
         await redis_conn.aclose()
+
+    # An amendment's anchor write finishes, bounded, before its engine goes.
+    from app.services import audit_anchor
+
+    await audit_anchor.drain()
 
     db_session = ctx.get("db_session")
     if db_session:

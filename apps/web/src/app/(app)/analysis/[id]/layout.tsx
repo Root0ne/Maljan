@@ -7,6 +7,7 @@ import {
   Activity,
   Anchor,
   Binary,
+  Bot,
   CircleAlert,
   CircleCheck,
   CircleHelp,
@@ -18,6 +19,7 @@ import {
   LayoutGrid,
   MessagesSquare,
   ScrollText,
+  Server,
   Shield,
   ShieldCheck,
   Tags,
@@ -43,7 +45,13 @@ import {
   verdictReadingNote,
   VERDICT_CONFLICT_NOTE,
 } from "@/lib/verdictHeader";
-import { getErrorMessage, isApiStatus } from "@/lib/errors";
+import {
+  POLL_INTERVAL_MS,
+  pollDelay,
+  pollFailure,
+  pollNotice,
+  reportFetchError,
+} from "./polling";
 import { jobFailure, jobFinished, jobStopNote } from "@/lib/runFailure";
 import type { VerdictBucket } from "@/lib/verdict";
 
@@ -52,6 +60,8 @@ interface ReportCtx {
   report: ReportDetailDTO | null;
   job: JobDTO | null;
   loading: boolean;
+  /** Why the report could not be read; a tab says so instead of drawing empty. */
+  reportError: string | null;
 }
 
 /* The run's events are deliberately absent here. They live in the run store,
@@ -62,6 +72,7 @@ const ReportContext = createContext<ReportCtx>({
   report: null,
   job: null,
   loading: true,
+  reportError: null,
 });
 export function useReport() {
   return useContext(ReportContext);
@@ -93,6 +104,8 @@ const TAB_ICON: Record<TabIcon, LucideIcon> = {
   detection: ShieldCheck,
   defense: Shield,
   evidence: ScrollText,
+  agent: Bot,
+  server: Server,
 };
 
 export default function AnalysisLayout({
@@ -115,12 +128,14 @@ export default function AnalysisLayout({
    * exist instead of blaming the backend for a reply the backend gave. */
   const [notFound, setNotFound] = useState(false);
   const [reportError, setReportError] = useState<string | null>(null);
+  /* Polling ended on a refusal the API will repeat (`pollFailure`). */
+  const [pollStopped, setPollStopped] = useState(false);
   const [enrichmentToast, setEnrichmentToast] = useState<string | null>(null);
   const refetchRef = useRef<(() => Promise<void>) | null>(null);
 
   useEffect(() => {
     let cancelled = false;
-    const POLL_INTERVAL = 3000;
+    let failures = 0;
 
     async function refetchReport(terminal = false) {
       if (cancelled) return;
@@ -130,13 +145,13 @@ export default function AnalysisLayout({
         setReport(r);
         setReportError(null);
       } catch (err) {
-        // While the job is
-        // still running a missing report is expected, so stay quiet. Once the
-        // job is terminal the report should exist — surface the failure.
-        if (!cancelled && terminal) {
-          setReportError(
-            getErrorMessage(err) || "Could not load the report for this job.",
-          );
+        // While the job is still running a missing report is expected, and a
+        // finished run's 404 is a run that wrote none — an absence the tabs
+        // say as such. Only another failure is a read error
+        // (`reportFetchError`).
+        if (!cancelled) {
+          const message = reportFetchError(err, terminal);
+          if (message) setReportError(message);
         }
       }
     }
@@ -149,6 +164,7 @@ export default function AnalysisLayout({
         setJob(j);
         setApiAvailable(true);
         setApiError(null);
+        failures = 0;
 
         /* A cancelled run has ended as surely as a failed one, and it may
          * have kept a partial report: polling stops and the report is read. */
@@ -160,13 +176,24 @@ export default function AnalysisLayout({
 
         // Job still running — schedule next poll
         if (!cancelled) setLoading(false);
-        setTimeout(() => { if (!cancelled) fetchAll(); }, POLL_INTERVAL);
+        setTimeout(() => { if (!cancelled) fetchAll(); }, POLL_INTERVAL_MS);
       } catch (err) {
         // Report *why* the API call failed instead of only
-        // the generic "could not connect" banner.
+        // the generic "could not connect" banner, and keep polling: one
+        // failed poll used to end the polling for good (`polling.ts`).
         if (!cancelled) {
-          if (isApiStatus(err, 404)) setNotFound(true);
-          else setApiError(getErrorMessage(err) || "Unknown error");
+          const failure = pollFailure(err);
+          if (failure.kind === "not-found") setNotFound(true);
+          else if (failure.kind === "stop") {
+            // A refusal: asking again will not change it.
+            setApiError(failure.message);
+            setPollStopped(true);
+          } else {
+            setApiError(failure.message);
+            const delay = pollDelay(failures, failure.retryAfterMs);
+            failures += 1;
+            setTimeout(() => { if (!cancelled) fetchAll(); }, delay);
+          }
           setLoading(false);
         }
       }
@@ -287,7 +314,7 @@ export default function AnalysisLayout({
    * behind it, so one the run never filled is absent rather than present and
    * apologetic — and while the job is still running only the three that can
    * answer anything are offered. */
-  const tabs = useMemo(() => tabsFor(report), [report]);
+  const tabs = useMemo(() => tabsFor(report, job?.roster), [report, job?.roster]);
 
   /* The H1 should identify the sample, not restate the verdict (the verdict
    * badge already shows it). Prefer the original filename from the rich
@@ -314,6 +341,8 @@ export default function AnalysisLayout({
   const profileBadge = profileName && profileName !== "default" ? profileName : null;
   const profileAnalysts = profile?.analysts ?? [];
 
+  const pollBanner = pollNotice(apiError, apiAvailable, pollStopped);
+
   if (notFound) {
     return (
       <div className="bg-bg-surface border border-border rounded p-8 text-center">
@@ -329,12 +358,11 @@ export default function AnalysisLayout({
   }
 
   return (
-    <ReportContext.Provider value={{ report, job, loading }}>
+    <ReportContext.Provider value={{ report, job, loading, reportError }}>
       <div>
-        {!apiAvailable && !loading && (
+        {pollBanner && !loading && (
           <div role="alert" className="mb-4 p-2.5 text-xs text-status-orange bg-status-orange/10 border border-status-orange/20 rounded">
-            Could not connect to the API. Please ensure the backend is running.
-            {apiError ? ` (${apiError})` : ""}
+            {pollBanner}
           </div>
         )}
 
@@ -467,7 +495,7 @@ export default function AnalysisLayout({
               tabs.some((t) => t.group === g),
             );
             return (
-              <div key={group} className="flex items-end">
+              <div key={group} className="flex flex-wrap items-end">
                 {earlier && (
                   <span
                     aria-hidden="true"
@@ -479,13 +507,14 @@ export default function AnalysisLayout({
                   const active =
                     tab.key === ""
                       ? pathname === basePath
-                      : pathname.startsWith(href);
+                      : pathname === href || pathname.startsWith(`${href}/`);
                   const Icon = TAB_ICON[tab.icon];
                   return (
                     <Link
                       key={tab.key}
                       href={href}
                       aria-current={active ? "page" : undefined}
+                      title={tab.label}
                       className={`flex items-center gap-1.5 px-3 py-2.5 text-xs font-medium uppercase tracking-wider border-b-2 ${
                         active
                           ? "border-accent text-accent"
@@ -493,7 +522,7 @@ export default function AnalysisLayout({
                       }`}
                     >
                       <Icon size={16} aria-hidden="true" />
-                      {tab.label}
+                      <span className="max-w-[14rem] truncate">{tab.label}</span>
                     </Link>
                   );
                 })}

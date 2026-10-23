@@ -3,6 +3,8 @@
 import { useEffect, useState } from "react";
 
 import { useReport } from "../layout";
+import ReportAbsent from "@/components/analysis/ReportAbsent";
+import { reportAbsence } from "@/components/analysis/reportAbsence";
 import { api } from "@/lib/api";
 import { getErrorMessage } from "@/lib/errors";
 import {
@@ -27,7 +29,7 @@ const SOURCE_COLORS: Record<string, string> = {
 };
 
 export default function AttackTab() {
-  const { report, job, loading } = useReport();
+  const { report, job, loading, reportError } = useReport();
   const [search, setSearch] = useState("");
   const [mitreData, setMitreData] = useState<unknown[] | null>(null);
   // A failed /mitre fallback
@@ -73,13 +75,11 @@ export default function AttackTab() {
   if (loading) {
     return <div className="p-4 text-sm text-text-secondary">Loading...</div>;
   }
-  if (!report && (!job || job.status !== "completed")) {
-    return (
-      <div className="p-4 text-sm text-text-secondary animate-pulse">
-        Analysis in progress...
-      </div>
-    );
-  }
+  /* A run still going, a report that could not be read and a run that ended
+   * without one are three different absences, and none of them is "no
+   * technique mapped" (`reportAbsence`). */
+  const absent = reportAbsence({ report, job, reportError });
+  if (absent) return <ReportAbsent absence={absent} />;
 
   const rawTechniques = mitreData ?? (Array.isArray(report?.mitre_techniques)
     ? report.mitre_techniques
@@ -186,6 +186,14 @@ export default function AttackTab() {
                               {tech.notPublished}
                             </p>
                           </div>
+                        )}
+                        {tech.note && (
+                          <p
+                            className="mb-1 text-[11px] text-text-muted leading-snug"
+                            data-testid="capability-note"
+                          >
+                            {tech.note}
+                          </p>
                         )}
                         <div className="flex items-center justify-between">
                           <div className="flex items-center gap-1">

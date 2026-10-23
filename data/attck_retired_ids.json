@@ -1,6 +1,6 @@
 {
   "_meta": {
-    "attck_version": "19.2"
+    "attck_version": "20.0"
   },
   "T0803": {
     "domain": "ics",
@@ -17,6 +17,11 @@
     "status": "revoked",
     "revoked_by": "T1695.001"
   },
+  "T0807": {
+    "domain": "ics",
+    "retired_in": "20.0",
+    "status": "deprecated"
+  },
   "T0812": {
     "domain": "ics",
     "status": "revoked",
@@ -26,6 +31,11 @@
     "domain": "ics",
     "status": "revoked",
     "revoked_by": "T1693.002"
+  },
+  "T0853": {
+    "domain": "ics",
+    "retired_in": "20.0",
+    "status": "deprecated"
   },
   "T0855": {
     "domain": "ics",
@@ -844,10 +854,6 @@
     "revoked_by": "T1643"
   },
   "T1475": {
-    "domain": "mobile",
-    "status": "deprecated"
-  },
-  "T1476": {
     "domain": "mobile",
     "status": "deprecated"
   },

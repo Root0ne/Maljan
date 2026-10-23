@@ -24,8 +24,8 @@ When to upgrade to QdrantStore:
 
 from __future__ import annotations
 
-from maljan.memory.embeddings import cosine, encode
-from maljan.memory.long_term_memory import MemoryStoreDefaults, StoredCase
+from maljan.memory.embeddings import cosine, encode_with_backend, model_backend_id
+from maljan.memory.long_term_memory import MemoryStoreDefaults, StoredCase, owner_key
 
 
 class InMemoryStore(MemoryStoreDefaults):
@@ -40,25 +40,52 @@ class InMemoryStore(MemoryStoreDefaults):
         results = store.retrieve("encryption C2 beacon", top_k=3)
     """
 
+    keeps_owners = True
+
     def __init__(self) -> None:
-        # Each entry: (case, embedding_vector). Embeddings are cached at
-        # store-time so retrieve() never recomputes them.
-        self._cases: list[tuple[StoredCase, list[float]]] = []
+        # Each entry: (case, embedding_vector, backend). Embeddings are cached
+        # at store-time so retrieve() never recomputes them; the backend that
+        # produced each is kept beside it, because a bag-of-words vector and a
+        # model vector are not comparable.
+        self._cases: list[tuple[StoredCase, list[float], str]] = []
 
     def store(self, case: StoredCase) -> None:
-        """Persist a case, replacing any existing entry with the same sample_id.
+        """Persist a case, replacing any existing entry with the same sample_id and owner.
 
         Upsert semantics ensure repeated analysis runs on the same sample do
-        not cause unbounded store growth.
+        not cause unbounded store growth. Two owners' cases of one sample are
+        two entries.
         """
-        self._cases = [(c, v) for c, v in self._cases if c.sample_id != case.sample_id]
-        self._cases.append((case, encode(case.summary_text)))
+        owner = owner_key(case.owner)
+        self._cases = [
+            entry
+            for entry in self._cases
+            if not (entry[0].sample_id == case.sample_id and owner_key(entry[0].owner) == owner)
+        ]
+        vector, backend = encode_with_backend(case.summary_text)
+        self._cases.append((case, vector, backend))
+
+    def _vector_in(self, index: int, backend: str) -> list[float]:
+        """Entry ``index``'s vector in ``backend``'s space, embedding its text again when needed.
+
+        A vector made by another backend is never compared with the query's:
+        the case's text is embedded again by the query's backend, and kept
+        when that is the model.
+        """
+        case, vector, made_by = self._cases[index]
+        if made_by == backend:
+            return vector
+        again, again_by = encode_with_backend(case.summary_text)
+        if again_by == model_backend_id():
+            self._cases[index] = (case, again, again_by)
+        return again if again_by == backend else []
 
     def retrieve(
         self,
         query: str,
         top_k: int = 3,
         exclude_sample_id: str | None = None,
+        owner: str | None = None,
     ) -> list[StoredCase]:
         """Return the top_k stored cases most similar to the query text.
 
@@ -70,6 +97,8 @@ class InMemoryStore(MemoryStoreDefaults):
                 equals this value. Stops a
                 fresh analysis from feeding its own past run back to the
                 judge as a "weighted prior".
+            owner: Only this owner's cases; ``None`` reads the unscoped ones
+                (``long_term_memory.recall``).
 
         Returns:
             Ordered list of StoredCase objects, descending by similarity score.
@@ -78,14 +107,29 @@ class InMemoryStore(MemoryStoreDefaults):
         if not self._cases or not query.strip():
             return []
 
-        query_vec = encode(query)
-        scored: list[tuple[float, StoredCase]] = [
-            (cosine(query_vec, vec), case)
-            for case, vec in self._cases
-            if not exclude_sample_id or case.sample_id != exclude_sample_id
-        ]
+        scope = owner_key(owner)
+        query_vec, backend = encode_with_backend(query)
+        scored: list[tuple[float, StoredCase]] = []
+        for index, (case, _vec, _by) in enumerate(self._cases):
+            if exclude_sample_id and case.sample_id == exclude_sample_id:
+                continue
+            if owner_key(case.owner) != scope:
+                continue
+            scored.append((cosine(query_vec, self._vector_in(index, backend)), case))
         scored.sort(key=lambda pair: pair[0], reverse=True)
         return [case for _, case in scored[:top_k]]
+
+    def case_of(self, sample_id: str, owner: str | None = None) -> StoredCase | None:
+        """The case stored for ``sample_id`` under ``owner`` (the unscoped one for ``None``)."""
+        scope = owner_key(owner)
+        return next(
+            (
+                case
+                for case, _vec, _by in self._cases
+                if case.sample_id == sample_id and owner_key(case.owner) == scope
+            ),
+            None,
+        )
 
     def count(self) -> int:
         """Return the number of cases currently in the store."""
@@ -122,9 +166,9 @@ class InMemoryStore(MemoryStoreDefaults):
             return True
 
         if dry_run:
-            return sum(1 for c, _v in self._cases if _low_quality(c))
+            return sum(1 for entry in self._cases if _low_quality(entry[0]))
         before = len(self._cases)
-        self._cases = [(c, v) for c, v in self._cases if not _low_quality(c)]
+        self._cases = [entry for entry in self._cases if not _low_quality(entry[0])]
         return before - len(self._cases)
 
     def __repr__(self) -> str:

@@ -24,6 +24,9 @@ export interface EvidenceEntry {
   error?: string | null;
   remediation?: string | null;
   duration_ms: number;
+  /** Time the call waited for a free slot at its server before it was sent;
+   *  absent when it did not wait and on rows written before the field. */
+  waited_ms?: number;
   seq: number;
   args: Record<string, unknown> | null;
   /** True when the model's arguments were truncated and were closed off
@@ -52,6 +55,40 @@ export interface EvidenceEntry {
   symbol?: string | null;
   started_at?: number | null;
   created_at: string | null;
+  /** Where the tool's declaration lives (`mcp:<server key>`, `provider:<id>`,
+   *  `sandbox`, `pack`), what it declared about the answer, the reputation
+   *  record, and the operator's pack step, as the entry recorded them. Absent
+   *  where the entry carried none and on rows older than the columns. */
+  source?: string;
+  facts?: Record<string, unknown>;
+  reputation?: Record<string, unknown>;
+  pack_step?: Record<string, unknown>;
+  /** True when `structured` is the server's own structured answer beside a
+   *  prose text; absent otherwise. */
+  structured_from_server?: true;
+  /** The role and console tab the calling agent's definition declared. */
+  agent_role?: string;
+  agent_tab?: string;
+  /** Where the parts of the answer this entry does not keep whole are kept
+   *  whole, one reference per part the run shortened, blanked or dropped.
+   *  Absent where nothing was taken and on rows older than the column. */
+  spilled?: EvidenceObjectRef[];
+  /** SHA-256 hex of every column the row persists, in canonical form, and the
+   *  job's hash-chain value after this row in `seq` order. Absent on rows
+   *  written before sealing existed. */
+  digest?: string;
+  chain?: string;
+}
+
+/** One part of an answer kept whole in object storage. `key` is absent and
+ *  `error` says why when the upload failed. The bytes are served by
+ *  `GET /jobs/{id}/evidence/{entry_id}/objects/{part}`. */
+export interface EvidenceObjectRef {
+  part: "answer" | "structured_content" | "output" | "structured";
+  key?: string;
+  bytes?: number;
+  sha256?: string;
+  error?: string;
 }
 
 export interface EvidenceListResponse {

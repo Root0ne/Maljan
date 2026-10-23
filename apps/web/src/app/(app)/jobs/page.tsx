@@ -15,6 +15,9 @@ import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { FileText, X } from "lucide-react";
 import { api } from "@/lib/api";
+import { fetchAllPages } from "@/lib/pages";
+import ShowMoreRows from "@/components/ui/ShowMoreRows";
+import { ROWS_PER_STEP, visibleRows } from "@/lib/pagedRows";
 import {
   analysisRows,
   countByStatus,
@@ -38,6 +41,8 @@ function AnalysesList() {
   const filter: StatusFilter = statusFilterFrom(searchParams.get("status"));
 
   const [rows, setRows] = useState<AnalysisRow[]>([]);
+  /* Every run is read; a long history is drawn a step at a time (`lib/pagedRows`). */
+  const [shown, setShown] = useState(ROWS_PER_STEP);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [confirmJob, setConfirmJob] = useState<AnalysisRow | null>(null);
@@ -50,9 +55,11 @@ function AnalysesList() {
    * not worth failing the page over, so a reports call that fails leaves the
    * jobs listed without their verdicts rather than leaving nothing listed. */
   const load = useCallback(async () => {
+    // Every page of both, not the newest hundred: a list that stops at page
+    // one reads as the whole history (`fetchAllPages`).
     const [jobs, reports] = await Promise.all([
-      api.getJobs(1, 100),
-      api.getReports(1, 100).catch(() => null),
+      fetchAllPages((page, size) => api.getJobs(page, size)),
+      fetchAllPages((page, size) => api.getReports(page, size)).catch(() => null),
     ]);
     return analysisRows(jobs.items, reports?.items ?? []);
   }, []);
@@ -249,7 +256,7 @@ function AnalysesList() {
                   : `No ${filter} analysis.`}
               </div>
             ) : (
-              filtered.map((row) => {
+              visibleRows(filtered, shown).visible.map((row) => {
                 const badge = statusTone(row.status);
                 const canCancel = row.status === "pending" || row.status === "running";
                 const duration = formatDuration(row.durationSeconds);
@@ -338,6 +345,7 @@ function AnalysesList() {
               })
             )}
           </div>
+          <ShowMoreRows shown={Math.min(shown, filtered.length)} total={filtered.length} onShow={setShown} />
         </div>
       </div>
 

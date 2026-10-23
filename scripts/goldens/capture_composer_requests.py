@@ -13,7 +13,7 @@ Two uses, both with no model and no network:
   code, writing them at once, to it. Recapture it from that commit's tree::
 
       git archive cb04d3ad src data | tar -x -C /path/to/base
-      PYTHONPATH=/path/to/base/src python scripts/goldens/capture_composer_requests.py
+      PYTHONPATH=/path/to/base/src python scripts/goldens/capture_composer_requests.py --fixture F
 
 * **Stored runs** (``--replay RUN_DIR ... --out DIR``). Each run's
   ``report.json`` is re-rendered, then its own section values are fed back as
@@ -32,6 +32,7 @@ import argparse
 import asyncio
 import hashlib
 import json
+import subprocess
 import sys
 from pathlib import Path
 from typing import Any
@@ -40,7 +41,6 @@ from unittest.mock import patch
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 
-FIXTURE = ROOT / "tests" / "fixtures" / "composer_requests_before_concurrency.json"
 FACTS = "DETERMINISTIC FACTS (complete list):\n- file_type: PE32 executable"
 RUN_STATE = "Stages run: triage, static. Stages not run: dynamic."
 PROSE = (
@@ -125,6 +125,36 @@ def _stored_answers(stored: Any) -> dict[str, Any]:
     return answers
 
 
+def check_replay_paths(runs: list[Path], out: Path) -> Path:
+    """The resolved ``out``, after refusing what would write over the repository's own files.
+
+    ``--replay`` writes ``<run name>.*`` files into ``out``: ``out`` may not be
+    the repository's committed fixtures or source (``--fixture`` is where a
+    golden goes), and a run's name has to be a real directory name.
+    """
+    resolved = out.expanduser().resolve()
+    if resolved == ROOT or ROOT in resolved.parents:
+        try:
+            ignored = subprocess.run(  # noqa: S603 — fixed argv, no shell
+                ["git", "-C", str(ROOT), "check-ignore", "-q", str(resolved)],  # noqa: S607
+                check=False,
+                capture_output=True,
+            )
+        except FileNotFoundError:
+            raise SystemExit(
+                "--out inside the repository needs git to check it is ignored"
+            ) from None
+        if ignored.returncode != 0:
+            raise SystemExit(
+                f"--out {resolved} is inside the repository and not git-ignored; "
+                "pick a scratch directory"
+            )
+    for run in runs:
+        if run.resolve().name in ("", ".", ".."):
+            raise SystemExit(f"--replay {run} does not name a run directory")
+    return resolved
+
+
 def replay(runs: list[Path], out: Path, concurrent: bool) -> None:
     """Re-render each stored run, and replay its own section values as the answers."""
     from langchain_core.messages import AIMessage
@@ -149,9 +179,13 @@ def replay(runs: list[Path], out: Path, concurrent: bool) -> None:
     out.mkdir(parents=True, exist_ok=True)
     for run in runs:
         name = run.name
-        stored = MalwareReport.model_validate(json.loads((run / "report.json").read_text()))
-        (out / f"{name}.rerender.md").write_text(MarkdownRenderer().render(stored))
-        (out / f"{name}.rerender.html").write_text(HtmlRenderer().render(stored))
+        stored = MalwareReport.model_validate(
+            json.loads((run / "report.json").read_text(encoding="utf-8"))
+        )
+        (out / f"{name}.rerender.md").write_text(
+            MarkdownRenderer().render(stored), encoding="utf-8"
+        )
+        (out / f"{name}.rerender.html").write_text(HtmlRenderer().render(stored), encoding="utf-8")
         fresh = stored.model_copy(deep=True)
         fresh.intro_background = ""
         fresh.technical_analysis = None
@@ -161,10 +195,12 @@ def replay(runs: list[Path], out: Path, concurrent: bool) -> None:
         composer = _compose(
             llm, fresh, None, concurrent, citable_ids=[row.id for row in fresh.evidence_index]
         )
-        (out / f"{name}.requests.json").write_text(json.dumps(sorted(llm.requests), indent=0))
-        (out / f"{name}.report.json").write_text(fresh.model_dump_json(indent=1))
-        (out / f"{name}.md").write_text(MarkdownRenderer().render(fresh))
-        (out / f"{name}.html").write_text(HtmlRenderer().render(fresh))
+        (out / f"{name}.requests.json").write_text(
+            json.dumps(sorted(llm.requests), indent=0), encoding="utf-8"
+        )
+        (out / f"{name}.report.json").write_text(fresh.model_dump_json(indent=1), encoding="utf-8")
+        (out / f"{name}.md").write_text(MarkdownRenderer().render(fresh), encoding="utf-8")
+        (out / f"{name}.html").write_text(HtmlRenderer().render(fresh), encoding="utf-8")
         (out / f"{name}.extra.json").write_text(
             json.dumps(
                 {
@@ -172,7 +208,8 @@ def replay(runs: list[Path], out: Path, concurrent: bool) -> None:
                     "tally": composer.validation_tally.to_dict(),
                 },
                 indent=1,
-            )
+            ),
+            encoding="utf-8",
         )
         print(
             f"{name}: {len(llm.requests)} requests, {_digest(''.join(sorted(llm.requests)))[:16]}"
@@ -184,7 +221,12 @@ def main() -> int:
     parser.add_argument("--concurrent", action="store_true", help="pass concurrent=True")
     parser.add_argument("--replay", nargs="*", type=Path, default=[], help="stored run directories")
     parser.add_argument("--out", type=Path, help="where --replay writes")
-    parser.add_argument("--fixture", type=Path, default=FIXTURE, help="where the golden goes")
+    parser.add_argument(
+        "--fixture",
+        type=Path,
+        help="where the golden goes (required: the committed 'before' golden is frozen at "
+        "its own commit and a run of today's code must not overwrite it by default)",
+    )
     args = parser.parse_args()
     import maljan.reporting.composer as composer_module
 
@@ -192,10 +234,12 @@ def main() -> int:
     if args.replay:
         if args.out is None:
             parser.error("--replay needs --out")
-        replay(args.replay, args.out, args.concurrent)
+        replay(args.replay, check_replay_paths(args.replay, args.out), args.concurrent)
         return 0
+    if args.fixture is None:
+        parser.error("--fixture is required")
     found = golden(args.concurrent)
-    args.fixture.write_text(json.dumps(found, indent=1, sort_keys=True) + "\n")
+    args.fixture.write_text(json.dumps(found, indent=1, sort_keys=True) + "\n", encoding="utf-8")
     print(f"{len(found['requests'])} requests written to {args.fixture}")
     return 0
 

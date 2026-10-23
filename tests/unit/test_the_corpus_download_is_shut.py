@@ -59,6 +59,14 @@ class TestTheDoorsAreHeld:
 
         assert "fetched the ATT&CK corpus" in str(refused.value)
 
+    def test_the_streamed_download_refuses_as_well(self, tmp_path: Path) -> None:
+        with pytest.raises(pytest.fail.Exception) as refused:
+            attck_loader._download_bundle_file(
+                "https://example.org/enterprise-attack.json", tmp_path / "x.part"
+            )
+
+        assert "fetched the ATT&CK corpus" in str(refused.value)
+
     def test_the_embedding_model_is_not_reachable(self) -> None:
         """No model is the module's own signal to project bags of words.
 

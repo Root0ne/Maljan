@@ -14,6 +14,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from fastapi.responses import HTMLResponse, PlainTextResponse
 from maljan.core.logger import logger
 from maljan.core.settings_overrides import redact_url
+from maljan.reporting.section_servers import with_source_servers
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
@@ -109,6 +110,9 @@ async def _detail(svc: ReportService, report: Any) -> ReportDetailResponse:
     reading = (report.run_summary or {}).get("verdict_reading")
     if isinstance(reading, str) and reading:
         detail = detail.model_copy(update={"verdict_reading": reading})
+    served = with_source_servers(report.malware_report)
+    if served is not report.malware_report:
+        detail = detail.model_copy(update={"malware_report": served})
     placed = _section_tabs(report.malware_report)
     if placed:
         detail = detail.model_copy(update={"section_tabs": placed})
@@ -192,6 +196,14 @@ async def get_stix_bundle(
     produced no bundle — answers 200 with ``"kept": false`` and the reason: the
     report exists and says it has none, which is not the 404 of a report that
     does not.
+
+    The judge's bundle is labelled ``"published": false`` with a notice: it is
+    an unpublished draft that did not pass the publish rule. A run that made no
+    export stores that bundle as the report's bundle, and the stored bundle
+    then carries ``x_maljan_published: false`` and the same notice, and the
+    default source answers it in the same envelope: ``published: false``, the
+    notice and the bundle under ``bundle``. ``published`` is the envelope's
+    name for the flag, ``x_maljan_published`` only the stored bundle's.
     """
     if source == "judge":
         report = await svc.get_report(report_id, user)
@@ -208,14 +220,59 @@ async def get_stix_bundle(
                 "bundle": None,
                 "labels": {},
             }
-        return {"kept": True, **report.judge_stix_bundle}
+        from maljan.schemas.stix_models import UNPUBLISHED_NOTICE
+
+        # Served as the run's record and labelled: it is a draft that did not
+        # pass the publish rule, never the export.
+        return {
+            "kept": True,
+            **report.judge_stix_bundle,
+            "published": False,
+            "notice": UNPUBLISHED_NOTICE,
+        }
     bundle = await svc.get_stix_bundle(report_id, user, source=source)
     if bundle is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Report not found or STIX bundle not available",
         )
+    if isinstance(bundle, dict) and bundle.get("x_maljan_published") is False:
+        from maljan.schemas.stix_models import UNPUBLISHED_NOTICE
+
+        return {"published": False, "notice": UNPUBLISHED_NOTICE, "bundle": bundle}
     return bundle
+
+
+@router.get("/{report_id}/attack-layer")
+async def get_attack_navigator_layer(
+    report_id: uuid.UUID,
+    domain: Literal["enterprise", "mobile", "ics"] | None = None,
+    user: User = Depends(get_current_user),
+    svc: ReportService = Depends(_get_service),
+) -> dict:
+    """The ATT&CK Navigator layer of the techniques the report publishes.
+
+    Read from the stored report's published technique list, never a draft:
+    each technique is scored and coloured by the report's own support for it,
+    and its comment is its evidence ids. A layer holds one ATT&CK domain, the
+    one most published techniques belong to unless ``domain`` names another;
+    the layer's description names the techniques of the others. A report with
+    no published technique answers 200 with an empty layer; only an unknown or
+    unauthorized report, or one with no stored report document, is 404.
+    """
+    from maljan.reporting.navigator_layer import build_layer
+
+    mr = await svc.get_malware_report(report_id, user)
+    if mr is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Report not found or no MalwareReport persisted",
+        )
+    # The bundle-free build runs off the event loop all the same: it walks the
+    # stored mappings and the vendored tables.
+    return await asyncio.to_thread(
+        build_layer, mr, name=f"Maljan report {report_id}", domain=domain
+    )
 
 
 @router.get("/{report_id}/mitre")
@@ -266,7 +323,10 @@ async def get_full_malware_report(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Report not found or no MalwareReport persisted",
         )
-    return mr
+    # Read-time only, as in the detail: a stored run's sections say their
+    # server here too, and nothing stored changes.
+    served: dict = with_source_servers(mr)
+    return served
 
 
 @router.get("/{report_id}/markdown", response_class=PlainTextResponse)
@@ -518,7 +578,20 @@ async def delete_report(
     kept — only its report (and the agent findings that cascade from it) is
     removed, so the job history stays intact and the sample can be re-analysed.
     """
-    deleted = await svc.delete_report(report_id, user)
+    from app.services.audit_chain import DeletionNotChained
+
+    try:
+        deleted = await svc.delete_report(report_id, user)
+    except DeletionNotChained:
+        # A sealed report is never deleted without its record on the audit
+        # chain: nothing was deleted, and the owner can try again.
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=(
+                "The deletion could not be recorded on the audit chain, so nothing was "
+                "deleted. Try again."
+            ),
+        ) from None
     if not deleted:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,

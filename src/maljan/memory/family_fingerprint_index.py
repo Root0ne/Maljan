@@ -108,6 +108,14 @@ def load_family_index(catalog_path: str) -> FamilyFingerprintIndex | None:
         return result
 
 
+def build_record_path(catalog_path: Path) -> Path:
+    """Where the record of what a catalogue was built from sits, beside it.
+
+    Written by ``scripts/knowledge/build_family_feature_kb.py``.
+    """
+    return catalog_path.with_name(f"{catalog_path.stem}.build.json")
+
+
 def _load_uncached(catalog_path: str) -> FamilyFingerprintIndex | None:
     if not catalog_path or not Path(catalog_path).is_file():
         logger.info(
@@ -124,6 +132,14 @@ def _load_uncached(catalog_path: str) -> FamilyFingerprintIndex | None:
         logger.warning("family-RAG: catalog '%s' has no 'families' — RAG disabled.", catalog_path)
         return None
     index = FamilyFingerprintIndex.from_records(families)
+    if not build_record_path(Path(catalog_path)).is_file():
+        logger.warning(
+            "family-RAG: no build record '%s' beside catalog '%s': the cohorts it was built "
+            "from are unknown, so a held-out cohort may be in it. Rebuild it with "
+            "scripts/knowledge/build_family_feature_kb.py before a scored run.",
+            build_record_path(Path(catalog_path)).name,
+            catalog_path,
+        )
     logger.info("family-RAG: loaded %d family fingerprints from '%s'.", len(index), catalog_path)
     return index if len(index) else None
 

@@ -10,8 +10,6 @@ from __future__ import annotations
 from collections.abc import Sequence
 from typing import Any
 
-from langchain_core.prompts import ChatPromptTemplate
-
 from maljan.agents.base_agent import BaseAnalyst, prompt_to_messages
 from maljan.agents.prompt_fragments import (
     CLAIM_FORMAT_FRAGMENT,
@@ -185,48 +183,36 @@ class DynamicAnalyst(BaseAnalyst):
             sandbox_tools = stamp_source(
                 provider.dynamic_tools(), PROVIDER_FAMILY, declared=provider_source(provider)
             )
-            self.toolkit = getattr(provider, "_toolkit", None)
+            # A provider whose server goes through the shared lifecycle hands
+            # over its handle, closed by its own bounded ``aclose``; any other
+            # hands over its toolkit, as before.
+            self.toolkit = getattr(provider, "server_handle", None) or getattr(
+                provider, "_toolkit", None
+            )
         else:
             self.logger.info("Sandbox provider '%s' exposes no tools.", provider.id)
         own = [*sandbox_tools, *self._definition_sandbox_tools()]
         # The sandbox's tools are the agent's own: a server tool of the same
         # name is offered as ``<server>__<tool>`` beside them.
-        self.tools = [
-            *own,
-            *self._attach_registry_tools(
-                "dynamic", claimed=own, claimed_by=f"provider:{provider.id}"
-            ),
-        ]
+        from maljan.providers.servers import settle_tool_notes
+
+        self.tools = settle_tool_notes(
+            [
+                *own,
+                *self._attach_registry_tools(
+                    "dynamic", claimed=own, claimed_by=f"provider:{provider.id}"
+                ),
+            ],
+            getattr(getattr(self, "_container", None), "config", None),
+        )
 
     # ------------------------------------------------------------------
     # Text interface (backward compatible)
     # ------------------------------------------------------------------
 
     def analyze(self, data: str) -> str:
-        """Translates sandbox JSON logs into a behavioral malware profile."""
-        self.logger.info("Executing dynamic behavior analysis...")
-
-        # Graceful: the CAPE MCP endpoint is a port-forward to a separate VM
-        # and is routinely unreachable. The sandbox JSON in ``data`` is
-        # evidence on its own, so a missing toolkit costs depth, not the
-        # analyst. See ``BaseAnalyst._try_initialize_mcp``.
-        self._try_initialize_mcp()
-
-        # Treat `data` as task_id if it's numeric/short
-        task_info = f"Task ID: {data}" if data.strip().isdigit() else f"Sandbox data:\n{data}"
-
-        prompt_messages = [
-            ("system", self._system_prompt(_dynamic_prompt)),
-            (
-                "human",
-                "Analyze registry persistence, process injection, and file/folder drops "
-                "in this sandbox behavior data."
-                + (" You may use tools to gather more information.\n" if self.tools else "\n")
-                + f"{task_info}",
-            ),
-        ]
-
-        return self.execute_tool_loop(prompt_messages)
+        """The first report as text: the ISR analysis, written out."""
+        return self.analyze_isr(data).to_text_summary()
 
     def revise(
         self,
@@ -235,47 +221,8 @@ class DynamicAnalyst(BaseAnalyst):
         peer_reports: dict[str, str],
         mediator_feedback: str,
     ) -> str:
-        """Revise dynamic analysis based on peer findings and mediator feedback."""
-        self.logger.info("Revising dynamic analysis based on peer feedback...")
-
-        peer_section = (
-            "\n\n".join(
-                f"{name.upper()} ANALYST REPORT:\n{report}" for name, report in peer_reports.items()
-            )
-            or "No peer reports available."
-        )
-
-        prompt = ChatPromptTemplate.from_messages(
-            [
-                (
-                    "system",
-                    "You are an expert Dynamic Analyst participating in a collaborative "
-                    "multi-agent malware analysis. The mediator has identified contradictions "
-                    "between your report and other experts. Review the peer reports and mediator "
-                    "feedback, then revise your analysis. Correlate sandbox behaviors with "
-                    "any API imports or network indicators raised by peers. "
-                    "Focus on MITRE ATT&CK: T1547, T1055.",
-                ),
-                (
-                    "human",
-                    "YOUR ORIGINAL REPORT:\n{own_report}\n\n"
-                    "PEER ANALYST REPORTS:\n{peer_section}\n\n"
-                    "MEDIATOR CONTRADICTIONS:\n{mediator_feedback}\n\n"
-                    "ORIGINAL RAW DATA:\n{data}\n\n"
-                    "Revise your analysis addressing the contradictions above.",
-                ),
-            ]
-        )
-
-        return self.ask_the_model(
-            prompt.format_messages(
-                own_report=own_report,
-                peer_section=peer_section,
-                mediator_feedback=mediator_feedback,
-                data=original_data,
-            ),
-            what="revision",
-        )
+        """The revised report as text: the ISR revision's text."""
+        return self.revise_isr(original_data, own_report, peer_reports, mediator_feedback)[0]
 
     # ------------------------------------------------------------------
     # ISR interface
@@ -381,7 +328,11 @@ class DynamicAnalyst(BaseAnalyst):
         dissent = _parse_disputes(content)
 
         if not claims:
-            return content, self._text_to_isr(content, revision_round=revision_round)
+            # The lenient reading keeps the disputes the answer wrote: a
+            # revision's dissent is what it says, whichever reader read it.
+            lenient = self._text_to_isr(content, revision_round=revision_round)
+            lenient.dissent_items = dissent
+            return content, lenient
 
         isr = AgentISR(
             agent_id=self.name,

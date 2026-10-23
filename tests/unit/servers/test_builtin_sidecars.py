@@ -227,7 +227,11 @@ def test_only_the_analysis_sidecar_is_allowed_to_see_the_staging_directory() -> 
         "MALJAN_SAMPLE_ROOTS",
     ]
     assert servers["network"].env_allow == ["MALJAN_STAGING_DIR", "MALJAN_SAMPLE_ROOTS"]
-    assert servers["knowledge"].env_allow == ["MALJAN_INDEX_RETRY_SECONDS"]
+    assert servers["knowledge"].env_allow == [
+        "MALJAN_INDEX_RETRY_SECONDS",
+        "MALJAN_ATTCK_REFRESH_DAYS",
+        "MALJAN_SAMPLE_SHA256",
+    ]
 
 
 @pytest.mark.skipif(

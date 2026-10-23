@@ -95,13 +95,15 @@ ENV_NAME_PATTERN = r"^[A-Za-z_][A-Za-z0-9_]*$"
 _ENV_NAME_RE = re.compile(ENV_NAME_PATTERN)
 # A tool's argument name: an identifier, as a JSON schema property is written.
 _ARGUMENT_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_.-]{0,127}$")
+# A routed sample format's name, as the routing writes it (``pe``, ``mach-o``);
+# read with ``fullmatch``, so no trailing newline passes.
+_ROUTED_FORMAT_RE = re.compile(r"[a-z0-9][a-z0-9._+-]{0,63}")
 # The separator a registry joins a server key and a tool name with when two
 # servers offer the same name; a declared tool name may not hold it.
 RENAMED_TOOL_SEPARATOR = "__"
 
-# The two path wildcards; ``**N`` bounds the depth.
+# The two path wildcards, ``*`` and ``**``; ``**N`` bounds the depth.
 EVERY = "*"
-ANY_DEPTH = "**"
 _ANY_DEPTH_RE = re.compile(r"^\*\*(\d{0,4})$")
 
 
@@ -129,6 +131,46 @@ def check_tool_name(value: str, what: str = "tool name") -> str:
     if not value or value != value.strip():
         raise ValueError(f"{what} {value!r} must be a tool's name, not empty or padded")
     return value
+
+
+# A character that would break the one line a scope text is shown on: a line
+# break or another control character, the Unicode line breaks (NEL, LINE
+# SEPARATOR, PARAGRAPH SEPARATOR) included.
+_SCOPE_BREAK = re.compile(r"[\x00-\x1f\x7f\x85\u2028\u2029]")
+
+
+def check_scope_text(value: str, what: str = "shows") -> str:
+    """What a tool's answer shows or does not show (``ToolFacts.shows``): one line of text.
+
+    Kept as written, as ``display_name`` is (the note it gives a description
+    is trimmed where it is written). A line break or another control
+    character is refused in an operator's edit (``STRICT_DECLARATIONS``); a
+    text already accepted is read with each run of them and of blanks as one
+    space, with a warning. No length is imposed: the text is the operator's.
+    """
+    if not _SCOPE_BREAK.search(value):
+        return value
+    if STRICT_DECLARATIONS.get():
+        raise ValueError(f"{what} is one line of text, without line breaks or control characters")
+    read = " ".join(_SCOPE_BREAK.sub(" ", value).split())
+    _warn_scope_breaks(what)
+    return read
+
+
+def _warn_scope_breaks(what: str) -> None:
+    marker = (f"scope {what}", ())
+    if marker in _WARNED:
+        return
+    if len(_WARNED) >= _WARNED_MAX:
+        _WARNED.clear()
+    _WARNED.add(marker)
+    from maljan.core.logger import logger
+
+    logger.warning(
+        "A tool declaration's %s holds line breaks or control characters; each run of them "
+        "is read as one space and the rest is kept.",
+        loggable_names([what]),
+    )
 
 
 def check_own_prefix(server: str, names: Iterable[str]) -> None:
@@ -418,7 +460,9 @@ class ErrorPattern(BaseModel):
         found = fullmatch_pattern(self.match, text)
         if found is None:
             return None
-        return message_lines(found.group(self.message_group) if self.message_group else text)
+        said = found.group(self.message_group) if self.message_group else text
+        # An optional group that took part in no match is no message: the whole text stands.
+        return message_lines(text if said is None else said)
 
     def remediation_for(self, sample_path: str | None) -> str:
         """The remediation, naming ``sample_path`` where the pattern has a form for it."""
@@ -433,7 +477,10 @@ NO_KIND = "unclassified"
 # The fields of a tool declaration, split by whether they are read without a
 # kind. A kind-free field is read from the live declaration whatever the kind
 # (the guard's budget, a call's argument roles, the tag a description is shown
-# with, the words and name a tool is given, whether it discloses the sample).
+# with, the words and name a tool is given, whether it discloses the sample,
+# the routed formats it serves, what a call does beyond answering, the tools
+# of its server it is the aggregate form of, what its answer shows and does
+# not show).
 # A kind-dependent field is read only through the kind (an answer's rows and
 # the paths inside them, its techniques and reputation, a reader of its shape,
 # the report sections it is shown to): a declaration that names no kind may
@@ -448,12 +495,19 @@ KIND_FREE_FIELDS: tuple[str, ...] = (
     "long_running",
     "memory_peak_mb",
     "discloses_sample",
+    "read_only",
     "arguments",
+    "routed_formats",
+    "effects",
+    "aggregate_of",
+    "shows",
+    "does_not_show",
 )
 KIND_DEPENDENT_FIELDS: tuple[str, ...] = (
     "asserts_techniques",
     "source",
     "holds_strings",
+    "reads_delay_imports",
     "rows",
     "places",
     "values",
@@ -668,8 +722,120 @@ def _normal(raw: Any) -> str | None:
     return json.dumps(_set_fields(raw), sort_keys=True, default=str)
 
 
+def _aggregated(raw: Any) -> tuple[str, ...]:
+    """The names a declaration's ``aggregate_of`` holds, read or as written; () for none."""
+    if isinstance(raw, ToolFacts):
+        return raw.aggregate_of
+    value = raw.get("aggregate_of") if isinstance(raw, Mapping) else None
+    if not isinstance(value, list | tuple):
+        return ()
+    return tuple(name for name in value if isinstance(name, str))
+
+
+def aggregate_reference_errors(
+    tool_facts: Mapping[str, Any],
+    tools: Iterable[str] | None = None,
+    *,
+    only: Iterable[str] | None = None,
+) -> dict[str, str]:
+    """The refusals of each ``aggregate_of`` in ``tool_facts`` naming no tool of its server.
+
+    A name is a tool of the server when the server declares it (a key of
+    ``tool_facts``) or its allow-list names it (``tools``; ``None``, every
+    tool the server serves, names none here: a served list is known only
+    from a live handshake). A tool is not the aggregate form of itself, nor
+    of a tool that declares itself the aggregate form of it. ``only`` limits
+    the check to those tools' declarations. Keys are ``<tool>.aggregate_of``.
+    """
+    known = {str(name) for name in tool_facts} | {str(name) for name in tools or ()}
+    wanted = None if only is None else {str(name) for name in only}
+    errors: dict[str, str] = {}
+    for tool, raw in tool_facts.items():
+        if wanted is not None and str(tool) not in wanted:
+            continue
+        names = _aggregated(raw)
+        if str(tool) in names:
+            errors[f"{tool}.aggregate_of"] = "a tool is not the aggregate form of itself"
+            continue
+        unknown = [name for name in names if name not in known]
+        if unknown:
+            errors[f"{tool}.aggregate_of"] = (
+                f"aggregate_of names {', '.join(repr(n) for n in unknown)}, which "
+                f"{'is' if len(unknown) == 1 else 'are'} not a tool of this server; declare "
+                "each in tool_facts (e.g. its category)"
+            )
+            continue
+        mutual = _mutual(tool_facts, str(tool), names)
+        if mutual:
+            errors[f"{tool}.aggregate_of"] = (
+                f"aggregate_of names {', '.join(repr(n) for n in mutual)}, which "
+                f"{'declares' if len(mutual) == 1 else 'declare'} itself the aggregate form of "
+                f"{str(tool)!r}; of two tools, only one is the aggregate form of the other"
+            )
+    return errors
+
+
+def _mutual(tool_facts: Mapping[str, Any], tool: str, names: Iterable[str]) -> list[str]:
+    """The tools among ``names`` that declare themselves the aggregate form of ``tool``."""
+    return [name for name in names if tool in _aggregated(tool_facts.get(name))]
+
+
+def known_aggregates(
+    tool_facts: dict[str, ToolFacts], tools: Iterable[str] | None = None, where: str = ""
+) -> dict[str, ToolFacts]:
+    """``tool_facts`` with each ``aggregate_of`` holding only tools of its server.
+
+    Read leniently, as everything already accepted is: a name that is no tool
+    of the server (:func:`aggregate_reference_errors`), such as a tool an
+    operator later removed, or one that declares itself the aggregate form of
+    this tool in turn, is left out with one warning, and the rest of the
+    declaration is kept. In an operator's edit (``STRICT_DECLARATIONS``) the
+    reference is refused instead.
+    """
+    errors = aggregate_reference_errors(tool_facts, tools)
+    if not errors:
+        return tool_facts
+    if STRICT_DECLARATIONS.get():
+        raise ValueError("; ".join(f"tool_facts.{key}: {msg}" for key, msg in errors.items()))
+    known = {str(name) for name in tool_facts} | {str(name) for name in tools or ()}
+    out = dict(tool_facts)
+    for key in errors:
+        tool = key.removesuffix(".aggregate_of")
+        facts = out[tool]
+        mutual = set(_mutual(tool_facts, tool, facts.aggregate_of))
+        kept = tuple(
+            name
+            for name in facts.aggregate_of
+            if name in known and name != tool and name not in mutual
+        )
+        out[tool] = facts.model_copy(update={"aggregate_of": kept})
+        _warn_unknown_aggregates(f"{where}{tool}", [n for n in facts.aggregate_of if n not in kept])
+    return out
+
+
+def _warn_unknown_aggregates(where: str, names: Iterable[str]) -> None:
+    held = tuple(sorted(str(name) for name in names))
+    marker = (f"aggregate_of {where}", held)
+    if marker in _WARNED:
+        return
+    if len(_WARNED) >= _WARNED_MAX:
+        _WARNED.clear()
+    _WARNED.add(marker)
+    from maljan.core.logger import logger
+
+    logger.warning(
+        "A tool declaration (%s) names, as tools it is the aggregate form of, names that are "
+        "no tool of its server or that name it back; they are left out and the rest is kept: %s",
+        loggable_names([where]),
+        loggable_names(held),
+    )
+
+
 def changed_declaration_errors(
-    incoming: Mapping[str, Any], before: Iterable[Mapping[str, Any] | None] = ()
+    incoming: Mapping[str, Any],
+    before: Iterable[Mapping[str, Any] | None] = (),
+    *,
+    tools: Iterable[str] | None = None,
 ) -> dict[str, str]:
     """The strict refusals of the tool declarations in ``incoming`` that a save adds or changes.
 
@@ -677,11 +843,14 @@ def changed_declaration_errors(
     (the stored map, the shipped one) says for that tool, as written or as
     it is read leniently (what the console showed); an unchanged one is
     never refused, so a save that leaves a stored entry alone is never
-    blocked by it. Each other one is validated strictly. Keys are
+    blocked by it. Each other one is validated strictly, its ``aggregate_of``
+    against the tools of the server: the map's own and ``tools``, the
+    server's allow-list (:func:`aggregate_reference_errors`). Keys are
     ``<tool>`` or ``<tool>.<field>``.
     """
     held = [b for b in before if isinstance(b, Mapping)]
     errors: dict[str, str] = {}
+    changed: list[str] = []
     for tool, raw in incoming.items():
         said = _normal(raw)
         if said is not None:
@@ -706,6 +875,10 @@ def changed_declaration_errors(
                 for err in exc.errors():
                     loc = ".".join(str(part) for part in err["loc"])
                     errors[f"{tool}.{loc}" if loc else str(tool)] = err["msg"]
+                continue
+        changed.append(str(tool))
+    if changed:
+        errors.update(aggregate_reference_errors(incoming, tools, only=changed))
     return errors
 
 
@@ -749,7 +922,8 @@ class ReputationFacts(BaseModel):
     ``link`` are paths tried in order, the first that names a value giving it
     (a date as an ISO-8601 text or whole seconds since the epoch, a link as an
     ``http(s)`` URL). ``summary`` is the path of the service's own sentence
-    about the sample; empty, an answer written in prose is its own summary.
+    about the sample in a JSON answer; an answer written in prose is its own
+    summary.
     ``text_patterns`` read an answer written in prose: regular expressions with
     a ``malicious`` group and optionally ``total`` and ``suspicious`` groups,
     each *searched* for anywhere in the answer, the first pattern that finds a
@@ -806,7 +980,7 @@ class ReputationFacts(BaseModel):
         """
         for pattern in self.text_patterns:
             found = search_pattern(pattern, text)
-            if found is not None:
+            if found is not None and found.group("malicious") is not None:
                 groups = compile_pattern(pattern).groupindex
 
                 def _group(name: str, held: Any = found, named: Any = groups) -> int | None:
@@ -815,6 +989,117 @@ class ReputationFacts(BaseModel):
 
                 return int(found.group("malicious")), _group("total"), _group("suspicious")
         return None
+
+
+# What a tool's call does with the sample's code (``ToolEffects.executes``):
+# nothing, or runs it natively on its server's host, under an emulator, or in a
+# sandbox. Empty: the declaration does not say.
+EXECUTES_NO = "no"
+EXECUTES_NATIVE = "native"
+EXECUTES_EMULATION = "emulation"
+EXECUTES_SANDBOX = "sandbox"
+EXECUTION_MODES: tuple[str, ...] = (
+    EXECUTES_NO,
+    EXECUTES_NATIVE,
+    EXECUTES_EMULATION,
+    EXECUTES_SANDBOX,
+)
+# What of the sample a call sends to a third party (``ToolEffects.third_party``):
+# nothing, its hash, or its bytes. Empty: the declaration does not say.
+THIRD_PARTY_NO = "no"
+THIRD_PARTY_HASH = "hash"
+THIRD_PARTY_BYTES = "bytes"
+THIRD_PARTY_SENDS: tuple[str, ...] = (THIRD_PARTY_NO, THIRD_PARTY_HASH, THIRD_PARTY_BYTES)
+# Where a tool's call reaches a network, when it reaches one only in a named
+# way (``ToolEffects.network``, beside ``true`` and ``false``):
+# ``on_refresh``: only to fetch or refresh reference data the tool keeps (a
+# technique catalogue, model weights), never with anything of the sample;
+# ``case_store``: the configured case-memory store, wherever it is, which the
+# disclosure's case-memory row places;
+# ``operator_sandbox``: the operator's own sandbox service the tool's server
+# fronts (its API), which is not a third party.
+NETWORK_ON_REFRESH = "on_refresh"
+NETWORK_CASE_STORE = "case_store"
+NETWORK_OPERATOR_SANDBOX = "operator_sandbox"
+NETWORK_MODES: tuple[str, ...] = (
+    NETWORK_ON_REFRESH,
+    NETWORK_CASE_STORE,
+    NETWORK_OPERATOR_SANDBOX,
+)
+# The network answers that carry nothing of the sample out.
+_CLOSED_NETWORKS: tuple[bool | str, ...] = (False, NETWORK_ON_REFRESH, NETWORK_CASE_STORE)
+# The declaration fields merged one level deeper, sub-field by sub-field
+# (:func:`merge_tool_facts`, :func:`tool_facts_changes`): an operator's change of
+# one sub-field keeps the shipped value of every other, and a later release's
+# correction of another still reaches the tool. ``null`` clears the field.
+SUBFIELD_MERGED: tuple[str, ...] = ("effects",)
+
+
+class ToolEffects(BaseModel):
+    """What one tool's call does beyond answering, as its declaration says.
+
+    ``executes`` says whether the call runs the sample's code, and how
+    (:data:`EXECUTION_MODES`); ``network`` whether the tool itself reaches a
+    network service beyond its own server (a lookup, a submission, a fetch),
+    ``true`` or ``false``, or one of :data:`NETWORK_MODES` where it reaches
+    one only in that named way; ``third_party`` what of the sample it sends to
+    a third party (:data:`THIRD_PARTY_SENDS`). Each left unset (``""``,
+    ``None``) is not declared, and is said to be undeclared, never taken as
+    "no"; ``why_undeclared`` says why one is left unset, where the platform
+    cannot vouch for it (a tool that runs whatever script it is given), and
+    ``when`` the condition under which a declared effect happens, where it
+    happens only under one (an analysis level). ``offline_without_credentials``
+    says the tool answers from this machine when it is handed no credentials,
+    reaching its third party only where it is given them (left unset, it is
+    not declared); an offline rehearsal keeps such a server and names it. The
+    sample's bytes going out are ``ToolFacts.discloses_sample`` as well:
+    either one declares it, and the run's disclosure block reads the same
+    rule (``analysis.tool_effects.sends_sample_bytes``); a tool whose network
+    is ``operator_sandbox`` hands them to the operator's own sandbox.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    executes: str = ""
+    network: bool | str | None = None
+    third_party: str = ""
+    why_undeclared: str = ""
+    when: str = ""
+    offline_without_credentials: bool | None = None
+
+    def with_bytes_sent(self) -> ToolEffects:
+        """These effects with the sample's bytes sent out: ``third_party`` ``bytes``, and a
+        network that carries them (``true`` unless it already names the operator's sandbox)."""
+        network = True if self.network is None or self.network in _CLOSED_NETWORKS else self.network
+        return self.model_copy(update={"third_party": THIRD_PARTY_BYTES, "network": network})
+
+    @field_validator("network")
+    @classmethod
+    def _a_known_network(cls, value: bool | str | None) -> bool | str | None:
+        if isinstance(value, str) and value not in NETWORK_MODES:
+            raise ValueError(
+                f"effects.network {value!r} is not true, false or one of: "
+                + ", ".join(NETWORK_MODES)
+            )
+        return value
+
+    @field_validator("executes")
+    @classmethod
+    def _a_known_mode(cls, value: str) -> str:
+        if value and value not in EXECUTION_MODES:
+            raise ValueError(
+                f"effects.executes {value!r} is not one of: " + ", ".join(EXECUTION_MODES)
+            )
+        return value
+
+    @field_validator("third_party")
+    @classmethod
+    def _a_known_send(cls, value: str) -> str:
+        if value and value not in THIRD_PARTY_SENDS:
+            raise ValueError(
+                f"effects.third_party {value!r} is not one of: " + ", ".join(THIRD_PARTY_SENDS)
+            )
+        return value
 
 
 class ToolFacts(BaseModel):
@@ -829,9 +1114,17 @@ class ToolFacts(BaseModel):
     wall clock of its own; ``timeout_seconds`` is the budget the tool itself
     keeps and ``memory_peak_mb`` its measured peak, where known.
     ``discloses_sample`` marks a tool that sends the sample, or its bytes, out
-    of the deployment. ``holds_strings`` marks a tool whose answer holds the
+    of the deployment. ``read_only`` marks a tool that changes nothing and
+    answers an identical call the same (read-only or idempotent): a revision
+    that repeats an identical call of an earlier round is answered from that
+    round's entry. ``holds_strings`` marks a tool whose answer holds the
     sample's strings as data though its kind is not a strings kind (a report
     that anchors strings to the functions referring to them).
+    ``reads_delay_imports`` marks a format tool whose import rows cover the
+    imports the format binds late: the PE delay-load table, or, for a format
+    that keeps its late-bound imports in the one table the tool reads (ELF),
+    that table. A read of a tool that declares it, or whose answer
+    carries a ``delay_imports`` list, can be the binary's complete import list.
 
     ``rows`` is the path of the answer's rows; ``places`` names, per kind of
     place (``offset``, ``rva``, ``address``, ``addresses``, ``call_site``,
@@ -853,7 +1146,25 @@ class ToolFacts(BaseModel):
     report sections whose writer is shown this tool's answers, ``words`` the
     words a statement may use to name this tool's entry, ``display_name`` the
     name published text gives the tool, and ``category`` the tag its
-    description is shown with.
+    description is shown with. ``routed_formats`` lists the routed sample
+    formats a format-specific tool serves (``pe_info`` serves ``pe``): when the
+    tool cannot answer on its server, a sample of another known format loses
+    nothing by it, and its unavailability is not recorded for that sample.
+    ``effects`` says what a call does beyond answering (:class:`ToolEffects`):
+    whether it runs the sample's code, reaches the network, or sends the
+    sample's hash or bytes to a third party. ``aggregate_of`` names the tools
+    of the same server this tool is the aggregate (combined) form of: one call
+    answers what many calls of those would (a decompilation of many functions
+    at once, a whole-program graph that combines per-function ones). The tool
+    is shown to the model as such (``undeclared_tools.with_aggregate_notes``),
+    so it can choose the one call over the many; each name is a tool of the
+    same server (:func:`aggregate_reference_errors`). ``shows`` and
+    ``does_not_show`` say, in a few words of the operator's, what the tool's
+    answer shows and what it does not show (a reputation lookup shows what
+    others reported of the sample and not its behaviour): shown in the console
+    and the docs, and after the tool's description only while
+    ``mcp.answer_scope_notes`` is on (``undeclared_tools.answer_scope_note``).
+    Each is one line of text (:func:`check_scope_text`).
     """
 
     # A key this model does not know is refused in an operator's edit
@@ -869,7 +1180,9 @@ class ToolFacts(BaseModel):
     timeout_seconds: float | None = Field(default=None, gt=0)
     memory_peak_mb: int | None = Field(default=None, gt=0)
     discloses_sample: bool = False
+    read_only: bool = False
     holds_strings: bool = False
+    reads_delay_imports: bool = False
     rows: str = ""
     places: dict[str, str] = Field(default_factory=dict)
     values: dict[str, str] = Field(default_factory=dict)
@@ -882,6 +1195,11 @@ class ToolFacts(BaseModel):
     words: tuple[str, ...] = ()
     display_name: str = ""
     category: str = ""
+    routed_formats: tuple[str, ...] = ()
+    effects: ToolEffects | None = None
+    aggregate_of: tuple[str, ...] = ()
+    shows: str = ""
+    does_not_show: str = ""
 
     @model_validator(mode="before")
     @classmethod
@@ -947,6 +1265,48 @@ class ToolFacts(BaseModel):
     def _sections_are_words(cls, value: tuple[str, ...]) -> tuple[str, ...]:
         return tuple(_words(value, "report section"))
 
+    @field_validator("routed_formats")
+    @classmethod
+    def _formats_are_known_routed_formats(cls, value: tuple[str, ...]) -> tuple[str, ...]:
+        # A name the router never gives a sample would drop the tool's reason
+        # for every sample, without a word: each name is one it gives. And a
+        # tool's routed formats are the known formats it serves, so the label
+        # of a sample of no known format (``unknown``) is not one of them.
+        from maljan.extractors.sample_identity import UNKNOWN_FORMAT, routed_formats
+
+        known = tuple(name for name in routed_formats() if name != UNKNOWN_FORMAT)
+        for name in value:
+            if not _ROUTED_FORMAT_RE.fullmatch(name):
+                raise ValueError(
+                    f"routed format {name!r} is not a format name: lowercase letters, digits "
+                    "and . _ + -, starting with a letter or a digit, at most 64 characters"
+                )
+            if name == UNKNOWN_FORMAT:
+                raise ValueError(
+                    f"routed format {name!r} is the label of a sample of no known format; a "
+                    "tool's routed formats are the known formats it serves"
+                )
+            if name not in known:
+                raise ValueError(
+                    f"routed format {name!r} is not one the router gives a sample; one of: "
+                    + ", ".join(known)
+                )
+        return value
+
+    @field_validator("aggregate_of")
+    @classmethod
+    def _aggregated_tools_are_names(cls, value: tuple[str, ...]) -> tuple[str, ...]:
+        names = tuple(check_tool_name(v, "aggregate_of tool") for v in value)
+        repeated = sorted({name for name in names if names.count(name) > 1})
+        if repeated:
+            raise ValueError(f"aggregate_of names {', '.join(repeated)} more than once")
+        return names
+
+    @field_validator("shows", "does_not_show")
+    @classmethod
+    def _scope_is_one_line(cls, value: str, info: Any) -> str:
+        return check_scope_text(value, info.field_name)
+
     @model_validator(mode="after")
     def _a_source_is_an_asserting_tool_s(self) -> ToolFacts:
         if self.asserts_techniques and not self.techniques:
@@ -955,6 +1315,24 @@ class ToolFacts(BaseModel):
             raise ValueError("source names a corroborating tool; set asserts_techniques")
         if (self.places or self.values) and not self.rows:
             raise ValueError("places and values are read inside rows; declare rows")
+        effects = self.effects
+        if effects is not None and self.discloses_sample:
+            # A tick of ``discloses_sample`` (an operator's, over a shipped
+            # tool's effects) is the explicit word: the sample's bytes go out,
+            # so the effects say so, field by field, and are never refused for
+            # what the tick overrides.
+            lifted = effects.with_bytes_sent()
+            if lifted != effects:
+                object.__setattr__(self, "effects", lifted)
+        elif effects is not None and STRICT_DECLARATIONS.get():
+            # Refused in an operator's edit only; a record already accepted is
+            # read with the cautious answer (``analysis.tool_effects``).
+            sends = effects.third_party in (THIRD_PARTY_HASH, THIRD_PARTY_BYTES)
+            if sends and effects.network in _CLOSED_NETWORKS:
+                raise ValueError(
+                    "a tool that sends the sample or its hash out reaches the network with it; "
+                    "effects.network cannot be false, on_refresh or case_store"
+                )
         if not self.kind and STRICT_DECLARATIONS.get():
             held = self.model_dump(exclude_defaults=True)
             held.pop("kind", None)
@@ -1079,6 +1457,8 @@ DECLARATION_FIELDS: tuple[str, ...] = (
     "reference_urls",
     "tool_facts",
     "credential_bootstrap",
+    "launcher_depth",
+    "prepass_tools",
 )
 # The declaration fields a settings snapshot records only where an operator
 # set them (the shipped values are named by a digest instead).
@@ -1368,16 +1748,77 @@ def sent_names_refusal(sent: Mapping[str, Any], kept: Iterable[str] = (), server
     return ""
 
 
+# The declaration fields the last release that stored a tool map whole knew:
+# the frozen record's defaults
+# (``apps/api/alembic/versions/20261012000000_shipped_tool_declarations.json``,
+# held equal by a test). Frozen, because no later release stores a map whole.
+WHOLE_MAP_FIELDS: frozenset[str] = frozenset(
+    {
+        "arguments",
+        "asserts_techniques",
+        "category",
+        "discloses_sample",
+        "display_name",
+        "holds_strings",
+        "kind",
+        "long_running",
+        "memory_peak_mb",
+        "places",
+        "reader",
+        "report_sections",
+        "reputation",
+        "rows",
+        "source",
+        "techniques",
+        "timeout_seconds",
+        "values",
+        "words",
+    }
+)
+
+# The declaration fields no release that stored a tool map whole knew: every
+# ``ToolFacts`` field but those, so a field added later is one at once
+# (``read_only``, ``function_starts``, ``routed_formats``, ``effects``, ...).
+# Such a map leaves them out because it predates them, never to clear them, so
+# for a tool the block ships each one it leaves out follows the shipped
+# declaration, merged per field as :func:`merge_tool_facts` merges a change: a
+# value the map sets is the operator's and wins.
+FIELDS_AFTER_WHOLE_MAPS: tuple[str, ...] = tuple(
+    name for name in ToolFacts.model_fields if name not in WHOLE_MAP_FIELDS
+)
+
+
+def _with_later_fields(held: Any, shipped: Any) -> Any:
+    """A whole map's declaration of a shipped tool, with the later fields it leaves out shipped."""
+    if not isinstance(held, Mapping) or not isinstance(shipped, Mapping):
+        return held
+    later: dict[str, Any] = {}
+    for name in FIELDS_AFTER_WHOLE_MAPS:
+        if name not in shipped:
+            continue
+        below, above = shipped[name], held.get(name)
+        if name not in held:
+            later[name] = _copy(below)
+        elif name in SUBFIELD_MERGED and isinstance(below, Mapping) and isinstance(above, Mapping):
+            # Merged sub-field by sub-field, as :func:`merge_tool_facts` merges it.
+            later[name] = {**_copy(dict(below)), **_copy(dict(above))}
+    return {**held, **later} if later else held
+
+
 def whole_as_changes(whole: Mapping[str, Any], shipped: Mapping[str, Any]) -> dict[str, Any]:
     """A map stored whole, as the changes over ``shipped`` that put the same in force.
 
     Read whole, a shipped tool the map does not name was removed (``None``),
     and a field a shipped tool's declaration leaves out is at its default,
-    not at the shipped value. Time linear in the two maps.
+    not at the shipped value, except a field no release that stored a map
+    whole knew (:data:`FIELDS_AFTER_WHOLE_MAPS`), which follows the shipped
+    value. Time linear in the two maps.
     """
     unset = ToolFacts.model_construct().model_dump(mode="json")
     filled = {
-        tool: {**unset, **held} if tool in shipped and isinstance(held, Mapping) else held
+        tool: {**unset, **_with_later_fields(held, shipped[tool])}
+        if tool in shipped and isinstance(held, Mapping)
+        else held
         for tool, held in without_mark(whole).items()
     }
     return tool_facts_changes(filled, shipped)
@@ -1472,14 +1913,17 @@ def stored_in_force(
     A map marked as changes (:func:`holds_changes`) is merged over
     ``shipped`` one tool at a time (:func:`merge_tool_facts`). A map without
     the mark was stored whole by an earlier release and is in force as
-    stored, as it was then. Either way, each tool the stored map names is
-    read as the model reads a stored declaration (leniently); one the model
-    refuses (its name, or a field it sets that needs one this release no
-    longer ships, also for a tool this release no longer ships at all) is
-    left out: the tool is in force as shipped, or not at all where nothing
-    ships for it, its name is returned, and one warning names it. ``server``
-    is the block's tool-server key, if it is one, under which a name spelled
-    as its renamed tool is refused (:func:`check_own_prefix`). A stored value
+    stored, as it was then, but for the fields that release did not know
+    (:data:`FIELDS_AFTER_WHOLE_MAPS`), which a shipped tool it names takes
+    from the shipped declaration where it leaves them out. Either way, each
+    tool the stored map names is read as the model reads a stored
+    declaration (leniently); one the model refuses (its name, or a field it
+    sets that needs one this release no longer ships, also for a tool this
+    release no longer ships at all) is left out: the tool is in force as
+    shipped, or not at all where nothing ships for it, its name is returned,
+    and one warning names it. ``server`` is the block's tool-server key, if
+    it is one, under which a name spelled as its renamed tool is refused
+    (:func:`check_own_prefix`). A stored value
     whose form no release writes (:func:`unreadable_map`) is read as absent:
     what ships is in force, the mark's key is returned for the whole map, and
     one warning says so. So no stored map of tool declarations ever stops the
@@ -1493,7 +1937,9 @@ def stored_in_force(
         in_force = merge_tool_facts(shipped, named)
     else:
         named = dict(stored)
-        in_force = _copy(named)
+        in_force = {
+            tool: _copy(_with_later_fields(held, shipped.get(tool))) for tool, held in named.items()
+        }
     refused = [
         tool for tool in named if tool in in_force and _refused_tool(tool, in_force[tool], server)
     ]
@@ -1576,7 +2022,12 @@ def merge_tool_facts(shipped: Mapping[str, Any], stored: Mapping[str, Any]) -> d
         if change is None:
             continue
         if isinstance(change, Mapping) and isinstance(facts, Mapping):
-            out[tool] = {**_copy(dict(facts)), **_copy(dict(change))}
+            merged = {**_copy(dict(facts)), **_copy(dict(change))}
+            for name in SUBFIELD_MERGED:
+                below, above = facts.get(name), change.get(name)
+                if isinstance(below, Mapping) and isinstance(above, Mapping):
+                    merged[name] = {**_copy(dict(below)), **_copy(dict(above))}
+            out[tool] = merged
         else:
             out[tool] = _copy(change)
     for tool, change in stored.items():
@@ -1608,6 +2059,18 @@ def tool_facts_changes(in_force: Mapping[str, Any], shipped: Mapping[str, Any]) 
                 for name, value in held.items()
                 if name not in facts or not _same(value, facts[name])
             }
+            for name in SUBFIELD_MERGED:
+                below, above = facts.get(name), changed.get(name)
+                if isinstance(below, Mapping) and isinstance(above, Mapping):
+                    sub = {
+                        str(key): _copy(value)
+                        for key, value in above.items()
+                        if key not in below or not _same(value, below[key])
+                    }
+                    if sub:
+                        changed[name] = sub
+                    else:
+                        changed.pop(name)
             if changed:
                 out[tool] = changed
         elif not _same(held, facts):
@@ -1642,12 +2105,35 @@ def strip_declaration_defaults(dumped: dict[str, Any], default: MCPServerConfig)
     return out
 
 
+# The fields of a tool's declaration added after digests were first recorded,
+# left out of a block's digest where a tool leaves them at their default, so
+# adding one moves no digest of a block whose tools do not set it.
+DIGEST_OMITS_AT_DEFAULT: tuple[str, ...] = ("aggregate_of", "shows", "does_not_show")
+
+
+def _digested_tools(tool_facts: Any) -> Any:
+    if not isinstance(tool_facts, Mapping):
+        return tool_facts
+    return {
+        tool: {
+            key: value
+            for key, value in facts.items()
+            if not (key in DIGEST_OMITS_AT_DEFAULT and not is_set(key, value))
+        }
+        if isinstance(facts, Mapping)
+        else facts
+        for tool, facts in tool_facts.items()
+    }
+
+
 def declaration_digest(cfg: Any) -> str:
     """A short digest of one block's whole declaration, as it is in force."""
     dumped = cfg.model_dump(mode="json") if isinstance(cfg, BaseModel) else dict(cfg)
     # A field a block leaves unset (``None``) is left out, so a field added to
     # the declaration later moves no digest of a block that does not set it.
     body = {name: dumped.get(name) for name in DECLARATION_FIELDS if dumped.get(name) is not None}
+    if "tool_facts" in body:
+        body["tool_facts"] = _digested_tools(body["tool_facts"])
     text = json.dumps(body, sort_keys=True, separators=(",", ":"), default=str)
     return hashlib.sha256(text.encode("utf-8")).hexdigest()[:16]
 
@@ -2003,14 +2489,16 @@ class ToolDeclarations:
         except ValueError:
             return None
 
-    def declaration_for(self, entry: Any) -> ToolFacts | None:
+    def declaration_for(self, entry: Any, *, exact: bool = False) -> ToolFacts | None:
         """The declaration of one tool, by its source and its name together.
 
         ``entry`` is a ledger entry (or a mapping with ``source`` and ``tool``),
         or a ``(source, tool)`` pair whose source is a :class:`SourceRef` or its
         text (``mcp:analysis``). A tool server's tool renamed with its own
         server's prefix (``knowledge__capabilities``) is read without that
-        prefix; no other prefix is taken off.
+        prefix; no other prefix is taken off. With ``exact`` the name is the
+        declared one already (a tool recorded with the name its server
+        declares it under) and nothing is taken off it.
         """
         if isinstance(entry, tuple):
             raw, tool = entry
@@ -2025,7 +2513,7 @@ class ToolDeclarations:
             return None
         if tool in held.tools:
             return held.tools[tool]
-        if ref.kind == "mcp":
+        if ref.kind == "mcp" and not exact:
             return held.tools.get(renamed_tool(ref.key, tool))
         return None
 
@@ -2072,11 +2560,17 @@ class ToolDeclarations:
 
 
 def selected_static_providers(settings: Settings) -> set[str]:
-    """The static providers this deployment selects: the global one and any agent's own."""
+    """The static providers this deployment selects: the global one, any agent's and any team's.
+
+    A team's choice outranks its members' own at run time, so it is selected too.
+    """
     chosen = {str(settings.static.provider)}
     for definition in settings.agents.definitions.values():
         if definition.enabled and definition.static_provider:
             chosen.add(str(definition.static_provider))
+    for team in settings.agents.profiles.values():
+        if team.static_provider:
+            chosen.add(str(team.static_provider))
     return chosen
 
 

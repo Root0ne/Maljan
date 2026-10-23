@@ -2,12 +2,36 @@ import type { CatalogEntry, McpServerEntry } from "@/types/settings";
 import type { AgentLLMOverride } from "./AgentDefinitionsEditor";
 import {
   AGENT_DEFINITIONS_KEY,
+  builtinAgentKeys,
   displayedDefinitions,
   type DefinitionMap,
   type StagedDefinitionMap,
 } from "./agentStaging";
 import type { SettingsContextValue } from "./SettingsContext";
 import { agentEndpointProviders } from "@/lib/providerFacts";
+import { rosterAgentKeys } from "./choiceRows";
+
+/** `core.agents.definitions` as it stands on screen: the stored map with the
+ *  staged edits over it, read through the pair like every reader of the leaf. */
+export function liveDefinitions(ctx: SettingsContextValue): DefinitionMap {
+  return displayedDefinitions(
+    (ctx.pending[AGENT_DEFINITIONS_KEY] ?? null) as StagedDefinitionMap | null,
+    (ctx.values[AGENT_DEFINITIONS_KEY]?.value ?? {}) as DefinitionMap,
+    builtinAgentKeys(ctx.entriesByKey[AGENT_DEFINITIONS_KEY]?.builtin_agent_keys),
+  );
+}
+
+/** The agents a tool server may be bound to, as the next apply will judge
+ *  them (`rosterAgentKeys`). */
+export function serverAgentRoster(ctx: SettingsContextValue): string[] {
+  const serverMap = ctx.entriesByKey["core.mcp.servers"];
+  return rosterAgentKeys({
+    served: serverMap?.agent_keys,
+    seeded: serverMap?.builtin_agent_keys,
+    definitions: liveDefinitions(ctx),
+    definitionsStaged: ctx.pending[AGENT_DEFINITIONS_KEY] !== undefined,
+  });
+}
 
 /**
  * Builds the props `FieldRow` needs for one catalog entry, from the shared
@@ -52,10 +76,8 @@ export function buildFieldRowProps(ctx: SettingsContextValue, entry: CatalogEntr
     // pending value raw left the stage cards and the analyst picker naming
     // five built-ins by key — "static" where they had read "Static analyst" a
     // moment before — for as long as an agent-map edit was unapplied.
-    definitions: displayedDefinitions(
-      (ctx.pending[AGENT_DEFINITIONS_KEY] ?? null) as StagedDefinitionMap | null,
-      (ctx.values[AGENT_DEFINITIONS_KEY]?.value ?? {}) as DefinitionMap,
-    ),
+    definitions: liveDefinitions(ctx),
+    agentRoster: entry.editor === "server_map" ? serverAgentRoster(ctx) : undefined,
     activeProfile: (ctx.pending["core.agents.profile"] ??
       ctx.values["core.agents.profile"]?.value ??
       "default") as string,

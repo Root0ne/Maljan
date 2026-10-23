@@ -4,49 +4,173 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 import time
 import uuid
-from collections.abc import Callable
+from collections.abc import Callable, Iterable, Iterator
+from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
 
 from maljan.core import settings_secrets as box
 from maljan.core.config import BUILTIN_SERVER_KEYS, Settings, builtin_env_allow
+from maljan.core.plugins import (
+    ALLOW_LIST_KEY,
+    dropped_selections,
+    id_refusal,
+    install_allow_list,
+)
+from maljan.core.settings_catalog import PLUGIN_CHOICE_KINDS, _registry_choices
+from maljan.core.settings_masking import (
+    mask_left_in,
+    masked_server,
+    masked_server_map,
+    masked_strings,
+    masked_value,
+    unmasked,
+    value_at,
+)
 from maljan.core.settings_overrides import (
     SERVER_MAP_PATH,
     build_settings,
     effective_source,
     flatten_leaves,
     pack_step_refusals,
+    settings_from_store,
     shipped_tool_facts,
+    shipped_tools,
     split_key,
+    unknown_reference_refusals,
 )
 from pydantic import ValidationError
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm.attributes import flag_modified
 
 from app.config import settings as api_settings
 from app.models import RuntimeSetting
 from app.services.enrichment_sources import SOURCE_SECRETS
-from app.services.frontier_arms import ARMS
+from app.services.frontier_arms import ARMS, ARMS_KEY
 from app.services.nested_secrets import NestedSecretMap
 from app.services.server_map import (
+    SERVER_ENV_SUFFIX,
     SERVER_MAP_KEY,
     TOKEN_MASK,
     ServerMapError,
+    env_of_row,
     merge_server_secrets,
+    server_env_key,
     server_token_key,
+    split_server_env,
     split_server_secrets,
 )
 from app.services.settings_catalog_api import (
     API_DEFAULTS,
     _masked,
     catalog_index,
+    refresh_grace_problem,
     validate_editable_api_value,
 )
 
 logger = logging.getLogger(__name__)
+
+
+def merged_allow_list(changes: dict[str, Any], stored: dict[str, Any]) -> list[Any]:
+    """The plugin allow-list a save of ``changes`` over ``stored`` would leave in force."""
+    value = changes[ALLOW_LIST_KEY] if ALLOW_LIST_KEY in changes else stored.get(ALLOW_LIST_KEY)
+    return list(value) if isinstance(value, list) else []
+
+
+def choice_refusal(entry: Any, value: Any, allowed: list[Any]) -> str:
+    """Why ``value`` is not one of ``entry``'s choices; ``""`` when it is.
+
+    A provider id is a shipped one, or an installed plugin of that kind that
+    ``allowed`` (the list the save leaves) names, read from package metadata:
+    never what the API process has loaded, which is how the worker judges it
+    too. A refusal gives the plugin's own cause where one applies, else names
+    the allow-list.
+    """
+    kind = PLUGIN_CHOICE_KINDS.get(entry.choices_from)
+    if kind is None:
+        choices = entry.choices or []
+        return "" if value in choices else f"not one of: {', '.join(choices)}"
+    refused = id_refusal(kind, value, allowed)
+    if not refused:
+        return ""
+    return f"not one of: {', '.join(_registry_choices(entry.choices_from) or [])}; {refused}"
+
+
+def _core(flat: dict[str, Any]) -> dict[str, Any]:
+    return {split_key(k)[1]: v for k, v in flat.items() if k.startswith("core.")}
+
+
+# A key of an LLM or memory plugin's own settings block.
+_PLUGIN_BLOCK_KEY = re.compile(r"core\.(llm|memory)\.([^.]+)\..+")
+
+
+def unknown_key_reason(
+    key: str, stored_allowed: Any, said: str = "unknown setting", leaves: Any = None
+) -> str:
+    """Why ``key`` is refused as unknown: ``said``, with the cause when it is a plugin's block.
+
+    A plugin's own settings are read with its model, so a key of its block is
+    known once the API has loaded it, which it does for a save that writes
+    such a key while the stored allow-list ``stored_allowed`` names it and the
+    list the save leaves, ``leaves`` (the stored one when ``None``), still does.
+    """
+    from maljan.core import plugins
+
+    match = _PLUGIN_BLOCK_KEY.fullmatch(str(key))
+    if match is None:
+        return said
+    kind, name = match.groups()
+    listed = plugins.allowed_names(kind, plugins.usable_list(stored_allowed))
+    if name in plugins.loaded_names(kind):
+        return said
+    if name not in listed:
+        if not any(plugin.name == name for plugin in plugins.installed(kind)):
+            return said
+        return (
+            f"{said}: it belongs to plugin {kind}:{name}, whose own settings are read with its "
+            "model once the stored plugin allow-list names it; save the list naming "
+            f"{kind}:{name} first, then its settings"
+        )
+    if leaves is not None and name not in plugins.allowed_names(kind, plugins.usable_list(leaves)):
+        return (
+            f"{said}: it belongs to plugin {kind}:{name}, which this change drops from the "
+            "plugin allow-list, so the API does not load it to read its settings; leave its "
+            "changed settings out, or keep it on the list"
+        )
+    why = plugins.unavailable_reason(kind, name) or "its load has not finished"
+    return f"{said}: the API has not loaded plugin {kind}:{name} to read it ({why})"
+
+
+def cleared_plugin_block_keys(changes: dict[str, Any], known: Iterable[str]) -> list[str]:
+    """The keys ``changes`` clears (``None``) in an installed plugin's own block outside ``known``.
+
+    ``known`` is the catalogue's keys. Such a key is one of a plugin this
+    process has not loaded; clearing it deletes its stored row, which needs no
+    model, so no plugin is loaded for it and no value of the row is read.
+    """
+    from maljan.core import plugins
+
+    held = set(known)
+    names: dict[str, set[str]] = {}
+    out: list[str] = []
+    for key, value in changes.items():
+        if value is not None or key in held:
+            continue
+        match = _PLUGIN_BLOCK_KEY.fullmatch(str(key))
+        if match is None:
+            continue
+        kind, name = match.groups()
+        if kind not in names:
+            names[kind] = {plugin.name for plugin in plugins.installed(kind)}
+        if name in names[kind]:
+            out.append(key)
+    return out
 
 
 # The catalog leaves that hold a provider block's tool declarations
@@ -149,8 +273,19 @@ def changed_declaration_refusals(
             errors[key] = refusal
             continue
         before = stored_in_force(shipped, held)[0] if isinstance(held, dict) else None
+        # An ``aggregate_of`` names a tool the block declares or its allow-list in
+        # force names: sent in this save, else stored, else shipped, as a load reads it.
+        tools_key = key.removesuffix(TOOL_FACTS_LEAF_SUFFIX) + ".tools"
+        if tools_key in changes:
+            listed = changes[tools_key]
+        elif tools_key in current:
+            listed = current[tools_key]
+        else:
+            listed = shipped_tools(split_key(key)[1].removesuffix(TOOL_FACTS_LEAF_SUFFIX))
         for where, message in changed_declaration_errors(
-            merge_tool_facts(shipped, edited), [before, shipped]
+            merge_tool_facts(shipped, edited),
+            [before, shipped],
+            tools=listed if isinstance(listed, list) else None,
         ).items():
             errors[f"{key}.{where}"] = message
     return errors
@@ -219,7 +354,7 @@ def served_tool_facts(stored: dict[str, Any], shipped: dict[str, Any]) -> dict[s
 
 
 def lenient_imported_declarations(
-    values: dict[str, Any], *, whole_maps: bool = False
+    values: dict[str, Any],
 ) -> tuple[dict[str, Any], dict[str, str]]:
     """An import document's tool declarations, without what this version cannot read.
 
@@ -232,10 +367,11 @@ def lenient_imported_declarations(
     A block's tool declarations marked as changes
     (``tool_declarations.holds_changes``) are its changes over what the block
     ships, one tool at a time; each tool the document names is read as it is
-    in force, and kept as its changes again, marked. A map without the mark,
-    and every map when ``whole_maps`` says the document was written before
-    declarations were stored that way, is its whole map: a shipped tool it
-    does not name was removed, and stays removed.
+    in force, and kept as its changes again, marked, whichever format the
+    document is in: only a format that stores changes writes the mark, so a
+    ``maljan-settings/1`` document relabelled from one is read as it was
+    written. A map without the mark is its whole map: a shipped tool it does
+    not name was removed, and stays removed.
     """
     from maljan.core.tool_declarations import (
         holds_changes,
@@ -276,14 +412,15 @@ def lenient_imported_declarations(
             if tool in declared
         }
         declared = {tool: held for tool, held in declared.items() if tool not in carried}
-        # A map marked as changes is read as changes; one without the mark
-        # (every map of a ``/1`` document, or of a ``/2`` one exported from a
-        # store a release before the mark wrote) is read whole, as it was
-        # written: a shipped tool it does not name was removed, and a field a
-        # shipped tool's declaration leaves out is at its default.
+        # A map marked as changes is read as changes, in any document format;
+        # one without the mark (every map a ``/1`` document was written with,
+        # or one of a ``/2`` document exported from a store a release before
+        # the mark wrote) is read whole, as it was written: a shipped tool it
+        # does not name was removed, and a field a shipped tool's declaration
+        # leaves out is at its default.
         declared = (
             without_mark(declared)
-            if holds_changes(declared) and not whole_maps
+            if holds_changes(declared)
             else whole_as_changes(declared, shipped)
         )
         in_force = merge_tool_facts(shipped, declared)
@@ -331,6 +468,28 @@ def lenient_imported_declarations(
     return out, warnings
 
 
+_DEFINITIONS_KEY = "core.agents.definitions"
+
+
+def definitions_after_save(current: dict[str, Any], changes: dict[str, Any]) -> dict[str, Any]:
+    """The stored overrides with the agent definitions this save puts in force.
+
+    A server's ``agents`` list is checked against the definition keys, and a
+    console apply sends the definition map and the server map in one request:
+    an agent added in it is known to the server binding, and one the request
+    removes is not. The definition map is sent whole, so its value replaces
+    the stored one, an entry set to ``null`` names no agent, and a ``null``
+    map leaves the built-ins alone (``server_map._definition_keys`` adds them).
+    """
+    if _DEFINITIONS_KEY not in changes:
+        return current
+    incoming = changes[_DEFINITIONS_KEY]
+    out = {key: value for key, value in current.items() if key != _DEFINITIONS_KEY}
+    if isinstance(incoming, dict):
+        out[_DEFINITIONS_KEY] = {k: v for k, v in incoming.items() if v is not None}
+    return out
+
+
 class SettingsValidationError(Exception):
     def __init__(self, errors: dict[str, str]) -> None:
         super().__init__("; ".join(f"{k}: {v}" for k, v in errors.items()))
@@ -362,10 +521,111 @@ class SaveResult:
 # enrichment sources.
 NESTED_SECRET_MAPS: tuple[NestedSecretMap, ...] = (ARMS, SOURCE_SECRETS)
 _NESTED_BY_KEY = {spec.key: spec for spec in NESTED_SECRET_MAPS}
-_COMPOSITE_SECRET_SUFFIX = {
-    SERVER_MAP_KEY: ".auth_token",
+NESTED_SECRET_KEYS = frozenset(_NESTED_BY_KEY)
+# Rows a start-up repair writes to record that it is done. Their keys sit
+# outside every settings namespace and are never read as a setting.
+MARKER_PREFIX = "maljan.repair."
+# The settings audit rows written before their values were masked are masked
+# (``composite_secrets.mask_audited_settings``).
+AUDIT_MASKED_MARKER = f"{MARKER_PREFIX}settings_audit_masked"
+
+_COMPOSITE_SECRET_SUFFIX: dict[str, str | tuple[str, ...]] = {
+    SERVER_MAP_KEY: (".auth_token", SERVER_ENV_SUFFIX),
     **{spec.key: spec.suffix for spec in NESTED_SECRET_MAPS},
 }
+
+
+def shown_setting(entry: Any, value: Any) -> Any:
+    """A stored or default value as the console and the export may see it.
+
+    Masked as the run settings snapshot masks it, with the console's
+    ``TOKEN_MASK`` (``maljan.core.settings_masking``): the tool-server map by
+    ``masked_server`` (every ``env`` value, a credential a flag of the
+    arguments names, every URL), an open mapping (``dict``) by
+    ``masked_value`` (every entry whose key names a credential, every URL),
+    and every other value's URLs by ``masked_strings``. A secret leaf and a
+    nested-secret composite are masked by their own rules and pass through; a
+    stored row served beside the catalogue (an unloaded plugin's block) is read
+    as an open mapping, its leaf name included.
+    A value sent back as shown keeps what is stored (:func:`unmasked_changes`).
+    """
+    if value is None or entry.secret or entry.key in _NESTED_BY_KEY:
+        return value
+    if entry.key not in catalog_index():
+        # Served beside the catalogue, as stored (a plugin block this process
+        # has not loaded): no model says what its keys are, so it is read as
+        # an open mapping, its own leaf name included.
+        leaf = entry.path.rsplit(".", 1)[-1]
+        return masked_value({leaf: value}, TOKEN_MASK)[leaf]
+    if entry.key == SERVER_MAP_KEY:
+        return masked_server_map(value, TOKEN_MASK) if isinstance(value, dict) else value
+    if entry.type == "dict":
+        return masked_value(value, TOKEN_MASK)
+    return masked_strings(value, TOKEN_MASK)
+
+
+def _without_tokens(servers: dict[str, Any]) -> dict[str, Any]:
+    """The server map without its ``auth_token`` fields, which keep their own mask rule."""
+    return {
+        name: (
+            {k: v for k, v in entry.items() if k != "auth_token"}
+            if isinstance(entry, dict)
+            else entry
+        )
+        for name, entry in servers.items()
+    }
+
+
+def unmasked_changes(
+    changes: dict[str, Any], current: dict[str, Any], index: dict[str, Any]
+) -> dict[str, Any]:
+    """``changes`` with every part sent back as shown read as what is stored.
+
+    The console and the export show settings masked (:func:`shown_setting`);
+    a part that comes back exactly as shown keeps the stored value it stands
+    for. A mask left with nothing stored behind it is refused, named: it would
+    otherwise be saved as the literal characters of the mask. A server's
+    ``auth_token`` keeps its own rule (``split_server_secrets``), and so does
+    an ``env`` value, which is dropped when nothing is stored behind it.
+    """
+    out: dict[str, Any] = {}
+    errors: dict[str, str] = {}
+    for key, value in changes.items():
+        entry = index.get(key)
+        if entry is None or value is None or entry.secret or key in _NESTED_BY_KEY:
+            out[key] = value
+            continue
+        stored = current.get(key)
+        if key == SERVER_MAP_KEY and isinstance(value, dict):
+            bare = _without_tokens(stored) if isinstance(stored, dict) else {}
+            restored, paths = unmasked(value, bare, masked_server_map(bare, TOKEN_MASK))
+            left = [
+                path
+                for path in mask_left_in(_without_tokens(restored), TOKEN_MASK)
+                if ".env." not in f".{path}"
+            ]
+        else:
+            restored, paths = unmasked(value, stored, shown_setting(entry, stored))
+            left = mask_left_in(restored, TOKEN_MASK)
+        # A stored value read back is masked again where it now stands, and
+        # must read there exactly as the reader sent it; one that would be
+        # shown otherwise (an argument, or a URL argument's host and path,
+        # moved behind a flag that names no credential) is refused.
+        reshown = shown_setting(entry, restored)
+        left += [
+            ".".join(str(part) for part in path)
+            for path in paths
+            if value_at(reshown, path) != value_at(value, path)
+        ]
+        if left:
+            errors[key] = (
+                f"{', '.join(left) if left != [''] else 'the value'} still holds the mask "
+                f"({TOKEN_MASK}) with no stored value behind it: type the value again."
+            )
+        out[key] = restored
+    if errors:
+        raise SettingsValidationError(errors)
+    return out
 
 
 def _merge_nested(overrides: dict[str, Any]) -> dict[str, Any]:
@@ -374,8 +634,122 @@ def _merge_nested(overrides: dict[str, Any]) -> dict[str, Any]:
     return overrides
 
 
+def _with_env_names(stored_map: dict[str, Any], rows: dict[str, Any]) -> dict[str, Any]:
+    """The stored map with each server's encrypted ``env`` names folded back in.
+
+    Only the names are needed: the editor shows every env value as the mask
+    (``masked_server``), and a mask sent back keeps the stored value. A row
+    that cannot be decrypted shows nothing rather than failing the read.
+    """
+    out = dict(stored_map)
+    for name, entry in stored_map.items():
+        row = rows.get(server_env_key(name))
+        if row is None or not isinstance(entry, dict):
+            continue
+        try:
+            env = env_of_row(box.decrypt(str(row.value)))
+        except box.SecretsUnavailable:
+            continue
+        if env is not None:
+            out[name] = {**entry, "env": env}
+    return out
+
+
+def _audited(values: dict[str, Any], index: dict[str, Any]) -> dict[str, Any]:
+    """Settings values as the audit trail may keep them: masked as the console shows them.
+
+    A secret is already ``"set"``/``"unset"`` here. Every other value is masked
+    by :func:`shown_setting`, the console's rule: a tool server's ``env``
+    values and the credentials its arguments name, every mapping entry whose
+    key names a credential, every URL's userinfo and query values. A key with
+    no catalogue entry (a plugin block's row) is masked as an open mapping.
+    """
+    out: dict[str, Any] = {}
+    for key, value in values.items():
+        entry = index.get(key)
+        if entry is None:
+            leaf = key.rsplit(".", 1)[-1]
+            out[key] = masked_value({leaf: value}, TOKEN_MASK)[leaf]
+        elif entry.secret:
+            out[key] = value
+        else:
+            out[key] = shown_setting(entry, value)
+    return out
+
+
 def _loc_to_key(ns: str, loc: tuple[Any, ...]) -> str:
     return f"{ns}." + ".".join(str(p) for p in loc if not isinstance(p, int))
+
+
+# Whether the read in progress is the one that runs a job. A context variable
+# rather than a parameter: the read is reached through ``load_core_overrides``,
+# which the API's own readers call too, and they keep dropping a secret the
+# console cannot show.
+_refuse_undecryptable: ContextVar[bool] = ContextVar("refuse_undecryptable", default=False)
+
+
+@contextmanager
+def refusing_undecryptable_secrets() -> Iterator[None]:
+    """Within it, a core secret that cannot be decrypted refuses the read."""
+    token = _refuse_undecryptable.set(True)
+    try:
+        yield
+    finally:
+        _refuse_undecryptable.reset(token)
+
+
+_SERVER_SECRET_PREFIX = f"{SERVER_MAP_KEY}."
+
+
+async def refused_secrets_a_job_uses(
+    db: AsyncSession, refused: dict[str, str], config: dict[str, Any] | None
+) -> dict[str, str]:
+    """The refused secrets a job with ``config`` would read, keyed as they were refused.
+
+    A tool server's token or env belongs to that server, and a frontier arm's
+    key to an evaluation arm no job opens: a refusal of either that the job
+    never uses is no reason to refuse the job. Any other secret, and any key
+    whose owner cannot be told, stays refused, so the narrowing never lets a
+    job run on a default in place of a credential it reads.
+    """
+    server_suffixes = (".auth_token", SERVER_ENV_SUFFIX)
+    arm_prefix = f"{ARMS_KEY}."
+    owned = {
+        key
+        for key in refused
+        if key.startswith(_SERVER_SECRET_PREFIX) and key.endswith(server_suffixes)
+    }
+    arms = {key for key in refused if key.startswith(arm_prefix)}
+    if not owned and not arms:
+        return dict(refused)
+
+    from maljan.agents.composition import servers_a_job_calls
+
+    # Read past the refusal: the secret that cannot be read is simply absent,
+    # which is all the question "which servers does this job call" needs.
+    overrides = await load_core_overrides(db)
+    profile = str((config or {}).get("profile") or "")
+    if profile:
+        overrides = {**overrides, "agents.profile": profile}
+    provider = (config or {}).get("static_provider")
+    try:
+        used = servers_a_job_calls(
+            settings_from_store(overrides), global_provider=str(provider) if provider else None
+        )
+    except Exception:  # noqa: BLE001 - what the job calls is unknown, so every refusal stands
+        return dict(refused)
+
+    still: dict[str, str] = {}
+    for key, why in refused.items():
+        if key in arms:
+            continue
+        if key in owned:
+            name = key[len(_SERVER_SECRET_PREFIX) :]
+            name = name.removesuffix(".auth_token").removesuffix(SERVER_ENV_SUFFIX)
+            if name not in used:
+                continue
+        still[key] = why
+    return still
 
 
 class SettingsService:
@@ -390,6 +764,11 @@ class SettingsService:
     async def load_overrides(self) -> dict[str, Any]:
         """Full keys -> plain values; secrets decrypted, or dropped if they cannot be.
 
+        Inside :func:`refusing_undecryptable_secrets` (the read that runs a
+        job) a core secret that cannot be decrypted raises
+        ``StoredValueRefused`` naming its key, instead of being dropped so the
+        run goes on under the default the operator replaced.
+
         The per-server MCP tokens are stored as their own ``is_secret`` rows
         (see ``server_map``); they are merged back into the ``core.mcp.servers``
         map here, so every caller downstream — the worker's ``Settings``, the
@@ -398,11 +777,21 @@ class SettingsService:
         (see ``frontier_arms``) are stored and merged the same way.
         """
         out: dict[str, Any] = {}
+        undecryptable: dict[str, str] = {}
         for row in await self._rows():
+            if row.key.startswith(MARKER_PREFIX):
+                # A record a start-up repair keeps of itself, never a setting.
+                continue
             if row.is_secret:
                 try:
                     out[row.key] = box.decrypt(str(row.value))
                 except box.SecretsUnavailable:
+                    if _refuse_undecryptable.get() and row.key.startswith("core."):
+                        undecryptable[row.key.removeprefix("core.")] = (
+                            "the stored secret cannot be decrypted (the encryption key "
+                            "changed?); enter it again"
+                        )
+                        continue
                     logger.warning(
                         "Stored override for %s cannot be decrypted (encryption key "
                         "changed?); the environment value stays in effect.",
@@ -411,9 +800,20 @@ class SettingsService:
                     continue
             else:
                 out[row.key] = row.value
-        return _merge_nested(merge_server_secrets(out))
+        if undecryptable:
+            from maljan.core.settings_overrides import StoredValueRefused
 
-    async def values(self) -> dict[str, ValueInfo]:
+            raise StoredValueRefused(undecryptable)
+        merged = _merge_nested(merge_server_secrets(out))
+        # The stored plugin allow-list is the one this process judges a
+        # provider id by when a check is handed none; it loads and withdraws
+        # nothing (``maljan.core.plugins.load_allowed`` does, when told to).
+        install_allow_list(merged.get(ALLOW_LIST_KEY))
+        return merged
+
+    async def values(self, extra: Iterable[Any] = ()) -> dict[str, ValueInfo]:
+        """Every catalogue key's value, with its source; ``extra`` are catalogue entries
+        served beside the catalogue (a plugin block's stored rows, shown as stored)."""
         index = catalog_index()
         rows = {r.key: r for r in await self._rows()}
         core_defaults = build_settings({})
@@ -436,7 +836,7 @@ class SettingsService:
             if entry.key == SERVER_MAP_KEY:
                 stored_map: Any = row.value if row is not None else default_value
                 shown = self._masked_server_map(
-                    dict(stored_map or {}), core_defaults.mcp.servers, rows
+                    _with_env_names(dict(stored_map or {}), rows), core_defaults.mcp.servers, rows
                 )
                 src = "ui" if row is not None else effective_source(overridden=False)
                 out[key] = ValueInfo(
@@ -514,10 +914,11 @@ class SettingsService:
                 continue
             if row is not None:
                 held = row.value
-                shown_value = (
+                shown_value = shown_setting(
+                    entry,
                     served_tool_facts(held, _shipped_leaf(key))
                     if isinstance(held, dict) and _is_declaration_leaf(key, held)
-                    else held
+                    else held,
                 )
                 out[key] = ValueInfo(shown_value, None, None, "ui", row.updated_at, row.updated_by)
             else:
@@ -529,9 +930,39 @@ class SettingsService:
                 # URL-shaped values go through the same credential
                 # mask the catalog's default uses, so a password never
                 # reaches the response either way.
-                shown = default_value if entry.editable else _masked(entry.path, default_value)
+                shown = (
+                    shown_setting(entry, default_value)
+                    if entry.editable
+                    else _masked(entry.path, default_value)
+                )
                 src = effective_source(overridden=False)
                 out[key] = ValueInfo(shown, None, None, src)
+        for entry in extra:
+            row = rows.get(entry.key)
+            if entry.key in out or row is None:
+                continue
+            if entry.secret:
+                try:
+                    plain = box.decrypt(str(row.value))
+                except box.SecretsUnavailable:
+                    plain = ""
+                out[entry.key] = ValueInfo(
+                    None,
+                    True,
+                    box.hint(plain) if plain else None,
+                    "ui",
+                    row.updated_at,
+                    row.updated_by,
+                )
+            else:
+                out[entry.key] = ValueInfo(
+                    shown_setting(entry, row.value),
+                    None,
+                    None,
+                    "ui",
+                    row.updated_at,
+                    row.updated_by,
+                )
         return out
 
     def _masked_server_map(
@@ -562,7 +993,9 @@ class SettingsService:
         """
         out: dict[str, Any] = {}
         for name, entry in stored_map.items():
-            shown = dict(entry)
+            # Masked as the run snapshot masks a server (``shown_setting``):
+            # every env value, a credential a flag names, every URL.
+            shown = masked_server(dict(entry), TOKEN_MASK)
             if isinstance(shown.get("tool_facts"), dict):
                 shown["tool_facts"] = served_tool_facts(
                     shown["tool_facts"], shipped_tool_facts(f"{SERVER_MAP_PATH}.{name}")
@@ -597,11 +1030,12 @@ class SettingsService:
         """
         index = catalog_index()
         stored = stored or {}
+        allowed = merged_allow_list(changes, stored)
         errors = {}
         for key in changes:
             entry = index.get(key)
             if entry is None:
-                errors[key] = "unknown setting"
+                errors[key] = unknown_key_reason(key, stored.get(ALLOW_LIST_KEY), leaves=allowed)
             elif not entry.editable:
                 errors[key] = entry.reason or "read-only"
             elif (
@@ -609,7 +1043,6 @@ class SettingsService:
                 and entry.choices is not None
                 and changes[key] is not None
                 and changes[key] != stored.get(key)
-                and changes[key] not in entry.choices
             ):
                 # Exactly as the registry spells it: a value that differs in
                 # case or spacing names no provider when a job is built, so it
@@ -617,7 +1050,11 @@ class SettingsService:
                 # A choice a registry holds (a memory backend, say) is checked
                 # here, where it is saved, rather than wherever the settings
                 # are read: a stored id whose package later breaks still loads.
-                errors[key] = f"not one of: {', '.join(entry.choices)}"
+                # An installed plugin the allow-list this save leaves names is
+                # accepted by its name.
+                refusal = choice_refusal(entry, changes[key], allowed)
+                if refusal:
+                    errors[key] = refusal
         if errors:
             raise SettingsValidationError(errors)
 
@@ -640,8 +1077,9 @@ class SettingsService:
                 merged[key] = value
         core = {split_key(k)[1]: v for k, v in merged.items() if k.startswith("core.")}
         api = {split_key(k)[1]: v for k, v in merged.items() if k.startswith("api.")}
+        stored_api = {split_key(k)[1]: v for k, v in current.items() if k.startswith("api.")}
         try:
-            self.validate(core, api)
+            self.validate(core, api, stored_api)
         except SettingsValidationError as more:
             for key, message in more.errors.items():
                 errors.setdefault(key, message)
@@ -653,11 +1091,25 @@ class SettingsService:
             stored_core = {split_key(k)[1]: v for k, v in current.items() if k.startswith("core.")}
             for key, message in pack_step_refusals(core, stored_core).items():
                 errors.setdefault(key, message)
+            for key, message in unknown_reference_refusals(core, stored_core).items():
+                errors.setdefault(key, message)
         except Exception:  # noqa: BLE001 — the refusal stands on its own
             pass
         return SettingsValidationError(errors)
 
-    def validate(self, merged_core: dict[str, Any], merged_api: dict[str, Any]) -> None:
+    def validate(
+        self,
+        merged_core: dict[str, Any],
+        merged_api: dict[str, Any],
+        stored_api: dict[str, Any] | None = None,
+    ) -> None:
+        """Refuse what the merged values do not allow.
+
+        ``stored_api`` is what is saved now: an api leaf equal to its stored
+        value is not held to its minimum and maximum again (a stored value
+        outside them is clamped on read), so one such row never blocks a save
+        of other keys. A new or changed value is.
+        """
         errors: dict[str, str] = {}
         try:
             built = build_settings(merged_core)
@@ -684,17 +1136,64 @@ class SettingsService:
             entry = index.get(f"api.{name}")
             if entry is None:
                 continue
-            msg = validate_editable_api_value(entry, value)
+            unchanged = stored_api is not None and name in stored_api and stored_api[name] == value
+            msg = validate_editable_api_value(entry, value, check_bounds=not unchanged)
             if msg:
                 errors[f"api.{name}"] = msg
+        grace_problem = refresh_grace_problem(merged_api)
+        if grace_problem:
+            errors.setdefault("api.refresh_reuse_grace_seconds", grace_problem)
         if errors:
             raise SettingsValidationError(errors)
+
+    async def changed_since(self, versions: dict[str, datetime | None]) -> dict[str, str]:
+        """Each key of ``versions`` whose stored row is not the one it names, with why.
+
+        ``versions`` maps a key to the ``updated_at`` a page was served it
+        with, ``None`` for no stored row. A row saved, written by another
+        route (an accepted report format, a credential bootstrap) or reset
+        since then is named, so a page loaded before it never saves over it
+        unseen. Time linear in ``versions`` and the rows it names.
+        """
+        if not versions:
+            return {}
+        # The checked rows are locked until the save that follows commits in
+        # this same transaction, so two saves of one key cannot both pass the
+        # check. PostgreSQL takes ``FOR UPDATE``; SQLite has no row locks and
+        # SQLAlchemy leaves the clause out there, so on SQLite the check alone
+        # stands (its writes are serialised by the database file's own lock).
+        res = await self.db.execute(
+            select(RuntimeSetting).where(RuntimeSetting.key.in_(list(versions))).with_for_update()
+        )
+        rows = {r.key: r for r in res.scalars().all()}
+        out: dict[str, str] = {}
+        for key, loaded in versions.items():
+            row = rows.get(key)
+            stored = row.updated_at if row is not None else None
+            if stored == loaded:
+                continue
+            if row is None:
+                what = "reset"
+            elif loaded is None:
+                what = "saved"
+            else:
+                what = "saved again"
+            out[key] = (
+                f"{what} since this page loaded it, so this save would replace what is "
+                "stored now unseen; nothing was saved, the page shows the stored value "
+                "again, and the change can be made over it"
+            )
+        return out
 
     # ---- writing -------------------------------------------------------
     async def save(
         self, changes: dict[str, Any], *, user_id: uuid.UUID | None, ip: str | None
     ) -> SaveResult:
         current = await self.load_overrides()
+        # A clear of a key in the block of a plugin this process has not
+        # loaded deletes its stored row; no model is needed to delete it.
+        cleared = cleared_plugin_block_keys(changes, catalog_index())
+        changes = {key: value for key, value in changes.items() if key not in cleared}
         try:
             self.check_keys(changes, current)
         except SettingsValidationError as refused:
@@ -702,6 +1201,9 @@ class SettingsService:
             # refuse among the keys that passed is said beside it.
             raise self._with_value_errors(refused, changes, current) from None
         index = catalog_index()
+        # What the console and the export were shown masked comes back as the
+        # stored value it stands for (``shown_setting``).
+        changes = unmasked_changes(changes, current, index)
         # An import document carries the mask wherever a secret was omitted.
         # For a secret leaf the mask means "unchanged", exactly as it does in
         # a composite editor -- never a credential whose literal characters
@@ -709,6 +1211,7 @@ class SettingsService:
         changes = {k: v for k, v in changes.items() if not (index[k].secret and v == TOKEN_MASK)}
         changes = incoming_declaration_leaves(changes, current)
         tokens: dict[str, str | None] = {}
+        server_envs: dict[str, str | None] = {}
         server_map_kept: set[str] | None = None
         if SERVER_MAP_KEY in changes:
             if changes[SERVER_MAP_KEY] is None:
@@ -727,16 +1230,23 @@ class SettingsService:
                     changes[SERVER_MAP_KEY], tokens = split_server_secrets(
                         changes[SERVER_MAP_KEY],
                         stored=stored_map if isinstance(stored_map, dict) else None,
-                        stored_settings=current,
+                        stored_settings=definitions_after_save(current, changes),
                     )
                 except ServerMapError as exc:
                     raise SettingsValidationError(
                         {f"{SERVER_MAP_KEY}.{k}": v for k, v in exc.errors.items()}
                     ) from exc
+                # Each server's ``env`` map is where its own credentials live:
+                # out of the clear row as the token is, one encrypted row each.
+                changes[SERVER_MAP_KEY], server_envs = split_server_env(changes[SERVER_MAP_KEY])
                 unstorable = [
                     server_token_key(name)
                     for name, token in tokens.items()
                     if token and not box.is_available()
+                ] + [
+                    server_env_key(name)
+                    for name, env in server_envs.items()
+                    if env and not box.is_available()
                 ]
                 if unstorable:
                     raise SettingsValidationError(
@@ -786,7 +1296,12 @@ class SettingsService:
             validate_agent_map,
         )
 
-        if {AGENT_DEFINITIONS_KEY, AGENT_PROFILES_KEY, AGENT_PROFILE_KEY} & set(changes):
+        # A save of the server map is checked here too: withdrawing a tool a
+        # stored definition names is refused at that definition's key, not
+        # discovered when the agent starts.
+        if {AGENT_DEFINITIONS_KEY, AGENT_PROFILES_KEY, AGENT_PROFILE_KEY, SERVER_MAP_KEY} & set(
+            changes
+        ):
             # Per-key messages, so the two composite editors can put each error
             # on the card that caused it — the same reason the server map has
             # its own validation module.
@@ -797,7 +1312,7 @@ class SettingsService:
                 changes.update(await asyncio.to_thread(validate_agent_map, changes, current))
             except AgentMapError as exc:
                 raise SettingsValidationError(dict(exc.errors)) from exc
-        merged = {**current}
+        merged = {key: value for key, value in current.items() if key not in cleared}
         for key, value in changes.items():
             # ``null`` means "drop the override" for every key, secrets
             # included; an admin cannot pin a nullable field to None against
@@ -814,14 +1329,21 @@ class SettingsService:
         # changed ones held to the strict rules) and the tool declarations it
         # changes.
         refusals: dict[str, str] = {}
+        stored_api = {split_key(k)[1]: v for k, v in current.items() if k.startswith("api.")}
         try:
-            self.validate(core, api)
+            self.validate(core, api, stored_api)
         except SettingsValidationError as refused:
             refusals.update(refused.errors)
         stored_core = {split_key(k)[1]: v for k, v in current.items() if k.startswith("core.")}
         for more in (
             pack_step_refusals(core, stored_core),
+            unknown_reference_refusals(core, stored_core),
             changed_declaration_refusals(changes, current),
+            # A plugin this save drops from the allow-list may not stay the
+            # provider a setting selects, as a removed agent may not stay bound.
+            dropped_selections(current.get(ALLOW_LIST_KEY), merged.get(ALLOW_LIST_KEY), core)
+            if ALLOW_LIST_KEY in changes
+            else {},
         ):
             for key, message in more.items():
                 refusals.setdefault(key, message)
@@ -856,18 +1378,49 @@ class SettingsService:
                     existing.value = stored
                     existing.is_secret = entry.secret
                     existing.updated_by = user_id
+                    if key == SERVER_MAP_KEY:
+                        # The map's own row stands for its encrypted parts as
+                        # well: a save that changed only an env value still
+                        # moves its version, so a page loaded before it never
+                        # saves over it unseen (``changed_since``).
+                        flag_modified(existing, "value")
                 after[key] = "set" if entry.secret else value
             result.applied.append(key)
             result.applies[entry.applies] = result.applies.get(entry.applies, 0) + 1
+        removed: list[str] = []
+        for key in cleared:
+            existing = rows.get(key)
+            if existing is None:
+                continue
+            # Said from the row's own flag: a secret's value is never read.
+            before[key] = "set" if existing.is_secret else existing.value
+            after[key] = "unset" if existing.is_secret else None
+            await self.db.delete(existing)
+            removed.append(key)
+            result.applied.append(key)
+            result.applies["next_job"] = result.applies.get("next_job", 0) + 1
         if server_map_kept is not None:
             await self._save_server_tokens(tokens, server_map_kept)
+            await self._save_runtime_secrets(
+                server_envs,
+                server_map_kept,
+                prefix=f"{SERVER_MAP_KEY}.",
+                suffix=SERVER_ENV_SUFFIX,
+                key_of=server_env_key,
+            )
         for spec, secrets, kept in nested_writes:
             await self._save_runtime_secrets(
                 secrets, kept, prefix=f"{spec.key}.", suffix=spec.suffix, key_of=spec.row_key
             )
         await self.db.commit()
-        details = {"changed": list(changes), "before": before, "after": after}
+        details = {
+            "changed": [*changes, *removed],
+            "before": _audited(before, index),
+            "after": _audited(after, index),
+        }
         await _audit(user_id, "settings.update", details, ip)
+        if ALLOW_LIST_KEY in changes:
+            _say_the_allow_list_changed(user_id, before.get(ALLOW_LIST_KEY), after[ALLOW_LIST_KEY])
         return result
 
     async def _save_server_tokens(self, tokens: dict[str, str | None], kept: set[str]) -> None:
@@ -944,6 +1497,15 @@ class SettingsService:
             targets.update(
                 dict.fromkeys(k for k in rows if k.startswith(prefix) and k.endswith(suffix))
             )
+        held = rows.get(ALLOW_LIST_KEY)
+        allowed_before = held.value if held is not None else None
+        if held is not None and ALLOW_LIST_KEY in targets:
+            # A reset of the allow-list drops every plugin it named: refused,
+            # as a save is, while a stored provider id still selects one.
+            left = {key: row.value for key, row in rows.items() if key not in targets}
+            dangling = dropped_selections(allowed_before, None, _core(left))
+            if dangling:
+                raise SettingsValidationError(dangling)
         removed = []
         for key in targets:
             if key in rows:
@@ -952,7 +1514,25 @@ class SettingsService:
         await self.db.commit()
         if removed:
             await _audit(user_id, "settings.reset", {"keys": removed}, ip)
+        if ALLOW_LIST_KEY in removed:
+            _say_the_allow_list_changed(user_id, allowed_before, None)
         return removed
+
+
+def _say_the_allow_list_changed(user_id: uuid.UUID | None, before: Any, after: Any) -> None:
+    """Log a change of the plugin allow-list with who made it; the audit trail keeps it too."""
+
+    def named(value: Any) -> str:
+        if isinstance(value, list) and value:
+            return ", ".join(str(item) for item in value)
+        return "no plugin"
+
+    logger.info(
+        "The plugin allow-list was changed by user %s: it named %s and names %s.",
+        user_id or "(unknown)",
+        named(before),
+        named(after),
+    )
 
 
 async def _audit(
@@ -1001,7 +1581,9 @@ class _CoreSettingsCache:
             and now - self._loaded_at < self._ttl
         ):
             return self._cached
-        self._cached = build_settings(await load_core_overrides(db))
+        # A stored value the model refuses fails the read loudly, naming the
+        # key and the remedy; only the settings page reads past it.
+        self._cached = settings_from_store(await load_core_overrides(db))
         self._loaded_at = now
         return self._cached
 

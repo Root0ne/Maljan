@@ -29,12 +29,13 @@ import pytest
 from maljan.agents.base_agent import read_claim_blocks
 from maljan.agents.claim_headings import (
     CLAIM_HEAD_RE,
-    claim_heading_counts,
+    claim_blocks,
     count_claims_begun,
     heading_note,
     heading_sentence,
 )
 from maljan.agents.repeat_watch import ClaimRepeatReader
+from tests.claim_block_counts import begun_and_distinct
 
 # An answer shaped like the reverser's revision: numbered claims, each with a
 # square-bracketed note before the colon, the fields on their own lines.
@@ -123,7 +124,7 @@ class TestTheRevisionAnswersReadAsTheirClaims:
             for at in range(0, len(text), 7):
                 reader.feed(text[at : at + 7])
             count = reader.count()
-            assert (count.begun, count.distinct) == claim_heading_counts(text) == (2, 2)
+            assert (count.begun, count.distinct) == begun_and_distinct(text) == (2, 2)
 
 
 class TestEachHeadingForm:
@@ -235,7 +236,7 @@ class TestNoteOnlyClaimsAreToldApartByTheirNotes:
     )
 
     def test_two_notes_with_the_same_fields_are_two_distinct_claims(self) -> None:
-        assert claim_heading_counts(self.TEXT) == (2, 2)
+        assert begun_and_distinct(self.TEXT) == (2, 2)
         assert len({c.claim for c in _claims(self.TEXT)}) == 2
 
     @pytest.mark.parametrize("piece", [1, 3, 7, 64])
@@ -244,11 +245,11 @@ class TestNoteOnlyClaimsAreToldApartByTheirNotes:
         for at in range(0, len(self.TEXT), piece):
             reader.feed(self.TEXT[at : at + piece])
             count = reader.count()
-            assert (count.begun, count.distinct) == claim_heading_counts(self.TEXT[: at + piece])
+            assert (count.begun, count.distinct) == begun_and_distinct(self.TEXT[: at + piece])
 
     def test_the_same_note_twice_is_one_claim_repeated(self) -> None:
         twice = self.TEXT.split("CLAIM 2")[0] * 2
-        assert claim_heading_counts(twice) == (2, 1)
+        assert begun_and_distinct(twice) == (2, 1)
 
 
 # The hostile line: an opened note that never closes, and no colon.
@@ -259,7 +260,7 @@ def _hostile(size: int) -> str:
 _READERS: dict[str, Callable[[str], Any]] = {
     "read_claim_blocks": lambda text: read_claim_blocks(text),
     "count_claims_begun": count_claims_begun,
-    "claim_heading_counts": claim_heading_counts,
+    "claim_blocks": claim_blocks,
 }
 
 

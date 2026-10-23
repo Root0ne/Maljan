@@ -57,14 +57,18 @@ import numpy as np
 
 from maljan.core.delivery_limits import SAMPLE_UPLOAD_MAX_BYTES
 from maljan.llm.context_window import (
-    CHARS_PER_TOKEN,
     MAX_BELIEVABLE_WINDOW_TOKENS,
     UNKNOWN_WINDOW_TOOL_OUTPUT_CHARS,
+    chars_for_tokens,
 )
 from maljan.tools import pe_image
 from maljan.tools.errors import BAD_ARGUMENT, tool_error
 from maljan.tools.ioc_spans import string_iocs_with_spans
-from maljan.utils.written_forms import PACK_ESCAPES, pack_escaped
+from maljan.utils.written_forms import (
+    PACK_ESCAPES,
+    pack_escaped,
+    quoted_backslashes_written_out,
+)
 
 TOOL = "transform_bytes"
 
@@ -94,7 +98,7 @@ SHOWN_ROOM = UNKNOWN_WINDOW_TOOL_OUTPUT_CHARS
 SHOWN_BYTES = _bytes_for(SHOWN_ROOM)
 # The most a call is shown: what the largest tool answer any model gets
 # carries, the characters of the largest window this platform believes in.
-MAX_SHOWN_ROOM = MAX_BELIEVABLE_WINDOW_TOKENS * CHARS_PER_TOKEN
+MAX_SHOWN_ROOM = chars_for_tokens(MAX_BELIEVABLE_WINDOW_TOKENS)
 MAX_SHOWN_BYTES = _bytes_for(MAX_SHOWN_ROOM)
 
 # How many leading bytes of the output are shown in hex. The whole output is
@@ -119,7 +123,6 @@ OPERATIONS = (
 )
 AES_MODES = ("ecb", "cbc", "ctr")
 AES_PADDINGS = ("none", "pkcs7")
-BASE64_ALPHABETS = ("standard", "urlsafe")
 
 # The arguments and operations as the capabilities answer states them.
 CAPABILITY_FACTS = (
@@ -817,7 +820,7 @@ _STEPS: dict[str, Callable[[bytes, _File, Mapping[str, Any]], tuple[bytes, dict[
 
 def _ascii_reading(data: bytes) -> str:
     """The bytes as ASCII, each byte past it written as an escape, in the pack's escaping."""
-    out = data.decode("latin-1").translate(_ASCII_FORMS)
+    out = quoted_backslashes_written_out(data.decode("latin-1")).translate(_ASCII_FORMS)
     # A backslash that would end the string is written as the pack writes it.
     return out[:-1] + "\\x5c" if out.endswith("\\") else out
 
@@ -844,6 +847,7 @@ def _utf16_reading(data: bytes) -> str:
     makes one at a time.
     """
     text = data[: len(data) // 2 * 2].decode("utf-16-le", errors="surrogatepass")
+    text = quoted_backslashes_written_out(text)
     out = _ASTRAL.sub(lambda m: pack_escaped(m.group()), text.translate(_bmp_escapes()))
     return out[:-1] + "\\x5c" if out.endswith("\\") else out
 
@@ -855,15 +859,14 @@ def _entropy(counts: Any, total: int) -> float:
     return round(float(-(shares * np.log2(shares)).sum()), 4)
 
 
-def _indicators(shown: bytes, start: int) -> tuple[list[dict[str, Any]], int | None]:
+def _indicators(shown: bytes, start: int) -> list[dict[str, Any]]:
     """The indicator reader's rows over the part shown, each at the offset its match stands.
 
     The offset is the reader's own match (``string_iocs_with_spans``), as an
-    offset in the whole output; the second value is the output offset at which
-    the reader's run bound stopped it, or ``None``.
+    offset in the whole output. The reader reads every run of the part.
     """
-    rows, stopped = string_iocs_with_spans(shown, INDICATOR_KINDS)
-    found = [
+    rows = string_iocs_with_spans(shown, INDICATOR_KINDS)
+    return [
         {
             "kind": row["kind"],
             "value": pack_escaped(str(row["value"])),
@@ -872,7 +875,6 @@ def _indicators(shown: bytes, start: int) -> tuple[list[dict[str, Any]], int | N
         }
         for row in rows
     ]
-    return found, (None if stopped is None else start + stopped)
 
 
 def _measures(data: bytes) -> tuple[Any, int, int]:
@@ -915,7 +917,6 @@ def _fixed_output_chars() -> int:
         },
         "hex_head": "00" * HEX_HEAD_BYTES,
         "utf16le_note": _UTF16_NOTE,
-        "indicator_scan_stopped": _scan_stopped_sentence(big),
         "indicators": [],
         "indicators_left_out": _left_out_sentence(big, big),
         "ascii": "",
@@ -1008,9 +1009,7 @@ def _output_facts(
     }
     if len(shown) % 2:
         facts["utf16le_note"] = _UTF16_NOTE
-    rows, stopped = _indicators(shown, start)
-    if stopped is not None:
-        facts["indicator_scan_stopped"] = _scan_stopped_sentence(stopped)
+    rows = _indicators(shown, start)
     # The rows take what the part's room leaves after everything else,
     # the sentence saying some were left out included.
     left_out = _left_out_sentence(len(rows), room)
@@ -1025,13 +1024,6 @@ def _output_facts(
         facts["indicators_left_out"] = _left_out_sentence(len(rows) - len(kept), room)
     facts.update(readings)
     return facts
-
-
-def _scan_stopped_sentence(at: int) -> str:
-    return (
-        "the indicator reader's bound on the runs it reads stopped it at output byte "
-        f"{at}; indicators after it are not stated"
-    )
 
 
 def _left_out_sentence(count: int, room: int) -> str:

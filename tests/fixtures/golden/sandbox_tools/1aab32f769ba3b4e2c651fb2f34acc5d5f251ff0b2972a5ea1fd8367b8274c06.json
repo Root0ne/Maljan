@@ -1371,6 +1371,9 @@
     "total": 4
   },
   "sandbox_network": {
+    "absent": [
+      "network.tls"
+    ],
     "dns": [
       {
         "answers": [],
@@ -2532,6 +2535,7 @@
         "type": 3
       }
     ],
+    "statement": "The report does not hold this part, so whether there was any is not known. This is not the same as none.",
     "tcp": [
       {
         "dport": 443,

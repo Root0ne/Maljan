@@ -8,7 +8,7 @@ Launched by `maljan.core.config._builtin_servers()` as the `knowledge` server â€
 `sys.executable services/knowledge-mcp/server.py`, cwd `services/knowledge-mcp`,
 no environment variables passed through. It is registered with `agents: []` and
 reaches every built-in analyst and the judge through the `ToolRef`s in their
-definitions, so the definition's tool list is the only binding.
+definitions, so the definition's tool list is the only binding. `similar_cases` leaves out the run's own sample (`MALJAN_SAMPLE_SHA256`, which the platform writes into the child's environment); that needs the stdio transport, since a remote transport gets no environment.
 
 ## Tools
 

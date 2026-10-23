@@ -21,6 +21,7 @@ import pytest
 from maljan.agents import claim_headings
 from maljan.agents.base_agent import read_claim_blocks
 from maljan.agents.claim_headings import LINE_PREFIX
+from tests.claim_block_counts import begun_and_distinct
 
 FIXTURES = Path(__file__).resolve().parents[2] / "fixtures" / "claims"
 
@@ -81,7 +82,7 @@ def _read(text: str) -> dict[str, Any]:
             read.confidence_unreadable,
             read.blocks_read,
         )
-    out["counts"] = claim_headings.claim_heading_counts(text)
+    out["counts"] = begun_and_distinct(text)
     return out
 
 

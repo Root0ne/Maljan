@@ -2,7 +2,7 @@
 
 import enum
 
-from sqlalchemy import Boolean, Enum, String
+from sqlalchemy import Boolean, Enum, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
@@ -44,12 +44,26 @@ class User(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         nullable=False,
     )
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    # Every token carries the generation it was minted under
+    # (``app.auth.jwt.TOKEN_GENERATION_CLAIM``); moving this on revokes every
+    # access and refresh token of the account at once. A password change and a
+    # replayed refresh token move it (``app.auth.revocation``).
+    token_generation: Mapped[int] = mapped_column(
+        Integer, default=0, server_default="0", nullable=False
+    )
 
-    # Relationships
-    samples = relationship("Sample", back_populates="uploaded_by_user", lazy="selectin")
-    jobs = relationship("AnalysisJob", back_populates="created_by_user", lazy="selectin")
-    audit_logs = relationship("AuditLog", back_populates="user", lazy="selectin")
-    api_keys = relationship("APIKey", back_populates="user", lazy="selectin")
+    # Relationships. The account's history is never loaded with the account:
+    # every authenticated request resolves its caller to this row
+    # (``app.deps.get_current_user``, the WebSocket handshake), and an eager
+    # loader here pulled every sample, job, report, transcript, audit row and
+    # API key the account ever made into each of them. ``raise`` makes reading
+    # one off a loaded user an error rather than an unbounded query (or an
+    # async lazy load); a route that needs the history queries it with its
+    # own ``where`` and page, or asks for it with ``selectinload``.
+    samples = relationship("Sample", back_populates="uploaded_by_user", lazy="raise")
+    jobs = relationship("AnalysisJob", back_populates="created_by_user", lazy="raise")
+    audit_logs = relationship("AuditLog", back_populates="user", lazy="raise")
+    api_keys = relationship("APIKey", back_populates="user", lazy="raise")
 
     def __repr__(self) -> str:
         return f"<User {self.email} role={self.role}>"

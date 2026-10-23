@@ -104,6 +104,22 @@ def _read(entry: dict[str, Any]) -> dict[str, Any]:
     return ToolFacts.model_validate(entry).model_dump(mode="json")
 
 
+def _with_shipped_effects(entry: dict[str, Any], shipped: dict[str, Any]) -> dict[str, Any]:
+    """``entry`` as a whole map's tool is read: each later field shipped where it has none.
+
+    ``effects`` and ``reads_delay_imports`` came after every release that
+    stored a map whole (``tool_declarations.FIELDS_AFTER_WHOLE_MAPS``).
+    """
+    from maljan.core.tool_declarations import FIELDS_AFTER_WHOLE_MAPS
+
+    later = {
+        name: (shipped or {})[name]
+        for name in FIELDS_AFTER_WHOLE_MAPS
+        if name not in entry and (shipped or {}).get(name) is not None
+    }
+    return {**entry, **later} if later else entry
+
+
 def _full(entry: dict[str, Any]) -> dict[str, Any]:
     """A declaration as a release before the revision dumped it whole.
 
@@ -357,8 +373,12 @@ def test_an_unmigrated_whole_map_is_read_as_dev_read_it() -> None:
     held = _in_force({SERVERS: _dev_row(analysis_facts=whole)})
     analysis = held["mcp"]["servers"]["analysis"]["tool_facts"]
     # The removed tool stays removed, and a field the whole entry leaves at its
-    # default is not filled from what ships.
-    assert analysis == {tool: _read(entry) for tool, entry in whole.items()}
+    # default is not filled from what ships, but for a field no such release
+    # knew (``effects``), which follows the shipped declaration.
+    assert analysis == {
+        tool: _read(_with_shipped_effects(entry, shipped.get(tool)))
+        for tool, entry in whole.items()
+    }
     ghidra = _shipped_dump()["static"]["ghidra"]["tool_facts"]
     tool = next(iter(ghidra))
     leaf = _in_force({GHIDRA: {tool: {"kind": "strings"}}})["static"]["ghidra"]["tool_facts"]
@@ -413,7 +433,11 @@ def test_a_downgrade_reads_as_dev_and_leaves_an_unmarked_map_alone() -> None:
     # before the revision shipped: that release reads them as what was in
     # force, each untouched tool as it shipped then.
     dev = _dev_shipped("mcp.servers.analysis")
-    expected = {tool: _read(entry) for tool, entry in dev.items() if tool != first}
+    expected = {
+        tool: _read(_with_shipped_effects(entry, shipped.get(tool)))
+        for tool, entry in dev.items()
+        if tool != first
+    }
     expected[second] = {**expected[second], "timeout_seconds": 77.0}
     in_force_after = _in_force(after)
     assert in_force_after["mcp"]["servers"]["analysis"]["tool_facts"] == expected

@@ -224,6 +224,22 @@ def no_hidden_segment(path: Path) -> Path:
     resolved = Path(path).expanduser().resolve()
     if any(part.startswith(".") for part in resolved.parts[1:]):
         raise SystemExit(f"{resolved} holds a path segment starting with a dot; pick another --out")
+    # The run deletes scenario directories under --out, so --out must be a
+    # directory of its own: not the filesystem root, the home directory, or any
+    # directory holding this checkout.
+    try:
+        home: Path | None = Path.home().resolve()
+    except (RuntimeError, KeyError, OSError):  # a uid with no home directory
+        home = None
+    if (
+        resolved == Path(resolved.anchor)
+        or (home is not None and resolved == home)
+        or _ROOT == resolved
+        or resolved in _ROOT.parents
+    ):
+        raise SystemExit(
+            f"{resolved} is the root, home or holds this checkout; pick a directory of its own"
+        )
     return resolved
 
 
@@ -1699,4 +1715,9 @@ def main(argv: list[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
+    # The run's pipeline is in this process: before any thread or the YARA
+    # engine loads, C code is pinned to fold case as ASCII does.
+    from maljan.core.ctype_locale import pin_character_classification
+
+    pin_character_classification()
     raise SystemExit(main())

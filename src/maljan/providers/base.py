@@ -88,6 +88,26 @@ class MirrorSpec:
 DEFAULT_WORK_DIR = ".work"
 
 
+def requested_host(base_url: object, path: object) -> str:
+    """The host a request for ``path`` reaches on an HTTP client built with ``base_url``.
+
+    Merged as httpx merges them: an absolute URL (a scheme and a host) is sent
+    as it is, so it names its own host; anything else is appended to the base
+    URL and reaches the base's host. ``""`` where neither names a host.
+    """
+    import httpx
+
+    from maljan.core.host_locality import host_of
+
+    try:
+        url = httpx.URL(str(path or ""))
+    except Exception:  # noqa: BLE001 — a path httpx refuses reaches no host
+        return ""
+    if url.is_absolute_url:
+        return host_of(str(url))
+    return host_of(base_url)
+
+
 def path_in_server(spec: MirrorSpec, host_path: str | Path) -> str:
     """The path a server opens the worker's copy at ``host_path`` under.
 
@@ -125,6 +145,13 @@ class StaticJobContext:
     truncation_ledger: Any | None = None
     # The job's context budget, which answers what zero above means.
     context_budget: Any | None = None
+    # When the stage or job this work runs in must end, as a ``time.monotonic``
+    # instant, where the pipeline has a deadline for it; ``None`` where none.
+    deadline: float | None = None
+    # Told of each rest a server this provider guards itself gives, so it
+    # reaches the job's run summary with the registry's own (``ServerRegistry``).
+    # Not part of what makes two contexts the same job.
+    on_server_rest: Callable[[dict[str, Any]], None] | None = field(default=None, compare=False)
 
 
 @dataclass(frozen=True)
@@ -246,21 +273,34 @@ class ProviderProbe:
     tools: list[str] | None = None
 
 
-# What a static claim must cite, and which techniques to look for.
-CLAIM_CITATION = (
+# What a static claim must cite, and which techniques to look for. The two
+# sentences are kept apart so an agent whose definition turns the technique
+# line off (``AgentDefinition.attck_techniques``) is sent the first alone
+# (``without_attck_focus``); joined, they are the text every provider sends.
+CLAIM_ARTIFACT_CITATION = (
     "For EVERY claim you make, you MUST cite a concrete artifact: a function name, "
-    "string offset (.data+0xNN), API import, or hex pattern. "
+    "string offset (.data+0xNN), API import, or hex pattern."
+)
+ATTCK_FOCUS = (
     "Focus on MITRE ATT&CK: T1027 (Obfuscation), T1106 (Native API), "
     "T1055 (Process Injection), T1140 (Deobfuscation)."
 )
+CLAIM_CITATION = CLAIM_ARTIFACT_CITATION + " " + ATTCK_FOCUS
+
+
+def without_attck_focus(text: str) -> str:
+    """``text`` without the sentence that points claims at ATT&CK techniques.
+
+    For a provider's text sent to an agent whose definition turns the technique
+    line off. Only the platform's own sentence (``ATTCK_FOCUS``) is taken out,
+    wherever a provider's text carries it; the rest of the text is unchanged.
+    """
+    return text.replace(" " + ATTCK_FOCUS, "").replace(ATTCK_FOCUS, "")
+
 
 # The opening sentence of a provider that brings no tools of its own (and of a
 # provider whose tools did not attach): it says where the evidence comes from.
 STATIC_EVIDENCE_LEAD = "Analyze the deterministic static evidence you are given. "
-
-# The provider-neutral instructions a static fragment opened with before the
-# confidence discipline below was shared: the lead and what a claim cites.
-STATIC_EVIDENCE_INSTRUCTIONS = STATIC_EVIDENCE_LEAD + CLAIM_CITATION
 
 # How confident a static claim may be, whatever the provider: the cap without a
 # falsification, the two loci a High claim needs, and the idiom that is not
@@ -473,6 +513,16 @@ class StaticProvider(ABC):
 
         return get_settings().preprocessing
 
+    def withheld_reasons(self) -> list[str]:
+        """Why each tool this provider holds back from its agents is withheld, for the run.
+
+        Empty by default. A provider that withholds a tool (on a server other
+        jobs share, one it cannot hold to the job's own program) says why
+        here, and the agent attaching its tools puts each reason on the job's
+        degraded record (``record_provider_withheld``).
+        """
+        return []
+
     def call_graph(self, path: str) -> CallGraph | None:
         """The opened program's call graph in the neutral shape, or ``None`` without one.
 
@@ -523,6 +573,16 @@ class StaticProvider(ABC):
         (:meth:`call_budget`; zero: as long as the tool takes).
         """
         return None
+
+    @classmethod
+    def registry_servers(cls, cfg: Any) -> frozenset[str]:
+        """The ``mcp.servers`` keys this provider calls for a job, read from ``cfg``.
+
+        Asked without building the provider, so a submission can tell which
+        stored server settings a job will read. None by default: a provider
+        that drives an operator's registry server names it.
+        """
+        return frozenset()
 
     def server_block(self) -> Any:
         """The settings block of the server this provider drives, or ``None`` for none."""
@@ -719,6 +779,17 @@ class SandboxProvider(ABC):
     @abstractmethod
     def from_settings(cls, cfg: Settings) -> SandboxProvider: ...
 
+    def submission_address(self) -> str | None:
+        """The host a submission sends the sample to, as this provider resolves its URL.
+
+        Read by the run's disclosure block (``analysis.disclosure``) when the
+        sample is submitted. ``None`` for a submission that never leaves the
+        worker, such as recorded fixtures read in place; ``""`` where the
+        provider does not say, which the block states as a host it cannot
+        name.
+        """
+        return ""
+
     @classmethod
     def declaration(cls, cfg: Settings) -> Any:
         """This provider's own declaration of its tools, or ``None`` for none.
@@ -817,3 +888,20 @@ class SandboxProvider(ABC):
 
     def close(self) -> None:
         return None
+
+
+def record_provider_withheld(provider: Any, registry: Any, own: list[str] | None = None) -> None:
+    """Put each tool ``provider`` withholds, with its reason, on the job's degraded record.
+
+    ``registry`` is the job's server registry, whose ``degradation_reasons``
+    the run summary reads; ``own``, when given, an agent's own list, which
+    is extended in place. Each reason is put once.
+    """
+    reader = getattr(provider, "withheld_reasons", None)
+    reasons = reader() if callable(reader) else []
+    held = getattr(registry, "degradation_reasons", None)
+    for reason in reasons if isinstance(reasons, list) else []:
+        if own is not None and reason not in own:
+            own.append(reason)
+        if isinstance(held, list) and reason not in held:
+            held.append(reason)

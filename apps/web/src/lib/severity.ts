@@ -227,9 +227,19 @@ export interface SignatureScore {
  * neutral tone with the number as it came, rather than coloured by a guess.
  */
 export function signatureScore(
-  score: number,
+  score: number | null,
   scale: SignatureScale | null | undefined
 ): SignatureScore {
+  if (score === null || score === undefined) {
+    // The sandbox gave no number: unknown, in the neutral tone, never a zero.
+    return {
+      tone: NEUTRAL_TONE,
+      rung: null,
+      label: "unknown",
+      scale: scale?.name ?? null,
+      text: "unknown",
+    };
+  }
   const whole = Number.isInteger(score);
   if (!scale || !whole || score < 1 || score > scale.max) {
     const label = String(score);
@@ -244,4 +254,14 @@ export function signatureScore(
   const rung = scale.rungs[score - 1];
   const label = `${score}/${scale.max}`;
   return { tone: TONES[rung], rung, label, scale: scale.name, text: `${rung}, ${label}` };
+}
+
+/** Orders signatures by severity, highest first; an unknown (`null`) severity after every number. */
+export function bySignatureSeverity(
+  a: { severity: number | null },
+  b: { severity: number | null }
+): number {
+  if (a.severity === null) return b.severity === null ? 0 : 1;
+  if (b.severity === null) return -1;
+  return b.severity - a.severity;
 }

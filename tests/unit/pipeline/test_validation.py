@@ -13,6 +13,7 @@ from typing import Any
 import pytest
 
 from maljan.pipeline.validation import (
+    CHECK_FAILED_CODE,
     FEEDBACK_PREAMBLE,
     Violation,
     drop_ungrounded_indicators,
@@ -593,7 +594,11 @@ class TestRetryWithFeedback:
             lambda _m: "answer", ["ask"], [broken], parse=lambda answer: str(answer)
         )
 
-        assert (result, violations, retries) == ("answer", [], 0)
+        # Not silently: the check that raised is named in an advisory row the
+        # producer is never asked about, so nothing is retried for it.
+        assert (result, retries) == ("answer", 0)
+        assert [v.code for v in violations] == [CHECK_FAILED_CODE]
+        assert violations[0].advisory and not violations[0].asked
 
 
 class TestFeedbackText:
@@ -704,7 +709,7 @@ class TestAnAbsenceOverEvidenceTheRunKnowsIsPartial:
         message = self._message(self.URL, {"unrelated"}, ("strings", "list_imports"))
 
         assert "appears nowhere" in message
-        assert "shortened answers from" in message
+        assert "answers from" in message
         assert "list_imports, strings" in message
         assert "Narrow one of them and ask again" in message
 

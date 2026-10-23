@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import dataclasses
 import inspect
 import itertools
 import json
@@ -38,7 +39,11 @@ from maljan.agents.claim_headings import (
     count_claims_after_disputes,
     count_claims_begun,
 )
-from maljan.agents.prompt_fragments import CLAIM_FORMAT_FRAGMENT, KEEP_REPLY
+from maljan.agents.prompt_fragments import (
+    CLAIM_FORMAT_FRAGMENT,
+    CLAIM_FORMAT_WITHOUT_TECHNIQUE_FRAGMENT,
+    KEEP_REPLY,
+)
 from maljan.agents.tool_answer_clearing import (
     CLEARED_FOR_REFUSAL,
     Clearing,
@@ -46,15 +51,30 @@ from maljan.agents.tool_answer_clearing import (
     read_evidence_tool,
 )
 from maljan.analysis.sandbox_sections import item_index_of
+from maljan.analysis.technique_ids import ID_BODY
 from maljan.core.config import get_settings
 from maljan.core.exceptions import AgentLoopCancelled, AnalystError, SampleNotOpened
+from maljan.core.input_meter import TOOL_LOOP, request_parts
 from maljan.core.logger import logger
-from maljan.core.spend import LOOP_TURN_CALL, SPEND_CAP, SpendCeilingStop, call_deadline_of
+from maljan.core.spend import (
+    LOOP_TURN_CALL,
+    SPEND_CAP,
+    AgentCeilingStop,
+    SpendCeilingStop,
+    call_deadline_of,
+    carrying,
+    current_admission,
+)
 from maljan.core.token_ledger import (
+    RETRY_DROPS_QUESTION_CALL,
+    VALIDATION_RETRY_CALL,
+    WHOLE_ANSWER_RETRY_CALL,
     TokenLedger,
     record_lost_retries,
     record_response_usage,
+    turn_usage,
 )
+from maljan.llm.agent_ceiling import stopped_at_own_ceiling
 from maljan.llm.answer_text import answer_text
 from maljan.llm.anthropic_history import (
     RUN_STATE_ATTACHED,
@@ -65,6 +85,7 @@ from maljan.llm.anthropic_history import (
 from maljan.llm.context_window import (
     CHARS_PER_TOKEN,
     NO_ROOM_RUN_STATE,
+    chars_for_tokens,
     tool_definition_chars,
     window_full_error,
 )
@@ -107,12 +128,16 @@ from maljan.pipeline.validation import (
     RETRY_DROP_WITHDRAWN,
     RETRY_DROPPED_CODE,
     TECHNIQUE_LINE_UNREAD_CODE,
+    VALIDATION_TURN_NOT_RUN_CODE,
     VALIDITY_CODE,
+    AnswerCheckInputs,
     ClaimsRepeated,
     RetryDrops,
     ValidationTally,
     Violation,
+    analyst_answer_checks,
     analyst_cut_violation,
+    analyst_ledger_ids,
     analyst_repeated_violation,
     chunk_cut_unread_sentence,
     claim_block_indexes,
@@ -120,12 +145,8 @@ from maljan.pipeline.validation import (
     claims_repeated,
     count_claim_blocks,
     decompiled_functions,
-    decompiled_not_described_violation,
     discarded_retry_row,
-    image_bases_in,
     library_only_claims,
-    library_only_claims_violation,
-    mark_invalid_technique_ids,
     parse_violations,
     read_retry_drop_answers,
     retry_drop_question,
@@ -134,10 +155,11 @@ from maljan.pipeline.validation import (
     retry_unplaced_question,
     retry_with_feedback_sync,
     retry_withdrawn_row,
-    undescribed_decompiles,
+    run_image_bases,
+    settle_validation_marks,
     unparsed_answer_rows,
-    validate_isr,
     validity_check_available,
+    whole_answer_questions,
 )
 from maljan.schemas.evidence import (
     ENTRY_ID_RE,
@@ -148,7 +170,7 @@ from maljan.schemas.evidence import (
     beside_bytes,
     is_guard_answer,
 )
-from maljan.schemas.isr_models import AgentISR, Artifact, ClaimEvidence, Finding
+from maljan.schemas.isr_models import AgentISR, Artifact, ClaimEvidence, Finding, OpenQuestion
 from maljan.schemas.tool_evidence import CapturedToolOutput
 from maljan.utils.marked_cut import CUT_MARK
 
@@ -157,9 +179,6 @@ from maljan.utils.marked_cut import CUT_MARK
 # key admits (``core.config.SERVER_KEY_PATTERN``), so no server is ever taken
 # for the owner of a name an in-process tool claimed.
 IN_PROCESS_SOURCE = "in-process:agent"
-
-# Regex: matches MITRE ATT&CK technique IDs like T1055 or T1055.001.
-_TECHNIQUE_RE = re.compile(r"\b(T\d{4}(?:\.\d{3})?)\b")
 
 # Regex: the ReAct stop message emitted when an agent exhausts its
 # ``recursion_limit`` while still tool-calling (it never wrote a final answer).
@@ -259,9 +278,10 @@ def _model_context_tokens(cfg: Any, agent_name: str) -> int:
     Zero means nothing declared it, and the caller falls back to the floor.
     """
     try:
+        from maljan.core.config import model_entry
         from maljan.llm.provider_base import facts_of
 
-        entry = (getattr(cfg.llm, "agents", None) or {}).get(agent_name)
+        entry = model_entry(getattr(cfg.llm, "agents", None), agent_name)
         chain: list[Any] = entry.chain() if entry is not None else [None]
         windows: list[int] = []
         for choice in chain:
@@ -290,7 +310,10 @@ def synthesis_budget_chars(cfg: Any, agent_name: str, window_tokens: int = 0) ->
     tokens = min(windows) if windows else 0
     if tokens <= 0:
         return _SYNTHESIS_MIN_CHARS
-    return max(_SYNTHESIS_MIN_CHARS, int(tokens * _CHARS_PER_TOKEN * _SYNTHESIS_CONTEXT_SHARE))
+    return max(
+        _SYNTHESIS_MIN_CHARS,
+        int(chars_for_tokens(tokens, _CHARS_PER_TOKEN) * _SYNTHESIS_CONTEXT_SHARE),
+    )
 
 
 def salvage_chars_at_pace(
@@ -404,7 +427,7 @@ def _reported_request(messages: list, per_token: int) -> tuple[int, int]:
             prompt = 0
         if prompt > 0:
             after = _chars_of(messages[index:])
-            return prompt * max(1, per_token) + after, index
+            return chars_for_tokens(prompt, max(1, per_token)) + after, index
     return 0, -1
 
 
@@ -667,6 +690,12 @@ class BudgetCeiling:
         self.seconds = None if seconds is None else float(seconds)
         wall = seconds if wall is None else wall
         self.wall = None if wall is None else float(wall)
+
+
+# The note ``frame_messages`` leaves in a human turn's ``response_metadata``
+# when it put the triage pack at its head, which no client sends: the pack is
+# attached once by this note, never by a heading a sample's text can carry.
+FACTS_ATTACHED = "maljan_facts_attached"
 
 
 # The class-level stand-ins for two pieces of per-agent state, for an analyst
@@ -944,6 +973,43 @@ def _stored_answer_of(recorder: Any) -> Callable[[str], str | None]:
     return stored
 
 
+def _stored_copy_of(recorder: Any) -> Callable[[str], Any]:
+    """What the read-again tool pages through: the full copy of an entry's answer in the job's store.
+
+    The copy the entry references for its ``answer`` part, read by its
+    digest from the store the recorder spills into. ``None`` for an id this
+    loop did not file, an entry that kept its answer whole, a run with no
+    store, and a copy that was not kept.
+    """
+    from maljan.agents.tool_answer_clearing import StoredCopy
+    from maljan.schemas.evidence_spill import ANSWER
+
+    def _reader_of(reader: Callable[..., Any], digest: str) -> Callable[[int, int | None], Any]:
+        def read(offset: int, length: int | None) -> Any:
+            return reader(digest, offset, length)
+
+        return read
+
+    def copy(entry_id: str) -> StoredCopy | None:
+        spill = getattr(recorder, "spill", None)
+        reader = getattr(spill, "read", None)
+        if not callable(reader):
+            return None
+        holder = str(recorder.holder_of(entry_id)).lower()
+        for entry in reversed(list(recorder.entries)):
+            if str(entry.id).lower() != holder:
+                continue
+            for ref in entry.spilled or ():
+                digest = str(ref.get("sha256") or "")
+                if ref.get("part") == ANSWER and ref.get("key") and digest:
+                    return StoredCopy(
+                        total=int(ref.get("bytes") or 0), read=_reader_of(reader, digest)
+                    )
+        return None
+
+    return copy
+
+
 def _loop_binding(loop_model: Any, llm: Any) -> Any | None:
     """The model binding a loop's turns are sent through, where a turn's cap can be set on it.
 
@@ -968,7 +1034,16 @@ def _hold_the_turn(binding: Any, llm: Any, held: int | None) -> None:
     if binding is None:
         return
     from maljan.llm.context_window import output_bound_kwargs
+    from maljan.llm.fallback import ADMISSION_KEY, FallbackChatModel
 
+    # The turn's own admission, for the model list that falls back in its
+    # place: a turn is called from another task than the one that admitted it.
+    if isinstance(llm, FallbackChatModel):
+        admission = current_admission()
+        if admission is None:
+            binding.kwargs.pop(ADMISSION_KEY, None)
+        else:
+            binding.kwargs[ADMISSION_KEY] = admission
     field = next(iter(output_bound_kwargs(llm, 1)), None)
     if field is None:
         return
@@ -1033,6 +1108,16 @@ def _steps_this_loop_spent(ledger: LoopBudget, messages: list) -> int:
     reader who wants the other number.
     """
     return int(steps_used(messages) if messages else ledger.own_steps)
+
+
+def alignment_threshold_of(cfg_validation: Any, default: float = 0.05) -> float:
+    """The alignment floor the settings give, ``default`` only when they give none.
+
+    ``0.0`` is a setting (no floor), not a missing one: ``value or default``
+    turned it into the default.
+    """
+    configured = getattr(cfg_validation, "alignment_threshold", None)
+    return float(default if configured is None else configured)
 
 
 def hard_cap(timeout: float | None, ceiling: BudgetCeiling | None = None) -> float | None:
@@ -1175,7 +1260,9 @@ def loop_limits(
     """``(timeout, max_steps)`` for one loop of ``agent_name``; ``None`` is no limit.
 
     The agent's own definition first, then the deprecated per-agent override
-    maps — each held to what a budget can be — then the deployment's own
+    maps (kept until a release is named for their removal; see
+    ``Settings.react_agent_timeout_overrides``) — each held to what a budget
+    can be — then the deployment's own
     ``react_agent_timeout`` / ``react_agent_max_steps``. All of them are
     ``None`` unless an operator set one, and a dimension nobody set has no
     limit.
@@ -1424,7 +1511,9 @@ _BLOCK_EVIDENCE_LABEL_RE = re.compile(_INLINE + r"EVIDENCE:[ \t]*", re.MULTILINE
 _EVIDENCE_ENDS_AT_LINE_START_RE = re.compile(
     r"\n" + LINE_PREFIX + r"(?:CONFIDENCE|(?i:TECHNIQUE)):"
 )
-_EVIDENCE_ENDS_INLINE_RE = re.compile(r"\s+" + LINE_PREFIX + r"(?:CONFIDENCE|TECHNIQUE):")
+# A run of whitespace is read from its start and possessively, so a long run
+# is read once, not once per character of it.
+_EVIDENCE_ENDS_INLINE_RE = re.compile(r"(?<!\s)\s++" + LINE_PREFIX + r"(?:CONFIDENCE|TECHNIQUE):")
 # The CONFIDENCE value as written: what follows the label on its line, read
 # by ``_stated_confidence``. A label present with nothing readable after it is
 # a confidence the reader could not read, not one the analyst left out.
@@ -1508,19 +1597,29 @@ def _field(
     return at_line_start.search(tail) or anywhere.search(tail)
 
 
-_ONE_TECHNIQUE_RE = re.compile(r"T\d{4}(?:\.\d{3})?", re.IGNORECASE)
+_ONE_TECHNIQUE_RE = re.compile(ID_BODY, re.IGNORECASE)
 # What a TECHNIQUE line says to claim none.
 _NO_TECHNIQUE = frozenset({"", "NONE", "—", "–", "-"})
+# A line that opens with "none" and words after it ("none asserted", "none
+# (capability only)"): it claims none whatever the words say, when no
+# technique id and no catalogue technique name stands anywhere on it; with an
+# id or a name on it ("None; Process Injection is likely"), the words may name
+# one and the line is asked about.
+_NONE_WITH_WORDS_RE = re.compile(r"none\b", re.IGNORECASE)
+_ANY_TECHNIQUE_ID_RE = re.compile(rf"(?<![\w.]){ID_BODY}(?!\w)", re.IGNORECASE)
 # What separates the ids of a list on one TECHNIQUE line: a comma, "and", both
 # ("T1027, T1140, and T1106"), or a slash ("T1027 / T1140"). Every part must be
 # an id and nothing else; "or", "and/or", a doubled or trailing slash, or any
 # word beside an id leaves the line whole and asked about.
-_TECHNIQUE_LIST_SEPARATOR_RE = re.compile(r"\s*,\s*(?:and\s+)?|\s+and\s+|\s*/\s*", re.IGNORECASE)
+# Each run of whitespace is read from its start and possessively (linear time).
+_TECHNIQUE_LIST_SEPARATOR_RE = re.compile(
+    r"(?<!\s)\s*+,\s*+(?:and\s++)?|(?<!\s)\s++and\s++|(?<!\s)\s*+/\s*+", re.IGNORECASE
+)
 # The claim format's own block separator, "---", written at the end of a
 # TECHNIQUE line with a dot or bar before it ("TECHNIQUE: T1027 · ---", the
 # next claim on the line after). It is no part of what the line claims. A
 # next claim written on the same line after it is not read by this.
-_TRAILING_BLOCK_SEPARATOR_RE = re.compile(r"[\s·•|]*-{3,}\s*$")
+_TRAILING_BLOCK_SEPARATOR_RE = re.compile(r"(?<![\s·•|])[\s·•|]*+-{3,}+\s*+$")
 
 
 def _bare_technique(text: str) -> str:
@@ -1530,8 +1629,19 @@ def _bare_technique(text: str) -> str:
 
 # An id followed by words in brackets: "T1027 (Obfuscated Files or Information)".
 _ID_WITH_BRACKETED_WORDS_RE = re.compile(
-    r"(?<![\w.])(?P<id>T\d{4}(?:\.\d{3})?)\s*\((?P<words>[^()]*)\)", re.IGNORECASE
+    rf"(?<![\w.])(?P<id>{ID_BODY})\s*\((?P<words>[^()]*)\)", re.IGNORECASE
 )
+# An id at a place in a list item, and what separates it from the words after
+# it: a space, a dash or a colon (``_without_unbracketed_names``). Anchored at
+# the place it is tried, and every part of it possessive, so a try costs the
+# characters it reads.
+# The id's own optional sub-technique part is possessive too: ``{ID_BODY}+``.
+_ID_AT_RE = re.compile(rf"(?P<id>{ID_BODY}+)(?:\s*+[-–—:]\s*+|\s++)(?=[A-Za-z])", re.I)
+# Where an id may begin in an item: a T after no word character or dot.
+_ID_START_RE = re.compile(r"(?<![\w.])T(?=\d)", re.IGNORECASE)
+# What ends a list item, and what a name with no bracket never holds.
+_ITEM_END_RE = re.compile(r"[,;]")
+_NOT_IN_A_NAME = frozenset("()[]\n")
 
 
 def _catalogue_names_for(technique_id: str) -> set[str]:
@@ -1553,12 +1663,35 @@ def _catalogue_names_for(technique_id: str) -> set[str]:
     return {name for name in names if name}
 
 
+def _names_a_technique(text: str) -> bool:
+    """Whether ``text`` writes a vendored catalogue technique's name anywhere, folded.
+
+    Every run of words up to the longest name's length is looked up once in
+    the set of folded names: linear in the text.
+    """
+    from maljan.memory.attck_loader import _folded_name, technique_names
+
+    names = {_folded_name(name) for name in technique_names().values()}
+    names.discard("")
+    if not names:
+        return False
+    longest = max(len(name.split()) for name in names)
+    words = _folded_name(text).split()
+    for start in range(len(words)):
+        for size in range(1, min(longest, len(words) - start) + 1):
+            if " ".join(words[start : start + size]) in names:
+                return True
+    return False
+
+
 def _without_catalogue_names(text: str) -> str:
-    """``text`` with each bracketed catalogue name after its own id taken off.
+    """``text`` with each catalogue name after its own id taken off, bracketed or not.
 
     Only words that are the vendored catalogue's own name for the id they
-    follow are taken off; any other bracketed words stay where they are, and
-    the line is read as it always was.
+    follow are taken off; any other words stay where they are, and the line
+    is read as it always was. A name with no bracket runs to the next comma,
+    semicolon or the line's end, and is taken off only when all of it is the
+    id's name.
     """
     from maljan.memory.attck_loader import _folded_name
 
@@ -1568,7 +1701,115 @@ def _without_catalogue_names(text: str) -> str:
             return match.group("id")
         return match.group(0)
 
-    return _ID_WITH_BRACKETED_WORDS_RE.sub(_plain, text)
+    return _without_unbracketed_names(_ID_WITH_BRACKETED_WORDS_RE.sub(_plain, text))
+
+
+def _without_unbracketed_names(text: str) -> str:
+    """``text`` with an id's catalogue name written after it with no bracket taken off.
+
+    Read item by item (the text between commas and semicolons), each once:
+    the name runs from after the id's space, dash or colon to the item's end,
+    trailing whitespace aside, and is the first id of the item whose words to
+    the end hold no bracket or line break. Taken off only when all of it is
+    the id's catalogue name; any other item is kept as written. Linear in the
+    text.
+    """
+    from maljan.memory.attck_loader import _folded_name
+
+    out: list[str] = []
+    at = 0
+    for end in [m.start() for m in _ITEM_END_RE.finditer(text)] + [len(text)]:
+        item = text[at:end]
+        # The last bracket or line break of the item: a name runs past none.
+        last_stop = max((i for i, ch in enumerate(item) if ch in _NOT_IN_A_NAME), default=-1)
+        replaced = item
+        for start in _ID_START_RE.finditer(item):
+            found = _ID_AT_RE.match(item, start.start())
+            if found is None or found.end() <= last_stop:
+                continue
+            words = item[found.end() :].rstrip()
+            folded = _folded_name(words)
+            if folded and folded in _catalogue_names_for(found.group("id").upper()):
+                trailing = item[found.end() + len(words) :]
+                replaced = item[: start.start()] + found.group("id") + trailing
+            break
+        out.append(replaced)
+        out.append(text[end : end + 1])
+        at = end + 1
+    return "".join(out)
+
+
+def _sized_by_room(chunk: Any) -> bool:
+    """Whether the analyst's room sized ``chunk`` (``binary_chunker.SIZED_BY``)."""
+    from maljan.loaders.binary_chunker import SIZED_BY, SIZED_BY_ROOM
+
+    return (getattr(chunk, "metadata", None) or {}).get(SIZED_BY) == SIZED_BY_ROOM
+
+
+def _chunk_header(chunk: Any, open_total: bool) -> str:
+    """The header a chunk is sent behind: its total, or that more may follow where it is open."""
+    header = getattr(chunk, "to_prompt_header", None)
+    if not callable(header):
+        return ""
+    return str(header(more_may_follow=True) if open_total else header())
+
+
+def _holding(chunk: Any, content: str) -> Any:
+    """``chunk`` holding ``content``, its count and its token estimate made from it."""
+    from maljan.llm.context_window import tokens_for_chars
+    from maljan.loaders.binary_chunker import _CHARS_PER_TOKEN
+
+    return dataclasses.replace(
+        chunk,
+        content=content,
+        char_count=len(content),
+        token_estimate=tokens_for_chars(len(content), _CHARS_PER_TOKEN, ceil=False),
+    )
+
+
+def _past_overlap(rest: str, after: Any) -> str:
+    """``after``'s content without the overlap it opens with where ``rest`` already ends in it.
+
+    The chunker records how many characters a piece repeats of the piece
+    before it (``binary_chunker.OVERLAP_IN``); carried in front of it, the end
+    of that piece is already there, and would be held twice.
+    """
+    from maljan.loaders.binary_chunker import OVERLAP_IN
+
+    content = str(after.content)
+    overlap = (getattr(after, "metadata", None) or {}).get(OVERLAP_IN, 0)
+    if not isinstance(overlap, int) or not 0 < overlap <= len(content):
+        return content
+    opening = content[:overlap]
+    # The overlap is the end of the piece before; the rest is the end of what
+    # of it was not sent. Either one ends the other, and the overlap's earlier
+    # part, where the rest is the shorter, was sent with the piece before.
+    if rest.endswith(opening) or (len(rest) < overlap and opening.endswith(rest)):
+        return content[overlap:]
+    return content
+
+
+def _continues(chunk: Any, after: Any) -> bool:
+    """Whether ``after`` is the next piece of the same source as ``chunk``."""
+    total = getattr(chunk, "total", 1)
+    return (
+        isinstance(total, int)
+        and total > 1
+        and getattr(after, "total", None) == total
+        and getattr(after, "index", None) == getattr(chunk, "index", -2) + 1
+        and getattr(after, "domain", None) == getattr(chunk, "domain", None)
+    )
+
+
+def _numbered_at(chunk: Any, position: int, total: int) -> Any:
+    """``chunk`` numbered by its place in the list it is sent from, as ``_numbered_in_order`` does."""
+    import dataclasses
+
+    if (getattr(chunk, "index", None), getattr(chunk, "total", None)) == (position, total):
+        return chunk
+    if dataclasses.is_dataclass(chunk) and not isinstance(chunk, type):
+        return dataclasses.replace(chunk, index=position, total=total)
+    return chunk
 
 
 def _numbered_in_order(chunks: list[Any]) -> list[Any]:
@@ -1603,12 +1844,20 @@ def read_technique_line(line: str) -> tuple[tuple[str, ...], str | None]:
     reader could name without deciding what the words mean, so no id is read
     and the line is returned as written, for the validation turn to ask about
     (``isr.technique_line_unread``). An id followed by the vendored
-    catalogue's own name for it in brackets ("T1027 (Obfuscated Files or
-    Information)") is that id: the bracket names the id and decides nothing.
+    catalogue's own name for it, in brackets or not ("T1027 (Obfuscated Files
+    or Information)", "T1106 Native API"), is that id: the name names the id
+    and decides nothing. A line that opens with "none" and holds no technique
+    id ("none asserted") claims none.
     """
     text = str(line or "").strip()
     bare = _bare_technique(_without_catalogue_names(_TRAILING_BLOCK_SEPARATOR_RE.sub("", text)))
     if bare.upper() in _NO_TECHNIQUE:
+        return (), None
+    if (
+        _NONE_WITH_WORDS_RE.match(bare)
+        and not _ANY_TECHNIQUE_ID_RE.search(bare)
+        and not _names_a_technique(bare)
+    ):
         return (), None
     parts = [_bare_technique(part) for part in _TECHNIQUE_LIST_SEPARATOR_RE.split(bare)]
     if parts and all(_ONE_TECHNIQUE_RE.fullmatch(part) for part in parts):
@@ -1681,6 +1930,9 @@ def evidence_ref_width() -> int:
     be a fixed 200 characters, which cut an analyst's own citation mid-sentence
     on every window. Where the cut still lands, it is marked where the kept
     text ends.
+
+    The width bounds one claim's line, not a prompt: a prompt carrying many
+    claims holds that many lines, each up to this width.
     """
     from maljan.llm.context_window import (
         FALLBACK,
@@ -1703,7 +1955,7 @@ def evidence_ref_width() -> int:
 # The start of an id the cut sliced through, at the end of the kept text: any
 # prefix of ``[ev_NNNN``, from the bare bracket up to a whole id whose closing
 # bracket was cut, and the space before it. The whole id is written back.
-_PARTIAL_ID_AT_END_RE = re.compile(r"\s*(?:\[(?:e(?:v(?:_\d{0,4})?)?)?)?$", re.IGNORECASE)
+_PARTIAL_ID_AT_END_RE = re.compile(r"(?<!\s)\s*+(?:\[(?:e(?:v(?:_\d{0,4})?)?)?)?$", re.IGNORECASE)
 
 
 def evidence_ref_text(evidence_text: str) -> str:
@@ -1984,11 +2236,6 @@ def _confidence_as_written(match: re.Match[str]) -> str:
 _LABEL_AFTER_VALUE_RE = re.compile(r"\s+(?:TECHNIQUE|EVIDENCE):")
 
 
-def _extract_technique_ids(text: str) -> list[str]:
-    """Every distinct technique id mentioned in the text, in order, as written."""
-    return list(dict.fromkeys(_TECHNIQUE_RE.findall(text)))
-
-
 # ---------------------------------------------------------------------------
 # View-decomposition (findings-log §3.6) — text-path only.
 # Each "view" is a focused sub-prompt over the SAME evidence (AppPoet-style),
@@ -2007,6 +2254,15 @@ _VIEW_SYSTEM = (
     "the evidence does not support a claim, omit it. Cite MITRE ATT&CK technique "
     "IDs in the form Txxxx or Txxxx.yyy only when the evidence supports them.\n"
     + CLAIM_FORMAT_FRAGMENT
+)
+# The same system prompt for an agent whose definition turns the technique line
+# off (``BaseAnalyst.asks_for_techniques``): no technique id is asked for.
+_VIEW_SYSTEM_WITHOUT_TECHNIQUES = (
+    "You are an expert malware analyst examining one focused facet of a sample. "
+    "Analyse ONLY the aspect named in the instruction; ignore everything else. "
+    "For EVERY claim you MUST cite a concrete artifact (API/import, string, path, "
+    "registry key, host/domain). DO NOT invent capabilities — if "
+    "the evidence does not support a claim, omit it.\n" + CLAIM_FORMAT_WITHOUT_TECHNIQUE_FRAGMENT
 )
 
 # Per-domain ordered facets. ``_view_specs`` returns the first N (N=2 -> the first
@@ -2133,17 +2389,42 @@ _TIER_SPECS: list[tuple[str, str]] = [
 ]
 
 
-def _tier_specs(n_tiers: int) -> list[tuple[str, str]]:
+# The same ladder for an agent whose definition turns the technique line off:
+# the first tier asks for no technique id and the last states conclusions
+# rather than mapping them to techniques.
+_TIER_SPECS_WITHOUT_TECHNIQUES: list[tuple[str, str]] = [
+    (
+        "facts",
+        "Reasoning tier 1 of 3 (foundational facts). Extract ONLY concrete, "
+        "low-level artifacts present in the evidence: specific imported APIs, "
+        "strings, file paths, registry keys, hosts/domains/IPs. Do NOT interpret "
+        "intent yet — just enumerate what is verifiably present, each with its "
+        "artifact citation.",
+    ),
+    _TIER_SPECS[1],
+    (
+        "semantics",
+        "Reasoning tier 3 of 3 (conclusions). Using ONLY the behaviours "
+        "established by the previous tier, state the conclusions they support and "
+        "assess overall intent. Cite the supporting behaviour and artifact for "
+        "every conclusion; omit any conclusion the evidence does not support.",
+    ),
+]
+
+
+def _tier_specs(n_tiers: int, *, techniques: bool = True) -> list[tuple[str, str]]:
     """Return ``n_tiers`` ordered (key, instruction) reasoning tiers.
 
     Draws from the fixed LAMD-style facts->behaviour->semantics ladder (the
     canonical depth is 3); for N beyond the table it pads with generic numbered
-    tiers so the eval harness can probe any N>=2.
+    tiers so the eval harness can probe any N>=2. ``techniques=False`` is the
+    ladder for an agent not asked for technique ids.
     """
-    if n_tiers <= len(_TIER_SPECS):
-        return _TIER_SPECS[:n_tiers]
-    out = list(_TIER_SPECS)
-    for i in range(len(_TIER_SPECS), n_tiers):
+    ladder = _TIER_SPECS if techniques else _TIER_SPECS_WITHOUT_TECHNIQUES
+    if n_tiers <= len(ladder):
+        return ladder[:n_tiers]
+    out = list(ladder)
+    for i in range(len(ladder), n_tiers):
         out.append(
             (
                 f"tier{i}",
@@ -2256,11 +2537,6 @@ def _claim_grounded_in_evidence(
         return False
     hits = sum(1 for t in claim_tokens if t in ev_lower)
     return hits / len(claim_tokens) >= _GROUNDING_MIN_OVERLAP
-
-
-# Strip control characters except whitespace (\t \n \r) before sending
-# untrusted data into a prompt. This neutralises common prompt-injection
-# tricks such as embedded ANSI escape sequences or rogue BOMs.
 
 
 # ---------------------------------------------------------------------------
@@ -2481,12 +2757,15 @@ def _submit_to_agent_loop(
     # (``llm.stream_watch``), carried to the loop's task: the task runs in the
     # loop thread's context, not the caller's.
     rule = current_rule()
+    # And the spend admission of the call the caller just made, which a model
+    # list's fallback attempts are admitted under (``core.spend.Admission``).
+    admission = current_admission()
 
     async def _tracked() -> Any:
         task = asyncio.current_task()
         if task is not None:
             running.append(task)
-        with watching(rule):
+        with watching(rule), carrying(admission):
             return await coro
 
     return asyncio.run_coroutine_threadsafe(_tracked(), loop), running
@@ -2777,6 +3056,37 @@ _REVISION_ISR_FRAMING = (
 )
 
 
+# The closing of the negotiation round's human turn: the claim shape it is read in.
+_REVISION_ISR_FORMAT = (
+    "Format your response as structured claims (CLAIM/EVIDENCE/CONFIDENCE/TECHNIQUE)\n"
+    "followed by a DISPUTES section listing peer claims you reject.\n"
+    "Example:\n"
+    "CLAIM: ...\nEVIDENCE: ...\nCONFIDENCE: 0.8\nTECHNIQUE: T1071\n---\n"
+    "DISPUTES:\n- Static analyst says no C2 strings but PCAP shows beaconing.\n"
+)
+# The same closing for an agent whose definition turns the technique line off.
+# Its example dispute names no malware behaviour: such an agent's work is not
+# malware analysis, and an example is copied as readily as a rule.
+_REVISION_ISR_FORMAT_WITHOUT_TECHNIQUES = (
+    "Format your response as structured claims (CLAIM/EVIDENCE/CONFIDENCE)\n"
+    "followed by a DISPUTES section listing peer claims you reject.\n"
+    "Example:\n"
+    "CLAIM: ...\nEVIDENCE: ...\nCONFIDENCE: 0.8\n---\n"
+    "DISPUTES:\n- A peer says a setting is absent but the file you read lists it.\n"
+)
+
+
+def asks_for_techniques(agent: Any) -> bool:
+    """Whether ``agent`` is asked for an ATT&CK technique line on each claim.
+
+    ``BaseAnalyst.asks_for_techniques`` where the agent answers it, and true
+    for one that does not: true is the claim format every built-in class
+    sends, and an agent not built on ``BaseAnalyst`` sends no other.
+    """
+    asks = getattr(agent, "asks_for_techniques", None)
+    return bool(asks()) if callable(asks) else True
+
+
 def prompt_to_messages(prompt_messages: list[tuple[str, str]]) -> list[BaseMessage]:
     """``(role, text)`` pairs as LangChain messages, with no templating step.
 
@@ -2795,6 +3105,381 @@ def prompt_to_messages(prompt_messages: list[tuple[str, str]]) -> list[BaseMessa
         elif role == "human":
             built.append(HumanMessage(content=content))
     return built
+
+
+def current_run_state(agent: Any) -> str:
+    """``agent``'s run-state lines as of now, its budget aside; never raises.
+
+    The node renders the block once from the run's state when it briefs the
+    agent (``pipeline.nodes.brief_agent``), and the agent's own calls of this
+    node are filed after that: in its tool loop, and before every turn sent
+    after it (the nudge, the forced synthesis, a validation retry, a drops
+    question). So the block is rendered again from that state with the
+    entries the agent has filed since appended, and every turn reads the
+    ledger as it stands at that turn: a claim citing an entry the agent filed
+    is never told the ledger ends before it. An agent briefed without the
+    state (``run_state_source``), or with no entry of its own yet, reads the
+    block it was briefed with.
+    """
+    body = str(getattr(agent, "run_state_block", "") or "")
+    source = getattr(agent, "run_state_source", None)
+    if not body or not isinstance(source, Mapping):
+        return body
+    try:
+        own = [
+            *(getattr(agent, "_evidence_entries", None) or ()),
+            *(getattr(agent, "_live_map_entries", None) or ()),
+        ]
+        if not own:
+            return body
+        rows = list(source.get("evidence_ledger") or [])
+        held = {_row_id(row) for row in rows}
+        added: list[Any] = []
+        for entry in own:
+            entry_id = _row_id(entry)
+            if entry_id and entry_id not in held:
+                held.add(entry_id)
+                added.append(entry)
+        if not added:
+            return body
+        from maljan.pipeline.run_state import render_run_state
+
+        return render_run_state({**source, "evidence_ledger": [*rows, *added]}) or body
+    except Exception:  # noqa: BLE001 — the block the agent was briefed with still holds
+        return body
+
+
+def own_earlier_entries(agent: Any) -> list[LedgerEntry]:
+    """The entries ``agent`` filed in the run's earlier rounds, from the state it was briefed with.
+
+    Its own calls the run's ledger already held when the node briefed it
+    (``run_state_source``): a revision's first answer and the revisions before
+    it. None for an agent briefed without the state. Never raises.
+    """
+    source = getattr(agent, "run_state_source", None)
+    name = str(getattr(agent, "name", "") or "")
+    if not isinstance(source, Mapping) or not name:
+        return []
+    found: list[LedgerEntry] = []
+    try:
+        for row in source.get("evidence_ledger") or ():
+            owner = row.get("agent") if isinstance(row, Mapping) else getattr(row, "agent", None)
+            if owner != name:
+                continue
+            try:
+                entry = row if isinstance(row, LedgerEntry) else LedgerEntry.model_validate(row)
+            except Exception:  # noqa: BLE001 — one unreadable row is not a lost guard
+                continue
+            found.append(entry)
+    except Exception:  # noqa: BLE001 — no seed is the guard as it was
+        return []
+    return found
+
+
+def repeatable_earlier_entries(agent: Any) -> list[LedgerEntry]:
+    """The agent's own earlier-round entries whose answer still holds, for tools that answer the same.
+
+    Of :func:`own_earlier_entries`, those of a tool the agent holds, on the
+    same server, that its server marks read-only or its declaration marks
+    read-only or idempotent (``tool_pinning.answers_again``), whose answer is
+    no failure (``evidence_recorder.holds_a_settled_answer``), and only while
+    no call that is not read-only ran on the same server after the entry was
+    recorded, by any agent of the run (:func:`_stale_after`): a rename or a
+    patch makes a later decompile of that server's program a new question. A
+    call of any other tool (a rename, a status poll, a submission) runs again
+    in a revision. Never raises.
+    """
+    from maljan.agents.evidence_recorder import entry_server, holds_a_settled_answer
+    from maljan.agents.tool_pinning import answers_again, declared_source_of, server_of
+
+    try:
+        repeatable = {
+            (
+                server_of(tool) or declared_source_of(tool) or "",
+                str(getattr(tool, "name", "") or ""),
+            )
+            for tool in getattr(agent, "tools", None) or ()
+            if answers_again(tool)
+        }
+    except Exception:  # noqa: BLE001 — no tool read is no tool seeded
+        return []
+    if not repeatable:
+        return []
+    candidates = [
+        entry
+        for entry in own_earlier_entries(agent)
+        if (entry_server(entry), entry.tool) in repeatable and holds_a_settled_answer(entry)
+    ]
+    if not candidates:
+        return []
+    stale = _stale_after(agent, repeatable)
+    return [entry for entry in candidates if entry.id not in stale]
+
+
+def settled_chunk_entries(agent: Any, entries: Sequence[Any] | None) -> list[Any]:
+    """The earlier chunks' calls a later chunk may be answered from: settled, and not written over.
+
+    A call that failed is kept (it is seeded as a failure, one retry served).
+    Of the others, an answer that is not settled (a pending sandbox poll, one
+    that carries a reason or an error; ``evidence_recorder.holds_a_settled_answer``)
+    is left out, and so is a read-only call on a server a call that is not
+    read-only ran on after it (a decompile before a rename): what either
+    answered then is not what the tool answers now. Read once, newest first;
+    linear. Never raises: with the tools unreadable, only the unsettled go.
+    """
+    from maljan.agents.evidence_recorder import entry_server, holds_a_settled_answer
+    from maljan.agents.tool_pinning import answers_again, declared_source_of, server_of
+
+    rows = list(entries or ())
+    try:
+        repeatable = {
+            (
+                server_of(tool) or declared_source_of(tool) or "",
+                str(getattr(tool, "name", "") or ""),
+            )
+            for tool in getattr(agent, "tools", None) or ()
+            if answers_again(tool)
+        }
+    except Exception:  # noqa: BLE001 — no tool read judges nothing stale
+        repeatable = set()
+    changed: set[str] = set()
+    kept: list[Any] = []
+    for entry in reversed(rows):
+        server = entry_server(entry)
+        failed = not bool(getattr(entry, "ok", True))
+        if not failed and (
+            not holds_a_settled_answer(entry)
+            or (server in changed and _entry_reads_only(entry, server, repeatable))
+        ):
+            pass
+        else:
+            kept.append(entry)
+        if not getattr(entry, "repeated_of", None) and not _entry_reads_only(
+            entry, server, repeatable
+        ):
+            changed.add(server)
+    kept.reverse()
+    return kept
+
+
+def _entry_reads_only(row: Any, server: str, repeatable: set[tuple[str, str]]) -> bool:
+    """Whether a ledger row's call changed nothing: a read-only tool the agent holds on that
+    server, or one its stored source declares ``read_only`` under the name its call recorded
+    (``declared_reading.declared_name``: a ``<server>__`` prefix is never taken off by the name
+    alone). Anything unknown may have changed state; a tool is never judged by its name alone."""
+    tool = str(row.get("tool") if isinstance(row, Mapping) else getattr(row, "tool", "") or "")
+    if (server, tool) in repeatable:
+        return True
+    source = row.get("source") if isinstance(row, Mapping) else getattr(row, "source", None)
+    if not source:
+        return False
+    try:
+        from maljan.core.declared_reading import declarations, declared_name
+
+        facts = declarations().declaration_for((str(source), declared_name(row)), exact=True)
+    except Exception:  # noqa: BLE001 — an unreadable declaration declares nothing
+        return False
+    return bool(facts is not None and getattr(facts, "read_only", False) is True)
+
+
+def _stale_after(agent: Any, repeatable: set[tuple[str, str]]) -> set[str]:
+    """The ids of the ledger's entries after which a call that is not read-only ran on their server.
+
+    Read once, newest first, from the state the agent was briefed with: a
+    server is marked changed at the first such call met, and every entry
+    older than it on that server is stale. Newest is the highest ``seq``, or,
+    when any row has none, the later place in the ledger. A call answered
+    from the record (``repeated_of``) ran nothing. Linear in the ledger.
+    """
+    from maljan.agents.evidence_recorder import entry_server
+
+    source = getattr(agent, "run_state_source", None)
+    if not isinstance(source, Mapping):
+        return set()
+
+    def _field(row: Any, name: str) -> Any:
+        return row.get(name) if isinstance(row, Mapping) else getattr(row, name, None)
+
+    rows = list(source.get("evidence_ledger") or ())
+    if all(isinstance(_field(row, "seq"), int) and _field(row, "seq") > 0 for row in rows):
+        rows.sort(key=lambda row: int(_field(row, "seq")))
+    changed: set[str] = set()
+    stale: set[str] = set()
+    for row in reversed(rows):
+        server = entry_server(
+            SimpleNamespace(server=_field(row, "server"), source=_field(row, "source"))
+        )
+        if server in changed:
+            stale.add(str(_field(row, "id") or ""))
+        if _field(row, "repeated_of"):
+            continue
+        if not _entry_reads_only(row, server, repeatable):
+            changed.add(server)
+    return stale
+
+
+def _row_id(row: Any) -> str:
+    """A ledger row's id, whether the row is an entry or its stored mapping."""
+    value = row.get("id") if isinstance(row, Mapping) else getattr(row, "id", None)
+    return str(value or "")
+
+
+def parts_not_analysed_reason(agent: str, missed: Sequence[str]) -> str:
+    """The sentence an answer merged from parts carries for the parts it does not cover.
+
+    One clause per part (``missed``), each saying which part and why; ``""``
+    when every part answered.
+    """
+    said = [str(m) for m in missed if str(m)]
+    if not said:
+        return ""
+    return (
+        f"{agent}'s answer is merged from the parts that answered: {'; '.join(said)}; "
+        "what those parts held is not in it."
+    )
+
+
+# Where a chunk not started stands among the clauses of the chunks missed,
+# until :func:`_chunks_not_started` writes the runs of them.
+_NOT_STARTED = "\x00not started"
+
+
+def _chunks_not_started(missed: Sequence[str], numbers: Sequence[int]) -> list[str]:
+    """``missed`` with each run of consecutive not-started chunks written as one clause.
+
+    ``numbers`` are the chunks not started, in the order their places
+    (:data:`_NOT_STARTED`) stand in ``missed``. Linear in both.
+    """
+    out: list[str] = []
+    run: list[int] = []
+    taken = iter(numbers)
+
+    def _close() -> None:
+        if not run:
+            return
+        which = f"chunk {run[0]} was" if len(run) == 1 else f"chunks {run[0]}\u2013{run[-1]} were"
+        out.append(f"{which} not started (the spend ceiling is reached)")
+        run.clear()
+
+    for clause in missed:
+        if clause == _NOT_STARTED:
+            number = next(taken)
+            if run and number != run[-1] + 1:
+                _close()
+            run.append(number)
+            continue
+        _close()
+        out.append(clause)
+    _close()
+    return out
+
+
+def _with_parts_not_analysed(isr: AgentISR, agent: str, missed: Sequence[str]) -> AgentISR:
+    """``isr`` with the parts it does not cover stated on it, beside any reason it carries.
+
+    Stated as the answer's unread-claims reason, which the judge node puts
+    with the run's limitations for an answer in force; the reason the merge
+    already carried is kept ahead of it.
+    """
+    sentence = parts_not_analysed_reason(agent, missed)
+    if sentence:
+        held = str(getattr(isr, "claims_unread_reason", "") or "")
+        isr.note_claims_unread(f"{held} {sentence}" if held else sentence)
+    return isr
+
+
+def _not_asked(initial: Sequence[Violation], detail: str) -> list[Violation]:
+    """``initial`` as findings of a validation turn that was never answered.
+
+    An unknown id is a catalogue fact and stays as found, marked whether or
+    not it was asked. An absence reading, a claim whose sentence does not
+    describe its technique and every other question for the analyst notes
+    nothing on the claim when it went unanswered: the finding is recorded
+    saying it was not asked, and why (``detail``).
+    """
+    return [
+        replace(
+            v,
+            message=f"{v.message} {detail[:1].upper()}{detail[1:]}.",
+            sentence="",
+            asked=False,
+        )
+        if v.code
+        in (
+            ABSENCE_CLAIM_CODE,
+            CLAIM_DOES_NOT_DESCRIBE_CODE,
+            ANALYST_CUT_CODE,
+            ANALYST_REPEATED_CODE,
+            CLAIMS_UNDER_DISPUTES_CODE,
+            DECOMPILED_NOT_DESCRIBED_CODE,
+            LIBRARY_ONLY_CLAIMS_CODE,
+            FUNCTION_CLAIM_UNHELD_CODE,
+        )
+        else v
+        for v in initial
+    ]
+
+
+def _settle_an_unanswered_turn(
+    agent: Any,
+    isr: AgentISR,
+    initial: Sequence[Violation],
+    detail: str,
+    *,
+    asked: Sequence[Violation] = (),
+    asked_detail: str = "",
+    answered_earlier: Sequence[Violation] = (),
+    answered_earlier_detail: str = "",
+) -> AgentISR:
+    """Keep ``isr`` as it was when its validation turn gave no answer, and say why.
+
+    One rule for every such turn: not asked for want of time, failed before
+    its round was sent, or failed after. The claims are marked as an unasked
+    turn leaves them (an unknown id is a catalogue fact; nothing the analyst
+    never answered is noted on a claim); each finding is recorded with
+    ``detail``; :data:`VALIDATION_TURN_NOT_RUN_CODE` is listed among the
+    checks that could not run; the loop's record says it. A finding in
+    ``asked`` was put to the analyst in a round that brought back no answer
+    it could keep: it is worded with ``asked_detail``, and recorded as not
+    asked (``asked=False``), since no answer to it stands to be read.
+    """
+    unasked = _not_asked(initial, detail)
+    settle_validation_marks(isr, unasked)
+    put: set[Violation] | list[Violation]
+    try:
+        put = set(asked)
+    except TypeError:  # a finding holding an unhashable value is compared by value
+        put = list(asked)
+    said = asked_detail or detail
+    sentence = f"{said[:1].upper()}{said[1:]}."
+    # Put in an earlier round that did answer, whose answer the later failure
+    # kept nobody from reading but the run: asked, and not kept.
+    earlier: set[Violation] | list[Violation]
+    try:
+        earlier = set(answered_earlier)
+    except TypeError:
+        earlier = list(answered_earlier)
+    earlier_said = answered_earlier_detail or said
+    earlier_sentence = f"{earlier_said[:1].upper()}{earlier_said[1:]}."
+
+    def _worded(v: Violation, kept: Violation) -> Violation:
+        if v in put:
+            return replace(v, message=f"{v.message} {sentence}", sentence="", asked=False)
+        if v in earlier:
+            return replace(v, message=f"{v.message} {earlier_sentence}", sentence="", asked=False)
+        return kept
+
+    agent.validation_findings.extend(
+        _worded(v, kept) for v, kept in zip(initial, unasked, strict=True)
+    )
+    not_run = getattr(agent, "validation_not_run", None)
+    if not isinstance(not_run, list):
+        not_run = []
+        agent.validation_not_run = not_run
+    if VALIDATION_TURN_NOT_RUN_CODE not in not_run:
+        not_run.append(VALIDATION_TURN_NOT_RUN_CODE)
+    BaseAnalyst._note_on_last_loop(agent, "validation", said if put else detail)
+    return isr
 
 
 def frame_messages(
@@ -2827,19 +3512,42 @@ def frame_messages(
     """
     from langchain_core.messages import HumanMessage
 
-    from maljan.pipeline.triage_pack import PACK_HEADING
-
     out: list[BaseMessage] = without_run_state(list(messages))
     if facts_block:
         for index, message in enumerate(out):
             if isinstance(message, HumanMessage):
-                content = str(message.content)
-                if PACK_HEADING not in content:
-                    out[index] = HumanMessage(content=f"{facts_block}\n\n{content}")
+                # Attached once, known by the platform's own note on the turn
+                # (:data:`FACTS_ATTACHED`), never by its words: a sample whose
+                # strings carry the pack's heading is data in the turn, and
+                # read as the pack it left the analyst without one.
+                if not _carries_facts(message, facts_block):
+                    content = str(message.content)
+                    noted = {**(message.response_metadata or {}), FACTS_ATTACHED: True}
+                    out[index] = HumanMessage(
+                        content=f"{facts_block}\n\n{content}", response_metadata=noted
+                    )
                 break
     if run_state and out and _carries_run_state(out[-1]):
         out[-1] = _with_run_state_on(out[-1], run_state)
     return out
+
+
+def _carries_facts(message: Any, facts_block: str) -> bool:
+    """Whether the platform already put ``facts_block`` at the head of ``message``.
+
+    Its note on the turn says so. A turn without the note — rebuilt without
+    its metadata, or saved by a checkpoint before the note existed — carries
+    it when it begins with the block exactly or with the pack's heading at
+    its very first character, which only the platform writes there: the head
+    of the first human turn is the platform's, and a sample's text stands
+    after the task, so a heading anywhere else is the sample's.
+    """
+    from maljan.pipeline.triage_pack import PACK_HEADING
+
+    if (getattr(message, "response_metadata", None) or {}).get(FACTS_ATTACHED):
+        return True
+    content = str(message.content)
+    return content.startswith(PACK_HEADING) or content.startswith(f"{facts_block}\n\n")
 
 
 def _carries_run_state(message: Any) -> bool:
@@ -2875,24 +3583,33 @@ def _with_run_state_on(message: Any, body: str) -> Any:
 
 
 def _without_run_state_on(message: Any) -> Any:
-    """``message`` as it was before a block was put at its end; itself when none was."""
+    """``message`` as it was before a block was put at its end; itself when none was.
+
+    The block is recognised by the note :func:`_with_run_state_on` left
+    (:data:`RUN_STATE_ATTACHED`), never by its markers.
+    """
     from maljan.pipeline.run_state import is_run_state_block, without_run_state_tail
 
     if not _carries_run_state(message):
         return message
-    if RUN_STATE_ATTACHED in (message.response_metadata or {}):
-        kept = {k: v for k, v in message.response_metadata.items() if k != RUN_STATE_ATTACHED}
+    # Only the block the platform noted it attached comes off: a turn that
+    # ends on markers a sample or a tool wrote keeps them as written.
+    noted = message.response_metadata or {}
+    attached = noted.get(RUN_STATE_ATTACHED)
+    block = attached if isinstance(attached, str) else ""
+    if RUN_STATE_ATTACHED in noted:
+        kept = {k: v for k, v in noted.items() if k != RUN_STATE_ATTACHED}
         message = message.model_copy(update={"response_metadata": kept})
     content = message.content
     if isinstance(content, list):
         last = content[-1] if content else None
         if isinstance(last, dict) and last.get("type") == "text":
-            if is_run_state_block(last.get("text")):
+            if is_run_state_block(last.get("text"), block):
                 return message.model_copy(update={"content": content[:-1]})
         return message
     if not isinstance(content, str):
         return message
-    bare = without_run_state_tail(content)
+    bare = without_run_state_tail(content, block)
     return message if bare == content else message.model_copy(update={"content": bare})
 
 
@@ -2910,6 +3627,7 @@ def revision_messages(
     *,
     isr: bool = False,
     revision_round: int = 1,
+    techniques: bool = True,
 ) -> list[tuple[str, str]]:
     """The revision prompt every analyst sends, as ``(role, text)`` pairs.
 
@@ -2925,6 +3643,10 @@ def revision_messages(
     ``revision_round`` is not interpolated into the prompt (it never was); it
     is carried so a caller's log line and the returned ISR agree about which
     round produced which text.
+
+    ``techniques=False`` is the negotiation round for an agent whose
+    definition turns the technique line off: the same text with the
+    TECHNIQUE label and example line left out.
     """
     logger.debug(
         "Building revision prompt (isr=%s, round=%d, peers=%d).",
@@ -2947,11 +3669,7 @@ def revision_messages(
                 f"PEER REPORTS:\n{peer_section}\n\n"
                 f"MEDIATOR FEEDBACK:\n{mediator_feedback}\n\n"
                 f"RAW DATA:\n{original_data}\n\n"
-                "Format your response as structured claims (CLAIM/EVIDENCE/CONFIDENCE/TECHNIQUE)\n"
-                "followed by a DISPUTES section listing peer claims you reject.\n"
-                "Example:\n"
-                "CLAIM: ...\nEVIDENCE: ...\nCONFIDENCE: 0.8\nTECHNIQUE: T1071\n---\n"
-                "DISPUTES:\n- Static analyst says no C2 strings but PCAP shows beaconing.\n",
+                + (_REVISION_ISR_FORMAT if techniques else _REVISION_ISR_FORMAT_WITHOUT_TECHNIQUES),
             ),
         ]
 
@@ -3048,12 +3766,290 @@ EARLIER_CHUNKS_HEAD = (
 )
 
 
+# A later chunk's earlier calls in their most compact whole form, for a prompt
+# whose room the full list would cost a loop: every call, its tool and the
+# ledger entry that holds its result, nothing left out.
+EARLIER_CHUNKS_COMPACT_HEAD = (
+    "Earlier chunks of this same input were already analysed. These are the tool calls "
+    "made there, each with its arguments and the ledger entry that holds its result "
+    "(calls with the same arguments share a line, a range ev_0012\u2013ev_0015 being every "
+    "entry from the first to the last); the room in this prompt does not hold what they "
+    "returned. Cite those entries instead of making the same call again: an identical "
+    "call is not run again, and is answered with the result its entry recorded. A call "
+    "marked failed, or marked as one whose result was not kept, may be made once more."
+)
+
+# What a later chunk is told when its prompt has no room for either list: how
+# many calls, and the span of ledger entries that hold their results. The
+# repeat guard holds every earlier call whatever the prompt shows
+# (``_prior_chunk_calls``).
+EARLIER_CALLS_NOT_LISTED = (
+    "Earlier chunks of this same input made {count} tool call(s), held in ledger entries "
+    "{first} to {last}; this prompt has no room to list them. Each is answered from the "
+    "ledger: an identical call is not run again, and is answered with the result its "
+    "entry recorded."
+)
+
+# The count with the kind of work done: each tool and how often it was called.
+EARLIER_CALLS_BY_TOOL = (
+    "Earlier chunks of this same input made {count} tool call(s) ({tools}), held in "
+    "ledger entries {first} to {last}; this prompt has no room to list them. Each is "
+    "answered from the ledger: an identical call is not run again, and is answered with "
+    "the result its entry recorded."
+)
+
+# What stands for a call's arguments that no list in the prompt could hold.
+ARGUMENTS_HELD = (
+    "arguments of {chars} characters, as in the call held in {entry}; an identical "
+    "repeat is answered from the ledger"
+)
+
+# A ledger id: a prefix and a number, read so that ids in a row are a range.
+_ENTRY_ID = re.compile(r"^(.*?)(\d+)$")
+
+
 def earlier_chunks_block(entries: Sequence[Any]) -> str:
     """The earlier chunks' tool calls as ``tool(args) → ev_id`` lines under their head, or ``""``.
 
     Every call that ran, in the order made; a call that failed says so. A
     repeat the guard answered is left out: the entry it names is listed.
     """
+    lines = _earlier_call_lines(entries)
+    if not lines:
+        return ""
+    return "\n".join([EARLIER_CHUNKS_HEAD, *lines])
+
+
+def entry_ranges(ids: Sequence[str]) -> str:
+    """``ids`` in order, each run of consecutive numbers with one prefix as ``first–last``.
+
+    Every id is recoverable: a range names every entry from its first to its
+    last, and an id that is not a prefix and a number stands as it is.
+    """
+    parts: list[str] = []
+    run: list[str] = []
+    last: tuple[str, int, int] | None = None
+    for entry_id in ids:
+        found = _ENTRY_ID.match(entry_id)
+        key = (found.group(1), int(found.group(2)), len(found.group(2))) if found else None
+        if (
+            key is not None
+            and last is not None
+            and key[0] == last[0]
+            and key[2] == last[2]
+            and key[1] == last[1] + 1
+        ):
+            run.append(entry_id)
+        else:
+            if run:
+                parts.append(run[0] if len(run) == 1 else f"{run[0]}\u2013{run[-1]}")
+            run = [entry_id]
+        last = key
+    if run:
+        parts.append(run[0] if len(run) == 1 else f"{run[0]}\u2013{run[-1]}")
+    return ", ".join(parts)
+
+
+def earlier_chunks_compact(entries: Sequence[Any], held_over: int | None = None) -> str:
+    """Every earlier call with its arguments, without what it returned, under the compact head.
+
+    One line a call: the tool, its argument values in canonical JSON (by
+    name only where the tool's calls do not all name the same arguments),
+    its mark where it failed or its result was not kept, and the entry. Calls
+    with identical arguments and mark share one line, their entries as
+    ranges. Nothing is cut: an argument value longer than ``held_over`` (the
+    most a list could take in the prompt) can never be listed, and is named by
+    the entry that holds it verbatim ("args in ev_x"). ``""`` with no calls.
+    """
+    calls = _earlier_call_facts(entries)
+    if not calls:
+        return ""
+    keys_by_tool: dict[str, set[tuple[str, ...]]] = {}
+    for tool, args, _entry_id, _mark in calls:
+        keys_by_tool.setdefault(tool, set()).add(tuple(sorted(args)))
+    grouped: dict[tuple[str, str, str], list[str]] = {}
+    for tool, args, entry_id, mark in calls:
+        named = len(keys_by_tool[tool]) > 1
+        shown = _call_arguments(args, named=named, held_over=held_over, entry_id=entry_id)
+        grouped.setdefault((tool, shown, mark), []).append(entry_id)
+    lines = [
+        f"- {tool}({shown}) \u2192 {entry_ranges(ids)}{mark}"
+        for (tool, shown, mark), ids in grouped.items()
+    ]
+    return "\n".join([EARLIER_CHUNKS_COMPACT_HEAD, *lines])
+
+
+def _call_arguments(
+    args: dict[str, Any], *, named: bool, held_over: int | None, entry_id: str
+) -> str:
+    """A call's argument values in canonical JSON, by name where ``named``, none ever cut.
+
+    Arguments longer than ``held_over``, which no list in the prompt could
+    hold, are said as their size and the call that holds them
+    (:data:`ARGUMENTS_HELD`).
+    """
+    values: list[str] = []
+    for key in sorted(args):
+        try:
+            value = json.dumps(args[key], sort_keys=True, default=str, ensure_ascii=False)
+        except (TypeError, ValueError):
+            value = repr(args[key])
+        values.append(f"{key}={value}" if named else value)
+    shown = ", ".join(values)
+    if held_over is not None and len(shown) > held_over:
+        return ARGUMENTS_HELD.format(chars=len(shown), entry=entry_id)
+    return shown
+
+
+def _earlier_call_facts(entries: Sequence[Any]) -> list[tuple[str, dict[str, Any], str, str]]:
+    """``(tool, args, entry id, mark)`` for each earlier call the full list shows, in order."""
+    from maljan.schemas.evidence import holds_its_answer
+
+    facts: list[tuple[str, dict[str, Any], str, str]] = []
+    for entry in entries or ():
+        tool = str(getattr(entry, "tool", "") or "")
+        entry_id = str(getattr(entry, "id", "") or "")
+        if not tool or not entry_id or getattr(entry, "repeated_of", None):
+            continue
+        args = getattr(entry, "args", None)
+        ok = bool(getattr(entry, "ok", True))
+        mark = (
+            " (failed)"
+            if not ok
+            else ""
+            if holds_its_answer(entry)
+            else " (result not kept; may be made once more)"
+        )
+        facts.append((tool, dict(args) if isinstance(args, dict) else {}, entry_id, mark))
+    return facts
+
+
+def earlier_calls_counted(entries: Sequence[Any]) -> str:
+    """The earlier calls' count and the span of their entries (:data:`EARLIER_CALLS_NOT_LISTED`)."""
+    calls = _earlier_calls(entries)
+    if not calls:
+        return ""
+    return EARLIER_CALLS_NOT_LISTED.format(count=len(calls), first=calls[0][1], last=calls[-1][1])
+
+
+def earlier_calls_by_tool(entries: Sequence[Any]) -> str:
+    """The earlier calls' count, each tool's share of it and their entries' span, or ``""``."""
+    calls = _earlier_calls(entries)
+    if not calls:
+        return ""
+    counts: dict[str, int] = {}
+    for tool, _entry_id, _ok in calls:
+        counts[tool] = counts.get(tool, 0) + 1
+    tools = ", ".join(f"{tool} \u00d7{n}" for tool, n in counts.items())
+    return EARLIER_CALLS_BY_TOOL.format(
+        count=len(calls), tools=tools, first=calls[0][1], last=calls[-1][1]
+    )
+
+
+def _earlier_calls(entries: Sequence[Any]) -> list[tuple[str, str, bool]]:
+    """``(tool, entry id, ok)`` for each earlier call the full list shows, in the order made."""
+    calls: list[tuple[str, str, bool]] = []
+    for entry in entries or ():
+        tool = str(getattr(entry, "tool", "") or "")
+        entry_id = str(getattr(entry, "id", "") or "")
+        if not tool or not entry_id or getattr(entry, "repeated_of", None):
+            continue
+        calls.append((tool, entry_id, bool(getattr(entry, "ok", True))))
+    return calls
+
+
+def prompt_room(agent: Any, content: str) -> int | None:
+    """The agent's input room for ``content`` (``BaseAnalyst._input_room_chars``), or ``None``."""
+    measure = getattr(agent, "_input_room_chars", None)
+    if not callable(measure):
+        return None
+    try:
+        room = measure(content)
+    except Exception as exc:  # noqa: BLE001 — no measure is no bound, never a lost chunk
+        logger.debug("chunk room not measured (%s).", exc)
+        return None
+    return room if isinstance(room, int) and not isinstance(room, bool) else None
+
+
+def fitted_chunk(
+    agent: Any, header: str, content: str, earlier: Sequence[Any], ahead: int = 0
+) -> tuple[str, str, str]:
+    """``(earlier-calls block, content sent now, rest)`` for a later chunk's prompt.
+
+    The chunks run one after another, so the earlier calls are known when a
+    chunk is sent. The loops are fixed by the shortest form of those calls,
+    their count (:data:`EARLIER_CALLS_NOT_LISTED`): what is left of this
+    source (``content`` and the ``ahead`` characters of its pieces after it)
+    over the room that form leaves beside the header, spread evenly, so the
+    last loop is never a sliver. The slack this loop's share of the content
+    leaves goes to the most informative form that fits it: the full list
+    (:data:`EARLIER_CHUNKS_HEAD`), every call with its arguments but not what
+    it returned (:data:`EARLIER_CHUNKS_COMPACT_HEAD`), the count by tool with
+    the span of the entries (:data:`EARLIER_CALLS_BY_TOOL`), else the count.
+    A list never adds a loop, and never nothing while earlier calls exist.
+    Content past this loop's share is the ``rest``, cut at a line break where
+    there is one; the caller hands it to the next piece of the same source,
+    or sends it as a chunk of its own. With no room measured, the full list
+    and the content as they came.
+    """
+    full = earlier_chunks_block(earlier)
+    room = prompt_room(agent, content)
+    if room is None:
+        return full, content, ""
+    # With no earlier call there is no block, and only the header and the
+    # blank line after it stand beside the content.
+    fixed = len(header) + (4 if full else 2)
+    counted = earlier_calls_counted(earlier)
+    avail = room - fixed - len(counted)
+    if avail <= 0:
+        # No room even beside the count: it is still said, the content as it came.
+        return counted, content, ""
+    # The loops are the count form's: what is left of the source over the room
+    # the shortest form leaves, spread evenly so the last is no sliver. A list
+    # never adds a loop; it takes only the slack this loop's share leaves.
+    remaining = len(content) + max(0, ahead)
+    loops = -(-remaining // avail)
+    take = -(-remaining // loops)
+    if len(content) <= take:
+        sent, rest = content, ""
+    else:
+        cut = _line_cut(content, take, avail, remaining, loops)
+        sent, rest = content[:cut], content[cut:]
+    if not full:
+        return "", sent, rest
+    slack = room - fixed - len(sent)
+    for form in (
+        full,
+        earlier_chunks_compact(earlier, slack),
+        earlier_calls_by_tool(earlier),
+    ):
+        if len(form) <= slack:
+            return form, sent, rest
+    return counted, sent, rest
+
+
+def _line_cut(content: str, take: int, avail: int, remaining: int, loops: int) -> int:
+    """Where this loop's share of ``content`` ends: at a line break when that costs nothing.
+
+    ``take`` is the share. The last line break before it is used when the
+    line it keeps whole fits a later loop's room (``avail``) and what is left
+    after it still fits the loops left; otherwise the cut is at ``take``,
+    inside the line, so no chunk is past the room and no loop is added for a
+    line kept whole.
+    """
+    cut = content.rfind("\n", 0, take) + 1
+    if cut <= 0:
+        return take
+    end = content.find("\n", cut)
+    line = (end + 1 if end >= 0 else len(content)) - cut
+    left = loops - 1
+    if line <= avail and left > 0 and -(-(remaining - cut) // avail) <= left:
+        return cut
+    return take
+
+
+def _earlier_call_lines(entries: Sequence[Any]) -> list[str]:
+    """One ``tool(args) → ev_id`` line per earlier call, in the order made."""
     lines: list[str] = []
     for entry in entries or ():
         tool = str(getattr(entry, "tool", "") or "")
@@ -3096,9 +4092,7 @@ def earlier_chunks_block(entries: Sequence[Any]) -> str:
 
         said = f": {excerpt_view(headline)}" if headline else ""
         lines.append(f"- {tool}({shown}) \u2192 {entry_id}{failed}{said}")
-    if not lines:
-        return ""
-    return "\n".join([EARLIER_CHUNKS_HEAD, *lines])
+    return lines
 
 
 class _PriorAnswer:
@@ -3300,7 +4294,6 @@ class BudgetMeter:
         if sink is None:
             return
         try:
-            from maljan.core.token_ledger import turn_usage
             from maljan.llm.fallback import turn_model
             from maljan.pipeline.events import emit_agent_message_delta, scrub
 
@@ -3384,6 +4377,77 @@ class BudgetMeter:
                 self._event_sink(), stage=stage, agent=str(self.name), cap=cap, detail=detail
             )
 
+    def _input_meter(self) -> Any:
+        """The job's input meter (``core.input_meter``), or ``None`` outside a job."""
+        return getattr(getattr(self, "_container", None), "input_meter", None)
+
+    def _note_request(
+        self, messages: Sequence[Any], *, kind: str, loop: Any = None, definitions: int = 0
+    ) -> Any:
+        """What the request about to be sent is made of, onto the job's meter; its row, or ``None``.
+
+        Measures and changes nothing: ``messages`` are the ones the request
+        carries. The pack, the peer reports and this agent's own earlier
+        answers are the texts this agent was handed for the request
+        (``facts_block``, ``_measured_peers``, ``_measured_own``). Never raises.
+        """
+        meter = self._input_meter()
+        if meter is None:
+            return None
+        try:
+            replayed = getattr(self, "_replayed_run_state_chars", None)
+            parts = request_parts(
+                list(messages),
+                measure=_message_chars,
+                pack=str(
+                    getattr(self, "facts_block", "") or getattr(self, "_measured_pack", "") or ""
+                ),
+                peers=tuple(getattr(self, "_measured_peers", ()) or ()),
+                own=tuple(getattr(self, "_measured_own", ()) or ()),
+                definitions=definitions,
+                replayed=int(replayed()) if loop is not None and callable(replayed) else 0,
+            )
+            return meter.request(
+                str(getattr(self, "name", "") or ""),
+                parts,
+                stage=str(getattr(self, "pipeline_stage", "") or "analysis"),
+                kind=kind,
+                loop=loop,
+            )
+        except Exception as exc:  # noqa: BLE001 — a measure never costs a turn
+            self.logger.debug("%s: the request was not measured (%s).", self.name, exc)
+            return None
+
+    def _note_answered(self, row: Any, response: Any) -> None:
+        """A single call's provider-reported input tokens onto its row. Never raises."""
+        meter = self._input_meter()
+        if meter is None or row is None:
+            return
+        try:
+            meter.answered(row, turn_usage(response))
+        except Exception as exc:  # noqa: BLE001 — a measure never costs a turn
+            self.logger.debug("%s: the answer was not measured (%s).", self.name, exc)
+
+    def _close_input_loop(self, loop: Any, messages: Sequence[Any]) -> None:
+        """Close this loop's row on the meter, with each model turn's reported input. Never raises.
+
+        ``messages`` are the turns the loop's model answered, the very ones the
+        token ledger records the loop's usage from on the same exit path, so
+        the two agree however the loop ended. Every loop's own ``finally``
+        closes it; a second close of the same loop changes nothing.
+        """
+        meter = self._input_meter()
+        if meter is None:
+            return
+        try:
+            meter.close(
+                str(getattr(self, "name", "") or ""),
+                loop,
+                [turn_usage(m) for m in messages if is_model_turn(m)],
+            )
+        except Exception as exc:  # noqa: BLE001 — a measure never costs a turn
+            self.logger.debug("%s: the loop's input was not closed (%s).", self.name, exc)
+
     def _definitions_sent(self) -> int:
         """What this agent's tool definitions weigh with each request of its loop, or 0."""
         try:
@@ -3416,6 +4480,184 @@ class BudgetMeter:
             self._budget_records = []
         return records
 
+    def _clearing_per_token(self) -> int:
+        """The characters a token is counted at by this job's budget."""
+        budget = self._context_budget()
+        try:
+            return max(
+                1, int(getattr(budget, "chars_per_token", CHARS_PER_TOKEN) or CHARS_PER_TOKEN)
+            )
+        except (TypeError, ValueError):
+            return CHARS_PER_TOKEN
+
+    def _own_window_tokens(self) -> int | None:
+        """The window this agent's own model serves, in tokens, or ``None`` where none is known.
+
+        The window recorded on the built model (``context_window.built_window``,
+        a declared or probed fact), else the smallest window of the models the
+        agent's assignment may call, as ``context_window`` learns it without a
+        request; never the job's smallest window, which another agent's model
+        may set, and never the fallback for a window nobody reported.
+        """
+        from maljan.llm.context_window import FALLBACK, built_window, window_for_assignment
+
+        fact = built_window(getattr(self, "llm", None))
+        if fact is not None:
+            return int(fact.tokens)
+        try:
+            from maljan.core.model_assignments import assignment_chain_for
+
+            cfg = get_settings()
+            windows = [
+                window_for_assignment(cfg, assignment, probe=False)
+                for assignment in assignment_chain_for(cfg, self.name)
+            ]
+        except Exception as exc:  # noqa: BLE001 — no window is no point, never a lost loop
+            self.logger.debug("%s: its own window is not known (%s).", self.name, exc)
+            return None
+        known = [int(w.tokens) for w in windows if w.source != FALLBACK and int(w.tokens) > 0]
+        return min(known) if known else None
+
+    def _tool_answer_clearing(self) -> ToolAnswerClearing:
+        """This loop's clearing: after a refusal, and before a prompt past the agent's own window.
+
+        A provider's refusal of a request as over its window clears whatever
+        else is known. The window point is the window the agent's own model
+        serves (:meth:`_own_window_tokens`), in the budget's characters: a
+        prompt past it is refused by every server.
+        """
+        window = self._own_window_tokens()
+        return ToolAnswerClearing(
+            window_chars=chars_for_tokens(window, self._clearing_per_token()) if window else None
+        )
+
+    def _cleared_request(
+        self,
+        clearing: ToolAnswerClearing,
+        sent: list[Any],
+        on_clear: Callable[[Clearing], None] | None,
+        offered: Callable[[], bool] | None = None,
+    ) -> tuple[list[Any], int]:
+        """``sent`` with the loop's clears in place, and the characters newly cleared.
+
+        Where a clear is due and the loop does not offer ``read_evidence`` yet
+        (``offered``), raises :class:`OfferReadAgainFirst` instead: the loop
+        builds its graph again with the tool and sends the turn again. Never
+        raises otherwise.
+        """
+        per_token = self._clearing_per_token()
+
+        def reported(messages: list[Any]) -> tuple[int, int]:
+            return _reported_request(messages, per_token)
+
+        extra = self._definitions_sent() + self._replayed_run_state_chars()
+        try:
+            if offered is not None and not offered():
+                due = clearing.due(
+                    sent, extra_chars=extra, measure=_message_chars, reported=reported
+                )
+            else:
+                due = False
+        except Exception as exc:  # noqa: BLE001 — a clear never costs a turn
+            self.logger.debug("%s: tool answers not cleared (%s).", self.name, exc)
+            return sent, 0
+        if due:
+            raise OfferReadAgainFirst()
+        try:
+            fitted = clearing.fit(
+                sent,
+                extra_chars=extra,
+                measure=_message_chars,
+                reported=reported,
+                turn=sum(1 for m in sent if is_model_turn(m)) + 1,
+            )
+        except Exception as exc:  # noqa: BLE001 — a clear never costs a turn
+            self.logger.debug("%s: tool answers not cleared (%s).", self.name, exc)
+            return sent, 0
+        if fitted.clearing is not None and on_clear is not None:
+            try:
+                on_clear(fitted.clearing)
+            except Exception as exc:  # noqa: BLE001 — a record never costs a turn
+                self.logger.debug("%s: a clear was not recorded (%s).", self.name, exc)
+        return fitted.messages, fitted.freed_before_report
+
+    def _note_clearing(self, clearing: Clearing) -> None:
+        """Say one clear in the agent's log and as a ``tool_answers_cleared`` event."""
+        why = (
+            "the model server refused the request as over its window"
+            if clearing.why == CLEARED_FOR_REFUSAL
+            else "the request's prompt is past the model's own window"
+        )
+        self.logger.info(
+            "%s: cleared %d old tool answer(s) to ledger references at turn %d, because %s: "
+            "the request went from %d to %d characters of context (clearing starts past %d and "
+            "clears to %d).",
+            self.name,
+            clearing.answers,
+            clearing.turn,
+            why,
+            clearing.chars_before,
+            clearing.chars_after,
+            clearing.point_chars,
+            clearing.target_chars,
+        )
+        from maljan.pipeline.events import emit_tool_answers_cleared
+
+        emit_tool_answers_cleared(
+            self._event_sink(),
+            agent=str(self.name),
+            stage=str(getattr(self, "pipeline_stage", "") or "analysis"),
+            turn=clearing.turn,
+            answers=clearing.answers,
+            chars_before=clearing.chars_before,
+            chars_after=clearing.chars_after,
+            why=clearing.why,
+        )
+
+    def _replayed_run_state_chars(self) -> int:
+        """Characters of earlier run-state blocks the next request sends again, or ``0``.
+
+        Only where the model's provider keeps its history append-only
+        (``anthropic_history.replays_earlier_blocks``); every other provider
+        sends one block, the current one, which the messages already hold.
+        """
+        blocks = getattr(self, "_replayed_blocks", None) or {}
+        if not blocks or not replays_earlier_blocks(getattr(self, "llm", None)):
+            return 0
+        upto = getattr(self, "_replay_upto", None)
+        return sum(size for at, size in blocks.items() if upto is None or at < upto)
+
+    def _answer_sizer(self) -> Any | None:
+        """The job's tool-answer guardrail (``ServerRegistry.answer_sizer``), or ``None`` without a job."""
+        try:
+            registry = self._server_registry()
+            return None if registry is None else registry.answer_sizer()
+        except Exception as exc:  # noqa: BLE001 — an answer read again unsized is still an answer
+            self.logger.debug("%s: no answer guardrail for read_evidence (%s).", self.name, exc)
+            return None
+
+    def _server_registry(self) -> Any | None:
+        """The job's tool-server registry, or None when this agent runs bare."""
+        container = getattr(self, "_container", None)
+        if container is None:
+            return None
+        return container.get_server_registry()
+
+    def _context_budget(self) -> Any | None:
+        """The job's context budget, or None when this agent runs bare.
+
+        What the tool paths ask how many characters of an answer this model may
+        read now, and what this loop reports its own conversation size to.
+        """
+        container = getattr(self, "_container", None)
+        if container is None:
+            return None
+        try:
+            return container.get_context_budget()
+        except Exception as exc:  # noqa: BLE001 — a budget is never worth a lost loop
+            self.logger.debug("%s: the context budget is unavailable (%s).", self.name, exc)
+            return None
+
 
 class BaseAnalyst(BudgetMeter, ABC):
     """Abstract base class for expert agents."""
@@ -3433,6 +4675,9 @@ class BaseAnalyst(BudgetMeter, ABC):
         # The run-state block's body, derived from the state by the node and
         # regenerated with the remaining budget on every turn of a tool loop.
         self.run_state_block: str = ""
+        # The state the node rendered that block from, so each turn renders it
+        # again with this agent's own new entries (:func:`current_run_state`).
+        self.run_state_source: Mapping[str, Any] | None = None
         # Per-run token ledger (findings-log §4 Item 1). The container attaches
         # the shared ledger in get_agent(); None when an agent runs standalone.
         self.token_ledger: TokenLedger | None = None
@@ -3495,6 +4740,9 @@ class BaseAnalyst(BudgetMeter, ABC):
         # The run's record of what its tools answered, handed down by the
         # container. ``None`` for an agent built outside a job.
         self.evidence_corpus: Any = None
+        # The job's store for the parts of an answer an entry does not keep
+        # whole (``schemas.evidence_spill``). ``None`` outside a job.
+        self.evidence_spill: Any = None
         # What the optional ``maljan-findings`` block carried, accumulated as
         # the loop answers and drained onto the ISR the analyst returns. A
         # buffer rather than a return value because the block arrives with the
@@ -3502,6 +4750,7 @@ class BaseAnalyst(BudgetMeter, ABC):
         # chunked run it arrives once per chunk.
         self._findings_buffer: list[Finding] = []
         self._artifacts_buffer: list[Artifact] = []
+        self._open_questions_buffer: list[OpenQuestion] = []
         # The answers of the asks this agent made, as the specialists' own
         # ISRs. A lead's report is the only channel its chunk has out of a
         # stage, so a lead whose loop died with six answered asks behind it
@@ -3799,28 +5048,6 @@ class BaseAnalyst(BudgetMeter, ABC):
         self.logger.error("%s: %s; its loop is not started.", self.name, failure)
         raise failure
 
-    def _server_registry(self) -> Any | None:
-        """The job's tool-server registry, or None when this agent runs bare."""
-        container = getattr(self, "_container", None)
-        if container is None:
-            return None
-        return container.get_server_registry()
-
-    def _context_budget(self) -> Any | None:
-        """The job's context budget, or None when this agent runs bare.
-
-        What the tool paths ask how many characters of an answer this model may
-        read now, and what this loop reports its own conversation size to.
-        """
-        container = getattr(self, "_container", None)
-        if container is None:
-            return None
-        try:
-            return container.get_context_budget()
-        except Exception as exc:  # noqa: BLE001 — a budget is never worth a lost loop
-            self.logger.debug("%s: the context budget is unavailable (%s).", self.name, exc)
-            return None
-
     def _note_conversation(self, messages: list, cleared_chars: int = 0) -> None:
         """Tell the job's budget what this loop's next request will weigh.
 
@@ -3877,19 +5104,6 @@ class BaseAnalyst(BudgetMeter, ABC):
                 blocks[len(messages)] = len(block) + 2
         except Exception as exc:  # noqa: BLE001 — a measure never costs a turn
             self.logger.debug("%s: earlier run-state blocks not counted (%s).", self.name, exc)
-
-    def _replayed_run_state_chars(self) -> int:
-        """Characters of earlier run-state blocks the next request sends again, or ``0``.
-
-        Only where the model's provider keeps its history append-only
-        (``anthropic_history.replays_earlier_blocks``); every other provider
-        sends one block, the current one, which the messages already hold.
-        """
-        blocks = getattr(self, "_replayed_blocks", None) or {}
-        if not blocks or not replays_earlier_blocks(getattr(self, "llm", None)):
-            return 0
-        upto = getattr(self, "_replay_upto", None)
-        return sum(size for at, size in blocks.items() if upto is None or at < upto)
 
     def _forget_conversation(self) -> None:
         """Let go of this loop's size, so a finished loop stops binding the cap."""
@@ -3994,15 +5208,6 @@ class BaseAnalyst(BudgetMeter, ABC):
         tool = items_tool(report, _answer_sizer(container), normalised_by_of(container))
         return stamp_source([tool], SANDBOX_FAMILY, declared="sandbox")
 
-    def _answer_sizer(self) -> Any | None:
-        """The job's tool-answer guardrail (``ServerRegistry.answer_sizer``), or ``None`` without a job."""
-        try:
-            registry = self._server_registry()
-            return None if registry is None else registry.answer_sizer()
-        except Exception as exc:  # noqa: BLE001 — an answer read again unsized is still an answer
-            self.logger.debug("%s: no answer guardrail for read_evidence (%s).", self.name, exc)
-            return None
-
     def _profile_excluded_servers(self) -> str:
         """The servers the active profile withholds, as ``for_agent``'s argument."""
         container = getattr(self, "_container", None)
@@ -4070,8 +5275,19 @@ class BaseAnalyst(BudgetMeter, ABC):
         See ``agents.tool_pinning`` for what the guard does and why it is this
         narrow. With no pinned path the resolved tools come back unwrapped.
         """
+        from maljan.agents.composition import hold_sample_paths
         from maljan.agents.tool_pinning import pin_paths
 
+        # The job's own copy of the sample on each server behind these tools:
+        # on a server other jobs share, the only path an open may name.
+        try:
+            registry = self._server_registry()
+        except Exception:  # noqa: BLE001 - no registry holds no path; opens stay refused
+            registry = None
+        if registry is not None:
+            hold_sample_paths(
+                registry, list(self.tools), self._path_by_server, self._analysis_file_path
+            )
         return pin_paths(
             list(self.tools),
             default_path=self._analysis_file_path,
@@ -4084,14 +5300,14 @@ class BaseAnalyst(BudgetMeter, ABC):
     def _run_state_body(
         self, steps_left: int | NoLimit | None, seconds_left: float | NoLimit | None
     ) -> str:
-        """The node's run-state lines plus this loop's remaining budget.
+        """The run-state lines as of this turn (:func:`current_run_state`) plus this loop's budget.
 
         Once the conversation has no room left for a tool answer the block
         says so. Regenerated rather than appended, like the rest of it, so the
         fact costs the same whether the loop reads it once or forty times —
         which is what makes telling the model cheaper than refusing its calls.
         """
-        body = str(getattr(self, "run_state_block", "") or "").rstrip()
+        body = current_run_state(self).rstrip()
         if not body:
             return ""
         line = budget_line(steps_left, seconds_left)
@@ -4366,143 +5582,14 @@ class BaseAnalyst(BudgetMeter, ABC):
                 last = sent[-1]
                 noted = {**(last.response_metadata or {}), TOOL_LOOP_TURN: True}
                 sent = [*sent[:-1], last.model_copy(update={"response_metadata": noted})]
+            # What the request is made of, measured as it is sent
+            # (``core.input_meter``); nothing in it changes.
+            self._note_request(
+                sent, kind=TOOL_LOOP, loop=ledger, definitions=self._definitions_sent()
+            )
             return sent
 
         return refresh
-
-    def _clearing_per_token(self) -> int:
-        """The characters a token is counted at by this job's budget."""
-        budget = self._context_budget()
-        try:
-            return max(
-                1, int(getattr(budget, "chars_per_token", CHARS_PER_TOKEN) or CHARS_PER_TOKEN)
-            )
-        except (TypeError, ValueError):
-            return CHARS_PER_TOKEN
-
-    def _own_window_tokens(self) -> int | None:
-        """The window this agent's own model serves, in tokens, or ``None`` where none is known.
-
-        The window recorded on the built model (``context_window.built_window``,
-        a declared or probed fact), else the smallest window of the models the
-        agent's assignment may call, as ``context_window`` learns it without a
-        request; never the job's smallest window, which another agent's model
-        may set, and never the fallback for a window nobody reported.
-        """
-        from maljan.llm.context_window import FALLBACK, built_window, window_for_assignment
-
-        fact = built_window(getattr(self, "llm", None))
-        if fact is not None:
-            return int(fact.tokens)
-        try:
-            from maljan.core.model_assignments import assignment_chain_for
-
-            cfg = get_settings()
-            windows = [
-                window_for_assignment(cfg, assignment, probe=False)
-                for assignment in assignment_chain_for(cfg, self.name)
-            ]
-        except Exception as exc:  # noqa: BLE001 — no window is no point, never a lost loop
-            self.logger.debug("%s: its own window is not known (%s).", self.name, exc)
-            return None
-        known = [int(w.tokens) for w in windows if w.source != FALLBACK and int(w.tokens) > 0]
-        return min(known) if known else None
-
-    def _tool_answer_clearing(self) -> ToolAnswerClearing:
-        """This loop's clearing: after a refusal, and before a prompt past the agent's own window.
-
-        A provider's refusal of a request as over its window clears whatever
-        else is known. The window point is the window the agent's own model
-        serves (:meth:`_own_window_tokens`), in the budget's characters: a
-        prompt past it is refused by every server.
-        """
-        window = self._own_window_tokens()
-        return ToolAnswerClearing(
-            window_chars=window * self._clearing_per_token() if window else None
-        )
-
-    def _cleared_request(
-        self,
-        clearing: ToolAnswerClearing,
-        sent: list[Any],
-        on_clear: Callable[[Clearing], None] | None,
-        offered: Callable[[], bool] | None = None,
-    ) -> tuple[list[Any], int]:
-        """``sent`` with the loop's clears in place, and the characters newly cleared.
-
-        Where a clear is due and the loop does not offer ``read_evidence`` yet
-        (``offered``), raises :class:`OfferReadAgainFirst` instead: the loop
-        builds its graph again with the tool and sends the turn again. Never
-        raises otherwise.
-        """
-        per_token = self._clearing_per_token()
-
-        def reported(messages: list[Any]) -> tuple[int, int]:
-            return _reported_request(messages, per_token)
-
-        extra = self._definitions_sent() + self._replayed_run_state_chars()
-        try:
-            if offered is not None and not offered():
-                due = clearing.due(
-                    sent, extra_chars=extra, measure=_message_chars, reported=reported
-                )
-            else:
-                due = False
-        except Exception as exc:  # noqa: BLE001 — a clear never costs a turn
-            self.logger.debug("%s: tool answers not cleared (%s).", self.name, exc)
-            return sent, 0
-        if due:
-            raise OfferReadAgainFirst()
-        try:
-            fitted = clearing.fit(
-                sent,
-                extra_chars=extra,
-                measure=_message_chars,
-                reported=reported,
-                turn=sum(1 for m in sent if is_model_turn(m)) + 1,
-            )
-        except Exception as exc:  # noqa: BLE001 — a clear never costs a turn
-            self.logger.debug("%s: tool answers not cleared (%s).", self.name, exc)
-            return sent, 0
-        if fitted.clearing is not None and on_clear is not None:
-            try:
-                on_clear(fitted.clearing)
-            except Exception as exc:  # noqa: BLE001 — a record never costs a turn
-                self.logger.debug("%s: a clear was not recorded (%s).", self.name, exc)
-        return fitted.messages, fitted.freed_before_report
-
-    def _note_clearing(self, clearing: Clearing) -> None:
-        """Say one clear in the agent's log and as a ``tool_answers_cleared`` event."""
-        why = (
-            "the model server refused the request as over its window"
-            if clearing.why == CLEARED_FOR_REFUSAL
-            else "the request's prompt is past the model's own window"
-        )
-        self.logger.info(
-            "%s: cleared %d old tool answer(s) to ledger references at turn %d, because %s: "
-            "the request went from %d to %d characters of context (clearing starts past %d and "
-            "clears to %d).",
-            self.name,
-            clearing.answers,
-            clearing.turn,
-            why,
-            clearing.chars_before,
-            clearing.chars_after,
-            clearing.point_chars,
-            clearing.target_chars,
-        )
-        from maljan.pipeline.events import emit_tool_answers_cleared
-
-        emit_tool_answers_cleared(
-            self._event_sink(),
-            agent=str(self.name),
-            stage=str(getattr(self, "pipeline_stage", "") or "analysis"),
-            turn=clearing.turn,
-            answers=clearing.answers,
-            chars_before=clearing.chars_before,
-            chars_after=clearing.chars_after,
-            why=clearing.why,
-        )
 
     def execute_tool_loop(self, prompt_messages: list) -> str:
         """Run the tool loop (``_run_tool_loop``) and let go of its run-state copies.
@@ -4649,6 +5736,8 @@ class BaseAnalyst(BudgetMeter, ABC):
             sink=self._event_sink(),
             # What the run saw, before the byte budget trims what it keeps.
             corpus=getattr(self, "evidence_corpus", None),
+            # Where the parts of an answer an entry does not keep are kept whole.
+            spill=getattr(self, "evidence_spill", None),
             # The model a call is filed under until a turn names another.
             model=self._model_label(),
             # The role and tab this agent's definition declares, stored on each entry.
@@ -4658,8 +5747,15 @@ class BaseAnalyst(BudgetMeter, ABC):
         # The repeat guard is per loop, like the recorder, and a later chunk's
         # starts with the calls the earlier chunks of the same analysis made:
         # an identical one is answered with the entry that holds it, as the
-        # chunk's prompt lists them (``earlier_chunks_block``).
-        repeats = seeded_repeat_guard(getattr(self, "_prior_chunk_calls", None))
+        # chunk's prompt lists them (``earlier_chunks_block``). A revision's
+        # starts with the calls this agent made in the run's earlier rounds,
+        # answered the same way (``own_earlier_entries``), for the tools that
+        # change nothing and answer an identical call the same
+        # (``repeatable_earlier_entries``): any other tool runs again.
+        repeats = seeded_repeat_guard(
+            settled_chunk_entries(self, getattr(self, "_prior_chunk_calls", None)),
+            earlier_rounds=repeatable_earlier_entries(self),
+        )
         # The function map reads this loop's calls as they are made.
         self._live_map_entries = recorder.entries
         # The arguments this loop had to close off, so the ledger entry for
@@ -4713,8 +5809,15 @@ class BaseAnalyst(BudgetMeter, ABC):
                 return answer
             return repaired if repaired is not None else answer
 
+        bound = self.pinned_tools()
+        # The tools this analyst's loop binds, its setup for the run fingerprint
+        # (``ServiceContainer.note_bound_tools``): a built-in role attaches its
+        # own servers after it was resolved, and its prompt is written for them.
+        note_bound = getattr(getattr(self, "_container", None), "note_bound_tools", None)
+        if callable(note_bound):
+            note_bound(str(self.name), bound)
         recorded = record_tools(
-            self.pinned_tools(),
+            bound,
             recorder,
             repeats,
             repairs,
@@ -4742,7 +5845,13 @@ class BaseAnalyst(BudgetMeter, ABC):
         self._offered_after_clear = []
         clearing: ToolAnswerClearing | None = self._tool_answer_clearing()
         read_tool = record_tools(
-            [read_evidence_tool(_stored_answer_of(recorder), self._answer_sizer())],
+            [
+                read_evidence_tool(
+                    _stored_answer_of(recorder),
+                    self._answer_sizer(),
+                    _stored_copy_of(recorder),
+                )
+            ],
             recorder,
             repeats,
             repairs,
@@ -5104,9 +6213,12 @@ class BaseAnalyst(BudgetMeter, ABC):
                         spend_capped = True
                         spend_refusal = str(stop)
                         self.logger.warning(
-                            "%s ReAct loop ended: the next turn does not fit the job's spend "
-                            "ceiling; synthesising from what it gathered.",
+                            "%s ReAct loop ended: the next turn does not fit %s; "
+                            "synthesising from what it gathered.",
                             self.name,
+                            "its own ceiling"
+                            if isinstance(stop, AgentCeilingStop)
+                            else "the job's spend ceiling",
                         )
                     except GraphRecursionError:
                         # The step cap, reached without langgraph's own
@@ -5324,6 +6436,12 @@ class BaseAnalyst(BudgetMeter, ABC):
             # after they are on the ledger: never a moment counted nowhere.
             if spend_meter is not None and sys.exc_info()[1] is not None:
                 spend_meter.forget_loop(spend_key)
+            # And its row on the input meter closes with the turns the ledger
+            # just recorded from ``latest`` (``_record_turns_taken``); a loop
+            # that returned closes below, with the turns recorded from its
+            # result.
+            if sys.exc_info()[1] is not None:
+                self._close_input_loop(budget, list(latest.get("messages") or [])[len(messages) :])
             # Read before the conversation is forgotten: forgetting it clears
             # the mark, so a question asked afterwards is always answered no
             # and a loop that ran out of room recorded the step cap instead.
@@ -5338,6 +6456,7 @@ class BaseAnalyst(BudgetMeter, ABC):
         if thread_result is None:
             if spend_meter is not None:
                 spend_meter.forget_loop(spend_key)
+            self._close_input_loop(budget, list(latest.get("messages") or [])[len(messages) :])
             raise AnalystError(f"{self.name} ReAct agent returned no result")
 
         msgs = thread_result.get("messages", []) or []
@@ -5384,6 +6503,9 @@ class BaseAnalyst(BudgetMeter, ABC):
                 call=TOOL_LOOP_TURN_CALL,
                 held=last_held if index == len(turns) - 1 else None,
             )
+        # The loop's row on the input meter, closed with exactly the turns the
+        # ledger recorded above.
+        self._close_input_loop(budget, [*dropped, *turns])
         if spend_meter is not None:
             spend_meter.forget_loop(spend_key)
         elapsed = _time.monotonic() - _t0
@@ -5497,7 +6619,26 @@ class BaseAnalyst(BudgetMeter, ABC):
         # would read the graph's sentence as its own last turn.
         msgs = [message for message in msgs if not is_the_graph_s_step_stop(message)]
         answered = False
-        if tool_call_count > 0 and (not content.strip() or hit_step_cap or ended_early):
+        # Stopped at the agent's own ceiling: no model call is made after it,
+        # neither the salvage nor the nudge. The answer is the latest of its
+        # own turns that is a report, read as written, or none.
+        own_ceiling = spend_capped and stopped_at_own_ceiling(getattr(self, "llm", None))
+        if own_ceiling:
+            content = next(
+                (
+                    text
+                    for text in (answer_text(m.content) for m in reversed(msgs) if is_model_turn(m))
+                    if answer_is_isr(text)
+                ),
+                "",
+            )
+            answered = bool(content)
+            self.logger.warning(
+                "%s stopped at its own ceiling; %s.",
+                self.name,
+                "its latest report stands as written" if answered else "it wrote no report",
+            )
+        elif tool_call_count > 0 and (not content.strip() or hit_step_cap or ended_early):
             self.logger.warning(
                 "%s ReAct loop ended without a final answer after %d tool calls "
                 "(messages=%d); forcing synthesis from gathered tool output.",
@@ -5542,7 +6683,8 @@ class BaseAnalyst(BudgetMeter, ABC):
         # of "Let me search for more specific strings related to malware
         # indicators:" at 0.5. Say so once, in the same conversation, and give
         # it the step to answer in.
-        if window_full:
+        if window_full or own_ceiling:
+            # Past the agent's own ceiling no nudge is sent.
             # The nudge re-sends the conversation the server has just refused,
             # so it cannot fit and would only occupy the model's one slot for a
             # full prefill to learn that again. After the platform's own budget
@@ -5599,14 +6741,15 @@ class BaseAnalyst(BudgetMeter, ABC):
         from maljan.llm.context_window import accepts_output_bound
 
         target = self.llm if model is None else model
+        prompt_chars = (
+            _chars_of(messages) + self._definitions_sent() + self._replayed_run_state_chars()
+        )
         return cast(
             "int | None",
             meter.admit(
                 kind=kind,
                 model=self._model_label() or _model_label(self.llm),
-                prompt_chars=_chars_of(messages)
-                + self._definitions_sent()
-                + self._replayed_run_state_chars(),
+                prompt_chars=prompt_chars,
                 cap_tokens=self.output_cap_tokens(),
                 slot=slot,
                 holdable=accepts_output_bound(target) if holdable is None else holdable,
@@ -6081,11 +7224,13 @@ class BaseAnalyst(BudgetMeter, ABC):
             self._last_written_answer: tuple[str, str] | None = (block.prose, content)
             self._findings_buffer.extend(block.findings)
             self._artifacts_buffer.extend(block.artifacts)
+            vars(self).setdefault("_open_questions_buffer", []).extend(block.open_questions)
             self.logger.info(
-                "%s: findings block carried %d finding(s) and %d artifact(s).",
+                "%s: findings block carried %d finding(s), %d artifact(s) and %d open question(s).",
                 self.name,
                 len(block.findings),
                 len(block.artifacts),
+                len(block.open_questions),
             )
             return block.prose
         except Exception as exc:  # noqa: BLE001
@@ -6098,8 +7243,11 @@ class BaseAnalyst(BudgetMeter, ABC):
             isr.findings = list(self._findings_buffer)
         if self._artifacts_buffer:
             isr.artifacts = list(self._artifacts_buffer)
+        if getattr(self, "_open_questions_buffer", None):
+            isr.open_questions = list(self._open_questions_buffer)
         self._findings_buffer = []
         self._artifacts_buffer = []
+        self._open_questions_buffer = []
         return isr
 
     def drain_evidence_entries(self) -> list[LedgerEntry]:
@@ -6414,6 +7562,8 @@ class BaseAnalyst(BudgetMeter, ABC):
         from maljan.llm.context_window import output_bound_kwargs
 
         bound_kwargs = output_bound_kwargs(llm, bound) if bound is not None else {}
+        # What the call is made of, measured as it is sent (``core.input_meter``).
+        measured = self._note_request(messages, kind=what)
 
         async def _invoke() -> str:
             # ``what`` goes into the format itself so the timeout stays the
@@ -6436,6 +7586,7 @@ class BaseAnalyst(BudgetMeter, ABC):
                 call, timeout=None if timeout is None else float(timeout)
             )
             self._record_usage(response, call=what, held=bound if bound_kwargs else None)
+            self._note_answered(measured, response)
             return answer_text(response.content)
 
         _t0 = _time.monotonic()
@@ -6572,6 +7723,32 @@ class BaseAnalyst(BudgetMeter, ABC):
         revised_text = self.revise(original_data, own_report, peer_reports, mediator_feedback)
         isr = self._text_to_isr(revised_text, revision_round=revision_round)
         return revised_text, isr
+
+    def load_line_for(self, path: str) -> str:
+        """The line telling this agent to open the sample at ``path`` with its declared open tool.
+
+        The static role's load line (``static_analyst._extract_load_hint``),
+        for what this agent's provider declares opens a sample, else the
+        declared open tool a server marked on a tool it is offered
+        (``providers.sample_open.declared_open``), and only when that tool is
+        among its tools. ``""`` otherwise: a delegated task's turn
+        (``delegation._task_turn``) states the path on its own.
+        """
+        import json
+
+        from maljan.agents.prompt_fragments import tool_names
+        from maljan.agents.static_analyst import _extract_load_hint
+        from maljan.providers.sample_open import declared_open
+
+        if not path:
+            return ""
+        own = getattr(self, "_sample_open", None)
+        spec = (own() if callable(own) else None) or declared_open(self.tools)
+        offered = tool_names(self.tools)
+        tool = str(getattr(spec, "open_tool", "") or "")
+        if not tool or tool not in offered:
+            return ""
+        return _extract_load_hint(json.dumps({"analysis_file_path": path}), offered, spec)
 
     def answer_task(self, task: str) -> tuple[str, AgentISR]:
         """Work on one task another agent handed over, and answer with claims.
@@ -6774,6 +7951,20 @@ class BaseAnalyst(BudgetMeter, ABC):
         if isinstance(buffer, list):
             buffer.append(isr)
 
+    def _synthesis_timeout(self) -> float:
+        """What the salvage over answered asks waits for: only what is actually left.
+
+        With a deadline on the loop that just ended, the stage's live
+        remainder (``_last_loop_deadline`` less now, none below zero) plus the
+        grace every loop is given to come back in (``HARD_CAP_GRACE``). With
+        no deadline, one answer at the pace the loop measured
+        (``seconds_an_answer_needs``).
+        """
+        left = self._seconds_the_last_loop_left(None)
+        if left is not None:
+            return max(0.0, left) + HARD_CAP_GRACE
+        return self.seconds_an_answer_needs()
+
     def _synthesise_from_answered_asks(self) -> AgentISR | None:
         """One bounded turn that writes a lead's report from the asks it got back.
 
@@ -6829,7 +8020,7 @@ class BaseAnalyst(BudgetMeter, ABC):
         )
         try:
             text = self._invoke_llm_with_timeout(
-                messages, _SYNTHESIS_MIN_SECONDS, what="forced synthesis"
+                messages, self._synthesis_timeout(), what="forced synthesis"
             )
         except Exception as exc:  # noqa: BLE001 — a salvage that fails leaves the failure
             self.logger.error(
@@ -6845,86 +8036,155 @@ class BaseAnalyst(BudgetMeter, ABC):
     def safe_analyze_isr_chunked(self, chunks: list) -> AgentISR:
         """Analyze a list of TextChunk objects, merging their ISRs.
 
-        Each chunk's loop runs under this agent's delegation lock, the same one
-        a single-chunk run and an ask of it take, so nothing else drives the
-        agent while one of its chunks is in flight.
+        The whole analysis — every chunk's loop, the merge and its validation
+        turn — runs under this agent's delegation lock, the same one a
+        single-chunk run and an ask of it take. Held per chunk, an ask landing
+        between two chunks drained the findings the earlier chunks had left in
+        the buffers for the merge, and the ledger entries the later chunks are
+        told about, onto the ask's answer.
+
+        A chunk that failed or was never started is stated on the merged
+        answer (:func:`parts_not_analysed_reason`), never only logged: the
+        merged answer does not cover what that chunk held.
 
         Raises:
             AnalystError: If the chunk list is empty or analysis fails on all
                 chunks. An empty chunk list is treated as a hard input error
                 rather than a silent "no findings" success.
         """
-        from maljan.analysis.chunk_merger import merge_chunk_isrs
-
         if not chunks:
             raise AnalystError(f"{self.name} received an empty chunk list — no data to analyse.")
 
         if len(chunks) == 1:
             return self.safe_analyze_isr(chunks[0].content)
 
+        # Through the class's function, so a duck-typed analyst that borrows
+        # this method alone runs the same body.
+        with lock_for(self):
+            return BaseAnalyst._analyze_chunks(self, chunks)  # type: ignore[arg-type]
+
+    def _analyze_chunks(self, chunks: list) -> AgentISR:
+        """The body of :meth:`safe_analyze_isr_chunked`, under the agent's lock."""
+        from maljan.analysis.chunk_merger import merge_chunk_isrs
+
         self.logger.info("Chunked analysis: %d chunks for agent='%s'.", len(chunks), self.name)
         # Each chunk is named by its place in the list this analyst is handed:
         # chunks from several data sources each count within their own source
         # ("1 of 1" twice), and a question naming the chunk it was asked in
         # named the wrong one.
-        chunks = _numbered_in_order(chunks)
+        # Each piece keeps its place in its own source until it is sent, so a
+        # piece cut short (``fitted_chunk``) hands the rest of itself to the
+        # piece of the same source after it.
+        queue = list(chunks)
+        follows = [_continues(a, b) for a, b in zip(queue, queue[1:], strict=False)] + [False]
+        # What is left of each piece's source after it, for the choice of form.
+        ahead = [0] * len(queue)
+        for i in range(len(queue) - 2, -1, -1):
+            if follows[i]:
+                ahead[i] = len(str(queue[i + 1].content)) + ahead[i + 1]
+        # Where the room is measured a carry can add a chunk, so the total is
+        # not fixed: every header then says more may follow, never a total a
+        # later chunk revises.
+        # Only chunks the analyst's room sized are fitted: an operator's
+        # ``max_tokens_per_chunk`` and the unknown-window size are each the
+        # chunk size as set, and those chunks go as they came.
+        fitting = prompt_room(self, str(queue[0].content)) is not None and all(
+            _sized_by_room(chunk) for chunk in queue
+        )
+
+        from maljan.pipeline.events import describe_exception
 
         chunk_isrs: list[AgentISR] = []
         errors: list[str] = []
+        # What the merged answer says of each chunk it does not cover, in words
+        # a published reason may carry: the failure's type, never its message.
+        missed: list[str] = []
+        # The chunks not started for the spend ceiling, by number; a run of
+        # them is one clause (``_chunks_not_started``).
+        not_started: list[int] = []
         # Where this analysis's own ledger entries begin: a later chunk is told
         # the calls the earlier ones made, and its loop does not make them again.
         entries = getattr(self, "_evidence_entries", None)
         first_entry = len(entries) if isinstance(entries, list) else 0
 
-        for chunk in chunks:
+        position = -1
+        while position + 1 < len(queue):
+            position += 1
+            chunk = _numbered_at(queue[position], position, len(queue))
             # No new chunk once the job's spend ceiling is reached: what the
             # chunks so far gathered is merged, and the degradation says why.
             if spend_reached(self):
                 errors.append(f"chunk {chunk.index + 1}: not started, the spend ceiling is reached")
+                not_started.append(chunk.index + 1)
+                missed.append(_NOT_STARTED)
                 continue
             entries = getattr(self, "_evidence_entries", None)
             earlier = list(entries[first_entry:]) if isinstance(entries, list) else []
-            block = earlier_chunks_block(earlier)
-            prompt_text = f"{chunk.to_prompt_header()}\n\n" + (
+            # The earlier calls are known now: the chunk takes the room less
+            # its header and them, and what does not fit goes on.
+            if fitting:
+                block, sent, rest = fitted_chunk(
+                    self,
+                    _chunk_header(chunk, fitting),
+                    str(chunk.content),
+                    earlier,
+                    ahead[position],
+                )
+            else:
+                block, sent, rest = earlier_chunks_block(earlier), str(chunk.content), ""
+            if rest:
+                queue[position] = _holding(queue[position], sent)
+                if follows[position]:
+                    after = queue[position + 1]
+                    queue[position + 1] = _holding(after, rest + _past_overlap(rest, after))
+                else:
+                    queue.insert(position + 1, _holding(queue[position], rest))
+                    follows.insert(position + 1, False)
+                    ahead.insert(position + 1, 0)
+                chunk = _numbered_at(queue[position], position, len(queue))
+            prompt_text = f"{_chunk_header(chunk, fitting)}\n\n" + (
                 f"{block}\n\n{chunk.content}" if block else chunk.content
             )
             try:
-                # Each chunk's loop under this agent's lock, so an ask of it
-                # cannot run inside one: an ask drives the same buffers, the
-                # same budget and the same call chain this loop is using.
-                with lock_for(self):
-                    self._prior_chunk_calls = earlier
-                    try:
-                        isr = self.analyze_isr(prompt_text)
-                        cut = getattr(self, "_last_answer_cut", None)
-                        ended = bool(getattr(self, "_last_answer_ended", False))
-                    finally:
-                        self._prior_chunk_calls = []
-                        # Taken whether the chunk answered or raised: a cut
-                        # left here would be read as the next chunk's.
-                        self._last_answer_cut = None
-                        self._last_answer_ended = False
-                    repeat_margin = getattr(
-                        getattr(get_settings(), "validation", None), "claim_repeat_margin", None
+                # The whole chunked analysis runs under this agent's lock
+                # (``safe_analyze_isr_chunked``), so no ask runs inside a chunk
+                # or between two.
+                self._prior_chunk_calls = earlier
+                try:
+                    isr = self.analyze_isr(prompt_text)
+                    cut = getattr(self, "_last_answer_cut", None)
+                    ended = bool(getattr(self, "_last_answer_ended", False))
+                finally:
+                    self._prior_chunk_calls = []
+                    # Taken whether the chunk answered or raised: a cut
+                    # left here would be read as the next chunk's.
+                    self._last_answer_cut = None
+                    self._last_answer_ended = False
+                repeat_margin = getattr(
+                    getattr(get_settings(), "validation", None), "claim_repeat_margin", None
+                )
+                repeats = claims_repeated(
+                    isr.answer_text or isr.unparsed_answer or "",
+                    None if repeat_margin is None else int(repeat_margin),
+                )
+                if cut is not None or repeats is not None:
+                    # A cut, or an answer that repeated its claims, is
+                    # answered inside the chunk it happened in:
+                    # this chunk's answer is asked for a whole one over
+                    # this chunk's own input, and what comes back stands
+                    # for this chunk alone in the merge.
+                    self._last_answer_cut = cut
+                    self._last_answer_ended = ended
+                    isr = self._validate_isr(
+                        isr,
+                        prompt_text,
+                        chunk=(
+                            f"chunk {chunk.index + 1}"
+                            if fitting
+                            else f"chunk {chunk.index + 1} of {chunk.total}"
+                        ),
+                        only_cut=True,
                     )
-                    repeats = claims_repeated(
-                        isr.answer_text or isr.unparsed_answer or "",
-                        None if repeat_margin is None else int(repeat_margin),
-                    )
-                    if cut is not None or repeats is not None:
-                        # A cut, or an answer that repeated its claims, is
-                        # answered inside the chunk it happened in:
-                        # this chunk's answer is asked for a whole one over
-                        # this chunk's own input, and what comes back stands
-                        # for this chunk alone in the merge.
-                        self._last_answer_cut = cut
-                        self._last_answer_ended = ended
-                        isr = self._validate_isr(
-                            isr,
-                            prompt_text,
-                            chunk=f"chunk {chunk.index + 1} of {chunk.total}",
-                            only_cut=True,
-                        )
                 chunk_isrs.append(isr)
                 self.logger.debug(
                     "Chunk %d/%d analyzed: %d claims.",
@@ -6937,12 +8197,14 @@ class BaseAnalyst(BudgetMeter, ABC):
                 raise
             except Exception as exc:
                 errors.append(f"chunk {chunk.index + 1}: {exc}")
+                missed.append(f"chunk {chunk.index + 1} failed ({describe_exception(exc)})")
                 self.logger.warning("Chunk %d/%d failed: %s.", chunk.index + 1, chunk.total, exc)
 
         if not chunk_isrs:
             raise AnalystError(
                 f"{self.name} chunked analysis failed on all chunks: {'; '.join(errors)}"
             )
+        chunks = queue
 
         if errors:
             self.logger.warning(
@@ -6958,12 +8220,16 @@ class BaseAnalyst(BudgetMeter, ABC):
         # multi-chunk evidence (a claim from one chunk grounded by another is
         # still grounded in the sample). No-op when the gate is off.
         evidence = "\n".join(c.content for c in chunks)
-        # Under the agent's lock, as the single-chunk path runs it: the
+        # Still under the agent's lock taken for the whole analysis: the
         # validation turn marks and slices the findings buffer in ``_parse``,
         # and a delegated ask of this agent landing between the mark and the
         # slice would move its own findings onto this ISR, or these onto its.
-        with lock_for(self):
-            return self._validate_isr(self._apply_consistency_gate(merged, evidence), evidence)
+        checked = self._validate_isr(self._apply_consistency_gate(merged, evidence), evidence)
+        # Noted on the answer kept, after its validation turn: a retry's answer
+        # is parsed afresh, and the chunks it does not cover are the same.
+        return _with_parts_not_analysed(
+            checked, self.name, _chunks_not_started(missed, not_started)
+        )
 
     # ------------------------------------------------------------------
     # View-decomposition (findings-log §3.6) — text path only
@@ -6978,8 +8244,9 @@ class BaseAnalyst(BudgetMeter, ABC):
         """
         from langchain_core.messages import HumanMessage, SystemMessage
 
+        system = _VIEW_SYSTEM if asks_for_techniques(self) else _VIEW_SYSTEM_WITHOUT_TECHNIQUES
         messages = [
-            SystemMessage(content=_VIEW_SYSTEM),
+            SystemMessage(content=system),
             HumanMessage(content=f"{instruction}\n\n{data}"),
         ]
         # ``bind`` returns a Runnable, not a BaseChatModel; widen to Any so the
@@ -7018,8 +8285,11 @@ class BaseAnalyst(BudgetMeter, ABC):
         specs = _view_specs(domain, n_views)
         per_view_budget = (total_max_tokens // n_views) if total_max_tokens else None
 
+        from maljan.pipeline.events import describe_exception
+
         view_isrs: list[AgentISR] = []
         errors: list[str] = []
+        missed: list[str] = []
 
         def _run(spec: tuple[str, str]) -> AgentISR:
             text = self._invoke_view(spec[1], data, per_view_budget)
@@ -7033,6 +8303,7 @@ class BaseAnalyst(BudgetMeter, ABC):
                     view_isrs.append(fut.result())
                 except Exception as exc:  # noqa: BLE001 — fault isolation
                     errors.append(f"view '{key}': {exc}")
+                    missed.append(f"view '{key}' failed ({describe_exception(exc)})")
                     self.logger.warning("View '%s' failed: %s.", key, exc)
 
         if not view_isrs:
@@ -7052,7 +8323,7 @@ class BaseAnalyst(BudgetMeter, ABC):
             len(view_isrs),
             self.name,
         )
-        return merge_chunk_isrs(view_isrs)
+        return _with_parts_not_analysed(merge_chunk_isrs(view_isrs), self.name, missed)
 
     def safe_analyze_isr_views(
         self,
@@ -7103,11 +8374,14 @@ class BaseAnalyst(BudgetMeter, ABC):
         if n_tiers < 2:
             return self.analyze_isr(data)
 
-        specs = _tier_specs(n_tiers)
+        specs = _tier_specs(n_tiers, techniques=asks_for_techniques(self))
         per_tier_budget = (total_max_tokens // n_tiers) if total_max_tokens else None
+
+        from maljan.pipeline.events import describe_exception
 
         tier_isrs: list[AgentISR] = []
         errors: list[str] = []
+        missed: list[str] = []
         prior_text = ""
 
         for key, instruction in specs:
@@ -7124,6 +8398,7 @@ class BaseAnalyst(BudgetMeter, ABC):
                 text = self._invoke_view(instruction, tier_input, per_tier_budget)
             except Exception as exc:  # noqa: BLE001 — fault isolation
                 errors.append(f"tier '{key}': {exc}")
+                missed.append(f"reasoning tier '{key}' failed ({describe_exception(exc)})")
                 self.logger.warning("Reasoning tier '%s' failed: %s.", key, exc)
                 continue
             prior_text = text
@@ -7147,7 +8422,7 @@ class BaseAnalyst(BudgetMeter, ABC):
             len(tier_isrs),
             self.name,
         )
-        return merge_chunk_isrs(tier_isrs)
+        return _with_parts_not_analysed(merge_chunk_isrs(tier_isrs), self.name, missed)
 
     def safe_analyze_isr_tiered(
         self,
@@ -7213,17 +8488,10 @@ class BaseAnalyst(BudgetMeter, ABC):
         # agent was shown. Another analyst's entries are not among them. It
         # decides whether a technique claim that cites nothing is a violation:
         # an analyst with none has nothing to cite.
-        ledger_ids = [
-            str(getattr(entry, "id", ""))
-            for entry in (getattr(self, "_evidence_entries", None) or [])
-            if getattr(entry, "id", "")
-        ]
-        current = set(ledger_ids)
-        ledger_ids.extend(
-            dict.fromkeys(i for i in (_drained_ids_of(self) or []) if i not in current)
-        )
-        ledger_ids.extend(
-            str(i) for i in (getattr(self, "pack_ledger_ids", None) or []) if str(i).strip()
+        ledger_ids = analyst_ledger_ids(
+            getattr(self, "_evidence_entries", None) or [],
+            _drained_ids_of(self) or [],
+            getattr(self, "pack_ledger_ids", None) or [],
         )
         # The run's sandbox section index, read off the pack's entry: a claim
         # cites an item of the report as it cites an entry, each id one lookup.
@@ -7233,13 +8501,9 @@ class BaseAnalyst(BudgetMeter, ABC):
         decompiled = decompiled_functions(getattr(self, "_evidence_entries", None) or [])
         # The image bases the run read, the analyst's own calls' and the
         # pack's: an offset and a virtual address are matched by them.
-        image_bases = tuple(
-            dict.fromkeys(
-                [
-                    *image_bases_in(getattr(self, "_evidence_entries", None) or []),
-                    *(getattr(self, "pack_image_bases", None) or ()),
-                ]
-            )
+        image_bases = run_image_bases(
+            getattr(self, "_evidence_entries", None) or [],
+            getattr(self, "pack_image_bases", None) or (),
         )
         # The functions this analyst's own calls listed, and their facts: a
         # claim naming a call or a string its function's facts do not hold
@@ -7300,14 +8564,19 @@ class BaseAnalyst(BudgetMeter, ABC):
         sample = {"file_type": file_type, "platform": platform}
         cfg_validation = getattr(get_settings(), "validation", None)
         gate = alignment_gate(knowledge, cfg_validation, self.logger, self.name)
-        threshold = float(getattr(cfg_validation, "alignment_threshold", 0.05) or 0.05)
+        threshold = alignment_threshold_of(cfg_validation)
         margin = float(getattr(cfg_validation, "alignment_margin", ALIGNMENT_MARGIN))
         challenges = bool(getattr(cfg_validation, "weak_alignment", False))
         # One weak-alignment batch per turn. The ranking is recorded on every
         # claim every time; what is bounded is the asking, because a second
         # batch would spend another full model turn on a check whose first
-        # batch the analyst has already answered.
-        asked: list[bool] = []
+        # batch the analyst has already answered. The batch belongs to the
+        # answer the turn began with: on dev the loop's own first collection of
+        # that answer ran as the second call and dropped the challenge, so it
+        # never reached the model; with ``validation.weak_alignment`` on (off by
+        # default) it is asked now, one model turn. The first answer kept over a
+        # retry and checked again (``keep``) reads the same challenge. A retry's
+        # answer, and a merged one (a new object), is never challenged.
 
         # An answer the loop already asked once for a report — the nudge — is
         # not asked again for the claim format: that was the question. What it
@@ -7339,6 +8608,8 @@ class BaseAnalyst(BudgetMeter, ABC):
         # sent back; keyed by the parsed answer as the cuts are.
         repeat_margin = getattr(cfg_validation, "claim_repeat_margin", None)
         repeated_by: dict[int, ClaimsRepeated | None] = {}
+        # Every question below names the claim format this agent is asked for.
+        techniques = asks_for_techniques(self)
 
         def _repeated(candidate: AgentISR) -> ClaimsRepeated | None:
             key = id(candidate)
@@ -7350,64 +8621,55 @@ class BaseAnalyst(BudgetMeter, ABC):
             return repeated_by[key]
 
         def _whole_answer_questions(candidate: AgentISR) -> list[Violation]:
-            found = _repeated(candidate)
-            cut = cuts.get(id(candidate)) or []
-            if found is not None:
-                # One question for an answer that repeated, the cut folded in:
-                # the model sees its answer up to the first repeat, and the
-                # cut question's words say it sees none of it.
-                widest = max((cap for cap, _text, _named in cut), default=0)
-                return [
-                    analyst_repeated_violation(
-                        found,
-                        chunk=chunk,
-                        cut=widest or None,
-                        ended=ended_by.get(id(candidate), False),
-                    )
-                ]
-            return [analyst_cut_violation(cap, text, chunk=named) for cap, text, named in cut]
+            return whole_answer_questions(
+                _repeated(candidate),
+                cuts.get(id(candidate)) or [],
+                chunk=chunk,
+                ended=ended_by.get(id(candidate), False),
+                techniques=techniques,
+            )
+
+        # What every answer of this turn is checked against, composed once
+        # with the replay of a stored run (``validation.analyst_answer_checks``).
+        inputs = AnswerCheckInputs(
+            attck=knowledge,
+            ledger_ids=ledger_ids,
+            sample=sample,
+            items=items,
+            decompiled=decompiled,
+            image_bases=image_bases,
+            techniques=techniques,
+            alignment=gate,
+            alignment_threshold=threshold,
+            alignment_margin=margin,
+        )
 
         def _validator(candidate: AgentISR) -> list[Violation]:
-            first = not asked
-            asked.append(True)
             if only_cut:
                 return _whole_answer_questions(candidate)
-            unread = [] if nudged else parse_violations(candidate)
+            unread = [] if nudged else parse_violations(candidate, techniques=techniques)
             # Every answer checked that no claim could be read from, the first
             # and its retry alike, goes to the run record whole.
             self._keep_unparsed_answers(unread, candidate.revision_round)
-            undescribed = decompiled_not_described_violation(
-                undescribed_decompiles(candidate, decompiled, image_bases)
+            return analyst_answer_checks(
+                candidate,
+                inputs,
+                whole_answer=_whole_answer_questions(candidate),
+                unread=unread,
+                functions=_function_check(candidate).violations,
+                weak_alignment_challenges=challenges and candidate is isr,
             )
-            library_only = library_only_claims_violation(candidate)
-            return [
-                *_whole_answer_questions(candidate),
-                *unread,
-                *([undescribed] if undescribed is not None else []),
-                *([library_only] if library_only is not None else []),
-                *_function_check(candidate).violations,
-                *validate_isr(
-                    candidate,
-                    attck=knowledge,
-                    ledger_ids=ledger_ids,
-                    sample=sample,
-                    alignment=gate,
-                    alignment_threshold=threshold,
-                    alignment_margin=margin,
-                    weak_alignment_challenges=challenges and first,
-                    items=items,
-                ),
-            ]
 
         if nudged and not only_cut:
-            unasked = parse_violations(isr)
+            unasked = parse_violations(isr, techniques=techniques)
             self.validation_findings.extend(unasked)
             self._keep_unparsed_answers(unasked, isr.revision_round)
 
-        # The findings and artifacts the answer being checked carried are its
-        # own from here on: a retry's are kept apart (``_parse``) and go with
-        # the retry only if the retry is the answer kept. A chunk's are left in
-        # the buffers for the merged answer, which is where they are drained.
+        # The findings, artifacts and open questions the answer being checked
+        # carried are its own from here on: a retry's are kept apart
+        # (``_parse``) and go with the retry only if the retry is the answer
+        # kept. A chunk's are left in the buffers for the merged answer, which
+        # is where they are drained.
         if (
             not only_cut
             and isinstance(getattr(self, "_findings_buffer", None), list)
@@ -7452,31 +8714,7 @@ class BaseAnalyst(BudgetMeter, ABC):
             # describe its technique, are questions for the analyst, and one
             # never sent notes nothing on the claim: the finding is recorded
             # saying it was not asked, and the technique goes through as claimed.
-            unasked = [
-                replace(
-                    v,
-                    message=f"{v.message} {detail[:1].upper()}{detail[1:]}.",
-                    sentence="",
-                    asked=False,
-                )
-                if v.code
-                in (
-                    ABSENCE_CLAIM_CODE,
-                    CLAIM_DOES_NOT_DESCRIBE_CODE,
-                    ANALYST_CUT_CODE,
-                    ANALYST_REPEATED_CODE,
-                    CLAIMS_UNDER_DISPUTES_CODE,
-                    DECOMPILED_NOT_DESCRIBED_CODE,
-                    LIBRARY_ONLY_CLAIMS_CODE,
-                    FUNCTION_CLAIM_UNHELD_CODE,
-                )
-                else v
-                for v in initial
-            ]
-            mark_invalid_technique_ids(isr, [v for v in unasked if v.code != ABSENCE_CLAIM_CODE])
-            self.validation_findings.extend(unasked)
-            BaseAnalyst._note_on_last_loop(self, "validation", detail)  # type: ignore[arg-type]
-            return isr
+            return _settle_an_unanswered_turn(self, isr, initial, detail)
 
         from langchain_core.messages import HumanMessage, SystemMessage
 
@@ -7495,7 +8733,7 @@ class BaseAnalyst(BudgetMeter, ABC):
         messages = frame_messages(
             messages,
             facts_block=str(getattr(self, "facts_block", "") or ""),
-            run_state=str(getattr(self, "run_state_block", "") or ""),
+            run_state=current_run_state(self),
         )
 
         # An answer that repeated its claims is sent back as written up to the
@@ -7514,8 +8752,7 @@ class BaseAnalyst(BudgetMeter, ABC):
         # not the framed conversation alone: fourteen questions are not free.
         from maljan.pipeline.retry_merge import numbering_unsettled
         from maljan.pipeline.validation import (
-            ANALYST_FEEDBACK_CLOSING,
-            ANALYST_FEEDBACK_CLOSING_BY_NUMBER,
+            analyst_feedback_closing,
             feedback_text,
             gate_removed_note,
         )
@@ -7528,7 +8765,7 @@ class BaseAnalyst(BudgetMeter, ABC):
             if only_cut or loop_cuts or _repeated(isr) is not None
             else numbering_unsettled(isr)
         )
-        closing = ANALYST_FEEDBACK_CLOSING if merge_why else ANALYST_FEEDBACK_CLOSING_BY_NUMBER
+        closing = analyst_feedback_closing(whole=bool(merge_why), techniques=techniques)
         if isr.gate_removed and isr.answer_text:
             closing = f"{gate_removed_note(isr.gate_removed)}\n{closing}"
         sent = with_question(messages, feedback_text(initial, closing=closing))
@@ -7559,7 +8796,7 @@ class BaseAnalyst(BudgetMeter, ABC):
             )
             self.logger.warning("%s: the cut-at-cap question was %s.", self.name, detail)
             for cap, text, named in loop_cuts:
-                unasked_cut = analyst_cut_violation(cap, text, chunk=named)
+                unasked_cut = analyst_cut_violation(cap, text, chunk=named, techniques=techniques)
                 self.validation_findings.append(
                     replace(
                         unasked_cut,
@@ -7569,7 +8806,10 @@ class BaseAnalyst(BudgetMeter, ABC):
                 )
             if loop_repeat is not None:
                 unasked_repeat = analyst_repeated_violation(
-                    loop_repeat, chunk=chunk, ended=ended_by.get(id(isr), False)
+                    loop_repeat,
+                    chunk=chunk,
+                    ended=ended_by.get(id(isr), False),
+                    techniques=techniques,
                 )
                 self.validation_findings.append(
                     replace(
@@ -7588,17 +8828,27 @@ class BaseAnalyst(BudgetMeter, ABC):
         # Each retry answer's own text, by the ISR it parsed to: a retry the
         # first answer is kept over is kept in the run record whole.
         raw_answers: dict[int, str] = {}
+        # The findings of the round being asked, from its feedback until its
+        # answer returns, and those of each round that returned an answer.
+        # ``on_feedback`` runs before the round's call, so a round is counted
+        # only once the call has come back: one that raised was put, and never
+        # answered.
+        round_asked: list[list[Violation]] = []
+        rounds_answered: list[list[Violation]] = []
 
         def _run(turns: list[Any]) -> Any:
             if first:
                 return first.pop()
             # The block moves to the retry's own question, the last message,
             # and the turn that carried it before is sent as it was written.
-            return self._invoke_llm_with_timeout(
-                frame_messages(turns, run_state=str(getattr(self, "run_state_block", "") or "")),
+            answer = self._invoke_llm_with_timeout(
+                frame_messages(turns, run_state=current_run_state(self)),
                 left,
-                what="validation retry",
+                what=VALIDATION_RETRY_CALL,
             )
+            if round_asked:
+                rounds_answered.append(round_asked.pop())
+            return answer
 
         def _parse(answer: Any) -> AgentISR:
             if isinstance(answer, _PriorAnswer):
@@ -7616,16 +8866,33 @@ class BaseAnalyst(BudgetMeter, ABC):
             # an answer ``_keep`` discards takes its findings with it.
             findings = getattr(self, "_findings_buffer", None)
             artifacts = getattr(self, "_artifacts_buffer", None)
+            questions = getattr(self, "_open_questions_buffer", None)
             f_mark = len(findings) if isinstance(findings, list) else 0
             a_mark = len(artifacts) if isinstance(artifacts, list) else 0
+            q_mark = len(questions) if isinstance(questions, list) else 0
             prose = self._capture_findings(text)
             parsed = self._text_to_isr(prose, isr.revision_round)
+            # The retry fixes the answer it was shown; it does not read the
+            # disputes section, so the dissent the answer stated stands. A
+            # fresh ISR without it would read as a convergence signal.
+            if not parsed.dissent_items and isr.dissent_items:
+                parsed.dissent_items = list(isr.dissent_items)
             if isinstance(findings, list):
                 parsed.findings = findings[f_mark:]
                 del findings[f_mark:]
             if isinstance(artifacts, list):
                 parsed.artifacts = artifacts[a_mark:]
                 del artifacts[a_mark:]
+            questions = getattr(self, "_open_questions_buffer", None)
+            if isinstance(questions, list):
+                # The retry's own, then each of the answer's it did not repeat:
+                # a question is never lost because a retry left it unwritten.
+                asked = questions[q_mark:]
+                del questions[q_mark:]
+                parsed.open_questions = [
+                    *asked,
+                    *(q for q in isr.open_questions if q not in asked),
+                ]
             retry_cut = getattr(self, "_last_answer_cut", None)
             cuts[id(parsed)] = [(*retry_cut, chunk)] if retry_cut is not None else []
             self._last_answer_cut = None
@@ -7709,7 +8976,7 @@ class BaseAnalyst(BudgetMeter, ABC):
                 cards=cards,
             )
             retried_answer = raw_answers.get(id(retried), "")
-            question = whole_answer_after_retry_question(why)
+            question = whole_answer_after_retry_question(why, techniques=techniques)
             # A retry answer with no text is not sent back (``_with_feedback``'s
             # rule): the question is asked at the end of the turn before it.
             turns = (
@@ -7720,11 +8987,9 @@ class BaseAnalyst(BudgetMeter, ABC):
             self.validation_retries += 1
             try:
                 answer = self._invoke_llm_with_timeout(
-                    frame_messages(
-                        turns, run_state=str(getattr(self, "run_state_block", "") or "")
-                    ),
+                    frame_messages(turns, run_state=current_run_state(self)),
                     left,
-                    what="whole answer after an unmerged retry",
+                    what=WHOLE_ANSWER_RETRY_CALL,
                 )
             except Exception as exc:  # noqa: BLE001 — unanswered, the first answer stays
                 self.logger.warning(
@@ -8082,6 +9347,7 @@ class BaseAnalyst(BudgetMeter, ABC):
             def _fed_back(violations: Sequence[Violation]) -> None:
                 shown.extend(violations)
                 tally.count(violations)
+                round_asked[:] = [list(violations)]
 
             revised, violations, retries = retry_with_feedback_sync(
                 _run,
@@ -8102,8 +9368,48 @@ class BaseAnalyst(BudgetMeter, ABC):
                 cards=cards,
             )
         except Exception as exc:  # noqa: BLE001 — a retry that fails keeps the first answer
-            self.logger.warning("Validation retry failed (%s); keeping the first answer.", exc)
-            return isr
+            # The first answer is kept: an unknown id is marked, every finding
+            # is recorded saying why it stands, and the run summary says the
+            # turn gave no answer. Only a round whose call came back counts as
+            # a retry and as fed back; the findings of a round put and never
+            # answered say so, and a turn that failed before any round was put
+            # is "not asked".
+            from maljan.pipeline.events import describe_exception
+
+            self.logger.warning(
+                "Validation retry failed (%s); keeping the first answer.",
+                describe_exception_for_log(exc),
+            )
+            failed = describe_exception(exc)
+            self.validation_retries += len(rounds_answered)
+            answered_tally = ValidationTally()
+            for returned in rounds_answered:
+                answered_tally.count(returned)
+            for code, count in answered_tally.by_code.items():
+                self.validation_fed_back[code] = self.validation_fed_back.get(code, 0) + count
+            earlier_rounds = [v for returned in rounds_answered for v in returned]
+            if round_asked:
+                return _settle_an_unanswered_turn(
+                    self,
+                    isr,
+                    initial,
+                    f"not asked: the validation turn failed ({failed})",
+                    asked=round_asked[0],
+                    asked_detail=f"asked; no answer came ({failed})",
+                    answered_earlier=earlier_rounds,
+                    answered_earlier_detail=f"asked; the answer could not be kept ({failed})",
+                )
+            if rounds_answered:
+                return _settle_an_unanswered_turn(
+                    self,
+                    isr,
+                    initial,
+                    f"not asked: the validation turn failed ({failed})",
+                    asked=earlier_rounds,
+                    asked_detail=f"asked; the answer could not be kept ({failed})",
+                )
+            detail = f"not asked: the validation turn failed ({failed})"
+            return _settle_an_unanswered_turn(self, isr, initial, detail)
 
         self.validation_retries += retries
         for code, count in tally.by_code.items():
@@ -8136,6 +9442,10 @@ class BaseAnalyst(BudgetMeter, ABC):
                 if isinstance(artifacts, list) and revised.artifacts:
                     artifacts.extend(revised.artifacts)
                     revised.artifacts = []
+                questions = getattr(self, "_open_questions_buffer", None)
+                if isinstance(questions, list) and revised.open_questions:
+                    questions.extend(revised.open_questions)
+                    revised.open_questions = []
             # Still cut after the question: the chunk's answer is kept as it
             # was cut, and what it did not reach is unread.
             violations = [
@@ -8146,7 +9456,7 @@ class BaseAnalyst(BudgetMeter, ABC):
             ]
 
         if violations:
-            mark_invalid_technique_ids(revised, violations)
+            settle_validation_marks(revised, violations)
             self.validation_findings.extend(violations)
             self.logger.info(
                 "Validation: %d finding(s) survived the retry for '%s' (%s).",
@@ -8388,9 +9698,9 @@ class BaseAnalyst(BudgetMeter, ABC):
                 HumanMessage(content=question),
             ]
             reply = self._invoke_llm_with_timeout(
-                frame_messages(turns, run_state=str(getattr(self, "run_state_block", "") or "")),
+                frame_messages(turns, run_state=current_run_state(self)),
                 left,
-                what="kept-retry drops question",
+                what=RETRY_DROPS_QUESTION_CALL,
             )
             decided = read_retry_drop_answers(
                 answer_text(getattr(reply, "content", reply)), [row[0] for row in labelled]
@@ -8557,29 +9867,60 @@ class BaseAnalyst(BudgetMeter, ABC):
         """
         self.current_round = int(revision_round)
         with lock_for(self):
+            # The texts this round's requests embed, for the input meter
+            # (``_note_request``) to count as peer reports and as this agent's
+            # own answer; cleared when the round ends.
+            self._measured_peers = tuple(str(r) for r in (peer_reports or {}).values() if r)
+            self._measured_own = (str(own_report),) if own_report else ()
             try:
-                truncated = self._truncate_input(original_data)
-                self._last_loop_deadline = None
-                self._answer_unstructured = False
-                self._revision_reads = bool(read_places)
-                try:
-                    text, isr = self.revise_isr(
-                        truncated, own_report, peer_reports, mediator_feedback, revision_round
-                    )
-                finally:
-                    self._revision_reads = False
-                isr = self._drain_findings(isr)
-                if not isr.answer_text:
-                    isr.note_answer_text(strip_tool_call_scaffolding(str(text or "")))
-                checked = self._validate_isr(
-                    self._apply_consistency_gate(isr, truncated), truncated
+                return self._safe_revise_isr(
+                    original_data,
+                    own_report,
+                    peer_reports,
+                    mediator_feedback,
+                    revision_round,
+                    read_places=read_places,
                 )
-                return text, self._drain_findings(checked)
-            except AnalystError:
-                raise
-            except Exception as e:
-                self.logger.error("ISR revision failed: %s", e)
-                raise AnalystError(f"{self.name} ISR revision failed: {e}") from e
+            finally:
+                self._measured_peers = ()
+                self._measured_own = ()
+
+    def _safe_revise_isr(
+        self,
+        original_data: str,
+        own_report: str,
+        peer_reports: dict[str, str],
+        mediator_feedback: str,
+        revision_round: int,
+        *,
+        read_places: bool,
+    ) -> tuple[str, AgentISR]:
+        """:meth:`safe_revise_isr`'s body, run under the agent's lock."""
+        try:
+            # The raw data sits beside the reports and the feedback in the
+            # revision prompt, so it has the input room less them.
+            beside = len(own_report or "") + len(mediator_feedback or "")
+            beside += sum(len(str(r)) for r in (peer_reports or {}).values() if r)
+            truncated = self._truncate_input(original_data, beside)
+            self._last_loop_deadline = None
+            self._answer_unstructured = False
+            self._revision_reads = bool(read_places)
+            try:
+                text, isr = self.revise_isr(
+                    truncated, own_report, peer_reports, mediator_feedback, revision_round
+                )
+            finally:
+                self._revision_reads = False
+            isr = self._drain_findings(isr)
+            if not isr.answer_text:
+                isr.note_answer_text(strip_tool_call_scaffolding(str(text or "")))
+            checked = self._validate_isr(self._apply_consistency_gate(isr, truncated), truncated)
+            return text, self._drain_findings(checked)
+        except AnalystError:
+            raise
+        except Exception as e:
+            self.logger.error("ISR revision failed: %s", e)
+            raise AnalystError(f"{self.name} ISR revision failed: {e}") from e
 
     # ------------------------------------------------------------------
     # Private helpers
@@ -8637,14 +9978,16 @@ class BaseAnalyst(BudgetMeter, ABC):
         """True when ``text`` is a placeholder or an intention, not real analysis."""
         if not text:
             return True
-        # Match the placeholder anywhere near the start of the text — analysts
-        # sometimes prepend a one-line header (e.g. "CLAIM:") before parroting
-        # the fallback, so probe both the raw first line and the same line with
-        # a leading ``CLAIM:``/``EVIDENCE:`` label stripped.
+        # The placeholder is meta only when it is the whole of the text: every
+        # line and sentence in it says there was nothing to read. Analysts
+        # sometimes prepend a ``CLAIM:``/``EVIDENCE:`` label before parroting
+        # the fallback, so each is probed with that label stripped too. An
+        # answer that opens on the placeholder and then writes its claims is
+        # those claims: reading the first line alone dropped every one of them.
         stripped = text.strip()
         first = stripped.splitlines()[0] if stripped else ""
         unlabelled = re.sub(r"^\s*(?:claim|evidence)\s*:\s*", "", first, flags=re.IGNORECASE)
-        if self._META_CLAIM_RE.match(first) or self._META_CLAIM_RE.match(unlabelled):
+        if self._is_placeholder_text(stripped):
             return True
         announces = bool(
             self._INTENTION_CLAIM_RE.match(first)
@@ -8658,6 +10001,21 @@ class BaseAnalyst(BudgetMeter, ABC):
         # the opening sentence on its own — zeroing the whole answer for its
         # first line would throw away the findings that followed.
         return announces and len(self._SENTENCE_SPLIT_RE.split(stripped)) == 1
+
+    def _is_placeholder_text(self, text: str) -> bool:
+        """Whether every line and sentence of ``text`` says there was no data to read."""
+        pieces = [
+            piece
+            for line in str(text or "").strip().splitlines()
+            for piece in self._SENTENCE_SPLIT_RE.split(line)
+            if piece.strip()
+        ]
+        return bool(pieces) and all(self._is_placeholder_sentence(piece) for piece in pieces)
+
+    def _is_placeholder_sentence(self, sentence: str) -> bool:
+        """Whether ``sentence``, a ``CLAIM:``/``EVIDENCE:`` label aside, says there was no data."""
+        unlabelled = re.sub(r"^\s*(?:claim|evidence)\s*:\s*", "", sentence, flags=re.IGNORECASE)
+        return bool(self._META_CLAIM_RE.match(sentence) or self._META_CLAIM_RE.match(unlabelled))
 
     def _drop_meta_claims(self, claims: list[ClaimEvidence]) -> list[ClaimEvidence]:
         """Strip parsed claims that are really "I could not analyse" meta-claims.
@@ -8795,7 +10153,7 @@ class BaseAnalyst(BudgetMeter, ABC):
         # ISR rather than one with a meta-sentence. Every consumer already
         # skips an empty-claim ISR, so this is the single tightest place to
         # stop "I had nothing to read" being counted as a finding.
-        if self._is_meta_claim_text(text):
+        def _meta() -> AgentISR:
             self.logger.info(
                 "%s: meta-claim text detected; emitting zero-claim ISR.",
                 self.name,
@@ -8809,6 +10167,9 @@ class BaseAnalyst(BudgetMeter, ABC):
                     revision_round=revision_round,
                 )
             )
+
+        if self._is_meta_claim_text(text):
+            return _meta()
 
         # Structured output first, and only. Several prompts —
         # notably the view/tier decomposition ones — mandate the
@@ -8825,6 +10186,13 @@ class BaseAnalyst(BudgetMeter, ABC):
             unreadable = read.confidence_unreadable
             shortfall = self._claims_shortfall(read, revision_round)
             under_disputes = read.after_disputes if read.claims else 0
+            # A claim block that only parrots the placeholder is no finding,
+            # whatever else the answer holds; an answer of nothing else is the
+            # placeholder answer.
+            if structured:
+                structured = [c for c in structured if not self._is_placeholder_text(c.claim)]
+                if not structured:
+                    return _meta()
         if structured:
             isr = AgentISR(
                 agent_id=self.name,
@@ -8908,6 +10276,17 @@ class BaseAnalyst(BudgetMeter, ABC):
         "network": "network",
     }
 
+    def asks_for_techniques(self) -> bool:
+        """Whether this agent is asked for an ATT&CK technique line on each claim.
+
+        True for every built-in class, whose claim format is its own. The
+        configurable analyst answers from its definition
+        (``AgentDefinition.attck_techniques``). Every text that asks an agent
+        for a technique reads this: its claim format, a delegated ask, the
+        validation questions and the view and tier prompts.
+        """
+        return True
+
     def _infer_domain(self) -> str:
         """Infer the ISR domain from the agent's registered name.
 
@@ -8931,7 +10310,7 @@ class BaseAnalyst(BudgetMeter, ABC):
         )
         return "static"
 
-    def _truncate_input(self, text: str) -> str:
+    def _truncate_input(self, text: str, beside: int = 0) -> str:
         """``text`` whole when it fits this analyst's input room, else shortened and said.
 
         The room is ``max_token_limit`` where an operator set it, and otherwise
@@ -8941,8 +10320,14 @@ class BaseAnalyst(BudgetMeter, ABC):
         text the model reads begins with a notice saying so, and the run's
         truncation ledger records a sentence the judge node turns into a
         degradation reason. Never a silent cut.
+
+        ``beside`` is the characters the request carries next to this input
+        that the room does not already hold — a revision's own report, its
+        peers' reports and the mediator's feedback — and is taken off the room.
         """
         room = self._input_room_chars(text)
+        if room is not None:
+            room = max(0, room - max(0, int(beside)))
         if room is None or len(text) <= room:
             return text
         shortened, sentence = shorten_input(text, room)
@@ -8989,7 +10374,7 @@ class BaseAnalyst(BudgetMeter, ABC):
         except Exception:  # noqa: BLE001 — a prompt that cannot be built weighs nothing here
             framing = 0
         framing += len(str(getattr(self, "facts_block", "") or ""))
-        framing += len(str(getattr(self, "run_state_block", "") or ""))
+        framing += len(current_run_state(self))
         framing += self._definitions_sent() or tool_definition_chars(list(self.tools or []))
         room = int(budget.tool_budget_chars())
         answers = int(room * ANSWER_SHARE)

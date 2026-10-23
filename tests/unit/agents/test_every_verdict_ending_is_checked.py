@@ -118,7 +118,7 @@ class TestTheMalwareDirection:
 
     @pytest.mark.asyncio
     async def test_prose_the_model_answered_twice(self) -> None:
-        verdict = await _verdict("This is malware.", "It is malware, a loader.")
+        verdict = await _verdict("Verdict: Malware.", "Verdict: Malware, a loader.")
 
         # The model said it, so the model keeps it.
         assert decide_from_bundle(verdict.bundle) == "Malware"
@@ -127,7 +127,7 @@ class TestTheMalwareDirection:
 
     @pytest.mark.asyncio
     async def test_json_that_is_not_a_bundle(self) -> None:
-        answer = json.dumps({"objects": {"malware": "yes, this is malware"}})
+        answer = json.dumps({"objects": {"verdict": "malware, a loader"}})
         verdict = await _verdict(answer, answer)
 
         assert verdict.bundle.x_maljan_fallback_verdict is not None
@@ -158,7 +158,7 @@ class TestTheBenignDirection:
 
     @pytest.mark.asyncio
     async def test_prose_the_model_answered_twice(self) -> None:
-        verdict = await _verdict("The sample is benign.", "Still benign; nothing to report.")
+        verdict = await _verdict("Verdict: Benign.", "Verdict: benign; nothing to report.")
 
         assert decide_from_bundle(verdict.bundle) == "Benign"
         assert VERDICT_FALLBACK_CODE in _codes(verdict)
@@ -179,7 +179,7 @@ class TestWhatTheConversationIsTold:
     @pytest.mark.asyncio
     async def test_the_endings_publish_what_they_recorded(self) -> None:
         published: list[tuple[str, dict[str, Any]]] = []
-        judge = JudgeAgent(llm=_Llm("This is malware.", "It is malware."))  # type: ignore[arg-type]
+        judge = JudgeAgent(llm=_Llm("Verdict: Malware.", "Verdict: Malware."))  # type: ignore[arg-type]
         container = SimpleNamespace(event_sink=lambda kind, data: published.append((kind, data)))
         judge._container = container
 
@@ -223,7 +223,7 @@ class TestARunWithClaimsBehindItIsAskedNothing:
     async def test_prose_over_a_run_with_claims(self) -> None:
         from maljan.schemas.isr_models import ClaimEvidence
 
-        judge = JudgeAgent(llm=_Llm("This is malware.", "It is malware."))  # type: ignore[arg-type]
+        judge = JudgeAgent(llm=_Llm("Verdict: Malware.", "Verdict: Malware."))  # type: ignore[arg-type]
         verdict = await judge.give_verdict(
             reports=REPORTS,
             history=[],

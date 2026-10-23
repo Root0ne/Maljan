@@ -21,7 +21,6 @@ PCAP detection heuristic:
 from __future__ import annotations
 
 import contextlib
-import os
 import re
 from collections.abc import Sequence
 from typing import Any
@@ -93,7 +92,6 @@ _PCAP_STEPS: tuple[tuple[str, str], ...] = (
 NO_PACKET_TOOL_LINE = (
     "No packet tool is in your tool list, so base your findings on the structured flows above."
 )
-OTHER_TOOLS_THEN_ANALYZE = "Use the tools in your tool list where they help, then analyze"
 # What it says instead when the request carries tools that declare no kind:
 # any of them may read the capture, and the model, not this line, decides.
 UNDECLARED_TOOLS_LINE = (
@@ -191,38 +189,19 @@ def _flows_label(sandbox: Any) -> str:
     )
 
 
-# The text revision path's own system prompt. It is not ``_ISR_SYSTEM`` plus a
-# suffix — it is a different prompt, and it was inline in ``revise`` until the
-# revision framing moved to ``BaseAnalyst``. Byte-for-byte unchanged.
-_NETWORK_REVISE_SYSTEM = (
-    "You are an expert Network Analyst participating in a collaborative "
-    "multi-agent malware analysis. The mediator has identified contradictions "
-    "between your report and other experts. Review the peer reports and mediator "
-    "feedback, then revise your analysis. Correlate network traffic with any "
-    "hardcoded C2 URLs or HTTP API calls raised by peers. "
-    "Focus on MITRE ATT&CK: T1071, T1571."
-)
+def _capture_line(captures: Sequence[str]) -> str:
+    """The sentence naming the job's packet capture(s), which the platform fetched.
 
-# Regex to detect PCAP file paths in the input data.
-# Captures both bare paths and quoted paths (single/double).
-_PCAP_PATH_RE = re.compile(
-    r"""
-    (?:["']?)            # optional opening quote
-    (?P<path>[\w/\\:.-]+\.pcapn?g?)
-    (?:["']?)            # optional closing quote
-    (?=$|[\s,;)"'])     # boundary
-    """,
-    re.IGNORECASE | re.VERBOSE,
-)
+    With one, the packet tools' capture argument is filled by the platform and
+    no path is shown; with several, each is named by its job-relative name
+    (``tools.staging.job_relative``, never a host path), since the model must
+    choose.
+    """
+    if len(captures) == 1:
+        return "A raw packet capture is ALSO available to the packet tools."
+    from maljan.tools.staging import job_relative
 
-
-def _detect_pcap_path(data: str) -> str | None:
-    """Extract a PCAP file path from the input data if present."""
-    for match in _PCAP_PATH_RE.finditer(data):
-        candidate = match.group("path")
-        if any(sep in candidate for sep in (os.sep, "/", "\\", ":")):
-            return candidate
-    return None
+    return "Raw packet captures are ALSO available: " + ", ".join(job_relative(c) for c in captures)
 
 
 @register_agent("network")
@@ -269,7 +248,12 @@ class NetworkAnalyst(BaseAnalyst):
         # The sandbox's tools are the agent's own, listed after the servers'
         # as they always were: a server tool of the same name is offered as
         # ``<server>__<tool>`` and never shadows one of them.
-        self.tools = [*self._attach_registry_tools("network", claimed=sandbox), *sandbox]
+        from maljan.providers.servers import settle_tool_notes
+
+        self.tools = settle_tool_notes(
+            [*self._attach_registry_tools("network", claimed=sandbox), *sandbox],
+            getattr(getattr(self, "_container", None), "config", None),
+        )
         self.logger.info("Network tool servers: %d tools attached.", len(self.tools))
 
     # ``_try_initialize_mcp`` used to live here. It now lives on ``BaseAnalyst``
@@ -277,79 +261,12 @@ class NetworkAnalyst(BaseAnalyst):
     # same graceful degradation and had been hard-failing every run without it.
 
     # ------------------------------------------------------------------
-    # Text interface (backward compatible)
+    # Text interface (the abstract contract; the ISR path is the one that runs)
     # ------------------------------------------------------------------
 
     def analyze(self, data: str) -> str:
-        """Translates network flows into a C2 connectivity profile."""
-        self.logger.info("Executing network flow analysis...")
-
-        pcap_path = _detect_pcap_path(data)
-
-        if pcap_path:
-            # PCAP mode: use MCP tools for deep analysis
-            self.logger.info("PCAP path detected: %s — using MCP tools.", pcap_path)
-            mcp_ready = self._try_initialize_mcp()
-
-            if mcp_ready:
-                packet_tools = _pcap_tools_in(self.tools)
-                steps = (
-                    "Use the available tools to:\n"
-                    + "".join(
-                        f"{i}. {name} — {what}\n" for i, (name, what) in enumerate(packet_tools, 1)
-                    )
-                    + "\nThen analyze"
-                    if packet_tools
-                    else OTHER_TOOLS_THEN_ANALYZE
-                )
-                prompt_messages = [
-                    ("system", self._system_prompt(_network_prompt)),
-                    (
-                        "human",
-                        "A PCAP capture file is available for analysis.\n\n"
-                        f"PCAP file path: {pcap_path}\n\n"
-                        f"{steps} the results for C2 beaconing, DGA domains, "
-                        "data exfiltration, and protocol tunneling.",
-                    ),
-                ]
-                content = self.execute_tool_loop(prompt_messages)
-                return str(content)
-            else:
-                self.logger.warning("MCP unavailable, falling back to text analysis of PCAP ref.")
-
-        # Text mode: LLM-only analysis on pre-parsed data
-        target_info = (
-            f"Target PCAP: {data}" if len(data.strip()) < 512 else f"Network output:\n{data}"
-        )
-
-        # Try MCP for text mode too (agent might extract useful patterns).
-        # Attached before the prompt is built: the prompt says what the
-        # request carries, and it carries what this call attached.
-        mcp_ready = self._try_initialize_mcp()
-        prompt_messages = [
-            ("system", self._system_prompt(_network_prompt)),
-            (
-                "human",
-                "Analyze DNS queries, HTTPS SSL flows, and potential C2 beacons "
-                "in this network data:\n"
-                f"{target_info}\n\n"
-                "Identify beaconing patterns, suspicious domains, and exfiltration channels.",
-            ),
-        ]
-
-        if mcp_ready:
-            content = self.execute_tool_loop(prompt_messages)
-        else:
-            # Messages, not a template: the resolved system prompt carries a
-            # literal JSON example and a template would read its braces as
-            # variables.
-            content = self._capture_findings(
-                self.ask_the_model(
-                    self.frame_messages(prompt_to_messages(prompt_messages)), what="analysis"
-                )
-            )
-
-        return str(content)
+        """The first report as text: the ISR analysis, written out."""
+        return self.analyze_isr(data).to_text_summary()
 
     def revise(
         self,
@@ -358,29 +275,8 @@ class NetworkAnalyst(BaseAnalyst):
         peer_reports: dict[str, str],
         mediator_feedback: str,
     ) -> str:
-        """Revise network analysis based on peer findings and mediator feedback.
-
-        The framing moved to ``BaseAnalyst.revision_messages`` so a custom
-        analyst sends the same one. The messages that reach the model are
-        identical, which is what ``tests/unit/agents/test_revision_prompt_golden.py``
-        compares against a fixture captured before the move; the
-        ``ChatPromptTemplate`` round trip is gone with it, because the template
-        only ever substituted these same four values and could not survive a
-        brace inside one of them.
-        """
-        self.logger.info("Revising network analysis based on peer feedback...")
-
-        messages = revision_messages(
-            _NETWORK_REVISE_SYSTEM,
-            original_data,
-            own_report,
-            peer_reports,
-            mediator_feedback,
-            isr=False,
-        )
-        return self.ask_the_model(
-            self.frame_messages(prompt_to_messages(messages)), what="revision"
-        )
+        """The revised report as text: the ISR revision's text."""
+        return self.revise_isr(original_data, own_report, peer_reports, mediator_feedback)[0]
 
     # ------------------------------------------------------------------
     # ISR interface
@@ -390,10 +286,13 @@ class NetworkAnalyst(BaseAnalyst):
         """Return a structured AgentISR with evidence-backed network claims."""
         self.logger.info("Executing network ISR analysis...")
 
-        pcap_path = _detect_pcap_path(data)
+        # The packet capture is what the platform fetched for this job, never
+        # a path the sample's own flow text happens to carry: a flow string is
+        # sample-controlled, and a path in it is a path the sample chose.
+        captures = tuple(getattr(self, "_captures", ()) or ())
 
-        if pcap_path:
-            self.logger.info("PCAP path detected for ISR: %s", pcap_path)
+        if captures:
+            self.logger.info("%d packet capture(s) fetched for this job.", len(captures))
             mcp_ready = self._try_initialize_mcp()
 
             if mcp_ready:
@@ -428,7 +327,7 @@ class NetworkAnalyst(BaseAnalyst):
                         "list of findings.\n\n"
                         + primary_evidence_line(self._job_sandbox(), data)
                         + f"{data}\n\n"
-                        f"A raw packet capture is ALSO available at: {pcap_path}\n"
+                        f"{_capture_line(captures)}\n"
                         f"{peek}"
                         "For each finding state: the claim, the exact artifact reference "
                         "(e.g. 'TCP dst=185.220.101.5:443', 'DNS query: rnd7x.evil.com'), "
@@ -516,7 +415,11 @@ class NetworkAnalyst(BaseAnalyst):
         dissent = _parse_disputes(content)
 
         if not claims:
-            return content, self._text_to_isr(content, revision_round=revision_round)
+            # The lenient reading keeps the disputes the answer wrote: a
+            # revision's dissent is what it says, whichever reader read it.
+            lenient = self._text_to_isr(content, revision_round=revision_round)
+            lenient.dissent_items = dissent
+            return content, lenient
 
         isr = AgentISR(
             agent_id=self.name,

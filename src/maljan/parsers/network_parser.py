@@ -1,8 +1,14 @@
+import ipaddress
 from typing import Any
 
+from maljan.extractors.network_extractor import _is_emittable_ip, is_private_flow_address
 from maljan.parsers.base_parser import BaseParser
 from maljan.parsers.registry import register_parser
 from maljan.schemas.sandbox_document import DnsAnswers, dns_row_name
+
+# What a flow table writes in the ASN / Country column of a flow to a private,
+# loopback or link-local address.
+PRIVATE_ADDRESS = "private address"
 
 # The column a flow or host table names each destination's ASN and country
 # under, and the heading of the paragraph about reputation records; the
@@ -16,6 +22,25 @@ REPUTATION_PARAGRAPH = (
     "(``network.ips[].reputation`` / ``network.domains[].reputation``), written by the "
     "declared reputation sources — pivot for third-party verdicts."
 )
+# The context column's heading when no row of its table carries ASN data.
+CONTEXT_COLUMN = "Note"
+# What a context cell holds when it names no ASN or country.
+_NOT_ASN = frozenset({"—", PRIVATE_ADDRESS, "domain", ""})
+
+
+def _context_column(rows: list[list[str]], column: int) -> str:
+    """``ASN_COUNTRY_COLUMN`` when some row's cell in ``column`` names an ASN or a
+    country, else ``CONTEXT_COLUMN``: a heading promises what its cells hold."""
+    if any(row[column] not in _NOT_ASN for row in rows):
+        return ASN_COUNTRY_COLUMN
+    return CONTEXT_COLUMN
+
+
+def _private_network(address: str) -> str:
+    """The /24 (IPv4) or /64 (IPv6) network a private address sits in."""
+    addr = ipaddress.ip_address(address)
+    prefix = 24 if addr.version == 4 else 64
+    return str(ipaddress.ip_network(f"{addr}/{prefix}", strict=False))
 
 
 @register_parser("network")
@@ -91,35 +116,43 @@ class NetworkParser(BaseParser):
             method = entry.get("method", "GET")
             http_rows.append([str(host), f"{method} {uri}", str(entry.get("status", "?"))])
 
-        # TCP / UDP flows — dedupe by (dst, port) and drop internal/multicast
-        # noise (guest-resolver DNS to 192.168.x:53, SSDP/WS-Discovery to
-        # 239.255.255.250). A single detonation emits dozens of identical
-        # internal-resolver rows that would drown the real C2 surface; the DNS
-        # table already carries the queries and the hosts table the endpoints.
+        # TCP / UDP flows — dedupe by (dst, port) and drop multicast, broadcast
+        # and reserved noise (SSDP/WS-Discovery to 239.255.255.250). A single
+        # detonation emits dozens of identical internal-resolver rows; the
+        # dedupe writes each (dst, port) once.
         # ``_is_emittable_ip`` is the same public/routable filter used for IOC
         # emission, so the flow tables and the report agree on what's "external".
-        from maljan.extractors.network_extractor import _is_emittable_ip
-
-        seen_tcp: set[tuple[str, str]] = set()
-        for entry in raw_data.get("tcp", []):
-            if not isinstance(entry, dict):
-                continue
-            dst = str(entry.get("dst", "")).strip()
-            port = str(entry.get("dport", "?"))
-            if not _is_emittable_ip(dst) or (dst, port) in seen_tcp:
-                continue
-            seen_tcp.add((dst, port))
-            tcp_rows.append([dst, port, self._host_ctx(host_meta.get(dst, {}))])
-        seen_udp: set[tuple[str, str]] = set()
-        for entry in raw_data.get("udp", []):
-            if not isinstance(entry, dict):
-                continue
-            dst = str(entry.get("dst", "")).strip()
-            port = str(entry.get("dport", "?"))
-            if not _is_emittable_ip(dst) or (dst, port) in seen_udp:
-                continue
-            seen_udp.add((dst, port))
-            udp_rows.append([dst, port, self._host_ctx(host_meta.get(dst, {}))])
+        # A flow to a private, loopback or link-local address is kept too,
+        # marked ``private address`` in place of its ASN: lateral movement and
+        # a local C2 or proxy are flows the analyst must see, and the dedupe
+        # keeps the resolver's dozens of rows to one.
+        for proto, rows in (("tcp", tcp_rows), ("udp", udp_rows)):
+            seen: set[tuple[str, str]] = set()
+            # A private flow is one row per network (/24, or /64 for IPv6) and
+            # port: the row names the first destination and how many distinct
+            # ones the network holds, so a sweep of a subnet is one row that
+            # says so, and no flow is left out.
+            groups: dict[tuple[str, str], tuple[int, str, set[str]]] = {}
+            for entry in raw_data.get(proto, []):
+                if not isinstance(entry, dict):
+                    continue
+                dst = str(entry.get("dst", "")).strip()
+                port = str(entry.get("dport", "?"))
+                if (dst, port) in seen:
+                    continue
+                if _is_emittable_ip(dst):
+                    seen.add((dst, port))
+                    rows.append([dst, port, self._host_ctx(host_meta.get(dst, {}))])
+                elif is_private_flow_address(dst):
+                    seen.add((dst, port))
+                    key = (_private_network(dst), port)
+                    if key not in groups:
+                        groups[key] = (len(rows), dst, set())
+                        rows.append([dst, port, PRIVATE_ADDRESS])
+                    groups[key][2].add(dst)
+            for (network, _port), (index, first, members) in groups.items():
+                if len(members) > 1:
+                    rows[index][0] = f"{network}: {len(members)} destinations, the first {first}"
 
         # Contacted hosts (ip / ASN+country / ports)
         for h in raw_data.get("hosts", []):
@@ -139,11 +172,14 @@ class NetworkParser(BaseParser):
 
         dns_table = self._format_as_table(headers=["Target Domain", "IP Address"], rows=dns_rows)
         http_table = self._format_as_table(headers=["Host", "Request", "Status"], rows=http_rows)
-        flow_hdr = ["Destination", "Port", ASN_COUNTRY_COLUMN]
-        tcp_table = self._format_as_table(headers=flow_hdr, rows=tcp_rows)
-        udp_table = self._format_as_table(headers=flow_hdr, rows=udp_rows)
+        tcp_table = self._format_as_table(
+            headers=["Destination", "Port", _context_column(tcp_rows, 2)], rows=tcp_rows
+        )
+        udp_table = self._format_as_table(
+            headers=["Destination", "Port", _context_column(udp_rows, 2)], rows=udp_rows
+        )
         host_table = self._format_as_table(
-            headers=["Host/Domain", ASN_COUNTRY_COLUMN, "Ports"], rows=host_rows
+            headers=["Host/Domain", _context_column(host_rows, 1), "Ports"], rows=host_rows
         )
 
         # Deterministic FULL-PCAP analysis folded in as text. We read every

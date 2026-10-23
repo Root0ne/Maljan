@@ -45,6 +45,12 @@ class CatalogEntryDTO(BaseModel):
     builtin_servers: list[str] | None = None
     reserved_servers: list[str] | None = None
     capability_servers: dict[str, list[str]] | None = None
+    data_source_choices: list[str] | None = None
+    agent_keys: list[str] | None = None
+    builtin_agent_keys: list[str] | None = None
+    always_enabled_agent_keys: list[str] | None = None
+    pack_step_vocabulary: dict[str, Any] | None = None
+    needs_current_password: bool = False
 
 
 class GroupDTO(BaseModel):
@@ -84,6 +90,12 @@ class SchemaResponse(BaseModel):
     # shipped declaration that changed its tool's kind), the shipped step it
     # changed, if any, is in force, and the console marks it on the steps.
     pack_steps_left_out: dict[str, str] = Field(default_factory=dict)
+    # Each stored value the settings model refuses (``core.<path>`` -> why),
+    # read past here so the page can open and the admin repair it
+    # (``core.settings_overrides.stored_settings``, the settings page alone;
+    # every read that runs something refuses it): its default is shown
+    # until it is saved again or reset, and the console says so beside it.
+    stored_values_refused: dict[str, str] = Field(default_factory=dict)
 
 
 class ValueDTO(BaseModel):
@@ -93,6 +105,9 @@ class ValueDTO(BaseModel):
     source: str
     updated_at: datetime | None = None
     updated_by: uuid.UUID | None = None
+    # Why a stored row is not served (``value`` is then ``None``): the answer
+    # could not be written with it in (``api.v1.settings.unwritable_reason``).
+    unreadable: str | None = None
 
 
 class ValuesResponse(BaseModel):
@@ -101,6 +116,14 @@ class ValuesResponse(BaseModel):
 
 class PatchRequest(BaseModel):
     changes: dict[str, Any] = Field(min_length=1, max_length=500)
+    # Per changed key, the ``updated_at`` the page was served it with
+    # (``null``: no stored row then). A key whose stored row is not that one
+    # any more (saved, accepted or reset since) is refused with 409, nothing
+    # is saved, and the page reloads it. A key left out is not checked.
+    versions: dict[str, datetime | None] = Field(default_factory=dict, max_length=500)
+    # Asked again when ``changes`` holds a setting marked
+    # ``needs_current_password`` (the sign-in policy); ignored otherwise.
+    current_password: str | None = Field(None, max_length=128)
 
 
 class PatchResponse(BaseModel):
@@ -111,6 +134,12 @@ class PatchResponse(BaseModel):
     # operator was editing, for a configuration that is legal and will not do
     # what they expect.
     warnings: dict[str, str] = Field(default_factory=dict)
+
+
+class ResetRequest(BaseModel):
+    """The optional body of a reset: the password a sign-in policy reset asks for."""
+
+    current_password: str | None = Field(None, max_length=128)
 
 
 class ResetResponse(BaseModel):
@@ -131,11 +160,21 @@ class ExportResponse(BaseModel):
             "token is restored as the nested auth_token field inside the map instead."
         )
     )
+    unreadable: dict[str, str] = Field(
+        default_factory=dict,
+        description=(
+            "Catalog keys whose stored value the export could not write, each with why "
+            "(a row nested deeper than the answer's writer goes). Left out of 'values'; "
+            "an import ignores this field."
+        ),
+    )
 
 
 class ImportRequest(BaseModel):
     format: str
     values: dict[str, Any] = Field(default_factory=dict)
+    # As on ``PatchRequest``: asked when ``values`` changes the sign-in policy.
+    current_password: str | None = Field(None, max_length=128)
 
 
 class ProbeRequest(BaseModel):
@@ -157,6 +196,51 @@ class ProbeResponse(BaseModel):
     # dedicated editor reads. The agent probe is the first user: a prompt hash
     # and a per-server status do not fit in a sentence.
     details: dict[str, Any] | None = None
+
+
+class AttckStatusResponse(BaseModel):
+    """The cached ATT&CK bundles as the worker that holds them reads them.
+
+    ``domains`` carries, per domain, whether a bundle is cached, its release
+    and date, when it was written and how old it is, and when the automatic
+    check is next due; ``last_check``, ``last_update`` and ``running`` are
+    the worker's record of the console's check and update.
+    """
+
+    refresh_days: int
+    next_check_at: str | None = None
+    domains: list[dict[str, Any]]
+    last_check: dict[str, Any] | None = None
+    last_update: dict[str, Any] | None = None
+    running: dict[str, Any] | None = None
+
+
+class AttckCheckResponse(BaseModel):
+    """One comparison of the cache with MITRE's release index.
+
+    ``outcome`` is ``up_to_date``, ``outdated`` or ``failed``; a failed read of
+    the index is never reported as up to date.
+    """
+
+    ok: bool
+    outcome: str
+    reason: str = ""
+    checked_at: str | None = None
+    refresh_days: int | None = None
+    next_check_at: str | None = None
+    domains: list[dict[str, Any]] = Field(default_factory=list)
+
+
+class AttckUpdateStarted(BaseModel):
+    job_id: str
+
+
+class AttckUpdateProgress(BaseModel):
+    """Where one update is: ``queued``, ``running``, ``done`` or ``unknown``."""
+
+    job_id: str
+    state: str
+    result: dict[str, Any] | None = None
 
 
 class ContextWindowResponse(BaseModel):
@@ -312,3 +396,41 @@ class ChannelPreview(BaseModel):
 class MappingPreviewResponse(BaseModel):
     target_sha256: str
     channels: dict[str, ChannelPreview]
+
+
+class PluginDTO(BaseModel):
+    """One installed plugin: its name, package and version, read from package metadata.
+
+    ``allowed`` is what the stored allow-list says. ``state`` is what the
+    metadata says of it in every process: ``refused`` (``error`` says why),
+    else ``allowed`` or ``not_allowed``. ``api_state`` and ``api_error`` are
+    the API process's own load result, where the API loaded the plugin to run
+    its code (a settings block, a test, the memory purge or health check);
+    empty when it never did. A worker's load result is in that worker's log.
+    """
+
+    name: str
+    entry: str
+    distribution: str
+    version: str
+    allowed: bool
+    state: str
+    error: str = ""
+    api_state: str = ""
+    api_error: str = ""
+
+
+class PluginKindDTO(BaseModel):
+    kind: str
+    group: str
+    title: str
+    plugins: list[PluginDTO]
+    # Names the allow-list holds for this kind that no installed package declares.
+    allowed_absent: list[str] = Field(default_factory=list)
+
+
+class PluginsResponse(BaseModel):
+    """Every installed provider plugin per kind, and the setting that allows them."""
+
+    allow_list_key: str
+    kinds: list[PluginKindDTO]

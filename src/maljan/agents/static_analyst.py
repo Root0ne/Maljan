@@ -12,8 +12,6 @@ import re
 from collections.abc import Sequence
 from typing import Any
 
-from langchain_core.prompts import ChatPromptTemplate
-
 from maljan.agents.base_agent import (
     BaseAnalyst,
     prompt_to_messages,
@@ -251,6 +249,13 @@ class StaticAnalyst(BaseAnalyst):
         pool = stamp_source(
             provider.get_tools(), PROVIDER_FAMILY, declared=provider_source(provider)
         )
+        # A tool the provider withholds is said where it is withheld.
+        from maljan.providers.base import record_provider_withheld
+
+        own = list(getattr(self, "degradation_reasons", None) or [])
+        record_provider_withheld(provider, self._server_registry(), own)
+        if own:
+            self.degradation_reasons = own
         # No ``self.toolkit`` assignment here: the provider holds its own client
         # privately and closes it itself (``ServiceContainer.aclose`` calls
         # ``get_static_provider().close()``), so there is nothing for this
@@ -258,15 +263,22 @@ class StaticAnalyst(BaseAnalyst):
         # The provider's tools are the agent's own: a server tool of the same
         # name is offered as ``<server>__<tool>`` beside them, never in their
         # place.
-        self.tools = [
-            *pool,
-            *self._attach_registry_tools(
-                "static",
-                exclude=str(getattr(provider, "server_name", "")),
-                claimed=pool,
-                claimed_by=f"provider:{provider.id}",
-            ),
-        ]
+        # The notes after each description, settled over the whole list
+        # (``servers.settle_tool_notes``).
+        from maljan.providers.servers import settle_tool_notes
+
+        self.tools = settle_tool_notes(
+            [
+                *pool,
+                *self._attach_registry_tools(
+                    "static",
+                    exclude=str(getattr(provider, "server_name", "")),
+                    claimed=pool,
+                    claimed_by=f"provider:{provider.id}",
+                ),
+            ],
+            getattr(getattr(self, "_container", None), "config", None),
+        )
         self.logger.info("Static provider '%s': %d tools attached.", provider.id, len(self.tools))
 
     def _record_provider_degradation(self, provider: Any, exc: BaseException) -> None:
@@ -307,7 +319,15 @@ class StaticAnalyst(BaseAnalyst):
                 summarizer = container.get_function_summarizer()
                 if summarizer is not None:
                     guardrail = summarizer.summarize_chunk
+        rest_hook = None
+        owner = getattr(self, "_container", None)
+        if owner is not None:
+            try:
+                rest_hook = owner.get_server_registry().rest_hook()
+            except Exception:  # noqa: BLE001 - a rest is then logged, not recorded
+                rest_hook = None
         return StaticJobContext(
+            on_server_rest=rest_hook,
             job_key=str(getattr(self, "_job_id", "") or ""),
             host_sample_path=getattr(self, "_host_sample_path", None),
             mirror_sample_path=getattr(self, "_analysis_file_path", None),
@@ -394,11 +414,22 @@ class StaticAnalyst(BaseAnalyst):
                     StaticJobContext(mirror_sample_path=file_path)
                 )
                 if not functions:
+                    unread = getattr(functions, "unavailable", "")
+                    if unread:
+                        self.logger.warning(
+                            "Function-hash pre-pass: no hashes could be read (%s); "
+                            "continuing without prior.",
+                            unread,
+                        )
                     return ""
 
-                matches = store.match(
+                from maljan.memory.long_term_memory import match_functions, memory_owner_of
+
+                matches = match_functions(
+                    store,
                     [fh for _name, fh in functions],
                     exclude_sample_id=sample_hash or None,
+                    owner=memory_owner_of(getattr(self, "_container", None)),
                 )
             results = aggregate_matches(matches, max_families=pre.function_hash_max_matches)
             hint = build_attribution_hint(results)
@@ -483,47 +514,8 @@ class StaticAnalyst(BaseAnalyst):
             return ""
 
     def analyze(self, data: str) -> str:
-        """Translates binary file paths or raw disassembly into a focused malware analysis report."""
-        self.logger.info("Executing static evaluation...")
-
-        self._try_initialize_mcp()
-
-        # If data looks like a file path and exists, use PELoader
-        # for structural PE analysis instead of passing raw path to LLM.
-        target_info: str
-        if len(data.strip()) < 512 and os.path.exists(data.strip()):
-            try:
-                from maljan.loaders.pe_loader import PELoader
-
-                loader = PELoader(data.strip())
-                target_info = loader.to_markdown()
-                self.logger.info("PELoader parsed static data for '%s'.", data.strip())
-            except Exception as exc:
-                self.logger.warning(
-                    "PELoader failed for '%s': %s. Falling back to raw path.", data.strip(), exc
-                )
-                target_info = f"Target File: {data}"
-        elif len(data.strip()) < 512:
-            target_info = f"Target File: {data}"
-        else:
-            target_info = f"Static output:\n{data}"
-
-        prompt_messages = [
-            ("system", self._system_prompt(self._fallback_prompt)),
-            (
-                "human",
-                "Analyze the following target for obfuscation, "
-                "suspicious API imports, and hardcoded C2 patterns. "
-                + (
-                    "Use your tools to deeply analyze the binary if it's a file path.\n"
-                    if self.tools
-                    else "\n"
-                )
-                + f"{target_info}",
-            ),
-        ]
-
-        return self.execute_tool_loop(prompt_messages)
+        """The first report as text: the ISR analysis, written out."""
+        return self.analyze_isr(data).to_text_summary()
 
     def revise(
         self,
@@ -532,49 +524,8 @@ class StaticAnalyst(BaseAnalyst):
         peer_reports: dict[str, str],
         mediator_feedback: str,
     ) -> str:
-        """Revise static analysis based on peer findings and mediator feedback."""
-        self.logger.info("Revising static analysis based on peer feedback...")
-
-        peer_section = (
-            "\n\n".join(
-                f"{name.upper()} ANALYST REPORT:\n{report}" for name, report in peer_reports.items()
-            )
-            or "No peer reports available."
-        )
-
-        prompt = ChatPromptTemplate.from_messages(
-            [
-                (
-                    "system",
-                    "You are an expert Static Malware Analyst participating in a collaborative "
-                    "multi-agent malware analysis. The mediator has identified contradictions "
-                    "between your report and other experts. Review the peer reports and mediator "
-                    "feedback, then revise your analysis. Look for corroborating evidence "
-                    "in the original data for any findings raised by peers. "
-                    "Focus on MITRE ATT&CK: T1027, T1106.",
-                ),
-                (
-                    "human",
-                    "YOUR ORIGINAL REPORT:\n{own_report}\n\n"
-                    "PEER ANALYST REPORTS:\n{peer_section}\n\n"
-                    "MEDIATOR CONTRADICTIONS:\n{mediator_feedback}\n\n"
-                    "ORIGINAL RAW DATA:\n{data}\n\n"
-                    "Revise your analysis addressing the contradictions above.",
-                ),
-            ]
-        )
-
-        return self.ask_the_model(
-            prompt.format_messages(
-                own_report=own_report,
-                peer_section=peer_section,
-                mediator_feedback=mediator_feedback,
-                # Don't let the "No static data available" placeholder
-                # talk the model out of its live-Ghidra ORIGINAL REPORT.
-                data=_reframe_static_raw_data(original_data, bool(self.tools)),
-            ),
-            what="revision",
-        )
+        """The revised report as text: the ISR revision's text."""
+        return self.revise_isr(original_data, own_report, peer_reports, mediator_feedback)[0]
 
     # ------------------------------------------------------------------
     # ISR interface (structured claim extraction)
@@ -785,7 +736,11 @@ class StaticAnalyst(BaseAnalyst):
             )
 
         if not claims:
-            return content, self._text_to_isr(content, revision_round=revision_round)
+            # The lenient reading keeps the disputes the answer wrote: a
+            # revision's dissent is what it says, whichever reader read it.
+            lenient = self._text_to_isr(content, revision_round=revision_round)
+            lenient.dissent_items = dissent
+            return content, lenient
 
         isr = AgentISR(
             agent_id=self.name,
@@ -895,15 +850,6 @@ def _extract_sample_hash(data: str) -> str | None:
     return None
 
 
-# DISPUTES section runs until end-of-string OR the next ALL-CAPS markdown-style
-# header (e.g. ``\nSUMMARY:`` or ``\nFINAL VERDICT:``). The previous greedy
-# pattern silently absorbed whatever followed.
-_DISPUTES_RE = re.compile(
-    r"DISPUTES:\s*(.*?)(?=\r?\n[A-Z][A-Z_ ]{2,}:|\Z)",
-    flags=re.DOTALL | re.IGNORECASE,
-)
-
-
 def _parse_claim_blocks(text: str) -> list[ClaimEvidence]:
     """The claims the static, dynamic and network analysts read out of ``text``.
 
@@ -918,17 +864,22 @@ def _parse_claim_blocks(text: str) -> list[ClaimEvidence]:
 def _parse_disputes(text: str) -> list[str]:
     """Extract dispute items from the DISPUTES section of a revision response.
 
-    Stops at the next ALL-CAPS header (e.g. ``SUMMARY:``) so trailing
-    sections do not get absorbed as dispute items.
+    The section is the one the claim reader stops at
+    (``claim_headings.disputes_section``): it opens at its label alone and
+    runs to the next all-capitals section label (e.g. ``SUMMARY:``), so
+    trailing sections do not get absorbed as dispute items and every dispute
+    line, bulleted or not, is one.
     """
+    from maljan.agents.claim_headings import disputes_section
+
     disputes: list[str] = []
-    match = _DISPUTES_RE.search(text)
-    if not match:
+    found = disputes_section(text)
+    if found is None:
         return disputes
     # Stripped over the whole section before it is split: a tool-call block
     # spans several lines, so a per-line check would never see one and every
     # line of it would become its own dispute item.
-    section = strip_tool_call_scaffolding(match.group(1)).strip()
+    section = strip_tool_call_scaffolding(found).strip()
     if section.upper().rstrip(".") in {"", "NONE"}:
         return disputes
     for line in section.splitlines():

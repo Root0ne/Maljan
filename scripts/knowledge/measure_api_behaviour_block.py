@@ -105,6 +105,9 @@ def elf_imports(blob: bytes) -> list[str] | None:
         return None
 
 
+# The platforms ``corpus`` can read binaries for.
+PLATFORMS = ("linux", "windows")
+
 _PE_EXTENSIONS = frozenset({".exe", ".dll", ".sys", ".ocx", ".cpl"})
 
 
@@ -232,11 +235,15 @@ def corpus(roots: list[str], platform: str) -> Iterator[dict]:
     seen: set[str] = set()
     walker = walk_pe if platform == "windows" else walk_elf
     for row in walker(roots):
-        digest = str(row.get("sha256") or "")
-        if digest:
-            if digest in seen:
-                continue
-            seen.add(digest)
+        digest = str(row.get("sha256") or "").strip().lower()
+        if not digest:
+            # An inventory row may carry no digest: the same imports under the
+            # same name are the same binary, so they are counted once too.
+            key = json.dumps([row.get("name"), sorted(map(str, row.get("imports") or []))])
+            digest = "imports:" + hashlib.sha256(key.encode("utf-8")).hexdigest()
+        if digest in seen:
+            continue
+        seen.add(digest)
         yield row
 
 
@@ -396,6 +403,8 @@ def main() -> int:
     )
     args = parser.parse_args()
     platform = str(args.platform or "").strip().lower()
+    if platform not in PLATFORMS:
+        parser.error(f"--platform {args.platform!r} is not one of {', '.join(PLATFORMS)}")
     result = measure(args.roots, platform, args.behaviour_map, args.attck_map, args.write_inventory)
     return report(result, args.fail_over)
 

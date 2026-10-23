@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import {
   readEnvNames,
   readErrorPatterns,
+  readCallTimeout,
+  readLauncherDepth,
   readMount,
   readPrefixes,
   readReferenceUrls,
@@ -12,6 +14,7 @@ import {
   setFields,
   showJson,
   splitWords,
+  withPrepass,
 } from "../declarationFields";
 import served from "@/test-fixtures/settings-schema.json";
 import shared from "@/test-fixtures/tool-declaration-cases.json";
@@ -179,6 +182,23 @@ describe("the server editor's declaration readers", () => {
     expect(readWorkDir("..").error).toMatch(/one directory name/);
   });
 
+  it("reads the launcher's levels as a whole number, or none when empty", () => {
+    expect(readLauncherDepth("1")).toEqual({ value: 1, error: null });
+    expect(readLauncherDepth(" ")).toEqual({ value: null, error: null });
+    expect(readLauncherDepth("-1").error).toMatch(/whole number of levels/);
+    expect(readLauncherDepth("1.5").error).toMatch(/whole number of levels/);
+  });
+
+  it("reads the call timeout as seconds from 0, or unset when empty", () => {
+    expect(readCallTimeout("45")).toEqual({ value: 45, error: null });
+    expect(readCallTimeout("2.5")).toEqual({ value: 2.5, error: null });
+    expect(readCallTimeout("0")).toEqual({ value: 0, error: null });
+    expect(readCallTimeout("  ")).toEqual({ value: null, error: null });
+    for (const held of ["-", "-1", "1.", "abc", "1e3"]) {
+      expect(readCallTimeout(held).error).toMatch(/number of seconds/);
+    }
+  });
+
   it("reads auto-name prefixes ending in _ or .", () => {
     expect(readPrefixes("FUN_, fcn.").value).toEqual(["FUN_", "fcn."]);
     expect(readPrefixes("FUN").error).toMatch(/not a prefix: FUN/);
@@ -193,5 +213,17 @@ describe("the server editor's declaration readers", () => {
 
   it("splits words without keeping empty entries", () => {
     expect(splitWords(" a ,\n\n b ")).toEqual(["a", "b"]);
+  });
+});
+
+describe("withPrepass", () => {
+  const empty = { call_graph: "", function_hashes: "", anti_analysis: "" };
+
+  it("stages the names while one is set", () => {
+    expect(withPrepass(empty, "call_graph", "graph")).toEqual({ ...empty, call_graph: "graph" });
+  });
+
+  it("stages null once every name is cleared", () => {
+    expect(withPrepass({ ...empty, anti_analysis: "scan" }, "anti_analysis", "")).toBeNull();
   });
 });

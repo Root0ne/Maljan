@@ -405,7 +405,7 @@ def _ghidra_tools(provider: GhidraStaticProvider, calls: list[str]) -> list[Any]
         calls.append("load_program")
         return NOT_FOUND
 
-    async def get_function_count() -> str:
+    async def get_function_count(program: str | None = None) -> str:
         calls.append("get_function_count")
         return NO_PROGRAM
 
@@ -420,7 +420,8 @@ def _ghidra_tools(provider: GhidraStaticProvider, calls: list[str]) -> list[Any]
         coroutine=get_function_count,
         name="get_function_count",
         description="count",
-        args_schema=create_model("NoArgs"),
+        # Ghidra's own count takes the program it counts.
+        args_schema=create_model("CountArgs", program=(str | None, None)),
         infer_schema=False,
     )
     return stamp_source(provider._pin_load_program_path([load, count]), PROVIDER_FAMILY)

@@ -57,7 +57,7 @@ import signal
 import sys
 import time
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 from urllib.parse import urlsplit
 
 _ROOT = Path(__file__).resolve().parents[2]
@@ -466,12 +466,16 @@ def third_party_off(values: dict[str, dict[str, Any]]) -> dict[str, Any]:
     """What keeps a rehearsal from reaching any third party beside the model.
 
     The sandbox becomes the mock and the threat-intel enrichment is switched
-    off. The threat-intel sidecar stays, with the reputation keys withheld from
-    its environment (it then answers from its own offline data), so its tool
-    definitions still ride every request; it is disabled only where a token is
-    written into its own environment map. Every tool server that answers from
-    outside this machine (VirusTotal, any HTTP server not on loopback) is
-    disabled, and its tool definitions are then missing from the rehearsed
+    off. Each enabled tool server is judged by what its tool declarations in
+    force say (:func:`server_effects`), never by its key and never by its
+    environment: a server's offline behaviour is not inferred from what keys
+    it is handed. A server that answers from outside this machine (an HTTP
+    server not on loopback) is disabled, and so is every server that declares
+    reaching a third party, whatever its ``env``, ``env_allow``, ``args`` or
+    transport hold (the shipped threat-intel sidecar among them). A server
+    that declares no effects at all is kept at full strength, its environment
+    untouched, and :func:`describe_changes` names it as kept undeclared. A
+    disabled server's tool definitions are missing from the rehearsed
     requests. The server map comes back masked and goes back masked; a masked
     token in a PATCH means "unchanged", so no token is lost.
     """
@@ -490,17 +494,151 @@ def third_party_off(values: dict[str, dict[str, Any]]) -> dict[str, Any]:
         remote = str(server.get("transport") or "stdio") != "stdio" and not is_local_endpoint(
             server.get("url")
         )
-        if key == "threatintel" and not server.get("env"):
-            if server.get("env_allow"):
-                server["env_allow"] = []
-                moved = True
-            continue
-        if key in ("virustotal", "threatintel") or remote:
+        effects = server_effects(str(key), server)
+        if remote or effects == REACHES:
             server["enabled"] = False
+            moved = True
+        elif effects == OFFLINE_WITHOUT_CREDENTIALS and withhold_credentials(server):
             moved = True
     if moved:
         changes["core.mcp.servers"] = servers
     return changes
+
+
+_SECRET_WORDS = ("key", "token", "secret", "password", "passwd", "auth", "credential", "bearer")
+
+
+def _names_a_secret(text: str) -> bool:
+    lowered = text.lower()
+    return any(word in lowered for word in _SECRET_WORDS)
+
+
+def withhold_credentials(server: dict[str, Any]) -> bool:
+    """Take every credential out of ``server`` (in place); whether anything was taken.
+
+    Its ``env`` and ``env_allow`` are emptied, its ``auth_token`` cleared, and
+    an argument that names a secret (``--api-key VALUE``, ``--token=VALUE``,
+    ``NAME_KEY=VALUE``) is dropped with its value, so the server answers as it
+    does with none.
+    """
+    changed = False
+    for field, empty in (("env", {}), ("env_allow", []), ("auth_token", ""), ("headers", {})):
+        if server.get(field):
+            server[field] = empty
+            changed = True
+    args = server.get("args")
+    if isinstance(args, list):
+        kept: list[Any] = []
+        skip_value = False
+        for arg in args:
+            text = str(arg)
+            if skip_value:
+                skip_value = False
+                if not text.startswith("-"):
+                    continue
+            if _names_a_secret(text.split("=", 1)[0]) and (text.startswith("-") or "=" in text):
+                skip_value = text.startswith("-") and "=" not in text
+                continue
+            kept.append(arg)
+        if kept != args:
+            server["args"] = kept
+            changed = True
+    return changed
+
+
+# What a server's tool declarations in force say about reaching a third party.
+REACHES = "reaches"
+LOCAL = "local"
+UNDECLARED = "undeclared"
+# Some tools declare an effect, others declare none: named as kept like an
+# undeclared server, since the tools without a declaration are used at full
+# strength.
+PARTLY_DECLARED = "partly declared"
+# Every tool that would reach a third party declares that it answers offline
+# without credentials (``effects.offline_without_credentials``).
+OFFLINE_WITHOUT_CREDENTIALS = "offline without credentials"
+
+
+def server_effects(key: str, server: dict[str, Any]) -> str:
+    """Whether the server's tools declare reaching a third party, staying local, or nothing.
+
+    Read from the tool declarations in force on the block: a built-in's
+    shipped ones with the stored changes over them, an operator's server's as
+    stored. :data:`REACHES` when a tool's ``effects.network`` is ``true``, it
+    sends the sample's hash or bytes to a third party (``effects.third_party``,
+    ``discloses_sample``), or a declaration is refused (it vouches for
+    nothing). A network reached only in a named way (the operator's own
+    sandbox, the case store, a reference-data refresh) is not an outside
+    service the rehearsal must keep from. :data:`UNDECLARED` when no tool
+    declares any effect; :data:`PARTLY_DECLARED` when some tools do and others
+    do not; :data:`LOCAL` when every tool does. "Every tool" is the server's
+    stored allow-list (``tools``) when it has one, joined to the tools that have
+    an entry in the declarations in force; a server with no allow-list advertises
+    tools the rehearsal cannot list without starting it, so a tool with no entry
+    at all is unknown there and only an entry that declares nothing counts as
+    undeclared. A tool that reaches a third party but declares
+    ``effects.offline_without_credentials`` does not make its server
+    :data:`REACHES`; a server whose reaching tools all declare it is
+    :data:`OFFLINE_WITHOUT_CREDENTIALS`, kept running with its credentials
+    withheld (:func:`withhold_credentials`) and named. A tool that sends the
+    sample's bytes keeps its server :data:`REACHES` whatever it declares.
+    """
+    from maljan.analysis.tool_effects import sends_sample_bytes
+    from maljan.core.builtin_declarations import server_declaration
+    from maljan.core.tool_declarations import (
+        THIRD_PARTY_BYTES,
+        THIRD_PARTY_HASH,
+        ToolFacts,
+        stored_in_force,
+    )
+
+    shipped = server_declaration(key).get("tool_facts") or {}
+    stored = server.get("tool_facts")
+    in_force, refused = (
+        stored_in_force(shipped, stored, f"core.mcp.servers.{key}.tool_facts", key)
+        if stored is not None
+        else (dict(shipped), [])
+    )
+    if refused:
+        return REACHES
+    declared = 0
+    tools = 0
+    offline = False
+    for raw in in_force.values():
+        if not isinstance(raw, dict):
+            continue
+        tools += 1
+        try:
+            facts = ToolFacts.model_validate(raw)
+        except ValueError:
+            return REACHES
+        effects = facts.effects
+        if sends_sample_bytes(facts) or (
+            effects is not None and effects.third_party == THIRD_PARTY_BYTES
+        ):
+            # The sample's bytes going out are never made offline by a
+            # declaration about credentials.
+            return REACHES
+        if effects is not None and (
+            effects.network is True or effects.third_party in (THIRD_PARTY_HASH, THIRD_PARTY_BYTES)
+        ):
+            if effects.offline_without_credentials is not True:
+                return REACHES
+            offline = True
+        if effects is not None and (
+            effects.executes or effects.network is not None or effects.third_party
+        ):
+            declared += 1
+    # A tool the operator's allow-list names that has no entry at all declares
+    # nothing either.
+    allowed = server.get("tools")
+    if isinstance(allowed, list):
+        tools += sum(1 for name in allowed if name not in in_force)
+    if offline:
+        return OFFLINE_WITHOUT_CREDENTIALS
+    if not declared:
+        return UNDECLARED
+    return LOCAL if declared == tools else PARTLY_DECLARED
 
 
 def describe_changes(values: dict[str, dict[str, Any]], changes: dict[str, Any]) -> dict[str, Any]:
@@ -514,14 +652,20 @@ def describe_changes(values: dict[str, dict[str, Any]], changes: dict[str, Any])
         and not server.get("enabled", True)
         and (servers_before.get(key) or {}).get("enabled", True)
     )
-    keys_withheld = sorted(
-        key
-        for key, server in servers_during.items()
+    named = {
+        UNDECLARED: "kept: effects not declared",
+        PARTLY_DECLARED: "kept: effects not declared for some tools",
+        OFFLINE_WITHOUT_CREDENTIALS: (
+            "kept: declares it answers offline without credentials; credentials withheld"
+        ),
+    }
+    kept = {
+        key: named[effects]
+        for key, server in sorted(servers_during.items())
         if isinstance(server, dict)
         and server.get("enabled", True)
-        and (servers_before.get(key) or {}).get("env_allow")
-        and not server.get("env_allow")
-    )
+        and (effects := server_effects(str(key), server)) in named
+    }
     return {
         "settings": {
             key: {"before": _value(values, key), "rehearsed": value}
@@ -529,7 +673,7 @@ def describe_changes(values: dict[str, dict[str, Any]], changes: dict[str, Any])
             if key != "core.mcp.servers"
         },
         "servers_disabled": disabled,
-        "servers_with_keys_withheld": keys_withheld,
+        "servers_kept": kept,
     }
 
 
@@ -691,7 +835,7 @@ class SettingsGuard:
         self.saved: dict[str, dict[str, Any]] = {}
 
     def keep(self, values: dict[str, dict[str, Any]], keys: list[str]) -> None:
-        self.saved = {
+        saved = {
             key: {
                 "source": (values.get(key) or {}).get("source", "default"),
                 "value": (values.get(key) or {}).get("value"),
@@ -699,7 +843,18 @@ class SettingsGuard:
             for key in keys
         }
         self.snapshot.parent.mkdir(parents=True, exist_ok=True)
-        self.snapshot.write_text(json.dumps(self.saved, indent=1, default=str), encoding="utf-8")
+        # Exclusive create: a snapshot an earlier run left holds the operator's real
+        # settings (this run would only see the stub's), so it is never overwritten.
+        try:
+            with self.snapshot.open("x", encoding="utf-8") as handle:
+                handle.write(json.dumps(saved, indent=1, default=str))
+        except FileExistsError:
+            raise SystemExit(
+                f"refusing to start: {self.snapshot} already exists, a snapshot an earlier "
+                f"run did not restore. Put it back with `--restore {self.snapshot}` "
+                "(it is deleted once restored) before another run."
+            ) from None
+        self.saved = saved
 
     def restore(self) -> list[str]:
         """Put every kept key back; answer what could not be (the snapshot stays for it)."""
@@ -737,7 +892,7 @@ def queued_elsewhere(redis_url: str) -> int:
 
     client = redis.Redis.from_url(redis_url, socket_timeout=5)
     try:
-        waiting = int(client.zcard("arq:queue") or 0)
+        waiting = int(cast(int, client.zcard("arq:queue")) or 0)
         running = sum(1 for _ in client.scan_iter("arq:in-progress:*"))
     finally:
         client.close()
@@ -913,7 +1068,12 @@ def run_against_stack(args: argparse.Namespace) -> list[RunRecord]:
             slots=args.slots,
             runtime=args.runtime,
         )
-        server = StubServer(state, args.stub_port, host=args.stub_host).start()
+        server = StubServer(
+            state,
+            args.stub_port,
+            host=args.stub_host,
+            allow_private=getattr(args, "stub_host_private", False),
+        ).start()
     stub_root = args.stub_url.rstrip("/") if args.stub_url else server.root  # type: ignore[union-attr]
     client = StackClient(args.api)
     guard = SettingsGuard(client, Path(args.out) / SNAPSHOT_NAME)
@@ -973,7 +1133,7 @@ def run_against_stack(args: argparse.Namespace) -> list[RunRecord]:
             guard.keep(values, list(changes))
             applied = client.save(changes)
             print(f"pointed {len(applied)} setting(s) at the stub: {', '.join(sorted(applied))}")
-        params = {
+        params: dict[str, Any] = {
             "loop_steps": brain.loop_steps,
             "slow_seconds": brain.slow_seconds,
             "job_timeout_s": _job_timeout(args, values),
@@ -1214,6 +1374,12 @@ def main(argv: list[str] | None = None) -> int:
         "worker reaches the host on (172.17.0.0 to 172.31.255.255)",
     )
     parser.add_argument(
+        "--stub-host-private",
+        action="store_true",
+        help="also allow --stub-host to be another private address (podman, a custom bridge, a "
+        "LAN); a wildcard or public address is still refused",
+    )
+    parser.add_argument(
         "--redis-url",
         default=os.environ.get("REDIS_URL", ""),
         help="the stack's Redis, to check every account's jobs before the gate starts",
@@ -1285,4 +1451,9 @@ def main(argv: list[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
+    # An in-process rehearsal runs the pipeline here: before any thread or the
+    # YARA engine loads, C code is pinned to fold case as ASCII does.
+    from maljan.core.ctype_locale import pin_character_classification
+
+    pin_character_classification()
     raise SystemExit(main())

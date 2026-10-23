@@ -52,8 +52,6 @@ VT_MCP_VERSION = "0.8.4"
 STDIO_COMMAND = "vt-mcp"
 STDIO_FALLBACK_COMMAND = "uvx"
 STDIO_FALLBACK_ARGS = ("--python", "3.12", f"vt-mcp=={VT_MCP_VERSION}")
-# The variable the stdio server reads its agent token from.
-TOKEN_ENV_VAR = "VTAI_TOKEN"
 
 # Read-only lookups: ticked by default, and the whole default tool list.
 LOOKUP_TOOLS: tuple[str, ...] = (

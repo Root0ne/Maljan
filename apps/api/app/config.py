@@ -15,6 +15,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from maljan.core.platform_secrets import PlatformSecrets
 from pydantic import Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -52,8 +53,16 @@ def _is_test_env() -> bool:
     return "pytest" in _sys.modules
 
 
-class APISettings(BaseSettings):
-    """API-level configuration (separate from maljan-core Settings)."""
+class APISettings(BaseSettings, PlatformSecrets):
+    """API-level configuration (separate from maljan-core Settings).
+
+    The variables whose values open the platform's own stores -- the database
+    and Redis URLs, the object store's keys, the settings key and the JWT
+    signing keys -- are marked on ``PlatformSecrets``, which this model
+    inherits; each is declared here again with its development default. The
+    names no tool server's environment may carry are read from those marks
+    (``maljan.core.platform_secrets``).
+    """
 
     model_config = SettingsConfigDict(
         env_file=None,
@@ -106,6 +115,19 @@ class APISettings(BaseSettings):
     minio_bucket: str = "maljan-samples"
     minio_secure: bool = False
 
+    # ── Audit chain anchor ───────────────────────────────────────
+    # Where the audit chain's head is kept outside the database
+    # (``app.services.audit_anchor``): ``database`` (a separate role that may
+    # only INSERT and SELECT ``audit_chain_anchor``, reached through
+    # ``audit_anchor_database_url``), ``object_store`` (one object per head in
+    # ``minio_bucket``, under object lock when the bucket has it) or ``none``.
+    # Empty means ``database`` when that URL is set, else ``none``. Read from
+    # the environment only, never from the settings store: a database writer
+    # must not be able to switch the anchor off. ``app.bootstrap`` refuses an
+    # unknown value.
+    audit_anchor: str = ""
+    audit_anchor_database_url: str = ""
+
     # ── Settings-store encryption ──────────────────────────────
     # Fernet key that encrypts secret values in the runtime settings store.
     # Read directly from the environment by ``maljan.core.settings_secrets``
@@ -127,8 +149,10 @@ class APISettings(BaseSettings):
     #
     # The grace period has an end, and the end is written down rather than
     # remembered: ``jwt_previous_secret_not_after`` is the moment after which a
-    # token signed with the old secret is refused, and a previous secret
-    # configured without one is a bootstrap refusal. An old signing secret that
+    # token signed with the old secret is refused. A previous secret configured
+    # without one is accepted with no end and warned about at every start (an
+    # upgrade may not log out a rotation already under way); a value that does
+    # not read as a moment is the bootstrap refusal. An old signing secret that
     # nobody remembers to clear is a key that stays accepted for the life of
     # the deployment, which is the whole risk rotating was meant to remove.
     # ``/system/status`` and the startup log say that a grace secret is

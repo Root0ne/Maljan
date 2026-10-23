@@ -39,6 +39,7 @@ from maljan.pipeline.debate_facts import (
 from maljan.pipeline.mediation_models import CONTRADICTIONS_BLOCK_MISSING_NOTE
 from maljan.pipeline.nodes import (
     NOT_NAMED_BY_MEDIATOR,
+    RevisionInput,
     make_negotiation_node,
     make_revision_node,
 )
@@ -341,8 +342,7 @@ def _revise(
         "discussion_history": [argument],
     }
     with pytest.MonkeyPatch.context() as mp:
-        mp.setattr("maljan.pipeline.nodes._revision_input_is_absent", lambda *a: False)
-        mp.setattr("maljan.pipeline.nodes._build_revision_context", lambda *a: "data")
+        mp.setattr("maljan.pipeline.nodes._revision_input", lambda *a: RevisionInput(text="data"))
         update = asyncio.run(make_revision_node(container)(state))
     return update, agents
 
@@ -810,8 +810,9 @@ class TestAReportFromOutsideTheDebateIsShownAsOnDev:
             "discussion_history": [argument],
         }
         with pytest.MonkeyPatch.context() as mp:
-            mp.setattr("maljan.pipeline.nodes._revision_input_is_absent", lambda *a: False)
-            mp.setattr("maljan.pipeline.nodes._build_revision_context", lambda *a: "data")
+            mp.setattr(
+                "maljan.pipeline.nodes._revision_input", lambda *a: RevisionInput(text="data")
+            )
             asyncio.run(make_revision_node(container)(state))
 
         peers = agents["static"].safe_revise_isr.call_args[0][2]

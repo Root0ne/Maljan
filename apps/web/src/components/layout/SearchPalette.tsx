@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { api } from "@/lib/api";
 import type { JobDTO, ReportSummaryDTO, SampleDTO } from "@/lib/api";
@@ -8,7 +8,14 @@ import { analysisRows } from "@/lib/analyses";
 import { timeAgo } from "@/lib/report-utils";
 import { statusTone } from "@/lib/status";
 import { verdictLabel, verdictTone } from "@/lib/verdict";
-import { getErrorMessage } from "@/lib/errors";
+import { fetchAllPages } from "@/lib/pages";
+import {
+  SEARCH_SOURCES,
+  readSearchSources,
+  searchSourcesError,
+  shouldStartSearchRead,
+  type SearchSource,
+} from "./searchSources";
 
 /* ── Types ─────────────────────────────────────────────── */
 
@@ -83,7 +90,6 @@ export default function SearchPalette({
   const [jobs, setJobs] = useState<JobDTO[]>([]);
   const [reports, setReports] = useState<ReportSummaryDTO[]>([]);
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
   const [activeIndex, setActiveIndex] = useState(0);
   const [debouncedQuery, setDebouncedQuery] = useState("");
 
@@ -116,64 +122,69 @@ export default function SearchPalette({
     setActiveIndex(0);
   }, [debouncedQuery]);
 
-  /* Fetch in parallel once the palette opens & the query is non-empty. */
-  useEffect(() => {
-    if (!open) return;
-    if (!debouncedQuery) {
-      // The empty-query branch clears stale
-      // results from the previous query so the dropdown collapses
-      // immediately. The state IS derived (an empty query maps to an
-      // empty list) but the source of truth — the debounced query —
-      // lives in another effect, so cross-effect reset via setState
-      // is the cleanest path.
-      setSamples([]);
-      setJobs([]);
-      setReports([]);
-      setError(null);
-      return;
-    }
+  /* Read every sample, job and report once per opening of the palette, and
+   * filter locally from then on.
+   *
+   * The palette used to read the newest fifty of each list on every keystroke
+   * and then answer "No matches" for anything older, which reads as "this
+   * hash was never analysed". All pages are read (`fetchAllPages`), once per
+   * opening whatever is typed; the read is aborted when the palette closes,
+   * and a list that failed is read again only when the reader asks for it
+   * (`readSearchSources`). */
+  const [failed, setFailed] = useState<SearchSource[]>([]);
+  const readRef = useRef<AbortController | null>(null);
 
-    let cancelled = false;
+  const readSources = useCallback(async (sources: readonly SearchSource[], signal: AbortSignal) => {
     setLoading(true);
-    setError(null);
+    const outcome = await readSearchSources(
+      sources,
+      async (source, sig) => {
+        const options = { signal: sig };
+        if (source === "samples") {
+          const all = await fetchAllPages((page, size) => api.getSamples(page, size, sig), options);
+          setSamples(all.items);
+        } else if (source === "jobs") {
+          const all = await fetchAllPages(
+            (page, size) => api.getJobs(page, size, undefined, undefined, sig),
+            options,
+          );
+          setJobs(all.items);
+        } else {
+          const all = await fetchAllPages((page, size) => api.getReports(page, size, sig), options);
+          setReports(all.items);
+        }
+      },
+      signal,
+    );
+    if (!outcome) return;
+    setFailed(outcome.failed);
+    setLoading(false);
+  }, []);
 
-    // Each source used to be
-    // swallowed into an empty list, so an unreachable API rendered as a
-    // confident "No matches". Track which sources failed and say so.
-    Promise.all([
-      api.getSamples(1, 50).catch((e: unknown) => e as Error),
-      api.getJobs(1, 50).catch((e: unknown) => e as Error),
-      api.getReports(1, 50).catch((e: unknown) => e as Error),
-    ])
-      .then(([s, j, r]) => {
-        if (cancelled) return;
-        const failed: string[] = [];
-        if (s instanceof Error) failed.push("samples");
-        else setSamples(s.items ?? []);
-        if (j instanceof Error) failed.push("jobs");
-        else setJobs(j.items ?? []);
-        if (r instanceof Error) failed.push("reports");
-        else setReports(r.items ?? []);
-        setError(
-          failed.length === 0
-            ? null
-            : failed.length === 3
-              ? "Search unavailable — could not reach the API."
-              : `Search is incomplete — ${failed.join(", ")} could not be loaded.`,
-        );
-      })
-      .catch((err: unknown) => {
-        if (cancelled) return;
-        setError(`Search unavailable — ${getErrorMessage(err)}`);
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
-      });
+  /* The read starts with the first character typed after the palette opens —
+   * focusing the box opens it, and a reader who only tabbed past must not
+   * cost a read of the whole history — and runs once per opening. */
+  const typed = query.trim().length > 0;
+  useEffect(() => {
+    if (!shouldStartSearchRead(open, typed, readRef.current !== null)) return;
+    const controller = new AbortController();
+    readRef.current = controller;
+    void readSources(SEARCH_SOURCES, controller.signal);
+  }, [open, typed, readSources]);
 
-    return () => {
-      cancelled = true;
-    };
-  }, [open, debouncedQuery]);
+  // Closing aborts the read; the next opening reads again.
+  useEffect(() => {
+    if (open) return;
+    readRef.current?.abort();
+    readRef.current = null;
+  }, [open]);
+  useEffect(() => () => readRef.current?.abort(), []);
+
+  const retryFailed = () => {
+    const controller = readRef.current;
+    if (controller && failed.length > 0) void readSources(failed, controller.signal);
+  };
+  const error = searchSourcesError(failed);
 
   /* Compute filtered, grouped results. */
   const results = useMemo<ResultItem[]>(() => {
@@ -318,9 +329,17 @@ export default function SearchPalette({
         </div>
       )}
 
-      {error && (
-        <div role="alert" className="px-3 py-3 text-xs text-status-red">
-          {error}
+      {error && !showEmpty && (
+        <div role="alert" className="px-3 py-3 text-xs text-status-red flex items-center gap-3">
+          <span>{error}</span>
+          <button
+            type="button"
+            className="text-accent-strong hover:underline"
+            disabled={loading}
+            onClick={retryFailed}
+          >
+            Retry
+          </button>
         </div>
       )}
 

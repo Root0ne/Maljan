@@ -343,3 +343,29 @@ class TestOneCountOfEachThing:
         await _run(container)
 
         assert container.pending_memory_case is None
+
+
+@pytest.mark.asyncio
+class TestTheReportCarriesWhatNoNodeDrained:
+    async def test_an_undrained_entry_is_on_the_ledger_and_in_the_report(
+        self, container: Any
+    ) -> None:
+        from maljan.schemas.evidence import build_entry
+
+        late = build_entry(
+            entry_id="ev_0001",
+            seq=1,
+            agent="static",
+            tool="peek",
+            args={},
+            server=None,
+            output="what the revision read before it raised",
+        )
+        container.collect_undrained_evidence.return_value = [late]
+
+        result, _column = await _run(container)
+
+        assert [row["id"] for row in result["evidence_ledger"]] == ["ev_0001"]
+        index = result["malware_report"]["evidence_index"]
+        assert [row["id"] for row in index] == ["ev_0001"]
+        container.collect_undrained_evidence.assert_called_once()

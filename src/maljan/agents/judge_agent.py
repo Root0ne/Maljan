@@ -27,26 +27,31 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import logging
 import re
 import uuid
 from collections.abc import Iterable, Mapping, Sequence
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Any, Literal, NamedTuple, cast
 
 from langchain_core.language_models.chat_models import BaseChatModel
-from langchain_core.messages import HumanMessage, SystemMessage
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from langchain_core.prompts import ChatPromptTemplate
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ValidationError
 
 from maljan.agents.base_agent import (
     TOOL_LOOP_TURN_CALL,
     BudgetMeter,
     LoopBudget,
+    OfferReadAgainFirst,
     _hold_the_turn,
     _message_chars,
+    _stored_answer_of,
+    _stored_copy_of,
     _trim_for_synthesis,
     _turn_key,
     counted_window_tokens,
+    describe_exception_for_log,
     is_model_turn,
     is_the_graph_s_step_stop,
     limit_text,
@@ -57,15 +62,21 @@ from maljan.agents.base_agent import (
     recursion_limit,
     request_chars,
     run_on_agent_loop,
+    steps_used,
     synthesis_budget_chars,
 )
 from maljan.agents.judge_postprocess import (
+    ASSESSMENT_READ_LOOSELY_CODE,
     ASSESSMENT_RELOCATED_CODE,
+    ASSESSMENT_UNREADABLE_CODE,
     PROPERTY_NOT_CARRIED_CODE,
 )
 from maljan.agents.prompt_fragments import tools_statement
+from maljan.agents.run_evidence_corpus import read_of_entry as _read_of_entry
+from maljan.agents.tool_answer_clearing import read_evidence_tool
 from maljan.agents.tool_fence import (
     FENCE_STATEMENT,
+    QUOTED_VALUE_STATEMENT,
     escaped,
     escapes,
     fence_lines_room,
@@ -73,13 +84,13 @@ from maljan.agents.tool_fence import (
     json_view,
     needs_fence,
 )
-from maljan.core.config import MEDIATOR_AGENT_KEY, get_settings
+from maljan.core.config import MEDIATOR_AGENT_KEY, MEDIATOR_AGENT_NAME, get_settings
 from maljan.core.logger import logger
-from maljan.core.spend import SpendCeilingStop, call_deadline_of
-from maljan.core.token_ledger import TokenLedger, structured_answer
+from maljan.core.spend import AgentCeilingStop, SpendCeilingStop, call_deadline_of
+from maljan.core.token_ledger import TokenLedger, read_structured_reply, say_structured_reply
 from maljan.core.truncation_ledger import TruncationLedger, record_judge_response
-from maljan.llm.answer_text import answer_text
-from maljan.llm.anthropic_history import keeps_turns_as_received
+from maljan.llm.answer_text import answer_text, structured_answer_text, tool_call_arguments
+from maljan.llm.anthropic_history import TOOL_LOOP_TURN, keeps_turns_as_received
 from maljan.llm.context_window import (
     ContextBudget,
     tool_definition_chars,
@@ -88,9 +99,13 @@ from maljan.llm.context_window import (
 from maljan.llm.generation_rate import GenerationRates, ModelCallDeadline, model_name_of
 from maljan.llm.transient import as_call
 from maljan.memory.attck_loader import technique_label
-from maljan.memory.long_term_memory import a_past_case_technique
+from maljan.memory.long_term_memory import (
+    a_past_case_technique,
+    foreign_ids_written_out,
+    foreign_quoted_value,
+)
 from maljan.memory.technique_cards import technique_card_lines
-from maljan.pipeline.debate_facts import read_marks, with_ledger_facts
+from maljan.pipeline.debate_facts import read_marks, with_ledger_facts, with_ledger_stated
 from maljan.pipeline.events import emit_judge_question, safe_finding_value, scrub
 from maljan.pipeline.mediation_models import (
     CONTRADICTIONS_BLOCK_MISSING_NOTE,
@@ -128,8 +143,15 @@ if TYPE_CHECKING:
     from maljan.memory.long_term_memory import MemoryStore
 
 # Rows the judge's parse settles itself, so the retry is never spent on them:
-# an assessment moved to its property, and a property the export does not carry.
-_SETTLED_CODES = frozenset({ASSESSMENT_RELOCATED_CODE, PROPERTY_NOT_CARRIED_CODE})
+# an assessment moved to its property, an assessment leaf read in the one
+# reading its type allows, and a property the export does not carry.
+_SETTLED_CODES = frozenset(
+    {ASSESSMENT_RELOCATED_CODE, ASSESSMENT_READ_LOOSELY_CODE, PROPERTY_NOT_CARRIED_CODE}
+)
+
+# The settled rows that are announced as resolved when the parse makes them:
+# the act is done and nothing is left to ask.
+_RESOLVED_BY_THE_PARSE = frozenset({ASSESSMENT_RELOCATED_CODE, ASSESSMENT_READ_LOOSELY_CODE})
 
 # How many times the judge is asked again about a verdict answer that was
 # wrong. One: a second correction has never produced a better bundle than the
@@ -248,11 +270,13 @@ def _was_cut(answer: Any, cap: int | None) -> bool:
 _ASSESSMENT_KEY = '"x_maljan_assessment"'
 
 
-def stated_assessment_in(text: str) -> Any | None:
+def stated_assessment_in(text: str, notes: list[Any] | None = None) -> Any | None:
     """The assessment an unreadable answer stated whole, read by the bundle's own readers.
 
-    The JSON object written under ``"x_maljan_assessment"``, validated as a
-    ``JudgeAssessment`` and kept only when its verdict is one
+    The JSON object written under ``"x_maljan_assessment"``, read leaf by leaf
+    as a ``JudgeAssessment`` (``schemas.judgement.read_assessment``: a
+    mistyped leaf is left absent, not the reason the whole is) and kept only
+    when its verdict is one
     ``pipeline.outcome.normalise_verdict`` recognises; then its confidence,
     severity and family are the judge's own statements. The last whole one
     counts: an answer that drafted an assessment in reasoning spilled into its
@@ -261,22 +285,22 @@ def stated_assessment_in(text: str) -> Any | None:
     only then through the repairing reader a whole answer goes through, which
     rewrites comments and quotes. ``None`` when no occurrence is whole and
     states a verdict that can be read. Nothing is inferred from prose.
+    ``notes`` receives what reading the kept one took.
     """
     import json
 
     from maljan.pipeline.outcome import normalise_verdict
-    from maljan.schemas.judgement import JudgeAssessment
+    from maljan.schemas.judgement import read_assessment
     from maljan.utils.json_cleaner import extract_json, safe_parse_json
 
     at = text.rfind(_ASSESSMENT_KEY)
     while at >= 0:
         found = _assessment_at(text, at, json, extract_json, safe_parse_json)
         if found is not None:
-            try:
-                assessment = JudgeAssessment.model_validate(found)
-            except Exception:  # noqa: BLE001 — one that does not validate states nothing
-                assessment = None
+            assessment, read = read_assessment(found)
             if assessment is not None and normalise_verdict(assessment.verdict) is not None:
+                if notes is not None:
+                    notes.extend(read)
                 return assessment
         at = text.rfind(_ASSESSMENT_KEY, 0, at)
     return None
@@ -419,6 +443,24 @@ def _indicator_findings(bundle: Any, found: Iterable[Violation]) -> list[Violati
 VERDICT_TIMEOUT_CODE = "verdict.timeout"
 VERDICT_TIMEOUT_REASON = "the judge did not answer within its budget"
 
+# What is recorded when the judge's own ceiling (``llm.agents.judge``) refused
+# the verdict call: no answer, as with a timeout, so nothing is asked again and
+# the verdict is this pipeline's own fallback bundle. The row's message is the
+# ceiling's sentence; the degradation reason naming the agent and its ceiling
+# comes from the spend meter (``SpendMeter.agent_reasons``).
+VERDICT_AGENT_CEILING_CODE = "verdict.agent_ceiling"
+# What stands in for the answer of a verdict call the judge's own ceiling refused.
+AGENT_CEILING_ANSWER = "[AGENT CEILING]"
+
+# What is recorded when the judge's one retry failed — it timed out, answered
+# prose, or answered JSON that was not a bundle — after a first answer that was
+# a bundle. The first bundle is kept, with what was still wrong with it: a
+# failed correction says nothing about the sample, and a valid verdict replaced
+# by the text fallback or by a timeout published what the judge never wrote.
+# The row says the retry was spent and how it failed.
+VERDICT_RETRY_FAILED_CODE = "verdict.retry_failed"
+VERDICT_RETRY_FAILED_REASON = "the judge's retry failed and its first bundle was kept"
+
 
 def _answer_text(answer: Any) -> str:
     """The text of a model answer, whatever shape it arrived in, thinking aside."""
@@ -455,16 +497,32 @@ MEDIATION_CALL_SPANS = 4
 # able to end the negotiation, and must not be mistakable for a real score.
 _UNREADABLE_AGREEMENT = 0.0
 
-# ``agreement_confidence: 0.95`` / ``**confidence**= 95%`` / ``"confidence": 0.9``
-# / ``The confidence score is: 0.78``.
-#
-# A short run of anything-but-a-separator is allowed between the key and the
-# ``:``/``=`` so ordinary phrasing parses, but the number must follow the
-# separator **immediately**. That is the whole point: "Confidence: 0.95 (based
-# on 3 agents)" must yield 0.95, never the 3 — see
-# ``_extract_confidence_from_text`` for the false consensus that produced.
+# ``agreement_confidence: 0.95`` / ``**agreement_confidence:** 95%`` /
+# ``"agreement_confidence": 0.9`` / ``Agreement confidence = 0.9`` — the key the
+# system prompt asks for, written with an underscore or a space, and nothing
+# else. Any other "confidence: x" (a claim's, a technique's, the
+# mediator's own certainty) is not the agents' agreement, and read as one it
+# ended the negotiation on a consensus nobody stated. Only markdown emphasis and
+# quotes may sit around the separator; the number must follow them
+# immediately, so "agreement_confidence: 0.95 (based on 3 agents)" yields 0.95,
+# never the 3.
 _AGREEMENT_RE = re.compile(
-    r"confidence[^\n:=]{0,24}?[:=]\s*(\d*\.?\d+)\s*(%?)",
+    r"\bagreement(?:_|[^\S\n])confidence\b[*_`\"']*[^\S\n]*[:=][*_`\"'\s]*(\d*\.?\d+)\s*(%?)",
+    re.IGNORECASE,
+)
+
+# An explicit verdict statement in the judge's prose: ``Verdict: Benign``,
+# ``**Verdict:** Malware``, ``Verdict:`` with the word on the next line,
+# ``Final verdict - Malware.``, ``the verdict is suspicious``,
+# ``"verdict": "Malware"``. Only emphasis and quotes may sit around the
+# separator; the word must follow them, stand whole and end the statement (a
+# sentence or clause end, a parenthesis, a line end), so "the verdict is not
+# malware", "verdict: malware-free" and "the analysts' verdict - benign - is
+# wrong" state nothing; :func:`maljan.pipeline.outcome.normalise_verdict` is
+# what reads the word.
+_VERDICT_STATEMENT_RE = re.compile(
+    r"\bverdict\b[*_`\"']*[^\S\n]*(?:[:=\-\u2013\u2014]|\bis\b)[*_`\"'\s]*"
+    r"([A-Za-z]+)\b(?![-'\w])(?=[*_`\"']*[^\S\n]*(?:[.;:!?,(\n]|\Z))",
     re.IGNORECASE,
 )
 
@@ -725,9 +783,13 @@ def verdict_report_parts(
     degradation note. Nothing here is cut; :func:`fit_prompt_parts` does
     that, and only when the judge's window cannot hold them.
     """
+    from maljan.utils.written_forms import markers_written_out
+
     parts: dict[str, str] = {}
     for name, report in reports.items():
-        parts[f"{name} report"] = f"--- {name.upper()} ANALYST ---\n{report}"
+        # A report is what a model wrote: a run-state marker in it is written
+        # out, so the judge never reads one as the platform's block.
+        parts[f"{name} report"] = f"--- {name.upper()} ANALYST ---\n{markers_written_out(report)}"
     if isr_reports:
         isr_block = "\n".join(
             f"[{name}] domain={isr.domain} | "
@@ -815,12 +877,60 @@ def fit_prompt_parts(parts: Mapping[str, str], room: int | None) -> tuple[dict[s
     return shown, notice
 
 
+_MEMORY_END = "=== END LONG-TERM MEMORY ==="
+
+
+def closed_memory_cut(shown: str, whole: str) -> str:
+    """The long-term memory block as fitted, its quoted value and its end line closed after a cut.
+
+    A cut ends the block mid-line, and a case's summary is one quoted value
+    (``tool_fence.quoted_value``): left open, its quote would run into the
+    rest of the prompt. The quote is closed in front of the cut mark, found by
+    a scan that reads a backslash as escaping the character after it (a lone
+    backslash the cut left at the end is dropped). Another run's ids the cut
+    completed are renamed (``long_term_memory.foreign_ids_written_out``). A
+    block that was not cut is returned as it is, and so is one with nothing of it left (only the cut
+    mark's own line).
+    """
+    from maljan.utils.marked_cut import CUT_MARK
+
+    if shown == whole or not shown.startswith("=== LONG-TERM MEMORY"):
+        return shown
+    cut = shown.endswith(CUT_MARK)
+    body = shown[: -len(CUT_MARK)] if cut else shown
+    # The block is other runs' text under fixed headings, and a cut can end an
+    # item id where its text went on (``net:44x`` cut to ``net:4``): renamed
+    # again here. The renaming writes no backslash and no quote.
+    body = foreign_ids_written_out(body)
+    inside = False
+    escaped = False
+    for char in body.rsplit("\n", 1)[-1]:
+        if escaped:
+            escaped = False
+        elif char == "\\":
+            escaped = True
+        elif char == '"':
+            inside = not inside
+    if inside:
+        body = f'{body[:-1] if escaped else body}"'
+    return f"{body}{CUT_MARK if cut else ''}\n{_MEMORY_END}"
+
+
 # The key the negotiation history is fitted under beside the report parts.
 _HISTORY_PART = "negotiation history"
 # Kept back for the shortening notice itself, which is written only once the
 # parts are fitted: the notice names the parts it cut, so its length is known
 # only then, and this is more than any notice over a dozen parts needs.
 _NOTICE_ROOM = 600
+
+
+# What the verdict prompt says where retrieving similar past cases failed.
+MEMORY_UNAVAILABLE_NOTE = (
+    "=== LONG-TERM MEMORY: unavailable ===\n"
+    "Retrieving similar past cases failed; no prior case is shown, which says nothing "
+    "about whether one exists.\n"
+    "=== END LONG-TERM MEMORY ==="
+)
 
 
 class JudgeVerdict(NamedTuple):
@@ -871,6 +981,29 @@ COMPACT_BUNDLE_RULES = (
 # What the mediator's fast path says when it needs no tool; replaced by the
 # sentence about the tools that attached if the fast path falls back to a loop.
 _NO_TOOLS_NEEDED = "No Threat Intelligence tools are needed for this run.\n"
+
+# The mediator's sentence about its tools, by the case: no analyst consulted a
+# reputation source and the sample's sha256 is known (``{sha256}`` is replaced
+# with it), the same with no hash to name, and a dispute to resolve with them.
+# Module constants so the run fingerprint hashes them as templates
+# (``analysis.setup_prompts``).
+MEDIATOR_LOOKUP_ONCE_BY_HASH = (
+    "You have reputation tools and no analyst has consulted one. "
+    "Look the sample's hash up once — its sha256 is {sha256} "
+    "and it is in the sample identity block below — cite what comes back "
+    "as evidence, and treat a reputation label as one source rather than "
+    "as the verdict.\n"
+)
+MEDIATOR_LOOKUP_ONCE = (
+    "You have reputation tools and no analyst has consulted one. "
+    "Look the sample up once to settle its identity, cite what comes "
+    "back as evidence, and treat a reputation label as one source "
+    "rather than as the verdict.\n"
+)
+MEDIATOR_TI_TOOLS = (
+    "You have Threat Intelligence tools to verify disputed "
+    "IPs/domains/hashes — use them only to resolve contradictions.\n"
+)
 
 
 # The question asked once after the verdict about the techniques the verdict's
@@ -1000,10 +1133,18 @@ def question_evidence(ledger: Iterable[Any], corpus: Any = None) -> dict[str, Qu
         lowered = False
         if not text and corpus is not None:
             try:
-                text = str(corpus.text_for(written) or "")
+                text = _read_of_entry(corpus, written)
             except Exception:  # noqa: BLE001 — no copy is no text
                 text = ""
             lowered = bool(text)
+        elif text and corpus is not None:
+            # Pages of this entry the model read past what the ledger stored.
+            try:
+                pages = str(getattr(corpus, "pages_of", lambda _id: "")(written) or "")
+            except Exception:  # noqa: BLE001 — no page is no text
+                pages = ""
+            if pages:
+                text, lowered = f"{text.lower()}\n{pages}", True
         shown[written.lower()] = QuestionEvidence(
             text=text,
             tool=str(getattr(entry, "tool", "") or ""),
@@ -1269,19 +1410,6 @@ def _structured_decisions(parsed: Any, asked: Sequence[str]) -> list[Any]:
     return sorted(found.values(), key=lambda d: wanted.index(d.technique_id))
 
 
-def _tool_call_arguments(raw: Any) -> Any:
-    """The arguments of the first tool call an answer made, or ``None``.
-
-    A provider that answers a schema by function calling leaves ``content``
-    empty and the answer in the call's arguments.
-    """
-    for call in list(getattr(raw, "tool_calls", None) or []):
-        args = call.get("args") if isinstance(call, dict) else getattr(call, "args", None)
-        if isinstance(args, dict):
-            return args
-    return None
-
-
 def fit_shown_evidence(
     texts: dict[str, str], room: int | None
 ) -> tuple[dict[str, str], str, int | None]:
@@ -1521,6 +1649,66 @@ def _standing_blocks(run_state: str, facts_block: str) -> str:
     return "".join(f"{part}\n\n" for part in parts if part)
 
 
+def mediation_reports_text(
+    reports: dict[str, str], isr_reports: dict[str, AgentISR] | None = None
+) -> str:
+    """The analysts' reports as the mediator reads them, each analyst's claims once.
+
+    Each report under its analyst's heading, then the structured claims of
+    every ISR whose summary is not already one of those reports word for
+    word. An analyst's first answer is its ISR summary, so in a first
+    mediation every report was sent a second time; a revised report is the
+    analyst's own words and its ISR the claims in force, which differ and are
+    both kept. Empty ISRs are left out, as before.
+    """
+    from maljan.utils.written_forms import markers_written_out
+
+    # A report and a claim's words are what a model wrote: a run-state marker
+    # in them is written out, so the mediator never reads one as the
+    # platform's block.
+    reports_text = "\n\n".join(
+        f"--- {name.upper()} ANALYST ---\n{markers_written_out(report)}"
+        for name, report in reports.items()
+    )
+    if not isr_reports:
+        return reports_text
+    shown = set(reports.values())
+    isr_block = "\n\n".join(
+        f"[ISR] {markers_written_out(summary)}"
+        for summary in (isr.to_text_summary() for isr in isr_reports.values() if isr.claims)
+        if summary not in shown
+    )
+    if not isr_block:
+        return reports_text
+    return f"{reports_text}\n\n=== STRUCTURED CLAIMS (ISR) ===\n{isr_block}"
+
+
+def mediator_system_prompt(
+    *,
+    identity_unanswered: bool,
+    lookup_attached: bool,
+    needs_tools: bool,
+    sha256: str,
+    tools: Any,
+) -> str:
+    """The mediator's system prompt for one mediation: its head and the sentence about its tools.
+
+    The one builder ``JudgeAgent.mediate`` sends it through, and the run
+    fingerprint renders it through (``analysis.setup_prompts``) for every case.
+    """
+    return MEDIATOR_SYSTEM_HEAD + (
+        MEDIATOR_LOOKUP_ONCE_BY_HASH.replace("{sha256}", sha256)
+        if identity_unanswered and lookup_attached and sha256
+        else MEDIATOR_LOOKUP_ONCE
+        if identity_unanswered and lookup_attached
+        else MEDIATOR_TI_TOOLS
+        if needs_tools and lookup_attached
+        else tools_statement(tools) + "\n"
+        if needs_tools
+        else _NO_TOOLS_NEEDED
+    )
+
+
 def _sha256_of(sample: Any) -> str:
     """The sha256 the identity block carries, for a sentence that names it."""
     data = sample if isinstance(sample, dict) else {}
@@ -1548,12 +1736,117 @@ def _seconds_or_none(value: Any) -> float | None:
     return None if value is None else float(value)
 
 
-def _last_ledger_facts(history: Sequence[Any]) -> list[str]:
-    """The ledger counts the platform stated for the last mediation's lines, or none."""
+def _prompt_chars(messages: Sequence[Any]) -> int:
+    """How many characters a call's turns carry, which its wait is sized from."""
+    return sum(len(str(getattr(message, "content", ""))) for message in messages)
+
+
+def _last_ledger_facts(history: Sequence[Any], field: str = "ledger_facts") -> list[str]:
+    """What the platform recorded in ``field`` for the last mediation's lines, or none.
+
+    ``ledger_facts`` are the ledger counts it stated; ``ledger_stated`` the
+    blocking lines every count of which the ledger states and the analysts
+    were told before.
+    """
     for argument in reversed(list(history or [])):
-        if getattr(argument, "agent_name", "") == "Mediator":
-            return [str(f) for f in getattr(argument, "ledger_facts", None) or []]
+        if getattr(argument, "agent_name", "") == MEDIATOR_AGENT_NAME:
+            return [str(f) for f in getattr(argument, field, None) or []]
     return []
+
+
+@dataclass(frozen=True)
+class VerdictCheckInputs:
+    """What the verdict round's bundle checks read, on the run's side.
+
+    No field has a default: an input added here is one every caller states,
+    the replay of a stored run (``scripts/replay``) included.
+    """
+
+    evidence_corpus: Any
+    attck: Any
+    sample: Any
+    shortened_tools: Sequence[str]
+    searched: Sequence[str]
+    corpus_state: Any
+    technique_sources: Mapping[str, Sequence[str]] | None
+    sandbox_facts: Any
+    analyst_claims: int
+    ledger_ids: Sequence[str] | None
+
+
+def verdict_checks(bundle: Bundle, inputs: VerdictCheckInputs) -> list[Violation]:
+    """Whether the verdict was stated, and what a Benign or a Malware one cites.
+
+    Its own function because it runs on every way the round can end, not only
+    on the one where the judge answered a bundle: prose the model stood by
+    twice, JSON that was not a bundle, and a timeout all produce a verdict, and
+    the two paths that produce one out of *text* were the two that reached a
+    report unasked. Where the loop ran them they were fed back once; everywhere
+    else they are recorded, because they annotate the verdict and never change
+    it. One reading of the verdict serves all three checks and the pipeline
+    with it (``pipeline.outcome.decide_from_bundle``).
+    """
+    return [
+        *stated_verdict_violations(bundle),
+        *unsupported_benign_violations(
+            bundle, analyst_claims=inputs.analyst_claims, ledger_ids=inputs.ledger_ids
+        ),
+        *unsupported_malware_violations(
+            bundle, analyst_claims=inputs.analyst_claims, ledger_ids=inputs.ledger_ids
+        ),
+    ]
+
+
+def _unasked_unreadable_leaves(
+    shape: Sequence[Violation], violations: Sequence[Violation]
+) -> list[Violation]:
+    """The assessment leaves a text fallback's stated assessment left absent, not yet recorded.
+
+    A fallback bundle's round asks about the answer's shape, not its leaves, so
+    these were never put to the judge; they are recorded as such, because a
+    leaf left absent is never left absent in silence.
+    """
+    have = {(v.code, v.path) for v in violations}
+    return [
+        replace(v, asked=False)
+        for v in shape
+        if v.code == ASSESSMENT_UNREADABLE_CODE and (v.code, v.path) not in have
+    ]
+
+
+def verdict_bundle_checks(
+    bundle: Bundle,
+    shape: Sequence[Violation],
+    inputs: VerdictCheckInputs,
+    *,
+    origins: Any,
+    written: Any,
+) -> list[Violation]:
+    """Every finding the verdict round asks about a bundle the judge answered.
+
+    The set-aside objects of the parse (``shape``) but the settled ones (the
+    relocation is announced and done, and a retry for it would be a turn spent
+    on a problem that no longer exists), then the bundle's own checks.
+    """
+    return [
+        *(v for v in shape if v.code not in _SETTLED_CODES),
+        *validate_verdict_bundle(
+            bundle,
+            inputs.evidence_corpus,
+            attck=inputs.attck,
+            sample=inputs.sample,
+            shortened_tools=inputs.shortened_tools,
+            searched=inputs.searched,
+            corpus_state=inputs.corpus_state,
+            technique_sources=inputs.technique_sources,
+            origins=origins,
+            written=written,
+        ),
+        *assessment_violations(bundle),
+        *assessment_conflict_violations(bundle),
+        *verdict_checks(bundle, inputs),
+        *unattributed_indicator_violations(bundle, inputs.sandbox_facts),
+    ]
 
 
 class JudgeAgent(BudgetMeter):
@@ -1617,6 +1910,9 @@ class JudgeAgent(BudgetMeter):
         # What the run saw, handed down by the container. ``None`` for a judge
         # built outside a job.
         self.evidence_corpus: Any = None
+        # The job's store for the parts of an answer an entry does not keep
+        # whole (``schemas.evidence_spill``). ``None`` outside a job.
+        self.evidence_spill: Any = None
         # The name the meter and the console draw this agent under. Fixed:
         # there is one judge, and the ledger already stamps its entries with
         # this word.
@@ -1695,15 +1991,17 @@ class JudgeAgent(BudgetMeter):
             return None
         if holdable is None:
             holdable = accepts_output_bound(self.llm)
+        # As an analyst's call is measured: tool calls and reasoning counted
+        # with the text, and the tool definitions sent with it.
+        prompt_chars = sum(_message_chars(m) for m in messages) + max(
+            0, int(getattr(self, "_tool_definition_chars", 0) or 0)
+        )
         return cast(
             "int | None",
             meter.admit(
                 kind=kind,
                 model=self._model_label() or model_name_of(self.llm),
-                # As an analyst's call is measured: tool calls and reasoning
-                # counted with the text, and the tool definitions sent with it.
-                prompt_chars=sum(_message_chars(m) for m in messages)
-                + max(0, int(getattr(self, "_tool_definition_chars", 0) or 0)),
+                prompt_chars=prompt_chars,
                 cap_tokens=int(self._output_cap().tokens or 0),
                 slot=slot,
                 holdable=holdable,
@@ -1864,6 +2162,28 @@ class JudgeAgent(BudgetMeter):
         self.tools = tools
         self.degradation_reasons = reasons
         self.logger.info("Judge tool servers: %s", [t.name for t in self.tools])
+        # The judge's setup, as an analyst's is noted where it is resolved
+        # (``ServiceContainer.note_role_setup``): what the run fingerprint reads.
+        note = getattr(getattr(self, "_container", None), "note_role_setup", None)
+        if callable(note):
+            note(str(getattr(self, "_runs_on", "judge") or "judge"), tools, self.bound_servers())
+
+    def bound_servers(self) -> set[str]:
+        """The tool servers this agent's role and definition bind, by name; never attaches."""
+        registry = self._server_registry()
+        if registry is None:
+            return set()
+        try:
+            names = {
+                handle.name
+                for handle in registry.for_agent("judge", exclude=self._profile_excluded_servers())
+            }
+        except Exception:  # noqa: BLE001 — a name never costs a mediation
+            names = set()
+        names |= {
+            str(ref.server) for ref in self._definition_tool_refs() if getattr(ref, "server", None)
+        }
+        return names
 
     async def aclose(self) -> None:
         """Release every judge-bound tool server and its stdio subprocess.
@@ -1988,6 +2308,7 @@ class JudgeAgent(BudgetMeter):
             stage=str(getattr(self, "pipeline_stage", "") or "analysis"),
             sink=self._event_sink(),
             corpus=getattr(self, "evidence_corpus", None),
+            spill=getattr(self, "evidence_spill", None),
             agent_role=self._definition_role(),
             agent_tab=self._definition_tab(),
         )
@@ -2031,13 +2352,32 @@ class JudgeAgent(BudgetMeter):
         # On the budget record and the ticks, as the analysts' loop puts it.
         self._tool_definition_chars = definitions
 
-        def _note_the_conversation(conversation: list[Any]) -> None:
+        # Old tool answers cleared to references where the request is past the
+        # point in force or the server refuses it (``tool_answer_clearing``),
+        # as an analyst's loop does; ``read_evidence`` is offered only from
+        # the request that carries the first clear.
+        self._offered_after_clear: list[Any] = []
+        clearing = self._tool_answer_clearing()
+        read_tool = record_tools(
+            [
+                read_evidence_tool(
+                    _stored_answer_of(recorder),
+                    self._answer_sizer(),
+                    _stored_copy_of(recorder),
+                )
+            ],
+            recorder,
+            repeats,
+            context_budget=room,
+        )[0]
+
+        def _note_the_conversation(conversation: list[Any], cleared_chars: int = 0) -> None:
             if not isinstance(room, ContextBudget):
                 return
             try:
                 room.note_conversation(
                     recorder.agent,
-                    request_chars(conversation, definitions, room.chars_per_token),
+                    request_chars(conversation, definitions, room.chars_per_token, cleared_chars),
                 )
             except Exception as exc:  # noqa: BLE001 — a budget is never worth a lost loop
                 self.logger.debug("judge: the conversation size was not recorded (%s).", exc)
@@ -2073,7 +2413,13 @@ class JudgeAgent(BudgetMeter):
             # exactly that, one verdict call that ran past its wall clock.
             budget.note_turns(conversation)
             budget.own_steps += 1
-            _note_the_conversation(conversation)
+            conversation, cleared_chars = self._cleared_request(
+                clearing,
+                conversation,
+                self._note_clearing,
+                lambda: bool(self._offered_after_clear),
+            )
+            _note_the_conversation(conversation, cleared_chars)
             # The spend ceiling's word on the turn about to be sent, reserved
             # under the loop's key until the step is counted, and held as an
             # analyst's turn is: the model is bound to its tools here, so the
@@ -2083,17 +2429,71 @@ class JudgeAgent(BudgetMeter):
                 "mediation turn",
                 conversation,
                 slot=spend_key,
-                holdable=held_binding is not None,
+                holdable=binding_now["held"] is not None,
                 wait_s=budget.seconds_left(),
             )
-            _hold_the_turn(held_binding, self.llm, held)
+            _hold_the_turn(binding_now["held"], self.llm, held)
             self._publish_questions(conversation, asked)
+            # What the request is made of, measured as it is sent
+            # (``core.input_meter``); nothing in it changes.
+            from maljan.core.input_meter import TOOL_LOOP
+
+            self._note_request(conversation, kind=TOOL_LOOP, loop=budget, definitions=definitions)
+            # Each turn after the loop's first tool round says it is a loop
+            # turn, as an analyst's does, for a provider that caches a
+            # conversation it will send again (``anthropic_history``): that
+            # turn writes the prompt's prefix and every later turn reads it.
+            # The first request is not noted: most mediations answer on it, and
+            # a single-turn call pays no write premium for a prefix nothing
+            # reads. The note rides the request alone, never the loop's own
+            # messages.
+            if conversation and any(isinstance(m, AIMessage) for m in conversation):
+                last = conversation[-1]
+                sent = last.model_copy()
+                sent.response_metadata = {
+                    **(getattr(last, "response_metadata", None) or {}),
+                    TOOL_LOOP_TURN: True,
+                }
+                return [*conversation[:-1], sent]
             return conversation
 
         # The key this loop's turns are counted and reserved under.
         spend_key = object()
+        binding_now: dict[str, Any] = {"held": None}
         loop_model, held_binding = model_held_per_turn(self.llm, recorded)
-        agent_executor = create_react_agent(loop_model, recorded, prompt=_count_the_turns)
+        # The binding a turn's held cap is set on: replaced when the graph is
+        # built again with ``read_evidence``.
+        binding_now["held"] = held_binding
+        graph: dict[str, Any] = {
+            "executor": create_react_agent(loop_model, recorded, prompt=_count_the_turns)
+        }
+
+        def _offer_read_again() -> bool:
+            """Build the loop's graph again with ``read_evidence``; whether it now has it."""
+            nonlocal definitions
+            if self._offered_after_clear:
+                return True
+            try:
+                model, binding = model_held_per_turn(self.llm, [*recorded, read_tool])
+                recorded.append(read_tool)
+                binding_now["held"] = binding
+                graph["executor"] = create_react_agent(model, recorded, prompt=_count_the_turns)
+            except Exception as exc:  # noqa: BLE001 — said, and today's ending follows
+                if recorded and recorded[-1] is read_tool:
+                    recorded.pop()
+                binding_now["held"] = held_binding
+                clearing.enabled = False
+                self.logger.warning(
+                    "JudgeAgent: read_evidence could not be offered (%s: %s); old tool answers "
+                    "are not cleared in this loop.",
+                    type(exc).__name__,
+                    exc,
+                )
+                return False
+            definitions = self._tool_definition_chars = tool_definition_chars(recorded)
+            self._offered_after_clear = [read_tool]
+            return True
+
         self.logger.info(
             "JudgeAgent invoking ReAct (timeout=%s, steps=%s, tools=%d)...",
             limit_text(timeout, "s"),
@@ -2117,10 +2517,15 @@ class JudgeAgent(BudgetMeter):
         # The refusal that ended it, when the spend ceiling refused its next turn.
         spend_said: dict[str, str] = {"why": ""}
 
-        async def _until_it_answers_or_runs_out() -> None:
-            stream: Any = agent_executor.astream(
-                {"messages": messages},
-                {"recursion_limit": recursion_limit(max_steps)},
+        async def _until_it_answers_or_runs_out(start: list[Any] | None = None) -> None:
+            resend = False
+            begun = messages if start is None else start
+            # A pass sent again goes on from the steps the conversation has
+            # spent: the step limit is the loop's, not each pass's.
+            left = None if max_steps is None else max(1, max_steps - steps_used(begun))
+            stream: Any = graph["executor"].astream(
+                {"messages": begun},
+                {"recursion_limit": recursion_limit(left)},
                 stream_mode="values",
             )
             async with contextlib.aclosing(stream) as snapshots:
@@ -2157,13 +2562,35 @@ class JudgeAgent(BudgetMeter):
                         raise
                     ended["call_deadline"] = True
                 except Exception as exc:
-                    # Only a provider's own full-window answer, and only once
-                    # something was gathered; anything else fails the judge's
-                    # loop as it always did.
-                    if not (window_full_error(exc) and answers_held(recorder.entries)):
+                    if isinstance(exc, OfferReadAgainFirst) or isinstance(
+                        exc.__cause__, OfferReadAgainFirst
+                    ):
+                        # The request about to be sent carries the loop's first
+                        # clear: the graph is built again with the tool that
+                        # reads a cleared answer and the turn is sent again.
+                        _offer_read_again()
+                        resend = True
+                    elif (
+                        window_full_error(exc)
+                        and clearing.enabled
+                        and clearing.refused(list(latest.get("messages") or []), _message_chars)
+                        and _offer_read_again()
+                    ):
+                        # A refusal as over the window: one batch of the oldest
+                        # answers is cleared and the turn is sent again, again
+                        # only while each resend is refused and something is
+                        # left to clear.
+                        resend = True
+                    elif not (window_full_error(exc) and answers_held(recorder.entries)):
+                        # Only a provider's own full-window answer, and only once
+                        # something was gathered; anything else fails the judge's
+                        # loop as it always did.
                         raise
-                    ended["window_full"] = True
-                    note_a_window_that_moved(exc)
+                    else:
+                        ended["window_full"] = True
+                        note_a_window_that_moved(exc)
+            if resend:
+                await _until_it_answers_or_runs_out(list(latest.get("messages") or []))
 
         turns_recorded = False
 
@@ -2227,7 +2654,7 @@ class JudgeAgent(BudgetMeter):
                 # What is left of the loop's own time, as the analysts'
                 # salvage gets: loop and salvage together stay inside it.
                 return await self._reasoning_from_what_was_gathered(
-                    _msgs,
+                    clearing.apply(_msgs),
                     budget.seconds_left(),
                     settings,
                     counted_window_tokens(room),
@@ -2267,9 +2694,13 @@ class JudgeAgent(BudgetMeter):
             # reservation with the spend meter goes with them. Once only.
             with contextlib.suppress(Exception):
                 _record_the_turns()
+            # The loop's row on the input meter, closed with the turns the
+            # ledger recorded just above, however the loop ended.
+            self._close_input_loop(budget, list(latest.get("messages") or [])[len(messages) :])
             # In a ``finally`` for the reason the analysts' loop uses one: a
             # mediation that timed out still made the calls it made.
             self._evidence_entries.extend(recorder.entries)
+            self._offered_after_clear = []
             details = {
                 "time": deadline_said["why"]
                 or f"the loop did not answer within {limit_text(timeout, 's')}",
@@ -2295,7 +2726,12 @@ class JudgeAgent(BudgetMeter):
         if not keeps_turns or not tools or bind is None:
             return self.llm
         try:
-            return bind(tools, tool_choice="none")
+            # ``read_evidence`` too once the loop offered it: the turns it
+            # kept name it.
+            return bind(
+                [*tools, *(getattr(self, "_offered_after_clear", None) or [])],
+                tool_choice="none",
+            )
         except Exception as exc:  # noqa: BLE001 — the unbound model is the salvage's fallback
             self.logger.debug("JudgeAgent: tools not bound for the salvage (%s).", exc)
             return self.llm
@@ -2417,17 +2853,10 @@ class JudgeAgent(BudgetMeter):
         Unlike ``_holds_a_lookup_tool``, a reference that did not attach does
         not count: this answers what the mediator's prompt may say it has.
         """
-        from maljan.agents.tool_pinning import declared_source_of
-        from maljan.core.declared_reading import declarations
+        from maljan.agents.tool_pinning import declared_facts_of
         from maljan.core.reputation import is_lookup
 
-        held = declarations()
-        for attached in getattr(self, "tools", None) or []:
-            source = declared_source_of(attached)
-            name = str(getattr(attached, "name", "") or "")
-            if source and is_lookup(held.declaration_for((source, name))):
-                return True
-        return False
+        return any(is_lookup(declared_facts_of(t)) for t in getattr(self, "tools", None) or [])
 
     def _can_ask_an_identity_question(self, reputation_asked: bool) -> bool:
         """Whether the judge should open its tool loop to ask who this sample is.
@@ -2448,6 +2877,48 @@ class JudgeAgent(BudgetMeter):
         return self._holds_a_lookup_tool() and not reputation_asked
 
     async def mediate(
+        self,
+        reports: dict[str, str],
+        history: list[AgentArgument],
+        isr_reports: dict[str, AgentISR] | None = None,
+        consensus_threshold: float | None = None,
+        reputation_asked: bool = False,
+        sample: Any = None,
+        facts_block: str = "",
+        run_state: str = "",
+    ) -> tuple[AgentArgument, bool | None]:
+        """One mediation round (:meth:`_mediate_round`), or the round the mediator's ceiling ends.
+
+        A call the mediator's own ceiling refuses (``llm.agents.mediator``)
+        ends the round as a call the job's ceiling does not admit ends it: the
+        mediator wrote no answer, the note says why in the ceiling's words,
+        and consensus is neither reached nor refused.
+        """
+        try:
+            return await self._mediate_round(
+                reports,
+                history,
+                isr_reports=isr_reports,
+                consensus_threshold=consensus_threshold,
+                reputation_asked=reputation_asked,
+                sample=sample,
+                facts_block=facts_block,
+                run_state=run_state,
+            )
+        except AgentCeilingStop as stop:
+            self.logger.warning("Mediator: %s; the round is not mediated.", stop)
+            return (
+                AgentArgument(
+                    agent_name=MEDIATOR_AGENT_NAME,
+                    finding="",
+                    confidence_score=None,
+                    status=MEDIATOR_NO_ANSWER,
+                    note=mediator_no_answer_note(str(stop)),
+                ),
+                None,
+            )
+
+    async def _mediate_round(
         self,
         reports: dict[str, str],
         history: list[AgentArgument],
@@ -2482,6 +2953,11 @@ class JudgeAgent(BudgetMeter):
             the argument carries no confidence.
         """
         self.logger.info("Mediating %d expert reports for contradictions...", len(reports))
+        # The texts this mediation's requests embed, for the input meter
+        # (``BudgetMeter._note_request``) to count as the pack and as the
+        # analysts' reports.
+        self._measured_pack = str(facts_block or "")
+        self._measured_peers = tuple(str(text) for text in (reports or {}).values() if text)
         answered_by: Any = None
         # The output bound the answer's call was sent with: what a cut is
         # measured against. ``None`` reads the model's built cap.
@@ -2504,21 +2980,9 @@ class JudgeAgent(BudgetMeter):
             await self._initialize_mcp_client()
         lookup_attached = self._holds_attached_lookup_tool()
 
-        # Build a human-readable summary of all reports
-        reports_text = "\n\n".join(
-            f"--- {name.upper()} ANALYST ---\n{report}" for name, report in reports.items()
-        )
-
-        # Append ISR summaries when available — gives judge access to per-claim
-        # confidence scores and explicit dissent signals from each agent.
-        if isr_reports:
-            isr_block = "\n\n".join(
-                f"[ISR] {isr.to_text_summary()}"
-                for isr in isr_reports.values()
-                if isr.claims  # skip empty ISRs
-            )
-            if isr_block:
-                reports_text = f"{reports_text}\n\n=== STRUCTURED CLAIMS (ISR) ===\n{isr_block}"
+        # The reports, then the ISR summaries that are not one of them word
+        # for word: per-claim confidence and dissent, each analyst's once.
+        reports_text = mediation_reports_text(reports, isr_reports)
 
         # The mediator is NOT allowed to state a
         # verdict or describe the sample as "clean". Its only job is to
@@ -2529,41 +2993,55 @@ class JudgeAgent(BudgetMeter):
         # benign even when YARA had a hit.
         # The counts the ledger states for the lines the last mediation listed,
         # carried on this call rather than asked in one of their own.
-        last_counts = with_ledger_facts("", _last_ledger_facts(history))
+        # And the blocking lines of it every count of which the ledger states
+        # and the analysts were told: the mediator decides whether each still
+        # blocks.
+        last_counts = with_ledger_stated(
+            with_ledger_facts("", _last_ledger_facts(history)),
+            _last_ledger_facts(history, "ledger_stated"),
+        )
         carried_facts = f"{last_counts}\n\n" if last_counts else ""
+        system_text = mediator_system_prompt(
+            identity_unanswered=identity_unanswered,
+            lookup_attached=lookup_attached,
+            needs_tools=needs_tools,
+            sha256=_sha256_of(sample),
+            tools=self.tools,
+        )
+        history_text = str(history)
+
+        def _mediation_human(reports_shown: str, history_shown: str, notice: str) -> str:
+            note = f"{notice}\n\n" if notice else ""
+            return (
+                f"{_standing_blocks(run_state, facts_block)}"
+                f"{_identity_prefix(sample)}{note}"
+                f"Expert Reports:\n{reports_shown}\n\nPrevious Discussion:\n{history_shown}\n\n"
+                f"{carried_facts}"
+                f"{MEDIATOR_HUMAN_CLOSING}"
+            )
+
+        # Whole when the judge's window holds it with its output cap kept
+        # free; otherwise the largest part shortened first, the prompt saying
+        # so, as the verdict prompt does (``fit_prompt_parts``).
+        mediation_room = self._question_room(
+            len(system_text) + len(_mediation_human("", "", "")) + _NOTICE_ROOM,
+            int(self._built_cap_tokens() or 0),
+        )
+        fitted_parts, fitted_notice = fit_prompt_parts(
+            {"expert reports": reports_text, _HISTORY_PART: history_text}, mediation_room
+        )
+        if fitted_notice:
+            self.logger.warning("JudgeAgent mediation prompt: %s", fitted_notice)
         prompt_messages = [
-            (
-                "system",
-                MEDIATOR_SYSTEM_HEAD
-                + (
-                    "You have reputation tools and no analyst has consulted one. "
-                    f"Look the sample's hash up once — its sha256 is {_sha256_of(sample)} "
-                    "and it is in the sample identity block below — cite what comes back "
-                    "as evidence, and treat a reputation label as one source rather than "
-                    "as the verdict.\n"
-                    if identity_unanswered and lookup_attached and _sha256_of(sample)
-                    else "You have reputation tools and no analyst has consulted one. "
-                    "Look the sample up once to settle its identity, cite what comes "
-                    "back as evidence, and treat a reputation label as one source "
-                    "rather than as the verdict.\n"
-                    if identity_unanswered and lookup_attached
-                    else "You have Threat Intelligence tools to verify disputed "
-                    "IPs/domains/hashes — use them only to resolve contradictions.\n"
-                    if needs_tools and lookup_attached
-                    else tools_statement(self.tools) + "\n"
-                    if needs_tools
-                    else _NO_TOOLS_NEEDED
-                ),
-            ),
+            ("system", system_text),
             (
                 "human",
-                f"{_standing_blocks(run_state, facts_block)}"
-                f"{_identity_prefix(sample)}"
-                f"Expert Reports:\n{reports_text}\n\nPrevious Discussion:\n{history}\n\n"
-                f"{carried_facts}"
-                f"{MEDIATOR_HUMAN_CLOSING}",
+                _mediation_human(
+                    fitted_parts["expert reports"], fitted_parts[_HISTORY_PART], fitted_notice
+                ),
             ),
         ]
+        window_full_reason = ""
 
         if needs_tools:
             self.logger.info(
@@ -2632,6 +3110,16 @@ class JudgeAgent(BudgetMeter):
                 answered_cap = getattr(self, "_last_answer_cap", None)
                 loop_ending = getattr(self, "_last_loop_ending", "")
                 looped = True
+            except Exception as exc:  # noqa: BLE001 — only a full window is handled here
+                if not window_full_error(exc):
+                    raise
+                # The server's own word that the prompt did not fit: the
+                # round's reason, not an error out of the debate.
+                self.logger.error("Mediator fast path: the model server reported its window full.")
+                window_full_reason = "the model server reported its context window full"
+                reasoning_text = ""
+                answered_by = None
+                not_asked = True
             else:
                 reasoning_text = "" if response is None else answer_text(response.content)
                 answered_by = response
@@ -2655,7 +3143,7 @@ class JudgeAgent(BudgetMeter):
             )
             return (
                 AgentArgument(
-                    agent_name="Mediator",
+                    agent_name=MEDIATOR_AGENT_NAME,
                     # The mediator's words whole, and the platform's own
                     # sentence in a field of its own rather than inside them.
                     finding=reasoning_text.strip(),
@@ -2704,15 +3192,17 @@ class JudgeAgent(BudgetMeter):
                 ending = loop_ending or self._no_answer_reason(answered_by, answered_cap)
                 reason = f"{ending}; the tool loop was not run again"
             else:
-                reason = second_ask or self._no_answer_reason(
-                    answered_by, answered_cap, not_asked=not_asked
+                reason = (
+                    second_ask
+                    or window_full_reason
+                    or self._no_answer_reason(answered_by, answered_cap, not_asked=not_asked)
                 )
             self.logger.warning(
                 "Mediator wrote no answer; the round is not mediated (the round's note says why)."
             )
             return (
                 AgentArgument(
-                    agent_name="Mediator",
+                    agent_name=MEDIATOR_AGENT_NAME,
                     finding="",
                     confidence_score=None,
                     status=MEDIATOR_NO_ANSWER,
@@ -2825,7 +3315,7 @@ class JudgeAgent(BudgetMeter):
             f"Confidence: {verdict.confidence:.2f}"
         )
         argument = AgentArgument(
-            agent_name="Mediator",
+            agent_name=MEDIATOR_AGENT_NAME,
             finding=finding,
             confidence_score=verdict.confidence,
             contradictions=blocking,
@@ -2865,6 +3355,9 @@ class JudgeAgent(BudgetMeter):
             )
             self._record_usage(response, call="mediation")
             return response, (bound if held else None), ""
+        except AgentCeilingStop as stop:
+            self.logger.warning("Mediator not asked once more: %s.", stop)
+            return None, None, f"asking once more was not made: {stop}"
         except Exception as exc:  # noqa: BLE001 — a second ask that fails leaves no answer
             self.logger.warning("Mediator asked once more failed (%s).", type(exc).__name__)
             return None, None, f"asking once more failed ({type(exc).__name__})"
@@ -3008,8 +3501,13 @@ class JudgeAgent(BudgetMeter):
         # Long-term memory — inject top-K similar past cases as weighted
         # priors, each case's summary whole. Degrades gracefully to an empty
         # string when the store is empty or retrieval fails.
+        from maljan.memory.long_term_memory import memory_owner_of
+
         memory_block = self._build_memory_context(
-            isr_reports, memory_store, current_sample_id=current_sample_id
+            isr_reports,
+            memory_store,
+            current_sample_id=current_sample_id,
+            owner=memory_owner_of(self._container),
         )
         if memory_block:
             parts["long-term memory"] = memory_block
@@ -3051,6 +3549,10 @@ class JudgeAgent(BudgetMeter):
         fixed = len(JUDGE_VERDICT_SYSTEM) + len(_human(dict.fromkeys(whole, ""), ""))
         room = self._question_room(fixed + _NOTICE_ROOM, int(cap or 0))
         fitted, notice = fit_prompt_parts(whole, room)
+        if "long-term memory" in fitted:
+            fitted["long-term memory"] = closed_memory_cut(
+                fitted["long-term memory"], whole["long-term memory"]
+            )
         self.verdict_prompt_notice = notice
         if notice:
             self.logger.warning("JudgeAgent verdict prompt: %s", notice)
@@ -3066,10 +3568,8 @@ class JudgeAgent(BudgetMeter):
         # And then held to the model's measured pace: the verdict may take its
         # whole ``judge_max_tokens``, which a slow model cannot generate inside
         # a timeout chosen for a fast one (``llm.generation_rate``).
-        timeout = self._verdict_timeout(
-            _seconds_or_none(loop_limits("judge")[0]),
-            sum(len(str(getattr(message, "content", ""))) for message in messages),
-        )
+        configured_timeout = _seconds_or_none(loop_limits("judge")[0])
+        timeout = self._verdict_timeout(configured_timeout, _prompt_chars(messages))
         self.logger.info(
             "JudgeAgent invoking verdict LLM (timeout=%s)...", limit_text(timeout, "s")
         )
@@ -3086,6 +3586,9 @@ class JudgeAgent(BudgetMeter):
         # that happened to validate dirty would then spend a second full judge
         # timeout and throw the answer away.
         timed_out = False
+        # The sentence of the judge's own ceiling, when it refused a verdict
+        # call: no answer, read the way a timeout is.
+        ceiling_said = ""
 
         async def _ask(turns: list[Any]) -> Any:
             # The verdict is always made; past the spend ceiling its output cap
@@ -3106,9 +3609,26 @@ class JudgeAgent(BudgetMeter):
             record_judge_response(getattr(self, "truncation_ledger", None), answer, cap=cap)
             return answer
 
+        # How many verdict calls were sent. The retry's prompt is the first
+        # one with the answer and the feedback after it, so its wait is sized
+        # from its own prompt at the model's pace, as the first call's was —
+        # a retry held to the first call's wait timed out where its longer
+        # prompt needed longer.
+        calls = 0
+
         async def _run(turns: list[Any]) -> Any:
-            nonlocal timed_out
+            nonlocal timed_out, calls, ceiling_said
             timed_out = False
+            calls += 1
+            wait = timeout
+            if calls > 1:
+                wait = self._verdict_timeout(
+                    configured_timeout, _prompt_chars(turns), call="judge:verdict_retry"
+                )
+                self.logger.info(
+                    "JudgeAgent invoking verdict retry (timeout=%s)...", limit_text(wait, "s")
+                )
+                restart_models(self.llm, loop_seconds=wait, share=self._turn_share())
             try:
                 # On the shared agent loop, not on the graph's. The judge's
                 # model is one cached client and the mediator has already used
@@ -3121,13 +3641,18 @@ class JudgeAgent(BudgetMeter):
                 # connection and the retry, opening a fresh one, always
                 # succeeded. See ``run_on_agent_loop`` for the same fault in
                 # the mediator, and for why one loop owns every LLM call.
-                return await run_on_agent_loop(_ask(turns), timeout, label="judge:verdict")
+                return await run_on_agent_loop(_ask(turns), wait, label="judge:verdict")
             except TimeoutError:
-                self.logger.error(
-                    "JudgeAgent verdict timed out after %s.", limit_text(timeout, "s")
-                )
+                self.logger.error("JudgeAgent verdict timed out after %s.", limit_text(wait, "s"))
                 timed_out = True
                 return "[TIMEOUT]"
+            except AgentCeilingStop as stop:
+                # Not made: no answer, as a timeout leaves none, so nothing is
+                # asked again and the fallback bundle is the verdict.
+                self.logger.error("JudgeAgent verdict not made: %s.", stop)
+                timed_out = True
+                ceiling_said = str(stop)
+                return AGENT_CEILING_ANSWER
 
         # Whether the answer being validated was a JSON bundle at all, and how
         # many turns have been spent. A model that answered with prose or with
@@ -3152,7 +3677,82 @@ class JudgeAgent(BudgetMeter):
         as_written: list[dict[str, Any]] = []
         tally = ValidationTally()
 
+        # What the first parse left for the checks to read, so that a first
+        # bundle kept over a failed retry is validated as it was, not with the
+        # retry's state; and how the failed retry failed, for its row.
+        first_state: dict[str, Any] | None = None
+        retry_failure = ""
+
         def _parse(answer: Any) -> Bundle:
+            nonlocal first_state
+            parsed = _parse_answer(answer)
+            if attempts == 1:
+                first_state = {
+                    "timed_out": timed_out,
+                    "not_json": not_json,
+                    "cut_at": cut_at,
+                    "cut_text": cut_text,
+                    "shape": list(shape),
+                    "where": list(where),
+                    "labels": dict(labels),
+                    "as_written": list(as_written),
+                }
+            return parsed
+
+        def _keep(first: Bundle, last: Bundle) -> Bundle:
+            """The first bundle when the retry failed and the first was a bundle; else the last.
+
+            A retry that timed out, or answered prose or JSON that was not a
+            bundle without stating an assessment, has said nothing about the
+            sample, and the bundle the first answer stated is the judge's
+            verdict, with what is still wrong with it. A retry that stated its
+            assessment is kept, however it ended. The first parse's state is restored, so it is
+            validated, dropped from and published as it was.
+            """
+            nonlocal timed_out, not_json, cut_at, cut_text, retry_failure
+            state = first_state
+            if (
+                state is None
+                or state["timed_out"]
+                or state["not_json"]
+                or first.x_maljan_fallback_verdict is not None
+            ):
+                return last
+            if not timed_out and last.x_maljan_assessment is not None:
+                # The retry stated its assessment — whole, cut after it, or in
+                # JSON that was not a bundle — and that statement is its
+                # correction, read as written.
+                return last
+            if timed_out:
+                failure = (
+                    f"it was not made: {ceiling_said}"
+                    if ceiling_said
+                    else "it did not answer within its budget"
+                )
+            elif not_json:
+                failure = "it answered with text that is not a JSON bundle"
+            elif last.x_maljan_fallback_verdict is not None:
+                failure = "it answered JSON that is not a bundle"
+            else:
+                return last
+            timed_out = state["timed_out"]
+            not_json = state["not_json"]
+            cut_at = state["cut_at"]
+            cut_text = state["cut_text"]
+            shape[:] = state["shape"]
+            where[:] = state["where"]
+            labels.clear()
+            labels.update(state["labels"])
+            as_written[:] = state["as_written"]
+            retry_failure = failure
+            self.logger.warning(
+                "Judge verdict: the retry failed (%s); the first bundle is kept with what is "
+                "still wrong with it.",
+                failure,
+            )
+            return first
+
+        def _parse_answer(answer: Any) -> Bundle:
             nonlocal not_json, attempts, cut_at, cut_text
             attempts += 1
             cut_at = None
@@ -3163,7 +3763,10 @@ class JudgeAgent(BudgetMeter):
             if timed_out:
                 not_json = False
                 return self._fallback_bundle_from_text(
-                    "[TIMEOUT]", reports, isr_reports, extracted=False
+                    AGENT_CEILING_ANSWER if ceiling_said else "[TIMEOUT]",
+                    reports,
+                    isr_reports,
+                    extracted=False,
                 )
             not_json = _is_not_json(answer)
             if not_json and _was_cut(answer, cap):
@@ -3188,10 +3791,11 @@ class JudgeAgent(BudgetMeter):
                 labels=labels,
                 as_written=as_written,
             )
-            # The relocation is done and nothing is left to ask about, so it is
-            # published as settled and counted where the round's other codes
+            # The relocation, or the one reading of a mistyped assessment leaf,
+            # is done and nothing is left to ask about, so it is published as
+            # settled and counted where the round's other codes
             # are, rather than spending the one retry this round has.
-            moved = [v for v in shape if v.code == ASSESSMENT_RELOCATED_CODE]
+            moved = [v for v in shape if v.code in _RESOLVED_BY_THE_PARSE]
             if moved:
                 tally.count(moved)
                 announce_resolved(
@@ -3216,34 +3820,23 @@ class JudgeAgent(BudgetMeter):
             len(getattr(isr, "claims", None) or []) for isr in (isr_reports or {}).values()
         )
 
+        # What the round's bundle checks read, composed once with the replay of
+        # a stored run (``verdict_checks``, ``verdict_bundle_checks``).
+        inputs = VerdictCheckInputs(
+            evidence_corpus=evidence_corpus,
+            attck=_knowledge,
+            sample=sample,
+            shortened_tools=shortened_tools,
+            searched=searched,
+            corpus_state=corpus_state,
+            technique_sources=technique_sources,
+            sandbox_facts=sandbox_facts,
+            analyst_claims=_analyst_claims,
+            ledger_ids=ledger_ids,
+        )
+
         def _verdict_checks(bundle: Bundle) -> list[Violation]:
-            """Whether the verdict was stated, and what a Benign or a Malware one cites.
-
-            Its own function because it runs on every way this round can end,
-            not only on the one where the judge answered a bundle: prose the
-            model stood by twice, JSON that was not a bundle, and a timeout all
-            produce a verdict, and the two paths that produce one out of *text*
-            were the two that reached a report unasked. Where the loop ran them
-            they were fed back once; everywhere else they are recorded, because
-            they annotate the verdict and never change it.
-
-            One reading of the verdict serves all three checks and the pipeline
-            with it — ``pipeline.outcome.decide_from_bundle`` — so no ending can
-            be told the sample is one thing and the report another.
-            """
-            return [
-                *stated_verdict_violations(bundle),
-                *unsupported_benign_violations(
-                    bundle,
-                    analyst_claims=_analyst_claims,
-                    ledger_ids=ledger_ids,
-                ),
-                *unsupported_malware_violations(
-                    bundle,
-                    analyst_claims=_analyst_claims,
-                    ledger_ids=ledger_ids,
-                ),
-            ]
+            return verdict_checks(bundle, inputs)
 
         def _validate(bundle: Bundle) -> list[Violation]:
             # A timeout produced no answer, so there is nothing to give
@@ -3257,29 +3850,13 @@ class JudgeAgent(BudgetMeter):
                 return [verdict_cut_violation(int(cap), cut_text)]
             if not_json:
                 return [Violation(code="verdict.not_json", message=_NOT_JSON_FEEDBACK)]
-            return [
-                # The set-aside objects, which are the model's to explain. The
-                # relocation is not among them: it is settled, announced in
-                # ``_parse``, and a retry for it would be a turn spent on a
-                # problem that no longer exists.
-                *(v for v in shape if v.code not in _SETTLED_CODES),
-                *validate_verdict_bundle(
-                    bundle,
-                    evidence_corpus,
-                    attck=_knowledge,
-                    sample=sample,
-                    shortened_tools=shortened_tools,
-                    searched=searched,
-                    corpus_state=corpus_state,
-                    technique_sources=technique_sources,
-                    origins=where,
-                    written=as_written[0] if as_written else None,
-                ),
-                *assessment_violations(bundle),
-                *assessment_conflict_violations(bundle),
-                *_verdict_checks(bundle),
-                *unattributed_indicator_violations(bundle, sandbox_facts),
-            ]
+            return verdict_bundle_checks(
+                bundle,
+                shape,
+                inputs,
+                origins=where,
+                written=as_written[0] if as_written else None,
+            )
 
         # What the judge was shown. A finding its retry's answer raised first
         # was never put to it, and a row saying it "kept" something "when
@@ -3302,13 +3879,31 @@ class JudgeAgent(BudgetMeter):
             stage=str(getattr(self, "pipeline_stage", "") or "verdict"),
             # The cut answer is described, not repeated: see verdict_cut_violation.
             drop_answer_for=frozenset({VERDICT_CUT_CODE}),
+            keep=_keep,
             # A kept indicator after the sandbox's fact is the judge's answer,
             # and the conversation is told so before it is told the rest.
             answered=lambda left, told: kept_after_the_sandbox_fact(not_asked(left, told)),
         )
         violations = kept_after_the_sandbox_fact(not_asked(violations, shown))
         _from_the_loop = list(violations)
-        if timed_out:
+        if retry_failure:
+            # The first bundle stands; the retry's failure is its own row, not
+            # a timeout or a fallback of the verdict the run publishes.
+            violations = [
+                *violations,
+                Violation(
+                    code=VERDICT_RETRY_FAILED_CODE,
+                    message=f"{VERDICT_RETRY_FAILED_REASON}: {retry_failure}",
+                ),
+            ]
+        if timed_out and ceiling_said:
+            # The judge's own ceiling refused the call: no answer, as below,
+            # and the row says why in the ceiling's words.
+            violations = [
+                *violations,
+                Violation(code=VERDICT_AGENT_CEILING_CODE, message=ceiling_said),
+            ]
+        elif timed_out:
             # No answer at all, so there is nothing to feed back and nothing
             # was: the bundle is this pipeline's own conservative verdict.
             # Cheap to record and invisible without it.
@@ -3334,6 +3929,7 @@ class JudgeAgent(BudgetMeter):
                 violations.append(
                     Violation(code=VERDICT_FALLBACK_CODE, message=VERDICT_FALLBACK_REASON)
                 )
+            violations.extend(_unasked_unreadable_leaves(shape, violations))
             # The indicators the answer wrote whole are asked what every
             # bundle's indicator is asked. Nobody can be asked again, so what
             # is wrong is recorded, and an ungrounded one is dropped below
@@ -3578,17 +4174,22 @@ class JudgeAgent(BudgetMeter):
                     )
                 else:
                     if isinstance(result, dict) and "raw" in result:
-                        raw = result.get("raw")
-                        try:
-                            parsed = structured_answer(
-                                result,
-                                self.token_ledger,
-                                agent=str(self.name),
-                                model=self._model_label(),
-                                call=TECHNIQUE_QUESTION_CALL,
-                            )
-                        except Exception:  # noqa: BLE001 — the call's own arguments are read
-                            parsed = _tool_call_arguments(raw)
+                        read = read_structured_reply(
+                            result,
+                            self.token_ledger,
+                            agent=str(self.name),
+                            model=self._model_label(),
+                            call=TECHNIQUE_QUESTION_CALL,
+                            announce=self._announce_fallback,
+                        )
+                        raw = read.raw
+                        # A refused object is read from the call's own
+                        # arguments; an answer with no call, from its text.
+                        parsed = read.parsed
+                        if parsed is None:
+                            parsed = tool_call_arguments(raw)
+                            if read.kept is not None:
+                                say_structured_reply("JudgeAgent technique question", read)
                         record_judge_response(
                             getattr(self, "truncation_ledger", None), raw, cap=cap
                         )
@@ -3695,7 +4296,7 @@ class JudgeAgent(BudgetMeter):
                 "LLM did not return a JSON object (got %s). Attempting text-based fallback.",
                 type(data).__name__,
             )
-            return self._fallback_bundle_from_text(raw, reports, isr_reports)
+            return self._fallback_bundle_from_text(raw, reports, isr_reports, record=record)
 
         try:
             # No technique-id filter here. Dropping the object silently is what
@@ -3707,6 +4308,7 @@ class JudgeAgent(BudgetMeter):
                 duplicate_label_violations,
                 lift_misplaced_extensions,
                 postprocess_judge_bundle,
+                read_judge_assessment,
             )
 
             # Before the schema, and before anything that walks the objects: an
@@ -3736,7 +4338,13 @@ class JudgeAgent(BudgetMeter):
             data = postprocess_judge_bundle(
                 data, ledger=getattr(self, "truncation_ledger", None), labels=labels
             )
+            # The assessment is read apart from the objects, leaf by leaf: one
+            # mistyped leaf is left absent and asked about, never the reason
+            # the objects are lost.
+            read_rows = read_judge_assessment(data)
             bundle = Bundle.model_validate(data)
+            if record is not None:
+                record.extend(read_rows)
             if origins is not None:
                 origins[:] = [written.get(id(obj), (None, "")) for obj in data["objects"]]
             return bundle
@@ -3744,7 +4352,7 @@ class JudgeAgent(BudgetMeter):
             self.logger.warning(
                 "LLM did not return a valid Bundle: %s. Attempting text-based fallback.", exc
             )
-            return self._fallback_bundle_from_text(raw, reports, isr_reports)
+            return self._fallback_bundle_from_text(raw, reports, isr_reports, record=record)
 
     async def _extract_mediator_verdict(
         self,
@@ -3792,7 +4400,7 @@ class JudgeAgent(BudgetMeter):
             try:
                 llm_structured = self.llm.with_structured_output(MediatorVerdict, include_raw=True)
                 try:
-                    result = structured_answer(
+                    read = read_structured_reply(
                         await (extract_prompt | llm_structured).ainvoke(
                             {"reasoning_log": reasoning_text}
                         ),
@@ -3800,11 +4408,38 @@ class JudgeAgent(BudgetMeter):
                         agent=str(self.name),
                         model=self._model_label(),
                         call="mediation extraction",
+                        announce=self._announce_fallback,
                     )
                 finally:
                     self._spend_release(extraction_slot)
+                result = read.parsed
                 if isinstance(result, MediatorVerdict):
                     return result
+                if read.kept is not None:
+                    # The verdict written as text, or a call the schema refused:
+                    # the model's answer, read rather than asked again.
+                    from maljan.utils.json_cleaner import safe_parse_json
+
+                    written = safe_parse_json(structured_answer_text(read.kept))
+                    if not isinstance(written, dict):
+                        raise ValueError(
+                            "the verdict written in the answer is not an object "
+                            f"({type(written).__name__})"
+                        )
+                    try:
+                        verdict = MediatorVerdict.model_validate(written)
+                    except ValidationError as refused:
+                        # Not the verdict: asked again, saying why.
+                        raise ValueError(
+                            "the verdict written in the answer does not fit the schema: "
+                            + "; ".join(
+                                f"{'.'.join(str(part) for part in error['loc']) or 'verdict'}: "
+                                f"{error['msg']}"
+                                for error in refused.errors()
+                            )
+                        ) from refused
+                    say_structured_reply("JudgeAgent mediation extraction", read)
+                    return verdict
                 raise ValueError(
                     f"Structured output produced unexpected type: {type(result).__name__}"
                 )
@@ -3833,31 +4468,25 @@ class JudgeAgent(BudgetMeter):
 
     @staticmethod
     def _verdict_from_text(text: str) -> str:
-        """Token-level verdict extraction.
+        """The verdict the judge's prose states explicitly, or the inconclusive one.
 
-        The previous implementation searched for ``"malware"`` and
-        ``"benign"`` as substrings, which let phrases like *"not malware"*
-        or *"likely not benign"* flip the result. We now tokenise into
-        word-shape segments and ignore negation neighbours.
+        Only a verdict statement counts (``_VERDICT_STATEMENT_RE``). Statements
+        that disagree — the judge's own and a quoted one, a draft and a
+        correction — leave the verdict inconclusive: which one is the judge's
+        cannot be read from the words. Any other mention of a verdict word is
+        not a verdict. The previous reader
+        took the first "malware" not preceded by a negator, before it looked
+        for "benign" at all, so "isn't malware", "no evidence of malware" and
+        "a legitimate anti-malware updater" were published as Malware.
         """
-        import re
+        from maljan.pipeline.outcome import INCONCLUSIVE_VERDICT, normalise_verdict
 
-        tokens = re.findall(r"[a-z]+", text.lower())
-        if not tokens:
-            return "Suspicious"
-
-        negators = {"not", "no", "non", "neither", "without", "isn't"}
-        for i, tok in enumerate(tokens):
-            if tok == "malware":
-                prev = tokens[i - 1] if i > 0 else ""
-                if prev not in negators and prev != "non":
-                    return "Malware"
-        for i, tok in enumerate(tokens):
-            if tok in {"benign", "clean"} or tok.startswith("non-malicious"):
-                prev = tokens[i - 1] if i > 0 else ""
-                if prev not in negators:
-                    return "Benign"
-        return "Suspicious"
+        stated: set[str] = set()
+        for match in _VERDICT_STATEMENT_RE.finditer(text or ""):
+            word = normalise_verdict(match.group(1))
+            if word is not None:
+                stated.add(word)
+        return next(iter(stated)) if len(stated) == 1 else INCONCLUSIVE_VERDICT
 
     def _fallback_bundle_from_text(
         self,
@@ -3866,8 +4495,12 @@ class JudgeAgent(BudgetMeter):
         isr_reports: dict[str, AgentISR] | None = None,
         *,
         extracted: bool = True,
+        record: list[Violation] | None = None,
     ) -> Bundle:
         """Build a minimal STIX Bundle when the LLM fails to produce valid JSON.
+
+        ``record`` collects what reading the stated assessment took
+        (``read_assessment``), as ``_bundle_from_response``'s does.
 
         The verdict is read out of the judge's own text and the bundle's object
         set follows it: a ``malware`` object only when the verdict is Malware.
@@ -3889,7 +4522,12 @@ class JudgeAgent(BudgetMeter):
         # first — has said its verdict, confidence, severity and family, and
         # those are kept as it said them. Anything less is read for the
         # verdict word alone.
-        stated = stated_assessment_in(text) if extracted else None
+        notes: list[Any] = []
+        stated = stated_assessment_in(text, notes) if extracted else None
+        if stated is not None and record is not None:
+            from maljan.agents.judge_postprocess import assessment_rows
+
+            record.extend(assessment_rows(notes))
         if stated is not None:
             decision = str(normalise_verdict(stated.verdict))
         else:
@@ -3923,9 +4561,8 @@ class JudgeAgent(BudgetMeter):
         # where it worked. Identifiers scraped from the raw text are real ATT&CK
         # identifiers no evidence source claimed, which is exactly what a schema
         # check cannot catch. They are recorded for audit and are not emitted.
-        import re
+        from maljan.analysis.technique_ids import TECHNIQUE_WORD_RE, is_technique_id
 
-        _VALID_TID_RE = re.compile(r"\b(T\d{4}(?:\.\d{3})?)\b")
         tids: set[str] = set()
         # Who claimed each one, named the way the evidence summary names them.
         # A relationship this pipeline builds names the agents whose claims it
@@ -3935,12 +4572,12 @@ class JudgeAgent(BudgetMeter):
             for name, isr in isr_reports.items():
                 source = str(getattr(isr, "agent_id", "") or name)
                 for claim in isr.claims:
-                    if claim.technique_id and _VALID_TID_RE.match(claim.technique_id):
+                    if is_technique_id(claim.technique_id):
                         tids.add(claim.technique_id)
                         agents = claimed_by.setdefault(claim.technique_id, [])
                         if source not in agents:
                             agents.append(source)
-        model_only = sorted(set(_VALID_TID_RE.findall(text)) - tids)
+        model_only = sorted(set(TECHNIQUE_WORD_RE.findall(text)) - tids)
         if model_only:
             self.logger.warning(
                 "Fallback Bundle: %d technique identifier(s) appeared in the model's raw "
@@ -4123,7 +4760,7 @@ class JudgeAgent(BudgetMeter):
         if rates is None:
             return configured
         output = self._output_cap()
-        from maljan.llm.context_window import CHARS_PER_TOKEN
+        from maljan.llm.context_window import tokens_for_chars
 
         seconds = rates.call_timeout(
             call,
@@ -4131,7 +4768,7 @@ class JudgeAgent(BudgetMeter):
             configured,
             output.tokens,
             budget=output.sentence,
-            prompt_tokens=-(-int(prompt_chars) // CHARS_PER_TOKEN),
+            prompt_tokens=tokens_for_chars(prompt_chars),
         )
         return None if seconds is None else float(seconds)
 
@@ -4187,16 +4824,20 @@ class JudgeAgent(BudgetMeter):
     def _extract_confidence_from_text(text: str) -> float | None:
         """Read the mediator's agreement score, or ``None`` if it is not there.
 
-        The number must sit **adjacent to the key** — the previous version
+        Only the ``agreement_confidence`` line the system prompt asks for is
+        read (``_AGREEMENT_RE``); anything else is unreadable, which the caller
+        records as ``_UNREADABLE_AGREEMENT``. The bare word used to be accepted
+        too, so a claim's "confidence: 0.92" quoted in the reasoning was read
+        as the agents' agreement and ended the negotiation on a consensus no
+        one stated.
+
+        The number must sit **adjacent to the key** — an earlier version
         accepted any token on any line mentioning "confidence" and clamped it
         into range, so ``"Confidence: 0.95 (based on 3 agents)"`` scanned in
         reverse, hit ``3``, clamped to 1.0 and declared instant consensus off
         a number that was never a score. Out-of-range values are therefore
         rejected rather than clamped: clamping is what made the wrong token
         look legitimate.
-
-        The reasoning prompt asks for ``agreement_confidence``; the bare word
-        is accepted too because the model does not always echo the key.
         """
         matches = _AGREEMENT_RE.findall(text or "")
         for raw, pct in reversed(matches):  # the model's last word wins
@@ -4215,6 +4856,7 @@ class JudgeAgent(BudgetMeter):
         isr_reports: dict | None,
         memory_store: MemoryStore | None,
         current_sample_id: str | None = None,
+        owner: str | None = None,
     ) -> str:
         """Retrieve similar past cases and format them as a few-shot prompt block.
 
@@ -4230,6 +4872,8 @@ class JudgeAgent(BudgetMeter):
         Args:
             isr_reports: Current ISR reports (used to build the search query).
             memory_store: MemoryStore-protocol object, or None to skip.
+            owner: Whose cases may be read: the job's owner, or ``None`` for
+                the unscoped ones (``long_term_memory.recall``).
 
         Returns:
             Formatted prompt block string, or "" when store is None/empty or
@@ -4255,24 +4899,28 @@ class JudgeAgent(BudgetMeter):
             return ""
 
         try:
-            # Never retrieve the current
-            # sample's own past run as a "weighted prior". Newer
-            # QdrantStore.retrieve accepts ``exclude_sample_id``; older
-            # MemoryStore implementations (InMemoryStore in tests) may
-            # not — fall back to the unfiltered call in that case.
-            try:
-                cases = memory_store.retrieve(
-                    query,
-                    top_k=3,
-                    exclude_sample_id=current_sample_id,
-                )
-            except TypeError:
-                cases = memory_store.retrieve(query, top_k=3)
-                if current_sample_id:
-                    cases = [c for c in cases if c.sample_id != current_sample_id]
-        except Exception:  # noqa: BLE001
-            # Never let retrieval failure block verdict generation
-            return ""
+            # Never retrieve the current sample's own past run as a "weighted
+            # prior", and only the job's owner's cases (``recall``, which also
+            # serves a backend older than ``exclude_sample_id``).
+            from maljan.memory.long_term_memory import recall
+
+            cases = recall(
+                memory_store,
+                query,
+                top_k=3,
+                exclude_sample_id=current_sample_id,
+                owner=owner,
+            )
+        except Exception as exc:  # noqa: BLE001
+            # Never let retrieval failure block verdict generation, and never
+            # let it pass unsaid: the verdict is then drawn without the prior
+            # cases, and the prompt and the log both say so.
+            logging.getLogger(__name__).warning(
+                "JudgeAgent: long-term memory retrieval failed (%s); the verdict is drawn "
+                "without prior cases.",
+                describe_exception_for_log(exc),
+            )
+            return MEMORY_UNAVAILABLE_NOTE
 
         if not cases:
             return ""
@@ -4282,6 +4930,7 @@ class JudgeAgent(BudgetMeter):
             "=== LONG-TERM MEMORY: Similar Past Case(s) ===",
             "Use these historical analyses as WEIGHTED PRIORS for TTP selection.",
             "Do NOT copy technique IDs blindly — corroborate with current evidence.",
+            QUOTED_VALUE_STATEMENT,
             "",
         ]
 
@@ -4289,12 +4938,18 @@ class JudgeAgent(BudgetMeter):
             ttps = ", ".join(case.technique_ids) if case.technique_ids else "none"
             # Whole: the verdict prompt is fitted to the judge's window as a
             # whole, and a case's summary is shortened there only when it must be.
-            summary = case.summary_text
-            lines.append(
-                f"[{idx}/{total}] sample_id: {case.sample_id} (category: {case.malware_category})"
-            )
-            lines.append(f"  Past techniques: {ttps}")
+            # A past run's summary is built from that run's claims, which carry
+            # its sample's strings: one quoted value on its line, so no line of
+            # it can read as a line of this prompt (``tool_fence.quoted_value``).
+            # The category is stored text of the same run, written the same way.
+            # Its ledger and item ids are that run's numbers, which this run
+            # issues too: each is renamed so none can be cited as this run's
+            # (``long_term_memory.foreign_ids_written_out``).
+            summary = foreign_quoted_value(case.summary_text)
+            category = foreign_quoted_value(case.malware_category)
+            lines.append(f"[{idx}/{total}] sample_id: {case.sample_id} (category: {category})")
+            lines.append(f"  Past techniques: {foreign_ids_written_out(ttps)}")
             lines.append(f"  Behavioral summary: {summary}")
 
-        lines.append("=== END LONG-TERM MEMORY ===")
+        lines.append(_MEMORY_END)
         return "\n".join(lines)

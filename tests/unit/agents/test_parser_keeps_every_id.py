@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import logging
 
-from maljan.agents.base_agent import _extract_technique_ids
+from maljan.analysis.technique_ids import technique_ids_in
 
 
 def _analyst():
@@ -46,7 +46,7 @@ class TestEveryIdIsKeptAsWritten:
         assert [c.technique_id for c in isr.claims] == [None]
 
     def test_findings_keep_every_id_too(self) -> None:
-        assert _extract_technique_ids("T1055 then T1701.001, T9999 and T1055 again") == [
+        assert technique_ids_in("T1055 then T1701.001, T9999 and T1055 again") == [
             "T1055",
             "T1701.001",
             "T9999",

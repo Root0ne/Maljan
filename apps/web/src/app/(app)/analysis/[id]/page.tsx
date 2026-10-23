@@ -1,9 +1,12 @@
 "use client";
 
+import { correctionLine } from "./correctionLine";
 import { useState } from "react";
 import Link from "next/link";
 
 import { useReport } from "./layout";
+import ReportAbsent from "@/components/analysis/ReportAbsent";
+import { reportAbsence } from "@/components/analysis/reportAbsence";
 import { api } from "@/lib/api";
 import {
   bundleLossSentence,
@@ -20,17 +23,29 @@ import { useRun } from "@/lib/useRun";
 import { rosterNames } from "@/lib/rosterNames";
 import { formatStageDuration, stageTiming } from "@/components/analysis/stageTimeline";
 import { getErrorMessage } from "@/lib/errors";
-import { ENRICH_BUTTON_LABEL, ENRICH_STATUS_MESSAGE } from "@/lib/enrichment";
+import {
+  ENRICH_BUTTON_LABEL,
+  enrichMessage,
+  enrichmentAskSentence,
+  enrichmentAsks,
+} from "@/lib/enrichment";
 import { degradedBannerText } from "@/lib/degradedBanner";
 import { validationRowClass, validationRowText } from "@/lib/validationRows";
 import EvidenceChips from "@/components/analysis/EvidenceChips";
+import FollowUpQuestions from "@/components/analysis/FollowUpQuestions";
 import TechnicalAnalysisPanel from "@/components/analysis/TechnicalAnalysisPanel";
 import {
   MEASURED_VOICE,
   REPORT_MODEL_VOICE,
+  claimsNotDiscussed,
+  flaggedMark,
+  flaggedStatements,
   keyFindings,
   noSummaryReason,
+  outcomeLine,
+  questionAnswers,
 } from "@/components/analysis/reportProse";
+import { endpointCounts } from "@/components/analysis/networkFacts";
 import { severityTone } from "@/lib/severity";
 import type { FpWarning, MalwareReport, NoToolCallAsk } from "@/types/malware-report";
 
@@ -46,42 +61,28 @@ function countNetworkIOCs(mr: MalwareReport): {
   const staticIocs = (mr.static?.interesting_strings ?? []).filter(
     (s) => s.kind === "domain" || s.kind === "ip" || s.kind === "url",
   );
-  const staticDomains = staticIocs.filter((s) => s.kind === "domain").length;
-  const staticIps = staticIocs.filter((s) => s.kind === "ip").length;
-  const staticUrls = staticIocs.filter((s) => s.kind === "url").length;
+  const counts = endpointCounts(n, staticIocs);
   if (!n) {
-    return {
-      domains: staticDomains,
-      ips: staticIps,
-      urls: staticUrls,
-      suspicious: 0,
-    };
+    return { ...counts, suspicious: 0 };
   }
   const susp =
     n.domains.filter((d) => d.is_suspicious).length +
     n.ips.filter((i) => i.is_suspicious).length;
-  return {
-    domains: n.domains.length + staticDomains,
-    ips: n.ips.length + staticIps,
-    urls: n.urls.length + staticUrls,
-    suspicious: susp,
-  };
+  return { ...counts, suspicious: susp };
 }
 
 export default function SummaryTab() {
-  const { report, job, loading } = useReport();
+  const { report, job, loading, reportError } = useReport();
 
   if (loading) {
     return <div className="p-4 text-sm text-text-secondary">Loading...</div>;
   }
 
-  if (!report && (!job || job.status !== "completed")) {
-    return (
-      <div className="p-4 text-sm text-text-secondary animate-pulse">
-        Analysis in progress... Gathering intelligence.
-      </div>
-    );
-  }
+  /* No report at all — still running, unreadable, or never written — is not
+   * a report old enough to carry no structured payload, which is what the
+   * legacy summary below says. Each absence is said as itself. */
+  const absent = reportAbsence({ report, job, reportError });
+  if (absent) return <ReportAbsent absence={absent} />;
 
   const mr = report?.malware_report ?? null;
   return mr ? <MalwareReportSummary mr={mr} /> : <LegacySummary />;
@@ -399,6 +400,10 @@ function MalwareReportSummary({ mr }: { mr: MalwareReport }) {
 
       <StageTimingCard jobId={jobId} elapsedSeconds={job?.duration_seconds ?? null} />
 
+      <QuestionAnswers mr={mr} />
+
+      <FollowUpQuestions jobId={jobId} status={job?.status} />
+
       {/* Key findings and the summary, as the report model wrote them, or the
           reason none was written. The exported report's §1; the paragraphs a
           report stored before the technical analysis existed carried are kept
@@ -462,6 +467,8 @@ function MalwareReportSummary({ mr }: { mr: MalwareReport }) {
       )}
 
       <TechnicalAnalysisPanel report={mr} />
+
+      <ReportChecks mr={mr} />
 
       {/* How the run was set up and what it spent, in the one place that
           answers it. This is the rollup the retired pipeline panel carried:
@@ -604,6 +611,7 @@ function RunRecord({
     (block?.fallbacks ?? []).map((row) => ({ agent, reason: row.reason })),
   );
   const rests = runSummary.server_rests ?? [];
+  const enrichmentAsked = enrichmentAsks(runSummary);
   const configRows = Object.entries(config ?? {}).filter(
     ([key]) => !SHOWN_IN_THE_HEADER.has(key),
   );
@@ -643,9 +651,7 @@ function RunRecord({
               </li>
             )}
             <li>
-              {validation?.retries
-                ? `${countLabel(validation.retries, "correction turn")} were spent on producers that answered in the wrong shape.`
-                : "No producer needed a correction turn."}
+              {correctionLine(validation, countLabel)}
             </li>
             {spent && <li>{spent}</li>}
             {fallbacks.map((row, i) => (
@@ -656,6 +662,15 @@ function RunRecord({
             {rests.map((row, i) => (
               <li key={`rest-${i}`} className="text-status-orange">
                 {serverRestSentence(row)}
+              </li>
+            ))}
+            {enrichmentAsked.map((row, i) => (
+              <li
+                key={`enrichment-asked-${i}`}
+                className={row.errored || row.failed ? "text-status-orange" : "text-text-muted"}
+                data-testid="enrichment-asked"
+              >
+                Enrichment asked {enrichmentAskSentence(row)}.
               </li>
             ))}
             {bundleLoss && <li className="text-text-muted">{bundleLoss}</li>}
@@ -906,7 +921,7 @@ function EnrichButton({ reportId }: { reportId: string }) {
       // skipped_no_network_iocs — say which one happened rather than always
       // promising a refresh.
       const res = await api.enrichReport(reportId);
-      setMessage(ENRICH_STATUS_MESSAGE[res.status] ?? ENRICH_STATUS_MESSAGE.queued);
+      setMessage(enrichMessage(res.status));
     } catch (err) {
       setMessage(`Could not queue enrichment: ${getErrorMessage(err)}`);
     } finally {
@@ -929,5 +944,136 @@ function EnrichButton({ reportId }: { reportId: string }) {
         </p>
       )}
     </>
+  );
+}
+
+/* ── The questions the job was asked ─────────────────────────────────
+ *
+ * Each question the analyst asked when submitting the run, the outcome the
+ * report stands by, the report model's answer, what it cites and what the
+ * platform's checks said. The exported report leads with the same section.
+ * Nothing is drawn for a job asked nothing.
+ */
+function QuestionAnswers({ mr }: { mr: MalwareReport }) {
+  const answers = questionAnswers(mr);
+  if (answers.length === 0) return null;
+  return (
+    <div className="bg-bg-reading border border-border rounded">
+      <div className="px-4 py-3 border-b border-border flex items-baseline gap-3">
+        <h2 className="text-xs font-medium text-text-primary uppercase tracking-wider">
+          Questions asked of this run
+        </h2>
+        <span className="text-[11px] italic text-text-muted">{REPORT_MODEL_VOICE}</span>
+      </div>
+      <ol className="p-4 space-y-4">
+        {answers.map((answer, i) => (
+          <li key={i} className="space-y-1.5">
+            <p className="text-sm text-text-primary font-medium">
+              Q{i + 1}. {answer.question}
+            </p>
+            <p className="text-xs">
+              <span className="uppercase tracking-wider text-text-muted mr-2">Outcome</span>
+              <span className={answer.answered ? "text-status-orange" : "text-text-secondary"}>
+                {outcomeLine(answer)}
+              </span>
+            </p>
+            {answer.answer.trim() && (
+              <p className="text-sm text-text-secondary leading-relaxed">{answer.answer}</p>
+            )}
+            {answer.evidence_ids.length > 0 && (
+              <p className="text-xs text-text-muted">
+                Evidence <EvidenceChips ids={answer.evidence_ids} className="ml-1" />
+              </p>
+            )}
+            {answer.looked_at.length > 0 && (
+              <p className="text-xs text-text-muted">
+                Looked at <EvidenceChips ids={answer.looked_at} className="ml-1" />
+              </p>
+            )}
+            {answer.open_questions.length > 0 && (
+              <p className="text-xs text-text-muted">
+                Open questions it rests on: {answer.open_questions.join("; ")}
+              </p>
+            )}
+            {answer.checks.map((check, j) => (
+              <p key={j} className="text-[11px] italic text-text-muted">
+                Platform check: {check}
+              </p>
+            ))}
+          </li>
+        ))}
+      </ol>
+    </div>
+  );
+}
+
+/* ── What the report's own checks left standing ──────────────────────
+ *
+ * Two lists the report carries and the console never drew: the report
+ * model's sentences a capability or rule-match check asked about and the
+ * retry left standing, and the analyst claims in force the body neither cites
+ * nor discusses. The exported report prints both; a reader of the console saw
+ * the body without either caveat. Nothing is drawn for a report that carries
+ * neither, or that was stored before the fields existed.
+ */
+function ReportChecks({ mr }: { mr: MalwareReport }) {
+  const flagged = flaggedStatements(mr);
+  const undiscussed = claimsNotDiscussed(mr);
+  if (flagged.length === 0 && undiscussed.length === 0) return null;
+  return (
+    <div className="bg-bg-surface border border-border rounded">
+      <div className="px-4 py-3 border-b border-border">
+        <h2 className="text-xs font-medium text-text-primary uppercase tracking-wider">
+          What the report&apos;s checks left standing
+        </h2>
+      </div>
+      <div className="p-4 space-y-4">
+        {flagged.length > 0 && (
+          <section>
+            <h3 className="text-[11px] uppercase tracking-wider text-text-muted mb-1.5">
+              Flagged statements
+            </h3>
+            <ul className="space-y-1.5">
+              {flagged.map((statement, i) => (
+                <li key={`${statement.code}-${i}`} className="text-sm text-text-secondary">
+                  &ldquo;{statement.sentence}&rdquo;
+                  <span className="ml-2 text-[10px] italic text-status-orange">
+                    ({flaggedMark(statement)})
+                  </span>
+                </li>
+              ))}
+            </ul>
+          </section>
+        )}
+        {undiscussed.length > 0 && (
+          <section>
+            <h3 className="text-[11px] uppercase tracking-wider text-text-muted mb-1.5">
+              Claims the report does not discuss
+            </h3>
+            <ul className="space-y-1.5">
+              {undiscussed.map((claim) => (
+                <li
+                  key={`${claim.agent}-${claim.claim_number}`}
+                  className="text-sm text-text-secondary"
+                >
+                  <span className="text-text-primary font-medium">
+                    {claim.agent} #{claim.claim_number}
+                  </span>{" "}
+                  {claim.claim}
+                  {(claim.missing ?? []).length > 0 && (
+                    <span className="ml-2 text-[11px] text-text-muted">
+                      not named in the body: {(claim.missing ?? []).join(", ")}
+                    </span>
+                  )}
+                  {claim.evidence_ref && (
+                    <EvidenceChips ids={[claim.evidence_ref]} className="ml-2" />
+                  )}
+                </li>
+              ))}
+            </ul>
+          </section>
+        )}
+      </div>
+    </div>
   );
 }

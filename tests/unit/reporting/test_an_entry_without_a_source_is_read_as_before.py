@@ -160,14 +160,30 @@ def test_the_builders_and_the_analysis_order_are_kept_as_they_were() -> None:
 
 
 def test_no_two_built_in_sources_declare_one_name_two_ways() -> None:
+    """One name, one reading; a declaration that names neither a kind nor a reader gives none.
+
+    Such a declaration states other facts only (that the tool sends the
+    sample out, its display name), and every kind-based reading treats it as
+    undeclared, so it cannot read a name a second way. What it must not do is
+    become the legacy reading of a name another source declares a kind for,
+    which takes the first source in its order (``shipped_by_name``).
+    """
     from maljan.core.config import Settings
+    from maljan.core.declared_reading import shipped_by_name
     from maljan.core.tool_declarations import ToolDeclarations
 
     seen: dict[str, tuple[str, str]] = {}
+    unread: set[str] = set()
     for source in ToolDeclarations.from_settings(Settings()).sources():
         for name, facts in source.tools.items():
+            if not facts.kind and not facts.reader:
+                unread.add(name)
+                continue
             shape = (facts.kind, facts.reader)
             assert seen.setdefault(name, shape) == shape, name
+    for name in unread & set(seen):
+        taken = shipped_by_name()[name]
+        assert (taken.kind, taken.reader) == seen[name], name
 
 
 @pytest.mark.parametrize(("before", "kinds", "reader"), PROJECTION_READERS)
@@ -265,13 +281,14 @@ def test_a_stored_flow_marked_orig_is_read_as_marked() -> None:
 ROOT = Path(__file__).resolve().parents[3]
 GOLDEN = ROOT / "tests" / "fixtures" / "golden" / "reporting"
 BENCHMARK = Path(".superpowers") / "sdd" / "mandate-2026-09-17" / "benchmark" / "deepseek"
-# ``build_sections`` over each stored run's whole ledger as dev f96cb89f drew it:
+# ``build_sections`` over each stored run's whole ledger as dev f96cb89f drew it, but for the
+# one "Functions examined" item that named the tool twice (``list_functions (list_functions)``):
 # the section count and the digest of the sections' JSON (sorted keys).
 STORED_REBUILDS = {
     "run7": (89, "5622126326362a4b"),
-    "run5": (102, "329861e13d99f920"),
-    "run4": (92, "5b820703de8ef174"),
-    "local8": (40, "03a831e737a44641"),
+    "run5": (102, "4668dbef55b4a0c6"),
+    "run4": (92, "25b1a5f928e3585b"),
+    "local8": (40, "38eef84aca43089b"),
 }
 
 

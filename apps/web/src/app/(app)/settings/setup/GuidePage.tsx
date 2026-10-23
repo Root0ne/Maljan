@@ -16,6 +16,7 @@ import {
 import { useSettingsContext, type SettingsContextValue } from "../configuration/SettingsContext";
 import { appliesSummary } from "../configuration/vocabulary";
 import { isProbeStale, probeFingerprint } from "./probeStale";
+import { applyNotice } from "./applyNotice";
 import AgentFormStep, { agentStepSection } from "./steps/AgentFormStep";
 import ProfilePickerStep from "./steps/ProfilePickerStep";
 import RestMappingStep from "./steps/RestMappingStep";
@@ -268,7 +269,11 @@ export default function GuidePage({ guide }: { guide: GuideDef }) {
   const probeId = step.probe;
   const result = probeId ? probeResult(probeId) : undefined;
 
+  const failedApply = applyNotice(ctx.actionError, ctx.errors);
+
   const onApply = async () => {
+    // A staged sign-in policy setting is confirmed with the current password:
+    // `apply` asks for it (`CurrentPasswordDialog`) before anything is sent.
     const res = await ctx.apply();
     if (res) setApplied(res);
   };
@@ -407,6 +412,27 @@ export default function GuidePage({ guide }: { guide: GuideDef }) {
                 </div>
               )}
             </>
+          )}
+        </div>
+      )}
+
+      {/* A refused Apply is said here: the console's toolbar, which draws the
+          same message, is not on this page (`applyNotice`). */}
+      {step.component === "review" && applied === null && failedApply && (
+        <div
+          role="alert"
+          className="flex items-center justify-between gap-3 text-xs text-status-red bg-status-red/10 border border-status-red/20 rounded px-3 py-2 mt-4"
+        >
+          <span>{failedApply}</span>
+          {ctx.actionError && (
+            <button
+              type="button"
+              aria-label="Dismiss error"
+              className="text-status-red/80 hover:text-status-red shrink-0"
+              onClick={ctx.clearActionError}
+            >
+              &times;
+            </button>
           )}
         </div>
       )}

@@ -15,9 +15,11 @@ Inputs (pick one):
                             (``{sample_id, summary_text, technique_ids,
                             malware_category}``). Test/operator-friendly; needs no infra.
 
-Each case becomes one corpus row. Cases with fewer than ``--min-techniques`` attributed
-techniques are dropped (nothing useful to recommend), and duplicate ``sample_id``s keep
-the last seen. Output JSON stores TEXT only; the runtime index embeds it on load.
+Each unscoped case becomes one corpus row; a case filed under an owner is never copied
+(the corpus is read by every job, and an owner's cases are that owner's alone). Cases
+with fewer than ``--min-techniques`` attributed techniques are dropped (nothing useful to
+recommend), and duplicate ``sample_id``s keep the last seen. Output JSON stores TEXT
+only; the runtime index embeds it on load.
 
 Run:
     uv run python scripts/knowledge/build_attck_case_kb.py --qdrant-url http://localhost:6333 \
@@ -45,7 +47,13 @@ _MABEL_MAX_YARA = 8
 
 
 def _row_from_payload(p: dict) -> dict | None:
-    """Normalise a raw case dict (Qdrant payload or JSONL line) into a corpus row."""
+    """Normalise a raw case dict (Qdrant payload or JSONL line) into a corpus row.
+
+    ``None`` for a case filed under an owner: the corpus is vendored and every
+    job reads it, so only unscoped cases go into it.
+    """
+    if str(p.get("owner") or "").strip():
+        return None
     sample_id = str(p.get("sample_id", "")).strip()
     summary = str(p.get("summary_text", "")).strip()
     if not summary:
@@ -168,7 +176,10 @@ def _cases_from_mabel(paths: list[str], max_per_family: int) -> list[dict]:
                 continue
             for row in reader:
                 fam = (row.get("family_name") or "").strip()
-                if max_per_family > 0 and per_family.get(fam, 0) >= max_per_family:
+                # A row with no family name is capped like a labelled one, but under
+                # its own category, not one shared "" group the first rows would use up.
+                group = fam or f"(unlabelled {_mabel_category(row)})"
+                if max_per_family > 0 and per_family.get(group, 0) >= max_per_family:
                     continue
                 techs = list(dict.fromkeys(_MABEL_TID.findall(row.get("mitre_attack_id") or "")))
                 if not techs:
@@ -184,7 +195,7 @@ def _cases_from_mabel(paths: list[str], max_per_family: int) -> list[dict]:
                         "malware_category": _mabel_category(row),
                     }
                 )
-                per_family[fam] = per_family.get(fam, 0) + 1
+                per_family[group] = per_family.get(group, 0) + 1
     return rows
 
 

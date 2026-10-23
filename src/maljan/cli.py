@@ -7,14 +7,15 @@ It does not mutate global settings or know about internal architecture.
 import asyncio
 import json
 from pathlib import Path
-from typing import Any, cast, get_args
+from typing import Any, cast
 
 import typer
 
 from maljan.analysis.run_summary import NOT_APPLICABLE_SENTENCE
 from maljan.app import MaljanApp
-from maljan.core.config import LLMConfig, Settings
+from maljan.core.config import Settings
 from maljan.core.logger import logger
+from maljan.core.plugins import id_refusal, install_allow_list, load_allowed, shipped_ids
 from maljan.memory.long_term_memory import MemoryStore
 
 app = typer.Typer(
@@ -22,6 +23,18 @@ app = typer.Typer(
     help="Multi-Agent Malware Analysis Pipeline powered by LangGraph.",
     no_args_is_help=True,
 )
+
+
+def _settings() -> Settings:
+    """The command line's settings, read after the plugins their allow-list names are loaded.
+
+    As the worker does: the list is read, its plugins loaded, and the settings
+    read again, so a plugin's own block is read with its model.
+    """
+    allowed = Settings().plugins.allowed
+    install_allow_list(allowed)
+    load_allowed(allowed)
+    return Settings()
 
 
 @app.command()
@@ -35,11 +48,18 @@ def analyze(
     sample_path: str | None = typer.Option(
         None, "--sample", "-s", help="Path to the malware sample file for sandbox submission."
     ),
-    provider: str = typer.Option(
-        "openai", "--provider", "-p", help="A registered LLM provider's name."
+    provider: str | None = typer.Option(
+        None,
+        "--provider",
+        "-p",
+        help="A registered LLM provider's name (default: the configured one).",
     ),
-    max_iterations: int = typer.Option(
-        2, "--max-iterations", "-i", min=1, help="Maximum negotiation rounds."
+    max_iterations: int | None = typer.Option(
+        None,
+        "--max-iterations",
+        "-i",
+        min=1,
+        help="Maximum negotiation rounds (default: the configured number).",
     ),
     mock: bool = typer.Option(
         False, "--mock", "-m", help="Run in mock mode without real LLM calls."
@@ -57,13 +77,19 @@ def analyze(
     """Run the full malware analysis pipeline on a sample."""
 
     # Build config at construction time — no post-init mutation
-    config = Settings()
-    if not mock:
-        allowed = get_args(LLMConfig.model_fields["provider"].annotation)
-        if provider not in allowed:
-            raise typer.BadParameter(f"provider must be one of {', '.join(allowed)}")
+    config = _settings()
+    if provider is not None and not mock:
+        # Only an option the operator gave replaces the configured value; a
+        # default of the command's own would silently overwrite their settings.
+        # The same judgement a save and a job make: a shipped id, or an
+        # installed plugin these settings' allow-list names.
+        refused = id_refusal("llm", provider, config.plugins.allowed)
+        if refused:
+            known = ", ".join(shipped_ids("llm"))
+            raise typer.BadParameter(f"provider must be one of {known}; {refused}")
         config.llm.provider = cast(Any, provider)
-    config.negotiation.max_iterations = max_iterations
+    if max_iterations is not None:
+        config.negotiation.max_iterations = max_iterations
 
     # Create and run. The ``finally`` covers the whole of it — a completed
     # run, a failed one and an interrupted one alike — because what the run
@@ -135,7 +161,12 @@ def _print_run_summary_inline(run_summary_dict: dict) -> None:
 
     typer.echo("\n--- Analysis Summary ---")
     final = neg.get("final_confidence")
-    shown = "not applicable" if final is None else f"{final:.3f}"
+    if final is not None:
+        shown = f"{final:.3f}"
+    elif neg.get("termination_reason", "unknown") == "unknown":
+        shown = "not recorded"
+    else:
+        shown = "not applicable"
     typer.echo(
         f"Termination: {neg.get('termination_reason', 'unknown')} | Final confidence: {shown}"
     )
@@ -227,10 +258,7 @@ def _write_markdown_report(result: dict, report_path: str) -> None:
             sycophancy_events=n_data.get("sycophancy_events", 0),
             confidence_history=n_data.get("confidence_history", []),
             # Absent when no agreement was measured; ``None`` then, not 0.0.
-            final_confidence=n_data.get(
-                "final_confidence",
-                None if n_data.get("termination_reason") == "not_applicable" else 0.0,
-            ),
+            final_confidence=n_data.get("final_confidence"),
         )
 
         agent_stats = [
@@ -274,6 +302,8 @@ def _write_markdown_report(result: dict, report_path: str) -> None:
             elapsed_seconds=run_summary_dict.get("elapsed_seconds", 0.0),
             corroboration=dict(run_summary_dict.get("corroboration") or {}),
             timestamp=run_summary_dict.get("timestamp", 0.0),
+            degraded_mode=bool(run_summary_dict.get("degraded_mode", False)),
+            degradation_reasons=[str(r) for r in run_summary_dict.get("degradation_reasons") or []],
         )
 
         Path(report_path).write_text(summary.to_markdown(), encoding="utf-8")
@@ -304,11 +334,10 @@ def _release(maljan_app: MaljanApp | None) -> None:
 @app.command()
 def info() -> None:
     """Show current configuration and registered components."""
-    from maljan.core.config import get_settings
     from maljan.core.container import ServiceContainer
     from maljan.parsers.registry import ParserRegistry
 
-    config = get_settings()
+    config = _settings()
     container = ServiceContainer(config, mock=True)
     parser_reg = ParserRegistry()
 
@@ -338,7 +367,7 @@ def _build_memory_store_cli() -> MemoryStore:
     """
     from maljan.memory.store_factory import build_memory_store
 
-    return build_memory_store(Settings())
+    return build_memory_store(_settings())
 
 
 @memory_app.command("stats")
@@ -395,6 +424,11 @@ def memory_purge_low_quality(
 
 def main() -> None:
     """Application entrypoint."""
+    # Before any command runs, and so before any thread or the YARA engine
+    # loads: C code folds case by LC_CTYPE (``core.ctype_locale``).
+    from maljan.core.ctype_locale import pin_character_classification
+
+    pin_character_classification()
     app()
 
 

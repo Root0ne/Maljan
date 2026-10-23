@@ -1,6 +1,6 @@
 "use client";
 
-import { getErrorMessage } from "@/lib/errors";
+import { getErrorMessage, isForbidden } from "@/lib/errors";
 import { useState, useEffect } from "react";
 import { api } from "@/lib/api";
 import type { AuditLogDTO } from "@/lib/api";
@@ -29,7 +29,7 @@ export default function AuditLogsPage() {
         setLogs(res.items);
         setTotal(res.total);
       } catch (err) {
-        if (getErrorMessage(err)?.includes("403") || getErrorMessage(err)?.toLowerCase().includes("forbidden") || getErrorMessage(err)?.toLowerCase().includes("access denied")) {
+        if (isForbidden(err)) {
           setError("Access denied. Audit logs are restricted to administrators.");
         } else {
           setError(getErrorMessage(err) || "Failed to load audit logs.");
@@ -46,7 +46,8 @@ export default function AuditLogsPage() {
    * read "settings" on all twenty rows and IP ADDRESS was an em dash on all
    * twenty, between them spending a third of the table on nothing. */
   const columns = auditColumns(rows);
-  const columnCount = 3 + (columns.resource ? 1 : 0) + (columns.ip ? 1 : 0);
+  const columnCount =
+    3 + (columns.resource ? 1 : 0) + (columns.ip ? 1 : 0) + (columns.details ? 1 : 0);
   const th =
     "text-left text-xs text-text-muted font-normal px-4 py-2 uppercase tracking-wider";
 
@@ -122,6 +123,7 @@ export default function AuditLogsPage() {
                 {columns.resource && <th scope="col" className={th}>Resource</th>}
                 <th scope="col" className={th}>Who</th>
                 {columns.ip && <th scope="col" className={th}>IP address</th>}
+                {columns.details && <th scope="col" className={th}>Details</th>}
               </tr>
             </thead>
             <tbody className="divide-y divide-border-light">
@@ -162,12 +164,19 @@ export default function AuditLogsPage() {
                     </td>
                     {columns.resource && (
                       <td className="px-4 py-2.5">
-                        <span className="text-xs text-text-secondary">{row.resource || "—"}</span>
+                        <span
+                          className="text-xs text-text-secondary"
+                          title={row.resourceId || undefined}
+                        >
+                          {row.resource || "—"}
+                        </span>
                       </td>
                     )}
                     <td className="px-4 py-2.5">
                       <span
-                        className={`text-xs text-text-secondary${row.actorId ? "" : " font-mono"}`}
+                        className={`text-xs text-text-secondary${
+                          !row.actorId || row.actorId.startsWith(row.actor) ? " font-mono" : ""
+                        }`}
                         title={row.actorId || undefined}
                       >
                         {row.actor}
@@ -178,6 +187,22 @@ export default function AuditLogsPage() {
                         <span className="text-xs text-text-secondary font-mono">
                           {row.ip || "—"}
                         </span>
+                      </td>
+                    )}
+                    {columns.details && (
+                      <td className="px-4 py-2.5">
+                        {row.details.length > 0 ? (
+                          <dl className="text-[11px] text-text-secondary space-y-0.5">
+                            {row.details.map(([key, value]) => (
+                              <div key={key} className="flex gap-1.5">
+                                <dt className="text-text-muted shrink-0">{key}</dt>
+                                <dd className="font-mono break-all">{value}</dd>
+                              </div>
+                            ))}
+                          </dl>
+                        ) : (
+                          <span className="text-xs text-text-muted">—</span>
+                        )}
                       </td>
                     )}
                   </tr>

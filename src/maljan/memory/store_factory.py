@@ -13,8 +13,12 @@ answering ``None``), and every caller degrades the same way for it.
 Registration reaches every process (API, analysis worker, enrichment worker,
 command line) through this module: the shipped backends register as it is
 imported, and an installed package adds its own through the
-``maljan.memory_backends`` entry-point group, loaded here on first use. An
-entry point names a callable that calls ``register_memory_backend``.
+``maljan.memory_backends`` entry-point group. A process loads such a plugin
+only when it is told to load by a plugin allow-list that names it
+(``maljan.core.plugins.load_allowed``, ``load_plugins`` here); reading the
+registry loads nothing. An entry point is named after the backend id it
+registers and names a callable that calls ``register_memory_backend`` for
+that id.
 """
 
 from __future__ import annotations
@@ -25,11 +29,11 @@ import threading
 from collections.abc import Callable, Iterator, Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass, field
-from importlib.metadata import entry_points
 from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel
 
+from maljan.core import plugins
 from maljan.core.config import QdrantMemoryConfig
 from maljan.core.exceptions import MemoryStoreError
 from maljan.core.logger import logger
@@ -38,14 +42,15 @@ if TYPE_CHECKING:
     from maljan.memory.long_term_memory import FunctionHashIndex, MemoryStore
 
 MemoryBackendBuilder = Callable[[Any], "MemoryStore"]
-ENTRY_POINT_GROUP = "maljan.memory_backends"
+ENTRY_POINT_GROUP = plugins.PLUGIN_GROUPS["memory"]
 
 
 class MemoryBackendNotConfiguredError(MemoryStoreError):
     """``memory.backend`` names no backend this process can build.
 
-    ``unavailable`` is true when a package declared that backend and failed to
-    load (``reason`` says how); false when nothing registered the id at all.
+    ``unavailable`` is true when an installed plugin declares that backend and
+    it was not loaded (``reason`` says why: it failed, was refused, or the
+    plugin allow-list does not name it); false when nothing declares the id.
     """
 
     def __init__(self, backend: str, reason: str, *, unavailable: bool) -> None:
@@ -65,7 +70,11 @@ class MemoryBackend:
     each a ``settings_annotations.Annotation``. ``label`` is the short phrase
     the console shows beside the id (``"in-process"``); empty shows the id alone.
     ``probe_label`` names its connection test in the console; empty shows a
-    generic one.
+    generic one. Where its store is, for a run's disclosure block
+    (``analysis.disclosure``): ``in_process`` for a store kept in the
+    process, ``address_leaf`` for the leaf of ``memory.<id>`` that holds the
+    store's address; a backend that declares neither is one whose store
+    cannot be placed.
     """
 
     id: str
@@ -74,14 +83,15 @@ class MemoryBackend:
     annotations: Mapping[str, Mapping[str, Any]] = field(default_factory=dict)
     label: str = ""
     probe_label: str = ""
+    in_process: bool = False
+    address_leaf: str = ""
 
 
 _BACKENDS: dict[str, MemoryBackend] = {}
-# Entry points that failed to load, by entry-point name (the backend id it
-# registers, by convention), with the reason.
-_UNAVAILABLE: dict[str, str] = {}
-_LOAD_LOCK = threading.Lock()
-_entry_points_loaded = False
+# The ids the shipped backends at the end of this module register; a plugin
+# never takes one. Named before they register, so a registration is judged
+# against it whenever it runs.
+BUILT_IN_BACKENDS: frozenset[str] = frozenset({"memory", "qdrant"})
 
 
 def _key(backend_id: Any) -> str:
@@ -96,19 +106,27 @@ def register_memory_backend(
     annotations: Mapping[str, Mapping[str, Any]] | None = None,
     label: str = "",
     probe_label: str = "",
+    in_process: bool = False,
+    address_leaf: str = "",
 ) -> None:
     """Make ``backend_id`` a value ``memory.backend`` can select.
 
     ``builder`` takes the memory configuration and returns a ``MemoryStore``;
     it reads its own settings with ``backend_settings(memory, backend_id)``.
-    Registering an id again replaces it. A package's entry point is best named
-    after the id it registers: a failure to load is then reported against that
-    id alone, where otherwise any selected id nothing registered is reported
-    unavailable with every failure's reason.
+    Registering an id again replaces it. A package's entry point is named
+    after the id it registers: while it loads, it registers that id alone,
+    never a built-in one. ``in_process`` and ``address_leaf`` say where the
+    store is (:class:`MemoryBackend`).
     """
     key = _key(backend_id)
     if not key:
         raise ValueError("a memory backend needs a non-empty id")
+    current = _BACKENDS.get(key)
+    refusal = plugins.registration_refusal(
+        "memory", key, builder, current.build if current else None, lambda: BUILT_IN_BACKENDS
+    )
+    if refusal:
+        raise plugins.PluginRefused(refusal)
     _BACKENDS[key] = MemoryBackend(
         key,
         builder,
@@ -116,42 +134,57 @@ def register_memory_backend(
         dict(annotations or {}),
         str(label or "").strip(),
         str(probe_label or "").strip(),
+        bool(in_process),
+        str(address_leaf or "").strip(),
     )
     forget_built_stores()
 
 
-def _load_entry_points() -> None:
-    """Run every installed ``maljan.memory_backends`` entry point, once per process."""
-    global _entry_points_loaded
-    if _entry_points_loaded:
-        return
-    with _LOAD_LOCK:
-        if _entry_points_loaded:
-            return
-        _entry_points_loaded = True
-        for point in entry_points(group=ENTRY_POINT_GROUP):
-            try:
-                loaded = point.load()
-                if callable(loaded):
-                    loaded()
-            except Exception as exc:  # noqa: BLE001 — one broken package never stops the rest
-                reason = f"{type(exc).__name__}: {exc}".strip()
-                _UNAVAILABLE[_key(point.name)] = reason
-                logger.warning(
-                    "memory backend entry point %r failed to load (%s).", point.name, exc
-                )
+def declared_backends() -> dict[str, dict[str, Any]]:
+    """Where each registered backend says its store is: ``{id: {in_process, address_leaf}}``."""
+    return {
+        key: {"in_process": backend.in_process, "address_leaf": backend.address_leaf}
+        for key, backend in registered_backends().items()
+    }
+
+
+def load_plugins(allowed: Any) -> None:
+    """Bring the memory plugins in line with the allow-list ``allowed``.
+
+    The entry points of the ``maljan.memory_backends`` group it names are
+    loaded once each, and one it no longer names is withdrawn
+    (``maljan.core.plugins.load_allowed``).
+    """
+    plugins.reconcile(PLUGINS, plugins.usable_list(allowed))
+
+
+def _register_plugin(plugin: plugins.InstalledPlugin, loaded: object) -> None:
+    """Call the callable a memory plugin's entry point named; it registers the plugin's id."""
+    if not callable(loaded):
+        raise plugins.PluginRefused(
+            f"its entry point names {plugins.describe(loaded)}, which is not callable; a "
+            "memory plugin names a callable that calls register_memory_backend"
+        )
+    loaded()
+    if plugin.name not in _BACKENDS:
+        raise plugins.PluginRefused(
+            f"{plugins.describe(loaded)} registered no memory backend named {plugin.name!r}"
+        )
+
+
+def _withdraw_plugin(name: str) -> None:
+    if _BACKENDS.pop(name, None) is not None:
+        forget_built_stores()
 
 
 def registered_backends() -> dict[str, MemoryBackend]:
-    """Every registered backend by id, in registration order."""
-    _load_entry_points()
+    """Every registered backend by id, in registration order; no plugin is loaded to answer."""
     return dict(_BACKENDS)
 
 
 def unavailable_backends() -> dict[str, str]:
-    """Backends a package declared that failed to load, each with the reason."""
-    _load_entry_points()
-    return dict(_UNAVAILABLE)
+    """Allowed memory plugins this process was told to load and did not, each with the reason."""
+    return plugins.failures("memory")
 
 
 def memory_backends() -> tuple[str, ...]:
@@ -179,24 +212,33 @@ def _backend(settings_or_memory: Any) -> MemoryBackend:
     found = registered_backends().get(backend)
     if found is not None:
         return found
-    # The entry point that failed is matched by name when it carries the
-    # backend's id; any other failed package may be the one that registers
-    # this id, so the selected id is unavailable whenever one failed.
-    broken = _UNAVAILABLE.get(backend)
-    failures = [broken] if broken is not None else list(_UNAVAILABLE.values())
-    if failures:
+    # A plugin is known by its entry point's name, which is the id it
+    # registers: an installed plugin of this name that was not loaded makes
+    # the backend unavailable, and why is said.
+    installed = plugins.installed("memory")
+    reason = plugins.unavailable_reason("memory", backend)
+    if any(plugin.name == backend for plugin in installed):
+        reason = reason or "it is an allowed plugin this process has not loaded"
         raise MemoryBackendNotConfiguredError(
-            backend,
-            f"memory backend {backend!r} is unavailable: a backend package failed to load "
-            f"({'; '.join(failures)})",
-            unavailable=True,
+            backend, f"memory backend {backend!r} is unavailable: {reason}", unavailable=True
         )
     known = ", ".join(_BACKENDS) or "none"
-    raise MemoryBackendNotConfiguredError(
-        backend,
-        f"memory.backend {backend!r} is not a registered memory backend (known: {known})",
-        unavailable=False,
-    )
+    said = f"memory.backend {backend!r} is not a registered memory backend (known: {known})"
+    if reason:
+        said = f"{said}; {reason}"
+    if installed:
+        # A package that registers this id under an entry point of another
+        # name (a name the platform once only recommended) is named here, with
+        # the rule it breaks, rather than left to look absent.
+        named = ", ".join(f"{plugin.name} ({plugin.source})" for plugin in installed)
+        raise MemoryBackendNotConfiguredError(
+            backend,
+            f"{said}; the installed memory plugins are {named}, and a memory plugin is "
+            "loaded only under its entry point's name, which must be the backend id it "
+            "registers",
+            unavailable=True,
+        )
+    raise MemoryBackendNotConfiguredError(backend, said, unavailable=False)
 
 
 def build_memory_store(settings_or_memory: Any) -> MemoryStore:
@@ -386,7 +428,61 @@ def _build_qdrant(memory: Any) -> MemoryStore:
     )
 
 
-register_memory_backend("memory", _build_in_process, label="in-process")
+# Qdrant's leaves, described the way a package backend describes its own
+# (``annotations`` of ``register_memory_backend``), each a
+# ``settings_annotations.Annotation``.
+_QDRANT_ANNOTATIONS: dict[str, dict[str, Any]] = {
+    "collection": {
+        "title": "Qdrant case collection",
+        "description": (
+            "Qdrant collection name storing semantic case embeddings for few-shot "
+            "retrieval into the judge prompt. Bump this when migrating to a new "
+            "embedding scheme (e.g. a dimension change) rather than reusing an "
+            "incompatible old collection."
+        ),
+        "probe": "qdrant",
+        "applies_when": {"core.memory.backend": ["qdrant"]},
+    },
+    "function_hash_collection": {
+        "title": "Qdrant function-hash collection",
+        "description": (
+            "Separate Qdrant collection storing per-function normalized-opcode hashes "
+            "for the exact-match function-hash attribution tier, independent of the "
+            "fuzzy semantic case collection above."
+        ),
+        "applies_when": {"core.memory.backend": ["qdrant"]},
+    },
+    "url": {
+        "title": "Qdrant URL",
+        "description": ("URL of the Qdrant server backing long-term memory."),
+        "probe": "qdrant",
+        "applies_when": {"core.memory.backend": ["qdrant"]},
+    },
+    "api_key": {
+        "title": "Qdrant API key",
+        "description": (
+            "API key sent with every Qdrant request when the server enforces one (compose "
+            "does); empty means no authentication, which is fine for a loopback-only server."
+        ),
+        "applies_when": {"core.memory.backend": ["qdrant"]},
+    },
+}
+
+
+register_memory_backend("memory", _build_in_process, label="in-process", in_process=True)
 register_memory_backend(
-    "qdrant", _build_qdrant, settings_model=QdrantMemoryConfig, probe_label="Test Qdrant"
+    "qdrant",
+    _build_qdrant,
+    settings_model=QdrantMemoryConfig,
+    annotations=_QDRANT_ANNOTATIONS,
+    probe_label="Test Qdrant",
+    address_leaf="url",
+)
+
+PLUGINS = plugins.PluginRegistry(
+    kind="memory",
+    builtin=lambda: BUILT_IN_BACKENDS,
+    registered=lambda: list(_BACKENDS),
+    register=_register_plugin,
+    withdraw=_withdraw_plugin,
 )

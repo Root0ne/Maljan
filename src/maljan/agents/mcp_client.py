@@ -13,17 +13,21 @@ supported:
 from __future__ import annotations
 
 import asyncio
+import logging
+import os
 from collections.abc import Callable, Mapping, Sequence
 from contextlib import suppress
 from datetime import timedelta
-from typing import Any
+from typing import Any, cast
 
+from anyio.abc import ObjectReceiveStream
 from langchain_core.tools import BaseTool, StructuredTool
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
-from pydantic import create_model
+from pydantic import ValidationError, create_model
 
 from maljan.core.logger import logger
+from maljan.llm.context_window import note_call_began
 
 
 def tool_error_marker(kind: str, tool: str, **fields: str) -> str:
@@ -38,6 +42,93 @@ def tool_error_marker(kind: str, tool: str, **fields: str) -> str:
     import json
 
     return json.dumps({"tool_error": kind, "tool": tool, **fields})
+
+
+def _json_width(text: str) -> int:
+    """How many characters ``text`` takes inside a JSON string, as ``json.dumps`` writes it."""
+    import json
+
+    return len(json.dumps(text)) - 2
+
+
+def _json_fit(text: str, room: int) -> int:
+    """How many of ``text``'s first characters fit ``room`` once JSON writes them. Linear."""
+    import json
+
+    used = 0
+    for count, ch in enumerate(text):
+        width = len(json.dumps(ch)) - 2
+        if used + width > room:
+            return count
+        used += width
+    return len(text)
+
+
+_HEX = frozenset(b"0123456789abcdefABCDEF")
+
+
+def _fully_unquoted(text: str) -> str:
+    """``text`` with percent-encoding decoded until none is left, as repeated ``unquote`` would.
+
+    A double-encoded URL (``%253A``) decodes to the URL it is, not to one more
+    encoding of it. One pass over the bytes, each reduced at most once: an
+    escape is decoded as soon as its three bytes stand at the top, and the byte
+    it gives may complete the escape before it. Linear in ``text``.
+    """
+    if "%" not in text:
+        return text
+    out = bytearray()
+    for byte in text.encode("utf-8", "surrogatepass"):
+        out.append(byte)
+        while len(out) >= 3 and out[-3] == 0x25 and out[-2] in _HEX and out[-1] in _HEX:
+            value = int(out[-2:].decode("ascii"), 16)
+            del out[-3:]
+            out.append(value)
+    return out.decode("utf-8", "replace")
+
+
+# Where a URL quoted in a message ends: a closing quote or bracket.
+_URL_CLOSERS = frozenset("\"'`)]}>")
+
+
+def _quoted_end(text: str, begin: int, end: int) -> int:
+    """``end`` pulled back to the first closing quote or bracket after ``begin``.
+
+    Not one inside the authority's ``[...]``: an IPv6 literal
+    (``http://[::1]:8080/``) is the host, whole.
+    """
+    start = begin
+    authority = text.find("://", begin, end) + 3
+    if 2 < authority < end and text[authority] == "[":
+        closing = text.find("]", authority, end)
+        if closing >= 0:
+            start = closing + 1
+    for index in range(start, end):
+        if text[index] in _URL_CLOSERS:
+            return index
+    return end
+
+
+# The port a URL scheme means when it writes none.
+_DEFAULT_PORTS = {"http": 80, "https": 443, "ws": 80, "wss": 443}
+
+
+def _host_and_port(url: str) -> tuple[str, int | None] | None:
+    """``(host, port)`` of ``url``, the host lowercased and the scheme's default port filled in.
+
+    ``None`` for a text with no host, or one that cannot be read as a URL.
+    """
+    from urllib.parse import urlsplit
+
+    try:
+        parts = urlsplit(url)
+        host = (parts.hostname or "").lower()
+        port = parts.port
+    except ValueError:
+        return None
+    if not host:
+        return None
+    return host, port if port is not None else _DEFAULT_PORTS.get(parts.scheme.lower())
 
 
 class StructuredAnswer(str):
@@ -152,6 +243,169 @@ async def _cancel_at_the_server(session: Any, request_id: Any, reason: str) -> N
         logger.debug("the cancellation of request %s was not sent (%s).", request_id, exc)
 
 
+# The record the SDK's stdio reader logs, with a traceback, for each stdout line
+# that is not a protocol message. Every stdio connection is opened by the
+# toolkit below, whose read stream states those lines itself
+# (``_ProtocolLinesOnly``), so the per-line record is left out.
+_SDK_STDIO_LOGGER = "mcp.client.stdio"
+_SDK_PARSE_FAILURE = "Failed to parse JSONRPC message from server"
+
+
+class _OneLinePerServer(logging.Filter):
+    """Leaves out the SDK's per-line record of a stdout line that is not a protocol message."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        return record.getMessage() != _SDK_PARSE_FAILURE
+
+
+_PER_LINE_RECORD = _OneLinePerServer()
+
+
+def _leave_out_the_per_line_record() -> None:
+    """Attach the filter to the SDK's stdio logger, once per process."""
+    sdk_logger = logging.getLogger(_SDK_STDIO_LOGGER)
+    if _PER_LINE_RECORD not in sdk_logger.filters:
+        sdk_logger.addFilter(_PER_LINE_RECORD)
+
+
+def _message_after_a_redraw(line: str) -> Any:
+    """The protocol message a progress bar's redraw left at the end of ``line``, or ``None``.
+
+    A progress bar redraws its line with carriage returns and can end without
+    a newline, so the server's next message lands on the bar's line, after its
+    last carriage return. Only there is a message read out of a line: from the
+    first ``{`` after the last carriage return (a CRLF line's own ``\\r`` taken
+    off first), or a whole line after a byte-order mark. A message after any
+    other text is never read as one: a log line that echoes text the server
+    read (a string found in a sample) could end with a message the sample's
+    author wrote. Asked only during the toolkit's setup
+    (``_ProtocolLinesOnly.reads_redraws``), whose answers carry nothing from a
+    sample. One parse at most.
+    """
+    from mcp import types
+    from mcp.shared.message import SessionMessage
+
+    if line.endswith("\r"):
+        line = line[:-1]
+    marked = line.startswith("\ufeff")
+    if marked:
+        line = line[1:]
+    if "\r" in line:
+        tail = line.rsplit("\r", 1)[1]
+        brace = tail.find("{")
+        if brace < 0:
+            return None
+        candidate = tail[brace:]
+    elif marked:
+        candidate = line
+    else:
+        return None
+    try:
+        return SessionMessage(types.JSONRPCMessage.model_validate_json(candidate))
+    except ValidationError:
+        return None
+
+
+def _where_it_fails(error: ValidationError) -> str:
+    """What failed a line's validation, by error type and location, never by content."""
+    failed = {
+        f"{detail.get('type')} at {'.'.join(str(part) for part in detail.get('loc', ())) or 'top'}"
+        for detail in error.errors(include_url=False)
+    }
+    return "; ".join(sorted(failed))
+
+
+class _ProtocolLinesOnly(ObjectReceiveStream[Any]):
+    """A stdio transport's read stream, with each stdout line that is not a protocol message
+    stated and left out.
+
+    The SDK's stdio reader parses every line of the server's stdout as JSON-RPC
+    and puts each parse failure into the stream it hands the session, with a
+    traceback in the log: a log line or a dependency's progress bar on a
+    server's stdout cost a traceback per line. Here two kinds are told apart.
+    Log or progress output (a line that is not JSON, or JSON that does not
+    claim to be a protocol message, such as a log record) is counted and left
+    out, with a warning at the first one of the connection. A line that claims
+    to be a protocol message (an object with a ``jsonrpc`` member) and is not a
+    valid one is an answer the server got wrong, so each one is stated when it
+    comes, with what failed its validation. Every message, and every other
+    item the transport sends, reaches the session as it came, and the
+    connection stays as it is.
+
+    Only during the toolkit's setup is a message a progress bar's redraw left
+    on a stray line read out and handed on (``_message_after_a_redraw``): the
+    answers to ``initialize`` and ``tools/list`` carry nothing from a sample,
+    and no tool has been called yet. A server whose first answer followed a
+    startup bar never finished initialising before. Once the toolkit has the
+    tool list it clears ``reads_redraws``, and from then on every stray line is
+    skipped as it always was: a tool's answer can echo text a sample's author
+    wrote, and an absent answer, which fails its call, beats a forged one.
+    """
+
+    def __init__(self, inner: Any, server: str) -> None:
+        self._inner = inner
+        self._server = server
+        self.noise = 0
+        self.invalid = 0
+        self.recovered = 0
+        # Open from the start of the connection until the toolkit has the
+        # tool list (``MCPLangChainToolkit.initialize``).
+        self.reads_redraws = True
+
+    async def receive(self) -> Any:
+        while True:
+            item = await self._inner.receive()
+            if not isinstance(item, ValidationError):
+                return item
+            details = item.errors(include_url=False)
+            found = details[0].get("input") if details else None
+            if details and details[0].get("type") == "json_invalid" and isinstance(found, str):
+                self._note_noise()
+                if self.reads_redraws:
+                    message = _message_after_a_redraw(found)
+                    if message is not None:
+                        self.recovered += 1
+                        return message
+                continue
+            if not (isinstance(found, dict) and "jsonrpc" in found):
+                # JSON that does not claim to be a protocol message, such as a
+                # log record a server writes as JSON: log output like any other.
+                self._note_noise()
+                continue
+            self.invalid += 1
+            logger.warning(
+                "MCP server %r wrote a line to stdout that claims to be a protocol message and "
+                "is not a valid one (%s: %s); it was skipped, so an answer it carried is lost.",
+                self._server,
+                type(item).__name__,
+                _where_it_fails(item),
+            )
+
+    def _note_noise(self) -> None:
+        self.noise += 1
+        if self.noise == 1:
+            logger.warning(
+                "MCP server %r wrote a line to stdout that is not a protocol message; such "
+                "lines are skipped and counted, and the count is stated when the connection "
+                "closes. A server's stdout carries protocol messages only: its logs and "
+                "progress output belong on stderr.",
+                self._server,
+            )
+
+    async def aclose(self) -> None:
+        await self._inner.aclose()
+
+
+def served_info(info: Any) -> dict[str, str]:
+    """``{name, version}`` as an MCP server gave them for itself, each only where it gave one."""
+    out: dict[str, str] = {}
+    for key in ("name", "version"):
+        value = getattr(info, key, None)
+        if isinstance(value, str) and value.strip():
+            out[key] = value.strip()
+    return out
+
+
 class MCPLangChainToolkit:
     """Toolkit that connects to an MCP server and exposes its tools to LangChain."""
 
@@ -169,8 +423,15 @@ class MCPLangChainToolkit:
         guard: Any | None = None,
         categories: Mapping[str, str] | None = None,
         keep_tool_definitions: bool = False,
+        label: str = "",
     ):
         self.server_params = server_params
+        # The server's name in what this toolkit logs about it; a stdio
+        # server's command name when none is given.
+        self._label = label
+        # The stdio transport's read stream as the session reads it, which
+        # counts the stdout lines that are not protocol messages.
+        self._stdout_lines: _ProtocolLinesOnly | None = None
         self.transport = (transport or "stdio").lower()
         self.http_url = http_url
         self.http_headers = http_headers or {}
@@ -201,6 +462,10 @@ class MCPLangChainToolkit:
         # nothing. Tool-supplied text: shown to a model only as the server's
         # quoted words (``agents.prompt_fragments.undeclared_server_text``).
         self.server_instructions = ""
+        # The name and version the server gave for itself when it was
+        # initialised (MCP ``serverInfo``), each only where it gave one; read
+        # into the run fingerprint (``analysis.efficiency``).
+        self.server_info: dict[str, str] = {}
         # Each tool's definition exactly as the server listed it (MCP
         # ``Tool``: its input and output schemas, annotations, title and
         # description), kept only when asked. Read by the settings probe
@@ -211,16 +476,28 @@ class MCPLangChainToolkit:
         self.tool_definitions: list[Any] = []
 
     async def initialize(self) -> None:
-        """Initialize the connection to the MCP server and fetch available tools."""
+        """Initialize the connection to the MCP server and fetch available tools.
+
+        Once per connection: a call while the toolkit is connected, or still
+        connecting, is refused before it touches anything, so the setup window
+        of a stdio server's read stream (``_ProtocolLinesOnly.reads_redraws``)
+        can never reopen and the open connection is neither abandoned nor
+        doubled.
+        """
         from contextlib import AsyncExitStack
 
+        if self._exit_stack is not None:
+            raise RuntimeError(
+                f"MCP server {self._server_name()!r} is already connected or connecting; a "
+                "second initialize() is refused. Call cleanup() before connecting again."
+            )
         self._exit_stack = AsyncExitStack()
 
         try:
             if self.transport in ("http", "streamable-http"):
                 from mcp.client.streamable_http import streamablehttp_client
 
-                logger.info("Connecting to MCP server over streamable-http: %s", self.http_url)
+                logger.info("Connecting to MCP server over streamable-http: %s", self._host_label())
                 streams = await self._exit_stack.enter_async_context(
                     streamablehttp_client(self.http_url, headers=self.http_headers)
                 )
@@ -229,28 +506,42 @@ class MCPLangChainToolkit:
             elif self.transport == "sse":
                 from mcp.client.sse import sse_client
 
-                logger.info("Connecting to MCP server over SSE: %s", self.http_url)
+                logger.info("Connecting to MCP server over SSE: %s", self._host_label())
                 read, write = await self._exit_stack.enter_async_context(
                     sse_client(self.http_url, headers=self.http_headers)
                 )
             else:
                 if self.server_params is None:
                     raise ValueError("stdio transport requires server_params (command/args).")
+                from maljan.core.settings_masking import masked_args
+
                 logger.info(
                     "Connecting to MCP server over stdio: %s %s",
                     self.server_params.command,
-                    self.server_params.args,
+                    masked_args(list(self.server_params.args or [])),
                 )
+                # A line of the server's stdout that is not a protocol message
+                # is stated and left out rather than handed to the session, and
+                # the count is stated again when the connection closes.
+                _leave_out_the_per_line_record()
                 read, write = await self._exit_stack.enter_async_context(
                     stdio_client(self.server_params)
                 )
+                self._stdout_lines = _ProtocolLinesOnly(read, self._server_name())
+                read = cast(Any, self._stdout_lines)
             self.session = await self._exit_stack.enter_async_context(ClientSession(read, write))
             initialized = await self.session.initialize()
             served = getattr(initialized, "instructions", None)
             self.server_instructions = served if isinstance(served, str) else ""
+            self.server_info = served_info(getattr(initialized, "serverInfo", None))
 
             # Fetch available tools
             response = await self.session.list_tools()
+            # The setup's answers are in. From here a stray line on the
+            # server's stdout is skipped, never read for a message: a tool's
+            # answer can echo text a sample's author wrote.
+            if self._stdout_lines is not None:
+                self._stdout_lines.reads_redraws = False
             for tool in response.tools:
                 lc_tool = self._create_langchain_tool(tool)
                 self._tools.append(lc_tool)
@@ -280,7 +571,11 @@ class MCPLangChainToolkit:
             # cancel (theirs) are indistinguishable; swallowing the former would
             # break the timeout contract in ``_run_coro_blocking``. The
             # conversion belongs at the loop boundary, which can tell them apart.
-            logger.error("Failed to initialize MCP client (%s): %s", type(e).__name__, e or "—")
+            logger.error(
+                "Failed to initialize MCP client (%s): %s",
+                type(e).__name__,
+                self._said(e) or "—",
+            )
             with suppress(BaseException):
                 await self.cleanup()
             raise
@@ -328,6 +623,106 @@ class MCPLangChainToolkit:
                 logger.warning("MCP cleanup failed (non-fatal): %s", exc)
         except BaseException as exc:  # noqa: BLE001 — teardown must not propagate
             logger.warning("MCP cleanup failed (%s, non-fatal): %s", type(exc).__name__, exc or "—")
+        # After the close, whichever way it went. Lines a server writes once
+        # the session has stopped reading are neither read nor counted.
+        self._state_the_stray_stdout()
+
+    def _host_label(self) -> str:
+        """Where a network server is reached, as a log may name it: scheme, host and port.
+
+        Never the URL whole: its user name and password, its path and its query
+        can each carry a credential. A URL that cannot be read is named by its
+        transport alone.
+        """
+        from urllib.parse import urlsplit
+
+        try:
+            parts = urlsplit(str(self.http_url or ""))
+            host = parts.hostname or ""
+            port = parts.port
+        except ValueError:
+            return self.transport
+        if not host:
+            return self.transport
+        shown = f"[{host}]" if ":" in host else host
+        where = f"{parts.scheme}://{shown}" if parts.scheme else shown
+        return f"{where}:{port}" if port is not None else where
+
+    def _said(self, exc: BaseException) -> str:
+        """What ``exc`` says, with this server's URLs and any credential in a URL masked.
+
+        The message is kept, because it is what tells the model and the operator
+        what went wrong (:meth:`_said_text`).
+        """
+        return self._said_text(str(exc))
+
+    def _said_text(self, text: str) -> str:
+        """``text`` with every URL of this server named by its host label, every other masked.
+
+        Percent-encoding is decoded first, until none is left, so an encoded
+        URL is read as the URL it is, and every control character is then
+        written out (``utils.written_forms.controls_written_out``); a URL quoted
+        in the text ends at its closing quote or bracket. A URL whose host and port are this server's (host case aside, a
+        scheme's default port written or not) is replaced whole, path included,
+        by :meth:`_host_label`: a path can carry a key. Every other URL has its
+        user name and password, query values and fragment masked
+        (``core.settings_masking``). Linear in ``text``.
+        """
+        from maljan.core.settings_masking import masked_text, url_spans
+        from maljan.utils.written_forms import controls_written_out
+
+        # Decoded, then every control character written out: an encoded line
+        # break or escape sequence never reaches the log or the ledger as one.
+        text = controls_written_out(_fully_unquoted(str(text or "")))
+        ours = _host_and_port(str(self.http_url or ""))
+        if ours is None or "://" not in text:
+            return masked_text(text)
+        out: list[str] = []
+        last = 0
+        for begin, whole_end in url_spans(text):
+            end = _quoted_end(text, begin, whole_end)
+            if _host_and_port(text[begin:end]) == ours:
+                out.append(text[last:begin])
+                out.append(self._host_label())
+                last = end
+        out.append(text[last:])
+        return masked_text("".join(out))
+
+    def _server_name(self) -> str:
+        """The server's name in what this toolkit logs: its label, else its command's name.
+
+        A server reached over the network with no label is named by its
+        transport alone: its URL can carry a credential.
+        """
+        command = str(getattr(self.server_params, "command", "") or "")
+        return self._label or os.path.basename(command) or self.transport
+
+    def _state_the_stray_stdout(self) -> None:
+        """One line per server at close: what it wrote to stdout that was not a protocol message."""
+        counted, self._stdout_lines = self._stdout_lines, None
+        if counted is None or not (counted.noise or counted.invalid):
+            return
+        written = []
+        if counted.noise:
+            written.append(f"{counted.noise} line(s) of log or progress output, skipped")
+        if counted.invalid:
+            written.append(
+                f"{counted.invalid} line(s) that claim to be a protocol message and are not "
+                "a valid one, each stated when it came"
+            )
+        delivered = (
+            f"; {counted.recovered} protocol message(s) left after a progress bar's carriage "
+            "return during setup were read out and handed on"
+            if counted.recovered
+            else ""
+        )
+        logger.warning(
+            "MCP server %r wrote to stdout %s%s. A server's stdout carries protocol messages "
+            "only: its logs and progress output belong on stderr.",
+            self._server_name(),
+            " and ".join(written),
+            delivered,
+        )
 
     async def __aenter__(self) -> MCPLangChainToolkit:
         await self.initialize()
@@ -430,12 +825,30 @@ class MCPLangChainToolkit:
         raw_desc = mcp_tool.description or f"Executes {mcp_tool.name} on the MCP server."
         description = self._tag_description(mcp_tool.name, raw_desc)
 
+        # Whether the server marks the tool read-only (MCP ``readOnlyHint``):
+        # an identical call answers the same, so a revision that repeats one
+        # of an earlier round is answered from its entry
+        # (``tool_pinning.answers_again``).
+        from maljan.agents.tool_pinning import READ_ONLY_METADATA_KEY, SERVER_HINTS_METADATA_KEY
+        from maljan.core.declared_reading import hints_of_annotations
+
+        hints = getattr(mcp_tool, "annotations", None)
+        read_only = getattr(hints, "readOnlyHint", None)
+        if read_only is None and isinstance(hints, Mapping):
+            read_only = hints.get("readOnlyHint")
+        metadata: dict[str, Any] = {READ_ONLY_METADATA_KEY: True} if read_only is True else {}
+        # Every MCP hint the server gave, read here at attach time and kept on
+        # each entry of the tool (``core.declared_reading.with_hints``).
+        given = hints_of_annotations(hints)
+        if given:
+            metadata[SERVER_HINTS_METADATA_KEY] = given
         return StructuredTool.from_function(
             func=None,  # Not supporting sync execution since MCP client is async
             coroutine=arun_tool,
             name=mcp_tool.name,
             description=description,
             args_schema=args_schema,
+            metadata=metadata or None,
         )
 
     async def _call(
@@ -464,6 +877,7 @@ class MCPLangChainToolkit:
             )
             long_running = guard is not None and guard.long_running(tool_name)
             request_id = next_request_id(session)
+            note_call_began()
             try:
                 result = await session.call_tool(tool_name, arguments=args, **timing)
             except asyncio.CancelledError:
@@ -491,27 +905,34 @@ class MCPLangChainToolkit:
             if guard is not None:
                 guard.answered()
                 settled = True
+            from maljan.llm.context_window import output_limit
+
+            # One limit for the whole call: the text's guardrail, the structure
+            # beside it and an error's detail are held to the same number.
+            limit = output_limit(self._max_output_chars, self._context_budget)
             if result.isError:
-                return tool_error_marker(
-                    "tool_returned_error",
-                    tool_name,
-                    detail="\n".join(
-                        str(getattr(c, "text", "") or "") for c in result.content or []
-                    ).strip(),
+                detail = "\n".join(
+                    str(getattr(c, "text", "") or "") for c in result.content or []
+                ).strip()
+                # The server's words, with any credential in a URL masked.
+                return await asyncio.to_thread(
+                    lambda: self._held_error(
+                        "tool_returned_error", tool_name, self._said_text(detail), limit
+                    )
                 )
             output = "\n".join(c.text for c in result.content if hasattr(c, "text"))
             # On a thread: shortening a five-megabyte answer is CPU-bound
             # and synchronous, and this is a coroutine serving an agent.
-            from maljan.llm.context_window import output_limit
-
-            # One limit for the whole call: the text's guardrail and the
-            # structure beside it are held to the same number.
-            limit = output_limit(self._max_output_chars, self._context_budget)
             shown = await asyncio.to_thread(self._apply_output_guardrail, output, narrowing, limit)
             # The server's own structured answer, when it gave one and it is no
             # larger than what the model could be shown, rides on the text to
-            # the ledger; the text the model reads is unchanged.
+            # the ledger; the text the model reads is unchanged. It is noted
+            # for the call either way, so an entry that cannot keep it keeps a
+            # reference to it whole (``schemas.evidence_spill``).
             content = getattr(result, "structuredContent", None)
+            from maljan.llm.context_window import note_answer_structure
+
+            note_answer_structure(content)
             if not isinstance(content, dict) or not content or limit <= 0:
                 return shown
             # Parsing the text and sizing the structure are CPU-bound too.
@@ -526,9 +947,18 @@ class MCPLangChainToolkit:
                 else:
                     guard.failed(reason, trial=trial)
                 settled = True
-            logger.warning("MCP tool '%s' raised %s: %s", tool_name, type(exc).__name__, exc)
-            return tool_error_marker(
-                "exception", tool_name, type=type(exc).__name__, detail=str(exc)
+            said = self._said(exc)
+            logger.warning("MCP tool '%s' raised %s: %s", tool_name, type(exc).__name__, said)
+            from maljan.llm.context_window import output_limit
+
+            # On a thread: writing a long message as JSON is CPU-bound.
+            return await asyncio.to_thread(
+                self._held_error,
+                "exception",
+                tool_name,
+                said,
+                output_limit(self._max_output_chars, self._context_budget),
+                type=type(exc).__name__,
             )
         finally:
             if guard is not None and not settled:
@@ -589,8 +1019,9 @@ class MCPLangChainToolkit:
         better of the two: the summariser answers in English prose, and prose
         is exactly what leaves the record with nothing structured in it.
         Everything that is not a JSON object — a decompilation, any plain text
-        — reaches the summariser and then the character cut exactly as it
-        always did, byte for byte.
+        — reaches the summariser and then the character cut, which keeps back
+        the room of the completeness line the recorder appends to a cut answer
+        (``schemas.answer_completeness.cut_line_room``).
 
         ``narrowing`` names this tool's own arguments that reach what a
         shortening leaves out. The recorder appends a sentence naming them to a
@@ -608,13 +1039,20 @@ class MCPLangChainToolkit:
         """
         from maljan.agents.output_shortening import shorten_json_document, shorten_target
         from maljan.agents.tool_fence import cut_length, view_room
-        from maljan.llm.context_window import note_answer_not_shown, output_limit
+        from maljan.llm.context_window import (
+            note_answer_line_room,
+            note_answer_not_shown,
+            note_answer_whole,
+            output_limit,
+        )
+        from maljan.schemas.answer_completeness import cut_line_room, shortened_line_room
 
         chars_in = len(output)
         if limit is None:
             limit = output_limit(self._max_output_chars, self._context_budget)
 
         if limit <= 0:
+            note_answer_whole(output)
             note_answer_not_shown(chars_in)
             said = self._no_room(chars_in)
             self._record_guardrail(chars_in, len(said), over_limit=True, no_room=True, limit=limit)
@@ -628,13 +1066,28 @@ class MCPLangChainToolkit:
             self._record_guardrail(chars_in, chars_in, over_limit=False, limit=limit)
             return output
 
+        # The answer as the tool gave it, for the call's entry to keep whole
+        # when what follows cuts it (``schemas.evidence_spill``).
+        note_answer_whole(output)
         logger.warning(
             "Tool output exceeds limit (%d > %d chars). Applying guardrail.",
             chars_in,
             limit,
         )
 
-        attempt = shorten_json_document(output, shorten_target(limit, narrowing), cap=limit)
+        # The completeness line under a shortened document is kept back from
+        # the shortening's target as its sentence is, so the answer, the
+        # sentence and the line together are inside the limit; the compact
+        # form is still measured against the limit itself.
+        # Kept back only while the shortening still has a target left;
+        # otherwise the line is charged by the recorder.
+        target = shorten_target(limit, narrowing) - shortened_line_room(output, narrowing)
+        line_kept_back = target >= 1
+        if not line_kept_back:
+            target = shorten_target(limit, narrowing)
+        attempt = shorten_json_document(output, target, cap=limit)
+        if attempt.shortened and line_kept_back:
+            note_answer_line_room()
         if attempt.compacted:
             self._record_guardrail(
                 chars_in, len(attempt.text), over_limit=True, compacted=True, limit=limit
@@ -653,7 +1106,13 @@ class MCPLangChainToolkit:
             except Exception as exc:
                 logger.warning("Output guardrail failed: %s — falling back to truncation.", exc)
             else:
-                self._charge_overage(len(summarised) + view_room(summarised), limit)
+                # The completeness line the recorder appends to a cut answer
+                # (``schemas.answer_completeness``) enters the conversation too.
+                self._charge_overage(
+                    len(summarised) + view_room(summarised) + cut_line_room(chars_in, narrowing),
+                    limit,
+                )
+                note_answer_line_room()
                 self._record_guardrail(
                     chars_in, len(summarised), over_limit=True, summarised=True, limit=limit
                 )
@@ -661,8 +1120,19 @@ class MCPLangChainToolkit:
 
         # Fallback: simple truncation with a marker
         # The kept part is text and fenced: the fence and the escapes inside
-        # the kept part, never the whole answer's, are kept back.
-        result = output[: cut_length(output, truncation_target(limit))] + TRUNCATION_MARKER
+        # the kept part, never the whole answer's, are kept back, and so is the
+        # completeness line the recorder appends to it, so the answer and the
+        # line together are inside the limit.
+        # Kept back only while some of the answer still fits beside it; a
+        # limit too small for both keeps the answer's place, as it always
+        # did, and the recorder charges the line instead.
+        room = cut_line_room(chars_in, narrowing)
+        kept = cut_length(output, max(0, truncation_target(limit) - room))
+        if kept > 0:
+            note_answer_line_room()
+        else:
+            kept = cut_length(output, truncation_target(limit))
+        result = output[:kept] + TRUNCATION_MARKER
         self._charge_overage(len(result) + view_room(result), limit)
         self._record_guardrail(
             chars_in,
@@ -673,6 +1143,50 @@ class MCPLangChainToolkit:
             limit=limit,
         )
         return result
+
+    def _held_error(self, kind: str, tool: str, detail: str, limit: int, **fields: str) -> str:
+        """The failure marker for ``detail``, held to the call's output limit like any answer.
+
+        An error's text reaches the model as an answer does, so it is held to
+        the same limit (``_apply_output_guardrail``): the detail keeps its head
+        and its tail with :data:`TRUNCATION_MARKER` between them, so the whole
+        marker fits,
+        and the decision goes on the truncation ledger. The marker's kind and
+        tool are the failure itself and are always kept, so a limit too small
+        for any detail keeps them with none. The marker as the server gave it
+        is noted for the call's entry to keep whole (``note_answer_whole``).
+        Linear in ``detail``; CPU-bound on a large one, so a coroutine runs it
+        on a thread.
+        """
+        import json
+
+        from maljan.llm.context_window import note_answer_whole
+
+        whole = tool_error_marker(kind, tool, **fields, detail=detail)
+        if len(whole) <= limit:
+            self._record_guardrail(len(whole), len(whole), over_limit=False, limit=limit)
+            return whole
+        note_answer_whole(whole)
+        bare = tool_error_marker(kind, tool, **fields, detail="")
+        room = max(0, int(limit) - len(bare) - len(json.dumps(TRUNCATION_MARKER)[1:-1]))
+        # Its head and its tail, the marker between them: what a failure says
+        # first and what it says last (a traceback's own error line) are both
+        # kept. Each part is the longest run whose JSON form fits its half of
+        # the room; every character is written in one or more, so no more than
+        # ``room`` of them is ever read, whatever the detail's length.
+        head = _json_fit(detail[: room // 2], room // 2)
+        left = room - _json_width(detail[:head])
+        rest = detail[head:]
+        tail = _json_fit(rest[-left:][::-1], left) if left > 0 else 0
+        kept_tail = rest[len(rest) - tail :] if tail else ""
+        held = tool_error_marker(
+            kind, tool, **fields, detail=detail[:head] + TRUNCATION_MARKER + kept_tail
+        )
+        self._record_guardrail(
+            len(whole), len(held), over_limit=True, hard_truncated=True, limit=limit
+        )
+        self._charge_overage(len(held), limit)
+        return held
 
     def _charge_overage(self, kept: int, limit: int) -> str:
         """Charge what a result is longer than the cap it was measured against.

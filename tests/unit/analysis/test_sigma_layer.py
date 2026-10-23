@@ -130,6 +130,24 @@ class TestSigmaLayerMetadata:
         assert layer._extract_technique_id(rule) == "T1003.001"
         assert layer._get_confidence(rule) == 0.88  # stable
 
+    def test_a_tactic_tag_is_not_read_as_a_technique(self, tmp_rules_dir: Path) -> None:
+        tagged = VALID_RULE_CONTENT.replace(
+            "    - attack.credential_access\n",
+            "    - attack.ta0006\n    - attack.g0016\n",
+        )
+        _write_rule(tmp_rules_dir, "rule1.yml", tagged)
+        layer = SigmaLayer.from_rules_dir(tmp_rules_dir)
+        rule = layer._collection.rules[0]
+        assert layer._extract_technique_id(rule) == "T1003.001"
+        assert layer.techniques_covered() == {"T1003.001"}
+
+    def test_a_rule_with_only_a_tactic_tag_names_no_technique(self, tmp_rules_dir: Path) -> None:
+        tagged = VALID_RULE_CONTENT.replace("    - attack.t1003.001\n", "    - attack.ta0006\n")
+        _write_rule(tmp_rules_dir, "rule1.yml", tagged)
+        layer = SigmaLayer.from_rules_dir(tmp_rules_dir)
+        assert layer._extract_technique_id(layer._collection.rules[0]) is None
+        assert layer.techniques_covered() == set()
+
 
 # ---------------------------------------------------------------------------
 # scan_events() tests (Structured)
@@ -485,6 +503,19 @@ tags:
     - attack.t1218.011
 """
 
+PIPE_CONDITION_RULE_CONTENT = """\
+title: Brute Force In The Retired Pipe Syntax
+id: 6d1e2f3a-0b4c-4d5e-8f60-718293a4b5c6
+status: test
+logsource:
+    category: process_creation
+    product: windows
+detection:
+    selection:
+        Image|endswith: '\\rundll32.exe'
+    condition: selection | count() > 5
+"""
+
 RUNDLL32_EVENT = {
     "Image": "C:\\Windows\\System32\\rundll32.exe",
     "CommandLine": 'rundll32.exe javascript:"\\..\\mshtml,RunHTMLApplication "',
@@ -518,23 +549,12 @@ class TestAnUnreadableRuleDoesNotSilenceTheCorpus:
     def test_a_rule_that_raises_is_counted_and_the_scan_carries_on(self, tmp_rules_dir):
         """The backstop for a shape nobody has seen yet. One rule raising must
         cost that rule, not the corpus — and must leave a number behind, or the
-        next silent failure looks exactly like a clean sample."""
+        next silent failure looks exactly like a clean sample. The shape here
+        is the one 55 shipped rules take: a condition in the retired pipe
+        syntax, which pySigma refuses when the condition is parsed."""
         _write_rule(tmp_rules_dir, "good.yml", GOOD_RULE_CONTENT)
-        _write_rule(tmp_rules_dir, "other.yml", UNPARSABLE_RULE_CONTENT)
+        _write_rule(tmp_rules_dir, "other.yml", PIPE_CONDITION_RULE_CONTENT)
         layer = SigmaLayer.from_rules_dir(tmp_rules_dir)
-
-        exploding, good = None, None
-        for rule, evaluator in layer._evaluators:
-            if rule.title == "Suspicious Rundll32 Script Execution":
-                good = evaluator
-            else:
-                exploding = evaluator
-        assert good is not None and exploding is not None
-
-        def _raise(event, strict=True):
-            raise RuntimeError("a shape pySigma cannot evaluate")
-
-        exploding.evaluate = _raise
 
         matches = layer.scan_events([RUNDLL32_EVENT], sample_platform="windows")
 

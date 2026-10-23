@@ -412,6 +412,9 @@ class RetryRecorder(BaseCallbackHandler):
         self.ledger = ledger
         self.agent = agent
         self.model = model
+        # The agent's own ceiling on the same model (``llm.agent_ceiling``),
+        # where it sets one: a billed failed attempt counts toward it too.
+        self.ceiling: Any = None
 
     def retried(self, reason: str) -> None:
         """One retry, as a row of the run summary's Provider Retries."""
@@ -424,7 +427,11 @@ class RetryRecorder(BaseCallbackHandler):
         """Charge one failed attempt to the spend ceiling as the provider bills it.
 
         A failure before any piece of the answer arrived (a 5xx, a refused
-        connection) generated nothing and is charged nothing. A failure after
+        connection) generated nothing and is charged nothing, except a request
+        cancelled from outside: whether it was sent before it was cancelled is
+        not detectable here, so it is charged the prompt as a labelled
+        estimate (``CANCELLED_ATTEMPT_ESTIMATE``) that may overstate when it
+        was cancelled before it left. A failure after
         pieces streamed is charged the usage the error carries where it carries
         one, and otherwise a stated estimate: the prompt at
         ``CHARS_PER_TOKEN`` characters a token, priced with the share of the
@@ -448,13 +455,27 @@ class RetryRecorder(BaseCallbackHandler):
             if self._charge_streamed(exc):
                 return
             pieces = int(getattr(exc, PIECES_ATTRIBUTE, 0) or 0)
-            if pieces <= 0:
-                return
             from maljan.core.spend import AT_CACHED_SHARE
-            from maljan.llm.context_window import CHARS_PER_TOKEN
+            from maljan.llm.context_window import tokens_for_chars
+
+            if pieces <= 0:
+                # A request cancelled from outside was sent, and its provider
+                # bills the prompt it read; any other failure before a piece
+                # arrived (a refused connection, a 5xx) read nothing.
+                if _cancelled(exc):
+                    self._charge(
+                        None,
+                        {
+                            "input_tokens": tokens_for_chars(_prompt_chars(prompt)),
+                            "output_tokens": 0,
+                            "source": CANCELLED_ATTEMPT_ESTIMATE,
+                            AT_CACHED_SHARE: True,
+                        },
+                    )
+                return
 
             estimate = {
-                "input_tokens": -(-max(0, _prompt_chars(prompt)) // CHARS_PER_TOKEN),
+                "input_tokens": tokens_for_chars(_prompt_chars(prompt)),
                 "output_tokens": pieces,
                 "source": FAILED_ATTEMPT_ESTIMATE,
                 # A long conversation reads most of its prompt from the cache:
@@ -469,7 +490,7 @@ class RetryRecorder(BaseCallbackHandler):
 
         from maljan.core.spend import OUTPUT_ESTIMATED
         from maljan.core.token_ledger import turn_usage
-        from maljan.llm.context_window import CHARS_PER_TOKEN
+        from maljan.llm.context_window import tokens_for_chars
         from maljan.llm.generation_rate import STREAM_USAGE_ATTRIBUTE
 
         streamed = getattr(exc, STREAM_USAGE_ATTRIBUTE, None)
@@ -488,7 +509,7 @@ class RetryRecorder(BaseCallbackHandler):
             return True
         chars = int(streamed.get("output_chars") or 0)
         pieces = int(getattr(exc, PIECES_ATTRIBUTE, 0) or 0)
-        estimated_output = -(-chars // CHARS_PER_TOKEN) if chars > 0 else pieces
+        estimated_output = tokens_for_chars(chars) if chars > 0 else pieces
         if estimated_output <= 0:
             # Nothing of the answer arrived: the prompt as reported, no output.
             self._charge({**reported, "output_tokens": 0}, None)
@@ -505,6 +526,9 @@ class RetryRecorder(BaseCallbackHandler):
 
     def _charge(self, usage: dict[str, int] | None, estimated: dict[str, Any] | None) -> None:
         """Settle one failed attempt, through the ledger so its record is kept with the calls."""
+        if self.ceiling is not None:
+            with contextlib.suppress(Exception):
+                self.ceiling.note(usage, estimated)
         charge = getattr(self.ledger, "charge_failed_attempt", None)
         if callable(charge):
             charge(
@@ -518,6 +542,21 @@ class RetryRecorder(BaseCallbackHandler):
         settle = getattr(getattr(self.ledger, "spend", None), "settle", None)
         if callable(settle):
             settle(usage, self.model, FAILED_ATTEMPT_CALL, estimated=estimated)
+
+
+# How a cancelled request that streamed nothing is charged: the prompt it sent.
+CANCELLED_ATTEMPT_ESTIMATE = (
+    "estimated: the request was cancelled before any of its answer arrived; "
+    "its prompt may have been billed"
+)
+
+
+def _cancelled(exc: BaseException) -> bool:
+    """Whether ``exc`` is a cancellation from outside the request."""
+    import asyncio
+    from concurrent.futures import CancelledError
+
+    return isinstance(exc, asyncio.CancelledError | CancelledError)
 
 
 # What the spend meter names a failed attempt's charge, and how its estimate
@@ -747,11 +786,6 @@ def retry_on_connection_error_sync(
     raise AssertionError("unreachable")  # pragma: no cover
 
 
-def inside_a_retry() -> bool:
-    """Whether the current call is already being retried by the policy around it."""
-    return _INSIDE.get()
-
-
 _RETRYING_CLASSES: dict[type, type] = {}
 
 
@@ -781,6 +815,67 @@ def _what(model: Any) -> str:
     return f"{label} ({name})" if name else label
 
 
+# How an abandoned answer that reported no usage is charged.
+ABANDONED_ANSWER_ESTIMATE = (
+    "estimated: the answer arrived after its turn had given up on it, and reported no usage"
+)
+
+
+def _answer_chars(answer: Any) -> int:
+    """The characters an answer carries: its text, and the arguments of the tool calls it made.
+
+    A structured request answered by calling its schema's tool leaves the text
+    empty and the answer in the call's arguments.
+    """
+    import json
+
+    from maljan.llm.generation_rate import _content_chars
+
+    total = _content_chars([answer])
+    for call in list(getattr(answer, "tool_calls", None) or []):
+        args = call.get("args") if isinstance(call, dict) else getattr(call, "args", None)
+        if args:
+            total += len(json.dumps(args, ensure_ascii=False, default=str))
+    for call in list(getattr(answer, "invalid_tool_calls", None) or []):
+        sent = call.get("args") if isinstance(call, dict) else None
+        if isinstance(sent, str):
+            total += len(sent)
+    return total
+
+
+def charge_abandoned(model: Any, answer: Any, prompt: Any) -> None:
+    """Charge an answer ``model`` billed that nobody received. Never raises.
+
+    A blocking request cannot be cancelled: one its turn gave up on runs to
+    its end, and the provider bills it. Charged to the spend ceiling as a
+    failed attempt of ``model``: the usage the answer reported, and where it
+    reported none, its prompt and its text at ``CHARS_PER_TOKEN`` characters
+    a token, stated as estimated.
+    """
+    recorder = recorder_of(model)
+    if recorder is None:
+        return
+    with contextlib.suppress(Exception):
+        from maljan.core.token_ledger import turn_usage
+
+        usage = turn_usage(answer)
+        if usage is not None:
+            recorder._charge(usage, None)
+            return
+        from maljan.core.spend import AT_CACHED_SHARE
+        from maljan.llm.context_window import tokens_for_chars
+
+        recorder._charge(
+            None,
+            {
+                "input_tokens": tokens_for_chars(_prompt_chars(prompt)),
+                "output_tokens": tokens_for_chars(_answer_chars(answer)),
+                "source": ABANDONED_ANSWER_ESTIMATE,
+                AT_CACHED_SHARE: True,
+            },
+        )
+
+
 def _failed_once(model: Any, exc: BaseException, prompt: Any) -> None:
     """One failed request of ``model``: charged as billed, and named to a policy around it."""
     recorder = recorder_of(model)
@@ -799,7 +894,9 @@ def with_transient_retries(chat_class: Any) -> Any:
     loop through the bound model, a structured-output chain, a model list
     asking one of its models — so the retry sits there and a whole request is
     made again, never a part of one. A call made inside the policy already is
-    made once. Every failed request is charged as the provider bills it.
+    made once. Every failed request is charged as the provider bills it, one
+    cancelled from outside (a fallback's turn deadline, the spend cap, the
+    operator's cancel) included: the pieces it streamed are on its error.
     Anything that is not a class is returned as it is.
     """
     if not isinstance(chat_class, type):
@@ -813,7 +910,7 @@ def with_transient_retries(chat_class: Any) -> Any:
         async def _once() -> Any:
             try:
                 return await base.ainvoke(self, input, config, **kwargs)
-            except Exception as exc:
+            except BaseException as exc:  # a call cancelled from outside was billed too
                 _failed_once(self, exc, input)
                 raise
 
@@ -825,7 +922,7 @@ def with_transient_retries(chat_class: Any) -> Any:
         def _once() -> Any:
             try:
                 return base.invoke(self, input, config, **kwargs)
-            except Exception as exc:
+            except BaseException as exc:  # an interrupted call was billed too
                 _failed_once(self, exc, input)
                 raise
 

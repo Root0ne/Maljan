@@ -186,9 +186,20 @@ stated in the answer: a key below 0x40 over letters leaves them printable,
 plain text under such a key "decodes" just as readily, and nothing in the bytes
 says which is the writing, so such a string whose encoded bytes are printable is
 not decoded here.
-A span one scheme reads under two keys is dropped (`ambiguous_spans`), and of
-two decodings of overlapping bytes the one a header placed, else the longer, is
-kept. `results` holds the decodings some code or data refers to — a scan for
+Where a key turns the encoded NUL after a text into its terminator, the
+readings of other keys of the same scheme that read that byte as one more
+character are set aside when the terminated reading reads better than each of
+them (a tab, LF or CR as that character: no more changes of character class and
+no fewer letters or digits; any other but the space: better on both; the space:
+never); the other sweep's such reading, not ending in white space and worse on
+both, is stated under the row's `also_read_as` instead; a header found inside a
+terminated text is set aside too; the strings affected are counted
+(`outranked_spans`). A span one scheme then reads under two keys is dropped
+(`ambiguous_spans`), and of two decodings of overlapping bytes the one a header
+placed, else the longer, is kept; where both sweeps' terminated readings stand
+on the same bytes, the row is the one the earlier rules answered, else the span
+is ambiguous (a decoder that recovered a reading under `also_read_as` is said
+under `floss_matches_the_alternative`, never as confirming the row). `results` holds the decodings some code or data refers to — a scan for
 RIP-relative displacements in x64 code and absolute virtual addresses anywhere
 that land on the blob or its text — or that FLOSS recovered too in this
 process (`floss`, with FLOSS's routine and call site; FLOSS's kept result is

@@ -24,15 +24,35 @@ export class ApiError extends Error {
   constructor(
     message: string,
     readonly status: number,
+    /** How long the server asked the client to wait (`Retry-After`), when it did. */
+    readonly retryAfterMs: number | null = null,
   ) {
     super(message);
     this.name = "ApiError";
   }
 }
 
+/**
+ * A `Retry-After` header in milliseconds: delay-seconds or an HTTP date.
+ * `null` when absent or unreadable.
+ */
+export function parseRetryAfter(value: string | null | undefined, now: number = Date.now()): number | null {
+  const text = (value ?? "").trim();
+  if (!text) return null;
+  if (/^\d+$/.test(text)) return Number(text) * 1000;
+  const at = Date.parse(text);
+  return Number.isNaN(at) ? null : Math.max(0, at - now);
+}
+
 /** A response the API answered with, for `status` — not a transport failure. */
 export function isApiStatus(e: unknown, status: number): boolean {
   return e instanceof ApiError && e.status === status;
+}
+
+/** The API answered 403: the account lacks the role, as opposed to any
+ *  failure whose text happens to mention "admin" or "403". */
+export function isForbidden(e: unknown): boolean {
+  return isApiStatus(e, 403);
 }
 
 /**
@@ -52,4 +72,26 @@ export function getErrorMessage(e: unknown): string {
     if (typeof maybe === "string") return maybe;
   }
   return "Unknown error";
+}
+
+/**
+ * The readable text of an API error body's `detail`. FastAPI answers a failed
+ * validation (422) with a list of `{loc, msg}` objects, which `||` chaining
+ * turned into "[object Object]"; those are joined as `loc: msg`.
+ */
+export function detailMessage(body: unknown, fallback: string): string {
+  const detail = (body as { detail?: unknown } | null | undefined)?.detail;
+  if (typeof detail === "string" && detail) return detail;
+  if (Array.isArray(detail) && detail.length > 0) {
+    const parts = detail.map((item) => {
+      if (typeof item === "string") return item;
+      const rec = (item ?? {}) as { loc?: unknown; msg?: unknown };
+      const msg = typeof rec.msg === "string" ? rec.msg : JSON.stringify(item);
+      const loc = Array.isArray(rec.loc) ? rec.loc.join(".") : "";
+      return loc ? `${loc}: ${msg}` : msg;
+    });
+    return parts.join("; ");
+  }
+  if (detail && typeof detail === "object") return JSON.stringify(detail);
+  return fallback;
 }

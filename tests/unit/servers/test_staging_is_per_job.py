@@ -1261,6 +1261,7 @@ class TestTheSidecarThatStagesNothingIsUnaffected:
         from maljan.providers.servers import ServerHandle
 
         monkeypatch.setenv("MALJAN_INDEX_RETRY_SECONDS", "900")
+        monkeypatch.setenv("MALJAN_ATTCK_REFRESH_DAYS", "0")
         handle = ServerHandle("knowledge", Settings(_env_file=None).mcp.servers["knowledge"])
         handle._job_id = "job-x"
         env = child_env(handle.config.env, allow=tuple(handle.config.env_allow))
@@ -1268,6 +1269,7 @@ class TestTheSidecarThatStagesNothingIsUnaffected:
         handle._name_the_job_staging(env)
 
         assert env["MALJAN_INDEX_RETRY_SECONDS"] == "900"
+        assert env["MALJAN_ATTCK_REFRESH_DAYS"] == "0"
         assert staging.STAGING_JOB_ENV not in env
 
 

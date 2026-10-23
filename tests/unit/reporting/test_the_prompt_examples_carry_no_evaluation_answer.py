@@ -28,6 +28,13 @@ from typing import Any
 import pytest
 
 from maljan.agents.base_agent import (
+    _REVISION_ISR_FORMAT_WITHOUT_TECHNIQUES,
+    _TIER_SPECS_WITHOUT_TECHNIQUES,
+    _VIEW_SYSTEM_WITHOUT_TECHNIQUES,
+    ARGUMENTS_HELD,
+    EARLIER_CALLS_BY_TOOL,
+    EARLIER_CALLS_NOT_LISTED,
+    EARLIER_CHUNKS_COMPACT_HEAD,
     FINAL_ANSWER_NUDGE,
     INPUT_SHORTENED_NOTICE,
     SPEND_CEILING_QUESTION,
@@ -36,13 +43,18 @@ from maljan.agents.base_agent import (
     claims_unread_sentence,
     earlier_chunks_block,
 )
+from maljan.agents.configurable_analyst import _ISR_FORMAT_INSTRUCTION_WITHOUT_TECHNIQUES
 from maljan.agents.delegation import (
     SPEND_CEILING_REFUSAL,
     WAITING_ON_EACH_OTHER_REFUSAL,
     _what_an_ask_gets_sentence,
 )
 from maljan.agents.dynamic_analyst import sandbox_server_label
-from maljan.agents.evidence_recorder import earlier_chunk_answer, same_function_notice
+from maljan.agents.evidence_recorder import (
+    EARLIER_ROUND,
+    earlier_chunk_answer,
+    same_function_notice,
+)
 from maljan.agents.judge_agent import (
     COMPACT_BUNDLE_RULES,
     CONTRADICTION_DEFINITION,
@@ -68,13 +80,13 @@ from maljan.agents.judge_agent import (
 from maljan.agents.judge_agent import QUESTION_ROOTS_LABEL as _ROOTS_LABEL
 from maljan.agents.network_analyst import (
     NO_PACKET_TOOL_LINE,
-    OTHER_TOOLS_THEN_ANALYZE,
     UNDECLARED_TOOLS_LINE,
     _flows_label,
     primary_evidence_line,
 )
 from maljan.agents.prompt_fragments import (
     CLAIM_FORMAT_FRAGMENT,
+    CLAIM_FORMAT_WITHOUT_TECHNIQUE_FRAGMENT,
     ENDPOINTS_ROW_SHAPE,
     NO_TOOLS_STATEMENT,
     TOOL_FREE_TURN_STATEMENT,
@@ -113,7 +125,9 @@ from maljan.analysis.evidence_roots import roots_phrase as _roots_phrase
 from maljan.analysis.function_summarizer import SHORTENED_NOTE as SUMMARISER_SHORTENED_NOTE
 from maljan.analysis.function_summarizer import SUMMARY_CUT_NOTE, SUMMARY_FENCE_STATEMENT
 from maljan.analysis.pcap_summary import CaptureRead
+from maljan.analysis.run_summary import unknown_window_split_sentence
 from maljan.core.config import SampleOpenConfig
+from maljan.core.container import unknown_window_split_line
 from maljan.core.pack_steps import CALLED_API_CATALOGUE, shipped_label
 from maljan.core.reputation import read_answer
 from maljan.extractors.capability_matrix import (
@@ -122,8 +136,9 @@ from maljan.extractors.capability_matrix import (
     not_asked_unknown_id,
     unknown_id_reason,
 )
-from maljan.llm.context_window import no_room_sentence
+from maljan.llm.context_window import no_room_sentence, unknown_window_remedy
 from maljan.llm.tool_replies import NO_REPLY_RECORDED, NOT_RUN_REPLY
+from maljan.loaders.binary_chunker import ChunkStrategy, TextChunk
 from maljan.memory.technique_cards import card_lines, load_cards
 from maljan.pipeline import function_claims, nodes, triage_pack
 from maljan.pipeline.debate_facts import (
@@ -131,8 +146,10 @@ from maljan.pipeline.debate_facts import (
     BLOCK_NOT_READ_NOTE,
     analysts_field_unknown_note,
     ledger_count_facts,
+    ledger_stated_sentence,
     place_facts,
     with_ledger_facts,
+    with_ledger_stated,
     with_place_facts,
 )
 from maljan.pipeline.evidence_summary import summarise
@@ -157,8 +174,11 @@ from maljan.pipeline.run_state import LOOKUP_UNREAD, NO_LIMIT, SHA256_GIVEN, bud
 from maljan.pipeline.sycophancy_detector import convergence_sentence
 from maljan.pipeline.validation import (
     _UNPARSED_ANSWER_MESSAGE,
+    _UNPARSED_ANSWER_MESSAGE_WITHOUT_TECHNIQUES,
     ANALYST_FEEDBACK_CLOSING,
     ANALYST_FEEDBACK_CLOSING_BY_NUMBER,
+    ANALYST_FEEDBACK_CLOSING_BY_NUMBER_WITHOUT_TECHNIQUES,
+    ANALYST_FEEDBACK_CLOSING_WITHOUT_TECHNIQUES,
     FUNCTION_CHECK_HEAD,
     FUNCTION_CHECK_NOT_ASKED_HEAD,
     ITEM_NOT_IN_RUN,
@@ -185,6 +205,7 @@ from maljan.pipeline.validation import (
     flow_voice_violations,
     gate_removed_note,
     kept_after_the_sandbox_fact,
+    ledger_absence_contradictions,
     library_only_claims_violation,
     malware_object_violations,
     misstated_entry_contents,
@@ -213,11 +234,13 @@ from maljan.providers.base import (
 )
 from maljan.providers.sandbox.cape2 import CAPE2SandboxProvider
 from maljan.providers.sandbox.mock import MockSandboxProvider
+from maljan.providers.static import capa_child as _capa_child
 from maljan.providers.static import r2 as _r2
 from maljan.providers.static.ghidra import (
     GHIDRA_GUIDANCE,
     GHIDRA_WORKFLOW,
     ghidra_not_answering,
+    ghidra_resting,
     sample_not_opened,
 )
 from maljan.providers.static.ghidra.http_client import no_program_as_error
@@ -300,6 +323,7 @@ from maljan.schemas.isr_models import (
 from maljan.schemas.sandbox_report import SECTION_IDS
 from maljan.schemas.stix_models import Bundle
 from maljan.tools import api_hashes, artefact_index, binary, knowledge, string_blobs
+from maljan.tools import rules as _capa_rules
 from maljan.tools.errors import CAPTURES_REMEDIATION, NO_CAPTURE_REMEDIATION
 
 # Every no: sentence a root reading writes, and the names of the roots.
@@ -961,7 +985,6 @@ def _transform_sentences() -> str:
             transforms.CAPABILITY_FACTS,
             transforms.REMEDIATION,
             transforms._cap_sentence(),
-            transforms._scan_stopped_sentence(9),
             transforms._left_out_sentence(3, 6000),
             transforms._stopped(2, 4, "the output reached the platform's sample upload cap"),
             transforms._stopped(
@@ -978,7 +1001,6 @@ def _transform_sentences() -> str:
                             "shown",
                             "utf16le_note",
                             "indicators_left_out",
-                            "indicator_scan_stopped",
                         )
                     }
                 )
@@ -1016,6 +1038,9 @@ def _upx_sentences() -> str:
         for name, blob in files.items():
             (Path(folder) / name).write_bytes(blob)
             answers.append(upx.unpack_upx(str(Path(folder) / name), Path(folder)))
+        # The temporary folder's random name is not a sentence the module
+        # writes; it could spell a scored term by chance.
+        answers = [json.loads(json.dumps(a).replace(folder, "/work")) for a in answers]
     entries = [
         LedgerEntry(id=f"ev_000{i}", tool=upx.TOOL, structured=a, ok="error" not in a)
         for i, a in enumerate(answers, 1)
@@ -1292,6 +1317,13 @@ def _every_message(found: list[Any]) -> str:
     missing = [index for index, violation in enumerate(found) if violation is None]
     assert not missing, f"the questions at {missing} were not asked of their synthetic claims"
     return " ".join(violation.message for violation in found)
+
+
+class _SplitRows:
+    """A run summary's bounds holding only the unknown-window split rows."""
+
+    def __init__(self, rows: list[dict[str, Any]]) -> None:
+        self.input_split_unknown_window = rows
 
 
 PROMPTS: dict[str, str] = {
@@ -1728,6 +1760,46 @@ PROMPTS: dict[str, str] = {
     "an analyst input shortened to its window": INPUT_SHORTENED_NOTICE.format(
         detail="the first 1,000 of 9,000 characters are shown, ending in …"
     ),
+    "a chunk header whose total may still grow": TextChunk(
+        index=2,
+        total=5,
+        strategy=ChunkStrategy.SLIDING_WINDOW,
+        content="",
+        char_count=0,
+        token_estimate=6_400,
+        domain="network",
+    ).to_prompt_header(more_may_follow=True),
+    "a call's arguments no list could hold": ARGUMENTS_HELD.format(chars=48_000, entry="ev_0031"),
+    "a later chunk's earlier calls counted by tool": EARLIER_CALLS_BY_TOOL.format(
+        count=38,
+        tools="decompile_function \u00d734, list_strings \u00d74",
+        first="ev_0012",
+        last="ev_0049",
+    ),
+    "a later chunk's earlier calls in their compact form, or counted": " ".join(
+        [
+            EARLIER_CHUNKS_COMPACT_HEAD,
+            EARLIER_CALLS_NOT_LISTED.format(count=7, first="ev_0001", last="ev_0007"),
+            '- decompile_function("0x3c7c") \u2192 ev_0001\u2013ev_0003, ev_0006 (failed)',
+        ]
+    ),
+    "an analyst input split at the shipped size with no window learned": " ".join(
+        [
+            unknown_window_split_line("network", 3, 80_000, unknown_window_remedy()),
+            unknown_window_split_sentence(
+                _SplitRows(
+                    [
+                        {
+                            "agent": "network",
+                            "chunks": 3,
+                            "chunk_chars": 80_000,
+                            "remedy": unknown_window_remedy(),
+                        }
+                    ]
+                )
+            ),
+        ]
+    ),
     "the summariser's fence statement": SUMMARY_FENCE_STATEMENT,
     "a summariser prompt shortened to its window": SUMMARISER_SHORTENED_NOTE.format(
         shown=1000, total=9000
@@ -1973,6 +2045,26 @@ PROMPTS: dict[str, str] = {
             binary.apk_unread_note(["package", "permissions"], binary.MANIFEST_UNPARSED),
         ]
     ),
+    "the OOXML tool's reasons for a relationship part it did not read": " ".join(
+        [
+            binary.RELATIONSHIP_PART_DOCUMENT_TYPE,
+            binary.RELATIONSHIP_PART_EXTERNAL_ENTITY,
+            binary.RELATIONSHIP_PART_NOT_XML.format(error="syntax error", line=1),
+            binary.RELATIONSHIP_MEMBER_UNREAD.format(error="BadZipFile: Bad CRC-32"),
+            binary.RELATIONSHIP_PART_OVER_CAP.format(size=2, left=1, cap=1),
+            binary.RELATIONSHIP_PART_PAST_CAP.format(left=1, cap=1),
+            binary.RELATIONSHIP_PART_AFTER_CAP.format(cap=1),
+        ]
+    ),
+    "the capa answer's reasons for library functions it did not look for": " ".join(
+        [
+            _capa_child.LIBRARY_FUNCTIONS_NO_DIRECTORY,
+            _capa_child.LIBRARY_FUNCTIONS_NOT_FOR_FORMAT,
+            _capa_child.LIBRARY_FUNCTIONS_NO_FILES,
+            _capa_child.LIBRARY_FUNCTIONS_UNSTATED,
+            _capa_rules.LIBRARY_FUNCTION_NOT_IN_IMAGE,
+        ]
+    ),
     "the stated candidate scan and readability test": (
         f"{api_hashes.SCAN_HEURISTIC} {string_blobs.READABLE_TEST}"
     ),
@@ -2069,6 +2161,20 @@ PROMPTS: dict[str, str] = {
     ),
     "a later chunk's answer from an earlier chunk's recorded result": earlier_chunk_answer(
         "a", "ev_0001", "a recorded result"
+    ),
+    "a revision's answer from an earlier round's recorded result": earlier_chunk_answer(
+        "a", "ev_0001", "a recorded result", origin=EARLIER_ROUND
+    ),
+    "blocking lines the ledger states, told before, shown to the next mediation": (
+        with_ledger_stated(
+            "",
+            [
+                ledger_stated_sentence(
+                    "[analysts: A] A claim 2 reports 0 hits of 9 rules [ev_0001]. [blocking: x]",
+                    ("entry ev_0001 (scan) states matches = 0 items, rule_count = 9",),
+                )
+            ],
+        )
     ),
     "a decompile answered with a function an earlier entry holds": same_function_notice(
         "FUN_00401000", "ev_0001"
@@ -2170,6 +2276,12 @@ PROMPTS: dict[str, str] = {
     "a Ghidra that gave no answer to the load, as an ask's caller reads it": str(
         ghidra_not_answering("http://localhost:8089", "HTTP 401")
     ),
+    "a Ghidra the guard rested after the load, noted, as an ask's caller reads it": str(
+        ghidra_resting("tool server 'ghidra' is resting", "a.bin")
+    ),
+    "a Ghidra the guard rested after the load, not noted, as an ask's caller reads it": str(
+        ghidra_resting("tool server 'ghidra' is resting", None)
+    ),
     "a Ghidra answer with no program current": no_program_as_error(
         "No program loaded.", "get_function_count"
     ),
@@ -2189,9 +2301,7 @@ PROMPTS: dict[str, str] = {
             ),
         ]
     ),
-    "network packet-tool lines": (
-        f"{NO_PACKET_TOOL_LINE} {OTHER_TOOLS_THEN_ANALYZE} {UNDECLARED_TOOLS_LINE}"
-    ),
+    "network packet-tool lines": (f"{NO_PACKET_TOOL_LINE} {UNDECLARED_TOOLS_LINE}"),
     "a server that declares no workflow, in its own quoted words": undeclared_server_text(
         "custom", "Served words.", [_StampedTool("decompile_function", "custom")]
     ),
@@ -2221,6 +2331,38 @@ PROMPTS: dict[str, str] = {
             EntryTexts(
                 texts={"ev_0001": '{"summary": "a\\nb", "packets_read": 3}'},
                 tools={"ev_0001": "pcap_summary"},
+            ),
+        )
+    ),
+    "question for a sentence saying the ledger lacks what an entry holds": " ".join(
+        v.message
+        for v in ledger_absence_contradictions(
+            {
+                "body": "Routine 0x1400, which is not read, calls 0x1800. "
+                "Its callers are not in the ledger. The names (OpenThing, CloseThing) "
+                "are not confirmed by the parser output [ev_0003]."
+            },
+            EntryTexts.from_ledger(
+                [
+                    build_entry(
+                        entry_id="ev_0001",
+                        seq=1,
+                        agent="a",
+                        server="a",
+                        tool="decompile_function",
+                        args={"address": "0x1400"},
+                        output="undefined8 FUN_00001400(void)\n{ FUN_00001800(); }",
+                    ),
+                    build_entry(
+                        entry_id="ev_0003",
+                        seq=3,
+                        agent="a",
+                        server="a",
+                        tool="pe_info",
+                        args={},
+                        output='{"imports": ["OpenThing", "CloseThing"]}',
+                    ),
+                ]
             ),
         )
     ),
@@ -2274,6 +2416,30 @@ PROMPTS: dict[str, str] = {
     ).message,
     "the claim format the analysts are given and the unparsed-answer question": " ".join(
         [CLAIM_FORMAT_FRAGMENT, _UNPARSED_ANSWER_MESSAGE]
+    ),
+    "the claim format an agent with the technique line turned off is given": " ".join(
+        [
+            CLAIM_FORMAT_WITHOUT_TECHNIQUE_FRAGMENT,
+            _ISR_FORMAT_INSTRUCTION_WITHOUT_TECHNIQUES,
+            _REVISION_ISR_FORMAT_WITHOUT_TECHNIQUES,
+            _VIEW_SYSTEM_WITHOUT_TECHNIQUES,
+            _TIER_SPECS_WITHOUT_TECHNIQUES[0][1],
+            _TIER_SPECS_WITHOUT_TECHNIQUES[2][1],
+        ]
+    ),
+    "the validation questions to an agent with the technique line turned off": " ".join(
+        [
+            ANALYST_FEEDBACK_CLOSING_WITHOUT_TECHNIQUES,
+            ANALYST_FEEDBACK_CLOSING_BY_NUMBER_WITHOUT_TECHNIQUES,
+            _UNPARSED_ANSWER_MESSAGE_WITHOUT_TECHNIQUES,
+            whole_answer_after_retry_question("the retry wrote claim 2 twice", techniques=False),
+            analyst_cut_violation(4096, "", techniques=False).message,
+            analyst_repeated_violation(
+                ClaimsRepeated(begun=15, distinct=3, margin=3, chars=900, first_repeat=4),
+                cut=4096,
+                techniques=False,
+            ).message,
+        ]
     ),
     "the question and the reason for claim headings under DISPUTES": (
         f"{claims_under_disputes_violation(2).message} "

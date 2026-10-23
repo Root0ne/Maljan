@@ -31,6 +31,7 @@ from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
 from pydantic import BaseModel, ConfigDict, Field
 
 from maljan.agents.base_agent import retry_on_connection_error
+from maljan.agents.tool_fence import QUOTED_VALUE_STATEMENT, quoted_value
 from maljan.analysis.sandbox_sections import ItemIndex
 from maljan.core.config import REPORTER_AGENT_KEY
 from maljan.core.logger import logger
@@ -43,7 +44,8 @@ from maljan.core.spend import (
     spend_preview,
     spend_release,
 )
-from maljan.core.token_ledger import structured_answer
+from maljan.core.token_ledger import read_structured_reply, say_structured_reply
+from maljan.llm.answer_text import structured_answer_text
 from maljan.llm.registry import structured_output_supported_for_llm
 from maljan.pipeline.validation import (
     KEPT_WITH_A_FINDING,
@@ -53,6 +55,7 @@ from maljan.pipeline.validation import (
     Violation,
     citation_violations,
     key_finding_citation_violations,
+    ledger_absence_contradictions,
     misstated_entry_contents,
     narrative_capability_violations,
     pack_line_ids,
@@ -62,6 +65,7 @@ from maljan.pipeline.validation import (
     retry_with_feedback,
     schema_violations,
     technique_name_violations,
+    with_calls_said,
     wrong_entry_citations,
 )
 from maljan.reporting import tool_kinds
@@ -72,7 +76,6 @@ from maljan.reporting.models import (
     confidence_text,
 )
 from maljan.utils.json_cleaner import safe_parse_json
-from maljan.utils.written_forms import pack_escaped
 
 # ---------------------------------------------------------------------------
 # Structured output schema
@@ -206,7 +209,7 @@ _SYSTEM_PROMPT_TEMPLATE = (
     "1. DO NOT invent capabilities, families, or TTPs. Only describe what the "
     "deterministic evidence below supports. A sandbox answer with nothing in it is "
     "not an execution: describe sandbox behaviour, seen or absent, only where a "
-    "sandbox entry above records some.\n"
+    "sandbox entry above records some. " + QUOTED_VALUE_STATEMENT + "\n"
     "2. Every MITRE ATT&CK technique you cite must appear in parentheses with "
     "its ID, e.g. 'inhibit system recovery (T1490)'.\n"
     "3. executive_summary: one paragraph of at least 120 characters, no headings. This "
@@ -327,7 +330,7 @@ def _narrative_payload(answer: Any) -> dict[str, Any] | None:
     ``schema_violations`` reports as its own violation rather than treating as
     an empty answer.
     """
-    text = _message_text(answer)
+    text = structured_answer_text(answer, _message_text)
     payload = _parse_keeping_duplicate_keys(text) or safe_parse_json(text)
     if not isinstance(payload, dict):
         return None
@@ -369,10 +372,16 @@ def claims_in_force_lines(isr_reports: Any) -> list[str]:
         return []
     lines = [CLAIMS_IN_FORCE_HEADING]
     for claim in claims:
-        evidence = f" — {claim.evidence_ref}" if claim.evidence_ref.strip() else ""
-        lines.append(f"  - [{claim.label}] {claim.claim}{evidence}")
+        # Another model's words, which may carry the sample's text: each
+        # quoted and escaped, one value on one line.
+        evidence = f" — {quoted_value(claim.evidence_ref)}" if claim.evidence_ref.strip() else ""
+        lines.append(f"  - [{claim.label}] {quoted_value(claim.claim)}{evidence}")
     lines.append("")
     return lines
+
+
+# Said under a list a sandbox fills when this run has no sandbox observation.
+NO_SANDBOX_OBSERVATION = "not observed: this run has no sandbox observation"
 
 
 def build_prompt_text(report: MalwareReport, isr_reports: Any = None) -> str:
@@ -384,6 +393,25 @@ def build_prompt_text(report: MalwareReport, isr_reports: Any = None) -> str:
     label, so the summary and the key findings are written over every claim
     the run holds.
     """
+    lines = findings_lines(report, isr_reports)
+    lines.extend(
+        [
+            "TASK",
+            "----",
+            "Write the three narrative fields described in the system prompt. "
+            "Return ONLY the JSON object shown there, with those keys.",
+        ]
+    )
+    return "\n".join(lines)
+
+
+def findings_lines(report: MalwareReport, isr_reports: Any = None) -> list[str]:
+    """The prompt body's lines before its task: what the run established, each fact whole.
+
+    The narrative round's (:func:`build_prompt_text`) and the question
+    round's (``reporting.question_round``), so both are written over the
+    same facts.
+    """
     lines: list[str] = [
         "DETERMINISTIC FINDINGS",
         "----------------------",
@@ -394,9 +422,13 @@ def build_prompt_text(report: MalwareReport, isr_reports: Any = None) -> str:
             else f"Overall confidence: {report.overall_confidence:.2f}"
         ),
         (f"Severity: {report.severity.rating}" if report.severity else "Severity: not assessed"),
-        f"Malware category: {report.malware_category or 'unknown'}",
+        # The category is a model's word: quoted as any value from outside.
+        "Malware category: "
+        + (quoted_value(report.malware_category) if report.malware_category else "unknown"),
         (
-            f"Attribution family: {report.attribution.family or 'unknown'} "
+            "Attribution family: "
+            + (quoted_value(report.attribution.family) if report.attribution.family else "unknown")
+            + " "
             + (
                 "(confidence not assessed)"
                 if report.attribution.family_confidence is None
@@ -421,7 +453,8 @@ def build_prompt_text(report: MalwareReport, isr_reports: Any = None) -> str:
 
         rule_only = rule_match_only(report)
         for mapping in report.ttp_mappings:
-            quote = " | ".join(q for q in mapping.evidence_quotes if q)
+            # Each quote is the evidence's own text: quoted and escaped.
+            quote = " | ".join(quoted_value(q) for q in mapping.evidence_quotes if q)
             layers = ",".join(mapping.contributing_layers) or "-"
             # The layers that said something of their own: copies count once.
             independent = (
@@ -451,7 +484,11 @@ def build_prompt_text(report: MalwareReport, isr_reports: Any = None) -> str:
     if report.dynamic and report.dynamic.sandbox_signatures:
         for sig in report.dynamic.sandbox_signatures:
             ttps = ",".join(sig.technique_ids) or "-"
-            lines.append(f"  - {sig.name} (severity {sig.severity}, ATT&CK={ttps})")
+            severity = "unknown" if sig.severity is None else sig.severity
+            lines.append(f"  - {quoted_value(sig.name)} (severity {severity}, ATT&CK={ttps})")
+    elif report.dynamic is None:
+        # No sandbox observation: nothing was watched, so nothing is absent.
+        lines.append(f"  ({NO_SANDBOX_OBSERVATION})")
     else:
         lines.append("  (none)")
     lines.append("")
@@ -464,7 +501,8 @@ def build_prompt_text(report: MalwareReport, isr_reports: Any = None) -> str:
             cited = ", ".join(report.static.api_capabilities_evidence_ids)
             lines.append(
                 "  "
-                + ", ".join(f"{cat} x{count}" for cat, count in ordered)
+                # A category name is the knowledge tool's text: quoted.
+                + ", ".join(f"{quoted_value(str(cat))} x{count}" for cat, count in ordered)
                 + (f" [{cited}]" if cited else "")
             )
         else:
@@ -483,23 +521,27 @@ def build_prompt_text(report: MalwareReport, isr_reports: Any = None) -> str:
             cited_resolved = ", ".join(report.static.api_capabilities_resolved_evidence_ids)
             lines.append(
                 f"  Names {RESOLVED_AT_RUNTIME}, not imports: "
-                + ", ".join(f"{cat} x{count}" for cat, count in ordered_resolved)
+                + ", ".join(f"{quoted_value(str(cat))} x{count}" for cat, count in ordered_resolved)
                 + (f" [{cited_resolved}]" if cited_resolved else "")
             )
         for hit in rule_hits:
             at_runtime = [str(a) for a in (hit.get("resolved_apis") or [])]
+            # An API name is the sample's import or resolved name: quoted.
             apis = ", ".join(
-                f"{a} ({RESOLVED_AT_RUNTIME})" if str(a) in at_runtime else str(a)
+                f"{quoted_value(str(a))} ({RESOLVED_AT_RUNTIME})"
+                if str(a) in at_runtime
+                else quoted_value(str(a))
                 for a in (hit.get("matched_apis") or [])
             )
             cite = f" [{hit['evidence_id']}]" if hit.get("evidence_id") else ""
             # The rule's own label, because a row is a rule: two rules for one
             # technique carry the catalogue's name twice and rendered as two
             # lines the model could only read as a duplicate.
-            rule = f" ({hit['rule']})" if hit.get("rule") else ""
-            lines.append(
-                f"  - {hit.get('technique_id', '?')} {hit.get('name', '')}{rule}: {apis}{cite}"
-            )
+            # The rule's label and the technique's name are the tool's text:
+            # quoted. The id is shape-checked where the hit is read.
+            rule = f" ({quoted_value(str(hit['rule']))})" if hit.get("rule") else ""
+            name = f" {quoted_value(str(hit['name']))}" if hit.get("name") else " "
+            lines.append(f"  - {hit.get('technique_id', '?')}{name}{rule}: {apis}{cite}")
     else:
         lines.append("  (no static analysis)")
     lines.append("")
@@ -514,7 +556,7 @@ def build_prompt_text(report: MalwareReport, isr_reports: Any = None) -> str:
         # is shown quoted and escaped, one value on one line.
         for dom in domains:
             reason = dom.reason or "observed"
-            lines.append(f'  - domain: "{pack_escaped(str(dom.fqdn))}" ({reason})')
+            lines.append(f"  - domain: {quoted_value(str(dom.fqdn))} ({reason})")
         for ip in report.network.ips:
             note = ip.reputation.get("_heuristic_reason") if ip.reputation else None
             tag = note or ("suspicious" if ip.is_suspicious else "observed")
@@ -528,9 +570,13 @@ def build_prompt_text(report: MalwareReport, isr_reports: Any = None) -> str:
     if report.persistence:
         for mech in report.persistence:
             lines.append(
-                f'  - {mech.kind}: "{pack_escaped(str(mech.target or ""))}" '
+                f"  - {mech.kind}: {quoted_value(str(mech.target or ''))} "
                 f"({mech.technique_id or 'no-ATT&CK-id'})"
             )
+    elif report.dynamic is None:
+        # Persistence is read from what a sandbox recorded; with no sandbox
+        # observation none was looked for, which is not "none detected".
+        lines.append(f"  ({NO_SANDBOX_OBSERVATION})")
     else:
         lines.append("  (none detected)")
     lines.append("")
@@ -538,24 +584,15 @@ def build_prompt_text(report: MalwareReport, isr_reports: Any = None) -> str:
     # --- Static hints --------------------------------------------------
     if report.static:
         if report.static.packer_hint:
-            lines.append(f"Packer hint: {report.static.packer_hint}")
+            lines.append(f"Packer hint: {quoted_value(report.static.packer_hint)}")
         if report.static.obfuscation_indicators:
-            ind = ", ".join(report.static.obfuscation_indicators)
+            ind = ", ".join(quoted_value(i) for i in report.static.obfuscation_indicators)
             lines.append(f"Obfuscation indicators: {ind}")
         lines.append("")
 
     # --- The analysts' claims in force -----------------------------------
     lines.extend(claims_in_force_lines(isr_reports))
-
-    lines.extend(
-        [
-            "TASK",
-            "----",
-            "Write the three narrative fields described in the system prompt. "
-            "Return ONLY the JSON object shown there, with those keys.",
-        ]
-    )
-    return "\n".join(lines)
+    return lines
 
 
 # ---------------------------------------------------------------------------
@@ -666,7 +703,7 @@ class NarrativeAgent:
         """
         return NARRATIVE_ATTEMPTS + (1 if structured_output_supported_for_llm(self.llm) else 0)
 
-    def round_timeout(self, configured: float, prompt_chars: int = 0) -> float:
+    def round_timeout(self, configured: float | None, prompt_chars: int = 0) -> float | None:
         """This round's wait: configured, or what its calls need at the model's pace.
 
         The composer section's rule (``ReportComposer._section_timeout``):
@@ -674,29 +711,34 @@ class NarrativeAgent:
         output cap takes at that pace (``GenerationRates.call_timeout``, with
         the prompt read at the reading rate where one is measured), and the
         round holds :meth:`attempts` such calls; where it is not, or the round
-        has no output cap, the configured wait stands. Recorded in the run
-        summary as ``narrative:round``.
+        has no output cap, the configured wait stands. ``None`` configured is
+        a round with no wait of its own: ``None`` whether or not a pace is
+        measured (the paced time is still recorded). Recorded in the run summary as
+        ``narrative:round``.
         """
-        configured = float(configured)
         rates = getattr(self, "generation_rates", None)
         if rates is None:
-            return configured
-        from maljan.llm.context_window import CHARS_PER_TOKEN
+            return None if configured is None else float(configured)
+        from maljan.llm.context_window import tokens_for_chars
         from maljan.llm.generation_rate import model_name_of
 
-        per_call = float(
-            rates.call_timeout(
-                "narrative:round",
-                model_name_of(self.llm),
-                configured,
-                int(getattr(self, "output_cap", 0) or 0),
-                budget=str(getattr(self, "budget_note", "") or ""),
-                prompt_tokens=-(-int(prompt_chars) // CHARS_PER_TOKEN),
-            )
+        per_call = rates.call_timeout(
+            "narrative:round",
+            model_name_of(self.llm),
+            None if configured is None else float(configured),
+            int(getattr(self, "output_cap", 0) or 0),
+            budget=str(getattr(self, "budget_note", "") or ""),
+            prompt_tokens=tokens_for_chars(prompt_chars),
         )
-        if per_call <= configured:
-            return configured
-        return per_call * self.attempts()
+        if configured is None or per_call is None:
+            # Nothing configured: no outer cut. The paced time is recorded
+            # (above) and each call is bound by its own deadline, which grows
+            # with the progress it shows, so a slow model is never cut to the
+            # template by a wait shorter than its calls'.
+            return None
+        if float(per_call) <= float(configured):
+            return float(configured)
+        return float(per_call) * self.attempts()
 
     def _call_bound(self, turns: Sequence[BaseMessage]) -> int | None:
         """The ``max_tokens`` one call of this round is held to, or ``None``.
@@ -709,7 +751,12 @@ class NarrativeAgent:
         return self._call_limit(turns, preview=True)[0]
 
     def _call_limit(
-        self, turns: Sequence[BaseMessage], *, slot: Any = None, preview: bool = False
+        self,
+        turns: Sequence[BaseMessage],
+        *,
+        slot: Any = None,
+        preview: bool = False,
+        what: str = "narrative round's",
     ) -> tuple[int | None, str]:
         """The ``max_tokens`` one call of this round is held to, and the limit that set it.
 
@@ -726,7 +773,7 @@ class NarrativeAgent:
         cap = int(getattr(self, "output_cap", 0) or 0)
         chars = sum(len(str(getattr(message, "content", "") or "")) for message in turns)
         window = int(getattr(self, "window_tokens", 0) or 0)
-        overflow = prompt_overflow_sentence("narrative round's", chars, window)
+        overflow = prompt_overflow_sentence(what, chars, window)
         if overflow is not None and overflow not in self.degradations:
             self.degradations.append(overflow)
         why = f"its output budget of {cap} tokens"
@@ -752,12 +799,12 @@ class NarrativeAgent:
         fit is said, and its calls are held to what the window leaves
         (:meth:`_call_bound`), rather than a fact being left out.
         """
-        from maljan.llm.context_window import CHARS_PER_TOKEN
+        from maljan.llm.context_window import chars_for_tokens
 
         window = int(getattr(self, "window_tokens", 0) or 0)
         if window <= 0:
             return
-        room = max(0, (window - int(getattr(self, "output_cap", 0) or 0)) * CHARS_PER_TOKEN)
+        room = max(0, chars_for_tokens(window - int(getattr(self, "output_cap", 0) or 0)))
         if int(prompt_chars) <= room:
             return
         reason = (
@@ -815,6 +862,13 @@ class NarrativeAgent:
         # the ISRs, a capability an analyst stated in a claim would be a
         # violation here and a pass there, on one run.
         grounding = CapabilityGrounding.from_report(report, isr_reports, ledger=evidence)
+        if grounding.unread:
+            unread = (
+                "the report's capability claims were not checked against the run's evidence: "
+                f"the evidence could not be read ({grounding.unread})"
+            )
+            if unread not in self.degradations:
+                self.degradations.append(unread)
         # What the run publishes, which is what a recommendation may act on:
         # its indicators and its techniques.
         answers = published_answers(report)
@@ -842,6 +896,12 @@ class NarrativeAgent:
         # in seconds instead of an hour and a half.
         # A call that has to be held under its budget goes by the manual path,
         # where the hold can be passed with the call.
+        # A structured answer that parsed to nothing but holds text or a tool
+        # call's arguments is the round's first answer below, not asked again;
+        # ``structured`` then sends the round's retry, so the retry's request
+        # only appends to the one answered.
+        kept: Any = None
+        structured: Any = None
         if (
             structured_output_supported_for_llm(self.llm)
             and not spend_ceiling_set(getattr(self, "token_ledger", None))
@@ -860,7 +920,9 @@ class NarrativeAgent:
                     cap_tokens=int(getattr(self, "output_cap", 0) or 0),
                     holdable=False,
                 ):
-                    result = structured_answer(
+                    # Recorded and announced here, once, whatever becomes of
+                    # the answer; a parser's dict is read through the schema.
+                    read = read_structured_reply(
                         await retry_on_connection_error(
                             lambda: structured.ainvoke(messages),
                             what="NarrativeAgent structured",
@@ -869,27 +931,16 @@ class NarrativeAgent:
                         agent=REPORTER_AGENT_KEY,
                         model=self.model_label,
                         call="narrative",
+                        schema=NarrativeOutput,
+                        announce=self._announce_fallback,
                     )
+                result = read.parsed
                 if isinstance(result, NarrativeOutput):
                     return self._kept_with_ungrounded_recorded(
                         result, grounding, known_ids, citable, evidence, answers, published
                     )
-                # Some providers return a dict — coerce defensively.
-                if isinstance(result, dict):
-                    return self._kept_with_ungrounded_recorded(
-                        NarrativeOutput.model_validate(result),
-                        grounding,
-                        known_ids,
-                        citable,
-                        evidence,
-                        answers,
-                        published,
-                    )
-                logger.warning(
-                    "NarrativeAgent: unexpected structured-output type %s; "
-                    "falling back to manual parse.",
-                    type(result).__name__,
-                )
+                kept = read.kept
+                say_structured_reply("NarrativeAgent", read)
             except Exception as exc:  # noqa: BLE001
                 logger.warning(
                     "NarrativeAgent: structured_output path failed (%s); trying manual JSON parse.",
@@ -906,18 +957,34 @@ class NarrativeAgent:
         # is still retried separately (``retry_on_connection_error``).
         from maljan.llm.context_window import output_bound_kwargs
 
+        # The kept structured answer stands for the round's first call, which
+        # is then never sent; its usage is already on the ledger.
+        pending = [kept] if kept is not None else []
+
         async def _run(turns: list[BaseMessage]) -> Any:
+            if pending:
+                return pending.pop()
             slot = object()
             bound, why = self._call_limit(turns, slot=slot)
             if bound is not None:
                 logger.info("NarrativeAgent: output limit on this call: %d — %s.", bound, why)
             try:
-                raw = await retry_on_connection_error(
-                    (lambda: self.llm.ainvoke(turns, **output_bound_kwargs(self.llm, bound)))
+                # The retry of a kept structured answer goes as that answer
+                # went, so its request only appends to the one answered; held
+                # under an output bound it goes by the plain model. The plain
+                # model is offered no tool, so a call in its turns is said as
+                # text, once. One call is chosen, and made once.
+                as_kept = kept is not None and bound is None
+                plain = turns if as_kept else with_calls_said(turns)
+                reply = await retry_on_connection_error(
+                    (lambda: structured.ainvoke(turns))
+                    if as_kept
+                    else (lambda: self.llm.ainvoke(plain, **output_bound_kwargs(self.llm, bound)))
                     if bound is not None
-                    else (lambda: self.llm.ainvoke(turns)),
-                    what="NarrativeAgent raw",
+                    else (lambda: self.llm.ainvoke(plain)),
+                    what="NarrativeAgent structured" if as_kept else "NarrativeAgent raw",
                 )
+                raw = reply.get("raw") if isinstance(reply, dict) and "raw" in reply else reply
                 # On the ledger before the reservation goes.
                 if self.token_ledger is not None:
                     try:
@@ -930,11 +997,7 @@ class NarrativeAgent:
                             model=self.model_label,
                             call="narrative",
                         )
-                        from maljan.pipeline.events import announce_model_fallback
-
-                        announce_model_fallback(
-                            getattr(self, "event_sink", None), raw, agent="reporter", stage="report"
-                        )
+                        self._announce_fallback(raw)
                     except Exception as exc:  # noqa: BLE001
                         # nosemgrep: python.lang.security.audit.logging.logger-credential-leak.python-logger-credential-disclosure — record_response_usage() swallows its own exceptions, so exc here is only an import/attribute error  # noqa: E501
                         logger.debug("NarrativeAgent: token usage not recorded (%s).", exc)
@@ -947,7 +1010,7 @@ class NarrativeAgent:
         answer_read = [""]
 
         def _parse(answer: Any) -> dict[str, Any] | None:
-            answer_read[0] = _message_text(answer)
+            answer_read[0] = structured_answer_text(answer, _message_text)
             return _narrative_payload(answer)
 
         try:
@@ -965,12 +1028,15 @@ class NarrativeAgent:
                     ),
                     lambda p: wrong_entry_citations(p, evidence, prose=NARRATIVE_PROSE),
                     lambda p: misstated_entry_contents(p, evidence, prose=NARRATIVE_PROSE),
+                    lambda p: ledger_absence_contradictions(p, evidence),
                     technique_name_violations,
                     lambda p: recommendation_indicator_violations(p, answers),
                     lambda p: recommendation_technique_violations(p, published),
                 ],
                 parse=_parse,
                 on_feedback=self.validation_tally.count,
+                # Only a kept structured answer's retry offers the schema's tool again.
+                reply_to_calls=kept is not None,
             )
         except SpendCeilingStop as stop:
             said = f"The narrative round was not written: {stop}."
@@ -1012,6 +1078,57 @@ class NarrativeAgent:
             logger.error("NarrativeAgent: the validated payload would not build (%s).", exc)
             return None
 
+    async def ask(self, turns: list[BaseMessage], *, call: str, what: str) -> Any:
+        """One plain call of the reporter's model for another round of the report stage.
+
+        Held and recorded as this round's manual calls are: to the output
+        budget, what the window leaves after the prompt or the spend
+        ceiling's hold (:meth:`_call_limit`, its overflow sentence naming
+        ``what``), its usage on the ledger under ``call``, and the slot it
+        reserved released whatever becomes of it. A call in the turns is said
+        as text, since the plain model is offered no tool.
+        """
+        from maljan.llm.context_window import output_bound_kwargs
+
+        slot = object()
+        bound, why = self._call_limit(turns, slot=slot, what=what)
+        if bound is not None:
+            logger.info("NarrativeAgent: output limit on this %s call: %d — %s.", call, bound, why)
+        try:
+            plain = with_calls_said(turns)
+            reply = await retry_on_connection_error(
+                (lambda: self.llm.ainvoke(plain, **output_bound_kwargs(self.llm, bound)))
+                if bound is not None
+                else (lambda: self.llm.ainvoke(plain)),
+                what=f"NarrativeAgent {call}",
+            )
+            if self.token_ledger is not None:
+                try:
+                    from maljan.core.token_ledger import record_response_usage
+
+                    record_response_usage(
+                        self.token_ledger,
+                        reply,
+                        agent=REPORTER_AGENT_KEY,
+                        model=self.model_label,
+                        call=call,
+                    )
+                    self._announce_fallback(reply)
+                except Exception as exc:  # noqa: BLE001
+                    # nosemgrep: python.lang.security.audit.logging.logger-credential-leak.python-logger-credential-disclosure — record_response_usage() swallows its own exceptions, so exc here is only an import/attribute error  # noqa: E501
+                    logger.debug("NarrativeAgent: token usage not recorded (%s).", exc)
+        finally:
+            spend_release(getattr(self, "token_ledger", None), slot)
+        return reply
+
+    def _announce_fallback(self, answer: Any) -> None:
+        """Publish ``model_fallback`` when ``answer`` is the one the model list moved on for."""
+        from maljan.pipeline.events import announce_model_fallback
+
+        announce_model_fallback(
+            getattr(self, "event_sink", None), answer, agent="reporter", stage="report"
+        )
+
     def _record_ungrounded(self, violations: list[Violation], *, asked: bool = True) -> None:
         """Keep the over-claims and stray citations on the record, without touching the prose."""
         if not violations:
@@ -1049,6 +1166,7 @@ class NarrativeAgent:
             *citation_violations(answer, citable, prose=NARRATIVE_PROSE, items=self._items),
             *wrong_entry_citations(answer, evidence, prose=NARRATIVE_PROSE),
             *misstated_entry_contents(answer, evidence, prose=NARRATIVE_PROSE),
+            *ledger_absence_contradictions(answer, evidence),
             *technique_name_violations(answer),
             *(recommendation_indicator_violations(answer, answers) if answers else []),
             *recommendation_technique_violations(answer, published),

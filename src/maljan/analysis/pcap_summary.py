@@ -21,6 +21,7 @@ that cannot be read as a capture returns ``None``. The capture is read by
 from __future__ import annotations
 
 import ipaddress
+import math
 from collections import defaultdict
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -46,7 +47,8 @@ class CaptureRead:
     no limit reads the whole capture. The rest is what the reader had to skip
     or where it stopped (``capture_reader.ReadNotes``): pcapng blocks it could
     not read, by kind of reason; the byte cap a gzip capture reached; where a
-    gzip stream could not be decompressed further; records whose headers could
+    gzip stream could not be decompressed further; where the capture's framing
+    ended before the file did, and why; records whose headers could
     not be walked to the end. A surface adds what it could not extract: DNS
     names longer than DNS allows, and values it could not write. Each appears
     in the fields only when it happened, and the statement grows with the
@@ -60,6 +62,7 @@ class CaptureRead:
     unreadable_reasons: dict[str, dict[str, Any]] = field(default_factory=dict)
     byte_cap: int | None = None
     stream_error: str | None = None
+    framing_end: str | None = None
     packets_undecoded: int = 0
     dns_names_malformed: int = 0
     dns_name_octets_first: int = 0
@@ -71,6 +74,7 @@ class CaptureRead:
         self.unreadable_reasons = {k: dict(v) for k, v in notes.unreadable_reasons.items()}
         self.byte_cap = notes.byte_cap
         self.stream_error = notes.stream_error
+        self.framing_end = notes.framing_end
         self.packets_undecoded = notes.packets_undecoded
 
     def malformed_dns_name(self, octets: int) -> None:
@@ -90,17 +94,24 @@ class CaptureRead:
             and not self.blocks_unreadable
             and self.byte_cap is None
             and self.stream_error is None
+            and self.framing_end is None
         )
 
     def statement(self) -> str:
         """``"14887 of 14887 packets in the capture read"``, and why fewer when fewer.
 
-        When blocks were skipped, a byte cap stopped the read or a gzip stream
-        broke off, the capture's own count is not known, and the statement says
+        When blocks were skipped, a byte cap stopped the read, a gzip stream
+        broke off or the capture's framing ended early, the capture's own count
+        is not known, and the statement says
         what was read and why instead: ``"6 packets read, 1 blocks unreadable:
         <reason> (1, the first at byte 72, interface 7)"``.
         """
-        partial = self.blocks_unreadable or self.byte_cap is not None or self.stream_error
+        partial = (
+            self.blocks_unreadable
+            or self.byte_cap is not None
+            or self.stream_error
+            or self.framing_end
+        )
         if partial:
             said = f"{self.packets_read} packets read"
         else:
@@ -119,6 +130,8 @@ class CaptureRead:
             )
         if self.stream_error:
             said += f", reading stopped where {self.stream_error}"
+        if self.framing_end:
+            said += f", reading stopped where {self.framing_end}"
         if self.packets_undecoded:
             said += (
                 f", {self.packets_undecoded} of them read only to the headers before "
@@ -148,6 +161,8 @@ class CaptureRead:
             fields["byte_cap"] = self.byte_cap
         if self.stream_error:
             fields["stream_error"] = self.stream_error
+        if self.framing_end:
+            fields["framing_end"] = self.framing_end
         if self.packets_undecoded:
             fields["packets_undecoded"] = self.packets_undecoded
         if self.values_unwritable:
@@ -166,6 +181,7 @@ class CaptureRead:
             unreadable_reasons=dict(reasons) if isinstance(reasons, dict) else {},
             byte_cap=facts.get("byte_cap"),
             stream_error=facts.get("stream_error"),
+            framing_end=facts.get("framing_end"),
             packets_undecoded=int(facts.get("packets_undecoded") or 0),
             values_unwritable=int(facts.get("values_unwritable") or 0),
             unwritable_reason=str(facts.get("unwritable_reason") or ""),
@@ -229,21 +245,6 @@ def _is_external(ip: str) -> bool:
     )
 
 
-def _mean(xs: list[float]) -> float:
-    return sum(xs) / len(xs) if xs else 0.0
-
-
-def _cv(xs: list[float]) -> float:
-    """Coefficient of variation (std/mean) — low = regular/periodic."""
-    if len(xs) < 2:
-        return 1.0
-    m = _mean(xs)
-    if m <= 0:
-        return 1.0
-    var = sum((x - m) ** 2 for x in xs) / len(xs)
-    return float((var**0.5) / m)
-
-
 def _extract_sni(pkt: Packet) -> bytes | None:
     """Best-effort TLS SNI from a ClientHello, parsed from the raw TCP payload.
 
@@ -294,17 +295,89 @@ def _server_name(name: bytes) -> str:
     return pack_escaped(name.decode("ascii", "backslashreplace"))
 
 
+def _is_capture_time(value: Any) -> bool:
+    """True for a packet time that can be placed: a finite, positive number.
+
+    A corrupt record header can carry NaN, infinity or a negative time; one of
+    them would stretch the duration to nonsense and put a gap into every
+    beacon interval, so such a packet is counted but never timed.
+    """
+    return isinstance(value, (int, float)) and math.isfinite(value) and value > 0
+
+
+class _Span:
+    """The capture's earliest and latest packet time: two numbers however long it is."""
+
+    def __init__(self) -> None:
+        self.low = 0.0
+        self.high = 0.0
+        self.timed = 0
+
+    def add(self, t: float) -> None:
+        if self.timed == 0:
+            self.low = self.high = t
+        else:
+            self.low = min(self.low, t)
+            self.high = max(self.high, t)
+        self.timed += 1
+
+    def duration(self) -> float:
+        return self.high - self.low if self.timed >= 2 else 0.0
+
+
+class _Intervals:
+    """One conversation's times, read sorted: a capture need not be in time order.
+
+    Linear in the input, as it always was. A multi-interface capture
+    interleaves its interfaces, so the times are sorted before the gaps are
+    taken; a gap of zero (equal times) is not an interval.
+    """
+
+    def __init__(self) -> None:
+        self.times: list[float] = []
+
+    def add(self, t: float) -> None:
+        self.times.append(t)
+
+    def beacon(self) -> tuple[int, float] | None:
+        """``(callbacks, mean interval)`` when the times are a regular callback, else ``None``.
+
+        Regular: at least ``_BEACON_MIN_HITS`` times whose gaps average at least
+        ``_BEACON_MIN_INTERVAL_S`` with a coefficient of variation at most
+        ``_BEACON_MAX_CV``.
+        """
+        ts = sorted(self.times)
+        if len(ts) < _BEACON_MIN_HITS:
+            return None
+        deltas = [b - a for a, b in zip(ts, ts[1:], strict=False) if (b - a) > 0]
+        if len(deltas) < _BEACON_MIN_HITS - 1:
+            return None
+        mean = sum(deltas) / len(deltas)
+        if mean < _BEACON_MIN_INTERVAL_S:
+            return None
+        variance = sum((x - mean) ** 2 for x in deltas) / len(deltas)
+        if (variance**0.5) / mean <= _BEACON_MAX_CV:
+            return len(ts), mean
+        return None
+
+
 def capture_facts(pcap_path: str, packet_limit: Any = None) -> dict[str, Any] | None:
     """The capture's facts as data, or ``None`` when it could not be read.
 
     Keys: ``packets_read``, ``packets_in_capture``, ``packet_limit`` (the
     caller's, or ``None``), ``bytes``, ``duration_s``, ``protocols`` (count per
     ``tcp``/``udp``/``other`` of the IP packets read), ``conversations`` (every
-    external destination as ``{dst, dport, proto, packets, bytes}``, the
-    heaviest first), ``sni`` (``{name: ClientHello count}``) and ``beacons``
-    (``{dst, dport, proto, callbacks, interval_s}``).
+    external host and port as ``{dst, dport, proto, packets, bytes}``, both
+    directions counted, the heaviest first; ``packets_from_host`` and
+    ``bytes_from_host`` added when the external host sent any of them, and
+    ``inbound_only`` when it sent all of them),
+    ``sni`` (``{name: ClientHello count}``) and ``beacons`` (``{dst, dport,
+    proto, callbacks, interval_s}``, measured on the packets toward the host;
+    when those are not regular, on the TCP connections the other side opened
+    toward it, one per SYN source address and port, and then marked ``unit:
+    "connection"``).
     """
-    times: list[float] = []
+    span = _Span()
     proto_counts: dict[str, int] = defaultdict(int)
     # (dst, dport, proto) -> {pkts, bytes, times}
     convs: dict[tuple[str, int, str], dict[str, Any]] = {}
@@ -317,36 +390,62 @@ def capture_facts(pcap_path: str, packet_limit: Any = None) -> dict[str, Any] | 
         try:
             plen = pkt.length
             total_bytes += plen
-            t = pkt.time
+            t = pkt.time if _is_capture_time(pkt.time) else 0.0
             if t:
-                times.append(t)
-            if pkt.ip_dst is None:
+                span.add(t)
+            if pkt.ip_dst is None and not pkt.ipv6:
                 return
             dst = pkt.ip_dst
+            sport = 0
             if pkt.tcp is not None:
                 proto = "tcp"
-                dport = pkt.tcp.dport
-                if dport == 443:
-                    name = _extract_sni(pkt)
-                    if name:
-                        try:
-                            snis[_server_name(name)] += 1
-                        except Exception as exc:  # noqa: BLE001 - one value, counted
-                            unwritten.append(exc)
+                sport, dport = pkt.tcp.sport, pkt.tcp.dport
+                # A ClientHello is recognised by its bytes, not its port: TLS
+                # on 8443, 993 or a C2 port names its server the same way.
+                name = _extract_sni(pkt)
+                if name:
+                    try:
+                        snis[_server_name(name)] += 1
+                    except Exception as exc:  # noqa: BLE001 - one value, counted
+                        unwritten.append(exc)
             elif pkt.udp is not None:
                 proto = "udp"
-                dport = pkt.udp.dport
+                sport, dport = pkt.udp.sport, pkt.udp.dport
             else:
                 proto = "other"
                 dport = 0
             proto_counts[proto] += 1
-            if not _is_external(dst):
-                return  # the summary is about the external (C2) surface
-            c = convs.setdefault((dst, dport, proto), {"pkts": 0, "bytes": 0, "times": []})
+            # An IPv6 datagram is counted by its next header; its addresses are
+            # not read, so it names no conversation.
+            if dst is None:
+                return
+            # The summary is about the external (C2) surface: a conversation is
+            # an external host and its port, and holds the packets both ways.
+            # A packet to an external address is toward it, as it always was;
+            # one from an external address to an internal one is from it.
+            if _is_external(dst):
+                key, from_host = (dst, dport, proto), False
+            elif pkt.ip_src is not None and _is_external(pkt.ip_src):
+                key, from_host = (pkt.ip_src, sport, proto), True
+            else:
+                return
+            c = convs.setdefault(key, _conversation())
             c["pkts"] += 1
             c["bytes"] += plen
+            if from_host:
+                c["pkts_from"] += 1
+                c["bytes_from"] += plen
+                return
+            # The beacon is measured on the packets toward the host, as before,
+            # and on the connections the sandbox's side opened toward it: one
+            # per source address and port, so a retransmitted SYN is one.
             if t:
-                c["times"].append(t)
+                c["times"].add(t)
+                if pkt.tcp is not None and pkt.tcp.opens:
+                    opener = (pkt.ip_src, sport)
+                    if opener not in c["openers"]:
+                        c["openers"].add(opener)
+                        c["opens"].add(t)
         except Exception:  # noqa: BLE001 — one malformed packet is not a lost capture
             return
 
@@ -362,21 +461,21 @@ def capture_facts(pcap_path: str, packet_limit: Any = None) -> dict[str, Any] | 
 
     beacons: list[dict[str, Any]] = []
     for (dst, dport, proto), c in convs.items():
-        ts = sorted(c["times"])
-        if len(ts) < _BEACON_MIN_HITS:
-            continue
-        deltas = [b - a for a, b in zip(ts, ts[1:], strict=False) if (b - a) > 0]
-        if len(deltas) < _BEACON_MIN_HITS - 1:
-            continue
-        interval = _mean(deltas)
-        if interval >= _BEACON_MIN_INTERVAL_S and _cv(deltas) <= _BEACON_MAX_CV:
+        beacon = c["times"].beacon()
+        unit: dict[str, str] = {}
+        if beacon is None:
+            beacon = c["opens"].beacon()
+            unit = {"unit": "connection"}
+        if beacon is not None:
+            callbacks, interval = beacon
             beacons.append(
                 {
                     "dst": dst,
                     "dport": dport,
                     "proto": proto,
-                    "callbacks": len(ts),
+                    "callbacks": callbacks,
                     "interval_s": round(interval, 1),
+                    **unit,
                 }
             )
 
@@ -384,23 +483,64 @@ def capture_facts(pcap_path: str, packet_limit: Any = None) -> dict[str, Any] | 
     return {
         **read.as_fields(),
         "bytes": total_bytes,
-        "duration_s": round(max(times) - min(times), 1) if len(times) >= 2 else 0.0,
+        "duration_s": round(span.duration(), 1),
         "protocols": dict(sorted(proto_counts.items())),
-        "conversations": [
-            {"dst": dst, "dport": dport, "proto": proto, "packets": c["pkts"], "bytes": c["bytes"]}
-            for (dst, dport, proto), c in ranked
-        ],
+        "conversations": [_conversation_row(key, c) for key, c in ranked],
         "sni": dict(sorted(snis.items())),
         "beacons": beacons,
     }
 
 
+def _conversation() -> dict[str, Any]:
+    return {
+        "pkts": 0,
+        "bytes": 0,
+        "pkts_from": 0,
+        "bytes_from": 0,
+        "times": _Intervals(),
+        "opens": _Intervals(),
+        "openers": set(),
+    }
+
+
+def _conversation_row(key: tuple[str, int, str], c: dict[str, Any]) -> dict[str, Any]:
+    """One conversation's row: packets and bytes both ways, and the part from
+    the external host when there is one."""
+    dst, dport, proto = key
+    row: dict[str, Any] = {
+        "dst": dst,
+        "dport": dport,
+        "proto": proto,
+        "packets": c["pkts"],
+        "bytes": c["bytes"],
+    }
+    if c["pkts_from"]:
+        row["packets_from_host"] = c["pkts_from"]
+        row["bytes_from_host"] = c["bytes_from"]
+    if c["pkts_from"] == c["pkts"]:
+        # Every packet came from the external host: the sandbox never sent to
+        # it, so it is no host the sample contacted.
+        row["inbound_only"] = True
+    return row
+
+
 def conversation_line(row: dict[str, Any]) -> str:
-    """``"<dst>:<port>/<proto> — N pkts, M bytes"``: one conversation as every surface writes it."""
-    return (
+    """``"<dst>:<port>/<proto> — N pkts, M bytes"``: one conversation as every surface writes it.
+
+    Both directions are in the totals; the part from the external host follows
+    when the row states one: ``"(K pkts, B bytes from the host)"``.
+    """
+    line = (
         f"{row.get('dst')}:{row.get('dport')}/{row.get('proto')} — "
         f"{row.get('packets')} pkts, {row.get('bytes')} bytes"
     )
+    if row.get("packets_from_host"):
+        line += (
+            f" ({row.get('packets_from_host')} pkts, "
+            f"{row.get('bytes_from_host')} bytes from the host"
+            + ("; inbound only)" if row.get("inbound_only") else ")")
+        )
+    return line
 
 
 def summary_text(facts: dict[str, Any]) -> str:
@@ -441,8 +581,9 @@ def summary_text(facts: dict[str, Any]) -> str:
             "",
             "Beaconing detected (periodic callbacks — strong C2 signal):",
             *[
-                f"- {b['dst']}:{b['dport']}/{b['proto']} — {b['callbacks']} callbacks, "
-                f"~{b['interval_s']:.1f}s interval (regular; likely C2 beacon)"
+                f"- {b['dst']}:{b['dport']}/{b['proto']} — {b['callbacks']} "
+                + ("connections opened" if b.get("unit") == "connection" else "callbacks")
+                + f", ~{b['interval_s']:.1f}s interval (regular; likely C2 beacon)"
                 for b in beacons
             ],
         ]

@@ -111,6 +111,7 @@ def test_submitting_a_job_is_audited_with_its_sample_and_profile(rows):
     with (
         patch.object(jobs_module, "_unprobed_models_for", AsyncMock(return_value=[])),
         patch.object(jobs_module, "_unready_providers_for", AsyncMock(return_value=[])),
+        patch.object(jobs_module, "_undecryptable_secrets", AsyncMock(return_value=[])),
     ):
         response = client.post(
             "/api/v1/jobs",
@@ -173,10 +174,22 @@ def test_deleting_a_sample_is_audited(rows, monkeypatch):
 
     db = MagicMock()
     db.execute = AsyncMock(
-        side_effect=[sample_result, no_active_jobs, no_reports, None, still_shared]
+        # The sample, its active jobs, the sha's lock, its sandbox reports, its job
+        # ids (none), the jobs' delete, the lock again, the rows still sharing it.
+        side_effect=[
+            sample_result,
+            no_active_jobs,
+            None,  # lock_sample_bytes
+            no_reports,
+            no_reports,
+            None,
+            None,  # lock_sample_bytes, taken again
+            still_shared,
+        ]
     )
     db.delete = AsyncMock()
     db.flush = AsyncMock()
+    db.commit = AsyncMock()
     monkeypatch.setattr(samples_module, "_minio_client", lambda: MagicMock())
 
     response = _client(samples_module, db, user, require_active_user).delete(
@@ -200,10 +213,13 @@ def test_deleting_a_sandbox_report_is_audited(rows, monkeypatch):
     load_result.scalar_one_or_none.return_value = sample
     report_result = MagicMock()
     report_result.scalar_one_or_none.return_value = row_obj
+    in_flight = MagicMock()
+    in_flight.scalar.return_value = 0
 
     db = MagicMock()
-    db.execute = AsyncMock(side_effect=[load_result, report_result, None])
+    db.execute = AsyncMock(side_effect=[load_result, report_result, in_flight, None])
     db.flush = AsyncMock()
+    db.commit = AsyncMock()
     monkeypatch.setattr(reports_module, "_minio_client", lambda: MagicMock())
 
     response = _client(reports_module, db, user, require_active_user).delete(

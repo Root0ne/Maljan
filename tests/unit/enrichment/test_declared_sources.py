@@ -149,15 +149,8 @@ async def test_the_shipped_address_lookup_makes_the_same_call() -> None:
     wire = _Wire({"data": {"attributes": {"last_analysis_stats": {"malicious": 1}}}})
     record = await _ask(_ready("virustotal", _key("vt", "k")), "ip", "1.2.3.4", wire)
     assert str(wire.requests[0].url) == "https://www.virustotal.com/api/v3/ip_addresses/1.2.3.4"
-    # Counts the answer left out are zero, as the client wrote them.
-    assert record == {
-        "source": "virustotal",
-        "malicious": 1,
-        "suspicious": 0,
-        "harmless": 0,
-        "undetected": 0,
-        "reputation": 0,
-    }
+    # Counts the answer left out stay absent: nothing counted them.
+    assert record == {"source": "virustotal", "malicious": 1}
 
 
 @pytest.mark.asyncio
@@ -495,7 +488,11 @@ async def test_a_server_source_asks_the_tool_with_the_argument_its_declaration_n
             )
     assert calls == [("intelsrv", "lookup_address", {"ip_address": "8.8.4.4"})]
     ip = report["network"]["ips"][0]
-    assert ip["reputation"] == {"source": "intel", "abuse_confidence": 70}
+    assert ip["reputation"] == {
+        "source": "intel",
+        "abuse_confidence": 70,
+        "malicious_verdict": True,
+    }
     assert ip["is_suspicious"] is True
 
 

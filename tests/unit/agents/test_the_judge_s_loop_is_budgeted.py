@@ -34,6 +34,7 @@ from pydantic import BaseModel
 from maljan.agents.base_agent import _message_chars
 from maljan.agents.judge_agent import JudgeAgent
 from maljan.agents.mcp_client import MCPLangChainToolkit
+from maljan.agents.tool_answer_clearing import ToolAnswerClearing
 from maljan.llm import context_window as cw
 
 WINDOW = 32_768
@@ -240,6 +241,14 @@ class TestAGenuineOverflowAfterGathering:
             _settings(declared),
             patch.object(judge, "_initialize_mcp_client", AsyncMock()),
             patch.object(judge, "_extract_mediator_verdict", _extract),
+            # Where nothing can be cleared a refusal ends the tool phase; a
+            # loop that can clear sends the turn again instead
+            # (``test_the_judge_s_loop_clears_old_tool_answers``).
+            patch.object(
+                JudgeAgent,
+                "_tool_answer_clearing",
+                lambda self: ToolAnswerClearing(enabled=False),
+            ),
         ):
             argument, _consensus = asyncio.run(judge.mediate({"static": "r" * 10_000}, []))
 

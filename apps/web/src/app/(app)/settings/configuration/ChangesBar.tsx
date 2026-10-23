@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { buildReviewItems, ReviewErrorSummary, ReviewList } from "./ReviewList";
 import { useSettingsContext } from "./SettingsContext";
+import { keysNeedingPassword } from "./signInPolicy";
 import { appliesSummary } from "./vocabulary";
 import { countLabel } from "@/lib/report-utils";
 
@@ -18,8 +19,12 @@ export default function ChangesBar() {
   const [reviewing, setReviewing] = useState(false);
   const [discarding, setDiscarding] = useState(false);
   const [statusVisible, setStatusVisible] = useState(false);
+  const [currentPassword, setCurrentPassword] = useState("");
 
   const keys = Object.keys(pending);
+  // A change to the sign-in policy is saved only with the current password.
+  const policyKeys = keysNeedingPassword(keys, ctx.entriesByKey);
+  const passwordMissing = policyKeys.length > 0 && currentPassword === "";
   const count = keys.length;
   const hiddenCount = keys.filter((k) => hiddenKeys.includes(k)).length;
 
@@ -50,7 +55,8 @@ export default function ChangesBar() {
   };
 
   const onApply = async () => {
-    const result = await ctx.apply();
+    const result = await ctx.apply(policyKeys.length > 0 ? currentPassword : undefined);
+    setCurrentPassword("");
     if (result) setReviewing(false);
   };
 
@@ -76,10 +82,30 @@ export default function ChangesBar() {
           <div className="border border-border rounded bg-bg-surface shadow-lg px-4 py-3 max-h-[60vh] overflow-auto">
             <ReviewErrorSummary lines={lines} />
             <ReviewList lines={lines} />
+            {policyKeys.length > 0 && (
+              <div className="mt-4 pt-3 border-t border-border">
+                <label
+                  htmlFor="settings-current-password"
+                  className="block text-xs text-text-secondary"
+                >
+                  {policyKeys.join(", ")} change how accounts sign in. Confirm with your current
+                  password.
+                </label>
+                <input
+                  id="settings-current-password"
+                  name="current_password"
+                  type="password"
+                  autoComplete="current-password"
+                  value={currentPassword}
+                  onChange={(e) => setCurrentPassword(e.target.value)}
+                  className="mt-1 w-full max-w-xs rounded border border-border bg-bg-deep px-2 py-1 text-sm text-text-primary"
+                />
+              </div>
+            )}
             <div className="flex items-center gap-4 mt-4 pt-3 border-t border-border">
               <button
                 type="button"
-                disabled={saving || unread.length > 0}
+                disabled={saving || unread.length > 0 || passwordMissing}
                 className="px-3 py-1.5 text-xs font-medium uppercase tracking-wider bg-accent-fill text-white rounded hover:bg-accent-fill-hover disabled:opacity-50"
                 onClick={onApply}
               >

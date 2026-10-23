@@ -49,6 +49,9 @@ algorithm or two, carries both; one is never picked. Each hit lists every place
 in the file where the value is stored (little-endian, aligned or not), with the
 RVA, the section and, inside code, the start of the function the file's own
 function table puts around it (``maljan.tools.pe_image``); no start is guessed.
+The places the rows list, all rows together, stop at what the largest tool
+answer any model is given holds (``pe_image.PLACE_BUDGET``); past it the answer
+says once how many it left out (``occurrences_cut``).
 
 Nothing is limited by default: ``limit`` pages the answer only when the caller
 asks for pages.
@@ -282,12 +285,68 @@ def _code_immediates(code: bytes, is64: bool) -> set[int]:
     return values
 
 
-def candidate_values(image: pe_image.Image) -> list[int]:
-    """The values the scan looks up, in ascending order (see the module docstring)."""
-    values: set[int] = set()
+def _code_ranges(image: pe_image.Image) -> list[pe_image.Section]:
+    """The code sections to scan: for each file offset, only the one that reaches furthest.
+
+    A section is a window over the file's bytes, and every value a window gives
+    is read from bytes at or after its opcode, so a longer window from the same
+    start gives every value a shorter one does. Reading the longest of each
+    start once costs one pass per start, however many sections name it.
+    """
+    longest: dict[int, pe_image.Section] = {}
     for section in image.code_sections():
-        values |= _code_immediates(image.section_bytes(section), image.is64)
+        held = longest.get(section.raw_offset)
+        if held is None or section.mapped_size > held.mapped_size:
+            longest[section.raw_offset] = section
+    return list(longest.values())
+
+
+def _data_ranges(image: pe_image.Image) -> list[pe_image.Section]:
+    """The data sections to scan, merged into one range per run of the same alignment.
+
+    A data section is read as 32-bit words from its own start, so what a word
+    is depends on its file offset modulo four. Within each such class the
+    sections' word ranges are merged, and each merged range is a section of its
+    own to read once: a word is in a merged range exactly when it is in one of
+    the sections it was merged from, and the bytes under it are the file's.
+    """
+    classes: dict[int, list[tuple[int, int]]] = {}
     for section in image.data_sections():
+        length = len(image.section_view(section)) // 4 * 4
+        if length:
+            classes.setdefault(section.raw_offset % 4, []).append(
+                (section.raw_offset, section.raw_offset + length)
+            )
+    merged: list[pe_image.Section] = []
+    for ranges in classes.values():
+        low, high = None, None
+        for start, end in sorted(ranges):
+            if high is not None and start <= high:
+                high = max(high, end)
+                continue
+            if low is not None and high is not None:
+                merged.append(_whole(low, high))
+            low, high = start, end
+        if low is not None and high is not None:
+            merged.append(_whole(low, high))
+    return merged
+
+
+def _whole(low: int, high: int) -> pe_image.Section:
+    """The range ``[low, high)`` of the file as a section that maps all of it."""
+    return pe_image.Section("", 0, high - low, low, high - low, 0)
+
+
+def candidate_values(image: pe_image.Image) -> list[int]:
+    """The values the scan looks up, in ascending order (see the module docstring).
+
+    Each byte of the file is read once for the code and once for the data,
+    however many sections cover it (:func:`_code_ranges`, :func:`_data_ranges`).
+    """
+    values: set[int] = set()
+    for section in _code_ranges(image):
+        values |= _code_immediates(image.section_bytes(section), image.is64)
+    for section in _data_ranges(image):
         raw = image.data_bytes(section)
         usable = len(raw) // 4 * 4
         if usable:
@@ -311,6 +370,26 @@ def _value(raw: Any) -> int | None:
         except ValueError:
             return None
     return value if 0 <= value <= 0xFFFFFFFF else None
+
+
+def _values(raw: Any) -> list[int]:
+    """Every reading of one caller-given hash.
+
+    A bare string of exactly eight digits is how a 32-bit hash is printed in hex
+    when no letter happens to appear, and it is also a valid decimal. Reading it
+    as decimal alone drops those hashes; so both readings are looked up. A
+    zero-padded one is hex only, because nobody pads a decimal.
+    """
+    value = _value(raw)
+    if value is None:
+        return []
+    text = str(raw).strip().strip("\"'")
+    if isinstance(raw, str) and len(text) == 8 and text.isdigit():
+        as_hex = int(text, 16)
+        if text.startswith("0"):
+            return [as_hex]
+        return [value] if as_hex == value else [value, as_hex]
+    return [value]
 
 
 # ---------------------------------------------------------------------------
@@ -360,14 +439,19 @@ def resolve_api_hashes(
 
     given = hashes is not None and len(hashes) > 0
     unreadable: list[str] = []
+    # Each given string with its readings, once: a string with two readings is
+    # one input that either reading may resolve.
+    inputs: list[tuple[str, list[int]]] = []
     if given:
         values: list[int] = []
         for raw in hashes or []:
-            value = _value(raw)
-            if value is None:
+            read = _values(raw)
+            if not read:
                 unreadable.append(str(raw))
-            elif value not in values:
-                values.append(value)
+                continue
+            if not any(read == held for _text, held in inputs):
+                inputs.append((str(raw).strip().strip("\"'"), read))
+            values.extend(v for v in read if v not in values)
     else:
         values = candidate_values(image)
 
@@ -387,19 +471,29 @@ def resolve_api_hashes(
             for value, readings in resolved.items()
             if any(per_algorithm[r["algorithm"]] > 1 for r in readings)
         ]
-        lone_values = [value for value in resolved if value not in set(hit_values)]
+        chosen = set(hit_values)
+        lone_values = [value for value in resolved if value not in chosen]
+
+    # Every resolved value's places, found in one pass over the file.
+    stored = pe_image.value_offsets(image.data, resolved)
+
+    # The places every row lists, all rows together, at most the answer's budget.
+    budget = pe_image.PlaceBudget()
+
+    def _first(value: int) -> tuple[int, int]:
+        offsets = stored[value]
+        return (0, int(offsets[0])) if len(offsets) else (1, 0)
 
     def _row(value: int) -> dict[str, Any]:
-        places = [image.where(at) for at in image.occurrences(value)]
+        places = budget.take(stored[value], image.where)
         return {"value": f"{value:#010x}", "readings": resolved[value], "occurrences": places}
 
-    hits = [_row(value) for value in hit_values]
-    hits.sort(key=lambda row: _first_place(row))
-    lone = [_row(value) for value in lone_values]
-    lone.sort(key=lambda row: _first_place(row))
+    ordered = sorted(hit_values, key=_first)
     start = max(0, int(offset or 0))
-    page = hits[start:] if limit is None else hits[start : start + max(0, int(limit))]
-    more = start + len(page) < len(hits)
+    paged = ordered[start:] if limit is None else ordered[start : start + max(0, int(limit))]
+    page = [_row(value) for value in paged]
+    lone = [_row(value) for value in sorted(lone_values, key=_first)]
+    more = start + len(page) < len(ordered)
     answer: dict[str, Any] = {
         "tool": TOOL,
         "image_base": hex(image.image_base),
@@ -414,26 +508,26 @@ def resolve_api_hashes(
             "modules_source": str((names.get("modules") or {}).get("source") or ""),
         },
         "candidates": (
-            {"given": len(values) + len(unreadable)}
+            {"given": len(inputs) + len(unreadable)}
             if given
             else {"scanned": len(values), "how": SCAN_HEURISTIC}
         ),
         "hits": page,
-        "total": len(hits),
+        "total": len(ordered),
         "page_offset": start,
         "next_offset": start + len(page) if more else None,
     }
     if given:
-        answer["unresolved"] = [f"{v:#010x}" for v in values if v not in resolved]
+        # One entry per given string, and only when none of its readings resolved.
+        answer["unresolved"] = [
+            f"{read[0]:#010x}" if len(read) == 1 else text
+            for text, read in inputs
+            if not any(v in resolved for v in read)
+        ]
         if unreadable:
             answer["unreadable"] = unreadable
     else:
         answer["lone_hits"] = lone
+    if budget.cut:
+        answer["occurrences_cut"] = budget.cut
     return answer
-
-
-def _first_place(row: dict[str, Any]) -> tuple[int, int]:
-    places = row.get("occurrences") or []
-    if not places:
-        return (1, 0)
-    return (0, int(str(places[0]["offset"]), 16))

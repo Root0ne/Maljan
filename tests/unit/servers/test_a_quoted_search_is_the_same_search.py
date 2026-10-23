@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import importlib.util
+import json
 import sys
 from pathlib import Path
 from typing import Any
@@ -179,30 +180,64 @@ class TestTheKnowledgeServer:
         assert answer["read_as"] == {argument: ["CreateMutexW", "GetLastError"]}
 
 
+def _service_has_nothing(threatintel: Any, monkeypatch: pytest.MonkeyPatch) -> list[str]:
+    """A keyed VirusTotal that answers 404 to everything; the URLs asked, in order."""
+    import httpx
+
+    asked: list[str] = []
+
+    class _Client:
+        def __init__(self, **_: Any) -> None:
+            pass
+
+        def __enter__(self) -> Any:
+            return self
+
+        def __exit__(self, *_: Any) -> None:
+            return None
+
+        def get(self, url: str, **__: Any) -> Any:
+            asked.append(url)
+            return httpx.Response(404, request=httpx.Request("GET", url))
+
+    monkeypatch.setattr(threatintel, "VT_API_KEY", "key")
+    monkeypatch.setattr(threatintel, "ABUSEIPDB_API_KEY", "")
+    monkeypatch.setattr(threatintel, "_cache", {})
+    monkeypatch.setattr(threatintel.httpx, "Client", _Client)
+    return asked
+
+
 class TestTheThreatIntelServer:
     def test_a_quoted_hash_is_looked_up_as_the_hash(
         self, threatintel: Any, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        monkeypatch.setattr(threatintel, "VT_API_KEY", "")
-        monkeypatch.setattr(threatintel, "_cache", {})
+        asked = _service_has_nothing(threatintel, monkeypatch)
         digest = "9" * 64
 
-        answer = threatintel.check_hash(f'"{digest}"')
+        quoted = json.loads(threatintel.check_hash(f'"{digest}"'))
+        bare = json.loads(threatintel.check_hash(digest))
 
-        assert answer == threatintel.check_hash(digest)
-        assert f"Hash {digest} " in answer
+        assert next(iter(quoted)) == "read_as"
+        assert quoted.pop("read_as") == {"file_hash": digest}
+        assert quoted == bare and "read_as" not in bare
+        assert asked == [f"{threatintel.VT_BASE}/files/{digest}"]
+        assert bare["hash"] == digest and bare["found"] is False
 
     def test_a_quoted_domain_and_address_are_looked_up_bare(
         self, threatintel: Any, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        monkeypatch.setattr(threatintel, "VT_API_KEY", "")
-        monkeypatch.setattr(threatintel, "ABUSEIPDB_API_KEY", "")
-        monkeypatch.setattr(threatintel, "_cache", {})
+        asked = _service_has_nothing(threatintel, monkeypatch)
 
-        assert threatintel.check_domain_reputation("'c2.example.org'") == (
-            "Domain c2.example.org is benign."
-        )
-        assert threatintel.check_ip_reputation('"192.0.2.10"').startswith("IP 192.0.2.10 ")
+        domain = json.loads(threatintel.check_domain_reputation("'c2.example.org'"))
+        assert domain["read_as"] == {"domain": "c2.example.org"}
+        assert domain["summary"] == "Domain c2.example.org not found in VirusTotal database."
+        address = json.loads(threatintel.check_ip_reputation('"8.8.8.8"'))
+        assert address["read_as"] == {"ip_address": "8.8.8.8"}
+        assert address["ip"] == "8.8.8.8"
+        assert asked == [
+            f"{threatintel.VT_BASE}/domains/c2.example.org",
+            f"{threatintel.VT_BASE}/ip_addresses/8.8.8.8",
+        ]
 
 
 @pytest.mark.parametrize(

@@ -618,7 +618,7 @@ class Brain:
                     "x_maljan_contributing_agents": [],
                 }
             )
-        assessment = {
+        assessment: dict[str, Any] = {
             "verdict": "Malware",
             "confidence": 0.8,
             "severity": {
@@ -1588,7 +1588,7 @@ def _entry_holding(value: str, evidence: str) -> str:
         if value in line:
             ids = _EVIDENCE_ID.findall(line)
             if ids:
-                return ids[0]
+                return str(ids[0])
     return ""
 
 

@@ -1,3 +1,4 @@
+import { describeDebate } from "./debateOptions";
 /**
  * Turns one staged catalog change into a human-readable review line for the
  * changes bar and the guide's review step. Pure and side-effect free: no
@@ -16,6 +17,7 @@ import type {
 } from "@/types/settings";
 import type { AgentLLMOverride } from "./AgentDefinitionsEditor";
 import { deepEqual } from "./deepEqual";
+import { ENRICHMENT_SOURCES_SPEC, REPORT_FORMATS_SPEC, type RowsSpec } from "./recordRows";
 import { shippedToolFactsOf } from "@/lib/providerFacts";
 import { toolFactsDiff, type ToolFactsDiff } from "./toolFactsChanges";
 
@@ -81,15 +83,82 @@ function asRecord(v: unknown): Record<string, unknown> {
 // Generic list / dict / json leaves (no special key handling below applies)
 // ---------------------------------------------------------------------------
 
-function describeListChange(before: unknown[], after: unknown[]): {
+const MAX_RECORD_LENGTH = 80;
+
+/** Field names that hold a secret in a record of a collection: the ones the
+ *  record editors mark, plus any name that reads as a credential, so a record
+ *  the editors do not know never prints one. */
+const SECRET_NAME = /(api_?key|token|secret|password|passwd)/i;
+
+function secretFieldsOf(entry: CatalogEntry): Set<string> {
+  const spec: RowsSpec | null =
+    entry.editor === "enrichment_sources"
+      ? ENRICHMENT_SOURCES_SPEC
+      : entry.editor === "report_formats"
+        ? REPORT_FORMATS_SPEC
+        : null;
+  return new Set((spec?.fields ?? []).filter((f) => f.secret).map((f) => f.name));
+}
+
+const isPlainRecord = (v: unknown): v is Record<string, unknown> =>
+  v !== null && typeof v === "object" && !Array.isArray(v);
+
+const isSecretField = (name: string, secrets: Set<string>) =>
+  secrets.has(name) || SECRET_NAME.test(name);
+
+/** The value with every secret field's value left out. */
+function redacted(v: unknown, secrets: Set<string>): unknown {
+  if (Array.isArray(v)) return v.map((x) => redacted(x, secrets));
+  if (!isPlainRecord(v)) return v;
+  const out: Record<string, unknown> = {};
+  for (const [k, x] of Object.entries(v)) {
+    out[k] = isSecretField(k, secrets) ? (hasToken(x) ? "(secret)" : x) : redacted(x, secrets);
+  }
+  return out;
+}
+
+/** A list or dict entry as one short piece of text: a scalar as `formatScalar`
+ *  has it, a record or list as compact JSON cut at 80 characters. */
+function formatEntryValue(v: unknown, secrets: Set<string>): string {
+  if (v === null || typeof v !== "object") return formatScalar(v);
+  const text = JSON.stringify(redacted(v, secrets));
+  return text.length > MAX_RECORD_LENGTH ? `${text.slice(0, MAX_RECORD_LENGTH)}…` : text;
+}
+
+/** What changed in one secret field, never its value. */
+function secretChange(name: string, before: unknown, after: unknown): string {
+  if (after === null || after === undefined || after === "") return `${name} cleared`;
+  return hasToken(before) ? `${name} new value` : `${name} set`;
+}
+
+/** The fields that differ between two records, `field old → new`; a changed
+ *  value that is itself a record or list reads as compact JSON. */
+function describeRecordFields(
+  before: Record<string, unknown>,
+  after: Record<string, unknown>,
+  secrets: Set<string>
+): string {
+  const parts: string[] = [];
+  for (const name of collectKeys(before, after)) {
+    if (deepEqual(before[name], after[name])) continue;
+    parts.push(
+      isSecretField(name, secrets)
+        ? secretChange(name, before[name], after[name])
+        : `${name} ${formatEntryValue(before[name], secrets)} → ${formatEntryValue(after[name], secrets)}`
+    );
+  }
+  return parts.join("; ");
+}
+
+function describeListChange(before: unknown[], after: unknown[], secrets: Set<string>): {
   summary: string;
   detail?: string[];
 } {
   const added = after.filter((v) => !before.some((b) => deepEqual(b, v)));
   const removed = before.filter((v) => !after.some((a) => deepEqual(a, v)));
   const detail = [
-    ...added.map((v) => `+ ${formatScalar(v)}`),
-    ...removed.map((v) => `− ${formatScalar(v)}`),
+    ...added.map((v) => `+ ${formatEntryValue(v, secrets)}`),
+    ...removed.map((v) => `− ${formatEntryValue(v, secrets)}`),
   ];
   return {
     summary: `+${added.length} −${removed.length} entries`,
@@ -99,7 +168,8 @@ function describeListChange(before: unknown[], after: unknown[]): {
 
 function describeDictChange(
   before: Record<string, unknown>,
-  after: Record<string, unknown>
+  after: Record<string, unknown>,
+  secrets: Set<string>
 ): { summary: string; detail?: string[] } {
   const keys = collectKeys(before, after);
   const detail: string[] = [];
@@ -110,12 +180,16 @@ function describeDictChange(
     const inAfter = Object.prototype.hasOwnProperty.call(after, key);
     if (!inBefore && inAfter) {
       added++;
-      detail.push(`+ ${key}: ${formatScalar(after[key])}`);
+      detail.push(`+ ${key}: ${formatEntryValue(after[key], secrets)}`);
     } else if (inBefore && !inAfter) {
       removed++;
-      detail.push(`− ${key}: ${formatScalar(before[key])}`);
+      detail.push(`− ${key}: ${formatEntryValue(before[key], secrets)}`);
     } else if (!deepEqual(before[key], after[key])) {
-      detail.push(`~ ${key}: ${formatScalar(before[key])} → ${formatScalar(after[key])}`);
+      detail.push(
+        isPlainRecord(before[key]) && isPlainRecord(after[key])
+          ? `~ ${key}: ${describeRecordFields(before[key], after[key], secrets)}`
+          : `~ ${key}: ${formatEntryValue(before[key], secrets)} → ${formatEntryValue(after[key], secrets)}`
+      );
     }
   }
   return {
@@ -124,17 +198,19 @@ function describeDictChange(
   };
 }
 
-function describeCollection(before: unknown, after: unknown): {
+function describeCollection(entry: CatalogEntry, before: unknown, after: unknown): {
   summary: string;
   detail?: string[];
 } {
+  const secrets = secretFieldsOf(entry);
   if (Array.isArray(before) || Array.isArray(after)) {
     return describeListChange(
       Array.isArray(before) ? before : [],
-      Array.isArray(after) ? after : []
+      Array.isArray(after) ? after : [],
+      secrets
     );
   }
-  return describeDictChange(asRecord(before), asRecord(after));
+  return describeDictChange(asRecord(before), asRecord(after), secrets);
 }
 
 // ---------------------------------------------------------------------------
@@ -167,6 +243,8 @@ const SERVER_FIELDS = [
   "reference_urls",
   "tool_facts",
   "credential_bootstrap",
+  "launcher_depth",
+  "prepass_tools",
 ] as const;
 
 function hasToken(v: unknown): boolean {
@@ -220,13 +298,15 @@ function describeServerMap(
     const as = asRecord(a[key]);
     const enabledChanged = bs.enabled !== as.enabled;
     const changed: string[] = [];
+    let toolLines: string[] = [];
     for (const field of SERVER_FIELDS) {
       if (deepEqual(bs[field], as[field])) continue;
-      if (
-        field === "tool_facts" &&
-        toolFactsDiff(shippedToolFactsOf(entry, key), bs[field], as[field], fields).length === 0
-      ) {
-        continue;
+      if (field === "tool_facts") {
+        const diff = toolFactsDiff(shippedToolFactsOf(entry, key), bs[field], as[field], fields);
+        if (diff.length === 0) continue;
+        // Each tool that changes in force is named, as on a block's own
+        // declarations, under the server's line.
+        toolLines = diff.map((d) => `${key}: tool ${describeToolLine(d)}`);
       }
       changed.push(field);
     }
@@ -252,6 +332,7 @@ function describeServerMap(
       detail.push(`${key}: changed: ${changed.join(", ")}`);
       changedCount++;
     }
+    detail.push(...toolLines);
   }
 
   return {
@@ -283,7 +364,17 @@ export const DEFINITION_FIELDS: [keyof AgentDefinitionEntry, string][] = [
   ["max_steps", "steps per loop"],
   ["timeout_seconds", "seconds per loop"],
   ["tab", "console tab"],
+  ["data_sources", "input data"],
+  ["chunk_boundary", "chunk boundaries"],
+  ["attck_techniques", "ATT&CK technique line"],
 ];
+
+/** A definition field as the settings model reads it: an absent ATT&CK
+ *  technique switch is on, so an explicit `true` and no field are the same. */
+function comparableField(def: AgentDefinitionEntry, field: keyof AgentDefinitionEntry): unknown {
+  if (field === "attck_techniques") return def.attck_techniques !== false;
+  return def[field];
+}
 
 function findCloneSource(
   def: AgentDefinitionEntry,
@@ -326,7 +417,7 @@ function describeDefinitionsMap(before: unknown, after: unknown): {
     const enabledChanged = bs.enabled !== as.enabled;
     const fields: string[] = [];
     for (const [field, label] of DEFINITION_FIELDS) {
-      if (!deepEqual(bs[field], as[field])) fields.push(label);
+      if (!deepEqual(comparableField(bs, field), comparableField(as, field))) fields.push(label);
     }
 
     // Same rule as the server map: an enable/disable that travels with other
@@ -388,9 +479,7 @@ function describeStage(profile: string, before: StageEntry, after: StageEntry): 
   }
   if (!deepEqual(before.debate, after.debate)) {
     lines.push(
-      after.debate
-        ? `${field}: debate ${after.debate.max_rounds} round(s), threshold ${after.debate.consensus_threshold}`
-        : `${field}: debate options cleared`
+      `${field}: ${describeDebate(after.debate)}`
     );
   }
   if (before.label !== after.label) lines.push(`${field}: label changed`);
@@ -467,7 +556,8 @@ function describeProfilesMap(before: unknown, after: unknown): {
 // ---------------------------------------------------------------------------
 
 function formatOverride(o: AgentLLMOverride): string {
-  let base = `${o.provider}/${o.model}`;
+  // An entry holding only its ceilings names no model of its own.
+  let base = o.provider || o.model ? `${o.provider}/${o.model}` : "its usual model";
   if (o.base_url) base = `${base} @ ${o.base_url}`;
   if (o.effort) base = `${base} (effort ${o.effort})`;
   if (o.temperature !== null && o.temperature !== undefined) {
@@ -476,7 +566,12 @@ function formatOverride(o: AgentLLMOverride): string {
   const fallbacks = (o.fallbacks ?? []).map(
     (f) => `${f.provider}/${f.model}${f.effort ? ` (effort ${f.effort})` : ""}`,
   );
-  return fallbacks.length ? `${base}, then ${fallbacks.join(", then ")}` : base;
+  const listed = fallbacks.length ? `${base}, then ${fallbacks.join(", then ")}` : base;
+  const ceilings = [
+    o.max_spend_usd != null ? `${o.max_spend_usd} USD` : "",
+    o.max_unpriced_tokens != null ? `${o.max_unpriced_tokens} unpriced tokens` : "",
+  ].filter(Boolean);
+  return ceilings.length ? `${listed} (ceiling ${ceilings.join(", ")})` : listed;
 }
 
 function describeLlmAgentsMap(before: unknown, after: unknown): {
@@ -617,7 +712,7 @@ export function describeChange(
   }
 
   if (entry.type === "list" || entry.type === "dict" || entry.type === "json") {
-    return { ...base, ...describeCollection(before, after) };
+    return { ...base, ...describeCollection(entry, before, after) };
   }
 
   return { ...base, summary: `${formatScalar(before)} → ${formatScalar(after)}` };

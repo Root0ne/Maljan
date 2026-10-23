@@ -22,22 +22,27 @@ import { stageTimeline } from "@/components/analysis/stageTimeline";
 import type { StageEvent, StageTimelineRow } from "@/components/analysis/stageTimeline";
 import type { StageRow } from "@/components/analysis/pipelineSteps";
 import { api } from "@/lib/api";
-import { getErrorMessage } from "@/lib/errors";
+import { ApiError, getErrorMessage, isNetworkFailure } from "@/lib/errors";
+import { pollDelay, pollFailure } from "@/app/(app)/analysis/[id]/polling";
+import { API_BASE } from "@/lib/apiBase";
 import { knownKind } from "@/lib/conversation";
 import type { TranscriptRow } from "@/lib/conversation";
 import type { JobRoster } from "@/types";
 
 /* ── Shape ─────────────────────────────────────────────── */
 
-/** Where the socket stands. `unauthorized` is terminal: the credential has to
- *  be replaced before another dial can succeed, so nothing retries. */
+/** Where the socket stands. `unauthorized` is terminal: the credential was
+ *  refused and could not be renewed, so nothing retries until it is replaced.
+ *  `refused` is terminal too: the server turned the feed down for a reason a
+ *  new credential does not change (the job is gone, or not the reader's). */
 export type RunConnection =
   | "idle"
   | "connecting"
   | "open"
   | "reconnecting"
   | "closed"
-  | "unauthorized";
+  | "unauthorized"
+  | "refused";
 
 /** One event as it arrives, from either reader. Deliberately looser than the
  *  published union: an event type this console has never heard of is held and
@@ -90,7 +95,10 @@ export interface RunSocket {
 export interface RunSocketHandlers {
   onOpen(): void;
   onEvent(event: IncomingEvent): void;
-  onClose(code: number): void;
+  /** Any frame arrived, a heartbeat included: the socket is carrying traffic. */
+  onAlive?(): void;
+  /** `reason` is the close frame's own text, empty when it carried none. */
+  onClose(code: number, reason?: string): void;
 }
 
 export interface RunTransport {
@@ -101,7 +109,7 @@ export interface RunTransport {
 }
 
 function defaultWsBase(): string {
-  const base = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000";
+  const base = API_BASE;
   return (process.env.NEXT_PUBLIC_WS_URL || base).replace(/^http/, "ws");
 }
 
@@ -110,9 +118,72 @@ function defaultWsBase(): string {
 const BASE_DELAY_MS = 1_000;
 const MAX_DELAY_MS = 30_000;
 
-/** Close codes that mean the credential was rejected rather than the
- *  connection dropped. Redialling would resend the same bad token. */
-const NO_RETRY_CLOSE_CODES = new Set([1008, 4401]);
+/** Close codes that mean the server refused the socket rather than the
+ *  connection dropped. Redialling would resend the same request. */
+const NO_RETRY_CLOSE_CODES = new Set([1008, 4400, 4401, 4404]);
+
+/**
+ * Why the server refused a socket: over the credential, or over the request.
+ *
+ * The server says which in the close code itself: 4401 is the credential (an
+ * expired, revoked or missing token), 4404 a job that does not exist or is not
+ * the reader's, 4400 a request that names no job. A bare 1008, which an older
+ * server closes with for all of them, is told apart by the close frame's
+ * reason (`Unauthorized: …`, `Not found: …`, `Forbidden: …`) as before.
+ * Every 1008 used to read as a refused credential, so a token that expired
+ * an hour into a run ended the feed with "sign in again" for a reader who was
+ * still signed in. A credential refusal is now renewed and redialled; a
+ * refusal over the request is not, because no token changes it. A 4401 and a
+ * 1008 with no reason are read as the credential, which is what they were
+ * read as before.
+ */
+export function refusalKind(code: number, reason = ""): "credential" | "request" | null {
+  if (!NO_RETRY_CLOSE_CODES.has(code)) return null;
+  if (code === 4401) return "credential";
+  if (code === 4400 || code === 4404) return "request";
+  const said = reason.trim();
+  if (!said || /^unauthori[sz]ed\b/i.test(said)) return "credential";
+  return "request";
+}
+
+/** The token the feed is sent with, and how a refused one is replaced. */
+export interface RunCredentials {
+  /** The token a dial would send now; `null` when none is held. */
+  current(): string | null;
+  /** A token to replace `refused` with, or `null` when none can be had. */
+  renew(refused: string | null): Promise<string | null>;
+}
+
+const browserCredentials: RunCredentials = {
+  current() {
+    try {
+      return typeof window !== "undefined" ? localStorage.getItem("access_token") : null;
+    } catch {
+      return null;
+    }
+  },
+  async renew(refused) {
+    const renewal = await api.renewSession(refused).catch(() => null);
+    return renewal?.kind === "renewed" ? renewal.token : null;
+  },
+};
+
+let credentials: RunCredentials = browserCredentials;
+
+/** Replace where the feed's token comes from. Tests drive renewal with this. */
+export function configureRunCredentials(next: RunCredentials | null): void {
+  credentials = next ?? browserCredentials;
+}
+
+/**
+ * How long a socket has to stay open, carrying nothing, before it counts as
+ * established. The server accepts a socket before it checks the credential
+ * and closes it with 1008 when the check fails, so `open` precedes every
+ * refusal and cannot by itself say the feed is working; a frame or this much
+ * time can. Until then the reconnect backoff keeps growing and a renewal is
+ * not granted a second time.
+ */
+const STABLE_MS = 10_000;
 
 /** How long a socket outlives its last reader, so a route change costs
  *  nothing and a tab left on another page does not hold one open forever. */
@@ -158,6 +229,7 @@ const browserTransport: RunTransport = {
 
     ws.onopen = () => handlers.onOpen();
     ws.onmessage = (message) => {
+      handlers.onAlive?.();
       try {
         const event = JSON.parse(message.data) as IncomingEvent;
         if (event.type === "heartbeat" || event.type === "pong") return;
@@ -166,7 +238,7 @@ const browserTransport: RunTransport = {
         /* A malformed frame is dropped rather than allowed to break the feed. */
       }
     };
-    ws.onclose = (event) => handlers.onClose(event.code);
+    ws.onclose = (event) => handlers.onClose(event.code, event.reason ?? "");
     ws.onerror = () => ws.close();
 
     return { close: () => ws.close() };
@@ -193,6 +265,15 @@ interface RunEntry {
   socket: RunSocket | null;
   readers: number;
   attempt: number;
+  /** The token the open (or last) dial was sent with. */
+  dialToken: string | null;
+  /** A renewal was spent and no socket has opened since: a second credential
+   *  refusal is then final rather than another renewal. */
+  renewedSinceOpen: boolean;
+  /** Fires once a socket has stayed open for `STABLE_MS`. */
+  stableTimer: ReturnType<typeof setTimeout> | null;
+  /** A renewal is in flight; no other dial goes out until it answers. */
+  renewing: boolean;
   /** Whether the recorded feed has been asked for. */
   asked: boolean;
   retryTimer: ReturnType<typeof setTimeout> | null;
@@ -261,6 +342,10 @@ function entryFor(jobId: string): RunEntry {
     socket: null,
     readers: 0,
     attempt: 0,
+    dialToken: null,
+    renewedSinceOpen: false,
+    stableTimer: null,
+    renewing: false,
     asked: false,
     backfilled: false,
     retryTimer: null,
@@ -455,6 +540,7 @@ export function resetRun(jobId: string): void {
   if (!entry) return;
   if (entry.retryTimer) clearTimeout(entry.retryTimer);
   if (entry.closeTimer) clearTimeout(entry.closeTimer);
+  clearStable(entry);
   entry.pending = [];
   entry.readers = 0;
   entry.socket?.close();
@@ -471,22 +557,34 @@ function dial(entry: RunEntry): void {
    * the second answers from cache and dials first, so the first one's dial can
    * land after the socket has already been refused. Only the one rule stops
    * it, and it belongs here rather than at each caller. */
-  if (entry.state.connection === "unauthorized") return;
+  if (isTerminal(entry.state.connection) || entry.renewing) return;
   const jobId = entry.state.jobId;
   patch(entry, { connection: entry.attempt === 0 ? "connecting" : "reconnecting" });
 
+  entry.dialToken = credentials.current();
   entry.socket = transport.connect(jobId, entry.state.lastSeq, {
     onOpen() {
-      entry.attempt = 0;
       patch(entry, { connection: "open" });
+      clearStable(entry);
+      entry.stableTimer = setTimeout(() => markEstablished(entry), STABLE_MS);
     },
     onEvent(event) {
+      markEstablished(entry);
       queueRunEvent(jobId, event);
     },
-    onClose(code) {
+    onAlive() {
+      markEstablished(entry);
+    },
+    onClose(code, reason) {
       entry.socket = null;
-      if (NO_RETRY_CLOSE_CODES.has(code)) {
-        patch(entry, { connection: "unauthorized" });
+      clearStable(entry);
+      const refusal = refusalKind(code, reason);
+      if (refusal === "request") {
+        patch(entry, { connection: "refused" });
+        return;
+      }
+      if (refusal === "credential") {
+        renewAndRedial(entry);
         return;
       }
       if (entry.readers === 0) {
@@ -502,6 +600,81 @@ function dial(entry: RunEntry): void {
       }, delay);
     },
   });
+}
+
+/** A state nothing redials out of. */
+function isTerminal(connection: RunConnection): boolean {
+  return connection === "unauthorized" || connection === "refused";
+}
+
+/**
+ * The server refused the socket's credential: replace it and dial again.
+ *
+ * A token newer than the one the socket was sent with is used as it is — the
+ * session timer or another request has already renewed it. Otherwise one
+ * renewal is asked for (`RunCredentials.renew`, the refresh cookie behind
+ * it). A second refusal before any socket has opened on a renewed token is
+ * final, so a server that refuses every token cannot turn the feed into a
+ * renewal loop; so is a renewal that brings nothing back.
+ */
+function renewAndRedial(entry: RunEntry): void {
+  const refused = entry.dialToken;
+  /* One replacement per refusal chain: a chain ends only when a socket is
+   * established (`markEstablished`), so a server that accepts and then
+   * refuses every token cannot turn the feed into a refresh loop. */
+  if (!refused || entry.renewedSinceOpen) {
+    patch(entry, { connection: "unauthorized" });
+    return;
+  }
+  entry.renewedSinceOpen = true;
+  const redial = () => {
+    // Backed off like any other reconnect. Whether anybody is still reading
+    // is asked when the timer fires: the last reader can leave during the
+    // wait, and a dial for nobody would open a socket no one closes.
+    const delay = backoffDelay(entry.attempt);
+    entry.attempt += 1;
+    patch(entry, { connection: "reconnecting" });
+    entry.retryTimer = setTimeout(() => {
+      entry.retryTimer = null;
+      if (runs.get(entry.state.jobId) !== entry || entry.readers === 0) {
+        patch(entry, { connection: "closed" });
+        return;
+      }
+      dial(entry);
+    }, delay);
+  };
+  const held = credentials.current();
+  if (held && held !== refused) {
+    redial();
+    return;
+  }
+  entry.renewing = true;
+  patch(entry, { connection: "reconnecting" });
+  void credentials.renew(refused).then(
+    (token) => {
+      entry.renewing = false;
+      if (token && token !== refused) redial();
+      else patch(entry, { connection: "unauthorized" });
+    },
+    () => {
+      entry.renewing = false;
+      patch(entry, { connection: "unauthorized" });
+    },
+  );
+}
+
+/** The socket carried traffic or outlasted `STABLE_MS`: the feed works. */
+function markEstablished(entry: RunEntry): void {
+  clearStable(entry);
+  entry.attempt = 0;
+  entry.renewedSinceOpen = false;
+}
+
+function clearStable(entry: RunEntry): void {
+  if (entry.stableTimer) {
+    clearTimeout(entry.stableTimer);
+    entry.stableTimer = null;
+  }
 }
 
 /** The highest number a page carries, and 0 for a page that carries none. */
@@ -533,6 +706,40 @@ function topSeq(page: IncomingEvent[]): number {
  * remove. The reading stops instead, silently: a run the store was told to
  * forget has no reader to tell anything to.
  */
+/**
+ * One page of the recording, asked again when the API may recover: no answer
+ * at all, a 5xx, a 408 or a 429, waiting the longer of the backoff and the
+ * server's `Retry-After` (the rule the job poll uses). The failure is said
+ * while it lasts and cleared when a page arrives. A refusal is thrown to the
+ * caller, which says it; `null` means the run was forgotten while waiting.
+ */
+async function readPageAgain(
+  entry: RunEntry,
+  jobId: string,
+  since: number | undefined,
+  held: () => boolean,
+): Promise<IncomingEvent[] | null> {
+  let failures = 0;
+  for (;;) {
+    try {
+      const page = await transport.readEvents(jobId, since);
+      if (failures > 0 && held()) patch(entry, { feedError: null });
+      return page;
+    } catch (error) {
+      if (!(error instanceof ApiError || isNetworkFailure(error))) throw error;
+      const failure = pollFailure(error);
+      if (failure.kind !== "retry") throw error;
+      if (!held()) return null;
+      patch(entry, {
+        feedError: `Earlier events could not be replayed (${failure.message}); asking again.`,
+      });
+      await new Promise((resolve) => setTimeout(resolve, pollDelay(failures, failure.retryAfterMs)));
+      failures += 1;
+      if (!held()) return null;
+    }
+  }
+}
+
 async function backfill(entry: RunEntry): Promise<void> {
   if (entry.asked) return;
   entry.asked = true;
@@ -544,8 +751,8 @@ async function backfill(entry: RunEntry): Promise<void> {
     let since: number | undefined;
     let truncated: string | null = null;
     for (;;) {
-      const page = await transport.readEvents(jobId, since);
-      if (!held()) return;
+      const page = await readPageAgain(entry, jobId, since, held);
+      if (page === null || !held()) return;
       applyRunEvents(jobId, page);
       /* A page short of the cap is the end of the recording. The count
        * against the cap is the whole of what the endpoint says about that. */
@@ -669,7 +876,7 @@ export function subscribeRun(jobId: string, listener: () => void): () => void {
   /* A credential the server rejected is not retried by coming back to the
    * page: the token has to be replaced first, and redialling would resend the
    * same one. */
-  if (!entry.socket && !entry.retryTimer && entry.state.connection !== "unauthorized") {
+  if (!entry.socket && !entry.retryTimer && !isTerminal(entry.state.connection)) {
     void backfill(entry).then(() => {
       // The run may have been reset or evicted while the back-fill was in
       // flight; the socket belongs to the entry that asked for it.

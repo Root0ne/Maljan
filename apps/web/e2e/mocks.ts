@@ -735,7 +735,9 @@ export const MOCK_SETTINGS_SCHEMA = withServedDeclarations({
         },
         {
           key: "core.agents.profiles", namespace: "core", path: "agents.profiles",
-          type: "json", default: {}, nullable: false, choices: null,
+          // The API serves the code default, which holds the seeded teams; the
+          // console locks a team whose key is in it.
+          type: "json", default: { default: { label: "Default", stages: PAPER_STAGES(), analysts: ["static", "dynamic", "network"] } }, nullable: false, choices: null,
           minimum: null, maximum: null, secret: false, group: "agents",
           title: "Teams",
           description: "Named teams, each an ordered list of stages.",
@@ -1176,10 +1178,10 @@ export const MOCK_SETTINGS_SCHEMA_FULL: SettingsSchema = withServedDeclarations(
           required_env: null,
         },
         {
-          key: "core.static.r2.mirror_dir", namespace: "core", path: "static.r2.mirror_dir",
+          key: "core.static.r2.work_dir", namespace: "core", path: "static.r2.work_dir",
           type: "str", default: "", nullable: false, choices: null,
           minimum: null, maximum: null, secret: false, group: "static",
-          title: "radare2 mirror directory", description: "Where a copy of the sample is written before analysis.",
+          title: "radare2 work directory", description: "Where a copy of the sample is written before analysis.",
           applies: "next_job", editable: true, reason: null, probe: null,
           applies_when: { "core.static.provider": ["r2"] }, order: 0,
           choices_from: null, editor: null, subgroup: null, advanced: false,
@@ -1326,7 +1328,9 @@ export const MOCK_SETTINGS_SCHEMA_FULL: SettingsSchema = withServedDeclarations(
         },
         {
           key: "core.agents.profiles", namespace: "core", path: "agents.profiles",
-          type: "json", default: {}, nullable: false, choices: null,
+          // The API serves the code default, which holds the seeded teams; the
+          // console locks a team whose key is in it.
+          type: "json", default: { default: { label: "Default", stages: PAPER_STAGES(), analysts: ["static", "dynamic", "network"] } }, nullable: false, choices: null,
           minimum: null, maximum: null, secret: false, group: "agents",
           title: "Teams",
           description: "Named teams, each an ordered list of stages.",
@@ -1475,7 +1479,7 @@ export const MOCK_SETTINGS_VALUES_FULL: SettingsValues = {
     "core.llm.openai.api_key": { value: null, is_set: false, hint: null, source: "default", updated_at: null, updated_by: null },
     "core.static.provider": { value: "ghidra", ...unset() },
     "core.static.r2.binary_path": { value: "", ...unset() },
-    "core.static.r2.mirror_dir": { value: "", ...unset() },
+    "core.static.r2.work_dir": { value: "", ...unset() },
     "core.static.generic.server": { value: "", ...unset() },
     "core.sandbox.provider": { value: "mock", ...unset() },
     "core.sandbox.triage.api_token": { value: null, is_set: false, hint: null, source: "default", updated_at: null, updated_by: null },
@@ -1618,6 +1622,10 @@ export async function installApiMocks(
   await page.route("**/api/v1/jobs/*/events**", (route) =>
     json(route, { job_id: MOCK_JOB_DETAIL.id, events: [], count: 0 })
   );
+  // The follow-up questions asked of a finished job: none yet in the fixture.
+  await page.route("**/api/v1/jobs/*/follow-ups", (route) =>
+    json(route, { job_id: MOCK_JOB_DETAIL.id, follow_ups: [] })
+  );
   // The evidence ledger. Answered from the fixture and narrowed here rather
   // than in the panel, because the endpoint filters server-side and a mock
   // that ignored the query would let a broken filter pass.
@@ -1731,6 +1739,61 @@ export async function installApiMocks(
   });
   await page.route("**/api/v1/settings/schema", (route) =>
     json(route, options.settingsSchema ?? MOCK_SETTINGS_SCHEMA)
+  );
+  // The ATT&CK cache panel under "Analysis layers": registered after the
+  // generic `settings/*` handler so `/settings/attck` is not answered as a
+  // per-key reset. Every domain current; a check says so; an update is done
+  // at the first poll with nothing to change. A spec that wants the outdated
+  // dialog or a failure overrides these with its own `page.route(...)`.
+  await page.route("**/api/v1/settings/attck", (route) =>
+    json(route, {
+      refresh_days: 7,
+      next_check_at: "2026-08-08T00:00:00+00:00",
+      domains: ["enterprise", "mobile", "ics"].map((domain) => ({
+        domain,
+        label: domain === "ics" ? "ICS" : domain[0].toUpperCase() + domain.slice(1),
+        present: true,
+        readable: true,
+        version: "20.0",
+        released: "2026-07-28T00:00:00Z",
+        techniques: 100,
+        cached_at: "2026-08-01T00:00:00+00:00",
+        age_days: 0.5,
+        next_check_at: "2026-08-08T00:00:00+00:00",
+      })),
+      last_check: null,
+      last_update: null,
+      running: null,
+    })
+  );
+  await page.route("**/api/v1/settings/attck/check", (route) =>
+    json(route, {
+      ok: true,
+      outcome: "up_to_date",
+      reason: "",
+      checked_at: "2026-08-01T00:00:00+00:00",
+      refresh_days: 7,
+      next_check_at: "2026-08-08T00:00:00+00:00",
+      domains: [
+        {
+          domain: "enterprise",
+          label: "Enterprise",
+          cached: { present: true, version: "20.0" },
+          latest: { version: "20.0", released: "2026-07-28T00:00:00Z" },
+          state: "current",
+        },
+      ],
+    })
+  );
+  await page.route("**/api/v1/settings/attck/update", (route) =>
+    json(route, { job_id: "0".repeat(32) }, 202)
+  );
+  await page.route("**/api/v1/settings/attck/update/*", (route) =>
+    json(route, {
+      job_id: "0".repeat(32),
+      state: "done",
+      result: { ok: true, outcome: "up_to_date", reason: "", changes: [] },
+    })
   );
   await page.route("**/api/v1/settings/export", (route) =>
     route.fulfill({

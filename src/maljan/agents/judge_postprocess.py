@@ -34,15 +34,16 @@ drop is recorded in the run summary rather than happening quietly.
 
 from __future__ import annotations
 
-import re
+import json
 import uuid
 from collections.abc import Mapping
 from typing import TYPE_CHECKING, Any
 
-from maljan.analysis.technique_ids import attack_reference_id
+from maljan.analysis.technique_ids import attack_reference_id, is_technique_id
 from maljan.core.logger import logger
 from maljan.core.truncation_ledger import EXPORT_PASS, JUDGE_PASS
 from maljan.reporting.dedupe import pattern_fingerprint
+from maljan.schemas.stix_models import PROPERTY_NOT_CARRIED_CODE as _PROPERTY_NOT_CARRIED_CODE
 
 if TYPE_CHECKING:
     from maljan.pipeline.validation import Violation
@@ -71,13 +72,27 @@ UNKNOWN_OBJECT_CODE = "stix.unknown_object"
 # A property of a judge object that the platform's model for its type does not
 # declare, so the export does not carry it. Recorded, not asked about: nothing
 # is wrong with the judge's answer, and the retry is not spent on it.
-PROPERTY_NOT_CARRIED_CODE = "stix.property_not_carried"
+PROPERTY_NOT_CARRIED_CODE = _PROPERTY_NOT_CARRIED_CODE
 
 # Properties the platform's models declare because the export writes them from
 # the run's record, and which a judge object therefore never carries: the
 # judge's copy is recorded as not carried, like an undeclared key, and dropped.
 PLATFORM_ONLY_PROPERTIES: frozenset[str] = frozenset(
     {"x_maljan_evidence_refs", "x_maljan_support", "x_maljan_support_note"}
+)
+
+# A leaf of the judge's assessment written in a type it does not take, and with
+# one reading in the type it does (``schemas.judgement.read_assessment``): read
+# so and recorded as settled, like the relocation; nothing is left to ask.
+ASSESSMENT_READ_LOOSELY_CODE = "verdict.assessment_read_loosely"
+
+# A leaf of the judge's assessment that cannot be read in the type it takes.
+# Left absent — never guessed — and the judge is asked about it once with its
+# own value quoted; one still unreadable after that is published absent, and
+# the report reader is told so.
+ASSESSMENT_UNREADABLE_CODE = "verdict.assessment_unreadable"
+ASSESSMENT_UNREADABLE_REASON = (
+    "a part of the judge's assessment could not be read and is left absent"
 )
 
 
@@ -159,6 +174,96 @@ def _object_problem(obj: dict[str, Any]) -> str:
     return ""
 
 
+# The standard properties the platform's models declare for a judge object, by
+# type. One of them written in a form the standard does not allow is dropped
+# from the object — the object is kept — and recorded.
+_STANDARD_PROPERTIES: dict[str, frozenset[str]] = {
+    "indicator": frozenset({"valid_until", "kill_chain_phases"}),
+    "malware": frozenset({"aliases", "kill_chain_phases", "first_seen", "last_seen"}),
+    "attack-pattern": frozenset({"aliases", "kill_chain_phases"}),
+    "relationship": frozenset({"description", "start_time", "stop_time"}),
+}
+# The later property of each ordered pair, which an order the standard refuses
+# drops; the earlier one stands.
+_LATER_OF_PAIR: dict[str, str] = {
+    "indicator": "valid_until",
+    "malware": "last_seen",
+    "relationship": "stop_time",
+}
+
+
+def _refuse_unholdable_standard_properties(obj: dict[str, Any]) -> list[str]:
+    """Drop the standard properties of ``obj`` the standard does not allow as written.
+
+    A judge's ``valid_until`` equal to its ``valid_from``, or a kill-chain phase
+    with no chain name, would fail the object's validation and set the whole
+    object aside. The object is the judge's answer and the property is the part
+    that cannot be held, so the property is taken out of the object (in place;
+    the answer as written was copied before this runs) and the object is read
+    without it. A property of the type that is not one of these, or an error
+    about anything else, is left for the validation that follows. Returns one
+    ``"<key> (<reason>)"`` for each property taken out.
+    """
+    from pydantic import ValidationError
+
+    from maljan.pipeline.events import safe_finding_value
+    from maljan.schemas.stix_models import bundle_model_for
+
+    kind = str(obj.get("type") or "")
+    model = bundle_model_for(kind)
+    standard = _STANDARD_PROPERTIES.get(kind)
+    if model is None or standard is None:
+        return []
+    refused: list[str] = []
+    # Each pass takes out at least one key or ends, so the loop is bounded by
+    # the object's own keys.
+    while True:
+        try:
+            model.model_validate(obj)
+        except ValidationError as exc:
+            dropped = False
+            bad_phases: dict[int, str] = {}
+            for error in exc.errors():
+                loc = tuple(error.get("loc", ()))
+                where = ".".join(map(str, loc))
+                reason = f"{where}: " if where else ""
+                reason += str(error.get("msg", "")).removeprefix("Value error, ")
+                phases = obj.get("kill_chain_phases")
+                if (
+                    loc[:1] == ("kill_chain_phases",)
+                    and len(loc) > 1
+                    and isinstance(loc[1], int)
+                    and isinstance(phases, list)
+                    and loc[1] < len(phases)
+                ):
+                    # Only the failing phase goes; the valid ones stay.
+                    bad_phases.setdefault(loc[1], reason)
+                    continue
+                if loc and loc[0] in standard and loc[0] in obj:
+                    key = str(loc[0])
+                elif not loc and _LATER_OF_PAIR.get(kind) in obj:
+                    key = _LATER_OF_PAIR[kind]
+                else:
+                    continue
+                obj.pop(key)
+                refused.append(f"{key} ({safe_finding_value(reason)})")
+                dropped = True
+            if bad_phases and isinstance(obj.get("kill_chain_phases"), list):
+                kept = [p for i, p in enumerate(obj["kill_chain_phases"]) if i not in bad_phases]
+                if kept:
+                    obj["kill_chain_phases"] = kept
+                else:
+                    obj.pop("kill_chain_phases")
+                refused.extend(
+                    f"kill_chain_phases[{i}] ({safe_finding_value(why)})"
+                    for i, why in sorted(bad_phases.items())
+                )
+                dropped = True
+            if dropped:
+                continue
+        return refused
+
+
 def lift_misplaced_extensions(bundle_dict: dict[str, Any]) -> list[Violation]:
     """Move the assessment out of ``objects``, set aside what cannot be held.
 
@@ -186,8 +291,22 @@ def lift_misplaced_extensions(bundle_dict: dict[str, Any]) -> list[Violation]:
     for index, obj in enumerate(objects):
         kind = _object_type(obj)
         if kind in BUNDLE_OBJECT_TYPES:
+            refused = _refuse_unholdable_standard_properties(obj)
             problem = _object_problem(obj)
             if not problem:
+                if refused:
+                    found.append(
+                        Violation(
+                            code=PROPERTY_NOT_CARRIED_CODE,
+                            message=(
+                                f"objects[{index}] {safe_finding_value(obj.get('id') or kind)!r} "
+                                f"carries {safe_finding_value('; '.join(refused))}: a value the standard does not "
+                                "allow, so the export does not carry it; the judge's own bundle "
+                                "keeps it as written."
+                            ),
+                            path=f"objects[{index}]",
+                        )
+                    )
                 not_carried = _not_carried(obj)
                 # Dropped in place: callers key the judge's objects by identity
                 # (``JudgeAgent`` maps each back to its position), and the
@@ -263,6 +382,73 @@ def lift_misplaced_extensions(bundle_dict: dict[str, Any]) -> list[Violation]:
             len(kept),
         )
     return found
+
+
+def assessment_rows(notes: list[Any]) -> list[Violation]:
+    """The rows for what reading the judge's assessment took (``read_assessment``'s notes).
+
+    A reading taken is settled and recorded; a leaf left absent is put to the
+    judge once, its own value quoted back.
+    """
+    from maljan.pipeline.events import safe_finding_value
+    from maljan.pipeline.validation import Violation
+    from maljan.schemas.stix_models import ASSESSMENT_PROPERTY
+
+    rows: list[Violation] = []
+    for note in notes:
+        # The path is made of the schema's own field names, and still goes
+        # through the helper with every other value of the row.
+        where = safe_finding_value(
+            f"{ASSESSMENT_PROPERTY}.{note.path}" if note.path else ASSESSMENT_PROPERTY
+        )
+        # Quoted as JSON first, so an empty list, a zero, ``false`` or an empty
+        # object is shown as what was written rather than as nothing.
+        written = safe_finding_value(json.dumps(note.written, default=str))
+        reason = safe_finding_value(note.reason)
+        if note.readable:
+            read_as = safe_finding_value(json.dumps(note.read_as, default=str))
+            rows.append(
+                Violation(
+                    code=ASSESSMENT_READ_LOOSELY_CODE,
+                    message=f"{where} was written as {written}, {reason}: {read_as}.",
+                    path=where,
+                )
+            )
+        else:
+            rows.append(
+                Violation(
+                    code=ASSESSMENT_UNREADABLE_CODE,
+                    message=(
+                        f"{where} is {written}, which cannot be read: "
+                        f"{reason}. It is left absent and the rest "
+                        "of the bundle was read. Write it again in the form the field takes, "
+                        "or leave it out."
+                    ),
+                    path=where,
+                )
+            )
+    return rows
+
+
+def read_judge_assessment(bundle_dict: dict[str, Any]) -> list[Violation]:
+    """Read the bundle's assessment apart from its objects, leaf by leaf.
+
+    The assessment is replaced by what could be read of it (removed when none
+    of it could), so a mistyped leaf never fails the Bundle and never costs
+    the judge's objects. What the reading took is returned as rows
+    (:func:`assessment_rows`). A bundle without an assessment is untouched.
+    """
+    from maljan.schemas.judgement import read_assessment
+    from maljan.schemas.stix_models import ASSESSMENT_PROPERTY
+
+    if bundle_dict.get(ASSESSMENT_PROPERTY) is None:
+        return []
+    read, notes = read_assessment(bundle_dict[ASSESSMENT_PROPERTY])
+    if read is None:
+        del bundle_dict[ASSESSMENT_PROPERTY]
+    else:
+        bundle_dict[ASSESSMENT_PROPERTY] = read
+    return assessment_rows(notes)
 
 
 DUPLICATE_LABEL_CODE = "stix.duplicate_label"
@@ -392,7 +578,6 @@ def postprocess_judge_bundle(
         _rewrite_references(objects, id_remap)
 
     # ── back-fill external_references on AttackPatterns ────────────
-    _VALID_TID_RE_LOCAL = re.compile(r"^T\d{4}(?:\.\d{3})?$")
     _CURATED_PLACEHOLDERS = frozenset({"T0000", "T0000.000", "T9999", "T1234"})
     for obj in objects:
         if not isinstance(obj, dict) or obj.get("type") != "attack-pattern":
@@ -405,7 +590,7 @@ def postprocess_judge_bundle(
         # with a placeholder or non-MITRE-shaped value. Without this guard,
         # ``attack-pattern--<uuid>(name=T0000)`` would gain a synthesized
         # MITRE reference that links to a non-existent technique page.
-        if not tid or tid in _CURATED_PLACEHOLDERS or not _VALID_TID_RE_LOCAL.match(tid):
+        if not tid or tid in _CURATED_PLACEHOLDERS or not is_technique_id(tid):
             continue
         name = _technique_display_name(tid) or obj.get("name") or tid
         url = f"https://attack.mitre.org/techniques/{tid.replace('.', '/')}/"
@@ -454,9 +639,7 @@ def _mint_id(obj: dict[str, Any], old_id: str) -> str:
     stix_type = obj.get("type") or _parse_type(old_id) or "indicator"
     if stix_type == "attack-pattern":
         suffix = _parse_type_suffix(old_id) or ""
-        tid = _attack_pattern_technique_id(obj) or (
-            suffix if re.match(r"^T\d{4}(?:\.\d{3})?$", suffix) else None
-        )
+        tid = _attack_pattern_technique_id(obj) or (suffix if is_technique_id(suffix) else None)
         if tid:
             from maljan.schemas.stix_models import attack_pattern_id
 
@@ -485,13 +668,13 @@ def _attack_pattern_technique_id(obj: dict[str, Any]) -> str | None:
     3. ``x_maljan_technique_id`` (Maljan custom field).
     """
     declared = attack_reference_id(obj)
-    if re.match(r"^T\d{4}(?:\.\d{3})?$", declared):
+    if is_technique_id(declared):
         return declared
     name = obj.get("name", "")
-    if isinstance(name, str) and re.match(r"^T\d{4}(?:\.\d{3})?$", name.strip()):
+    if isinstance(name, str) and is_technique_id(name.strip()):
         return name.strip()
     custom = obj.get("x_maljan_technique_id")
-    if isinstance(custom, str) and re.match(r"^T\d{4}(?:\.\d{3})?$", custom.strip()):
+    if isinstance(custom, str) and is_technique_id(custom.strip()):
         return custom.strip()
     return None
 
@@ -538,10 +721,10 @@ def _oset(o: Any, key: str, value: Any) -> None:
 def _technique_id_poly(o: Any) -> str | None:
     """Technique ID from an attack-pattern (dict or pydantic), via refs or name."""
     declared = attack_reference_id(o)
-    if re.match(r"^T\d{4}(?:\.\d{3})?$", declared):
+    if is_technique_id(declared):
         return declared
     name = _oget(o, "name", "") or ""
-    if isinstance(name, str) and re.match(r"^T\d{4}(?:\.\d{3})?$", name.strip()):
+    if isinstance(name, str) and is_technique_id(name.strip()):
         return name.strip()
     return None
 

@@ -73,6 +73,42 @@ class TestTheLedgerSaysWhichAnswersWereShort:
         assert _tools_that_were_shortened([]) == set()
 
 
+class TestAnAnswerCutShortInAnotherWayIsNamedToo:
+    """The tool's own ``truncated``, a character cut and an answer not shown say the same."""
+
+    def test_a_tool_that_set_its_own_truncated_flag_is_named(self) -> None:
+        entries = [_entry("strings", json.dumps({"strings": ["a"], "truncated": True}))]
+
+        assert _tools_that_were_shortened(entries) == {"strings"}
+
+    def test_a_truncated_flag_that_is_not_true_names_nothing(self) -> None:
+        for flag in (False, "yes", 1, None):
+            entries = [_entry("strings", json.dumps({"strings": ["a"], "truncated": flag}))]
+
+            assert _tools_that_were_shortened(entries) == set()
+
+    def test_an_answer_the_guardrail_cut_by_characters_is_named(self) -> None:
+        entry = _entry("decompile", "int main(void) { return 0; }")
+        entry.truncated = True
+        entry.chars_dropped = 4000
+
+        assert _tools_that_were_shortened([entry]) == {"decompile"}
+
+    def test_an_answer_the_conversation_had_no_room_for_is_named(self) -> None:
+        from maljan.schemas.evidence import not_shown_record
+
+        entry = _entry("decompile", not_shown_record(90_000))
+        entry.truncated = True
+
+        assert _tools_that_were_shortened([entry]) == {"decompile"}
+
+    def test_an_answer_the_byte_budget_blanked_after_it_was_read_is_not(self) -> None:
+        entry = _entry("decompile", "")
+        entry.truncated = True
+
+        assert _tools_that_were_shortened([entry]) == set()
+
+
 class TestTheModelAndTheLedgerReadTheSameAnswer:
     """The premise the grounding rule rests on, driven rather than assumed.
 

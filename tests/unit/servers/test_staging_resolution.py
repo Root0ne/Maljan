@@ -164,7 +164,9 @@ class TestTheWarningNamesTheJob:
         finally:
             base_agent.run_coro_blocking = original  # type: ignore[assignment]
 
-        assert (staged, reasons) == ({}, [])
+        assert staged == {}
+        # Said, not swallowed: the server the upload was for is named.
+        assert len(reasons) == 1 and "'remote'" in reasons[0] and "TimeoutError" in reasons[0]
         assert "sample staging skipped for job job-42" in caplog.text
 
     def test_the_container_hands_the_resolver_its_job_id(self) -> None:

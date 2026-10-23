@@ -428,7 +428,9 @@ class TestTheHumanTurnSaysWhatTheListHolds:
     def test_a_pcap_turn_names_only_the_packet_tools_it_has(self) -> None:
         agent = _container("none", "mock", "default").get_agent("network")
         agent.tools = [_Tool("attck_lookup", "knowledge")]
-        turns = _turns(agent, "analyze_isr", "flows here, capture at /tmp/run/dump.pcap")
+        # The capture is the one the platform fetched, not a path in the flow text.
+        agent._captures = ("/tmp/run/dump.pcap",)
+        turns = _turns(agent, "analyze_isr", "flows here")
 
         assert "read_pcap_summary" not in turns["human"]
         assert "No packet tool is in your tool list" in turns["human"]
@@ -436,12 +438,12 @@ class TestTheHumanTurnSaysWhatTheListHolds:
         # A tool its server declares nothing for may read the capture: the
         # turn does not say there is no packet tool.
         agent.tools = [_Tool("x", "knowledge")]
-        turns = _turns(agent, "analyze_isr", "flows here, capture at /tmp/run/dump.pcap")
+        turns = _turns(agent, "analyze_isr", "flows here")
         assert "No packet tool is in your tool list" not in turns["human"]
         assert UNDECLARED_TOOLS_LINE in turns["human"]
 
         agent.tools = [_Tool("read_pcap_summary", "network"), _Tool("x", "knowledge")]
-        turns = _turns(agent, "analyze_isr", "flows here, capture at /tmp/run/dump.pcap")
+        turns = _turns(agent, "analyze_isr", "flows here")
         assert "(read_pcap_summary)" in turns["human"]
 
 
@@ -470,13 +472,14 @@ def test_the_validation_turn_is_told_it_carries_no_tools(monkeypatch: Any) -> No
     """The retry after a cut answer is tools-free, and its prompt says so."""
     from langchain_core.messages import AIMessage
 
-    from maljan.agents import base_agent
     from maljan.pipeline.validation import Violation
     from maljan.schemas.isr_models import AgentISR, ClaimEvidence
 
     told = [Violation(code="isr.ungrounded_technique", message="cite ev_0001")]
     answers = iter([told, told, []])
-    monkeypatch.setattr(base_agent, "validate_isr", lambda *_a, **_k: next(answers, []))
+    monkeypatch.setattr(
+        "maljan.pipeline.validation.validate_isr", lambda *_a, **_k: next(answers, [])
+    )
     agent = _static_agent([_Tool("x", "knowledge")])
     sent: list[list[Any]] = []
 
@@ -571,13 +574,14 @@ class TestAToolsFreeCallKeepsTheProvidersGuidance:
     ) -> None:
         from langchain_core.messages import AIMessage
 
-        from maljan.agents import base_agent
         from maljan.pipeline.validation import Violation
         from maljan.schemas.isr_models import AgentISR, ClaimEvidence
 
         told = [Violation(code="isr.ungrounded_technique", message="cite ev_0001")]
         answers = iter([told, told, []])
-        monkeypatch.setattr(base_agent, "validate_isr", lambda *_a, **_k: next(answers, []))
+        monkeypatch.setattr(
+            "maljan.pipeline.validation.validate_isr", lambda *_a, **_k: next(answers, [])
+        )
         agent = _static_agent([_Tool("x", "knowledge")], provider="ghidra")
         sent: list[list[Any]] = []
 

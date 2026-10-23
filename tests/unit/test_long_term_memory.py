@@ -33,7 +33,7 @@ Tests:
     - With cases returns formatted block
     - Block contains expected section headers
     - Block contains technique IDs from stored cases
-    - Retrieval exception returns "" (graceful degradation)
+    - Retrieval exception returns a note that retrieval failed (graceful, said)
 
   ServiceContainer.get_memory_store():
     - Returns InMemoryStore by default
@@ -202,6 +202,14 @@ class TestTheCaseStoresThePublishedTechniques:
         case = with_published_techniques(claimed, [], {})
         assert case.technique_ids == []
         assert case.total_techniques == 0
+
+    def test_a_tactic_or_malformed_id_is_not_remembered_as_a_technique(self) -> None:
+        claimed = build_stored_case(
+            "s1", {"static": _make_isr([{"claim": "x", "technique_id": "T1055"}])}
+        )
+        case = with_published_techniques(claimed, ["TA0005", "T1055.1", "T1055", "t1027.002"], {})
+        assert case.technique_ids == ["T1055", "T1027.002"]
+        assert case.total_techniques == 2
 
     def test_an_id_the_case_withholds_stays_withheld_when_published(self) -> None:
         """A claim kept after the absence question is published and never remembered."""
@@ -408,7 +416,8 @@ class TestBuildMemoryContext:
         broken_store = MagicMock()
         broken_store.retrieve.side_effect = RuntimeError("Qdrant unavailable")
         result = JudgeAgent._build_memory_context(self._make_isr_reports(), broken_store)
-        assert result == ""
+        assert "unavailable" in result
+        assert "Qdrant" not in result
 
 
 # ---------------------------------------------------------------------------

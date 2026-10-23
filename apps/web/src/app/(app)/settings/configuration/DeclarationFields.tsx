@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { shippedServerToolFacts } from "@/lib/providerFacts";
 import type {
   McpServerEntry,
+  PrepassToolsEntry,
   SampleOpenEntry,
   ToolDeclarationFields,
   ToolFactsEntry,
@@ -11,9 +12,12 @@ import type {
 import { deepEqual } from "./mapEditorHelpers";
 import { useOptionalSettingsContext } from "./SettingsContext";
 import {
+  DECLARATION_PANEL_COPY,
+  readCallTimeout,
   readCredentialBootstrap,
   readEnvNames,
   readErrorPatterns,
+  readLauncherDepth,
   readMount,
   readPrefixes,
   readReferenceUrls,
@@ -22,6 +26,7 @@ import {
   readWorkDir,
   showJson,
   usableFields,
+  withPrepass,
   type Read,
 } from "./declarationFields";
 import {
@@ -59,6 +64,15 @@ const OPEN_FIELDS: { key: keyof SampleOpenEntry; label: string; hint: string }[]
   { key: "select_argument", label: "Select tool's argument", hint: "the argument the opened name goes in" },
   { key: "analyse_tool", label: "Analysis tool", hint: "runs the server's analysis after the first open; empty runs none" },
   { key: "analyse_argument", label: "Analysis tool's argument", hint: "the argument the opened name goes in; empty calls it with none" },
+];
+
+const EMPTY_PREPASS: PrepassToolsEntry = { call_graph: "", function_hashes: "", anti_analysis: "" };
+
+/* The three fields of `prepass_tools`, with the guide's words. */
+const PREPASS_FIELDS: { key: keyof PrepassToolsEntry; label: string; hint: string }[] = [
+  { key: "call_graph", label: "Call-graph tool", hint: "the program's whole call graph, for the priority-functions pre-pass" },
+  { key: "function_hashes", label: "Function-hash tool", hint: "a hash per function, for function-hash attribution" },
+  { key: "anti_analysis", label: "Anti-analysis scan tool", hint: "the triage pack's anti-analysis scan" },
 ];
 
 /**
@@ -310,6 +324,8 @@ export function ToolFactsBox({
 const joinComma = (v: string[]) => v.join(", ");
 const joinLines = (v: string[]) => v.join("\n");
 const asIs = (v: string) => v;
+const showSeconds = (v: number | null) => (v === null ? "" : String(v));
+const showDepth = (v: number | null) => (v === null ? "" : String(v));
 
 /**
  * The server's declaration: the facts the platform will read about this
@@ -330,14 +346,13 @@ export default function DeclarationFields({
   const fields = usableFields(schema?.tool_declaration_fields);
   const shipped = shippedServerToolFacts(schema, serverKey);
   const open = server.sample_open ?? EMPTY_OPEN;
+  const prepass = server.prepass_tools ?? EMPTY_PREPASS;
   const box = (field: string) => `${serverKey}.${field}`;
   return (
     <details className="border border-border rounded p-2" data-declaration={serverKey}>
       <summary className="text-xs text-text-muted cursor-pointer">Declaration</summary>
       <p className="text-[11px] text-text-secondary mt-1">
-        What the platform reads about this server and its tools. A built-in ships its own; a
-        server you add needs none to work. Nothing reads the declaration yet besides
-        sample_open. See the configuration guide for every field.
+        {DECLARATION_PANEL_COPY}
       </p>
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs mt-2">
         <fieldset className="sm:col-span-2 border border-border rounded p-2">
@@ -352,6 +367,25 @@ export default function DeclarationFields({
                   placeholder={hint}
                   value={open[key]}
                   onChange={(e) => put({ sample_open: { ...open, [key]: e.target.value } })}
+                />
+              </label>
+            ))}
+          </div>
+        </fieldset>
+        <fieldset className="sm:col-span-2 border border-border rounded p-2">
+          <legend className="text-xs text-text-muted px-1">
+            Tools the platform calls (when the generic static provider drives this server)
+          </legend>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+            {PREPASS_FIELDS.map(({ key, label, hint }) => (
+              <label key={key} className="block">
+                <span className="text-text-muted">{label}</span>
+                <input
+                  className={input}
+                  aria-label={`${serverKey} prepass_tools ${key}`}
+                  placeholder={hint}
+                  value={prepass[key]}
+                  onChange={(e) => put({ prepass_tools: withPrepass(prepass, key, e.target.value) })}
                 />
               </label>
             ))}
@@ -435,6 +469,26 @@ export default function DeclarationFields({
           />
           the platform&apos;s own server
         </label>
+        <ReadField
+          id={box("launcher_depth")}
+          label="Launcher levels (top levels of the started process tree that are a launcher, not a reader; empty: none)"
+          ariaLabel={`${serverKey} launcher_depth`}
+          value={server.launcher_depth ?? null}
+          show={showDepth}
+          rows={1}
+          read={readLauncherDepth}
+          onValue={(launcher_depth) => put({ launcher_depth })}
+        />
+        <ReadField
+          id={box("call_timeout_seconds")}
+          label="Call timeout in seconds (from 0; 0: no deadline of its own; empty: the deployment's floor)"
+          ariaLabel={`${serverKey} call_timeout_seconds`}
+          value={server.call_timeout_seconds ?? null}
+          show={showSeconds}
+          rows={1}
+          read={readCallTimeout}
+          onValue={(call_timeout_seconds) => put({ call_timeout_seconds })}
+        />
         <div className="sm:col-span-2">
           <ReadField
             id={box("reference_urls")}

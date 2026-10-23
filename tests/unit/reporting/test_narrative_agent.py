@@ -288,7 +288,7 @@ class TestPromptBuilder:
         text = build_prompt_text(report)
 
         assert all(f"T999{i} " in text for i in range(20))
-        assert all(f"sig-{i} " in text for i in range(9))
+        assert all(f'"sig-{i}" ' in text for i in range(9))
         assert all(f"relay{i}.example.net" in text for i in range(7))
         assert all(f"192.0.2.{i} " in text for i in range(7))
         assert all(f"HKCU\\Example\\{i}" + "y" * 150 in text for i in range(6))
@@ -675,7 +675,7 @@ class TestTheRoundIsSizedFromItsBudget:
         assert row["max_tokens"] == 393216
         assert row["budget"].startswith("393216 tokens")
 
-    def test_the_report_node_uses_the_sized_wait(self) -> None:
+    def test_the_report_node_puts_no_outer_cut_on_a_measured_round(self) -> None:
         from maljan.llm.generation_rate import GenerationRates
         from maljan.pipeline.nodes import _narrative_timeout
 
@@ -683,7 +683,10 @@ class TestTheRoundIsSizedFromItsBudget:
         rates.observe(self.MODEL, 4000, 100.0, "output tokens over the call's wall clock")
         agent = self._agent(rates)
 
-        assert _narrative_timeout(agent, _make_report(), "", "") > 1800
+        # Nothing is configured, so the round has no outer cut at any pace;
+        # the paced time is still recorded and each call keeps its deadline.
+        assert _narrative_timeout(agent, _make_report(), "", "") is None
+        assert rates.snapshot()["timeouts"]["narrative:round"]["max_tokens"] == 393216
 
     def test_a_call_past_its_window_is_held_to_what_the_window_leaves(self) -> None:
         from langchain_core.messages import HumanMessage

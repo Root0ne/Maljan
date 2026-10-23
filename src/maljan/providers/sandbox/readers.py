@@ -348,11 +348,6 @@ def sandbox_format_named(name: str, formats: Iterable[Any]) -> Any:
     return None
 
 
-def sandbox_format_ids(declared: Iterable[ReportFormat] = ()) -> list[str]:
-    """The registry's format ids: what ``sandbox.upload.allowed_formats`` may name."""
-    return [fmt.name for fmt in sandbox_formats(declared)]
-
-
 # -- the built-in readers ---------------------------------------------------
 
 
@@ -502,11 +497,13 @@ class MappedReportReader(ReportReader):
 
             mapping = RestMappingConfig()
         compiled = mapping if isinstance(mapping, CompiledMapping) else compile_mapping(mapping)
-        report = apply_mapping(compiled, payload, provider=provider, task_id=task_id).report
-        scale = context.get("signature_scale")
-        report.signature_scale = (
-            scale if scale is not None else getattr(fmt, "signature_scale", None)
-        )
+        given = context.get("signature_scale")
+        scale = given if given is not None else getattr(fmt, "signature_scale", None)
+        # A severity the sandbox wrote as its rung's word is that rung's score.
+        report = apply_mapping(
+            compiled, payload, provider=provider, task_id=task_id, signature_scale=scale
+        ).report
+        report.signature_scale = scale
         return report
 
     def reading(self, read_from: str = "", provider: str = "") -> Reading:

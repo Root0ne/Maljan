@@ -141,22 +141,45 @@ def yara_scan(
         }
     rule_count = len(getattr(layer, "_rules", []) or [])
     compiled = getattr(layer, "_yara_rules", None)
+    answer: dict[str, Any] = {"rule_count": rule_count, "filtered": 0}
     if compiled is not None:
-        matches = _yara_native_matches(compiled, layer, data, timeout_s)
-    else:
-        matches = _yara_regex_matches(layer, data)
-    return {"matches": matches, "rule_count": rule_count, "filtered": 0}
+        try:
+            hits = compiled.match(data=data, timeout=max(1, int(timeout_s)))
+        except Exception as exc:  # noqa: BLE001 — the engine's failure is stated, not hidden
+            logger.warning("yara_scan: native scan failed (%s); literal fallback used.", exc)
+            answer["native_error"] = f"{type(exc).__name__}: {exc}"
+        else:
+            native: dict[str, Any] = {
+                "matches": _yara_native_matches(layer, hits),
+                "engine": "yara",
+                **answer,
+            }
+            # A nocase string or an import hash the engine folds by a broken
+            # locale was not checked as written: say so beside the answer.
+            from maljan.core.ctype_locale import yara_case_folding_problem
+
+            problem = yara_case_folding_problem()
+            if problem:
+                native["engine_note"] = problem
+            return native
+    # The literal fallback reads each rule's strings, not its condition: a
+    # rule it does not list was not checked by the YARA engine, and an
+    # engine failure (a timeout among them) is named in ``native_error``
+    # rather than passed off as the engine's own empty answer.
+    answer["engine"] = "literal_fallback"
+    answer["engine_note"] = LITERAL_FALLBACK_NOTE
+    return {"matches": _yara_regex_matches(layer, data), **answer}
 
 
-def _yara_native_matches(
-    compiled: Any, layer: Any, data: bytes, timeout_s: int
-) -> list[dict[str, Any]]:
+# What an answer from the literal fallback says about what it checked.
+LITERAL_FALLBACK_NOTE = (
+    "the YARA engine did not scan: each rule's literal strings were searched instead, "
+    "so a rule's condition was not checked and a rule not listed is not shown absent"
+)
+
+
+def _yara_native_matches(layer: Any, hits: Any) -> list[dict[str, Any]]:
     """yara-python's own match objects, flattened to plain rows."""
-    try:
-        hits = compiled.match(data=data, timeout=max(1, int(timeout_s)))
-    except Exception as exc:  # noqa: BLE001
-        logger.warning("yara_scan: native scan failed (%s); falling back to regex.", exc)
-        return _yara_regex_matches(layer, data)
     id_map: dict[str, str] = getattr(layer, "_yara_id_map", {}) or {}
     rows: list[dict[str, Any]] = []
     for hit in hits:
@@ -200,9 +223,13 @@ def _yara_regex_matches(layer: Any, data: bytes) -> list[dict[str, Any]]:
 
     Reports the same row shape, offsets included: the fallback searches the
     same bytes, so it knows where each literal was found even though it never
-    compiled a YARA rule.
+    compiled a YARA rule. Each offset is a byte offset into ``data`` and each
+    ``data_hex`` the bytes found there: the bytes are decoded with every
+    undecodable byte kept as one escaped character, so the text maps back to
+    the bytes exactly. A replacement character used to stand for one or more
+    bytes, and the offsets were character indices that drifted from the file.
     """
-    decoded = data.decode("utf-8", errors="replace")
+    decoded = data.decode("utf-8", errors="surrogateescape")
     rows: list[dict[str, Any]] = []
     for rule in getattr(layer, "_rules", []) or []:
         rule_id = rule.id
@@ -213,15 +240,20 @@ def _yara_regex_matches(layer: Any, data: bytes) -> list[dict[str, Any]]:
         fired = layer.literal_matches(rule, decoded)
         strings: list[dict[str, Any]] = []
         for pattern in fired:
+            # The byte offset is carried from match to match, so each match
+            # encodes only the text since the one before it.
+            chars = 0
+            at = 0
             for match in re.finditer(re.escape(pattern), decoded, re.IGNORECASE):
+                at += len(decoded[chars : match.start()].encode("utf-8", "surrogateescape"))
+                chars = match.start()
+                raw = match.group().encode("utf-8", "surrogateescape")
                 strings.append(
                     {
-                        "offset": match.start(),
+                        "offset": at,
                         "identifier": f"${_identifier_for(rule, pattern)}",
-                        "data_hex": match.group()
-                        .encode("utf-8", errors="replace")[:_MAX_MATCH_BYTES]
-                        .hex(),
-                        "length": len(match.group().encode("utf-8", errors="replace")),
+                        "data_hex": raw[:_MAX_MATCH_BYTES].hex(),
+                        "length": len(raw),
                     }
                 )
         if not strings:
@@ -280,49 +312,45 @@ def sigma_match(events: list[dict[str, Any]], ruleset: str = "default") -> dict[
     normalised = [
         {str(k): str(v) for k, v in row.items()} for row in events if isinstance(row, dict)
     ]
+    return _sigma_result(layer, layer.scan(normalised))
+
+
+def _sigma_result(layer: Any, scan: Any) -> dict[str, Any]:
+    """The tool's answer for one scan.
+
+    A rule the corpus carries that raises while being evaluated (a value whose
+    regex does not compile, a condition pySigma cannot parse) is skipped and
+    counted, and the scan continues with the rest of the corpus.
+    """
     rows: list[dict[str, Any]] = []
-    rule_errors = 0
-    for rule, evaluator in getattr(layer, "_evaluators", []) or []:
-        for event in normalised:
-            # A rule the corpus carries with no parseable detection block
-            # raises inside pySigma rather than evaluating to "no match". One
-            # such rule must not take the whole corpus down with it, so the
-            # rule is skipped, counted, and the scan continues.
-            try:
-                matched = evaluator.evaluate(event, strict=True)
-            except Exception as exc:  # noqa: BLE001
-                rule_errors += 1
-                logger.debug("sigma_match: rule %s could not be evaluated (%s).", rule.id, exc)
-                break
-            if matched is None:
-                continue
-            logsource = rule.logsource
-            rows.append(
-                {
-                    "rule": str(rule.id) if rule.id else "unknown",
-                    "title": str(rule.title),
-                    "level": str(rule.level.name).lower() if rule.level else "",
-                    "logsource": {
-                        "product": str(logsource.product or "") if logsource else "",
-                        "category": str(logsource.category or "") if logsource else "",
-                        "service": str(logsource.service or "") if logsource else "",
-                    },
-                    "tags": [str(tag) for tag in rule.tags],
-                    "matched_fields": matched,
-                }
-            )
-            break  # a rule fires at most once per batch
-    if rule_errors:
+    for _position, rule, matched in scan.hits:
+        logsource = rule.logsource
+        rows.append(
+            {
+                "rule": str(rule.id) if rule.id else "unknown",
+                "title": str(rule.title),
+                "level": str(rule.level.name).lower() if rule.level else "",
+                "logsource": {
+                    "product": str(logsource.product or "") if logsource else "",
+                    "category": str(logsource.category or "") if logsource else "",
+                    "service": str(logsource.service or "") if logsource else "",
+                },
+                "tags": [str(tag) for tag in rule.tags],
+                "matched_fields": matched,
+            }
+        )
+    if scan.rule_errors:
         logger.warning(
             "sigma_match: %d of %d rules could not be evaluated; the scan used the rest.",
-            rule_errors,
+            scan.rule_errors,
             int(getattr(layer, "rule_count", 0)),
         )
-    return {
+    result = {
         "matches": rows,
         "rule_count": int(getattr(layer, "rule_count", 0)),
-        "rule_errors": rule_errors,
+        "rule_errors": scan.rule_errors,
     }
+    return result
 
 
 def sandbox_events(report: dict[str, Any] | None) -> list[dict[str, str]]:
@@ -340,11 +368,65 @@ def sandbox_events(report: dict[str, Any] | None) -> list[dict[str, str]]:
     return build_events_from_sandbox(report)
 
 
+def _runs(indices: list[int]) -> list[list[int]]:
+    """Ascending positions as ``[first, last]`` runs of consecutive ones."""
+    runs: list[list[int]] = []
+    for index in indices:
+        if runs and index == runs[-1][1] + 1:
+            runs[-1][1] = index
+        else:
+            runs.append([index, index])
+    return runs
+
+
 def sigma_match_sandbox(report: dict[str, Any] | None, ruleset: str = "default") -> dict[str, Any]:
-    """``sigma_match`` over the events derived from a sandbox report."""
-    events = sandbox_events(report)
-    result = sigma_match([dict(event) for event in events], ruleset=ruleset)
+    """``sigma_match`` over the events derived from a sandbox report.
+
+    The events are read as what the sandbox collected
+    (``sigma_layer.SandboxEvents.contexts``): a rule meets only the events of
+    its logsource category, and fires only where its condition is true. The
+    answer says what could not be decided: ``not_evaluable`` gives, for the
+    events (by position, as ``[first, last]`` runs) alike in it, how many
+    rules that did not fire ended unknown on each and the fields that made
+    them so (a field not collected, or ``"<field> path"`` where the image has
+    no path); ``no_events_of`` counts, per logsource the report holds no
+    events of, the rules not run.
+    """
+    from maljan.analysis.sigma_layer import NOT_EVALUABLE, read_sandbox_events
+
+    read = read_sandbox_events(report)
+    events = read.events
+    try:
+        layer = _sigma_layer(ruleset)
+    except Exception as exc:  # noqa: BLE001
+        return {
+            "error": f"ruleset load failed: {type(exc).__name__}: {exc}",
+            "tool": "sigma_match",
+            "event_count": len(events),
+        }
+    scan = layer.scan([dict(event) for event in events], contexts=read.contexts())
+    result = _sigma_result(layer, scan)
     result["event_count"] = len(events)
+    if scan.not_evaluable:
+        # Events alike in what was undecided share one row, their positions as
+        # [first, last] runs: complete, and as long as the distinct shapes.
+        shapes: dict[tuple[int, tuple[tuple[str, int], ...]], list[int]] = {}
+        distinct: set[int] = set()
+        for index in sorted(scan.not_evaluable):
+            held = scan.not_evaluable[index]
+            fields: dict[str, int] = {}
+            for position, names in held:
+                distinct.add(position)
+                for name in names:
+                    fields[name] = fields.get(name, 0) + 1
+            shapes.setdefault((len(held), tuple(sorted(fields.items()))), []).append(index)
+        rows = [
+            {"events": _runs(indices), "rules": count, "fields": dict(fields_held)}
+            for (count, fields_held), indices in shapes.items()
+        ]
+        result["not_evaluable"] = {"note": NOT_EVALUABLE, "rules": len(distinct), "rows": rows}
+    if scan.no_events_of:
+        result["no_events_of"] = dict(sorted(scan.no_events_of.items()))
     return result
 
 
@@ -359,14 +441,23 @@ def capa(
     backend: str = "auto",
     rules_dir: str = DEFAULT_CAPA_RULES,
     signatures_dir: str = DEFAULT_CAPA_SIGNATURES,
+    scratch: str | Path | None = None,
 ) -> dict[str, Any]:
     """The capabilities capa finds, each with its ATT&CK and MBC metadata.
 
-    capa runs in a spawned subprocess with the caller's budget, exactly as the
-    provider runs it (``None``, the default, is no wall clock of its own):
-    vivisect's disassembly loop has no cancellation point, so a thread-based
-    timeout can report an overrun while the work keeps running.
-    A child process can actually be killed, and on expiry this one is.
+    capa runs in a child process of its own with the caller's budget, exactly
+    as the provider runs it (``capa_yara.run_capa_document``; ``None``, the
+    default, is no wall clock of its own): vivisect's disassembly loop has no
+    cancellation point, so a thread-based timeout can report an overrun while
+    the work keeps running. A child process can actually be killed, and on
+    expiry this one is. It gets none of this process's environment.
+    ``scratch`` is the directory the run's own directory goes in, which the
+    triage pack opens in its job's staging directory; the sidecar passes none
+    and joins its own job directory.
+
+    ``library_functions`` names the functions capa's signatures identified as
+    library code, or says why none were looked for (``capa_library_functions``);
+    an empty ``signatures_dir`` runs without library identification.
     """
     target = Path(path)
     if not target.is_file():
@@ -375,15 +466,20 @@ def capa(
     if not rules.is_dir() or not any(rules.rglob("*.yml")):
         return {"error": f"capa rules directory {rules} is missing or empty", "tool": "capa"}
 
-    from maljan.providers.static.capa_yara import _BACKEND_NAMES, run_capa_document
+    from maljan.providers.static.capa_yara import (
+        _BACKEND_NAMES,
+        run_capa_document,
+        signatures_argument,
+    )
 
     backend_name = _BACKEND_NAMES.get(backend, "BACKEND_VIV")
     document = run_capa_document(
         sample_path=str(target),
         rules_dir=str(rules),
-        signatures_dir=str(resolve_data(signatures_dir)),
+        signatures_dir=signatures_argument(signatures_dir),
         backend_name=backend_name,
         timeout_seconds=None if timeout_s is None else max(1, int(timeout_s)),
+        scratch=scratch,
     )
     if document is None:
         return {
@@ -397,6 +493,7 @@ def capa(
         "capabilities": _capa_capabilities(document),
         "meta": _capa_meta(document),
         "function_starts": capa_function_starts(document),
+        "library_functions": capa_library_functions(document),
     }
 
 
@@ -438,12 +535,16 @@ def _capa_capabilities(document: dict[str, Any]) -> list[dict[str, Any]]:
 
 
 def capa_function_starts(document: dict[str, Any]) -> list[str]:
-    """Every function capa found, as the offset of its start from the image base.
+    """The start of every function capa analysed or identified as library code.
 
     Read from the document's feature counts, which list each function capa
-    analysed with its address. Only addresses inside the image are kept, and
-    only when capa names the base, so each is the number a disassembler agrees
-    with; the list says where functions start, not where they end.
+    matched rules in, and then from its library functions: a function capa's
+    signatures identify as library code is matched against no rule and left
+    out of the counts, and without its start the function before it would
+    seem to run on over it. Each start is its offset from the image base, kept
+    only when it is inside the image and capa names the base, so it is the
+    number a disassembler agrees with; the list says where functions start,
+    not where they end, in address order.
     """
     base = _capa_base_address(document)
     if base is None:
@@ -451,12 +552,52 @@ def capa_function_starts(document: dict[str, Any]) -> list[str]:
     analysis = (document.get("meta") or {}).get("analysis") or {}
     counts = analysis.get("feature_counts") or {}
     starts: list[str] = []
-    for row in counts.get("functions") or []:
+    seen: set[str] = set()
+    for row in [*(counts.get("functions") or []), *(analysis.get("library_functions") or [])]:
         address = row.get("address") if isinstance(row, dict) else None
         where = _capa_address(address, base)
-        if where and where.startswith("0x") and where not in starts:
+        if where and where.startswith("0x") and where not in seen:
+            seen.add(where)
             starts.append(where)
-    return starts
+    return sorted(starts, key=lambda start: int(start, 16))
+
+
+# What a library function's address says when capa's address for it is not a
+# place in the image (a .NET token, no address at all), as the model reads it.
+LIBRARY_FUNCTION_NOT_IN_IMAGE = "no: not a place in the image"
+
+
+def capa_library_functions(document: dict[str, Any]) -> list[dict[str, str]] | str:
+    """The functions capa's signatures identified as library code, or why none were looked for.
+
+    Each is its start (as ``capa_function_starts`` gives it) and the name its
+    signature gives it, so a reader can leave runtime and library code unread.
+    An empty list means capa looked and found none. When it did not look (no
+    signature directory, or capa loads no signatures for this format and
+    backend), the reason stands in place of the list, so its absence is never
+    read as "none".
+    """
+    from maljan.providers.static.capa_child import LIBRARY_FUNCTIONS_UNSTATED, NOT_IDENTIFIED_KEY
+
+    if NOT_IDENTIFIED_KEY not in document:
+        return LIBRARY_FUNCTIONS_UNSTATED
+    not_identified = document[NOT_IDENTIFIED_KEY]
+    if not_identified is not None:
+        return str(not_identified)
+    base = _capa_base_address(document)
+    analysis = (document.get("meta") or {}).get("analysis") or {}
+    found: list[dict[str, str]] = []
+    for row in analysis.get("library_functions") or []:
+        if not isinstance(row, dict):
+            continue
+        where = _capa_address(row.get("address"), base)
+        found.append(
+            {
+                "address": where or LIBRARY_FUNCTION_NOT_IN_IMAGE,
+                "name": str(row.get("name") or ""),
+            }
+        )
+    return found
 
 
 def _capa_base_address(document: dict[str, Any]) -> int | None:

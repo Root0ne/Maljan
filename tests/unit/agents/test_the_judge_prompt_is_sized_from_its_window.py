@@ -135,3 +135,52 @@ class TestAWindowThatCannotHoldIt:
         parts = {"a": "x" * 10, "b": "y" * 10}
         assert fit_prompt_parts(parts, 20) == (parts, "")
         assert fit_prompt_parts(parts, None) == (parts, "")
+
+
+class TestACutMemoryBlockIsClosed:
+    BLOCK = (
+        "=== LONG-TERM MEMORY: Similar Past Case(s) ===\n"
+        '[1/1] sample_id: s1 (category: "dropper")\n'
+        '  Behavioral summary: "' + "writes a run key; " * 40 + '"\n'
+        "=== END LONG-TERM MEMORY ==="
+    )
+    END = "\n=== END LONG-TERM MEMORY ==="
+
+    def _cut(self, width: int) -> str:
+        from maljan.agents.judge_agent import closed_memory_cut
+
+        fitted, _notice = fit_prompt_parts({"long-term memory": self.BLOCK}, width)
+        return closed_memory_cut(fitted["long-term memory"], self.BLOCK)
+
+    def test_an_uncut_block_is_unchanged(self) -> None:
+        from maljan.agents.judge_agent import closed_memory_cut
+
+        assert closed_memory_cut(self.BLOCK, self.BLOCK) == self.BLOCK
+
+    def test_a_cut_inside_the_summary_closes_its_quote_before_the_mark(self) -> None:
+        assert self._cut(200).endswith('"' + CUT_MARK + self.END)
+
+    def test_a_cut_after_a_closed_quote_adds_only_the_end_line(self) -> None:
+        from maljan.agents.judge_agent import closed_memory_cut
+
+        shown = self.BLOCK.split("\n  Behavioral")[0] + CUT_MARK
+        assert closed_memory_cut(shown, self.BLOCK) == shown + self.END
+
+    def test_an_escaped_quote_does_not_close_the_value(self) -> None:
+        from maljan.agents.judge_agent import closed_memory_cut
+
+        head = '=== LONG-TERM MEMORY: x ===\n  Behavioral summary: "says \\"hi'
+        whole = head + 'more"\n'
+        assert closed_memory_cut(head + CUT_MARK, whole) == head + '"' + CUT_MARK + self.END
+
+    def test_a_lone_backslash_the_cut_left_is_not_left_escaping_the_quote(self) -> None:
+        from maljan.agents.judge_agent import closed_memory_cut
+
+        head = '=== LONG-TERM MEMORY: x ===\n  Behavioral summary: "abc'
+        whole = head + 'def"\n'
+        assert closed_memory_cut(head + "\\" + CUT_MARK, whole) == head + '"' + CUT_MARK + self.END
+
+    def test_a_block_with_nothing_left_emits_nothing_of_its_own(self) -> None:
+        shown = self._cut(5)
+        assert "END LONG-TERM MEMORY" not in shown
+        assert "LONG-TERM MEMORY" not in shown

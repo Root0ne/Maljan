@@ -22,6 +22,7 @@ import httpx
 from maljan.core.config import BUILTIN_SERVER_KEYS, MCPServerConfig, builtin_env_allow
 from maljan.core.logger import logger
 from maljan.core.model_assignments import endpoint_for, endpoint_label
+from maljan.core.plugins import ALLOW_LIST_KEY, PLUGIN_GROUPS
 from maljan.core.settings_overrides import build_settings, redact_url, split_key
 from maljan.core.tool_declarations import SANDBOX_ROLE
 from maljan.llm.provider_base import COMPLETION_MAX_TOKENS as _COMPLETION_MAX_TOKENS
@@ -643,6 +644,7 @@ def _proposals(
     *,
     withheld: list[str] | None,
     sandbox_source: bool = False,
+    remote: bool = False,
 ) -> dict[str, Any] | None:
     """The declaration proposals for the tools ``found`` lists and nothing declares.
 
@@ -653,7 +655,8 @@ def _proposals(
     is made without (:func:`_withheld`); ``None`` when the server's
     declaration needs its credential and it is sent. ``sandbox_source`` says
     the server's declaration names it a sandbox source (its ``roles``), the
-    only server whose tools may be proposed sandbox kinds.
+    only server whose tools may be proposed sandbox kinds. ``remote`` says it is
+    reached at an address other jobs share (:func:`maljan.core.declaration_proposals.propose`).
     """
     from maljan.core.declaration_proposals import propose
     from maljan.tools.capabilities import CAPABILITIES_TOOL
@@ -667,6 +670,7 @@ def _proposals(
             answers=found.answers,
             skip=declared | {CAPABILITIES_TOOL},
             sandbox_source=sandbox_source,
+            remote=remote,
         )
     except Exception as exc:  # noqa: BLE001 — a proposal is never worth the probe
         logger.warning("declaration proposals could not be built (%s).", type(exc).__name__)
@@ -868,8 +872,14 @@ async def probe_mcp(v: dict[str, Any]) -> ProbeResult:
         if unavailable:
             detail += f"; {len(unavailable)} unavailable on this host"
         details = {"capabilities": capabilities}
+    from maljan.providers.sample_open import is_shared_address
+
     proposals = _proposals(
-        found, declared, withheld=withheld, sandbox_source=SANDBOX_ROLE in config.roles
+        found,
+        declared,
+        withheld=withheld,
+        sandbox_source=SANDBOX_ROLE in config.roles,
+        remote=is_shared_address(config),
     )
     if proposals is not None:
         details = {**(details or {}), "proposals": proposals}
@@ -957,7 +967,10 @@ async def _ask_each_model(
     by an agent definition's probe and a role's (``mediator``, ``summarizer``),
     whose entry is read the same way.
     """
-    agent_llm = settings.llm.agents.get(name)
+    from maljan.core.config import model_entry
+
+    # An entry holding only its ceilings is asked as no entry: it chooses no model.
+    agent_llm = model_entry(settings.llm.agents, name)
     llm_provider = agent_llm.provider if agent_llm else settings.llm.provider
     # No per-agent override means the agent inherits the global expert
     # model; reporting "" left the operator to work out which provider
@@ -1080,7 +1093,7 @@ async def probe_agent(v: dict[str, Any]) -> ProbeResult:
         available = ", ".join(sorted([*settings.agents.definitions, *ROLE_ENTRY_KEYS]))
         return ProbeResult(False, _ms(t0), f"unknown agent: {name!r}. Available: {available}")
 
-    from maljan.agents.composition import aresolve_agent, mcp_refs_for
+    from maljan.agents.composition import aresolve_agent, mcp_refs_for, servers_bound_to
     from maljan.core.config import ToolRef
     from maljan.core.container import ServiceContainer
 
@@ -1094,7 +1107,10 @@ async def probe_agent(v: dict[str, Any]) -> ProbeResult:
     bound += [
         str(ref.server) for ref in mcp_refs_for(settings, name) if str(ref.server) not in bound
     ]
-    bound = list(dict.fromkeys(bound))
+    # Only the servers resolution opens: the ones the team withholds from this
+    # agent are neither listed nor budgeted for.
+    reachable = servers_bound_to(settings, name)
+    bound = [key for key in dict.fromkeys(bound) if key in reachable]
 
     # One server's own open, at B's budget; the whole resolution gets that
     # budget once per server bound to the agent, never a fixed multiple —
@@ -1249,18 +1265,25 @@ def _provider_probe_kinds(stored: dict[str, Any] | None = None) -> dict[str, str
     An enrichment source is tested under its key; ``stored`` adds the ones an
     operator declared to the ones the platform ships.
     """
+    from maljan.core.plugins import accepted_names, loaded_names
     from maljan.memory.store_factory import memory_backends
     from maljan.providers.registry import sandbox_provider_ids, static_provider_ids
 
     kinds: dict[str, str] = {}
     for source in _probed_sources(stored):
         kinds.setdefault(source, "reputation")
-    for backend in memory_backends():
-        kinds.setdefault(backend, "memory")
-    for provider_id in sandbox_provider_ids():
-        kinds.setdefault(provider_id, "sandbox")
-    for provider_id in static_provider_ids():
-        kinds.setdefault(provider_id, "static")
+    allowed = (stored or {}).get(ALLOW_LIST_KEY) or []
+    for kind, ids in (
+        ("memory", memory_backends()),
+        ("sandbox", sandbox_provider_ids()),
+        ("static", static_provider_ids()),
+    ):
+        # A plugin is tested under its id when the stored list allows it,
+        # whether or not this process has loaded it yet.
+        plugin_ids = loaded_names(kind)
+        shipped = [i for i in ids if i not in plugin_ids]
+        for provider_id in [*shipped, *sorted(accepted_names(kind, allowed))]:
+            kinds.setdefault(provider_id, kind)
     return kinds
 
 
@@ -1303,6 +1326,13 @@ async def _probe_registered_provider(kind: str, name: str, core: Any) -> ProbeRe
     t0 = time.perf_counter()
     discover_providers()
     registry = _STATIC_REGISTRY if kind == "static" else _SANDBOX_REGISTRY
+    if name not in registry:
+        # An allowed plugin this process has not loaded: why, or that it is
+        # still loading, never a bare failure.
+        from maljan.core.plugins import unavailable_reason
+
+        why = unavailable_reason(kind, name) or "it is an allowed plugin still loading in the API"
+        return ProbeResult(False, _ms(t0), f"{kind} provider {name!r} is not loaded: {why}")
     try:
         cls: Any = registry[name]
         provider = cls.from_settings(core)
@@ -1418,6 +1448,19 @@ async def run_probe(name: str, values: dict[str, Any], stored: dict[str, Any]) -
         return await in_probe_loop(lambda: _probe_reputation_source(name, values, stored))
     if name == "redis":
         return await in_probe_loop(probe_redis)
+    plugin_kind = "llm" if name == "llm" else kinds.get(name)
+    if plugin_kind in PLUGIN_GROUPS:
+        # A plugin's own test runs its own code: that plugin alone (the LLM
+        # test's is the provider it would ask), when the stored list allows
+        # it, loaded off the event loop and waited for at most this budget.
+        from app.services.plugins import load_in_background
+
+        tested = (
+            str(values.get("core.llm.provider", stored.get("core.llm.provider")) or "")
+            if name == "llm"
+            else name
+        )
+        await load_in_background(stored.get(ALLOW_LIST_KEY), [f"{plugin_kind}:{tested}"], TIMEOUT)
     try:
         core = candidate_settings(values, stored)
     except (ValueError, ValidationError) as exc:

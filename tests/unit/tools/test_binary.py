@@ -786,7 +786,9 @@ class TestDocumentInfo:
         assert result["format"] == "ooxml"
         assert result["vba_project_present"] is True
         assert "word/document.xml" in result["parts"]
-        assert result["external_relationships"] == 1
+        # A relationship part that lists nothing outside the package is not an
+        # external relationship (test_ooxml_external_relationships).
+        assert "external_relationships" not in result
 
     def test_an_ooxml_document_without_macros_says_so(self, tmp_path: Path) -> None:
         docx = tmp_path / "doc.docx"

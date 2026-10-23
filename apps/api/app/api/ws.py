@@ -22,7 +22,7 @@ import redis.asyncio as aioredis
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from sqlalchemy import select
 
-from app.auth.jwt import decode_token
+from app.auth.jwt import decode_token, is_current_generation
 from app.config import settings
 from app.database import async_session_factory
 from app.logging_config import get_logger
@@ -41,21 +41,42 @@ router = APIRouter(tags=["WebSocket"])
 # indexed read per socket.
 ACTIVE_RECHECK_SECONDS = 60.0
 
+# One reason for a closed account and a revoked token alike: the socket says
+# no more than the HTTP 401 does about which of the two it was.
+_ACCOUNT_CLOSED_REASON = "Unauthorized: account is deactivated or the session was revoked"
+_JOB_NOT_FOUND_REASON = "Not found: job does not exist"
 
-async def _account_is_open(db: Any, user_id: str) -> bool:
-    """Whether this account still exists and is still active.
+
+async def _account_is_open(db: Any, user_id: str, payload: dict[str, Any] | None = None) -> bool:
+    """Whether this account still exists, is still active and the token still holds.
 
     The same question ``deps.require_active_user`` asks on every mutating
     HTTP request, asked here because the handshake never did: a user an admin
     deactivated kept the live feed of their own jobs — and everything the
-    events on it carry — until their access token expired.
+    events on it carry — until their access token expired. With the token's
+    ``payload`` it also asks whether the token was minted under the account's
+    current generation, so a password change or a refresh-token replay closes
+    the feed too; under ``auth_disabled`` there is no token and no payload.
     """
     try:
         user_uuid = uuid.UUID(str(user_id))
     except (ValueError, AttributeError, TypeError):
         return False
     row = (await db.execute(select(User).where(User.id == user_uuid))).scalar_one_or_none()
-    return bool(row is not None and getattr(row, "is_active", False))
+    if row is None or not getattr(row, "is_active", False):
+        return False
+    return payload is None or is_current_generation(payload, row)
+
+
+# The close code says why a socket was refused, so a client never has to read
+# the reason text. 4401 is the credential (missing, invalid, expired, revoked):
+# renew it and dial again. 4404 is the job: it does not exist or is not the
+# caller's, one code for both because two would tell any signed-in caller which
+# job ids exist (a 4403 for somebody else's job would be that oracle). 4400 is
+# a request that names no job at all. No code renews or redials the last two.
+CLOSE_CREDENTIAL = 4401
+CLOSE_BAD_REQUEST = 4400
+CLOSE_JOB_NOT_FOUND = 4404
 
 
 async def _reject(websocket: WebSocket, code: int, reason: str) -> None:
@@ -148,8 +169,14 @@ class ConnectionManager:
                     if isinstance(data, bytes):
                         data = data.decode("utf-8")
                     await self.broadcast(job_id, data)
+                    # The next event is asked for at once: a pause after every
+                    # message capped a busy run's live feed near ten events a
+                    # second, and the backlog then grew for as long as it ran.
+                    continue
 
-                await asyncio.sleep(0.1)
+                # ``get_message`` already waited its timeout; this only yields
+                # the loop when the connection answered nothing.
+                await asyncio.sleep(0)
         except asyncio.CancelledError:
             pass
         finally:
@@ -328,7 +355,7 @@ async def ws_analysis(websocket: WebSocket, job_id: str, since: int | None = Non
             logger.warning(  # nosemgrep
                 "WebSocket rejected: invalid token (job=%s)", log_safe(job_id)
             )
-            await _reject(websocket, 1008, "Unauthorized: invalid token")
+            await _reject(websocket, CLOSE_CREDENTIAL, "Unauthorized: invalid token")
             return
         payload = decoded
 
@@ -336,7 +363,7 @@ async def ws_analysis(websocket: WebSocket, job_id: str, since: int | None = Non
             logger.warning(  # nosemgrep
                 "WebSocket rejected: wrong token type (job=%s)", log_safe(job_id)
             )
-            await _reject(websocket, 1008, "Unauthorized: access token required")
+            await _reject(websocket, CLOSE_CREDENTIAL, "Unauthorized: access token required")
             return
 
         sub = payload.get("sub")
@@ -344,16 +371,19 @@ async def ws_analysis(websocket: WebSocket, job_id: str, since: int | None = Non
             logger.warning(  # nosemgrep
                 "WebSocket rejected: token missing subject (job=%s)", log_safe(job_id)
             )
-            await _reject(websocket, 1008, "Unauthorized: token missing subject")
+            await _reject(websocket, CLOSE_CREDENTIAL, "Unauthorized: token missing subject")
             return
         user_id = sub
+
+    # The token's claims, for the generation check; none under auth_disabled.
+    token_payload: dict[str, Any] | None = None if settings.auth_disabled else payload
 
     # ── Job ownership check ──────────────────────────────────────────
     try:
         job_uuid = uuid.UUID(job_id)
     except ValueError:
         logger.warning("WebSocket rejected: invalid job_id format (%s)", log_safe(job_id))
-        await _reject(websocket, 1008, "Bad request: invalid job ID")
+        await _reject(websocket, CLOSE_BAD_REQUEST, "Bad request: invalid job ID")
         return
 
     # One spelling from here on. ``uuid.UUID`` accepts the uppercase,
@@ -371,7 +401,7 @@ async def ws_analysis(websocket: WebSocket, job_id: str, since: int | None = Non
     async with async_session_factory() as db:
         # The account first, and before the job: a caller whose account is
         # closed learns nothing about whether the job exists.
-        account_open = await _account_is_open(db, user_id)
+        account_open = await _account_is_open(db, user_id, token_payload)
         owner: str | None = None
         job_exists = False
         if account_open:
@@ -383,16 +413,19 @@ async def ws_analysis(websocket: WebSocket, job_id: str, since: int | None = Non
 
     if not account_open:
         logger.warning(
-            "WebSocket rejected: account is not active (user=%s job=%s)",
+            "WebSocket rejected: account closed or session revoked (user=%s job=%s)",
             log_safe(user_id),
             log_safe(job_id),
         )
-        await _reject(websocket, 1008, "Unauthorized: account is deactivated")
+        await _reject(websocket, CLOSE_CREDENTIAL, _ACCOUNT_CLOSED_REASON)
         return
 
+    # One answer for a job that is not there and a job that is somebody
+    # else's: two reasons would tell any signed-in caller which job ids exist.
+    # The log keeps the two apart for the operator.
     if not job_exists:
         logger.warning("WebSocket rejected: job not found (%s)", log_safe(job_id))
-        await _reject(websocket, 1008, "Not found: job does not exist")
+        await _reject(websocket, CLOSE_JOB_NOT_FOUND, _JOB_NOT_FOUND_REASON)
         return
 
     if owner != user_id:
@@ -401,7 +434,7 @@ async def ws_analysis(websocket: WebSocket, job_id: str, since: int | None = Non
             log_safe(user_id),
             log_safe(job_id),
         )
-        await _reject(websocket, 1008, "Forbidden: not your job")
+        await _reject(websocket, CLOSE_JOB_NOT_FOUND, _JOB_NOT_FOUND_REASON)
         return
 
     # ── Connection accepted ──────────────────────────────────────────
@@ -414,7 +447,7 @@ async def ws_analysis(websocket: WebSocket, job_id: str, since: int | None = Non
     # ``exp``, but a long-lived connection could outlive its token. Read
     # the original ``exp`` claim once and revalidate against the wall
     # clock on every heartbeat tick (~30 s). When expired, close the
-    # connection with policy code 1008 so the client must re-auth before
+    # connection with code 4401 so the client must re-auth before
     # reconnecting.
     import time as _time
 
@@ -437,7 +470,7 @@ async def ws_analysis(websocket: WebSocket, job_id: str, since: int | None = Non
         _checked_at = _time.monotonic()
         try:
             async with async_session_factory() as db:
-                return await _account_is_open(db, user_id)
+                return await _account_is_open(db, user_id, token_payload)
         except Exception as exc:  # noqa: BLE001 — a database blip is not a verdict
             logger.warning(
                 "WebSocket account re-check failed (job=%s): %s",
@@ -448,7 +481,7 @@ async def ws_analysis(websocket: WebSocket, job_id: str, since: int | None = Non
 
     async def _close_unauthorized(reason: str) -> None:
         try:
-            await websocket.close(code=1008, reason=reason)
+            await websocket.close(code=CLOSE_CREDENTIAL, reason=reason)
         except Exception:  # noqa: BLE001 — the socket may already be gone
             pass
 
@@ -464,11 +497,25 @@ async def ws_analysis(websocket: WebSocket, job_id: str, since: int | None = Non
                 # once more first.
                 if not await _still_allowed():
                     logger.warning(
-                        "WebSocket closed: account deactivated mid-stream (user=%s job=%s).",
+                        "WebSocket closed: account closed or session revoked (user=%s job=%s).",
                         log_safe(user_id),
                         log_safe(job_id),
                     )
-                    await _close_unauthorized("Unauthorized: account is deactivated")
+                    await _close_unauthorized(_ACCOUNT_CLOSED_REASON)
+                    break
+
+                # A token that has run out ends the socket here too: the
+                # expiry used to be read only when the client had been silent
+                # for a whole heartbeat, so a page that pings every few
+                # seconds kept a dead token's socket open for the length of
+                # the run.
+                if _token_exp_ts is not None and _time.time() >= _token_exp_ts:
+                    logger.warning(  # nosemgrep: python.lang.security.audit.logging.logger-credential-leak.python-logger-credential-disclosure — user_id/job_id are opaque identifiers, not the token  # noqa: E501
+                        "WebSocket closed: token expired mid-stream (user=%s job=%s).",
+                        log_safe(user_id),
+                        log_safe(job_id),
+                    )
+                    await _close_unauthorized("Unauthorized: token expired")
                     break
 
                 # Handle client ping
@@ -477,11 +524,11 @@ async def ws_analysis(websocket: WebSocket, job_id: str, since: int | None = Non
             except TimeoutError:
                 if not await _still_allowed():
                     logger.warning(
-                        "WebSocket closed: account deactivated mid-stream (user=%s job=%s).",
+                        "WebSocket closed: account closed or session revoked (user=%s job=%s).",
                         log_safe(user_id),
                         log_safe(job_id),
                     )
-                    await _close_unauthorized("Unauthorized: account is deactivated")
+                    await _close_unauthorized(_ACCOUNT_CLOSED_REASON)
                     break
                 # Re-check token expiry on every heartbeat boundary.
                 if _token_exp_ts is not None and _time.time() >= _token_exp_ts:

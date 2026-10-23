@@ -25,6 +25,7 @@ when no agent thought to ask for them.
 
 from __future__ import annotations
 
+import bisect
 import hashlib
 import json
 import re
@@ -32,12 +33,18 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
 
-from maljan.analysis.technique_ids import api_capability_hits, sigma_technique_ids
+from maljan.analysis.directed_text import KIND as DIRECTED_TEXT_KIND
+from maljan.analysis.technique_ids import (
+    api_capability_hits,
+    sigma_technique_ids,
+    technique_ids_in,
+)
 from maljan.core.logger import logger
 from maljan.core.tool_declarations import first, select
 from maljan.reporting import tool_kinds
 from maljan.reporting.dedupe import distinct_signatures, process_identity
 from maljan.reporting.models import (
+    DirectedText,
     DynamicBehavior,
     ExportRow,
     FileHashes,
@@ -77,8 +84,6 @@ if TYPE_CHECKING:
 # hash the sample was actually hashed for beats one a format tool reported in
 # passing.
 _IDENTITY_KINDS = ("identity", "signing")
-
-_TECHNIQUE_RE = re.compile(r"\bT\d{4}(?:\.\d{3})?\b")
 
 # Beside an address's disputed lineage facts: the sandboxes whose mark they are.
 _MARKED_BY = "marked_by"
@@ -286,6 +291,37 @@ def _hashes_of(sample_path: str | None) -> dict[str, Any]:
     }
 
 
+# The flag a format answer states a damaged import directory by. No
+# declaration names such a signal, so the answer's own word is read.
+IMPORT_TABLE_DAMAGED_KEY = "import_table_damaged"
+
+
+def _import_read_partial(entry: LedgerEntry, data: dict[str, Any]) -> str:
+    """Why one answer's import tables may hold part of the binary's imports; ``""`` when whole.
+
+    A shortened answer (``LedgerEntry.truncated``: the guardrail cut it or
+    dropped rows of its lists); an answer the shared completeness reading
+    reads as holding part of its rows (``answer_completeness.read_answer``:
+    a ``truncated`` flag, a next page, a count above the rows); one that
+    reads the import directory as damaged; and a read that does not cover the
+    late-bound imports: its answer carries no ``delay_imports`` list and its
+    tool does not declare ``reads_delay_imports``.
+    """
+    from maljan.schemas.answer_completeness import read_answer
+
+    if getattr(entry, "truncated", False):
+        return f"{entry.id}: the answer was shortened"
+    args = entry.args if isinstance(entry.args, dict) else None
+    if read_answer(data, args=args).capped:
+        return f"{entry.id}: the answer says it holds part of its rows"
+    if data.get(IMPORT_TABLE_DAMAGED_KEY):
+        return f"{entry.id}: the import directory reads as damaged"
+    facts = tool_kinds.facts_of(entry)
+    if "delay_imports" not in data and not (facts is not None and facts.reads_delay_imports):
+        return f"{entry.id}: this tool does not read the delay-load table"
+    return ""
+
+
 def _opt(value: Any) -> str | None:
     text = str(value or "").strip()
     return text or None
@@ -305,8 +341,18 @@ def static_from_ledger(ledger: list[LedgerEntry]) -> StaticAnalysis | None:
     """
     static = StaticAnalysis()
     seen = False
+    # One note per answer that read the sample's import tables: ``""`` for a
+    # whole read.
+    import_reads: list[str] = []
+    # Which file each call read (``evidence_roots.files_read``): ``""`` for
+    # the sample. The import tables are the sample's: a carved payload's or an
+    # unpacked child's read is that file's, and joins neither the sample's
+    # list nor its completeness.
+    from maljan.analysis.evidence_roots import files_read
 
-    for _entry, data in _payloads(ledger, "format_info"):
+    file_of = files_read(ledger)
+
+    for format_entry, data in _payloads(ledger, "format_info"):
         seen = True
         for row in data.get("sections") or []:
             if not isinstance(row, dict):
@@ -322,12 +368,18 @@ def static_from_ledger(ledger: list[LedgerEntry]) -> StaticAnalysis | None:
                     characteristics=str(row.get("characteristics") or ""),
                 )
             )
-        for row in data.get("imports") or []:
-            if not isinstance(row, dict):
-                continue
-            static.imports.append(
-                ImportRow(dll=str(row.get("dll") or ""), function=str(row.get("function") or ""))
-            )
+        of_sample = file_of(format_entry) == ""
+        for key, table in (("imports", static.imports), ("delay_imports", static.delay_imports)):
+            for row in (data.get(key) or []) if of_sample else []:
+                if not isinstance(row, dict):
+                    continue
+                table.append(
+                    ImportRow(
+                        dll=str(row.get("dll") or ""), function=str(row.get("function") or "")
+                    )
+                )
+        if of_sample and ("imports" in data or "delay_imports" in data):
+            import_reads.append(_import_read_partial(format_entry, data))
         static.exports.extend(str(name) for name in data.get("exports") or [])
         for row in data.get("export_rows") or []:
             if isinstance(row, dict):
@@ -339,14 +391,13 @@ def static_from_ledger(ledger: list[LedgerEntry]) -> StaticAnalysis | None:
                         rva=_opt(row.get("rva")),
                     )
                 )
-        # An APK's declared permissions are its import table: the same
-        # question — what did the author ask the platform for — answered in
-        # the vocabulary Android uses.
+        # An APK's declared permissions: what its author asked the platform
+        # for, in a list of their own (they used to be written as exports).
         # A permission list androguard could not read is a ``no: <reason>``
         # string, which lists no permission.
         permissions = data.get("permissions")
         if isinstance(permissions, list):
-            static.exports.extend(str(name) for name in permissions)
+            static.permissions.extend(str(name) for name in permissions)
         if data.get("pdb_path"):
             static.pdb_path = str(data["pdb_path"])
         rows = [row for row in data.get("packer_signatures") or [] if row]
@@ -479,7 +530,13 @@ def static_from_ledger(ledger: list[LedgerEntry]) -> StaticAnalysis | None:
     # call's rows printed every section and export twice.
     static.sections = _once(static.sections, lambda s: (s.name, s.virtual_address, s.raw_offset))
     static.imports = _once(static.imports, lambda row: (row.dll, row.function))
+    static.delay_imports = _once(static.delay_imports, lambda row: (row.dll, row.function))
+    # One whole read holds every row any other read holds; with none, each
+    # read says why it may hold part of them.
+    if import_reads and all(import_reads):
+        static.imports_partial = import_reads
     static.exports = list(dict.fromkeys(static.exports))
+    static.permissions = list(dict.fromkeys(static.permissions))
     static.export_rows = _once(static.export_rows, lambda row: (row.name, row.ordinal, row.rva))
     # capa run twice over one file fires the same rules twice.
     static.api_technique_hits = _once(
@@ -493,6 +550,56 @@ def static_from_ledger(ledger: list[LedgerEntry]) -> StaticAnalysis | None:
         ),
     )
     return static
+
+
+def directed_text_from_ledger(ledger: list[LedgerEntry]) -> list[DirectedText]:
+    """The phrase groups the pack's directed-text pass stated, each with its ledger id."""
+    out: list[DirectedText] = []
+    for entry, data in _payloads(ledger, DIRECTED_TEXT_KIND):
+        for row in data.get("groups") or []:
+            if isinstance(row, dict) and row.get("phrase"):
+                out.append(_directed_text_row(row, entry.id))
+    return out
+
+
+def _directed_place(where: Any) -> str:
+    """Where a group first stands, in a few words, from the fields the answer holds escaped."""
+    if not isinstance(where, dict):
+        return ""
+    entry = f" [{where['entry']}]" if where.get("entry") else ""
+    if where.get("offset"):
+        said = [f"{where['length']} bytes" if where.get("length") else ""]
+        said += [str(where[key]) for key in ("encoding", "region") if where.get(key)]
+        within = ", ".join(part for part in said if part)
+        return f"{where.get('source')}{entry} {where['offset']}" + (
+            f" ({within})" if within else ""
+        )
+    place = f" {where['place']}" if where.get("place") else ""
+    return f"{where.get('source')}{entry}{place}"
+
+
+def _held_phrase(held: Any) -> str:
+    """A held phrase as the report prints it: whole, or its prefix, length and digest."""
+    if isinstance(held, dict):
+        return (
+            f"{held.get('prefix')}… ({held.get('characters')} characters, "
+            f"sha256 {held.get('sha256')})"
+        )
+    return str(held or "")
+
+
+def _directed_text_row(row: dict[str, Any], evidence_id: str) -> DirectedText:
+    """One directed-text group as the report holds it."""
+    count = row.get("count")
+    return DirectedText(
+        family=str(row.get("family") or ""),
+        text=_held_phrase(row.get("phrase")),
+        count=count if isinstance(count, int) else 1,
+        where=_directed_place(row.get("first")),
+        disguises=[str(d) for d in row.get("disguises") or []],
+        inside_template=_int(row.get("inside_template")),
+        evidence_id=evidence_id,
+    )
 
 
 def _canonical(name: str) -> str:
@@ -528,6 +635,18 @@ def _names_resolved_at_runtime(ledger: list[LedgerEntry], static: StaticAnalysis
     return found
 
 
+def _not_held(rows: list[dict[str, Any]], held: set[str]) -> list[dict[str, Any]]:
+    """``rows`` without those an earlier entry already gave (``held``), which then holds these too.
+
+    A row is its whole content, compared as canonical JSON: a row that differs
+    in any field (a size, a hash) is another row.
+    """
+    keys = [json.dumps(row, sort_keys=True, default=str) for row in rows]
+    kept = [row for row, key in zip(rows, keys, strict=True) if key not in held]
+    held.update(keys)
+    return kept
+
+
 def _once[T](rows: list[T], key: Any) -> list[T]:
     """``rows`` with each key kept at its first occurrence, in order."""
     seen: set[Any] = set()
@@ -553,18 +672,21 @@ def _hex(value: Any) -> str:
         return str(value or "")
 
 
+def _optional_int(value: Any) -> int | None:
+    """A whole number as written, or ``None`` where there is none: unknown is not 0."""
+    if isinstance(value, bool):
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
 def _int(value: Any) -> int:
     try:
         return int(value)
     except (TypeError, ValueError):
         return 0
-
-
-def _technique_id(value: Any) -> str:
-    """The ``T1027`` out of a capa ATT&CK label, or the label if it is already one."""
-    text = str(value or "")
-    match = _TECHNIQUE_RE.search(text)
-    return match.group(0) if match else ""
 
 
 # The kinds whose answers are rules that matched the sample and name the
@@ -667,7 +789,10 @@ def dynamic_from_ledger(ledger: list[LedgerEntry]) -> DynamicBehavior | None:
                 SandboxSignature(
                     name=str(row.get("name") or ""),
                     description=str(row.get("description") or ""),
-                    severity=_int(row.get("severity")),
+                    severity=_optional_int(row.get("severity")),
+                    # The ids the sandbox tags the signature with, under the
+                    # key the tool writes them (``sandbox_signatures``).
+                    technique_ids=technique_ids_in(row.get("technique_ids")),
                 )
             )
 
@@ -707,17 +832,26 @@ def dynamic_from_ledger(ledger: list[LedgerEntry]) -> DynamicBehavior | None:
     dynamic.api_capabilities = _called_api_categories(ledger, dynamic.notable_apis)
     seen = seen or bool(dynamic.api_capabilities)
 
+    # The same task read by the pack and by an analyst lists the same mutexes
+    # and dropped files: a row an earlier entry already gave is that row, and
+    # is kept once. Rows one answer lists twice are its own, and stay.
+    held_rows: set[str] = set()
     for _entry, data in _payloads(ledger, "sandbox_mutexes"):
         names = [str(name) for name in data.get("mutexes") or [] if name]
         if names:
             seen = True
-            dynamic.file_operations.extend({"operation": "mutex", "name": name} for name in names)
+            mutexes: list[dict[str, Any]] = [{"operation": "mutex", "name": n} for n in names]
+            dynamic.file_operations.extend(_not_held(mutexes, held_rows))
 
     for _entry, data in _payloads(ledger, "sandbox_dropped_files"):
-        for row in data.get("dropped") or []:
-            if isinstance(row, dict):
-                seen = True
-                dynamic.file_operations.append({"operation": "write", **row})
+        dropped: list[dict[str, Any]] = [
+            {"operation": "write", **row}
+            for row in data.get("dropped") or []
+            if isinstance(row, dict)
+        ]
+        if dropped:
+            seen = True
+            dynamic.file_operations.extend(_not_held(dropped, held_rows))
 
     # A sandbox that cannot fill a section says so in the report's own
     # ``unavailable`` list, and that disclaimer is the difference between "the
@@ -780,14 +914,51 @@ def _as_tree(nodes: list[ProcessNode]) -> list[ProcessNode]:
     sandbox did not watch the parent, and hiding the child under nothing would
     lose it.
     """
-    by_pid = {node.pid: node for node in nodes}
+    # A pid is reused once its process exits, so the parent of a process is
+    # the latest process of that pid listed before it (a sandbox lists them in
+    # the order they started), else the first one listed after it, never itself.
+    # A row with no pid (read as 0) is never a parent, and a row whose parent
+    # is its own pid is a root: neither names a process that spawned it.
+    positions: dict[int, list[int]] = {}
+    for index, node in enumerate(nodes):
+        if node.pid > 0:
+            positions.setdefault(node.pid, []).append(index)
+    parent_of: list[int | None] = []
+    for index, node in enumerate(nodes):
+        held = positions.get(node.ppid) if node.ppid > 0 and node.ppid != node.pid else None
+        if not held:
+            parent_of.append(None)
+            continue
+        at = bisect.bisect_left(held, index)
+        parent_of.append(held[at - 1] if at else held[0])
+    # A loop of parents (A is B's parent and B is A's) would leave its members
+    # under each other and out of every root: the member listed first is made a
+    # root. One pass over the parent links, each row walked once.
+    state = [0] * len(nodes)  # 0 not walked, 1 on the walk in hand, 2 done
+    for start in range(len(nodes)):
+        path: list[int] = []
+        walk: int | None = start
+        while walk is not None and state[walk] == 0:
+            state[walk] = 1
+            path.append(walk)
+            walk = parent_of[walk]
+        if walk is not None and state[walk] == 1:
+            loop = path[path.index(walk) :]
+            first = min(loop)
+            logger.warning(
+                "The process list holds a parent loop; process %s is shown as a root.",
+                nodes[first].pid,
+            )
+            parent_of[first] = None
+        for held_index in path:
+            state[held_index] = 2
     roots: list[ProcessNode] = []
-    for node in nodes:
-        parent = by_pid.get(node.ppid)
-        if parent is not None and parent is not node:
-            parent.children.append(node)
-        else:
+    for index, node in enumerate(nodes):
+        parent = parent_of[index]
+        if parent is None:
             roots.append(node)
+        else:
+            nodes[parent].children.append(node)
     return roots
 
 
@@ -1059,6 +1230,9 @@ def network_from_ledger(
 
     for _entry, data in _payloads(ledger, "pcap"):
         for row in data.get("conversations") or []:
+            # A host that only sent to the sandbox was not contacted by it.
+            if isinstance(row, dict) and row.get("inbound_only"):
+                continue
             _add("ip", address_key(_first_str(row, "dst", "ip", "address")), "sandbox")
         sni = data.get("sni")
         for name in sni if isinstance(sni, dict | list) else []:
@@ -1124,16 +1298,37 @@ def value_key(kind: str, value: Any) -> str:
     """One spelling of a value for every lookup: an address canonical, anything else folded.
 
     An address loses its brackets and is written in its compressed lower-case
-    form; any other value is lower-cased with a trailing dot taken off. The
-    sightings are keyed with it and looked up with it, so a spelling cannot
-    miss.
+    form; a URL has its scheme and its host lower-cased (a trailing dot off the
+    host) and its path, query and fragment as written, since a server may read
+    those by case; any other value is lower-cased with a trailing dot taken
+    off. The sightings are keyed with it and looked up with it, so a spelling
+    cannot miss.
     """
     text = str(value or "").strip()
     if kind == "ip":
         canonical = address_key(text.strip("[]"))
         if _parses_as_an_address(canonical):
             return canonical
+    if kind == "path":
+        # One separator, run or not, either way round: a path a STIX file
+        # names in its directory is read back joined by one separator.
+        unc = text.startswith(("\\\\", "//"))
+        folded = _PATH_SEPARATORS_RE.sub("\\\\", text.lower())
+        return (("\\" if unc else "") + folded).rstrip(".")
+    if kind == "url":
+        parts = _URL_PARTS_RE.match(text)
+        if parts is not None and (parts.group("scheme") or parts.group("rest")):
+            host = parts.group("host").lower()
+            host = host[:-1] if host.endswith(".") else host
+            return (parts.group("scheme") or "").lower() + host + parts.group("rest")
     return text.lower().rstrip(".")
+
+
+_PATH_SEPARATORS_RE = re.compile(r"[\\\\/]+")
+# A URL as its scheme, its authority and the rest (path, query, fragment).
+_URL_PARTS_RE = re.compile(
+    r"^(?P<scheme>[A-Za-z][A-Za-z0-9+.\-]*://)?(?P<host>[^/?#]*)(?P<rest>.*)$", re.S
+)
 
 
 def _strings_in(value: Any) -> Iterator[str]:
@@ -1181,20 +1376,83 @@ def tool_sightings(
         for entry in ledger or []
         if entry.ok
     ]
-    seen: dict[str, list[tuple[str, str]]] = {}
-    queried: dict[str, list[tuple[str, str]]] = {}
+    # Each value is searched for as it is spelled (``searched_spelling``) and
+    # keyed by ``value_key``: two spellings of one key (``/tmp/x``,
+    # ``\\tmp\\x``) hold what either is seen in.
+    spellings: dict[str, list[str]] = {}
     for kind, value in values:
         key = value_key(kind, value)
-        if not key or key in seen:
-            continue
+        searched = searched_spelling(kind, value)
+        if key and searched and searched not in spellings.setdefault(key, []):
+            spellings[key].append(searched)
+    seen: dict[str, list[tuple[str, str]]] = {}
+    queried: dict[str, list[tuple[str, str]]] = {}
+    holders = _every_holder(
+        [spelled for searched_as in spellings.values() for spelled in searched_as],
+        [text for _eid, _tool, text, _asked in texts],
+    )
+    for key, searched_as in spellings.items():
+        at = sorted({i for spelled in searched_as for i in holders.get(spelled.lower(), ())})
         holding = [
-            (eid, tool, whole_value_in(key, asked))
-            for eid, tool, text, asked in texts
-            if whole_value_in(key, text)
+            (
+                texts[i][0],
+                texts[i][1],
+                any(whole_value_in(spelled, texts[i][3]) for spelled in searched_as),
+            )
+            for i in at
         ]
         seen[key] = [(eid, tool) for eid, tool, was_asked in holding if not was_asked]
         queried[key] = [(eid, tool) for eid, tool, was_asked in holding if was_asked]
     return seen, queried
+
+
+def _every_holder(literals: Iterable[str], haystacks: list[str]) -> dict[str, list[int]]:
+    """``{literal: [index, ...]}``: each haystack that holds the literal as a value of its own.
+
+    The answer of asking ``whole_value_in`` of every literal against every
+    haystack, read without that product: ``first_holders`` reads the haystacks
+    once for all the literals and finds each literal's first holder, and the
+    search for a literal goes on after the holder it found, so a literal costs
+    the haystacks it is held in, not every haystack.
+    """
+    from maljan.agents._indicator_denylists import first_holders
+
+    found: dict[str, list[int]] = {}
+    resume: dict[str, int] = {}
+    for literal in dict.fromkeys(str(held or "").lower() for held in literals):
+        if literal:
+            resume[literal] = 0
+            found[literal] = []
+    while resume:
+        by_offset: dict[int, list[str]] = {}
+        for literal, offset in resume.items():
+            by_offset.setdefault(offset, []).append(literal)
+        resume = {}
+        for offset, group in by_offset.items():
+            for literal, index in first_holders(group, haystacks[offset:]).items():
+                found[literal].append(offset + index)
+                resume[literal] = offset + index + 1
+    return found
+
+
+def searched_spelling(kind: str, value: Any) -> str:
+    """How a value is searched for in a tool's text: lower-cased as written, a trailing dot off.
+
+    The text is the tool's own, so a path is searched with its own separators
+    (``value_key`` writes one separator for indexing, which no text holds);
+    an address is searched in its canonical form. It is also the key a report
+    stored before ``value_key`` normalised URLs and paths keyed its sightings by.
+    """
+    if kind == "ip":
+        return value_key(kind, value)
+    return str(value or "").strip().lower().rstrip(".")
+
+
+def sighting_keys(kind: str, value: Any) -> list[str]:
+    """The keys a value's sightings may be held under: ``value_key``, then the stored spelling."""
+    return list(
+        dict.fromkeys(k for k in (value_key(kind, value), searched_spelling(kind, value)) if k)
+    )
 
 
 # The artifact kinds that list a network value as an indicator: the analyst's
@@ -1369,18 +1627,118 @@ _LISTED_PERSISTENCE_KINDS = {
 }
 
 
-def listed_non_network_values(kind: Any, rows: Iterable[Any]) -> list[tuple[str, str, str]]:
+# The headings an analyst's listing names its type, its value and its payload
+# under, each list in the order a heading is preferred: a persistence table
+# headed "Kind | Target | Value" holds the target under "Target" and what was
+# written under "Value".
+_LISTED_TYPE_HEADINGS = (
+    "type",
+    "kind",
+    "mechanism",
+    "category",
+    "method",
+    "ioc type",
+    "indicator type",
+    "field",
+    "label",
+)
+_LISTED_VALUE_HEADINGS = (
+    "target",
+    "location",
+    "key",
+    "registry key",
+    "path",
+    "file",
+    "service",
+    "task",
+    "name",
+    "indicator",
+    "ioc",
+    "value",
+)
+_LISTED_PAYLOAD_HEADINGS = (
+    "payload",
+    "command",
+    "command line",
+    "commandline",
+    "binary",
+    "image",
+    "executable",
+    "program",
+    "data",
+)
+
+
+def listed_columns(columns: Iterable[Any] | None) -> tuple[int, int, int | None] | None:
+    """``(type, value, payload)`` columns a listing's headings name, or ``None``.
+
+    ``None`` when the headings do not name both a type and a value column, and
+    the row is read by position (type, value, payload), as a listing with no
+    headings is. Named, the payload is the column a payload heading names, or
+    a second ``value`` column; otherwise the first cell past the headings,
+    which only a row longer than its headings holds.
+    """
+    headings = [str(h or "").strip().lower() for h in columns or []]
+
+    def _first(names: tuple[str, ...], taken: tuple[int, ...] = ()) -> int | None:
+        for name in names:
+            for index, heading in enumerate(headings):
+                if heading == name and index not in taken:
+                    return index
+        return None
+
+    typed = _first(_LISTED_TYPE_HEADINGS)
+    if typed is None:
+        return None
+    valued = _first(_LISTED_VALUE_HEADINGS, (typed,))
+    if valued is None:
+        return None
+    payload = _first(_LISTED_PAYLOAD_HEADINGS, (typed, valued))
+    if payload is None:
+        payload = _first(("value",), (typed, valued))
+    if payload is None:
+        # No heading names one: the first cell past the headings, which a row
+        # longer than them (a merged artifact's payload) holds.
+        payload = len(headings)
+    return typed, valued, payload
+
+
+def listed_cells(cells: list[str], columns: tuple[int, int, int | None] | None) -> list[str]:
+    """``[type, value, payload]`` of one listed row, read by its headings where they name them.
+
+    By position — the row's own cells — when the headings name no columns or
+    the row is too short for them.
+    """
+    if columns is None:
+        return cells
+    typed, valued, payload = columns
+    if max(typed, valued) >= len(cells):
+        return cells
+    return [
+        cells[typed],
+        cells[valued],
+        cells[payload] if payload is not None and payload < len(cells) else "",
+    ]
+
+
+def listed_non_network_values(
+    kind: Any, rows: Iterable[Any], columns: Iterable[Any] | None = None
+) -> list[tuple[str, str, str]]:
     """``(IOC kind, value, payload)`` for each non-network value an analyst's table lists.
 
     An IOC list's row typed as a mutex, a path or a registry key, and a
     persistence table's Run key, scheduled task or service target. Read the
     same way from an artifact at build time and from its Appendix A section
-    of a stored report, so both answer alike.
+    of a stored report, so both answer alike. Each row is read by the
+    ``columns`` its headings name (:func:`listed_columns`), by position when
+    they name none.
     """
     kind = artifact_kind(kind)
+    named = listed_columns(columns)
     out: list[tuple[str, str, str]] = []
     for row in rows:
         cells = [str(cell).strip() for cell in row] if isinstance(row, list | tuple) else []
+        cells = listed_cells(cells, named)
         if len(cells) < 2 or not cells[1]:
             continue
         if kind in _IOC_LIST_KINDS:
@@ -1411,7 +1769,9 @@ def analyst_listed_values(isrs: dict[str, AgentISR] | None) -> list[tuple[str, s
             values.extend(
                 (kind, value)
                 for kind, value, _payload in listed_non_network_values(
-                    getattr(artifact, "kind", ""), _rows_of(artifact)
+                    getattr(artifact, "kind", ""),
+                    _rows_of(artifact),
+                    getattr(artifact, "columns", None),
                 )
             )
     return list(dict.fromkeys(values))
@@ -1540,7 +1900,7 @@ def cell_network_values(cell: str, hint: str | None) -> list[tuple[str, str]]:
     """What one cell holds: a URL and its host, an address, or a name; nothing otherwise."""
     from maljan.extractors.network_extractor import (
         host_is_public,
-        is_well_known_benign_host,
+        host_rides_a_url,
         url_host,
     )
 
@@ -1553,8 +1913,9 @@ def cell_network_values(cell: str, hint: str | None) -> list[tuple[str, str]]:
         as_address = _address_of(host) if host else ""
         if as_address:
             out.append(("ip", as_address))
-        elif host and not is_well_known_benign_host(host):
-            # A well-known host is kept only as itself, never through a URL on it.
+        elif host and host_rides_a_url(host):
+            # A well-known host is kept only as itself, never through a URL on
+            # it, and so is a tenant's name on shared hosting.
             out.append(("domain", host))
         return out
     as_address = _address_of(text)
@@ -1805,24 +2166,51 @@ def _first_str(row: Any, *keys: str) -> str:
 # ---------------------------------------------------------------------------
 
 
-# Registry paths that mean "run this again", and the mechanism each one is.
-_AUTOSTART_MARKERS: tuple[tuple[str, str], ...] = (
-    ("\\currentversion\\run", "registry_run"),
-    ("\\currentversion\\runonce", "registry_run"),
-    ("\\currentversion\\runservices", "registry_run"),
-    ("\\currentversion\\windows\\load", "registry_run"),
-    ("\\image file execution options", "image_hijack"),
-    ("\\windows nt\\currentversion\\windows\\appinit_dlls", "appinit_dll"),
-    ("\\winlogon", "winlogon_helper"),
-    ("\\currentcontrolset\\services", "service"),
+# Registry paths that mean "run this again", and the mechanism each one is. Each
+# is matched at its components' boundaries (a trailing separator allowed), and
+# to the component that arranges a run: a write under
+# ``Services\SharedAccess\Parameters\FirewallPolicy`` or a Winlogon value
+# that logs a user on configures the machine, it registers nothing to start. A
+# service is its own key (created), the image or DLL it runs, or its
+# ``Parameters`` key; a write of only ``Start``, ``Type`` or ``Security`` under
+# a service configures one that exists, and a new service is caught by its key.
+# Winlogon is its key (a write that names no value) or a value it starts a
+# program from.
+_CONTROL_SET = r"\\(?:currentcontrolset|controlset\d+)"
+_AUTOSTART_PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = tuple(
+    (re.compile(pattern), kind)
+    for pattern, kind in (
+        (
+            r"\\currentversion\\(?:run|runonce|runonceex|runservices|runservicesonce)(?:\\|$)",
+            "registry_run",
+        ),
+        (r"\\currentversion\\windows\\load\\?$", "registry_run"),
+        (r"\\image file execution options(?:\\|$)", "image_hijack"),
+        (r"\\windows nt\\currentversion\\windows\\appinit_dlls\\?$", "appinit_dll"),
+        (
+            r"\\windows nt\\currentversion\\winlogon(?:\\?$"
+            r"|\\(?:userinit|shell|taskman|appsetup|vmapplet|ginadll|system)\\?$"
+            r"|\\notify(?:\\|$))",
+            "winlogon_helper",
+        ),
+        (
+            _CONTROL_SET + r"\\services\\[^\\]+"
+            r"(?:\\(?:imagepath|servicedll|parameters|parameters\\servicedll|failurecommand))?"
+            r"\\?$",
+            "service",
+        ),
+    )
 )
 
 
 def _autostart_kind(key: str) -> str | None:
-    """The persistence mechanism a registry path names, or None when it names none."""
-    lowered = key.strip().lower()
-    for marker, kind in _AUTOSTART_MARKERS:
-        if marker in lowered:
+    """The persistence mechanism a registry path names, or None when it names none.
+
+    Separators a key is written with at its end are not part of it.
+    """
+    lowered = key.strip().lower().rstrip("\\").rstrip()
+    for pattern, kind in _AUTOSTART_PATTERNS:
+        if pattern.search(lowered):
             return kind
     return None
 

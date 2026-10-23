@@ -76,10 +76,34 @@ And the encoded bytes under the text:
 * under the rolling key, hold no byte three times in a row, which is a
   constant or a fill (the bytes of a floating-point number) and not text.
 
-Discardable sections (debug information, relocations) are not read. A span
-one scheme reads as text under two keys is dropped with every reading of it,
-and two decodings of overlapping bytes keep the one a header placed, else the
-longer. The answer counts the dropped spans under ``ambiguous_spans``.
+Discardable sections (debug information, relocations) are not read. Where the
+key turns the non-zero byte after a sweep's text into its NUL (the NUL was
+encoded with the text), the key explains where the text ends; another key of
+the same scheme reads that byte as one more character, and its last character
+is the difference between the two keys. Such readings of a span are set aside
+when the terminated reading is the only one its scheme makes there and reads
+better than each of them by the test's own measures: no more changes of
+character class and no fewer letters or digits, better on one, where the
+difference is a tab, LF or CR (the keys differ in the low bits and letters stay
+letters); better on both where it is any other character but the space; and
+never where it is the space, which flips the case of every letter. One reading
+that does not read worse holds the whole span. Only a scheme's own terminated
+reading sets its readings aside. The other sweep's reading of the same span,
+one character longer through that byte, not ending in white space and worse on
+both measures, gives way to the terminated reading and is stated under its
+``also_read_as``, never dropped. A header found inside a terminated text's
+bytes is set aside too. The strings affected are counted under
+``outranked_spans``. A span one scheme then still reads as text under two keys
+is dropped with every reading of it; setting readings aside settles a scheme's
+span only for its terminated reading, and not where the other sweep still
+reads that offset under two keys with a terminator or a white-space ending of
+its own. Two decodings of overlapping bytes keep the one a header placed, else
+the longer; where both sweeps' terminated readings stand on exactly the same
+bytes, the row is the one the rules before the terminator rule answered, and
+where those answered nothing the span is ambiguous. A decoder that recovered a
+reading stated under ``also_read_as`` is said under
+``<decoder>_matches_the_alternative``, never as recovering the row's text. The
+answer counts the dropped spans under ``ambiguous_spans``.
 
 Each result names the blob's file offset and RVA, the section, the scheme and
 its parameters, the decoded text and the code that refers to the blob: the
@@ -107,8 +131,9 @@ from __future__ import annotations
 import base64
 import binascii
 import re
-from collections.abc import Iterator, Mapping, Sequence
-from dataclasses import dataclass, field
+from collections import Counter
+from collections.abc import Callable, Iterator, Mapping, Sequence
+from dataclasses import dataclass, field, replace
 from typing import Any
 
 import numpy as np
@@ -172,6 +197,21 @@ def _char_class(byte: int) -> int:
     return 4
 
 
+def class_changes(text: bytes) -> int:
+    """How often the character class changes along ``text`` (``READABLE_TEST``).
+
+    Lower case, upper case, digit, space and punctuation; a capital before
+    lower case does not count. Words, numbers, paths and URLs change class
+    seldom, random bytes often.
+    """
+    changes = 0
+    for before, after in zip(text, text[1:], strict=False):
+        first, second = _char_class(before), _char_class(after)
+        if first != second and not (first == 1 and second == 0):
+            changes += 1
+    return changes
+
+
 def readable(text: bytes, min_len: int) -> bool:
     """Whether ``text`` passes the stated test (``READABLE_TEST``)."""
     text = text.rstrip(b"\0")
@@ -186,14 +226,10 @@ def readable(text: bytes, min_len: int) -> bool:
         return False
     if _repetitive(text):
         return False
-    changes = 0
     steps: dict[int, int] = {}
     for before, after in zip(text, text[1:], strict=False):
-        first, second = _char_class(before), _char_class(after)
-        if first != second and not (first == 1 and second == 0):
-            changes += 1
         steps[after - before] = steps.get(after - before, 0) + 1
-    if changes * 3 > length:
+    if class_changes(text) * 3 > length:
         return False
     # A run of evenly spaced characters is a table of numbers under a key, not
     # text: the bytes of a counter or an index read "defghijk" once decoded.
@@ -257,6 +293,9 @@ class Found:
     text: bytes
     layers: list[dict[str, Any]] = field(default_factory=list)
     encoding: str = "ascii"
+    # A sweep's text whose key turns the non-zero byte after it into its NUL:
+    # the key explains where the text ends (``_bounded_runs``).
+    terminated: bool = False
 
 
 # ---------------------------------------------------------------------------
@@ -270,67 +309,171 @@ def _xor(raw: bytes, stream: bytes) -> bytes:
     )
 
 
-def _bounded_runs(zeros: np.ndarray, decoded: bytes, min_len: int) -> Iterator[tuple[int, int]]:
+# How many positions the sweeps read at a time: it bounds their working arrays
+# (a few bytes per position), never what they find.
+_WINDOW = pe_image._SCAN_WORDS
+
+# The most bytes a two-byte length field states, so the farthest past its
+# start a header's stated text reaches.
+_TWO_BYTE_REACH = 1 << 16
+
+# The work the sweeps do, counted for the tests that hold them linear: the
+# positions each pass over a section reads. Counted, never timed.
+WORK: Counter[str] = Counter()
+
+
+def _long_runs(
+    mask_of: Callable[[int, int], np.ndarray], size: int, span: int
+) -> tuple[np.ndarray, np.ndarray]:
+    """The starts and ends of the maximal runs of a mask at least ``span`` long, ascending.
+
+    ``mask_of(low, high)`` is the mask over ``[low, high)``. A window of
+    positions at a time: a position starts ``span`` set places in a row when
+    the count of set places over the ``span`` from it is ``span``, read off a
+    running count; the positions that do, in a row, are one run's, which
+    starts at the first of them and ends ``span`` past the last. A run that
+    goes on into the next window is joined to the rest of it there.
+    """
+    firsts: list[np.ndarray] = []
+    lasts: list[np.ndarray] = []
+    for low in range(0, size, _WINDOW):
+        high = min(size, low + _WINDOW)
+        piece = mask_of(low, min(size, high + span - 1))
+        WORK["positions"] += len(piece)
+        if len(piece) < span:
+            break
+        running = np.concatenate(([0], np.cumsum(piece, dtype=np.int64)))
+        hits = np.flatnonzero((running[span:] - running[:-span])[: high - low] == span)
+        if not len(hits):
+            continue
+        hits += low
+        breaks = np.flatnonzero(np.diff(hits) != 1)
+        first = hits[np.concatenate(([0], breaks + 1))]
+        last = hits[np.concatenate((breaks, [len(hits) - 1]))]
+        if lasts and lasts[-1][-1] + 1 == first[0]:
+            lasts[-1][-1] = last[0]
+            first, last = first[1:], last[1:]
+        if len(first):
+            firsts.append(first)
+            lasts.append(last)
+    if not firsts:
+        empty = np.zeros(0, dtype=np.int64)
+        return empty, empty
+    return np.concatenate(firsts), np.concatenate(lasts) + span
+
+
+def _bounded_runs(
+    zeros: np.ndarray, decoded: np.ndarray, min_len: int
+) -> Iterator[tuple[int, int, bool]]:
     """The printable runs of ``decoded`` bounded on both sides as the test says.
 
     A zero byte of the encoded section is a boundary, never a character: a key
     applied to it gives the key itself, and plain text with its NULs under the
     key 0x20 would otherwise read as the same text in the other case.
+
+    Each run comes with whether its key terminated it: the byte after it is a
+    non-zero encoded byte the key turns into a NUL. One key in 256 does that to
+    a given byte, so the key then says where the text ends as a header does,
+    while a wrong key near the right one reads the same letters as other
+    letters and runs on through that byte as one more character.
+
+    Only runs of at least ``min_len`` are looked at, found by array operations
+    a window at a time (``_long_runs``) rather than one match per run.
     """
-    if zeros.any():
-        masked = np.frombuffer(decoded, dtype=np.uint8).copy()
-        masked[zeros] = 0
-        decoded = masked.tobytes()
-    for match in _RUN.finditer(decoded):
-        start, end = match.span()
-        if end - start < min_len:
-            continue
-        before = start == 0 or decoded[start - 1] == 0
-        after = end == len(decoded) or decoded[end] == 0
-        if before and after:
-            yield start, end
+    size = len(decoded)
+
+    def printable(low: int, high: int) -> np.ndarray:
+        mask: np.ndarray = _PRINTABLE_TABLE[decoded[low:high]] & ~zeros[low:high]
+        return mask
+
+    starts, ends = _long_runs(printable, size, max(1, min_len))
+    if not len(starts):
+        return
+    # Bounded: the byte before and the byte after are a zero of the section,
+    # a decoded NUL, or the section's edge.
+    before_at = np.maximum(starts - 1, 0)
+    after_at = np.minimum(ends, size - 1)
+    before = (starts == 0) | zeros[before_at] | (decoded[before_at] == 0)
+    after = (ends == size) | zeros[after_at] | (decoded[after_at] == 0)
+    terminated = (ends < size) & ~zeros[after_at]
+    for index in np.flatnonzero(before & after).tolist():
+        yield int(starts[index]), int(ends[index]), bool(terminated[index])
 
 
 def _xor8(raw: bytes, base: int, min_len: int) -> Iterator[Found]:
     zeros = np.frombuffer(raw, dtype=np.uint8) == 0
     for key in range(1, 256):
         decoded = raw.translate(bytes(b ^ key for b in range(256)))
-        for start, end in _bounded_runs(zeros, decoded, min_len):
+        decoded_array = np.frombuffer(decoded, dtype=np.uint8)
+        for start, end, terminated in _bounded_runs(zeros, decoded_array, min_len):
             text = decoded[start:end]
             if _reads_as_text(raw[start:end]) or not _passes(text, min_len):
                 continue
-            yield Found(base + start, base + start, "xor8", {"key": f"{key:#04x}"}, text)
+            yield Found(
+                base + start,
+                base + start,
+                "xor8",
+                {"key": f"{key:#04x}"},
+                text,
+                terminated=terminated,
+            )
 
 
-def _le(array: np.ndarray, at: np.ndarray, width: int) -> np.ndarray:
-    """The little-endian unsigned ints of ``width`` bytes starting at each of ``at``."""
-    value = np.zeros(len(at), dtype=np.int64)
-    for index in range(width):
-        value |= array[at + index].astype(np.int64) << (8 * index)
-    return value
+def _seed_groups(array: np.ndarray, ramp: bytes) -> list[np.ndarray] | None:
+    """Every place a seed-and-length header could stand, grouped by its ramp constant.
 
-
-def _seed_headers(array: np.ndarray) -> list[tuple[np.ndarray, np.ndarray, np.ndarray, bool]]:
-    """Every place a seed-and-length header could stand, per variant.
-
-    Each variant is the blob starts, the stated text lengths and, for each, the
-    constant ``c`` of the absolute key ramp (key at position ``p`` is
-    ``(c + p) & 0xFF``) the header's seed puts the text under.
+    At position ``p`` the seed's low byte ``s`` puts the text, which starts at
+    ``p + 6``, under the absolute key ramp constant ``(s + extra - (p + 6)) &
+    0xFF`` (``extra`` 0 or 1, the key starting at the seed's low byte or one
+    past it). Group ``g`` holds, ascending, the positions where ``(s - (p +
+    6)) & 0xFF`` is ``g``; constant ``c`` with ``extra`` reads group ``(c -
+    extra) & 0xFF``. Grouped a window at a time with a stable sort of one byte
+    per position, so the groups hold one number per position and nothing
+    else. ``None`` when the section is too short to hold a header.
     """
     size = len(array)
     if size < 6 + _HEADER_MIN_LENGTH:
-        return []
-    at = np.arange(0, size - 6, dtype=np.int64)
-    seed = _le(array, at, 4)
-    stored = _le(array, at + 4, 2)
-    variants = []
-    for masked in (False, True):
-        length = stored ^ (seed & 0xFFFF) if masked else stored
-        fits = (length >= _HEADER_MIN_LENGTH) & (length <= size - (at + 6))
-        for extra in (0, 1):
-            constant = ((seed + extra) - (at + 6)) & 0xFF
-            variants.append((at[fits], length[fits], constant[fits], masked))
-    return variants
+        return None
+    count = size - 6
+    pieces: list[list[np.ndarray]] = [[] for _ in range(256)]
+    for low in range(0, count, _WINDOW):
+        high = min(count, low + _WINDOW)
+        WORK["positions"] += high - low
+        shifted = np.frombuffer(ramp, dtype=np.uint8, count=high - low, offset=(low + 6) % 256)
+        group = array[low:high] - shifted
+        order = np.argsort(group, kind="stable")
+        bounds = np.concatenate(([0], np.cumsum(np.bincount(group, minlength=256))))
+        for value in np.flatnonzero(bounds[1:] > bounds[:-1]).tolist():
+            pieces[value].append(order[bounds[value] : bounds[value + 1]] + low)
+    return [np.concatenate(piece) if piece else np.zeros(0, dtype=np.int64) for piece in pieces]
+
+
+def _clean_spans(decoded: np.ndarray, starts: np.ndarray, stops: np.ndarray) -> np.ndarray:
+    """Whether each span ``[start, stop)`` of ``decoded`` holds only printable or zero bytes.
+
+    The spans are a header's stated text, so none is longer than a two-byte
+    length states (``_TWO_BYTE_REACH``). A window of starts at a time: a
+    running count of the other bytes over the window and the reach past it
+    answers every span that starts in the window.
+    """
+    clean = np.zeros(len(starts), dtype=bool)
+    if not len(starts):
+        return clean
+    order = np.argsort(starts, kind="stable")
+    ordered = starts[order]
+    size = len(decoded)
+    for low in range(0, size, _WINDOW):
+        high = min(size, low + _WINDOW)
+        first, last = np.searchsorted(ordered, (low, high))
+        if last <= first:
+            continue
+        piece = decoded[low : min(size, high + _TWO_BYTE_REACH)]
+        WORK["positions"] += len(piece)
+        other = ~(_PRINTABLE_TABLE[piece] | (piece == 0))
+        running = np.concatenate(([0], np.cumsum(other, dtype=np.int64)))
+        chosen = order[first:last]
+        clean[chosen] = running[stops[chosen] - low] == running[starts[chosen] - low]
+    return clean
 
 
 def _rolling(raw: bytes, base: int, min_len: int, sweep: bool, headers: bool) -> Iterator[Found]:
@@ -343,15 +486,16 @@ def _rolling(raw: bytes, base: int, min_len: int, sweep: bool, headers: bool) ->
     size = len(raw)
     array = np.frombuffer(raw, dtype=np.uint8)
     zeros = array == 0
-    variants = _seed_headers(array) if headers else []
     ramp = bytes(range(256)) * (size // 256 + 2)
+    groups = _seed_groups(array, ramp) if headers else None
     for constant in range(256):
-        stream = ramp[constant : constant + size]
-        decoded = _xor(raw, stream)
-        yield from _seeded(raw, base, decoded, stream, constant, variants)
+        stream = np.frombuffer(ramp, dtype=np.uint8, count=size, offset=constant)
+        decoded = array ^ stream
+        if groups is not None:
+            yield from _seeded(raw, base, decoded, constant, groups)
         if sweep:
-            for start, end in _bounded_runs(zeros, decoded, min_len):
-                text = decoded[start:end]
+            for start, end, terminated in _bounded_runs(zeros, decoded, min_len):
+                text = decoded[start:end].tobytes()
                 encoded = raw[start:end]
                 if _reads_as_text(encoded) or _repeats(encoded) or not _passes(text, min_len):
                     continue
@@ -359,36 +503,50 @@ def _rolling(raw: bytes, base: int, min_len: int, sweep: bool, headers: bool) ->
                     base + start,
                     base + start,
                     "xor8_rolling",
-                    {"first_key": f"{stream[start]:#04x}", "step": 1},
+                    {"first_key": f"{(constant + start) & 0xFF:#04x}", "step": 1},
                     text,
+                    terminated=terminated,
                 )
 
 
 def _seeded(
     raw: bytes,
     base: int,
-    decoded: bytes,
-    stream: bytes,
+    decoded: np.ndarray,
     constant: int,
-    variants: list[tuple[np.ndarray, np.ndarray, np.ndarray, bool]],
+    groups: list[np.ndarray],
 ) -> Iterator[Found]:
-    """The seed-and-length headers whose seed puts their text under this ramp constant."""
-    if not variants:
-        return
-    decoded_array = np.frombuffer(decoded, dtype=np.uint8)
-    # Printable or zero: a UTF-16LE text has a zero byte after each character.
-    plain = _PRINTABLE_TABLE[decoded_array] | (decoded_array == 0)
-    bad = np.concatenate(([0], np.cumsum(~plain, dtype=np.int64)))
-    for at, length, constants, masked in variants:
-        chosen = constants == constant
-        if not chosen.any():
-            continue
-        start = at[chosen] + 6
-        stop = start + length[chosen]
-        clean = bad[stop] - bad[start] == 0
-        for index in np.nonzero(clean)[0]:
+    """The seed-and-length headers whose seed puts their text under this ramp constant.
+
+    Four variants, in this order: the length stored plain or XOR the seed's
+    low 16 bits, each with the key starting at the seed's low byte or one
+    past it; each variant's headers ascending by position.
+    """
+    size = len(raw)
+    array = np.frombuffer(raw, dtype=np.uint8)
+    places = [groups[(constant - extra) & 0xFF] for extra in (0, 1)]
+    variants: list[tuple[np.ndarray, np.ndarray, bool]] = []
+    for masked in (False, True):
+        for extra in (0, 1):
+            at = places[extra]
+            stored = array[at + 4].astype(np.int64) | (array[at + 5].astype(np.int64) << 8)
+            if masked:
+                stored ^= array[at].astype(np.int64) | (array[at + 1].astype(np.int64) << 8)
+            fits = (stored >= _HEADER_MIN_LENGTH) & (stored <= size - (at + 6))
+            start = at[fits] + 6
+            variants.append((start, start + stored[fits], masked))
+    every = _clean_spans(
+        decoded,
+        np.concatenate([start for start, _, _ in variants]),
+        np.concatenate([stop for _, stop, _ in variants]),
+    )
+    taken = 0
+    for start, stop, masked in variants:
+        clean = every[taken : taken + len(start)]
+        taken += len(start)
+        for index in np.flatnonzero(clean).tolist():
             first, last = int(start[index]), int(stop[index])
-            read = _header_text(decoded[first:last], raw[first:last], rolling=True)
+            read = _header_text(decoded[first:last].tobytes(), raw[first:last], rolling=True)
             if read is None:
                 continue
             text, encoding = read
@@ -402,7 +560,7 @@ def _seeded(
                     + (", XOR the seed's low 16 bits" if masked else "")
                     + "), text",
                     "seed": f"{seed:#010x}",
-                    "first_key": f"{stream[first]:#04x}",
+                    "first_key": f"{(constant + first) & 0xFF:#04x}",
                     "step": 1,
                 },
                 text,
@@ -645,12 +803,29 @@ def _error(message: str) -> dict[str, Any]:
     return {"error": message, "tool": TOOL}
 
 
-def _remembered_rows(path: str) -> list[dict[str, Any]]:
-    """This process's emulated strings for this file, when that tool already ran on it here."""
+# The count of decodings no code refers to that were compared with only part
+# of a decoder's rows (``recovered_partial``), kept apart from ``unreferenced``.
+NOT_COMPARED = "not_compared"
+
+# What an answer says when it read this process's emulated strings for the
+# file and none were held.
+ROWS_NOT_HELD = (
+    "no emulated strings are held for this file in this process: the emulator did not run on "
+    "it here, or its result is no longer remembered; nothing was compared"
+)
+
+
+def _remembered_rows(path: str) -> tuple[list[dict[str, Any]], str]:
+    """This process's emulated strings for this file, and why they could not be read, or ``""``.
+
+    None remembered is an empty list and no reason: that tool did not run on
+    the file here. A failure to read them is the reason, so the answer says
+    the comparison was not made rather than that it compared nothing.
+    """
     try:
-        return emulated_strings.remembered_rows(path)
-    except Exception:  # noqa: BLE001 - the emulator's absence is not this tool's failure
-        return []
+        return emulated_strings.remembered_rows(path), ""
+    except Exception as exc:  # noqa: BLE001 - stated in the answer, not this tool's failure
+        return [], f"{type(exc).__name__}: {exc}"
 
 
 # The schemes whose header says where the text is. Where two decodings of the
@@ -658,6 +833,14 @@ def _remembered_rows(path: str) -> list[dict[str, Any]]:
 # longer text: a key that is right reads the whole string, and a wrong key
 # that happens to pass the test reads a few characters of it.
 _HEADER_SCHEMES = frozenset({"xor_keyed_header", "xor8_rolling_header"})
+# The schemes that only the bytes around the text bound (``_bounded_runs``).
+_SWEEP_SCHEMES = frozenset({"xor8", "xor8_rolling"})
+# White space, which a text may end in before a zero byte (``_char_class``).
+_WHITE_SPACE = frozenset(byte for byte in range(256) if _char_class(byte) == 3)
+# The space: a key that differs from the right one by it flips the case of
+# every letter, and the test's measures read either case as well, so a reading
+# that ends in a space is never set aside by the case-flipped key's reading.
+_CASE_FLIP = ord(" ")
 
 
 @dataclass
@@ -667,6 +850,12 @@ class Decoded:
     items: list[Found]
     # Spans where one scheme read text under more than one key.
     ambiguous: int = 0
+    # Strings (spans) whose near-key readings, or a header inside them, were
+    # set aside (``_through_readings``, ``_headers_inside_terminated_text``).
+    outranked: int = 0
+    # The data sections whose ranges of the file overlap, in groups, each with
+    # the one range of the file its group was decoded as (``_read_together``).
+    overlapping: list[tuple[list[str], int, int]] = field(default_factory=list)
 
 
 def _span_length(item: Found) -> int:
@@ -674,27 +863,264 @@ def _span_length(item: Found) -> int:
     return len(item.text) * (2 if item.encoding == "utf-16le" else 1)
 
 
+def letters_or_digits(text: bytes) -> int:
+    """How many characters of ``text`` are letters or digits (``READABLE_TEST``)."""
+    return sum(1 for byte in text if _char_class(byte) in (0, 1, 2))
+
+
+def _reads_better(first: bytes, second: bytes, strictly: bool = False) -> bool:
+    """Whether ``first`` reads as text better than ``second`` by the test's own measures.
+
+    Two of the measures ``READABLE_TEST`` states for every text: changes of
+    character class (fewer reads better) and letters or digits (more reads
+    better). ``first`` reads better when it is no worse on either and better on
+    one, or, ``strictly``, better on both; otherwise neither does, and nothing
+    in the bytes says which is the writing.
+    """
+    changes = (class_changes(first), class_changes(second))
+    letters = (letters_or_digits(first), letters_or_digits(second))
+    if strictly:
+        return changes[0] < changes[1] and letters[0] > letters[1]
+    no_worse = changes[0] <= changes[1] and letters[0] >= letters[1]
+    return no_worse and (changes[0] < changes[1] or letters[0] > letters[1])
+
+
+def _near_key_reading(maker: Found, item: Found) -> bool:
+    """Whether ``item`` reads ``maker``'s terminator as one more character under a wrong key.
+
+    Its last character is the difference between the two keys. Below the
+    space (tab, LF, CR: the only printable ones) the keys differ in the low
+    bits alone, letters stay letters under both, and ``maker`` must read better
+    than ``item``'s characters before that byte (``_reads_better``). The space
+    flips the case of every letter, which the measures read as well either
+    way, so it never decides. Any other difference moves letters off the
+    letters under one of the two keys, and ``maker`` must read better on every
+    measure (``_reads_better`` with ``strictly``); when it ties on one, nothing
+    tells which of the two is the writing.
+    """
+    difference, before = item.text[-1], item.text[:-1]
+    if difference == _CASE_FLIP:
+        return False
+    return _reads_better(maker.text, before, strictly=difference not in _WHITE_SPACE)
+
+
+def _through_readings(candidates: Sequence[Found]) -> tuple[set[int], int]:
+    """The sweep readings that read another reading's key-made terminator as one more character.
+
+    A reading whose key turns the non-zero byte after its text into the NUL
+    (``Found.terminated``) has its end explained by the key; it may set others
+    aside only when no other key of its scheme makes a terminator for a
+    different text at its offset, and only readings of its own scheme. A
+    reading of that scheme at the same offset, not terminated, one character
+    longer, whose last character is that very byte, is set aside when it is a
+    wrong key's (``_near_key_reading``). One such reading that is not holds the
+    whole span, so no partial setting aside dissolves an ambiguity, and a text
+    that ends in white space before a zero byte, which reads the same way under
+    the near key as under the right one, is left to the rules that follow. A
+    terminated reading whose own span then reads as text under two keys sets
+    nothing aside, so it lets no third reading through. Returns the indexes set
+    aside and how many spans (strings) lost readings to it. Linear: a pass to
+    collect, a pass to set aside, and one more where an offset is withdrawn.
+    """
+    # The terminated readings of each scheme at each offset, by their texts.
+    terminated: dict[tuple[str, int], set[bytes]] = {}
+    for item in candidates:
+        if item.terminated and item.scheme in _SWEEP_SCHEMES:
+            terminated.setdefault((item.scheme, item.text_offset), set()).add(item.text)
+    # The terminated reading that may set others of its scheme aside, by
+    # (scheme, offset, terminator byte).
+    makers: dict[tuple[str, int, int], Found] = {}
+    for item in candidates:
+        if item.terminated and len(terminated.get((item.scheme, item.text_offset), ())) == 1:
+            end = item.text_offset + _span_length(item)
+            makers.setdefault((item.scheme, item.text_offset, end), item)
+
+    def aside(withdrawn: set[tuple[str, int]]) -> dict[int, tuple[str, int, int]]:
+        found: dict[int, tuple[str, int, int]] = {}
+        # A span where one through-reading does not read worse sets none aside.
+        held: set[tuple[str, int, int]] = set()
+        for index, item in enumerate(candidates):
+            if (
+                item.terminated
+                or item.scheme not in _SWEEP_SCHEMES
+                or (item.scheme, item.text_offset) in withdrawn
+            ):
+                continue
+            span = (item.scheme, item.text_offset, item.text_offset + _span_length(item) - 1)
+            maker = makers.get(span)
+            if maker is None:
+                continue
+            if _near_key_reading(maker, item):
+                found[index] = span
+            else:
+                held.add(span)
+        return {index: span for index, span in found.items() if span not in held}
+
+    found = aside(set())
+    readings: dict[tuple[str, int], set[bytes]] = {}
+    for index, item in enumerate(candidates):
+        if index not in found:
+            readings.setdefault((item.scheme, item.text_offset), set()).add(item.text)
+    withdrawn = {
+        (scheme, offset) for (scheme, offset, _end) in makers if len(readings[(scheme, offset)]) > 1
+    }
+    if withdrawn:
+        found = aside(withdrawn)
+    return set(found), len({(offset, end) for _scheme, offset, end in found.values()})
+
+
+def _other_sweep_through_readings(kept: list[Found]) -> list[Found]:
+    """The decodings left once the other sweep's reading of a terminator is stated beside it.
+
+    A terminated reading (``Found.terminated``) left as its scheme's only one
+    at its offset, and a reading of the other sweep at the same offset, not
+    terminated, one character longer, whose last character is the byte the
+    first one's key turned into its NUL. When that character is not white
+    space, the terminated reading is the row: a text that ends in white space
+    before a zero byte is common, so then nothing is decided here, but under
+    the key that turns any other character into a NUL the letters before it
+    move off the letters and a reading that still passes the test is the
+    text. The other reading is not dropped: it is stated under the row's
+    ``also_read_as``. Linear: one pass to index, one to match.
+    """
+    makers: dict[tuple[str, int, int], Found] = {}
+    for item in kept:
+        if item.terminated:
+            makers[(item.scheme, item.text_offset, item.text_offset + _span_length(item))] = item
+    left: list[Found] = []
+    for item in kept:
+        last = item.text_offset + _span_length(item) - 1
+        others = _SWEEP_SCHEMES - {item.scheme}
+        maker = (
+            next(
+                (
+                    makers[(other, item.text_offset, last)]
+                    for other in others
+                    if (other, item.text_offset, last) in makers
+                ),
+                None,
+            )
+            if item.scheme in _SWEEP_SCHEMES and not item.terminated
+            else None
+        )
+        if (
+            maker is not None
+            and item.text[-1] not in _WHITE_SPACE
+            and _reads_better(maker.text, item.text[:-1])
+        ):
+            maker.parameters.setdefault("also_read_as", []).append(_alternative(item))
+            continue
+        left.append(item)
+    return left
+
+
+def _headers_inside_terminated_text(kept: list[Found]) -> tuple[list[Found], int]:
+    """The decodings left once a header found inside a key-terminated text is set aside.
+
+    A header is tried at every offset, so a stated length that fits its span
+    turns up by chance inside other bytes. When the whole blob, header and text,
+    lies inside the bytes of a sweep's text whose key turned the byte after it
+    into its NUL (``Found.terminated``) and which no other key of its scheme
+    read, those header bytes are characters of that text: the header is set
+    aside and counted. A header whose blob reaches outside such a text is kept,
+    first, as before. Linear in the length of the terminated texts.
+    """
+    inside: dict[int, int] = {}
+    for item in kept:
+        if item.terminated:
+            end = item.text_offset + _span_length(item)
+            for at in range(item.text_offset, end):
+                inside[at] = max(inside.get(at, end), end)
+    left: list[Found] = []
+    dropped = 0
+    for item in kept:
+        stop = item.text_offset + _span_length(item)
+        if item.scheme in _HEADER_SCHEMES and inside.get(item.blob_offset, -1) >= stop:
+            dropped += 1
+            continue
+        left.append(item)
+    return left, dropped
+
+
+def _same_bytes_other_sweep(holder: Found, item: Found) -> bool:
+    """Whether ``item`` is the other sweep's reading of exactly the bytes ``holder`` reads.
+
+    A single key byte and a rising key can both read the same bytes as text.
+    Unless both turned the byte after them into their NUL, the row is the one
+    the earlier rules kept, as before. When both did, the row is the one those
+    rules answered (``_earlier_rules_choose``), and where they answered nothing
+    the span is ambiguous. A reading not chosen is stated under the row's
+    ``also_read_as``.
+    """
+    return (
+        holder.scheme in _SWEEP_SCHEMES
+        and item.scheme in _SWEEP_SCHEMES
+        and holder.scheme != item.scheme
+        and holder.text_offset == item.text_offset
+        and _span_length(holder) == _span_length(item)
+    )
+
+
+def _earlier_rules_choose(
+    holder: Found, item: Found, readings: Mapping[tuple[str, int], set[bytes]]
+) -> bool:
+    """Whether the rules before the terminator rule answered ``holder`` for these bytes.
+
+    They dropped a scheme's reading of a span it read under two keys. When
+    only ``item``'s scheme did that, they answered ``holder``; when neither
+    did, they answered the reading they met first, which is ``holder`` here
+    (the sort keeps their order). When both did, they answered nothing, and
+    the span stays ambiguous.
+    """
+    return len(readings[(holder.scheme, holder.text_offset)]) == 1
+
+
+def _alternative(item: Found) -> dict[str, Any]:
+    """A reading stated under another row's ``also_read_as``."""
+    return {
+        "scheme": item.scheme,
+        "parameters": {k: v for k, v in item.parameters.items() if k != "also_read_as"},
+        "text": item.text.decode("latin-1"),
+    }
+
+
 def decode(
     image: pe_image.Image, min_len: int = DEFAULT_MIN_LENGTH, schemes: Sequence[str] = SCHEMES
 ) -> Decoded:
     """Every decoding the schemes find in the image's non-executable sections.
 
-    A span one scheme reads as text under two keys is dropped with every
-    reading of it: an encoded string decodes under its key, and a table of
-    numbers that reads as text under several is a table of numbers. Two
-    decodings of overlapping bytes are one too many: the one a header placed,
-    else the longer, is kept, and the other is named in its ``also_decoded_by``
-    when it read the same characters.
+    Near-key readings of a span whose terminator the right key of the same
+    scheme made are set aside first (``_through_readings``), and so are headers
+    inside such a text (``_headers_inside_terminated_text``); the other sweep's
+    reading through that terminator is stated beside it
+    (``_other_sweep_through_readings``). A span one scheme then reads as text
+    under two keys is dropped with every reading of it: an encoded string
+    decodes under its key, and a table of numbers that reads as text under
+    several is a table of numbers. Two decodings of overlapping bytes are one
+    too many: the one a header placed, else the longer, is kept, and the other
+    is named in its ``also_decoded_by`` when it read the same characters, or
+    stated in its ``also_read_as`` when it is the other sweep's reading of
+    exactly the same bytes (``_same_bytes_other_sweep``).
     """
     wanted = set(schemes)
     candidates: list[Found] = []
+    # Sections whose ranges of the file overlap are decoded together, as the
+    # one range their union is, once: every byte of the file is read at most
+    # once and every byte a data section holds is read. A section that
+    # overlaps no other is decoded as it always was (``_read_together``).
+    groups = _read_together(image)
     for section in image.data_sections():
+        held = groups.get(id(section))
+        if held is None:
+            continue
+        section = held[0]
         raw = image.data_bytes(section)
         base = section.raw_offset
+        found: list[Found] = []
         if "xor_keyed_header" in wanted:
-            candidates.extend(_keyed_headers(raw, base, min_len))
+            found.extend(_keyed_headers(raw, base, min_len))
         if "xor8_rolling" in wanted or "xor8_rolling_header" in wanted:
-            candidates.extend(
+            found.extend(
                 _rolling(
                     raw,
                     base,
@@ -704,22 +1130,78 @@ def decode(
                 )
             )
         if "xor8" in wanted:
-            candidates.extend(_xor8(raw, base, min_len))
+            found.extend(_xor8(raw, base, min_len))
         if "base64" in wanted:
-            candidates.extend(_plain_base64(raw, base))
+            found.extend(_plain_base64(raw, base))
+        candidates.extend(found)
 
+    outranked, outranked_spans = _through_readings(candidates)
     readings: dict[tuple[str, int], set[bytes]] = {}
-    for item in candidates:
-        readings.setdefault((item.scheme, item.text_offset), set()).add(item.text)
-    ambiguous = {key for key, texts in readings.items() if len(texts) > 1}
-    kept = [item for item in candidates if (item.scheme, item.text_offset) not in ambiguous]
+    left: dict[tuple[str, int], set[bytes]] = {}
+    # The groups whose one reading left is a terminated one.
+    terminated_left: set[tuple[str, int]] = set()
+    for index, item in enumerate(candidates):
+        group = (item.scheme, item.text_offset)
+        readings.setdefault(group, set()).add(item.text)
+        if index not in outranked:
+            left.setdefault(group, set()).add(item.text)
+            if item.terminated:
+                terminated_left.add(group)
+    # Setting readings aside settles a span only for the reading whose key made
+    # the terminator: any other group that read text under two keys stays
+    # ambiguous, so what is set aside never lets a third reading through.
+    ambiguous = {
+        group
+        for group, texts in readings.items()
+        if len(left.get(group, ())) > 1
+        or (len(texts) > 1 and not (group in terminated_left and len(left[group]) == 1))
+    }
+    # A group that setting aside settled stays ambiguous where the other sweep
+    # still reads the same offset under two keys and holds evidence of its own
+    # there: a key that made a terminator, or a reading that ends in white
+    # space before a zero byte, which a text may do. The earlier rules
+    # answered nothing there, and neither sweep is chosen.
+    contested = {
+        (item.scheme, item.text_offset)
+        for item in candidates
+        if item.terminated or (item.scheme in _SWEEP_SCHEMES and item.text[-1] in _WHITE_SPACE)
+    }
+    settled = {
+        group for group, texts in readings.items() if len(texts) > 1 and group not in ambiguous
+    }
+    ambiguous |= {
+        (scheme, offset)
+        for scheme, offset in settled
+        if any(
+            (other, offset) in ambiguous and (other, offset) in contested
+            for other in _SWEEP_SCHEMES - {scheme}
+        )
+    }
+    kept = [
+        item
+        for index, item in enumerate(candidates)
+        if index not in outranked and (item.scheme, item.text_offset) not in ambiguous
+    ]
+    kept, inside = _headers_inside_terminated_text(kept)
+    outranked_spans += inside
+    kept = _other_sweep_through_readings(kept)
+    # Of two readings of the same bytes that tie, the row is the one the rules
+    # before the terminator rule kept: a reading whose scheme read its span
+    # under one key only, else the earlier candidate.
     kept.sort(
-        key=lambda item: (item.scheme not in _HEADER_SCHEMES, -len(item.text), item.text_offset)
+        key=lambda item: (
+            item.scheme not in _HEADER_SCHEMES,
+            -len(item.text),
+            item.text_offset,
+            len(readings[(item.scheme, item.text_offset)]) > 1,
+        )
     )
 
     accepted: dict[tuple[int, bytes], Found] = {}
     # Which accepted decoding covers each byte of the file.
     covered: dict[int, Found] = {}
+    # Spans the two sweeps read as two texts, neither reading better.
+    tied = 0
     for item in kept:
         key = (item.text_offset, item.text)
         if key in accepted:
@@ -730,6 +1212,19 @@ def decode(
             also = holder.parameters.get("also_decoded_by") or []
             if item.text in holder.text and item.scheme not in (holder.scheme, *also):
                 holder.parameters["also_decoded_by"] = [*also, item.scheme]
+            elif _same_bytes_other_sweep(holder, item):
+                if not (holder.terminated and item.terminated):
+                    # Unless both keys made the NUL after the text, the row
+                    # is the one the earlier rules kept, as before.
+                    holder.parameters.setdefault("also_read_as", []).append(_alternative(item))
+                elif _earlier_rules_choose(holder, item, readings):
+                    holder.parameters.setdefault("also_read_as", []).append(_alternative(item))
+                elif (holder.text_offset, holder.text) in accepted:
+                    # Both keys made the NUL and the rules before the
+                    # terminator rule chose neither: the span is ambiguous, as
+                    # those rules leave it, and nothing else takes its bytes.
+                    del accepted[(holder.text_offset, holder.text)]
+                    tied += 1
             continue
         if not item.layers and item.scheme != "base64":
             item.layers = _layers(item.text)
@@ -738,8 +1233,68 @@ def decode(
             covered.setdefault(at, item)
     return Decoded(
         items=sorted(accepted.values(), key=lambda item: item.text_offset),
-        ambiguous=len(ambiguous),
+        ambiguous=len(ambiguous) + tied,
+        outranked=outranked_spans,
+        overlapping=[
+            (names, union.raw_offset, union.raw_offset + union.raw_size)
+            for union, names in groups.values()
+            if len(names) > 1
+        ],
     )
+
+
+def _read_together(image: pe_image.Image) -> dict[int, tuple[pe_image.Section, list[str]]]:
+    """The range each group of overlapping data sections is decoded as, by its first section.
+
+    The data sections are grouped where their ranges of the file overlap (a
+    shared byte, not a shared edge: sections that only touch stay apart). A
+    group of one section is decoded as that section. A larger one is decoded
+    as one section over the union of their ranges, the first section's in
+    the header's order with the range widened, and is keyed by that first
+    section, so the groups are read in the order their first sections stand;
+    each comes with its sections' names in that order.
+    """
+    sections = image.data_sections()
+    spans = sorted(
+        (s.raw_offset, s.raw_offset + len(image.section_bytes(s)), index)
+        for index, s in enumerate(sections)
+    )
+    members: list[list[int]] = []
+    high = -1
+    for low, end, index in spans:
+        if members and low < high:
+            members[-1].append(index)
+            high = max(high, end)
+        else:
+            members.append([index])
+            high = end
+    out: dict[int, tuple[pe_image.Section, list[str]]] = {}
+    for group in members:
+        first = sections[min(group)]
+        names = [sections[i].name for i in sorted(group)]
+        if len(group) == 1:
+            out[id(first)] = (first, names)
+            continue
+        low = min(sections[i].raw_offset for i in group)
+        end = max(sections[i].raw_offset + len(image.section_bytes(sections[i])) for i in group)
+        union = replace(first, raw_offset=low, raw_size=end - low, virtual_size=end - low)
+        out[id(first)] = (union, names)
+    return out
+
+
+def _sections_said(decoded: Decoded) -> dict[str, str]:
+    """What the answer says of data sections that overlap; nothing where none do."""
+    if not decoded.overlapping:
+        return {}
+    return {
+        "sections_read_together": "; ".join(
+            f"{', '.join(names)} overlap in the file and were decoded together as the one range "
+            f"{low:#x}-{high:#x}"
+            for names, low, high in decoded.overlapping
+        )
+        + ": each byte was decoded once and each decoding is stated once, under the first "
+        "section in the header's order that holds it"
+    }
 
 
 # The word the answer's fields name a decoder by where its rows came from any
@@ -792,6 +1347,7 @@ def decode_string_blobs(
     function_source: str = "",
     recovered: Sequence[Mapping[str, Any]] | None = None,
     decoder: str = "",
+    recovered_partial: str = "",
 ) -> dict[str, Any]:
     """Decode the text a PE keeps encoded in its data sections (see the module docstring).
 
@@ -808,6 +1364,20 @@ def decode_string_blobs(
     tool ran here. A decoding one of them recovered too is marked and counted
     under the answer's fields for it, named by ``decoder`` (empty: the
     shipped emulator's name, :func:`decoder_word`).
+
+    ``recovered_partial`` says why ``recovered`` is only part of the
+    decoder's rows (``""``: they are whole). A decoding no code refers to and
+    none of those rows recovered may then be one the rest recovered: it is
+    counted under ``not_compared`` rather than ``unreferenced``, listed under
+    ``not_compared_results`` with ``include_unreferenced``, and the reason is
+    stated under ``<decoder>_rows_partial``.
+
+    Where it stops: with ``recovered`` ``None`` the rows are what this
+    process remembers of the emulator's results for the file at the moment
+    of the call. Where none are held (the emulator did not run on the file
+    here, or its result is no longer remembered) the answer says so under
+    ``<decoder>_rows_not_held`` and compares with nothing. A caller that
+    holds the rows hands them in.
     """
     wanted = tuple(SCHEMES) if not schemes else tuple(str(s).strip() for s in schemes)
     unknown = [scheme for scheme in wanted if scheme not in SCHEMES]
@@ -826,7 +1396,12 @@ def decode_string_blobs(
 
     row_field, compared_field, also_field = decoder_fields(decoder or decoder_word())
     recovered_by: dict[str, Mapping[str, Any]] = {}
-    for recovered_row in _remembered_rows(path) if recovered is None else recovered:
+    unread = ""
+    not_held = False
+    if recovered is None:
+        recovered, unread = _remembered_rows(path)
+        not_held = not recovered and not unread
+    for recovered_row in recovered:
         if (
             isinstance(recovered_row, Mapping)
             and recovered_row.get("kind") == "decoded"
@@ -844,6 +1419,7 @@ def decode_string_blobs(
 
     results: list[dict[str, Any]] = []
     unreferenced: list[dict[str, Any]] = []
+    not_compared: list[dict[str, Any]] = []
     also = 0
     for item in items:
         text = item.text.rstrip(b"\0").decode("latin-1")
@@ -904,8 +1480,29 @@ def decode_string_blobs(
                 "function_rva": same.get("function_rva"),
                 "called_at_rva": same.get("called_at_rva"),
             }
-        if row["references"] or row_field in row:
+        # A decoder that recovered a reading stated beside the row confirms
+        # that reading, never the row's text: it is said apart and not counted.
+        alternative = next(
+            (
+                other
+                for other in item.parameters.get("also_read_as", [])
+                if other["text"] in recovered_by
+            ),
+            None,
+        )
+        alternative_field = f"{row_field}_matches_the_alternative"
+        if alternative is not None:
+            matched = recovered_by[alternative["text"]]
+            row[alternative_field] = {
+                "text": alternative["text"],
+                "scheme": alternative["scheme"],
+                "function_rva": matched.get("function_rva"),
+                "called_at_rva": matched.get("called_at_rva"),
+            }
+        if row["references"] or row_field in row or alternative_field in row:
             results.append(row)
+        elif recovered_partial:
+            not_compared.append(row)
         else:
             unreferenced.append(row)
 
@@ -921,13 +1518,28 @@ def decode_string_blobs(
         "readable_test": READABLE_TEST,
         "min_len": minimum,
         "longest_key": LONGEST_KEY,
-        compared_field: len(recovered_by),
-        also_field: also,
+        # Unknown, not zero, when the decoder's rows could not be read.
+        compared_field: None if unread else len(recovered_by),
+        also_field: None if unread else also,
+        **({f"{row_field}_rows_unread": unread} if unread else {}),
+        **({f"{row_field}_rows_not_held": ROWS_NOT_HELD} if not_held else {}),
+        **(
+            {f"{row_field}_rows_partial": recovered_partial, NOT_COMPARED: len(not_compared)}
+            if recovered_partial
+            else {}
+        ),
         "results": page,
         "total": len(results),
         "page_offset": start,
         "next_offset": start + len(page) if more else None,
         "unreferenced": len(unreferenced),
         "ambiguous_spans": decoded.ambiguous,
+        "outranked_spans": decoded.outranked,
         **({"unreferenced_results": unreferenced} if include_unreferenced else {}),
+        **(
+            {"not_compared_results": not_compared}
+            if include_unreferenced and recovered_partial
+            else {}
+        ),
+        **_sections_said(decoded),
     }

@@ -16,15 +16,19 @@ still exists and answers ``{"error": "<module> is not installed"}``.
 from __future__ import annotations
 
 import hashlib
+import io
 import json
+import lzma
 import os
 import re
 import stat
 import tarfile
 import zipfile
+import zlib
 from pathlib import Path
 from typing import Any
 
+from maljan.core.delivery_limits import SAMPLE_UPLOAD_MAX_BYTES
 from maljan.core.logger import logger
 from maljan.core.paths import resolve_data
 
@@ -56,6 +60,58 @@ _PDF_OBJECT_RE = re.compile(rb"\b\d+\s+\d+\s+obj\b")
 
 # OLE2 streams whose mere presence means the document carries VBA.
 _OLE_MACRO_STREAMS = ("vba", "macros", "_vba_project", "dir")
+
+# An OOXML relationship, as the Open Packaging Conventions name its element
+# (namespace and local name, joined by the reader's separator).
+_RELATIONSHIP_ELEMENT = "http://schemas.openxmlformats.org/package/2006/relationships Relationship"
+# How much of a relationship part one read hands the XML reader.
+_RELATIONSHIP_CHUNK = 64 * 1024
+# The most bytes the relationship parts of one document may inflate to, all of
+# them together: the platform's fixed sample upload cap, as every
+# decompression a tool does (``transforms`` caps what its whole chain writes,
+# ``upx``). Every target read stays in the answer, and deflate lets a small
+# file carry many huge ones, so the cap is the document's and not each part's.
+RELATIONSHIP_PART_CAP = SAMPLE_UPLOAD_MAX_BYTES
+# How far into a tar stream ``archive_list`` reads, inflated bytes for a
+# compressed tar: the platform's fixed sample upload cap, as every
+# decompression a tool does (``RELATIONSHIP_PART_CAP``, ``transforms``,
+# ``upx``), or the file's own size when that is larger.
+ARCHIVE_STREAM_CAP = SAMPLE_UPLOAD_MAX_BYTES
+# What the answer says when the tar stream was not read to its end.
+TAR_LISTING_STOPPED = (
+    "the listing stopped after {members} members: reading on would take the tar stream (inflated "
+    "bytes for a compressed tar) past byte {bound}, the larger of the file's size and the "
+    "platform's sample upload cap, which every decompression a tool does stops at; the member "
+    "or header being read there and everything after it are neither listed nor counted in total"
+)
+# What the answer says when the tar stream broke before its end: truncated,
+# a damaged compressed block, a header that does not read.
+TAR_LISTING_BROKEN = (
+    "the listing stopped after {members} members: the tar stream broke there ({error}); the "
+    "member or header being read there and everything after it are neither listed nor counted "
+    "in total"
+)
+# Why a relationship part was not read, as ``relationship_parts_unread`` says it.
+RELATIONSHIP_PART_DOCUMENT_TYPE = (
+    "it declares a document type, which a relationship part never needs"
+)
+RELATIONSHIP_PART_EXTERNAL_ENTITY = "it refers to an external entity"
+RELATIONSHIP_PART_NOT_XML = "it is not well-formed XML ({error} at line {line})"
+RELATIONSHIP_MEMBER_UNREAD = "the archive member could not be read ({error})"
+RELATIONSHIP_PART_OVER_CAP = (
+    "the archive member states {size} uncompressed bytes, more than the {left} bytes left of "
+    "the platform's fixed sample upload cap of {cap} bytes, which the document's relationship "
+    "parts share; it was not inflated, and no later relationship part was read"
+)
+RELATIONSHIP_PART_PAST_CAP = (
+    "it inflated past the {left} bytes left of the platform's fixed sample upload cap of {cap} "
+    "bytes, which the document's relationship parts share, more than the archive member "
+    "states; reading stopped there, and no later relationship part was read"
+)
+RELATIONSHIP_PART_AFTER_CAP = (
+    "an earlier relationship part reached the platform's fixed sample upload cap of {cap} "
+    "bytes, which the document's relationship parts share; it was not read"
+)
 
 
 def _missing(module: str, tool: str) -> dict[str, Any]:
@@ -427,11 +483,12 @@ def elf_info(path: str) -> dict[str, Any]:
         return {"error": "not an ELF file (no \\x7fELF magic)", "tool": "elf_info"}
 
     from maljan.extractors.pe_extractor import (
+        _elf_sections,
         _parse_elf_exports,
         _parse_elf_imports,
-        _parse_elf_sections,
     )
 
+    sections, sections_stopped = _elf_sections(blob)
     out: dict[str, Any] = {
         "bitness": 64 if blob[4:5] == b"\x02" else 32,
         "endianness": "little" if blob[5:6] == b"\x01" else "big",
@@ -445,11 +502,13 @@ def elf_info(path: str) -> dict[str, Any]:
                 "entropy": round(float(s.entropy), 4),
                 "characteristics": s.characteristics,
             }
-            for s in _parse_elf_sections(blob)
+            for s in sections
         ],
         "imports": [{"dll": row.dll, "function": row.function} for row in _parse_elf_imports(blob)],
         "exports": list(_parse_elf_exports(blob)),
     }
+    if sections_stopped:
+        out["sections_stopped"] = sections_stopped
     out.update(_elf_dynamic_view(blob))
     return out
 
@@ -940,12 +999,21 @@ def _write_carved(child: Path, blob: bytes) -> str | None:
         return f"{child.name} is already taken by something this run did not write"
     except OSError as exc:
         return f"cannot write {child.name}: {type(exc).__name__}"
+    # ``os.write`` may write fewer bytes than it is given; the rest is written
+    # until none is left. A payload that cannot be written whole is removed,
+    # so a later run never reads a part of it as the payload.
+    view = memoryview(blob)
     try:
-        os.write(fd, blob)
+        while view:
+            written = os.write(fd, view)
+            if written <= 0:
+                raise OSError(f"wrote nothing with {len(view)} bytes left")
+            view = view[written:]
     except OSError as exc:
-        return f"cannot write {child.name}: {type(exc).__name__}"
-    finally:
         os.close(fd)
+        child.unlink(missing_ok=True)
+        return f"cannot write {child.name}: {type(exc).__name__}"
+    os.close(fd)
     return None
 
 
@@ -1022,8 +1090,11 @@ def archive_list(path: str, limit: int = 500) -> dict[str, Any]:
     """Members of a zip, 7z, tar or gzip archive, without extracting anything.
 
     Listing is not extraction: nothing is written and no member is decompressed,
-    so a zip bomb costs a directory read. ``compressed`` and ``crc`` are absent
-    for the formats whose directory does not carry them.
+    so a zip bomb costs a directory read. A compressed tar is the exception the
+    format makes: its headers stand between the members' data in one
+    compressed stream, so reaching each header inflates the members before it,
+    and that read stops at a stated bound (``_tar_members``). ``compressed``
+    and ``crc`` are absent for the formats whose directory does not carry them.
     """
     target = Path(path)
     if not target.is_file():
@@ -1032,8 +1103,12 @@ def archive_list(path: str, limit: int = 500) -> dict[str, Any]:
 
     if zipfile.is_zipfile(target):
         return _zip_members(target, limit)
-    if tarfile.is_tarfile(target):
-        return _tar_members(target, limit)
+    # ``tarfile.is_tarfile`` would read the first member through an unbounded
+    # stream (a long name or a pax header of any size), so the listing itself
+    # is the test: ``None`` when no way of opening the file reads a tar header.
+    listed = _tar_members(target, limit)
+    if listed is not None:
+        return listed
     blob_head = target.open("rb").read(6)
     if blob_head[:6] == b"7z\xbc\xaf\x27\x1c":
         return _sevenzip_members(target, limit)
@@ -1042,19 +1117,36 @@ def archive_list(path: str, limit: int = 500) -> dict[str, Any]:
     return {"error": "unsupported archive format", "tool": "archive_list"}
 
 
+# What reading a zip's directory or a member raises when the file is damaged:
+# a truncated or rewritten central directory, a member header that does not
+# match it, a stream that ends early.
+_ZIP_READ_ERRORS: tuple[type[BaseException], ...] = (
+    zipfile.BadZipFile,
+    zipfile.LargeZipFile,
+    OSError,
+    EOFError,
+    ValueError,
+    NotImplementedError,
+)
+
+
 def _zip_members(target: Path, limit: int) -> dict[str, Any]:
-    with zipfile.ZipFile(target) as archive:
-        infos = archive.infolist()
-        members = [
-            {
-                "name": info.filename,
-                "size": int(info.file_size),
-                "compressed": int(info.compress_size),
-                "crc": f"{info.CRC:08x}",
-                "is_dir": info.is_dir(),
-            }
-            for info in infos[:limit]
-        ]
+    try:
+        with zipfile.ZipFile(target) as archive:
+            infos = archive.infolist()
+    except _ZIP_READ_ERRORS as exc:
+        # A central directory that does not read is the answer's to state.
+        return {"error": f"zip read failed: {type(exc).__name__}: {exc}", "tool": "archive_list"}
+    members = [
+        {
+            "name": info.filename,
+            "size": int(info.file_size),
+            "compressed": int(info.compress_size),
+            "crc": f"{info.CRC:08x}",
+            "is_dir": info.is_dir(),
+        }
+        for info in infos[:limit]
+    ]
     return {
         "format": "zip",
         "members": members,
@@ -1063,19 +1155,136 @@ def _zip_members(target: Path, limit: int) -> dict[str, Any]:
     }
 
 
-def _tar_members(target: Path, limit: int) -> dict[str, Any]:
-    with tarfile.open(target) as archive:
-        infos = archive.getmembers()
-        members = [
-            {"name": info.name, "size": int(info.size), "is_dir": info.isdir()}
-            for info in infos[:limit]
-        ]
-    return {
-        "format": "tar",
-        "members": members,
-        "total": len(infos),
-        "truncated": len(infos) > limit,
-    }
+class _ArchiveStreamCapReached(Exception):
+    """The tar stream read past its bound (``_tar_members``)."""
+
+
+class _BoundedStream(io.RawIOBase):
+    """A decompressed tar stream that counts the bytes read from it and stops past a bound.
+
+    Every byte the tar reader takes passes through ``read``, a member's
+    header, a GNU long name or a pax header as much as a member's data, so
+    no header of any size reads past the bound.
+    """
+
+    def __init__(self, inner: Any, bound: int) -> None:
+        super().__init__()
+        self.inner = inner
+        self.bound = bound
+        self.count = 0
+
+    def readable(self) -> bool:
+        return True
+
+    def read(self, size: int | None = -1) -> bytes:
+        if self.count > self.bound:
+            raise _ArchiveStreamCapReached
+        wanted = -1 if size is None or size < 0 else size
+        # Never more than one byte past the bound, so the overrun is seen
+        # without inflating what lies beyond it.
+        room = self.bound + 1 - self.count
+        data: bytes = self.inner.read(room if wanted < 0 else min(wanted, room))
+        self.count += len(data)
+        if self.count > self.bound:
+            raise _ArchiveStreamCapReached
+        return data
+
+
+def _tar_openers() -> list[tuple[Any, tuple[type[BaseException], ...]]]:
+    """How ``tarfile.open`` in its default mode tries a file, in its order, and what moves it on.
+
+    Every compression first (gzip, bzip2, xz) and the plain tar last, as
+    ``tarfile.open`` sorts its methods: a file that reads both as a gzip
+    stream and as a plain tar is listed as the gzip stream's tar. With each
+    opener, the errors on its first header that make ``tarfile.open`` try
+    the next (its ``gzopen``, ``bz2open``, ``xzopen`` and ``taropen``); any
+    other error is raised, as it is there.
+    """
+    import bz2
+    import gzip
+    import lzma
+
+    tar_errors = (tarfile.ReadError, tarfile.CompressionError)
+    return [
+        (lambda path: gzip.GzipFile(path, "rb"), (*tar_errors, OSError, EOFError, zlib.error)),
+        (lambda path: bz2.BZ2File(path, "rb"), (*tar_errors, OSError, EOFError)),
+        (lambda path: lzma.LZMAFile(path, "rb"), (*tar_errors, lzma.LZMAError, EOFError)),
+        (lambda path: open(path, "rb"), tar_errors),  # noqa: SIM115 - closed by the caller
+    ]
+
+
+# What reading on in a tar stream raises when the stream breaks: a truncated
+# or damaged compressed stream, a header that does not read.
+_TAR_STREAM_ERRORS: tuple[type[BaseException], ...] = (
+    tarfile.TarError,
+    EOFError,
+    OSError,
+    zlib.error,
+    lzma.LZMAError,
+)
+
+
+def _tar_members(target: Path, limit: int) -> dict[str, Any] | None:
+    """The members of a tar stream, plain or compressed, read header after header.
+
+    A member's header stands after the previous member's data, so a
+    compressed tar is inflated through every member before it to reach the
+    next header: a few kilobytes of bzip2 can stand for a gigabyte of zeros
+    in front of it. The file is opened the way ``tarfile.open`` tries it
+    (gzip, bzip2 and xz, then plain), the decompressed stream is read through
+    a counter (``_BoundedStream``) by the tar reader in streaming mode, and
+    the read stops before it passes the larger of the file's own size, which
+    a plain tar never passes, and ``ARCHIVE_STREAM_CAP``, whatever part of
+    the tar the bytes are; the answer then says so under ``listing_stopped``
+    and ``total`` counts the members read whole. ``None`` when no way of
+    opening the file reads a tar header, where ``tarfile.is_tarfile`` says no.
+    """
+
+    bound = max(ARCHIVE_STREAM_CAP, target.stat().st_size)
+    members: list[dict[str, Any]] = []
+    total = 0
+    stopped = ""
+    for opener, next_opener in _tar_openers():
+        inner = opener(target)
+        try:
+            stream = _BoundedStream(inner, bound)
+            try:
+                # A block at a time, as the default mode reads a header: a
+                # stream that ends inside the first record still opens.
+                archive = tarfile.open(fileobj=stream, mode="r|", bufsize=tarfile.BLOCKSIZE)
+            except next_opener:
+                continue
+            try:
+                while True:
+                    info = archive.next()
+                    if info is None:
+                        break
+                    total += 1
+                    if len(members) < limit:
+                        members.append(
+                            {"name": info.name, "size": int(info.size), "is_dir": info.isdir()}
+                        )
+            except _TAR_STREAM_ERRORS as exc:
+                # A stream that breaks after its first header is a listing
+                # cut there, said so, not an exception out of the tool.
+                error = f"{type(exc).__name__}: {exc}"
+                stopped = TAR_LISTING_BROKEN.format(members=total, error=error)
+            finally:
+                archive.close()
+        except _ArchiveStreamCapReached:
+            stopped = TAR_LISTING_STOPPED.format(members=total, bound=bound)
+        finally:
+            inner.close()
+        answer: dict[str, Any] = {
+            "format": "tar",
+            "members": members,
+            "total": total,
+            "truncated": total > limit or bool(stopped),
+        }
+        if stopped:
+            answer["listing_stopped"] = stopped
+        return answer
+    return None
 
 
 def _sevenzip_members(target: Path, limit: int) -> dict[str, Any]:
@@ -1107,21 +1316,87 @@ def _sevenzip_members(target: Path, limit: int) -> dict[str, Any]:
 
 
 def _gzip_member(target: Path) -> dict[str, Any]:
-    """A gzip stream carries one member and, usually, its original name."""
+    """A gzip stream carries one member and, usually, its original name.
+
+    The header is read as RFC 1952 lays it out: an extra field (``FEXTRA``),
+    its two-byte length first, stands before the name (``FNAME``) and is
+    skipped. The name ends at its zero byte, found a block at a time; a
+    header that ends before its extra field or its name does is said under
+    ``name_unread``, and the member is then listed with no name rather than
+    with bytes that are not one.
+    """
+    name = ""
+    unread = ""
     with target.open("rb") as fh:
         header = fh.read(10)
-        name = ""
-        if len(header) == 10 and header[3] & 0x08:
-            chunks: list[bytes] = []
-            while (byte := fh.read(1)) not in (b"", b"\x00"):
-                chunks.append(byte)
-            name = b"".join(chunks).decode("utf-8", errors="replace")
-    return {
+        flags = header[3] if len(header) == 10 else 0
+        if len(header) < 10:
+            unread = "the gzip header ends before its tenth byte"
+        elif flags & _GZIP_FEXTRA:
+            size = fh.read(2)
+            if len(size) < 2:
+                unread = "the gzip header ends inside its extra field's length"
+            else:
+                extra = int.from_bytes(size, "little")
+                fh.seek(extra, os.SEEK_CUR)
+                if fh.tell() > target.stat().st_size:
+                    unread = "the gzip header ends inside its extra field"
+        if not unread and flags & _GZIP_FNAME:
+            start = fh.tell()
+            # The name stands in the member's own bytes, and the member also
+            # holds its compressed data and its eight-byte trailer after it,
+            # so the zero byte is searched for no further than that leaves room
+            # for. A file with no zero byte there is read once, never held.
+            room = target.stat().st_size - start - _GZIP_AFTER_NAME
+            length = _zero_offset(fh, room)
+            if length is None:
+                unread = GZIP_NAME_UNENDED.format(room=max(room, 0))
+            else:
+                fh.seek(start)
+                name = fh.read(length).decode("utf-8", errors="replace")
+    member: dict[str, Any] = {"name": name or ("" if unread else target.stem)}
+    member["compressed"] = target.stat().st_size
+    answer: dict[str, Any] = {
         "format": "gzip",
-        "members": [{"name": name or target.stem, "compressed": target.stat().st_size}],
+        "members": [member],
         "total": 1,
         "truncated": False,
     }
+    if unread:
+        answer["name_unread"] = unread
+    return answer
+
+
+# The gzip header's flag bits this listing reads (RFC 1952, section 2.3.1).
+_GZIP_FEXTRA = 0x04
+_GZIP_FNAME = 0x08
+_GZIP_NAME_BLOCK = 64 * 1024
+# What a member holds after its name: at least one byte of compressed data and
+# the eight-byte trailer (CRC-32 and input size).
+_GZIP_AFTER_NAME = 9
+# What the answer says when no zero byte ends the name within the member's own bytes.
+GZIP_NAME_UNENDED = (
+    "the gzip header's name has no zero byte within the {room} bytes the member leaves for it "
+    "(its data and trailer follow the name), so no name is stated"
+)
+
+
+def _zero_offset(fh: Any, room: int) -> int | None:
+    """How many bytes lie before the next zero byte within ``room`` bytes, or ``None``.
+
+    Read a block at a time and kept nowhere, so a name that never ends costs
+    its length in time and nothing in memory.
+    """
+    seen = 0
+    while seen < room:
+        block: bytes = fh.read(min(_GZIP_NAME_BLOCK, room - seen))
+        if not block:
+            return None
+        end = block.find(b"\x00")
+        if end >= 0:
+            return seen + end
+        seen += len(block)
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -1134,8 +1409,10 @@ def document_info(path: str) -> dict[str, Any]:
 
     All three formats answer one question — can this document run something —
     with different evidence: an OLE2 macro storage, an OOXML ``vbaProject.bin``
-    part, a PDF ``/OpenAction``. Each is reported as a count or a presence
-    flag, never as a verdict.
+    part or relationship pointing outside the package, a PDF ``/OpenAction``.
+    Each is reported as a count, a presence flag or what the document itself
+    states (an OOXML external relationship, its target as written), never as
+    a verdict.
     """
     target = Path(path)
     if not target.is_file():
@@ -1145,7 +1422,14 @@ def document_info(path: str) -> dict[str, Any]:
     if head[:8] == b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1":
         return _ole_info(target)
     if zipfile.is_zipfile(target):
-        return _ooxml_info(target)
+        try:
+            return _ooxml_info(target)
+        except _ZIP_READ_ERRORS as exc:
+            # A package whose directory does not read is stated, not raised.
+            return {
+                "error": f"OOXML read failed: {type(exc).__name__}: {exc}",
+                "tool": "document_info",
+            }
     if head[:5] == b"%PDF-":
         return _pdf_info(target)
     return {"error": "not an OLE2, OOXML or PDF document", "tool": "document_info"}
@@ -1184,15 +1468,185 @@ def _ole_info(target: Path) -> dict[str, Any]:
 
 
 def _ooxml_info(target: Path) -> dict[str, Any]:
+    """The parts, the VBA project's presence, and the relationships that point outside.
+
+    ``external_relationships`` lists each relationship a relationship part
+    marks ``TargetMode="External"`` (a remote template, an external OLE link,
+    a hyperlink): the part, its id, its type (the last segment of its Type)
+    and its target exactly as the part writes it. A tool answer carries values
+    live, as every other tool's does; the report's renderers defang them where
+    they print them for reading. It is absent when there are none.
+    ``relationship_parts_unread`` names a relationship part that could not be
+    read and why, so its silence is never taken for "none".
+
+    Every relationship part of the document is counted against one
+    ``RELATIONSHIP_PART_CAP``: the part that would cross it, by what its
+    member states or by what it inflates to, is not read, and neither is any
+    relationship part after it; each is named with the reason.
+    """
+    external: list[dict[str, str]] = []
+    unread: list[dict[str, str]] = []
+    cap = RELATIONSHIP_PART_CAP
+    left = cap
+    reached = False
     with zipfile.ZipFile(target) as archive:
         parts = archive.namelist()
+        for info in archive.infolist():
+            if not _is_relationship_part(info.filename):
+                continue
+            if reached:
+                reason = RELATIONSHIP_PART_AFTER_CAP.format(cap=cap)
+                unread.append({"part": info.filename, "reason": reason})
+                continue
+            if info.file_size > left:
+                reason = RELATIONSHIP_PART_OVER_CAP.format(size=info.file_size, left=left, cap=cap)
+                unread.append({"part": info.filename, "reason": reason})
+                reached = True
+                continue
+            counted = _CountedStream(None)
+            damaged = 0
+            try:
+                with archive.open(info) as stream:
+                    counted = _CountedStream(stream)
+                    found, _ = _external_relationships(info.filename, counted, left, cap)
+                external.extend(found)
+            except _RelationshipPartPastCap as exc:
+                unread.append({"part": info.filename, "reason": str(exc)})
+                reached = True
+            except _RelationshipPartUnread as exc:
+                unread.append({"part": info.filename, "reason": str(exc)})
+            except Exception as exc:  # noqa: BLE001 - a damaged member is stated, never raised
+                reason = RELATIONSHIP_MEMBER_UNREAD.format(error=f"{type(exc).__name__}: {exc}")
+                unread.append({"part": info.filename, "reason": reason})
+                # A damaged member may have inflated more than it handed
+                # out: zipfile checks the CRC once the last block is
+                # inflated and raises with it unreturned. It inflates no
+                # more than the member states, so that is what it costs.
+                damaged = info.file_size
+            finally:
+                # What the part inflated counts however it ended: a part
+                # refused at its end, or for an external entity, was
+                # inflated as far as it got all the same.
+                left = max(0, left - max(counted.inflated, damaged))
     lowered = [p.lower() for p in parts]
-    return {
+    answer: dict[str, Any] = {
         "format": "ooxml",
         "parts": sorted(parts),
         "vba_project_present": any(p.endswith("vbaproject.bin") for p in lowered),
-        "external_relationships": sum(1 for p in lowered if p.endswith(".rels")),
     }
+    if external:
+        answer["external_relationships"] = external
+    if unread:
+        answer["relationship_parts_unread"] = unread
+    return answer
+
+
+class _RelationshipPartUnread(Exception):
+    """A relationship part the reader refused or could not parse; the message says why."""
+
+
+class _RelationshipPartPastCap(_RelationshipPartUnread):
+    """A relationship part that inflated past what the document had left of the cap."""
+
+
+class _CountedStream:
+    """An archive member's stream that counts the inflated bytes it hands out."""
+
+    def __init__(self, stream: Any) -> None:
+        self._stream = stream
+        self.inflated = 0
+
+    def read(self, size: int = -1) -> bytes:
+        chunk: bytes = self._stream.read(size)
+        self.inflated += len(chunk)
+        return chunk
+
+
+def _is_relationship_part(name: str) -> bool:
+    """A part the Open Packaging Conventions read relationships from: ``…/_rels/<source>.rels``."""
+    folder, _, leaf = name.rpartition("/")
+    return leaf.lower().endswith(".rels") and folder.rpartition("/")[2].lower() == "_rels"
+
+
+def _external_relationships(
+    part: str, stream: Any, left: int, cap: int
+) -> tuple[list[dict[str, str]], int]:
+    """Every ``TargetMode="External"`` relationship in one part, in order, and the bytes read.
+
+    Read in chunks with defusedxml's expat reader, fed as it inflates, so the
+    time follows the part's size and the memory its longest token. Past the
+    ``left`` bytes the document has left of ``cap`` the reading stops,
+    whatever the archive member stated, and the part is refused whole
+    (``_RelationshipPartPastCap``). A document type is refused before anything
+    in it is read: a relationship part never needs one, so no entity is ever
+    declared, expanded or fetched; defusedxml also refuses an entity
+    declaration and an external reference, should one be reached.
+    """
+    from defusedxml import DTDForbidden, EntitiesForbidden, ExternalReferenceForbidden
+
+    found: list[dict[str, str]] = []
+    parser = _relationship_reader(part, found)
+    read = 0
+    try:
+        while chunk := stream.read(_RELATIONSHIP_CHUNK):
+            read += len(chunk)
+            if read > left:
+                reason = RELATIONSHIP_PART_PAST_CAP.format(left=left, cap=cap)
+                raise _RelationshipPartPastCap(reason)
+            parser.feed(chunk)
+        parser.close()
+    except (DTDForbidden, EntitiesForbidden):
+        raise _RelationshipPartUnread(RELATIONSHIP_PART_DOCUMENT_TYPE) from None
+    except ExternalReferenceForbidden:
+        raise _RelationshipPartUnread(RELATIONSHIP_PART_EXTERNAL_ENTITY) from None
+    return found, read
+
+
+class _NotXml:
+    """The reader's error handler: a part that is not well-formed XML is unread, and why."""
+
+    @staticmethod
+    def fatalError(exc: Any) -> None:  # noqa: N802 - the SAX handler's own name
+        reason = RELATIONSHIP_PART_NOT_XML.format(error=exc.getMessage(), line=exc.getLineNumber())
+        raise _RelationshipPartUnread(reason) from None
+
+    error = fatalError
+
+    @staticmethod
+    def warning(exc: Any) -> None:
+        return None
+
+
+def _relationship_reader(part: str, found: list[dict[str, str]]) -> Any:
+    """defusedxml's expat reader, refusing a document type, that lists ``part``'s External ones.
+
+    Namespace-aware, as the Open Packaging Conventions name the element; each
+    element's name and plain attributes come from expat itself, as before.
+    """
+    from defusedxml.expatreader import DefusedExpatParser
+
+    class _Reader(DefusedExpatParser):  # type: ignore[misc]
+        def start_element_ns(self, name: str, attributes: dict[str, str]) -> None:
+            # expat writes a prefixed name as "namespace local prefix".
+            if " ".join(name.split(" ")[:2]) != _RELATIONSHIP_ELEMENT:
+                return
+            if attributes.get("TargetMode") != "External":
+                return
+            found.append(
+                {
+                    "part": part,
+                    "id": attributes.get("Id", ""),
+                    "type": attributes.get("Type", "").rstrip("/").rpartition("/")[2],
+                    "target": attributes.get("Target", ""),
+                }
+            )
+
+        def end_element_ns(self, name: str) -> None:
+            return None
+
+    reader = _Reader(namespaceHandling=1, forbid_dtd=True)
+    reader.setErrorHandler(_NotXml())
+    return reader
 
 
 def _pdf_info(target: Path) -> dict[str, Any]:

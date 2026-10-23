@@ -32,6 +32,7 @@ the judge holds.
 from __future__ import annotations
 
 import json
+import math
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -48,6 +49,16 @@ REPUTATION_KIND = "reputation"
 RECORD_VERSION = 1
 # The argument role a lookup takes the sample's hash in (``ToolFacts.arguments``).
 HASH_ARGUMENT = "hash"
+# The argument roles a network indicator is given to a tool in, and every role
+# that carries an indicator: the sample's hash and those.
+NETWORK_INDICATOR_ARGUMENTS: tuple[str, ...] = ("domain", "ip", "url")
+INDICATOR_ARGUMENTS: tuple[str, ...] = (HASH_ARGUMENT, *NETWORK_INDICATOR_ARGUMENTS)
+# The kinds a lookup about an indicator declares, beside a reputation lookup
+# about the sample: a service's report on an indicator, and its reputation.
+INDICATOR_LOOKUP_KINDS: tuple[str, ...] = ("indicator_report", "indicator_reputation")
+# The role a tool server declares when it answers reputation lookups
+# (``MCPServerConfig.roles``), as the built-in lookup servers do.
+REPUTATION_ROLE = "reputation"
 # The rank a lookup whose declaration names none is asked at.
 DEFAULT_RANK = 100
 
@@ -110,6 +121,22 @@ def is_lookup(facts: ToolFacts | None) -> bool:
     return facts is not None and facts.kind in REPUTATION_KINDS
 
 
+def asks_about_an_indicator(facts: ToolFacts | None) -> bool:
+    """Whether a tool's facts declare that it asks a service about the sample or an indicator.
+
+    A reputation lookup (:func:`is_lookup`), a tool of an indicator lookup kind
+    (:data:`INDICATOR_LOOKUP_KINDS`), or a tool that declares an argument
+    carrying an indicator (:data:`INDICATOR_ARGUMENTS`), whatever its kind.
+    """
+    if facts is None:
+        return False
+    return (
+        is_lookup(facts)
+        or facts.kind in INDICATOR_LOOKUP_KINDS
+        or any(role in facts.arguments for role in INDICATOR_ARGUMENTS)
+    )
+
+
 def kinds_of_capability(capability: str) -> frozenset[str]:
     """The tool kinds a ``ToolRef(kind="capability")`` names: the kind itself.
 
@@ -147,6 +174,8 @@ def _moment(value: Any) -> str | None:
         return value.strip() or None
     whole = _whole(value)
     if whole is None and isinstance(value, float) and not isinstance(value, bool):
+        if not math.isfinite(value):
+            return None
         whole = int(value)
     if whole is None or whole <= 0:
         return None
@@ -252,9 +281,11 @@ def read_answer(
             malicious, said_total, said_suspicious = counted
             total = total if total is not None else said_total
             suspicious = suspicious if suspicious is not None else said_suspicious
-    if declared.summary:
+    if declared.summary and document is not None:
         summary = next(iter(_texts(document, [declared.summary])), "")
     else:
+        # An answer written in prose is its own summary, also for a lookup
+        # whose declared summary path reads its JSON answers.
         summary = "" if document is not None else str(output or "").strip()
     return ReputationRecord(
         service=declared.service or facts.display_name or str(server or ""),
@@ -460,5 +491,10 @@ def lookup_servers(declared: ToolDeclarations) -> set[str]:
 
 
 def is_lookup_tool(declared: ToolDeclarations, server: str, tool: str) -> bool:
-    """Whether ``server``'s tool ``tool`` (a renamed tool's prefix off) is a reputation lookup."""
-    return bool(server) and is_lookup(declared.declaration_for((f"mcp:{server}", tool)))
+    """Whether ``server``'s tool ``tool`` is a reputation lookup.
+
+    ``tool`` is the name the server declares it under (for a tool the request
+    holds, ``agents.tool_pinning.declared_name_of``), looked up exactly: a
+    ``<server>__`` prefix is never taken off by the name alone.
+    """
+    return bool(server) and is_lookup(declared.declaration_for((f"mcp:{server}", tool), exact=True))

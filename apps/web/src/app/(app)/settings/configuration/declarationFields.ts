@@ -15,6 +15,7 @@
 import type {
   CredentialBootstrapEntry,
   ErrorPatternEntry,
+  PrepassToolsEntry,
   ToolDeclarationFields,
   ToolFactsEntry,
 } from "@/types/settings";
@@ -78,6 +79,27 @@ export function readWorkDir(text: string): Read<string> {
     return bad("one directory name under the samples directory, not a path");
   }
   return ok(value);
+}
+
+/** The launcher's levels: a whole number from 0, or empty for none declared. */
+export function readLauncherDepth(text: string): Read<number | null> {
+  const value = text.trim();
+  if (value === "") return ok(null);
+  if (!/^\d+$/.test(value)) {
+    return bad("a whole number of levels (1: the started process alone), or empty");
+  }
+  return ok(Number(value));
+}
+
+/** A call's deadline in seconds: a number from 0 (0: no deadline of its own),
+ *  or empty to leave it unset so the deployment's floor applies. */
+export function readCallTimeout(text: string): Read<number | null> {
+  const value = text.trim();
+  if (value === "") return ok(null);
+  if (!/^\d+(\.\d+)?$/.test(value)) {
+    return bad("a number of seconds from 0 (0: no deadline of its own), or empty");
+  }
+  return ok(Number(value));
 }
 
 /** Auto-name prefixes: letters and digits ending in `_` or `.` (FUN_, fcn.). */
@@ -282,4 +304,25 @@ export function showJson(value: unknown): string {
   if (Array.isArray(value) && value.length === 0) return "";
   if (isObject(value) && Object.keys(value).length === 0) return "";
   return JSON.stringify(value, null, 2);
+}
+
+/** What the Declaration panel says it is for. The platform reads a tool's
+ *  declaration well beyond where a sample is opened (the kind of answer a tool
+ *  gives, what it needs, what it does to the host), so the copy names no
+ *  single field as the only one read. */
+export const DECLARATION_PANEL_COPY =
+  "What the platform reads about this server and its tools: the kind of answer " +
+  "each tool gives, what it needs, what it does, and how a sample is opened. A " +
+  "built-in ships its own; a server you add needs none to work. See the " +
+  "configuration guide for every field.";
+
+/** The staged `prepass_tools` after one name changes: null once every name is
+ *  empty, so nothing is declared (as the API holds three empty names). */
+export function withPrepass(
+  held: PrepassToolsEntry,
+  key: keyof PrepassToolsEntry,
+  value: string,
+): PrepassToolsEntry | null {
+  const next = { ...held, [key]: value };
+  return Object.values(next).some((name) => name !== "") ? next : null;
 }

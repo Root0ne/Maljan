@@ -12,13 +12,20 @@ name as the entry's ``path`` (the catalog key without its ``api.`` prefix).
 from __future__ import annotations
 
 import ipaddress
+import math
 from collections.abc import Iterable
 from dataclasses import replace
 from functools import lru_cache
 from typing import Any, get_args, get_origin
 
-from maljan.core.config import REQUIRED_ENV_ALLOW
+from maljan.core.config import (
+    ALWAYS_ENABLED_AGENTS,
+    DATA_SOURCES,
+    REQUIRED_ENV_ALLOW,
+    _builtin_definitions,
+)
 from maljan.core.delivery_limits import SAMPLE_UPLOAD_MAX_BYTES
+from maljan.core.pack_steps import step_vocabulary
 from maljan.core.settings_annotations import GROUP_ORDER
 from maljan.core.settings_catalog import CatalogEntry, FieldType, _bounds, core_catalog
 from maljan.core.settings_overrides import redact_url
@@ -50,6 +57,28 @@ def dedicated_enrichment_worker_default() -> bool:
     import os
 
     return os.environ.get("ENRICHMENT_DEDICATED_WORKER", "false").strip().lower() == "true"
+
+
+# The console's refresh timing, mirrored from apps/web/src/lib/refreshLock.ts
+# (``LEASE_MS``, ``TRANSPORT_RETRY_ACQUIRE_MS`` and ``LEASE_POLL_MS``; a test
+# pins the two sides together). A refresh that rotated the cookie but whose
+# answer was lost is aborted at the lease's end and retried at once under a
+# fresh lease acquired within the retry budget (plus one poll to confirm it),
+# so the old cookie can reach the API again up to their sum, plus the
+# network's latency, after the rotation. A grace window shorter than that
+# would read the console's own retry as a replay and revoke every session.
+CONSOLE_REFRESH_LEASE_SECONDS = 7
+CONSOLE_REFRESH_RETRY_SECONDS = 1
+CONSOLE_REFRESH_POLL_SECONDS = 0.05
+# The network's allowance: the retry's request travelling to the API, and
+# the clocks of the two ends not starting at the same instant.
+CONSOLE_REFRESH_LATENCY_MARGIN_SECONDS = 1
+MIN_REFRESH_REUSE_GRACE_SECONDS = math.ceil(
+    CONSOLE_REFRESH_LEASE_SECONDS
+    + CONSOLE_REFRESH_RETRY_SECONDS
+    + CONSOLE_REFRESH_POLL_SECONDS
+    + CONSOLE_REFRESH_LATENCY_MARGIN_SECONDS
+)
 
 
 API_DEFAULTS: dict[str, Any] = {
@@ -193,6 +222,11 @@ API_DEFAULTS: dict[str, Any] = {
     "trusted_proxy_ips": [],
     "jwt_access_token_expire_minutes": 30,
     "jwt_refresh_token_expire_days": 7,
+    # Long enough for a retried request or two tabs refreshing at once, short
+    # against the access token's lifetime: a stolen refresh token presented
+    # after the window still revokes every session of the account. Equal to
+    # ``MIN_REFRESH_REUSE_GRACE_SECONDS`` (10), the console's worst case.
+    "refresh_reuse_grace_seconds": 10,
 }
 
 API_EDITABLE: dict[str, dict[str, Any]] = {
@@ -236,6 +270,7 @@ API_EDITABLE: dict[str, dict[str, Any]] = {
     },
     "enrichment_sources": {
         "type": "dict",
+        "editor": "enrichment_sources",
         "group": "enrichment",
         "title": "Enrichment sources",
         "description": (
@@ -287,6 +322,7 @@ API_EDITABLE: dict[str, dict[str, Any]] = {
         ),
     },
     "rate_limit_enabled": {
+        "needs_current_password": True,
         "type": "bool",
         "group": "api",
         "title": "Rate limiting",
@@ -295,6 +331,7 @@ API_EDITABLE: dict[str, dict[str, Any]] = {
         ),
     },
     "rate_limit_requests": {
+        "needs_current_password": True,
         "type": "int",
         "minimum": 1,
         "group": "api",
@@ -302,6 +339,7 @@ API_EDITABLE: dict[str, dict[str, Any]] = {
         "description": "Requests allowed per window per IP and path.",
     },
     "rate_limit_window_seconds": {
+        "needs_current_password": True,
         "type": "int",
         "minimum": 1,
         "group": "api",
@@ -309,28 +347,35 @@ API_EDITABLE: dict[str, dict[str, Any]] = {
         "description": "Length of the rate-limit window.",
     },
     "rate_limit_whitelist": {
+        "needs_current_password": True,
         "type": "list",
         "group": "api",
         "title": "Rate limit: whitelisted paths",
         "description": "Paths that bypass rate limiting entirely (e.g. health checks).",
     },
     "login_max_attempts": {
+        "needs_current_password": True,
         "type": "int",
         "minimum": 1,
+        "maximum": 100,
         "group": "api",
         "title": "Login attempts before lockout",
         "description": (
-            "Failed logins per e-mail before the account is locked for the lockout period."
+            "Failed logins per e-mail before the account is locked for the lockout period. "
+            "From 1 to 100."
         ),
     },
     "login_lockout_seconds": {
+        "needs_current_password": True,
         "type": "int",
-        "minimum": 1,
+        "minimum": 60,
+        "maximum": 86400,
         "group": "api",
         "title": "Login lockout (s)",
-        "description": "How long a locked account stays locked.",
+        "description": "How long a locked account stays locked. From 1 minute to 1 day.",
     },
     "trusted_proxy_ips": {
+        "needs_current_password": True,
         "type": "list",
         "group": "api",
         "title": "Trusted proxy IPs",
@@ -340,18 +385,39 @@ API_EDITABLE: dict[str, dict[str, Any]] = {
         ),
     },
     "jwt_access_token_expire_minutes": {
+        "needs_current_password": True,
         "type": "int",
         "minimum": 1,
+        "maximum": 1440,
         "group": "api",
         "title": "Access token lifetime (min)",
-        "description": "How long an issued access token stays valid.",
+        "description": "How long an issued access token stays valid. At most 24 hours (1440).",
     },
     "jwt_refresh_token_expire_days": {
+        "needs_current_password": True,
         "type": "int",
         "minimum": 1,
+        "maximum": 90,
         "group": "api",
         "title": "Refresh token lifetime (days)",
-        "description": "How long an issued refresh token, and its cookie, stay valid.",
+        "description": (
+            "How long an issued refresh token, and its cookie, stay valid. At most 90 days."
+        ),
+    },
+    "refresh_reuse_grace_seconds": {
+        "needs_current_password": True,
+        "type": "int",
+        "minimum": 0,
+        "group": "api",
+        "title": "Refresh reuse grace (s)",
+        "description": (
+            "How long after a refresh token is used a second use of it counts as a "
+            "retry or a race between tabs: refused, but nothing is revoked. A use "
+            "after the window revokes every session of the account. 0 turns the window "
+            "off (every second use is a replay); otherwise at least "
+            f"{MIN_REFRESH_REUSE_GRACE_SECONDS} s, the console's refresh lease, its "
+            "prompt retry and a network allowance, and shorter than the access token lifetime."
+        ),
     },
 }
 
@@ -449,7 +515,50 @@ def _masked(name: str, value: Any) -> Any:
     return value
 
 
-def validate_editable_api_value(entry: CatalogEntry, value: Any) -> str | None:
+def refresh_grace_problem(merged_api: dict[str, Any]) -> str | None:
+    """Why the refresh reuse grace window does not fit, or ``None``.
+
+    The window is 0 (off) or at least ``MIN_REFRESH_REUSE_GRACE_SECONDS``, so
+    the console's own prompt retry lands inside it. It must be shorter than
+    the access token's lifetime: a window as
+    long as the token lets a replayed refresh token pass as a retry for as
+    long as the token it would mint. Values absent from ``merged_api`` are read
+    from ``API_DEFAULTS``; a value of the wrong type is its own leaf's error.
+    """
+    grace = merged_api.get(
+        "refresh_reuse_grace_seconds", API_DEFAULTS["refresh_reuse_grace_seconds"]
+    )
+    minutes = merged_api.get(
+        "jwt_access_token_expire_minutes", API_DEFAULTS["jwt_access_token_expire_minutes"]
+    )
+    maximum = API_EDITABLE["jwt_access_token_expire_minutes"].get("maximum")
+    if isinstance(minutes, int) and not isinstance(minutes, bool) and maximum is not None:
+        # A stored lifetime above its ceiling is read clamped, so the window
+        # is held against the lifetime a token really gets.
+        minutes = min(minutes, int(maximum))
+    if isinstance(grace, bool) or isinstance(minutes, bool):
+        return None
+    if not isinstance(grace, int) or not isinstance(minutes, int):
+        return None
+    if 0 < grace < MIN_REFRESH_REUSE_GRACE_SECONDS:
+        return (
+            f"must be 0 (off) or at least {MIN_REFRESH_REUSE_GRACE_SECONDS} s: the console's "
+            f"refresh lease ({CONSOLE_REFRESH_LEASE_SECONDS} s), its prompt retry "
+            f"({CONSOLE_REFRESH_RETRY_SECONDS} s) and a network allowance "
+            f"({CONSOLE_REFRESH_LATENCY_MARGIN_SECONDS} s); a shorter window reads the "
+            "console's own retry as a replay and revokes every session"
+        )
+    if grace >= minutes * 60:
+        return (
+            f"must be shorter than the access token lifetime ({minutes * 60} s, from "
+            "jwt_access_token_expire_minutes)"
+        )
+    return None
+
+
+def validate_editable_api_value(
+    entry: CatalogEntry, value: Any, *, check_bounds: bool = True
+) -> str | None:
     """Return an error message when ``value`` does not fit ``entry``, else ``None``.
 
     ``API_EDITABLE`` fields no longer live on ``APISettings``, so
@@ -465,9 +574,15 @@ def validate_editable_api_value(entry: CatalogEntry, value: Any) -> str | None:
     if entry.type in ("int", "float"):
         if isinstance(value, bool) or not isinstance(value, int | float):
             return "Input should be a valid number"
-        if entry.minimum is not None and value < entry.minimum:
+        if entry.type == "int" and isinstance(value, float) and not value.is_integer():
+            # 1.5 for a count was stored as 1.5, and whatever read it then took
+            # the integer it needed from a number nobody had entered. An
+            # integral float (30.0) is what installs already store and send
+            # back as shown, so it is not refused.
+            return "Input should be a valid integer"
+        if check_bounds and entry.minimum is not None and value < entry.minimum:
             return f"Input should be greater than or equal to {entry.minimum}"
-        if entry.maximum is not None and value > entry.maximum:
+        if check_bounds and entry.maximum is not None and value > entry.maximum:
             return f"Input should be less than or equal to {entry.maximum}"
         return None
     if entry.type == "list":
@@ -540,7 +655,8 @@ def api_catalog() -> list[CatalogEntry]:
                 applies_when=None,
                 order=0,
                 choices_from=None,
-                editor=None,
+                editor=ann.get("editor"),
+                needs_current_password=bool(ann.get("needs_current_password")),
             )
         )
     for name, ann in API_READONLY.items():
@@ -580,32 +696,55 @@ def full_catalog() -> list[CatalogEntry]:
     return sorted(core_catalog() + api_catalog(), key=lambda e: (order[e.group], e.order, e.path))
 
 
-@lru_cache(maxsize=1)
 def catalog_index() -> dict[str, CatalogEntry]:
+    """Every catalogue entry by key, read again once a plugin is loaded or withdrawn.
+
+    A loaded plugin can add settings of its own (an LLM provider's or a memory
+    backend's block), so the index is kept per state of the registries.
+    """
+    from maljan.core.plugins import registry_changes
+
+    return _catalog_index(registry_changes())
+
+
+@lru_cache(maxsize=1)
+def _catalog_index(_registries: int) -> dict[str, CatalogEntry]:
     return {e.key: e for e in full_catalog()}
 
 
 def _choice_sources(
-    servers: Iterable[str], profiles: Iterable[str], agents: Iterable[str]
+    servers: Iterable[str],
+    profiles: Iterable[str],
+    agents: Iterable[str],
+    plugins_allowed: Any = None,
 ) -> dict[str, list[str]]:
     """Every ``choices_from`` source, resolved once on the way out.
 
     The core catalog is a pure function of the models and cannot know which
     servers, profiles or agents exist right now; the web must not decide
-    either, or "what is a valid profile" has two answers.
+    either, or "what is a valid profile" has two answers. A provider source
+    offers the shipped ids, then each installed plugin of its kind that the
+    stored allow-list ``plugins_allowed`` names, read from package metadata:
+    never one because this process happens to have loaded it.
     """
+    from maljan.core.plugins import accepted_names, loaded_names
     from maljan.llm.provider_base import provider_names
     from maljan.memory.store_factory import memory_backends
     from maljan.providers.registry import sandbox_provider_ids, static_provider_ids
     from maljan.providers.sandbox.readers import choosable_reader_ids
+
+    def offered(kind: str, ids: Iterable[str]) -> list[str]:
+        plugin_ids = loaded_names(kind)
+        shipped = [i for i in ids if i not in plugin_ids]
+        return shipped + sorted(accepted_names(kind, plugins_allowed or []) - set(shipped))
 
     return {
         # Declared for completeness and for the agent definitions.
         # Neither provider selector uses them today: those two are enum leaves
         # whose choices already come from the settings Literal, in its own
         # order, and re-deriving them here would only re-sort the dropdown.
-        "static_providers": static_provider_ids(),
-        "sandbox_providers": sandbox_provider_ids(),
+        "static_providers": offered("static", static_provider_ids()),
+        "sandbox_providers": offered("sandbox", sandbox_provider_ids()),
         # The empty string is a real choice: it is how an operator says the
         # generic provider has no server yet.
         "mcp_servers": ["", *sorted(servers)],
@@ -613,8 +752,8 @@ def _choice_sources(
         # any agent an operator has defined (spec §2, role vocabulary).
         "agent_roles": list(agents),
         "profiles": list(profiles),
-        "memory_backends": list(memory_backends()),
-        "llm_providers": provider_names(),
+        "memory_backends": offered("memory", memory_backends()),
+        "llm_providers": offered("llm", provider_names()),
         "sandbox_report_readers": choosable_reader_ids(),
     }
 
@@ -624,6 +763,7 @@ def resolved_catalog(
     *,
     profiles: Iterable[str] = ("default",),
     agents: Iterable[str] = ("static", "dynamic", "network", "judge"),
+    plugins_allowed: Any = None,
 ) -> list[CatalogEntry]:
     """``full_catalog`` with every ``choices_from`` turned into real ``choices``.
 
@@ -640,7 +780,7 @@ def resolved_catalog(
     """
     from app.services.provider_facts import selector_choices, server_keys
 
-    sources = _choice_sources(servers, profiles, agents)
+    sources = _choice_sources(servers, profiles, agents, plugins_allowed)
     catalog = full_catalog()
     selectors = selector_choices([entry.key for entry in catalog])
     builtin, reserved = server_keys()
@@ -665,9 +805,19 @@ def resolved_catalog(
                 required_env={key: list(names) for key, names in REQUIRED_ENV_ALLOW.items()},
                 builtin_servers=builtin,
                 reserved_servers=reserved,
+                agent_keys=list(sources["agent_roles"]),
+                builtin_agent_keys=sorted(_builtin_definitions()),
             )
         if entry.editor == "agent_definitions":
-            entry = replace(entry, capability_servers=_capability_servers(servers))
+            entry = replace(
+                entry,
+                capability_servers=_capability_servers(servers),
+                data_source_choices=list(DATA_SOURCES),
+                builtin_agent_keys=sorted(_builtin_definitions()),
+                always_enabled_agent_keys=list(ALWAYS_ENABLED_AGENTS),
+            )
+        if entry.editor == "pack_steps":
+            entry = replace(entry, pack_step_vocabulary=step_vocabulary())
         out.append(entry)
     return out
 
@@ -679,7 +829,7 @@ def _capability_servers(servers: Iterable[str]) -> dict[str, list[str]]:
     the same function resolution reads (``agents.composition``).
     """
     from maljan.agents.composition import servers_of_capability
-    from maljan.core.config import _builtin_definitions, _builtin_servers
+    from maljan.core.config import _builtin_servers
 
     keys = list(dict.fromkeys([*_builtin_servers(), *servers]))
     capabilities = sorted(

@@ -179,9 +179,9 @@ def test_a_record_the_validators_refuse_is_absent_and_stops_no_reader(record: di
     assert corroboration(None, [entry]) == {}
 
 
-# Dev's ``evidence_roots._read_entry`` chain, by the tool names each branch was
+# The ``evidence_roots._read_entry`` chain as it stood, by the tool names each branch was
 # keyed on, before the reading moved onto the declared kind and reader.
-DEV_BRANCH: dict[str, str] = {
+NAMED_BRANCH: dict[str, str] = {
     **{name: "reference" for name in legacy.REFERENCE_TOOLS},
     **{name: "whole_file" for name in legacy.WHOLE_FILE_TOOLS},
     **{name: "assessment" for name in legacy.FILE_ASSESSMENT_TOOLS},
@@ -208,21 +208,29 @@ DEV_BRANCH: dict[str, str] = {
     "sandbox_signatures": "sandbox_signatures",
     "sandbox_items": "report_items",
     "yara_scan": "signature_rules",
+    # Declared since: the pack's directed-text pass declares its rows, so a
+    # claim citing it is read through them.
+    "find_directed_text": "declared_rows",
+    # Shipped since: GoReSym's function rows declare where each function
+    # starts, so a claim citing them is read through them.
+    "go_symbols": "declared_rows",
 }
 
 
-def test_the_roots_dispatch_is_devs_for_every_built_in_tool(held: ToolDeclarations) -> None:
+def test_the_roots_dispatch_matches_the_name_keyed_chain_for_every_built_in_tool(
+    held: ToolDeclarations,
+) -> None:
     from maljan.analysis.evidence_roots import reading_branch
 
     differ = []
-    names = set(shipped_by_name()) | set(DEV_BRANCH)
+    names = set(shipped_by_name()) | set(NAMED_BRANCH)
     for name in sorted(names):
-        want = DEV_BRANCH.get(name, "call_address")
+        want = NAMED_BRANCH.get(name, "call_address")
         got = reading_branch({"tool": name})
         if got != want:
             differ.append(("stored", name, want, got))
     for source, tool in _built_in(held):
-        want = DEV_BRANCH.get(tool, "call_address")
+        want = NAMED_BRANCH.get(tool, "call_address")
         entry = {"tool": tool, "source": source, "facts": facts_record(source, tool, declared=held)}
         got = reading_branch(entry)
         if got != want:
@@ -230,20 +238,20 @@ def test_the_roots_dispatch_is_devs_for_every_built_in_tool(held: ToolDeclaratio
     assert not differ, differ
 
 
-def test_the_function_map_and_the_pack_join_by_devs_names(held: ToolDeclarations) -> None:
+def test_the_function_map_and_the_pack_join_as_the_name_tables_did(held: ToolDeclarations) -> None:
     from maljan.agents.function_map import _map_kind
     from maljan.pipeline.triage_pack import _index_slot
 
-    dev_map = set(legacy.FUNCTION_MAP_TOOLS)
-    dev_slot = {"pe_info": "pe_header", "capa": "rules", "floss": "call_sites",
+    named_map = set(legacy.FUNCTION_MAP_TOOLS)
+    named_slot = {"pe_info": "pe_header", "capa": "rules", "floss": "call_sites",
                 "resolve_api_hashes": "hashes", "decode_string_blobs": "blobs"}  # fmt: skip
     for source, tool in _built_in(held):
         for entry in (
             {"tool": tool},
             {"tool": tool, "source": source, "facts": facts_record(source, tool, declared=held)},
         ):
-            assert bool(_map_kind(entry)) == (tool in dev_map), (source, tool)
-            assert _index_slot(entry) == dev_slot.get(tool, ""), (source, tool)  # type: ignore[arg-type]
+            assert bool(_map_kind(entry)) == (tool in named_map), (source, tool)
+            assert _index_slot(entry) == named_slot.get(tool, ""), (source, tool)  # type: ignore[arg-type]
 
 
 def _fixture_ledger(stamp: bool) -> list[object]:

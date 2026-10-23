@@ -83,6 +83,51 @@ class TestAWellKnownHostOfAPublishedURL:
 
         assert publishes(_row(report, "www.googleapis.com").published)
 
+    def test_a_storage_endpoint_is_not_published_through_a_url_on_it(self) -> None:
+        url = "https://storage.googleapis.com/some-bucket/stage2.bin"
+        report = _report(NetworkIOCs(urls=[NetworkURL(url=url, source="sandbox")]))
+
+        assert publishes(_row(report, url).published)
+        assert not publishes(_row(report, "storage.googleapis.com").published)
+
+
+TENANT = "evil-bucket.s3.amazonaws.com"
+TENANT_URL = f"https://{TENANT}/stage2.bin"
+
+
+class TestATenantHostOfSharedHosting:
+    """A bucket on shared hosting is its tenant's: not benign, and published on
+    evidence of its own, never because a published URL carries it."""
+
+    def test_the_url_alone_does_not_publish_it(self) -> None:
+        report = _report(NetworkIOCs(urls=[NetworkURL(url=TENANT_URL, source="sandbox")]))
+
+        assert publishes(_row(report, TENANT_URL).published)
+        assert _row(report, TENANT).published == (
+            "no: a tenant's name on shared hosting carried by a published URL, with no "
+            f"evidence of its own ({TENANT_URL}), and no model kept it as an indicator"
+        )
+
+    def test_the_guests_resolution_alone_does_not_publish_it(self) -> None:
+        """Guest DNS is not the tenant name's own evidence: the row is held as a
+        name the guest resolved until a keep, a tree flow or a recovery backs it."""
+        report = _report(
+            NetworkIOCs(
+                urls=[NetworkURL(url=TENANT_URL, source="sandbox")],
+                domains=[NetworkDomain(fqdn=TENANT, source="sandbox")],
+            )
+        )
+
+        answer = _row(report, TENANT).published
+        assert not publishes(answer)
+        assert "with no evidence of its own" in answer
+
+    def test_the_judge_keeping_it_publishes_it(self) -> None:
+        report = _report(NetworkIOCs(urls=[NetworkURL(url=TENANT_URL, source="sandbox")]))
+        report.judge_indicators = [JudgeIndicator(kind="domain", value=TENANT)]
+
+        assert publishes(_row(report, TENANT).published)
+
 
 class TestTheReportIsReadOnce:
     @staticmethod

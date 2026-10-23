@@ -57,6 +57,7 @@ from typing import Any
 
 from pydantic import ValidationError
 
+from maljan.analysis.technique_ids import SIGMA_TAG_RE, is_technique_id
 from maljan.core.report_shapes import (
     DNS_TYPE_KEYS,
     host_names,
@@ -64,6 +65,7 @@ from maljan.core.report_shapes import (
     note_question_value,
     row_shape,
 )
+from maljan.core.reputation import HASH_ARGUMENT, NETWORK_INDICATOR_ARGUMENTS
 from maljan.core.tool_declarations import (
     KIND_DEPENDENT_FIELDS,
     SANDBOX_ROLE,
@@ -71,6 +73,7 @@ from maljan.core.tool_declarations import (
     ToolFacts,
     check_auto_name_prefixes,
     check_tool_name,
+    fullmatch_pattern,
     strict_declarations,
 )
 from maljan.core.undeclared_tools import (
@@ -198,11 +201,6 @@ def _tokens(name: str) -> tuple[str, ...]:
     return tuple(part for part in spaced.lower().split("_") if part)
 
 
-# A technique id as ATT&CK writes it, and a Sigma tag naming one.
-_TECHNIQUE_VALUE = re.compile(r"^T\d{4}(?:\.\d{3})?$")
-_SIGMA_TAG_VALUE = re.compile(r"^attack\.t\d{4}(?:\.\d{3})?$", re.IGNORECASE)
-
-
 # ---------------------------------------------------------------------------
 # A schema or an answer, as one shape
 # ---------------------------------------------------------------------------
@@ -325,9 +323,10 @@ def shape_of_value(value: Any) -> _Shape:
             shape.type = "string"
             text = node.strip()
             if len(text) <= 32:
-                if _TECHNIQUE_VALUE.match(text):
+                # A technique id as ATT&CK writes it, and a Sigma tag naming one.
+                if is_technique_id(text):
                     shape.value_hint = "attck"
-                elif _SIGMA_TAG_VALUE.match(text):
+                elif SIGMA_TAG_RE.match(text):
                     shape.value_hint = "sigma_tag"
         elif isinstance(node, bool):
             shape.type = "boolean"
@@ -387,6 +386,9 @@ class Proposed:
     evidence: list[str]
     confidence: str
     requires: tuple[str, ...] = ()
+    # Fields only the operator can say, without which the value does less than
+    # it seems to; the console accepts it only once they are declared.
+    incomplete: tuple[str, ...] = ()
 
     def as_dict(self) -> dict[str, Any]:
         out: dict[str, Any] = {
@@ -396,6 +398,8 @@ class Proposed:
         }
         if self.requires:
             out["requires"] = list(self.requires)
+        if self.incomplete:
+            out["incomplete"] = list(self.incomplete)
         return out
 
 
@@ -404,7 +408,36 @@ class Proposed:
 # ---------------------------------------------------------------------------
 
 _HEX_LENGTHS = {32, 40, 64}
-_HEX_PATTERN = re.compile(r"[0-9a-fA-F]|a-f|A-F")
+_HEX_DIGITS = "0a1b2c3d4e5f6789"
+
+
+def _counts_a_hex_class(regex: str) -> bool:
+    """Whether ``regex`` takes a hash's hex digits and nothing near them.
+
+    Decided by what it does, not by how it is written: it must match a hex
+    string of 32, 40 or 64 characters whole, and refuse the same string with a
+    non-hex character swapped in (first and last place), with one character
+    more and with one fewer. A pattern the platform's engine cannot run is none.
+    """
+    try:
+        for n in sorted(_HEX_LENGTHS):
+            digits = (_HEX_DIGITS * 4)[:n]
+            if fullmatch_pattern(regex, digits) is None:
+                continue
+            if any(
+                fullmatch_pattern(regex, bad) is not None
+                for bad in (
+                    "g" + digits[1:],
+                    digits[:-1] + "g",
+                    digits + "a",
+                    digits[:-1],
+                )
+            ):
+                continue
+            return True
+    except ValueError:
+        return False
+    return False
 
 
 def _argument_role(name: str, shape: _Shape) -> tuple[str, str, str] | None:
@@ -417,11 +450,7 @@ def _argument_role(name: str, shape: _Shape) -> tuple[str, str, str] | None:
         tokens
     ):
         return "hash", HIGH, "name"
-    if (
-        shape.regex
-        and _HEX_PATTERN.search(shape.regex)
-        and any(f"{{{n}}}" in shape.regex for n in _HEX_LENGTHS)
-    ):
+    if shape.regex and _counts_a_hex_class(shape.regex):
         return "hash", HIGH, "pattern"
     if (
         shape.min_length == shape.max_length
@@ -1031,14 +1060,14 @@ def _kind_of(
     """
     roles = proposal.roles
     counts = f"a malicious count in the answer ({reading.reputation.get('malicious', '')})"
-    if reading.reputation and "hash" in roles:
+    if reading.reputation and HASH_ARGUMENT in roles:
         return "reputation", MEDIUM, [counts, "inputSchema hash argument"]
-    if reading.reputation and {"ip", "domain", "url"} & set(roles):
+    if reading.reputation and _SUBJECT_ROLES & set(roles):
         return "indicator_reputation", MEDIUM, [counts, "inputSchema indicator argument"]
     if "reputation" in words or "detections" in words:
-        if "hash" in roles:
+        if HASH_ARGUMENT in roles:
             return "reputation", LOW, [f"{word_origin} (reputation)", "inputSchema hash argument"]
-        if {"ip", "domain", "url"} & set(roles):
+        if _SUBJECT_ROLES & set(roles):
             return (
                 "indicator_reputation",
                 LOW,
@@ -1083,7 +1112,7 @@ def _answer_holds_code(answer: Any) -> bool:
 
 # The argument roles that name a subject to describe rather than a run or its
 # sample: a tool taking one is never read by the sandbox shape test.
-_SUBJECT_ROLES = frozenset({"ip", "domain", "url"})
+_SUBJECT_ROLES = frozenset(NETWORK_INDICATOR_ARGUMENTS)
 # The top-level keys a flow table lays its rows out under
 # (``analysis.evidence_roots``: reader ``flow_table``).
 _FLOW_TABLE_KEYS = frozenset({"tcp", "udp", "conversations", "dns"})
@@ -1499,6 +1528,18 @@ ROLE_HINT = (
 )
 
 
+# The note for a server at an address other jobs share whose schemas suggest a
+# ``sample_open``: offered incomplete, because only the operator can say which tools
+# name an opened program and which read nothing a job opened.
+SHARED_OPEN_INCOMPLETE = ("program_arguments", "job_safe_tools")
+SHARED_OPEN_NOTE = (
+    "sample_open is incomplete: {tool} opens a file and other tools take what it opened, but "
+    "this server is reached at an address other jobs share, and a declaration without "
+    "program_arguments and job_safe_tools would offer only the tools that take a path. "
+    "Declare program_arguments and job_safe_tools beside it before accepting it."
+)
+
+
 def propose(
     definitions: Iterable[Any],
     *,
@@ -1506,6 +1547,7 @@ def propose(
     answers: Mapping[str, tuple[ProbeCall, Any]] | None = None,
     skip: Iterable[str] = (),
     sandbox_source: bool = False,
+    remote: bool = False,
 ) -> dict[str, Any]:
     """The proposals for every tool ``definitions`` lists, as JSON the console reads.
 
@@ -1520,7 +1562,12 @@ def propose(
     holds the hint, for a server that is not, that names the tools whose rows
     read like a sandbox run's (:data:`ROLE_HINT`): nothing is proposed from
     them, since such rows are also what a memory image, a capture or a lookup
-    answers with, and the admin knows which this server is.
+    answers with, and the admin knows which this server is. ``remote`` says the
+    server is reached at an address other jobs share: a ``sample_open`` read
+    from the schemas names no ``program_arguments`` and no ``job_safe_tools``,
+    and accepted there it would offer only the tools that take a path, so it is
+    offered marked ``incomplete`` (``program_arguments``, ``job_safe_tools``),
+    with a note that says what to declare (:data:`SHARED_OPEN_NOTE`).
     """
     definitions = list(definitions)
     cells = _manifest_cells(capabilities)
@@ -1575,11 +1622,17 @@ def propose(
         server["auto_name_prefixes"] = prefixes.as_dict()
     named = [d for d in definitions if isinstance(_get(d, "name"), str)]
     opens = sample_open_in(d for d in named if _get(d, "name") not in skipped)
+    notes: list[str] = []
+    if opens is not None and remote:
+        opens.incomplete = SHARED_OPEN_INCOMPLETE
+        notes.append(SHARED_OPEN_NOTE.format(tool=opens.value["open_tool"]))
     if opens is not None:
         server["sample_open"] = opens.as_dict()
     out: dict[str, Any] = {"v": PROPOSALS_VERSION, "tools": tools, "server": server}
     if shaped:
-        out["notes"] = [ROLE_HINT.format(tools=", ".join(shaped), role=SANDBOX_ROLE)]
+        notes.append(ROLE_HINT.format(tools=", ".join(shaped), role=SANDBOX_ROLE))
+    if notes:
+        out["notes"] = notes
     if planned:
         out["planned"] = planned
     if failed:
