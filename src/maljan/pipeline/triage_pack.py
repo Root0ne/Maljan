@@ -985,7 +985,7 @@ class _Pack:
                     started_at=time.time() - took,
                     duration_ms=int(took * 1000),
                 )
-            self._record_answer(value)
+            self._record_answer(value, step.called)
             return
         values = self._template_values()
         shown = placeholder_values(step.arguments, values)
@@ -1001,9 +1001,9 @@ class _Pack:
         if step.starts_after and step.id not in self.result.schedules:
             self.result.schedules[step.id] = "in turn"
         self.steps_run += 1
-        self._record_answer(self.server_step(step, values, self._budget_left()))
+        self._record_answer(self.server_step(step, values, self._budget_left()), step.called)
 
-    def _record_answer(self, answer: ServerAnswer) -> None:
+    def _record_answer(self, answer: ServerAnswer, called: str) -> None:
         entry = self.recorder.record(
             tool=answer.tool,
             args=answer.args,
@@ -1015,6 +1015,7 @@ class _Pack:
             started_at=answer.started_at,
             duration_ms=answer.duration_ms,
             structured_content=answer.structured_content,
+            declared_name=called,
         )
         # A call that was never made is an absence, as a lookup with no
         # server to ask is; one that was made and failed is a failure.
@@ -2224,7 +2225,7 @@ def _server_facts(step: PackStep) -> ToolFacts | None:
     from maljan.core.declared_reading import declarations
 
     try:
-        return declarations().declaration_for((f"mcp:{step.server}", step.called))
+        return declarations().declaration_for((f"mcp:{step.server}", step.called), exact=True)
     except Exception as exc:  # noqa: BLE001 — an unread declaration declares nothing
         logger.debug("triage pack: %s's declaration was not read (%s).", step.called, exc)
         return None

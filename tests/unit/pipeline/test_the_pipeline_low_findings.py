@@ -279,7 +279,7 @@ def test_n9_the_reputation_lookup_waits_as_long_as_the_tool_declares(
         def __getattr__(self, name: str) -> Any:
             return getattr(self._held, name)
 
-        def declaration_for(self, key: Any) -> Any:
+        def declaration_for(self, key: Any, *, exact: bool = False) -> Any:
             return SimpleNamespace(timeout_seconds=7.5)
 
     monkeypatch.setattr(container, "get_server_registry", lambda: _Registry())
@@ -441,7 +441,7 @@ def test_n9_the_reputation_lookup_falls_back_to_what_is_left_of_the_pack_budget(
         def __getattr__(self, name: str) -> Any:
             return getattr(self._held, name)
 
-        def declaration_for(self, key: Any) -> Any:
+        def declaration_for(self, key: Any, *, exact: bool = False) -> Any:
             return SimpleNamespace(timeout_seconds=None)
 
     monkeypatch.setattr(container, "get_server_registry", lambda: _Registry())
