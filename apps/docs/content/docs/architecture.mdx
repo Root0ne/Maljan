@@ -3638,6 +3638,34 @@ id the case leaves out of memory (a claim kept after the absence question, an
 id the catalogue lacks) stays out although the run published it. The judge's
 log line counts the claimed techniques and says so.
 
+An earlier run on the same sample reaches a later run only as hypotheses.
+Every similarity read (the judge's prior cases, the report's similar samples,
+`similar_cases`, the function matches) leaves the sample's own case out; the
+case an earlier run stored for the same sha256 is read apart, by the sample's
+id and under the owner rule (`long_term_memory.earlier_case`, through a
+backend's optional `case_of`; the in-process and Qdrant backends offer it, and
+a backend without it shows no earlier run). Each analyst, the mediator and the
+judge are shown it once per job after the triage pack, under the heading
+"AN EARLIER RUN ON THIS SAMPLE: hypotheses, not evidence". The pack's room
+under its bound (`reporting.upstream_findings_max_chars` or the derived one)
+shrinks by the block, and the block itself is never cut, so a block longer
+than the bound leaves the two past it. It holds the day it was stored and the
+technique ids its case keeps, never its summary, whose evidence ids name the
+earlier run's ledger, and never its category, an earlier verdict's word no
+tool can check. The report writer is not shown it. It is no ledger entry, so
+it has no evidence id, no claim can cite it and it adds no source to any
+technique's corroboration row. The judge's bundle records what was shown
+(`x_maljan_earlier_run`, set by the platform on every bundle, never
+exported), as a fact that decides nothing: the capability matrix publishes
+by the same rules as without it, so a run publishes the same set whether or
+not an earlier run is recorded, and a run repeated on one sample does not
+alternate what it publishes. A recorded technique with no independent source
+in this run's corroboration row (a lookup, an external assessment or a
+citation placed nowhere is none; a row the record does not hold has none)
+carries the note "an earlier run on this sample also reported it; no source
+of this run stands behind it". A job with no earlier case, or whose store
+cannot be read, is briefed as before.
+
 The run summary's `stix_object_count` is the exported bundle's object count
 once the report node has built the export, on the state's summary and on
 `report.run_summary` alike; the judge's own bundle size is kept as

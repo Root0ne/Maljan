@@ -119,6 +119,18 @@ class InMemoryStore(MemoryStoreDefaults):
         scored.sort(key=lambda pair: pair[0], reverse=True)
         return [case for _, case in scored[:top_k]]
 
+    def case_of(self, sample_id: str, owner: str | None = None) -> StoredCase | None:
+        """The case stored for ``sample_id`` under ``owner`` (the unscoped one for ``None``)."""
+        scope = owner_key(owner)
+        return next(
+            (
+                case
+                for case, _vec, _by in self._cases
+                if case.sample_id == sample_id and owner_key(case.owner) == scope
+            ),
+            None,
+        )
+
     def count(self) -> int:
         """Return the number of cases currently in the store."""
         return len(self._cases)

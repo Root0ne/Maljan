@@ -782,6 +782,26 @@ class TechniqueReview(_SpecConformantModel):
 TECHNIQUE_REVIEW_PROPERTY = "x_maljan_technique_review"
 
 
+class EarlierRun(_SpecConformantModel):
+    """What an earlier run on this sample reported, as this run's agents were shown it.
+
+    Hypotheses, never evidence (``long_term_memory.earlier_run_block``): a
+    recorded fact that decides nothing. A technique listed here that no source
+    of this run stands behind carries a note saying so
+    (``capability_matrix.EARLIER_RUN_UNSUPPORTED_NOTE``) and is published or
+    not by the same rules as without the record.
+    """
+
+    sample_id: str
+    techniques: list[str] = Field(default_factory=list)
+    # The day the earlier run's case was stored, ``YYYY-MM-DD`` in UTC.
+    stored: str = ""
+
+
+# The bundle property the earlier run on this sample is kept in.
+EARLIER_RUN_PROPERTY = "x_maljan_earlier_run"
+
+
 class Bundle(_SpecConformantModel):
     """STIX 2.1 Bundle container for transferring multiple objects.
 
@@ -809,6 +829,10 @@ class Bundle(_SpecConformantModel):
     # when there was nothing to ask. Never exported: the export is built from
     # the objects.
     x_maljan_technique_review: TechniqueReview | None = None
+    # What an earlier run on this sample reported, as the run's agents were
+    # shown it (:class:`EarlierRun`). ``None`` when there was none. Set by the
+    # platform on every bundle and never exported, as the review is.
+    x_maljan_earlier_run: EarlierRun | None = None
 
     def confidence_annotated_relationships(self) -> list[ConfidenceAnnotatedRelationship]:
         """Return only the ConfidenceAnnotatedRelationship objects in this bundle."""
