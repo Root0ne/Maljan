@@ -97,6 +97,7 @@ from maljan.reporting.models import (
     SandboxSignature,
     TechnicalSubsection,
     is_open_question_section,
+    outcome_words,
     stated_family,
 )
 from maljan.schemas.evidence import is_guard_answer
@@ -302,6 +303,7 @@ class MarkdownRenderer:
         ctx = _Context.of(report)
         sections: list[str] = [
             self._safe_section("title", lambda: self._section_title(report, ctx)),
+            self._safe_section("questions", lambda: self._section_questions(report, ctx)),
             self._safe_section("key_findings", lambda: self._section_key_findings(report, ctx)),
             self._safe_section("sample_overview", lambda: self._section_overview(report, ctx)),
             self._safe_section("verdict", lambda: self._section_verdict(report, ctx)),
@@ -430,6 +432,45 @@ class MarkdownRenderer:
             custom = set(profile.get("custom") or [])
             names = ", ".join(f"{a} (custom)" if a in custom else a for a in analysts)
             lines.append(f"\nProfile: {profile['name']} — analysts: {names}")
+        return "\n".join(lines)
+
+    # ------------------------------------------------------------------
+    # The questions the analyst asked of the run
+    # ------------------------------------------------------------------
+
+    def _section_questions(self, report: MalwareReport, ctx: _Context) -> str:
+        """Each question asked of the run, its outcome, the answer and what it rests on.
+
+        Unnumbered and before §1, so the report leads with what it was asked;
+        "" for a job asked nothing, which renders as it always did.
+        """
+        answers = list(getattr(report, "question_answers", None) or [])
+        if not answers:
+            return ""
+        lines = [_lead_heading("Questions asked of this run", REPORT_MODEL), "", QUESTIONS_NOTE]
+        for number, answer in enumerate(answers, 1):
+            # The analyst's words: escaped as inline text, a "#" included, so
+            # a trailing run of them cannot close the heading early.
+            asked = _HEADING_HASH.sub("\\\\", ctx.inline(answer.question))
+            lines.extend(["", _plain_heading(f"Q{number}. {asked}"), ""])
+            outcome = f"**Outcome:** {outcome_words(answer.outcome)}"
+            if answer.answered:
+                outcome += (
+                    f" _(the report model answered {outcome_words(answer.answered)}; "
+                    "the platform's check refused it)_"
+                )
+            lines.append(outcome)
+            if answer.answer.strip():
+                lines.extend(["", _paragraph_line(ctx.inline(answer.answer))])
+            facts = [
+                ("Evidence", _ids(answer.evidence_ids)),
+                ("Looked at", _ids(answer.looked_at)),
+                ("Open questions it rests on", "; ".join(answer.open_questions)),
+            ]
+            said = [_item(f"{label}: {ctx.inline(value)}") for label, value in facts if value]
+            said.extend(_item(f"_Platform check:_ {ctx.inline(check)}") for check in answer.checks)
+            if said:
+                lines.extend(["", *said])
         return "\n".join(lines)
 
     # ------------------------------------------------------------------
@@ -4138,6 +4179,47 @@ def _links_cell(links: Iterable[Any]) -> str:
 def _heading(number: int, title: str, voice: str) -> str:
     """An H2 with its section number and its voice tag."""
     return f"## {number}. {_one_line(title)} · _{voice}_"
+
+
+# A line that would open a list or draw a rule, read after its other openers
+# are escaped (:func:`_paragraph_line`).
+_LIST_OPENER = re.compile(r"^([-+*])(?![^ \t])")
+_ORDERED_OPENER = re.compile(r"^(\d{1,9})([.)])(?![^ \t])")
+# Each "#" of a heading's text, to be escaped so a trailing run of them cannot
+# close the heading.
+_HEADING_HASH = re.compile(r"(?=#)")
+_THEMATIC_BREAK = re.compile(r"^([-_*])(?:[ \t]*\1){2,}[ \t]*$")
+
+
+def _paragraph_line(text: str) -> str:
+    """One paragraph of text already escaped as inline text, on one line, opening no block.
+
+    The answer a model writes to a question: its line breaks become spaces and
+    its indent goes, so no line of it can start a code block; a heading, a
+    fence, a quote, a setext underline or a table row is escaped
+    (:func:`_escape_block`), and so is a leading list marker, a numbered-list
+    opener and a thematic break.
+    """
+    line = _escape_block(_one_line(text).strip())
+    if _THEMATIC_BREAK.match(line):
+        return "\\" + line
+    line = _LIST_OPENER.sub(r"\\\1", line)
+    return _ORDERED_OPENER.sub(r"\1\\\2", line)
+
+
+def _lead_heading(title: str, voice: str) -> str:
+    """An unnumbered H2 before §1, with its voice tag."""
+    return f"## {_one_line(title)} · _{voice}_"
+
+
+# The line the "Questions asked of this run" section opens with.
+QUESTIONS_NOTE = (
+    "_The analyst's questions, each answered from this run's evidence with one outcome: "
+    "established, partial, limited negative, not determinable from this run, out of scope. "
+    "The platform checks each answer: it refuses established with no answered entry cited "
+    "and limited negative with no record of what was looked at, and an open question is "
+    "never read as an absence._"
+)
 
 
 def _appendix_heading(letter: str, title: str, voice: str) -> str:

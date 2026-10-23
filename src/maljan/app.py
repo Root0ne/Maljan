@@ -113,6 +113,10 @@ class MaljanApp:
         # cancel, the worker shutting down) had produced when it stopped. An
         # empty dict until the first step completes.
         self.latest_state: dict[str, Any] = {}
+        # The questions this run was asked (``arun``), kept here as well as on
+        # the state, so a run stopped before its first graph step still prints
+        # each of them (``stopped_run.stopped_state``).
+        self.questions: list[str] = []
 
     async def aclose(self) -> None:
         """Release the container's agents, toolkits and per-job caches.
@@ -483,6 +487,7 @@ class MaljanApp:
         static_sample_paths: dict[str, str] | None = None,
         started_at: float | None = None,
         server_sample_paths: dict[str, str] | None = None,
+        questions: list[str] | None = None,
     ) -> dict[str, Any]:
         """Execute the full analysis pipeline asynchronously.
 
@@ -512,12 +517,17 @@ class MaljanApp:
                 figure a reader compares against the job's duration, so the two
                 are measured from the same instant. Absent, this call's entry
                 is the start.
+            questions: The questions the analyst asked of this run, which the
+                report answers in a fixed vocabulary
+                (``reporting.question_round``). None or empty asks nothing,
+                and the report is the one a run without them has.
 
         This prevents the need for spinning up separate threads and manually
         managing event loops in async contexts (like ARQ workers), which
         solves the 'Event loop is closed' issue with google-genai.
         """
         start = float(started_at) if started_at else time.time()
+        self.questions = list(questions or [])
         logger.info("=" * 60)
         logger.info("MALJAN - Multi-Agent Malware Analysis Pipeline")
         logger.info("=" * 60)
@@ -556,6 +566,7 @@ class MaljanApp:
                 static_sample_path=static_sample_path,
                 static_sample_paths=static_sample_paths,
                 server_sample_paths=server_sample_paths,
+                questions=questions,
             )
 
         elapsed = time.time() - start
@@ -575,6 +586,7 @@ class MaljanApp:
         static_sample_path: str | None,
         static_sample_paths: dict[str, str] | None,
         server_sample_paths: dict[str, str] | None = None,
+        questions: list[str] | None = None,
     ) -> dict[str, Any]:
         """The sandbox submission and the graph, for ``arun``."""
         # Submit to sandbox if sample_path is provided
@@ -658,6 +670,7 @@ class MaljanApp:
             "validation_not_run": [],
             "validation_unparsed_answers": [],
             "triage_facts": {},
+            "analyst_questions": list(questions or []),
             "nudge_retry_modes": {},
             "budget_records": {},
         }

@@ -393,6 +393,25 @@ def build_prompt_text(report: MalwareReport, isr_reports: Any = None) -> str:
     label, so the summary and the key findings are written over every claim
     the run holds.
     """
+    lines = findings_lines(report, isr_reports)
+    lines.extend(
+        [
+            "TASK",
+            "----",
+            "Write the three narrative fields described in the system prompt. "
+            "Return ONLY the JSON object shown there, with those keys.",
+        ]
+    )
+    return "\n".join(lines)
+
+
+def findings_lines(report: MalwareReport, isr_reports: Any = None) -> list[str]:
+    """The prompt body's lines before its task: what the run established, each fact whole.
+
+    The narrative round's (:func:`build_prompt_text`) and the question
+    round's (``reporting.question_round``), so both are written over the
+    same facts.
+    """
     lines: list[str] = [
         "DETERMINISTIC FINDINGS",
         "----------------------",
@@ -573,16 +592,7 @@ def build_prompt_text(report: MalwareReport, isr_reports: Any = None) -> str:
 
     # --- The analysts' claims in force -----------------------------------
     lines.extend(claims_in_force_lines(isr_reports))
-
-    lines.extend(
-        [
-            "TASK",
-            "----",
-            "Write the three narrative fields described in the system prompt. "
-            "Return ONLY the JSON object shown there, with those keys.",
-        ]
-    )
-    return "\n".join(lines)
+    return lines
 
 
 # ---------------------------------------------------------------------------
@@ -741,7 +751,12 @@ class NarrativeAgent:
         return self._call_limit(turns, preview=True)[0]
 
     def _call_limit(
-        self, turns: Sequence[BaseMessage], *, slot: Any = None, preview: bool = False
+        self,
+        turns: Sequence[BaseMessage],
+        *,
+        slot: Any = None,
+        preview: bool = False,
+        what: str = "narrative round's",
     ) -> tuple[int | None, str]:
         """The ``max_tokens`` one call of this round is held to, and the limit that set it.
 
@@ -758,7 +773,7 @@ class NarrativeAgent:
         cap = int(getattr(self, "output_cap", 0) or 0)
         chars = sum(len(str(getattr(message, "content", "") or "")) for message in turns)
         window = int(getattr(self, "window_tokens", 0) or 0)
-        overflow = prompt_overflow_sentence("narrative round's", chars, window)
+        overflow = prompt_overflow_sentence(what, chars, window)
         if overflow is not None and overflow not in self.degradations:
             self.degradations.append(overflow)
         why = f"its output budget of {cap} tokens"
@@ -1062,6 +1077,49 @@ class NarrativeAgent:
         except Exception as exc:  # noqa: BLE001
             logger.error("NarrativeAgent: the validated payload would not build (%s).", exc)
             return None
+
+    async def ask(self, turns: list[BaseMessage], *, call: str, what: str) -> Any:
+        """One plain call of the reporter's model for another round of the report stage.
+
+        Held and recorded as this round's manual calls are: to the output
+        budget, what the window leaves after the prompt or the spend
+        ceiling's hold (:meth:`_call_limit`, its overflow sentence naming
+        ``what``), its usage on the ledger under ``call``, and the slot it
+        reserved released whatever becomes of it. A call in the turns is said
+        as text, since the plain model is offered no tool.
+        """
+        from maljan.llm.context_window import output_bound_kwargs
+
+        slot = object()
+        bound, why = self._call_limit(turns, slot=slot, what=what)
+        if bound is not None:
+            logger.info("NarrativeAgent: output limit on this %s call: %d — %s.", call, bound, why)
+        try:
+            plain = with_calls_said(turns)
+            reply = await retry_on_connection_error(
+                (lambda: self.llm.ainvoke(plain, **output_bound_kwargs(self.llm, bound)))
+                if bound is not None
+                else (lambda: self.llm.ainvoke(plain)),
+                what=f"NarrativeAgent {call}",
+            )
+            if self.token_ledger is not None:
+                try:
+                    from maljan.core.token_ledger import record_response_usage
+
+                    record_response_usage(
+                        self.token_ledger,
+                        reply,
+                        agent=REPORTER_AGENT_KEY,
+                        model=self.model_label,
+                        call=call,
+                    )
+                    self._announce_fallback(reply)
+                except Exception as exc:  # noqa: BLE001
+                    # nosemgrep: python.lang.security.audit.logging.logger-credential-leak.python-logger-credential-disclosure — record_response_usage() swallows its own exceptions, so exc here is only an import/attribute error  # noqa: E501
+                    logger.debug("NarrativeAgent: token usage not recorded (%s).", exc)
+        finally:
+            spend_release(getattr(self, "token_ledger", None), slot)
+        return reply
 
     def _announce_fallback(self, answer: Any) -> None:
         """Publish ``model_fallback`` when ``answer`` is the one the model list moved on for."""

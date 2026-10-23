@@ -29,6 +29,7 @@ ALLOWED: dict[str, str] = {
     "_title_heading": "writes the report's H1",
     "_heading": "writes a numbered H2 with its voice tag",
     "_appendix_heading": "writes an appendix H2 with its voice tag",
+    "_lead_heading": "writes the unnumbered H2 before §1 with its voice tag",
     "_subheading": "writes a numbered H3 with its voice tag",
     "_plain_heading": "writes an unnumbered H3",
     "_item": "writes one bullet, flattened onto its line",

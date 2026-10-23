@@ -17,6 +17,8 @@ import type {
   HostIdentifier,
   KeyFinding,
   MalwareReport,
+  QuestionAnswer,
+  QuestionOutcome,
   TechnicalSubsection,
 } from "@/types/malware-report";
 
@@ -310,6 +312,28 @@ export function flaggedMark(statement: FlaggedStatement): string {
   return statement.asked === false
     ? `${found} — the model was not asked about it`
     : `${found} — asked about and left standing`;
+}
+
+/** Each outcome as the exported report prints it. */
+export const OUTCOME_WORDS: Record<QuestionOutcome, string> = {
+  established: "established",
+  partial: "partial",
+  limited_negative: "limited negative",
+  not_determinable: "not determinable from this run",
+  out_of_scope: "out of scope",
+};
+
+/** The questions the job was asked, with the report's answers. */
+export function questionAnswers(mr: MalwareReport | null | undefined): QuestionAnswer[] {
+  return (mr?.question_answers ?? []).filter((a) => said(a?.question));
+}
+
+/** An answer's outcome as the exported report prints it, with a refused word said. */
+export function outcomeLine(answer: QuestionAnswer): string {
+  const words = OUTCOME_WORDS[answer.outcome] ?? answer.outcome;
+  if (!answer.answered) return words;
+  const asked = OUTCOME_WORDS[answer.answered] ?? answer.answered;
+  return `${words} (the report model answered ${asked}; the platform's check refused it)`;
 }
 
 /** The analyst claims in force the body neither cites nor discusses. */

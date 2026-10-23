@@ -21,7 +21,7 @@ writes, a fragment — moves it, and no real value is masked out of anything:
 - the narrative's (``narrative_agent.system_prompt``), every format fragment
   ``prompt_fragments.format_fragment`` can produce, and the prompts a call
   sends as a constant: the view prompts, the judge's verdict and technique
-  questions, the composer's and the summariser's.
+  questions, the composer's, the question round's and the summariser's.
 
 ``PROMPT_SITES`` names, for every place in the code that builds a system
 message, which of these renders it. The proof that the map is complete is
@@ -55,6 +55,7 @@ PROMPT_CONSTANTS: dict[str, tuple[tuple[str, str], ...]] = {
     "mediation extraction": (("maljan.agents.judge_agent", "MEDIATION_EXTRACTION_SYSTEM"),),
     "technique questions": (("maljan.agents.judge_agent", "TECHNIQUE_QUESTION_SYSTEM"),),
     "composer": (("maljan.reporting.composer", "_SYSTEM"),),
+    "questions": (("maljan.reporting.question_round", "SYSTEM_PROMPT"),),
     "summarizer": (
         ("maljan.analysis.function_summarizer", "_SUMMARIZE_SYSTEM"),
         ("maljan.analysis.function_summarizer", "_MERGE_SYSTEM"),
@@ -91,6 +92,7 @@ PROMPT_SITES: dict[str, str | None] = {
     "maljan.agents.judge_agent:JudgeAgent.decide_techniques": "technique questions",
     "maljan.reporting.composer:ReportComposer._author._turns": "composer",
     "maljan.reporting.narrative_agent:NarrativeAgent._build_prompt": "narrative",
+    "maljan.reporting.question_round:build_messages": "questions",
     "maljan.analysis.function_summarizer:FunctionSummarizer.summarize_chunk": "summarizer",
     "maljan.analysis.function_summarizer:FunctionSummarizer._merge_summaries": "summarizer",
     # A settings section's label ("system"), not a model prompt.

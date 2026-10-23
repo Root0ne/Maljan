@@ -4210,6 +4210,21 @@ a tool of the kind each question names. An open question names an unknown. It
 is never read as an absence: no grounding, value holder or corroboration
 reads the table.
 
+A job may also be submitted with questions of its own (`config.questions`,
+the "Questions for this run" box of the submit dialog). After the narrative
+round the report model is asked once to answer each from the run's evidence
+with one outcome of a fixed set: established, partial, limited negative, not
+determinable from this run, out of scope (`reporting/question_round.py`). The
+model picks the word and cites the entries; code checks them. Every cited id
+must be one the run issued, "established" needs an entry of a call that
+answered, "limited negative" needs a coverage record (`looked_at`, the calls
+that looked), and an answer resting on an analyst's open question is never a
+limited negative. The model is told what is wrong and asked once more; a word
+still refused is printed as not determinable from this run, with the model's
+word and the reason beside it. The answers lead the report as "Questions asked
+of this run" and are drawn on the console's summary. A job asked nothing runs
+no round and renders as before.
+
 A repeated tool call is a message to the model and nothing else. The third
 identical `(tool, arguments)` call in one loop is not run; the model is told
 which entry already holds the answer, and whether that entry was an answer or a

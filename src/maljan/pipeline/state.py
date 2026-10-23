@@ -400,6 +400,12 @@ class AnalysisState(TypedDict):
     # triage node; empty on a run whose team has no triage stage.
     triage_facts: dict[str, Any]
 
+    # The questions the analyst asked of the job when submitting it
+    # (``config.questions``), each answered by the report's question round
+    # (``reporting.question_round``). Written once at the start; empty on a
+    # job asked none, whose report carries no answers.
+    analyst_questions: list[str]
+
     # Which analysts had their final-answer nudge sent another way than the
     # plain one, and which way. Written by the analyst nodes, merged per agent,
     # read by the judge into ``run_summary.nudge``.

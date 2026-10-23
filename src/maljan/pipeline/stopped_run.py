@@ -66,6 +66,11 @@ def stopped_state(app: Any) -> dict[str, Any]:
     else:
         latest = getattr(app, "latest_state", None)
         state = dict(latest) if isinstance(latest, dict) else {}
+    # The questions the run was asked, which a run stopped before its first
+    # graph step has no state to carry.
+    asked = getattr(app, "questions", None)
+    if not state.get("analyst_questions") and isinstance(asked, list) and asked:
+        state["analyst_questions"] = list(asked)
     # What the run's agents held when it stopped is on its ledger too: a stage
     # node that was cancelled never ran its drain.
     try:
@@ -577,10 +582,36 @@ def partial_report(state: dict[str, Any], container: Any, *, note: str) -> dict[
     report["degraded_mode"] = True
     reasons = report.get("degradation_reasons")
     report["degradation_reasons"] = [*(reasons if isinstance(reasons, list) else []), note]
+    _with_questions(report, state)
     _with_disclosure(report, state, container)
     _with_efficiency(report, state, container)
     _with_coverage(report, state, container)
     return report
+
+
+# Why a stopped run's questions carry no answer of the report model's.
+QUESTIONS_STOPPED = "the run was stopped before the report's question round answered"
+
+
+def _with_questions(report: dict[str, Any], state: dict[str, Any]) -> None:
+    """The job's questions on ``report`` as not determinable, where it answers none yet.
+
+    A question the analyst asked is never dropped because the run stopped:
+    each is printed "not determinable from this run" with the reason.
+    """
+    if report.get("question_answers"):
+        return
+    try:
+        from maljan.reporting.question_round import asked_questions, unanswered
+
+        questions = asked_questions(state.get("analyst_questions"))
+        if questions:
+            report["question_answers"] = [
+                answer.model_dump(mode="json")
+                for answer in unanswered(questions, QUESTIONS_STOPPED)
+            ]
+    except Exception as exc:  # noqa: BLE001 — every function here is total
+        logger.debug("stopped run: the questions were not kept (%s).", type(exc).__name__)
 
 
 def _with_coverage(report: dict[str, Any], state: dict[str, Any], container: Any) -> None:
