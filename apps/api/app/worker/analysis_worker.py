@@ -53,6 +53,7 @@ from app.logging_config import get_logger, setup_logging
 from app.runtime_config import runtime_config
 from app.services.job_events import STREAM_TTL_SECONDS, stream_key
 from app.worker.queues import ANALYSIS_QUEUE, build_redis_settings
+from app.worker.sample_integrity import SampleIntegrity, copies_of, ended_record, with_record
 
 logger = get_logger("worker")
 
@@ -2140,6 +2141,7 @@ async def keep_the_built_report(
     hash_mismatch_reason: str | None,
     scale_record: Mapping[str, Any] | None = None,
     container: Any = None,
+    sample_integrity: Any = None,
 ) -> bool:
     """Store a report a failed run built, marked incomplete. Never raises.
 
@@ -2171,6 +2173,7 @@ async def keep_the_built_report(
             override_keys=override_keys,
             hash_mismatch_reason=hash_mismatch_reason,
             scale_record=scale_record,
+            sample_integrity=await ended_record(sample_integrity),
         )
         _end_the_token_ledger(container)
         run_summary["degraded_mode"] = True
@@ -2272,6 +2275,7 @@ async def keep_the_stopped_run(
     core_settings: Any,
     override_keys: Any,
     hash_mismatch_reason: str | None,
+    sample_integrity: Any = None,
 ) -> bool:
     """Store what a stopped run produced: its run summary and a partial report. Never raises.
 
@@ -2309,6 +2313,7 @@ async def keep_the_stopped_run(
             override_keys=override_keys,
             hash_mismatch_reason=hash_mismatch_reason,
             scale_record=recorded_signature_scale(container),
+            sample_integrity=await ended_record(sample_integrity),
         )
         _end_the_token_ledger(container)
         async with db_session() as db:
@@ -2537,6 +2542,8 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
     # below removes every one of them, symmetric with today's single-path
     # cleanup.
     host_mirrors: list[Path] = []
+    # The copies' readings against the intake digest (``sample_integrity``).
+    _integrity: SampleIntegrity | None = None
     # L2 (live-run finding): set below when an attached sandbox report's
     # own claimed hash disagreed with the sample at upload time, so the
     # degradation makes it into both run_summary and the report banner
@@ -2664,6 +2671,7 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
             sample = sample_result.scalar_one()
             sample_uuid = sample.id
             sample_sha256 = str(sample.sha256)
+            sample_size = sample.file_size_bytes
             sample_filename = str(sample.original_filename or "")
             sample_storage_path = str(sample.storage_path or "")
 
@@ -3199,6 +3207,14 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
                 extra={"job_id": job_id, "component": "minio"},
             )
             temp_path = None
+        if temp_path:
+            _integrity = SampleIntegrity(
+                sample_sha256,
+                copies_of(temp_path, host_mirrors),
+                size=sample_size,
+                job_id=job_id,
+            )
+            await _integrity.started()
 
         # Execute the asynchronous pipeline natively to
         # avoid "Event loop is closed" errors caused by threading mismatches.
@@ -3350,6 +3366,7 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
                     core_settings=core_settings,
                     override_keys=overrides,
                     hash_mismatch_reason=_report_hash_mismatch_reason,
+                    sample_integrity=_integrity,
                 )
                 if _kind == STOP_SHUTDOWN:
                     # A shutdown is waited on by ``docker stop``, whose grace
@@ -3474,6 +3491,7 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
             override_keys=overrides,
             hash_mismatch_reason=_report_hash_mismatch_reason,
             scale_record=recorded_signature_scale(getattr(app, "container", None)),
+            sample_integrity=await ended_record(_integrity),
             enrichment=(
                 await enrichment_plan(core_settings)
                 if pipeline_result.get("malware_report")
@@ -3795,6 +3813,7 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
                     override_keys=overrides,
                     hash_mismatch_reason=_report_hash_mismatch_reason,
                     scale_record=recorded_signature_scale(getattr(app, "container", None)),
+                    sample_integrity=_integrity,
                 )
             await mark_job_failed(db_session, job_uuid, reason=reason, error_id=error_id)
         else:
@@ -4749,6 +4768,7 @@ def _report_inputs(
     hash_mismatch_reason: str | None,
     scale_record: Mapping[str, Any] | None = None,
     enrichment: list[dict[str, Any]] | None = None,
+    sample_integrity: Mapping[str, Any] | None = None,
 ) -> tuple[dict | None, dict[str, Any]]:
     """The STIX bundle and the run summary a stored report carries.
 
@@ -4820,6 +4840,9 @@ def _report_inputs(
                 hash_mismatch_reason,
             ]
     _disclosed(_run_summary, pipeline_result, core_settings=core_settings, enrichment=enrichment)
+    # The copies' readings at the job's start and end, said in the isolation
+    # part (``sample_integrity``); a job that handed out no copy adds nothing.
+    with_record(_run_summary, pipeline_result.get("malware_report"), sample_integrity)
     return stix_bundle_for_persist, _run_summary
 
 

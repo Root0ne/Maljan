@@ -270,6 +270,39 @@ when at least one reader exists and every one was measured and passed. A run
 that recorded no read of the sample says so, and claims nothing. A version-1
 record has no isolation part and renders as before.
 
+**Whether the copies stayed the sample.** The worker hashes every copy of the
+sample it hands out (its download, which the sample path names, and each
+mirror it wrote for a server that reads a mount) once after the copies are
+made and before the pipeline starts, and once more when the run ends, before
+the report is stored and the copies are removed. Each reading is compared with
+the SHA-256 taken at upload:
+
+- The copy's directory is opened without following a link, and the copy is
+  opened through it without following a link; only a regular file is read. A
+  link or a pipe put in place of the copy or its directory is a reading that
+  failed. A hard link put in its place is read, and shows as the bytes it
+  holds.
+- A copy whose size is not the size taken at upload is a change and is not
+  read at all. Otherwise one streaming pass reads no more than that size, so a
+  copy grown during the run costs no more than the sample does.
+
+When every reading matches, the isolation part ends with one line saying so.
+When one does not (a store that answered with other bytes, a tool server that
+wrote into its mount, a copy put in another's place), the part names each copy
+that differed, what it read or why it was not hashed, and whether that was
+seen when the job started or when the run ended, with the time. The run is not
+failed or marked degraded for it: which findings it touches is the analyst's
+call.
+
+The run summary stores the readings as `sample_integrity` (`expected_sha256`,
+`readings`, `changed`). The same record is put in the disclosure record's
+isolation part, and the line is printed, only when the run's disclosure record
+has an isolation part (its `rows` present, even empty); otherwise the record is kept at
+`sample_integrity` in the run summary alone and nothing is printed. A copy a
+server holds at an address (a staged upload) or a sandbox's own copy is not
+read by the worker and is not in the record. A run stored without the record
+renders as before.
+
 ### What each tool did beyond answering
 
 Inside the same block, after the isolation part and under its own **Tool
