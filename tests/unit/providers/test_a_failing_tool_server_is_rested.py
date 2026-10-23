@@ -302,9 +302,12 @@ class TestTheRegistryHoldsOneGuardPerServer:
                     "failures": 1,
                     "cooldown_s": 60.0,
                     "reason": "the server could not be reached",
+                    # The built-in's display name, beside its key.
+                    "label": handle.config.label,
                 },
             )
         ]
+        assert handle.config.label and handle.config.label != handle.name
 
 
 def test_the_run_summary_names_every_rest() -> None:
@@ -332,6 +335,15 @@ def test_the_sentence_counts_in_words(failures: int) -> None:
 
     text = server_rest_sentence({"server": "s", "failures": failures, "cooldown_s": 5})
     assert (" call in a row" in text) == (failures == 1)
+
+
+def test_the_sentence_names_a_labelled_server_by_its_label_and_key() -> None:
+    from maljan.analysis.run_summary import server_rest_sentence
+
+    row = {"server": "analysis", "failures": 3, "cooldown_s": 60.0, "reason": "timed out"}
+    labelled = server_rest_sentence({**row, "label": "Analysis MCP"})
+    assert labelled.startswith("Tool server Analysis MCP (analysis) was rested for 60 s")
+    assert server_rest_sentence({**row, "label": "analysis"}) == server_rest_sentence(row)
 
 
 class TestTheHalfOpenPath:

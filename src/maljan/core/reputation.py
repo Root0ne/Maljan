@@ -315,11 +315,15 @@ def record_at_write(
     output: str,
     structured: Any = None,
     server: str | None = None,
+    source: str | None = None,
 ) -> dict[str, Any] | None:
     """The stored record of an answer whose entry stored ``facts_record``, or ``None``.
 
     ``None`` for a call that did not answer and for a tool that is not a
-    declared reputation lookup. Called once, when the entry is written.
+    declared reputation lookup. Called once, when the entry is written. A
+    lookup whose facts name no service is attributed to its tool server by
+    the server's display name (``MCPServerConfig.label``), read now from the
+    source the entry is recorded under (``source``), else by its key.
     """
     if not ok or not isinstance(facts_record, Mapping):
         return None
@@ -330,12 +334,42 @@ def record_at_write(
         return None
     assert facts is not None
     try:
+        # Read off the stored record itself: both are names, not readings.
+        declared = facts_record.get("reputation")
+        named = facts_record.get("display_name") or (
+            declared.get("service") if isinstance(declared, Mapping) else ""
+        )
+        if not str(named or "").strip():
+            server = server_label(source, server)
         return read_answer(facts, output=output, structured=structured, server=server).stored()
     except Exception as exc:  # noqa: BLE001 — a record is never worth a lost entry
         from maljan.core.logger import logger
 
         logger.debug("reputation record not written (%s).", type(exc).__name__)
         return None
+
+
+def server_label(source: str | None, server: str | None) -> str | None:
+    """The display name of the tool server ``source`` names (``mcp:<key>``), else ``server``.
+
+    The label the operator gave the server's block; a server with none, a
+    source that is not a tool server's, or settings that cannot be read give
+    ``server`` back unchanged.
+    """
+    kind, _, key = str(source or "").partition(":")
+    if kind != "mcp" or not key:
+        return server
+    try:
+        from maljan.core.declared_reading import declarations
+
+        held = declarations().source(f"mcp:{key}")
+    except Exception as exc:  # noqa: BLE001 — a name is never worth a lost record
+        from maljan.core.logger import logger
+
+        logger.debug("the label of tool server %s was not read (%s).", key, type(exc).__name__)
+        return server
+    label = str(getattr(held, "label", "") or "").strip()
+    return label or server
 
 
 def _field(entry: Any, name: str) -> Any:

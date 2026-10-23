@@ -1256,7 +1256,7 @@ def expected_first_lookup(servers: dict[str, Any]) -> str:
             continue
         for facts in entry.tool_facts.values():
             if facts.kind == "reputation" and facts.reputation is not None:
-                service = facts.reputation.service or facts.display_name or key
+                service = facts.reputation.service or facts.display_name or entry.label or key
                 ranked.append((facts.reputation.rank, order, service))
     return min(ranked)[2] if ranked else ""
 
@@ -1266,11 +1266,10 @@ def expected_first_lookup(servers: dict[str, Any]) -> str:
 # and a pack lookup is the judge's to cite.
 REPUTATION_E = ("E1", "E3", "E4", "E5", "E6")
 STUB_SERVICE = "Stub reputation"
-# The stub's server key: the service an accepted proposal names the stub by,
-# since a probe proposes no display name for a tool whose server gives no
-# title (``core.reputation``: service, display name, then the server).
-STUB_KEY = "repstub"
-STUB_NAMES = frozenset({STUB_SERVICE, STUB_KEY})
+# An accepted proposal declares no display name for a tool whose server gives
+# no title, so its answers are named by the server's label, the same name
+# (``core.reputation``: service, display name, then the server's label).
+STUB_NAMES = frozenset({STUB_SERVICE})
 
 
 def scenario_e(ctx: Context) -> list[RunResult]:
@@ -1292,10 +1291,6 @@ def scenario_e(ctx: Context) -> list[RunResult]:
     results = []
     for name, servers, wires in variants:
         expected = expected_first_lookup(servers)
-        if name.startswith("e2p") and expected not in STUB_NAMES:
-            # An accepted proposal is held to what the hand declaration gets:
-            # the stub asked first, whatever name the accepted facts give it.
-            expected = STUB_SERVICE
         for wire in wires:
 
             def gates(

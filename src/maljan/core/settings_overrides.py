@@ -705,6 +705,8 @@ def declaration_blocks(settings: Settings) -> dict[str, str]:
 
     blocks = {f"mcp:{key}": f"mcp.servers.{key}" for key in settings.mcp.servers}
     blocks.update(provider_blocks())
+    for key in settings.providers:
+        blocks.setdefault(f"provider:{key}", f"providers.{key}")
     return blocks
 
 
@@ -725,15 +727,20 @@ def trim_declarations(
     from maljan.core.builtin_declarations import shipped_digest
     from maljan.core.tool_declarations import SNAPSHOT_DIGESTED_FIELDS, ToolDeclarations
 
-    stored_map = overrides.get("mcp.servers")
-    stored_map = stored_map if isinstance(stored_map, Mapping) else {}
+    # The two maps of blocks, each stored as one row: a field is the
+    # operator's where the stored entry holds it.
+    stored_maps: dict[str, Mapping[str, Any]] = {}
+    for map_path in ("mcp.servers", "providers"):
+        held = overrides.get(map_path)
+        stored_maps[map_path] = held if isinstance(held, Mapping) else {}
     kept_prefixes: list[str] = []
     dropped_prefixes: list[str] = []
     for path in declaration_blocks(settings).values():
         for name in SNAPSHOT_DIGESTED_FIELDS:
             field_path = f"{path}.{name}"
-            if path.startswith("mcp.servers."):
-                entry = stored_map.get(path.removeprefix("mcp.servers."))
+            held_in = next((m for m in stored_maps if path.startswith(f"{m}.")), None)
+            if held_in is not None:
+                entry = stored_maps[held_in].get(path.removeprefix(f"{held_in}."))
                 operator_set = isinstance(entry, Mapping) and name in entry
             else:
                 operator_set = any(

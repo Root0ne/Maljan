@@ -2176,6 +2176,10 @@ PACK = SourceRef("pack")
 # the one list of both that the read API, the run snapshot and anything else
 # that walks the blocks use.
 _REGISTERED_PROVIDER_BLOCKS: dict[str, str] = {}
+# The settings mapping of the tool servers' blocks, and the one of the
+# third-party providers' blocks, each entry read under ``provider:<id>``.
+SERVER_BLOCKS_PATH = "mcp.servers"
+PROVIDER_BLOCKS_PATH = "providers"
 _BLOCK_PATH_RE = re.compile(r"[a-z_][a-z0-9_]*(?:\.[a-z_][a-z0-9_]*)*")
 
 
@@ -2199,27 +2203,42 @@ def _settings_block_class(path: str) -> type[BaseModel] | None:
     """The settings model class at a dotted ``path`` of :class:`Settings`, ``None`` for none.
 
     Walked through the settings model's declared fields, so no settings are
-    built; a step through anything but a model (a mapping, a scalar) is no
-    place.
+    built; a step into a mapping of models (``providers``) names one of its
+    entries, and a step through anything else (a scalar) is no place.
     """
-    from typing import get_args
+    from typing import get_args, get_origin
 
     from maljan.core.config import Settings
 
-    node: type[BaseModel] | None = Settings
-    for part in path.split("."):
-        held = node.model_fields.get(part) if node is not None else None
-        if held is None:
-            return None
-        node = next(
+    def model_in(annotation: Any) -> type[BaseModel] | None:
+        return next(
             (
                 c
-                for c in (held.annotation, *get_args(held.annotation))
+                for c in (annotation, *get_args(annotation))
                 if isinstance(c, type) and issubclass(c, BaseModel)
             ),
             None,
         )
-    return node
+
+    node: type[BaseModel] | None = Settings
+    entry: type[BaseModel] | None = None
+    for part in path.split("."):
+        if entry is not None:
+            # The step after a mapping names one of its entries.
+            node, entry = entry, None
+            continue
+        held = node.model_fields.get(part) if node is not None else None
+        if held is None:
+            return None
+        annotation = held.annotation
+        if get_origin(annotation) is dict:
+            entry = model_in(get_args(annotation)[-1])
+            if entry is None:
+                return None
+            node = None
+            continue
+        node = model_in(annotation)
+    return None if entry is not None else node
 
 
 def _overlaps(path: str, other: str) -> bool:
@@ -2255,6 +2274,19 @@ def register_provider_block(source: str, path: str) -> None:
                 f"{path!r} is {other!r}'s block {held!r} or overlaps it; "
                 f"{source!r} needs a settings block of its own"
             )
+    # A tool server's block is read under its own source (``mcp:<key>``), and
+    # ``providers.<id>`` under ``provider:<id>``.
+    if _overlaps(path, SERVER_BLOCKS_PATH):
+        raise ValueError(
+            f"{path!r} is a tool server's block or holds one, read under that server's own "
+            f"source; {source!r} needs a settings block of its own"
+        )
+    own = f"{PROVIDER_BLOCKS_PATH}.{ref.key}"
+    if _overlaps(path, PROVIDER_BLOCKS_PATH) and path != own:
+        raise ValueError(
+            f"{path!r} is not {source!r}'s block in {PROVIDER_BLOCKS_PATH}; its block there "
+            f"is {own!r}"
+        )
     place = _settings_block_class(path)
     if place is None or "tool_facts" not in place.model_fields:
         raise ValueError(
@@ -2274,11 +2306,44 @@ def forget_provider_block(source: str) -> None:
 
 
 def block_at(settings: Any, path: str) -> Any:
-    """The settings block at a dotted ``path``."""
+    """The settings block at a dotted ``path``; a step into a mapping names one of its entries.
+
+    Raises ``AttributeError`` for a step the settings do not hold, an entry a
+    mapping lacks included.
+    """
     node = settings
     for part in path.split("."):
-        node = getattr(node, part)
+        if isinstance(node, Mapping):
+            if part not in node:
+                raise AttributeError(part)
+            node = node[part]
+        else:
+            node = getattr(node, part)
     return node
+
+
+# The (source, registered path) pairs whose unread ``providers`` entry was logged.
+_UNREAD_ENTRIES_NOTED: set[tuple[str, str]] = set()
+
+
+def elsewhere_declared(provider: str) -> str:
+    """The block path ``provider``'s class registered other than ``providers.<id>``, else ``""``.
+
+    Such a provider declares its tools in that block, so its entry in
+    ``providers`` would never be read.
+    """
+    held = _REGISTERED_PROVIDER_BLOCKS.get(f"provider:{provider}", "")
+    return "" if held in ("", f"{PROVIDER_BLOCKS_PATH}.{provider}") else held
+
+
+def provider_block(settings: Any, provider: str) -> Any:
+    """The third-party provider ``provider``'s own server block (``providers.<id>``), or ``None``.
+
+    Where such a provider reads how its server is reached; its declaration is
+    read from the same block (:func:`provider_declarations`).
+    """
+    held = getattr(settings, PROVIDER_BLOCKS_PATH, None)
+    return held.get(provider) if isinstance(held, Mapping) else None
 
 
 # The (source, path) pairs whose missing block was logged in this process.
@@ -2358,6 +2423,27 @@ def provider_declarations(settings: Any) -> dict[str, Any]:
             blocks[text] = block_at(settings, path)
         else:
             readers[text] = partial(provider_block_at, source=text, path=path)
+    # A third-party provider's own block in ``providers`` comes before its
+    # class's declaration hook: the operator's block, as a shipped one is.
+    # A provider whose class registered another block keeps that one, and the
+    # unread entry is said once (a save refuses it: ``elsewhere_declared``).
+    for key in getattr(settings, PROVIDER_BLOCKS_PATH, None) or {}:
+        text = f"provider:{key}"
+        if text in shipped:
+            continue
+        other = elsewhere_declared(key)
+        if other:
+            if (text, other) not in _UNREAD_ENTRIES_NOTED:
+                _UNREAD_ENTRIES_NOTED.add((text, other))
+                logger.warning(
+                    "Provider block %s.%s is not read: %s declares its tools in %s.",
+                    PROVIDER_BLOCKS_PATH,
+                    key,
+                    text,
+                    other,
+                )
+            continue
+        readers.setdefault(text, partial(provider_block, provider=key))
     for text, read in list(_RUNTIME_PROVIDER_DECLARATIONS.items()):
         readers.setdefault(text, read)
     for text, read in readers.items():

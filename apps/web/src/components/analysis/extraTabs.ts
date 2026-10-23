@@ -11,7 +11,8 @@
  *
  * Everything is read from what the run recorded: the roster (role, stages),
  * the agents' findings, and each section's `source` and `source_server`. No
- * agent's or server's name is ever tested for.
+ * agent's or server's name is ever tested for. A server's tab is labelled by
+ * the display name the roster gives it (`servers`), else by its key.
  *
  * What goes where, in this order, for a section no fixed tab draws:
  *  1. it names (`agent:<name>`, `artifact:<a>, <b>`) an agent of the run that
@@ -209,12 +210,13 @@ export function extraTabs(
       sections: own,
     });
   }
+  const serverLabels = roster?.servers ?? {};
   for (const [server, own] of serverSections) {
     tabs.push({
       kind: "server",
       id: server,
       key: serverTabKey(server),
-      label: server,
+      label: serverLabels[server] || server,
       claims: null,
       sections: own,
     });

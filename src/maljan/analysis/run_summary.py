@@ -531,12 +531,19 @@ def usage_totals(calls: Iterable[Any], meter: Callable[[], Any]) -> dict[str, An
 
 
 def server_rest_sentence(row: dict[str, Any]) -> str:
-    """One rested tool server, in the words the report and the console print."""
+    """One rested tool server, in the words the report and the console print.
+
+    Named by its display name and its key (``Label (key)``) where the row
+    carries a label other than the key, else by its key alone.
+    """
     failures = int(row.get("failures") or 0)
     noun = "call" if failures == 1 else "calls"
     reason = str(row.get("reason") or "").strip()
+    key = str(row.get("server", "") or "")
+    label = str(row.get("label") or "")
+    name = f"{label} ({key})" if label and label != key else key
     return (
-        f"Tool server {row.get('server', '')!s} was rested for "
+        f"Tool server {name!s} was rested for "
         f"{float(row.get('cooldown_s') or 0):.0f} s after {failures} {noun} in a row it did not "
         "answer" + (f" (the last: {reason})" if reason else "") + "."
     )

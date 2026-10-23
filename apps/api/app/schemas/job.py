@@ -143,10 +143,25 @@ class RosterStage(BaseModel):
 
 
 class JobRoster(BaseModel):
-    """Everyone who can speak in one run, and the stages they speak in."""
+    """Everyone who can speak in one run, and the stages they speak in.
+
+    ``servers`` names each tool server whose display name is not its key, by
+    its key; ``None`` when no server has a label of its own.
+    """
 
     agents: list[RosterAgent] = []
     stages: list[RosterStage] = []
+    servers: dict[str, str] | None = None
+
+    @field_validator("servers", mode="before")
+    @classmethod
+    def _labels_or_none(cls, value: Any) -> Any:
+        # A roster is how the console draws names: anything but a map of
+        # labels is read as none, and a label that is not text is left out,
+        # rather than failing the response it is in.
+        if not isinstance(value, dict):
+            return None
+        return {str(k): str(v) for k, v in value.items() if isinstance(v, str)}
 
 
 class JobResponse(BaseModel):

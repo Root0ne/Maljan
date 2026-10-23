@@ -3999,6 +3999,7 @@ def _roster_for(container: Any) -> dict[str, Any]:
             # The same bound the asks themselves run under, so the roster
             # names exactly the agents that can be reached and no more.
             depth=int(agents.delegation_depth),
+            servers=container.config.mcp.servers,
         )
     except Exception as exc:  # noqa: BLE001 — a roster never costs a run
         logger.warning("Could not build the roster for this run (%s).", exc)

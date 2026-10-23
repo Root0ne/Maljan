@@ -4111,7 +4111,7 @@ and the console draws the running analysis from them.
 |---|---|---|
 | `status_change` | the worker | `status` |
 | `pipeline_started` | the worker | `agents`, `sample_filename`, `sha256` |
-| `roster` | the worker, once, before anybody speaks | `agents[{key, label, role, stages, via}]`, `stages[{key, label, kind, agents}]` |
+| `roster` | the worker, once, before anybody speaks | `agents[{key, label, role, stages, via}]`, `stages[{key, label, kind, agents}]`, and `servers{key: label}` for each tool server whose label is not its key (left out when none has one) |
 | `agent_progress` | the worker and the analyst nodes | `agent`, `phase` |
 | `phase_change` | the worker | `phase` |
 | `stage_started` / `stage_skipped` / `stage_finished` | the stage nodes | `stage`, `kind`, and `agents` / `reason` / `ran`, `duration_ms` |
@@ -4124,7 +4124,7 @@ and the console draws the running analysis from them.
 | `judge_question` | the judge's ReAct loop | `stage`, `text`, `addressed_to` |
 | `budget_tick` / `stage_ended_at_cap` | the budget meter | see *The evidence ledger* |
 | `tool_answers_cleared` | an analyst's tool loop, on each clear of its oldest tool answers | `stage`, `agent`, `turn`, `answers`, `chars_before`, `chars_after`, `why` (`refused` or `window`) |
-| `tool_server_rested` | a tool server's guard, when its breaker opens | `server`, `failures`, `cooldown_s`, `reason` |
+| `tool_server_rested` | a tool server's guard, when its breaker opens | `server`, `failures`, `cooldown_s`, `reason`, and `label` where the server's block has a label other than its key |
 | `enrichment_complete` | the enrichment worker, after the run | `report_id`, `domains_enriched`, `ips_enriched`, `similar_samples` |
 | `completed` / `error` / `cancelled` | the worker | the outcome |
 
@@ -4237,6 +4237,9 @@ same ownership check as the report.
 /api/v1/jobs/{id}` carries the same roster, so a reader who is not an admin —
 and cannot read the agent definitions through the settings endpoint — still
 sees "Lead analyst" rather than `lead`, on a live run and on a finished one.
+Its `servers` names each tool server by the `label` its block gives it, so a
+server's own tab is drawn under that label; its key stays the id everywhere
+(the tab's route, the ledger, the events).
 
 ## The findings block
 

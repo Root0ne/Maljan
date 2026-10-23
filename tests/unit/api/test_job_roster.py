@@ -411,6 +411,7 @@ def test_the_run_and_the_job_endpoint_describe_the_same_team() -> None:
     set of names and the finished one another, which is the whole failure this
     roster exists to prevent.
     """
+    from app.api.v1.jobs import _server_labels
     from app.services.agent_map import effective_definitions, effective_profiles
     from app.worker.analysis_worker import _roster_for
     from maljan.core.config import Settings
@@ -429,9 +430,40 @@ def test_the_run_and_the_job_endpoint_describe_the_same_team() -> None:
         effective_profiles({})[settings.agents.profile],
         effective_definitions({}),
         depth=int(settings.agents.delegation_depth),
+        servers=_server_labels({}),
     )
     assert from_the_run == from_the_store
     assert [a["key"] for a in from_the_run["agents"]]
+    # Each tool server's display name, read the same way on both sides.
+    assert from_the_run["servers"]["analysis"] == "Analysis MCP"
+
+
+def test_the_job_endpoint_names_servers_by_the_stored_labels() -> None:
+    """A stored server's label is the one named; a server with none of its own is left out."""
+    from app.api.v1.jobs import _server_labels
+
+    labels = _server_labels(
+        {
+            "core.mcp.servers": {
+                "repstub": {"label": "Stub reputation"},
+                "plain": {"label": ""},
+                "analysis": {"label": "analysis"},
+            }
+        }
+    )
+    assert labels["repstub"] == "Stub reputation"
+    assert "plain" not in labels and "analysis" not in labels
+    assert labels["knowledge"] == "Knowledge MCP"
+
+
+def test_the_roster_response_keeps_only_text_labels() -> None:
+    """A map of labels keeps its text values; anything else is read as none."""
+    from app.schemas.job import JobRoster
+
+    held = JobRoster.model_validate({"servers": {"a": "A", "b": 3, "c": None}})
+    assert held.servers == {"a": "A"}
+    assert JobRoster.model_validate({"servers": ["a"]}).servers is None
+    assert JobRoster.model_validate({}).servers is None
 
 
 def test_a_container_that_cannot_name_its_team_costs_no_run() -> None:

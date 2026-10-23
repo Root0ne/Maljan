@@ -8,7 +8,7 @@
   words is refused.
 * A path where the settings model holds no server block is refused at
   registration, and so is a path that is, holds or sits inside another
-  source's block: two sources never read one block.
+  source's block, a tool server's included: two sources never read one block.
 * A settings object that still lacks a registered block declares nothing, and
   that is logged once per source and path in the process, not on each read.
 """
@@ -35,9 +35,10 @@ SOURCE = "provider:invented_block_g12"
 def unowned_r2_block(monkeypatch: pytest.MonkeyPatch) -> str:
     """A settings server block no shipped source owns: ``static.r2`` with its owner left out.
 
-    The settings have no place of a third-party provider's own yet, so the
-    registration path is proven on a real block with its shipped owner taken
-    out of the shipped list.
+    The registration path is proven on a real block with its shipped owner
+    taken out of the shipped list; a third-party provider's own place
+    (``providers.<id>``) is proven in
+    ``test_a_third_party_provider_has_a_settings_place``.
     """
     shipped = {k: v for k, v in shipped_provider_blocks().items() if v != "static.r2"}
     monkeypatch.setattr(tool_declarations, "shipped_provider_blocks", lambda: dict(shipped))
@@ -96,9 +97,12 @@ def test_a_shipped_source_keeps_its_block_and_a_bad_path_is_refused() -> None:
 
 
 def test_a_path_the_settings_do_not_hold_is_refused_at_registration() -> None:
-    for unheld in ("static.no_such_block", "static.capa", "mcp.servers.analysis", "triage"):
+    for unheld in ("static.no_such_block", "static.capa", "triage"):
         with pytest.raises(ValueError, match="no server block in the settings"):
             register_provider_block(SOURCE, unheld)
+    # A tool server's block is a block the settings hold, read under its own source.
+    with pytest.raises(ValueError, match="tool server's block"):
+        register_provider_block(SOURCE, "mcp.servers.analysis")
     assert SOURCE not in provider_blocks()
 
 
