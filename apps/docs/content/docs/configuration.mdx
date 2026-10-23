@@ -3756,7 +3756,7 @@ it:
 | `places` | per kind of place (`offset`, `rva`, `address`, `addresses`, `call_site`, `function`, `pid`, `command_line` …), the path inside a row that holds one |
 | `values` | per kind of value (`text`, `rule`, `namespace`, `value` …), the path inside a row that holds one |
 | `techniques` | where the answer names ATT&CK ids: a list of `{path, format}`, `format` being `attck` (an id or a decorated label) or `sigma_tag` (`attack.t1055.012`) |
-| `reputation` | for a reputation lookup (`kind: reputation`): `service` (the name it is attributed to; empty uses `display_name`, then the server key), the paths `stats`, `malicious`, `suspicious`, `total`, `labels`, `detections`, `engines`, `summary`, the path lists `first_seen`, `last_seen` and `link`, `text_patterns` and `rank` (below) |
+| `reputation` | for a reputation lookup (`kind: reputation`): `service` (the name it is attributed to; empty uses `display_name`, then the tool server's `label`, then the server key; the label is read when the entry is written, so a stored run keeps the name it recorded), the paths `stats`, `malicious`, `suspicious`, `total`, `labels`, `detections`, `engines`, `summary`, the path lists `first_seen`, `last_seen` and `link`, `text_patterns` and `rank` (below) |
 | `arguments` | per role (`path`, `hash`, `address`, `program`, `command_lines` …), the argument a call gives it in |
 | `reader` | the answer shape the paths cannot express (below); empty reads the paths |
 | `report_sections` | the report sections whose writer is shown this tool's answers, beside the sections its `kind` reaches (below) |
@@ -4292,9 +4292,10 @@ taken out. The built-in providers' blocks (`static.ghidra`, `static.r2`,
 for one of them. Registration refuses, with the reason, a path where the
 settings model holds no server block (a block with `tool_facts`) and a path
 that is, holds or sits inside another provider's block, shipped or registered,
-so two providers never read one block. The settings have no place for a
-third-party provider's own block yet, so such a provider declares through
-`declaration(cfg)`. A sandbox provider says where a submission sends the
+so two providers never read one block; a tool server's block in
+`mcp.servers` is read under its own server's source and is refused too. A
+third-party provider's own block has its place in the settings: see
+[Third-party provider blocks](#third-party-provider-blocks). A sandbox provider says where a submission sends the
 sample in its `submission_address()` method: the host its submission URL
 reaches, resolved as its HTTP client resolves it (the REST provider merges
 `sandbox.rest.submit.path` with `base_url` as httpx does, so an absolute
@@ -4452,7 +4453,10 @@ registry attaches; the Ghidra and CAPE providers' own toolkits are outside it. A
 that is not there) has answered, and never counts. Each rest is published as a
 `tool_server_rested` event, drawn in the conversation, and kept in
 `run_summary.server_rests`, which the report and the console's "What the run
-spent" print. The call cap queues calls per event loop: a handle is opened per
+spent" print. The event and the record name the server by its key (`server`)
+and, where its block has a `label` other than its key, by that label too
+(`label`); the sentence printed names it `Label (key)`, else by the key, so a
+server with no label of its own reads as before. The call cap queues calls per event loop: a handle is opened per
 loop, and for a stdio server that is one child process per loop.
 
 ## Writing a tool server
@@ -4553,6 +4557,43 @@ answers the same interface and declares the same facts about itself (its
 console title, its settings model, its probe). An LLM provider class may leave
 its `name` empty or set it to the entry point's name; a memory plugin's
 callable registers exactly the entry point's name.
+
+### Third-party provider blocks
+
+`core.providers` (Settings → Plugins → Third-party provider blocks, a JSON
+editor) holds one server block per third-party provider, keyed by the
+provider's id: the fields of a tool server's entry in `mcp.servers`, saying how
+the provider's server is reached and what it declares about its tools. Empty by
+default, and settings stored before it existed read exactly as before.
+
+```json
+{"mydecomp": {"enabled": true, "transport": "streamable-http",
+              "url": "http://mydecomp-mcp:9000/mcp", "env_allow": ["MYDECOMP_TOKEN"],
+              "tool_facts": {"list_strings": {"kind": "strings", "rows": "/strings/*"}}}}
+```
+
+The block declares the provider's tools under `provider:<id>`, read wherever a
+built-in provider's block is read, with no code of the platform's naming the
+provider. It comes before the provider class's `declaration(cfg)` hook, which
+answers only while no block is set, and the run's settings snapshot records
+its declaration fields as it does a built-in's. The provider reads how its
+server is reached from the same block
+(`maljan.core.tool_declarations.provider_block(settings, "<id>")`), and a class
+may name `providers.<id>` as its `declaration_block`; another provider's entry,
+the whole map or a path inside a tool server's block is refused at
+registration. A provider whose class names another block keeps it: its entry
+here is not read, which is logged once, and a save that writes one is refused.
+
+Each block validates as a tool server's entry does, and a save refuses with the
+reason, at `core.providers.<id>`: an id that is not a provider id; the id of a
+built-in provider, which keeps its own block or declaration; a tool declared
+under the provider's renamed spelling (`<id>__<tool>`); and a tool declaration
+the save adds or changes that breaks the strict rules (one sent back as stored
+is not checked again). The map is stored as one clear row, so a block holds no
+`auth_token`, no `env` value and no `url` with a user name or password, and
+takes no `credential_bootstrap`: a
+credential reaches the provider's server by name, through `env_allow`, from
+the worker's environment.
 
 ### Allowing a plugin
 

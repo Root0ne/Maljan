@@ -292,10 +292,18 @@ export function tokensSentence(tokens: TokenCounts | null | undefined): string |
   return `${text}.`;
 }
 
+/** A tool server as a rest sentence names it: `Label (key)` where its label
+ *  is not its key, else the key alone. */
+export function restedServerName(key: string, label?: string): string {
+  return label && label !== key ? `${label} (${key})` : key;
+}
+
 /** One tool server the run rested, in the words the report prints
- *  (`analysis/run_summary.server_rest_sentence`). */
+ *  (`analysis/run_summary.server_rest_sentence`): named by its display name
+ *  and key where the row carries a label, else by its key. */
 export function serverRestSentence(row: {
   server?: string;
+  label?: string;
   failures?: number;
   cooldown_s?: number;
   reason?: string;
@@ -303,7 +311,7 @@ export function serverRestSentence(row: {
   const failures = Number(row.failures ?? 0) || 0;
   const reason = (row.reason ?? "").trim();
   return (
-    `Tool server ${row.server ?? ""} was rested for ${Math.round(Number(row.cooldown_s ?? 0) || 0)} s ` +
+    `Tool server ${restedServerName(row.server ?? "", row.label)} was rested for ${Math.round(Number(row.cooldown_s ?? 0) || 0)} s ` +
     `after ${failures} ${failures === 1 ? "call" : "calls"} in a row it did not answer` +
     (reason ? ` (the last: ${reason})` : "") +
     "."

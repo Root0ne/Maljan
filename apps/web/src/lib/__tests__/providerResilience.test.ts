@@ -99,6 +99,19 @@ describe("a rested tool server", () => {
       "Tool server analysis was rested for 60 s after 3 calls in a row it did not answer (the last: timed out).",
     );
   });
+
+  it("is named by its display name and its key where the record carries a label", () => {
+    expect(serverRestSentence({ server: "repstub", label: "Stub reputation", failures: 1, cooldown_s: 5 })).toBe(
+      "Tool server Stub reputation (repstub) was rested for 5 s after 1 call in a row it did not answer.",
+    );
+    expect(restedLine({ server: "repstub", label: "Stub reputation", failures: 1, cooldown_s: 5 })).toBe(
+      "Tool server Stub reputation (repstub) is resting for 5 s after 1 call in a row it did not answer.",
+    );
+    expect(restedLine({ server: "repstub", failures: 1, cooldown_s: 5 })).toContain("Tool server repstub is");
+    expect(serverRestSentence({ server: "repstub", label: "repstub", failures: 1, cooldown_s: 5 })).toContain(
+      "Tool server repstub was",
+    );
+  });
 });
 
 describe("what the run spent", () => {

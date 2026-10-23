@@ -1809,6 +1809,7 @@ class ServerRegistry:
                 on_open=_on_open,
                 sample_open=getattr(handle.config, "sample_open", None),
                 block=handle.config,
+                label=str(getattr(handle.config, "label", "") or ""),
             )
         # The job's own bound-hit ledger and the job's own tool-output limit,
         # put on every toolkit this registry opens. Both used to be left to the

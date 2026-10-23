@@ -153,6 +153,7 @@ class GenericMCPStaticProvider(StaticProvider):
             block=block,
             on_open=self._rested,
             sample_open=getattr(block, "sample_open", None),
+            label=str(getattr(block, "label", "") or ""),
         )
 
     def _mirror_path(self) -> str | None:

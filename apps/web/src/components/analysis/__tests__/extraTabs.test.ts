@@ -213,6 +213,19 @@ describe("a tool server's tab", () => {
     expect(tabs[0].key).toBe("/server/qu1cksc0pe");
   });
 
+  it("is labelled by the display name the roster gives the server, its key kept as the id", () => {
+    const sections = [
+      section(),
+      section({ key: "tool_other", source_server: "ghidra" }),
+    ];
+    const roster: JobRoster = { ...ROSTER, servers: { qu1cksc0pe: "Quick Scope" } };
+    const tabs = extraTabs(sections, null, [], roster);
+    expect(tabs.map((t) => [t.id, t.label, t.key])).toEqual([
+      ["qu1cksc0pe", "Quick Scope", "/server/qu1cksc0pe"],
+      ["ghidra", "ghidra", "/server/ghidra"],
+    ]);
+  });
+
   it("never takes a section a fixed tab draws, by key or by the report's placement", () => {
     const sections = [
       section({ key: "pe_imports", source_server: "analysis" }),

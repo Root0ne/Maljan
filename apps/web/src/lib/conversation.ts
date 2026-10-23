@@ -15,6 +15,7 @@
  * here requires a number to exist.
  */
 
+import { restedServerName } from "@/lib/report-utils";
 import { rosterNames } from "@/lib/rosterNames";
 import type { RunEvent } from "@/lib/runStore";
 import type { JobRoster } from "@/types";
@@ -469,12 +470,14 @@ export function fallbackLine(name: string, model: string, reason: string): strin
   return `${answered} — ${reason}.`;
 }
 
-/** The line a rested tool server gets, in the words the report prints. */
+/** The line a rested tool server gets, in the words the report prints: the
+ *  server named by its display name and key where the event gives a label,
+ *  else by its key. */
 export function restedLine(data: Record<string, unknown>): string {
   const failures = Number(data.failures ?? 0) || 0;
   const reason = text(data.reason);
   return (
-    `Tool server ${text(data.server)} is resting for ${Math.round(Number(data.cooldown_s ?? 0) || 0)} s ` +
+    `Tool server ${restedServerName(text(data.server), text(data.label))} is resting for ${Math.round(Number(data.cooldown_s ?? 0) || 0)} s ` +
     `after ${failures} ${failures === 1 ? "call" : "calls"} in a row it did not answer` +
     (reason ? ` (the last: ${reason})` : "") +
     "."

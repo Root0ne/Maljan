@@ -26,7 +26,7 @@ from __future__ import annotations
 import base64
 import binascii
 import re
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Mapping
 from typing import Any
 
 from maljan.core.logger import logger
@@ -250,17 +250,21 @@ def announce_model_fallback(
 
 
 def emit_tool_server_rested(sink: EventSink | None, record: dict[str, Any]) -> None:
-    """A tool server is resting: which one, after how many failures, for how long and why."""
-    emit(
-        sink,
-        TOOL_SERVER_RESTED,
-        {
-            "server": str(record.get("server") or ""),
-            "failures": max(0, int(record.get("failures") or 0)),
-            "cooldown_s": round(max(0.0, float(record.get("cooldown_s") or 0.0)), 1),
-            "reason": str(record.get("reason") or ""),
-        },
-    )
+    """A tool server is resting: which one, after how many failures, for how long and why.
+
+    ``label`` is the server's display name, given only where it has one other
+    than its key; ``server`` stays the key.
+    """
+    data: dict[str, Any] = {
+        "server": str(record.get("server") or ""),
+        "failures": max(0, int(record.get("failures") or 0)),
+        "cooldown_s": round(max(0.0, float(record.get("cooldown_s") or 0.0)), 1),
+        "reason": str(record.get("reason") or ""),
+    }
+    label = str(record.get("label") or "")
+    if label:
+        data["label"] = label
+    emit(sink, TOOL_SERVER_RESTED, data)
 
 
 def emit_agent_message(
@@ -2334,7 +2338,26 @@ def _asks_of(definition: Any) -> list[str]:
     return asked
 
 
-def roster_payload(profile: Any, definitions: Any, depth: int = 2) -> dict[str, Any]:
+def server_labels(servers: Any) -> dict[str, str]:
+    """Each tool server's display name, by key, for a server whose label is not its key.
+
+    Accepts the settings' ``mcp.servers`` map of models, the plain documents
+    they dump to, or a map of labels already read (a string per key). A server
+    with no label, or one equal to its key, is left out: it is named by its key
+    as before.
+    """
+    out: dict[str, str] = {}
+    for key, entry in (servers or {}).items() if isinstance(servers, Mapping) else ():
+        held = entry if isinstance(entry, str) else _field(entry, "label", "")
+        label = str(held or "").strip()
+        if label and label != str(key):
+            out[str(key)] = label
+    return out
+
+
+def roster_payload(
+    profile: Any, definitions: Any, depth: int = 2, servers: Any = None
+) -> dict[str, Any]:
     """Everyone who can speak in this run, and the stages they speak in.
 
     Read off the team the job runs rather than off the messages as they
@@ -2364,6 +2387,11 @@ def roster_payload(profile: Any, definitions: Any, depth: int = 2) -> dict[str, 
     Accepts the pydantic models or the plain documents they dump to, because
     the worker holds the models and the API holds the stored documents, and
     one shape of roster is the point.
+
+    ``servers`` is the run's tool-server map: ``servers`` in the roster names
+    each server's display name by its key (:func:`server_labels`), so the
+    console names a server as the operator labelled it; left out when no
+    server has a label of its own.
     """
     field = _field
 
@@ -2427,4 +2455,8 @@ def roster_payload(profile: Any, definitions: Any, depth: int = 2) -> dict[str, 
         frontier = next_frontier
         if not frontier:
             break
-    return {"agents": list(agents_out.values()), "stages": stages_out}
+    roster: dict[str, Any] = {"agents": list(agents_out.values()), "stages": stages_out}
+    labels = server_labels(servers)
+    if labels:
+        roster["servers"] = labels
+    return roster

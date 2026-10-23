@@ -972,6 +972,20 @@ ANNOTATIONS: dict[str, Annotation] = {
         ),
         "editor": "plugin_allow_list",
     },
+    "providers": {
+        "title": "Third-party provider blocks",
+        "description": (
+            "A server block per third-party provider, keyed by the provider's id: how its "
+            "server is reached and what it declares about its tools, in the fields of a tool "
+            "server's entry. The provider's tools are read by this declaration as a shipped "
+            "provider's are by its own block, with no code of the platform's naming them. A "
+            "shipped provider's id is refused: it keeps its own block. The map is stored in "
+            "clear, so a block holds no token and no env value; a credential reaches the "
+            "server by name through env_allow. Empty by default."
+        ),
+        "group": "plugins",
+        "order": 1,
+    },
     "preprocessing.api_attck_map_path": {
         "title": "API-to-ATT&CK map path",
         "description": (
@@ -1942,7 +1956,9 @@ def mcp_server_annotations(
         )
         entries[f"{prefix}.label"] = ann(
             f"{label} display name",
-            "Display name shown in the tool-server registry; empty uses the server's key.",
+            "Display name: the server's name in the tool-server registry, in a reputation "
+            "lookup's answer whose declaration names no service, in a rest's sentence and on "
+            "the server's own tab; empty uses the server's key. The key stays the id.",
         )
 
     return entries

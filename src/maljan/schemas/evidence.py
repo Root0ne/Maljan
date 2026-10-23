@@ -640,6 +640,7 @@ def build_entry(
             output=full,
             structured=structured,
             server=server,
+            source=source,
         ),
     )
 
@@ -680,7 +681,13 @@ def _declares_no_kind(facts: dict[str, Any] | None) -> bool:
 
 
 def _reputation_at_write(
-    facts: dict[str, Any] | None, *, ok: bool, output: str, structured: Any, server: str | None
+    facts: dict[str, Any] | None,
+    *,
+    ok: bool,
+    output: str,
+    structured: Any,
+    server: str | None,
+    source: str | None = None,
 ) -> dict[str, Any] | None:
     """A reputation lookup's answer read through its stored facts, to be stored with the entry.
 
@@ -691,7 +698,9 @@ def _reputation_at_write(
         return None
     from maljan.core.reputation import record_at_write
 
-    return record_at_write(facts, ok=ok, output=output, structured=structured, server=server)
+    return record_at_write(
+        facts, ok=ok, output=output, structured=structured, server=server, source=source
+    )
 
 
 def _structured_beside(content: Any, text: str, parsed: Any) -> dict[str, Any] | None:

@@ -405,6 +405,20 @@ def _delegation_depth(overrides: dict[str, Any]) -> int:
         return default
 
 
+def _server_labels(overrides: dict[str, Any]) -> dict[str, str]:
+    """Each tool server's display name in force: the built-ins', then the stored map's."""
+    from maljan.core.settings_overrides import build_settings
+    from maljan.pipeline.events import server_labels
+
+    labels = {key: cfg.label for key, cfg in build_settings({}).mcp.servers.items()}
+    stored = overrides.get("core.mcp.servers")
+    if isinstance(stored, dict):
+        for key, entry in stored.items():
+            if isinstance(entry, dict) and "label" in entry:
+                labels[str(key)] = str(entry.get("label") or "")
+    return server_labels(labels)
+
+
 async def _roster_for_job(db: AsyncSession, job: Any) -> dict[str, Any]:
     """Who can speak in this job's run, by key, label, role and stage.
 
@@ -440,7 +454,10 @@ async def _roster_for_job(db: AsyncSession, job: Any) -> dict[str, Any]:
             # ones who would speak.
             document = ProfileDefinition.model_validate(document).model_dump(mode="json")
         roster = roster_payload(
-            document, effective_definitions(overrides), depth=_delegation_depth(overrides)
+            document,
+            effective_definitions(overrides),
+            depth=_delegation_depth(overrides),
+            servers=_server_labels(overrides),
         )
         if cache_key:
             _remember_roster(cache_key, roster)

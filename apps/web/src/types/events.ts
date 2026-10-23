@@ -227,9 +227,12 @@ export interface RosterStage {
 export interface RosterEventData {
   agents: RosterAgent[];
   stages: RosterStage[];
+  /** Each tool server's display name by its key, for a server whose label is
+   *  not its key. Absent (or null) when no server has a label of its own. */
+  servers?: Record<string, string> | null;
   seq?: number;
 }
 
 /** The roster as the job endpoint carries it, which is the same shape without
  *  the publisher's sequence number. */
-export type JobRoster = Pick<RosterEventData, "agents" | "stages">;
+export type JobRoster = Pick<RosterEventData, "agents" | "stages" | "servers">;
