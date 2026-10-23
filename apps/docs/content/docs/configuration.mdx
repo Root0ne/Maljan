@@ -662,7 +662,25 @@ before it.
 
 No sample is refused for its format. Routing detects the file type from magic
 bytes (`pe`, `elf`, `mach-o`, `apk`, `dex`, `ipa`, `jar`, `ole2`, `ooxml`,
-`pdf`, `lnk`, the script types, the archive types) and maps it to a platform.
+`pdf`, `rtf`, `chm`, `img`, `vhd`, `lnk`, the script types, the archive types)
+and maps it to a platform. Each of the four newest is read by the bytes its
+specification fixes and nothing more: RTF's `{\rtf` header; compiled HTML
+help's `ITSF` header with version 2 or 3; a virtual hard disk's `conectix`
+footer cookie, at its start (a dynamic or differencing disk's copy) or, for a
+raw disk image whose last 512 bytes are that footer, there (a fixed disk;
+only those 512 bytes are read); and a raw disk image (`img`) by its boot
+sector: the boot signature with a GPT header, an MBR with a partition
+(status 0x00 or 0x80, a type, a first sector past the MBR and a length) that
+lies inside the file, or a volume boot record (a jump, `EB xx 90` or
+`E9 xx xx`, and a BIOS parameter block of 512, 1024, 2048 or 4096 bytes per
+sector and a power-of-two sectors per cluster, or exFAT's own fields). An
+executable, a script by its shebang and a script by its extension are named
+as such before a boot sector is looked for. No shipped reader opens them: they
+route to whichever tool declares them in its `routed_formats` or pack step
+declares them in its `formats`, and a run with no such reader says the
+container was not parsed. Their platform stays `unknown`; `rtf` is a
+`document` and the other three are `archive` in the category an
+identification reports.
 
 The platform vocabulary is `windows`, `linux`, `macos`, `android`, `ios`,
 `multi` and `unknown`. It is a plain string rather than a closed set: an
@@ -2390,8 +2408,11 @@ console* below):
 | :-- | :-- |
 | `id` | the step's name, unique in the list (lowercase letters, digits, `_`, the whole id read) |
 | `tool`, `server` | what the step calls. No `server`: one of the platform's own steps, named by its shipped id. A `server`: that tool server's tool, called through the tool server registry as an agent's call is, to the path that server opens the sample at, and recorded under that server |
-| `arguments` | a server step's argument template; a string at any depth (inside objects and lists too) may hold `{sample_path}`, `{sha256}` and `{file_type}`, each filled once. None: the argument the tool declares for the `path` role takes the sample's path and the one for `hash` its sha256. The platform's own steps compute their own and refuse one |
+| `arguments` | a server step's argument template; a string at any depth (inside objects and lists too) may hold `{sample_path}`, `{sha256}` and `{file_type}`, each filled once, and a file of the job's artefact store (*Files passed between servers*, below) at the path the step's server opens it at: `{capture_path}` (the sandbox's packet capture) and `{sandbox_report_path}` (the sandbox report as JSON), with which the step runs only where the job has one, and, on a step that `reads`, `{artefact_path}` and `{artefact_sha256}`. None: the argument the tool declares for the `path` role takes the sample's path (on a step that `reads`, the file's) and the one for `hash` its sha256 (the file's). The platform's own steps compute their own and refuse one |
 | `formats` | the routed formats the step runs for; empty is every format |
+| `when` | the values earlier steps' answers must hold for the step to run, each `{"step": <an earlier step>, "value": <a value its tool declares>, "equals": [<texts>]}`: the step runs when a row of that step's answer holds the value (`tool_facts.<tool>.values`) equal to one of the texts, compared whole (a text as it stands, any other value as JSON writes it: `true`, `3`). Every condition must hold. One that does not, an earlier step that did not run or gave no answer, and a tool that declares no such value are a `not run:` entry saying which, never a failure. Any step can have one, the platform's own included; a step that starts beside the pack starts only once what it runs on has answered, and otherwise runs in turn, saying so |
+| `outputs` | a server step's answer path (a declared field path, `/written/*`) that names each file its tool wrote, as its server names it; each is taken into the job's artefact store, and the entry's `pack_step` names what was (`wrote`) and what was not, with why (`not_taken`) |
+| `reads` | an earlier server step with `outputs`: this server step runs once for each file that step wrote and the store took in, in the order they were named, each call's entry naming the file it read (`pack_step.read`); with none, one `not run:` entry says why |
 | `budget_seconds` | the step's wall clock; none takes the tool's declared `timeout_seconds`, else what is left of `triage.budget_seconds`. Of the platform's own steps only those whose shipped declaration says their in-process code honours a clock take one: `capa` (else `static.capa.timeout_seconds`), `floss` and `yara_scan` |
 | `peak_mb` | the memory the step takes at its peak, where this worker does not measure it; only on a step that starts beside the pack or that another step runs beside |
 | `starts_after`, `beside` | a step that starts on a thread of its own right after `starts_after`, when the host has room for it beside the steps `beside` names (their peaks and its own against `triage.memory_floor_mb`); its entry keeps its place in the list, its thread is let go when its work is done, and `triage_facts.<id>` and the run summary's `triage.<id>` say `beside …` or `in turn: <why>`; a step named as one of the state's own keys (`entries`, `has_signature`, `hits`, …) runs as any other and says it under `_held_schedules.<id>` in both instead, so no fact or count is replaced. Any server's tool can; of the platform's own steps only `floss` |
@@ -2404,7 +2425,11 @@ console* below):
 A declaration under a shipped id changes that step in its place; one that
 names another `tool` or `server` replaces it there, keeping only the id; a new
 id adds a step. A list that cannot run as declared is refused when it is
-saved: an id twice, a placeholder no template may name, a step with no server
+saved: an id twice, a placeholder no template may name (`{artefact_path}` or
+`{artefact_sha256}` on a step that `reads` nothing among them), a `when` or
+`reads` naming no step or one that does not come before it, a `reads` of a
+step with no `outputs` or with a `starts_after`, `outputs` or `reads` on one
+of the platform's own steps, a step with no server
 that is not one of the platform's own, on an enabled step a server
 `mcp.servers` does not hold or a tool outside its `tools` list (in the words an
 agent's reference is refused in, and removing a server a step uses is refused
@@ -2431,6 +2456,36 @@ save, and no new or changed item rides on it. A server step whose server the tea
 configured is a `not run:` entry, not a failure; a call that fails is a
 failure of its tool. Every entry an operator's step writes carries the step
 (`pack_step`), so the pack reads it back without the settings.
+
+**Files passed between servers.** A file one server's tool writes (a payload
+carved out of the sample, an archive member, a decoded script) reaches
+another server's tool through the job's artefact store
+(`maljan.pipeline.artefacts`). A step that declares `outputs` has each file
+its answer names taken in: copied under the job's own staging directory
+(`<MALJAN_STAGING_DIR>/<job>/artefacts/<sha256>/<name>`, every directory
+0o700 and the file 0o600, removed with the job's staging) under a stable id,
+`art_<sha256>`; its name is kept to its last part in safe characters, never
+deciding where it lands. The bytes come over the producing server's
+`get_artefact` tool where it offers one (see
+[MCP servers](/integrations/mcp-servers/#files-a-server-wrote)), whatever its
+transport, and otherwise, for a server on the worker's filesystem (stdio, no
+`sample_mount`), from inside that server's own job staging directory only,
+opened component by component beneath it with no link followed anywhere (a
+link, a `..`, a name outside it, anything but a regular file and a file with
+more than one hard link, which a path outside it may name too, are refused). A
+step that `reads` it, or names `{capture_path}` or `{sandbox_report_path}`
+(which the pack takes into the store the first time a step names them; the
+capture only from the directory the worker fetched this job's captures into,
+opened the same way, so a path the report names anywhere else is refused and
+never read), hands its server each file as the
+sample is handed: a server on the worker's filesystem a copy under its own
+job staging directory, a server with a `sample_mount` the worker's copy under
+its mount (as read-only as the deployment made it, released with the job's
+other copies), a server over HTTP an upload over its `put_sample` tools,
+listed with the run's other uploads in the disclosure block. A server none of
+these reaches is not called: the step's entry says `not run:` and why, and no
+path only the worker can open is ever handed over. A file is streamed once,
+with no size limit, and opened as bytes only.
 
 **Adding a step in the console.** *Triage pack steps* (Analysis layers, under
 Triage pack) draws your steps as a form, one card per step. Type an id under
@@ -2459,7 +2514,8 @@ which the save does not check against its server, a tool outside the server's
 `tools` list is noted as refused once the step is enabled. A listing is dropped
 once that server's staged settings change. **Arguments** are name and value
 rows. A value may name
-`{sample_path}`, `{sha256}` and `{file_type}`, and a placeholder outside the
+`{sample_path}`, `{sha256}`, `{file_type}`, `{capture_path}`,
+`{sandbox_report_path}`, `{artefact_path}` and `{artefact_sha256}`, and a placeholder outside the
 list is flagged on its row before Apply, by the pattern and the list the
 settings schema serves on the entry (`pack_step_vocabulary`, built by
 `core.pack_steps.step_vocabulary` from the step model), which is the rule the
@@ -2468,7 +2524,8 @@ is put right. **Budget (seconds)** and **Formats** (a box per format the
 router can give a sample, `extractors.sample_identity.routed_formats`; a
 stored format outside it is drawn, marked and kept) follow, and **More fields**
 draws every other field by the type the schema serves, the renderer picked
-from the pack's renderers. An empty value over a shipped one is a value of its
+from the pack's renderers (`outputs` and `reads` as text boxes; `when`, a list
+of conditions, is shown as its JSON and edited in the setting's JSON view). An empty value over a shipped one is a value of its
 own (`renderer: ""` is the generic line, `display_name: ""` the tool's own
 name, `beside: []` nothing to run beside, `formats: []` every format): such a
 field is drawn as set to empty, in place of the shipped value, and **Unset**

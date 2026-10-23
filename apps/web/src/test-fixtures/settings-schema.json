@@ -11818,6 +11818,33 @@
         "type": "array"
        },
        {
+        "bounds": {},
+        "default": [],
+        "items": "",
+        "name": "when",
+        "nullable": false,
+        "required": false,
+        "type": "array"
+       },
+       {
+        "bounds": {},
+        "default": "",
+        "items": "",
+        "name": "outputs",
+        "nullable": false,
+        "required": false,
+        "type": "string"
+       },
+       {
+        "bounds": {},
+        "default": "",
+        "items": "",
+        "name": "reads",
+        "nullable": false,
+        "required": false,
+        "type": "string"
+       },
+       {
         "bounds": {
          "exclusiveMinimum": 0
         },
@@ -11908,11 +11935,13 @@
        "apk",
        "bat",
        "bz2",
+       "chm",
        "cmd",
        "dex",
        "elf",
        "gz",
        "hta",
+       "img",
        "ipa",
        "iso",
        "jar",
@@ -11927,9 +11956,11 @@
        "ps1",
        "py",
        "rar",
+       "rtf",
        "sh",
        "unknown",
        "vbs",
+       "vhd",
        "wsf",
        "xz",
        "zip"
@@ -11948,6 +11979,22 @@
        {
         "meaning": "the format the run routed the sample as",
         "name": "file_type"
+       },
+       {
+        "meaning": "the sandbox's packet capture, at the path the step's server opens it; a step naming it runs only where the job has one",
+        "name": "capture_path"
+       },
+       {
+        "meaning": "the run's sandbox report as JSON, at the path the step's server opens it; a step naming it runs only where the job has one",
+        "name": "sandbox_report_path"
+       },
+       {
+        "meaning": "a file the step named in reads wrote, at the path the step's server opens it; the step runs once for each",
+        "name": "artefact_path"
+       },
+       {
+        "meaning": "the sha256 of the file the step named in reads wrote",
+        "name": "artefact_sha256"
        }
       ],
       "renderers": [

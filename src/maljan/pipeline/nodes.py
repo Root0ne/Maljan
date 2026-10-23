@@ -1299,7 +1299,8 @@ def _step_arguments(step: Any, facts: Any, values: dict[str, str]) -> dict[str, 
     """A server step's arguments: its template filled, else read from its tool's declaration.
 
     With no template, the argument the tool declares for the ``path`` role
-    takes the sample's path and the one for ``hash`` its sha256.
+    takes the sample's path and the one for ``hash`` its sha256; on a step
+    that reads an earlier step's files, the file's path and sha256.
     """
     from maljan.core.pack_steps import placeholder_values
 
@@ -1308,13 +1309,14 @@ def _step_arguments(step: Any, facts: Any, values: dict[str, str]) -> dict[str, 
     roles = dict(getattr(facts, "arguments", None) or {})
     args: dict[str, Any] = {}
     if roles.get("path"):
-        args[roles["path"]] = values["sample_path"]
-    if roles.get("hash") and values.get("sha256"):
-        args[roles["hash"]] = values["sha256"]
+        args[roles["path"]] = values.get("artefact_path") or values["sample_path"]
+    digest = values.get("artefact_sha256") or values.get("sha256")
+    if roles.get("hash") and digest:
+        args[roles["hash"]] = digest
     return args
 
 
-def _server_step_call(container: ServiceContainer) -> Any:
+def _server_step_call(container: ServiceContainer, artefacts: Any = None) -> Any:
     """The pack's call of a step a tool server answers, bound to this job's servers and settings.
 
     Returns the callable the pack hands each server step to
@@ -1326,12 +1328,16 @@ def _server_step_call(container: ServiceContainer) -> Any:
     and the answer says why; one that cannot be attached or whose call fails
     answers its failure. The call's wall clock is the step's budget, else the
     tool's declared ``timeout_seconds``, else what is left of the pack's
-    budget, else none. Never raises.
+    budget, else none. The files of the job's artefact store a step names
+    (``artefacts``, ``pipeline.artefacts``) are handed to the server as the
+    sample is, and the files a step's answer names as written (``outputs``)
+    are taken into it. Never raises.
     """
     from maljan.agents.base_agent import run_coro_blocking
     from maljan.agents.composition import _mounted, _stage
     from maljan.core.config import ALL_SERVERS, ToolRef
     from maljan.core.declared_reading import declarations
+    from maljan.pipeline import artefacts as artefact_store
     from maljan.pipeline.triage_pack import ServerAnswer
 
     def call(step: Any, values: Any, left: float | None) -> Any:
@@ -1347,8 +1353,9 @@ def _server_step_call(container: ServiceContainer) -> Any:
             logger.debug("triage pack: %s's declaration was not read (%s).", tool_name, exc)
         args = _step_arguments(step, facts, held)
 
-        def answer(output: str, *, ok: bool = True, made: bool = True) -> Any:
+        def answer(output: str, *, ok: bool = True, made: bool = True, files: Any = None) -> Any:
             said = output if made or ok else f"{NOT_RUN_PREFIX} {output}"
+            wrote, not_taken = files or ((), ())
             return ServerAnswer(
                 tool=tool_name,
                 args=args,
@@ -1358,6 +1365,8 @@ def _server_step_call(container: ServiceContainer) -> Any:
                 error=None if ok else said,
                 started_at=wall_clock,
                 duration_ms=int((time.monotonic() - started) * 1000),
+                wrote=tuple(wrote),
+                not_taken=tuple(not_taken),
             )
 
         withheld = _withheld_servers(container)
@@ -1396,7 +1405,7 @@ def _server_step_call(container: ServiceContainer) -> Any:
             uses_sample = (
                 any("{sample_path}" in str(v) for v in step.arguments.values())
                 if step.arguments
-                else bool(roles.get("path"))
+                else bool(roles.get("path")) and not held.get("artefact_path")
             )
             ours = [r for r in staging_reasons if f"'{server}'" in r]
             if uses_sample and ours:
@@ -1404,6 +1413,10 @@ def _server_step_call(container: ServiceContainer) -> Any:
                     f"the sample could not be staged to {server}: " + "; ".join(ours), ok=False
                 )
         budget = step.budget_seconds or getattr(facts, "timeout_seconds", None) or left
+        why = artefact_store.hand_over(artefacts, container, server, configured, held, budget)
+        if why:
+            return answer(why, ok=False, made=False)
+        args = _step_arguments(step, facts, held)
         try:
             output = str(
                 run_coro_blocking(
@@ -1416,7 +1429,12 @@ def _server_step_call(container: ServiceContainer) -> Any:
             return answer(f"{type(exc).__name__}: {exc}", ok=False)
         # Handed in as a success and left to ``build_entry`` to read, as the
         # reputation lookup's answer is.
-        return answer(output)
+        return answer(
+            output,
+            files=artefact_store.take_in_outputs(
+                artefacts, container, server, configured, step.outputs, output, budget
+            ),
+        )
 
     return call
 
@@ -2084,9 +2102,11 @@ def make_triage_node(
         cfg = container.config
         capa_cfg = cfg.static.capa
         from maljan.core.pack_steps import effective_steps
+        from maljan.pipeline.artefacts import ArtefactStore
         from maljan.providers import sandbox_tools
 
         steps = effective_steps(getattr(cfg.triage, "steps", None) or ())
+        artefacts = ArtefactStore(container.job_key())
         inputs = PackInputs(
             sample_path=path,
             sha256=str(state.get("file_hash") or ""),
@@ -2111,6 +2131,7 @@ def make_triage_node(
             carve_environ=_carve_server_environ(container),
             steps=steps,
             pack_chars=upstream_chars(container),
+            artefacts=artefacts,
         )
 
         def _elapsed_ms() -> int:
@@ -2137,7 +2158,7 @@ def make_triage_node(
                 reputation=_reputation_lookup(container, inputs.sha256),
                 function_matches=_function_matches_step(container, state),
                 anti_analysis=_anti_analysis_step(container, state),
-                server_step=_server_step_call(container),
+                server_step=_server_step_call(container, artefacts),
             )
         except Exception as exc:  # noqa: BLE001 — the pack never fails the job
             logger.warning(

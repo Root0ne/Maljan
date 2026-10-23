@@ -616,6 +616,8 @@ class MaljanApp:
             **({"": static_sample_path} if static_sample_path else {}),
             **dict(static_sample_paths or {}),
         }
+        # The paths files were handed to servers at belong to one run.
+        self.container.artefact_paths = []
 
         initial_state: AnalysisState = {
             "file_hash": file_hash,
