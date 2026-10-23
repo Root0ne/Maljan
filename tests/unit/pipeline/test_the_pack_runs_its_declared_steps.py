@@ -94,6 +94,10 @@ SHIPPED_IDS = [
     "find_directed_text",
     "behaviour_code_links",
 ]
+# The shipped steps of a server's tool, beside the format readers: each is off
+# while its server is not switched on (``pack_steps.steps_on_servers``).
+SHIPPED_SERVER_STEPS = ["die_scan", "dotnet_types", "go_symbols"]
+_AFTER_THE_READERS = SHIPPED_IDS.index("archive_list") + 1
 
 INVENTORY = {
     "command": "invented-inventory",
@@ -223,7 +227,11 @@ def _only(result: Any, tool: str) -> LedgerEntry:
 
 class TestTheShippedList:
     def test_it_is_today_s_pack_in_today_s_order(self) -> None:
-        assert [step.id for step in default_steps()] == SHIPPED_IDS
+        assert [step.id for step in default_steps()] == (
+            SHIPPED_IDS[:_AFTER_THE_READERS]
+            + SHIPPED_SERVER_STEPS
+            + SHIPPED_IDS[_AFTER_THE_READERS:]
+        )
         assert effective_steps() == default_steps()
 
     def test_every_shipped_step_has_its_own_implementation(self) -> None:
@@ -252,7 +260,8 @@ class TestTheOperatorsDeclarations:
             [{"id": "capa", "enabled": False}, {"id": "yara_scan", "budget_seconds": 30}]
         )
         ids = [step.id for step in steps]
-        assert "capa" not in ids and ids.index("yara_scan") == SHIPPED_IDS.index("yara_scan")
+        shipped = [step.id for step in default_steps()]
+        assert "capa" not in ids and ids.index("yara_scan") == shipped.index("yara_scan")
         assert next(s for s in steps if s.id == "yara_scan").budget_seconds == 30
 
     def test_a_new_step_goes_where_its_after_says_else_last(self) -> None:

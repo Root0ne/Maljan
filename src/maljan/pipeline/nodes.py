@@ -2132,6 +2132,7 @@ def make_triage_node(
             steps=steps,
             pack_chars=upstream_chars(container),
             artefacts=artefacts,
+            servers=cfg.mcp.servers,
         )
 
         def _elapsed_ms() -> int:

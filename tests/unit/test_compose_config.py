@@ -28,7 +28,26 @@ REQUIRED_ENV = {
 OPTIONAL_ENV = {
     "GHIDRA_MCP_AUTH_TOKEN": "t" * 32,
     "QDRANT_API_KEY": "q" * 32,
+    "DIE_MCP_AUTH_TOKEN": "e" * 32,
+    "ILSPY_MCP_AUTH_TOKEN": "i" * 32,
+    "GORESYM_MCP_AUTH_TOKEN": "g" * 32,
 }
+
+# The identification sidecars, each under its own profile, by profile: the
+# sidecar, its published-port relay and the port the server listens on.
+IDENTIFIERS = {
+    "die": ("die-mcp", "die-port", 8090),
+    "ilspy": ("ilspy-mcp", "ilspy-port", 8091),
+    "goresym": ("goresym-mcp", "goresym-port", 8092),
+}
+# Each identification sidecar's memory-and-swap ceiling by default, in GiB, and
+# the variable that sets it.
+IDENTIFIER_MEMORY = {
+    "die": ("DIE_MEM_LIMIT", 2),
+    "ilspy": ("ILSPY_MEM_LIMIT", 4),
+    "goresym": ("GORESYM_MEM_LIMIT", 2),
+}
+ALL_PROFILES = ("ghidra", "qdrant", *IDENTIFIERS)
 
 
 @pytest.mark.skipif(shutil.which("docker") is None, reason="docker not installed")
@@ -299,19 +318,20 @@ def test_the_stack_renders_without_ghidra_and_qdrant_and_without_their_tokens(tm
     services = _render(tmp_path)["services"]
     assert "ghidra-mcp" not in services
     assert "qdrant" not in services
+    for sidecar, relay, _port in IDENTIFIERS.values():
+        assert sidecar not in services and relay not in services
     for name in ("backend-api", "backend-worker", "migrate", "enrichment-worker", "frontend"):
         assert name in services, name
 
 
 @pytest.mark.skipif(shutil.which("docker") is None, reason="docker not installed")
 def test_no_service_waits_for_an_optional_one(tmp_path):
-    services = _render(tmp_path, "ghidra", "qdrant", env={**REQUIRED_ENV, **OPTIONAL_ENV})[
-        "services"
-    ]
-    assert {"ghidra-mcp", "qdrant"} <= set(services)
+    services = _render(tmp_path, *ALL_PROFILES, env={**REQUIRED_ENV, **OPTIONAL_ENV})["services"]
+    optional = {"ghidra-mcp", "qdrant", *(names[0] for names in IDENTIFIERS.values())}
+    assert optional <= set(services)
     for name, service in services.items():
         waits = set(service.get("depends_on") or {})
-        assert not waits & {"ghidra-mcp", "qdrant"}, (name, waits)
+        assert not waits & optional, (name, waits)
 
 
 @pytest.mark.skipif(shutil.which("docker") is None, reason="docker not installed")
@@ -320,6 +340,10 @@ def test_each_optional_service_runs_under_its_own_profile(tmp_path):
     assert config["services"]["ghidra-mcp"]["profiles"] == ["ghidra"]
     assert config["services"]["ghidra-port"]["profiles"] == ["ghidra"]
     assert config["services"]["qdrant"]["profiles"] == ["qdrant"]
+    config = _render(tmp_path, *ALL_PROFILES, env={**REQUIRED_ENV, **OPTIONAL_ENV})
+    for profile, (sidecar, relay, _port) in IDENTIFIERS.items():
+        assert config["services"][sidecar]["profiles"] == [profile]
+        assert config["services"][relay]["profiles"] == [profile]
     # Ghidra's port is published by its relay; ghidra-mcp publishes none.
     for name in ("ghidra-port", "qdrant"):
         ports = config["services"][name]["ports"]
@@ -468,12 +492,12 @@ def test_every_container_that_opens_the_sample_is_kept_from_the_platform(
 
     # A value no service could hold by chance, so finding one is finding the secret.
     secrets = {var: f"x2-{var.lower()}-value" for var in REQUIRED_ENV}
-    config = _render_with(tmp_path, *files, profiles=("ghidra", "qdrant"), env=secrets)
+    config = _render_with(tmp_path, *files, profiles=ALL_PROFILES, env=secrets)
     openers = _sample_openers(config)
     # The worker does hold them, so their absence below is not a render that dropped them.
     assert secrets["JWT_SECRET_KEY"] in yaml.safe_dump(config["services"]["backend-worker"])
     # Found from the mounts, so the checks below never pass on an empty set.
-    assert set(openers) == {"ghidra-mcp"}
+    assert set(openers) == {"ghidra-mcp", *(names[0] for names in IDENTIFIERS.values())}
     for name, service in openers.items():
         # Not root, no capability, no way to gain one.
         uid = str(service.get("user") or "0").split(":", 1)[0]
@@ -509,7 +533,7 @@ def test_every_container_that_opens_the_sample_is_kept_from_the_platform(
 def test_only_the_platforms_callers_share_a_network_with_a_sample_opener(
     tmp_path: Path, files: tuple[str, ...]
 ) -> None:
-    config = _render_with(tmp_path, *files, profiles=("ghidra", "qdrant"))
+    config = _render_with(tmp_path, *files, profiles=ALL_PROFILES)
     services = config["services"]
     for name, opener in _sample_openers(config).items():
         for network in _networks_of(opener):
@@ -522,10 +546,12 @@ def test_only_the_platforms_callers_share_a_network_with_a_sample_opener(
                 if service.get("image") == BACKEND_IMAGE:
                     continue
                 assert _is_bare_relay(service), (name, network, other)
-    # The API and the worker keep the project network and reach Ghidra on its own.
+    # The API and the worker keep the project network and reach Ghidra and
+    # each identification sidecar on its own.
     for caller in ("backend-api", "backend-worker"):
-        assert _networks_of(services[caller]) == {DEFAULT_NETWORK, "ghidra"}, caller
-    assert config["networks"]["ghidra"]["internal"] is True
+        assert _networks_of(services[caller]) == {DEFAULT_NETWORK, "ghidra", *IDENTIFIERS}, caller
+    for network in ("ghidra", *IDENTIFIERS):
+        assert config["networks"][network]["internal"] is True
 
 
 def _is_bare_relay(service: dict) -> bool:
@@ -592,3 +618,58 @@ def test_ghidra_starts_as_its_user_only_after_its_projects_changed_hands(tmp_pat
     # A writable home for the JVM whatever JAVA_OPTS an operator sets.
     assert ghidra["environment"]["JAVA_TOOL_OPTIONS"] == "-Duser.home=/tmp"
     assert ghidra["environment"]["JAVA_OPTS"] == "-Xmx4g -XX:+UseG1GC"
+
+
+@pytest.mark.skipif(shutil.which("docker") is None, reason="docker not installed")
+@pytest.mark.parametrize("files", STACKS)
+@pytest.mark.parametrize("profile", sorted(IDENTIFIERS))
+def test_each_identification_sidecar_is_held_as_ghidra_is(
+    tmp_path: Path, files: tuple[str, ...], profile: str
+) -> None:
+    from maljan.core.config import Settings
+
+    sidecar_name, relay_name, port = IDENTIFIERS[profile]
+    config = _render_with(tmp_path, *files, profiles=(profile,))
+    sidecar, relay = config["services"][sidecar_name], config["services"][relay_name]
+    # Built from its own directory under services/, as the worker's ids, with a
+    # read-only root whose only writable place is a tmpfs.
+    assert sidecar["build"]["dockerfile"] == f"{sidecar_name}/Dockerfile"
+    assert Path(sidecar["build"]["context"]).name == "services"
+    assert sidecar["user"] == config["services"]["backend-worker"]["user"]
+    assert sidecar["read_only"] is True and sidecar["tmpfs"] == ["/tmp"]
+    # A memory ceiling the kernel enforces, swap pinned to it, as Ghidra's.
+    variable, gib = IDENTIFIER_MEMORY[profile]
+    assert int(sidecar["mem_limit"]) == int(sidecar["memswap_limit"]) == gib * GIB
+    lighter = _render_with(tmp_path, *files, profiles=(profile,), env={variable: "1g"})
+    held = lighter["services"][sidecar_name]
+    assert int(held["mem_limit"]) == int(held["memswap_limit"]) == GIB
+    # The one variable it is handed is its own token.
+    assert set(sidecar["environment"]) == {"MCP_AUTH_TOKEN"}
+    # The samples directory, read-only, at the mount its block declares, and nothing else.
+    block = Settings(_env_file=None).mcp.servers[profile]
+    (mount,) = sidecar["volumes"]
+    assert _mounts_samples(sidecar) and mount["read_only"] is True
+    assert mount["target"] == block.sample_mount
+    assert _networks_of(sidecar) == {profile}
+    # The block reaches it by its service name on its own port.
+    assert block.url == f"http://{sidecar_name}:{port}/mcp"
+    # Its relay forwards that port and nothing else, from a network of its own.
+    assert _is_bare_relay(relay) and not _mounts_samples(relay)
+    assert _networks_of(relay) == {profile, f"{profile}-publish"}
+    assert relay["command"] == [
+        f"tcp-listen:{port},fork,reuseaddr",
+        f"tcp-connect:{sidecar_name}:{port}",
+    ]
+    (published,) = relay["ports"]
+    assert (published["host_ip"], str(published["published"]), published["target"]) == (
+        "127.0.0.1",
+        str(port),
+        port,
+    )
+    others = {
+        name
+        for name, service in config["services"].items()
+        if f"{profile}-publish" in _networks_of(service)
+    }
+    assert others == {relay_name}
+    assert DIGEST.search(relay["image"])

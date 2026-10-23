@@ -2640,6 +2640,9 @@
      "choices": [
       "",
       "analysis",
+      "die",
+      "goresym",
+      "ilspy",
       "knowledge",
       "network",
       "threatintel",
@@ -12222,6 +12225,51 @@
         "renderer": "archive_listing"
        },
        {
+        "display_name": "Detect It Easy",
+        "id": "die_scan",
+        "server": "die",
+        "tool": "die_scan"
+       },
+       {
+        "display_name": ".NET types",
+        "formats": [
+         "pe"
+        ],
+        "id": "dotnet_types",
+        "server": "ilspy",
+        "tool": "dotnet_types",
+        "when": [
+         {
+          "equals": [
+           ".NET Framework",
+           ".NET Core"
+          ],
+          "step": "die_scan",
+          "value": "name"
+         }
+        ]
+       },
+       {
+        "display_name": "Go symbols",
+        "formats": [
+         "pe",
+         "elf",
+         "mach-o"
+        ],
+        "id": "go_symbols",
+        "server": "goresym",
+        "tool": "go_symbols",
+        "when": [
+         {
+          "equals": [
+           "Go"
+          ],
+          "step": "die_scan",
+          "value": "name"
+         }
+        ]
+       },
+       {
         "display_name": "strings",
         "id": "strings",
         "renderer": "string_runs"
@@ -12421,9 +12469,17 @@
         "called": "decode_string_blobs",
         "server": ""
        },
+       "die_scan": {
+        "called": "die_scan",
+        "server": "die"
+       },
        "document_info": {
         "called": "document_info",
         "server": ""
+       },
+       "dotnet_types": {
+        "called": "dotnet_types",
+        "server": "ilspy"
        },
        "elf_info": {
         "called": "elf_info",
@@ -12448,6 +12504,10 @@
        "function_matches": {
         "called": "function_matches",
         "server": ""
+       },
+       "go_symbols": {
+        "called": "go_symbols",
+        "server": "goresym"
        },
        "hashes": {
         "called": "hashes",

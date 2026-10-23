@@ -49,6 +49,19 @@ NEWLY_ROUTED_UNREAD = frozenset({"rtf"})
 # Every format the router gives a sample, an unknown one, none, and spellings
 # the reading lowercases and trims into a routed one.
 FORMATS = sorted({*routed_formats(), "", "unknown", "PE", " Mach-O ", "  pe  ", "OLE2"})
+# The built-in servers shipped after the table (the identification servers):
+# no tool of theirs stood in it, and each declares the formats it serves.
+SHIPPED_SINCE = ("die", "ilspy", "goresym")
+
+
+def _declared_formats(server: str) -> dict[str, frozenset[str]]:
+    """The routed formats each tool of a built-in server's shipped declaration names."""
+    facts = builtin_declarations.server_declaration(server).get("tool_facts") or {}
+    return {
+        tool: frozenset(held["routed_formats"])
+        for tool, held in facts.items()
+        if held.get("routed_formats")
+    }
 
 
 def _dev_needed_for(tool: str, file_type: str, server: str) -> bool:
@@ -97,7 +110,18 @@ def test_every_built_in_tool_and_routed_format_reads_as_the_table_did(in_force: 
 
     # The shipped settings: every built-in server's live declarations.
     assert ToolDeclarations.from_settings(Settings()).source("mcp:analysis") is not None
-    assert differ(built_in) == []
+    assert differ(tuple(key for key in built_in if key not in SHIPPED_SINCE)) == []
+    # A server shipped since reads as its declaration says: a tool that names
+    # formats is needed for those (and for a sample of no known format) alone.
+    for server in SHIPPED_SINCE:
+        declared = _declared_formats(server)
+        for tool in sorted(builtin_declarations.server_declaration(server)["tool_facts"]):
+            for routed in FORMATS:
+                held = str(routed).strip().lower()
+                want = (
+                    tool not in declared or held in ("", UNKNOWN_FORMAT) or held in declared[tool]
+                )
+                assert _needed_for(tool, routed, server) is want, (server, tool, routed)
     # An operator's server whose tools share the parsers' names and declare nothing.
     in_force(_server({"tool_facts": {tool: {"kind": "format_info"} for tool in tools}}, "kit"))
     assert differ(("kit",)) == []
@@ -127,8 +151,16 @@ def test_the_shipped_declarations_carry_the_table_s_routed_names_and_nothing_els
         "mcp:analysis": {
             tool: (formats & routed) - NEWLY_ROUTED_UNREAD
             for tool, formats in DEV_FORMAT_TOOLS.items()
-        }
+        },
+        # The servers shipped since, as their declarations name them.
+        **{
+            f"mcp:{server}": _declared_formats(server)
+            for server in SHIPPED_SINCE
+            if _declared_formats(server)
+        },
     }
+    assert set(found["mcp:ilspy"].values()) == {frozenset({"pe"})}
+    assert set(found["mcp:goresym"].values()) == {frozenset({"pe", "elf", "mach-o"})}
 
 
 def test_an_operator_server_declares_formats_for_its_own_tools(in_force: Any) -> None:

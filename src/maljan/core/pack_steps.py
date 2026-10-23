@@ -59,7 +59,12 @@ before any analyst starts. Each step is declared here as a :class:`PackStep`:
 * ``after``: where a step not in the shipped list goes: after the step it
   names, else after every shipped step.
 
-:func:`default_steps` is the shipped list. ``triage.steps`` holds the
+:func:`default_steps` is the shipped list. Three of its steps, after the
+format readers, call servers' tools (the identification servers); each is
+off, with why, while its server
+is not configured, switched off or does not offer the tool
+(:func:`steps_on_servers`), so a deployment without the server runs the list
+as it was. ``triage.steps`` holds the
 operator's declarations (:func:`effective_steps`): one under a shipped step's
 id is laid over that step field by field, in its place (``enabled: false``
 drops it); one that changes the step's ``tool`` or ``server`` replaces it at
@@ -105,6 +110,8 @@ __all__ = [
     "LeftOutStep",
     "steps_left_out",
     "held_schedules",
+    "on_its_shipped_server",
+    "steps_on_servers",
     "read_answer_field",
     "runs_shipped",
     "shipped_step",
@@ -203,6 +210,20 @@ LEGACY_STEP_NAMES: Mapping[str, str] = {"find_anti_analysis_techniques": "anti_a
 
 # The fields of a declared step that name another step.
 _STEP_REFERENCES = ("id", "after", "starts_after", "reads")
+
+# The shipped identification step, and the names its tool (Detect It Easy's
+# ``die_scan``) gives the runtimes a later step runs on, as Detect It Easy's
+# own signatures write them: the library of a managed .NET assembly, and the
+# Go compiler.
+IDENTIFY_STEP = "die_scan"
+DOTNET_RUNTIMES: tuple[str, ...] = (".NET Framework", ".NET Core")
+GO_COMPILERS: tuple[str, ...] = ("Go",)
+
+# Why a shipped step of a server's tool is off (:func:`steps_on_servers`).
+SERVER_NOT_CONFIGURED = "no tool server is configured as {server}"
+SERVER_SWITCHED_OFF = "{server} is switched off"
+TOOL_NOT_TICKED = "{tool} is not among the tools {server} offers"
+NO_SERVER_CALLS_OFF = "this run calls no tool server"
 
 # The renderers that read an answer through its tool's declared facts (its
 # rows, their values and places, its techniques) as well as in the shape of
@@ -491,6 +512,31 @@ def _shipped() -> tuple[PackStep, ...]:
             renderer="archive_listing",
             display_name="archive",
         ),
+        # The identification servers' steps (``builtin_declarations``), beside
+        # the format readers. Each is off while its server is not switched on
+        # (:func:`steps_on_servers`), and an off step writes no entry, so
+        # every later id keeps its value. Detect It Easy reads any file; ILSpy
+        # lists a .NET assembly's types, and GoReSym recovers a Go binary's
+        # functions, each only where Detect It Easy's answer named the runtime:
+        # the .NET library, or the Go compiler it tells by the Go build id or
+        # the symbol table Go writes.
+        _o(id=IDENTIFY_STEP, server="die", tool="die_scan", display_name="Detect It Easy"),
+        _o(
+            id="dotnet_types",
+            server="ilspy",
+            tool="dotnet_types",
+            formats=("pe",),
+            when=(StepCondition(step=IDENTIFY_STEP, value="name", equals=DOTNET_RUNTIMES),),
+            display_name=".NET types",
+        ),
+        _o(
+            id="go_symbols",
+            server="goresym",
+            tool="go_symbols",
+            formats=("pe", "elf", "mach-o"),
+            when=(StepCondition(step=IDENTIFY_STEP, value="name", equals=GO_COMPILERS),),
+            display_name="Go symbols",
+        ),
         _o(id="strings", renderer="string_runs", display_name="strings"),
         _o(id="iocs_from_file", renderer="file_iocs", display_name="iocs"),
         _o(id="yara_scan", renderer="signature_rules", display_name="yara", wall_clock=True),
@@ -690,6 +736,61 @@ def read_answer_field(
         if name in mapping:
             return mapping[name]
     return None
+
+
+def on_its_shipped_server(step: PackStep) -> bool:
+    """Whether ``step`` is a shipped step of a server's tool, still calling that tool there.
+
+    Such a step is in the shipped list for every deployment, whether or not
+    the server is there: it is off, never refused, where the server is not
+    configured, switched off or does not offer the tool (:func:`steps_on_servers`).
+    A declaration over it naming another tool is an operator's step, checked
+    as one.
+    """
+    shipped = shipped_step(step.id)
+    return bool(
+        shipped is not None
+        and shipped.server
+        and step.server == shipped.server
+        and step.called == shipped.called
+    )
+
+
+def steps_on_servers(
+    steps: Iterable[PackStep], servers: Mapping[str, Any] | None
+) -> tuple[tuple[PackStep, ...], dict[str, str]]:
+    """The steps that run, and each shipped server step left off, by id, with why.
+
+    A shipped step of a server's tool (:func:`on_its_shipped_server`) runs only
+    where ``servers`` (``mcp.servers``) holds its server, switched on, offering
+    its tool; otherwise it is off: no call and no entry, as a step of another
+    format is, and the reason is the pack's to say. ``None`` is a run that
+    calls no tool server. Every other step is kept as it is, an operator's
+    step on a server that is not there included: it is recorded as not run.
+    """
+    kept: list[PackStep] = []
+    off: dict[str, str] = {}
+    for step in steps:
+        why = _why_off(step, servers) if on_its_shipped_server(step) else ""
+        if why:
+            off[step.id] = why
+        else:
+            kept.append(step)
+    return tuple(kept), off
+
+
+def _why_off(step: PackStep, servers: Mapping[str, Any] | None) -> str:
+    if servers is None:
+        return NO_SERVER_CALLS_OFF
+    server = servers.get(step.server)
+    if server is None:
+        return SERVER_NOT_CONFIGURED.format(server=step.server)
+    if not getattr(server, "enabled", True):
+        return SERVER_SWITCHED_OFF.format(server=step.server)
+    offered = getattr(server, "tools", None)
+    if offered is not None and step.called not in offered:
+        return TOOL_NOT_TICKED.format(tool=step.called, server=step.server)
+    return ""
 
 
 def shipped_step(step_id: str) -> PackStep | None:

@@ -48,6 +48,9 @@ def test_the_schema_carries_registry_ids_and_the_current_server_keys(client):
     assert generic["choices"] == [
         "",
         "analysis",
+        "die",
+        "goresym",
+        "ilspy",
         "knowledge",
         "network",
         "threatintel",
