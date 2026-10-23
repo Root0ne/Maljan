@@ -141,7 +141,7 @@ def populate_similar_samples(
     own_sha256 = (malware_report.get("identity") or {}).get("hashes", {}).get("sha256")
 
     try:
-        from maljan.memory.long_term_memory import recall
+        from maljan.memory.long_term_memory import foreign_ids_written_out, recall
 
         # +1 so we can drop the sample's own entry without falling short of top_k.
         hits = recall(store, query, top_k=top_k + 1, owner=owner)
@@ -156,9 +156,17 @@ def populate_similar_samples(
         similars.append(
             {
                 "sample_id": case.sample_id,
-                "malware_category": case.malware_category,
+                "malware_category": (
+                    foreign_ids_written_out(case.malware_category)
+                    if isinstance(case.malware_category, str)
+                    else case.malware_category
+                ),
                 "technique_ids": list(case.technique_ids),
-                "summary": _trim(case.summary_text, 240),
+                # Another run's text, like its category: its ledger and item
+                # ids are renamed so none reads as an entry of this run's
+                # report. After the cut, which can end an item id where the
+                # text went on.
+                "summary": foreign_ids_written_out(_trim(case.summary_text, 240)),
                 "source": "maljan-ltm",
             }
         )
