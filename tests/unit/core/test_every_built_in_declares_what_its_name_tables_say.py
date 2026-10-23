@@ -115,7 +115,9 @@ def test_every_step_the_triage_pack_records_is_declared(declared: ToolDeclaratio
     from maljan.pipeline import sandbox_status
     from maljan.tools import artefact_index, crypto_constants, upx
 
-    steps = {step.called for step in default_steps()}
+    # A step of a server's tool is declared by its server (the identification
+    # servers' steps, held in ``tests/unit/servers/test_identification_servers.py``).
+    steps = {step.called for step in default_steps() if step.builtin}
     steps |= {
         "identify_file",
         "hashes",
@@ -351,9 +353,10 @@ def test_the_reputation_servers_are_the_servers_with_the_reputation_role(
 def test_the_pinned_servers_are_the_servers_that_read_the_staged_sample(
     declared: ToolDeclarations,
 ) -> None:
-    # The servers the name list held before the declaration was read.
+    # The servers the name list held before the declaration was read, and the
+    # identification servers shipped since, which declare it.
     reading = {d.source.key for d in declared.sources() if d.reads_staged_sample}
-    assert reading == {"analysis", "knowledge", "network"}
+    assert reading == {"analysis", "knowledge", "network", "die", "ilspy", "goresym"}
 
 
 def test_the_platforms_own_sources_are_the_resolving_servers(declared: ToolDeclarations) -> None:

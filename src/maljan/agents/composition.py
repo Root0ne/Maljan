@@ -1386,9 +1386,12 @@ def servers_a_job_calls(settings: Settings, *, global_provider: str | None = Non
         _decoder_server_key,
         _step_server_key,
     )
-    from maljan.core.pack_steps import effective_steps
+    from maljan.core.pack_steps import effective_steps, steps_on_servers
 
-    steps = effective_steps(getattr(settings.triage, "steps", None) or ())
+    # A shipped step whose server is off calls nothing (``steps_on_servers``).
+    steps, _off = steps_on_servers(
+        effective_steps(getattr(settings.triage, "steps", None) or ()), settings.mcp.servers
+    )
     used |= {
         str(step.server) for step in steps if step.enabled and not step.builtin and step.server
     }

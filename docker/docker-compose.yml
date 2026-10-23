@@ -21,6 +21,39 @@ x-backend-image: &backend-image
   security_opt:
     - no-new-privileges:true
 
+# What every identification sidecar (die-mcp, ilspy-mcp, goresym-mcp below)
+# is held to. Each opens the sample, so each is held as ghidra-mcp is (X2):
+# the worker's unprivileged ids (the worker writes its sample mirrors
+# 0700/0600 and these must read them), no Linux capability and no way to gain
+# one, a pids limit against a fork storm, and a read-only root whose only
+# writable place is a tmpfs for each run's scratch directory. Each holds no
+# platform credential: its only secret is its own token.
+x-identification-sidecar: &identification-sidecar
+  restart: unless-stopped
+  user: "${MALJAN_UID:-10001}:${MALJAN_GID:-10001}"
+  cap_drop:
+    - ALL
+  security_opt:
+    - no-new-privileges:true
+  read_only: true
+  tmpfs:
+    - /tmp
+  pids_limit: 256
+
+# What each sidecar's published-port relay is held to, as ghidra-port is: it
+# forwards bytes and nothing else, mounts nothing and holds nothing.
+x-sidecar-relay: &sidecar-relay
+  image: alpine/socat:1.8.1.1@sha256:7f9a06753033f2b7de18edc2353f2c15153413d95a039163c6db270fc7a6c3b0
+  restart: unless-stopped
+  user: "65534:65534"
+  cap_drop:
+    - ALL
+  security_opt:
+    - no-new-privileges:true
+  read_only: true
+  pids_limit: 64
+  mem_limit: 64m
+
 services:
   # ─────────────────────────────────────────────
   # PostgreSQL 16 — Relational data store
@@ -276,6 +309,133 @@ services:
       - "${BIND_ADDRESS:-127.0.0.1}:${GHIDRA_MCP_PORT:-8089}:8089"
 
   # -────────────────────────────────────────────
+  # Identification sidecars — Detect It Easy, ILSpy, GoReSym, each optional
+  # -────────────────────────────────────────────
+  # One analysis program each, served over MCP (services/die-mcp,
+  # services/ilspy-mcp, services/goresym-mcp): Detect It Easy's packer,
+  # compiler and protector names for any file, ILSpy's view of a .NET
+  # assembly, GoReSym's recovery of a Go binary's functions and types. None
+  # runs by default: each starts only under its profile, which the shipped
+  # docker/.env does not turn on, and the platform's built-in server blocks
+  # die, ilspy and goresym ship switched off. To use one, add its profile to
+  # COMPOSE_PROFILES, set its token here, and switch its block on in the
+  # console with the same token as the block's auth_token. Its pack step then
+  # runs and agents are offered its tools; nothing waits for it, and a block
+  # switched on with no container behind it is a step that says it failed.
+  #
+  # Held as x-identification-sidecar says, with the sample directory mounted
+  # read-only at the blocks' declared sample_mount (/data/samples), and on an
+  # internal network of its own (no gateway) shared only with the API and the
+  # worker, which reach it at http://<service>:<port>/mcp. It publishes no
+  # port; its relay below does, for a worker run on the host. The server
+  # refuses to listen without its token, so an unset token stops this
+  # container and no other.
+  #
+  # A memory ceiling the kernel enforces, as Ghidra's is: a machine-safety
+  # limit, not a bound on the analysis. The program's output is read whole,
+  # and a pathological file could otherwise grow the container until the host
+  # runs out. Past it the container's process dies, the call fails and the run
+  # records the failure. Swap is pinned to the same value. DIE_MEM_LIMIT,
+  # ILSPY_MEM_LIMIT and GORESYM_MEM_LIMIT set each (2g, 4g, 2g by default).
+  die-mcp:
+    <<: *identification-sidecar
+    profiles: [die]
+    build:
+      context: ../services
+      dockerfile: die-mcp/Dockerfile
+    image: maljan-die-mcp:3.21
+    container_name: maljan-die-mcp
+    environment:
+      MCP_AUTH_TOKEN: ${DIE_MCP_AUTH_TOKEN:-}
+    mem_limit: ${DIE_MEM_LIMIT:-2g}
+    memswap_limit: ${DIE_MEM_LIMIT:-2g}
+    networks:
+      - die
+    volumes:
+      - ../data/samples:/data/samples:ro
+    healthcheck: &sidecar-health
+      test: ["CMD", "python3", "-c", "import os, socket; socket.create_connection(('127.0.0.1', int(os.environ['MCP_PORT'])), 5)"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 10s
+
+  die-port:
+    <<: *sidecar-relay
+    profiles: [die]
+    container_name: maljan-die-port
+    command:
+      - tcp-listen:8090,fork,reuseaddr
+      - tcp-connect:die-mcp:8090
+    networks:
+      - die
+      - die-publish
+    ports:
+      - "${BIND_ADDRESS:-127.0.0.1}:${DIE_MCP_PORT:-8090}:8090"
+
+  ilspy-mcp:
+    <<: *identification-sidecar
+    profiles: [ilspy]
+    build:
+      context: ../services
+      dockerfile: ilspy-mcp/Dockerfile
+    image: maljan-ilspy-mcp:11.1.0.9782
+    container_name: maljan-ilspy-mcp
+    environment:
+      MCP_AUTH_TOKEN: ${ILSPY_MCP_AUTH_TOKEN:-}
+    mem_limit: ${ILSPY_MEM_LIMIT:-4g}
+    memswap_limit: ${ILSPY_MEM_LIMIT:-4g}
+    networks:
+      - ilspy
+    volumes:
+      - ../data/samples:/data/samples:ro
+    healthcheck: *sidecar-health
+
+  ilspy-port:
+    <<: *sidecar-relay
+    profiles: [ilspy]
+    container_name: maljan-ilspy-port
+    command:
+      - tcp-listen:8091,fork,reuseaddr
+      - tcp-connect:ilspy-mcp:8091
+    networks:
+      - ilspy
+      - ilspy-publish
+    ports:
+      - "${BIND_ADDRESS:-127.0.0.1}:${ILSPY_MCP_PORT:-8091}:8091"
+
+  goresym-mcp:
+    <<: *identification-sidecar
+    profiles: [goresym]
+    build:
+      context: ../services
+      dockerfile: goresym-mcp/Dockerfile
+    image: maljan-goresym-mcp:3.4.1
+    container_name: maljan-goresym-mcp
+    environment:
+      MCP_AUTH_TOKEN: ${GORESYM_MCP_AUTH_TOKEN:-}
+    mem_limit: ${GORESYM_MEM_LIMIT:-2g}
+    memswap_limit: ${GORESYM_MEM_LIMIT:-2g}
+    networks:
+      - goresym
+    volumes:
+      - ../data/samples:/data/samples:ro
+    healthcheck: *sidecar-health
+
+  goresym-port:
+    <<: *sidecar-relay
+    profiles: [goresym]
+    container_name: maljan-goresym-port
+    command:
+      - tcp-listen:8092,fork,reuseaddr
+      - tcp-connect:goresym-mcp:8092
+    networks:
+      - goresym
+      - goresym-publish
+    ports:
+      - "${BIND_ADDRESS:-127.0.0.1}:${GORESYM_MCP_PORT:-8092}:8092"
+
+  # -────────────────────────────────────────────
   # Volume ownership — one-shot, before api, worker and Ghidra
   # -────────────────────────────────────────────
   # The backend services and Ghidra used to run as root, so an existing
@@ -413,10 +573,14 @@ services:
     extra_hosts:
       - "host.docker.internal:host-gateway"
     # `default` as before; `ghidra` to reach Ghidra, which is on no other
-    # network these services share (see ghidra-mcp).
+    # network these services share (see ghidra-mcp), and `die`, `ilspy` and
+    # `goresym` to reach the identification sidecars the same way.
     networks:
       - default
       - ghidra
+      - die
+      - ilspy
+      - goresym
     # The source trees are read-only: a process in this container that opens
     # hostile bytes cannot plant code the API or a later worker would run, or
     # change the host's working tree. data/ is read-only as well (its rule sets
@@ -527,10 +691,14 @@ services:
     # F8 (2026-07-05): resolve host.docker.internal on Linux (see backend-api).
     extra_hosts:
       - "host.docker.internal:host-gateway"
-    # As on the API: `ghidra` is how the worker reaches Ghidra.
+    # As on the API: `ghidra` is how the worker reaches Ghidra, and `die`,
+    # `ilspy` and `goresym` the identification sidecars.
     networks:
       - default
       - ghidra
+      - die
+      - ilspy
+      - goresym
     # Hard ceiling (2026-07-26). One analysis took this process from 3.4 GB to
     # 8.5 GB and never gave it back; two in a row exhausted a 30 GB host that
     # also runs a ~15 GB llama-server, and the machine locked up. The graceful
@@ -670,6 +838,19 @@ networks:
     internal: true
   # The relay's side for Ghidra's published port; nothing else is on it.
   ghidra-publish:
+    driver: bridge
+  # Each identification sidecar's own, as `ghidra` is, and its relay's side.
+  die:
+    internal: true
+  die-publish:
+    driver: bridge
+  ilspy:
+    internal: true
+  ilspy-publish:
+    driver: bridge
+  goresym:
+    internal: true
+  goresym-publish:
     driver: bridge
 
 volumes:

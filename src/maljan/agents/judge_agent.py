@@ -83,7 +83,6 @@ from maljan.agents.tool_fence import (
     fenced,
     json_view,
     needs_fence,
-    quoted_value,
 )
 from maljan.core.config import MEDIATOR_AGENT_KEY, MEDIATOR_AGENT_NAME, get_settings
 from maljan.core.logger import logger
@@ -100,7 +99,11 @@ from maljan.llm.context_window import (
 from maljan.llm.generation_rate import GenerationRates, ModelCallDeadline, model_name_of
 from maljan.llm.transient import as_call
 from maljan.memory.attck_loader import technique_label
-from maljan.memory.long_term_memory import a_past_case_technique
+from maljan.memory.long_term_memory import (
+    a_past_case_technique,
+    foreign_ids_written_out,
+    foreign_quoted_value,
+)
 from maljan.memory.technique_cards import technique_card_lines
 from maljan.pipeline.debate_facts import read_marks, with_ledger_facts, with_ledger_stated
 from maljan.pipeline.events import emit_judge_question, safe_finding_value, scrub
@@ -884,8 +887,9 @@ def closed_memory_cut(shown: str, whole: str) -> str:
     (``tool_fence.quoted_value``): left open, its quote would run into the
     rest of the prompt. The quote is closed in front of the cut mark, found by
     a scan that reads a backslash as escaping the character after it (a lone
-    backslash the cut left at the end is dropped). A block that was not cut is
-    returned as it is, and so is one with nothing of it left (only the cut
+    backslash the cut left at the end is dropped). Another run's ids the cut
+    completed are renamed (``long_term_memory.foreign_ids_written_out``). A
+    block that was not cut is returned as it is, and so is one with nothing of it left (only the cut
     mark's own line).
     """
     from maljan.utils.marked_cut import CUT_MARK
@@ -894,6 +898,10 @@ def closed_memory_cut(shown: str, whole: str) -> str:
         return shown
     cut = shown.endswith(CUT_MARK)
     body = shown[: -len(CUT_MARK)] if cut else shown
+    # The block is other runs' text under fixed headings, and a cut can end an
+    # item id where its text went on (``net:44x`` cut to ``net:4``): renamed
+    # again here. The renaming writes no backslash and no quote.
+    body = foreign_ids_written_out(body)
     inside = False
     escaped = False
     for char in body.rsplit("\n", 1)[-1]:
@@ -4934,10 +4942,13 @@ class JudgeAgent(BudgetMeter):
             # its sample's strings: one quoted value on its line, so no line of
             # it can read as a line of this prompt (``tool_fence.quoted_value``).
             # The category is stored text of the same run, written the same way.
-            summary = quoted_value(str(case.summary_text or ""))
-            category = quoted_value(str(case.malware_category or ""))
+            # Its ledger and item ids are that run's numbers, which this run
+            # issues too: each is renamed so none can be cited as this run's
+            # (``long_term_memory.foreign_ids_written_out``).
+            summary = foreign_quoted_value(case.summary_text)
+            category = foreign_quoted_value(case.malware_category)
             lines.append(f"[{idx}/{total}] sample_id: {case.sample_id} (category: {category})")
-            lines.append(f"  Past techniques: {ttps}")
+            lines.append(f"  Past techniques: {foreign_ids_written_out(ttps)}")
             lines.append(f"  Behavioral summary: {summary}")
 
         lines.append(_MEMORY_END)

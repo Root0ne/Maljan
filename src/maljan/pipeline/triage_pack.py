@@ -157,6 +157,7 @@ from maljan.core.pack_steps import (
     shipped_label,
     shipped_renderer,
     shipped_step,
+    steps_on_servers,
     template_placeholders,
     written_for,
 )
@@ -556,6 +557,10 @@ class PackInputs:
     # for another step's server. ``None``: a step naming one is not run, and
     # says why.
     artefacts: Any = None
+    # The run's tool servers (``mcp.servers``): a shipped step of a server's
+    # tool runs only where its server is here, switched on and offering it
+    # (``pack_steps.steps_on_servers``). ``None``: none is configured.
+    servers: Mapping[str, Any] | None = None
 
 
 # The one reputation call, made by the node through the tool server. It takes
@@ -586,6 +591,10 @@ class PackResult:
     # How each step that may run beside the pack ran, by step id: "beside
     # <steps>", or "in turn" and why. A step that did not run at all has none.
     schedules: dict[str, str] = field(default_factory=dict)
+    # The shipped steps of a server's tool that were off, by step id, and why:
+    # their server is not configured, switched off or does not offer the tool
+    # (``pack_steps.steps_on_servers``). They made no call and wrote no entry.
+    steps_off: dict[str, str] = field(default_factory=dict)
 
     @property
     def degradation_reasons(self) -> list[str]:
@@ -669,8 +678,13 @@ class _Pack:
         self.function_matches = function_matches
         self.anti_analysis = anti_analysis
         self.server_step = server_step
-        self.steps = tuple(inputs.steps) if inputs.steps is not None else effective_steps()
-        self.result = PackResult()
+        steps = tuple(inputs.steps) if inputs.steps is not None else effective_steps()
+        # A run with no tool server registry calls none; otherwise the run's servers.
+        servers = None if server_step is None else (getattr(inputs, "servers", None) or {})
+        self.steps, steps_off = steps_on_servers(steps, servers)
+        self.result = PackResult(steps_off=steps_off)
+        for step_id, why in steps_off.items():
+            logger.info("triage pack: %s is off: %s.", step_id, why)
         self.started = time.monotonic()
         self.steps_run = 0
         self.has_signature = False

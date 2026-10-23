@@ -2135,6 +2135,22 @@ server has no view of this host's filesystem, so it offers `submit_file`
 it as described in [deployment.md](/deployment/) and add a second server
 entry with transport `stdio`.
 
+### The identification servers
+
+`die`, `ilspy` and `goresym` are built-in blocks for three containers of this
+deployment, one command-line program each: Detect It Easy (`die_scan`), ILSpy
+(`dotnet_types`, three decompilers, `dotnet_resources`,
+`dotnet_metadata_table`) and GoReSym (`go_symbols`, `go_types`,
+`go_strings`). Each ships **disabled**, over streamable-HTTP at the address
+the shipped compose file gives its container under its profile
+(`http://die-mcp:8090/mcp`, `http://ilspy-mcp:8091/mcp`,
+`http://goresym-mcp:8092/mcp`), bound to the `static` and `reverser` agents,
+with `sample_mount` `/data/samples` and `reads_staged_sample`, every tool
+declared read-only and running nothing. Switching one on takes its container
+(its profile and its token in `docker/.env`) and the same token as the
+block's `auth_token`; then its tools are offered and its pack step runs. See
+[Identification servers](/tools/identification/).
+
 ## Teams and stages
 
 A team (`core.agents.profiles.<key>`, edited under Settings → Agents and
@@ -2456,6 +2472,20 @@ save, and no new or changed item rides on it. A server step whose server the tea
 configured is a `not run:` entry, not a failure; a call that fails is a
 failure of its tool. Every entry an operator's step writes carries the step
 (`pack_step`), so the pack reads it back without the settings.
+
+**The shipped steps of a server's tool.** Three shipped steps, after the
+format readers, call the identification servers: `die_scan` (Detect It
+Easy's `die_scan`, on every sample), `dotnet_types` (ILSpy's, on `pe`, when
+`die_scan`'s `name` is `.NET Framework` or `.NET Core`) and `go_symbols`
+(GoReSym's, on `pe`, `elf` and `mach-o`, when `die_scan`'s `name` is `Go`).
+Each is **off** while its server is not configured, switched off, or does not
+offer its tool (`core.pack_steps.steps_on_servers`): it makes no call and
+writes no entry, as a step of another format does, and the pack's result and
+the worker's log say why. It is never refused for its server, so settings
+without the server stay valid. Its conditions read `die_scan`'s declared
+values, so a server of your own under the same key, or a step of yours laid
+over the shipped one, runs the same way. Switched on, a step whose condition
+does not hold is a `not run:` entry, as any condition is.
 
 **Files passed between servers.** A file one server's tool writes (a payload
 carved out of the sample, an archive member, a decoded script) reaches

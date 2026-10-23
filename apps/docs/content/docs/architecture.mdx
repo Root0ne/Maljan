@@ -413,7 +413,11 @@ block for an APK; `LC_CODE_SIGNATURE` for a Mach-O; and for anything else the
 fact that it has no signing scheme);
 the format tool the routed type selects (`pe_info`, `elf_info`, `macho_info`,
 `apk_info`, `document_info` or `archive_list`, which carry the section
-entropies, the packer signature hits and the import rows); a `strings` head
+entropies, the packer signature hits and the import rows); the identification
+servers' steps, each off (no call, no entry) while its server is not switched
+on: `die_scan` (Detect It Easy) on every sample, then `dotnet_types` (ILSpy)
+and `go_symbols` (GoReSym) where `die_scan`'s declared `name` value says .NET
+or Go (see [Identification servers](/tools/identification/)); a `strings` head
 capped by `triage.strings_head` and `iocs_from_file` (its indicator scan reads printable
 ASCII and UTF-16LE runs; a UTF-16LE host written directly after a NUL-terminated ASCII
 string can be read with that string's last letter in front of it, because the bytes are
@@ -3665,6 +3669,21 @@ citation placed nowhere is none; a row the record does not hold has none)
 carries the note "an earlier run on this sample also reported it; no source
 of this run stands behind it". A job with no earlier case, or whose store
 cannot be read, is briefed as before.
+
+Another run's ids never reach a run in its own form. Ledger ids (`ev_0007`)
+and sandbox item ids (`net:4`) are each run's own sequence numbers, so a past
+case's `ev_0007` names a real entry of this run that says something else, and
+a judge that copied it would cite that entry with every id check passing.
+Wherever a stored case's text reaches a run (the judge's similar past cases,
+their summary, category and techniques, and the report's similar samples,
+their summary and category),
+`long_term_memory.foreign_ids_written_out` renames each entry id, in any case
+and at any boundary, to `other-run-entry` and each item id to
+`other-run-item`, before and after the quoting, so an id a written-out
+control character completes is renamed too, and again after any cut, which
+can end an item id where its text went on (`net:44x` cut to `net:4`). Neither form is read as an id by
+any reader, alone or beside the text around it. One pass, linear in the text;
+a case with no id is shown byte for byte as before.
 
 The run summary's `stix_object_count` is the exported bundle's object count
 once the report node has built the export, on the state's summary and on

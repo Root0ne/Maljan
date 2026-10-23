@@ -80,10 +80,11 @@ def test_a_server_that_declares_it_reads_the_staged_sample_has_its_argument_fill
     assert "file_path" in pinned["theirs"].args_schema.model_fields
 
 
-def test_the_built_ins_that_read_the_staged_sample_are_the_three_they_were() -> None:
+def test_the_built_ins_that_read_the_staged_sample_are_the_three_and_the_identifiers() -> None:
     held = ToolDeclarations.from_settings(Settings())
     reading = {d.source.key for d in held.sources() if d.reads_staged_sample}
-    assert reading == {"analysis", "knowledge", "network"}
+    # The three they were, and the identification servers shipped since.
+    assert reading == {"analysis", "knowledge", "network", "die", "ilspy", "goresym"}
 
 
 # ---------------------------------------------------------------------------
