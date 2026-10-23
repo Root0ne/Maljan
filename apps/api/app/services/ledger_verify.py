@@ -46,7 +46,7 @@ extra or reordered row and a changed row count are each a break.
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Collection, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -568,6 +568,136 @@ def _check_report(
     return None
 
 
+@dataclass
+class FollowUpCheck:
+    """What checking a job's follow-ups against their chained records found."""
+
+    checks: list[str] = field(default_factory=list)
+    problems: list[str] = field(default_factory=list)
+    notes: list[str] = field(default_factory=list)
+
+
+def check_follow_ups(
+    rows: Sequence[Any],
+    chained: Sequence[Mapping[str, Any]],
+    keys: Mapping[str, ledger_chain.ChainKey],
+    reports: Collection[str] = (),
+) -> FollowUpCheck:
+    """Each stored follow-up against its keyed record and the chained audit row that holds it.
+
+    ``rows`` are the job's ``job_follow_ups`` rows; ``chained`` the ``details``
+    of its ``report.follow_up`` audit rows that verified; ``reports`` the ids
+    of the job's stored reports. A row's question, answer and model are
+    digested again (``ledger_chain.follow_up_digest``) and compared with its
+    record, the record must verify under its key and name the row, and the
+    audit chain must hold the same record. A row with no record was written
+    without the chain key and is said, not checked. A chained follow-up whose
+    row is gone while the report it names is stored was removed: a break. One
+    gone with its report (the cascade of a deletion) is said. One pass over
+    the rows and the chained records.
+    """
+    found = FollowUpCheck()
+    held = {str(d.get("follow_up_id")): d for d in chained if isinstance(d, Mapping)}
+    stored: set[str] = set()
+    matched = 0
+    for row in rows:
+        own = str(_read(row, "id"))
+        stored.add(own)
+        record = _read(row, "record")
+        chain = held.get(own)
+        if not isinstance(record, Mapping):
+            if chain is not None:
+                found.problems.append(
+                    f"follow-up {own} carries no record, and the audit chain holds one for it"
+                )
+            else:
+                found.notes.append(
+                    f"Follow-up {own} carries no record (written without the chain key); "
+                    "it is not checked."
+                )
+            continue
+        digest = ledger_chain.follow_up_digest(
+            {
+                "question": _read(row, "question"),
+                "answer": _read(row, "answer"),
+                "model": _read(row, "model"),
+            }
+        )
+        if digest != record.get("answer_sha256"):
+            found.problems.append(
+                f"follow-up {own} differs from its record: its question, answer or model changed"
+            )
+            continue
+        if (
+            str(record.get("follow_up_id")) != own
+            or str(record.get("report_id")) != str(_read(row, "report_id"))
+            or record.get("report_sha256") != _read(row, "report_sha256")
+        ):
+            found.problems.append(f"follow-up {own}'s record names another follow-up or report")
+            continue
+        key = keys.get(str(record.get("key_id") or ""))
+        if key is None:
+            found.notes.append(
+                f"Follow-up {own}'s record is under a key the platform cannot derive; its "
+                "digest was not checked."
+            )
+        elif ledger_chain.record_digest(record, key) != record.get("digest"):
+            found.problems.append(f"follow-up {own}'s record does not verify under its key")
+            continue
+        if chain is None:
+            notes = " ".join(str(n) for n in _read(row, "notes") or [])
+            if "did not land" in notes:
+                found.notes.append(
+                    f"Follow-up {own}'s audit row did not land when it was written; its record "
+                    "is checked against itself only."
+                )
+                matched += 1
+                continue
+            found.problems.append(f"follow-up {own} has a record but no chained audit row")
+            continue
+        if ledger_chain.canonical(ledger_chain.json_value(chain.get("record"))) != (
+            ledger_chain.canonical(ledger_chain.json_value(dict(record)))
+        ):
+            found.problems.append(
+                f"follow-up {own}'s record differs from the one its chained audit row holds"
+            )
+            continue
+        matched += 1
+    present = {str(r) for r in reports}
+    for gone in sorted(set(held) - stored):
+        record = held[gone].get("record")
+        named = str(record.get("report_id")) if isinstance(record, Mapping) else ""
+        if named and named in present:
+            found.problems.append(
+                f"follow-up {gone} is on the audit chain and its row is gone while the report "
+                "it was answered from is stored"
+            )
+        else:
+            found.notes.append(
+                f"Follow-up {gone} is on the audit chain and no longer stored; the report it "
+                "was answered from is gone too (a follow-up goes with its report)."
+            )
+    if matched:
+        found.checks.append(f"{matched} follow-up(s) match their chained records")
+    return found
+
+
+def _with_follow_ups(verdict: dict[str, Any], found: FollowUpCheck) -> dict[str, Any]:
+    """``verdict`` with what the follow-ups' check found: a changed follow-up is a break."""
+    verdict["checks"].extend(found.checks)
+    verdict["notes"].extend(found.notes)
+    if found.problems:
+        first, *rest = found.problems
+        if verdict["status"] in (VERIFIED, NOT_SEALED, DELETED):
+            verdict["status"] = BROKEN
+            verdict["reason"] = f"A follow-up does not match its chained record: {first}."
+            verdict["first_broken_seq"] = None
+        else:
+            verdict["notes"].append(f"A follow-up does not match its chained record: {first}.")
+        verdict["notes"].extend(f"Also: {problem}." for problem in rest)
+    return verdict
+
+
 async def verify_job(
     db: Any,
     job_id: Any,
@@ -724,6 +854,30 @@ async def verify_job(
         audit=audit,
         keys=keys,
     )
+    # The follow-ups asked of the job, each against its chained record: one
+    # read of the job's own rows.
+    from app.models.follow_up import JobFollowUp
+
+    asked = JobFollowUp.__table__
+    follow_ups = (
+        (
+            await db.execute(
+                select(asked).where(asked.c.job_id == job_id).order_by(asked.c.answered_at)
+            )
+        )
+        .mappings()
+        .all()
+    )
+    if follow_ups or _details(audit_chain.REPORT_FOLLOW_UP):
+        verdict = _with_follow_ups(
+            verdict,
+            check_follow_ups(
+                follow_ups,
+                _details(audit_chain.REPORT_FOLLOW_UP),
+                keys,
+                [str(report["id"])] if report is not None and report.get("id") else [],
+            ),
+        )
     if operator:
         verdict["anchor"] = anchor.as_dict(full=True)
         if anchor.protection:

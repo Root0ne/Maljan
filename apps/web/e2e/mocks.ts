@@ -1622,6 +1622,10 @@ export async function installApiMocks(
   await page.route("**/api/v1/jobs/*/events**", (route) =>
     json(route, { job_id: MOCK_JOB_DETAIL.id, events: [], count: 0 })
   );
+  // The follow-up questions asked of a finished job: none yet in the fixture.
+  await page.route("**/api/v1/jobs/*/follow-ups", (route) =>
+    json(route, { job_id: MOCK_JOB_DETAIL.id, follow_ups: [] })
+  );
   // The evidence ledger. Answered from the fixture and narrowed here rather
   // than in the panel, because the endpoint filters server-side and a mock
   // that ignored the query would let a broken filter pass.

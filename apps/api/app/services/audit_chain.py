@@ -71,6 +71,9 @@ class HeadRefused(RuntimeError):
 LEDGER_SEAL = "ledger.seal"
 REPORT_AMEND = "report.amend"
 REPORT_DELETE = "report.delete"
+# A question asked of a finished job and answered from its stored report
+# (``services.follow_up``); the report itself is not changed.
+REPORT_FOLLOW_UP = "report.follow_up"
 HEAD_REPAIR = "audit.head_repair"
 
 DIGESTED: tuple[str, ...] = (

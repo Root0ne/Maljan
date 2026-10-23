@@ -4225,6 +4225,21 @@ word and the reason beside it. The answers lead the report as "Questions asked
 of this run" and are drawn on the console's summary. A job asked nothing runs
 no round and renders as before.
 
+A finished job can be asked a new question as well, from the console's summary
+or `POST /jobs/{id}/follow-ups` (`reporting/follow_up.py`,
+`app/services/follow_up.py`). It is answered by the same round, with the same
+checks, from what the job stored and nothing else: the ledger rows read back
+as entries, the report, the claims in force from the per-agent findings, the
+open questions from the report's own "Open questions" table and the run state
+rebuilt from the report's identity, the ledger and the run summary's stages.
+No tool is called. The model is the reporter the run's settings snapshot
+recorded, served where its provider is served now (no endpoint is taken from
+the snapshot), else the current one. The answer is a record beside the report
+(`job_follow_ups`), which it never changes; it names the digest of the stored
+report it was answered from and goes onto the audit chain as a keyed
+`report.follow_up` row. The sandbox report is not read back, so a sandbox item
+stands only as an id the stored report cites: issued, never an answered entry.
+
 A repeated tool call is a message to the model and nothing else. The third
 identical `(tool, arguments)` call in one loop is not run; the model is told
 which entry already holds the answer, and whether that entry was an answer or a

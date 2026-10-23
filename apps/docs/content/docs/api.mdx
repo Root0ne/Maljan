@@ -42,7 +42,7 @@ and is never sent by hand. See [security.md](/security/).
 | `/samples` | Upload a sample, list and read sample metadata, delete a sample. |
 | `/samples/{sample_id}/sandbox-reports` | Attach, list and delete sandbox reports produced elsewhere, for the `upload` sandbox provider. With `unread` in `sandbox.upload.allowed_formats`, a report no format recognises is accepted as `unread`, and the answer carries a `proposal` (a format declaration with each field's evidence and confidence); `.../{report_id}/proposal` reads it again. |
 | `/sandbox-report-formats` | Every declared sandbox report format, built-in and your own, in the order a report is tried against them: how each is recognised, where its task id and target hash sit, its reader, its signature scale and whether uploads accept it. `POST /sandbox-report-formats/accept` (admin) saves an accepted declaration for an unread upload, only where it recognises that report, and reads the upload as it. |
-| `/jobs` | Create an analysis job, list and read jobs, read a job's event history and its evidence ledger, cancel a job. |
+| `/jobs` | Create an analysis job, list and read jobs, read a job's event history and its evidence ledger, ask a finished job a follow-up question, cancel a job. |
 | `/reports` | Everything a finished analysis produces: the report itself, its renderings, its indicators, its signatures, its timeline, and post-hoc enrichment. |
 | `/dashboard` | Aggregate counts for the console's landing page, and `GET /dashboard/tools?limit=` — the per-tool call counts of the caller's last `limit` completed runs (default 20, at most 100), read from each run's `run_summary.evidence.by_tool`. |
 | `/audit` | The audit trail, admin only (`/audit/logs`), and API keys (`/audit/api-keys`): any signed-in user mints, lists and revokes their own keys, and a key acts as the account that minted it. |
@@ -155,6 +155,53 @@ records carried their charge is priced again by the meter's code at the current
 `spent_is_at_least` where a call could not be priced, and `per_agent`. It
 answers during a run and after a worker that died before its run summary. Only the job's owner reads it, as for the events endpoint: another
 account's job is not found, to an admin as to anyone else.
+
+`POST /jobs/{job_id}/follow-ups` (`{"question": "..."}`) asks a finished job
+a new question. The report's question round answers it from what the job
+stored: its report, its evidence ledger and the run state rebuilt from both,
+with the same prompt and the same checks as a question asked at submit time
+(every cited id must be one the run issued, `established` needs an entry of a
+call that answered, `limited_negative` needs the calls that looked and never
+rests on an analyst's open question) and its one retry. No tool is called and
+nothing is analysed again, so a question the stored evidence cannot settle is
+`not_determinable` with the reason. The model is the reporter's model the
+run's settings snapshot recorded (the provider, model, effort and temperature
+of its `llm.agents.reporter` entry and of each model it falls back to, else the
+judge role's provider and model). No endpoint is taken from the snapshot: each
+model is served where its provider is served now (the current reporter entry's
+own address for that provider, else the provider's configured one), with the
+current credential, and the current entry's ceilings are kept. A model the run
+called at another place than its provider is served now, whose provider is no
+longer registered, that the snapshot hides, or that no longer builds settings
+is not asked; the current report model is, and `model_source` says why. A job
+that ran as a mock is answered as one: it had no report model, so the answer
+is `not_determinable`. It is built as the report stage builds it, with the
+same output cap and the job's spend ceiling, and its calls are recorded as
+`model_usage` events of the job under the call name `follow-up`, numbered from
+the job's event counter like every event of its feed (from the table, and said
+in `notes`, when Redis cannot be reached), so `GET /jobs/{job_id}/usage`
+counts them. A stored ledger row that keeps part of its answer in object
+storage is read as the row holds it, and `notes` says so. The answer comes back once the model has answered (201): `question`,
+`outcome`, `answer` (the question round's answer: the model's words,
+`evidence_ids`, `looked_at`, `open_questions`, `answered` and `checks` where a
+check refused its word), `model`, `model_source`, `report_sha256` (the digest
+of the stored report it was answered from), `record` and `notes` (what could
+not be read back or recorded). The stored report is never changed: the answer
+is a record of its own, and with a settings encryption key a keyed record of
+it (the report digest, the digest of the report's seal and of its last
+amendment, the SHA-256 of the question and answer) is written onto the audit
+chain as a `report.follow_up` row in the same transaction; without one `record`
+is null and `notes` says so. `GET /jobs/{job_id}/evidence/verify` checks each
+follow-up against that record: its question, answer and model are digested
+again, the record must verify under its key and name the row, and the chained
+audit row must hold the same record; a follow-up that does not match makes the
+answer `broken`, as does a chained follow-up whose row is gone while the report
+it names is stored (one gone with its report is noted). No transaction is held while the model answers. A
+job still `pending` or `running`, or one that stored no report, is a 409; a
+report that predates the structured payload or does not read is a 422.
+`GET /jobs/{job_id}/follow-ups` lists the job's follow-ups, oldest first. Both
+are the job owner's alone, checked as the evidence page checks it: another
+account's job is not found.
 
 ### The run summary
 

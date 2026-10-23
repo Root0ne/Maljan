@@ -313,6 +313,7 @@ AMENDMENTS_KEY = "ledger_amendments"
 _SEAL_KEYS = frozenset({SEAL_KEY, AMENDMENTS_KEY})
 _REPORT_TAG = b"maljan-stored-report/1\n"
 _RECORD_TAG = b"maljan-ledger-record/1\n"
+_FOLLOW_UP_TAG = b"maljan-follow-up/1\n"
 
 
 def _without_seal(document: Any) -> Any:
@@ -525,6 +526,47 @@ def amend(
     if isinstance(next_summary, Mapping):
         next_summary = {**next_summary, AMENDMENTS_KEY: amendments}
     return payload, next_summary, record
+
+
+def follow_up_record(
+    *,
+    follow_up_id: Any,
+    report_id: Any,
+    report_sha256: str,
+    seal_record: Any,
+    last_amendment: Any,
+    answer_sha256: str,
+    at: datetime,
+    key: ChainKey,
+) -> dict[str, Any]:
+    """The record of a question asked of a finished job, keyed: what it was answered from.
+
+    It names the follow-up, the stored report and that report's digest as it
+    read when the question was answered, the digest of the report's seal and
+    of its last amendment (``None`` for a report stored before sealing) and
+    the SHA-256 of the follow-up's question and answer (``answer_sha256``).
+    Nothing of the report is changed: a follow-up is a record beside it.
+    """
+    seal = seal_record if isinstance(seal_record, Mapping) else {}
+    amended = last_amendment if isinstance(last_amendment, Mapping) else {}
+    record: dict[str, Any] = {
+        "kind": "follow_up",
+        "follow_up_id": str(follow_up_id),
+        "report_id": str(report_id),
+        "report_sha256": report_sha256,
+        "seal_digest": seal.get("digest"),
+        "amendment_digest": amended.get("digest"),
+        "answer_sha256": answer_sha256,
+        "at": timestamp(at),
+        "key_id": key.key_id or None,
+    }
+    record["digest"] = record_digest(record, key)
+    return record
+
+
+def follow_up_digest(document: Mapping[str, Any]) -> str:
+    """The SHA-256 of a follow-up's question and answer in canonical form, as hex."""
+    return hashlib.sha256(_FOLLOW_UP_TAG + canonical(json_value(dict(document)))).hexdigest()
 
 
 def with_seal(document: Any, record: Mapping[str, Any]) -> Any:

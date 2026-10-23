@@ -24,6 +24,7 @@ import pytest
 from fastapi import HTTPException
 from scripts.ledger import verify as cli
 
+from app.models.follow_up import JobFollowUp
 from app.models.report import AnalysisReport
 from app.services import ledger_chain, ledger_verify
 from app.services.audit_chain import AuditChainCheck
@@ -645,7 +646,7 @@ async def test_the_job_is_read_from_the_database_with_only_its_own_audit_rows(mo
 
     engine = sa.create_engine("sqlite://")
     with engine.begin() as conn:
-        for model in (EvidenceEntry, AnalysisReport, AuditLog, AuditChainHead):
+        for model in (EvidenceEntry, AnalysisReport, AuditLog, AuditChainHead, JobFollowUp):
             model.__table__.create(conn)
         for row in rows:
             values = {c.name: getattr(row, c.name) for c in EvidenceEntry.__table__.columns}
@@ -771,7 +772,7 @@ async def test_another_job_s_seal_landing_mid_verify_does_not_break_this_one(mon
     theirs = _audit_row(2, mine["chain"], uuid.uuid4(), audit_chain.LEDGER_SEAL, {"seal": {}})
     engine = sa.create_engine("sqlite://")
     with engine.begin() as conn:
-        for model in (EvidenceEntry, AnalysisReport, AuditLog, AuditChainHead):
+        for model in (EvidenceEntry, AnalysisReport, AuditLog, AuditChainHead, JobFollowUp):
             model.__table__.create(conn)
         conn.execute(
             AnalysisReport.__table__.insert().values(
