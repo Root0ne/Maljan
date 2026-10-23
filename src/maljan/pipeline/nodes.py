@@ -76,7 +76,7 @@ from maljan.loaders.binary_chunker import (
     head_room,
     joined_when_it_fits,
 )
-from maljan.memory.long_term_memory import build_stored_case
+from maljan.memory.long_term_memory import build_stored_case, earlier_run_of, earlier_run_text
 from maljan.pipeline import triage_pack
 from maljan.pipeline.claim_drops import (
     answer_unchanged,
@@ -2293,11 +2293,26 @@ def pack_text(
     (``composition.window_assignments``), so for the narrative and the
     composer (``for_reporter``) the pack is cut at the smaller of the job's
     bound and the one the reporter's own models' window derives.
+
+    The agents' copy ends with the earlier run on this sample, as hypotheses
+    (``long_term_memory.earlier_run_block``), when there is one; the
+    reporter's never does.
     """
     chars = upstream_chars(container)
     if for_reporter:
         chars = min(chars, upstream_chars(container, reporter=True))
-    return pack_block(pack_entries(state.get("evidence_ledger") or []), chars)
+    entries = pack_entries(state.get("evidence_ledger") or [])
+    if for_reporter:
+        return pack_block(entries, chars)
+    # An earlier run on this sample, after the pack, as hypotheses: the agents
+    # check it; the report states only what this run found. The two share the
+    # one bound, the earlier run taken off the pack's room with its break (a
+    # bound of 0 or less is none, and the pack's smallest room is 1).
+    earlier = earlier_run_text(container, str(state.get("file_hash") or ""))
+    if not earlier:
+        return pack_block(entries, chars)
+    pack = pack_block(entries, chars if chars <= 0 else max(1, chars - len(earlier) - 2))
+    return "\n\n".join(part for part in (pack, earlier) if part)
 
 
 def upstream_chars(container: ServiceContainer, *, reporter: bool = False) -> int:
@@ -6123,6 +6138,12 @@ def make_judge_node(
                             "Judge technique question skipped (%s).", type(_exc).__name__
                         )
                 verdict.bundle.x_maljan_technique_review = _review
+                # What an earlier run on this sample reported, as the agents
+                # were shown it: a recorded fact that decides nothing; the
+                # matrix notes its techniques no source of this run stands behind.
+                verdict.bundle.x_maljan_earlier_run = earlier_run_of(
+                    container, str(state.get("file_hash") or "")
+                )
 
             bundle = verdict.bundle
             stix_output: dict[str, Any] = bundle.model_dump() if isinstance(bundle, Bundle) else {}

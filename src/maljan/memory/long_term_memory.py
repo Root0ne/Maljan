@@ -226,6 +226,14 @@ class MemoryStoreDefaults:
     def close(self) -> None:
         return None
 
+    def case_of(self, sample_id: str, owner: str | None = None) -> StoredCase | None:
+        """The case stored for ``sample_id`` (``owner``'s, or the unscoped one), or ``None``.
+
+        Optional: a backend that offers no read by id answers ``None``, and
+        no earlier run is shown (:func:`earlier_case`).
+        """
+        return None
+
 
 @runtime_checkable
 class FunctionHashIndex(Protocol):
@@ -357,6 +365,136 @@ def match_functions(
     if not keeps_owners(index):
         return []
     return list(index.match(hashes, exclude_sample_id=exclude_sample_id, owner=scoped))
+
+
+# ---------------------------------------------------------------------------
+# An earlier run on this sample: hypotheses, never evidence
+# ---------------------------------------------------------------------------
+#
+# Every similarity read above leaves the sample's own case out
+# (``exclude_sample_id``): an earlier run is not prior art for itself. What
+# that run reported is still worth checking, so it is read here by the sample's
+# sha256, under the same owner rule, and shown to the run's agents as
+# hypotheses (:func:`earlier_run_block`). It has no evidence id, so nothing
+# cites it and nothing corroborates with it, and the publish rules read this
+# run alone: a technique it reported that no source of this run stands behind
+# is published or not as it would be without it, with a note saying so
+# (``capability_matrix.EARLIER_RUN_UNSUPPORTED_NOTE``).
+
+EARLIER_RUN_HEADING = "=== AN EARLIER RUN ON THIS SAMPLE: hypotheses, not evidence ==="
+EARLIER_RUN_END = "=== END EARLIER RUN ==="
+EARLIER_RUN_STATEMENT = (
+    "An earlier run on this sample (the same sha256) reported what follows. Treat each item "
+    "as a hypothesis to check with this run's tools, not as evidence: it has no evidence id, "
+    "it cannot be cited, and it corroborates nothing."
+)
+
+
+def earlier_case(store: Any, sample_id: str, *, owner: Any = None) -> StoredCase | None:
+    """The case an earlier run stored for ``sample_id``, under the owner rule above, or ``None``.
+
+    Read by the sample's id (``case_of``), never by similarity. ``None`` as
+    well for a backend that offers no such read, and for an answer that is not
+    the sample's own case of this owner.
+    """
+    sha = str(sample_id or "").strip()
+    if owner is NO_MEMORY or not sha:
+        return None
+    read = getattr(store, "case_of", None)
+    if not callable(read):
+        return None
+    scoped = owner_key(owner)
+    if scoped is None:
+        case = read(sha)
+    elif keeps_owners(store):
+        case = read(sha, owner=scoped)
+    else:
+        return None
+    if not isinstance(case, StoredCase) or case.sample_id != sha:
+        return None
+    return case if owner_key(case.owner) == scoped else None
+
+
+def earlier_case_of(container: Any, sample_id: str) -> StoredCase | None:
+    """:func:`earlier_case` for ``container``'s job, read once per sample. Never raises.
+
+    Kept on the container (``earlier_cases``) for the length of the job, so
+    every agent briefed in it is shown the same case and the store is asked
+    once. A store that cannot be built or read is no earlier case.
+    """
+    sha = str(sample_id or "").strip()
+    if container is None or not sha:
+        return None
+    kept = getattr(container, "earlier_cases", None)
+    if isinstance(kept, dict) and sha in kept:
+        held = kept[sha]
+        return held if isinstance(held, StoredCase) else None
+    case: StoredCase | None = None
+    try:
+        case = earlier_case(container.get_memory_store(), sha, owner=memory_owner_of(container))
+    except Exception as exc:  # noqa: BLE001 — memory never costs a run
+        from maljan.core.logger import logger
+
+        logger.debug("LTM: the earlier run on this sample was not read (%s).", exc)
+    if isinstance(kept, dict):
+        kept[sha] = case
+    return case
+
+
+def earlier_techniques(case: StoredCase | None) -> list[str]:
+    """The technique ids ``case`` reported, each once, upper-cased, and only technique ids."""
+    out: list[str] = []
+    for raw in getattr(case, "technique_ids", None) or []:
+        tid = str(raw or "").strip().upper()
+        if TECHNIQUE_ID_EXACT_RE.fullmatch(tid) and tid not in out:
+            out.append(tid)
+    return out
+
+
+def earlier_run_block(case: StoredCase | None) -> str:
+    """The earlier run on this sample as its agents are shown it, or ``""`` for none.
+
+    The day it was stored and its technique ids, under a heading that says
+    they are hypotheses. Not its summary: that is the earlier run's claims,
+    whose evidence ids name that run's ledger, not this one's. Not its
+    category: an earlier verdict's word is no hypothesis a tool can check.
+    """
+    if case is None:
+        return ""
+    techniques = earlier_techniques(case)
+    stored = case.created_at.astimezone(UTC).strftime("%Y-%m-%d")
+    return "\n".join(
+        [
+            EARLIER_RUN_HEADING,
+            EARLIER_RUN_STATEMENT,
+            f"  Stored: {stored}",
+            f"  Earlier techniques: {', '.join(techniques) if techniques else 'none'}",
+            EARLIER_RUN_END,
+        ]
+    )
+
+
+def earlier_run_text(container: Any, sample_id: str) -> str:
+    """:func:`earlier_run_block` of the earlier run on ``container``'s sample. Never raises."""
+    return earlier_run_block(earlier_case_of(container, sample_id))
+
+
+def earlier_run_of(container: Any, sample_id: str) -> Any:
+    """The ``EarlierRun`` record of what the agents were shown, or ``None``. Never raises.
+
+    The record the judge's bundle carries (``stix_models.EARLIER_RUN_PROPERTY``),
+    from the same case :func:`earlier_run_text` showed.
+    """
+    case = earlier_case_of(container, sample_id)
+    if case is None:
+        return None
+    from maljan.schemas.stix_models import EarlierRun
+
+    return EarlierRun(
+        sample_id=case.sample_id,
+        techniques=earlier_techniques(case),
+        stored=case.created_at.astimezone(UTC).strftime("%Y-%m-%d"),
+    )
 
 
 # ---------------------------------------------------------------------------

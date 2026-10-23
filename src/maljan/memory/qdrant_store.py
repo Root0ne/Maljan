@@ -46,7 +46,7 @@ from __future__ import annotations
 
 import hashlib
 import uuid
-from datetime import UTC
+from datetime import UTC, datetime
 from typing import Any
 
 from maljan.core.exceptions import MemoryStoreError
@@ -110,6 +110,31 @@ def _scope_filter(owner: str | None, *, backend: str | None = None) -> Any:
             )
         )
     return Filter(must=must)
+
+
+def _case_from_payload(p: dict[str, Any]) -> StoredCase:
+    """The ``StoredCase`` a point's payload holds; ``KeyError`` without a ``sample_id``.
+
+    ``created_at`` is the stored time where the payload holds a readable one,
+    and the time of reading otherwise.
+    """
+    case = StoredCase(
+        sample_id=p["sample_id"],
+        summary_text=p.get("summary_text", ""),
+        technique_ids=p.get("technique_ids", []),
+        malware_category=p.get("malware_category", "UNKNOWN"),
+        stix_bundle_json=p.get("stix_bundle_json", ""),
+        corroborated_count=int(p.get("corroborated_count", 0) or 0),
+        total_techniques=int(p.get("total_techniques", 0) or 0),
+        has_analyst_errors=bool(p.get("has_analyst_errors", False)),
+        owner=owner_key(p.get(OWNER_KEY)),
+    )
+    try:
+        stored = datetime.fromisoformat(str(p.get("created_at") or ""))
+    except ValueError:
+        return case
+    case.created_at = stored if stored.tzinfo else stored.replace(tzinfo=UTC)
+    return case
 
 
 class QdrantStore:
@@ -288,22 +313,7 @@ class QdrantStore:
                 again, again_by = encode_with_backend(str(p.get("summary_text") or ""))
                 score = cosine(vector, again) if again_by == backend else 0.0
             try:
-                ranked.append(
-                    (
-                        score,
-                        StoredCase(
-                            sample_id=p["sample_id"],
-                            summary_text=p.get("summary_text", ""),
-                            technique_ids=p.get("technique_ids", []),
-                            malware_category=p.get("malware_category", "UNKNOWN"),
-                            stix_bundle_json=p.get("stix_bundle_json", ""),
-                            corroborated_count=int(p.get("corroborated_count", 0) or 0),
-                            total_techniques=int(p.get("total_techniques", 0) or 0),
-                            has_analyst_errors=bool(p.get("has_analyst_errors", False)),
-                            owner=owner_key(p.get(OWNER_KEY)),
-                        ),
-                    )
-                )
+                ranked.append((score, _case_from_payload(p)))
             except (KeyError, TypeError) as exc:
                 logger.warning("QdrantStore.retrieve: skipping malformed payload: %s", exc)
         ranked.sort(key=lambda pair: pair[0], reverse=True)
@@ -322,6 +332,31 @@ class QdrantStore:
             len(results),
         )
         return results
+
+    def case_of(self, sample_id: str, owner: str | None = None) -> StoredCase | None:
+        """The case stored for ``sample_id`` under ``owner`` (the unscoped one for ``None``).
+
+        Read by its point ID (``_case_id``), the one ``store`` files it under,
+        and kept only when its payload names that sample and that owner.
+        """
+        if not self._collection_exists():
+            return None
+        scope = owner_key(owner)
+        points = self._client.retrieve(
+            collection_name=self._collection,
+            ids=[_case_id(sample_id, scope)],
+            with_payload=True,
+            with_vectors=False,
+        )
+        for point in points or []:
+            p = point.payload or {}
+            if p.get("sample_id") != sample_id or owner_key(p.get(OWNER_KEY)) != scope:
+                continue
+            try:
+                return _case_from_payload(p)
+            except (KeyError, TypeError) as exc:
+                logger.warning("QdrantStore.case_of: skipping malformed payload: %s", exc)
+        return None
 
     def count(self) -> int:
         """Return the total number of points in the Qdrant collection."""

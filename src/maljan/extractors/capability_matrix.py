@@ -62,6 +62,7 @@ from maljan.schemas.isr_models import (
     judge_kept_note,
 )
 from maljan.schemas.stix_models import (
+    EARLIER_RUN_PROPERTY,
     TECHNIQUE_REVIEW_PROPERTY,
     TechniqueReview,
     stated_confidence,
@@ -135,6 +136,7 @@ def build_capability_matrix(
 
     out_of_scope = _out_of_scope(list(techniques), sample)
     review = technique_review(stix_output)
+    earlier = earlier_run_techniques(stix_output)
 
     cells: list[CapabilityCell] = []
     mappings: list[TTPMapping] = []
@@ -245,6 +247,12 @@ def build_capability_matrix(
             # Every analyst claim naming it cites only calls that failed.
             # Published all the same: the analyst decided; the row says so.
             notes.append(FAILED_CALLS_MARKER)
+        if tid.upper() in earlier and _no_source_of_this_run(row, bool(rows)):
+            # An earlier run on this sample also reported it, and nothing of
+            # this run stands behind it. Published by the same rules as any
+            # technique: the earlier run is a fact beside the row, never a
+            # reason to publish or to withhold.
+            notes.append(EARLIER_RUN_UNSUPPORTED_NOTE)
         if undescribed and not not_published:
             notes.append(undescribed)
         if decided is not None and decided.decision == "keep":
@@ -441,6 +449,45 @@ def independent_statements(statements: Sequence[tuple[str, str]]) -> tuple[list[
 FINDING_ONLY_REASON = (
     "it was named on a finding rather than on a claim, so no check asked what evidence holds it up"
 )
+
+
+# The note on a technique an earlier run on this sample also reported when no
+# source of this run stands behind it. A note, not a reason: the earlier run
+# was shown as a hypothesis (``long_term_memory.earlier_run_block``), and the
+# publish rules read this run alone, so the published set is the one a run
+# without the earlier run would publish.
+EARLIER_RUN_UNSUPPORTED_NOTE = (
+    "an earlier run on this sample also reported it; no source of this run stands behind it"
+)
+
+
+def earlier_run_techniques(stix_output: dict[str, Any] | None) -> set[str]:
+    """The techniques the earlier run on this sample reported, from the bundle's record.
+
+    Empty for a bundle with no record (no earlier run, memory off, a stored
+    run from before the record) and for one that cannot be read.
+    """
+    raw = (stix_output or {}).get(EARLIER_RUN_PROPERTY)
+    techniques = (
+        raw.get("techniques") if isinstance(raw, dict) else getattr(raw, "techniques", None)
+    )
+    if not isinstance(techniques, list):
+        return set()
+    return {str(tid or "").strip().upper() for tid in techniques if str(tid or "").strip()}
+
+
+def _no_source_of_this_run(row: dict[str, Any], read: bool) -> bool:
+    """Whether the run's corroboration record says no independent source stands behind it.
+
+    ``independent_sources`` 0 on a row read with its sources: a citation
+    placed nowhere, a reference lookup and an external assessment of the whole
+    file stand behind no fact about it (``evidence_roots.summary_of_sources``).
+    A record that was read and holds no row for it says the same. Without the
+    record nothing is said.
+    """
+    if "sources" in row:
+        return int(row.get("independent_sources") or 0) == 0
+    return read
 
 
 def _out_of_scope(ids: list[str], sample: dict[str, Any] | None) -> dict[str, str]:
