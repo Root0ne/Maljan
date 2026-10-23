@@ -30,6 +30,10 @@ ROOT = Path(__file__).resolve().parents[3]
 GOLDEN = ROOT / "tests" / "fixtures" / "golden" / "error_filing_on_dev.json"
 DEV: dict[str, Any] = json.loads(GOLDEN.read_text(encoding="utf-8"))
 UNDECLARED = "zz_not_declared"
+# The built-in sources shipped after the golden was captured (the
+# identification servers): each tool of theirs declares a kind and files as a
+# declared tool of dev's did, and their undeclared tool as dev's undeclared one.
+SHIPPED_SINCE = frozenset({"mcp:die", "mcp:ilspy", "mcp:goresym"})
 
 
 @pytest.fixture
@@ -60,7 +64,12 @@ def test_every_built_in_tool_files_every_answer_as_dev_did(declared: ToolDeclara
         source = str(held.source)
         for tool in [*sorted(held.tools), UNDECLARED]:
             key = f"{source}::{tool}"
-            dev = DEV["filed"].get(key) or DEV["filed"][f"{source}::{UNDECLARED}"]
+            if source in SHIPPED_SINCE:
+                assert tool == UNDECLARED or held.tools[tool].kind, key
+                like = UNDECLARED if tool == UNDECLARED else "strings"
+                dev = DEV["filed"][f"mcp:analysis::{like}"]
+            else:
+                dev = DEV["filed"].get(key) or DEV["filed"][f"{source}::{UNDECLARED}"]
             now = [_filed(held.source, tool, answer) for answer in DEV["answers"]]
             if now != dev:
                 changed.append(key)

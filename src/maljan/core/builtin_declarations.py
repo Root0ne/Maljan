@@ -560,6 +560,133 @@ _SANDBOX_TOOLS: dict[str, dict[str, Any]] = {
     "sandbox_items": {"kind": "sandbox_items", "reader": "report_items"},
 }
 
+# The identification servers: one analysis program each, in an image of its
+# own (``services/die-mcp``, ``services/ilspy-mcp``, ``services/goresym-mcp``),
+# shipped switched off. Each tool reads the file its path names, as the
+# sidecar's own answer shapes say; none runs the sample. Their kinds are read
+# by kind alone: no entry of theirs was stored before declarations were.
+_SAMPLE_PATH = {"path": "path"}
+_EXECUTABLE_FORMATS = ["pe", "elf", "mach-o"]
+_DIE_TOOLS: dict[str, dict[str, Any]] = {
+    "capabilities": _CAPABILITIES,
+    "die_scan": {
+        "kind": "identification",
+        "rows": "/detections/*",
+        "values": {
+            "name": "/name",
+            "type": "/type",
+            "version": "/version",
+            "file_type": "/file_type",
+        },
+        "arguments": _SAMPLE_PATH,
+        "display_name": "Detect It Easy",
+        "shows": (
+            "the packers, compilers, linkers, protectors, installers and libraries Detect It "
+            "Easy's signatures name in the file, with the format each was found in"
+        ),
+        "does_not_show": (
+            "what the code does, or a packer or compiler no signature describes; a name is a "
+            "signature match, not a proof"
+        ),
+    },
+}
+# The report sections a decompiled function's writer is shown (Ghidra's
+# ``decompile_function``), for a decompiled .NET type or member.
+_DECOMPILED_CODE_SECTIONS = list(GHIDRA_TOOLS["decompile_function"]["report_sections"])
+_ILSPY_DECOMPILE: dict[str, Any] = {
+    "kind": "decompile",
+    "arguments": _SAMPLE_PATH,
+    "routed_formats": ["pe"],
+    "report_sections": _DECOMPILED_CODE_SECTIONS,
+    "display_name": "ILSpy",
+    "shows": "C# (or IL) that ILSpy decompiled from the assembly's metadata and IL",
+    "does_not_show": (
+        "what runs at run time: code loaded, decrypted or emitted while the assembly runs, or "
+        "native code beside the IL"
+    ),
+}
+_ILSPY_TOOLS: dict[str, dict[str, Any]] = {
+    "capabilities": _CAPABILITIES,
+    "dotnet_types": {
+        "kind": "type_list",
+        "rows": "/types/*",
+        "values": {"name": "/name", "type_kind": "/type_kind"},
+        "arguments": _SAMPLE_PATH,
+        "routed_formats": ["pe"],
+        "display_name": "ILSpy",
+        "shows": "the classes, interfaces, structs, delegates and enums the assembly defines",
+        "does_not_show": "what any of them does, or types built or loaded at run time",
+    },
+    "dotnet_decompile_type": _ILSPY_DECOMPILE,
+    "dotnet_decompile_member": _ILSPY_DECOMPILE,
+    "dotnet_decompile_assembly": {
+        **_ILSPY_DECOMPILE,
+        "kind": "decompile_batch",
+        "long_running": True,
+        "aggregate_of": ["dotnet_decompile_type", "dotnet_decompile_member"],
+    },
+    "dotnet_resources": {
+        "kind": "resource_listing",
+        "rows": "/resources/*",
+        "values": {"name": "/name"},
+        "arguments": _SAMPLE_PATH,
+        "routed_formats": ["pe"],
+        "display_name": "ILSpy",
+        "shows": "the names of the resources embedded in the assembly",
+        "does_not_show": "what a resource holds",
+    },
+    "dotnet_metadata_table": {
+        "kind": "metadata_table",
+        "rows": "/rows/*",
+        "arguments": _SAMPLE_PATH,
+        "routed_formats": ["pe"],
+        "display_name": "ILSpy",
+        "shows": "every row of one ECMA-335 metadata table as the assembly holds it",
+        "does_not_show": "how the rows are used by the code",
+    },
+}
+_GORESYM_TOOLS: dict[str, dict[str, Any]] = {
+    "capabilities": _CAPABILITIES,
+    "go_symbols": {
+        "kind": "function_list",
+        "long_running": True,
+        "rows": "/functions/*",
+        "places": {"address": "/start"},
+        "values": {"name": "/name", "package": "/package"},
+        "arguments": _SAMPLE_PATH,
+        "routed_formats": _EXECUTABLE_FORMATS,
+        "display_name": "GoReSym",
+        "shows": (
+            "the Go version, build id and build info, and each function's name, package and "
+            "address range, read from the Go runtime's own tables in the file"
+        ),
+        "does_not_show": "what a function does, or code that is not Go",
+    },
+    "go_types": {
+        "kind": "type_list",
+        "long_running": True,
+        "rows": "/types/*",
+        "values": {"name": "/Str", "type_kind": "/Kind"},
+        "arguments": _SAMPLE_PATH,
+        "routed_formats": _EXECUTABLE_FORMATS,
+        "display_name": "GoReSym",
+        "shows": "the Go type structures and interfaces the binary's moduledata lists",
+        "does_not_show": "how the types are used, or types of a Go version it misreads",
+    },
+    "go_strings": {
+        "kind": "embedded_strings",
+        "long_running": True,
+        "holds_strings": True,
+        "rows": "/strings/*",
+        "values": {"text": "/Str"},
+        "arguments": _SAMPLE_PATH,
+        "routed_formats": _EXECUTABLE_FORMATS,
+        "display_name": "GoReSym",
+        "shows": "the strings the binary's Go string table holds, each cut where Go cuts it",
+        "does_not_show": "strings built, decoded or decrypted at run time",
+    },
+}
+
 # The triage pack's steps (``pipeline.triage_pack``), each recorded under the
 # pack's own source. The in-process implementations answer as the sidecar's
 # tools of the same name do, so they declare the same facts.
@@ -967,6 +1094,18 @@ def _with_effects(
     return out
 
 
+def _identification_block(role: str, tools: dict[str, dict[str, Any]]) -> dict[str, Any]:
+    """An identification server's declaration: its role, its mount and its tools, read-only."""
+    return {
+        "roles": [role],
+        "sample_mount": "/data/samples",
+        "reads_staged_sample": True,
+        "tool_facts": _with_effects(
+            _marked_read_only(tools, frozenset(tools)), {}, default=_NO_EFFECT
+        ),
+    }
+
+
 # Each built-in server's declaration. ``roles``: ``reputation`` on the two
 # servers that declare a reputation lookup. ``reads_staged_sample`` on the
 # three servers whose path-taking tools read the sample the platform staged
@@ -1054,6 +1193,12 @@ _SERVER_BLOCKS: dict[str, dict[str, Any]] = {
         ),
         "credential_bootstrap": _VIRUSTOTAL_BOOTSTRAP,
     },
+    # The identification servers: each reads the sample the worker mirrors
+    # under the samples directory its container mounts read-only at
+    # /data/samples (``docker/docker-compose.yml``), and none runs it.
+    "die": _identification_block("identifier", _DIE_TOOLS),
+    "ilspy": _identification_block("decompiler", _ILSPY_TOOLS),
+    "goresym": _identification_block("symbol_recovery", _GORESYM_TOOLS),
 }
 
 # The static providers' own blocks (``static.ghidra``, ``static.r2``) and the

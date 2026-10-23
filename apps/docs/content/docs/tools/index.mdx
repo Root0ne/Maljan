@@ -3,7 +3,7 @@ title: "Tools"
 description: "Static providers, sandboxes, VirusTotal, the built-in sidecars and generic MCP servers."
 ---
 
-import { FlaskConical, Globe, Plug, Puzzle, ScanSearch, ShieldCheck, SquareTerminal } from 'lucide-react';
+import { Fingerprint, FlaskConical, Globe, Plug, Puzzle, ScanSearch, ShieldCheck, SquareTerminal } from 'lucide-react';
 
 Agents reach analysis tools in three ways, and each is configuration rather
 than code:
@@ -51,6 +51,13 @@ CAPEv2, Hatching Triage, an uploaded report, any REST sandbox, or the mock.
 <Card icon={<Globe />} title="VirusTotal" href="/tools/virustotal/">
 
 VirusTotal's own MCP server, registered with an agent token.
+
+</Card>
+
+<Card icon={<Fingerprint />} title="Identification servers" href="/tools/identification/">
+
+Detect It Easy, ILSpy and GoReSym, one container each, shipped switched off,
+with their own pack steps.
 
 </Card>
 

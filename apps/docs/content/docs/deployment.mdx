@@ -23,6 +23,8 @@ applies both.
 | `minio` | `minio/minio:RELEASE.2025-09-07T16-13-09Z` | Sample storage, with its own console. |
 | `ghidra-mcp` | built from `external/ghidra-mcp` | A static analyser. Runs (and is built) under the `ghidra` profile, which the shipped `docker/.env` turns on; without `GHIDRA_MCP_AUTH_TOKEN` it refuses to bind and restarts. Capped at 6 GB memory and swap, because the JVM's own limit does not bound the container. `GHIDRA_JAVA_OPTS`, `GHIDRA_MEM_LIMIT` and `GHIDRA_RESTART` in `docker/.env` change the JVM options, the cap and the restart policy; see *Running Ghidra lighter* in [configuration.md](/configuration/). |
 | `ghidra-port` | `alpine/socat` (pinned by digest) | Publishes Ghidra's port on `BIND_ADDRESS` for a worker run on the host, under the `ghidra` profile; `ghidra-mcp` itself is on an internal network only. See *The container that opens the sample* below. |
+| `die-mcp`, `ilspy-mcp`, `goresym-mcp` | built from `services/<name>/Dockerfile` | The identification servers (Detect It Easy, ILSpy, GoReSym), each under its own profile (`die`, `ilspy`, `goresym`), which the shipped `docker/.env` does not turn on; each refuses to start without its token. Capped at 2 GB, 4 GB and 2 GB of memory and swap (`DIE_MEM_LIMIT`, `ILSPY_MEM_LIMIT`, `GORESYM_MEM_LIMIT`). See [Identification servers](/tools/identification/). |
+| `die-port`, `ilspy-port`, `goresym-port` | `alpine/socat` (pinned by digest) | Each publishes its server's port (8090, 8091, 8092) on `BIND_ADDRESS` for a worker run on the host, under the server's profile, as `ghidra-port` does. |
 | `migrate` | `maljan-backend` | One-shot `alembic upgrade head`. Runs to completion before the API and the worker start; on an upgrade, migrate before restarting either, since a stored built-in team written before a seeding revision loads under a renamed key until the revision has run. |
 | `backend-api` | `maljan-backend` | The FastAPI service. |
 | `backend-worker` | `maljan-backend` | The arq worker. Capped at 8 GB memory and swap; `WORKER_RSS_RESTART_MB` makes it exit between jobs before it gets there, and `restart: unless-stopped` brings it back. It runs one analysis at a time (`WorkerSettings.max_jobs = 1`): a job's settings, the values the event scrub masks and the API names its hash resolution read are held per process, so any other `max_jobs` is refused at startup with that reason. More analyses at once take more worker processes. |
@@ -164,6 +166,20 @@ Ghidra project, so the name Ghidra runs as owns nothing it opens. A project in
 `ghidra_projects` created while the image ran as root is owned by `root`, and
 Ghidra refuses a project owned by another name; an operator who opens such
 projects sets `GHIDRA_USER=root` in `docker/.env`.
+
+The identification servers (`die-mcp`, `ilspy-mcp`, `goresym-mcp`) open the
+sample too, and are held the same way: `MALJAN_UID:MALJAN_GID`, no capability,
+no way to gain one, a process limit, and its own token as its only secret.
+Each also runs with a read-only root whose only writable place is a tmpfs at
+`/tmp`, mounts the samples directory read-only at `/data/samples` and nothing
+else, and is on an internal network of its own (`die`, `ilspy`, `goresym`)
+shared only with `backend-api`, `backend-worker` and its relay, whose other
+network (`die-publish` …) carries nothing else. Each has a memory ceiling the
+kernel enforces, with swap pinned to it, as Ghidra's: a machine-safety limit,
+not a bound on the analysis, since a program's output is read whole. A file
+past it fails its call and the run records the failure; `DIE_MEM_LIMIT`
+(2g), `ILSPY_MEM_LIMIT` (4g) and `GORESYM_MEM_LIMIT` (2g) in `docker/.env`
+change them.
 
 ## Where a tool server sees the sample
 

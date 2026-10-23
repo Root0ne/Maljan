@@ -23,6 +23,7 @@
     "./tools/capa-yara",
     "./tools/sandboxes",
     "./tools/virustotal",
+    "./tools/identification",
     "./tools/sidecars",
     "./tools/generic-mcp",
     "---Integrations---",

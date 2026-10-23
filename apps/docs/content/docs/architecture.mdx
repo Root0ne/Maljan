@@ -413,7 +413,11 @@ block for an APK; `LC_CODE_SIGNATURE` for a Mach-O; and for anything else the
 fact that it has no signing scheme);
 the format tool the routed type selects (`pe_info`, `elf_info`, `macho_info`,
 `apk_info`, `document_info` or `archive_list`, which carry the section
-entropies, the packer signature hits and the import rows); a `strings` head
+entropies, the packer signature hits and the import rows); the identification
+servers' steps, each off (no call, no entry) while its server is not switched
+on: `die_scan` (Detect It Easy) on every sample, then `dotnet_types` (ILSpy)
+and `go_symbols` (GoReSym) where `die_scan`'s declared `name` value says .NET
+or Go (see [Identification servers](/tools/identification/)); a `strings` head
 capped by `triage.strings_head` and `iocs_from_file` (its indicator scan reads printable
 ASCII and UTF-16LE runs; a UTF-16LE host written directly after a NUL-terminated ASCII
 string can be read with that string's last letter in front of it, because the bytes are

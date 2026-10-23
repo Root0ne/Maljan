@@ -53,6 +53,7 @@ from maljan.core.pack_steps import (
     PackStep,
     check_steps,
     effective_steps,
+    on_its_shipped_server,
     written_for,
 )
 from maljan.core.platform_secrets import platform_secrets_refusal
@@ -1953,6 +1954,30 @@ def _builtin_servers() -> dict[str, MCPServerConfig]:
             agents=[],
             label=virustotal.SERVER_LABEL,
         ),
+        # The identification sidecars, one analysis program each in an image
+        # of its own (``services/die-mcp``, ``services/ilspy-mcp``,
+        # ``services/goresym-mcp``), each reached over streamable HTTP at the
+        # address the shipped compose file gives it under its profile. Off
+        # until an operator starts the container and switches the block on with
+        # the container's token as ``auth_token``: a block on with nothing
+        # behind it would only ever contribute a failure. Switched on, the
+        # static analyst and the reverser are offered every tool the server
+        # advertises, and its triage pack step runs (``core.pack_steps``).
+        **{
+            key: _declared(
+                key,
+                enabled=False,
+                transport="streamable-http",
+                url=url,
+                agents=["static", "reverser"],
+                label=label,
+            )
+            for key, url, label in (
+                ("die", "http://die-mcp:8090/mcp", "Detect It Easy MCP"),
+                ("ilspy", "http://ilspy-mcp:8091/mcp", "ILSpy MCP"),
+                ("goresym", "http://goresym-mcp:8092/mcp", "GoReSym MCP"),
+            )
+        },
     }
 
 
@@ -5024,9 +5049,13 @@ class Settings(BaseSettings):
         another kind, or none, it would call that tool's rows what they are
         not. The step's own ``kind`` declares its tool's kind where it is set.
         Read strictly on a save, leniently for stored settings
-        (``core.pack_steps.lenient_steps``).
+        (``core.pack_steps.lenient_steps``). A shipped step of a server's tool
+        still calling that server's shipped tool is never refused for its
+        server: it is off where the server is not configured, switched off or
+        does not offer the tool (``core.pack_steps.steps_on_servers``). Its
+        renderer and kind are held to the rule above as any step's are.
         """
-        if not step.builtin:
+        if not step.builtin and not on_its_shipped_server(step):
             try:
                 self._check_server_tool(f"triage step {step.id!r}", step.server, step.called)
             except ValueError as exc:
