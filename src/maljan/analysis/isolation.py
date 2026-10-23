@@ -24,7 +24,9 @@ check passed. A field that could not be read is ``None``, and never counts as
 passing. A server reached at an address is not measured by this run and is
 said to be "not verified". The whole part is isolated only when at least one
 row exists and every row is isolated. A run that recorded no read of the
-sample says so and claims nothing.
+sample says so and claims nothing. Where the worker hashed the copies it
+handed out at the job's start and end, the part also says whether each stayed
+the intake bytes (``analysis.sample_integrity``).
 
 What is measured is the process the worker started and every process under it
 (:func:`measure_tree`): a launcher starts the real server as its own child, and
@@ -1014,4 +1016,9 @@ def isolation_lines(part: Any, code: Callable[[str], str] = _code) -> list[str]:
             f"{unsourced} {calls} that read the sample recorded no source, so where "
             f"{'it' if unsourced == 1 else 'they'} ran cannot be told."
         )
+    # Whether the copies handed out stayed the intake bytes, where the worker
+    # recorded it (``analysis.sample_integrity``); a part stored without it says none.
+    from maljan.analysis.sample_integrity import RECORD_KEY, integrity_lines
+
+    lines.extend(integrity_lines(part.get(RECORD_KEY), code))
     return lines
