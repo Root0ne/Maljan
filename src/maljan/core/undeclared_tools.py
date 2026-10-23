@@ -261,6 +261,108 @@ def aggregate_note(names: Iterable[str]) -> str:
     )
 
 
+# What a tool's description says after its own text (and its aggregate note)
+# when the tool declares what its answer shows and does not show
+# (``ToolFacts.shows`` / ``does_not_show``) and ``mcp.answer_scope_notes`` is
+# on. Declared tools only, as the aggregate note.
+ANSWER_SHOWS_NOTE = "This answer shows: {text}."
+ANSWER_DOES_NOT_SHOW_NOTE = "It does not show: {text}."
+
+# The metadata key a tool given a note keeps its own description under, so a
+# later settling of the notes (:func:`with_declared_notes`) writes them afresh
+# from the tool's own words instead of after the notes it already carries.
+OWN_DESCRIPTION_METADATA_KEY = "maljan_own_description"
+
+
+def answer_scopes_of(tool_facts: Mapping[str, Any] | None) -> dict[str, tuple[str, str]]:
+    """``{tool: (shows, does_not_show)}`` for each tool that declares either."""
+    out: dict[str, tuple[str, str]] = {}
+    for name, facts in (tool_facts or {}).items():
+        shows = str(getattr(facts, "shows", "") or "")
+        hidden = str(getattr(facts, "does_not_show", "") or "")
+        if shows or hidden:
+            out[str(name)] = (shows, hidden)
+    return out
+
+
+def answer_scope_note(shows: str, does_not_show: str) -> str:
+    """The note a description carries for what its answer shows and does not; "" for none."""
+    parts = [
+        template.format(text=text.strip().rstrip("."))
+        for template, text in (
+            (ANSWER_SHOWS_NOTE, shows),
+            (ANSWER_DOES_NOT_SHOW_NOTE, does_not_show),
+        )
+        if text.strip().rstrip(".")
+    ]
+    return " ".join(parts)
+
+
+def own_description(tool: Any) -> str:
+    """A tool's description as its server wrote it, without the notes the platform added."""
+    metadata = getattr(tool, "metadata", None) or {}
+    held = metadata.get(OWN_DESCRIPTION_METADATA_KEY)
+    return str(held if isinstance(held, str) else getattr(tool, "description", "") or "")
+
+
+def with_declared_notes(
+    tools: Iterable[Any],
+    aggregates: Mapping[str, Iterable[str]],
+    offered: Mapping[str, str],
+    *,
+    scopes: Mapping[str, tuple[str, str]] | None = None,
+    declared: Callable[[Any], str] | None = None,
+) -> list[Any]:
+    """``tools``, each with the notes its declaration gives it after its own description.
+
+    ``aggregates`` is the server's :func:`aggregates_of`, by the names the
+    server gave its tools; ``offered`` maps each of the server's tools the
+    request offers, by that name, to the name it is offered under (a name
+    another server took is offered as ``<server>__<name>``). A tool the request
+    does not offer is left out of the aggregate note, and a tool none of whose
+    aggregated tools is offered carries none. ``scopes`` is the server's
+    :func:`answer_scopes_of`, given only while ``mcp.answer_scope_notes`` is
+    on; its note follows the aggregate note. ``declared`` reads a tool's own
+    name (default: its ``name``).
+
+    The notes are written from the tool's own description
+    (:func:`own_description`), so settling them again over a narrower or a
+    wider set of offered tools replaces the notes a tool carries rather than
+    adding to them, and takes off a note that names nothing offered any more.
+    A tool that carries no note and gains none is the same object.
+    """
+    read = declared or (lambda tool: str(getattr(tool, "name", "") or ""))
+    held_scopes = scopes or {}
+    out: list[Any] = []
+    for tool in tools:
+        name = read(tool)
+        notes = [
+            aggregate_note(offered[n] for n in aggregates.get(name, ()) if n in offered),
+            answer_scope_note(*held_scopes[name]) if name in held_scopes else "",
+        ]
+        note = " ".join(n for n in notes if n)
+        metadata = getattr(tool, "metadata", None) or {}
+        noted = OWN_DESCRIPTION_METADATA_KEY in metadata
+        if note:
+            raw = own_description(tool)
+            own = " ".join(raw.split())
+            described = f"{own} {note}" if own else note
+            if not noted or described != getattr(tool, "description", None):
+                tool = tool.model_copy(
+                    update={
+                        "description": described,
+                        "metadata": {**metadata, OWN_DESCRIPTION_METADATA_KEY: raw},
+                    }
+                )
+        elif noted:
+            kept = {k: v for k, v in metadata.items() if k != OWN_DESCRIPTION_METADATA_KEY}
+            tool = tool.model_copy(
+                update={"description": own_description(tool), "metadata": kept or None}
+            )
+        out.append(tool)
+    return out
+
+
 def with_aggregate_notes(
     tools: Iterable[Any],
     aggregates: Mapping[str, Iterable[str]],
@@ -270,23 +372,11 @@ def with_aggregate_notes(
 ) -> list[Any]:
     """``tools``, each that declares itself an aggregate with the note after its description.
 
-    ``aggregates`` is the server's :func:`aggregates_of`, by the names the
-    server gave its tools; ``offered`` maps each of the server's tools the
-    request offers, by that name, to the name it is offered under (a name
-    another server took is offered as ``<server>__<name>``). A tool the request
-    does not offer is left out of the note, and a tool none of whose
-    aggregated tools is offered carries none; ``declared`` reads a tool's own
-    name (default: its ``name``). Every other tool is the same object.
+    :func:`with_declared_notes` with the aggregate notes alone: what a
+    provider writes when it attaches, before the agent's whole tool list is
+    settled.
     """
-    read = declared or (lambda tool: str(getattr(tool, "name", "") or ""))
-    out: list[Any] = []
-    for tool in tools:
-        note = aggregate_note(offered[n] for n in aggregates.get(read(tool), ()) if n in offered)
-        if note:
-            own = " ".join(str(getattr(tool, "description", "") or "").split())
-            tool = tool.model_copy(update={"description": f"{own} {note}" if own else note})
-        out.append(tool)
-    return out
+    return with_declared_notes(tools, aggregates, offered, declared=declared)
 
 
 # ---------------------------------------------------------------------------

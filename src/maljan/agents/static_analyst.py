@@ -263,15 +263,22 @@ class StaticAnalyst(BaseAnalyst):
         # The provider's tools are the agent's own: a server tool of the same
         # name is offered as ``<server>__<tool>`` beside them, never in their
         # place.
-        self.tools = [
-            *pool,
-            *self._attach_registry_tools(
-                "static",
-                exclude=str(getattr(provider, "server_name", "")),
-                claimed=pool,
-                claimed_by=f"provider:{provider.id}",
-            ),
-        ]
+        # The notes after each description, settled over the whole list
+        # (``servers.settle_tool_notes``).
+        from maljan.providers.servers import settle_tool_notes
+
+        self.tools = settle_tool_notes(
+            [
+                *pool,
+                *self._attach_registry_tools(
+                    "static",
+                    exclude=str(getattr(provider, "server_name", "")),
+                    claimed=pool,
+                    claimed_by=f"provider:{provider.id}",
+                ),
+            ],
+            getattr(getattr(self, "_container", None), "config", None),
+        )
         self.logger.info("Static provider '%s': %d tools attached.", provider.id, len(self.tools))
 
     def _record_provider_degradation(self, provider: Any, exc: BaseException) -> None:

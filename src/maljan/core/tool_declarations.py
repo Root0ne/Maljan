@@ -133,6 +133,46 @@ def check_tool_name(value: str, what: str = "tool name") -> str:
     return value
 
 
+# A character that would break the one line a scope text is shown on: a line
+# break or another control character, the Unicode line breaks (NEL, LINE
+# SEPARATOR, PARAGRAPH SEPARATOR) included.
+_SCOPE_BREAK = re.compile(r"[\x00-\x1f\x7f\x85\u2028\u2029]")
+
+
+def check_scope_text(value: str, what: str = "shows") -> str:
+    """What a tool's answer shows or does not show (``ToolFacts.shows``): one line of text.
+
+    Kept as written, as ``display_name`` is (the note it gives a description
+    is trimmed where it is written). A line break or another control
+    character is refused in an operator's edit (``STRICT_DECLARATIONS``); a
+    text already accepted is read with each run of them and of blanks as one
+    space, with a warning. No length is imposed: the text is the operator's.
+    """
+    if not _SCOPE_BREAK.search(value):
+        return value
+    if STRICT_DECLARATIONS.get():
+        raise ValueError(f"{what} is one line of text, without line breaks or control characters")
+    read = " ".join(_SCOPE_BREAK.sub(" ", value).split())
+    _warn_scope_breaks(what)
+    return read
+
+
+def _warn_scope_breaks(what: str) -> None:
+    marker = (f"scope {what}", ())
+    if marker in _WARNED:
+        return
+    if len(_WARNED) >= _WARNED_MAX:
+        _WARNED.clear()
+    _WARNED.add(marker)
+    from maljan.core.logger import logger
+
+    logger.warning(
+        "A tool declaration's %s holds line breaks or control characters; each run of them "
+        "is read as one space and the rest is kept.",
+        loggable_names([what]),
+    )
+
+
 def check_own_prefix(server: str, names: Iterable[str]) -> None:
     """Refuse a declared tool name spelled as a renamed tool of ``server``.
 
@@ -439,7 +479,8 @@ NO_KIND = "unclassified"
 # (the guard's budget, a call's argument roles, the tag a description is shown
 # with, the words and name a tool is given, whether it discloses the sample,
 # the routed formats it serves, what a call does beyond answering, the tools
-# of its server it is the aggregate form of).
+# of its server it is the aggregate form of, what its answer shows and does
+# not show).
 # A kind-dependent field is read only through the kind (an answer's rows and
 # the paths inside them, its techniques and reputation, a reader of its shape,
 # the report sections it is shown to): a declaration that names no kind may
@@ -459,6 +500,8 @@ KIND_FREE_FIELDS: tuple[str, ...] = (
     "routed_formats",
     "effects",
     "aggregate_of",
+    "shows",
+    "does_not_show",
 )
 KIND_DEPENDENT_FIELDS: tuple[str, ...] = (
     "asserts_techniques",
@@ -1115,7 +1158,13 @@ class ToolFacts(BaseModel):
     at once, a whole-program graph that combines per-function ones). The tool
     is shown to the model as such (``undeclared_tools.with_aggregate_notes``),
     so it can choose the one call over the many; each name is a tool of the
-    same server (:func:`aggregate_reference_errors`).
+    same server (:func:`aggregate_reference_errors`). ``shows`` and
+    ``does_not_show`` say, in a few words of the operator's, what the tool's
+    answer shows and what it does not show (a reputation lookup shows what
+    others reported of the sample and not its behaviour): shown in the console
+    and the docs, and after the tool's description only while
+    ``mcp.answer_scope_notes`` is on (``undeclared_tools.answer_scope_note``).
+    Each is one line of text (:func:`check_scope_text`).
     """
 
     # A key this model does not know is refused in an operator's edit
@@ -1149,6 +1198,8 @@ class ToolFacts(BaseModel):
     routed_formats: tuple[str, ...] = ()
     effects: ToolEffects | None = None
     aggregate_of: tuple[str, ...] = ()
+    shows: str = ""
+    does_not_show: str = ""
 
     @model_validator(mode="before")
     @classmethod
@@ -1250,6 +1301,11 @@ class ToolFacts(BaseModel):
         if repeated:
             raise ValueError(f"aggregate_of names {', '.join(repeated)} more than once")
         return names
+
+    @field_validator("shows", "does_not_show")
+    @classmethod
+    def _scope_is_one_line(cls, value: str, info: Any) -> str:
+        return check_scope_text(value, info.field_name)
 
     @model_validator(mode="after")
     def _a_source_is_an_asserting_tool_s(self) -> ToolFacts:
@@ -2052,7 +2108,7 @@ def strip_declaration_defaults(dumped: dict[str, Any], default: MCPServerConfig)
 # The fields of a tool's declaration added after digests were first recorded,
 # left out of a block's digest where a tool leaves them at their default, so
 # adding one moves no digest of a block whose tools do not set it.
-DIGEST_OMITS_AT_DEFAULT: tuple[str, ...] = ("aggregate_of",)
+DIGEST_OMITS_AT_DEFAULT: tuple[str, ...] = ("aggregate_of", "shows", "does_not_show")
 
 
 def _digested_tools(tool_facts: Any) -> Any:

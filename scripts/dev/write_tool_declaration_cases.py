@@ -43,6 +43,8 @@ _GOOD: dict[str, Any] = {
     "routed_formats": ["pe"],
     "effects": {"executes": "emulation", "network": False},
     "aggregate_of": ["t"],
+    "shows": "what it shows",
+    "does_not_show": "what it does not show",
     "asserts_techniques": True,
     "source": "sigma",
     "holds_strings": True,

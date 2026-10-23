@@ -2343,6 +2343,19 @@ ANNOTATIONS.update(
             "subgroup": "Resilience",
             "advanced": True,
         },
+        "mcp.answer_scope_notes": {
+            "title": "Tell the model what each tool's answer shows",
+            "description": (
+                "On, a tool whose declaration says what its answer shows and what it does "
+                "not show (its shows and does_not_show) is shown to the model with that "
+                "after its description: 'This answer shows: … It does not show: …'. "
+                "Off, the default, the declarations are shown in the console and the docs "
+                "only, and every prompt is as it was; a tool that declares neither is "
+                "shown as before either way. Off until an A/B measures what it changes."
+            ),
+            "subgroup": "Tool descriptions",
+            "advanced": True,
+        },
         "static.generic.server": {
             "title": "Custom MCP server",
             "description": (

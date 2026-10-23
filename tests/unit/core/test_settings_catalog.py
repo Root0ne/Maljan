@@ -115,11 +115,13 @@ def test_entries_sort_by_order_then_path_within_a_group():
 
 def test_the_mcp_group_exposes_the_server_registry_and_the_breaker():
     """``mcp.servers`` is the operator-configurable server surface and
-    ``mcp.breaker.*`` how a job treats a server that keeps failing; the catalog
-    walks ``model_fields`` and must not grow another ``mcp.*`` leaf without a
-    deliberate decision."""
+    ``mcp.breaker.*`` how a job treats a server that keeps failing;
+    ``mcp.answer_scope_notes`` whether the model is shown what each tool's
+    answer shows (X21, off until its A/B); the catalog walks ``model_fields``
+    and must not grow another ``mcp.*`` leaf without a deliberate decision."""
     paths = {e.path for e in cat.core_catalog()}
     assert sorted(p for p in paths if p.startswith("mcp.")) == [
+        "mcp.answer_scope_notes",
         "mcp.breaker.call_timeout_seconds",
         "mcp.breaker.cooldown_seconds",
         "mcp.breaker.failures_to_open",

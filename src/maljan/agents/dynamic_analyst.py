@@ -194,12 +194,17 @@ class DynamicAnalyst(BaseAnalyst):
         own = [*sandbox_tools, *self._definition_sandbox_tools()]
         # The sandbox's tools are the agent's own: a server tool of the same
         # name is offered as ``<server>__<tool>`` beside them.
-        self.tools = [
-            *own,
-            *self._attach_registry_tools(
-                "dynamic", claimed=own, claimed_by=f"provider:{provider.id}"
-            ),
-        ]
+        from maljan.providers.servers import settle_tool_notes
+
+        self.tools = settle_tool_notes(
+            [
+                *own,
+                *self._attach_registry_tools(
+                    "dynamic", claimed=own, claimed_by=f"provider:{provider.id}"
+                ),
+            ],
+            getattr(getattr(self, "_container", None), "config", None),
+        )
 
     # ------------------------------------------------------------------
     # Text interface (backward compatible)

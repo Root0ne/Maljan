@@ -2033,6 +2033,12 @@ class MCPConfig(BaseModel):
     # how many calls it may have in flight at once. Per job and per server;
     # see ``maljan.providers.server_guard``.
     breaker: MCPBreakerConfig = Field(default_factory=lambda: MCPBreakerConfig())
+    # Whether a tool's description, as the model is shown it, ends with what
+    # its answer shows and does not show, where its declaration says
+    # (``ToolFacts.shows`` / ``does_not_show``). Off by default: the
+    # declarations are shown in the console and the docs, and the prompts stay
+    # as they were until an A/B turns it on (``servers.settle_tool_notes``).
+    answer_scope_notes: bool = False
 
     @model_validator(mode="after")
     def _no_tool_is_declared_under_a_renamed_spelling(self) -> "MCPConfig":

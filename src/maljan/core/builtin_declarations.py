@@ -359,7 +359,16 @@ _PCAP_SUMMARY: dict[str, Any] = {
 _ANALYSIS_TOOLS: dict[str, dict[str, Any]] = {
     "apk_info": _file("format_info"),
     "archive_list": _file("archive_listing"),
-    "capa": _CAPABILITY_RULES,
+    # capa reads the file, its code and its structure without running it (with
+    # the pefile backend, file-scope features only).
+    "capa": {
+        **_CAPABILITY_RULES,
+        "shows": (
+            "the capabilities whose capa rules match features of the file, its code and its "
+            "structure"
+        ),
+        "does_not_show": "whether the matched code runs, or a capability no rule describes",
+    },
     "capabilities": _CAPABILITIES,
     "carve_payloads": _file("carve"),
     "decode_string_blobs": _DECODED_STRINGS,
@@ -386,7 +395,15 @@ _ANALYSIS_TOOLS: dict[str, dict[str, Any]] = {
     "sigma_match": _event_rules("events"),
     "sigma_match_sandbox": _event_rules("report"),
     "signing_info": _file("signing"),
-    "strings": _STRINGS,
+    # Runs read as they sit in the file (``string_tools.strings``).
+    "strings": {
+        **_STRINGS,
+        "shows": "printable ASCII and UTF-16LE runs as they sit in the file, with their offsets",
+        "does_not_show": (
+            "strings that are encoded, encrypted, compressed or built at run time; nor runs "
+            "shorter than min_len, or past this page (read next_offset)"
+        ),
+    },
     "transform_bytes": _file("transform", "byte_transform"),
     "unpack_upx": _file("unpack", "unpacked_image"),
     "yara_scan": {**_SIGNATURE_RULES, "timeout_seconds": 60},
@@ -432,11 +449,18 @@ _THREATINTEL_TOOLS: dict[str, dict[str, Any]] = {
     "check_domain_reputation": {
         "kind": "indicator_reputation",
         "arguments": {"domain": "domain"},
+        "shows": "what VirusTotal reports of the domain: its engine counts and categories",
+        "does_not_show": "whether the sample contacts the domain, or what it would send there",
     },
     "check_hash": {
         "kind": "reputation",
         "arguments": {"hash": "file_hash"},
         "display_name": "Threat intelligence",
+        "shows": "what VirusTotal reports of the hash: its engine counts and details of the file",
+        "does_not_show": (
+            "this run's own analysis of the sample; an unknown hash or no detections is no "
+            "evidence that the file is clean"
+        ),
         "reputation": {
             "stats": "/last_analysis_stats",
             "malicious": "/last_analysis_stats/malicious",
@@ -450,7 +474,12 @@ _THREATINTEL_TOOLS: dict[str, dict[str, Any]] = {
             "rank": 20,
         },
     },
-    "check_ip_reputation": {"kind": "indicator_reputation", "arguments": {"ip": "ip_address"}},
+    "check_ip_reputation": {
+        "kind": "indicator_reputation",
+        "arguments": {"ip": "ip_address"},
+        "shows": "what VirusTotal and AbuseIPDB report of the address",
+        "does_not_show": "whether the sample contacts the address, or what it would send there",
+    },
     "get_threatintel_status": {"kind": "status"},
 }
 
@@ -491,6 +520,11 @@ _VIRUSTOTAL_TOOLS: dict[str, dict[str, Any]] = {
         "arguments": {"hash": "hash"},
         "reputation": _VT_REPUTATION,
         "display_name": "VirusTotal",
+        "shows": "what VirusTotal holds for the hash: its engines' detections and file details",
+        "does_not_show": (
+            "this run's own analysis of the sample; an unknown hash or no detections is no "
+            "evidence that the file is clean"
+        ),
     },
     "get_ip_report": {"kind": "indicator_report"},
     "get_submission": {"kind": "submission_status"},

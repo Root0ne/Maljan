@@ -1220,7 +1220,11 @@ def resolve_agent(key: str, container: Any, job_key: str = "job") -> ResolvedAge
     tools.extend(served)
     reasons.extend(served_reasons)
 
-    deduped = _dedupe(tools)
+    # The notes after each description, settled over the whole list: the
+    # provider's tools as the agent is offered them, beside the servers'.
+    from maljan.providers.servers import settle_tool_notes
+
+    deduped = settle_tool_notes(_dedupe(tools), settings)
     staged, staging_reasons = _stage(container, deduped, job_key)
     staged = _mounted(container, deduped, staged)
     hold_sample_paths(registry, deduped, staged)
@@ -1296,7 +1300,11 @@ async def aresolve_agent(key: str, container: Any, job_key: str = "job") -> Reso
     tools.extend(served)
     reasons.extend(served_reasons)
 
-    deduped = _dedupe(tools)
+    # The notes after each description, settled over the whole list: the
+    # provider's tools as the agent is offered them, beside the servers'.
+    from maljan.providers.servers import settle_tool_notes
+
+    deduped = settle_tool_notes(_dedupe(tools), settings)
     staged, staging_reasons = await _astage(
         container.get_server_registry(), container, deduped, job_key
     )

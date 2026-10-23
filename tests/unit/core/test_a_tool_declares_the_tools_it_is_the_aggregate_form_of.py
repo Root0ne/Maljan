@@ -285,6 +285,8 @@ class TestTheDigests:
         assert declaration_digest(plain) != declaration_digest(declaring)
 
     def test_an_unchanged_built_in_keeps_dev_s_digest(self) -> None:
-        # The analysis server declares no aggregate; its digest as dev records it.
+        # The knowledge server declares no aggregate; its digest as dev records it.
+        # (The analysis server's moved when two of its tools declared what their
+        # answers show and do not show.)
         digests = ToolDeclarations.from_settings(Settings(_env_file=None)).digests()
-        assert digests["mcp:analysis"] == "2ddebbae1cb980dc"
+        assert digests["mcp:knowledge"] == "2fbd76f41eddabe6"

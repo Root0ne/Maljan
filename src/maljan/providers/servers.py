@@ -1638,6 +1638,79 @@ def _offered_names(server: str, incoming: Sequence[Any], seen: dict[str, str]) -
     return out
 
 
+def settle_tool_notes(tools: Sequence[Any], settings: Any = None) -> list[Any]:
+    """An agent's whole tool list, each tool with the notes its declaration gives it.
+
+    The one place the notes after a tool's description are settled once every
+    name the agent is offered is known: ``aggregate_of`` (each aggregated tool
+    named as offered, ``<server>__<tool>`` after a collision, and left out when
+    it is not offered) and, while ``mcp.answer_scope_notes`` is on, what the
+    tool's answer shows and does not show (``ToolFacts.shows`` /
+    ``does_not_show``). Tools are grouped by the source they are declared under
+    (``mcp:<key>``, a provider's, the sandbox report's;
+    ``tool_pinning.declared_source_of``), so a server's tools merged in several
+    halves (bound by ``agents``, named by a ``ToolRef``) are read as one set,
+    whatever order they arrived in. A delivery tool, never offered to the model
+    (``tool_pinning.DELIVERY_TOOLS``), is not named. Each note is written from
+    the tool's own description (``undeclared_tools.with_declared_notes``), so
+    a note a provider or a merge wrote earlier is replaced, not repeated, and
+    one naming no offered tool is taken off. ``settings`` is the job's
+    (default: the process's). A tool with no declared source, or whose source
+    declares nothing it reads, is the same object.
+    """
+    from maljan.agents.tool_pinning import DELIVERY_TOOLS, declared_name_of, declared_source_of
+    from maljan.core.declared_reading import declarations
+    from maljan.core.undeclared_tools import (
+        OWN_DESCRIPTION_METADATA_KEY,
+        aggregates_of,
+        answer_scopes_of,
+        with_declared_notes,
+    )
+
+    if settings is None:
+        from maljan.core.config import get_settings
+
+        settings = get_settings()
+    offered: dict[str, dict[str, str]] = {}
+    for tool in tools:
+        source = declared_source_of(tool)
+        name = str(getattr(tool, "name", "") or "")
+        declared = declared_name_of(tool)
+        if source is None or not name or declared in DELIVERY_TOOLS:
+            continue
+        offered.setdefault(source, {}).setdefault(declared, name)
+    if not offered:
+        return list(tools)
+    try:
+        held = declarations(settings)
+    except Exception as exc:  # noqa: BLE001 — an unreadable declaration adds no note
+        logger.debug("tool notes not settled (%s).", type(exc).__name__)
+        return list(tools)
+    scoped = bool(getattr(getattr(settings, "mcp", None), "answer_scope_notes", False))
+    notes: dict[str, tuple[dict[str, tuple[str, ...]], dict[str, tuple[str, str]]]] = {}
+    for source in offered:
+        try:
+            facts = getattr(held.source(source), "tools", None) or {}
+        except ValueError:  # a source that does not parse declares nothing
+            facts = {}
+        notes[source] = (aggregates_of(facts), answer_scopes_of(facts) if scoped else {})
+    out: list[Any] = []
+    for tool in tools:
+        source = declared_source_of(tool)
+        aggregates, scopes = notes.get(source or "", ({}, {}))
+        noted = OWN_DESCRIPTION_METADATA_KEY in (getattr(tool, "metadata", None) or {})
+        if source is not None and (aggregates or scopes or noted):
+            tool = with_declared_notes(
+                [tool],
+                aggregates,
+                offered.get(source, {}),
+                scopes=scopes,
+                declared=declared_name_of,
+            )[0]
+        out.append(tool)
+    return out
+
+
 def offered_name(server: str, name: str, seen: dict[str, str]) -> str:
     """The name ``server``'s tool ``name`` is offered under, given the names ``seen`` claimed.
 
@@ -1704,6 +1777,8 @@ class ServerRegistry:
         self._handles = {
             name: ServerHandle(name, config) for name, config in cfg.mcp.servers.items()
         }
+        # What an agent's merged tool list is settled against (``settle_tool_notes``).
+        self._settings = cfg
         # The job's note of the paths each server opened, for the servers
         # that declare their open tool; one per job, given to every handle.
         self.sample_notes = sample_notes if sample_notes is not None else SampleNotes()
@@ -2312,6 +2387,10 @@ class ServerRegistry:
         holding the names the agent's in-process tools claimed (its provider's,
         its sandbox's), which therefore never move either. A server both bound
         and named contributes one copy.
+
+        The notes after each tool's description are settled once over the
+        merged list (:func:`settle_tool_notes`), so a server's tool reached in
+        one half names the tools of the same server another half offered.
         """
         seen = {} if seen is None else seen
         tools, reasons = self.tools_for(
@@ -2326,7 +2405,7 @@ class ServerRegistry:
         )
         tools.extend(added)
         reasons.extend(added_reasons)
-        return tools, reasons
+        return settle_tool_notes(tools, getattr(self, "_settings", None)), reasons
 
     async def aagent_tools(
         self,
@@ -2352,7 +2431,7 @@ class ServerRegistry:
         )
         tools.extend(added)
         reasons.extend(added_reasons)
-        return tools, reasons
+        return settle_tool_notes(tools, getattr(self, "_settings", None)), reasons
 
     def server_versions(self) -> dict[str, dict[str, str]]:
         """Per configured server this job attached, the name and version it gave for itself.
