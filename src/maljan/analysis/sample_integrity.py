@@ -15,6 +15,13 @@ which copy, what it read and when it was seen, and the analyst decides what
 it touches. A run stored before the record existed carries none and reads as
 before.
 
+A sandbox that detonated the sample names the target it ran in its own
+report. Where that hash is not the intake digest, the run keeps a second
+record (``run_summary["sandbox_target"]``, :func:`sandbox_target_record`),
+said in the same part (:func:`sandbox_target_lines`): what the sandbox
+observed may be of other bytes. A report that names no target hash, or the
+intake one, adds nothing.
+
 Each reading is one streaming pass over the copy (:func:`file_sha256`), of no
 more than the intake size: a copy of another size is a change without being
 read. The cost is linear in the sample's size, with no limit of its own.
@@ -24,12 +31,18 @@ from __future__ import annotations
 
 import hashlib
 import os
+import re
 import stat
+import unicodedata
 from collections.abc import Callable, Mapping, Sequence
 from typing import Any
 
 # The run summary key and the isolation part key the record is kept under.
 RECORD_KEY = "sample_integrity"
+# The same, for a sandbox report that named another target.
+SANDBOX_KEY = "sandbox_target"
+
+_SHA256 = re.compile(r"[0-9a-f]{64}")
 
 # When a reading was taken.
 AT_START = "start"
@@ -135,14 +148,66 @@ def integrity_record(expected: str, readings: Sequence[Mapping[str, Any]]) -> di
     }
 
 
-def with_integrity(disclosure: Any, record: Mapping[str, Any]) -> Any:
+def sandbox_target_record(
+    expected: str, claimed: Any, *, provider: str = "", task_id: str = ""
+) -> dict[str, Any] | None:
+    """The record of a sandbox report whose target hash is not ``expected``; else ``None``.
+
+    ``claimed`` is the target SHA-256 the sandbox's report names, as the
+    provider's reader put it in the neutral report. No claim, or the intake
+    digest in any case, is no record. A claim that is not a SHA-256 is the
+    sandbox's own text: it is kept as :func:`_shown` keeps it, marked
+    ``sandbox_sha256_valid: False``.
+    """
+    claim = str(claimed or "").strip().lower()
+    if not claim or not expected or claim == expected.lower():
+        return None
+    if _SHA256.fullmatch(claim):
+        return {
+            "expected_sha256": expected,
+            "sandbox_sha256": claim,
+            "provider": provider,
+            "task_id": task_id,
+        }
+    return {
+        "expected_sha256": expected,
+        "sandbox_sha256": _shown(claim),
+        "sandbox_sha256_valid": False,
+        "provider": provider,
+        "task_id": task_id,
+    }
+
+
+def _shown(value: str) -> str:
+    """A sandbox's value that is not a SHA-256, as a sandbox failure's words are kept.
+
+    A URL loses its credentials, every line break becomes a space, every
+    other control character is dropped, and the value is cut to the bound a
+    sandbox failure's words have (``app.SANDBOX_FAILURE_CHARS``) with the cut
+    mark. Only a bounded head of it is read.
+    """
+    from maljan.app import SANDBOX_FAILURE_CHARS
+    from maljan.core.settings_overrides import redact_url
+    from maljan.utils.marked_cut import CUT_MARK, marked_cut
+
+    head = value[: 4 * SANDBOX_FAILURE_CHARS]
+    one_line = " ".join(redact_url(head).splitlines())
+    printable = "".join(ch for ch in one_line if unicodedata.category(ch) != "Cc")
+    cut = marked_cut(printable, SANDBOX_FAILURE_CHARS)
+    if len(value) > len(head) and not cut.endswith(CUT_MARK):
+        # Only the head was read: what is shown still says it was cut.
+        cut = cut[: max(0, SANDBOX_FAILURE_CHARS - len(CUT_MARK))].rstrip() + CUT_MARK
+    return cut
+
+
+def with_integrity(disclosure: Any, record: Mapping[str, Any], key: str = RECORD_KEY) -> Any:
     """``disclosure`` with ``record`` in its isolation part; unchanged when it has no such part."""
     if not isinstance(disclosure, Mapping):
         return disclosure
     part = disclosure.get("isolation")
     if not isinstance(part, Mapping) or "rows" not in part:
         return disclosure
-    return {**disclosure, "isolation": {**part, RECORD_KEY: dict(record)}}
+    return {**disclosure, "isolation": {**part, key: dict(record)}}
 
 
 def _copy_name(entry: Mapping[str, Any], code: Callable[[str], str]) -> str:
@@ -187,3 +252,32 @@ def integrity_lines(record: Any, code: Callable[[str], str]) -> list[str]:
             why = str(entry.get("error") or "no reason recorded")
             lines.append(f"{who[:1].upper()}{who[1:]} was not hashed {when}: {why}.")
     return lines
+
+
+def sandbox_target_lines(record: Any, code: Callable[[str], str]) -> list[str]:
+    """The sandbox target record's sentences; ``[]`` for a part stored without one."""
+    if not isinstance(record, Mapping):
+        return []
+    claim = str(record.get("sandbox_sha256") or "")
+    expected = str(record.get("expected_sha256") or "")
+    if not claim or not expected:
+        return []
+    provider = str(record.get("provider") or "")
+    task_id = str(record.get("task_id") or "")
+    which = f"The report of the sandbox {code(provider)}" if provider else "The sandbox report"
+    if task_id:
+        which += f" (task {code(task_id)})"
+    if record.get("sandbox_sha256_valid") is False:
+        said = (
+            f"{which} names its target with a value that is not a SHA-256, {code(claim)}, "
+            f"so what it observed cannot be tied to the sample's intake SHA-256 "
+            f"{code(expected)}."
+        )
+    else:
+        said = (
+            f"{which} names its target SHA-256 as {code(claim)}, not the sample's intake "
+            f"SHA-256 {code(expected)}: what it observed may be of other bytes."
+        )
+    return [
+        f"{said} The run was not failed for it; which findings it touches is the analyst's call."
+    ]

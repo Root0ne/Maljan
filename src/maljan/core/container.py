@@ -647,6 +647,14 @@ class ServiceContainer:
         # degradation reason (``pipeline.nodes.sandbox_degradation_reason``).
         # ``None`` where the sandbox answered or was never asked.
         self.sandbox_failure: str | None = None
+        # The target a detonating sandbox's report names
+        # (``{"provider", "task_id", "sha256"}``, the hash as the provider's
+        # reader put it in the neutral report), set by ``app._submit_to_sandbox``
+        # and compared with the sample by the worker
+        # (``analysis.sample_integrity.sandbox_target_record``). ``None`` for an
+        # attached report, a stand-in, a recorded fixture, a task that ended
+        # without a report, or no sandbox.
+        self.sandbox_target_claim: dict[str, str] | None = None
         # Each submission of the sample to the job's sandbox provider
         # (``analysis.disclosure.upload_record``), set by ``app.arun`` as it
         # submits and read by the run's disclosure block. Empty outside a job.
