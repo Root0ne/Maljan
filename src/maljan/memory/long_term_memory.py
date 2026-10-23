@@ -32,6 +32,7 @@ Helper build_stored_case():
 
 from __future__ import annotations
 
+import functools
 import re
 import unicodedata
 from collections.abc import Iterable, Mapping
@@ -495,6 +496,64 @@ def earlier_run_of(container: Any, sample_id: str) -> Any:
         techniques=earlier_techniques(case),
         stored=case.created_at.astimezone(UTC).strftime("%Y-%m-%d"),
     )
+
+
+# ---------------------------------------------------------------------------
+# Another run's ids: never in this run's form
+# ---------------------------------------------------------------------------
+#
+# A stored case's text was written by another run, and its ledger ids
+# (``ev_0007``) and sandbox item ids (``net:4``) are that run's sequence
+# numbers. This run issues the same numbers, so a past case's ``ev_0007``
+# names a real entry of this run that says something else: a judge that
+# copies it cites that entry, and every id check passes. Every text that
+# carries a stored case into this run goes through
+# :func:`foreign_ids_written_out` first.
+
+# What another run's ledger id and item id are written as. Each starts and
+# ends with a word character and holds no digit, underscore or colon: no
+# reader of an entry id (any ``ev_<digits>``, in any case, at any boundary)
+# or of an item id (``sandbox_sections.ITEM_ID_RE``) finds one in it, nor
+# in it and the text either side of it. It starts with no hex digit, so it
+# cannot complete an escape the text left open before it.
+FOREIGN_ENTRY_ID = "other-run-entry"
+FOREIGN_ITEM_ID = "other-run-item"
+
+
+@functools.lru_cache(maxsize=1)
+def _foreign_id_re() -> re.Pattern[str]:
+    """Either id shape: an entry id as the widest reader takes it, or an item id."""
+    from maljan.analysis.sandbox_sections import ITEM_ID_RE
+
+    return re.compile(rf"(?P<entry>ev_\d++)|(?P<item>{ITEM_ID_RE.pattern})", re.IGNORECASE)
+
+
+def _foreign_id(match: re.Match[str]) -> str:
+    return FOREIGN_ENTRY_ID if match.group("entry") is not None else FOREIGN_ITEM_ID
+
+
+def foreign_ids_written_out(text: str) -> str:
+    """``text`` of another run with each of its ledger and item ids renamed.
+
+    An entry id becomes :data:`FOREIGN_ENTRY_ID` and an item id
+    :data:`FOREIGN_ITEM_ID`, so nothing of it reads as an id of this run. One
+    pass, linear in the text; a text with no id comes back as it was. Safe on
+    raw text and on text already quoted: an id the quoting left right after an
+    escape (``\\x0e`` then ``v_0003``) is still matched.
+    """
+    return _foreign_id_re().sub(_foreign_id, text)
+
+
+def foreign_quoted_value(text: str) -> str:
+    """Another run's text as one quoted value of a prompt (``tool_fence.quoted_value``).
+
+    Its ids are renamed before the quoting, where an item id after a control
+    character is still one, and again after it, where a written-out control
+    can have brought the ``e`` of an entry id.
+    """
+    from maljan.agents.tool_fence import quoted_value
+
+    return foreign_ids_written_out(quoted_value(foreign_ids_written_out(str(text or ""))))
 
 
 # ---------------------------------------------------------------------------
