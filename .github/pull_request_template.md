@@ -11,5 +11,5 @@ Playwright spec when the console changed, the migration when the schema did. -->
 
 - [ ] The PR targets `dev` (only a promotion PR targets `main`)
 - [ ] New behaviour has a test; changed behaviour has an updated test
-- [ ] `CHANGELOG.md` has an entry under Unreleased when users would notice
+- [ ] A `changelog.d/` fragment holds the entry when users would notice
 - [ ] No secret, sample hash or credential appears in the diff

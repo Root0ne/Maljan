@@ -20,8 +20,10 @@ details.
 3. Run the gates locally before pushing: `make lint format-check typecheck`,
    `uv run pytest tests/`, and in `apps/web` the type-check, lint and unit
    tests. Run the named Playwright spec for any console area you touched.
-4. Add or update tests for the behaviour you change, and a `CHANGELOG.md`
-   entry under Unreleased when a user would notice.
+4. Add or update tests for the behaviour you change, and a changelog entry when
+   a user would notice: a fragment file under `changelog.d/`, not an edit to
+   `CHANGELOG.md` (see `changelog.d/README.md`). Promotion folds the fragments
+   into Unreleased with `python scripts/changelog/fold.py`.
 5. Fill in the pull request template. CI, CodeQL and the dependency review
    must be green; a code owner reviews every change.
 
