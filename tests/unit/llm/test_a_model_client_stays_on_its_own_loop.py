@@ -48,7 +48,7 @@ class _Handler(BaseHTTPRequestHandler):
 
     def setup(self) -> None:
         super().setup()
-        self.server.opened += 1  # type: ignore[attr-defined]
+        self.server.connection_opened()  # type: ignore[attr-defined]
 
     def _answer(self, body: dict[str, Any]) -> tuple[str, bytes]:
         """The content type and bytes the API this path belongs to answers with."""
@@ -140,11 +140,44 @@ class _Handler(BaseHTTPRequestHandler):
     do_GET = _reply  # noqa: N815
 
 
+class _StubServer(ThreadingHTTPServer):
+    """The stub, counting the connections it accepted and the ones it has closed.
+
+    A connection the client closes is closed on the server's side by the
+    handler thread once it reads the end of the stream, after the client's own
+    close has returned; until then its socket is one more of this process's.
+    """
+
+    def __init__(self) -> None:
+        super().__init__(("127.0.0.1", 0), _Handler)
+        self.opened = 0
+        self.closed = 0
+        self._changed = threading.Condition()
+
+    def connection_opened(self) -> None:
+        with self._changed:
+            self.opened += 1
+
+    def shutdown_request(self, request: Any) -> None:
+        super().shutdown_request(request)
+        with self._changed:
+            self.closed += 1
+            self._changed.notify_all()
+
+    def wait_for_closes(self) -> None:
+        """Return once every connection accepted so far is closed on this side.
+
+        Bounded only so that a connection the client never closes fails the
+        socket count after it rather than hanging the test.
+        """
+        with self._changed:
+            self._changed.wait_for(lambda: self.closed >= self.opened, 60)
+
+
 @pytest.fixture
 def server() -> Iterator[ThreadingHTTPServer]:
-    httpd = ThreadingHTTPServer(("127.0.0.1", 0), _Handler)
+    httpd = _StubServer()
     httpd.daemon_threads = True
-    httpd.opened = 0  # type: ignore[attr-defined]
     httpd.requests = 0  # type: ignore[attr-defined]
     httpd.cookies = []  # type: ignore[attr-defined]
     httpd.targets = []  # type: ignore[attr-defined]
@@ -156,6 +189,22 @@ def server() -> Iterator[ThreadingHTTPServer]:
         httpd.shutdown()
         httpd.server_close()
         thread.join(10)
+
+
+@pytest.fixture(autouse=True)
+def endpoint_pools_of_this_test(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Each test reads only the pools its own models opened.
+
+    The Anthropic provider shares one loop-bound client per endpoint for the
+    life of the process, and an endpoint here is a loopback port the kernel
+    hands out again: an earlier test's model on the same port, sent on a loop
+    still open (the shared agent loop runs for the whole session), left its
+    entry in the pool a later test's stub would find on that port, and its
+    cookie in the jar that pool's requests are built with.
+    """
+    from maljan.llm import loop_clients
+
+    monkeypatch.setattr(loop_clients, "_SHARED", {})
 
 
 def _url(httpd: ThreadingHTTPServer) -> str:
@@ -211,6 +260,18 @@ def _socket_count() -> int:
         except OSError:
             continue
     return count
+
+
+def _settled_socket_count(httpd: ThreadingHTTPServer) -> int:
+    """The process's sockets once the stub has closed every connection the client closed.
+
+    Counted any earlier, a server-side socket whose handler thread has not yet
+    read the client's close is counted as one the client left open.
+    """
+    assert isinstance(httpd, _StubServer)
+    gc.collect()
+    httpd.wait_for_closes()
+    return _socket_count()
 
 
 # ---------------------------------------------------------------------------
@@ -288,12 +349,10 @@ class TestTheAnthropicModel:
             return str((await model.ainvoke("hello")).content)
 
         asyncio.run(call())
-        gc.collect()
-        before = _socket_count()
+        before = _settled_socket_count(server)
         for _ in range(25):
             assert asyncio.run(call()) == "answered"
-        gc.collect()
-        assert _socket_count() <= before
+        assert _settled_socket_count(server) <= before
         assert server.requests == 26  # type: ignore[attr-defined]
         # Each loop's client was closed with its loop, and none is held for it.
         assert len(model._async_client._client._loop_bound_clients) == 0
@@ -307,16 +366,14 @@ class TestTheAnthropicModel:
             return str((await model.ainvoke("hello")).content)
 
         asyncio.run(call())
-        gc.collect()
-        before = _socket_count()
+        before = _settled_socket_count(server)
         for _ in range(10):
             # A retired agent loop: stopped and closed, its generators never shut down.
             retired = _LoopThread()
             assert retired.run(call()) == "answered"
             retired.close()
             assert asyncio.run(call()) == "answered"
-        gc.collect()
-        assert _socket_count() <= before + 1
+        assert _settled_socket_count(server) <= before + 1
         # Only the last retired loop can still be held: the next send forgets it.
         assert len(model._async_client._client._loop_bound_clients) <= 1
 
@@ -414,12 +471,10 @@ class TestTheOpenAIModel:
             return str((await model.ainvoke("hello")).content)
 
         asyncio.run(call())
-        gc.collect()
-        before = _socket_count()
+        before = _settled_socket_count(server)
         for _ in range(25):
             assert asyncio.run(call()) == "answered"
-        gc.collect()
-        assert _socket_count() <= before
+        assert _settled_socket_count(server) <= before
 
 
 def _ollama(base_url: str) -> Any:
