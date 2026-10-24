@@ -68,6 +68,22 @@ SCENARIOS: dict[str, str] = {
     ),
 }
 
+# The degradation reasons a fault scenario causes on purpose, by name (the words
+# before a reason's first parenthesis or semicolon). The gate allows exactly
+# these for that scenario and fails on any other; a scenario not listed, the
+# normal one first, may carry none. ``{n}`` stands for a count and ``{section}``
+# for a report section's key. Measured in process on both wires: every other
+# fault is asked again and leaves no reason behind. ``deadline_hit``'s is the
+# note a run stopped by the worker's job timeout keeps (``stop_note``); a run
+# stopped in process keeps no report and so no reason.
+SCENARIO_DEGRADATIONS: dict[str, tuple[str, ...]] = {
+    "cut_at_cap": (
+        "report section '{section}' is not written: its answer was cut at {n} tokens "
+        "with no text written",
+    ),
+    "deadline_hit": ("Stopped by the job timeout",),
+}
+
 # The faults that hit the first call of each role instance.
 _FIRST_CALL_FAULTS = {
     "cut_at_cap",

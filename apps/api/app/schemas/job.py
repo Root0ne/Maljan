@@ -164,6 +164,25 @@ class JobRoster(BaseModel):
         return {str(k): str(v) for k, v in value.items() if isinstance(v, str)}
 
 
+class UnavailableTool(BaseModel):
+    """A tool a job would call that the host running its server cannot run.
+
+    Named when the job is submitted (``services.tool_availability``), before
+    any of it runs: the job is still accepted, and this is the warning.
+    """
+
+    server: str
+    tool: str
+    # The server's own words: "capa is not installed (No module named 'capa')".
+    reason: str
+    # What to do about it: "... uv sync --extra capa".
+    remediation: str = ""
+    # What the tool still answers without it; empty when it answers nothing.
+    still_answers: str = ""
+    # The words the run's degraded block would use for the same tool.
+    degradation_reason: str
+
+
 class JobResponse(BaseModel):
     """Analysis job status response."""
 
@@ -187,6 +206,10 @@ class JobResponse(BaseModel):
     # where the team can be resolved; ``None`` in a listing, which is a page
     # of rows rather than a run somebody is watching.
     roster: JobRoster | None = None
+    # The tools this job would call that this host cannot run, each with why
+    # and the remedy. Filled on the answer to ``POST /jobs`` alone, and only
+    # when there is one to name; ``None`` everywhere else.
+    unavailable_tools: list[UnavailableTool] | None = None
 
     model_config = {"from_attributes": True}
 

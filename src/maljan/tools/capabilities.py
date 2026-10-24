@@ -24,9 +24,10 @@ from __future__ import annotations
 
 import importlib
 import importlib.metadata
+import importlib.util
 import os
 import shutil
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -44,8 +45,10 @@ class Requirement:
     kind: str  # "module" | "binary" | "env"
     name: str
     # For a binary found somewhere other than ``PATH`` alone: the lookup that
-    # answers ``None`` when it is present, else the reason it is not.
-    locate: Callable[[], str | None] | None = field(default=None, compare=False)
+    # answers ``None`` when it is present, else the reason it is not. Called
+    # with no argument inside the server, and with the server's environment
+    # when the check is made from outside it (``installed``).
+    locate: Callable[..., str | None] | None = field(default=None, compare=False)
 
     def probe(self) -> str | None:
         """``None`` when present, else the reason it is not.
@@ -75,12 +78,44 @@ class Requirement:
             return None if os.environ.get(self.name) else f"{self.name} is not configured"
         return f"unknown requirement kind {self.kind!r}"
 
+    def installed(self, environ: Mapping[str, str] | None = None) -> str | None:
+        """``None`` when the module or binary is on this host, else the reason ``probe`` gives.
+
+        The check made before a job, from outside the server: nothing is
+        imported and nothing is run. A module is looked up on the import path
+        (a library uninstalled under a running process is noticed, where a
+        module that process imported once would still answer), and a binary is
+        looked for as ``probe`` looks for it, in ``environ`` (the environment
+        the server is started with) rather than this process's. A setting is
+        no install: an ``env`` requirement answers ``None`` here, since the
+        value is handed to the server by its own settings, which this
+        process's environment does not show.
+
+        The import path looked on is this process's: a server started with a
+        ``PYTHONPATH`` of its own can import what this answers is missing, so
+        a caller leaves a module of such a server unchecked.
+        """
+        if self.kind == "module":
+            try:
+                found = importlib.util.find_spec(self.name)
+            except (ImportError, ValueError):
+                found = None
+            if found is None:
+                return f"{self.name} is not installed (No module named '{self.name}')"
+            return None
+        if self.kind == "binary":
+            if self.locate is not None:
+                return self.locate(environ)
+            path = None if environ is None else environ.get("PATH")
+            return None if shutil.which(self.name, path=path) else f"{self.name} is not on PATH"
+        return None
+
 
 def module(name: str) -> Requirement:
     return Requirement("module", name)
 
 
-def binary(name: str, locate: Callable[[], str | None] | None = None) -> Requirement:
+def binary(name: str, locate: Callable[..., str | None] | None = None) -> Requirement:
     """A tool that shells out to an executable.
 
     Found on ``PATH`` by default. ``locate`` is for an executable looked for in

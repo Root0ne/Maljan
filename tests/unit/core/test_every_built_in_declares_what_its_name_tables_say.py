@@ -458,7 +458,8 @@ def test_ghidras_open_tools_are_its_long_running_tools(declared: ToolDeclaration
 def test_the_analysis_servers_long_running_tools_and_budgets_are_its_manifests() -> None:
     from maljan.core.builtin_declarations import server_declaration
 
-    manifest = (ROOT / "services" / "analysis-mcp" / "server.py").read_text(encoding="utf-8")
+    # The sidecar's manifest is declared where a check before a job reads it too.
+    manifest = (ROOT / "src" / "maljan" / "tools" / "sidecar_needs.py").read_text(encoding="utf-8")
     facts = server_declaration("analysis")["tool_facts"]
     assert {n for n, f in facts.items() if f.get("long_running")} == {"capa", "floss"}
     assert manifest.count("long_running=True") == 2
