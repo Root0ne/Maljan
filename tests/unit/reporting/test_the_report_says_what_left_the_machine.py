@@ -233,11 +233,11 @@ def test_the_enrichment_queued_after_the_report_is_named_then_what_it_asked() ->
 # is an anomalous-activity indicator of its own, and an indicator's reason is
 # read from the rebuilt table.
 STORED_RENDERS = {
-    "run7": ("10450fac1da78b0d", "c898eb0ef67822cf"),
-    "run5": ("5ccad835542f23f0", "a06ab76f09a2cb09"),
-    "run4": ("256307208c446f42", "3274cf2a12296eca"),
-    "local8": ("8c5e17409d9a71af", "9feab83d7602db67"),
-    "haiku4": ("9e48dabb38b94d23", "4bda1b01fc6026a1"),
+    "run7": ("56ba218bfdd38f0c", "b229d1d5d08362c0"),
+    "run5": ("e645b4e33f1e2046", "1d3964267514a2ca"),
+    "run4": ("30e4d03751bb2760", "7c21afe931f2652d"),
+    "local8": ("f16aaba51ce874eb", "c18035f83e61303b"),
+    "haiku4": ("5c3c0ac88b9f96f1", "1687de4769937d7f"),
 }
 
 

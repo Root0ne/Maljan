@@ -117,6 +117,37 @@ def _row_wider_than_columns(run: dict[str, Any]) -> None:
         mr["sections"][0]["rows"] = [[CELL, "a cell with no heading"]]
 
 
+def _dropped_cell_printed_elsewhere(run: dict[str, Any]) -> None:
+    # The dropped cell's value is the sample's SHA-256, which the IOC table
+    # prints: only the section's own block tells that its cell is gone.
+    for mr in (_mr(run), run["report_full"]):
+        mr["sections"][0]["rows"] = [[CELL, SHA256]]
+
+
+def _section_draws_no_table(run: dict[str, Any]) -> None:
+    run["markdown"] = run["markdown"].replace("| Text |\n|---|\n", "")
+
+
+def _row_dropped_under_a_same_titled_heading(run: dict[str, Any]) -> None:
+    # The body has a heading of the section's title too (as "Imports" is both
+    # a section of the report and an Appendix A table) and prints the row
+    # the Appendix A table lost: only the voiced heading is the section's.
+    lost = "a row only the body prints"
+    for mr in (_mr(run), run["report_full"]):
+        mr["sections"][0]["rows"].append([lost])
+    run["markdown"] = run["markdown"].replace(
+        "## 10. Detection",
+        f"### Printable strings\n\n| Text |\n|---|\n| {lost} |\n\n## 10. Detection",
+    )
+    run["html"] += f"<p>{lost}</p>"
+
+
+def _text_section_rows_not_drawn(run: dict[str, Any]) -> None:
+    for mr in (_mr(run), run["report_full"]):
+        mr["sections"][0]["kind"] = "text"
+        mr["sections"][0]["rows"].append(["a row the page leaves out"])
+
+
 def _full_report_verdict(run: dict[str, Any]) -> None:
     run["report_full"]["verdict"] = "Suspicious"
 
@@ -210,17 +241,37 @@ CASES: dict[str, tuple[Callable[[dict[str, Any]], None], set[tuple[str, str, str
         _stix_cites_nothing,
         {("unresolved_citation", "citation", "stix")},
     ),
-    "a table's text the console does not draw": (
-        _section_text_beside_rows,
-        {("dropped", "section", "web")},
-    ),
     "a section placed on a tab that does not draw it": (
         _section_on_detection,
         {("missing", "section", "web")},
     ),
-    "cells past a table's columns": (
+    "a cell past a table's columns the page does not draw": (
         _row_wider_than_columns,
-        {("dropped", "section", "markdown"), ("dropped", "section", "html")},
+        {
+            ("dropped", "section", "markdown"),
+            ("missing", "section_item", "markdown:strings"),
+            ("missing", "section_item", "html:strings"),
+        },
+    ),
+    "a dropped cell whose value the page prints elsewhere": (
+        _dropped_cell_printed_elsewhere,
+        {("dropped", "section", "markdown"), ("missing", "section_item", "markdown:strings")},
+    ),
+    "a section with rows that draws no table": (
+        _section_draws_no_table,
+        {("dropped", "section", "markdown")},
+    ),
+    "a text section's row the page does not draw": (
+        _text_section_rows_not_drawn,
+        {
+            ("dropped", "section", "markdown"),
+            ("missing", "section_item", "markdown:strings"),
+            ("missing", "section_item", "html:strings"),
+        },
+    ),
+    "a row dropped under a heading another part of the page shares": (
+        _row_dropped_under_a_same_titled_heading,
+        {("dropped", "section", "markdown"), ("missing", "section_item", "markdown:strings")},
     ),
     "a verdict two surfaces disagree on": (
         _full_report_verdict,
@@ -292,6 +343,15 @@ def test_defanged_network_values_read_as_the_values() -> None:
     result = surfaces.audit(run, clean_spec())
 
     assert not [d for d in result["defects"] if d["kind"] in {"ioc", "network_fact"}]
+
+
+def test_a_section_s_text_beside_its_rows_is_drawn_on_every_surface() -> None:
+    # The console draws a section's rows, items and text whatever its kind
+    # (ArtifactTable's section body), and so does the Markdown.
+    run = clean_run()
+    _section_text_beside_rows(run)
+
+    assert defects(surfaces.audit(run, clean_spec())) == []
 
 
 def test_an_empty_section_is_not_blank_when_its_call_answered_nothing() -> None:

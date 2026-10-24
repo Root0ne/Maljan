@@ -28,6 +28,7 @@ every number the first occurrence carried exactly as it was written.
 
 from __future__ import annotations
 
+from collections import Counter
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
@@ -237,6 +238,12 @@ class _Sections:
             if said not in (section.text or ""):
                 section.text = f"{section.text}\n\n{said}".strip() if section.text else said
         self._left_out = {}
+        # A row wider than its table's columns has every cell headed, by
+        # position where nothing names it, so no surface draws a cell headless.
+        for section in self._by_key.values():
+            if section.columns:
+                widest = max((len(row) for row in section.rows), default=0)
+                section.columns += [f"Column {i + 1}" for i in range(len(section.columns), widest)]
         return [
             self._by_key[key]
             for key in self._order
@@ -1309,7 +1316,9 @@ def _artifact_sections(acc: _Sections, isrs: dict[str, Any]) -> None:
     A kind more than one artifact listed rows under is one table whose first
     columns say which analyst listed each row and the evidence that row's
     artifact cites (``LISTED_BY_COLUMN``, ``EVIDENCE_COLUMN``), so a merged
-    table never loses whose row is whose or which ids stand behind it.
+    table never loses whose row is whose or which ids stand behind it. Its
+    columns are the union of what its rows hold: a cell past them adds its
+    heading (:func:`_in_the_union`), so no cell is dropped or left unheaded.
     """
     by_kind: dict[str, list[tuple[str, Any]]] = {}
     for agent, isr in (isrs or {}).items():
@@ -1343,9 +1352,19 @@ def _artifact_sections(acc: _Sections, isrs: dict[str, Any]) -> None:
             cited = ", ".join(str(i) for i in getattr(artifact, "evidence_ids", None) or [])
             for row in rows:
                 cells = [_text(cell) for cell in row]
+                names: list[str] = []
                 if merged:
-                    cells = _placed(cells, columns, headings)
-                acc.add_row(section, [_text(source), cited, *cells] if merged else cells)
+                    cells, names = _placed(cells, columns, headings)
+                full, added = _in_the_union(
+                    section.columns,
+                    [_text(source), cited, *cells] if merged else cells,
+                    2 + len(headings) if merged else 0,
+                    names,
+                )
+                held = len(section.rows)
+                acc.add_row(section, full)
+                if len(section.rows) > held:
+                    section.columns.extend(added)
             for entry_id in getattr(artifact, "evidence_ids", None) or []:
                 acc.cite(section, str(entry_id))
 
@@ -1374,7 +1393,9 @@ def _roles(columns: list[str]) -> tuple[int, int, int | None] | None:
     return 0, 1, 2 if len(columns) > 2 else None
 
 
-def _placed(cells: list[str], columns: list[str], headings: list[str]) -> list[str]:
+def _placed(
+    cells: list[str], columns: list[str], headings: list[str]
+) -> tuple[list[str], list[str]]:
     """One artifact's row, read by its own ``columns``, in a table headed ``headings``.
 
     A row of an artifact headed as the table is kept as it is, and so is one
@@ -1383,12 +1404,19 @@ def _placed(cells: list[str], columns: list[str], headings: list[str]) -> list[s
     them, any other cell under the heading of its own spelling, and what the
     table has no place for follows the table's columns, the payload first:
     the place a reader takes a payload from when the headings name none.
+
+    Returned with the artifact's own heading of each cell past ``headings``,
+    ``""`` where it has none, for the table to head that cell by.
     """
+
+    def own(at: int | None) -> str:
+        return columns[at] if at is not None and 0 <= at < len(columns) else ""
+
     if _heading_keys(columns) == _heading_keys(headings):
-        return cells
+        return cells, [own(at) for at in range(len(headings), len(cells))]
     mine, table = _roles(columns), _roles(headings)
     if mine is None or table is None:
-        return cells
+        return cells, [own(at) for at in range(len(headings), len(cells))]
     placed: dict[int, int] = {mine[0]: table[0], mine[1]: table[1]}
     if mine[2] is not None and table[2] is not None:
         placed[mine[2]] = table[2]
@@ -1400,15 +1428,123 @@ def _placed(cells: list[str], columns: list[str], headings: list[str]) -> list[s
             taken.add(places[key])
     out = [""] * len(headings)
     rest: list[str] = []
+    names: list[str] = []
     for at, cell in enumerate(cells):
         if at in placed:
             out[placed[at]] = cell
         elif at != mine[2]:
             rest.append(cell)
+            names.append(own(at))
     if table[2] is None and (rest or (mine[2] is not None and mine[2] not in placed)):
         payload = cells[mine[2]] if mine[2] is not None and mine[2] < len(cells) else ""
         rest = [payload if mine[2] not in placed else "", *rest]
-    return out + rest
+        # The payload stays where a reader takes it from, whatever its heading.
+        names = ["", *names]
+    return out + rest, names
+
+
+def _in_the_union(
+    columns: list[str], row: list[str], first: int, names: list[str]
+) -> tuple[list[str], list[str]]:
+    """``row`` laid out in a table headed ``columns``, and the headings it adds.
+
+    The cells from position ``first`` on are the ones the table's own headings
+    have no place for, ``names`` their artifact's headings. A named cell goes
+    under the column of its own heading, which it adds when the table has none;
+    a cell with no heading of its own (the payload :func:`_placed` puts first
+    among them is given none) stays at its position, as a reader takes the
+    payload by position. An empty named cell says nothing and is not placed.
+
+    The row is laid out by position instead when the named layout would be
+    read otherwise (``ledger_projection.listed_cells``: a type, a value and a
+    payload each taken from where a reader takes them), so naming a column
+    never moves what a reader of the table takes from it; and so it is when
+    the named layout would not hold every value the positional layout holds.
+    """
+    from maljan.reporting.ledger_projection import listed_cells, listed_columns
+
+    positional = _laid_out(columns, row, first, [])
+    if not any(name.strip() for name in names):
+        return positional
+    named = _laid_out(columns, row, first, names)
+
+    def read(layout: tuple[list[str], list[str]]) -> list[str] | None:
+        cells, added = layout
+        if not cells:
+            return None
+        headed = [*columns, *added]
+        listed = listed_headings_of(headed)
+        return listed_cells(cells[len(headed) - len(listed) :], listed_columns(listed))
+
+    def held(layout: tuple[list[str], list[str]]) -> Counter[str]:
+        return Counter(cell for cell in layout[0] if cell)
+
+    kept = named[0] and held(named) == held(positional) and read(named) == read(positional)
+    return named if kept else positional
+
+
+def _laid_out(
+    columns: list[str], row: list[str], first: int, names: list[str]
+) -> tuple[list[str], list[str]]:
+    """:func:`_in_the_union`'s layout of ``row`` by ``names``: ``([], [])`` when two cells collide.
+
+    A heading the table gains is kept only when the table is read as it was
+    read with it (``ledger_projection.listed_columns``: a heading that names a
+    type, a value or a payload moves where a reader takes them from);
+    otherwise the column is headed ``Column N``, its position, or ``Payload``,
+    which a reader takes the first cell past a type and a value as anyway.
+    """
+    from maljan.reporting.ledger_projection import listed_columns
+
+    headed = list(columns)
+    out = list(row[:first])
+    end = len(out)
+
+    def place(at: int, cell: str) -> bool:
+        nonlocal end
+        out.extend([""] * (at + 1 - len(out)))
+        if out[at]:
+            # A filled slot is never written over: an empty cell says nothing,
+            # and a second value there is a collision.
+            return not cell
+        out[at] = cell
+        end = max(end, at + 1)
+        return True
+
+    def add(own: str) -> int:
+        reading = listed_columns(listed_headings_of(headed))
+        taken = {str(c).strip().lower() for c in headed}
+        heading = f"Column {len(headed) + 1}"
+        for candidate in (own, heading, "Payload"):
+            if (
+                candidate
+                and candidate.lower() not in taken
+                and listed_columns(listed_headings_of([*headed, candidate])) == reading
+            ):
+                heading = candidate
+                break
+        headed.append(heading)
+        return len(headed) - 1
+
+    for k, cell in enumerate(row[first:]):
+        own = names[k].strip() if k < len(names) else ""
+        if not own:
+            at = first + k
+            while at >= len(headed):
+                add("")
+            if not place(at, cell):
+                return [], []
+            continue
+        if not cell:
+            continue
+        free = [
+            at
+            for at in range(first, len(headed))
+            if str(headed[at]).strip().lower() == own.lower() and not (at < len(out) and out[at])
+        ]
+        if not place(free[0] if free else add(own), cell):
+            return [], []
+    return out[:end], headed[len(columns) :]
 
 
 # The first two columns of an artifact table more than one artifact listed rows in.
@@ -1440,7 +1576,11 @@ def listed_rows(section: Any) -> list[tuple[str, str, list[str]]]:
 
 def listed_headings(section: Any) -> list[str]:
     """The headings of the cells :func:`listed_rows` gives each row of an artifact section."""
-    columns = [str(c) for c in getattr(section, "columns", None) or []]
+    return listed_headings_of([str(c) for c in getattr(section, "columns", None) or []])
+
+
+def listed_headings_of(columns: list[str]) -> list[str]:
+    """:func:`listed_headings` of a section headed ``columns``."""
     if columns[:2] == [LISTED_BY_COLUMN, EVIDENCE_COLUMN]:
         return columns[2:]
     if columns[:1] == [LISTED_BY_COLUMN]:

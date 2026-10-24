@@ -2702,7 +2702,7 @@ class _Context:
         balanced backtick pair stays a code span (:func:`_escaped_keeping_spans`);
         the table separator is left to the row (:func:`_cell`).
         """
-        return self._defang(_escaped_keeping_spans(text))
+        return _emphasis_escaped(self._defang(_escaped_keeping_spans(text)))
 
     def line(self, text: Any) -> str:
         """Model prose that has to stay on one line: a list item, a step."""
@@ -3073,6 +3073,11 @@ _EMAIL_IN_TEXT = re.compile(r"(?<![\w.+-])[\w.+-]+@[\w-]+(?:\.[\w-]+)+")
 # image, an HTML tag, a table cell, emphasis, and the backslash itself.
 _INLINE_META = re.compile(r"([\\`\[\]<>*" + _PIPE + r"])")
 _INLINE_META_NO_PIPE = re.compile(r"([\\`\[\]<>*])")
+# An underscore that can open or close emphasis: one without a letter or digit
+# on both sides of it ("FUN_00401310" holds none). Escaped after the defanger
+# has read the value (:func:`_emphasis_escaped`), so a host such as
+# "_ldap._tcp.example.com" is still read, and defanged, as a host.
+_EMPHASIS_UNDERSCORE = re.compile(r"(?<![^\W_])_" + _PIPE + r"_(?![^\W_])")
 # A link a reference service may own: https, at no scheme character's end.
 _REFERENCE_CANDIDATE = re.compile(r"(?i)(?<![a-z0-9+.-])https://[^\s<>()\[\]`'\"" + _PIPE + r"]+")
 # What ends the authority of a URL, or of a "//" target: a separator, a space,
@@ -3769,7 +3774,7 @@ def _inline_safe(text: Any, *, pipes: bool = True) -> str:
     separator to the row, which escapes it itself (:func:`_cell`).
     """
     meta = _INLINE_META if pipes else _INLINE_META_NO_PIPE
-    return _defanged_text(meta.sub(r"\\\1", str(text or "")))
+    return _emphasis_escaped(_defanged_text(meta.sub(r"\\\1", str(text or ""))))
 
 
 def _escaped_keeping_spans(text: Any, meta: re.Pattern[str] = _INLINE_META_NO_PIPE) -> str:
@@ -3807,6 +3812,52 @@ def _escaped_keeping_spans(text: Any, meta: re.Pattern[str] = _INLINE_META_NO_PI
         at = runs[closer][1]
         index = closer + 1
     out.append(meta.sub(r"\\\1", raw[at:]))
+    return "".join(out)
+
+
+# What stands around the run of backticks that closes a code span: no backtick.
+_NOT_A_TICK_BEFORE = "(?<!" + chr(96) + ")"
+_NOT_A_TICK_AFTER = "(?!" + chr(96) + ")"
+
+
+def _emphasis_escaped(text: str) -> str:
+    """Escaped, defanged text with each underscore that could open emphasis escaped too.
+
+    Run after the defanger, which has to read a value's underscores as the
+    value's (``_ldap._tcp.example.com`` is a host), and whose marks hold none.
+    A pair a backslash already escapes is left as it is, and so is a code span:
+    a run of backticks and the next run of the same length, which no escape
+    inside it reaches.
+    """
+    out: list[str] = []
+    plain: list[str] = []
+
+    def flush() -> None:
+        out.append(_EMPHASIS_UNDERSCORE.sub(r"\\_", "".join(plain)))
+        plain.clear()
+
+    at = 0
+    while at < len(text):
+        char = text[at]
+        if char == "\\":
+            flush()
+            out.append(text[at : at + 2])
+            at += 2
+            continue
+        if char == "`":
+            opened = at
+            while opened < len(text) and text[opened] == "`":
+                opened += 1
+            ticks = text[at:opened]
+            closer = re.compile(_NOT_A_TICK_BEFORE + ticks + _NOT_A_TICK_AFTER).search(text, opened)
+            flush()
+            end = closer.end() if closer is not None else opened
+            out.append(text[at:end])
+            at = end
+            continue
+        plain.append(char)
+        at += 1
+    flush()
     return "".join(out)
 
 
@@ -3958,7 +4009,7 @@ def _finding_text(row: dict[str, Any]) -> str:
     """
     message = str(row.get("message") or "")
     try:
-        return _defanged_text(_escaped_keeping_spans(message, _INLINE_META))
+        return _emphasis_escaped(_defanged_text(_escaped_keeping_spans(message, _INLINE_META)))
     except Exception as exc:  # noqa: BLE001 — never the raw values
         logger.debug("markdown: a finding was not written (%s).", exc)
         return STATE_UNKNOWN
@@ -5455,30 +5506,46 @@ def _as_is(text: str) -> str:
 
 
 def _evidence_body(section: Any, write: Callable[[str], str] = _as_is) -> list[str]:
-    """One evidence section's rows, in whichever shape it carries.
+    """One evidence section's rows, items and text, whichever of them it carries.
 
-    A section may carry both. Rows are what a tool found; the text beside them
-    is what this system has to say about how it got them — that the answer was
-    too big for the prompt and the table below is a page of it. It goes above
-    the rows, as prose rather than as a fenced block, because a reader has to
-    know a table is partial before they read it as complete. A section with
-    nothing but text is a tool's own output and keeps its fence.
+    A section may carry more than one. Rows are what a tool found; the text
+    beside them is what this system has to say about how it got them — that
+    the answer was too big for the prompt and the table below is a page of
+    it. It goes above the rows, as prose rather than as a fenced block,
+    because a reader has to know a table is partial before they read it as
+    complete. A section with nothing but text is a tool's own output and
+    keeps its fence, and so does the text of a section opened by such an
+    output that a later call of the same tool answered with records: the
+    section keeps the kind of its first answer, and its rows follow the fence.
     """
     rows = _evidence_rows(section, write)
     if not rows:
         return _fenced(write(section.text)) if section.text else []
-    return [_escape_block(write(section.text)), ""] + rows if section.text else rows
+    if not section.text:
+        return rows
+    if section.kind == "text":
+        return [*_fenced(write(section.text)), "", *rows]
+    return [_escape_block(write(section.text)), ""] + rows
 
 
 def _evidence_rows(section: Any, write: Callable[[str], str] = _as_is) -> list[str]:
-    """The tabular or bulleted half of a section, or nothing.
+    """The tabular and bulleted parts of a section, or nothing.
+
+    Drawn whatever kind the section was opened as: a tool keyed to one
+    section can answer it in more than one shape, and a part the kind does
+    not name is still a part of the answer. Every cell of a row is drawn, a
+    cell past the declared columns under its position (``Column 4``), so a
+    table merged from listings of other widths loses none of them.
 
     ``write`` is how a cell's text is written: the report's own network
     indicators defanged in it, where a section is printed for reading.
     """
-    if section.kind in {"table", "kv"} and section.rows:
-        columns = section.columns or [f"Column {i + 1}" for i in range(len(section.rows[0]))]
-        out = [_row(*columns), _divider(len(columns))]
+    out: list[str] = []
+    if section.rows:
+        columns = list(section.columns or [])
+        widest = max(len(row) for row in section.rows)
+        columns += [f"Column {i + 1}" for i in range(len(columns), widest)]
+        out += [_row(*columns), _divider(len(columns))]
         # The columns of a section that hold the sample's or a sandbox's own
         # text, each written as one code span after its cut, so the value
         # cannot open a link, a tag or a fence (``ledger_report``).
@@ -5487,15 +5554,18 @@ def _evidence_rows(section: Any, write: Callable[[str], str] = _as_is) -> list[s
             cells = [
                 _code_span(_one_line(_truncate(write(str(cell)), 160)))
                 if at in spans and str(cell) and str(cell) not in plain
-                else _truncate_escaped(write(_escaped(cell)), 160)
+                else _truncate_escaped(_emphasis_escaped(write(_escaped(cell))), 160)
                 for at, cell in enumerate(row)
             ]
             cells += [""] * (len(columns) - len(cells))
-            out.append(_row(*cells[: len(columns)]))
-        return out
-    if section.kind == "list" and section.items:
-        return [_item(_truncate_escaped(write(_escaped(item)), 200)) for item in section.items]
-    return []
+            out.append(_row(*cells))
+    if section.items:
+        out += [""] if out else []
+        out += [
+            _item(_truncate_escaped(_emphasis_escaped(write(_escaped(item))), 200))
+            for item in section.items
+        ]
+    return out
 
 
 # The sections whose table columns hold the sample's or a sandbox's own text,
@@ -5685,13 +5755,26 @@ def _left_out(total: int, shown: int, what: str) -> list[str]:
     return ["", LEFT_OUT_LINE.format(rest=rest, what=what)]
 
 
+def _outside_marks(text: str, cut: int) -> int:
+    """``cut``, or the start of the defang mark it would fall inside.
+
+    A cell is defanged before it is cut, and ``skinnyjeanso[.…`` is neither
+    the value nor a defanged spelling of it: the cut falls before the mark.
+    """
+    for mark in _DEFANGED_MARKS:
+        for start in range(max(0, cut - len(mark) + 1), cut):
+            if text.startswith(mark, start):
+                return start
+    return cut
+
+
 def _truncate(value: Any, length: int) -> str:
     if value is None:
         return ""
     s = str(value)
     if len(s) <= length:
         return s
-    return s[: length - 1] + "…"
+    return s[: _outside_marks(s, length - 1)] + "…"
 
 
 def _truncate_escaped(text: str, length: int) -> str:
@@ -5699,7 +5782,7 @@ def _truncate_escaped(text: str, length: int) -> str:
 
     Every backslash in such text escapes the character after it, and the pair
     is one character on the page: the cut counts it once, and never falls
-    between the two.
+    between the two, nor inside a defang mark.
     """
     cut = None
     index = visible = 0
@@ -5710,7 +5793,7 @@ def _truncate_escaped(text: str, length: int) -> str:
         visible += 1
     if visible <= length or cut is None:
         return text
-    return text[:cut] + "…"
+    return text[: _outside_marks(text, cut)] + "…"
 
 
 def _process_tree_lines(
