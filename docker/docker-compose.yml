@@ -648,6 +648,128 @@ services:
       - "${BIND_ADDRESS:-127.0.0.1}:${JADX_MCP_PORT:-8097}:8097"
 
   # -────────────────────────────────────────────
+  # Sample readers — the analysis and network servers, each optional
+  # -────────────────────────────────────────────
+  # The platform's own analysis server (services/analysis-mcp: the format
+  # readers, YARA, capa, FLOSS, the UPX unpacker, the byte readings) and its
+  # network server (services/network-mcp: the packet capture readers), in a
+  # container each instead of as children of the worker (X2). Each runs the
+  # worker's own image and source, read-only, with `--http`: streamable HTTP
+  # behind its token. Off until its profile (analysis, network) is in
+  # COMPOSE_PROFILES, its token set here, and its built-in block in the
+  # console pointed at it: transport streamable-http, url
+  # http://analysis-mcp:8098/mcp (http://network-mcp:8099/mcp), the token as
+  # auth_token and sample_mount /data/samples. The worker then copies the
+  # sample under the mount for it, and the triage pack's own readings of the
+  # sample (maljan.tools.readers) and every agent's call to that server run
+  # there. The worker still reads the sample for a few things of its own: its
+  # hashes and routing, and the readings tests/unit/test_sample_reading_guard.py
+  # lists as left for a later change.
+  #
+  # Each job's staging directory in the container's /tmp (capa's and FLOSS's
+  # scratch, the unpacked program, an uploaded capture) is removed by the
+  # server's own sweep once nothing in it changed for MALJAN_STAGING_TTL_HOURS
+  # (24 h unless set), not when the job ends; it counts against the tmpfs,
+  # and so against the memory ceiling, until then. Size the tmpfs for a day's
+  # jobs, or set the TTL lower in the container's environment.
+  #
+  # Held as x-cli-sidecar says, on the backend image's account: no
+  # capability and no way to gain one, a pids limit, a read-only root whose
+  # only writable place is its /tmp, a tmpfs sized below its memory ceiling
+  # where each job's staging directory goes (capa's and FLOSS's scratch, what
+  # the unpacker writes), the samples read-only at /data/samples, an internal
+  # network of its own, and no platform credential: its only secret is its own
+  # token. A bare relay publishes its port for a worker run on the host.
+  # ANALYSIS_MEM_LIMIT and NETWORK_MEM_LIMIT set each memory-and-swap ceiling
+  # (8g and 2g by default, the analysis server's room for capa and FLOSS's
+  # 4 GiB address space beside its tmpfs), ANALYSIS_TMPFS_SIZE and
+  # NETWORK_TMPFS_SIZE each /tmp (2g and 512m).
+  analysis-mcp:
+    <<: *backend-image
+    profiles: [analysis]
+    container_name: maljan-analysis-mcp
+    restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp:size=${ANALYSIS_TMPFS_SIZE:-2g}
+    pids_limit: 512
+    working_dir: /app/services/analysis-mcp
+    command: ["python", "server.py", "--http"]
+    environment: &reader-environment
+      MCP_AUTH_TOKEN: ${ANALYSIS_MCP_AUTH_TOKEN:-}
+      MCP_BIND_ADDRESS: 0.0.0.0
+      MCP_PORT: "8098"
+      MALJAN_SAMPLE_ROOTS: /data/samples
+      HOME: /tmp
+    mem_limit: ${ANALYSIS_MEM_LIMIT:-8g}
+    memswap_limit: ${ANALYSIS_MEM_LIMIT:-8g}
+    networks:
+      - analysis
+    # The worker's own source and data, read-only, so the server runs the
+    # readings the worker would; then the samples, read-only, at the mount
+    # its block declares.
+    volumes: &reader-volumes
+      - ../src:/app/src:ro
+      - ../services:/app/services:ro
+      - ../data:/app/data:ro
+      - ../data/samples:/data/samples:ro
+    depends_on:
+      volume-init:
+        condition: service_completed_successfully
+    healthcheck: *sidecar-health
+
+  analysis-port:
+    <<: *sidecar-relay
+    profiles: [analysis]
+    container_name: maljan-analysis-port
+    command:
+      - tcp-listen:8098,fork,reuseaddr
+      - tcp-connect:analysis-mcp:8098
+    networks:
+      - analysis
+      - analysis-publish
+    ports:
+      - "${BIND_ADDRESS:-127.0.0.1}:${ANALYSIS_MCP_PORT:-8098}:8098"
+
+  network-mcp:
+    <<: *backend-image
+    profiles: [network]
+    container_name: maljan-network-mcp
+    restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp:size=${NETWORK_TMPFS_SIZE:-512m}
+    pids_limit: 256
+    working_dir: /app/services/network-mcp
+    command: ["python", "server.py", "--http"]
+    environment:
+      <<: *reader-environment
+      MCP_AUTH_TOKEN: ${NETWORK_MCP_AUTH_TOKEN:-}
+      MCP_PORT: "8099"
+    mem_limit: ${NETWORK_MEM_LIMIT:-2g}
+    memswap_limit: ${NETWORK_MEM_LIMIT:-2g}
+    networks:
+      - network
+    volumes: *reader-volumes
+    depends_on:
+      volume-init:
+        condition: service_completed_successfully
+    healthcheck: *sidecar-health
+
+  network-port:
+    <<: *sidecar-relay
+    profiles: [network]
+    container_name: maljan-network-port
+    command:
+      - tcp-listen:8099,fork,reuseaddr
+      - tcp-connect:network-mcp:8099
+    networks:
+      - network
+      - network-publish
+    ports:
+      - "${BIND_ADDRESS:-127.0.0.1}:${NETWORK_MCP_PORT:-8099}:8099"
+
+  # -────────────────────────────────────────────
   # Volume ownership — one-shot, before api, worker and Ghidra
   # -────────────────────────────────────────────
   # The backend services and Ghidra used to run as root, so an existing
@@ -785,9 +907,10 @@ services:
     extra_hosts:
       - "host.docker.internal:host-gateway"
     # `default` as before; `ghidra` to reach Ghidra, which is on no other
-    # network these services share (see ghidra-mcp), and `die`, `ilspy`,
+    # network these services share (see ghidra-mcp), `die`, `ilspy`,
     # `goresym`, `yarax`, `oletools`, `webcrack`, `unblob` and `jadx` to reach
-    # the sidecars of one analysis program each the same way.
+    # the sidecars of one analysis program each the same way, and `analysis`
+    # and `network` the sample readers.
     networks:
       - default
       - ghidra
@@ -799,6 +922,8 @@ services:
       - webcrack
       - unblob
       - jadx
+      - analysis
+      - network
     # The source trees are read-only: a process in this container that opens
     # hostile bytes cannot plant code the API or a later worker would run, or
     # change the host's working tree. data/ is read-only as well (its rule sets
@@ -909,9 +1034,10 @@ services:
     # F8 (2026-07-05): resolve host.docker.internal on Linux (see backend-api).
     extra_hosts:
       - "host.docker.internal:host-gateway"
-    # As on the API: `ghidra` is how the worker reaches Ghidra, and `die`,
+    # As on the API: `ghidra` is how the worker reaches Ghidra, `die`,
     # `ilspy`, `goresym`, `yarax`, `oletools`, `webcrack`, `unblob` and `jadx`
-    # the sidecars of one analysis program each.
+    # the sidecars of one analysis program each, and `analysis` and `network`
+    # the sample readers.
     networks:
       - default
       - ghidra
@@ -923,6 +1049,8 @@ services:
       - webcrack
       - unblob
       - jadx
+      - analysis
+      - network
     # Hard ceiling (2026-07-26). One analysis took this process from 3.4 GB to
     # 8.5 GB and never gave it back; two in a row exhausted a 30 GB host that
     # also runs a ~15 GB llama-server, and the machine locked up. The graceful
@@ -1097,6 +1225,15 @@ networks:
   jadx:
     internal: true
   jadx-publish:
+    driver: bridge
+  # The sample readers' own, the same way.
+  analysis:
+    internal: true
+  analysis-publish:
+    driver: bridge
+  network:
+    internal: true
+  network-publish:
     driver: bridge
 
 volumes:

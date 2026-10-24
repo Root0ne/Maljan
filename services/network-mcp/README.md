@@ -25,6 +25,20 @@ with `MALJAN_STAGING_DIR` and `MALJAN_SAMPLE_ROOTS` passed through, plus the
 one directory name the spawn composes for the job (`MALJAN_STAGING_JOB`) — and
 its tools are bound to the `network` analyst.
 
+With `--http` it listens over streamable HTTP behind its token instead, as the
+compose file's `network-mcp` service under the `network` profile runs it, held
+as the analysis server's container is (`services/analysis-mcp/README.md`).
+Its built-in block pointed at it (transport `streamable-http`, url
+`http://network-mcp:8099/mcp`, the token, `sample_mount` `/data/samples`), the
+triage pack's reading of the job's capture runs here over `run_reader`, a
+delivery primitive no model is shown, the capture handed over through the
+job's artefact store, and the worker does not run that reading itself. The
+network analyst's own input slice still summarises the capture in the worker,
+a reading left for a later change. A job's staging directory in the
+container's `/tmp` (the capture handed over) is swept
+`MALJAN_STAGING_TTL_HOURS` (24 h unless set) after it last changed, not when
+the job ends, and counts against the tmpfs until then.
+
 ## Which captures it may read
 
 Every `pcap_path` is resolved (symlinks followed) and refused unless it lands

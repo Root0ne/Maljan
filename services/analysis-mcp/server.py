@@ -12,6 +12,12 @@ capability at all.
 ``put_sample`` implements the remote-delivery convention (see
 ``maljan.agents.sample_staging``): a caller on another host uploads the bytes
 and gets back the path to pass to every other tool here.
+
+Started by the worker it serves over stdio; with ``--http``, over streamable
+HTTP behind its own token, from a container of its own (``MCP_BIND_ADDRESS``,
+``MCP_PORT``, ``MCP_AUTH_TOKEN``, the shared sidecar plumbing's), where
+``run_reader`` runs the triage pack's own readings of the sample
+(``maljan.tools.readers``), which the worker then does not run itself.
 """
 
 from __future__ import annotations
@@ -23,6 +29,7 @@ import copy
 import hashlib
 import os
 import stat
+import sys
 import tempfile
 import time
 import uuid
@@ -45,6 +52,7 @@ from maljan.tools import (
     children,
     crypto_constants,
     emulated_strings,
+    readers,
     staging,
     string_blobs,
     transforms,
@@ -74,7 +82,7 @@ from maljan.tools.strings import DEFAULT_STRINGS_LIMIT
 # one line goes to standard error: standard output is this server's protocol.
 pin_character_classification(say=say_on_stderr)
 
-mcp = FastMCP("AnalysisMCP")
+mcp = FastMCP("AnalysisMCP", stateless_http=True)
 
 # What each tool needs beyond the interpreter, probed once when the server
 # starts. A tool that is not listed always answers.
@@ -138,6 +146,7 @@ TOOL_NEEDS: list[ToolNeeds] = [
     ToolNeeds("put_sample_begin"),
     ToolNeeds("put_sample_chunk"),
     ToolNeeds("put_sample_finish"),
+    ToolNeeds(readers.RUN_READER),
 ]
 CAPABILITIES = manifest("analysis", TOOL_NEEDS)
 
@@ -1707,12 +1716,54 @@ def put_sample_finish(upload_id: str) -> dict[str, Any]:
     )
 
 
+# The tools whose readings ``run_reader`` runs here: this server's own.
+_OFFERED = frozenset(need.name for need in TOOL_NEEDS)
+
+
+def _reader_path(value: str, job: str) -> str:
+    """A reading's file argument held to the sample roots and this job's staging directory."""
+    environ: dict[str, str] = dict(os.environ)
+    if job:
+        environ[staging.STAGING_JOB_ENV] = staging.job_directory_name(job)
+    inside = resolve_under_roots(value, extra_roots=(staging.staging_root(environ),))
+    return str(staging.confined_to_this_job(inside, environ))
+
+
+@mcp.tool()
+def run_reader(
+    reader: str, arguments: dict[str, Any] | None = None, job: str = ""
+) -> dict[str, Any]:
+    """Run one of the platform's own readings of the job's sample here, for the worker.
+
+    A delivery primitive, never offered to a model: the worker's triage pack
+    calls it when this server runs in a container of its own, so the reading
+    opens the sample here and the worker reads only the answer
+    (``maljan.tools.readers``). Only a reading standing in for a tool this
+    server offers is run, its file arguments held to the sample roots and
+    ``job``'s staging directory.
+    """
+    return readers.serve_reader(reader, arguments, job, offered=_OFFERED, confine=_reader_path)
+
+
+def _http_serve() -> None:
+    """Serve over streamable HTTP behind the token, with the shared sidecar plumbing."""
+    try:  # An image that copies the shared module beside this file.
+        import cli_sidecar as sidecar
+    except ModuleNotFoundError:  # The repository keeps it in a directory of its own.
+        sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "cli-sidecar"))
+        import cli_sidecar as sidecar
+    sidecar.serve(mcp, [])
+
+
 if __name__ == "__main__":
     # A child a tool started runs in a session of its own, so it does not die
     # with this server: every one still running is killed when the server
     # ends, on end of input or on a termination signal.
     children.kill_all_on_exit()
     try:
-        mcp.run(transport="stdio")
+        if "--http" in sys.argv[1:]:
+            _http_serve()
+        else:
+            mcp.run(transport="stdio")
     finally:
         children.kill_all()

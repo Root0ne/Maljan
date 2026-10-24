@@ -34,7 +34,7 @@ from maljan.pipeline.triage_pack import (
     run_pack,
 )
 from maljan.schemas.evidence import EvidenceCounter
-from maljan.tools import emulated_strings, rules, staging, upx
+from maljan.tools import emulated_strings, readers, rules, staging, upx
 
 from ..tools import synthetic_upx as su
 from ..tools.synthetic_pe import SyntheticPE
@@ -102,7 +102,7 @@ def test_the_unpacking_comes_last_and_writes_beside_the_carved_files(tmp_path: P
     assert entry.ok and entry.args == {"path": path}
     child = entry.structured["child"]
     written = Path(child["carved_path"])
-    digest = triage_pack._file_digest(path)
+    digest = readers._file_digest(path)
     tree = staging.job_staging_dir(tmp_path / "staging", JOB) / staging.CARVED_DIRECTORY / digest
     assert written.parent == tree
     assert stat.S_IMODE(written.stat().st_mode) == 0o600
@@ -135,7 +135,7 @@ def test_the_ids_before_it_are_the_ids_a_pack_without_it_gives(
     path = _sample(tmp_path, su.build().data)
     with_step = _pack(path, tmp_path)
     monkeypatch.setattr(triage_pack, "_names_upx", lambda facts: False)
-    monkeypatch.setattr(triage_pack, "_holds_a_pack_header", lambda path: False)
+    monkeypatch.setattr(upx, "has_pack_header_at", lambda path: False)
     without = _pack(path, tmp_path)
     last = "find_directed_text"
     assert [(e.id, e.tool) for e in with_step.entries if e.tool != last][:-1] == [

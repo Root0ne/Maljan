@@ -120,6 +120,11 @@
       "offset",
       "path"
     ],
+    "run_reader": [
+      "arguments",
+      "job",
+      "reader"
+    ],
     "sigma_match": [
       "events",
       "ruleset"
@@ -192,6 +197,7 @@
     "put_sample_chunk",
     "put_sample_finish",
     "resolve_api_hashes",
+    "run_reader",
     "sigma_match",
     "sigma_match_sandbox",
     "signing_info",

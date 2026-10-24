@@ -23,7 +23,6 @@ import pytest
 from maljan.agents.evidence_recorder import EvidenceRecorder
 from maljan.core.config import Settings, TriageConfig
 from maljan.core.container import ServiceContainer
-from maljan.pipeline import triage_pack
 from maljan.pipeline.conditions import StageContext, TriageFacts, evaluate
 from maljan.pipeline.nodes import _reputation_lookup, make_triage_node, stage_context
 from maljan.pipeline.triage_pack import (
@@ -33,7 +32,7 @@ from maljan.pipeline.triage_pack import (
     run_pack,
 )
 from maljan.schemas.evidence import EvidenceCounter, LedgerEntry, parse_structured
-from maljan.tools import rules
+from maljan.tools import pcap, rules
 from tests.unit.pipeline.test_stage_events import _state
 from tests.unit.tools.test_binary import _elf, _elf_with_imports, _pe
 
@@ -374,7 +373,7 @@ class TestTheSandboxSteps:
         capture = tmp_path / "run.pcap"
         capture.write_bytes(b"\xd4\xc3\xb2\xa1" + b"\x00" * 20)
         monkeypatch.setattr(
-            triage_pack.pcap,
+            pcap,
             "pcap_summary",
             lambda path, **_: {"summary": "1 flow", "empty": False, "packet_limit": 5000},
         )
