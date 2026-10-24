@@ -60,6 +60,8 @@ from maljan.schemas.evidence import (
 if TYPE_CHECKING:
     from langchain_core.tools import BaseTool
 
+    from maljan.agents.image_range import ImageRange
+
 
 # The servers whose ``resolve_api_hashes`` is this platform's own: the triage
 # pack (recorded as ``pipeline``) and the analysis server.
@@ -431,6 +433,7 @@ class EvidenceRecorder:
         whole: str | None = None,
         whole_structure: dict[str, Any] | None = None,
         hints: Any = None,
+        failure_note: Callable[[], str] | None = None,
     ) -> LedgerEntry:
         """Append one entry and return it, so the caller can quote its id.
 
@@ -463,6 +466,11 @@ class EvidenceRecorder:
         neither; the entry it names holds the answer. ``hints`` are the MCP
         hints the tool's own server gave it when it was attached, kept on the
         entry's facts record beside the declaration.
+
+        ``failure_note`` is asked, only when the entry is a failure, for a
+        sentence the platform adds to its remediation (an address outside the
+        loaded image, ``agents.image_range``), after the server's own
+        remediation, which keeps the headline.
 
         A call with a ``null`` the tool boundary dropped or the transport
         withheld (``agents.null_arguments``) names each such field on
@@ -506,6 +514,10 @@ class EvidenceRecorder:
             agent_tab=self.agent_tab,
             hints=hints,
         )
+        if failure_note is not None and not entry.ok and not repeated_of:
+            note = failure_note()
+            if note:
+                entry.remediation = f"{entry.remediation}; {note}" if entry.remediation else note
         entry._spill = self.spill
         if self.spill is not None and not repeated_of:
             self._keep_whole(
@@ -1130,6 +1142,16 @@ def earlier_chunk_sentence(tool: str, entry_id: str, *, origin: str = EARLIER_CH
 # What the model is told when its call ran on arguments that were closed off.
 # It is on the result rather than only in the ledger, because the model is the
 # one that can look at the answer and say the brackets were not what it meant.
+def out_of_image_notice(noted: Sequence[str]) -> str:
+    """The platform's line beside a failed answer given an address outside the image, else ``""``.
+
+    ``noted`` holds the note the entry's remediation was given
+    (``agents.image_range``), asked only of a failed entry.
+    """
+    note = noted[-1] if noted else ""
+    return f"\n\n[platform] {note}" if note else ""
+
+
 REPAIRED_NOTICE = (
     "\n\nThe arguments for this call stopped in the middle and were closed off "
     "before it ran. Read the answer against what you meant to ask, and call it "
@@ -1356,14 +1378,18 @@ def record_tools(
     repairs: ArgumentRepairs | None = None,
     context_budget: Any | None = None,
     on_question: Callable[[str], None] | None = None,
+    image_range: Callable[[], ImageRange | None] | None = None,
 ) -> list[BaseTool]:
     """Every tool, each writing its call to ``recorder`` and stamping the id.
 
     ``on_question`` is told the code of every question a call is answered with
     instead of being run, so the run summary counts what the model was asked.
+    ``image_range`` answers, when a call failed, the loaded image's range by
+    the facts the run holds (``agents.image_range``): a failed call given an
+    address outside it is told so.
     """
     return [
-        _record_tool(tool, recorder, repeats, repairs, context_budget, on_question)
+        _record_tool(tool, recorder, repeats, repairs, context_budget, on_question, image_range)
         for tool in tools
     ]
 
@@ -1375,6 +1401,7 @@ def _record_tool(
     repairs: ArgumentRepairs | None = None,
     context_budget: Any | None = None,
     on_question: Callable[[str], None] | None = None,
+    image_range: Callable[[], ImageRange | None] | None = None,
 ) -> Any:
     """One tool, rebuilt so its result is recorded and stamped.
 
@@ -1442,6 +1469,27 @@ def _record_tool(
     from maljan.agents.tool_pinning import answers_again
 
     reads_only = answers_again(tool)
+    # Whether a failed call is held against the loaded image's range: the tool
+    # declares an address argument and that it does not run the sample's code.
+    from maljan.agents.image_range import locates_in_image, out_of_image_note
+
+    locates = image_range is not None and locates_in_image(facts)
+
+    def _outside(kwargs: dict[str, Any], noted: list[str]) -> Callable[[], str] | None:
+        """The failure note for this call (``EvidenceRecorder.record``), kept in ``noted``."""
+        if not locates or image_range is None:
+            return None
+
+        def _note() -> str:
+            try:
+                note = out_of_image_note(facts, kwargs, image_range())
+            except Exception as exc:  # noqa: BLE001 — a note is never worth a lost call
+                logger.debug("image range for '%s' not read (%s).", name, exc)
+                note = ""
+            noted.append(note)
+            return note
+
+        return _note
 
     def _charged(line: str, reserved: bool = False) -> str:
         """``line``, charged to this agent's conversation: it enters it beside the answer.
@@ -1756,6 +1804,7 @@ def _record_tool(
                 if repeated is not None and repeats is not None
                 else same_function_notice(_function_label(text, function), holder)
             )
+        noted: list[str] = []
         entry = recorder.record(
             tool=name,
             args=kwargs,
@@ -1763,6 +1812,7 @@ def _record_tool(
             source=source,
             declared_name=declared_name,
             hints=hints,
+            failure_note=_outside(kwargs, noted),
             # A repeat keeps the note, not a second copy of the listing the
             # entry it names already holds.
             output=same or text,
@@ -1833,7 +1883,7 @@ def _record_tool(
         text = fenced(entry.id, text)
         if raw is not None:
             text = f"{text}{REPAIRED_NOTICE}"
-        text = f"{text}{shortened}{complete}"
+        text = f"{text}{shortened}{complete}{_charged(out_of_image_notice(noted))}"
         # ``text``, not ``entry.output``: the ledger trims what it stores, and
         # what the model reads is not the ledger's business. The size of a tool
         # result in a prompt is decided where it has always been decided —
@@ -1856,6 +1906,7 @@ def _record_tool(
     ) -> str:
         message = f"{type(exc).__name__}: {exc}"
         raw = _was_repaired(kwargs)
+        noted: list[str] = []
         entry = recorder.record(
             tool=name,
             args=sent if sent is not None else kwargs,
@@ -1863,6 +1914,7 @@ def _record_tool(
             source=source,
             declared_name=declared_name,
             hints=hints,
+            failure_note=_outside(kwargs, noted),
             output=message,
             ok=False,
             error=message,
@@ -1878,12 +1930,16 @@ def _record_tool(
         # is shown as a tool answer is (``agents.tool_fence``), never as a line
         # of the platform's own. A refusal the platform composed is its own
         # sentence and stays as written (``platform_refusal``).
+        outside = _charged(out_of_image_notice(noted))
         if platform_refusal(exc):
-            return f"[{entry.id}] tool call failed: {message}{_steering(kwargs, repeated, failed=True)}"
+            return (
+                f"[{entry.id}] tool call failed: {message}{outside}"
+                f"{_steering(kwargs, repeated, failed=True)}"
+            )
         said = str(exc)
         shown = f"\n{fenced(entry.id, said)}" if said.strip() else ""
         return (
-            f"[{entry.id}] tool call failed: {type(exc).__name__}{shown}"
+            f"[{entry.id}] tool call failed: {type(exc).__name__}{shown}{outside}"
             f"{_steering(kwargs, repeated, failed=True)}"
         )
 

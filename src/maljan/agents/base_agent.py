@@ -5720,6 +5720,10 @@ class BaseAnalyst(BudgetMeter, ABC):
             repair_invalid_tool_calls,
             seeded_repeat_guard,
         )
+        from maljan.agents.image_range import ImageRangeReader
+
+        # Read again only when the run's entries grew (``ImageRangeReader``).
+        image_range = ImageRangeReader()
 
         # An agent built outside a container has no counter attached, and one
         # per loop would issue ``ev_0001`` twice to the same buffer. It keeps
@@ -5823,6 +5827,12 @@ class BaseAnalyst(BudgetMeter, ABC):
             repairs,
             self._context_budget(),
             on_question=self._count_question,
+            # The loaded image's range by the facts the run holds, read when a
+            # call given an address failed: the pack's and this agent's own.
+            image_range=lambda: image_range(
+                list(getattr(self, "pack_entries", None) or ()),
+                [*(getattr(self, "_evidence_entries", None) or ()), *recorder.entries],
+            ),
         )
         # Sent with every request of this loop, so counted with its conversation.
         self._tool_definition_chars = tool_definition_chars(recorded)
