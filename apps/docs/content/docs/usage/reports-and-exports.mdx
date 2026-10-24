@@ -303,6 +303,25 @@ server holds at an address (a staged upload) or a sandbox's own copy is not
 read by the worker and is not in the record. A run stored without the record
 renders as before.
 
+**Whether the sandbox ran the sample.** A sandbox that detonated the sample
+during the run names the target it ran in its own report. Whichever sandbox
+it was, the worker reads that hash from the report as the sandbox provider
+read it (the neutral report's target SHA-256) and compares it with the SHA-256
+taken at upload. When they differ, the isolation part adds one line naming the
+sandbox, its task and both hashes: what the sandbox observed may be of other
+bytes. A value that is not a SHA-256 (another length, other characters) is
+said as such: it is kept on one line, without control characters, and cut to
+the length a sandbox failure's words are cut to. The run is not failed or
+marked degraded for it. The run summary stores it as `sandbox_target`
+(`expected_sha256`, `sandbox_sha256`, `provider`, `task_id`, and
+`sandbox_sha256_valid` set to false for a value that is not a SHA-256), and in
+the isolation part under the same rule as `sample_integrity`. A report that
+names the sample's hash in any case, or no target hash, adds nothing; so does
+a task that did not end with a report, a stand-in report written when no
+sandbox ran, and a mock sandbox's recorded fixture, which was not detonated
+during the run. An attached sandbox report is compared once, when it is
+uploaded, and a mismatch there marks the run degraded as before.
+
 ### What each tool did beyond answering
 
 Inside the same block, after the isolation part and under its own **Tool

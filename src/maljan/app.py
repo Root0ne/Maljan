@@ -314,6 +314,7 @@ class MaljanApp:
         self.container.sandbox_signature_scale = None
         self.container.sample_uploads = []
         self.container.sandbox_failure = None
+        self.container.sandbox_target_claim = None
         if not sample_path or self.container.is_mock:
             return None
 
@@ -327,6 +328,7 @@ class MaljanApp:
         # it was (an unreachable sandbox, a task that never finished, a report
         # that could not be read) and not only that there was one.
         stage = "choosing the sandbox"
+        claim: dict[str, str] | None = None
         try:
             provider = self.container.get_sandbox_provider()
             caps = provider.capabilities
@@ -386,6 +388,16 @@ class MaljanApp:
                 stage = "fetching the report"
                 run = await asyncio.to_thread(provider.fetch, task_id)
                 self._note_the_reader(provider, run)
+                if not (run.report.synthetic or run.report.recorded_fixture):
+                    # The target the sandbox says it ran, for the worker to
+                    # compare with the sample, kept once the report is used
+                    # (below); a stand-in or a recorded fixture ran nothing
+                    # during this run and names none.
+                    claim = {
+                        "provider": str(provider.id),
+                        "task_id": str(run.task_id),
+                        "sha256": str(run.report.target.sha256 or ""),
+                    }
                 result = SubmissionResult(
                     task_id=run.task_id,
                     sample_sha256=run.sample_sha256,
@@ -448,6 +460,7 @@ class MaljanApp:
                     len(result.report.get("signatures", [])),
                     len(result.report.get("ttp_tags", [])),
                 )
+                self.container.sandbox_target_claim = claim
                 return result.report  # type: ignore[no-any-return]
             logger.warning("Sandbox task ended with status=%s: %s", result.status, result.error)
             ended = f"sandbox task {result.task_id} ended with status {result.status!r}"

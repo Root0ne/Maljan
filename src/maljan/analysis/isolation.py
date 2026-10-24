@@ -26,7 +26,8 @@ said to be "not verified". The whole part is isolated only when at least one
 row exists and every row is isolated. A run that recorded no read of the
 sample says so and claims nothing. Where the worker hashed the copies it
 handed out at the job's start and end, the part also says whether each stayed
-the intake bytes (``analysis.sample_integrity``).
+the intake bytes, and where a sandbox report named another target, that too
+(``analysis.sample_integrity``).
 
 What is measured is the process the worker started and every process under it
 (:func:`measure_tree`): a launcher starts the real server as its own child, and
@@ -1018,7 +1019,14 @@ def isolation_lines(part: Any, code: Callable[[str], str] = _code) -> list[str]:
         )
     # Whether the copies handed out stayed the intake bytes, where the worker
     # recorded it (``analysis.sample_integrity``); a part stored without it says none.
-    from maljan.analysis.sample_integrity import RECORD_KEY, integrity_lines
+    from maljan.analysis.sample_integrity import (
+        RECORD_KEY,
+        SANDBOX_KEY,
+        integrity_lines,
+        sandbox_target_lines,
+    )
 
     lines.extend(integrity_lines(part.get(RECORD_KEY), code))
+    # A sandbox report that named another target, where the worker recorded one.
+    lines.extend(sandbox_target_lines(part.get(SANDBOX_KEY), code))
     return lines

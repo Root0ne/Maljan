@@ -9,7 +9,9 @@ starts, and once more when the run ends, before the store and the teardown
 (``maljan.analysis.sample_integrity`` holds the record and its sentences).
 
 A changed copy is logged and recorded; the run goes on, and the report says
-what changed and when it was seen.
+what changed and when it was seen. A detonating sandbox whose report names
+another target than the sample is recorded the same way
+(:func:`sandbox_target_of`).
 """
 
 from __future__ import annotations
@@ -133,31 +135,70 @@ class SampleIntegrity:
         return integrity_record(self.expected, self.readings)
 
 
+def sandbox_target_of(container: Any) -> dict[str, Any] | None:
+    """The record of the job's sandbox report naming another target, ``None`` otherwise.
+
+    Read off what ``app._submit_to_sandbox`` kept of the live report the
+    provider's reader filled (``container.sandbox_target_claim``), whichever
+    sandbox it was, against the hash the job ran the sample under. An attached
+    report is checked at its upload instead, and a stand-in or a recorded
+    fixture ran nothing during the run: neither keeps a claim. A report that
+    names no target hash, or the sample's, is no record. Never raises.
+    """
+    from maljan.analysis.sample_integrity import sandbox_target_record
+
+    claim = getattr(container, "sandbox_target_claim", None)
+    if not isinstance(claim, Mapping):
+        return None
+    record = sandbox_target_record(
+        str(getattr(container, "sample_sha256", "") or ""),
+        claim.get("sha256"),
+        provider=str(claim.get("provider") or ""),
+        task_id=str(claim.get("task_id") or ""),
+    )
+    if record is not None:
+        logger.warning(
+            "The %r sandbox report names its target as %r, not the sample's SHA-256%s.",
+            record["provider"],
+            record["sandbox_sha256"],
+            "" if record.get("sandbox_sha256_valid", True) else " (not a SHA-256)",
+            extra={"component": "sample-integrity"},
+        )
+    return record
+
+
 async def ended_record(integrity: SampleIntegrity | None) -> dict[str, Any] | None:
     """``integrity``'s end record, ``None`` for a job that handed out no copy."""
     return await integrity.ended() if integrity is not None else None
 
 
 def with_record(
-    run_summary: dict[str, Any], malware_report: Any, record: Mapping[str, Any] | None
+    run_summary: dict[str, Any],
+    malware_report: Any,
+    record: Mapping[str, Any] | None,
+    key: str | None = None,
 ) -> None:
-    """Put ``record`` on the run summary and in each disclosure's isolation part, in place."""
+    """Put ``record`` on the run summary and in each disclosure's isolation part, in place.
+
+    Under ``key``, the copies' record's key by default.
+    """
     if not record:
         return
     from maljan.analysis.sample_integrity import RECORD_KEY, with_integrity
 
-    run_summary[RECORD_KEY] = dict(record)
+    key = key or RECORD_KEY
+    run_summary[key] = dict(record)
     if "disclosure" in run_summary:
-        run_summary["disclosure"] = with_integrity(run_summary["disclosure"], record)
+        run_summary["disclosure"] = with_integrity(run_summary["disclosure"], record, key)
     if not isinstance(malware_report, dict):
         return
     held = malware_report.get("run_summary")
     if isinstance(held, dict):
         malware_report["run_summary"] = {
             **held,
-            RECORD_KEY: dict(record),
+            key: dict(record),
             **(
-                {"disclosure": with_integrity(held["disclosure"], record)}
+                {"disclosure": with_integrity(held["disclosure"], record, key)}
                 if "disclosure" in held
                 else {}
             ),
