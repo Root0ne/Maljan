@@ -232,6 +232,18 @@ describe("a tab earned by the ledger rather than by a typed block", () => {
     expect(tabHasContent("/static", strings)).toBe(true);
   });
 
+  it("offers DETECTION for a run whose only export content is its indicator table", () => {
+    const iocs = report({
+      malware_report: malwareReport({
+        consolidated_iocs: [
+          { type: "Mutex", kind: "mutex", value: "runnung", published: "yes" },
+        ],
+      }),
+    });
+    expect(tabHasContent("/detection", iocs)).toBe(true);
+    expect(tabHasContent("/detection", report())).toBe(false);
+  });
+
   it("does not offer ATT&CK for corroboration the judge mapped nothing from", () => {
     /* The tab builds its matrix from the mapped techniques and reads
      * corroboration only to decorate a card that already exists, so a

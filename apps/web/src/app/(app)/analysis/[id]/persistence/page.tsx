@@ -5,6 +5,7 @@ import ReportAbsent from "@/components/analysis/ReportAbsent";
 import { reportAbsence } from "@/components/analysis/reportAbsence";
 import type { PersistenceKind } from "@/types/malware-report";
 import { ArtifactSections } from "@/components/analysis/ArtifactTable";
+import { CitedText } from "@/components/analysis/EvidenceChips";
 import { sectionsForTab } from "@/components/analysis/reportSections";
 
 const KIND_LABELS: Record<PersistenceKind, string> = {
@@ -143,7 +144,9 @@ export default function PersistenceTab() {
             )}
             {p.evidence_ref && (
               <Row label="Evidence">
-                <span className="text-xs text-text-muted break-all">{p.evidence_ref}</span>
+                <span className="text-xs text-text-muted break-all">
+                  <CitedText text={p.evidence_ref} />
+                </span>
               </Row>
             )}
           </div>
