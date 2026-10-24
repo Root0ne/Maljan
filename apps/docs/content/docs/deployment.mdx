@@ -27,6 +27,8 @@ applies both.
 | `die-port`, `ilspy-port`, `goresym-port` | `alpine/socat` (pinned by digest) | Each publishes its server's port (8090, 8091, 8092) on `BIND_ADDRESS` for a worker run on the host, under the server's profile, as `ghidra-port` does. |
 | `yarax-mcp`, `oletools-mcp`, `webcrack-mcp` | built from `services/<name>/Dockerfile` | The rule and document servers (YARA-X, oletools, webcrack), each under its own profile (`yarax`, `oletools`, `webcrack`), off in the shipped `docker/.env`; each refuses to start without its token. Capped at 2 GB of memory and swap each (`YARAX_MEM_LIMIT`, `OLETOOLS_MEM_LIMIT`, `WEBCRACK_MEM_LIMIT`). `yarax-mcp` reads the operator's rule files from `data/yara-x-rules` (or `YARA_X_RULES_DIR`), mounted read-only. See [Rule and document servers](/tools/rules-and-documents/). |
 | `yarax-port`, `oletools-port`, `webcrack-port` | `alpine/socat` (pinned by digest) | Each publishes its server's port (8093, 8094, 8095) on `BIND_ADDRESS` for a worker run on the host, under the server's profile. |
+| `unblob-mcp`, `jadx-mcp` | built from `services/<name>/Dockerfile` | The container and Android servers (unblob, JADX), each under its own profile (`unblob`, `jadx`), off in the shipped `docker/.env`; each refuses to start without its token. Capped at 2 GB and 4 GB of memory and swap (`UNBLOB_MEM_LIMIT`, `JADX_MEM_LIMIT`). Each has a `/tmp` tmpfs of its own, sized below its ceiling (`UNBLOB_TMPFS_SIZE`, `JADX_TMPFS_SIZE`). `unblob-mcp` writes what it extracts there, never beside the sample, and is handed `UPLOAD_MAX_BYTES`, `UNBLOB_MAX_ENTRIES` and `CARVED_KEEP_SECONDS`. See [Container and Android servers](/tools/containers-and-android/). |
+| `unblob-port`, `jadx-port` | `alpine/socat` (pinned by digest) | Each publishes its server's port (8096, 8097) on `BIND_ADDRESS` for a worker run on the host, under the server's profile. |
 | `migrate` | `maljan-backend` | One-shot `alembic upgrade head`. Runs to completion before the API and the worker start; on an upgrade, migrate before restarting either, since a stored built-in team written before a seeding revision loads under a renamed key until the revision has run. |
 | `backend-api` | `maljan-backend` | The FastAPI service. |
 | `backend-worker` | `maljan-backend` | The arq worker. Capped at 8 GB memory and swap; `WORKER_RSS_RESTART_MB` makes it exit between jobs before it gets there, and `restart: unless-stopped` brings it back. It runs one analysis at a time (`WorkerSettings.max_jobs = 1`): a job's settings, the values the event scrub masks and the API names its hash resolution read are held per process, so any other `max_jobs` is refused at startup with that reason. More analyses at once take more worker processes. |
@@ -189,6 +191,23 @@ are held exactly so, on networks of their own (`yarax`, `oletools`,
 (`YARAX_MEM_LIMIT`, `OLETOOLS_MEM_LIMIT`, `WEBCRACK_MEM_LIMIT`). `yarax-mcp`
 mounts one directory besides the samples, the operator's YARA rule files,
 read-only at `/data/rules`.
+
+The container and Android servers (`unblob-mcp`, `jadx-mcp`) are held exactly
+so, on networks of their own (`unblob`, `jadx`) with their relays'
+(`unblob-publish`, `jadx-publish`), with 2g and 4g (`UNBLOB_MEM_LIMIT`,
+`JADX_MEM_LIMIT`), and each has a `/tmp` of its own, a tmpfs sized below that
+ceiling (`UNBLOB_TMPFS_SIZE`, `JADX_TMPFS_SIZE`, 1536m each), so a run that
+writes too much fills the file system rather than the container's memory.
+Keep each below its memory ceiling and change the two together: unblob's at
+about three quarters of `UNBLOB_MEM_LIMIT`, JADX's at `JADX_MEM_LIMIT` less its
+heap (half of it) and about 0.5 GiB more for the runtime.
+`unblob-mcp` writes the files it extracts under `/tmp/carved`; it stops a run
+past the larger of the sample's size and `UPLOAD_MAX_BYTES` (100 MiB unless
+set; set it to the console's `upload_max_bytes` where you raised that) or past
+`UNBLOB_MAX_ENTRIES` entries (100000 unless set), no one file it writes may
+pass that byte bound, and it removes each extraction `CARVED_KEEP_SECONDS`
+after it was written (3600 unless set), the oldest first when a new run would
+not fit.
 
 ## Where a tool server sees the sample
 

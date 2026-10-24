@@ -422,6 +422,10 @@ servers' steps, each off the same way and each on the routed format: `ole_vba`
 (oletools) on an Office container, `office_dde` on an Office container or an
 RTF, `rtf_objects` on an RTF, `js_deobfuscate` (webcrack) on a JavaScript,
 HTA or WSF file (see [Rule and document servers](/tools/rules-and-documents/));
+the container and Android servers' steps, each off the same way:
+`container_extract` (unblob) on every sample, each file it wrote taken into
+the job's artefact store, and `android_classes` (JADX) on an APK or dex file
+(see [Container and Android servers](/tools/containers-and-android/));
 a `strings` head
 capped by `triage.strings_head` and `iocs_from_file` (its indicator scan reads printable
 ASCII and UTF-16LE runs; a UTF-16LE host written directly after a NUL-terminated ASCII

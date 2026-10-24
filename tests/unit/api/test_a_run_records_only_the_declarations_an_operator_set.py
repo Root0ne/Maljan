@@ -51,7 +51,8 @@ def test_a_changed_declaration_changes_its_digest() -> None:
 def test_the_snapshot_keeps_its_old_size() -> None:
     snap = settings_snapshot(Settings(), {})
     # Each built-in server adds its launch settings (some 26 leaves) and one
-    # digest, never its declaration's leaves: the bound grew by the three
-    # identification servers' share, not by a thousand.
-    assert len(snap) < 700
+    # digest, never its declaration's leaves: the bound grew by the
+    # one-program sidecars' share (the identification, document, container
+    # and Android servers), not by a thousand.
+    assert len(snap) < 800
     assert not _leaves(snap, "tool_facts")

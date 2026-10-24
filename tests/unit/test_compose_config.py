@@ -34,6 +34,8 @@ OPTIONAL_ENV = {
     "YARAX_MCP_AUTH_TOKEN": "y" * 32,
     "OLETOOLS_MCP_AUTH_TOKEN": "o" * 32,
     "WEBCRACK_MCP_AUTH_TOKEN": "w" * 32,
+    "UNBLOB_MCP_AUTH_TOKEN": "u" * 32,
+    "JADX_MCP_AUTH_TOKEN": "j" * 32,
 }
 
 # The sidecars of one analysis program each (the identification sidecars and
@@ -46,6 +48,8 @@ ONE_PROGRAM = {
     "yarax": ("yarax-mcp", "yarax-port", 8093),
     "oletools": ("oletools-mcp", "oletools-port", 8094),
     "webcrack": ("webcrack-mcp", "webcrack-port", 8095),
+    "unblob": ("unblob-mcp", "unblob-port", 8096),
+    "jadx": ("jadx-mcp", "jadx-port", 8097),
 }
 # Each one's memory-and-swap ceiling by default, in GiB, and the variable that
 # sets it.
@@ -56,11 +60,20 @@ ONE_PROGRAM_MEMORY = {
     "yarax": ("YARAX_MEM_LIMIT", 2),
     "oletools": ("OLETOOLS_MEM_LIMIT", 2),
     "webcrack": ("WEBCRACK_MEM_LIMIT", 2),
+    "unblob": ("UNBLOB_MEM_LIMIT", 2),
+    "jadx": ("JADX_MEM_LIMIT", 4),
 }
 # The mounts a sidecar holds beside the samples directory, by profile: YARA-X
 # reads the operator's rule files, read-only, from the directory
 # YARA_X_RULES_DIR names (data/yara-x-rules by default).
 RULE_MOUNTS = {"yarax": ("YARA_X_RULES_DIR", ("data", "yara-x-rules"), "/data/rules")}
+# The variables a sidecar is handed beside its token, by profile, none of them
+# a secret: unblob's bound on what one extraction writes (the console's upload
+# bound) and how long it keeps an extraction's files.
+SIDECAR_SETTINGS = {"unblob": {"UPLOAD_MAX_BYTES", "CARVED_KEEP_SECONDS", "UNBLOB_MAX_ENTRIES"}}
+# The sidecars whose /tmp is a tmpfs sized below their memory ceiling, by
+# profile: the variable that sets it and its size by default, in MiB.
+TMPFS_SIZES = {"unblob": ("UNBLOB_TMPFS_SIZE", 1536), "jadx": ("JADX_TMPFS_SIZE", 1536)}
 ALL_PROFILES = ("ghidra", "qdrant", *ONE_PROGRAM)
 
 
@@ -650,15 +663,37 @@ def test_each_one_program_sidecar_is_held_as_ghidra_is(
     assert sidecar["build"]["dockerfile"] == f"{sidecar_name}/Dockerfile"
     assert Path(sidecar["build"]["context"]).name == "services"
     assert sidecar["user"] == config["services"]["backend-worker"]["user"]
-    assert sidecar["read_only"] is True and sidecar["tmpfs"] == ["/tmp"]
+    assert sidecar["read_only"] is True
+    if profile in TMPFS_SIZES:
+        # Sized below the memory ceiling, so too much written fills it, not memory.
+        size_variable, mib = TMPFS_SIZES[profile]
+        assert sidecar["tmpfs"] == [f"/tmp:size={mib}m"]
+        limit = ONE_PROGRAM_MEMORY[profile][1] * GIB
+        tmpfs = mib * 1024 * 1024
+        # The room each leaves beside its tmpfs: unblob's at most three
+        # quarters of its ceiling, JADX's its ceiling less its heap (half of
+        # it) and half a GiB for the runtime.
+        if profile == "unblob":
+            assert tmpfs <= limit * 3 // 4
+        else:
+            assert tmpfs <= limit - limit // 2 - GIB // 2
+        resized = _render_with(tmp_path, *files, profiles=(profile,), env={size_variable: "512m"})
+        assert resized["services"][sidecar_name]["tmpfs"] == ["/tmp:size=512m"]
+    else:
+        assert sidecar["tmpfs"] == ["/tmp"]
     # A memory ceiling the kernel enforces, swap pinned to it, as Ghidra's.
     variable, gib = ONE_PROGRAM_MEMORY[profile]
     assert int(sidecar["mem_limit"]) == int(sidecar["memswap_limit"]) == gib * GIB
     lighter = _render_with(tmp_path, *files, profiles=(profile,), env={variable: "1g"})
     held = lighter["services"][sidecar_name]
     assert int(held["mem_limit"]) == int(held["memswap_limit"]) == GIB
-    # The one variable it is handed is its own token.
-    assert set(sidecar["environment"]) == {"MCP_AUTH_TOKEN"}
+    # The one secret it is handed is its own token; unblob's settings beside it.
+    settings = SIDECAR_SETTINGS.get(profile, set())
+    assert set(sidecar["environment"]) == {"MCP_AUTH_TOKEN", *settings}
+    if settings:
+        given = {name: "7" for name in settings}
+        held = _render_with(tmp_path, *files, profiles=(profile,), env=given)
+        assert {k: held["services"][sidecar_name]["environment"][k] for k in settings} == given
     # The samples directory, read-only, at the mount its block declares, and
     # nothing else but YARA-X's rule directory, read-only too.
     block = Settings(_env_file=None).mcp.servers[profile]

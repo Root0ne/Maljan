@@ -105,6 +105,8 @@ SHIPPED_SERVER_STEPS = [
     "office_dde",
     "rtf_objects",
     "js_deobfuscate",
+    "container_extract",
+    "android_classes",
 ]
 _AFTER_THE_READERS = SHIPPED_IDS.index("archive_list") + 1
 _AFTER_YARA = SHIPPED_IDS.index("yara_scan") + 1

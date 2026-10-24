@@ -94,6 +94,8 @@ def test_the_built_ins_that_read_the_staged_sample_are_the_three_and_the_identif
         "yarax",
         "oletools",
         "webcrack",
+        "unblob",
+        "jadx",
     }
 
 

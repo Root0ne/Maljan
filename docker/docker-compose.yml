@@ -22,8 +22,8 @@ x-backend-image: &backend-image
     - no-new-privileges:true
 
 # What every sidecar that serves one analysis program (services/cli-sidecar:
-# die-mcp, ilspy-mcp, goresym-mcp, yarax-mcp, oletools-mcp and webcrack-mcp
-# below) is held to. Each opens the sample, so each is held as ghidra-mcp is
+# die-mcp, ilspy-mcp, goresym-mcp, yarax-mcp, oletools-mcp, webcrack-mcp,
+# unblob-mcp and jadx-mcp below) is held to. Each opens the sample, so each is held as ghidra-mcp is
 # (X2): the worker's unprivileged ids (the worker writes its sample mirrors
 # 0700/0600 and these must read them), no Linux capability and no way to gain
 # one, a pids limit against a fork storm, and a read-only root whose only
@@ -551,6 +551,103 @@ services:
       - "${BIND_ADDRESS:-127.0.0.1}:${WEBCRACK_MCP_PORT:-8095}:8095"
 
   # -────────────────────────────────────────────
+  # Container and Android sidecars — unblob, JADX, each optional
+  # -────────────────────────────────────────────
+  # One analysis program each, served over MCP as the sidecars above are
+  # (services/unblob-mcp, services/jadx-mcp): unblob carving and extracting
+  # every file a container or firmware image holds, JADX decompiling an
+  # Android package's or dex file's bytecode to Java. Each is off until its
+  # profile is in COMPOSE_PROFILES, its token set here and its built-in block
+  # (unblob, jadx) switched on in the console with that token; held as
+  # x-cli-sidecar says, with the samples read-only at /data/samples and an
+  # internal network of its own, published by a bare relay. Neither runs what
+  # it reads: unblob's extractors unpack, JADX decompiles and loads no class.
+  #
+  # unblob writes what it extracts into a directory of its own per call under
+  # /tmp/carved, never beside the sample. Machine-safety bounds, each the
+  # operator's to set: a run stops once the files written pass the larger of
+  # the sample's size and the platform's sample upload bound
+  # (UPLOAD_MAX_BYTES, the console's upload_max_bytes, 100 MiB when unset) or
+  # once it made more than UNBLOB_MAX_ENTRIES entries (100000 when unset); no
+  # one file may pass that byte bound; each directory goes CARVED_KEEP_SECONDS
+  # after it was written (an hour when unset), and the oldest goes first when
+  # a new run would not fit. Its /tmp is a tmpfs of its own, sized below the
+  # memory ceiling (UNBLOB_TMPFS_SIZE, 1536m), so a run that writes past the
+  # last check fills the file system rather than the container's memory.
+  # JADX's /tmp is sized the same way (JADX_TMPFS_SIZE, 1536m) beside a heap of
+  # half the container's memory. UNBLOB_MEM_LIMIT and JADX_MEM_LIMIT set each
+  # memory-and-swap ceiling (2g and 4g by default), a machine-safety limit as
+  # the others are.
+  unblob-mcp:
+    <<: *cli-sidecar
+    profiles: [unblob]
+    build:
+      context: ../services
+      dockerfile: unblob-mcp/Dockerfile
+    image: maljan-unblob-mcp:26.6.4
+    container_name: maljan-unblob-mcp
+    environment:
+      MCP_AUTH_TOKEN: ${UNBLOB_MCP_AUTH_TOKEN:-}
+      UPLOAD_MAX_BYTES: ${UPLOAD_MAX_BYTES:-}
+      CARVED_KEEP_SECONDS: ${CARVED_KEEP_SECONDS:-}
+      UNBLOB_MAX_ENTRIES: ${UNBLOB_MAX_ENTRIES:-}
+    tmpfs:
+      - /tmp:size=${UNBLOB_TMPFS_SIZE:-1536m}
+    mem_limit: ${UNBLOB_MEM_LIMIT:-2g}
+    memswap_limit: ${UNBLOB_MEM_LIMIT:-2g}
+    networks:
+      - unblob
+    volumes:
+      - ../data/samples:/data/samples:ro
+    healthcheck: *sidecar-health
+
+  unblob-port:
+    <<: *sidecar-relay
+    profiles: [unblob]
+    container_name: maljan-unblob-port
+    command:
+      - tcp-listen:8096,fork,reuseaddr
+      - tcp-connect:unblob-mcp:8096
+    networks:
+      - unblob
+      - unblob-publish
+    ports:
+      - "${BIND_ADDRESS:-127.0.0.1}:${UNBLOB_MCP_PORT:-8096}:8096"
+
+  jadx-mcp:
+    <<: *cli-sidecar
+    profiles: [jadx]
+    build:
+      context: ../services
+      dockerfile: jadx-mcp/Dockerfile
+    image: maljan-jadx-mcp:1.5.6
+    container_name: maljan-jadx-mcp
+    environment:
+      MCP_AUTH_TOKEN: ${JADX_MCP_AUTH_TOKEN:-}
+    tmpfs:
+      - /tmp:size=${JADX_TMPFS_SIZE:-1536m}
+    mem_limit: ${JADX_MEM_LIMIT:-4g}
+    memswap_limit: ${JADX_MEM_LIMIT:-4g}
+    networks:
+      - jadx
+    volumes:
+      - ../data/samples:/data/samples:ro
+    healthcheck: *sidecar-health
+
+  jadx-port:
+    <<: *sidecar-relay
+    profiles: [jadx]
+    container_name: maljan-jadx-port
+    command:
+      - tcp-listen:8097,fork,reuseaddr
+      - tcp-connect:jadx-mcp:8097
+    networks:
+      - jadx
+      - jadx-publish
+    ports:
+      - "${BIND_ADDRESS:-127.0.0.1}:${JADX_MCP_PORT:-8097}:8097"
+
+  # -────────────────────────────────────────────
   # Volume ownership — one-shot, before api, worker and Ghidra
   # -────────────────────────────────────────────
   # The backend services and Ghidra used to run as root, so an existing
@@ -689,8 +786,8 @@ services:
       - "host.docker.internal:host-gateway"
     # `default` as before; `ghidra` to reach Ghidra, which is on no other
     # network these services share (see ghidra-mcp), and `die`, `ilspy`,
-    # `goresym`, `yarax`, `oletools` and `webcrack` to reach the sidecars of
-    # one analysis program each the same way.
+    # `goresym`, `yarax`, `oletools`, `webcrack`, `unblob` and `jadx` to reach
+    # the sidecars of one analysis program each the same way.
     networks:
       - default
       - ghidra
@@ -700,6 +797,8 @@ services:
       - yarax
       - oletools
       - webcrack
+      - unblob
+      - jadx
     # The source trees are read-only: a process in this container that opens
     # hostile bytes cannot plant code the API or a later worker would run, or
     # change the host's working tree. data/ is read-only as well (its rule sets
@@ -811,8 +910,8 @@ services:
     extra_hosts:
       - "host.docker.internal:host-gateway"
     # As on the API: `ghidra` is how the worker reaches Ghidra, and `die`,
-    # `ilspy`, `goresym`, `yarax`, `oletools` and `webcrack` the sidecars of
-    # one analysis program each.
+    # `ilspy`, `goresym`, `yarax`, `oletools`, `webcrack`, `unblob` and `jadx`
+    # the sidecars of one analysis program each.
     networks:
       - default
       - ghidra
@@ -822,6 +921,8 @@ services:
       - yarax
       - oletools
       - webcrack
+      - unblob
+      - jadx
     # Hard ceiling (2026-07-26). One analysis took this process from 3.4 GB to
     # 8.5 GB and never gave it back; two in a row exhausted a 30 GB host that
     # also runs a ~15 GB llama-server, and the machine locked up. The graceful
@@ -987,6 +1088,15 @@ networks:
   webcrack:
     internal: true
   webcrack-publish:
+    driver: bridge
+  # The container and Android sidecars' own, the same way.
+  unblob:
+    internal: true
+  unblob-publish:
+    driver: bridge
+  jadx:
+    internal: true
+  jadx-publish:
     driver: bridge
 
 volumes:

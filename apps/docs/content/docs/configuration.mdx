@@ -2167,6 +2167,24 @@ declared read-only and running nothing. `yarax_scan` is declared as
 signature rule hits and corroborate as the one YARA layer. See
 [Rule and document servers](/tools/rules-and-documents/).
 
+### The container and Android servers
+
+`unblob` and `jadx` are built-in blocks for two more containers of this
+deployment, held and switched on the same way: unblob (`container_scan`,
+`container_extract`, and `get_artefact`, the delivery primitive the artefact
+store reads a written file back with, never offered to a model) and JADX
+(`android_classes`, `android_decompile_class`). Each ships **disabled**, over
+streamable-HTTP at `http://unblob-mcp:8096/mcp` and
+`http://jadx-mcp:8097/mcp`, with `sample_mount` `/data/samples` and
+`reads_staged_sample`, every tool declared read-only and running nothing.
+`unblob` is bound to the `static` and `reverser` agents, `jadx` to the
+`android_static` and `reverser` agents. unblob writes what it extracts into a
+directory of its own in its container, never beside the sample, and stops at
+the larger of the sample's size and the sample upload bound (`UPLOAD_MAX_BYTES`
+in `docker/.env`, 100 MiB unless set) or past `UNBLOB_MAX_ENTRIES` entries,
+in a `/tmp` tmpfs sized below its memory ceiling (`UNBLOB_TMPFS_SIZE`). See
+[Container and Android servers](/tools/containers-and-android/).
+
 ## Teams and stages
 
 A team (`core.agents.profiles.<key>`, edited under Settings → Agents and
@@ -2510,6 +2528,12 @@ and `rtf`) and `rtf_objects` (on `rtf`), oletools' tools, and
 identification steps; and `yarax_scan` (YARA-X's, on every sample), right
 after `yara_scan`. Each runs on the routed format alone, the formats its
 tool declares.
+
+Two more call the container and Android servers and are off the same way,
+after the document steps: `container_extract` (unblob's, on every sample),
+which declares `outputs` `/files/*/path`, so each file it wrote is taken into
+the job's artefact store for a step of yours that `reads` it; and
+`android_classes` (JADX's, on `apk` and `dex`).
 
 **Files passed between servers.** A file one server's tool writes (a payload
 carved out of the sample, an archive member, a decoded script) reaches
