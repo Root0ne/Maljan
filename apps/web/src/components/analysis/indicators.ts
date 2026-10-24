@@ -98,11 +98,12 @@ export function judgeIndicatorRows(mr: MalwareReport | null | undefined): JudgeI
 /**
  * Why the MISP export has nothing to download.
  *
- * `misp_attributes` is a field of the stored report that no build step
- * writes, so it is `null` on every report — and "this run generated no MISP
- * attributes" said of a run with fourteen indicators that it found none. A
- * `null` is said as what it is; only an empty list, which a builder would
- * have written, is a run that produced none.
+ * The report build writes `misp_attributes` from the IOC table's published
+ * rows and the published techniques; a report stored before it did holds
+ * `null` — and "this run generated no MISP attributes" said of such a run
+ * with fourteen indicators that it found none. A `null` is said as what it
+ * is; only an empty list, which the builder wrote, is a run that produced
+ * none.
  */
 export function mispAbsence(mr: MalwareReport | null | undefined): string {
   if (Array.isArray(mr?.misp_attributes)) return "this run generated no MISP attributes";
@@ -111,7 +112,7 @@ export function mispAbsence(mr: MalwareReport | null | undefined): string {
     count > 0
       ? ` — its ${count} indicator${count === 1 ? " is" : "s are"} on DETECTION and in the IOC list`
       : "";
-  return `no MISP attributes are stored with this report: the platform does not build them${where}`;
+  return `no MISP attributes are stored with this report: it was stored before the platform built them${where}`;
 }
 
 /** Whether the report holds any indicator for the panel to draw. */

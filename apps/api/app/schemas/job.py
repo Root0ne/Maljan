@@ -440,6 +440,11 @@ class ReportDetailResponse(BaseModel):
     # the report is served, never stored; a section it does not name is
     # placed by its key, as before. ``None`` when no section is placed.
     section_tabs: dict[str, str] | None = None
+    # Set on a report stored before its IOC table, ``/iocs`` and MISP
+    # attributes were built by the current publish rule: they are rebuilt when
+    # served, while the stored STIX bundle is served as it was rendered then,
+    # and this says so. ``None`` on a report built under the current rule.
+    stix_note: str | None = None
     # A report kept from a run that failed after the report was built says so
     # here: where the run failed and the error id. ``None`` on a report of a
     # completed run.
@@ -458,9 +463,9 @@ class ReportDetailResponse(BaseModel):
 class IOCEntry(BaseModel):
     """One flattened IOC row used by the ``/iocs`` endpoint."""
 
-    # "domain" | "ip" | "url" | "user_agent" | "ja3" | "ja3s" | "hash", and for
-    # a value the STIX export carries from the judge's objects "email" |
-    # "path" | "registry" | "mutex" | "command" as well.
+    # The row kind of the report's IOC table the row is: "hash" | "domain" |
+    # "ip" | "url" | "email" | "user_agent" | "ja3" | "ja3s" | "path" |
+    # "registry" | "mutex" | "scheduled_task" | "service" | "command" | ...
     kind: str
     value: str
     is_suspicious: bool = False

@@ -115,7 +115,13 @@ UNSIGNED = "unsigned"
 OTHER_KEY = "other_key"
 SEAL_UNVERIFIABLE = "seal_unverifiable"
 
-NO_MISP = "The platform has no MISP event exporter: no MISP event is built for any job."
+NO_MISP = (
+    "The platform builds no MISP event: the report's MISP attributes, built from its published "
+    "indicators and techniques, are the misp_attributes part."
+)
+NO_MISP_ATTRIBUTES = (
+    "The report holds no MISP attributes: it was stored before the platform built them."
+)
 OFFLINE = (
     "An offline build from a run directory reads no object store: only the reference and its "
     "digest are packaged."
@@ -523,6 +529,18 @@ def build_package(
             _part("stix_bundle", None, "The report row holds no STIX bundle.")
         del stix, byjob
         _part("misp_event", None, NO_MISP)
+        attributes = report.get("misp_attributes") if isinstance(report, Mapping) else None
+        if isinstance(attributes, list):
+            # In the report document, or in the report row that carried it.
+            where, pointer = (
+                (f"{RUN}/report.json", "/misp_attributes")
+                if "report.json" in present
+                else (f"{RUN}/report-byjob.json", "/malware_report/misp_attributes")
+            )
+            _part("misp_attributes", where, None, pointer=pointer, count=len(attributes))
+        else:
+            _part("misp_attributes", None, NO_MISP_ATTRIBUTES)
+        del attributes
 
         if refs is None and "evidence.json" in left_out:
             _part(

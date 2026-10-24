@@ -423,7 +423,19 @@ def test_the_served_report_carries_the_placements() -> None:
     # Served, a section also says its server, derived from the index.
     expected = json.loads(report.model_dump_json())
     expected["sections"][0]["source_server"] = "invented"
-    assert placed.malware_report == expected
+    # And its IOC table is the one /iocs serves, with the MISP attributes of a
+    # report stored before they were built (``with_current_iocs``).
+    from maljan.reporting.builder import build_consolidated_iocs
+
+    expected["consolidated_iocs"] = [
+        row.model_dump(mode="json") for row in build_consolidated_iocs(report)
+    ]
+    served = dict(placed.malware_report)
+    attributes = served.pop("misp_attributes")
+    expected.pop("misp_attributes")
+    assert served == expected
+    assert [(a["type"], a["value"]) for a in attributes] == [("sha256", "a" * 64)]
+    assert placed.stix_note
     plain = asyncio.run(_detail(MagicMock(), _row_of(None)))
     assert plain.section_tabs is None
 

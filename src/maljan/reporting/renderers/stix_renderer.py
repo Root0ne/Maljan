@@ -935,7 +935,11 @@ class ExtendedSTIXRenderer:
         # and for the string rows below: one rule, asked of both.
         judge_corroborating = _corroborating_values(report, corpus)
         if base_bundle is not None:
-            self.declined.extend(self._normalize_judge_timestamps(base_bundle.objects))
+            # The judge's objects as this export carries them: copies, so the
+            # stamping, the moves and the integrity pass below never edit the
+            # bundle the caller handed in, and a second render of it is the same.
+            judge_objects = [obj.model_copy(deep=True) for obj in base_bundle.objects]
+            self.declined.extend(self._normalize_judge_timestamps(judge_objects))
             remap = _technique_remap(report, base_bundle)
             gone = _rejected_pattern_ids(base_bundle, remap)
             # A credit the judge was asked about and kept, naming an agent no
@@ -950,7 +954,7 @@ class ExtendedSTIXRenderer:
                 for credit in unconfirmed_credits(base_bundle, technique_sources)
             }
             unasked_credits = _unasked_findings(report, "stix.credit_without_claim")
-            for position, obj in enumerate(base_bundle.objects):
+            for position, obj in enumerate(judge_objects):
                 kind = getattr(obj, "type", "")
                 if position in unconfirmed:
                     credit = unconfirmed[position]
@@ -1103,12 +1107,18 @@ class ExtendedSTIXRenderer:
         #    sample's hash is malicious activity — a stronger contradiction
         #    than the malware object the same export declines, because a
         #    consumer blocks on the indicator and reads the objects afterwards.
+        #    Every identity digest the router established for the sample is
+        #    one comparison of it (:func:`sample_hash_pattern`): the IOC table
+        #    and ``/iocs`` publish its MD5 and SHA-1 as the sample's own, and
+        #    the export carried its SHA-256 alone. Its imphash, ssdeep and TLSH
+        #    also match files that are not the sample, so they are an
+        #    indicator of their own that claims no more than anomalous activity.
         sample_hash_id: str | None = None
         sha256 = report.identity.hashes.sha256
         if sha256 and _SHA256_RE.match(sha256):
             indicator = Indicator(
                 name=f"Sample hash {sha256[:12]}",
-                pattern=f"[file:hashes.'SHA-256' = '{sha256}']",
+                pattern=sample_hash_pattern(report.identity.hashes),
                 pattern_type="stix",
                 indicator_types=[indicator_type_for(report.verdict)],
             )
@@ -1121,6 +1131,21 @@ class ExtendedSTIXRenderer:
                         source_ref=indicator.id,
                         target_ref=malware_id,
                     )
+                )
+            similar = sample_similarity_pattern(report.identity.hashes)
+            if similar is not None:
+                _queue(
+                    Indicator(
+                        name=f"Files like the sample {sha256[:12]}",
+                        description=(
+                            "The sample's import-table and similarity digests; each also "
+                            "matches files that share its imports or most of its bytes."
+                        ),
+                        pattern=similar,
+                        pattern_type="stix",
+                        indicator_types=[minted_indicator_type(report.verdict)],
+                    ),
+                    _BAND_OWN_HASH,
                 )
 
         # 5) Network IP/URL/domain → Indicator, in the order the priority rule
@@ -1259,6 +1284,21 @@ class ExtendedSTIXRenderer:
         for carried_indicator in carried:
             _queue(carried_indicator, _indicator_band(carried_indicator.pattern), "judge")
 
+        # 6.7) The host rows of the report's IOC table a sandbox, a persistence
+        #      record or a static carve recorded and the one rule publishes: a
+        #      dropped file's digest, a path the sample wrote, a registry key,
+        #      a mutex. No step above reads them, so the table and ``/iocs``
+        #      said ``yes`` for values this export did not carry. Queued after
+        #      the judge's, each once: a value an indicator above already
+        #      names is not written twice.
+        #      The table as §9 prints it (``builder.ioc_table``: rebuilt by
+        #      the current rule), read once for this step and the reasons below.
+        from maljan.reporting.builder import ioc_table
+
+        table = ioc_table(report)
+        for observed, source in _observed_host_indicators(table, objects, report.verdict):
+            _queue(observed, _indicator_band(observed.pattern), source)
+
         # 7) ObservedData for the process tree roots.
         #    The processes and their images are objects of the bundle, named by
         #    ``object_refs``. The sandbox block carries no observation time, so
@@ -1359,9 +1399,15 @@ class ExtendedSTIXRenderer:
         # values the bundle did not carry.
         from maljan.agents.judge_postprocess import enforce_bundle_integrity
 
+        # An indicator naming the sample by its own digests alone — the judge
+        # writes one for its SHA-256 — is the sample's indicator, which now
+        # names every digest; it is folded into that one, and what pointed at
+        # it points at the sample's.
+        if sample_hash_id is not None:
+            objects = _folded_into_the_sample(objects, sample_hash_id, report.identity.hashes)
         # Every indicator the export carries says why it is published, in the
         # words the report's IOC table prints for its values.
-        objects = _with_the_publish_reason(objects, report)
+        objects = _with_the_publish_reason(objects, table)
         objects = enforce_bundle_integrity(objects, ledger=ledger)
         _record_indicator_cap(ledger, removed=0)
         # A note, opinion, grouping or report is about the objects it names,
@@ -1924,6 +1970,166 @@ def indicator_pattern(kind: str, value: str) -> str | None:
     return f"[{family}:value = '{quoted}']"
 
 
+# STIX 2.1's ``hashing-algorithm-ov`` name for each digest the IOC table types,
+# keyed as the table's type is folded (``SHA-256`` -> ``sha256``). An imphash
+# is no hash of the file: it is the PE extension's own property.
+_STIX_HASH_NAMES = {
+    "md5": "MD5",
+    "sha1": "SHA-1",
+    "sha256": "SHA-256",
+    "sha512": "SHA-512",
+    "ssdeep": "SSDEEP",
+    "tlsh": "TLSH",
+}
+_IMPHASH_PATH = "file:extensions.'windows-pebinary-ext'.imphash"
+
+
+# The digest a whole hex value of each length is, for a file a tool recorded
+# without naming the algorithm. Any other length names no digest.
+_DIGEST_BY_LENGTH = {32: "MD5", 40: "SHA-1", 64: "SHA-256", 128: "SHA-512"}
+
+
+def digest_label(value: Any) -> str | None:
+    """``MD5``, ``SHA-1``, ``SHA-256`` or ``SHA-512`` by the hex value's length, else ``None``."""
+    text = str(value or "").strip()
+    if not _WHOLE_DIGEST_RE.match(text):
+        return None
+    return _DIGEST_BY_LENGTH.get(len(text))
+
+
+def hash_comparison(algorithm: str, value: str) -> str | None:
+    """One comparison naming a file by a digest, or ``None`` for an algorithm STIX has no name for.
+
+    ``algorithm`` as the IOC table types it (``SHA-256``, ``MD5``,
+    ``imphash``, ...). The comparison and not the pattern: the sample's own
+    digests are one observation of one file (:func:`sample_hash_pattern`).
+    """
+    key = str(algorithm or "").strip().lower().replace("-", "")
+    quoted = _escape_stix(str(value or "").strip())
+    if not quoted:
+        return None
+    if key == "imphash":
+        return f"{_IMPHASH_PATH} = '{quoted}'"
+    name = _STIX_HASH_NAMES.get(key)
+    return f"file:hashes.'{name}' = '{quoted}'" if name else None
+
+
+def hash_pattern(algorithm: str, value: str) -> str | None:
+    """The STIX pattern for a file one digest names, or ``None`` (:func:`hash_comparison`)."""
+    comparison = hash_comparison(algorithm, value)
+    return f"[{comparison}]" if comparison else None
+
+
+# The sample's digests in the order the IOC table lists them.
+SAMPLE_DIGESTS = (
+    ("SHA-256", "sha256"),
+    ("SHA-1", "sha1"),
+    ("MD5", "md5"),
+    ("SHA-512", "sha512"),
+    ("imphash", "imphash"),
+    ("ssdeep", "ssdeep"),
+    ("TLSH", "tlsh"),
+)
+# The digests that name the sample's own bytes and nothing else, which the
+# sample's indicator carries under the verdict's word; and the ones that also
+# match other files — an import table's hash, a fuzzy hash — which a separate
+# indicator carries under a softer one (:func:`sample_similarity_pattern`).
+SAMPLE_IDENTITY_DIGESTS = SAMPLE_DIGESTS[:4]
+SAMPLE_SIMILARITY_DIGESTS = SAMPLE_DIGESTS[4:]
+
+# A file digest property, its key quoted or not (``hashes.'SHA-256'``,
+# ``hashes.MD5``).
+_ANY_HASH_PROPERTY_RE = re.compile(r"^hashes\.('?)([^']+)\1$")
+
+
+def _sample_digests(hashes: Any, which: Sequence[tuple[str, str]]) -> set[str]:
+    found = {str(getattr(hashes, field, "") or "").strip().lower() for _label, field in which}
+    found.discard("")
+    return found
+
+
+def _folded_into_the_sample(objects: list[Any], sample_id: str, hashes: Any) -> list[Any]:
+    """The objects without the other indicators that name only the sample's own digests.
+
+    Every comparison of such an indicator is a file digest ``=`` to one of the
+    sample's identity digests, which the sample's indicator
+    (:func:`sample_hash_pattern`) names already. Its labels and external
+    references are merged onto a copy of the sample's indicator, and every
+    object naming it is copied with the sample's id in its place: nothing the
+    caller handed in is changed, so the judge's bundle renders the same twice.
+    The integrity pass then drops the edge that became a duplicate.
+    """
+    from maljan.agents.judge_postprocess import _merge_indicator_sets
+
+    own = _sample_digests(hashes, SAMPLE_IDENTITY_DIGESTS)
+    folded: dict[str, str] = {}
+    merged: list[Any] = []
+    kept: list[Any] = []
+    for obj in objects:
+        if isinstance(obj, Indicator) and obj.id != sample_id:
+            comparisons = read_comparisons(obj.pattern or "")
+            if comparisons and all(
+                c.readable
+                and c.operator == "="
+                and c.object_type == "file"
+                and _ANY_HASH_PROPERTY_RE.match(c.prop)
+                and c.literal.strip().lower() in own
+                for c in comparisons
+            ):
+                folded[obj.id] = sample_id
+                merged.append(obj)
+                continue
+        kept.append(obj)
+    if not folded:
+        return kept
+    out: list[Any] = []
+    for obj in kept:
+        if isinstance(obj, Indicator) and obj.id == sample_id:
+            sample = obj.model_copy(deep=True)
+            for other in merged:
+                _merge_indicator_sets(sample, other)
+            out.append(sample)
+            continue
+        update: dict[str, Any] = {
+            key: folded[str(getattr(obj, key, ""))]
+            for key in ("source_ref", "target_ref")
+            if str(getattr(obj, key, "") or "") in folded
+        }
+        refs = getattr(obj, "object_refs", None)
+        if isinstance(refs, list) and any(str(ref) in folded for ref in refs):
+            update["object_refs"] = list(dict.fromkeys(folded.get(str(r), r) for r in refs))
+        out.append(obj.model_copy(update=update) if update else obj)
+    return out
+
+
+def sample_hash_pattern(hashes: Any) -> str:
+    """The sample as one file named by every identity digest it holds, joined by ``OR``.
+
+    One observation expression, so a consumer matching any of the digests
+    matches the sample; the SHA-256 leads, as every identity carries one.
+    """
+    comparisons = [
+        comparison
+        for label, field in SAMPLE_IDENTITY_DIGESTS
+        if (comparison := hash_comparison(label, str(getattr(hashes, field, "") or "")))
+    ]
+    return f"[{' OR '.join(comparisons)}]"
+
+
+def sample_similarity_pattern(hashes: Any) -> str | None:
+    """The sample's imphash, ssdeep and TLSH joined by ``OR``, or ``None`` when it holds none.
+
+    Each also matches files that are not the sample — another build sharing
+    its import table, a near copy — so they are no identity of it.
+    """
+    comparisons = [
+        comparison
+        for label, field in SAMPLE_SIMILARITY_DIGESTS
+        if (comparison := hash_comparison(label, str(getattr(hashes, field, "") or "")))
+    ]
+    return f"[{' OR '.join(comparisons)}]" if comparisons else None
+
+
 # A mailbox: a local part, one ``@``, and a domain part. Deliberately the
 # syntax and nothing more — whether anything could answer for the domain is the
 # host rule's question, asked separately below, and whether anybody but the
@@ -2085,6 +2291,10 @@ def indicator_publish_reason(
     """
     if kind == "ip" and is_public_resolver(value):
         return None
+    if unattributed and kind in HOST_KINDS:
+        # A host row no process of the sample's tree made is not its
+        # observation: it is published only on the judge's keep against that fact.
+        return _kept_with_the_fact(kept_by, unattributed)
     if listed_only_by_an_analyst(kind, source):
         if kind not in ("domain", "ip", "url"):
             # A mutex, a path, a registry key only an analyst listed: a
@@ -2622,6 +2832,117 @@ TENANT_NAME_IN_A_URL = (
 
 # Why a sandbox row is not the sample's own observation, as the rule reports it.
 UNATTRIBUTED_FLOW = "the sandbox report does not say which process made the flows to it"
+# A file, a digest, a key or a mutex the sandbox recorded is the sample's own
+# observation when the record names a process of the sample's tree; one that
+# names none, or a process outside it, is the guest's as much as the sample's.
+UNATTRIBUTED_HOST_ROW = "the sandbox report does not say which process {did} it"
+HOST_ROW_OUTSIDE_THE_TREE = (
+    "the sandbox report attributes it to a process outside the sample's process tree"
+)
+# The host kinds that answer for the process that made them.
+HOST_KINDS = frozenset({"hash", "path", "registry", "mutex"})
+# The keys a sandbox record names the process that made it under.
+_PID_KEYS = ("pid", "process_id")
+_PROCESS_KEYS = ("process", "process_name", "processes")
+
+
+def _tree_processes(roots: list[Any]) -> tuple[set[str], set[str]]:
+    """The pids and the image names (lower case) of every process in the sample's tree."""
+    pids: set[str] = set()
+    names: set[str] = set()
+    stack = list(roots)
+    while stack:
+        node = stack.pop()
+        pids.add(str(_field(node, "pid")))
+        name = str(_field(node, "name") or "").strip().lower()
+        if name:
+            names.add(name)
+        stack.extend(_field(node, "children") or [])
+    return pids, names
+
+
+def _not_the_sample_s(record: Any, pids: set[str], names: set[str], did: str) -> str:
+    """Why a sandbox record is not the sample's, or ``""`` when a process of its tree made it.
+
+    Decided by the record's pid when it names one; its image name is read only
+    when it names no pid, because a common image the tree also runs
+    (``explorer.exe``) would otherwise attribute every record of that name.
+    """
+    if not isinstance(record, dict):
+        return UNATTRIBUTED_HOST_ROW.format(did=did)
+    by_pid = [str(record[key]) for key in _PID_KEYS if record.get(key) not in (None, "")]
+    if by_pid:
+        return "" if any(pid in pids for pid in by_pid) else HOST_ROW_OUTSIDE_THE_TREE
+    by_name: list[str] = []
+    for key in _PROCESS_KEYS:
+        value = record.get(key)
+        for one in value if isinstance(value, list) else [value]:
+            if one not in (None, ""):
+                by_name.append(str(one).strip().lower())
+    if not by_name:
+        return UNATTRIBUTED_HOST_ROW.format(did=did)
+    return "" if any(name in names for name in by_name) else HOST_ROW_OUTSIDE_THE_TREE
+
+
+def _sandbox_host_index(report: Any) -> dict[tuple[str, str], str]:
+    """``(kind, value key) -> why it is not the sample's`` for each host value the sandbox holds.
+
+    ``""`` for a value a record attributes to the sample's tree: one such
+    record is enough. A registry record names no process, so no key is.
+    """
+
+    def _build() -> dict[tuple[str, str], str]:
+        dynamic = _field(report, "dynamic")
+        if dynamic is None:
+            return {}
+        pids, names = _tree_processes(list(_field(dynamic, "process_tree") or []))
+        out: dict[tuple[str, str], str] = {}
+
+        def _put(kind: str, value: Any, record: Any, did: str) -> None:
+            text = str(value or "").strip()
+            if not text:
+                return
+            key = (kind, _value_key(kind, text))
+            why = _not_the_sample_s(record, pids, names, did)
+            if key not in out or not why:
+                out[key] = why
+
+        for op in list(_field(dynamic, "file_operations") or []):
+            if not isinstance(op, dict):
+                continue
+            if op.get("operation") == "write":
+                _put("hash", op.get("sha256"), op, "wrote")
+                _put("path", op.get("path"), op, "wrote")
+            elif op.get("operation") == "mutex":
+                _put("mutex", op.get("name"), op, "created")
+        for mod in list(_field(dynamic, "registry_mods") or []):
+            if _field(mod, "operation") in ("create", "modify"):
+                _put("registry", _field(mod, "key"), None, "wrote")
+        return out
+
+    index: dict[tuple[str, str], str] = _memo(report, "sandbox_host_index", _build)
+    return index
+
+
+def sandbox_host_kwargs(report: Any, kind: str, value: str) -> dict[str, str]:
+    """``unattributed``, ``kept_by`` and ``untold`` for a host value the sandbox recorded.
+
+    Empty for a value a record attributes to the sample's tree, and for one
+    the sandbox did not record. A value no record attributes is the judge's
+    only by its answer to the question that told it that fact, exactly as an
+    unattributed flow is (:func:`_the_judge_s_keep`); the sandbox's own record
+    of the value is never its second source.
+    """
+    if kind not in HOST_KINDS:
+        return {}
+    key = _value_key(kind, value)
+    why = _sandbox_host_index(report).get((kind, key))
+    if not why:
+        return {}
+    said = {"unattributed": why, **kept_kwargs(report, kind, key)}
+    return _the_judge_s_keep(report, kind, key, said)
+
+
 FLOW_OUTSIDE_THE_TREE = (
     "the sandbox report attributes its flows to a process outside the sample's process tree"
 )
@@ -3584,6 +3905,8 @@ def publish_answer(
         return not_kept_reason(
             f"{TENANT_NAME_IN_A_URL} ({in_published_url})", mentioned_by, listed_by
         )
+    if unattributed and kind in HOST_KINDS:
+        return f"no: {unattributed}; {untold}" if untold else f"no: {unattributed}"
     if unattributed and kind in ("ip", "domain", "url"):
         refused = _recovery_refusal(recovered, verdict, url_host(text) if kind == "url" else text)
         if untold:
@@ -3660,6 +3983,12 @@ def judge_value_answer(report: Any, kind: str, value: str, corroborating: str) -
     """
     text = str(value or "").strip()
     network = getattr(report, "network", None)
+    host = sandbox_host_kwargs(report, kind, text)
+    if host:
+        # A file, digest, key or mutex the sandbox recorded and attributes to
+        # no process of the sample's tree: the judge's indicator for it is
+        # asked as the sandbox's row is, never corroborated by that row.
+        return publish_answer(kind, text, "sandbox", **host)
     emulated = emulation_kwargs(report, kind, text)
     if emulated.get("unattributed"):
         # A value the sandbox attributes no flow of the sample to is the
@@ -3920,6 +4249,66 @@ def exported_indicator_values(bundle: Any) -> list[ExportedValue]:
             seen.add((value.kind, value.value.lower()))
             found.append(value)
     return found
+
+
+# Who records a host row the export carries from the IOC table (step 6.7), and
+# the kinds it has a pattern for. The string rows and the network block have
+# their own steps; the judge's values are its own indicators.
+_OBSERVED_HOST_SOURCES = frozenset({"sandbox", "persistence", "static"})
+_OBSERVED_HOST_KINDS = frozenset({"hash", "path", "registry", "mutex"})
+
+
+def _observed_host_indicators(
+    rows: Sequence[Any], objects: list[Any], verdict: Any
+) -> list[tuple[Indicator, str]]:
+    """An indicator, with its source, for each published observed host row no indicator names.
+
+    Read from the report's IOC table (``rows``), whose answer is the one
+    rule's (``yes`` from the source that recorded the row), so the export
+    carries exactly the rows the table and ``/iocs`` publish. One pass over
+    the indicators already queued and one over the rows.
+    """
+    carried = {
+        (value.kind, _value_key(value.kind, value.value))
+        for obj in objects
+        if isinstance(obj, Indicator)
+        for value in pattern_values(obj.pattern or "")
+    }
+    out: list[tuple[Indicator, str]] = []
+    for row in rows:
+        kind = str(row.kind or "")
+        source = str(row.source or "")
+        if (
+            source not in _OBSERVED_HOST_SOURCES
+            or kind not in _OBSERVED_HOST_KINDS
+            or not publishes(row.published)
+        ):
+            continue
+        key = (kind, _value_key(kind, row.value))
+        if key in carried:
+            continue
+        # A digest is named by its length: a tool that recorded one without
+        # its algorithm is not taken at the label, and any other length is none.
+        pattern = (
+            hash_pattern(digest_label(row.value) or "", row.value)
+            if kind == "hash"
+            else indicator_pattern(kind, row.value)
+        )
+        if pattern is None:
+            continue
+        carried.add(key)
+        out.append(
+            (
+                Indicator(
+                    name=f"{row.type} {row.value[:32]}",
+                    pattern=pattern,
+                    pattern_type="stix",
+                    indicator_types=[minted_indicator_type(verdict)],
+                ),
+                source,
+            )
+        )
+    return out
 
 
 def _stix_pattern_for_string_ioc(ioc: StringIOC) -> str | None:
@@ -4293,19 +4682,16 @@ def _indicator_for_url(url: NetworkURL, report: Any = None) -> Indicator | None:
 PUBLISHED_BECAUSE = "Published because"
 
 
-def _with_the_publish_reason(objects: list[Any], report: Any) -> list[Any]:
+def _with_the_publish_reason(objects: list[Any], rows: Sequence[Any]) -> list[Any]:
     """Each indicator with the reason the one publish rule gave for its values, in words.
 
-    Read from the report's IOC table (``build_consolidated_iocs``), the
-    answers every other surface prints, so the export says what the table
-    says. The reason follows whatever description the indicator carries — the
+    Read from the report's IOC table (``rows``, as ``builder.ioc_table``
+    builds it), the answers every other surface prints, so the export says
+    what the table says. The reason follows whatever description the indicator carries — the
     judge's own words for one it wrote stay first and unchanged, and the
     judge's own bundle is not touched. An indicator whose values the table
     has no published answer for keeps what it carries.
     """
-    from maljan.reporting.builder import build_consolidated_iocs
-
-    rows = list(getattr(report, "consolidated_iocs", None) or []) or build_consolidated_iocs(report)
     answers: dict[tuple[str, str], str] = {}
     for row in rows:
         kind = str(row.kind or "")
