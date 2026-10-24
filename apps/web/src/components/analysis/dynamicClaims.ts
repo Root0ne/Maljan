@@ -23,6 +23,8 @@ export interface AnalystClaim {
   description?: string;
   confidence?: number;
   evidence_ref?: string | string[];
+  /** The round whose tool-less validation retry added it, beside the answer in force. */
+  added_by_retry_in_round?: number;
 }
 
 export interface AnalystClaims {

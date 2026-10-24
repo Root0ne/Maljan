@@ -166,6 +166,7 @@ from maljan.pipeline.nodes import (
     NO_STATIC_FIXTURE_NOTE,
     NOT_ASKED_TO_REVISE,
     NOT_NAMED_BY_MEDIATOR,
+    retry_additions_text,
     run_quality_note,
     skipped_analysts_reason,
 )
@@ -319,6 +320,7 @@ from maljan.schemas.isr_models import (
     judge_and_findings_note,
     judge_dropped_reason,
     judge_kept_note,
+    retry_added_marker,
 )
 from maljan.schemas.sandbox_report import SECTION_IDS
 from maljan.schemas.stix_models import Bundle
@@ -1477,6 +1479,16 @@ PROMPTS: dict[str, str] = {
     ).message,
     "absence marker": ABSENCE_TECHNIQUE_MARKER,
     "failed-calls marker": FAILED_CALLS_MARKER,
+    "retry-added marker": retry_added_marker(2),
+    "retry additions after the answer in force": retry_additions_text(
+        AgentISR(
+            agent_id="a",
+            domain="a",
+            claims=[ClaimEvidence(claim="c", evidence_ref="e", confidence=0.5)],
+        ),
+        1,
+        2,
+    ),
     "sandbox-called api catalogue label": shipped_label("api_capability", CALLED_API_CATALOGUE),
     "capability questions for the anti-analysis and anti-forensics terms": " ".join(
         v.message

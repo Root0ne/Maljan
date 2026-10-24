@@ -740,6 +740,11 @@ class TTPMapping(BaseModel):
     independent_sources: int = 0
     source_kinds: dict[str, int] = Field(default_factory=dict)
     support: str = ""
+    # The layers in ``contributing_layers`` that named it only in claims a
+    # tool-less retry added and nothing of their own backs
+    # (``validation.retry_claim_unbacked``): listed, never counted as a layer
+    # that names it. Left out of the stored row when empty.
+    retry_only_layers: list[str] = Field(default_factory=list, exclude_if=lambda value: not value)
 
 
 class AttckLink(BaseModel):
@@ -1226,6 +1231,9 @@ class ClaimNotDiscussed(BaseModel):
     carried: int = 0
     named: int = 0
     counted: str = "names"
+    # The round whose tool-less validation retry added the claim beside the
+    # answer in force (``ClaimEvidence.added_by_retry_in_round``), or ``None``.
+    added_by_retry_in_round: int | None = None
 
 
 class FlaggedStatement(BaseModel):

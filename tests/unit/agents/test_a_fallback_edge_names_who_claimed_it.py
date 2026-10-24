@@ -100,3 +100,41 @@ class TestTheFallbackEdges:
         assert pattern["external_references"][0]["url"] == (
             "https://attack.mitre.org/techniques/T1059/001/"
         )
+
+
+class TestARetryAddedClaim:
+    """A technique only claims a tool-less retry added name carries their note."""
+
+    @staticmethod
+    def _patterns(claims: dict[str, AgentISR]) -> dict[str, dict]:
+        bundle = JudgeAgent(llm=MagicMock())._fallback_bundle_from_text(
+            "Verdict: Malware.", {}, claims
+        )
+        return {
+            o["name"]: o
+            for o in bundle.model_dump(mode="json")["objects"]
+            if o.get("type") == "attack-pattern"
+        }
+
+    def test_the_pattern_says_so_only_where_every_claim_naming_it_was_retry_added(self) -> None:
+        claims = _claims()
+        claims["dynamic"].claims[0].added_by_retry_in_round = 2
+        retried = ClaimEvidence(
+            claim="claim for T1053.005",
+            evidence_ref="[ev_0003]",
+            confidence=0.3,
+            technique_id="T1053.005",
+        )
+        retried.added_by_retry_in_round = 3
+        claims["dynamic"].claims.append(retried)
+
+        patterns = self._patterns(claims)
+
+        assert patterns["T1053.005"]["description"] == "added by a tool-less retry, round 3"
+        # T1055 is also claimed in static's own answer: no note.
+        assert "description" not in patterns["T1055"]
+
+    def test_an_unmarked_pattern_is_as_it_was(self) -> None:
+        for pattern in self._patterns(_claims()).values():
+            assert "description" not in pattern
+            assert not any(key.startswith("x_maljan_added") for key in pattern)

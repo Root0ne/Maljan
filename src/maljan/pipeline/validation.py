@@ -11824,9 +11824,12 @@ def corroboration(
 
     # The ledger's roots, read once for both readings below.
     read = run_roots(list(ledger)) if ledger else None
-    roots = technique_roots(isrs, ledger, read)
-    traced = technique_sources(isrs, ledger, read)
-    sayers = _independent_sayers(isrs)
+    # A claim a tool-less retry added is support only where it cites what its
+    # own analyst's tool calls read (``tool_backed_answers``).
+    backed = tool_backed_answers(isrs, ledger)
+    roots = technique_roots(backed, ledger, read)
+    traced = technique_sources(backed, ledger, read)
+    sayers = _independent_sayers(backed)
     out: dict[str, dict[str, list[str]]] = {}
     collected = collect(isrs, ledger)
     for tid in associations:
@@ -11836,6 +11839,9 @@ def corroboration(
         claimed: list[str] = []
         for source, _confidence in sources:
             if source in agents:
+                # ``claimed_by`` is read over every claim, a tool-less retry's
+                # included, on purpose: it records who said what, and no
+                # decision reads it (the sayers and sources below do).
                 if source not in claimed:
                     claimed.append(source)
             else:
@@ -11875,6 +11881,53 @@ def corroboration(
             if summary.support:
                 row["support"] = summary.support
         out[tid] = row
+    return out
+
+
+def retry_claim_unbacked(claim: Any, agent: str, ledger: Sequence[Any] | None) -> bool:
+    """Whether a claim a tool-less retry added cites nothing its own analyst's tools read.
+
+    A claim with no ``added_by_retry_in_round`` is never one. A marked claim
+    is backed when one of the ledger entries it cites is a call ``agent``
+    made itself; one citing only other agents' entries, sandbox items or
+    nothing is not.
+    """
+    if getattr(claim, "added_by_retry_in_round", None) is None:
+        return False
+    own = {
+        str(getattr(entry, "id", "") or "").lower()
+        for entry in ledger or ()
+        if str(getattr(entry, "agent", "") or "") == agent
+    }
+    said = f"{getattr(claim, 'claim', '') or ''} {getattr(claim, 'evidence_ref', '') or ''}"
+    return not any(i.lower() in own for i in entry_ids_in(said))
+
+
+def tool_backed_answers(
+    isrs: dict[str, Any] | None, ledger: Sequence[Any] | None
+) -> dict[str, Any] | None:
+    """``isrs`` with each claim a tool-less retry added and nothing of its own backs left out.
+
+    The corroboration reading (sayers, sources and roots) counts the answers
+    this returns, so a claim written in a turn with no tools, after a
+    revision that wrote none, is never independent tool-backed support for
+    its technique unless it cites an entry its analyst's own calls filed
+    (:func:`retry_claim_unbacked`). The answers in force are not changed: an
+    answer with such a claim is read as a copy without it.
+    """
+    if not isrs:
+        return isrs
+    out: dict[str, Any] = {}
+    for name, isr in isrs.items():
+        claims = list(getattr(isr, "claims", None) or [])
+        agent = str(getattr(isr, "agent_id", "") or name)
+        kept = [c for c in claims if not retry_claim_unbacked(c, agent, ledger)]
+        if len(kept) == len(claims) or not hasattr(isr, "model_copy"):
+            out[name] = isr
+            continue
+        view = isr.model_copy()
+        view.claims = kept
+        out[name] = view
     return out
 
 

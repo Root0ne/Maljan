@@ -18,7 +18,7 @@
 import { useState } from "react";
 import { ArrowRight, CircleHelp, Gavel } from "lucide-react";
 
-import type { ConversationItem } from "@/lib/conversation";
+import { retryAddedLabel, type ConversationItem } from "@/lib/conversation";
 import { statusTone } from "@/lib/status";
 import { agentColor } from "./agentIdentity";
 
@@ -171,6 +171,9 @@ export default function MessageBubble({
                     {claim.confidence === null
                       ? "no confidence stated"
                       : `${Math.round(claim.confidence * 100)}%`}
+                    {claim.added_by_retry_in_round !== undefined
+                      ? ` · ${retryAddedLabel(claim.added_by_retry_in_round)}`
+                      : ""}
                   </span>
                 </li>
               ))}
