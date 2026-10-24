@@ -67,6 +67,14 @@ class EvidenceEntryResponse(BaseModel):
     structured_from_server: bool | None = Field(default=None, exclude_if=_absent)
     agent_role: str | None = Field(default=None, exclude_if=_absent)
     agent_tab: str | None = Field(default=None, exclude_if=_absent)
+    # The fields of the call whose ``null`` the tool boundary dropped (the
+    # field took its declared default), and the top-level ones the schema
+    # admitted that the transport did not send, each by its path segments
+    # (``maljan.agents.null_arguments``). Left out where the row holds none,
+    # as the entry's own dump leaves them out: a row older than the columns
+    # reads as it did, and as empty to a ledger entry read from it.
+    args_nulls_dropped: list[list[str]] | None = Field(default=None, exclude_if=_absent)
+    args_nulls_withheld: list[list[str]] | None = Field(default=None, exclude_if=_absent)
     # Where the parts of the answer this entry does not keep whole are kept
     # whole: one reference per part the run shortened, blanked or dropped
     # (``answer``, ``structured_content``, ``output``, ``structured``), each
@@ -86,6 +94,12 @@ class EvidenceEntryResponse(BaseModel):
     def _only_true_is_kept(cls, value: Any) -> bool | None:
         """Absent unless it was true, the rule the entry's dump keeps."""
         return True if value is True else None
+
+    @field_validator("args_nulls_dropped", "args_nulls_withheld", mode="before")
+    @classmethod
+    def _none_is_absent(cls, value: Any) -> Any:
+        """An empty list is no field named, the rule the entry's dump keeps."""
+        return value or None
 
     @field_validator("args_repaired", "truncated", mode="before")
     @classmethod

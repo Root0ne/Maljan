@@ -24,8 +24,9 @@ from anyio.abc import ObjectReceiveStream
 from langchain_core.tools import BaseTool, StructuredTool
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
-from pydantic import ValidationError, create_model
+from pydantic import ValidationError
 
+from maljan.agents.null_arguments import argument_model, schema_rules
 from maljan.core.logger import logger
 from maljan.llm.context_window import note_call_began
 
@@ -833,7 +834,15 @@ class MCPLangChainToolkit:
             # than raising inside LangChain's own argument parsing.
             properties[prop_name] = (py_type | None, prop_schema.get("default", None))
 
-        args_schema = create_model(f"{mcp_tool.name}Schema", **properties)  # type: ignore[call-overload]
+        # A ``null`` the server's schema does not allow is dropped while the
+        # model validates (``agents.null_arguments``), so the field takes its
+        # declared default exactly as if the call had left it out. A ``null``
+        # it admits is let through, and ``arun_tool`` does not send it.
+        args_schema = argument_model(
+            f"{mcp_tool.name}Schema",
+            properties,
+            schema_rules(mcp_tool.inputSchema, withholds_admitted_nulls=True),
+        )
 
         tool_name = mcp_tool.name
         # This tool's own way of asking for less, read off the schema it

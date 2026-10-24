@@ -1,6 +1,6 @@
 """Every field a ledger entry carries is stored on its row and served back.
 
-``LedgerEntry`` has 31 fields. Each one goes into the row ``_evidence_row``
+``LedgerEntry`` has 33 fields. Each one goes into the row ``_evidence_row``
 builds and comes out of ``GET /jobs/{id}/evidence`` unchanged; the entry's
 ``id`` is the row's ``entry_id``. A row written before the seven newest
 columns existed reads with those seven absent, never as false or empty, and
@@ -42,7 +42,7 @@ _SEVEN = (
 
 
 def _full_entry() -> LedgerEntry:
-    """An entry where every one of the 31 fields holds a value other than its default."""
+    """An entry where every one of the 33 fields holds a value other than its default."""
     return LedgerEntry(
         id="ev_0042",
         stage="verdict",
@@ -62,6 +62,8 @@ def _full_entry() -> LedgerEntry:
         repeated_of="ev_0040",
         args_repaired=True,
         args_raw='{"address": "0x401000"',
+        args_nulls_dropped=[["timeout"], ["options", "depth"]],
+        args_nulls_withheld=[["program"]],
         model="provider/model-a",
         started_at=1_700_000_000.25,
         duration_ms=1234,
@@ -81,8 +83,8 @@ def _full_entry() -> LedgerEntry:
     )
 
 
-def test_the_entry_has_the_thirty_one_fields_the_round_trip_walks():
-    assert len(LedgerEntry.model_fields) == 31
+def test_the_entry_has_the_thirty_three_fields_the_round_trip_walks():
+    assert len(LedgerEntry.model_fields) == 33
     for name in _SEVEN:
         assert name in LedgerEntry.model_fields
 
