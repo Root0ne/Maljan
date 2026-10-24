@@ -802,6 +802,35 @@ class EarlierRun(_SpecConformantModel):
 EARLIER_RUN_PROPERTY = "x_maljan_earlier_run"
 
 
+class SimilarCase(_SpecConformantModel):
+    """One similar case of another sample, as the judge was shown its techniques."""
+
+    sample_id: str
+    techniques: list[str] = Field(default_factory=list)
+
+
+class SimilarCases(_SpecConformantModel):
+    """The similar cases of other samples whose techniques the judge was shown.
+
+    Weighted priors, never evidence (``judge_agent.JudgeAgent._memory_block``):
+    a recorded fact that decides nothing. A technique listed here that no
+    source of this run stands behind carries a note saying so
+    (``capability_matrix.SIMILAR_CASE_UNSUPPORTED_NOTE``) and is published or
+    not by the same rules as without the record.
+    """
+
+    cases: list[SimilarCase] = Field(default_factory=list)
+
+
+# The bundle property the similar cases the judge was shown are kept in.
+SIMILAR_CASES_PROPERTY = "x_maljan_similar_cases"
+
+# The run facts the judge's stored bundle keeps and no other bundle carries:
+# the earlier run and the similar cases name other runs' samples, so a
+# bundle stored as the report's is written without them.
+JUDGE_ONLY_PROPERTIES = (EARLIER_RUN_PROPERTY, SIMILAR_CASES_PROPERTY)
+
+
 class Bundle(_SpecConformantModel):
     """STIX 2.1 Bundle container for transferring multiple objects.
 
@@ -833,6 +862,11 @@ class Bundle(_SpecConformantModel):
     # shown it (:class:`EarlierRun`). ``None`` when there was none. Set by the
     # platform on every bundle and never exported, as the review is.
     x_maljan_earlier_run: EarlierRun | None = None
+    # The similar cases of other samples whose techniques the judge was shown
+    # (:class:`SimilarCases`). ``None`` when there were none. Set by the
+    # platform on every bundle; never exported and never in the report's
+    # bundle (:data:`JUDGE_ONLY_PROPERTIES`), as the earlier run is.
+    x_maljan_similar_cases: SimilarCases | None = None
 
     def confidence_annotated_relationships(self) -> list[ConfidenceAnnotatedRelationship]:
         """Return only the ConfidenceAnnotatedRelationship objects in this bundle."""

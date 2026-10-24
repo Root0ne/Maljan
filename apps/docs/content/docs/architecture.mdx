@@ -3690,6 +3690,31 @@ can end an item id where its text went on (`net:44x` cut to `net:4`). Neither fo
 any reader, alone or beside the text around it. One pass, linear in the text;
 a case with no id is shown byte for byte as before.
 
+A similar case of another sample decides nothing either. The judge is shown up
+to three of them as weighted priors, read once per job
+(`long_term_memory.similar_cases`, kept on the container by the sample's
+sha256, so every verdict prompt of the job shows the same cases; a read that
+fails is not kept). A technique such a case carried can reach the verdict, or
+an analyst claim the judge keeps, with no source of this run behind it, so the
+judge's bundle records which cases' techniques its verdict prompt carried
+(`x_maljan_similar_cases`, each case's sample id and technique ids, set by the
+platform on every bundle). Both this record and `x_maljan_earlier_run` name
+other runs' samples, so they are in no STIX export and not in the report's
+bundle (the judge's draft stored as the report's when no export was made is
+written without them, `stix_models.JUDGE_ONLY_PROPERTIES`); they are kept on
+the judge's stored bundle as the run's facts. A case the fitted prompt cut
+before its header and techniques lines (matched with its number in the block,
+so two cases with the same techniques are told apart) is not recorded, since
+the judge was shown none of its techniques. The capability matrix publishes by the
+same rules as without the record, so the published set and every row's reason
+not to publish are the same with and without the similar cases, and a run
+repeated across samples that are each other's similar cases does not
+alternate. A recorded technique with no independent source in this run's
+corroboration row carries the note "a similar case from another sample also
+reported it; no source of this run stands behind it", beside the earlier
+run's note when both apply. A stored run from before the record carries none
+and replays as before.
+
 The run summary's `stix_object_count` is the exported bundle's object count
 once the report node has built the export, on the state's summary and on
 `report.run_summary` alike; the judge's own bundle size is kept as

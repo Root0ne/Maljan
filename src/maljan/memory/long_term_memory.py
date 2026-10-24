@@ -557,6 +557,82 @@ def foreign_quoted_value(text: str) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Similar cases from other samples: a fact beside the row, never a reason
+# ---------------------------------------------------------------------------
+#
+# The judge is shown up to three similar cases of other samples as weighted
+# priors (``judge_agent.JudgeAgent._memory_block``). A technique such a
+# case carried can reach the verdict, or an analyst's claim the judge keeps,
+# with nothing of this run behind it. The publish rules read this run alone, so
+# the published set is the one the run publishes without the cases; the
+# platform records which techniques the judge was shown on its bundle
+# (``stix_models.SIMILAR_CASES_PROPERTY``), and a recorded technique no source
+# of this run stands behind carries a note saying so
+# (``capability_matrix.SIMILAR_CASE_UNSUPPORTED_NOTE``).
+
+
+def similar_cases(
+    store: Any,
+    query: str,
+    *,
+    exclude_sample_id: str | None = None,
+    owner: Any = None,
+    container: Any = None,
+) -> list[StoredCase]:
+    """The similar cases of other samples the judge is shown, read once per job.
+
+    :func:`recall` with the judge's three, kept on ``container``
+    (``similar_cases``) by the sample's id for the length of the job, so every
+    verdict prompt of it shows the same cases. A read that raises is not kept
+    and raises to the caller, which says the cases are missing.
+    """
+    kept = getattr(container, "similar_cases", None)
+    key = str(exclude_sample_id or "").strip()
+    if isinstance(kept, dict) and key in kept:
+        return list(kept[key])
+    cases = recall(store, query, top_k=3, exclude_sample_id=exclude_sample_id, owner=owner)
+    if isinstance(kept, dict):
+        kept[key] = list(cases)
+    return cases
+
+
+def similar_case_head(idx: int, total: int, case: StoredCase) -> str:
+    """A similar case's header and techniques lines, as the judge's block writes them.
+
+    ``idx`` counts from 1 of ``total``. The category is that run's stored
+    text, quoted and with its ids renamed (:func:`foreign_quoted_value`).
+    """
+    category = foreign_quoted_value(case.malware_category)
+    ttps = ", ".join(case.technique_ids) if case.technique_ids else "none"
+    return (
+        f"[{idx}/{total}] sample_id: {case.sample_id} (category: {category})\n"
+        f"  Past techniques: {foreign_ids_written_out(ttps)}"
+    )
+
+
+def similar_cases_shown(cases: Iterable[StoredCase], shown: str) -> Any:
+    """The ``SimilarCases`` record of what the judge's block showed, or ``None``.
+
+    A case counts when its header and techniques lines reached the prompt
+    whole (:func:`similar_case_head`, numbered as the block numbers it, so two
+    cases with the same techniques are told apart): the block is fitted to the
+    judge's window and can be cut, and a case cut before its line showed the
+    judge none of its techniques. Only technique ids, each
+    once and upper-cased (:func:`earlier_techniques`); a case with none is left
+    out, and so is the record when no case is left.
+    """
+    from maljan.schemas.stix_models import SimilarCase, SimilarCases
+
+    listed = list(cases)
+    kept: list[SimilarCase] = []
+    for idx, case in enumerate(listed, 1):
+        techniques = earlier_techniques(case)
+        if techniques and f"{similar_case_head(idx, len(listed), case)}\n" in shown:
+            kept.append(SimilarCase(sample_id=str(case.sample_id), techniques=techniques))
+    return SimilarCases(cases=kept) if kept else None
+
+
+# ---------------------------------------------------------------------------
 # Family names, as the function-hash corpus files them
 # ---------------------------------------------------------------------------
 
