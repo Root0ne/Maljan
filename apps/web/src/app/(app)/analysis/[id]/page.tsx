@@ -46,6 +46,7 @@ import {
   questionAnswers,
 } from "@/components/analysis/reportProse";
 import { endpointCounts } from "@/components/analysis/networkFacts";
+import { mispAbsence } from "@/components/analysis/indicators";
 import { severityTone } from "@/lib/severity";
 import type { FpWarning, MalwareReport, NoToolCallAsk } from "@/types/malware-report";
 
@@ -881,9 +882,7 @@ function DownloadBar({
         ↓ MISP attributes
       </button>
       {mispDisabled && (
-        <span className="text-[11px] text-text-muted">
-          this run generated no MISP attributes
-        </span>
+        <span className="text-[11px] text-text-muted">{mispAbsence(mr)}</span>
       )}
       <EnrichButton reportId={reportId} />
       {error && (

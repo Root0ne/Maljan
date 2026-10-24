@@ -351,6 +351,33 @@ export const MALWARE_REPORT: MalwareReport = {
   ],
   negotiation_summary: { rounds: 1, consensus: false },
   stix_bundle_extended: { type: "bundle", id: "bundle--extended", objects: [] },
+  // One indicator the export publishes and one it holds back, so DETECTION's
+  // indicator table draws both decisions.
+  consolidated_iocs: [
+    {
+      type: "SHA-256",
+      kind: "hash",
+      value: SAMPLE_SHA256,
+      source: "identity",
+      context: "the sample",
+      description: "the sample",
+      published: "yes: the sample's own digest",
+      is_network: false,
+      recovered_by: "",
+    },
+    {
+      type: "IPv4",
+      kind: "ip",
+      value: "8.8.8.8",
+      source: "sandbox",
+      context: "public DNS resolver",
+      description: "public DNS resolver",
+      published: "no: it is a public DNS resolver",
+      is_network: true,
+      recovered_by: "",
+    },
+  ],
+  judge_indicators: [{ kind: "hash", value: SAMPLE_SHA256, algorithm: "SHA-256" }],
   misp_attributes: [],
   references: [
     {

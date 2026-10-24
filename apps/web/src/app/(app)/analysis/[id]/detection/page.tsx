@@ -6,6 +6,8 @@ import { reportAbsence } from "@/components/analysis/reportAbsence";
 import RuleMatchesPanel from "@/components/analysis/RuleMatchesPanel";
 import GeneratedRulesPanel from "@/components/analysis/GeneratedRulesPanel";
 import StixPanel from "@/components/analysis/StixPanel";
+import IndicatorsPanel from "@/components/analysis/IndicatorsPanel";
+import { hasIndicators } from "@/components/analysis/indicators";
 import { hasRuleMatches } from "@/components/analysis/ruleMatches";
 
 /**
@@ -20,6 +22,10 @@ import { hasRuleMatches } from "@/components/analysis/ruleMatches";
  *      sample during this analysis (drives the ATT&CK techniques).
  *   2. Generated detection rules   — draft YARA/Sigma/Suricata rules Maljan
  *      produced for you to deploy to your own SOC tooling.
+ *
+ * Beside them, the indicators the export is made of: the consolidated IOC
+ * table with each row's publish decision and reason, and the judge's own
+ * indicators.
  */
 export default function DetectionTab() {
   const { report, job, loading, reportError } = useReport();
@@ -28,6 +34,7 @@ export default function DetectionTab() {
   const matched = hasRuleMatches(report?.agent_findings, mr?.sections);
   // A bundle with no objects in it is a bundle nobody wants to export.
   const stix = Object.keys(mr?.stix_bundle_extended ?? report?.stix_bundle ?? {}).length > 0;
+  const indicators = hasIndicators(mr);
 
   if (loading) {
     return <div className="p-4 text-sm text-text-secondary">Loading...</div>;
@@ -68,6 +75,21 @@ export default function DetectionTab() {
         </section>
       )}
 
+      {indicators && (
+        <section>
+          <div className="mb-3 pt-4 border-t border-border">
+            <h2 className="text-sm font-semibold text-text-primary">
+              Indicators and their export
+            </h2>
+            <p className="text-xs text-text-muted mt-0.5">
+              Every indicator the report recorded, typed, with whether the STIX
+              export publishes it and the publish rule&apos;s reason.
+            </p>
+          </div>
+          <IndicatorsPanel mr={mr} />
+        </section>
+      )}
+
       {stix && (
         <section>
           <div className="mb-3 pt-4 border-t border-border">
@@ -84,7 +106,7 @@ export default function DetectionTab() {
         </section>
       )}
 
-      {!matched && generated.length === 0 && !stix && (
+      {!matched && generated.length === 0 && !indicators && !stix && (
         <p className="p-8 text-center text-sm text-text-secondary">
           No rule fired on this sample, and the run wrote none of its own.
         </p>

@@ -32,6 +32,51 @@ export interface NarrowedTable {
   empty: string[];
 }
 
+/** A cell as text: what a tool wrote, and nothing for a cell it left out. */
+function cellText(value: unknown): string {
+  if (value === null || value === undefined) return "";
+  return typeof value === "string" ? value : String(value);
+}
+
+/**
+ * Every cell of a table under a heading.
+ *
+ * A table merged from two answers can carry rows wider than its declared
+ * columns: the imports table of one run held `Listed by`, `Evidence` and
+ * `Library`, and five of its rows a fourth cell, the function, which drew in
+ * no column at all. Nothing is guessed about such a cell. A positional one is
+ * headed by its position (`Column 4`), the way a table that declares no
+ * columns is; a row keyed by name contributes its keys, so the heading is the
+ * name the row itself used. A row shorter than the rest is padded, so every
+ * cell stays under the heading it belongs to.
+ */
+export function headedTable(
+  columns: readonly string[],
+  rows: readonly unknown[],
+): { columns: string[]; rows: string[][] } {
+  const headings = [...columns];
+  const width = rows.reduce<number>(
+    (widest, row) => (Array.isArray(row) ? Math.max(widest, row.length) : widest),
+    0,
+  );
+  for (let i = headings.length; i < width; i++) headings.push(`Column ${i + 1}`);
+  for (const row of rows) {
+    if (row === null || typeof row !== "object" || Array.isArray(row)) continue;
+    for (const key of Object.keys(row)) if (!headings.includes(key)) headings.push(key);
+  }
+  return {
+    columns: headings,
+    rows: rows.map((row) => {
+      if (Array.isArray(row)) return headings.map((_, i) => cellText(row[i]));
+      if (row !== null && typeof row === "object") {
+        const keyed = row as Record<string, unknown>;
+        return headings.map((heading) => cellText(keyed[heading]));
+      }
+      return headings.map((_, i) => (i === 0 ? cellText(row) : ""));
+    }),
+  };
+}
+
 /** The table with its constant and empty columns taken out. */
 export function withoutConstantColumns(columns: string[], rows: string[][]): NarrowedTable {
   if (rows.length < 2 || columns.length < 2) {

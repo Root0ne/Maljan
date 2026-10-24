@@ -487,6 +487,8 @@ test.describe("Analysis tabs", () => {
             detection_signatures: [],
             defensive_recommendations: [],
             stix_bundle_extended: {},
+            consolidated_iocs: [],
+            judge_indicators: [],
             attribution: {
               family: null,
               family_confidence: 0,

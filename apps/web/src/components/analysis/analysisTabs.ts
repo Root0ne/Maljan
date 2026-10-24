@@ -23,6 +23,7 @@
 import type { ReportDetailDTO } from "@/lib/api";
 import { hasMappedTechniques } from "./capabilityHeatmap";
 import { sectionsForTab } from "./reportSections";
+import { hasIndicators } from "./indicators";
 import { hasRuleMatches } from "./ruleMatches";
 import { dynamicAnalystClaims } from "./dynamicClaims";
 import { disambiguate, extraTabs } from "./extraTabs";
@@ -179,12 +180,14 @@ export function tabHasContent(
     case "/attribution":
       return attributionSaysSomething(mr);
     case "/detection":
-      // Rules that fired, rules the run wrote, and the STIX bundle it exports.
+      // Rules that fired, rules the run wrote, the indicators it recorded and
+      // the STIX bundle it exports.
       return (
         // Not "a layer carried a claim" but "the panel has a row", which is
         // the same reading the panel itself makes.
         hasRuleMatches(report.agent_findings, sections) ||
         nonEmpty(mr?.detection_signatures) ||
+        hasIndicators(mr) ||
         nonEmpty(mr?.stix_bundle_extended) ||
         nonEmpty(report.stix_bundle)
       );

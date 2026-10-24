@@ -2,6 +2,7 @@
 
 import { confidenceClass } from "@/lib/report-utils";
 import type { AnalystClaims } from "./dynamicClaims";
+import { CitedText } from "./EvidenceChips";
 
 /** What each analyst concluded, claim by claim, with its confidence and evidence. */
 export default function AnalystFindings({
@@ -50,7 +51,10 @@ export default function AnalystFindings({
                           <span className="text-text-secondary">
                             Evidence:{" "}
                           </span>
-                          {evidence}
+                          {/* An analyst's reference is prose naming ids
+                              ("ev_0004, ev_0020 (encoded blobs)"): each id
+                              opens its entry, the words stay words. */}
+                          <CitedText text={evidence} />
                         </span>
                       )}
                     </div>
