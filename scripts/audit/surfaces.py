@@ -46,6 +46,7 @@ constant and no tool is named.
 from __future__ import annotations
 
 import argparse
+import copy
 import html
 import io
 import json
@@ -73,6 +74,7 @@ FILTERS: list[dict[str, str]] = _MAP["filters"]
 ELLIPSIS = "\u2026"
 _EV_RE = re.compile(r"\bev_\d{3,}\b")
 _TAG_RE = re.compile(r"<[^>]+>")
+_CODE_TAG_RE = re.compile(r"</?code\b[^>]*>", re.I)
 _MD_ESCAPE_RE = re.compile(r"\\([!-/:-@\[-`{-~])")
 _SPACE_RE = re.compile(r"\s+")
 _PATTERN_RE = re.compile(r"([a-z0-9-]+):([A-Za-z0-9_.'\-]+)\s*=\s*'((?:[^'\\]|\\.)*)'")
@@ -244,11 +246,15 @@ def plain(text: str, *, markup: bool = False) -> str:
 
     A code span keeps its backslashes where the rest of the text has them as
     escapes, so the text is given twice: once with the escapes read and once
-    as written, a value counting as shown when either holds it.
+    as written, a value counting as shown when either holds it. Markup is given
+    a third time with each ``<code>`` element read back as the Markdown code
+    span it draws, since a value's own text writes its code spans in backticks.
     """
+    spans = ""
     if markup:
+        spans = "\n\x00\n" + _refanged(html.unescape(_TAG_RE.sub(" ", _CODE_TAG_RE.sub("`", text))))
         text = html.unescape(_TAG_RE.sub(" ", text))
-    return _refanged(_MD_ESCAPE_RE.sub(r"\1", text)) + "\n\x00\n" + _refanged(text)
+    return _refanged(_MD_ESCAPE_RE.sub(r"\1", text)) + "\n\x00\n" + _refanged(text) + spans
 
 
 def _refanged(text: str) -> str:
@@ -329,6 +335,45 @@ def _shortest_cut(value: str, cut_at: int) -> int:
         if written >= cut_at - 1:
             return max(kept - 2, 0)
     return kept
+
+
+def _as_pid(value: Any) -> Any:
+    """A pid as the report's model reads it (``"5"`` is 5, none is 0); unreadable, as written."""
+    try:
+        return int(value or 0)
+    except (TypeError, ValueError):
+        return value
+
+
+class _TreeRow:
+    """A process-tree row of the stored JSON with the attributes the exporter's dedupe reads."""
+
+    def __init__(self, row: dict[str, Any]) -> None:
+        self.pid = _as_pid(row.get("pid"))
+        self.ppid = _as_pid(row.get("ppid"))
+        self.name = _text(row.get("name"))
+        self.command_line = _text(row.get("command_line"))
+        self.injected_into = list(_list(row.get("injected_into")))
+        self.children = [_TreeRow(c) for c in _list(row.get("children")) if isinstance(c, dict)]
+
+    def model_copy(self, update: dict[str, Any]) -> _TreeRow:
+        twin = copy.copy(self)
+        for key, value in update.items():
+            setattr(twin, key, value)
+        return twin
+
+
+def _distinct_tree(rows: list[Any]) -> list[_TreeRow]:
+    """Every process of the tree as the exporter folds it, one per identity, depth first."""
+    from maljan.reporting.dedupe import distinct_processes, process_identity
+
+    found: dict[tuple[int, int, str, str], _TreeRow] = {}
+    pending = list(reversed(distinct_processes([_TreeRow(r) for r in rows if isinstance(r, dict)])))
+    while pending:
+        node = pending.pop()
+        found.setdefault(process_identity(node), node)
+        pending.extend(reversed(node.children))
+    return list(found.values())
 
 
 def _walk(node: Any, path: list[str], recursive: str | None = None) -> Iterator[Any]:
@@ -419,14 +464,13 @@ def canonical(surfaces: dict[str, Any]) -> Findings:
         for item in _list(net.get(rows)):
             if isinstance(item, dict) and _list(item.get("kept_by")) and _norm(item.get(key)):
                 network[_ioc_key(item.get(key))] = {"value": _norm(item.get(key)), "type": kind}
+    # The processes the export carries: the tree as the exporter reads it
+    # (``distinct_processes``), each identity once (``process_identity``, the
+    # raw pid, parent, image and command line), so the checker cannot count
+    # one process where the exporter counts two, or the reverse.
     processes = [
-        {
-            "pid": p.get("pid"),
-            "name": _norm(p.get("name")),
-            "command_line": _norm(p.get("command_line")),
-        }
-        for p in _walk(mr, ["dynamic", "process_tree[]"], "children")
-        if isinstance(p, dict)
+        {"pid": node.pid, "name": _norm(node.name), "command_line": _norm(node.command_line)}
+        for node in _distinct_tree(_list(_dict(mr.get("dynamic")).get("process_tree")))
     ]
     sections = [s for s in _list(mr.get("sections")) if isinstance(s, dict)]
     findings = [
@@ -1276,6 +1320,17 @@ def check_processes(
                 "missing", "process", "stix", f"pid {pid}", f"{cmd[:120]!r} has no process object"
             )
         for pid, cmd in seen - want:
+            if want[(pid, cmd)]:
+                # One process of the tree written as two objects: a duplicate in the export.
+                out.defect(
+                    "duplicate",
+                    "process",
+                    "stix",
+                    f"pid {pid}",
+                    f"{cmd[:120]!r} is carried {seen[(pid, cmd)]} times for "
+                    f"{want[(pid, cmd)]} process(es) of the tree",
+                )
+                continue
             out.defect(
                 "orphan",
                 "process",

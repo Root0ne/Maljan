@@ -58,7 +58,7 @@ from maljan.extractors.network_extractor import (
 )
 from maljan.pipeline.events import safe_finding_value
 from maljan.reporting import tool_kinds
-from maljan.reporting.dedupe import distinct_processes
+from maljan.reporting.dedupe import distinct_processes, process_identity
 from maljan.reporting.ledger_report import ANALYST_SECTION_SOURCES
 from maljan.reporting.models import (
     EmulatedStrings,
@@ -4742,12 +4742,43 @@ def _processes_to_observables(roots: list[ProcessNode]) -> list[File | Process]:
     process — so it becomes a ``file`` observable the process names by
     ``image_ref``, and one image run twice is one file. The tree is kept by
     ``child_refs``.
+
+    One process is one object: a process that stands under two parents (two
+    readings of its parent that differ, each holding it) is written once, with
+    the children of every place it stands, and each parent names it.
     """
     out: list[File | Process] = []
     images: dict[str, File] = {}
+    places: dict[tuple[int, int, str, str], list[ProcessNode]] = {}
+    pending = list(reversed(roots))
+    while pending:
+        node = pending.pop()
+        places.setdefault(process_identity(node), []).append(node)
+        pending.extend(reversed(node.children))
+    made: dict[tuple[int, int, str, str], str] = {}
+    path: set[tuple[int, int, str, str]] = set()
 
     def _walk(node: ProcessNode) -> str:
-        children = [_walk(child) for child in node.children]
+        key = process_identity(node)
+        if key in made:
+            return made[key]
+        process = Process(
+            pid=node.pid, command_line=node.command_line or None, image_ref=None, child_refs=[]
+        )
+        made[key] = process.id
+        # A process that stands below itself (a repeat of an ancestor further
+        # down) is not named as a child: the ancestor holds that place's
+        # children already, and ``child_refs`` stays a tree.
+        path.add(key)
+        children: list[str] = []
+        for place in places[key]:
+            for child in place.children:
+                if process_identity(child) in path:
+                    continue
+                ref = _walk(child)
+                if ref not in children:
+                    children.append(ref)
+        path.discard(key)
         image_ref = None
         if node.name:
             image = images.get(node.name)
@@ -4755,12 +4786,7 @@ def _processes_to_observables(roots: list[ProcessNode]) -> list[File | Process]:
                 image = images[node.name] = File(name=node.name)
                 out.append(image)
             image_ref = image.id
-        process = Process(
-            pid=node.pid,
-            command_line=node.command_line or None,
-            image_ref=image_ref,
-            child_refs=children,
-        )
+        process = process.model_copy(update={"image_ref": image_ref, "child_refs": children})
         out.append(process)
         return process.id
 
