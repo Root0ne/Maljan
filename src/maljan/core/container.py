@@ -1317,6 +1317,19 @@ class ServiceContainer:
         registry = self._server_registry_cache
         return list(registry.degradation_reasons) if registry is not None else []
 
+    def server_not_configured_reasons(self) -> list[str]:
+        """The reasons the attached servers' manifests mark unset settings, the operator's choice.
+
+        Reads the cached registry only, as ``server_degradation_reasons`` does.
+        """
+        registry = self._server_registry_cache
+        return list(registry.not_configured_reasons()) if registry is not None else []
+
+    def server_without_reads(self) -> dict[tuple[str, str], frozenset[str]]:
+        """By ``(server, tool)``, what a tool's missing part reads, from the cached registry."""
+        registry = self._server_registry_cache
+        return dict(registry.declared_without_reads()) if registry is not None else {}
+
     def server_rests(self) -> list[dict[str, Any]]:
         """Every tool-server rest this job gave, in order, or an empty list.
 

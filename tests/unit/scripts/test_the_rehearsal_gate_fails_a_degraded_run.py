@@ -156,3 +156,45 @@ def test_every_declared_scenario_is_a_fault_scenario() -> None:
     from scripts.rehearsal.roles import SCENARIO_DEGRADATIONS, SCENARIOS
 
     assert set(SCENARIO_DEGRADATIONS) <= set(SCENARIOS) - {"normal"}
+
+
+# T-338: what the operator's configuration left out, in the words its producers write.
+UNSET = (
+    "server.threatintel.check_hash_unavailable(VIRUSTOTAL_API_KEY is not configured); "
+    "set the credential or setting this tool needs in Settings and run the probe again"
+)
+
+
+def _withheld() -> str:
+    from maljan.providers.sample_open import UNCOVERED, withheld_unpinned
+
+    return withheld_unpinned("remote http://localhost:8089 (backend 1)", "open_project", UNCOVERED)
+
+
+def test_an_operator_choice_fails_nothing_and_is_named(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    record = _record()
+    record.run_summary["operator_choices"] = [UNSET]
+    assert write_results([record], tmp_path) == 0
+    shown = capsys.readouterr().out
+    assert "run 1: PASS" in shown
+    assert f"  NOT CONFIGURED OR WITHHELD BY CHOICE {UNSET}" in shown
+    result = json.loads((tmp_path / "normal-run1.json").read_text())
+    assert result["operator_choices"] == [UNSET]
+
+
+def test_a_record_that_lists_a_choice_among_its_reasons_is_read_as_one(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A record written before the choices were listed apart is gated as a current one.
+
+    A withheld tool's sentence says what it is. An unset key's sentence with
+    no manifest code behind it is a loss, and the gate fails on it.
+    """
+    withheld = _withheld()
+    assert degradations_not_allowed(_record(withheld, UNSET, CAPA)) == [UNSET, CAPA]
+    assert write_results([_record(withheld)], tmp_path) == 0
+    shown = capsys.readouterr().out
+    assert f"  NOT CONFIGURED OR WITHHELD BY CHOICE {withheld}" in shown
+    assert "DEGRADED" not in shown

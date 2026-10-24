@@ -251,3 +251,55 @@ def error_sentence(value: Any) -> str | None:
         return None
     _code, message, remediation = parts
     return f"{message}; {remediation}" if remediation else message
+
+
+def answered_short_of_a_library(tool: str, entries: Any) -> bool:
+    """Whether ``tool`` answered one of ``entries`` with a missing-dependency error.
+
+    ``entries`` are ledger entries or a run summary's tool-failure rows
+    (``evidence.failures``): each a call, whose code is read from its
+    structured answer where it has one and from its words otherwise. A call
+    that succeeded is not one.
+    """
+    from collections.abc import Mapping
+
+    for entry in entries or ():
+
+        def read(name: str, entry: Any = entry) -> Any:
+            return entry.get(name) if isinstance(entry, Mapping) else getattr(entry, name, None)
+
+        if read("ok") is True or str(read("tool") or "") != tool:
+            continue
+        if _short_of_a_library(read):
+            return True
+    return False
+
+
+def _short_of_a_library(read: Any) -> bool:
+    """Whether the call ``read`` reads answered with a missing-dependency error."""
+    if read("code") == MISSING_DEPENDENCY:
+        return True
+    parts = error_parts(read("structured"))
+    code = parts[0] if parts else code_for_text(str(read("error") or read("output") or ""))
+    return code == MISSING_DEPENDENCY or read("remediation") == REMEDIATIONS[MISSING_DEPENDENCY]
+
+
+def short_of_a_library_rows(entries: Any) -> list[dict[str, str]]:
+    """``{"tool", "code"}`` for each tool of ``entries`` that answered short of a library, once.
+
+    What a run summary keeps of its failed calls for whoever decides again
+    whether a tool that answered part cost the run anything
+    (``pipeline.operator_choice``): read back by :func:`answered_short_of_a_library`.
+    """
+    from collections.abc import Mapping
+
+    rows: dict[str, dict[str, str]] = {}
+    for entry in entries or ():
+
+        def read(name: str, entry: Any = entry) -> Any:
+            return entry.get(name) if isinstance(entry, Mapping) else getattr(entry, name, None)
+
+        tool = str(read("tool") or "")
+        if tool and read("ok") is not True and _short_of_a_library(read):
+            rows.setdefault(tool, {"tool": tool, "code": MISSING_DEPENDENCY})
+    return list(rows.values())

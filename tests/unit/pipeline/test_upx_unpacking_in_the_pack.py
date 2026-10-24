@@ -242,7 +242,7 @@ def test_a_sample_the_packer_reader_does_not_name_upx_gets_no_step(tmp_path: Pat
     assert upx.TOOL not in [e.tool for e in _pack(path, tmp_path).entries]
 
 
-def test_a_damaged_file_is_a_failed_pass_that_does_not_degrade_the_run(tmp_path: Path) -> None:
+def test_a_damaged_file_is_a_failed_pass_that_degrades_the_run(tmp_path: Path) -> None:
     packed = su.build()
     data = bytearray(packed.data)
     data[packed.header_offset + 32 + 7] ^= 0x01
@@ -250,4 +250,4 @@ def test_a_damaged_file_is_a_failed_pass_that_does_not_degrade_the_run(tmp_path:
     assert not _entry(result).ok
     assert "UPX unpacking: no: the pass failed: the compressed data's adler32 is" in _line(result)
     assert failure_reason(upx.TOOL) in result.degradation_reasons
-    assert not degrades_run(failure_reason(upx.TOOL))
+    assert degrades_run(failure_reason(upx.TOOL))

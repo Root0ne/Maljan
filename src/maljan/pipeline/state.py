@@ -367,6 +367,11 @@ class AnalysisState(TypedDict):
     # reflects it, and rendered in the report header so a reader sees why.
     degraded_mode: bool
     degradation_reasons: list[str]
+    # What the operator's configuration left out — a key never set, a server
+    # switched off, a tool a shared server withholds by policy. Written by the
+    # judge node beside the reasons and listed apart from them: it cost the run
+    # no evidence it would have had (``pipeline.operator_choice``).
+    operator_choices: list[str]
 
     # F10 (2026-07-05): attribution side-channels written by the judge node
     # (``make_judge_node``) and read back by the report node to populate

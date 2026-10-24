@@ -211,11 +211,36 @@ def _has_content(value: Any) -> bool:
     return value not in (None, "", False)
 
 
-def degradations(record: RunRecord) -> list[str]:
-    """Every degradation reason the run's summary and its report carry, as text."""
+def _reasons(record: RunRecord) -> list[str]:
     reasons = list(record.run_summary.get("degradation_reasons") or [])
     reasons += list(record.malware_report.get("degradation_reasons") or [])
     return [str(r) for r in reasons]
+
+
+def degradations(record: RunRecord) -> list[str]:
+    """Every degradation reason the run's summary and its report carry, as text.
+
+    A reason that is the operator's choice (``pipeline.operator_choice``) is
+    not one, even on a record written before the platform listed it apart:
+    it is in :func:`operator_choices`.
+    """
+    from maljan.pipeline.operator_choice import is_operator_choice
+
+    return [r for r in _reasons(record) if not is_operator_choice(r)]
+
+
+def operator_choices(record: RunRecord) -> list[str]:
+    """What the operator's configuration left out, as the run's summary and report list it.
+
+    With any of them a record written before the platform listed them apart
+    still carries among its degradation reasons. Each once, in order.
+    """
+    from maljan.pipeline.operator_choice import is_operator_choice
+
+    listed = list(record.run_summary.get("operator_choices") or [])
+    listed += list(record.malware_report.get("operator_choices") or [])
+    listed += [r for r in _reasons(record) if is_operator_choice(r)]
+    return list(dict.fromkeys(str(r) for r in listed))
 
 
 def _answered(record: RunRecord) -> list[dict[str, Any]]:
@@ -1608,6 +1633,7 @@ def observations(record: RunRecord) -> dict[str, Any]:
         "validation_retries": validation.get("retries"),
         "validation_codes": validation.get("by_code") or {},
         "degradation_reasons": degradations(record)[:20],
+        "operator_choices": operator_choices(record)[:20],
     }
 
 

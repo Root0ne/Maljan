@@ -35,6 +35,8 @@ CAPA_ROW = {
         "server.analysis.capa_unavailable(capa is not installed (No module named 'capa')); "
         "install capa on the host that runs this server: uv sync --extra capa"
     ),
+    # A library missing, never a setting left unset (T-338).
+    "manifest_code": "missing_dependency",
 }
 
 

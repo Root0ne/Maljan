@@ -192,12 +192,17 @@ def _missing(
             reasons.append(str(answered[held]))
     if not reasons:
         return None
+    from maljan.tools.errors import MISSING_DEPENDENCY
+
     return Unavailable(
         server="",
         tool=need.name,
         reason="; ".join(reasons),
         remediation=need.remediation or _general_remedy(),
         without=need.without,
+        # Only a module or an executable is checked here: a setting is the
+        # server's own to read (``Requirement.installed``).
+        code=MISSING_DEPENDENCY,
     )
 
 
@@ -293,6 +298,7 @@ def as_rows(found: list[Unavailable]) -> list[dict[str, Any]]:
             "remediation": u.remediation or "",
             "still_answers": u.without,
             "degradation_reason": u.degradation_reason,
+            "manifest_code": u.code or "",
         }
         for u in found
     ]

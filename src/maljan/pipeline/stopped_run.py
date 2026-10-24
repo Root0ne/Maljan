@@ -180,7 +180,7 @@ def _built_summary(
         "degradation",
         lambda: builder.set_degraded_mode(
             bool(state.get("degraded_mode")), list(state.get("degradation_reasons") or [])
-        ),
+        ).set_operator_choices(list(state.get("operator_choices") or [])),
     )
     _part("profile", _profile)
     _part(
@@ -452,6 +452,7 @@ def _deterministic_report(state: dict[str, Any], container: Any) -> dict[str, An
         malware_category=getattr(assessment, "malware_category", None),
         degraded_mode=True,
         degradation_reasons=reasons,
+        operator_choices=list(state.get("operator_choices") or []),
         sample_platform=state.get("platform"),
         sample_file_type=state.get("file_type"),
         evidence_ledger=ledger,

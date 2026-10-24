@@ -301,7 +301,7 @@ class TestWhenThereIsNothingToShow:
         assert entry.ok is False
         assert entry.error == message
         assert result.degradation_reasons == ["triage.floss_failed"]
-        assert not degrades_run("triage.floss_failed")
+        assert degrades_run("triage.floss_failed")
         assert f"decoded strings: failed ({message})" in render_pack([entry], 0)
 
     def test_a_pe_with_no_emulated_strings_says_so(self) -> None:

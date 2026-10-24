@@ -85,9 +85,9 @@ class TestTheFirstScreenSaysWhatADegradedRunMeans:
         head = _head(_render(_degraded()))
         assert (
             "> **[DEGRADED RUN]** The static analyst failed, the dynamic analyst was skipped "
-            "(no sandbox fixture for this sample), the network analyst produced no claims and "
-            "the sandbox recorded nothing for this sample; the verdict above is tentative. See "
-            "§13 for what this run could not examine."
+            "(no sandbox fixture for this sample), the network analyst produced no claims, "
+            "the sandbox recorded nothing for this sample and the run went without tool; the "
+            "verdict above is tentative. See §13 for what this run could not examine."
         ) in head
 
     def test_no_code_and_no_install_command_on_the_first_screen(self) -> None:
@@ -111,6 +111,30 @@ class TestTheFirstScreenSaysWhatADegradedRunMeans:
         head = _head(_render(report))
         assert "**Notes:** this run recorded 3 limitations; see §13." in head
         assert "uv sync" not in head
+
+    def test_an_operator_choice_is_listed_in_section_13_apart_and_never_in_the_banner(
+        self,
+    ) -> None:
+        """T-338: a key never set cost the run no evidence it would have had."""
+        report = _degraded()
+        unset = (
+            "server.threatintel.check_hash_unavailable(VIRUSTOTAL_API_KEY is not configured); "
+            "set the credential or setting this tool needs in Settings and run the probe again"
+        )
+        report.operator_choices = [unset]
+        rendered = _render(report)
+        assert unset not in _head(rendered)
+        limits = _section(rendered, "## 13. Limitations and analysis notes")
+        choices = limits.split("**Not configured or withheld by choice:**", 1)[1]
+        assert f"- {unset}" in choices
+        assert "**What limited this run:**" not in choices
+        report.degraded_mode = False
+        assert "**Notes:** this run recorded 3 limitations; see §13." in _head(_render(report))
+
+    def test_a_report_with_no_choice_reads_as_it_did(self) -> None:
+        report = _degraded()
+        assert "operator_choices" not in report.model_dump(mode="json")
+        assert "withheld by choice" not in _render(report)
 
     def test_no_consensus_is_claimed_among_analysts_that_claimed_nothing(self) -> None:
         verdict = _section(_render(_degraded()), "## 3. Verdict and assessment")

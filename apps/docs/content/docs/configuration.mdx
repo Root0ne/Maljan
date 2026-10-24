@@ -3544,7 +3544,11 @@ the server is asked (`foreign_program`), as is a call naming no program before
 the job opened one (`no_job_program`). A tool whose input schema takes none of
 these arguments, or cannot be read, is withheld with its reason on the run's
 degraded record unless `job_safe_tools` lists it, and a tool
-`shared_withheld_tools` lists is withheld whatever it takes. The arguments
+`shared_withheld_tools` lists is withheld whatever it takes. A tool withheld
+by either list is the operator's configuration rather than a loss: it is
+listed under "Not configured or withheld by choice" (`operator_choices`) and
+never draws the degraded-run banner. One withheld because its schema could
+not be read stays a degradation. The arguments
 checked are the ones a call carries, so one its schema does not declare is held
 to the job too. On a server no other job shares, the tools are offered as they
 are.
@@ -4540,8 +4544,34 @@ mid-run. A tool whose declaration names the routed formats it serves
 (`routed_formats`) is not recorded for a sample of another known format: a
 missing Mach-O library costs a PE sample nothing. `timeout_s` is the tool's real timeout, taken from the constant the
 tool itself uses, so a manifest cannot say a call has none when it gives up
-after fifteen seconds. An unavailable tool does not make the run degraded on its own; a
-server that could not be attached still does.
+after fifteen seconds. A tool missing its library or binary makes the run degraded, as
+does a server that could not be attached and any triage pack tool that failed: each is
+evidence the run would otherwise have had, and the degraded-run banner names each tool the
+run went without; one decision (`pipeline.operator_choice.is_loss`) sets both, so a
+degraded run always names a lost tool or a loss that is no tool. A tool cost the sample
+nothing, and neither degrades the run nor is named, when it serves only other formats
+than the sample's known one (its declared `routed_formats`, or its pack step's formats:
+a Mach-O parser on a PE), or when it still answers part of what it would (`without`, or a
+pack answer marked `degraded`) and the part it lacks is not the sample's: the tool
+declares the routed formats its missing part reads (`ToolNeeds.without_reads`, `7z` for
+`archive_list` without py7zr; the job's own manifest first, the shipped declaration
+otherwise), the sample's format is outside them, and the tool did not answer the run with
+its missing-dependency error. On one of those formats, after such an error, for a tool
+that declares none, or when the run holds no format, it is a loss.
+
+A tool whose manifest cell carries the code `not_configured` is the operator's choice
+only when the claim holds against what the platform knows of that server: the cell names
+at least one setting (`optional_dependency`), each is one the platform can hand the
+server (a key of its `env` or a name in its `env_allow`), none holds a value on the
+platform's side, and the reason is exactly the probe's `<NAME> is not configured` for
+each. A manifest speaks only for the server that answered it: one naming another
+server's key is read under its own. Such a tool, and a referenced tool of a server
+switched off, cost the run no evidence its configuration would have given: they are
+listed apart as the operator's choices (`operator_choices` in the report and the run
+summary, §13 of the report, the console's run record, the rehearsal gate's output), not
+among the degradation reasons. Anything else is a loss, whatever its words say. The run
+summary keeps what the degraded flag was decided on (`loss_facts`), and the header names
+the lost tools from it.
 
 **Errors that name their remedy.** A tool that cannot answer returns, never
 raises:

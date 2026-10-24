@@ -119,6 +119,7 @@ class MalwareReportBuilder:
         malware_category: str | None = None,
         degraded_mode: bool = False,
         degradation_reasons: list[str] | None = None,
+        operator_choices: list[str] | None = None,
         sample_platform: str | None = None,
         sample_file_type: str | None = None,
         evidence_ledger: list[LedgerEntry] | None = None,
@@ -141,7 +142,12 @@ class MalwareReportBuilder:
         self.judge_assessment = judge_assessment
         self.malware_category = malware_category
         self.degraded_mode = degraded_mode
-        self.degradation_reasons = degradation_reasons or []
+        # A reason that is the operator's choice is listed apart whoever
+        # handed it in (``pipeline.operator_choice``): never a degradation.
+        from maljan.pipeline.operator_choice import split_operator_choices
+
+        self.degradation_reasons, chosen = split_operator_choices(degradation_reasons or [])
+        self.operator_choices = list(dict.fromkeys([*(operator_choices or []), *chosen]))
         self.sample_platform = sample_platform
         self.sample_file_type = sample_file_type
         # Every tool call the run made, in the order the ids were issued. The
@@ -244,6 +250,7 @@ class MalwareReportBuilder:
             severity=severity,
             degraded_mode=self.degraded_mode,
             degradation_reasons=self.degradation_reasons,
+            operator_choices=self.operator_choices,
             identity=identity,
             static=static,
             directed_text=directed,

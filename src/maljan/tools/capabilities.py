@@ -140,6 +140,12 @@ class ToolNeeds:
     # What the tool still does without the requirement, when it does
     # something: ``apk_info`` answers the zip-level facts without androguard.
     without: str = ""
+    # The routed formats only the missing requirement reads, for a tool that
+    # still answers without it: a sample of another known format loses
+    # nothing (``archive_list`` without py7zr on a zip), and one of these
+    # formats loses what it would have read. Empty when that cannot be said,
+    # and the partial answer is then a loss for every sample.
+    without_reads: tuple[str, ...] = ()
     # The remedy when the requirement is missing, where the code's general one
     # names the wrong thing: an executable is not installed by ``uv sync``.
     remediation: str = ""
@@ -173,9 +179,15 @@ def _cell(tool: ToolNeeds) -> dict[str, Any]:
     if missing:
         kinds = {req.kind for req, _reason in missing}
         code = NOT_CONFIGURED if kinds == {"env"} else MISSING_DEPENDENCY
+        # Kept on the cell: a setting left unset is the operator's choice and a
+        # library missing is a loss, and the code, not the reason's words, is
+        # what tells them apart (``pipeline.operator_choice``).
+        cell["code"] = code
         cell["remediation"] = tool.remediation or REMEDIATIONS[code]
         if tool.without:
             cell["without"] = tool.without
+            if tool.without_reads:
+                cell["without_reads"] = list(tool.without_reads)
     return cell
 
 
@@ -205,6 +217,11 @@ class Unavailable:
     reason: str
     remediation: str | None = None
     without: str = ""
+    # The manifest's code for why (``not_configured``, ``missing_dependency``),
+    # ``None`` for a manifest written before cells carried one.
+    code: str | None = None
+    # What the tool needs, by name, as its cell lists it (``optional_dependency``).
+    requires: tuple[str, ...] = ()
 
     @property
     def degradation_reason(self) -> str:
@@ -268,6 +285,12 @@ class ServerCapabilities:
                     reason=str(cell.get("reason") or "unavailable"),
                     remediation=(str(cell["remediation"]) if cell.get("remediation") else None),
                     without=str(cell.get("without") or ""),
+                    code=str(cell["code"]) if cell.get("code") else None,
+                    requires=tuple(
+                        name.strip()
+                        for name in str(cell.get("optional_dependency") or "").split(",")
+                        if name.strip()
+                    ),
                 )
             )
         return out

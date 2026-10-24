@@ -202,7 +202,6 @@ from maljan.utils.written_forms import (
 )
 
 __all__ = [
-    "ESSENTIAL_TOOLS",
     "PACK_HEADING",
     "PIPELINE",
     "CapaSettings",
@@ -388,12 +387,6 @@ def degradation_reason_for(tool: str, value: Any) -> str | None:
     return f"triage.{tool}_degraded"
 
 
-# The two tools whose failure leaves the run without its identity. Every other
-# tool in the pack is an optional source: a capa that ran out of budget or a
-# reputation server that did not answer is an absence the judge is told about,
-# not a reason to call the whole run degraded.
-ESSENTIAL_TOOLS: frozenset[str] = frozenset({"identify_file", "hashes", "pack"})
-
 _REASON_RE = re.compile(r"^triage\.(?P<tool>.+)_(?:failed|degraded)$")
 _UNAVAILABLE_RE = re.compile(r"^server\.[^.]+\.[^.(]+_unavailable\(")
 
@@ -406,37 +399,48 @@ def is_pack_reason(reason: str) -> bool:
 _DEGRADED_RE = re.compile(r"^triage\.(?P<tool>.+)_degraded$")
 
 
-def degrades_run(reason: str) -> bool:
-    """Whether one of the pack's reasons makes the run degraded on its own.
+def degrades_run(reason: str, facts: Any = None, not_configured: Iterable[str] = ()) -> bool:
+    """Whether ``reason`` makes the run degraded on its own: every loss does.
 
-    A tool that answered a smaller set than it wanted to never does: the
-    facts it produced are in the pack, and what is missing from them is said
-    beside them.
+    A pack tool that failed, a tool missing its library or binary on its
+    host, a fetch that failed, a tool error, a cap, a timeout: each cost the
+    run evidence it would otherwise have had, whether or not the tool is one
+    the run's identity rests on. One run went without capa and shipped no
+    banner, because capa was called optional. The operator's choice
+    (``pipeline.operator_choice``: a key never set, a server switched off, a
+    tool a shared server withholds by policy) does not, since it took nothing
+    the run's configuration would have given it; nor does a tool that could
+    not have answered anything of this sample (``facts``, an
+    ``operator_choice.SampleFacts``: a Mach-O parser on a PE, a 7z reader on a
+    zip). The decision is ``operator_choice.is_loss``, which the banner's
+    named tools read too.
     """
-    if _DEGRADED_RE.match(str(reason or "")):
-        return False
-    match = _REASON_RE.match(str(reason or ""))
-    return bool(match and match.group("tool") in ESSENTIAL_TOOLS)
+    from maljan.pipeline.operator_choice import is_loss
+
+    return is_loss(str(reason or ""), facts, not_configured)
 
 
 def is_unavailable_tool_reason(reason: str) -> bool:
     """Whether ``reason`` says one tool of a server is missing on its host.
 
     ``server.<key>.<tool>_unavailable(<why>)`` is recorded at stage start from
-    the server's capability manifest. Like an optional tool of the pack that
-    failed, it is an absence the reader is told about, not a reason to call
-    the whole run degraded: the server attached and every other tool answered.
+    the server's capability manifest.
     """
     return bool(_UNAVAILABLE_RE.match(str(reason or "")))
 
 
-def run_is_degraded(reasons: Sequence[str], informational: Sequence[str] = ()) -> bool:
+def run_is_degraded(
+    reasons: Sequence[str],
+    informational: Sequence[str] = (),
+    facts: Any = None,
+    not_configured: Iterable[str] = (),
+) -> bool:
     """Whether a run's degradation reasons make it degraded.
 
-    Every reason that is not the pack's keeps the weight it always had; a
-    pack reason counts only for an essential tool or the pack itself. A capa
-    that ran out of budget is an absence the judge is told about, not a
-    degraded run.
+    Every reason that is a loss does (:func:`degrades_run`); the operator's
+    choices do not. ``facts`` (``operator_choice.SampleFacts``) is what the
+    run holds of its sample: its format and the tools that answered it short
+    of a library.
 
     ``informational`` names the reasons that describe part of an answer while
     the rest of it was read: they are the run's limitations and are listed
@@ -444,7 +448,7 @@ def run_is_degraded(reasons: Sequence[str], informational: Sequence[str] = ()) -
     """
     noted = {str(reason) for reason in informational or ()}
     return any(
-        degrades_run(reason) if is_pack_reason(reason) else not is_unavailable_tool_reason(reason)
+        degrades_run(reason, facts, not_configured)
         for reason in reasons or []
         if str(reason) not in noted
     )

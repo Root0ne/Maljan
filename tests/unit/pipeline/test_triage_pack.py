@@ -864,20 +864,21 @@ class TestAReasonBesideNothingIsAFailure:
 
 
 class TestWhichPackFailuresDegradeTheRun:
-    def test_only_the_identity_tools_and_the_pack_itself_do(self) -> None:
+    def test_every_pack_failure_does(self) -> None:
+        """T-338: an optional tool that failed is still evidence the run went without."""
         from maljan.pipeline.triage_pack import degrades_run, is_pack_reason, reason_sentence
 
-        assert degrades_run("triage.identify_file_failed")
-        assert degrades_run("triage.hashes_failed")
-        assert degrades_run("triage.pack_failed")
-        for optional in (
+        for tool in (
+            "identify_file",
+            "hashes",
+            "pack",
             "capa",
             "yara_scan",
             "sigma_match_sandbox",
             "reputation",
             "function_matches",
         ):
-            assert not degrades_run(f"triage.{optional}_failed"), optional
+            assert degrades_run(f"triage.{tool}_failed"), tool
         assert is_pack_reason("triage.capa_failed") and not is_pack_reason("analyst failures: x")
         assert reason_sentence("triage.capa_failed") == "the triage pack could not run capa"
         assert reason_sentence("no sandbox report") == "no sandbox report"
@@ -890,7 +891,7 @@ class TestWhichPackFailuresDegradeTheRun:
     def test_the_run_is_degraded_only_by_what_degrades_it(self) -> None:
         from maljan.pipeline.triage_pack import run_is_degraded
 
-        assert run_is_degraded(["triage.capa_failed", "triage.reputation_failed"]) is False
+        assert run_is_degraded(["triage.capa_failed", "triage.reputation_failed"]) is True
         assert run_is_degraded(["triage.hashes_failed"]) is True
         assert run_is_degraded(["triage.capa_failed", "analyst failures: static"]) is True
         assert run_is_degraded([]) is False
@@ -904,7 +905,7 @@ class TestWhichPackFailuresDegradeTheRun:
         )
         assert run_is_degraded([note]) is True
         assert run_is_degraded([note], informational=[note]) is False
-        assert run_is_degraded([note, "triage.capa_failed"], informational=[note]) is False
+        assert run_is_degraded([note, "triage.capa_failed"], informational=[note]) is True
         # What still degrades is not made informational by being listed beside one.
         assert run_is_degraded([note, "analyst failures: static"], informational=[note]) is True
         assert run_is_degraded([note, "triage.hashes_failed"], informational=[note]) is True
@@ -958,12 +959,13 @@ class TestADegradedAnswerIsAnAnswer:
 
         assert reason_sentence(f"triage.{tool}_failed") == (f"the triage pack could not run {tool}")
 
-    def test_the_degraded_reason_does_not_make_the_whole_run_degraded(self) -> None:
-        """Same weight as an optional tool that failed: an absence the reader
-        is told about, not a verdict about the run."""
+    def test_the_degraded_reason_makes_the_run_degraded_where_its_part_may_apply(self) -> None:
+        """T-338: apk_info declares nothing about the part androguard reads, so
+        what it could not answer may be this sample's: a loss."""
+        from maljan.pipeline.operator_choice import SampleFacts
         from maljan.pipeline.triage_pack import run_is_degraded
 
-        assert run_is_degraded(["triage.apk_info_degraded"]) is False
+        assert run_is_degraded(["triage.apk_info_degraded"], facts=SampleFacts("apk")) is True
 
 
 class TestAnApkFactAndroguardCouldNotRead:

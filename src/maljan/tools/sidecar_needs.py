@@ -53,7 +53,12 @@ ANALYSIS: list[ToolNeeds] = [
     ToolNeeds("apk_info", (module("androguard"),), without="the zip-level facts"),
     ToolNeeds("carve_payloads"),
     ToolNeeds(upx.TOOL, facts=upx.CAPABILITY_FACTS),
-    ToolNeeds("archive_list", (module("py7zr"),), without="zip and tar members; 7z needs py7zr"),
+    ToolNeeds(
+        "archive_list",
+        (module("py7zr"),),
+        without="zip and tar members; 7z needs py7zr",
+        without_reads=("7z",),
+    ),
     ToolNeeds("document_info", (module("olefile"),), without="the PDF and OOXML halves"),
     ToolNeeds(
         "yara_scan",
@@ -125,3 +130,26 @@ BY_DIRECTORY: dict[str, list[ToolNeeds]] = {
     "knowledge-mcp": KNOWLEDGE,
     "network-mcp": NETWORK,
 }
+
+
+def without_reads(tool: str, server: str | None = None) -> frozenset[str] | None:
+    """The routed formats only the missing requirement of ``tool`` reads, or ``None`` unsaid.
+
+    Read from the shipped declarations above (``ToolNeeds.without_reads``):
+    ``server`` is the key a built-in sidecar is attached under (``analysis``
+    for ``analysis-mcp``), and with none every shipped sidecar is looked in, as
+    for a pack step's token, which names no server. ``None`` when no shipped
+    tool of that name says which formats its missing part reads.
+    """
+    lists = (
+        [BY_DIRECTORY[f"{server}-mcp"]]
+        if server is not None and f"{server}-mcp" in BY_DIRECTORY
+        else []
+        if server is not None
+        else list(BY_DIRECTORY.values())
+    )
+    for needs in lists:
+        for entry in needs:
+            if entry.name == tool and entry.without_reads:
+                return frozenset(entry.without_reads)
+    return None

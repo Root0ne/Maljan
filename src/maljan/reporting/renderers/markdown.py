@@ -57,6 +57,7 @@ from maljan.analysis.run_summary import (
     NOT_APPLICABLE,
     NOT_APPLICABLE_PHRASE,
     NOT_APPLICABLE_SENTENCE,
+    OPERATOR_CHOICES_HEADING,
     bundle_loss_sentence,
     corpus_held_sentence,
     generation_lines,
@@ -1980,6 +1981,13 @@ class MarkdownRenderer:
             lines.extend(["**What limited this run:**", ""])
             lines.extend(_item(reason) for reason in report.degradation_reasons)
             lines.append("")
+        if report.operator_choices:
+            # What the operator's configuration left out: listed whole, apart
+            # from what limited the run, since it cost no evidence the run's
+            # configuration would have given.
+            lines.extend([f"**{OPERATOR_CHOICES_HEADING}:**", ""])
+            lines.extend(_item(reason) for reason in report.operator_choices)
+            lines.append("")
 
         evidence = summary.get("evidence") or {}
         if evidence:
@@ -3034,13 +3042,31 @@ def _joined(names: list[str]) -> str:
 def _degraded_sentence(report: MalwareReport, ctx: _Context) -> str:
     """The header's one sentence about a degraded run, built from what ran.
 
-    Built from the stage and agent records and the sandbox's state, not from
-    the degradation reasons: those are the operator's, carry codes and install
-    commands, and are listed whole in §13.
+    Built from the stage and agent records and the sandbox's state, and from
+    the reasons only the bare name of each tool the run went without: the
+    reasons are the operator's, carry codes and install commands, and are
+    listed whole in §13.
     """
+    from maljan.pipeline.operator_choice import facts_from_record, lost_tools
+
     parts = ctx.analysts.clauses()
     if not ctx.sandbox_observed and ctx.sandbox_state in ("empty", "not_called"):
         parts.append(ctx.no_sandbox_clause())
+    # A tool the run went without, by its bare name: capa missing on its host
+    # is the run's loss even when nothing else was, and the header says so.
+    # The same facts the judge node decided the run degraded on, as the run
+    # summary kept them; a summary written before it kept them reads its
+    # tool-failure rows and the shipped declarations.
+    summary = report.run_summary or {}
+    failures = (summary.get("evidence") or {}).get("failures") or []
+    facts = facts_from_record(
+        summary.get("loss_facts"),
+        report.identity.file_type or "",
+        [r for r in failures if isinstance(r, dict)],
+    )
+    lost = lost_tools(report.degradation_reasons, facts)
+    if lost:
+        parts.append(f"the run went without {_joined(lost)}")
     if not parts:
         parts.append("this run had less evidence than a full analysis")
     said = _joined(parts)

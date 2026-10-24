@@ -61,6 +61,10 @@ MEDIATION_FAILED = "mediation_failed"
 NOT_APPLICABLE_PHRASE = "not applicable; no agreement was measured"
 NOT_APPLICABLE_SENTENCE = f"Consensus: {NOT_APPLICABLE_PHRASE}."
 
+# What every surface heads the operator's choices with: what the configuration
+# left out, apart from what limited the run (``pipeline.operator_choice``).
+OPERATOR_CHOICES_HEADING = "Not configured or withheld by choice"
+
 
 @dataclass
 class NegotiationMetrics:
@@ -1177,6 +1181,10 @@ class RunSummary:
                             errors).
         degradation_reasons: Human-readable bullets explaining why this run
                             is flagged as degraded.
+        operator_choices:   What the operator's configuration left out (a key
+                            never set, a server switched off, a tool a shared
+                            server withholds by policy): listed, never a
+                            degradation (``pipeline.operator_choice``).
         failed_analysts:    Names of analysts whose ``reports[name]`` started
                             with ``[ERROR]``.
         techniques_by_layer: How many techniques each source named, so the
@@ -1206,6 +1214,11 @@ class RunSummary:
     timestamp: float = field(default_factory=time.time)
     degraded_mode: bool = False
     degradation_reasons: list[str] = field(default_factory=list)
+    operator_choices: list[str] = field(default_factory=list)
+    # What the judge node decided which missing tools cost the sample on
+    # (``operator_choice.facts_record``): the tools that answered short of a
+    # library and what each tool's missing part reads. ``None`` when nothing.
+    loss_facts: dict[str, Any] | None = None
     failed_analysts: list[str] = field(default_factory=list)
     techniques_by_layer: dict[str, int] = field(default_factory=dict)
     profile: dict[str, Any] | None = None
@@ -1337,6 +1350,12 @@ class RunSummary:
                 for reason in self.degradation_reasons:
                     lines.append(f"- {reason}")
                 lines.append("")
+        # Listed whether or not the run is degraded, and never under the
+        # banner: they cost the run no evidence its configuration would give.
+        if self.operator_choices:
+            lines += [f"**{OPERATOR_CHOICES_HEADING}:**", ""]
+            lines.extend(f"- {reason}" for reason in self.operator_choices)
+            lines.append("")
 
         # Negotiation
         n = self.negotiation
@@ -1729,6 +1748,10 @@ class RunSummary:
             "tokens": None,
             "degraded_mode": self.degraded_mode,
             "degradation_reasons": list(self.degradation_reasons),
+            # Absent when there are none, so a summary stored before the list
+            # existed, or a run with nothing left out, reads as it did.
+            **({"operator_choices": list(self.operator_choices)} if self.operator_choices else {}),
+            **({"loss_facts": dict(self.loss_facts)} if self.loss_facts else {}),
             "failed_analysts": list(self.failed_analysts),
             "techniques_by_layer": dict(self.techniques_by_layer),
             "profile": dict(self.profile) if self.profile else None,
@@ -1870,6 +1893,8 @@ class RunSummaryBuilder:
         self._corroboration: dict[str, dict[str, list[str]]] = {}
         self._degraded_mode: bool = False
         self._degradation_reasons: list[str] = []
+        self._operator_choices: list[str] = []
+        self._loss_facts: dict[str, Any] | None = None
         self._failed_analysts: list[str] = []
         self._techniques_by_layer: dict[str, int] = {}
         self._tokens: TokenUsageMetrics | None = None
@@ -2076,9 +2101,26 @@ class RunSummaryBuilder:
     def set_degraded_mode(
         self, degraded: bool, reasons: list[str] | None = None
     ) -> RunSummaryBuilder:
-        """Mark the run as degraded with optional human-readable reasons."""
+        """Mark the run as degraded with optional human-readable reasons.
+
+        A reason that is the operator's choice (``pipeline.operator_choice``)
+        is listed apart, whichever caller handed it in: it is no degradation.
+        """
+        from maljan.pipeline.operator_choice import split_operator_choices
+
         self._degraded_mode = bool(degraded)
-        self._degradation_reasons = list(reasons or [])
+        self._degradation_reasons, chosen = split_operator_choices(reasons or [])
+        return self.set_operator_choices(chosen)
+
+    def set_loss_facts(self, record: dict[str, Any] | None) -> RunSummaryBuilder:
+        """What the degraded flag was decided on (``operator_choice.facts_record``)."""
+        self._loss_facts = dict(record) if record else None
+        return self
+
+    def set_operator_choices(self, reasons: list[str] | None) -> RunSummaryBuilder:
+        """What the operator's configuration left out, apart from the degradations."""
+        held = [*self._operator_choices, *(str(r) for r in reasons or [])]
+        self._operator_choices = list(dict.fromkeys(held))
         return self
 
     def set_token_usage(self, snapshot: dict[str, Any] | None) -> RunSummaryBuilder:
@@ -2520,6 +2562,8 @@ class RunSummaryBuilder:
             truncation=self._truncation,
             degraded_mode=self._degraded_mode,
             degradation_reasons=self._degradation_reasons,
+            operator_choices=self._operator_choices,
+            loss_facts=self._loss_facts,
             failed_analysts=self._failed_analysts,
             techniques_by_layer=self._techniques_by_layer,
             profile=self._profile,

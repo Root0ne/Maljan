@@ -181,6 +181,9 @@ class UnavailableTool(BaseModel):
     still_answers: str = ""
     # The words the run's degraded block would use for the same tool.
     degradation_reason: str
+    # The manifest's code: ``not_configured`` for a setting left unset, which
+    # a run lists as the operator's choice rather than as a degradation.
+    manifest_code: str = ""
 
 
 class JobResponse(BaseModel):
