@@ -190,14 +190,17 @@ class TestWhatTheIndicatorCapOrphans:
             evidence_ledger=[],
         ).build_deterministic()
         report.network = NetworkIOCs()
-        # A sandbox saw every file written: the second source the one publish
-        # rule asks of the judge's values. A file name is a value the export
+        # A sandbox saw the sample's process write every file: the second
+        # source the one publish rule asks of the judge's values. A file name is a value the export
         # mints no row of its own for, so the indicators that reach the cap are
         # the judge's.
         from maljan.reporting.models import DynamicBehavior
 
         report.dynamic = DynamicBehavior(
-            file_operations=[{"operation": "write", "path": f"h{n}.exe"} for n in range(40)]
+            process_tree=[{"pid": 1, "name": "sample.exe"}],
+            file_operations=[
+                {"operation": "write", "path": f"h{n}.exe", "pid": 1} for n in range(40)
+            ],
         )
         # Forty indicators, more than the fifteen a cap used to keep, each with
         # a relationship of its own.

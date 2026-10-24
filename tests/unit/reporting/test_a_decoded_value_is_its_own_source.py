@@ -19,7 +19,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from app.services.report_service import _publishable
+from app.services.report_service import ioc_feed_rows
 from maljan.reporting.builder import build_consolidated_iocs
 from maljan.reporting.models import (
     EvidenceIndexRow,
@@ -130,6 +130,12 @@ def _published(report: MalwareReport, value: str) -> str:
     return str(row.published)
 
 
+def _fed(report: MalwareReport, value: str) -> bool:
+    """Whether ``/iocs`` publishes the value: its row of the feed, built from the table."""
+    (row,) = [r for r in ioc_feed_rows(report.model_dump(mode="json")) if r["value"] == value]
+    return bool(row["published"])
+
+
 class TestTheRecord:
     def test_a_decoded_url_and_its_host_are_recorded_with_the_entry(self) -> None:
         record = emulation_record(_report())
@@ -196,7 +202,7 @@ class TestAMalwareVerdict:
 
         assert C2 in _exported(report)
         assert publishes(_published(report, C2))
-        assert _publishable("domain", C2, "strings", None, emulation_kwargs(report, "domain", C2))
+        assert _fed(report, C2)
 
     def test_a_swept_row_of_a_decoded_value_publishes_with_the_reason(self) -> None:
         report = _report(network=NetworkIOCs(domains=[NetworkDomain(fqdn=C2, source="strings")]))
@@ -236,9 +242,7 @@ class TestABenignVerdict:
             f"no: {RECOVERED_BY_EMULATION}, ev_0012, but the verdict is Benign, which "
             "publishes no malicious indicator"
         )
-        assert not _publishable(
-            "domain", C2, "strings", None, emulation_kwargs(report, "domain", C2)
-        )
+        assert not _fed(report, C2)
 
 
 class TestAPlainStringTheSweepRead:
@@ -258,9 +262,7 @@ class TestAPlainStringTheSweepRead:
             "no: seen only in the file's strings — also a plain string in the file "
             "(ev_0005), so not a value the sample hid"
         )
-        assert not _publishable(
-            "domain", swept, "strings", None, emulation_kwargs(report, "domain", swept)
-        )
+        assert not _fed(report, swept)
 
     def test_a_value_inside_a_longer_name_is_not_held_as_swept(self) -> None:
         ledger = [_strings_entry(f"cdn-{C2}"), _floss_entry(("decoded", C2))]

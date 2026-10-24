@@ -97,6 +97,7 @@ class MalwareReportBuilder:
             report = builder.apply_narrative(narrative_output)
         builder.render_extended_stix(report)  # mutates report.stix_bundle_extended
         report.consolidated_iocs = build_consolidated_iocs(report)  # reads the export
+        report.misp_attributes = build_misp_attributes(report, owner=job_id)  # published rows
         report = builder.attach_detection_signatures(report, sample)  # published rows only
     """
 
@@ -121,6 +122,7 @@ class MalwareReportBuilder:
         sample_platform: str | None = None,
         sample_file_type: str | None = None,
         evidence_ledger: list[LedgerEntry] | None = None,
+        job_id: str | None = None,
     ) -> None:
         self.file_hash = file_hash
         self.file_name = file_name
@@ -148,6 +150,10 @@ class MalwareReportBuilder:
         # report body, which is the honest outcome for a run that gathered
         # nothing.
         self.evidence_ledger = list(evidence_ledger or [])
+        # The job the report is built for: what its MISP attributes' uuids are
+        # derived from. A build with none (the command line, a test) uses the
+        # report's own number.
+        self.job_id = job_id
 
     # ------------------------------------------------------------------
     # Deterministic build
@@ -322,6 +328,13 @@ class MalwareReportBuilder:
         report.tlp = report.front_matter.tlp
         report.version_history = _build_version_history(report.front_matter)
         report.consolidated_iocs = build_consolidated_iocs(report)
+        # The MISP attributes of the table's published rows and the published
+        # techniques, so the console's MISP export and the job package carry them.
+        from maljan.reporting.misp import build_misp_attributes, misp_owner
+
+        report.misp_attributes = build_misp_attributes(
+            report, owner=misp_owner(report, self.job_id)
+        )
         logger.info(
             "MalwareReportBuilder: deterministic build complete "
             "(verdict=%s, severity=%s, TTPs=%d, persistence=%d, IOCs=%d, "
@@ -713,6 +726,7 @@ def _build_consolidated_iocs(report: MalwareReport) -> list[ConsolidatedIOC]:
     from maljan.reporting.ledger_report import artifact_sections, listed_headings, listed_rows
     from maljan.reporting.renderers.stix_renderer import (
         corroborating_values,
+        digest_label,
         emulation_kwargs,
         emulation_record,
         listed_value_sightings,
@@ -720,6 +734,7 @@ def _build_consolidated_iocs(report: MalwareReport) -> list[ConsolidatedIOC]:
         publish_answer,
         query_answers,
         recovered_by_words,
+        sandbox_host_kwargs,
         yes_because,
     )
 
@@ -795,38 +810,98 @@ def _build_consolidated_iocs(report: MalwareReport) -> list[ConsolidatedIOC]:
     strings = list(static.interesting_strings) if static else []
     file_ops = [op for op in (dynamic.file_operations if dynamic else []) if isinstance(op, dict)]
 
+    # A file, a digest, a key or a mutex the sandbox recorded is the sample's
+    # observation when a record of it names a process of the sample's tree;
+    # one no record attributes is withheld with the reason, unless the judge
+    # kept it when asked with that fact, as an unattributed flow is
+    # (``stix_renderer.sandbox_host_kwargs``).
+    def _sandbox_host(kind: str, value: str) -> str:
+        return publish_answer(kind, value, "sandbox", **sandbox_host_kwargs(report, kind, value))
+
+    def _digest_type(value: str) -> str:
+        # A digest is named by its length; any other length names none.
+        return digest_label(value) or "Hash"
+
     if static:
         for res in static.embedded_resources:
             if res.get("carved") and res.get("sha256"):
-                _add("SHA-256", "hash", str(res["sha256"]), "static", f"carved at {res.get('id')}")
+                carved = str(res["sha256"])
+                _add(_digest_type(carved), "hash", carved, "static", f"carved at {res.get('id')}")
     for op in file_ops:
         if op.get("operation") == "write" and op.get("sha256"):
             name = str(op.get("path") or op.get("name") or "")
-            _add("SHA-256", "hash", str(op["sha256"]), "sandbox", f"dropped {name}".strip())
+            digest = str(op["sha256"])
+            _add(
+                _digest_type(digest),
+                "hash",
+                digest,
+                "sandbox",
+                f"dropped {name}".strip(),
+                published=_sandbox_host("hash", digest),
+            )
 
     for op in file_ops:
         if op.get("operation") == "write" and op.get("path"):
-            _add("File path", "path", str(op["path"]), "sandbox", "written by the sample")
+            written_path = str(op["path"])
+            _add(
+                "File path",
+                "path",
+                written_path,
+                "sandbox",
+                "written by the sample",
+                published=_sandbox_host("path", written_path),
+            )
     for s in strings:
         if s.kind == "path" and not _is_pipe(s.value):
             ioc_type = "File path" if path_names_a_file(s.value) else "Directory"
             _add(ioc_type, "path", s.value, "strings", s.notes or "")
 
-    if dynamic:
-        for mod in dynamic.registry_mods:
-            if mod.operation in ("create", "modify") and mod.key:
-                target = f"{mod.key} ({mod.value_name})" if mod.value_name else mod.key
-                _add("Registry key", "registry", target, "sandbox", mod.operation)
-    for mech in report.persistence:
-        if mech.kind == "registry_run" and mech.target:
-            _add("Registry key", "registry", mech.target, "persistence", "run key")
+    # The key is the row's value, as every surface carries it (a STIX
+    # registry key, a MISP regkey, the Sigma selection); each value the sample
+    # wrote under it is named in the row's context. A key a persistence
+    # mechanism names is that mechanism's row, answered as a persistence
+    # record, with the sandbox's writes under it in its context.
+    written: dict[str, tuple[str, dict[str, None]]] = {}
+    for mod in dynamic.registry_mods if dynamic else []:
+        if mod.operation in ("create", "modify") and mod.key.strip():
+            said = f"{mod.operation} value {mod.value_name}" if mod.value_name else mod.operation
+            written.setdefault(mod.key.strip().lower(), (mod.key.strip(), {}))[1][said] = None
+    run_keys = {
+        mech.target.strip().lower(): mech.target
+        for mech in report.persistence
+        if mech.kind == "registry_run" and mech.target.strip()
+    }
+    for folded, (key, operations) in written.items():
+        if folded in run_keys:
+            continue
+        # A registry record names no process, so no key is attributed.
+        _add(
+            "Registry key",
+            "registry",
+            key,
+            "sandbox",
+            "; ".join(operations),
+            published=_sandbox_host("registry", key),
+        )
+    for folded, target in run_keys.items():
+        under = written.get(folded)
+        context = "; ".join(["run key", *(under[1] if under else [])])
+        _add("Registry key", "registry", target, "persistence", context)
     for s in strings:
         if s.kind == "registry":
             _add("Registry key", "registry", s.value, "strings", s.notes or "")
 
     for op in file_ops:
         if op.get("operation") == "mutex" and op.get("name"):
-            _add("Mutex", "mutex", str(op["name"]), "sandbox", "created at run time")
+            mutex = str(op["name"])
+            _add(
+                "Mutex",
+                "mutex",
+                mutex,
+                "sandbox",
+                "created at run time",
+                published=_sandbox_host("mutex", mutex),
+            )
     for s in strings:
         if s.kind == "mutex":
             _add("Mutex", "mutex", s.value, "strings", s.notes or "")
@@ -857,12 +932,19 @@ def _build_consolidated_iocs(report: MalwareReport) -> list[ConsolidatedIOC]:
         elif s.kind == "crypto_wallet":
             _add("Cryptocurrency address", "crypto_wallet", s.value, "strings", s.notes or "")
 
-    # A string row of a kind the rule answers for is asked it; the sandbox's,
-    # the persistence mechanisms' and the identity's rows are observations
-    # and records the export reads on its own terms, and keep what they carry.
+    # Every row is asked the one rule: a string row as the string sweep's,
+    # with the run's second-source record, and a row the sandbox, a
+    # persistence record or a static carve recorded under the source that
+    # recorded it — the export carries the ones it publishes (a dropped
+    # file's digest, a path, a key, a mutex), and refuses a command line, a
+    # task and a service, for which it has no object.
     for row in rows:
-        if row.source == "strings" and row.kind in ("path", "registry", "mutex", "command"):
-            row.published = _from_strings(row.kind, row.value)
+        if row.published is not None:
+            continue
+        if row.source == "strings":
+            row.published = _from_strings(row.kind or "", row.value)
+        else:
+            row.published = publish_answer(row.kind or "", row.value, row.source)
 
     # What the analysts listed that no tool recorded: each value its own row,
     # in the analyst's name and with the rule's refusal, after every tool row
@@ -1051,12 +1133,9 @@ def _with_the_judge_s_values(
             if (row.kind or "") == item.kind and row.value.strip().lower() == wanted
         ]
         if same:
-            # A row the table never asked the rule of — a sandbox's file write,
-            # an analyst's persistence target — is asked it now, because the
-            # export asks it of the judge's indicator for the same value.
-            for index in same:
-                if out[index].published is None:
-                    out[index] = out[index].model_copy(update={"published": answer})
+            # The row was asked the rule under the source that recorded it,
+            # with the judge's keep where the rule reads one: the same answer
+            # the judge's indicator for the value gets.
             continue
         if item.kind == "hash":
             label = item.algorithm or "Hash"

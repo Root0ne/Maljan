@@ -21,18 +21,24 @@ from maljan.reporting.models import MalwareReport
 from tests.unit.reporting.test_an_entry_without_a_source_is_read_as_before import _benchmark
 
 # Normalised STIX over the judge's bundle, as dev 5cd25b75 renders it.
+# Re-pinned when every IOC-table row came to carry a publish answer and the
+# export to name the sample by its identity digests (T-344, T-345): a dropped file's
+# digest row the record names no process for now prints its refusal, so does
+# a command line, the sample's indicator adds its SHA-1 and MD5, its imphash
+# is an anomalous-activity indicator of its own, and an indicator's reason is
+# read from the rebuilt table.
 STORED_EXPORTS = {
-    "run7": "7d838df92fd9d16d",
-    "run5": "906f866271a2ba69",
-    "run4": "e2a8494073ca71fa",
-    "local8": "99fe30245c6e9213",
-    "haiku4": "226f93bcdf45d447",
+    "run7": "eff64a6fcc7d2c98",
+    "run5": "618c6bdf28561f05",
+    "run4": "9a3a7b4040b09b57",
+    "local8": "23b5d33c962e03b7",
+    "haiku4": "860e9bb2afe060ca",
 }
 # ``(markdown, html with the nonce "fixed", normalised STIX)`` for haiku4. The
 # Markdown and HTML were re-pinned when a sample's, a tool's or a finding's text
 # came to print escaped (F7), and when an analyst's listing came to be read by
 # its headings (AUD-43); the STIX did not change.
-HAIKU4_RENDERS = ("230d0d43a8a40244", "269dc8fdf849c364", "7a36a22e070d70fd")
+HAIKU4_RENDERS = ("9e48dabb38b94d23", "4bda1b01fc6026a1", "ffef51adf3a2ebac")
 
 _UUID = re.compile(r"--[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
 _STAMP = re.compile(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})")

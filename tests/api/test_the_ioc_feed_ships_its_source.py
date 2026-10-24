@@ -184,52 +184,70 @@ class TestThePublishRuleFailsClosed:
     not decide, and the import around it did the same — which for a hard
     dependency of this application could only ever hide a bug, and would hide
     it by quietly restoring the wider feed the default exists to replace. The
-    import is at module scope now, and the one guard that remains withholds the
-    row and says so at error level.
+    feed is the report's IOC table now: when the table cannot be rebuilt, the
+    rows the report stored are served with their stored answers, a report that
+    stored none serves only the sample's own digests — which the router
+    established and no rule decides — and the failure is logged at error level.
     """
 
-    def test_a_rule_that_raises_withholds_the_row(self, monkeypatch: Any) -> None:
-        from app.services import report_service
+    @staticmethod
+    def _broken(monkeypatch: Any) -> None:
+        from maljan.reporting import builder
 
         def _raises(*_args: Any, **_kwargs: Any) -> Any:
             raise RuntimeError("the renderer is broken")
 
-        monkeypatch.setattr(report_service, "indicator_publish_reason", _raises)
+        monkeypatch.setattr(builder, "build_consolidated_iocs", _raises)
 
-        assert report_service._publishable("domain", "c2.example.com", "sandbox", None) is False
+    def test_a_table_that_cannot_be_built_withholds_every_row_but_the_sample_s_digests(
+        self, monkeypatch: Any
+    ) -> None:
+        from app.services import report_service
+
+        self._broken(monkeypatch)
+        stored = _malware_report()
+        stored["identity"]["hashes"] = {"sha256": "f" * 64, "md5": "e" * 32, "imphash": "d" * 32}
+
+        rows = report_service.ioc_feed_rows(stored)
+
+        assert [(r["value"], r["source"], r["published"]) for r in rows] == [
+            (f"sha256:{'f' * 64}", "identity", True),
+            (f"md5:{'e' * 32}", "identity", True),
+            (f"imphash:{'d' * 32}", "identity", True),
+        ]
+        assert {r["publish_answer"] for r in rows} == {"yes: the sample's own digest"}
+
+    def test_a_report_the_model_cannot_read_still_serves_the_sample_s_digests(self) -> None:
+        from app.services import report_service
+
+        stored = {**_malware_report(), "verdict": {"not": "a verdict"}}
+
+        rows = report_service.ioc_feed_rows(stored)
+
+        assert [(r["kind"], r["value"]) for r in rows] == [("hash", f"sha256:{'f' * 64}")]
 
     def test_it_says_so_at_error_level(self, monkeypatch: Any, caplog: Any) -> None:
         import logging
 
         from app.services import report_service
 
-        def _raises(*_args: Any, **_kwargs: Any) -> Any:
-            raise RuntimeError("the renderer is broken")
-
-        monkeypatch.setattr(report_service, "indicator_publish_reason", _raises)
+        self._broken(monkeypatch)
         with caplog.at_level(logging.ERROR):
-            report_service._publishable("domain", "c2.example.com", "sandbox", None)
+            report_service.ioc_feed_rows(_malware_report())
 
         assert any(record.levelno >= logging.ERROR for record in caplog.records)
 
-    def test_the_default_feed_is_then_empty_of_network_rows(
+    def test_the_default_feed_then_serves_the_sample_s_digests_alone(
         self, client: TestClient, monkeypatch: Any
     ) -> None:
-        from app.services import report_service
+        self._broken(monkeypatch)
 
-        def _raises(*_args: Any, **_kwargs: Any) -> Any:
-            raise RuntimeError("the renderer is broken")
+        rows = _rows(client)
 
-        monkeypatch.setattr(report_service, "indicator_publish_reason", _raises)
+        assert rows and {row["source"] for row in rows} == {"identity"}
+        assert {row["kind"] for row in rows} == {"hash"}
 
-        kinds = {row["kind"] for row in _rows(client)}
-
-        assert "domain" not in kinds and "ip" not in kinds and "url" not in kinds
-        # The sample's own identity and the sandbox's own observations never
-        # asked the rule, so they are unaffected.
-        assert "hash" in kinds
-
-    def test_the_rule_is_imported_at_module_scope(self) -> None:
+    def test_the_table_is_imported_at_module_scope(self) -> None:
         """A hard dependency is imported like one, so a broken tree fails loudly."""
         import ast
         import inspect
@@ -237,44 +255,39 @@ class TestThePublishRuleFailsClosed:
 
         from app.services import report_service
 
-        assert hasattr(report_service, "indicator_publish_reason")
-        body = ast.parse(textwrap.dedent(inspect.getsource(report_service._published)))
+        assert hasattr(report_service, "ioc_table") and hasattr(report_service, "publishes")
+        body = ast.parse(textwrap.dedent(inspect.getsource(report_service.ioc_feed_rows)))
         assert not [
             node for node in ast.walk(body) if isinstance(node, ast.Import | ast.ImportFrom)
-        ], "the rule is imported once, at module scope, not per call"
+        ], "the table is imported once, at module scope, not per call"
 
 
 class TestAPublishedURLCarriesItsHost:
     def test_the_host_of_a_published_url_is_a_published_domain_row(self) -> None:
         """The table, the export and the feed read one decision for the host."""
         from app.services import report_service
-        from maljan.reporting.models import MalwareReport
 
-        report = MalwareReport.model_validate(
-            {
-                **_malware_report(),
-                "network": {
-                    **NETWORK,
-                    "domains": [],
-                    "urls": [{"url": "http://relay-alpha-7f3c.top/gate", "source": "sandbox"}],
-                },
-            }
-        )
-        out: list[dict[str, Any]] = []
+        stored = {
+            **_malware_report(),
+            "network": {
+                **NETWORK,
+                "domains": [],
+                "urls": [{"url": "http://relay-alpha-7f3c.top/gate", "source": "sandbox"}],
+            },
+        }
 
-        report_service._with_the_hosts_of_published_urls(out, report, None)
-
-        assert out == [
-            {
-                "kind": "domain",
-                "value": "relay-alpha-7f3c.top",
-                "source": "sandbox",
-                "published": True,
-                "publish_answer": (
-                    "yes: the host of http://relay-alpha-7f3c.top/gate, which this run publishes"
-                ),
-            }
+        (row,) = [
+            row
+            for row in report_service.ioc_feed_rows(stored)
+            if row["value"] == "relay-alpha-7f3c.top"
         ]
+
+        assert (row["kind"], row["source"], row["published"], row["publish_answer"]) == (
+            "domain",
+            "sandbox",
+            True,
+            "yes: the host of http://relay-alpha-7f3c.top/gate, which this run publishes",
+        )
 
 
 class TestARecoveredValueNamesItsTool:

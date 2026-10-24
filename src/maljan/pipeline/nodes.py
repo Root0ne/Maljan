@@ -1074,6 +1074,12 @@ def _absolute_host_sample_path(state: AnalysisState) -> str:
         return raw
 
 
+def _job_id_of(container: Any) -> str | None:
+    """The container's job id, or ``None`` for one that keys no job."""
+    key = getattr(container, "job_key", None)
+    return str(key()) if callable(key) else None
+
+
 def _yara_scan_budget(container: Any) -> int | None:
     """The operator's wall clock for one YARA scan of the sample, or ``None`` when unread."""
     try:
@@ -7077,6 +7083,7 @@ def make_report_node(
 
         try:
             builder = MalwareReportBuilder(
+                job_id=_job_id_of(container),
                 file_hash=state.get("file_hash"),
                 file_name=state.get("file_name"),
                 sample_path=state.get("sample_path"),
@@ -7494,8 +7501,12 @@ def make_report_node(
             # of the table, the one ``/iocs`` serves as well.
             try:
                 from maljan.reporting.builder import build_consolidated_iocs
+                from maljan.reporting.misp import build_misp_attributes, misp_owner
 
                 report.consolidated_iocs = build_consolidated_iocs(report)
+                report.misp_attributes = build_misp_attributes(
+                    report, owner=misp_owner(report, _job_id_of(container))
+                )
             except Exception as exc:  # noqa: BLE001
                 logger.warning("report_node: the IOC table was not re-read (%s).", exc)
 

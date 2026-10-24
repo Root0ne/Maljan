@@ -1468,6 +1468,8 @@ def _build(run: _Run, judged: _Judged, built: _Built) -> dict[str, Any]:
     summary["validation"] = _replayed_validation(run)
     summary["corroboration"] = corroboration(run.isrs, run.ledger)
     builder = MalwareReportBuilder(
+        # The job the run was, which its MISP attributes' uuids are derived from.
+        job_id=(run.stored.job or {}).get("id") or None,
         file_hash=run.identity.get("sha256"),
         file_name=run.identity.get("file_name"),
         sample_path=None,
@@ -1567,6 +1569,7 @@ def _report_values(run: _Run, built: _Built, judged: _Judged) -> dict[str, Any]:
     from maljan.pipeline.evidence_summary import collect as collect_technique_sources
     from maljan.pipeline.evidence_summary import technique_evidence
     from maljan.reporting.builder import build_consolidated_iocs
+    from maljan.reporting.misp import build_misp_attributes, misp_owner
     from maljan.reporting.renderers.stix_renderer import ExtendedSTIXRenderer
     from maljan.schemas.stix_models import Bundle
 
@@ -1591,6 +1594,9 @@ def _report_values(run: _Run, built: _Built, judged: _Judged) -> dict[str, Any]:
         )
         report.stix_bundle_extended = export.model_dump(mode="json")
         report.consolidated_iocs = build_consolidated_iocs(report)
+        report.misp_attributes = build_misp_attributes(
+            report, owner=misp_owner(report, (run.stored.job or {}).get("id"))
+        )
     else:
         run.name(
             "report",

@@ -238,7 +238,6 @@ CASES: dict[str, tuple[Callable[[dict[str, Any]], None], set[tuple[str, str, str
         _process_without_object,
         {("missing", "process", "stix"), ("orphan", "process", "stix")},
     ),
-    "an IOC no tab draws": (_ioc_no_tab_draws, {("missing", "ioc", "web")}),
     "an empty section whose call answered": (
         _section_blank_while_its_call_answered,
         {("blank_section", "section", "web")},
@@ -255,6 +254,25 @@ def test_one_break_is_one_named_defect(name: str) -> None:
     result = surfaces.audit(run, clean_spec())
 
     assert set(defects(result)) == expected
+    assert result["status"] == "defects"
+
+
+def test_an_ioc_no_tab_draws_is_one_named_defect() -> None:
+    # A console whose DETECTION tab no longer draws the IOC table.
+    run = clean_run()
+    _ioc_no_tab_draws(run)
+    spec = clean_spec()
+    spec["tabs"]["detection"]["fields"] = [
+        item
+        for item in spec["tabs"]["detection"]["fields"]
+        if "consolidated_iocs" not in item["path"]
+    ]
+    spec["kinds"].pop("ioc")
+    spec["kinds"].pop("ioc_publication")
+
+    result = surfaces.audit(run, spec)
+
+    assert set(defects(result)) == {("missing", "ioc", "web")}
     assert result["status"] == "defects"
 
 

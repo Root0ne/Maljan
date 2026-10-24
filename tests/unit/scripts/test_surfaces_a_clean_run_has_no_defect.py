@@ -62,8 +62,8 @@ def test_a_live_read_takes_only_an_http_url() -> None:
     assert surfaces.main(["--api", "http://127.0.0.1:9"]) == 2
 
 
-def test_the_shipped_field_map_names_what_no_tab_renders() -> None:
+def test_the_shipped_field_map_names_no_kind_no_tab_renders() -> None:
     result = surfaces.audit(clean_run())
 
     unrendered = {kind for cls, kind, _ in defects(result) if cls == "unrendered"}
-    assert unrendered == {"ioc", "ioc_publication", "judge_indicator"}
+    assert unrendered == set()
