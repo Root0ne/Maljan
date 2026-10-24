@@ -29,10 +29,10 @@ from tests.unit.reporting.test_an_entry_without_a_source_is_read_as_before impor
 # is an anomalous-activity indicator of its own, and an indicator's reason is
 # read from the rebuilt table.
 STORED_RENDERS = {
-    "run7": ("10450fac1da78b0d", "c898eb0ef67822cf", "e24f2d1b2733f7a3"),
-    "run5": ("5ccad835542f23f0", "a06ab76f09a2cb09", "85795f39d2b17a77"),
-    "run4": ("256307208c446f42", "3274cf2a12296eca", "74381ef6ce484e2a"),
-    "local8": ("8c5e17409d9a71af", "9feab83d7602db67", "d53c784002386286"),
+    "run7": ("56ba218bfdd38f0c", "b229d1d5d08362c0", "e24f2d1b2733f7a3"),
+    "run5": ("e645b4e33f1e2046", "1d3964267514a2ca", "85795f39d2b17a77"),
+    "run4": ("30e4d03751bb2760", "7c21afe931f2652d", "74381ef6ce484e2a"),
+    "local8": ("f16aaba51ce874eb", "c18035f83e61303b", "d53c784002386286"),
 }
 
 _UUID = re.compile(r"--[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")

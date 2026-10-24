@@ -417,7 +417,8 @@ def test_a_merged_table_reads_each_artifact_by_its_own_headings() -> None:
         (["Target", "Kind", "Payload"], [["Updater", "scheduled_task", "C:\\x.exe"]]),
     )
     table = sections[0]
-    assert table.columns == ["Listed by", "Evidence", "Type", "Value"]
+    # The payload the table names no place for is headed as a reader takes it.
+    assert table.columns == ["Listed by", "Evidence", "Type", "Value", "Payload"]
     assert table.rows == [
         ["static", "ev_1", "registry_run", "HKCU\\...\\Run\\x"],
         ["dynamic", "ev_2", "scheduled_task", "Updater", "C:\\x.exe"],
@@ -466,7 +467,7 @@ def test_a_merged_table_of_alike_headings_is_as_it_was() -> None:
         "dynamic": AgentISR(agent_id="dynamic", domain="dynamic", artifacts=[two]),
     }
     table = next(s for s in build_sections([], isrs) if s.key == "artifact_mutex")
-    assert table.columns == ["Listed by", "Evidence", "Label", "Value"]
+    assert table.columns == ["Listed by", "Evidence", "Label", "Value", "Payload"]
     assert table.rows == [["static", "", "m", "a"], ["dynamic", "", "n", "b", "extra"]]
 
 

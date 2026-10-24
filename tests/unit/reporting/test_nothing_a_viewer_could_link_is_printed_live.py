@@ -160,3 +160,81 @@ def test_the_html_report_carries_a_content_security_policy() -> None:
         '<meta http-equiv="Content-Security-Policy" '
         "content=\"default-src 'none'; style-src 'unsafe-inline'; img-src data:\">"
     ) in html
+
+
+# Hosts whose labels start or end with an underscore. The Markdown escapes an
+# underscore that could open emphasis, and that escape comes after the
+# defanger has read the value: escaped first, "\_ldap.\_tcp..." was no host to
+# the defanger and printed live. The first three are the run's own values, the
+# last one a host the run never recorded.
+UNDERSCORE_HOSTS = (
+    "_ldap._tcp.dc._msdcs.victimcorp.com",
+    "my_.duckdns.org",
+    "cdn_.update-srv.net",
+)
+UNRECORDED_UNDERSCORE_HOST = "www._x.ru"
+
+
+def _underscore_report() -> MalwareReport:
+    from maljan.reporting.models import EvidenceSection, NetworkDomain, NetworkIOCs
+
+    return MalwareReport(
+        identity=SampleIdentity(hashes=FileHashes(sha256="a" * 64)),
+        verdict="Malware",
+        network=NetworkIOCs(domains=[NetworkDomain(fqdn=host) for host in UNDERSCORE_HOSTS]),
+        sections=[
+            EvidenceSection(
+                key="tool_dns",
+                title="DNS queries",
+                kind="table",
+                columns=["Query"],
+                rows=[
+                    [f"query {host}"] for host in (*UNDERSCORE_HOSTS, UNRECORDED_UNDERSCORE_HOST)
+                ],
+                evidence_ids=["ev_0001"],
+            )
+        ],
+    )
+
+
+def _live(text: str, host: str) -> bool:
+    """Whether ``host`` reads live in ``text`` once its Markdown escapes are read."""
+    return host in text.replace("\\", "")
+
+
+@pytest.mark.parametrize("host", (*UNDERSCORE_HOSTS, UNRECORDED_UNDERSCORE_HOST))
+def test_an_underscore_host_in_an_appendix_cell_is_defanged(host: str) -> None:
+    report = _underscore_report()
+    markdown = MarkdownRenderer().render(report)
+    appendix = markdown[markdown.index("### DNS queries") :]
+    html = HtmlRenderer().render(report)
+
+    assert not _live(appendix, host)
+    assert host.replace(".", "[.]") in appendix.replace("\\", "")
+    assert host not in html
+
+
+@pytest.mark.parametrize("host", (*UNDERSCORE_HOSTS, UNRECORDED_UNDERSCORE_HOST))
+def test_an_underscore_host_in_a_finding_message_is_read_before_it_is_escaped(host: str) -> None:
+    # A finding message is defanged by the reader of every host, not by the
+    # run's own values: the escape must leave it exactly what that reader
+    # makes of the message, and a host the reader knows ("www.") defanged.
+    from maljan.reporting.renderers.markdown import _defanged_text, _finding_text
+
+    message = f"CLAIM 'it queries {host}' cites no entry"
+    said = _finding_text({"message": message})
+
+    assert said.replace("\\", "") == _defanged_text(message)
+    if host == UNRECORDED_UNDERSCORE_HOST:
+        assert not _live(said, host)
+        assert host.replace(".", "[.]") in said.replace("\\", "")
+
+
+@pytest.mark.parametrize("host", (*UNDERSCORE_HOSTS, UNRECORDED_UNDERSCORE_HOST))
+def test_an_underscore_host_a_tool_wrote_is_defanged_inline(host: str) -> None:
+    from maljan.reporting.renderers.markdown import _Context
+
+    said = _Context(_underscore_report()).inline(f"the tool saw {host} first")
+
+    assert not _live(said, host)
+    assert host.replace(".", "[.]") in said.replace("\\", "")

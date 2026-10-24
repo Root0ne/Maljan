@@ -948,9 +948,116 @@ def _found_in_text(
     return state
 
 
+_MD_HEADING_RE = re.compile(r"^ {0,3}#{1,6}\s+(.*?)\s*#*\s*$")
+_MD_FENCE_RE = re.compile(r"^ {0,3}(`{3,}|~{3,})")
+_HTML_HEADING_RE = re.compile(r"<h[1-6][^>]*>(.*?)</h[1-6]>", re.S | re.I)
+_MD_DIVIDER_RE = re.compile(r"^\|(?:\s*:?-+:?\s*\|)+\s*$")
+
+
+@dataclass
+class _Block:
+    """One heading of a rendering and what stands under it, to the next heading."""
+
+    heading: str
+    raw: str
+    markup: bool
+
+    def text(self) -> str:
+        return plain(self.raw, markup=self.markup)
+
+    def table(self) -> tuple[int, int] | None:
+        """The block's first table as (headings, body rows), or ``None`` when it draws none."""
+        if self.markup:
+            table = re.search(r"<table\b.*?</table>", self.raw, re.S | re.I)
+            if table is None:
+                return None
+            head = re.search(r"<thead\b.*?</thead>", table.group(), re.S | re.I)
+            body = re.search(r"<tbody\b.*?</tbody>", table.group(), re.S | re.I)
+            return (
+                len(re.findall(r"<th\b", head.group() if head else table.group(), re.I)),
+                len(re.findall(r"<tr\b", body.group(), re.I)) if body else 0,
+            )
+        lines = [line.strip() for line in self.raw.splitlines()]
+        for at, line in enumerate(lines):
+            if _MD_DIVIDER_RE.match(line):
+                rows = 0
+                for later in lines[at + 1 :]:
+                    if not later.startswith("|"):
+                        break
+                    rows += 1
+                return line.count("|") - 1, rows
+        return None
+
+
+def _md_blocks(markdown: str) -> list[_Block]:
+    """The Markdown's headings, each with its lines up to the next; a fenced line is no heading."""
+    blocks: list[_Block] = []
+    fence = ""
+    heading = ""
+    lines: list[str] = []
+    for line in markdown.splitlines():
+        opened = _MD_FENCE_RE.match(line)
+        if fence:
+            if opened and opened.group(1)[0] == fence[0] and len(opened.group(1)) >= len(fence):
+                fence = ""
+        elif opened:
+            fence = opened.group(1)
+        else:
+            match = _MD_HEADING_RE.match(line)
+            if match:
+                blocks.append(_Block(heading, "\n".join(lines), False))
+                heading, lines = match.group(1), []
+                continue
+        lines.append(line)
+    blocks.append(_Block(heading, "\n".join(lines), False))
+    return blocks
+
+
+def _html_blocks(document: str) -> list[_Block]:
+    """The HTML's ``h1``-``h6`` headings, each with what follows it up to the next."""
+    found = list(_HTML_HEADING_RE.finditer(document))
+    return [
+        _Block(
+            html.unescape(_TAG_RE.sub(" ", match.group(1))),
+            document[match.end() : found[i + 1].start() if i + 1 < len(found) else len(document)],
+            True,
+        )
+        for i, match in enumerate(found)
+    ]
+
+
+def _heading_text(heading: str) -> str:
+    return _norm(_refanged(_MD_ESCAPE_RE.sub(r"\1", heading)))
+
+
+def _section_blocks(blocks: list[_Block], title: str) -> list[_Block]:
+    """The blocks headed by a section's title: the title alone, or with its voice after " · ".
+
+    Where several are, only the voiced ones: an Appendix A section's heading
+    carries its voice, and a body heading of the same words ("Imports",
+    "Capabilities") is another part of the report.
+    """
+    found = [
+        block
+        for block in blocks
+        if (said := _heading_text(block.heading)) == title or said.startswith(f"{title} ·")
+    ]
+    if len(found) > 1:
+        found = [block for block in found if _heading_text(block.heading).startswith(f"{title} ·")]
+    return found
+
+
 def check_sections(
     found: Findings, surfaces: dict[str, Any], texts: dict[str, str], out: Report
 ) -> None:
+    blocks: dict[str, list[_Block]] = {}
+    if isinstance(surfaces.get("markdown"), str):
+        blocks["markdown"] = _md_blocks(surfaces["markdown"])
+    if isinstance(surfaces.get("html"), str):
+        blocks["html"] = _html_blocks(surfaces["html"])
+    # The i-th section of a title is drawn under the i-th heading of it.
+    nth: Counter = Counter()
+    whole_page: Counter = Counter()
     full = surfaces.get("report_full")
     full_keys = Counter(
         (_text(s.get("key")), len(_list(s.get("rows"))), len(_list(s.get("items"))))
@@ -976,7 +1083,6 @@ def check_sections(
         rows = [r for r in _list(section.get("rows")) if isinstance(r, list)]
         items = [_text(i) for i in _list(section.get("items"))]
         body = _text(section.get("text")).strip()
-        kind = _text(section.get("kind") or "text")
         has = bool(rows or items or body)
         if isinstance(full, dict):
             out.checked["section"] += 1
@@ -1013,46 +1119,63 @@ def check_sections(
                     "missing", "section", name, key, f"its title {title!r} is not in the rendering"
                 )
                 continue
-            # What the Markdown section body draws (markdown.py:5455): a table or
-            # kv section's rows up to its columns, a list's items, and the text.
-            if kind in {"table", "kv"} and rows:
-                width = len(_list(section.get("columns"))) or len(rows[0])
-                for cell in _distinct(_text(c) for r in rows for c in r[:width]):
-                    out.checked["section_item"] += 1
-                    _found_in_text(out, "section_item", f"{name}:{key}", text, cell, cut_at=160)
-                wide = sum(1 for r in rows if len(r) > width)
-                if wide:
+            # What the Markdown section body draws (markdown.py:5460), whatever
+            # the section's kind: every cell of every row, a cell past the
+            # declared columns under its position, every item, and the text.
+            # Each is looked for under the section's own heading, so a value
+            # the page prints elsewhere does not stand in for a dropped cell;
+            # the whole rendering is read only when no heading names the section.
+            matching = _section_blocks(blocks.get(name, []), title)
+            index = nth[(name, title)]
+            nth[(name, title)] += 1
+            block = matching[index] if index < len(matching) else None
+            if block is None:
+                # No heading of this section to read under: the whole page is
+                # read, and said, so a value printed elsewhere is never taken
+                # for the section's without a trace.
+                whole_page[name] += 1
+                where = text
+            else:
+                where = block.text()
+            if block is not None and rows:
+                widest = max(len(r) for r in rows)
+                distinct = len({tuple(_text(c) for c in r) for r in rows})
+                drawn = block.table()
+                out.checked["section_table"] += 1
+                if drawn is None:
+                    out.defect(
+                        "dropped", "section", name, key, f"{len(rows)} rows and no table drawn"
+                    )
+                elif drawn[0] < widest:
                     out.defect(
                         "dropped",
                         "section",
                         name,
                         key,
-                        f"{wide} rows carry more cells than the {width} columns; "
-                        "the cells past them are not rendered",
+                        f"the table has {drawn[0]} headings for rows of {widest} cells",
                     )
-            elif rows:
-                out.defect(
-                    "dropped",
-                    "section",
-                    name,
-                    key,
-                    f"a {kind} section's {len(rows)} rows are not rendered",
-                )
-            if kind == "list":
-                for item in _distinct(items):
-                    out.checked["section_item"] += 1
-                    _found_in_text(out, "section_item", f"{name}:{key}", text, item, cut_at=200)
-            elif items:
-                out.defect(
-                    "dropped",
-                    "section",
-                    name,
-                    key,
-                    f"a {kind} section's {len(items)} items are not rendered",
-                )
+                elif drawn[1] < distinct:
+                    out.defect(
+                        "dropped",
+                        "section",
+                        name,
+                        key,
+                        f"the table draws {drawn[1]} rows of the section's {distinct}",
+                    )
+            for cell in _distinct(_text(c) for r in rows for c in r):
+                out.checked["section_item"] += 1
+                _found_in_text(out, "section_item", f"{name}:{key}", where, cell, cut_at=160)
+            for item in _distinct(items):
+                out.checked["section_item"] += 1
+                _found_in_text(out, "section_item", f"{name}:{key}", where, item, cut_at=200)
             if body:
                 out.checked["section_item"] += 1
-                _found_in_text(out, "section_item", f"{name}:{key}", text, body, cut_at=None)
+                _found_in_text(out, "section_item", f"{name}:{key}", where, body, cut_at=None)
+    for name, count in sorted(whole_page.items()):
+        out.not_checked[f"{name}_section_blocks"] = (
+            f"{count} section(s) have no heading of their own in the rendering; their cells "
+            "were looked for in the whole page, and no table shape was checked"
+        )
 
 
 def _holds_data(value: Any) -> bool:
@@ -1434,16 +1557,21 @@ def _route(key: str, placed: dict[str, Any], routing: dict[str, Any]) -> str:
 
 
 def _section_shows(section: dict[str, Any]) -> list[str]:
-    """What ArtifactTable draws of a section, as strings."""
+    """What ArtifactTable's section body draws of a section, as strings.
+
+    Its rows, its items and its text, each when present, whatever the kind
+    (``section_body``). A kv row whose values are all empty is a field with no
+    value, which the console leaves out on purpose.
+    """
     kind = _text(section.get("kind") or "text")
     rows = [r for r in _list(section.get("rows")) if isinstance(r, list)]
     if kind == "kv":
         rows = [r for r in rows if any(_norm(c) not in {"", "-"} for c in r[1:])]
-    if kind == "table" or (kind == "kv" and rows):
-        return [_norm(c) for r in rows for c in r]
-    if kind == "list":
-        return [_norm(i) for i in _list(section.get("items"))]
-    return [_norm(section.get("text"))]
+    return [
+        *(_norm(c) for r in rows for c in r),
+        *(_norm(i) for i in _list(section.get("items"))),
+        _norm(section.get("text")),
+    ]
 
 
 def web_view(surfaces: dict[str, Any], spec: dict[str, Any], out: Report) -> str:
@@ -1510,37 +1638,8 @@ def web_view(surfaces: dict[str, Any], spec: dict[str, Any], out: Report) -> str
             else:
                 shown.extend(_section_shows(section))
             continue
-        lost = _section_lost(section)
-        if lost:
-            out.defect("dropped", "section", "web", key, f"{lost} ({spec['section_body']['ref']})")
         shown.extend(_section_shows(section))
     return "\n".join(s for s in shown if s)
-
-
-def _section_lost(section: dict[str, Any]) -> str:
-    """What of a section the console's section body does not draw, or nothing.
-
-    A kv row whose values are all empty is a field with no value, which the
-    console leaves out on purpose; it is not counted.
-    """
-    kind = _text(section.get("kind") or "text")
-    rows = [r for r in _list(section.get("rows")) if isinstance(r, list)]
-    items = _list(section.get("items"))
-    body = _text(section.get("text")).strip()
-    kept = (
-        [r for r in rows if any(_norm(c) not in {"", "-"} for c in r[1:])] if kind == "kv" else rows
-    )
-    lost: list[str] = []
-    draws_rows = kind == "table" or (kind == "kv" and bool(kept))
-    if items and kind != "list":
-        lost.append(f"{len(items)} items")
-    if rows and kind not in {"table", "kv"}:
-        lost.append(f"{len(rows)} rows")
-    if body and (draws_rows or kind == "list"):
-        lost.append(f"its text ({body[:80]!r})")
-    if kind == "table" and not rows and (items or body):
-        lost.append("drawn as 'The tool returned no rows.'")
-    return "; ".join(lost)
 
 
 def check_web(found: Findings, surfaces: dict[str, Any], spec: dict[str, Any], out: Report) -> None:

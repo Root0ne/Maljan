@@ -197,11 +197,11 @@
   "fallback": "other: an agent tab, a server tab or the EVIDENCE footer (components/analysis/extraTabs.ts:169)"
  },
  "section_body": {
-  "ref": "components/analysis/ArtifactTable.tsx:83",
-  "table": "rows only; items and text are not drawn",
-  "kv": "rows whose value cells say something; text only when no row is left; items never",
-  "list": "items only",
-  "text": "text only"
+  "ref": "components/analysis/ArtifactTable.tsx:105",
+  "table": "rows, then items, then text, each when present",
+  "kv": "rows whose value cells say something, then items, then text, each when present",
+  "list": "rows, then items, then text, each when present",
+  "text": "rows, then items, then text, each when present"
  },
  "kinds": {
   "verdict": "report:verdict",
