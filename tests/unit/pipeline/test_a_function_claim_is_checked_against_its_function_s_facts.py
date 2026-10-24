@@ -397,13 +397,21 @@ class TestWhereAValueHolds:
         found = _check(f"{MAIN_VA} fills the file with NtCreateFile/WriteFile.", index=index)
         assert found.violations == []
 
-    def test_a_name_repeated_many_times_reads_in_well_under_a_second(self) -> None:
+    def test_a_name_repeated_many_times_reads_in_linear_time(self) -> None:
         import time
 
-        body = " ".join(f"{MAIN_VA} calls CreateMutexW;" for _ in range(2_000))
-        began = time.perf_counter()
-        named_values(body)
-        assert time.perf_counter() - began < 1.0
+        def spent(n: int) -> float:
+            body = " ".join(f"{MAIN_VA} calls CreateMutexW;" for _ in range(n))
+            best = float("inf")
+            for _ in range(3):
+                started = time.perf_counter()
+                named_values(body)
+                best = min(best, time.perf_counter() - started)
+            return best
+
+        small, large = spent(2_000), spent(16_000)
+        # Eight times the repeats: linear is about 8x, a rescan per repeat about 64x.
+        assert large < max(small, 0.005) * 24, (small, large)
 
     def test_a_name_inside_a_statement_of_absence_is_no_claimed_call(self) -> None:
         held = _check(f"{MAIN_VA} does not use CreateRemoteThread; it guards with CreateMutexW.")
