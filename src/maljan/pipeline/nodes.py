@@ -534,6 +534,30 @@ def sandbox_degradation_reason(report: Any, failure: str | None = None) -> str |
     return None
 
 
+def _artefact_fetch_failures(container: Any) -> list[dict[str, str]]:
+    held = getattr(container, "artefact_fetch_failures", None)
+    return [r for r in held if isinstance(r, dict)] if isinstance(held, list) else []
+
+
+def artefact_fetch_reasons(container: Any) -> list[str]:
+    """One degradation reason per artefact the sandbox offered and the job could not fetch.
+
+    Composed by the provider (``ArtefactFetchFailed``): the artefact and an HTTP
+    status, an exception's type or the size of a file too small to be it.
+    """
+    return [str(r["reason"]) for r in _artefact_fetch_failures(container) if r.get("reason")]
+
+
+def capture_fetch_statement(container: Any) -> str:
+    """What the coverage record says of a capture offered and not fetched, or ``""``."""
+    from maljan.providers.errors import PACKET_CAPTURE
+
+    for record in _artefact_fetch_failures(container):
+        if record.get("artefact") == PACKET_CAPTURE and record.get("statement"):
+            return str(record["statement"])
+    return ""
+
+
 def _sandbox_fed(role: str) -> bool:
     """Whether this role's input is the sandbox report rather than the sample."""
     return role not in SAMPLE_FED_ROLES
@@ -5679,6 +5703,7 @@ def run_coverage(
         unreadable=unreadable,
         shortened=shortened,
         partial_reason=partial_reason,
+        capture_failure=capture_fetch_statement(container),
     )
 
 
@@ -6003,6 +6028,14 @@ def make_judge_node(
             )
             if _no_sandbox:
                 _degradation_reasons.append(_no_sandbox)
+            # An artefact the sandbox offered and the provider could not fetch
+            # (a packet capture answered with a 502, say): every IOC only it
+            # held is lost, and the reader is told which and why.
+            _degradation_reasons.extend(
+                reason
+                for reason in artefact_fetch_reasons(container)
+                if reason not in _degradation_reasons
+            )
             # A container we accept but cannot open. A .docm reaches here
             # legitimately — macro documents are among the commonest Windows
             # carriers, so rejecting them would be wrong — but the only analysis

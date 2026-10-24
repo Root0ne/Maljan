@@ -1481,8 +1481,9 @@ class TestACaptureIsPrivateFromItsFirstByte:
         assert target.read_bytes() == b"NOT-THIS\x00"
 
     def test_a_capture_too_small_to_read_is_not_left_on_disk(self, tmp_path: Path) -> None:
-        """Every provider answers ``None`` for a capture under the libpcap
-        header's own length; the bytes go with the answer."""
+        """Every provider fetches its capture through the one helper, which
+        refuses a capture under the libpcap header's own length; the bytes go
+        with the answer, as they do for a failed fetch."""
         import inspect
 
         from maljan.loaders import cape2_client
@@ -1493,7 +1494,9 @@ class TestACaptureIsPrivateFromItsFirstByte:
             inspect.getsource(triage.TriageSandboxProvider.fetch_pcap),
             inspect.getsource(cape2_client.CAPEv2Client.fetch_pcap),
         ):
-            assert source.count("unlink(missing_ok=True)") >= 2, source[:80]
+            assert "fetch_artefact(" in source, source[:80]
+        helper = inspect.getsource(triage.fetch_artefact)
+        assert helper.count("unlink(missing_ok=True)") >= 3, helper[:80]
 
 
 class TestTheLegacyCaptureDirectoryCanActuallyGo:

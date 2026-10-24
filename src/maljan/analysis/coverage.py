@@ -714,11 +714,14 @@ class _Run:
         layers: Mapping[str, tuple[str, str, int]],
         sandbox_incomplete: str = "",
         no_capture: bool = False,
+        capture_failure: str = "",
     ) -> None:
-        # The sandbox report's statement where it was not observed, and
-        # whether an observed one names no capture.
+        # The sandbox report's statement where it was not observed, whether
+        # an observed one names no capture, and why, where the sandbox offered
+        # one that could not be fetched.
         self.sandbox_incomplete = sandbox_incomplete
         self.no_capture = no_capture
+        self.capture_failure = capture_failure
         self.calls = calls
         self.order = order
         self.holders = holders
@@ -795,7 +798,11 @@ def _negative(
     if run.no_capture and any(
         label["input"] == SANDBOX_REPORT for call in answered for label in call["over"]
     ):
-        gaps.append({"gap": "no_capture"})
+        gaps.append(
+            {"gap": "no_capture", "why": run.capture_failure}
+            if run.capture_failure
+            else {"gap": "no_capture"}
+        )
     # The input read is the input the clause is about: a read of the sample
     # stands for it; one over a layer, another file or an argument alone does
     # not.
@@ -874,6 +881,7 @@ def _not_established(
     server_rests: int,
     unreadable: int,
     shortened: Sequence[str],
+    capture_failure: str = "",
 ) -> list[dict[str, Any]]:
     from maljan.pipeline.sandbox_status import OBSERVED, sandbox_status
 
@@ -913,17 +921,15 @@ def _not_established(
     if found.status != OBSERVED:
         rows.append({"what": "input", "input": SANDBOX_REPORT, "reason": found.statement})
     if not capture_path:
-        rows.append(
-            {
-                "what": "input",
-                "input": CAPTURE,
-                "reason": (
-                    "the sandbox report names no packet capture"
-                    if isinstance(sandbox_report, Mapping) and sandbox_report
-                    else "no sandbox report, so no packet capture"
-                ),
-            }
-        )
+        has_report = isinstance(sandbox_report, Mapping) and bool(sandbox_report)
+        if has_report and capture_failure:
+            # Offered and not fetched: not the same absence as none offered.
+            reason = capture_failure
+        elif has_report:
+            reason = "the sandbox report names no packet capture"
+        else:
+            reason = "no sandbox report, so no packet capture"
+        rows.append({"what": "input", "input": CAPTURE, "reason": reason})
     rows.extend({"what": "server", "reason": str(r)} for r in server_reasons if str(r).strip())
     if server_rests:
         rows.append({"what": "server_rests", "count": int(server_rests)})
@@ -988,6 +994,7 @@ def coverage_record(
     shortened: Sequence[str] = (),
     partial_reason: str = "",
     fills_staged_sample: Callable[[Any], bool] | None = None,
+    capture_failure: str = "",
 ) -> dict[str, Any] | None:
     """``run_summary.coverage`` as of now, or ``None`` where it cannot be read. Never raises.
 
@@ -998,7 +1005,9 @@ def coverage_record(
     ``server_rests`` how many rests the run summary lists; ``unreadable`` the
     ledger rows the caller could not read; ``shortened`` the inputs the run
     shortened. ``partial_reason`` says why the record may miss what the step
-    the run stopped in did. ``fills_staged_sample`` says whether an entry's
+    the run stopped in did. ``capture_failure`` says why a capture the sandbox
+    offered was not fetched (``ArtefactFetchFailed.statement``), ``""`` where
+    none was offered or it was fetched. ``fills_staged_sample`` says whether an entry's
     source declares it reads the staged sample (the live declaration by
     default).
     """
@@ -1039,6 +1048,7 @@ def coverage_record(
             layers,
             sandbox_incomplete="" if found.status == OBSERVED else found.statement,
             no_capture=found.status == OBSERVED and not capture_path,
+            capture_failure="" if capture_path else str(capture_failure or ""),
         )
         record: dict[str, Any] = {
             "v": COVERAGE_VERSION,
@@ -1053,6 +1063,7 @@ def coverage_record(
                 server_rests=int(server_rests or 0),
                 unreadable=int(unreadable or 0) + own_unreadable,
                 shortened=list(shortened or ()),
+                capture_failure="" if capture_path else str(capture_failure or ""),
             ),
         }
         if partial_reason:
@@ -1236,7 +1247,8 @@ def _gap_phrase(gap: Mapping[str, Any]) -> str:
     if kind == "not_declared_whole":
         return f"{_entry(gap.get('entry'))} is of a tool no declaration says reads its whole input"
     if kind == "no_capture":
-        return "the sandbox report names no packet capture"
+        # A capture offered and not fetched says why, in words the provider composed.
+        return str(gap.get("why") or "the sandbox report names no packet capture")
     if kind == "input_mismatch":
         return f"the calls read {_inputs_phrase(gap.get('over') or [])}, not the sample"
     if kind == "same_kind_no_answer":

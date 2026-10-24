@@ -42,7 +42,7 @@ class _FakeClient:
             report=self.report,
         )
 
-    def fetch_pcap(self, task_id, dest_dir):
+    def fetch_pcap(self, task_id, dest_dir, poll_interval_seconds=10):
         return None
 
 

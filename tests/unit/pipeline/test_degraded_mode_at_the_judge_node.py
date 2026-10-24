@@ -134,6 +134,36 @@ class TestTheJudgeRecordsItsOwnUncheckedIds:
         )
 
 
+class TestACaptureNotFetchedDegradesTheRun:
+    """T-336: an artefact the sandbox offered and the job could not fetch is a reason."""
+
+    def _update(self, failures: list[dict[str, str]]) -> dict[str, Any]:
+        container = _Container(EvidenceCounter())
+        container.artefact_fetch_failures = failures
+        judge = container.get_judge_agent(role="judge")
+        judge.give_verdict = AsyncMock(
+            return_value=JudgeVerdict(
+                bundle=Bundle(objects=[]), violations=[], retries=0, fed_back={}
+            )
+        )
+        return asyncio.run(make_judge_node(container)(_state([])))
+
+    def test_the_reason_reaches_the_run_and_its_summary(self) -> None:
+        from maljan.providers.errors import PACKET_CAPTURE, ArtefactFetchFailed
+
+        lost = ArtefactFetchFailed(PACKET_CAPTURE, "HTTP 502").record()
+        update = self._update([lost])
+        assert "packet capture not fetched (HTTP 502)" in update["degradation_reasons"]
+        assert update["degraded_mode"] is True
+        summary = update["run_summary"]
+        assert "packet capture not fetched (HTTP 502)" in summary["degradation_reasons"]
+
+    def test_none_recorded_adds_nothing(self) -> None:
+        update = self._update([])
+        assert not any("packet capture" in r for r in update["degradation_reasons"])
+        assert update["degraded_mode"] is False
+
+
 class TestTheZeroCorroborationNoteCountsClaims:
     def test_rule_only_tags_are_stated_apart_from_the_claimed_count(self) -> None:
         """capa and YARA firing richly on benign software used to read as

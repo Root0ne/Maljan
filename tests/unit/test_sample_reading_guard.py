@@ -61,7 +61,7 @@ ALLOWED = {
     ("src/maljan/pipeline/artefacts.py", "ArtefactStore._local_copy"): TRANSFER,
     ("src/maljan/pipeline/artefacts.py", "open_beneath"): TRANSFER,
     ("src/maljan/loaders/cape2_client.py", "CAPEv2Client.submit"): TRANSFER,
-    ("src/maljan/loaders/cape2_client.py", "CAPEv2Client.fetch_pcap"): TRANSFER,
+    ("src/maljan/loaders/cape2_client.py", "CAPEv2Client._write_capture"): TRANSFER,
     ("src/maljan/providers/sandbox/limits.py", "stream_to_file_capped"): TRANSFER,
     ("src/maljan/providers/sandbox/rest.py", "RestSandboxProvider.submit"): TRANSFER,
     ("src/maljan/providers/sandbox/triage.py", "TriageSandboxProvider._post_sample"): TRANSFER,
