@@ -494,10 +494,11 @@ def _stix_values(bundle: dict[str, Any]) -> dict[str, list[dict[str, Any]]]:
         kind = obj.get("type")
         values: list[str] = []
         if kind == "indicator":
-            values = [
-                m.group(3).replace("\\'", "'").replace("\\\\", "\\")
+            compared = [
+                (m.group(1), m.group(2), m.group(3).replace("\\'", "'").replace("\\\\", "\\"))
                 for m in _PATTERN_RE.finditer(_text(obj.get("pattern")))
             ]
+            values = _paired_path(compared) or [value for _type, _prop, value in compared]
         elif kind in {"domain-name", "ipv4-addr", "ipv6-addr", "url", "email-addr", "mutex"}:
             values = [_text(obj.get("value") or obj.get("name"))]
         elif kind == "windows-registry-key":
@@ -506,6 +507,27 @@ def _stix_values(bundle: dict[str, Any]) -> dict[str, list[dict[str, Any]]]:
             if value:
                 found.setdefault(_ioc_key(value), []).append(obj)
     return found
+
+
+def _paired_path(compared: list[tuple[str, str, str]]) -> list[str]:
+    """The one path a pattern naming a file in its directory compares, else nothing.
+
+    The export writes a path as the file's name and its parent directory's
+    path, joined by ``AND``; that pair is the table's one path value.
+    """
+    if len(compared) != 2:
+        return []
+    by_prop = {(otype, prop): value for otype, prop, value in compared}
+    name = by_prop.get(("file", "name"))
+    folder = by_prop.get(("file", "parent_directory_ref.path"))
+    if name is None or folder is None:
+        return []
+    if folder.endswith(("\\", "/")):
+        return [folder + name]
+    # A backslash for a directory written the Windows way (a backslash, a
+    # drive, a ``%VARIABLE%``), else a forward slash.
+    windows = "\\" in folder or "%" in folder or re.match(r"^[A-Za-z]:", folder) is not None
+    return [folder + ("\\" if windows else "/") + name]
 
 
 def _stix_techniques(bundle: dict[str, Any]) -> dict[str, str]:

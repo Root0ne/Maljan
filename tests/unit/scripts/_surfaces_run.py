@@ -24,8 +24,9 @@ CELL = "hello world from the sample"
 RULE = "maljan_rule_one"
 PROCESS = {"pid": 4, "name": "sample.exe", "command_line": "sample.exe /run", "children": []}
 
-# The kinds the shipped map names that no tab renders today.
-UNRENDERED_TODAY = ("ioc", "ioc_publication", "judge_indicator")
+# The kinds the shipped map names that no tab renders today: none since the
+# DETECTION tab's IndicatorsPanel draws the IOC table and the judge's values.
+UNRENDERED_TODAY: tuple[str, ...] = ()
 
 
 def _malware_report() -> dict[str, Any]:

@@ -254,15 +254,23 @@ class TestWhatAMintedIndicatorClaims:
 
 
 class TestThePrivacyPathsAreAllChecked:
-    def test_the_iocs_feed_carries_no_address(self) -> None:
-        """``/reports/{id}/iocs`` reads the network block and the hashes only."""
-        import inspect
+    def test_the_iocs_feed_publishes_no_address_the_export_withholds(self) -> None:
+        """``/reports/{id}/iocs`` is the IOC table: an address is published only as the export is.
 
-        from app.services.report_service import ReportService
+        The feed's rows are the table's, each with the one rule's answer, so a
+        mailbox only the file's strings carry is a withheld row, never one the
+        default feed serves.
+        """
+        from app.services.report_service import ioc_feed_rows
 
-        source = inspect.getsource(ReportService.get_malware_report_iocs)
-        assert "interesting_strings" not in source
-        assert "email" not in source
+        report = _report("Malware", StringIOC(kind="email", value="operator@example.org"))
+
+        rows = ioc_feed_rows(report.model_dump(mode="json"))
+
+        assert [(row["published"], row["source"]) for row in rows if row["kind"] == "email"] == [
+            (False, "strings")
+        ]
+        assert "operator@example.org" not in str(ExtendedSTIXRenderer().render(report))
 
     def test_the_enrichment_looks_up_no_address(self) -> None:
         import inspect

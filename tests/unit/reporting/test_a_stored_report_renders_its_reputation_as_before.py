@@ -22,11 +22,17 @@ from tests.unit.reporting.test_an_entry_without_a_source_is_read_as_before impor
 # ``(markdown, html with the nonce "fixed", normalised STIX)`` as dev 2c2522b2 renders them.
 # The Markdown and HTML were re-pinned when a sample's, a tool's or a finding's
 # text came to print escaped (F7); the STIX did not change.
+# Re-pinned when every IOC-table row came to carry a publish answer and the
+# export to name the sample by its identity digests (T-344, T-345): a dropped file's
+# digest row the record names no process for now prints its refusal, so does
+# a command line, the sample's indicator adds its SHA-1 and MD5, its imphash
+# is an anomalous-activity indicator of its own, and an indicator's reason is
+# read from the rebuilt table.
 STORED_RENDERS = {
-    "run7": ("10450fac1da78b0d", "c898eb0ef67822cf", "91afd1649c923cbb"),
-    "run5": ("5ccad835542f23f0", "a06ab76f09a2cb09", "901ef9efc8afb317"),
-    "run4": ("1e0160478a729008", "e32e52a8e99b4a47", "84bc0f9a2a45529f"),
-    "local8": ("9e6cf8ded02592af", "d1dce0f05d49d9d0", "ddc1552bd2bc0f89"),
+    "run7": ("10450fac1da78b0d", "c898eb0ef67822cf", "e24f2d1b2733f7a3"),
+    "run5": ("5ccad835542f23f0", "a06ab76f09a2cb09", "85795f39d2b17a77"),
+    "run4": ("256307208c446f42", "3274cf2a12296eca", "74381ef6ce484e2a"),
+    "local8": ("8c5e17409d9a71af", "9feab83d7602db67", "d53c784002386286"),
 }
 
 _UUID = re.compile(r"--[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")

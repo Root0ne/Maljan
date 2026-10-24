@@ -252,7 +252,10 @@ class TestWhatTheBundleCarries:
             for obj in bundle.objects
             if getattr(obj, "type", "") == "indicator" and "ipv4" in obj.pattern
         )
-        assert indicator.description == "a reputation provider has a record of it"
+        # The reason as the IOC table, rebuilt by the current rule, prints it.
+        assert indicator.description == (
+            "Published because: a reputation provider has a record of it."
+        )
 
     def test_a_page_of_version_numbers_does_not_crowd_out_the_endpoints(self) -> None:
         """Fourteen string-swept addresses against eight observed endpoints."""

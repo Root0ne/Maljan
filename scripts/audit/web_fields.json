@@ -158,7 +158,10 @@
     {"path": "stix:objects[].pattern", "ref": "components/analysis/stixGraph.ts:103"},
     {"path": "stix:objects[].value", "ref": "components/analysis/stixGraph.ts:103"},
     {"path": "stix:objects[].command_line", "ref": "components/analysis/stixGraph.ts:103"},
-    {"path": "stix:objects[].external_references[].external_id", "ref": "components/analysis/stixGraph.ts:103"}
+    {"path": "stix:objects[].external_references[].external_id", "ref": "components/analysis/stixGraph.ts:103"},
+    {"path": "report:malware_report.consolidated_iocs[].value", "ref": "components/analysis/IndicatorsPanel.tsx:49"},
+    {"path": "report:malware_report.consolidated_iocs[].published", "ref": "components/analysis/IndicatorsPanel.tsx:66", "note": "published or withheld, with the rule's reason (components/analysis/indicators.ts:68)"},
+    {"path": "report:malware_report.judge_indicators[].value", "ref": "components/analysis/IndicatorsPanel.tsx:108"}
    ]
   },
   "defense": {

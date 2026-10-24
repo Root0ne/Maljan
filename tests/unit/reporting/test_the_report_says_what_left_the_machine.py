@@ -226,12 +226,18 @@ def test_the_enrichment_queued_after_the_report_is_named_then_what_it_asked() ->
 # of Markdown's own characters. haiku4 re-pinned when an analyst's listing came
 # to be read by its headings (AUD-43): its six persistence rows headed "Type |
 # Value | Offset" no longer print the offset as the payload.
+# Re-pinned when every IOC-table row came to carry a publish answer and the
+# export to name the sample by its identity digests (T-344, T-345): a dropped file's
+# digest row the record names no process for now prints its refusal, so does
+# a command line, the sample's indicator adds its SHA-1 and MD5, its imphash
+# is an anomalous-activity indicator of its own, and an indicator's reason is
+# read from the rebuilt table.
 STORED_RENDERS = {
     "run7": ("10450fac1da78b0d", "c898eb0ef67822cf"),
     "run5": ("5ccad835542f23f0", "a06ab76f09a2cb09"),
-    "run4": ("1e0160478a729008", "e32e52a8e99b4a47"),
-    "local8": ("9e6cf8ded02592af", "d1dce0f05d49d9d0"),
-    "haiku4": ("230d0d43a8a40244", "269dc8fdf849c364"),
+    "run4": ("256307208c446f42", "3274cf2a12296eca"),
+    "local8": ("8c5e17409d9a71af", "9feab83d7602db67"),
+    "haiku4": ("9e48dabb38b94d23", "4bda1b01fc6026a1"),
 }
 
 
