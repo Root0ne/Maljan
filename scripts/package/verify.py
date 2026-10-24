@@ -2,8 +2,13 @@
 
     python -m scripts.package.verify <file> [--allow-unsigned] [--upload-max-bytes N]
 
-Reads the archive in one pass, to the gzip end (``app.services.job_package.
-verify_package``): the manifest must come first and every entry must be a
+Reads the file once, front to back (``app.services.job_package.
+verify_package``): every byte after the gzip header must match the SHA-256 the
+header carries, and the HMAC beside it must verify under the manifest's key,
+so any change to the file reads broken before the seal is looked at; a
+package built before that digest is compared byte for byte, in the same pass,
+with what the builder wrote then. The archive is read to the gzip end: the
+manifest must come first and every entry must be a
 plain regular file under a safe relative name, listed in the manifest with
 its SHA-256 and size; every size is bounded by ``upload_max_bytes``
 (``--upload-max-bytes``, by default the setting's own default, since an
