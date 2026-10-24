@@ -29,6 +29,14 @@ export interface TranscriptClaim {
   /** 0..1, or null when the speaker stated none. */
   confidence: number | null;
   technique_id: string | null;
+  /** The round whose tool-less validation retry added the claim beside the
+   *  answer in force; absent on every other claim. */
+  added_by_retry_in_round?: number;
+}
+
+/** The note a claim a tool-less retry added carries, as the report words it. */
+export function retryAddedLabel(round: number): string {
+  return `added by a tool-less retry, round ${round}`;
 }
 
 /** One `agent_messages` row, as the report endpoint returns it. */
@@ -232,6 +240,9 @@ export function normalizeClaims(value: unknown): TranscriptClaim[] {
             ? null
             : Number(c.confidence),
         technique_id: typeof c.technique_id === "string" ? c.technique_id : null,
+        ...(Number.isInteger(c.added_by_retry_in_round)
+          ? { added_by_retry_in_round: Number(c.added_by_retry_in_round) }
+          : {}),
       },
     ];
   });

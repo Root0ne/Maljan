@@ -4082,6 +4082,7 @@ def _title_heading(title: str) -> str:
 def _claims_not_discussed_lines(report: MalwareReport, ctx: _Context) -> list[str]:
     """The claims in force whose code the body does not name, each whole, with what it lacks."""
     from maljan.reporting.claim_coverage import COVERAGE_RULE, carried_sentence, claim_label
+    from maljan.schemas.isr_models import retry_added_marker
 
     rows = list(getattr(report, "claims_not_discussed", None) or [])
     if not rows:
@@ -4092,9 +4093,11 @@ def _claims_not_discussed_lines(report: MalwareReport, ctx: _Context) -> list[st
             f"confidence {row.confidence:.2f}; " if isinstance(row.confidence, int | float) else ""
         )
         evidence = f" Evidence: {row.evidence_ref}" if row.evidence_ref.strip() else ""
+        retried = getattr(row, "added_by_retry_in_round", None)
+        added = f"{retry_added_marker(retried)}; " if isinstance(retried, int) else ""
         lines.append(
             _item(
-                f"**{claim_label(row.agent, row.claim_number)}** ({stated}"
+                f"**{claim_label(row.agent, row.claim_number)}** ({added}{stated}"
                 f"{carried_sentence(row)}): {ctx.plain(row.claim)}{ctx.plain(evidence)}"
             )
         )
@@ -5000,7 +5003,6 @@ def _corroborated_words(mapping: Any, rules: list[dict[str, Any]]) -> str:
     if mapping is None:
         return words
     from maljan.analysis.evidence_roots import layers_and_roots, roots_phrase
-    from maljan.extractors.capability_matrix import JUDGE_SOURCE
 
     roots = list(getattr(mapping, "evidence_roots", None) or [])
     unread = list(getattr(mapping, "roots_not_read", None) or [])
@@ -5012,8 +5014,26 @@ def _corroborated_words(mapping: Any, rules: list[dict[str, Any]]) -> str:
     if words:
         return f"{words} ({phrase})"
     independent = len(getattr(mapping, "independent_layers", None) or [])
-    named = len([lyr for lyr in mapping.contributing_layers if lyr != JUDGE_SOURCE])
-    return f", {layers_and_roots(independent or named, roots, unread)}"
+    return f", {layers_and_roots(independent or _named_layers(mapping), roots, unread)}"
+
+
+def _named_layers(mapping: Any) -> int:
+    """How many analyst layers name a row's technique, the judge aside.
+
+    A layer that named it only in claims a tool-less retry added, which
+    nothing of its own backs (``TTPMapping.retry_only_layers``), is not
+    counted as naming it.
+    """
+    from maljan.extractors.capability_matrix import JUDGE_SOURCE
+
+    retry_only = set(getattr(mapping, "retry_only_layers", None) or [])
+    return len(
+        [
+            lyr
+            for lyr in mapping.contributing_layers
+            if lyr != JUDGE_SOURCE and lyr not in retry_only
+        ]
+    )
 
 
 def support_words(support: str, kinds: Any, sources: int, named: int, listed: str = "") -> str:
@@ -5061,9 +5081,8 @@ def _layer_words(mapping: Any, rules: list[dict[str, Any]]) -> str:
     """
     if mapping is None:
         return ""
-    from maljan.extractors.capability_matrix import JUDGE_SOURCE
 
-    named = len([lyr for lyr in mapping.contributing_layers if lyr != JUDGE_SOURCE])
+    named = _named_layers(mapping)
     independent = len(getattr(mapping, "independent_layers", None) or [])
     identical = int(getattr(mapping, "identical_statements", 0) or 0)
     repeated = (

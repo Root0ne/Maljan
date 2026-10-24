@@ -139,7 +139,7 @@ from maljan.pipeline.validation import (
     validate_verdict_bundle,
 )
 from maljan.schemas.evidence import EvidenceCounter, LedgerEntry, answers_held
-from maljan.schemas.isr_models import AgentISR
+from maljan.schemas.isr_models import AgentISR, retry_added_marker
 from maljan.schemas.stix_models import Bundle
 
 if TYPE_CHECKING:
@@ -4582,6 +4582,10 @@ class JudgeAgent(BudgetMeter):
         # A relationship this pipeline builds names the agents whose claims it
         # carries and nobody else.
         claimed_by: dict[str, list[str]] = {}
+        # The round of each claim naming a technique that a tool-less retry
+        # added (``ClaimEvidence.added_by_retry_in_round``), ``None`` for any
+        # other: a technique every claim of which a retry added says so.
+        retried: dict[str, list[int | None]] = {}
         if isr_reports:
             for name, isr in isr_reports.items():
                 source = str(getattr(isr, "agent_id", "") or name)
@@ -4591,6 +4595,9 @@ class JudgeAgent(BudgetMeter):
                         agents = claimed_by.setdefault(claim.technique_id, [])
                         if source not in agents:
                             agents.append(source)
+                        retried.setdefault(claim.technique_id, []).append(
+                            claim.added_by_retry_in_round
+                        )
         model_only = sorted(set(TECHNIQUE_WORD_RE.findall(text)) - tids)
         if model_only:
             self.logger.warning(
@@ -4652,22 +4659,25 @@ class JudgeAgent(BudgetMeter):
 
         for tid in sorted(tids):
             attack_id = f"attack-pattern--{uuid.uuid4()}"
-            objects.append(
-                {
-                    "type": "attack-pattern",
-                    "id": attack_id,
-                    "name": tid,
-                    "external_references": [
-                        {
-                            "source_name": "mitre-attack",
-                            "external_id": tid,
-                            "url": (
-                                f"https://attack.mitre.org/techniques/{tid.replace('.', '/')}/"
-                            ),
-                        }
-                    ],
-                }
-            )
+            pattern: dict[str, Any] = {
+                "type": "attack-pattern",
+                "id": attack_id,
+                "name": tid,
+                "external_references": [
+                    {
+                        "source_name": "mitre-attack",
+                        "external_id": tid,
+                        "url": (f"https://attack.mitre.org/techniques/{tid.replace('.', '/')}/"),
+                    }
+                ],
+            }
+            rounds = retried.get(tid) or []
+            if rounds and all(r is not None for r in rounds):
+                # Only claims a tool-less retry added name it: the pattern
+                # carries the note those claims carry.
+                first = min(r for r in rounds if r is not None)
+                pattern["description"] = retry_added_marker(first)
+            objects.append(pattern)
             if not malware_id:
                 # Nothing to relate the technique to, and a relationship with a
                 # dangling source is a defect the integrity pass would prune.

@@ -421,6 +421,11 @@ def claims_to_payload(claims: Any, limit: int = 12) -> list[dict[str, Any]]:
             note = getattr(claim, "heading_note", None)
             if note:
                 out[-1]["heading_note"] = _cut_kept(str(note), 300)
+            # The round whose tool-less validation retry added it, beside the
+            # answer in force; only on such a claim.
+            retried = getattr(claim, "added_by_retry_in_round", None)
+            if isinstance(retried, int) and not isinstance(retried, bool):
+                out[-1]["added_by_retry_in_round"] = retried
         except Exception:  # noqa: BLE001 — one malformed claim must not drop the rest
             continue
     return out

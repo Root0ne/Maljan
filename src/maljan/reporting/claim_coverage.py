@@ -91,10 +91,17 @@ class ClaimInForce:
     claim: str
     evidence_ref: str
     confidence: float | None
+    # The round whose tool-less validation retry added it, or ``None``.
+    added_by_retry_in_round: int | None = None
 
     @property
     def label(self) -> str:
         return claim_label(self.agent, self.number)
+
+
+def _retry_round(claim: Any) -> int | None:
+    value = getattr(claim, "added_by_retry_in_round", None)
+    return value if isinstance(value, int) and not isinstance(value, bool) else None
 
 
 def claims_in_force(isr_reports: Mapping[str, Any] | None) -> list[ClaimInForce]:
@@ -111,6 +118,7 @@ def claims_in_force(isr_reports: Mapping[str, Any] | None) -> list[ClaimInForce]
                     claim=str(getattr(claim, "claim", "") or ""),
                     evidence_ref=str(getattr(claim, "evidence_ref", "") or ""),
                     confidence=float(confidence) if isinstance(confidence, int | float) else None,
+                    added_by_retry_in_round=_retry_round(claim),
                 )
             )
     return out
@@ -236,6 +244,7 @@ def _row(
         carried=carried,
         named=named,
         counted=counted,
+        added_by_retry_in_round=claim.added_by_retry_in_round,
     )
 
 

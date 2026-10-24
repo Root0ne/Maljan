@@ -1,5 +1,6 @@
 "use client";
 
+import { retryAddedLabel } from "@/lib/conversation";
 import { confidenceClass } from "@/lib/report-utils";
 import type { AnalystClaims } from "./dynamicClaims";
 import { CitedText } from "./EvidenceChips";
@@ -45,6 +46,9 @@ export default function AnalystFindings({
                         <span className={`font-mono ${confidenceClass(conf)}`}>
                           {conf}%
                         </span>
+                      )}
+                      {Number.isInteger(c.added_by_retry_in_round) && (
+                        <span>{retryAddedLabel(Number(c.added_by_retry_in_round))}</span>
                       )}
                       {evidence && (
                         <span>

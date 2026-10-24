@@ -9914,8 +9914,24 @@ class BaseAnalyst(BudgetMeter, ABC):
             isr = self._drain_findings(isr)
             if not isr.answer_text:
                 isr.note_answer_text(strip_tool_call_scaffolding(str(text or "")))
+            # Read before the validation turn: a retry it asks for may write
+            # claims, and the revision node must still know that the revision
+            # itself wrote none and so decided nothing about the claims in force.
+            # A claim block the parser could not read (no confidence, or one
+            # it cannot read) is a claim the revision wrote: only a revision
+            # that began none is one that decided nothing.
+            wrote_no_claim = (
+                not isr.claims
+                and str(isr.status or "") == NO_STRUCTURED_REPORT_STATUS
+                and not isr.blocks_without_confidence
+                and not isr.confidence_unreadable
+                and count_claims_begun(str(text or "")) == 0
+            )
             checked = self._validate_isr(self._apply_consistency_gate(isr, truncated), truncated)
-            return text, self._drain_findings(checked)
+            checked = self._drain_findings(checked)
+            if wrote_no_claim:
+                checked.note_revision_wrote_no_claim()
+            return text, checked
         except AnalystError:
             raise
         except Exception as e:

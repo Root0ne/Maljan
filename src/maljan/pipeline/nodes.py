@@ -181,7 +181,14 @@ from maljan.schemas.evidence import (
     fit_structures_to_budget,
     is_guard_answer,
 )
-from maljan.schemas.isr_models import ABSENCE_TECHNIQUE_MARKER, FAILED_CALLS_MARKER, AgentISR
+from maljan.schemas.isr_models import (
+    ABSENCE_TECHNIQUE_MARKER,
+    FAILED_CALLS_MARKER,
+    AgentISR,
+    ClaimEvidence,
+    claim_summary_line,
+    retry_added_marker,
+)
 from maljan.schemas.stix_models import Bundle, SimilarCases
 from maljan.schemas.tool_evidence import trim_output
 
@@ -805,6 +812,122 @@ def revision_replacement_sentence(
     return (
         f"The {name} analyst's round-{int(revision_round)} revision replaced {before} "
         f"claim(s) with {after}."
+    )
+
+
+def revision_decided_nothing(isr: Any) -> bool:
+    """Whether a revision wrote no claim and no structured report of its own.
+
+    Read from the revision itself (``AgentISR.revision_wrote_no_claim``), not
+    from the answer its validation retry left: a retry asked for after an
+    empty revision writes claims, and those are not a decision about the
+    claims in force. An agent whose revision path does not record it is read
+    from the answer it returned, as it always was.
+    """
+    if getattr(isr, "revision_wrote_no_claim", False) is True:
+        return True
+    return (
+        not list(getattr(isr, "claims", None) or [])
+        and str(getattr(isr, "status", "") or "") == NO_STRUCTURED_REPORT_STATUS
+    )
+
+
+def answer_with_retry_additions(in_force: AgentISR, retried: Any, revision_round: int) -> AgentISR:
+    """The answer in force with what a validation retry wrote after an empty revision added.
+
+    The revision wrote no claim, so the claims in force stand, every one. The
+    retry's claims are added after them, each marked with the round
+    (``ClaimEvidence.added_by_retry_in_round``): the retry is a turn with no
+    tools, so what it writes replaces nothing a tool call backed. A claim
+    that states one in force again in substance (``claim_drops.claim_substance``:
+    its values, the entries it cites, its technique and the rest of the key
+    ``unchanged_in_substance`` compares) is not written twice; how many were
+    left out so is logged. Its findings with a title the answer does not use,
+    its artifacts, its open questions and its disputes are added the same
+    way, after the ones in force. ``in_force`` itself is not changed.
+    """
+    from types import SimpleNamespace
+
+    from maljan.pipeline.claim_drops import claim_substance
+    from maljan.pipeline.retry_merge import folded_title
+
+    def _key(claim: Any) -> Any:
+        return next(iter(claim_substance(SimpleNamespace(claims=[claim]))))
+
+    held = {_key(claim) for claim in in_force.claims}
+    added: list[ClaimEvidence] = []
+    skipped = 0
+    for claim in list(getattr(retried, "claims", None) or []):
+        key = _key(claim)
+        if key in held:
+            skipped += 1
+            continue
+        held.add(key)
+        marked = claim.model_copy()
+        marked.added_by_retry_in_round = int(revision_round)
+        added.append(marked)
+    if skipped:
+        logger.info(
+            "%s: %d claim(s) of the round-%d validation retry state a claim in force again "
+            "in substance and are not added twice.",
+            in_force.agent_id,
+            skipped,
+            int(revision_round),
+        )
+    titles = {folded_title(f.title) for f in in_force.findings}
+    findings = [
+        f
+        for f in list(getattr(retried, "findings", None) or [])
+        if folded_title(f.title) not in titles
+    ]
+    artifacts = [
+        a for a in list(getattr(retried, "artifacts", None) or []) if a not in in_force.artifacts
+    ]
+    questions = [
+        q
+        for q in list(getattr(retried, "open_questions", None) or [])
+        if q not in in_force.open_questions
+    ]
+    disputes = [
+        d
+        for d in list(getattr(retried, "dissent_items", None) or [])
+        if d not in in_force.dissent_items
+    ]
+    combined = in_force.model_copy()
+    combined.claims = [*in_force.claims, *added]
+    combined.findings = [*in_force.findings, *findings]
+    combined.artifacts = [*in_force.artifacts, *artifacts]
+    combined.open_questions = [*in_force.open_questions, *questions]
+    combined.dissent_items = [*in_force.dissent_items, *disputes]
+    combined.revision_round = int(revision_round)
+    return combined
+
+
+def retry_additions_text(combined: AgentISR, added: int, revision_round: int) -> str:
+    """The claims a retry added, as text to follow the answer in force in the reports.
+
+    Numbered on from the claims in force, each with its evidence, confidence
+    and the marker, so the next round and the mediator read them as added.
+    """
+    claims = list(combined.claims)
+    start = len(claims) - added
+    lines = [
+        f"Claims added by the round-{int(revision_round)} validation retry, written without "
+        "tools, beside the claims in force:"
+    ]
+    lines += [
+        f"  {claim_summary_line(start + i + 1, claim)}" for i, claim in enumerate(claims[start:])
+    ]
+    return "\n".join(lines)
+
+
+def retry_additions_sentence(name: str, revision_round: int, in_force: Any, added: int) -> str:
+    """The sentence for an empty revision whose validation retry added claims beside the answer."""
+    kept = len(list(getattr(in_force, "claims", None) or []))
+    return (
+        f"The {name} analyst's round-{int(revision_round)} revision wrote no claim; its "
+        f"validation retry, written without tools, added {added} claim(s) beside the {kept} "
+        "claim(s) in force and replaced none."
     )
 
 
@@ -2792,6 +2915,9 @@ def upstream_findings(stage: Any, state: AnalysisState, container: ServiceContai
             reference = getattr(claim, "evidence_ref", "") or "—"
             if getattr(claim, "cites_only_failed_calls", False):
                 reference = f"{reference}, {FAILED_CALLS_MARKER}"
+            retried = getattr(claim, "added_by_retry_in_round", None)
+            if isinstance(retried, int) and not isinstance(retried, bool):
+                reference = f"{reference}, {retry_added_marker(retried)}"
             confidence = float(getattr(claim, "confidence", 0.0) or 0.0)
             text = " ".join(str(getattr(claim, "claim", "") or "").split())
             lines.append(f"- {text} [{technique}, confidence {confidence:.2f}, {reference}]")
@@ -5222,6 +5348,9 @@ def make_revision_node(container: ServiceContainer, *, stage: Any = None) -> Any
         # the sycophancy check judges only the answers revised in the round.
         revised_names: list[str] = []
         not_revised: dict[str, str] = {}
+        # The claims a validation retry added beside the answer in force after
+        # a revision that wrote none, per analyst (``answer_with_retry_additions``).
+        retry_added: dict[str, int] = {}
 
         def _keep_the_answer_in_force(
             name: str, why: str, status: str = "", report: str = "", *, was_asked: bool = True
@@ -5314,15 +5443,66 @@ def make_revision_node(container: ServiceContainer, *, stage: Any = None) -> Any
                     # ceiling), or the call was refused before it was made.
                     _keep_the_answer_in_force(name, "no answer was written")
                     continue
-                if (
-                    not list(isr.claims or [])
-                    and str(getattr(isr, "status", "") or "") == NO_STRUCTURED_REPORT_STATUS
-                    and list(getattr(kept_isrs.get(name), "claims", None) or [])
+                in_force_isr = kept_isrs.get(name)
+                if revision_decided_nothing(isr) and (
+                    list(getattr(in_force_isr, "claims", None) or []) or list(isr.claims or [])
                 ):
                     # The revision ended without a structured report: it made
                     # no decision about the claims in force, so they stand.
-                    _keep_the_answer_in_force(
-                        name, "its answer carried no structured report", report=revised_text
+                    # A validation retry asked for after it may have written
+                    # claims, in a turn with no tools: they are added beside
+                    # the claims in force and replace none of them.
+                    combined = answer_with_retry_additions(
+                        in_force_isr
+                        if isinstance(in_force_isr, AgentISR)
+                        else _empty_isr(name, revision_round=iteration),
+                        isr,
+                        iteration,
+                    )
+                    added = len(combined.claims) - len(
+                        list(getattr(in_force_isr, "claims", None) or [])
+                    )
+                    if not added:
+                        _keep_the_answer_in_force(
+                            name, "its answer carried no structured report", report=revised_text
+                        )
+                        continue
+                    sentence = retry_additions_sentence(name, iteration, in_force_isr, added)
+                    logger.warning("%s", sentence)
+                    retry_added[name] = added
+                    in_force_report = kept_texts.get(name) or original_reports.get(name, "")
+                    revised[name] = (
+                        f"{in_force_report}\n\n{retry_additions_text(combined, added, iteration)}"
+                    )
+                    revised_isrs[name] = combined
+                    if name in not_asked:
+                        not_revised[name] = not_loaded.get(name, NOT_ASKED_TO_REVISE)
+                    else:
+                        # Claims were added: the answer in force is not what
+                        # it was, in words or in substance.
+                        made += 1
+                        revised_names.append(name)
+                        identical = False
+                        reworded = False
+                    emit_agent_message(
+                        container.event_sink,
+                        speaker=name,
+                        role="reviser",
+                        text=(
+                            summarize_claims(
+                                combined.claims,
+                                speaker=spoken_name(container, name, _home_stage(container, name)),
+                                source=claims_source(container, name, _home_stage(container, name)),
+                            )
+                            + f" {sentence}"
+                        ),
+                        round_index=iteration,
+                        status=isr_status(combined),
+                        claims=claims_to_payload(combined.claims),
+                        dissent=list(combined.dissent_items or []),
+                        report=revised_text,
+                        stage=stage_key_of(stage, "debate"),
+                        display_name=label_of(container, name),
                     )
                     continue
                 in_force_text = kept_texts.get(name) or original_reports.get(name, "")
@@ -5416,6 +5596,7 @@ def make_revision_node(container: ServiceContainer, *, stage: Any = None) -> Any
                     state, kept_isrs, revised_isrs, revised_names, revision_ledger
                 ),
                 **({"asked_all": asked_all} if asked_all else {}),
+                **({"retry_added": retry_added} if retry_added else {}),
             }
         ]
         if not made:
