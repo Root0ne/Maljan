@@ -15,7 +15,7 @@ import httpx
 import pytest
 
 from maljan.core.config import Settings
-from maljan.providers.errors import ProviderError
+from maljan.providers.errors import ArtefactFetchFailed, ProviderError
 from maljan.providers.sandbox import limits
 from maljan.providers.sandbox.rest import RestSandboxProvider
 from maljan.providers.sandbox.triage import TriageSandboxProvider
@@ -70,8 +70,10 @@ def test_a_triage_overview_past_the_cap_is_refused_with_a_legible_error():
 
 
 def test_a_rest_pcap_past_the_cap_is_not_written_whole(tmp_path):
-    """A pcap is best effort, so an over-cap capture degrades rather than raises."""
-    assert _rest(_oversized).fetch_pcap("T-1", tmp_path) is None
+    """A pcap is best effort, so an over-cap capture degrades the run, in words."""
+    with pytest.raises(ArtefactFetchFailed) as exc:
+        _rest(_oversized).fetch_pcap("T-1", tmp_path)
+    assert exc.value.reason == "packet capture not fetched (ResponseTooLarge)"
     written = list(tmp_path.iterdir())
     assert all(f.stat().st_size <= 4096 for f in written)
 

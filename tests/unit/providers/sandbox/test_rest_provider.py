@@ -10,7 +10,11 @@ import pytest
 from pydantic import SecretStr
 
 from maljan.core.config import RestMappingConfig, Settings
-from maljan.providers.errors import ProviderConfigurationError, ProviderError
+from maljan.providers.errors import (
+    ArtefactFetchFailed,
+    ProviderConfigurationError,
+    ProviderError,
+)
 from maljan.providers.sandbox.rest import RestSandboxProvider
 
 FIX = Path(__file__).resolve().parents[3] / "fixtures" / "sandbox"
@@ -317,6 +321,73 @@ def test_fetch_pcap_streams_to_the_destination(tmp_path):
     provider = _provider(lambda r: httpx.Response(200, content=body), cfg)
     out = provider.fetch_pcap("T-9", tmp_path)
     assert out is not None and out.endswith("rest_T-9.pcap")
+
+
+PCAP_BODY = b"\xd4\xc3\xb2\xa1" + b"y" * 64
+
+
+def _pcap_provider(answers):
+    """A provider whose capture is answered by ``answers`` in turn, and what it slept."""
+    cfg = _cfg(poll_interval_seconds=5)
+    cfg.sandbox.rest.report.pcap_path = "/samples/{task_id}/dump.pcap"
+    pending = list(answers)
+
+    def handler(request):
+        answer = pending.pop(0) if len(pending) > 1 else pending[0]
+        if isinstance(answer, Exception):
+            raise answer
+        if isinstance(answer, httpx.Response):
+            return answer
+        if isinstance(answer, bytes):
+            return httpx.Response(200, content=answer)
+        return httpx.Response(answer)
+
+    provider = _provider(handler, cfg)
+    slept: list[float] = []
+    provider._sleep = slept.append
+    return provider, slept
+
+
+def test_a_502_then_success_fetches_the_capture(tmp_path):
+    provider, slept = _pcap_provider([502, PCAP_BODY])
+    assert provider.fetch_pcap("T-9", tmp_path) is not None
+    assert slept == [5.0]
+
+
+def test_a_502_every_time_is_the_degraded_reason_with_the_status(tmp_path):
+    provider, slept = _pcap_provider([502])
+    with pytest.raises(ArtefactFetchFailed) as exc:
+        provider.fetch_pcap("T-9", tmp_path)
+    assert exc.value.reason == "packet capture not fetched (HTTP 502)"
+    assert slept == [5.0, 7.5]
+    assert not list(tmp_path.iterdir())
+
+
+def test_an_exception_is_the_degraded_reason_with_its_type(tmp_path):
+    provider, _slept = _pcap_provider([httpx.RemoteProtocolError("dropped")])
+    with pytest.raises(ArtefactFetchFailed) as exc:
+        provider.fetch_pcap("T-9", tmp_path)
+    assert exc.value.reason == "packet capture not fetched (RemoteProtocolError)"
+
+
+def test_an_empty_capture_is_its_own_reason(tmp_path):
+    provider, slept = _pcap_provider([b""])
+    with pytest.raises(ArtefactFetchFailed) as exc:
+        provider.fetch_pcap("T-9", tmp_path)
+    assert exc.value.reason == "packet capture fetched empty (0 bytes)"
+    assert slept == []
+
+
+def test_a_capture_the_sandbox_does_not_have_is_none(tmp_path):
+    provider, slept = _pcap_provider([404])
+    assert provider.fetch_pcap("T-9", tmp_path) is None
+    assert slept == []
+
+
+def test_a_retry_after_is_honoured_between_capture_attempts(tmp_path):
+    provider, slept = _pcap_provider([httpx.Response(429, headers={"Retry-After": "2"}), PCAP_BODY])
+    assert provider.fetch_pcap("T-9", tmp_path) is not None
+    assert slept == [2.0]
 
 
 def test_verify_tls_off_is_visible_in_the_probe_detail():

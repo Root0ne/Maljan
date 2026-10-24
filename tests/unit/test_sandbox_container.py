@@ -182,6 +182,18 @@ def _run(provider: Any, sample: Path) -> dict[str, Any] | None:
     return asyncio.run(app._submit_to_sandbox(str(sample)))
 
 
+def _run_app(provider: Any, sample: Path) -> tuple[Any, dict[str, Any] | None]:
+    """``_run``, keeping the app for what its container recorded."""
+    import asyncio
+
+    from maljan.app import MaljanApp
+
+    app = MaljanApp(mock=True)
+    app.container.mock = False
+    app.container._sandbox_provider_cache = provider
+    return app, asyncio.run(app._submit_to_sandbox(str(sample)))
+
+
 def _stub_run(task_id: str = "42") -> Any:
     from maljan.providers.sandbox.readers import required_reader
     from maljan.schemas.sandbox_report import SandboxRun
@@ -289,6 +301,131 @@ class TestMaljanAppSandboxProvider:
         assert report is not None
         assert "fetch_pcap" in [c[0] for c in with_pcap.calls]
         assert report["network"]["pcap_local_path"] == "/tmp/capture.pcap"
+
+    def test_a_capture_that_failed_to_fetch_is_a_degradation_reason(self, tmp_path: Path) -> None:
+        """T-336: the run keeps its report and says which capture it lost, and why."""
+        import asyncio
+
+        from maljan.app import MaljanApp
+        from maljan.pipeline.nodes import artefact_fetch_reasons, capture_fetch_statement
+        from maljan.providers.errors import PACKET_CAPTURE, ArtefactFetchFailed
+
+        sample = tmp_path / "s.exe"
+        sample.write_bytes(b"payload")
+
+        def drive(fetch: Any) -> tuple[Any, dict[str, Any] | None]:
+            provider = _StubProvider(can_fetch_pcap=True)
+            provider.fetch_pcap = fetch  # type: ignore[method-assign]
+            app = MaljanApp(mock=True)
+            app.container.mock = False
+            app.container._sandbox_provider_cache = provider
+            return app.container, asyncio.run(app._submit_to_sandbox(str(sample)))
+
+        def failed(task_id: str, dest_dir: str) -> str | None:
+            raise ArtefactFetchFailed(PACKET_CAPTURE, "HTTP 502")
+
+        container, report = drive(failed)
+        assert report is not None and "pcap_local_path" not in report["network"]
+        assert artefact_fetch_reasons(container) == ["packet capture not fetched (HTTP 502)"]
+        assert capture_fetch_statement(container) == (
+            "the packet capture could not be fetched (HTTP 502)"
+        )
+
+        def empty(task_id: str, dest_dir: str) -> str | None:
+            raise ArtefactFetchFailed(PACKET_CAPTURE, "0 bytes", empty=True)
+
+        container, _report = drive(empty)
+        assert artefact_fetch_reasons(container) == ["packet capture fetched empty (0 bytes)"]
+
+        def broken(task_id: str, dest_dir: str) -> str | None:
+            raise OSError("disk full")
+
+        container, _report = drive(broken)
+        assert artefact_fetch_reasons(container) == ["packet capture not fetched (OSError)"]
+
+        # The sandbox offering no capture is no reason at all, as before.
+        container, report = drive(lambda task_id, dest_dir: None)
+        assert report is not None
+        assert artefact_fetch_reasons(container) == []
+        assert capture_fetch_statement(container) == ""
+
+    def test_a_capture_that_could_not_be_attached_is_removed_and_said(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from maljan.pipeline.nodes import artefact_fetch_reasons
+        from maljan.tools import staging
+
+        sample = tmp_path / "s.exe"
+        sample.write_bytes(b"payload")
+        written = tmp_path / "capture.pcap"
+
+        def fetched(task_id: str, dest_dir: str) -> str | None:
+            written.write_bytes(b"\xd4\xc3\xb2\xa1" + b"\0" * 40)
+            return str(written)
+
+        def refuse(path: Path) -> None:
+            raise PermissionError("not this one")
+
+        monkeypatch.setattr(staging, "make_private", refuse)
+        provider = _StubProvider(can_fetch_pcap=True)
+        provider.fetch_pcap = fetched  # type: ignore[method-assign]
+        app, report = _run_app(provider, sample)
+        assert report is not None and "pcap_local_path" not in report["network"]
+        assert artefact_fetch_reasons(app.container) == [
+            "packet capture not fetched (attach PermissionError)"
+        ]
+        assert not written.exists()
+
+    def test_the_failures_are_reset_by_the_next_submission(self, tmp_path: Path) -> None:
+        import asyncio
+
+        from maljan.pipeline.nodes import artefact_fetch_reasons
+        from maljan.providers.errors import PACKET_CAPTURE, ArtefactFetchFailed
+
+        sample = tmp_path / "s.exe"
+        sample.write_bytes(b"payload")
+
+        def failed(task_id: str, dest_dir: str) -> str | None:
+            raise ArtefactFetchFailed(PACKET_CAPTURE, "HTTP 502")
+
+        provider = _StubProvider(can_fetch_pcap=True)
+        provider.fetch_pcap = failed  # type: ignore[method-assign]
+        app, _report = _run_app(provider, sample)
+        assert artefact_fetch_reasons(app.container) == ["packet capture not fetched (HTTP 502)"]
+
+        provider.fetch_pcap = lambda task_id, dest_dir: None  # type: ignore[method-assign]
+        assert asyncio.run(app._submit_to_sandbox(str(sample))) is not None
+        assert artefact_fetch_reasons(app.container) == []
+
+    def test_the_fetch_runs_off_the_loop_under_the_jobs_bounds(self, tmp_path: Path) -> None:
+        import threading
+        import time
+
+        from maljan.providers.sandbox.triage import _FETCH_BUDGET
+
+        sample = tmp_path / "s.exe"
+        sample.write_bytes(b"payload")
+        seen: dict[str, Any] = {}
+
+        def fetch(task_id: str, dest_dir: str) -> str | None:
+            seen["thread"] = threading.get_ident()
+            seen["budget"] = _FETCH_BUDGET.get()
+            return None
+
+        provider = _StubProvider(can_fetch_pcap=True)
+        provider.fetch_pcap = fetch  # type: ignore[method-assign]
+        app, _report = _run_app(provider, sample)
+        assert seen["thread"] != threading.get_ident()
+        budget = seen["budget"]
+        assert budget is not None
+        # The poll's own budget (300 s for the stub, the CAPE default) from the wait.
+        assert 0 < budget.deadline - time.monotonic() <= 300
+        assert budget.cancelled() is False
+        app.container.cancellation.cancel("test")
+        assert budget.cancelled() is True
+        started = time.monotonic()
+        budget.sleep(30)
+        assert time.monotonic() - started < 5
 
     def test_a_non_reported_status_degrades_to_none(self, tmp_path: Path) -> None:
         sample = tmp_path / "s.exe"

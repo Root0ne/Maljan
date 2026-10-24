@@ -650,6 +650,12 @@ class ServiceContainer:
         # degradation reason (``pipeline.nodes.sandbox_degradation_reason``).
         # ``None`` where the sandbox answered or was never asked.
         self.sandbox_failure: str | None = None
+        # The artefacts the sandbox offered beside its report that could not
+        # be fetched, one ``ArtefactFetchFailed.record()`` each; set by
+        # ``app._submit_to_sandbox`` and carried into the run's degradation
+        # reasons and its coverage record. Empty where every offered artefact
+        # was fetched, or none was offered.
+        self.artefact_fetch_failures: list[dict[str, str]] = []
         # The target a detonating sandbox's report names
         # (``{"provider", "task_id", "sha256"}``, the hash as the provider's
         # reader put it in the neutral report), set by ``app._submit_to_sandbox``

@@ -10,8 +10,13 @@ import httpx
 import pytest
 
 from maljan.core.config import Settings
-from maljan.providers.errors import ProviderError
-from maljan.providers.sandbox.triage import TriageSandboxProvider
+from maljan.providers.errors import ArtefactFetchFailed, ProviderError
+from maljan.providers.sandbox.triage import (
+    ARTEFACT_FETCH_ATTEMPTS,
+    FetchBudget,
+    TriageSandboxProvider,
+    fetch_budget,
+)
 from maljan.schemas.sandbox_report import section_id
 
 FIX = Path(__file__).resolve().parents[3] / "fixtures" / "sandbox"
@@ -510,7 +515,205 @@ def test_an_empty_pcap_is_not_written(tmp_path):
             return httpx.Response(200, json=overview)
         return httpx.Response(200, content=b"tiny")
 
-    assert _provider(handler).fetch_pcap("s1", tmp_path) is None
+    provider = _provider(handler)
+    provider._sleep = lambda _s: pytest.fail("an empty capture is not asked for again")
+    with pytest.raises(ArtefactFetchFailed) as exc:
+        provider.fetch_pcap("s1", tmp_path)
+    # Its own reason, apart from a capture that could not be fetched at all.
+    assert exc.value.empty is True
+    assert exc.value.reason == "packet capture fetched empty (4 bytes)"
+    assert not list(tmp_path.iterdir())
+
+
+def _pcap_handler(answers, seen=None):
+    """Overview, then the capture answered by ``answers`` in turn (a status or an exception)."""
+    overview = {"tasks": [{"name": "behavioral1", "kind": "behavioral"}]}
+    pending = list(answers)
+
+    def handler(request):
+        if request.url.path.endswith("overview.json"):
+            return httpx.Response(200, json=overview)
+        if seen is not None:
+            seen.append(request.url.path)
+        answer = pending.pop(0) if len(pending) > 1 else pending[0]
+        if isinstance(answer, Exception):
+            raise answer
+        if answer == 200:
+            return httpx.Response(200, content=b"\xd4\xc3\xb2\xa1" + b"\x00" * 40)
+        return httpx.Response(answer, content=b"https://tria.ge/?token=never-logged")
+
+    return handler
+
+
+def test_a_502_then_success_fetches_the_capture(tmp_path):
+    seen: list[str] = []
+    slept: list[float] = []
+    provider = _provider(_pcap_handler([502, 200], seen), poll_interval_seconds=7)
+    provider._sleep = slept.append
+    path = provider.fetch_pcap("s1", tmp_path)
+    assert path is not None and Path(path).stat().st_size >= 24
+    assert len(seen) == 2
+    # The status poll's own wait: its interval.
+    assert slept == [7.0]
+
+
+def test_a_502_every_time_is_the_degraded_reason_with_the_status(tmp_path, caplog):
+    seen: list[str] = []
+    slept: list[float] = []
+    provider = _provider(_pcap_handler([502], seen), poll_interval_seconds=10)
+    provider._sleep = slept.append
+    with caplog.at_level("WARNING"):
+        with pytest.raises(ArtefactFetchFailed) as exc:
+            provider.fetch_pcap("s1", tmp_path)
+    assert exc.value.reason == "packet capture not fetched (HTTP 502)"
+    assert exc.value.statement == "the packet capture could not be fetched (HTTP 502)"
+    assert exc.value.empty is False
+    # Bounded: every attempt the policy allows, backed off as the poll is.
+    assert len(seen) == ARTEFACT_FETCH_ATTEMPTS
+    assert slept == [10.0, 15.0]
+    assert not list(tmp_path.iterdir())
+    logged = caplog.text
+    assert "HTTP 502" in logged
+    assert "token" not in logged and "tria.ge" not in logged
+
+
+def test_an_exception_is_the_degraded_reason_with_its_type(tmp_path, caplog):
+    provider = _provider(_pcap_handler([httpx.ConnectError("https://tria.ge/?token=x")]))
+    provider._sleep = lambda _s: None
+    with caplog.at_level("WARNING"):
+        with pytest.raises(ArtefactFetchFailed) as exc:
+            provider.fetch_pcap("s1", tmp_path)
+    assert exc.value.reason == "packet capture not fetched (ConnectError)"
+    assert "token" not in caplog.text and "tria.ge" not in caplog.text
+
+
+def test_a_refusal_is_not_asked_for_again(tmp_path):
+    seen: list[str] = []
+    provider = _provider(_pcap_handler([403], seen))
+    provider._sleep = lambda _s: pytest.fail("a 403 is not transient")
+    with pytest.raises(ArtefactFetchFailed) as exc:
+        provider.fetch_pcap("s1", tmp_path)
+    assert exc.value.reason == "packet capture not fetched (HTTP 403)"
+    assert len(seen) == 1
+
+
+def test_a_capture_the_sandbox_does_not_have_is_none_as_before(tmp_path):
+    provider = _provider(_pcap_handler([404]))
+    provider._sleep = lambda _s: pytest.fail("a 404 is the sandbox offering none")
+    assert provider.fetch_pcap("s1", tmp_path) is None
+
+
+def test_an_overview_that_keeps_failing_loses_the_capture_in_words(tmp_path):
+    def handler(request):
+        return httpx.Response(503)
+
+    provider = _provider(handler)
+    provider._sleep = lambda _s: None
+    with pytest.raises(ArtefactFetchFailed) as exc:
+        provider.fetch_pcap("s1", tmp_path)
+    assert exc.value.reason == "packet capture not fetched (overview HTTP 503)"
+
+
+def test_a_truncated_overview_is_asked_for_again(tmp_path):
+    answers = [httpx.Response(200, content=b'{"tasks": [{"na'), None]
+    overview = {"tasks": [{"name": "behavioral1", "kind": "behavioral"}]}
+
+    def handler(request):
+        if request.url.path.endswith("overview.json"):
+            return answers.pop(0) or httpx.Response(200, json=overview)
+        return httpx.Response(200, content=b"\xd4\xc3\xb2\xa1" + b"\x00" * 40)
+
+    slept: list[float] = []
+    provider = _provider(handler)
+    provider._sleep = slept.append
+    assert provider.fetch_pcap("s1", tmp_path) is not None
+    assert len(slept) == 1
+
+
+def test_a_truncated_overview_every_time_names_the_decode_failure(tmp_path):
+    provider = _provider(lambda request: httpx.Response(200, content=b"{"))
+    provider._sleep = lambda _s: None
+    with pytest.raises(ArtefactFetchFailed) as exc:
+        provider.fetch_pcap("s1", tmp_path)
+    assert exc.value.reason == "packet capture not fetched (overview JSONDecodeError)"
+
+
+def test_a_cancelled_job_does_not_sleep_or_try_again(tmp_path):
+    seen: list[str] = []
+    provider = _provider(_pcap_handler([502], seen))
+    provider._sleep = lambda _s: pytest.fail("the provider's own sleep is replaced by the job's")
+    budget = FetchBudget(
+        deadline=1e9,
+        now=lambda: 0.0,
+        sleep=lambda _s: pytest.fail("a cancelled job does not sleep"),
+        # Cancelled while the first try at the capture was in flight.
+        cancelled=lambda: bool(seen),
+    )
+    with fetch_budget(budget), pytest.raises(ArtefactFetchFailed) as exc:
+        provider.fetch_pcap("s1", tmp_path)
+    assert exc.value.reason == "packet capture not fetched (cancelled)"
+    assert len(seen) == 1
+    assert not list(tmp_path.iterdir())
+
+
+def test_a_job_cancelled_before_the_fetch_makes_no_request(tmp_path):
+    def handler(request):
+        raise AssertionError("a cancelled job asks the sandbox nothing more")
+
+    budget = FetchBudget(deadline=1e9, cancelled=lambda: True)
+    with fetch_budget(budget), pytest.raises(ArtefactFetchFailed) as exc:
+        _provider(handler).fetch_pcap("s1", tmp_path)
+    assert exc.value.cause == "cancelled"
+
+
+def test_a_cancel_during_the_overview_leaves_no_capture_directory(tmp_path):
+    dest = tmp_path / "captures"
+    state = {"cancelled": False}
+    overview = {"tasks": [{"name": "behavioral1", "kind": "behavioral"}]}
+
+    def handler(request):
+        if request.url.path.endswith("overview.json"):
+            # The job is cancelled, and its staging torn down, while the
+            # overview is in flight.
+            state["cancelled"] = True
+            return httpx.Response(200, json=overview)
+        raise AssertionError("a cancelled job asks for no capture")
+
+    budget = FetchBudget(deadline=1e9, cancelled=lambda: state["cancelled"])
+    with fetch_budget(budget), pytest.raises(ArtefactFetchFailed) as exc:
+        _provider(handler).fetch_pcap("s1", dest)
+    assert exc.value.reason == "packet capture not fetched (cancelled)"
+    assert not dest.exists()
+
+
+def test_an_expired_deadline_stops_without_sleeping(tmp_path):
+    seen: list[str] = []
+    provider = _provider(_pcap_handler([502], seen))
+    budget = FetchBudget(
+        deadline=100.0,
+        now=lambda: 100.0,
+        sleep=lambda _s: pytest.fail("no wait past the deadline"),
+    )
+    with fetch_budget(budget), pytest.raises(ArtefactFetchFailed) as exc:
+        provider.fetch_pcap("s1", tmp_path)
+    assert exc.value.reason == "packet capture not fetched (deadline)"
+    assert len(seen) == 1
+
+
+def test_a_wait_is_clamped_to_the_deadline(tmp_path):
+    clock = {"t": 0.0}
+    slept: list[float] = []
+
+    def sleep(seconds: float) -> None:
+        slept.append(seconds)
+        clock["t"] += seconds
+
+    provider = _provider(_pcap_handler([502]), poll_interval_seconds=30)
+    budget = FetchBudget(deadline=4.0, now=lambda: clock["t"], sleep=sleep)
+    with fetch_budget(budget), pytest.raises(ArtefactFetchFailed) as exc:
+        provider.fetch_pcap("s1", tmp_path)
+    assert slept == [4.0]
+    assert exc.value.cause == "deadline"
 
 
 def test_pcap_is_skipped_when_disabled_in_config(tmp_path):

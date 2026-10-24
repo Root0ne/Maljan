@@ -22,3 +22,35 @@ class AttachedReportRefused(ProviderError):
     it whole. Any other ``ProviderError`` a provider raises over an attached
     report is stated by its class alone.
     """
+
+
+# The artefact a sandbox may offer beside its report that the platform fetches:
+# the detonation's packet capture.
+PACKET_CAPTURE = "packet capture"
+
+
+class ArtefactFetchFailed(ProviderError):
+    """An artefact the sandbox offered beside its report that could not be fetched.
+
+    ``cause`` is composed by the provider, never quoted from the sandbox: an
+    HTTP status, an exception's type, or the size of a file too small to be
+    the artefact (``empty``). ``reason`` is the run's degradation reason and
+    ``statement`` what the run summary's coverage record says in place of the
+    sandbox offering none.
+    """
+
+    def __init__(self, artefact: str, cause: str, *, empty: bool = False) -> None:
+        self.artefact = artefact
+        self.cause = cause
+        self.empty = empty
+        if empty:
+            self.reason = f"{artefact} fetched empty ({cause})"
+            self.statement = f"the {artefact} was fetched empty ({cause})"
+        else:
+            self.reason = f"{artefact} not fetched ({cause})"
+            self.statement = f"the {artefact} could not be fetched ({cause})"
+        super().__init__(self.reason)
+
+    def record(self) -> dict[str, str]:
+        """What the job keeps of the failure (``ServiceContainer.artefact_fetch_failures``)."""
+        return {"artefact": self.artefact, "reason": self.reason, "statement": self.statement}

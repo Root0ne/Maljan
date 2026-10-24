@@ -70,6 +70,10 @@ class Cancellation:
     def is_cancelled(self) -> bool:
         return self._event.is_set()
 
+    def wait(self, seconds: float) -> bool:
+        """Sleep up to ``seconds``, waking the moment the job is cancelled; whether it was."""
+        return self._event.wait(max(0.0, float(seconds)))
+
     def cancel(self, reason: str) -> None:
         """Mark the job cancelled and stop every call it has in flight. Idempotent."""
         with self._lock:

@@ -64,7 +64,10 @@ import json
 import re
 import time
 import uuid
-from contextlib import suppress
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager, suppress
+from contextvars import ContextVar
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from email.utils import parsedate_to_datetime
 from pathlib import Path
@@ -74,7 +77,7 @@ import httpx
 
 from maljan.core.logger import logger
 from maljan.providers.base import ProviderProbe, SandboxCapabilities, SandboxProvider
-from maljan.providers.errors import ProviderError
+from maljan.providers.errors import PACKET_CAPTURE, ArtefactFetchFailed, ProviderError
 from maljan.providers.registry import register_sandbox_provider
 from maljan.providers.sandbox.limits import read_capped, stream_to_file_capped
 from maljan.providers.sandbox.readers import required_reader
@@ -84,6 +87,8 @@ from maljan.providers.sandbox.readers import required_reader
 _READER = "triage"
 
 if TYPE_CHECKING:
+    from contextlib import AbstractContextManager
+
     from maljan.core.config import SandboxTriageConfig, Settings
     from maljan.schemas.sandbox_report import SandboxRun
 
@@ -197,6 +202,209 @@ def poll_deadline_error(what: str, budget: float, last_error: str) -> ProviderEr
     """The deadline's failure, naming the last transient poll error when there was one."""
     suffix = f" Last poll error: {last_error}" if last_error else ""
     return ProviderError(f"{what} did not complete within {budget:.0f}s.{suffix}")
+
+
+# How many times an artefact fetch is tried in all: the count the platform's
+# transient-retry policy gives a model call (``llm.transient.DEFAULT_ATTEMPTS``).
+# The waits between tries are the status poll's: its interval, backed off 1.5x
+# to 60 s, or a ``Retry-After`` the sandbox sent, clamped the same way.
+ARTEFACT_FETCH_ATTEMPTS = 3
+
+# The size below which a fetched capture holds nothing: the libpcap/pcapng
+# global header alone is 24 bytes.
+CAPTURE_MIN_BYTES = 24
+
+
+@dataclass(frozen=True)
+class FetchBudget:
+    """What bounds a job's artefact fetch beyond its attempt count.
+
+    ``deadline`` is on ``now``'s clock (the job's sandbox deadline); ``sleep``
+    waits between tries and returns early once ``cancelled()`` holds.
+    """
+
+    deadline: float
+    now: Callable[[], float] = time.monotonic
+    sleep: Callable[[float], Any] = time.sleep
+    cancelled: Callable[[], bool] = lambda: False
+
+    def stop_cause(self, *, retry: bool) -> str:
+        """Why no further try is made, or ``""``: the job was cancelled, or a retry is late."""
+        if self.cancelled():
+            return "cancelled"
+        if retry and self.now() >= self.deadline:
+            return "deadline"
+        return ""
+
+
+# The budget of the fetch running in this context; ``None`` outside a job.
+_FETCH_BUDGET: ContextVar[FetchBudget | None] = ContextVar("maljan_fetch_budget", default=None)
+
+
+@contextmanager
+def fetch_budget(budget: FetchBudget) -> Iterator[None]:
+    """Bound every artefact fetch made inside the block by ``budget``."""
+    token = _FETCH_BUDGET.set(budget)
+    try:
+        yield
+    finally:
+        _FETCH_BUDGET.reset(token)
+
+
+def stop_if_cancelled(artefact: str) -> None:
+    """Raise ``ArtefactFetchFailed(artefact, "cancelled")`` once the job is cancelled.
+
+    Called before a provider makes the directory an artefact goes in: a cancel
+    that arrived during an earlier request must not recreate the job's capture
+    directory after its staging was torn down.
+    """
+    budget = _FETCH_BUDGET.get()
+    if budget is not None and budget.cancelled():
+        logger.warning("%s not fetched (cancelled).", artefact)
+        raise ArtefactFetchFailed(artefact, "cancelled")
+
+
+class ArtefactAttemptFailed(Exception):
+    """One try at an artefact that failed, in words the provider composed.
+
+    ``transient`` says whether asking again can change the answer (a 5xx other
+    than 501/505, a 429, a dropped transport); ``retry_after`` is the wait the
+    sandbox asked for, in seconds, where it asked for one.
+    """
+
+    def __init__(self, cause: str, *, transient: bool, retry_after: float | None = None) -> None:
+        super().__init__(cause)
+        self.cause = cause
+        self.transient = transient
+        self.retry_after = retry_after
+
+
+def status_failure(response: httpx.Response, step: str = "") -> ArtefactAttemptFailed:
+    """An HTTP error answer to an artefact request, as one failed try."""
+    status = response.status_code
+    transient = status == 429 or poll_failure(response) is not None
+    header = response.headers.get("Retry-After") if transient else None
+    retry_after = _parse_retry_after(header, time.time()) if header else None
+    cause = f"{step} HTTP {status}" if step else f"HTTP {status}"
+    return ArtefactAttemptFailed(cause, transient=transient, retry_after=retry_after)
+
+
+def with_fetch_retries(
+    attempt: Callable[[], Any],
+    *,
+    artefact: str,
+    what: str,
+    sleep: Callable[[float], Any],
+    interval: float,
+    step: str = "",
+) -> Any:
+    """``attempt()``'s answer, asked again after a transient failure; never silent.
+
+    A try that raises :class:`ArtefactAttemptFailed` or a transport error and
+    is transient is tried again, up to :data:`ARTEFACT_FETCH_ATTEMPTS` in all;
+    any other exception is final at once. Each failure is logged with its
+    status or the exception's type (never a URL or the exception's text, which
+    may carry one), and the last raises :class:`ArtefactFetchFailed`, which
+    names the artefact lost and why.
+
+    Under a :class:`FetchBudget` (:func:`fetch_budget`, set by the job) its
+    sleep replaces ``sleep``, each wait is clamped to what remains of its
+    deadline, a retry past the deadline stops with the cause ``deadline``, and
+    a cancelled job neither sleeps nor tries again (``cancelled``): a thread
+    the job abandoned must not write a capture after its staging is gone.
+    """
+    budget = _FETCH_BUDGET.get()
+    if budget is not None:
+        sleep = budget.sleep
+    wait = float(interval)
+    for tried in range(1, ARTEFACT_FETCH_ATTEMPTS + 1):
+        stop = budget.stop_cause(retry=tried > 1) if budget is not None else ""
+        if stop:
+            logger.warning("%s: %s not fetched (%s).", what, artefact, stop)
+            raise ArtefactFetchFailed(artefact, stop)
+        try:
+            return attempt()
+        except ArtefactAttemptFailed as exc:
+            failure = exc
+        except Exception as exc:  # noqa: BLE001 — named by its type, never re-raised raw
+            label = f"{step} {type(exc).__name__}" if step else type(exc).__name__
+            failure = ArtefactAttemptFailed(label, transient=isinstance(exc, POLL_TRANSPORT_ERRORS))
+        if not failure.transient or tried == ARTEFACT_FETCH_ATTEMPTS:
+            logger.warning(
+                "%s: %s not fetched (%s) after %d attempt%s.",
+                what,
+                artefact,
+                failure.cause,
+                tried,
+                "" if tried == 1 else "s",
+            )
+            raise ArtefactFetchFailed(artefact, failure.cause) from None
+        stop = budget.stop_cause(retry=True) if budget is not None else ""
+        if stop:
+            logger.warning("%s: %s not fetched (%s, then %s).", what, artefact, failure.cause, stop)
+            raise ArtefactFetchFailed(artefact, stop)
+        logger.warning(
+            "%s: %s fetch attempt %d failed transiently (%s); retrying.",
+            what,
+            artefact,
+            tried,
+            failure.cause,
+        )
+        asked = failure.retry_after
+        delay = min(asked if asked is not None and asked > 0 else wait, _MAX_INTERVAL_SECONDS)
+        if budget is not None:
+            delay = min(delay, budget.deadline - budget.now())
+        if delay > 0:
+            sleep(delay)
+        wait = min(wait * _BACKOFF_FACTOR, _MAX_INTERVAL_SECONDS)
+    raise AssertionError("unreachable")  # pragma: no cover
+
+
+def fetch_artefact(
+    request: Callable[[], AbstractContextManager[httpx.Response]],
+    keep: Callable[[httpx.Response], bool],
+    out: Path,
+    *,
+    artefact: str,
+    what: str,
+    sleep: Callable[[float], Any],
+    interval: float,
+    min_bytes: int = CAPTURE_MIN_BYTES,
+) -> str | None:
+    """Stream one artefact to ``out``; its path, or ``None`` where none is offered.
+
+    ``request()`` opens the streamed answer and ``keep(response)`` writes it to
+    ``out``, returning ``False`` where the answer says there is no artefact
+    after all. A 404 is the sandbox offering none, as is ``keep``'s ``False``;
+    every other failure is retried by :func:`with_fetch_retries` and, when it
+    persists, raises :class:`ArtefactFetchFailed`. A file under ``min_bytes``
+    raises it too, with its size as the cause. Whatever is left of a failed or
+    empty fetch is removed: half a capture is a file of somebody's traffic
+    nobody will read.
+    """
+
+    def once() -> bool:
+        try:
+            with request() as response:
+                if response.status_code == 404:
+                    return False
+                if response.status_code >= 400:
+                    raise status_failure(response)
+                return keep(response)
+        except BaseException:
+            out.unlink(missing_ok=True)
+            raise
+
+    if not with_fetch_retries(once, artefact=artefact, what=what, sleep=sleep, interval=interval):
+        logger.info("%s: the sandbox offers no %s.", what, artefact)
+        out.unlink(missing_ok=True)
+        return None
+    size = out.stat().st_size if out.exists() else 0
+    if size < min_bytes:
+        out.unlink(missing_ok=True)
+        logger.warning("%s: %s fetched empty (%d bytes).", what, artefact, size)
+        raise ArtefactFetchFailed(artefact, f"{size} bytes", empty=True)
+    return str(out)
 
 
 @register_sandbox_provider("triage")
@@ -631,47 +839,65 @@ class TriageSandboxProvider(SandboxProvider):
             return None
         headers = self._auth_headers()
         http = self._get_http()
-        overview_response = http.get(OVERVIEW_PATH.format(sample_id=task_id), headers=headers)
-        if overview_response.status_code >= 400:
-            logger.info(
-                "Triage: could not fetch the overview for %s (HTTP %d) while looking for a "
-                "PCAP task; skipping.",
-                task_id,
-                overview_response.status_code,
+        what = f"Triage sample {task_id}"
+        interval = float(self._cfg.poll_interval_seconds)
+
+        # The overview names the task whose capture this is. Read again here
+        # rather than kept from ``fetch``; a failure to read it loses the
+        # capture as surely as a failed download does, and is said the same way.
+        def overview() -> Any:
+            response = http.get(OVERVIEW_PATH.format(sample_id=task_id), headers=headers)
+            if response.status_code >= 400:
+                raise status_failure(response, "overview")
+            try:
+                return response.json()
+            except ValueError:
+                # A body cut short in transit reads the same as one that is not
+                # JSON; asking again is what tells them apart.
+                raise ArtefactAttemptFailed("overview JSONDecodeError", transient=True) from None
+
+        names = self._behavioral_task_names(
+            with_fetch_retries(
+                overview,
+                artefact=PACKET_CAPTURE,
+                what=what,
+                sleep=self._sleep,
+                interval=interval,
+                step="overview",
             )
-            return None
-        names = self._behavioral_task_names(overview_response.json())
+        )
         if not names:
             logger.info("Triage: sample %s has no behavioural task; no PCAP to fetch.", task_id)
             return None
 
+        # A cancel that arrived during the overview request leaves no
+        # directory behind it.
+        stop_if_cancelled(PACKET_CAPTURE)
         dest = Path(dest_dir)
         dest.mkdir(parents=True, exist_ok=True)
         safe_task_id = _safe_path_component(str(task_id))
         safe_task_name = _safe_path_component(names[0])
         out = dest / f"triage_{safe_task_id}.pcap"
         url = PCAP_PATH.format(sample_id=safe_task_id, task=safe_task_name)
-        try:
-            with http.stream("GET", url, headers=headers) as response:
-                if response.status_code >= 400:
-                    return None
-                # A capture past the cap degrades this call the way
-                # every other pcap failure does, rather than filling the disk.
-                stream_to_file_capped(response, out, what="The Triage capture")
-        except Exception:
-            # Never a hard failure: the network analyst falls back to the
-            # structured ``network`` block alone, exactly as CAPEv2Client's
-            # fetch_pcap already behaves for this project's other sandbox.
-            out.unlink(missing_ok=True)
-            return None
 
-        # libpcap/pcapng global header is 24 bytes; anything smaller is empty,
-        # and what is left of a capture nobody will read goes with the answer.
-        size = out.stat().st_size if out.exists() else 0
-        if size < 24:
-            out.unlink(missing_ok=True)
-            return None
-        return str(out)
+        def keep(response: httpx.Response) -> bool:
+            # A capture past the cap fails this fetch rather than filling the disk.
+            stream_to_file_capped(response, out, what="The Triage capture")
+            return True
+
+        # Never a hard failure of the run: the network analyst falls back to
+        # the structured ``network`` block alone, and the run says what it lost
+        # (``ArtefactFetchFailed``). What is left of a capture nobody will read
+        # goes with the answer (``fetch_artefact``).
+        return fetch_artefact(
+            lambda: http.stream("GET", url, headers=headers),
+            keep,
+            out,
+            artefact=PACKET_CAPTURE,
+            what=what,
+            sleep=self._sleep,
+            interval=interval,
+        )
 
     async def probe(self) -> ProviderProbe:
         """List resources: the cheapest documented call that exercises URL and token."""
