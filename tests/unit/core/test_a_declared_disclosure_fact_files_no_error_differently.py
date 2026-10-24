@@ -34,7 +34,16 @@ UNDECLARED = "zz_not_declared"
 # identification servers): each tool of theirs declares a kind and files as a
 # declared tool of dev's did, and their undeclared tool as dev's undeclared one.
 SHIPPED_SINCE = frozenset(
-    {"mcp:die", "mcp:ilspy", "mcp:goresym", "mcp:yarax", "mcp:oletools", "mcp:webcrack"}
+    {
+        "mcp:die",
+        "mcp:ilspy",
+        "mcp:goresym",
+        "mcp:yarax",
+        "mcp:oletools",
+        "mcp:webcrack",
+        "mcp:unblob",
+        "mcp:jadx",
+    }
 )
 
 

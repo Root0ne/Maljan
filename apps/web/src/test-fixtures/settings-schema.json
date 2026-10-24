@@ -2643,10 +2643,12 @@
       "die",
       "goresym",
       "ilspy",
+      "jadx",
       "knowledge",
       "network",
       "oletools",
       "threatintel",
+      "unblob",
       "virustotal",
       "webcrack",
       "yarax"
@@ -12314,6 +12316,23 @@
         "tool": "js_deobfuscate"
        },
        {
+        "display_name": "extracted files",
+        "id": "container_extract",
+        "outputs": "/files/*/path",
+        "server": "unblob",
+        "tool": "container_extract"
+       },
+       {
+        "display_name": "Android classes",
+        "formats": [
+         "apk",
+         "dex"
+        ],
+        "id": "android_classes",
+        "server": "jadx",
+        "tool": "android_classes"
+       },
+       {
         "display_name": "strings",
         "id": "strings",
         "renderer": "string_runs"
@@ -12491,6 +12510,10 @@
        }
       ],
       "shipped_compared": {
+       "android_classes": {
+        "called": "android_classes",
+        "server": "jadx"
+       },
        "anti_analysis_scan": {
         "called": "anti_analysis_scan",
         "server": ""
@@ -12514,6 +12537,10 @@
        "capa": {
         "called": "capa",
         "server": ""
+       },
+       "container_extract": {
+        "called": "container_extract",
+        "server": "unblob"
        },
        "decode_string_blobs": {
         "called": "decode_string_blobs",

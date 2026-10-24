@@ -218,6 +218,8 @@ NAMED_BRANCH: dict[str, str] = {
     # places alike, so a claim citing them is read as one citing yara_scan's;
     # rtfobj's objects and webcrack's scripts declare where each starts.
     "yarax_scan": "signature_rules",
+    # unblob's chunks declare where each starts in the file.
+    "container_scan": "declared_rows",
     "rtf_objects": "declared_rows",
     "js_deobfuscate": "declared_rows",
 }

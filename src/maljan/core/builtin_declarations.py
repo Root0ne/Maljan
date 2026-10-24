@@ -817,6 +817,87 @@ _WEBCRACK_TOOLS: dict[str, dict[str, Any]] = {
     },
 }
 
+# The container and Android servers, shipped switched off as the others are
+# (``services/unblob-mcp``, ``services/jadx-mcp``). unblob carves and extracts
+# what a container or firmware image holds into a directory of its own in its
+# container, never beside the sample, and runs nothing it extracts; a written
+# file reaches another server only through the job's artefact store, which
+# reads it back over ``get_artefact`` (a delivery primitive, never a model's).
+# JADX decompiles dex bytecode to Java and loads no class; an APK's manifest,
+# permissions and certificates stay ``apk_info``'s.
+_UNBLOB_TOOLS: dict[str, dict[str, Any]] = {
+    "capabilities": _CAPABILITIES,
+    "container_scan": {
+        "kind": "embedded_chunks",
+        "rows": "/chunks/*",
+        "places": {"offset": "/start_offset"},
+        "values": {"handler": "/handler"},
+        "arguments": _SAMPLE_PATH,
+        "display_name": "unblob",
+        "shows": (
+            "each chunk of a known format inside the file (archives, compressed streams, file "
+            "systems, firmware containers, a payload appended to another file), found by its "
+            "own bytes, with its byte range, and the ranges no format claims with their entropy"
+        ),
+        "does_not_show": (
+            "what a chunk holds (nothing is unpacked), or a format unblob has no handler for; "
+            "nothing is run"
+        ),
+    },
+    "container_extract": {
+        "kind": "extracted_files",
+        "long_running": True,
+        "rows": "/files/*",
+        "values": {"name": "/name", "sha256": "/sha256", "magic": "/magic"},
+        "arguments": _SAMPLE_PATH,
+        "display_name": "unblob",
+        "shows": (
+            "every file the container's chunks hold, extracted recursively, each with its place "
+            "in the container, size, sha256 and file type; links by what they name, and what "
+            "unblob refused (a member whose path or link leaves the extraction, a device file)"
+        ),
+        "does_not_show": (
+            "what an extracted file does: nothing extracted is run or opened beyond its type; "
+            "a format unblob has no handler for, an encrypted chunk's contents, or anything "
+            "past the sample upload bound the extraction stops at"
+        ),
+    },
+    "get_artefact": {"kind": "artefact_delivery"},
+}
+_ANDROID_FORMATS = ["apk", "dex"]
+_JADX_TOOLS: dict[str, dict[str, Any]] = {
+    "capabilities": _CAPABILITIES,
+    "android_classes": {
+        "kind": "type_list",
+        "long_running": True,
+        "rows": "/classes/*",
+        "values": {"name": "/name"},
+        "arguments": _SAMPLE_PATH,
+        "routed_formats": _ANDROID_FORMATS,
+        "display_name": "JADX",
+        "shows": (
+            "the classes the APK's or dex file's bytecode defines, each with its methods and "
+            "their signatures, as JADX reads them"
+        ),
+        "does_not_show": (
+            "what any of them does; classes loaded, decrypted or downloaded at run time (no "
+            "code is run); the manifest, permissions and certificates, which apk_info reads"
+        ),
+    },
+    "android_decompile_class": {
+        "kind": "decompile",
+        "arguments": _SAMPLE_PATH,
+        "routed_formats": _ANDROID_FORMATS,
+        "report_sections": _DECOMPILED_CODE_SECTIONS,
+        "display_name": "JADX",
+        "shows": "Java source JADX decompiled from one class's dex bytecode, inner classes too",
+        "does_not_show": (
+            "what runs at run time: code loaded, decrypted or downloaded while the app runs, "
+            "or native libraries beside the bytecode; no code is run"
+        ),
+    },
+}
+
 # The triage pack's steps (``pipeline.triage_pack``), each recorded under the
 # pack's own source. The in-process implementations answer as the sidecar's
 # tools of the same name do, so they declare the same facts.
@@ -1323,16 +1404,18 @@ _SERVER_BLOCKS: dict[str, dict[str, Any]] = {
         ),
         "credential_bootstrap": _VIRUSTOTAL_BOOTSTRAP,
     },
-    # The identification servers and the rule and document servers: each
-    # reads the sample the worker mirrors under the samples directory its
-    # container mounts read-only at /data/samples
-    # (``docker/docker-compose.yml``), and none runs it.
+    # The identification servers, the rule and document servers and the
+    # container and Android servers: each reads the sample the worker mirrors
+    # under the samples directory its container mounts read-only at
+    # /data/samples (``docker/docker-compose.yml``), and none runs it.
     "die": _one_program_block("identifier", _DIE_TOOLS),
     "ilspy": _one_program_block("decompiler", _ILSPY_TOOLS),
     "goresym": _one_program_block("symbol_recovery", _GORESYM_TOOLS),
     "yarax": _one_program_block("rule_matcher", _YARAX_TOOLS),
     "oletools": _one_program_block("document_reader", _OLETOOLS_TOOLS),
     "webcrack": _one_program_block("deobfuscator", _WEBCRACK_TOOLS),
+    "unblob": _one_program_block("extractor", _UNBLOB_TOOLS),
+    "jadx": _one_program_block("decompiler", _JADX_TOOLS),
 }
 
 # The static providers' own blocks (``static.ghidra``, ``static.r2``) and the

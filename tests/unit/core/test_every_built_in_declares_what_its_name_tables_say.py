@@ -29,7 +29,16 @@ TOOLS = ROOT / "tests" / "fixtures" / "tools"
 LEDGER = ROOT / "tests" / "fixtures" / "ledger"
 BUILT_IN_SERVERS = ("analysis", "knowledge", "network", "threatintel", "virustotal")
 # The built-in sidecars of one analysis program each, shipped switched off.
-ONE_PROGRAM_SERVERS = ("die", "ilspy", "goresym", "yarax", "oletools", "webcrack")
+ONE_PROGRAM_SERVERS = (
+    "die",
+    "ilspy",
+    "goresym",
+    "yarax",
+    "oletools",
+    "webcrack",
+    "unblob",
+    "jadx",
+)
 
 
 @pytest.fixture(scope="module")
@@ -368,6 +377,8 @@ def test_the_pinned_servers_are_the_servers_that_read_the_staged_sample(
         "yarax",
         "oletools",
         "webcrack",
+        "unblob",
+        "jadx",
     }
 
 

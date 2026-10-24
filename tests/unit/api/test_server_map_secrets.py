@@ -159,6 +159,8 @@ async def test_an_explicit_null_for_the_whole_map_drops_it_and_every_token_row(e
         "yarax",
         "oletools",
         "webcrack",
+        "unblob",
+        "jadx",
     }
     assert shown["network"]["auth_token"] == ""
     assert shown["network"]["auth_token_source"] == "default"

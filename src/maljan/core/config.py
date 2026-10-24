@@ -1850,6 +1850,13 @@ def _declared(key: str, **fields: Any) -> MCPServerConfig:
     return MCPServerConfig(**fields, **server_declaration(key))
 
 
+# The analysts a built-in sidecar of one analysis program is offered to: the
+# static analyst and the reverser, and for the code of an APK or dex file
+# (JADX) the Android static analyst and the reverser.
+_STATIC = ("static", "reverser")
+_ANDROID = ("android_static", "reverser")
+
+
 def _builtin_servers() -> dict[str, MCPServerConfig]:
     """The servers a deployment starts with, as settings rather than constants.
 
@@ -1958,9 +1965,11 @@ def _builtin_servers() -> dict[str, MCPServerConfig]:
         ),
         # The sidecars of one analysis program each, in an image of its own:
         # the identification servers (``services/die-mcp``,
-        # ``services/ilspy-mcp``, ``services/goresym-mcp``) and the rule and
+        # ``services/ilspy-mcp``, ``services/goresym-mcp``), the rule and
         # document servers (``services/yarax-mcp``, ``services/oletools-mcp``,
-        # ``services/webcrack-mcp``), each reached over streamable HTTP at the
+        # ``services/webcrack-mcp``) and the container and Android servers
+        # (``services/unblob-mcp``, ``services/jadx-mcp``), each reached over
+        # streamable HTTP at the
         # address the shipped compose file gives it under its profile. Off
         # until an operator starts the container and switches the block on with
         # the container's token as ``auth_token``: a block on with nothing
@@ -1973,16 +1982,19 @@ def _builtin_servers() -> dict[str, MCPServerConfig]:
                 enabled=False,
                 transport="streamable-http",
                 url=url,
-                agents=["static", "reverser"],
+                agents=list(agents),
                 label=label,
             )
-            for key, url, label in (
-                ("die", "http://die-mcp:8090/mcp", "Detect It Easy MCP"),
-                ("ilspy", "http://ilspy-mcp:8091/mcp", "ILSpy MCP"),
-                ("goresym", "http://goresym-mcp:8092/mcp", "GoReSym MCP"),
-                ("yarax", "http://yarax-mcp:8093/mcp", "YARA-X MCP"),
-                ("oletools", "http://oletools-mcp:8094/mcp", "oletools MCP"),
-                ("webcrack", "http://webcrack-mcp:8095/mcp", "webcrack MCP"),
+            for key, url, label, agents in (
+                ("die", "http://die-mcp:8090/mcp", "Detect It Easy MCP", _STATIC),
+                ("ilspy", "http://ilspy-mcp:8091/mcp", "ILSpy MCP", _STATIC),
+                ("goresym", "http://goresym-mcp:8092/mcp", "GoReSym MCP", _STATIC),
+                ("yarax", "http://yarax-mcp:8093/mcp", "YARA-X MCP", _STATIC),
+                ("oletools", "http://oletools-mcp:8094/mcp", "oletools MCP", _STATIC),
+                ("webcrack", "http://webcrack-mcp:8095/mcp", "webcrack MCP", _STATIC),
+                ("unblob", "http://unblob-mcp:8096/mcp", "unblob MCP", _STATIC),
+                # The code of an APK or dex file: the Android static analyst's.
+                ("jadx", "http://jadx-mcp:8097/mcp", "JADX MCP", _ANDROID),
             )
         },
     }
