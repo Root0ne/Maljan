@@ -1467,6 +1467,12 @@ def _build(run: _Run, judged: _Judged, built: _Built) -> dict[str, Any]:
     summary = copy.deepcopy(run.stored.run_summary)
     summary["validation"] = _replayed_validation(run)
     summary["corroboration"] = corroboration(run.isrs, run.ledger)
+    # The rebuilt bundle's size, as the judge node counts it (``set_verdict``);
+    # the export's own replaces the first once it is built (``_report_values``).
+    from maljan.schemas.stix_models import Bundle
+
+    counted = len(bundle.objects) if isinstance(bundle, Bundle) else 0
+    summary["stix_object_count"] = summary["judge_stix_object_count"] = counted
     builder = MalwareReportBuilder(
         # The job the run was, which its MISP attributes' uuids are derived from.
         job_id=(run.stored.job or {}).get("id") or None,
@@ -1593,6 +1599,14 @@ def _report_values(run: _Run, built: _Built, judged: _Judged) -> dict[str, Any]:
             ledger_ids=[str(entry.id) for entry in run.ledger],
         )
         report.stix_bundle_extended = export.model_dump(mode="json")
+        # The summary counts the export, as the report node writes it once the
+        # export exists: a rebuilt export with the stored count is a stale summary.
+        # Only into a summary there is, as the node writes only a non-empty one.
+        if report.run_summary:
+            report.run_summary = {
+                **report.run_summary,
+                "stix_object_count": len(report.stix_bundle_extended.get("objects") or []),
+            }
         report.consolidated_iocs = build_consolidated_iocs(report)
         report.misp_attributes = build_misp_attributes(
             report, owner=misp_owner(report, (run.stored.job or {}).get("id"))

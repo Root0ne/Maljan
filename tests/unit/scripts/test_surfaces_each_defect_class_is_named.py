@@ -3,9 +3,10 @@
 Every case breaks one thing in the clean synthetic run: a finding left off a
 surface, a value cut or renamed, a citation that names no ledger entry, a
 section the console would draw blank, an object with no report item behind
-it, a scalar two surfaces disagree on, a count that does not add up. Each is
-reported, and nothing else is. An empty section is blank only when the call it
-cites answered with a value that no child section of it holds.
+it, one process written as two objects, a scalar two surfaces disagree on, a
+count that does not add up. Each is reported, and nothing else is. An empty
+section is blank only when the call it cites answered with a value that no
+child section of it holds.
 """
 
 from __future__ import annotations
@@ -177,6 +178,12 @@ def _process_without_object(run: dict[str, Any]) -> None:
     run["stix"]["objects"][5]["command_line"] = "sample.exe /other"
 
 
+def _process_written_twice(run: dict[str, Any]) -> None:
+    run["stix"]["objects"].append({**run["stix"]["objects"][5], "id": "process--2"})
+    run["report_row"]["run_summary"]["stix_object_count"] += 1
+    run["run_summary"]["stix_object_count"] += 1
+
+
 def _section_blank_while_its_call_answered(run: dict[str, Any]) -> None:
     for mr in (_mr(run), run["report_full"]):
         mr["sections"].append(
@@ -288,6 +295,10 @@ CASES: dict[str, tuple[Callable[[dict[str, Any]], None], set[tuple[str, str, str
     "a process with no STIX object": (
         _process_without_object,
         {("missing", "process", "stix"), ("orphan", "process", "stix")},
+    ),
+    "a process written as two STIX objects": (
+        _process_written_twice,
+        {("duplicate", "process", "stix")},
     ),
     "an empty section whose call answered": (
         _section_blank_while_its_call_answered,
