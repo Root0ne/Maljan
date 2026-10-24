@@ -109,7 +109,7 @@ the pack record, and the run-state block names it and the analysis server's
 
 from __future__ import annotations
 
-import hashlib
+import inspect
 import json
 import re
 import time
@@ -117,7 +117,7 @@ from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from concurrent.futures import Future, ThreadPoolExecutor
 from contextlib import contextmanager
 from contextvars import ContextVar
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from functools import partial
 from pathlib import Path
 from typing import Any, cast
@@ -180,22 +180,19 @@ from maljan.schemas.evidence import (
 )
 from maljan.schemas.sandbox_document import place as report_place
 from maljan.tools import (
-    api_hashes,
     artefact_index,
-    binary,
     crypto_constants,
     emulated_strings,
     identify,
     knowledge,
-    pcap,
     rules,
     staging,
     string_blobs,
-    strings,
     upx,
 )
 from maljan.tools.errors import error_parts, normalise_error
 from maljan.tools.knowledge import RESOLVED_AT_RUNTIME
+from maljan.tools.readers import SampleReaders, merge_groups_state
 from maljan.utils.written_forms import (
     ENTRY_ID_JOIN_ESCAPE,
     controls_written_out,
@@ -561,6 +558,9 @@ class PackInputs:
     # tool runs only where its server is here, switched on and offering it
     # (``pack_steps.steps_on_servers``). ``None``: none is configured.
     servers: Mapping[str, Any] | None = None
+    # Where each reading of the sample runs (``tools.readers.SampleReaders``):
+    # ``None`` runs every one in this process.
+    readers: Any = None
 
 
 # The one reputation call, made by the node through the tool server. It takes
@@ -678,6 +678,12 @@ class _Pack:
         self.function_matches = function_matches
         self.anti_analysis = anti_analysis
         self.server_step = server_step
+        # A reading on a server is given what is left of the pack's budget
+        # when its step names no clock of its own (``SampleReaders.clock``).
+        self.readers: SampleReaders = replace(
+            getattr(inputs, "readers", None) or SampleReaders(sample_path=inputs.sample_path),
+            clock=self._budget_left,
+        )
         steps = tuple(inputs.steps) if inputs.steps is not None else effective_steps()
         # A run with no tool server registry calls none; otherwise the run's servers.
         servers = None if server_step is None else (getattr(inputs, "servers", None) or {})
@@ -1254,7 +1260,7 @@ class _Pack:
     def _identify_file(self, step: PackStep) -> None:
         path = self.inputs.sample_path
         self.identity = self.record(
-            "identify_file", {"path": path}, lambda: identify.identify_file(path)
+            "identify_file", {"path": path}, lambda: self.readers.read("identify_file", path=path)
         )
         # The routed format decides which signing scheme and which format
         # reader are about this sample. Resolved here rather than sniffed
@@ -1263,45 +1269,55 @@ class _Pack:
 
     def _hashes(self, step: PackStep) -> None:
         path = self.inputs.sample_path
-        self.record("hashes", {"path": path}, lambda: identify.hashes(path))
+        self.record("hashes", {"path": path}, lambda: self.readers.read("hashes", path=path))
 
     def _signing_info(self, step: PackStep) -> None:
         path, routed = self.inputs.sample_path, self.routed
         signing = self.record(
             "signing_info",
             {"path": path, "file_type": routed},
-            lambda: identify.signing_info(path, file_type=routed),
+            lambda: self.readers.read("signing_info", path=path, file_type=routed),
         )
         self.has_signature = _carries_signature(signing)
 
     def _format_info(self, step: PackStep) -> None:
         """The header facts of the format the step reads, for a sample routed as one."""
-        call = _FORMAT_CALLS[step.called]
+        reader = _FORMAT_CALLS[step.called]
         path = self.inputs.sample_path
-        self.format_facts = self.record(step.called, {"path": path}, lambda: call(path))
+        self.format_facts = self.record(
+            step.called, {"path": path}, lambda: self.readers.read(reader, path=path)
+        )
 
     def _strings(self, step: PackStep) -> None:
         path = self.inputs.sample_path
         head = max(1, int(self.inputs.strings_head))
         args = {"path": path, "min_len": STRINGS_MIN_LEN, "limit": head}
         self.record(
-            "strings", args, lambda: strings.strings(path, min_len=STRINGS_MIN_LEN, limit=head)
+            "strings",
+            args,
+            lambda: self.readers.read("strings", path=path, min_len=STRINGS_MIN_LEN, limit=head),
         )
 
     def _iocs_from_file(self, step: PackStep) -> None:
         path = self.inputs.sample_path
-        self.record("iocs_from_file", {"path": path}, lambda: strings.iocs_from_file(path))
+        self.record(
+            "iocs_from_file", {"path": path}, lambda: self.readers.read("iocs_from_file", path=path)
+        )
 
     def _yara_scan(self, step: PackStep) -> None:
         path = self.inputs.sample_path
         if step.budget_seconds is None:
-            self.record("yara_scan", {"path": path}, lambda: rules.yara_scan(path=path))
+            self.record(
+                "yara_scan",
+                {"path": path},
+                lambda: self.readers.read("yara_scan", path=path, timeout=YARA_DEFAULT_SECONDS),
+            )
             return
         seconds = max(1, int(step.budget_seconds))
         self.record(
             "yara_scan",
             {"path": path, "timeout_s": seconds},
-            lambda: rules.yara_scan(path=path, timeout_s=seconds),
+            lambda: self.readers.read("yara_scan", path=path, timeout_s=seconds, timeout=seconds),
         )
 
     def _capa(self, step: PackStep) -> None:
@@ -1317,19 +1333,17 @@ class _Pack:
             "signatures_dir": capa.signatures_dir,
         }
 
-        def call() -> dict[str, Any]:
-            scratch = (
-                staging.open_job_directory(capa.job_id, staging.CAPA_DIRECTORY, capa.environ)
-                if capa.job_id
-                else None
-            )
-            return rules.capa(
-                path,
+        def call() -> Any:
+            return self.readers.read(
+                "capa",
+                capa.environ,
+                timeout=timeout,
+                path=path,
                 timeout_s=timeout,
                 backend=capa.backend,
                 rules_dir=capa.rules_dir,
                 signatures_dir=capa.signatures_dir,
-                scratch=scratch,
+                job=capa.job_id,
             )
 
         self.record("capa", capa_args, call)
@@ -1407,7 +1421,7 @@ class _Pack:
             self.record(
                 "pcap_summary",
                 {"pcap_path": staging.job_relative(capture)},
-                lambda: pcap.pcap_summary(capture),
+                lambda: self.readers.read("pcap_summary", path=capture),
             )
 
     def _reputation(self, step: PackStep) -> None:
@@ -1522,37 +1536,31 @@ class _Pack:
         path = self.inputs.sample_path
         timeout = self._floss_timeout(step)
 
-        def call() -> dict[str, Any]:
-            scratch = (
-                staging.open_job_directory(settings.job_id, "floss", settings.environ)
-                if settings.job_id
-                else None
-            )
-            # The whole result first, then the entry's page of it: the page
-            # and the rows the pack's readers compare with are one result,
-            # never a second read of the emulator's process-wide memory.
-            found = emulated_strings.recovered(
-                path, timeout_s=timeout, environ=settings.environ, scratch=scratch
-            )
-            if "error" in found:
-                return found
-            answer = emulated_strings.floss(
-                path,
+        def call() -> Any:
+            # The whole result first, then the entry's page of it, in one
+            # reading (``tools.readers``): the page and the rows the pack's
+            # readers compare with are one result.
+            read = self.readers.read(
+                "floss",
+                settings.environ,
+                timeout=timeout,
+                path=path,
                 limit=DECODED_STRINGS_ROWS,
                 timeout_s=timeout,
-                environ=settings.environ,
-                scratch=scratch,
-                found=found,
+                job=settings.job_id,
             )
+            if "found" in read:
+                return read["found"]
+            answer = read["answer"]
             if isinstance(answer, dict) and "error" not in answer:
-                self._floss_rows[step.id] = list(found["rows"])
+                self._floss_rows[step.id] = list(read["rows"])
             return answer
 
         return call
 
     def _floss_early(self, step: PackStep) -> Callable[[], Any] | None:
         """The emulator's work, when its build is installed; ``None`` otherwise."""
-        if emulated_strings.floss_unavailable(self.inputs.floss.environ):
+        if self.readers.read("floss_unavailable", self.inputs.floss.environ):
             return None
         return self._floss_call(step)
 
@@ -1587,7 +1595,7 @@ class _Pack:
             if spent is not None:
                 self._record_not_run("floss", args, spent)
                 return
-            missing = emulated_strings.floss_unavailable(settings.environ)
+            missing = self.readers.read("floss_unavailable", settings.environ)
             if missing:
                 message = f"{NOT_RUN_PREFIX} {missing}"
                 self.recorder.record(
@@ -1644,8 +1652,8 @@ class _Pack:
         self.resolved = self.record(
             "resolve_api_hashes",
             args,
-            lambda: api_hashes.resolve_api_hashes(
-                path, function_starts=starts, function_source=label
+            lambda: self.readers.read(
+                "resolve_api_hashes", path=path, function_starts=starts, function_source=label
             ),
         )
 
@@ -1665,8 +1673,9 @@ class _Pack:
         self.record(
             "decode_string_blobs",
             args,
-            lambda: string_blobs.decode_string_blobs(
-                path,
+            lambda: self.readers.read(
+                "decode_string_blobs",
+                path=path,
                 function_starts=starts,
                 function_source=label,
                 recovered=recovered,
@@ -1755,8 +1764,11 @@ class _Pack:
             crypto_constants.TOOL,
             args,
             lambda: _with_rules(
-                crypto_constants.find_crypto_constants(
-                    path, function_starts=starts, function_source=label
+                self.readers.read(
+                    "find_crypto_constants",
+                    path=path,
+                    function_starts=starts,
+                    function_source=label,
                 ),
                 rows,
                 mark,
@@ -1816,11 +1828,11 @@ class _Pack:
         # displace nothing in the pack.
         ranges: dict[str, list[list[str]]] = {}
         held = len(self.recorder.entries)
-        self.record(
-            artefact_index.TOOL,
-            args,
-            lambda: artefact_index.function_index(
-                path,
+
+        def call() -> Any:
+            read = self.readers.read(
+                "function_index",
+                path=path,
                 pe_info=joined.pe_info,
                 function_starts=joined.function_starts,
                 rule_hits=joined.rule_hits,
@@ -1828,11 +1840,13 @@ class _Pack:
                 hashes=joined.hashes,
                 blobs=joined.blobs,
                 absent=joined.absent,
-                ranges_into=ranges,
                 rules_under=joined.rules_under,
                 rule_sources=joined.rule_sources or None,
-            ),
-        )
+            )
+            ranges.update(read.get("ranges") or {})
+            return read["answer"]
+
+        self.record(artefact_index.TOOL, args, call)
         made = self.recorder.entries[held:]
         if ranges and made and made[-1].ok:
             made[-1].function_ranges = ranges
@@ -1855,7 +1869,17 @@ class _Pack:
         saying so.
         """
         path = self.inputs.sample_path
-        if not (_names_upx(self.format_facts) or _holds_a_pack_header(path)):
+        try:
+            holds = _names_upx(self.format_facts) or self._holds_a_pack_header(path)
+        except Exception as exc:  # noqa: BLE001 — a header that could not be read is an entry
+            failed = exc
+
+            def raised() -> Any:
+                raise failed
+
+            self.record(upx.TOOL, {"path": path}, raised)
+            return
+        if not holds:
             return
         args: dict[str, Any] = {"path": path}
         settings = self.inputs.floss
@@ -1865,12 +1889,18 @@ class _Pack:
         carve_environ = self.inputs.carve_environ
         environ = settings.environ if carve_environ is None else carve_environ
 
-        def call() -> dict[str, Any]:
-            carved = staging.open_job_directory(settings.job_id, staging.CARVED_DIRECTORY, environ)
-            destination = staging.private_dir(carved / _file_digest(path))
-            return upx.unpack_upx(path, destination)
+        self.record(
+            upx.TOOL,
+            args,
+            lambda: self.readers.read("unpack_upx", environ, path=path, job=settings.job_id),
+        )
 
-        self.record(upx.TOOL, args, call)
+    def _holds_a_pack_header(self, path: str) -> bool:
+        """Whether the file holds UPX's pack header with a true checksum byte where UPX writes it.
+
+        Only the headers and UPX's two windows are read, not the whole sample.
+        """
+        return bool(self.readers.read("upx_header", path=path))
 
     def _sandbox_sections(self, step: PackStep) -> None:
         """The sandbox report's section index, once, where a sandbox produced a report.
@@ -1919,6 +1949,7 @@ class _Pack:
                 routed=self.routed,
                 listed_formats=listed,
                 room=self.inputs.pack_chars or None,
+                readers=self.readers,
             ),
         )
 
@@ -1970,14 +2001,11 @@ def _capa_peak() -> int | None:
     return measured_capa_peak_bytes()
 
 
-# The platform's own format readers, by the tool each step calls.
-_FORMAT_CALLS: dict[str, Callable[..., dict[str, Any]]] = {
-    "pe_info": binary.pe_info,
-    "elf_info": binary.elf_info,
-    "macho_info": binary.macho_info,
-    "apk_info": binary.apk_info,
-    "document_info": binary.document_info,
-    "archive_list": binary.archive_list,
+# The platform's own format readers, by the tool each step calls: each the
+# reading of the same name (``tools.readers``).
+_FORMAT_CALLS: dict[str, str] = {
+    name: name
+    for name in ("pe_info", "elf_info", "macho_info", "apk_info", "document_info", "archive_list")
 }
 
 # The platform's own sandbox views, by the tool each step calls.
@@ -2038,6 +2066,10 @@ def budgeted_entries(entries: list[LedgerEntry]) -> list[LedgerEntry]:
     return [entry for entry in entries if renderer_of(entry) != "sandbox_sections"]
 
 
+# The YARA scan's own clock when its step names none: the tool's default, the
+# wall clock its reading on a server is given.
+YARA_DEFAULT_SECONDS = float(inspect.signature(rules.yara_scan).parameters["timeout_s"].default)
+
 # Why the pack did not unpack a sample the packer reader names UPX.
 UPX_NO_JOB = "the run names no job staging directory to write the unpacked program in"
 
@@ -2049,23 +2081,6 @@ def _names_upx(format_facts: dict[str, Any] | None) -> bool:
         str(row.get("name") if isinstance(row, dict) else row).strip().upper() == "UPX"
         for row in rows
     )
-
-
-def _holds_a_pack_header(path: str) -> bool:
-    """Whether the file holds UPX's pack header with a true checksum byte where UPX writes it.
-
-    Only the headers and UPX's two windows are read, not the whole sample.
-    """
-    return upx.has_pack_header_at(path)
-
-
-def _file_digest(path: str) -> str:
-    """The SHA-256 of the file at ``path``, read in pieces: the name of its carved tree."""
-    hasher = hashlib.sha256()
-    with Path(path).open("rb") as handle:
-        for block in iter(lambda: handle.read(1024 * 1024), b""):
-            hasher.update(block)
-    return hasher.hexdigest()
 
 
 # ---------------------------------------------------------------------------
@@ -2592,28 +2607,89 @@ class _DirectedRead:
         self.unread.append(row)
 
 
+def _scan_file(
+    readers: SampleReaders,
+    read: _DirectedRead,
+    path: str,
+    source: str,
+    opened: Callable[[int], None],
+    regions: Sequence[directed_text.Region] = (),
+    deadline: float | None = None,
+    extra: Mapping[str, str] | None = None,
+) -> None:
+    """One file's bytes scanned into the pass's groups, where its reading runs.
+
+    ``opened`` is told how many bytes the file held once it is read, before
+    any match. In this process the reading scans straight into the groups; on
+    a server it scans into groups of its own, folded into these in the same
+    order (``tools.readers.merge_groups_state``), and a deadline that passed
+    there stops the pass here, as it would have in process.
+    """
+    if readers.place_of("directed_scan") is None:
+        readers.read(
+            "directed_scan",
+            path=path,
+            source=source,
+            regions=list(regions),
+            extra=extra,
+            into=read.groups,
+            opened=opened,
+            deadline_at=deadline,
+        )
+        return
+    rows = [{"name": r.name, "start": r.start, "end": r.end} for r in regions]
+    seconds = None if deadline is None else deadline - time.monotonic()
+    said = readers.read(
+        "directed_scan",
+        timeout=None if seconds is None else max(1.0, seconds),
+        path=path,
+        source=source,
+        regions=rows,
+        extra=dict(extra) if extra else None,
+        seconds=seconds,
+        room=read.groups.room,
+    )
+    opened(int(said["bytes"]))
+    merge_groups_state(read.groups, said.get("groups") or {})
+    if said.get("spent"):
+        raise directed_text.Spent(str(said["spent"]))
+
+
 def _read_file(
     read: _DirectedRead,
     path: str,
     format_facts: Mapping[str, Any] | None,
     deadline: float | None,
+    readers: SampleReaders | None = None,
 ) -> None:
     """The sample's own bytes, each match placed in the regions its format answer gives."""
+    regions, unplaced = directed_text.file_regions(format_facts)
+
+    def opened(size: int) -> None:
+        row: dict[str, Any] = {"source": directed_text.FILE_SOURCE, "bytes": size}
+        if unplaced:
+            row["sections_unplaced"] = unplaced
+        read.scanned.append(row)
+
     try:
-        blob = Path(path).read_bytes()
+        _scan_file(
+            readers or SampleReaders(sample_path=path),
+            read,
+            path,
+            directed_text.FILE_SOURCE,
+            opened,
+            regions,
+            deadline,
+        )
     except OSError as exc:
         read.not_read(directed_text.FILE_SOURCE, f"{type(exc).__name__}: {exc}")
-        return
-    regions, unplaced = directed_text.file_regions(format_facts)
-    row: dict[str, Any] = {"source": directed_text.FILE_SOURCE, "bytes": len(blob)}
-    if unplaced:
-        row["sections_unplaced"] = unplaced
-    read.scanned.append(row)
-    directed_text.scan_bytes_into(read.groups, blob, directed_text.FILE_SOURCE, regions, deadline)
 
 
 def _read_unpacked(
-    read: _DirectedRead, entries: Sequence[LedgerEntry], deadline: float | None
+    read: _DirectedRead,
+    entries: Sequence[LedgerEntry],
+    deadline: float | None,
+    readers: SampleReaders | None = None,
 ) -> bool:
     """Every unpacked program an earlier answer wrote out; whether any was read."""
     any_read = False
@@ -2626,16 +2702,26 @@ def _read_unpacked(
         carved = str(child.get("carved_path") or "") if isinstance(child, dict) else ""
         if not carved:
             continue
+        found: list[bool] = []
+
+        def opened(size: int, entry_id: str = entry.id, found: list[bool] = found) -> None:
+            found.append(True)
+            read.scanned.append({"source": "unpacked image", "entry": entry_id, "bytes": size})
+
         try:
-            blob = Path(carved).read_bytes()
+            _scan_file(
+                readers or SampleReaders(),
+                read,
+                carved,
+                "unpacked image",
+                opened,
+                deadline=deadline,
+                extra={"entry": entry.id},
+            )
         except OSError as exc:
             read.not_read("the unpacked image", f"{type(exc).__name__}", entry.id)
             continue
-        any_read = True
-        read.scanned.append({"source": "unpacked image", "entry": entry.id, "bytes": len(blob)})
-        directed_text.scan_bytes_into(
-            read.groups, blob, "unpacked image", deadline=deadline, extra={"entry": entry.id}
-        )
+        any_read = any_read or bool(found)
     return any_read
 
 
@@ -2757,6 +2843,7 @@ def directed_text_answer(
     routed: str = "",
     listed_formats: frozenset[str] = frozenset(),
     room: int | None = None,
+    readers: SampleReaders | None = None,
 ) -> dict[str, Any]:
     """The directed-text pass's answer over everything the pack can hand it, in order.
 
@@ -2773,8 +2860,14 @@ def directed_text_answer(
     read = _DirectedRead(groups=directed_text.Groups(room=room))
     unpacked: list[bool] = []
     steps: list[tuple[str, Callable[[], None]]] = [
-        (directed_text.FILE_SOURCE, lambda: _read_file(read, path, format_facts, deadline)),
-        ("unpacked images", lambda: unpacked.append(_read_unpacked(read, entries, deadline))),
+        (
+            directed_text.FILE_SOURCE,
+            lambda: _read_file(read, path, format_facts, deadline, readers),
+        ),
+        (
+            "unpacked images",
+            lambda: unpacked.append(_read_unpacked(read, entries, deadline, readers)),
+        ),
         ("recovered texts", lambda: _read_recovered(read, entries, whole_rows, deadline)),
         ("archive member names", lambda: _read_member_names(read, entries, deadline)),
         (DROPPED_SOURCE, lambda: _read_dropped(read, report, deadline)),

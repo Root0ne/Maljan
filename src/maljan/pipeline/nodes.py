@@ -1001,6 +1001,7 @@ def _augment_static_chunks_with_path(
     state: AnalysisState,
     *,
     provider_id: str | None = None,
+    readers: Any = None,
 ) -> list:
     """Inject the container-visible sample path into the static analyst's chunks.
 
@@ -1088,12 +1089,16 @@ def _augment_static_chunks_with_path(
     # deserves.
     if isinstance(host_path, str) and host_path:
         try:
-            from pathlib import Path as _P
+            from maljan.tools.readers import SampleReaders
 
-            from maljan.extractors.sample_identity import _detect_language_or_compiler
-
-            with _P(host_path).open("rb") as _fh:
-                _lang = _detect_language_or_compiler(_fh.read(4 * 1024 * 1024))
+            # Where the job's readings run (``tools.readers``): the reading of
+            # the toolchain stands in for the identity reading.
+            held = readers or SampleReaders(sample_path=host_path)
+            # The readers' own path of the sample: the one a place is handed
+            # its copy for.
+            _lang = held.read(
+                "toolchain", path=held.sample_path or host_path, prefix_bytes=4 * 1024 * 1024
+            )
             if _lang:
                 parsed["language_or_compiler"] = _lang
         except Exception as _e:  # noqa: BLE001 — a prompt hint is never worth a failure
@@ -1314,6 +1319,127 @@ def _step_arguments(step: Any, facts: Any, values: dict[str, str]) -> dict[str, 
     if roles.get("hash") and digest:
         args[roles["hash"]] = digest
     return args
+
+
+def sample_readers(container: Any, sample_path: str, artefacts: Any = None) -> Any:
+    """Where this job's readings of the sample run (``tools.readers.SampleReaders``).
+
+    A reading runs on the server declaring the tool it stands in for
+    (``pack_servers._declaring_server_key``), among the servers that declare
+    the readers' delivery primitive (``run_reader``, its declared kind
+    ``providers.servers.READER_DELIVERY_KIND``), when that server is switched on and reached at
+    an address: a container of its own, which opens its copy of the sample
+    under its declared ``sample_mount`` and holds none of this worker's
+    secrets. Every other reading runs in this process, as before: a server
+    started as this worker's child shares it anyway, and a server that
+    declares the tool but not the primitive (an operator's YARA server) has
+    no way to run it. Which server each reading runs on is resolved once per
+    job (:func:`_reader_servers`). The place's call opens the server for the
+    job, as a pack step's call does, and sends ``run_reader`` with the
+    reading's wall clock; the job's packet capture reaches it through the
+    job's artefact store (``artefacts``), as a server step's file does. Never
+    raises: a place that cannot be built is a reading in this process, logged.
+    """
+    from maljan.tools.readers import SampleReaders
+
+    places: dict[str, Any] = {}
+    try:
+        servers = container.config.mcp.servers
+        built: dict[str, Any] = {}
+        for tool, key in _reader_servers(container).items():
+            if key not in built:
+                built[key] = _reader_place(container, key, servers[key], artefacts)
+            places[tool] = built[key]
+    except Exception as exc:  # noqa: BLE001 — a place not built leaves the reading here
+        logger.warning("sample readers: the readings' servers were not read (%s).", exc)
+        places = {}
+    return SampleReaders(sample_path=sample_path, places=places)
+
+
+def _reader_servers(container: Any) -> dict[str, str]:
+    """``{tool a reading stands in for: the key of the server it runs on}``, once per job.
+
+    Only the tools whose server declares the readers' delivery primitive, is switched
+    on and is reached at an address are named; the answer is kept on the
+    container under the job's key, so the choice (and what it logs) is made
+    once however many callers ask.
+    """
+    from maljan.agents.sample_staging import REMOTE_TRANSPORTS
+    from maljan.providers.servers import READER_DELIVERY_KIND
+    from maljan.tools.readers import READERS
+
+    job = str(container.job_key())
+    held = getattr(container, "_reader_servers_held", None)
+    if isinstance(held, tuple) and held[0] == job:
+        return dict(held[1])
+    servers = container.config.mcp.servers
+    runners = {
+        key: server
+        for key, server in servers.items()
+        if any(
+            getattr(facts, "kind", None) == READER_DELIVERY_KIND
+            for facts in (getattr(server, "tool_facts", None) or {}).values()
+        )
+    }
+    chosen: dict[str, str] = {}
+    for tool in dict.fromkeys(spec.stands_for for spec in READERS.values()):
+        key = _declaring_server_key(runners, tool, purpose=f"the reading of {tool}")
+        config = runners.get(key) if key else None
+        if config is None or not getattr(config, "enabled", True):
+            continue
+        transport = str(getattr(config, "transport", "stdio") or "stdio").lower()
+        if transport in REMOTE_TRANSPORTS:
+            chosen[tool] = key
+    try:
+        container._reader_servers_held = (job, dict(chosen))
+    except Exception:  # noqa: BLE001 — a container that keeps nothing resolves again
+        pass
+    return chosen
+
+
+def _reader_place(container: Any, key: str, config: Any, artefacts: Any) -> Any:
+    """The place of server ``key`` for this job's readings (``tools.readers.Place``)."""
+    from maljan.agents.base_agent import run_coro_blocking
+    from maljan.core.config import ToolRef
+    from maljan.pipeline import artefacts as artefact_store
+    from maljan.tools.readers import RUN_READER, Place, ReaderRefused, SampleNotPlaced
+
+    job = container.job_key()
+
+    def call(payload: dict[str, Any], timeout: float | None) -> Any:
+        registry = container.get_server_registry()
+        tools, reasons = registry.tools_for_ref(
+            ToolRef(kind="mcp", server=key, name=RUN_READER),
+            job,
+            truncation_ledger=container.get_truncation_ledger(),
+        )
+        handle = registry.get(key)
+        if not getattr(handle, "is_open", False):
+            raise ReaderRefused("; ".join(reasons) or f"{key} could not be attached")
+        return run_coro_blocking(
+            handle.deliver(RUN_READER, payload, timeout),
+            float(timeout) if timeout else None,
+            label=f"reader:{key}",
+        )
+
+    def hand(path: str) -> str:
+        if artefacts is None:
+            raise SampleNotPlaced(artefact_store.NO_STORE)
+        artefact = artefacts.take_in_capture(path)
+        values = {"capture_path": artefact.id}
+        why = artefact_store.hand_over(artefacts, container, key, config, values)
+        if why:
+            raise SampleNotPlaced(why)
+        return str(values["capture_path"])
+
+    mounted = getattr(container, "server_sample_paths", None) or {}
+    return Place(
+        server=key,
+        sample_path=str(mounted.get(key) or "") if isinstance(mounted, dict) else "",
+        job=job,
+        call=call,
+        hand=hand,
+    )
 
 
 def _server_step_call(container: ServiceContainer, artefacts: Any = None) -> Any:
@@ -2133,6 +2259,7 @@ def make_triage_node(
             pack_chars=upstream_chars(container),
             artefacts=artefacts,
             servers=cfg.mcp.servers,
+            readers=sample_readers(container, path, artefacts),
         )
 
         def _elapsed_ms() -> int:
@@ -2731,7 +2858,12 @@ def agent_input_room(container: Any, agent_name: str) -> Room:
 
 
 def added_to_head(
-    state: AnalysisState, block: str, *, sample_fed: bool, provider_id: str | None
+    state: AnalysisState,
+    block: str,
+    *,
+    sample_fed: bool,
+    provider_id: str | None,
+    readers: Any = None,
 ) -> Callable[[str], int]:
     """How many characters the node adds to a head chunk of a source's text, asked before chunking.
 
@@ -2757,7 +2889,9 @@ def added_to_head(
             )
         ]
         if sample_fed:
-            shown = _augment_static_chunks_with_path(shown, state, provider_id=provider_id)
+            shown = _augment_static_chunks_with_path(
+                shown, state, provider_id=provider_id, readers=readers
+            )
         shown = _with_upstream(shown, block)
         return max(len(str(shown[0].content)) - len(text), in_front)
 
@@ -2802,6 +2936,7 @@ def _analyst_input(
     """
     sample_fed = role in SAMPLE_FED_ROLES
     provider_id = provider_id if sample_fed else None
+    readers = sample_readers(container, _absolute_host_sample_path(state)) if sample_fed else None
     chunks = container.load_data_for_agent(
         agent_name,
         file_hash=file_hash,
@@ -2809,11 +2944,16 @@ def _analyst_input(
         sample_path=_absolute_host_sample_path(state) or None,
         room=room,
         head_room=head_room(
-            room, added_to_head(state, block, sample_fed=sample_fed, provider_id=provider_id)
+            room,
+            added_to_head(
+                state, block, sample_fed=sample_fed, provider_id=provider_id, readers=readers
+            ),
         ),
     )
     if sample_fed:
-        chunks = _augment_static_chunks_with_path(chunks, state, provider_id=provider_id)
+        chunks = _augment_static_chunks_with_path(
+            chunks, state, provider_id=provider_id, readers=readers
+        )
     return chunks
 
 

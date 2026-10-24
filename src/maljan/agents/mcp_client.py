@@ -406,6 +406,15 @@ def served_info(info: Any) -> dict[str, str]:
     return out
 
 
+# The most a delivery primitive's answer may hold, in characters (64 MiB): far
+# past any reading's answer, and short of what would exhaust the worker.
+DELIVERY_ANSWER_MAX_CHARS = 64 * 1024 * 1024
+
+# How long a streamable-HTTP or SSE session waits for the next bytes of an
+# answer, as the client library ships it.
+HTTP_READ_TIMEOUT_SECONDS = 300.0
+
+
 class MCPLangChainToolkit:
     """Toolkit that connects to an MCP server and exposes its tools to LangChain."""
 
@@ -424,6 +433,7 @@ class MCPLangChainToolkit:
         categories: Mapping[str, str] | None = None,
         keep_tool_definitions: bool = False,
         label: str = "",
+        http_read_timeout: float = HTTP_READ_TIMEOUT_SECONDS,
     ):
         self.server_params = server_params
         # The server's name in what this toolkit logs about it; a stdio
@@ -435,6 +445,10 @@ class MCPLangChainToolkit:
         self.transport = (transport or "stdio").lower()
         self.http_url = http_url
         self.http_headers = http_headers or {}
+        # How long an HTTP session waits for the next bytes of an answer: the
+        # library's own unless the server's block runs readings whose own
+        # clocks are longer (``ServerHandle``), each call still held to its own.
+        self.http_read_timeout = float(http_read_timeout)
         self.session: ClientSession | None = None
         self._exit_stack: Any = None
         self._tools: list[BaseTool] = []
@@ -493,13 +507,20 @@ class MCPLangChainToolkit:
             )
         self._exit_stack = AsyncExitStack()
 
+        # The session's wait for an answer's next bytes, named only where it
+        # is not the library's own, so every other session opens as before.
+        waits: dict[str, Any] = (
+            {"sse_read_timeout": self.http_read_timeout}
+            if self.http_read_timeout != HTTP_READ_TIMEOUT_SECONDS
+            else {}
+        )
         try:
             if self.transport in ("http", "streamable-http"):
                 from mcp.client.streamable_http import streamablehttp_client
 
                 logger.info("Connecting to MCP server over streamable-http: %s", self._host_label())
                 streams = await self._exit_stack.enter_async_context(
-                    streamablehttp_client(self.http_url, headers=self.http_headers)
+                    streamablehttp_client(self.http_url, headers=self.http_headers, **waits)
                 )
                 # streamablehttp_client yields (read, write, get_session_id).
                 read, write = streams[0], streams[1]
@@ -508,7 +529,7 @@ class MCPLangChainToolkit:
 
                 logger.info("Connecting to MCP server over SSE: %s", self._host_label())
                 read, write = await self._exit_stack.enter_async_context(
-                    sse_client(self.http_url, headers=self.http_headers)
+                    sse_client(self.http_url, headers=self.http_headers, **waits)
                 )
             else:
                 if self.server_params is None:
@@ -583,6 +604,47 @@ class MCPLangChainToolkit:
     def get_tools(self) -> list[BaseTool]:
         """Return the list of LangChain tools exposed by the MCP server."""
         return self._tools
+
+    async def deliver(
+        self, tool_name: str, args: dict[str, Any], timeout: float | None = None
+    ) -> Any:
+        """One call of a delivery primitive, answered whole, for the platform alone.
+
+        A delivery primitive's answer is the platform's input, never a model's
+        (``agents.tool_pinning.DELIVERY_TOOLS``), so it is not held to a
+        model's output limit: its text read as strict JSON (no ``NaN`` or
+        ``Infinity``), else the server's structured answer. The server may
+        have opened hostile bytes, so an answer past
+        :data:`DELIVERY_ANSWER_MAX_CHARS` is refused rather than read, and an
+        answer the server marked as an error is raised with its words.
+        ``timeout`` is how long the call waits for its answer.
+        """
+        import json
+
+        def refused(constant: str) -> Any:
+            raise ValueError(f"{tool_name}: the answer holds {constant}, which is no JSON value")
+
+        session = self.session
+        if session is None:
+            raise RuntimeError(f"{tool_name}: the server's session is not open")
+        timing: dict[str, Any] = (
+            {"read_timeout_seconds": timedelta(seconds=timeout)} if timeout else {}
+        )
+        result = await session.call_tool(tool_name, arguments=args, **timing)
+        text = "\n".join(str(getattr(c, "text", "") or "") for c in result.content or [])
+        if len(text) > DELIVERY_ANSWER_MAX_CHARS:
+            raise ValueError(
+                f"{tool_name}: the answer is {len(text)} characters, past the "
+                f"{DELIVERY_ANSWER_MAX_CHARS} a delivery answer may hold"
+            )
+        if result.isError:
+            raise RuntimeError(f"{tool_name}: {self._said_text(text.strip())}")
+        if text.strip():
+            return json.loads(text, parse_constant=refused)
+        content = getattr(result, "structuredContent", None)
+        if isinstance(content, dict) and content:
+            return content
+        raise ValueError(f"{tool_name}: the server answered nothing")
 
     async def cleanup(self) -> None:
         """Close the MCP server connection. Total: never raises, safe to repeat.

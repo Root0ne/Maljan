@@ -370,6 +370,13 @@ def _register_retirement_hook() -> None:
     _HOOK_REGISTERED.set()
 
 
+# The declared kind of the readers' delivery primitive (``tools.readers``), and
+# how long the session of a block that declares it waits for an answer's next
+# bytes: a day, past any reading's own clock, which each call is held to.
+READER_DELIVERY_KIND = "reader_delivery"
+READING_SESSION_READ_TIMEOUT_SECONDS = 24 * 3600.0
+
+
 class ServerHandle:
     """One configured MCP server, attached for at most one job at a time."""
 
@@ -489,6 +496,23 @@ class ServerHandle:
     @property
     def is_open(self) -> bool:
         return self._toolkit is not None
+
+    async def deliver(
+        self, tool_name: str, args: dict[str, Any], timeout: float | None = None
+    ) -> Any:
+        """One call of a delivery primitive on this open handle, answered whole.
+
+        Only a delivery primitive (``agents.tool_pinning.DELIVERY_TOOLS``): its
+        answer is the platform's input, never shown to a model, so no model's
+        output limit applies (``MCPLangChainToolkit.deliver``).
+        """
+        from maljan.agents.tool_pinning import DELIVERY_TOOLS
+
+        if tool_name not in DELIVERY_TOOLS:
+            raise ValueError(f"{tool_name} is no delivery primitive")
+        if self._toolkit is None:
+            raise RuntimeError(f"mcp server '{self.name}' is not open")
+        return await self._toolkit.deliver(tool_name, args, timeout)
 
     @property
     def note_key(self) -> str:
@@ -683,7 +707,23 @@ class ServerHandle:
             guard=self.guard,
             categories=categories_of(getattr(self.config, "tool_facts", None)),
             keep_tool_definitions=self.keeps_tool_definitions,
+            **self._reading_session(),
         )
+
+    def _reading_session(self) -> dict[str, Any]:
+        """The session's read timeout for a block that declares the readers' delivery primitive.
+
+        A reading on such a server (capa, FLOSS) runs for as long as its own
+        clock allows, past the HTTP session's usual wait for the next bytes
+        of an answer, and sends none while it works. Its session waits
+        :data:`READING_SESSION_READ_TIMEOUT_SECONDS`; each call is still held
+        to its own clock (``MCPLangChainToolkit.deliver``) and an agent's to
+        the job's breaker. Any other block keeps the library's wait.
+        """
+        facts = getattr(self.config, "tool_facts", None) or {}
+        if any(getattr(f, "kind", None) == READER_DELIVERY_KIND for f in facts.values()):
+            return {"http_read_timeout": READING_SESSION_READ_TIMEOUT_SECONDS}
+        return {}
 
     def open(
         self,

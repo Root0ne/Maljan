@@ -45,6 +45,12 @@ SHIPPED_SINCE = frozenset(
         "mcp:jadx",
     }
 )
+# The tools added since to a source dev had, each filed as the dev tool it is
+# like: the readers' delivery primitive as the sample's (``tools.readers``).
+ADDED_SINCE = {
+    "mcp:analysis::run_reader": "mcp:analysis::put_sample",
+    "mcp:network::run_reader": "mcp:analysis::put_sample",
+}
 
 
 @pytest.fixture
@@ -79,6 +85,8 @@ def test_every_built_in_tool_files_every_answer_as_dev_did(declared: ToolDeclara
                 assert tool == UNDECLARED or held.tools[tool].kind, key
                 like = UNDECLARED if tool == UNDECLARED else "strings"
                 dev = DEV["filed"][f"mcp:analysis::{like}"]
+            elif key in ADDED_SINCE:
+                dev = DEV["filed"][ADDED_SINCE[key]]
             else:
                 dev = DEV["filed"].get(key) or DEV["filed"][f"{source}::{UNDECLARED}"]
             now = [_filed(held.source, tool, answer) for answer in DEV["answers"]]
