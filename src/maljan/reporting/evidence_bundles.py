@@ -20,6 +20,7 @@ import ipaddress
 import re
 import weakref
 from collections.abc import Callable, Iterable, Iterator
+from dataclasses import dataclass, field
 from typing import Any
 from urllib.parse import urlsplit
 
@@ -68,6 +69,9 @@ _NETWORK_SANDBOX_TOOLS = "evidence_bundles._NETWORK_SANDBOX_TOOLS"
 # code is shown as decompiled source or as its disassembly, whichever the
 # reverser gives. A captured output with no recorded source is routed by its
 # tool's name, as it always was (``legacy_tool_names.SECTION_TOOL_HINTS``).
+# Decompiled code is read as ``decompile`` whichever tool gave it, a batch's
+# included (``tool_kinds.code_family_kind``), and the functions a batch's answer
+# lists are shown once each in the run (``function_table``).
 _CODE = ("decompile", "function_disassembly")
 _SECTION_KINDS: dict[str, tuple[str, ...]] = {
     "packing_obfuscation": ("segments", "anti_analysis_scan", "behaviour_scan"),
@@ -94,16 +98,22 @@ def shown_to_section(section: str, output: dict[str, Any]) -> bool:
     section reads, or its declaration names the section. A tool its source
     declares nothing for reaches the sections that read a function's code
     when its name says it lists one (``tool_kinds.undeclared_code_kind``), as
-    the function map reads it. With no source, by the tool's name, as before.
+    the function map reads it, or when its answer lists several functions'
+    code. Any code is read as the kind its code is
+    (``tool_kinds.code_family_kind``): a batch of decompiled functions
+    reaches the sections one decompiled function does. With no source, by
+    the tool's name, as before.
     """
     by_name = tool_kinds.shown_by_name(section, output)
     if by_name is not None:
         return by_name
+    reads = _SECTION_KINDS.get(section, ())
+    code = tool_kinds.code_family_kind(output)
+    as_code = code in _CODE and code in reads
     facts = tool_kinds.facts_of(output)
     if facts is None:
-        kind = tool_kinds.undeclared_code_kind(output)
-        return kind in _CODE and kind in _SECTION_KINDS.get(section, ())
-    return facts.kind in _SECTION_KINDS.get(section, ()) or section in facts.report_sections
+        return as_code
+    return facts.kind in reads or section in facts.report_sections or as_code
 
 
 # Keyword hints to pull the relevant ISR claims into a technical section.
@@ -388,6 +398,11 @@ def _filter_tool_outputs(
     cited: set[str] | None = None,
     index: dict[str, Any] | None = None,
 ) -> list[dict[str, str]]:
+    """The captured outputs a section is shown as items of their own.
+
+    A batch's answer is not one of them: its functions are shown once each,
+    run-wide (:func:`function_table`).
+    """
     if not technical_evidence:
         return []
     picked: list[dict[str, str]] = []
@@ -395,6 +410,8 @@ def _filter_tool_outputs(
         for o in outputs or []:
             name = str(o.get("tool_name", ""))
             if shown_to_section(section, o) or cited_undeclared_output(o, cited or set(), index):
+                if tool_kinds.function_parts(o):
+                    continue
                 picked.append(
                     {
                         "tool": name,
@@ -405,6 +422,219 @@ def _filter_tool_outputs(
                     }
                 )
     return picked
+
+
+# The section a function's code is shown in when no claim of any section that
+# reads code cites its entry or names the function. No composed section owns
+# the code listings (they fall through to the figure appendix) or "Functions
+# examined" (a measured block of the evidence appendix); ``commands`` is the
+# section whose reading leads with a function's code and the function-level
+# analysis beside it (``_SECTION_KINDS``), so it is the code's home.
+CODE_HOME_SECTION = "commands"
+# The sections that read a function's code, in report order.
+_CODE_SECTIONS = tuple(s for s in SECTIONS if "decompile" in _SECTION_KINDS.get(s, ()))
+# An address a claim writes (``0x`` and hex digits), and a decompiler's own name
+# for a function, which a claim names a function by.
+_CLAIMED_ADDRESS_RE = re.compile(r"\b0x([0-9a-fA-F]{1,16})\b")
+
+
+@dataclass
+class FunctionCode:
+    """One function's code, shown once in the run, with every entry it was read in.
+
+    ``key`` is the function in one spelling (``core.undeclared_tools.
+    function_key``); ``cites`` the entries and the function, in the ledger's
+    form for a part of an entry; ``shown_in`` the sections that show the code,
+    every other section that reads code listing it by one line; ``reaches``
+    the sections its answers were shown to.
+    """
+
+    key: str
+    where: str
+    tool: str
+    code: str
+    cites: list[str] = field(default_factory=list)
+    notes: list[str] = field(default_factory=list)
+    reaches: list[str] = field(default_factory=list)
+    shown_in: list[str] = field(default_factory=list)
+
+
+def function_table(
+    report: MalwareReport,
+    technical_evidence: dict[str, list[dict[str, Any]]] | None = None,
+    isr_reports: dict[str, Any] | None = None,
+) -> list[FunctionCode]:
+    """Every function a batch's answer listed, once each, and the sections that show its code.
+
+    One row for each distinct body of each function, the function in one
+    spelling (``0x1360bc03868``, ``1360bc03868`` and ``FUN_1360bc03868`` are
+    one), with the citation of every entry that listed it: an entry is cited
+    only where the report's evidence index names the same tool and agent for
+    it (:func:`cited_undeclared_output` holds a routed output to the same).
+    A body a single decompile's answer already shows is not repeated. A
+    function's code is shown in each section a claim of which names it (its
+    address, its decompiler name, or an offset from an image base the run
+    states), or cites its entry naming none of that entry's functions
+    (:func:`_claimed_rows`); one no claim points at is shown in
+    :data:`CODE_HOME_SECTION`. Linear in the answers and the claims.
+    """
+    from maljan.core.undeclared_tools import (
+        ANSWER_CUT_NOTE,
+        code_text,
+        function_address,
+        function_key,
+    )
+
+    tech_ev = technical_evidence if technical_evidence is not None else report.technical_evidence
+    index = _index_of(report)
+    rows: dict[tuple[str, str], FunctionCode] = {}
+    singles: set[str] = set()
+    for outputs in (tech_ev or {}).values():
+        for o in outputs or []:
+            if o.get("ok") is False:
+                continue
+            parts = tool_kinds.function_parts(o)
+            if not parts:
+                if tool_kinds.code_family_kind(o):
+                    singles.add(code_text(o.get("output")).strip())
+                continue
+            entry_id = _indexed_entry(o, index)
+            reaches = [s for s in _CODE_SECTIONS if shown_to_section(s, o)]
+            for part in parts:
+                row = rows.setdefault(
+                    (function_key(part.where), part.code),
+                    FunctionCode(
+                        function_key(part.where),
+                        part.where,
+                        str(o.get("tool_name", "")),
+                        part.code,
+                    ),
+                )
+                cite = tool_kinds.part_citation(entry_id, part) if entry_id else ""
+                if cite and cite not in row.cites:
+                    row.cites.append(cite)
+                if (part.answer_cut or part.cut) and ANSWER_CUT_NOTE not in row.notes:
+                    row.notes.append(ANSWER_CUT_NOTE)
+                row.reaches.extend(s for s in reaches if s not in row.reaches)
+    table = [row for row in rows.values() if row.code.strip() not in singles and row.reaches]
+    if not table:
+        return []
+    claims = _claims_text(report, isr_reports)
+    bases = _stated_bases(tech_ev)
+    by_address: dict[int, list[FunctionCode]] = {}
+    by_entry: dict[str, list[FunctionCode]] = {}
+    for row in table:
+        address = function_address(row.where)
+        if address is not None:
+            by_address.setdefault(address, []).append(row)
+        for entry_id in dict.fromkeys(cite.split(" ", 1)[0] for cite in row.cites):
+            by_entry.setdefault(entry_id, []).append(row)
+    for section in _CODE_SECTIONS:
+        for claim in _filter_claims(claims, _SECTION_CLAIM_KEYWORDS.get(section, ())):
+            for row in _claimed_rows(claim, by_address, by_entry, bases):
+                if section in row.reaches and section not in row.shown_in:
+                    row.shown_in.append(section)
+    for row in table:
+        if not row.shown_in:
+            home = CODE_HOME_SECTION if CODE_HOME_SECTION in row.reaches else row.reaches[0]
+            row.shown_in.append(home)
+    return table
+
+
+def _claimed_rows(
+    claim: dict[str, str],
+    by_address: dict[int, list[FunctionCode]],
+    by_entry: dict[str, list[FunctionCode]],
+    bases: tuple[int, ...],
+) -> list[FunctionCode]:
+    """The functions one claim points a section at, whose code the section is shown.
+
+    Each function the claim names (its address, its decompiler name, or an
+    offset from a stated image base). Of each entry it cites, only the
+    functions it names when it names any of them: the entry's others are
+    listed by a line. An entry it cites without naming any of its functions
+    gives all of them, so the code it was pointed at is shown.
+    """
+    from maljan.schemas.evidence import entry_ids_in
+
+    text = f"{claim.get('claim', '')} {claim.get('evidence_ref', '')}"
+    picked: dict[int, FunctionCode] = {}
+    for address in _named_functions(text):
+        for at in (address, *(address + base for base in bases)):
+            picked.update((id(row), row) for row in by_address.get(at, ()))
+    named = set(picked)
+    for entry_id in sorted(entry_ids_in(text)):
+        rows = by_entry.get(entry_id, [])
+        if not any(id(row) in named for row in rows):
+            picked.update((id(row), row) for row in rows)
+    return list(picked.values())
+
+
+def _indexed_entry(output: dict[str, Any], index: dict[str, Any]) -> str:
+    """The entry a captured output's call number names, when the index names its tool and agent."""
+    from maljan.schemas.evidence import format_entry_id
+
+    seq = output.get("seq")
+    if not isinstance(seq, int) or isinstance(seq, bool) or seq < 0:
+        return ""
+    entry_id = format_entry_id(seq + 1)
+    row = index.get(entry_id)
+    if row is None:
+        return ""
+    same_tool = str(getattr(row, "tool", "")) == str(output.get("tool_name") or "")
+    same_agent = str(getattr(row, "agent", "")) == str(output.get("agent_id") or "")
+    return entry_id if same_tool and same_agent else ""
+
+
+def _named_functions(text: str) -> set[int]:
+    """The addresses a claim's text names: ``0x`` and hex digits, and decompiler names."""
+    from maljan.core.undeclared_tools import auto_name_pattern
+
+    named = {int(m.group(1), 16) for m in _CLAIMED_ADDRESS_RE.finditer(text)}
+    named.update(int(m.group(1), 16) for m in auto_name_pattern().finditer(text))
+    return named
+
+
+def _stated_bases(technical_evidence: dict[str, list[dict[str, Any]]] | None) -> tuple[int, ...]:
+    """The image bases the run's answers state, an offset from which names a function too."""
+    from types import SimpleNamespace
+
+    from maljan.pipeline.validation import image_bases_in
+
+    return image_bases_in(
+        SimpleNamespace(output=str(o.get("output") or ""))
+        for outputs in (technical_evidence or {}).values()
+        for o in outputs or []
+    )
+
+
+def _function_code(section: str, table: list[FunctionCode]) -> list[dict[str, Any]]:
+    """The functions whose code ``section`` shows, each once, whole."""
+    return [
+        {
+            "tool": row.tool,
+            "symbol": row.where,
+            "output": row.code,
+            "cites": list(row.cites),
+            "notes": list(row.notes),
+        }
+        for row in table
+        if section in row.shown_in
+    ]
+
+
+def _function_index(section: str, table: list[FunctionCode]) -> list[dict[str, Any]]:
+    """One row for each function another section shows the code of: where it is, and how big."""
+    return [
+        {
+            "symbol": row.where,
+            "cites": list(row.cites),
+            "chars": len(row.code),
+            "shown_in": list(row.shown_in),
+        }
+        for row in table
+        if section in row.reaches and section not in row.shown_in
+    ]
 
 
 # The section facts whose values are the platform's own citations (an entry
@@ -517,6 +747,19 @@ def bundle_for(
     inventing one; a block that is present on every bundle would make every
     bundle look non-empty and defeat that.
     """
+    from maljan.core.undeclared_tools import code_parts_read
+
+    with code_parts_read():
+        return _bundle_for(section, report, technical_evidence, isr_reports)
+
+
+def _bundle_for(
+    section: str,
+    report: MalwareReport,
+    technical_evidence: dict[str, list[dict[str, Any]]] | None = None,
+    isr_reports: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """:func:`bundle_for`, each answer read once (``core.undeclared_tools.code_parts_read``)."""
     all_claims = _claims_text(report, isr_reports)
     tech_ev = technical_evidence if technical_evidence is not None else report.technical_evidence
     # Prepended to every section's facts, so no section can contradict what the
@@ -602,20 +845,26 @@ def bundle_for(
     if section in ("communications", "command_and_control"):
         net = report.network
         claims = _filter_claims(all_claims, _SECTION_CLAIM_KEYWORDS[section])
-        return {
-            "claims": claims,
-            "tool_outputs": _filter_tool_outputs(
-                tech_ev, section, cited_entry_ids(claims), _index_of(report)
-            ),
-            "binary": base,
-            "facts": {
-                "domains": [d.fqdn for d in (net.domains if net else [])],
-                "ips": [_endpoint(i) for i in (net.ips if net else [])],
-                "urls": [u.url for u in (net.urls if net else [])],
-                "user_agents": (net.user_agents if net else []),
-                VALUE_HOLDERS_FACT: _network_holders(report),
+        return _with_functions(
+            section,
+            {
+                "claims": claims,
+                "tool_outputs": _filter_tool_outputs(
+                    tech_ev, section, cited_entry_ids(claims), _index_of(report)
+                ),
+                "binary": base,
+                "facts": {
+                    "domains": [d.fqdn for d in (net.domains if net else [])],
+                    "ips": [_endpoint(i) for i in (net.ips if net else [])],
+                    "urls": [u.url for u in (net.urls if net else [])],
+                    "user_agents": (net.user_agents if net else []),
+                    VALUE_HOLDERS_FACT: _network_holders(report),
+                },
             },
-        }
+            report,
+            tech_ev,
+            isr_reports,
+        )
 
     # Generic technical-spine section. These carried ``facts: {}`` until
     # 2026-07-28 — every one of them wrote prose about a subject the report had
@@ -624,14 +873,48 @@ def bundle_for(
     # analyst claims to go on, and that is the same failure mode as the
     # conclusion's.
     claims = _filter_claims(all_claims, _SECTION_CLAIM_KEYWORDS.get(section, ()))
-    return {
-        "claims": claims,
-        "tool_outputs": _filter_tool_outputs(
-            tech_ev, section, cited_entry_ids(claims), _index_of(report)
-        ),
-        "binary": base,
-        "facts": _technical_facts(section, report),
-    }
+    return _with_functions(
+        section,
+        {
+            "claims": claims,
+            "tool_outputs": _filter_tool_outputs(
+                tech_ev, section, cited_entry_ids(claims), _index_of(report)
+            ),
+            "binary": base,
+            "facts": _technical_facts(section, report),
+        },
+        report,
+        tech_ev,
+        isr_reports,
+    )
+
+
+def _with_functions(
+    section: str,
+    bundle: dict[str, Any],
+    report: MalwareReport,
+    technical_evidence: dict[str, list[dict[str, Any]]] | None,
+    isr_reports: dict[str, Any] | None,
+) -> dict[str, Any]:
+    """``bundle`` with the batch functions a section that reads code is shown.
+
+    ``function_code``: the functions whose code the section shows, each
+    whole, with every entry that listed it; ``function_index``: one row for
+    each function another section shows, so the section can still cite it
+    (:func:`function_table`). Neither is a tool answer the section's window
+    is shared among (``ReportComposer._item_chars``). A section that reads no
+    code, and a run with no batch, gets neither key.
+    """
+    if section not in _CODE_SECTIONS:
+        return bundle
+    table = function_table(report, technical_evidence, isr_reports)
+    shown = _function_code(section, table)
+    listed = _function_index(section, table)
+    if shown:
+        bundle["function_code"] = shown
+    if listed:
+        bundle["function_index"] = listed
+    return bundle
 
 
 def _index_of(report: MalwareReport) -> dict[str, Any]:
@@ -1341,8 +1624,8 @@ def _payload_facts(report: MalwareReport) -> dict[str, Any]:
 
 
 def is_empty(bundle: dict[str, Any]) -> bool:
-    """A bundle with no claims, no tool outputs, and no meaningful facts."""
-    if bundle.get("claims") or bundle.get("tool_outputs"):
+    """A bundle with no claims, no tool outputs, no function code, and no meaningful facts."""
+    if bundle.get("claims") or bundle.get("tool_outputs") or bundle.get("function_code"):
         return False
     facts = bundle.get("facts") or {}
     return not any(v for v in facts.values())

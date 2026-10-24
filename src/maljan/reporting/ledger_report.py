@@ -1055,7 +1055,9 @@ def _pcap(acc: _Sections, entry: LedgerEntry, data: dict[str, Any]) -> None:
 # entry whose tool declares a function's code (``decompile``,
 # ``function_disassembly``) or a function listing (``function_list``,
 # ``method_list``) lands under "Functions examined", from any server
-# (``CONSUMER_KINDS``).
+# (``CONSUMER_KINDS``). A batch of decompiled functions, or any answer listing
+# several functions' code, lands there one line per function
+# (``tool_kinds.function_parts``).
 _FUNCTION_CONSUMERS = ("ledger_report._FUNCTION_TOOLS", "ledger_report._FUNCTION_LIST_TOOLS")
 
 
@@ -1081,8 +1083,22 @@ def _called_address(entry: LedgerEntry) -> str:
     return ""
 
 
-def _functions_examined(acc: _Sections, entry: LedgerEntry, _data: Any) -> None:
+def _functions_examined(
+    acc: _Sections, entry: LedgerEntry, _data: Any, seen: set[str] | None = None
+) -> None:
+    """One line for the function an entry examined, or for each function a batch listed.
+
+    ``seen`` holds the functions already listed, in one spelling
+    (``core.undeclared_tools.function_key``): a batch's function listed by
+    another line, a single call's or another batch's, is not listed twice. A
+    batch's answer cut for storage says so on its last line.
+    """
     section = acc.get("functions_examined", "Functions examined", "list")
+    parts = tool_kinds.function_parts(entry)
+    if parts:
+        _batch_functions(acc, section, entry, parts, seen)
+        acc.credit(section, entry)
+        return
     label = entry.symbol or _called_address(entry)
     if not label:
         # No argument of the call holds an address: the item says only that,
@@ -1097,6 +1113,37 @@ def _functions_examined(acc: _Sections, entry: LedgerEntry, _data: Any) -> None:
     else:
         acc.add_item(section, f"{label} ({entry.tool})")
     acc.credit(section, entry)
+
+
+def _batch_functions(
+    acc: _Sections,
+    section: EvidenceSection,
+    entry: LedgerEntry,
+    parts: list[Any],
+    seen: set[str] | None,
+) -> None:
+    """The lines of the functions a batch's answer listed, each function once."""
+    from maljan.core.undeclared_tools import ANSWER_CUT_NOTE, function_key
+
+    cut = entry.truncated or any(part.cut or part.answer_cut for part in parts)
+    named: list[str] = []
+    for part in parts:
+        key = function_key(part.where)
+        if seen is not None:
+            if key in seen:
+                continue
+            seen.add(key)
+        named.append(part.where)
+    if cut and not named:
+        # Every function it listed is listed already; the cut is still said.
+        named.append(parts[-1].where)
+    for at, where in enumerate(named, start=1):
+        said = [entry.tool]
+        if answer_not_shown(entry):
+            said.append(FUNCTION_NOT_SHOWN)
+        if cut and at == len(named):
+            said.append(ANSWER_CUT_NOTE)
+        acc.add_item(section, f"{where} ({'; '.join(said)})")
 
 
 def _finding_confidence(value: Any) -> str:
@@ -1622,6 +1669,21 @@ def build_sections(
     either way and marks nothing; an empty set is a run that published no
     technique at all, and every id it prints is marked.
     """
+    from maljan.core.undeclared_tools import code_parts_read
+
+    with code_parts_read():
+        return _build_sections(ledger, isrs, file_type, platform, merges, published_techniques)
+
+
+def _build_sections(
+    ledger: list[LedgerEntry],
+    isrs: dict[str, AgentISR] | None = None,
+    file_type: str = "unknown",
+    platform: str = "unknown",
+    merges: MergeTally | None = None,
+    published_techniques: frozenset[str] | None = None,
+) -> list[EvidenceSection]:
+    """:func:`build_sections`, each answer read once (``core.undeclared_tools.code_parts_read``)."""
     acc = _Sections(merges)
 
     identity = acc.get("identity", "Sample identity", "kv", columns=["Field", "Value"])
@@ -1631,14 +1693,20 @@ def build_sections(
     if platform and platform != "unknown":
         acc.add_row(identity, ["platform", platform])
 
+    seen = _singly_examined(ledger or [])
     for entry in ledger or []:
         if not entry.ok:
             # A failed call is on the record in the ledger and in the run
             # summary; it has no content to build a section out of.
             continue
         if any(tool_kinds.is_of(entry, consumer) for consumer in _FUNCTION_CONSUMERS):
-            _functions_examined(acc, entry, entry.structured)
+            _functions_examined(acc, entry, entry.structured, seen)
             continue
+        if tool_kinds.reads_code(entry, "ledger_report._FUNCTION_TOOLS"):
+            # Code read as the kind a function's code is (a batch of decompiled
+            # functions): its functions are examined ones, and its answer is
+            # still drawn as it always was below.
+            _functions_examined(acc, entry, entry.structured, seen)
         builder = _BUILDERS.get(tool_kinds.builder_of(entry) or "")
         data = entry.structured
         if builder is not None and isinstance(data, dict):
@@ -1660,6 +1728,20 @@ def build_sections(
     _findings_section(acc, isrs or {}, published_techniques)
     _open_questions_section(acc, isrs or {}, ledger or [])
     return acc.result()
+
+
+def _singly_examined(ledger: list[LedgerEntry]) -> set[str]:
+    """The functions a call of one function examined, in one spelling: a batch lists none again."""
+    from maljan.core.undeclared_tools import function_key
+
+    return {
+        function_key(label)
+        for entry in ledger
+        if entry.ok
+        and any(tool_kinds.is_of(entry, consumer) for consumer in _FUNCTION_CONSUMERS)
+        and not tool_kinds.function_parts(entry)
+        and (label := entry.symbol or _called_address(entry))
+    }
 
 
 def _function_map_coverage(acc: _Sections, ledger: list[LedgerEntry]) -> None:

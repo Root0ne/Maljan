@@ -18,9 +18,11 @@ undeclared tool only.
 from __future__ import annotations
 
 import re
-from collections.abc import Callable, Iterable, Mapping
+from collections.abc import Callable, Iterable, Iterator, Mapping
+from contextlib import contextmanager
+from contextvars import ContextVar
 from functools import lru_cache
-from typing import Any
+from typing import Any, NamedTuple
 
 # ---------------------------------------------------------------------------
 # Roles, by declared kind
@@ -927,3 +929,351 @@ def _joined_strings(document: Any) -> str:
 def code_text(answer: Any, path: str = "", rows: str = "") -> str:
     """The code a code-listing answer holds, or ``""`` when it holds none (:func:`code_listing`)."""
     return code_listing(answer, path, rows)[0]
+
+
+# ---------------------------------------------------------------------------
+# An answer that lists several functions' code, one function at a time
+# ---------------------------------------------------------------------------
+
+
+class CodePart(NamedTuple):
+    """One function of an answer that lists several functions' code (:func:`code_parts`).
+
+    ``where`` is the function as the answer names it: the key it stands
+    under, or the address or name its row gives; ``item <n>`` (1-based) for a
+    row that names none. ``cut`` is whether the cut for storage fell inside
+    this function's code; ``answer_cut`` is whether the answer was cut for
+    storage after it, so the functions it listed later are not shown (set on
+    the last function read of a cut answer).
+    """
+
+    where: str
+    code: str
+    cut: bool
+    answer_cut: bool = False
+
+
+# What a function of a batch's answer cut for storage says where it is listed:
+# the functions the answer held after the cut are not in the ledger.
+ANSWER_CUT_NOTE = "answer cut for storage; later functions not shown"
+# A key of an answer keyed by function: an address (``0x`` and hex digits, or
+# six hex digits or more, one of them a digit) or a decompiler's own name for
+# one (``FUN_00401000``). Four bare digits read as often as a year or a count.
+_FUNCTION_KEY_RE = re.compile(r"0x[0-9a-fA-F]{1,16}|(?=[0-9a-fA-F]*\d)[0-9a-fA-F]{6,16}")
+_AUTO_NAME_RE = auto_name_pattern()
+# A line of a listing that opens with its instruction's address: the address,
+# then a mnemonic.
+_ADDRESSED_LINE_RE = re.compile(
+    r"^[ \t]*(?:0x)?([0-9a-fA-F]{4,16})h?[ \t:]+(?:[0-9a-fA-F]{2}[ \t]+)*[A-Za-z]{2,7}\b",
+    re.MULTILINE,
+)
+# The fields a row of a code list names its function in, in the order read.
+_FUNCTION_FIELDS = (
+    "address",
+    "addr",
+    "entry_point",
+    "entry",
+    "start",
+    "ea",
+    "function",
+    "name",
+    "symbol",
+)
+# How deep a cut answer is read member by member: the answer, a function's
+# value or the list of rows, a row, a row's field.
+_CUT_READ_DEPTH = 4
+_WHITESPACE_RE = re.compile(r"[ \t\r\n]*")
+_NO_MEMBER = object()
+
+
+def _function_key(key: Any) -> bool:
+    said = str(key).strip()
+    return bool(_FUNCTION_KEY_RE.fullmatch(said) or _AUTO_NAME_RE.fullmatch(said))
+
+
+def function_address(where: Any) -> int | None:
+    """The address a function's key or name writes, or ``None`` for a name that holds none.
+
+    ``0x`` and hex digits, six hex digits or more, or a decompiler's own name
+    for a function (``FUN_00401000``, ``fcn.00401000``).
+    """
+    said = str(where or "").strip()
+    named = _AUTO_NAME_RE.fullmatch(said)
+    if named is not None:
+        return int(named.group(1), 16)
+    if _FUNCTION_KEY_RE.fullmatch(said):
+        return int(said[2:] if said[:2].lower() == "0x" else said, 16)
+    return None
+
+
+def function_key(where: Any) -> str:
+    """One spelling for one function: its address in lower-case hex with no ``0x``, else its name.
+
+    ``0x1360bc03868``, ``1360bc03868`` and ``FUN_1360bc03868`` are one key.
+    """
+    address = function_address(where)
+    return f"{address:x}" if address is not None else str(where or "").strip().lower()
+
+
+def names_itself(part: CodePart) -> bool:
+    """Whether a function's code names the function its key or row names.
+
+    Its address's own decompiler name stands in it (``FUN_00401000`` under
+    ``0x401000``), or its first addressed line is at that address. A
+    cross-reference list, a string table or a rule's matches keyed by
+    address holds other addresses: none of them names its key.
+    """
+    address = function_address(part.where)
+    if address is None:
+        return False
+    if any(int(m.group(1), 16) == address for m in _AUTO_NAME_RE.finditer(part.code)):
+        return True
+    first = _ADDRESSED_LINE_RE.search(part.code)
+    return first is not None and int(first.group(1), 16) == address
+
+
+def _part_code(value: Any, path: str = "") -> str:
+    """The code one function's value holds: a code string, or the code under a row's code key.
+
+    A row is read at the declared ``path``, else only in its fields named for
+    code (``code``, ``decompiled``, ``pseudocode``, ``disassembly`` …): a
+    string table's text or a rule's matches are not a function's code.
+    """
+    if path and isinstance(value, Mapping):
+        from maljan.core.tool_declarations import first
+
+        held = first(value, path)
+        if isinstance(held, str) and (holds_code(held) or holds_bare_listing(held)):
+            return held.strip("\n")
+    if isinstance(value, str):
+        return value.strip("\n") if holds_code(value) else ""
+    if isinstance(value, Mapping):
+        found = [(key, text) for key, text in code_strings(value) if _CODE_KEY_RE.search(key)]
+        return _pick_code(found).strip("\n") if found else ""
+    return ""
+
+
+def _row_where(row: Any, at: int, named: tuple[str, ...]) -> str:
+    """The function a row of a code list names: a declared path, else a field named for one.
+
+    Every ledger id in a name is written out (``utils.written_forms.
+    ids_written_out``): a row's name is the tool's text, never a citation.
+    """
+    from maljan.utils.written_forms import ids_written_out
+
+    if isinstance(row, Mapping):
+        from maljan.core.tool_declarations import first
+
+        held = [first(row, path) for path in named if path]
+        held.extend(row.get(name) for name in _FUNCTION_FIELDS)
+        for value in held:
+            if isinstance(value, bool):
+                continue
+            if isinstance(value, int):
+                return f"0x{value:x}"
+            if isinstance(value, str) and value.strip():
+                return ids_written_out(value.strip()[:120])
+    return f"item {at}"
+
+
+def _filled(value: Any) -> bool:
+    return value is not None and value not in ("", [], {})
+
+
+def _read_cut(text: str, at: int, depth: int, cuts: dict[int, Any]) -> tuple[Any, int, bool]:
+    """``(value, end, cut)`` of the JSON value at ``at`` of an answer cut for storage.
+
+    A whole value is read whole; a string the cut fell in is read to the cut
+    (:func:`_read_to_cut`); an object or a list the cut fell in is read
+    member by member, to ``depth`` levels, its whole members kept and the
+    member the cut fell in kept as far as it reads. ``cuts`` records, by the
+    id of each container the cut fell in, the key or index of that member.
+    Each level reads its text once more than the level above: linear in the
+    answer for the fixed depth.
+    """
+    import json
+
+    try:
+        value, end = json.JSONDecoder().raw_decode(text, at)
+        return value, end, False
+    except ValueError:
+        pass
+    except RecursionError:
+        # Nested deeper than the decoder reads: nothing of it is read.
+        return None, len(text), True
+    if at >= len(text):
+        return None, at, True
+    opening = text[at]
+    if opening == '"':
+        return _read_to_cut(text[at + 1 :]), len(text), True
+    if opening not in "{[" or depth <= 0:
+        return None, len(text), True
+    from json import decoder
+
+    scanstring = decoder.scanstring  # type: ignore[attr-defined]
+    keyed = opening == "{"
+    container: Any = {} if keyed else []
+    pos = at + 1
+    while True:
+        pos = _WHITESPACE_RE.match(text, pos).end()  # type: ignore[union-attr]
+        if pos < len(text) and text[pos] == ("}" if keyed else "]"):
+            return container, pos + 1, False
+        key: Any = len(container)
+        if keyed:
+            if pos >= len(text) or text[pos] != '"':
+                return container, len(text), True
+            try:
+                key, pos = scanstring(text, pos + 1, False)
+            except ValueError:
+                return container, len(text), True
+            pos = _WHITESPACE_RE.match(text, pos).end()  # type: ignore[union-attr]
+            if pos >= len(text) or text[pos] != ":":
+                return container, len(text), True
+            pos = _WHITESPACE_RE.match(text, pos + 1).end()  # type: ignore[union-attr]
+        if pos >= len(text):
+            return container, pos, True
+        value, pos, cut = _read_cut(text, pos, depth - 1, cuts)
+        if cut:
+            if _filled(value):
+                if keyed:
+                    container[key] = value
+                else:
+                    container.append(value)
+                cuts[id(container)] = key
+            return container, len(text), True
+        if keyed:
+            container[key] = value
+        else:
+            container.append(value)
+        pos = _WHITESPACE_RE.match(text, pos).end()  # type: ignore[union-attr]
+        if pos < len(text) and text[pos] == ",":
+            pos += 1
+            continue
+        if pos < len(text) and text[pos] == ("}" if keyed else "]"):
+            return container, pos + 1, False
+        return container, len(text), True
+
+
+def code_parts(
+    answer: Any, path: str = "", rows: str = "", named: tuple[str, ...] = ()
+) -> list[CodePart]:
+    """The functions an answer lists code for one by one, in its order; ``[]`` for any other.
+
+    Read by the answer's shape, never by its tool: an object every key of
+    which names a function (an address or a decompiler's own name) is one
+    function per key, a key whose value holds no code (an error) left out;
+    the declared ``rows`` (``ToolFacts.rows``), or a list of rows (the
+    answer, or its one list member when no code stands beside it), each
+    holding code, is one function per row, named by the declared ``named``
+    paths or a field named for a function, else by its place. Two functions
+    or more: one is the single listing :func:`code_listing` reads. An answer
+    cut for storage is read member by member to the cut: the function the cut
+    fell in is marked ``cut``, and the last one read ``answer_cut``. Linear in
+    the answer; inside one reading (:func:`code_parts_read`) each answer is
+    read once, however many readers ask. An answer nested deeper than the
+    decoder reads lists no function.
+    """
+    key = (str(answer or "").strip(), path, rows, tuple(named))
+    held = _PARTS_READ.get()
+    if held is not None and key in held:
+        return list(held[key])
+    parts = _code_parts(*key)
+    if held is not None:
+        held[key] = parts
+    return list(parts)
+
+
+# The answers read in the reading under way (:func:`code_parts_read`), or
+# ``None`` outside one.
+_PARTS_READ: ContextVar[
+    dict[tuple[str, str, str, tuple[str, ...]], tuple[CodePart, ...]] | None
+] = ContextVar("code_parts_read", default=None)
+
+
+@contextmanager
+def code_parts_read() -> Iterator[None]:
+    """One reading of a run's answers: :func:`code_parts` reads each answer once inside it.
+
+    A report build (a section's bundle, the ledger's sections, the figures)
+    reads each answer under one; what it read is let go when the outermost
+    one ends, so a long-lived worker holds no earlier job's answers. A
+    reading inside another shares the outer one's.
+    """
+    if _PARTS_READ.get() is not None:
+        yield
+        return
+    token = _PARTS_READ.set({})
+    try:
+        yield
+    finally:
+        _PARTS_READ.reset(token)
+
+
+def _code_parts(said: str, path: str, rows: str, named: tuple[str, ...]) -> tuple[CodePart, ...]:
+    if not said or said[0] not in "{[":
+        return ()
+    import json
+
+    cuts: dict[int, Any] = {}
+    answer_cut = False
+    try:
+        document: Any = json.loads(said)
+    except RecursionError:
+        return ()
+    except ValueError:
+        document, _end, answer_cut = _read_cut(said, 0, _CUT_READ_DEPTH, cuts)
+    parts: list[CodePart]
+    if isinstance(document, Mapping) and document and all(_function_key(k) for k in document):
+        parts = [
+            CodePart(str(key).strip(), code, _cut_in(cuts, document, key, value))
+            for key, value in document.items()
+            if (code := _part_code(value, path))
+        ]
+    else:
+        listed = _listed_rows(document, rows)
+        if listed is None:
+            return ()
+        parts = [
+            CodePart(_row_where(row, at, named), code, _cut_in(cuts, listed, at - 1, row))
+            for at, row in enumerate(listed, start=1)
+            if (code := _part_code(row, path))
+        ]
+    if len(parts) < 2:
+        return ()
+    if answer_cut:
+        parts[-1] = parts[-1]._replace(answer_cut=True)
+    return tuple(parts)
+
+
+def _listed_rows(document: Any, rows: str) -> list[Any] | None:
+    """The rows of a code list: the declared ``rows``, the answer, or its one list member.
+
+    The one list member of an object is its rows only when no code stands
+    beside it: an answer holding a function's code and a list of its blocks
+    is one listing.
+    """
+    if rows:
+        from maljan.core.tool_declarations import select
+
+        found = select(document, rows)
+        if found:
+            return found
+    if isinstance(document, list):
+        return document
+    if not isinstance(document, Mapping):
+        return None
+    members = [key for key, value in document.items() if isinstance(value, list)]
+    if len(members) != 1:
+        return None
+    beside = {key: value for key, value in document.items() if key != members[0]}
+    if code_strings(beside):
+        return None
+    listed = document[members[0]]
+    return listed if isinstance(listed, list) else None
+
+
+def _cut_in(cuts: dict[int, Any], container: Any, member: Any, value: Any) -> bool:
+    """Whether the cut for storage fell in one member: its container says so, or the member does."""
+    if cuts.get(id(container), _NO_MEMBER) == member:
+        return True
+    return isinstance(value, Mapping | list) and id(value) in cuts

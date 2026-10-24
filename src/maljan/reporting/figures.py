@@ -19,7 +19,7 @@ from html import escape
 from typing import Any
 
 from maljan.core.logger import logger
-from maljan.core.undeclared_tools import address_arguments, code_listing
+from maljan.core.undeclared_tools import address_arguments, code_listing, function_key
 from maljan.reporting import tool_kinds
 from maljan.reporting.dedupe import distinct_processes
 from maljan.reporting.defang import defang
@@ -354,6 +354,10 @@ def _listed_symbol(output: dict[str, Any], facts: Any) -> str:
 
 # The note a listing read from an answer cut for storage carries.
 LISTING_CUT_FOR_STORAGE = "The answer was cut for storage; the listing ends where the cut fell."
+# The note the last function read of a batch's answer cut for storage carries.
+ANSWER_CUT_AFTER_LISTING = (
+    "The answer was cut for storage after this function; later functions are not shown."
+)
 
 
 def build_code_listings(report: MalwareReport) -> list[Figure]:
@@ -363,14 +367,33 @@ def build_code_listings(report: MalwareReport) -> list[Figure]:
     drawn says how many more the run decompiled, and the evidence ledger holds
     every listing whole.
     """
-    listed: list[tuple[str, str, bool]] = []
+    from maljan.core.undeclared_tools import code_parts_read
+
+    with code_parts_read():
+        return _build_code_listings(report)
+
+
+def _build_code_listings(report: MalwareReport) -> list[Figure]:
+    """:func:`build_code_listings`, each answer read once (``undeclared_tools.code_parts_read``)."""
+    # ``(caption, code, cut, cut after it, function key)``: the key is a
+    # batch function's, which is drawn once, and not where a single listing
+    # of the function is drawn.
+    listed: list[tuple[str, str, bool, bool, str | None]] = []
     for outputs in (report.technical_evidence or {}).values():
         for o in outputs or []:
-            if not tool_kinds.is_of(o, "figures.code_listing"):
+            if not tool_kinds.reads_code(o, "figures.code_listing"):
                 continue
             # A failed call's answer is an error, not a listing: the ledger
             # report skips it, and no figure says a function was decompiled.
             if o.get("ok") is False:
+                continue
+            # An answer that lists several functions (a batch) is one listing
+            # per function, captioned by the function it names.
+            parts = tool_kinds.function_parts(o)
+            if parts:
+                listed.extend(
+                    (p.where, p.code, p.cut, p.answer_cut, function_key(p.where)) for p in parts
+                )
                 continue
             # What is drawn is the code the answer holds: a JSON answer's code
             # field, read at the declared path or as its one code-like string,
@@ -382,20 +405,32 @@ def build_code_listings(report: MalwareReport) -> list[Figure]:
             rows = str(facts.rows or "") if facts is not None and path else ""
             body, cut = code_listing(o.get("output"), path, rows)
             if body:
-                listed.append((_listed_symbol(o, facts), body, cut))
+                listed.append((_listed_symbol(o, facts), body, cut, False, None))
+    # One function, in any spelling, is one listing: a batch's function a
+    # single listing draws, or another batch listed, is not drawn again.
+    seen = {function_key(item[0]) for item in listed if item[4] is None}
+    drawn: list[tuple[str, str, bool, bool]] = []
+    for sym, body, cut, after, key in listed:
+        if key is not None:
+            if key in seen:
+                continue
+            seen.add(key)
+        drawn.append((sym, body, cut, after))
     figs: list[Figure] = []
-    for seq, (sym, body, cut) in enumerate(listed[:_LISTINGS]):
+    for seq, (sym, body, cut, after) in enumerate(drawn[:_LISTINGS]):
         notes: list[str] = []
         if cut:
             notes.append(LISTING_CUT_FOR_STORAGE)
+        if after:
+            notes.append(ANSWER_CUT_AFTER_LISTING)
         if len(body) > _LISTING_CHARS:
             notes.append(
                 f"Cut at {_LISTING_CHARS:,} of {len(body):,} characters; the evidence "
                 "ledger and the JSON report carry the listing whole."
             )
-        if seq == _LISTINGS - 1 and len(listed) > _LISTINGS:
+        if seq == _LISTINGS - 1 and len(drawn) > _LISTINGS:
             notes.append(
-                f"{len(listed) - _LISTINGS} more decompiled functions are not drawn; the "
+                f"{len(drawn) - _LISTINGS} more decompiled functions are not drawn; the "
                 "evidence ledger carries every one."
             )
         figs.append(

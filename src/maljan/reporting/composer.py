@@ -545,7 +545,60 @@ def _bundle_text(
             lines.append(f"- {quoted_value(str(t.get('tool', '') or ''))}{sym}:")
             lines.append(shown)
         lines.append("")
+    lines.extend(_function_lines(bundle, measuring=item_chars is not None and item_chars < 0))
     return "\n".join(lines)
+
+
+# The headings of the batch functions a section is shown (``evidence_bundles.function_table``).
+FUNCTION_CODE_HEADING = (
+    "FUNCTION CODE (each function a batch decompiled, shown once in the report's sections; "
+    "cite it as written after it):"
+)
+FUNCTION_INDEX_HEADING = (
+    "FUNCTIONS WHOSE CODE ANOTHER SECTION IS SHOWN (cite one as written; its code is not here):"
+)
+
+
+def _function_lines(bundle: dict[str, Any], *, measuring: bool = False) -> list[str]:
+    """The batch functions a section is shown, each whole, and the ones another section shows.
+
+    Each function's code is shown whole, never cut to a share of the window:
+    it is shown in one section of the report, and the claims and the tool
+    answers keep the share they had without it (``ReportComposer._section``
+    measures the prompt with this block out, ``measuring``, and states a
+    prompt the block takes past the window). Each function says how it is
+    cited: its entries, then the function.
+    """
+    if measuring:
+        return []
+    lines: list[str] = []
+    shown = bundle.get("function_code") or []
+    if shown:
+        lines.append(FUNCTION_CODE_HEADING)
+        for row in shown:
+            cites = "; ".join(quoted_value(str(c)) for c in row.get("cites") or [])
+            notes = "; ".join(str(n) for n in row.get("notes") or [])
+            lines.append(
+                f"- {quoted_value(str(row.get('tool', '')))} [{quoted_value(str(row['symbol']))}]"
+                + (f" (cite as {cites})" if cites else "")
+                + (f" ({notes})" if notes else "")
+                + ":"
+            )
+            lines.append(_captured_view(str(row.get("output", "") or "")))
+        lines.append("")
+    listed = bundle.get("function_index") or []
+    if listed:
+        lines.append(FUNCTION_INDEX_HEADING)
+        for row in listed:
+            cites = "; ".join(quoted_value(str(c)) for c in row.get("cites") or [])
+            lines.append(
+                f"- {quoted_value(str(row['symbol']))}"
+                + (f" — {cites}" if cites else "")
+                + f" — {int(row.get('chars') or 0):,} characters"
+                + f" — shown in {', '.join(row.get('shown_in') or [])}"
+            )
+        lines.append("")
+    return lines
 
 
 def _fact_line(key: str, value: Any) -> str:
@@ -1549,6 +1602,15 @@ class ReportComposer:
         human = "\n\n".join(
             [*head, instruction, contract, _bundle_text(section, bundle, entries, item_chars)]
         )
+        whole = len(_SYSTEM) + len(human)
+        if room is not None and bundle.get("function_code") and whole > room:
+            # The functions' code is shown whole beside the share the rest
+            # keeps: a prompt it takes past the window is stated, never cut.
+            self._note_degradation(
+                f"The {section} section's prompt with the code of the functions it is shown "
+                f"({whole} characters) exceeds the {room} its model's context window leaves "
+                "after the reply."
+            )
         # How much of the text is the head the other sections of its group
         # repeat, noted on the request for a provider that caches a prefix
         # only at a breakpoint (``anthropic_history.SHARED_HEAD``); no request
