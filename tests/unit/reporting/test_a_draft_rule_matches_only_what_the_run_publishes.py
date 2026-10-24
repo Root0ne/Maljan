@@ -90,7 +90,10 @@ class TestAMalwareVerdict:
         report = _report(
             judge_indicators=[JudgeIndicator(kind="path", value="C:\\ProgramData\\relay4.dat")],
             dynamic=DynamicBehavior(
-                file_operations=[{"operation": "write", "path": "C:\\ProgramData\\relay4.dat"}]
+                process_tree=[{"pid": 1, "name": "sample.exe"}],
+                file_operations=[
+                    {"operation": "write", "path": "C:\\ProgramData\\relay4.dat", "pid": 1}
+                ],
             ),
         )
 
@@ -127,16 +130,40 @@ class TestSigma:
     def _sigma(self, **over: Any) -> Any:
         return _rule(_report(**over), "sigma")
 
-    def test_an_analyst_persistence_target_the_table_does_not_publish_makes_no_draft(
-        self,
-    ) -> None:
+    def test_a_persistence_target_the_table_publishes_is_selected(self) -> None:
+        # The run's persistence mechanisms are what its sandbox tools and the
+        # Sigma rules over its events recorded (``persistence_from_ledger``),
+        # never an analyst's table; the one rule publishes such a key, and the
+        # table prints it so.
+        from maljan.reporting.builder import build_consolidated_iocs
         from maljan.reporting.models import PersistenceMechanism
 
         mech = PersistenceMechanism(
             kind="registry_run", target=self.RUN_KEY, payload="C:\\Users\\Public\\example.exe"
         )
+        (row,) = [
+            r for r in build_consolidated_iocs(_report(persistence=[mech])) if r.kind == "registry"
+        ]
 
-        assert self._sigma(persistence=[mech]) is None
+        assert row.published == "yes: a persistence mechanism this run recorded"
+        rule = self._sigma(persistence=[mech])
+        assert rule is not None and "CurrentVersion" in rule.body
+
+    def test_an_analyst_listed_key_the_table_does_not_publish_makes_no_draft(self) -> None:
+        from maljan.reporting.models import ConsolidatedIOC
+
+        report = _report()
+        report.consolidated_iocs = [
+            ConsolidatedIOC(
+                type="Registry key",
+                kind="registry",
+                value=self.RUN_KEY,
+                source="analyst",
+                published="no: named only by an analyst",
+            )
+        ]
+
+        assert _rule(report, "sigma") is None
 
     def test_a_key_the_sandbox_watched_is_selected(self) -> None:
         from maljan.reporting.models import DynamicBehavior, RegistryMod

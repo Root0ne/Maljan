@@ -96,13 +96,15 @@ def _report(
         evidence_ledger=[],
     ).build_deterministic()
     report.network = NetworkIOCs(urls=urls)
-    # What a sandbox saw written: the second source the one publish rule asks
-    # of the judge's file names and digests, as of any other row's.
+    # What a sandbox saw the sample's process write: the second source the one
+    # publish rule asks of the judge's file names and digests, as of any other
+    # row's. Each is a published row of the table, so the export carries it.
     report.dynamic = DynamicBehavior(
+        process_tree=[{"pid": 1, "name": "sample.exe"}],
         file_operations=[
-            {"operation": "write", "path": f"judge{n}.exe", "sha1": f"{n:040x}"}
+            {"operation": "write", "path": f"judge{n}.exe", "sha1": f"{n:040x}", "pid": 1}
             for n in range(MAX_TOTAL_INDICATORS + 5)
-        ]
+        ],
     )
     return report
 
@@ -480,10 +482,11 @@ class TestNothingCapsTheExport:
 
         patterns = _patterns(ExtendedSTIXRenderer().render(report, base_bundle=base))
 
-        # The sample's hash, the URL and the judge's two file names. The URL's
-        # host is a well-known one, which does not follow its URL unless a
-        # model kept the host itself.
-        assert len(patterns) == 4
+        # The sample's hash, the URL and the judge's two file names, then the
+        # other files the sandbox saw written, which the table publishes. The
+        # URL's host is a well-known one, which does not follow its URL unless
+        # a model kept the host itself.
+        assert len(patterns) == 4 + (MAX_TOTAL_INDICATORS + 5 - 2)
 
     def test_every_judge_hash_is_carried_beside_the_sample_s_own(self) -> None:
         judged = [
@@ -503,7 +506,9 @@ class TestNothingCapsTheExport:
             )
         )
 
-        assert len(patterns) == 21
+        # The sample's own, the twenty judge digests and the files the sandbox
+        # saw written, which the table publishes.
+        assert len(patterns) == 21 + MAX_TOTAL_INDICATORS + 5
         assert patterns[0] == f"[file:hashes.'SHA-256' = '{'b' * 64}']"
 
     def test_a_compound_hash_pattern_is_read_as_a_hash(self) -> None:
@@ -591,4 +596,4 @@ class TestWhatTheCapSpendsItsBudgetOn:
 
         patterns = _patterns(ExtendedSTIXRenderer().render(report, base_bundle=base))
 
-        assert not any("judge" in pattern for pattern in patterns)
+        assert not any("judge" in pattern for pattern in patterns if pattern.startswith("[url:"))

@@ -17,7 +17,7 @@ from typing import Any
 
 import pytest
 
-from app.services.report_service import _with_the_judge_s_values
+from app.services.report_service import ioc_feed_rows
 from maljan.reporting.builder import build_consolidated_iocs
 from maljan.reporting.detection_signatures import build_detection_rules
 from maljan.reporting.models import (
@@ -120,11 +120,8 @@ class TestAJudgeValueTheRuleRefuses:
 
     def test_the_feed_withholds_it(self) -> None:
         report, _judge_bundle = self._setup()
-        out: list[dict[str, Any]] = [
-            {"kind": "domain", "value": SWEPT, "source": "strings", "published": False}
-        ]
 
-        _with_the_judge_s_values(out, report.model_dump(mode="json"), None)
+        out = ioc_feed_rows(report.model_dump(mode="json"))
 
         assert [row["published"] for row in out if row["value"] == SWEPT] == [False]
 
@@ -189,7 +186,10 @@ class TestTheKindsTheRuleNowAnswers:
     def test_a_hash_of_a_file_the_sandbox_saw_dropped_is(self) -> None:
         judge = _judge(f"[file:hashes.'SHA-256' = '{DROPPED}']")
         dynamic = DynamicBehavior(
-            file_operations=[{"operation": "write", "path": "C:\\x\\a.bin", "sha256": DROPPED}]
+            process_tree=[{"pid": 1, "name": "sample.exe"}],
+            file_operations=[
+                {"operation": "write", "path": "C:\\x\\a.bin", "sha256": DROPPED, "pid": 1}
+            ],
         )
         report = _report(judge, dynamic=dynamic)
         exported, _renderer = _export(report, judge)
@@ -229,7 +229,10 @@ class TestOneDecision:
     def test_the_export_and_the_table_agree(self, patterns: tuple[str, ...]) -> None:
         judge = _judge(*patterns)
         dynamic = DynamicBehavior(
-            file_operations=[{"operation": "write", "path": "C:\\ProgramData\\relay.dat"}]
+            process_tree=[{"pid": 1, "name": "sample.exe"}],
+            file_operations=[
+                {"operation": "write", "path": "C:\\ProgramData\\relay.dat", "pid": 1}
+            ],
         )
         report = _report(judge, dynamic=dynamic)
         exported, _renderer = _export(report, judge)

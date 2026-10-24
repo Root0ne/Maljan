@@ -128,7 +128,7 @@ describe("why the MISP export is empty (T-333)", () => {
   it("does not blame the run when no builder wrote the field", () => {
     const said = mispAbsence(report());
     expect(said).not.toContain("this run generated no MISP attributes");
-    expect(said).toContain("the platform does not build them");
+    expect(said).toContain("it was stored before the platform built them");
     expect(said).toContain("its 5 indicators are on DETECTION");
   });
 

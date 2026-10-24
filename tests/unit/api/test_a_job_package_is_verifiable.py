@@ -43,7 +43,13 @@ def _keys(monkeypatch: Any) -> None:
     monkeypatch.setattr(ledger_chain, "known_keys", lambda: {CHAIN.key_id: CHAIN})
 
 
-def _run(into: Path, *, spilled: list[dict[str, Any]] | None = None, dynamic: bool = False) -> Path:
+def _run(
+    into: Path,
+    *,
+    spilled: list[dict[str, Any]] | None = None,
+    dynamic: bool = False,
+    misp: list[dict[str, Any]] | None = None,
+) -> Path:
     """A sealed stored run written the way the replay export writes one."""
     job_id = uuid.uuid4()
     rows = [
@@ -65,6 +71,7 @@ def _run(into: Path, *, spilled: list[dict[str, Any]] | None = None, dynamic: bo
         identity=SampleIdentity(hashes=FileHashes(sha256="ab" * 32, md5="cd" * 16)),
         verdict="Malware",
         dynamic=DynamicBehavior(notable_apis=[{"api": "VirtualAlloc"}]) if dynamic else None,
+        misp_attributes=misp,
     ).model_dump(mode="json")
     report = {
         "id": str(uuid.uuid4()),
@@ -250,8 +257,15 @@ def test_missing_parts_are_listed_as_absent_with_why(tmp_path: Path):
     run = _run(tmp_path / "run", spilled=[{"part": "answer", "error": "exceeds upload_max_bytes"}])
     manifest = _build(run, tmp_path / "p.tar.gz")
     absent = {a["part"]: a["reason"] for a in manifest["absent"]}
-    assert set(absent) == {"misp_event", "run_summary", "judge_stix_bundle", "sandbox_behaviour"}
-    assert "no MISP event exporter" in absent["misp_event"]
+    assert set(absent) == {
+        "misp_event",
+        "misp_attributes",
+        "run_summary",
+        "judge_stix_bundle",
+        "sandbox_behaviour",
+    }
+    assert "builds no MISP event" in absent["misp_event"]
+    assert "stored before the platform built them" in absent["misp_attributes"]
     assert "run-summary.json" in absent["run_summary"]
     assert all(absent.values())
     spilled = json.loads(_members(tmp_path / "p.tar.gz")["ledger/spilled.json"])
@@ -270,6 +284,21 @@ def test_missing_parts_are_listed_as_absent_with_why(tmp_path: Path):
         "path": "run/report.json",
         "pointer": "/dynamic",
     }
+
+
+def test_a_report_s_misp_attributes_are_a_part_of_the_package(tmp_path: Path):
+    attribute = {"type": "md5", "category": "Payload delivery", "value": "cd" * 16}
+    manifest = _build(_run(tmp_path / "run", misp=[attribute]), tmp_path / "m.tar.gz")
+    parts = {p["part"]: p for p in manifest["parts"]}
+    assert parts["misp_attributes"] == {
+        "part": "misp_attributes",
+        "path": "run/report.json",
+        "pointer": "/misp_attributes",
+        "count": 1,
+    }
+    assert "misp_attributes" not in {a["part"] for a in manifest["absent"]}
+    report = json.loads(_members(tmp_path / "m.tar.gz")["run/report.json"])
+    assert report["misp_attributes"] == [attribute]
 
 
 def test_a_spilled_part_is_packaged_only_when_its_bytes_verify(tmp_path: Path):

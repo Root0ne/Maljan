@@ -141,3 +141,23 @@ def test_a_stored_usage_snapshot_is_set_aside_and_a_live_gap_is_a_defect() -> No
     live = dict(stored)
     del live["_stored"]
     assert set(defects(surfaces.audit(live, clean_spec()))) == {("differs", "count", "usage")}
+
+
+def test_a_file_the_export_names_in_its_directory_is_the_table_s_one_path() -> None:
+    bundle = {
+        "objects": [
+            {
+                "type": "indicator",
+                "pattern": (
+                    "[file:name = 'updater.exe' AND "
+                    "file:parent_directory_ref.path = 'C:\\\\Users\\\\Public']"
+                ),
+            },
+            {
+                "type": "indicator",
+                "pattern": "[file:name = 'a.so' AND file:parent_directory_ref.path = '/tmp']",
+            },
+        ]
+    }
+
+    assert set(surfaces._stix_values(bundle)) == {"c:\\users\\public\\updater.exe", "/tmp/a.so"}
