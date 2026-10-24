@@ -9,7 +9,9 @@ cannot drift.
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Mapping, Sequence
+from functools import partial
 from typing import Any
 
 from maljan.core.logger import logger
@@ -42,7 +44,9 @@ def _declared_kind(called: str) -> str:
     return str(getattr(facts, "kind", "") or "")
 
 
-def _declaring_server_key(servers: Mapping[str, Any], called: str, *, purpose: str) -> str:
+def _declaring_server_key(
+    servers: Mapping[str, Any], called: str, *, purpose: str, level: int = logging.INFO
+) -> str:
     """The key of the server declaring a step's ``called`` tool or its kind, ``""`` for none.
 
     The in-process step stands in for that server's tool whether the server
@@ -51,8 +55,8 @@ def _declaring_server_key(servers: Mapping[str, Any], called: str, *, purpose: s
     name, then those declaring a tool of the same declared kind, each in
     ``mcp.servers`` order; switched-off servers follow in the same order, a
     last resort. When more than one qualifies, or the one read is switched
-    off, the choice is logged at info (the node resolves each purpose once
-    per run).
+    off, the choice is logged at ``level``, info by default (the node resolves
+    each purpose once per run; a status read asks for debug).
     """
     kind = _declared_kind(called)
     by_name: dict[bool, list[str]] = {True: [], False: []}
@@ -77,7 +81,9 @@ def _declaring_server_key(servers: Mapping[str, Any], called: str, *, purpose: s
         if len(qualified) > 1:
             also = f"; {', '.join(repr(k) for k in qualified[1:])} also declare {declared}"
         off = " (switched off; its env is still read)" if switched_off else ""
-        logger.info("triage pack: %s reads server %r%s%s.", purpose, chosen, off, also)
+        # ``info`` itself at the default: the worker's line is exactly what it was.
+        say = logger.info if level == logging.INFO else partial(logger.log, level)
+        say("triage pack: %s reads server %r%s%s.", purpose, chosen, off, also)
     return chosen
 
 

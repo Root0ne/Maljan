@@ -211,7 +211,8 @@ def _has_content(value: Any) -> bool:
     return value not in (None, "", False)
 
 
-def _degradations(record: RunRecord) -> list[str]:
+def degradations(record: RunRecord) -> list[str]:
+    """Every degradation reason the run's summary and its report carry, as text."""
     reasons = list(record.run_summary.get("degradation_reasons") or [])
     reasons += list(record.malware_report.get("degradation_reasons") or [])
     return [str(r) for r in reasons]
@@ -263,7 +264,7 @@ def _measured_empty(record: RunRecord, section: str) -> bool:
 
 def section_statuses(record: RunRecord) -> dict[str, str]:
     """Each composer section's status; any status starting ``LOST`` fails the run."""
-    reasons = _degradations(record)
+    reasons = degradations(record)
     asked: dict[str, list[dict[str, Any]]] = {}
     for entry in record.stub_log:
         if entry.get("role") == "composer" and entry.get("section"):
@@ -456,7 +457,7 @@ def _check_sections(record: RunRecord) -> Check:
 def _check_narrative(record: RunRecord) -> Check:
     summary = str(record.malware_report.get("executive_summary") or "").strip()
     calls = [e for e in record.stub_log if e.get("role") == "narrative"]
-    marked = [r for r in _degradations(record) if "narrative" in r.lower()]
+    marked = [r for r in degradations(record) if "narrative" in r.lower()]
     problems = []
     if not summary:
         problems.append("no executive summary")
@@ -1606,7 +1607,7 @@ def observations(record: RunRecord) -> dict[str, Any]:
         "termination_reason": negotiation.get("termination_reason"),
         "validation_retries": validation.get("retries"),
         "validation_codes": validation.get("by_code") or {},
-        "degradation_reasons": _degradations(record)[:20],
+        "degradation_reasons": degradations(record)[:20],
     }
 
 

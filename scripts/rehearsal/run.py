@@ -42,6 +42,14 @@ events, and checks them (``scripts/rehearsal/checklist.py``). One JSON and one
 markdown file per run, and a summary comparing the runs of a ``--repeat``. The
 exit code is non-zero when any check of any run fails or repeated runs differ.
 
+A run that carries a degradation reason fails the rehearsal too, each reason
+printed: a run that went on without a tool is not the run the paid one would
+be, and finding that out after a paid run is what the gate is for. A reason an
+operator expects is allowed by its name, the words before its parenthesis
+(``--allow-degradation server.analysis.capa_unavailable``, repeatable; ``{n}``
+stands for a count). A fault scenario allows the reasons it declares it causes
+(``SCENARIO_DEGRADATIONS`` in ``scripts/rehearsal/roles.py``), and only those.
+
 The account's sign-in is read from the environment variable named by
 ``--login-env``; it is never taken on the command line or printed.
 """
@@ -56,6 +64,7 @@ import os
 import signal
 import sys
 import time
+from collections.abc import Iterable
 from pathlib import Path
 from typing import Any, cast
 from urllib.parse import urlsplit
@@ -72,7 +81,12 @@ from scripts.rehearsal.checklist import (  # noqa: E402
     compare,
     signature,
 )
-from scripts.rehearsal.roles import SCENARIOS, STAGE_ROLES, Brain  # noqa: E402
+from scripts.rehearsal.roles import (  # noqa: E402
+    SCENARIO_DEGRADATIONS,
+    SCENARIOS,
+    STAGE_ROLES,
+    Brain,
+)
 from scripts.rehearsal.sample import sample_bytes  # noqa: E402
 from scripts.rehearsal.stub_model import Pace, StubServer, StubState  # noqa: E402
 
@@ -1297,13 +1311,57 @@ def known_stack_defects(record: RunRecord) -> dict[str, dict[str, Any]]:
     }
 
 
-def write_results(records: list[RunRecord], out: Path) -> int:
+def degradation_name(reason: str) -> str:
+    """A degradation reason's name: its words before the first ``(`` or ``;``.
+
+    ``server.analysis.capa_unavailable(capa is not installed ...); install ...``
+    is named ``server.analysis.capa_unavailable``; ``triage.capa_failed`` is its
+    own name.
+    """
+    return reason.split("(", 1)[0].split(";", 1)[0].strip()
+
+
+# What a placeholder in a declared degradation name stands for.
+_NAME_PLACEHOLDERS = {COUNT_PLACEHOLDER: r"\d+", "{section}": r"[a-z_]+"}
+
+
+def name_matches(declared: str, name: str) -> bool:
+    """Whether ``name`` is the declared one, word for word, its placeholders matching their kind."""
+    import re
+
+    pattern = re.escape(declared)
+    for placeholder, matches in _NAME_PLACEHOLDERS.items():
+        pattern = pattern.replace(re.escape(placeholder), matches)
+    return re.fullmatch(pattern, name) is not None
+
+
+def degradations_not_allowed(record: RunRecord, allowed: Iterable[str] = ()) -> list[str]:
+    """The run's degradation reasons no allowed name matches, each once, in order.
+
+    Allowed are the names the operator passed and the ones the run's scenario
+    declares it causes (``roles.SCENARIO_DEGRADATIONS``).
+    """
+    from scripts.rehearsal.checklist import degradations
+
+    names = [*allowed, *SCENARIO_DEGRADATIONS.get(record.scenario, ())]
+    return [
+        r
+        for r in dict.fromkeys(degradations(record))
+        if not any(name_matches(n, degradation_name(r)) for n in names)
+    ]
+
+
+def write_results(
+    records: list[RunRecord], out: Path, allowed_degradations: Iterable[str] = ()
+) -> int:
     """Each run's JSON and markdown, the comparison, and the exit code.
 
     A check a stack run fails with exactly the detail a known-defect row
     pins is reported as that defect, not as a failure of the rehearsal; a
-    pinned check that passes is reported as a defect to strike.
+    pinned check that passes is reported as a defect to strike. A run with
+    a degradation reason ``allowed_degradations`` does not name fails.
     """
+    allowed = list(allowed_degradations)
     out.mkdir(parents=True, exist_ok=True)
     signatures = []
     failed = False
@@ -1316,21 +1374,23 @@ def write_results(records: list[RunRecord], out: Path) -> int:
             if not c.ok and c.name in known and detail_matches(known[c.name]["detail"], c.detail)
         ]
         failures = [c for c in checks if not c.ok and c not in matched]
-        failed = failed or bool(failures)
+        degraded = degradations_not_allowed(record, allowed)
+        failed = failed or bool(failures) or bool(degraded)
         stem = f"{record.scenario}-run{index}"
         result = as_json(record, checks)
         result["known_defects"] = [
             {"id": known[c.name].get("id", ""), "check": c.name, "detail": c.detail}
             for c in matched
         ]
-        result["passed"] = not failures
+        result["degradations_not_allowed"] = degraded
+        result["passed"] = not failures and not degraded
         (out / f"{stem}.json").write_text(
             json.dumps(result, indent=1, default=str), encoding="utf-8"
         )
         (out / f"{stem}.md").write_text(as_markdown(record, checks), encoding="utf-8")
         signatures.append(signature(record, checks))
-        status = "PASS" if not failures else "FAIL"
-        if matched and not failures:
+        status = "PASS" if not failures and not degraded else "FAIL"
+        if matched and not failures and not degraded:
             status = "PASS but for known defects"
         print(f"run {index}: {status} ({record.elapsed_s:.1f}s, verdict {record.verdict})")
         for check in matched:
@@ -1339,6 +1399,10 @@ def write_results(records: list[RunRecord], out: Path) -> int:
             print(f"    {row.get('defect', '')}")
         for check in failures:
             print(f"  FAIL {check.name}: {check.detail}")
+        for reason in degraded:
+            print(f"  DEGRADED {reason}")
+        if degraded:
+            print("    allow an expected one with --allow-degradation <name>")
         for name, row in known.items():
             if any(c.name == name and c.ok for c in checks):
                 print(f"  known defect {row.get('id', '')} no longer reproduces: strike its row")
@@ -1418,6 +1482,14 @@ def main(argv: list[str] | None = None) -> int:
         choices=sorted(STAGE_ROLES),
         help="deadline_hit only: hold only this stage's model calls, so the deadline lands in it",
     )
+    parser.add_argument(
+        "--allow-degradation",
+        action="append",
+        default=[],
+        metavar="NAME",
+        help="a degradation reason a run may carry without failing, by its name: the words "
+        "before its parenthesis, e.g. server.analysis.capa_unavailable (repeatable)",
+    )
     parser.add_argument("--timeout", type=float, default=3600.0, help="seconds to wait per job")
     parser.add_argument(
         "--job-timeout",
@@ -1447,7 +1519,7 @@ def main(argv: list[str] | None = None) -> int:
         if not args.email:
             parser.error("--email is required against the stack")
         records = run_against_stack(args)
-    return write_results(records, Path(args.out))
+    return write_results(records, Path(args.out), args.allow_degradation)
 
 
 if __name__ == "__main__":

@@ -27,7 +27,7 @@ if __name__ == "__main__":
 
 from maljan.analysis.capture_reader import Packet
 from maljan.analysis.pcap_summary import each_packet
-from maljan.tools import readers, staging
+from maljan.tools import readers, sidecar_needs, staging
 from maljan.tools.capabilities import CAPABILITIES_TOOL, ToolNeeds, manifest
 from maljan.tools.errors import (
     CAPTURES_REMEDIATION,
@@ -59,13 +59,7 @@ mcp = FastMCP("NetworkMCP", stateless_http=True)
 # to its 5,000th, and "No DNS queries found" about the rest of it would have
 # been the platform stating something nobody looked at.
 
-TOOL_NEEDS: list[ToolNeeds] = [
-    ToolNeeds("read_pcap_summary"),
-    ToolNeeds("extract_dns"),
-    ToolNeeds("extract_http"),
-    ToolNeeds("pcap_summary"),
-    ToolNeeds(readers.RUN_READER),
-]
+TOOL_NEEDS: list[ToolNeeds] = sidecar_needs.NETWORK
 CAPABILITIES = manifest("network", TOOL_NEEDS)
 
 # The one argument every tool here takes a file in. Named once, because the

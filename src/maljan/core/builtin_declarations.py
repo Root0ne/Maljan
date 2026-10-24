@@ -355,7 +355,7 @@ _PCAP_SUMMARY: dict[str, Any] = {
 
 # The analysis sidecar's tools. Answer shapes from ``analysis.evidence_roots``
 # ``_read_entry``; capa and FLOSS long-running and YARA's own budget as the
-# sidecar's manifest (``services/analysis-mcp/server.py`` TOOL_NEEDS) declares.
+# sidecar's manifest (``maljan.tools.sidecar_needs.ANALYSIS``) declares.
 _ANALYSIS_TOOLS: dict[str, dict[str, Any]] = {
     "apk_info": _file("format_info"),
     "archive_list": _file("archive_listing"),

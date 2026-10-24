@@ -111,6 +111,7 @@ def test_submitting_a_job_is_audited_with_its_sample_and_profile(rows):
     with (
         patch.object(jobs_module, "_unprobed_models_for", AsyncMock(return_value=[])),
         patch.object(jobs_module, "_unready_providers_for", AsyncMock(return_value=[])),
+        patch.object(jobs_module, "_unavailable_tools_for", AsyncMock(return_value=[])),
         patch.object(jobs_module, "_undecryptable_secrets", AsyncMock(return_value=[])),
     ):
         response = client.post(
