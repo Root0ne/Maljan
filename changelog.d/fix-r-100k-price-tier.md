@@ -1,0 +1,3 @@
+### Fixed
+
+- **A call priced at a long prompt's figures names those figures (R-100k).** Claude Haiku 5.5 is priced higher for a prompt over 100,000 tokens, cache reads and writes included, and a call over it was charged at those figures, but its record (`price_source` on the `model_usage` event and in the run summary's prices) named the row's short-prompt figures ("for prompts up to 100,000 tokens"). The source is now the tier's the call was priced at. What a call costs, the spend ceiling's admissions and the vendored prices are unchanged; stored runs keep the source they recorded and replay byte-identical.

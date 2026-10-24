@@ -1189,7 +1189,10 @@ class SpendMeter:
             # split by lifetime (``message_delta``'s usage carries none); where
             # every write is an hour's, it is settled as one.
             usage = {**usage, "cache_write_1h_input_tokens": usage["cache_write_input_tokens"]}
-        return in_force.cost(usage), in_force.source
+        # The source is the tier's the call was priced at: a long prompt is
+        # not said to be priced at the short prompt's figures.
+        tier = in_force.for_prompt(int(usage.get("input_tokens") or 0))
+        return in_force.cost(usage), tier.source
 
     def _cost(self, usage: Mapping[str, Any] | None, model: str) -> tuple[float, str] | None:
         if usage is None:
