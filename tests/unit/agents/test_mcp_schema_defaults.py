@@ -144,8 +144,11 @@ class TestUnsetOptionalArguments:
 
     def test_an_explicit_none_from_the_caller_is_also_dropped(self) -> None:
         """A ReAct agent emitting ``{"token": null}`` is the same statement as
-        omitting it, and must not be forwarded as a null either."""
+        omitting it, and must not be forwarded as a null either: the call is
+        sent exactly as the one that left ``token`` out (T-330)."""
         tk, session = _toolkit()
         tool = tk._create_langchain_tool(_MCPTool("verify_auth", VERIFY_AUTH))
         asyncio.run(tool.arun({"token": None}))
-        assert session.calls[0][1] == {}
+        asyncio.run(tool.arun({}))
+        assert session.calls[0][1] == session.calls[1][1]
+        assert None not in session.calls[0][1].values()

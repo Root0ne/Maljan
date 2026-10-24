@@ -63,4 +63,19 @@ describe("what a row says about how its answer was kept", () => {
       "The model's arguments arrived cut off and were closed before the call ran.",
     ]);
   });
+
+  it("names the nulls a call left out, by path", () => {
+    expect(
+      entryNotes(
+        entry({
+          args_nulls_dropped: [["limit"], ["options", "depth"]],
+          args_nulls_withheld: [["program"]],
+        }),
+      ),
+    ).toEqual([
+      "The model gave null for limit, options › depth, which the tool's schema does not allow; each was left out and took its default.",
+      "The model gave null for program; it was not sent, so the server applied its own default.",
+    ]);
+    expect(entryNotes(entry({ args_nulls_dropped: [], args_nulls_withheld: null }))).toEqual([]);
+  });
 });

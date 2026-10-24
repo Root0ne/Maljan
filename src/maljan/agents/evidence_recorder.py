@@ -26,6 +26,14 @@ from collections.abc import Callable, Mapping, Sequence
 from typing import TYPE_CHECKING, Any
 
 from maljan.agents.mcp_client import structured_content_of
+from maljan.agents.null_arguments import (
+    NO_NULLS,
+    current_call_nulls,
+    noting_class,
+    nulls_of_call,
+    rules_of,
+    take_call_nulls,
+)
 from maljan.agents.tool_fence import fenced
 from maljan.core.exceptions import SampleNotOpened
 from maljan.core.logger import logger
@@ -337,6 +345,7 @@ class EvidenceRecorder:
         self, *, tool: str, args: dict[str, Any] | None = None, server: str | None = None
     ) -> None:
         """Announce a call that is about to run. Never raises."""
+        nulls = current_call_nulls(self)
         emit_tool_call_started(
             self.sink,
             stage=self.stage,
@@ -344,6 +353,8 @@ class EvidenceRecorder:
             tool=tool,
             server=server,
             args_summary=summarize_args(args),
+            nulls_dropped=nulls.dropped,
+            nulls_withheld=nulls.withheld,
         )
 
     def holder_of(self, entry_id: str) -> str:
@@ -452,9 +463,16 @@ class EvidenceRecorder:
         neither; the entry it names holds the answer. ``hints`` are the MCP
         hints the tool's own server gave it when it was attached, kept on the
         entry's facts record beside the declaration.
+
+        A call with a ``null`` the tool boundary dropped or the transport
+        withheld (``agents.null_arguments``) names each such field on
+        ``args_nulls_dropped`` or ``args_nulls_withheld``; ``args`` are the
+        call's arguments as validated, a withheld field never sent and
+        recorded as its default.
         """
         if repeated_of:
             repeated_of = self.holder_of(repeated_of)
+        nulls = current_call_nulls(self)
         entry_id, seq = self.counter.next_id()
         if guard_answer:
             repeated_of = entry_id
@@ -476,6 +494,8 @@ class EvidenceRecorder:
             remediation=remediation,
             args_repaired=args_repaired,
             args_raw=args_raw,
+            args_nulls_dropped=nulls.dropped,
+            args_nulls_withheld=nulls.withheld,
             model=self.model or None,
             not_shown=not_shown is not None,
             chars_dropped=int(cut or 0) if not_shown is None else 0,
@@ -1397,6 +1417,10 @@ def _record_tool(
 
     hints = (getattr(tool, "metadata", None) or {}).get(SERVER_HINTS_METADATA_KEY)
     accepted = tuple(getattr(args_schema, "model_fields", {}) or {})
+    # What the tool does with a ``null`` (``agents.null_arguments``): when it
+    # drops or withholds any, the boundary names each such field of a call.
+    null_rules = rules_of(args_schema)
+    notes_nulls = bool(null_rules)
 
     # The arguments of this tool that reach a part its answer left out, read
     # off the same schema the model was offered. Per tool rather than per call:
@@ -1907,6 +1931,11 @@ def _record_tool(
     if func is not None:
 
         def wrapped_func(**kwargs: Any) -> str:  # noqa: F811
+            nulls = take_call_nulls(kwargs, null_rules) if notes_nulls else NO_NULLS
+            with nulls_of_call(recorder, nulls):
+                return _recorded_func(kwargs)
+
+        def _recorded_func(kwargs: dict[str, Any]) -> str:
             # The guards first. A call the repeat guard answers is filed and
             # announced as a repeat of the entry that holds its answer
             # (``record_repeat``); a call another guard answers is filed and
@@ -1959,6 +1988,11 @@ def _record_tool(
     if coroutine is not None:
 
         async def wrapped_coroutine(**kwargs: Any) -> str:  # noqa: F811
+            nulls = take_call_nulls(kwargs, null_rules) if notes_nulls else NO_NULLS
+            with nulls_of_call(recorder, nulls):
+                return await _recorded_coroutine(kwargs)
+
+        async def _recorded_coroutine(kwargs: dict[str, Any]) -> str:
             ended = _the_room_is_gone(kwargs)
             if ended is not None:
                 return ended
@@ -2009,6 +2043,8 @@ def _record_tool(
             if isinstance(tool, StructuredTool) and getattr(tool, "keeps_named_args", False)
             else StructuredTool
         )
+        if notes_nulls:
+            builder = noting_class(builder)
         return builder.from_function(
             func=wrapped_func,
             coroutine=wrapped_coroutine,

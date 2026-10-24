@@ -310,6 +310,27 @@ class LedgerEntry(BaseModel):
         default=None,
         description="The arguments as the model wrote them, kept when they were repaired.",
     )
+    # Both absent when empty, so an entry written before the fields existed
+    # (or a call with no such null) dumps exactly as it did.
+    args_nulls_dropped: list[list[str]] = Field(
+        default_factory=list,
+        exclude_if=lambda value: not value,
+        description=(
+            "Fields the model gave null that the tool's schema neither allows nor requires, "
+            "each by its path segments: dropped before validation, so the field took its "
+            "declared default as if the call had left it out, and ``args`` shows that "
+            "(agents.null_arguments)."
+        ),
+    )
+    args_nulls_withheld: list[list[str]] = Field(
+        default_factory=list,
+        exclude_if=lambda value: not value,
+        description=(
+            "Top-level fields the model gave null that the schema admits and the tool's "
+            "transport does not send, each by its path segments: never sent, so the server "
+            "applied its own default, and recorded as its default in ``args``."
+        ),
+    )
     model: str | None = Field(
         default=None,
         description=(
@@ -496,6 +517,8 @@ def build_entry(
     remediation: str | None = None,
     args_repaired: bool = False,
     args_raw: str | None = None,
+    args_nulls_dropped: Sequence[Sequence[str]] = (),
+    args_nulls_withheld: Sequence[Sequence[str]] = (),
     model: str | None = None,
     not_shown: bool = False,
     chars_dropped: int = 0,
@@ -538,6 +561,10 @@ def build_entry(
     ``args_raw`` keeps them as the model wrote them. Both so a reader can see
     that a call was made on repaired arguments and check the repair against
     what arrived.
+
+    ``args_nulls_dropped`` and ``args_nulls_withheld`` name, by path segments,
+    the fields whose ``null`` the tool boundary dropped or the transport did
+    not send (``agents.null_arguments``).
 
     ``not_shown`` says the conversation had no room for any of the answer:
     ``output`` is then the statement of the cut (:func:`not_shown_record`),
@@ -624,6 +651,8 @@ def build_entry(
         repeated_of=repeated_of,
         args_repaired=bool(args_repaired),
         args_raw=args_raw if args_repaired else None,
+        args_nulls_dropped=[[str(part) for part in path] for path in args_nulls_dropped],
+        args_nulls_withheld=[[str(part) for part in path] for path in args_nulls_withheld],
         model=model or None,
         started_at=started_at,
         duration_ms=max(0, int(duration_ms)),

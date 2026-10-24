@@ -389,14 +389,22 @@ def _schema_without(args_schema: Any, hidden: tuple[str, ...]) -> Any:
     shared with the server registry, and the platform's own calls still go
     through the unwrapped tool.
     """
-    from pydantic import create_model
+    from maljan.agents.null_arguments import argument_model, rules_of, without_fields
 
     fields = getattr(args_schema, "model_fields", None)
     if not isinstance(fields, dict):
         return None
     kept = {name: (field.annotation, field) for name, field in fields.items() if name not in hidden}
     try:
-        return create_model(getattr(args_schema, "__name__", "Args"), **kept)  # type: ignore[call-overload]
+        # What the tool does with a ``null`` goes with the fields it keeps
+        # (``agents.null_arguments``): a hidden field is the platform's to
+        # fill, so a ``null`` the model wrote for it is neither dropped nor
+        # withheld.
+        return argument_model(
+            getattr(args_schema, "__name__", "Args"),
+            kept,
+            without_fields(rules_of(args_schema), hidden),
+        )
     except Exception as exc:  # noqa: BLE001 — a guardrail never costs a tool
         logger.warning("tool_pinning: the schema for a pinned tool could not be narrowed: %s", exc)
         return None

@@ -82,12 +82,24 @@ DIGESTED: tuple[str, ...] = (
     "agent_role",
     "agent_tab",
     "spilled",
+    "args_nulls_dropped",
+    "args_nulls_withheld",
 )
 # Columns the canonical form carries only when they hold something.
-_SEALED_WHEN_SET = frozenset({"waited_ms"})
+_SEALED_WHEN_SET = frozenset({"waited_ms", "args_nulls_dropped", "args_nulls_withheld"})
 # The JSON columns: their values are read back through the driver's ``json``.
 _JSON_COLUMNS = frozenset(
-    {"args", "structured", "function_ranges", "facts", "reputation", "pack_step", "spilled"}
+    {
+        "args",
+        "structured",
+        "function_ranges",
+        "facts",
+        "reputation",
+        "pack_step",
+        "spilled",
+        "args_nulls_dropped",
+        "args_nulls_withheld",
+    }
 )
 # The row's bookkeeping, never digested: named so a new column is a decision.
 BOOKKEEPING: tuple[str, ...] = ("id", "job_id", "updated_at", "digest", "chain")

@@ -26,7 +26,7 @@ from __future__ import annotations
 import base64
 import binascii
 import re
-from collections.abc import Callable, Iterable, Mapping
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from typing import Any
 
 from maljan.core.logger import logger
@@ -2150,6 +2150,8 @@ def emit_tool_call_started(
     tool: str,
     server: str | None = None,
     args_summary: str = "",
+    nulls_dropped: Sequence[Sequence[str]] = (),
+    nulls_withheld: Sequence[Sequence[str]] = (),
 ) -> None:
     """One tool call, as it starts.
 
@@ -2157,18 +2159,24 @@ def emit_tool_call_started(
     including the one where the repeat guard answers instead of the tool: a
     console that draws a spinner on the start and clears it on the finish must
     never be left holding one.
+
+    ``nulls_dropped`` and ``nulls_withheld`` name, by path segments, the
+    fields whose ``null`` the tool boundary dropped or the transport did not
+    send (``agents.null_arguments``); the event carries each only when there
+    are any.
     """
-    emit(
-        sink,
-        TOOL_CALL_STARTED,
-        {
-            "stage": str(stage),
-            "agent": str(agent),
-            "tool": str(tool),
-            "server": str(server) if server else None,
-            "args_summary": str(args_summary),
-        },
-    )
+    data: dict[str, Any] = {
+        "stage": str(stage),
+        "agent": str(agent),
+        "tool": str(tool),
+        "server": str(server) if server else None,
+        "args_summary": str(args_summary),
+    }
+    if nulls_dropped:
+        data["nulls_dropped"] = [[str(part) for part in path] for path in nulls_dropped]
+    if nulls_withheld:
+        data["nulls_withheld"] = [[str(part) for part in path] for path in nulls_withheld]
+    emit(sink, TOOL_CALL_STARTED, data)
 
 
 def emit_tool_call_finished(

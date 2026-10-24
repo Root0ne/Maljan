@@ -1281,6 +1281,13 @@ def _job_spill(container: Any) -> Any:
     return getter() if callable(getter) else None
 
 
+def _null_paths(value: Any) -> list[list[str]] | None:
+    """A ledger entry's ``args_nulls_*`` paths as the row stores them; ``None`` for none."""
+    if not isinstance(value, list) or not value:
+        return None
+    return [[str(part) for part in path] for path in value if isinstance(path, list)] or None
+
+
 def _evidence_row(
     entry: dict[str, Any], *, job_id: uuid.UUID, written_at: datetime | None = None
 ) -> Any:
@@ -1347,6 +1354,10 @@ def _evidence_row(
         structured_from_server=(True if entry.get("structured_from_server") is True else None),
         agent_role=(str(entry["agent_role"]) if entry.get("agent_role") is not None else None),
         agent_tab=(str(entry["agent_tab"]) if entry.get("agent_tab") is not None else None),
+        # The nulls the tool boundary dropped or the transport withheld, by
+        # path segments; absent where the call had none.
+        args_nulls_dropped=_null_paths(entry.get("args_nulls_dropped")),
+        args_nulls_withheld=_null_paths(entry.get("args_nulls_withheld")),
         # The references to the parts of the answer kept whole, as the entry
         # carries them; absent where nothing was taken.
         spilled=(list(entry["spilled"]) if entry.get("spilled") else None),

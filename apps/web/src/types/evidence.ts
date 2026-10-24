@@ -33,6 +33,12 @@ export interface EvidenceEntry {
    *  before the call ran; `args_raw` is what it wrote. */
   args_repaired?: boolean;
   args_raw?: string | null;
+  /** The fields whose `null` the tool boundary dropped (each took its
+   *  declared default), and the top-level ones the schema admitted that the
+   *  transport did not send, each by its path segments. Absent where the
+   *  call had none and on rows written before the fields. */
+  args_nulls_dropped?: string[][] | null;
+  args_nulls_withheld?: string[][] | null;
   /** The model whose turn asked for this call, as `provider/model`. Absent
    *  where nothing named it, including every row written before the column. */
   model?: string | null;
