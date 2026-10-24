@@ -87,6 +87,13 @@ def _text(
     )
 
 
+def _written(text: str) -> str:
+    """A sample's or a model's text for a figure's label, every network value in it defanged."""
+    from maljan.reporting.renderers.markdown import _defanged_text
+
+    return _defanged_text(text)
+
+
 def _rect(
     x: int, y: int, w: int, h: int, *, fill: str = "#fff", stroke: str = _LINE, rx: int = 4
 ) -> str:
@@ -181,7 +188,7 @@ def build_attack_matrix(report: MalwareReport) -> Figure | None:
         for j, tech in enumerate(by_tactic[tid][:_MATRIX_CELLS]):
             ty = 52 + j * 22
             parts.append(_rect(x, ty, col_w, 18, fill="#ddf4ff", stroke=_ACCENT))
-            parts.append(_text(x + 6, ty + 13, tech, fill=_ACCENT, size=10))
+            parts.append(_text(x + 6, ty + 13, _written(tech), fill=_ACCENT, size=10))
     return Figure(
         id="fig-attack-matrix",
         caption="MITRE ATT&CK tactic coverage",
@@ -212,7 +219,9 @@ def build_entropy_chart(report: MalwareReport) -> Figure | None:
         ent = max(0.0, min(8.0, float(sec.entropy or 0.0)))
         w = int(max_w * ent / 8.0)
         color = _DANGER if ent >= 7.0 else (_WARN if ent >= 6.0 else _ACCENT)
-        parts.append(_text(12, y + 15, marked_cut(sec.name or "?", 16), fill=_INK, size=11))
+        parts.append(
+            _text(12, y + 15, marked_cut(_written(sec.name or "?"), 16), fill=_INK, size=11)
+        )
         parts.append(_rect(axis_x, y, max_w, bar_h, fill="#f6f8fa", stroke=_LINE))
         parts.append(_rect(axis_x, y, max(2, w), bar_h, fill=color, stroke="none", rx=0))
         parts.append(_text(axis_x + max_w + 8, y + 15, f"{ent:.2f}", fill=_MUTED, size=11))
@@ -417,7 +426,16 @@ def _build_code_listings(report: MalwareReport) -> list[Figure]:
             seen.add(key)
         drawn.append((sym, body, cut, after))
     figs: list[Figure] = []
-    for seq, (sym, body, cut, after) in enumerate(drawn[:_LISTINGS]):
+    # A listing is printed for reading, not to compile, and a PDF viewer
+    # links a URL or a host in its text: the caption and the code are
+    # defanged, the run's recorded values first, then every other value.
+    from maljan.reporting.defang import ProseDefanger
+    from maljan.reporting.renderers.markdown import _defanged_text, run_network_values
+
+    run_values = ProseDefanger(run_network_values(report)) if drawn else None
+    for seq, (named, code, cut, after) in enumerate(drawn[:_LISTINGS]):
+        sym = _defanged_text(named, run_values)
+        body = _defanged_text(code, run_values)
         notes: list[str] = []
         if cut:
             notes.append(LISTING_CUT_FOR_STORAGE)
