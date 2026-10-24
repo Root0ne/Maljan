@@ -62,6 +62,8 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+import socket
+import threading
 import time
 import uuid
 from collections.abc import Callable, Iterator
@@ -221,12 +223,15 @@ class FetchBudget:
 
     ``deadline`` is on ``now``'s clock (the job's sandbox deadline); ``sleep``
     waits between tries and returns early once ``cancelled()`` holds.
+    ``track(stop)`` registers a try in flight, whose ``stop`` the job's cancel
+    calls, and returns its unregister (``core.cancellation.Cancellation.track``).
     """
 
     deadline: float
     now: Callable[[], float] = time.monotonic
     sleep: Callable[[float], Any] = time.sleep
     cancelled: Callable[[], bool] = lambda: False
+    track: Callable[[Callable[[], None]], Callable[[], None]] = lambda _stop: lambda: None
 
     def stop_cause(self, *, retry: bool) -> str:
         """Why no further try is made, or ``""``: the job was cancelled, or a retry is late."""
@@ -264,6 +269,142 @@ def stop_if_cancelled(artefact: str) -> None:
         raise ArtefactFetchFailed(artefact, "cancelled")
 
 
+def _transports(client: Any) -> list[Any]:
+    """The client's own transport and every proxy mount's, the ones a request may go through."""
+    mounts = getattr(client, "_mounts", None)
+    held = [getattr(client, "_transport", None)]
+    if isinstance(mounts, dict):
+        held += list(mounts.values())
+    return [transport for transport in held if transport is not None]
+
+
+def _shut_down(sock: Any) -> None:
+    """Shut ``sock`` down both ways, which wakes a thread blocked on it; never raises."""
+    with suppress(Exception):
+        sock.shutdown(socket.SHUT_RDWR)
+
+
+def abort_requests(client: Any) -> None:
+    """End every request ``client`` has in flight on a pooled connection; never raises.
+
+    Closing the client is not enough: its pool closes a socket without shutting
+    it down, and a thread blocked reading that socket waits out its timeout
+    (up to 120 s on CAPE). The socket of each connection pooled by the client's
+    transport and by every proxy mount is shut down instead, which wakes the
+    read, before headers or in the body alike. A connection still opening has
+    no socket here yet; :class:`_TryInFlight` holds those. A transport without
+    such a pool (a test's mock) has nothing to end.
+    """
+    try:
+        for transport in _transports(client):
+            pool = getattr(transport, "_pool", None)
+            for connection in list(getattr(pool, "connections", None) or ()):
+                # A proxied connection wraps the one that holds the stream.
+                held, stream = connection, None
+                for _ in range(4):
+                    stream = getattr(held, "_network_stream", None)
+                    held = getattr(held, "_connection", None)
+                    if stream is not None or held is None:
+                        break
+                if stream is not None:
+                    _shut_down(stream.get_extra_info("socket"))
+    except Exception as exc:  # noqa: BLE001 — the cancel goes on; the try ends at its timeout
+        logger.debug("an artefact request in flight could not be ended (%s).", type(exc).__name__)
+
+
+class _TryInFlight:
+    """One artefact try's sockets, so the job's cancel reaches a connection still opening.
+
+    A connection opened during the try registers its socket here as soon as it
+    is connected (:class:`_TrackedBackend`), before any TLS handshake, proxy
+    tunnel or request on it; a duplicate of the descriptor is held, which
+    outlives the TLS wrap and shuts down the same socket. ``stop`` (the job's
+    cancel) shuts down every one held, every one registered after it, and the
+    client's pooled connections (:func:`abort_requests`).
+    """
+
+    def __init__(self, client: Any) -> None:
+        self._client = client
+        self._lock = threading.Lock()
+        self._held: list[socket.socket] = []
+        self._stopped = False
+
+    def hold(self, sock: Any) -> None:
+        try:
+            dup = sock.dup()
+        except Exception:  # noqa: BLE001 — not a socket (a test's stream): nothing to hold
+            return
+        with self._lock:
+            stopped = self._stopped
+            if not stopped:
+                self._held.append(dup)
+        if stopped:
+            _shut_down(dup)
+            dup.close()
+
+    # The shutdowns and the closes are made under the lock (a shutdown does not
+    # block): a dup closed while a stop shut it down could free its descriptor
+    # for an unrelated socket the stop would then reach.
+    def stop(self) -> None:
+        with self._lock:
+            self._stopped = True
+            for sock in self._held:
+                _shut_down(sock)
+        abort_requests(self._client)
+
+    def close(self) -> None:
+        with self._lock:
+            held, self._held = self._held, []
+            for sock in held:
+                with suppress(OSError):
+                    sock.close()
+
+
+# The artefact try running in this context; ``None`` outside one.
+_TRY_IN_FLIGHT: ContextVar[_TryInFlight | None] = ContextVar("maljan_try_in_flight", default=None)
+
+
+class _TrackedBackend:
+    """A pool's network backend that registers each new socket with the try in flight.
+
+    The three calls httpx's connection pool makes of its backend, each passed
+    to the one it wraps.
+    """
+
+    def __init__(self, inner: Any) -> None:
+        self._inner = inner
+
+    def _held(self, stream: Any) -> Any:
+        running = _TRY_IN_FLIGHT.get()
+        if running is not None:
+            with suppress(Exception):
+                running.hold(stream.get_extra_info("socket"))
+        return stream
+
+    def connect_tcp(self, *args: Any, **kwargs: Any) -> Any:
+        return self._held(self._inner.connect_tcp(*args, **kwargs))
+
+    def connect_unix_socket(self, *args: Any, **kwargs: Any) -> Any:
+        return self._held(self._inner.connect_unix_socket(*args, **kwargs))
+
+    def sleep(self, seconds: float) -> None:
+        self._inner.sleep(seconds)
+
+
+def _track_connections(client: Any) -> None:
+    """Have every pool of ``client`` open its connections through :class:`_TrackedBackend`.
+
+    Its own transport's and each proxy mount's. Idempotent; a transport
+    without such a pool is left as it is.
+    """
+    with suppress(Exception):
+        for transport in _transports(client):
+            pool = getattr(transport, "_pool", None)
+            backend = getattr(pool, "_network_backend", None)
+            if hasattr(backend, "connect_tcp") and not isinstance(backend, _TrackedBackend):
+                pool._network_backend = _TrackedBackend(backend)  # type: ignore[union-attr]
+
+
 class ArtefactAttemptFailed(Exception):
     """One try at an artefact that failed, in words the provider composed.
 
@@ -297,6 +438,7 @@ def with_fetch_retries(
     sleep: Callable[[float], Any],
     interval: float,
     step: str = "",
+    client: httpx.Client | None = None,
 ) -> Any:
     """``attempt()``'s answer, asked again after a transient failure; never silent.
 
@@ -312,6 +454,9 @@ def with_fetch_retries(
     deadline, a retry past the deadline stops with the cause ``deadline``, and
     a cancelled job neither sleeps nor tries again (``cancelled``): a thread
     the job abandoned must not write a capture after its staging is gone.
+    While a try runs, the job's cancel ends the requests ``client`` has in
+    flight (:func:`abort_requests`), and a try that fails once the job is
+    cancelled is said as ``cancelled``, never as the error the cancel caused.
     """
     budget = _FETCH_BUDGET.get()
     if budget is not None:
@@ -322,13 +467,38 @@ def with_fetch_retries(
         if stop:
             logger.warning("%s: %s not fetched (%s).", what, artefact, stop)
             raise ArtefactFetchFailed(artefact, stop)
+        in_flight = untrack = token = None
+        if budget is not None and client is not None:
+            _track_connections(client)
+            in_flight = _TryInFlight(client)
+            token = _TRY_IN_FLIGHT.set(in_flight)
+            untrack = budget.track(in_flight.stop)
         try:
-            return attempt()
+            if budget is not None and budget.cancelled():
+                # Cancelled since the check above, before anything was asked.
+                failure = ArtefactAttemptFailed("before the try", transient=False)
+            else:
+                return attempt()
         except ArtefactAttemptFailed as exc:
             failure = exc
         except Exception as exc:  # noqa: BLE001 — named by its type, never re-raised raw
             label = f"{step} {type(exc).__name__}" if step else type(exc).__name__
             failure = ArtefactAttemptFailed(label, transient=isinstance(exc, POLL_TRANSPORT_ERRORS))
+        finally:
+            if untrack is not None:
+                untrack()
+            if token is not None:
+                _TRY_IN_FLIGHT.reset(token)
+            if in_flight is not None:
+                in_flight.close()
+        if budget is not None and budget.cancelled():
+            logger.warning(
+                "%s: %s not fetched (cancelled; the try in flight ended %s).",
+                what,
+                artefact,
+                failure.cause,
+            )
+            raise ArtefactFetchFailed(artefact, "cancelled")
         if not failure.transient or tried == ARTEFACT_FETCH_ATTEMPTS:
             logger.warning(
                 "%s: %s not fetched (%s) after %d attempt%s.",
@@ -370,6 +540,7 @@ def fetch_artefact(
     sleep: Callable[[float], Any],
     interval: float,
     min_bytes: int = CAPTURE_MIN_BYTES,
+    client: httpx.Client | None = None,
 ) -> str | None:
     """Stream one artefact to ``out``; its path, or ``None`` where none is offered.
 
@@ -380,7 +551,8 @@ def fetch_artefact(
     persists, raises :class:`ArtefactFetchFailed`. A file under ``min_bytes``
     raises it too, with its size as the cause. Whatever is left of a failed or
     empty fetch is removed: half a capture is a file of somebody's traffic
-    nobody will read.
+    nobody will read. ``client`` is the one ``request()`` asks with, whose
+    request in flight the job's cancel ends.
     """
 
     def once() -> bool:
@@ -395,7 +567,17 @@ def fetch_artefact(
             out.unlink(missing_ok=True)
             raise
 
-    if not with_fetch_retries(once, artefact=artefact, what=what, sleep=sleep, interval=interval):
+    fetched = with_fetch_retries(
+        once, artefact=artefact, what=what, sleep=sleep, interval=interval, client=client
+    )
+    budget = _FETCH_BUDGET.get()
+    if fetched and budget is not None and budget.cancelled():
+        # A body that ends at the connection's close reads to its end once the
+        # cancel shuts the socket down: what was written is half a capture.
+        out.unlink(missing_ok=True)
+        logger.warning("%s: %s not fetched (cancelled while it was read).", what, artefact)
+        raise ArtefactFetchFailed(artefact, "cancelled")
+    if not fetched:
         logger.info("%s: the sandbox offers no %s.", what, artefact)
         out.unlink(missing_ok=True)
         return None
@@ -864,6 +1046,7 @@ class TriageSandboxProvider(SandboxProvider):
                 sleep=self._sleep,
                 interval=interval,
                 step="overview",
+                client=http,
             )
         )
         if not names:
@@ -897,6 +1080,7 @@ class TriageSandboxProvider(SandboxProvider):
             what=what,
             sleep=self._sleep,
             interval=interval,
+            client=http,
         )
 
     async def probe(self) -> ProviderProbe:
