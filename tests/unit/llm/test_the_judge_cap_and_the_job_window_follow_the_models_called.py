@@ -289,13 +289,14 @@ class TestTheWindowsModels:
 
     def test_a_hostile_roster_is_read_in_linear_time(self) -> None:
         """A chain of agents each asking the next is walked once, each model asked once."""
-        import time
+        from collections.abc import Callable
         from types import SimpleNamespace
 
         from maljan.agents.composition import window_assignments
         from maljan.llm.context_window import _questions
+        from tests.linear_cost import TIME_RATIO_LIMIT, cpu_seconds
 
-        def _timed(count: int) -> float:
+        def _walk(count: int) -> Callable[[], None]:
             definitions = {
                 f"a{i}": {
                     "role": "generic",
@@ -311,16 +312,17 @@ class TestTheWindowsModels:
                 **{"agents.definitions": definitions, "llm.agents": entries},
             )
             stages = [SimpleNamespace(kind="analysis", agents=["a0"])]
-            started = time.perf_counter()
             chain = window_assignments(settings, stages)
-            _questions(settings, chain * 10)
-            elapsed = time.perf_counter() - started
             assert len(chain) == count + 1
-            return elapsed
 
-        small, large = _timed(200), _timed(2000)
+            def _read() -> None:
+                _questions(settings, window_assignments(settings, stages) * 10)
 
-        assert large < small * 30 + 0.05
+            return _read
+
+        small, large = cpu_seconds(_walk(500)), cpu_seconds(_walk(2000))
+
+        assert large < small * TIME_RATIO_LIMIT, (small, large)
 
 
 class TestAnEntryTheRegistryCannotBuild:
