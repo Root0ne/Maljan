@@ -407,7 +407,9 @@ UNPARSED_ANSWER_CODE = "isr.unparsed_answer"
 CLAIM_WITHOUT_CONFIDENCE_CODE = "isr.claim_without_confidence"
 # A claim whose TECHNIQUE line is more than ids or NONE. No id is read from
 # it, and the analyst is asked once for ids alone. A list of ids separated by
-# commas or "and" is read (``base_agent.read_technique_line``) and not asked.
+# commas, "and", slashes or semicolons is read (``base_agent.read_technique_line``)
+# and not asked, and so is an id with a closing note in brackets that decides
+# nothing or says the id is not asserted.
 TECHNIQUE_LINE_UNREAD_CODE = "isr.technique_line_unread"
 # Claim headings under the DISPUTES section, beside the analyst's own claims.
 # Not read as its own: they may be a peer's claims it quotes, or its own
@@ -1091,7 +1093,11 @@ def _in_a_negated_object(text: str, start: int) -> bool:
     return _NegationReader(text).in_a_negated_object(start)
 
 
-def states_absence(text: str, pattern: re.Pattern[str] | None) -> bool:
+def states_absence(
+    text: str,
+    pattern: re.Pattern[str] | None,
+    another_s: Callable[[str], bool] | None = None,
+) -> bool:
     """Whether ``text`` names the behaviour only to say it is absent.
 
     The capability check's own reader (:func:`_is_negated`), asked of every
@@ -1105,11 +1111,17 @@ def states_absence(text: str, pattern: re.Pattern[str] | None) -> bool:
     behaviour is there, and one is enough. A text that never names the
     behaviour states nothing about it. The reading decides only whether the
     analyst is asked (``ABSENCE_CLAIM_CODE``); what the analyst answers stands.
+    A mention ``another_s`` says belongs to another technique is not read
+    (:func:`_another_member_s_word`).
     """
     if not text or pattern is None:
         return False
     text = _read_dashes(text)
-    matches = list(pattern.finditer(text))
+    matches = [
+        match
+        for match in pattern.finditer(text)
+        if another_s is None or not another_s(match.group(0))
+    ]
     if not matches:
         return False
     reader = _NegationReader(text)
@@ -1146,7 +1158,8 @@ def absence_claim_violation(
     the technique when asked. The platform withholds nothing on this reading.
     """
     text = str(getattr(claim, "claim", "") or "")
-    if not states_absence(text, behaviour_pattern(technique_id, attck)):
+    pattern = behaviour_pattern(technique_id, attck)
+    if not states_absence(text, pattern, _another_member_s_word(technique_id, text)):
         return None
     tid = safe_finding_value(technique_id)
     # On a claim whose TECHNIQUE line lists other ids, NONE would take them
@@ -1168,6 +1181,79 @@ def absence_claim_violation(
         path=path,
         subject=str(technique_id).strip().upper(),
     )
+
+
+@cache
+def _family_name_stems(technique_id: str) -> tuple[frozenset[str], frozenset[str]]:
+    """The stems of the catalogue names that are ``technique_id``'s own (its name
+    and, for a sub-technique, its parent's) and those of the other members of
+    its family (its sub-techniques, or its siblings), built from the catalogue."""
+    from maljan.memory.attck_loader import sub_technique_entries, technique_entry
+
+    tid = str(technique_id or "").strip().upper()
+    parent = _family(tid)
+    own_ids = {tid, parent}
+    own: set[str] = set()
+    for one in own_ids:
+        entry = technique_entry(one)
+        if entry is not None:
+            own |= _name_stems(entry.name)
+    others: set[str] = set()
+    for entry in sub_technique_entries(parent):
+        if entry.technique_id.upper() not in own_ids:
+            others |= _name_stems(entry.name)
+    return frozenset(own), frozenset(others - own)
+
+
+def _another_member_s_word(technique_id: str, text: str) -> Callable[[str], bool]:
+    """Whether a mention of ``technique_id``'s behaviour in ``text`` names only another
+    member of its family: every word of it whose stem a catalogue name of the
+    family holds is in a sub-technique's or sibling's name and in none of its own
+    ("packed" under Dynamic API Resolution is Software Packing's word). The
+    absence question is not asked of such a mention.
+
+    For a sub-technique a sibling's word is never its absence. For a parent a
+    child's word may be ("The DLL is not packed." under Obfuscated Files or
+    Information is asked), so it is set aside only when ``text`` also names the
+    family's behaviour, neither named as absent nor after a negating word of its
+    own clause, by a word whose stem is a stem of a family member's name, a word
+    the vendored data writes for the parent itself (:func:`technique_vocabulary`),
+    and in no more technique families' names than the rarest family stem of the
+    word it would set aside ("strings XOR-encoded; not packed": "encod", two
+    families, beside "pack", two). Read from the catalogue's names and the
+    vendored data, for every parent and child, with no number of its own."""
+    own, others = _family_name_stems(technique_id)
+    families = _name_stem_families()
+    parent = "." not in str(technique_id or "")
+    affirmed: list[int] = []
+    if parent:
+        text = _read_dashes(text)
+        vocabulary = technique_vocabulary(technique_id)
+        reader: _NegationReader | None = None
+        negated: Callable[[int], bool] | None = None
+        for match in re.finditer(r"[A-Za-z]{3,}", text):
+            stem = _stem(match.group(0))
+            if (stem not in own and stem not in others) or stem not in vocabulary:
+                continue
+            reader = reader or _NegationReader(text)
+            negated = negated or _negated_in_its_clause(text)
+            if not reader.named_as_absent(match.start(), match.end()) and not negated(
+                match.start()
+            ):
+                affirmed.append(families.get(stem, 0))
+        if not affirmed:
+            return lambda _mention: False
+
+    def another_s(mention: str) -> bool:
+        stems = {_stem(word) for word in re.findall(r"[A-Za-z]+", mention) if len(word) >= 3}
+        if not stems & others or stems & own:
+            return False
+        if not parent:
+            return True
+        rarest = min(families.get(stem, 0) for stem in stems & others)
+        return any(count <= rarest for count in affirmed)
+
+    return another_s
 
 
 CLAIM_DOES_NOT_DESCRIBE_CODE = "attck.claim_does_not_describe"
@@ -1200,8 +1286,16 @@ _WORD_ENDINGS = (
 )
 
 
+# An acronym's plural: capitals and a closing small "s" ("APIs", "DLLs"). Its
+# stem is the acronym ("api"), which keeps fewer than four letters.
+_ACRONYM_PLURAL_RE = re.compile(r"[A-Z]{2,}s")
+
+
 def _stem(word: str) -> str:
-    """``word`` lower-cased with its common endings taken off, four letters kept."""
+    """``word`` lower-cased with its common endings taken off, four letters kept; an
+    acronym's plural is the acronym (``_ACRONYM_PLURAL_RE``)."""
+    if _ACRONYM_PLURAL_RE.fullmatch(word):
+        return word[:-1].lower()
     stem = word.lower()
     changed = True
     while changed:
@@ -1321,13 +1415,31 @@ _CALL_SPELLINGS = ("", "a", "w", "ex", "exa", "exw")
 # "imported but never referenced", "firing at run time not observed"). A
 # procedure word in such a sentence names what the sample could do, so it
 # shares no term with the technique on its own and the sentence is asked as
-# before.
+# before. It reaches the sentence it stands in (``_said_not_seen``): "This is a
+# code path only and was not observed." after a sentence naming the call says
+# nothing of that sentence's words.
 _NOT_SEEN_RE = re.compile(
     r"\b(?:no|not|never|nothing)\b(?:\s+[\w-]+){0,3}?\s+(?:seen|observed|exercised|invoked"
     r"|executed|called|referenced|used|fired|triggered|sent|performed)\b"
     r"|\b(?:is|are|was|were)\s+(?:not|never)\s+(?:read|run|made)\b|\bunobserved\b",
     re.IGNORECASE,
 )
+
+
+def _said_not_seen(text: str) -> Callable[[int], bool]:
+    """For ``text``, whether the sentence a position stands in says the behaviour was
+    not seen (``_NOT_SEEN_RE``). Each sentence is searched once."""
+    starts = [0, *(found.end() for found in _SENTENCE_END_RE.finditer(text))]
+    ends = [*starts[1:], len(text)]
+    unseen = [
+        _NOT_SEEN_RE.search(text, start, end) is not None
+        for start, end in zip(starts, ends, strict=True)
+    ]
+
+    def said(at: int) -> bool:
+        return unseen[bisect.bisect_right(starts, at) - 1]
+
+    return said
 
 
 @dataclass(frozen=True)
@@ -1549,6 +1661,32 @@ def procedure_words(technique_id: str) -> ProcedureWords:
     )
 
 
+@cache
+def technique_vocabulary(technique_id: str) -> frozenset[str]:
+    """Every word the vendored data writes for ``technique_id``, as :func:`_stem` reads it.
+
+    The catalogue name and the texts :func:`_procedure_sources` reads (the
+    technique card's requirements and indicators, the API catalogue's rule),
+    the id's own and, for a sub-technique, its parent's, each word of three
+    letters or more. The technique line's reader reads a note beside an id by
+    them (``base_agent._read_noted_line``).
+    """
+    from maljan.memory.attck_loader import technique_entry
+
+    tid = str(technique_id or "").strip().upper()
+    ids = [tid, _family(tid)] if "." in tid else [tid]
+    sources = _procedure_sources()
+    texts: list[str] = []
+    for one in ids:
+        entry = technique_entry(one)
+        if entry is not None and entry.name:
+            texts.append(entry.name)
+        texts.extend(sources.get(one, ()))
+    return frozenset(
+        _stem(word) for text in texts for word in re.findall(r"[A-Za-z]+", text) if len(word) >= 3
+    )
+
+
 # An identifier written as joined words names each of them ("BeingDebugged"
 # writes "Being" and "Debugged"). Each is compared with the stems of the
 # technique's name that the vendored names of one technique family only hold:
@@ -1626,19 +1764,25 @@ def _description_stopwords() -> frozenset[str]:
     """The words no description is compared by: the vendored generic English
     stopword list (``data/english_stopwords_v1.json``: ``very``, ``few``,
     ``made``), the catalogue index's stopwords and a name's filler words."""
-    from maljan.core.paths import resolve_data
     from maljan.memory.attck_index import _STOPWORDS
 
-    try:
-        document = json.loads(resolve_data(ENGLISH_STOPWORDS_FILE).read_text(encoding="utf-8"))
-        english = {str(word).lower() for word in document.get("words") or []}
-    except (OSError, ValueError, AttributeError) as exc:
-        logger.warning("validation: the English stopword list could not be read (%s).", exc)
-        english = set()
-    return frozenset(english | _STOPWORDS | _NAME_FILLER_WORDS)
+    return frozenset(english_stopwords() | _STOPWORDS | _NAME_FILLER_WORDS)
 
 
 ENGLISH_STOPWORDS_FILE = "data/english_stopwords_v1.json"
+
+
+@lru_cache(maxsize=1)
+def english_stopwords() -> frozenset[str]:
+    """The vendored generic English stopword list, lower-cased; empty when it cannot be read."""
+    from maljan.core.paths import resolve_data
+
+    try:
+        document = json.loads(resolve_data(ENGLISH_STOPWORDS_FILE).read_text(encoding="utf-8"))
+        return frozenset(str(word).lower() for word in document.get("words") or [])
+    except (OSError, ValueError, AttributeError) as exc:
+        logger.warning("validation: the English stopword list could not be read (%s).", exc)
+        return frozenset()
 
 
 def _description_words(text: str) -> Iterator[tuple[str, re.Match[str]]]:
@@ -1764,7 +1908,7 @@ def described_by_its_words(text: str, technique_id: str) -> bool:
     weight (see above).
 
     Read as a procedure word is read: nothing counts in a sentence that says the
-    behaviour was not seen, run or used (``_NOT_SEEN_RE``), and a word named to
+    behaviour was not seen, run or used (``_said_not_seen``), and a word named to
     say it is absent ("no string is encoded", "without a decode loop") is no
     hit (:func:`_named_as_absent`), nor is one after a negating word of its own
     clause ("and nothing is decoded"). The absence reading is asked of the
@@ -1775,8 +1919,7 @@ def described_by_its_words(text: str, technique_id: str) -> bool:
     if not phrases:
         return False
     text = _read_dashes(text)
-    if _NOT_SEEN_RE.search(text):
-        return False
+    unseen = _said_not_seen(text)
     vocabulary = {stem for phrase in phrases for stem in phrase}
     negated = _negated_in_its_clause(text)
     breaks = [(found.start(), found.end()) for found in _CLAUSE_BREAK_RE.finditer(text)]
@@ -1787,7 +1930,7 @@ def described_by_its_words(text: str, technique_id: str) -> bool:
     readers: dict[tuple[int, int], _NegationReader] = {}
     for stem, match in _description_words(text):
         start, end = match.span()
-        if stem in written or stem not in vocabulary or negated(start):
+        if stem in written or stem not in vocabulary or negated(start) or unseen(start):
             continue
         cut = bisect.bisect_right(break_ends, start)
         begin = break_ends[cut - 1] if cut else 0
@@ -1843,17 +1986,16 @@ def _names_a_procedure(text: str, technique_id: str, stems: Collection[str]) -> 
     """Whether ``text`` names the technique by one of its procedure words or joined words
     in a statement that the sample does it.
 
-    A sentence that says the behaviour was not seen (``_NOT_SEEN_RE``) names a
+    A sentence that says the behaviour was not seen (``_said_not_seen``) names a
     capability only, and a mention named to say it is absent asserts nothing:
     neither counts, and such a sentence is asked as it was before these words
     were read.
     """
     text = _read_dashes(text)
-    if _NOT_SEEN_RE.search(text):
-        return False
+    unseen = _said_not_seen(text)
     reader = _NegationReader(text)
     return any(
-        not reader.named_as_absent(start, end)
+        not unseen(start) and not reader.named_as_absent(start, end)
         for start, end in _procedure_places(text, technique_id, stems)
     )
 
@@ -5982,9 +6124,10 @@ STATED_VALUE_UNHELD_CODE = "report.value_not_in_cited_entry"
 # sentence kept after it is marked where it stands with the state.
 UNPUBLISHED_VALUE_CODE = "report.unpublished_value"
 TECHNIQUE_NAME_CODE = "report.technique_name"
-# A report sentence that says a routine was not read, or that something is not
-# in the ledger, or that a cited entry does not confirm a value, while an
-# answered entry of this run holds it (``ledger_absence_contradictions``).
+# A report sentence that says a routine was not read (or its decompile not
+# obtained), or that something is not in the ledger, or that a cited entry does
+# not confirm (or verify) a value, while an answered entry of this run holds it
+# (``ledger_absence_contradictions``).
 # Asked once, naming the entry; a sentence kept after it is recorded.
 ABSENCE_CONTRADICTS_LEDGER_CODE = "report.absence_contradicts_ledger"
 
@@ -7971,9 +8114,10 @@ def misstated_entry_contents(
 # ---------------------------------------------------------------------------
 
 # The three statements of absence read, each by what makes it false: a routine
-# "not read" is false when a decompile of it answered; a thing "not in the
-# ledger" when an answered entry holds it; a value "not confirmed by" (or "not
-# shown in", "not listed in") the entry a sentence cites when that entry
+# "not read" (or its decompile "not obtained") is false when a decompile of it
+# answered; a thing "not in the ledger" (or "no X is in the evidence") when an
+# answered entry holds it; a value "not confirmed by" (or "not verified by",
+# "not shown in", "not listed in") the entry a sentence cites when that entry
 # holds the value.
 _NOT_READ = "read"
 _NOT_IN_LEDGER = "ledger"
@@ -7983,11 +8127,29 @@ _ABSENCE_RE = re.compile(
     r"(?P<read>read|decompiled|disassembled)\b"
     r"|\b(?:has|have|had)\s++(?:not|never)\s++(?:yet\s++)?been\s++"
     r"(?P<read_perfect>read|decompiled|disassembled)\b"
+    r"|\b(?:is|are|was|were|be|been)\s++(?:not|never)\s++(?:yet\s++)?(?:been\s++)?"
+    r"(?P<obtained>obtained|returned|retrieved|produced)\b"
+    r"|\b(?:has|have|had)\s++(?:not|never)\s++(?:yet\s++)?been\s++"
+    r"(?P<obtained_perfect>obtained|returned|retrieved|produced)\b"
     r"|\b(?:is|are|was|were)\s++(?:not\s++(?:in|on|among|found\s++in)|absent\s++from|"
     r"missing\s++from)\s++(?:the\s++)?(?P<ledger>ledger|evidence)\b"
-    r"|\b(?:is|are|was|were)\s++not\s++(?P<confirmed>confirmed|shown|listed|named)\s++(?:by|in)\b",
+    r"|\bno\s++(?P<no_subject>(?:[^\s.;:!?]++\s++){1,8}?)(?:is|are|was|were)\s++"
+    r"(?:in|on|among|found\s++in)\s++(?:the\s++)?(?P<no_ledger>ledger|evidence)\b"
+    r"|\b(?:is|are|was|were)\s++not\s++(?P<confirmed>confirmed|verified|shown|listed|named)"
+    r"\s++(?:by|in)\b",
     re.IGNORECASE,
 )
+# A subject that is the decompile of a routine ("the decompile of init 0x3868",
+# "decompile results for 0x5a10"): the routine is the head. A routine is said
+# "not obtained" only through its decompile; any other subject of "not
+# obtained" ("the capture") names nothing the ledger answers for.
+_DECOMPILE_OF_RE = re.compile(
+    r"\s*+(?:the\s++)?(?:decompil(?:e|ation)s?|disassembl(?:y|ies)|pseudo-?code|listings?)"
+    r"(?:\s++results?)?\s++(?:of|for)\s++",
+    re.IGNORECASE,
+)
+# A routine's own name written before its address in that subject ("init 0x3868").
+_LABEL_BEFORE_ADDRESS_RE = re.compile(r"\s*+([a-z][a-z_]*+)\s++(?=0x[0-9a-f]+\b)", re.IGNORECASE)
 # Where the clause a statement belongs to begins, so its subject is the
 # clause's own words: a semicolon, a colon, a dash, or a comma before a word
 # that joins two clauses. Commas inside brackets are not read: a bracketed
@@ -8507,20 +8669,42 @@ def ledger_absence_contradictions(payload: Any, entries: EntryTexts | None) -> l
             # A sentence scoped to the text around it says nothing of the run.
             scoped = _SCOPED_TO_THE_TEXT_RE.search(sentence) is not None
             for match in statements:
+                obtained = bool(match.group("obtained") or match.group("obtained_perfect"))
                 kind = (
                     _NOT_READ
-                    if match.group("read") or match.group("read_perfect")
+                    if match.group("read") or match.group("read_perfect") or obtained
                     else _NOT_IN_LEDGER
-                    if match.group("ledger")
+                    if match.group("ledger") or match.group("no_ledger")
                     else _NOT_CONFIRMED
                 )
                 while at_start < len(starts) and starts[at_start] <= match.start():
                     at_start += 1
                 begins = max(starts[at_start - 1] if at_start else 0, done)
                 done = match.end()
-                relative_at = _relative_word_at(sentence, match.start())
+                if match.group("no_ledger"):
+                    # "No X is in the evidence": X is the subject, read as "X is
+                    # not in the evidence" is.
+                    relative_at = None
+                    subject = match.group("no_subject")
+                else:
+                    relative_at = _relative_word_at(sentence, match.start())
+                    subject = sentence[
+                        begins : relative_at
+                        if relative_at is not None and relative_at >= begins
+                        else match.start()
+                    ]
                 relative = relative_at is not None and relative_at >= begins
-                subject = sentence[begins : relative_at if relative else match.start()]
+                decompile = _DECOMPILE_OF_RE.match(subject) if kind == _NOT_READ else None
+                if decompile is not None and not relative:
+                    subject = subject[decompile.end() :]
+                    label = _LABEL_BEFORE_ADDRESS_RE.match(subject)
+                    if label is not None and label.group(1).lower() not in (
+                        _KIND_NOUNS | _DETERMINERS | _MODIFIER_WORDS
+                    ):
+                        subject = subject[label.end() :]
+                elif obtained:
+                    last_begins = begins
+                    continue
                 if relative and not subject.strip(" ,"):
                     # The relative word opens the clause: its subject is what
                     # the clause before it names last.

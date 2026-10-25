@@ -24,6 +24,7 @@ from concurrent.futures import CancelledError as _FuturesCancelled
 from concurrent.futures import Future as _ConcurrentFuture
 from concurrent.futures import TimeoutError as _FuturesTimeout
 from dataclasses import dataclass, replace
+from functools import lru_cache
 from types import MappingProxyType, SimpleNamespace
 from typing import TYPE_CHECKING, Any, Literal, cast
 
@@ -1618,20 +1619,23 @@ def _field(
 _ONE_TECHNIQUE_RE = re.compile(ID_BODY, re.IGNORECASE)
 # What a TECHNIQUE line says to claim none.
 _NO_TECHNIQUE = frozenset({"", "NONE", "—", "–", "-"})
-# A line that opens with "none" and words after it ("none asserted", "none
-# (capability only)"): it claims none whatever the words say, when no
-# technique id and no catalogue technique name stands anywhere on it; with an
-# id or a name on it ("None; Process Injection is likely"), the words may name
-# one and the line is asked about.
-_NONE_WITH_WORDS_RE = re.compile(r"none\b", re.IGNORECASE)
+# A line that opens with "none", or with a dash before a bracketed note, and
+# words after it ("none asserted", "none (capability only)", "— (provenance)"):
+# it claims none
+# whatever the words say, when no technique id and no catalogue technique name
+# stands anywhere on it; with an id or a name on it ("None; Process Injection
+# is likely"), the words may name one and the line is asked about, unless the
+# id stands in a closing note that says it is not asserted (``_read_noted_line``).
+_NONE_WITH_WORDS_RE = re.compile(r"none\b|[—–-]\s*+(?=\()", re.IGNORECASE)
 _ANY_TECHNIQUE_ID_RE = re.compile(rf"(?<![\w.]){ID_BODY}(?!\w)", re.IGNORECASE)
 # What separates the ids of a list on one TECHNIQUE line: a comma, "and", both
-# ("T1027, T1140, and T1106"), or a slash ("T1027 / T1140"). Every part must be
+# ("T1027, T1140, and T1106"), a slash ("T1027 / T1140") or a semicolon
+# ("T1027; T1140"). Every part must be
 # an id and nothing else; "or", "and/or", a doubled or trailing slash, or any
 # word beside an id leaves the line whole and asked about.
 # Each run of whitespace is read from its start and possessively (linear time).
 _TECHNIQUE_LIST_SEPARATOR_RE = re.compile(
-    r"(?<!\s)\s*+,\s*+(?:and\s++)?|(?<!\s)\s++and\s++|(?<!\s)\s*+/\s*+", re.IGNORECASE
+    r"(?<!\s)\s*+,\s*+(?:and\s++)?|(?<!\s)\s++and\s++|(?<!\s)\s*+[/;]\s*+", re.IGNORECASE
 )
 # The claim format's own block separator, "---", written at the end of a
 # TECHNIQUE line with a dot or bar before it ("TECHNIQUE: T1027 · ---", the
@@ -1681,19 +1685,46 @@ def _catalogue_names_for(technique_id: str) -> set[str]:
     return {name for name in names if name}
 
 
+@lru_cache(maxsize=1)
+def _catalogue_name_index() -> tuple[frozenset[str], frozenset[str], int]:
+    """The vendored catalogue's names folded, the one-word names that are ordinary
+    English words (the vendored stopword list: "At"), and the longest name's
+    length in words. Read once."""
+    from maljan.memory.attck_loader import _folded_name, technique_names
+    from maljan.pipeline.validation import english_stopwords
+
+    stopwords = english_stopwords()
+    folded = {_folded_name(name) for name in technique_names().values()}
+    folded.discard("")
+    ordinary = frozenset(name for name in folded if " " not in name and name in stopwords)
+    names = frozenset(folded - ordinary)
+    longest = max((len(name.split()) for name in names), default=0)
+    return names, ordinary, longest
+
+
+# A word written with a capital: an ordinary word that is a one-word catalogue
+# name ("At") names it only so.
+_CAPITALISED_WORD_RE = re.compile(r"\b[A-Z][A-Za-z]*\b")
+
+
 def _names_a_technique(text: str) -> bool:
     """Whether ``text`` writes a vendored catalogue technique's name anywhere, folded.
 
     Every run of words up to the longest name's length is looked up once in
-    the set of folded names: linear in the text.
+    the set of folded names: linear in the text. A one-word name that is an
+    ordinary English word ("At") names it only written with its capital
+    ("none (At job)"); in small letters it is the word ("none asserted at this
+    level").
     """
-    from maljan.memory.attck_loader import _folded_name, technique_names
+    from maljan.memory.attck_loader import _folded_name
 
-    names = {_folded_name(name) for name in technique_names().values()}
-    names.discard("")
+    names, ordinary, longest = _catalogue_name_index()
+    if ordinary and any(
+        word.group(0).lower() in ordinary for word in _CAPITALISED_WORD_RE.finditer(text)
+    ):
+        return True
     if not names:
         return False
-    longest = max(len(name.split()) for name in names)
     words = _folded_name(text).split()
     for start in range(len(words)):
         for size in range(1, min(longest, len(words) - start) + 1):
@@ -1850,6 +1881,211 @@ def _numbered_in_order(chunks: list[Any]) -> list[Any]:
     return out
 
 
+# A note in brackets closing one id of a TECHNIQUE line ("T1071.001 (configured
+# channel)"). What it says decides how the id is read (``_note_reading``).
+_NOTE_RE = re.compile(r"\(([^()]*+)\)")
+_NOTED_PART_RE = re.compile(rf"(?P<id>{ID_BODY})(?:\s*+\(\x00(?P<note>\d++)\))?", re.IGNORECASE)
+# A note that says the id before it is not asserted, and what may follow that
+# phrase: where it was said or by what ("by the traced code", "from my round-0
+# claim 11", "to the sample"), and nothing else. A second clause, a contrast or
+# a list after it ("rejected by peer but I keep it", "withdrawn earlier, now
+# reinstated") leaves the line asked.
+_NOTE_NEGATES_RE = re.compile(
+    r"\b(?:(?:is|are)\s++)?not\s++(?:supported|established|asserted|attributed|claimed|adopted"
+    r"|applicable)\b|\b(?:unsupported|withdrawn|refuted|rejected|ruled\s++out)\b",
+    re.IGNORECASE,
+)
+_NEGATED_TAIL_RE = re.compile(
+    r"\s*+(?:(?:by|from|in|to|for)(?:\s++(?:the|my|this|these|its|our|a|an|peers?|sample|code"
+    r"|traced|evidence|artefacts?|artifacts?|static|round-\d++|round|claim|\d++)){1,5})?\s*+\.?\s*+",
+    re.IGNORECASE,
+)
+# A note with any word that bears on whether, how surely or on whose word the
+# id is asserted: a doubt, an observation state, a provenance, a condition, a
+# negation of anything else, a confidence or another id. Such a line is asked
+# about as before.
+_NOTE_BEARS_RE = re.compile(
+    r"\b(?:candidates?|possibl[ey]|likely|probabl[ey]|maybe|may|might|could|would|should|if"
+    r"|unless|suspect\w*|potential\w*|tentativ\w*|uncertain\w*|unconfirmed|unproven|unverified"
+    r"|unvalidated|unattributed|unexercised|hypothes\w*|pending|only|leads?|capabilit\w*"
+    r"|assess\w*|inferr?\w*|presen\w*|absen\w*|negative|observ\w*|seen|exercised|executed|run"
+    r"|ran|attribut\w*|assert\w*|mapp\w*|label\w*|associat\w*|catalogue|context|reference\w*"
+    r"|confidence|confirm\w*|validat\w*|verif\w*|corroborat\w*|disput\w*|contest\w*|not|no"
+    r"|never|nor|neither|without|none|lacks?|missing|partial\w*|partly|perhaps|formerly"
+    r"|rather|except\w*|whether|seem\w*|less|otherwise|cannot|can't|nothing|however"
+    r"|although|though|yet|almost|against|nearly|hardly|barely|somewhat|instead)\b"
+    r"|[?%]|\d\.\d|(?<![\w.])T\d{4}",
+    re.IGNORECASE,
+)
+# The words of a note written as a name: each word of it capitalised.
+_NOTE_WORD_RE = re.compile(r"[A-Za-z][\w'’-]*")
+_NAME_JOINING_WORDS = frozenset({"and", "or", "of", "the", "a", "an", "to", "for", "with", "via"})
+# A note's tokens, the reference and layout words a neutral note may hold beside
+# the id's own vendored words, and the function words it may hold between
+# them: closed sets. No other word is skipped: a hedge or a negation
+# ("perhaps", "cannot", "formerly", "rather") leaves the line asked.
+_NOTE_TOKEN_RE = re.compile(r"[^\s,;:.()\[\]`\"“”]++")
+_NOTE_LAYOUT_WORDS = frozenset(
+    {
+        "claim",
+        "round",
+        "command",
+        "routine",
+        "listed",
+        "above",
+        "same",
+        "per",
+        "one",
+        "each",
+        "separate",
+        "entry",
+        "path",
+        "channel",
+        "step",
+        "as",
+    }
+)
+_NOTE_FUNCTION_WORDS = frozenset(
+    {
+        "the",
+        "a",
+        "an",
+        "of",
+        "in",
+        "on",
+        "at",
+        "to",
+        "for",
+        "by",
+        "from",
+        "with",
+        "via",
+        "and",
+        "this",
+        "these",
+        "that",
+        "its",
+        "it",
+        "is",
+        "are",
+        "was",
+        "were",
+        "be",
+    }
+)
+_NOTE_CITATION_RE = re.compile(r"ev_\d++|\d++", re.IGNORECASE)
+_NOTE_NEUTRAL = "neutral"
+_NOTE_NEGATED = "negated"
+
+
+def _note_holds_only_the_id_s_words(note: str, technique_id: str) -> bool:
+    """Whether every content word of ``note`` is a word the vendored data writes for
+    ``technique_id`` (``validation.technique_vocabulary``) or a reference and layout
+    word (``_NOTE_LAYOUT_WORDS``); a function word (``_NOTE_FUNCTION_WORDS``) is no
+    content word. A word of fewer than three letters outside those sets, or a
+    slash inside a word ("n/a"), is no such word."""
+    from maljan.pipeline.validation import _stem, technique_vocabulary
+
+    vocabulary = technique_vocabulary(technique_id)
+    tokens = _NOTE_TOKEN_RE.findall(note)
+    if not tokens:
+        return False
+    for token in tokens:
+        token = re.sub(r"['’]s$", "", token)
+        if _NOTE_CITATION_RE.fullmatch(token):
+            continue
+        if "/" in token:
+            return False
+        for part in token.split("-"):
+            lowered = part.lower()
+            if part.isdigit() or lowered in _NOTE_LAYOUT_WORDS or lowered in _NOTE_FUNCTION_WORDS:
+                continue
+            if len(part) < 3 or not part.isalpha():
+                return False
+            if _stem(part) not in vocabulary:
+                return False
+    return True
+
+
+def _note_reading(note: str, technique_id: str = "") -> str | None:
+    """How a note closing an id is read: ``"neutral"`` when every content word of
+    it is the id's own vendored word or a reference or layout word
+    (:func:`_note_holds_only_the_id_s_words`), ``"negated"`` when it says the id is
+    not asserted and only where or by what follows (``_NEGATED_TAIL_RE``), and
+    ``None`` otherwise. A note with a doubt, a provenance or an observation word,
+    one that names a catalogue technique, or one written as a name (every word
+    capitalised) is ``None``."""
+    negation = _NOTE_NEGATES_RE.search(note)
+    if negation is not None:
+        left = note[: negation.start()] + " " + note[negation.end() :]
+        return _NOTE_NEGATED if _NEGATED_TAIL_RE.fullmatch(left) else None
+    if _NOTE_BEARS_RE.search(note) or _names_a_technique(note):
+        return None
+    words = [w for w in _NOTE_WORD_RE.findall(note) if w.lower() not in _NAME_JOINING_WORDS]
+    if len(words) >= 2 and all(w[:1].isupper() for w in words):
+        return None
+    if not technique_id or not _note_holds_only_the_id_s_words(note, technique_id):
+        return None
+    return _NOTE_NEUTRAL
+
+
+# A line that opens with "none" or a dash and closes with one note naming the
+# ids it sets aside ("none (T1547.001 not supported)").
+_NONE_WITH_NOTE_RE = re.compile(
+    rf"(?:none\b|[—–-])(?P<before>[^()]*+)\(\s*+(?P<ids>{ID_BODY}(?:\s*+(?:,|/|and)\s*+{ID_BODY})*+)"
+    r"(?P<note>[^()]*+)\)\s*+\.?",
+    re.IGNORECASE,
+)
+
+
+def _read_noted_line(bare: str) -> tuple[str, ...] | None:
+    """The ids of a TECHNIQUE line whose ids carry notes in brackets, or ``None`` to ask.
+
+    Each part of the list is an id with at most one closing note. An id whose
+    note holds only its own vendored words and reference words is read; one
+    whose note says it is not asserted, and only where or by what, is not; any
+    other note, or anything else on the line, leaves it asked about. A negating
+    note on a list where another id has no note of its own may be said of every
+    id: asked. ``()`` when every id is set aside, which claims none, as a line
+    that opens with "none" and closes with a note setting its ids aside does.
+    """
+    opening = _NONE_WITH_NOTE_RE.fullmatch(bare)
+    if opening is not None:
+        note = opening.group("note")
+        if (
+            not _ANY_TECHNIQUE_ID_RE.search(opening.group("before"))
+            and not _names_a_technique(opening.group("before"))
+            and _note_reading(note) == _NOTE_NEGATED
+        ):
+            return ()
+        return None
+    notes: list[str] = []
+
+    def _hold(match: re.Match[str]) -> str:
+        notes.append(match.group(1))
+        return f"(\x00{len(notes) - 1})"
+
+    held = _NOTE_RE.sub(_hold, bare)
+    if not notes:
+        return None
+    readings: list[tuple[str, str | None]] = []
+    for part in _TECHNIQUE_LIST_SEPARATOR_RE.split(held):
+        found = _NOTED_PART_RE.fullmatch(_bare_technique(part))
+        if found is None:
+            return None
+        if found.group("note") is None:
+            readings.append((found.group("id").upper(), None))
+            continue
+        reading = _note_reading(notes[int(found.group("note"))], found.group("id").upper())
+        if reading is None:
+            return None
+        readings.append((found.group("id").upper(), reading))
+    said = [reading for _id, reading in readings]
+    if _NOTE_NEGATED in said and None in said:
+        return None
+    return tuple(dict.fromkeys(i for i, reading in readings if reading != _NOTE_NEGATED))
+
+
 def read_technique_line(line: str) -> tuple[tuple[str, ...], str | None]:
     """``(technique ids, unread line)`` for one claim's TECHNIQUE line as written.
 
@@ -1864,8 +2100,16 @@ def read_technique_line(line: str) -> tuple[tuple[str, ...], str | None]:
     (``isr.technique_line_unread``). An id followed by the vendored
     catalogue's own name for it, in brackets or not ("T1027 (Obfuscated Files
     or Information)", "T1106 Native API"), is that id: the name names the id
-    and decides nothing. A line that opens with "none" and holds no technique
-    id ("none asserted") claims none.
+    and decides nothing. Ids separated by commas, "and", slashes or semicolons
+    are a list. A line that opens with "none", or with a dash before a
+    bracketed note, and holds no technique id ("none asserted", "— (provenance)")
+    claims none. An id with a closing note in brackets is read by what the note
+    says (``_read_noted_line``): a note whose every content word is the id's own
+    vendored word or a reference or layout word ("T1071.001 (configured
+    channel)", "(one per command, as listed)") leaves the id read; a note that
+    says the id is not asserted, followed only by where or by what ("T1547.001
+    (not supported by the traced code)", "none (T1055 withdrawn)"), claims none
+    of it; any other note keeps the line whole and asked about.
     """
     text = str(line or "").strip()
     bare = _bare_technique(_without_catalogue_names(_TRAILING_BLOCK_SEPARATOR_RE.sub("", text)))
@@ -1880,6 +2124,9 @@ def read_technique_line(line: str) -> tuple[tuple[str, ...], str | None]:
     parts = [_bare_technique(part) for part in _TECHNIQUE_LIST_SEPARATOR_RE.split(bare)]
     if parts and all(_ONE_TECHNIQUE_RE.fullmatch(part) for part in parts):
         return tuple(dict.fromkeys(part.upper() for part in parts)), None
+    noted = _read_noted_line(bare)
+    if noted is not None:
+        return noted, None
     return (), text
 
 
