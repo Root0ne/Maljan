@@ -37,6 +37,9 @@ CODE_LISTING_KINDS: frozenset[str] = frozenset(
     {"disassembly", "byte_disassembly", "function_disassembly"}
 )
 FUNCTION_LISTING_KINDS: frozenset[str] = frozenset({"function_disassembly"})
+# A tool whose one call reads one whole function: decompiled, or as
+# instructions. A batch, a refresh and a byte range are not.
+WHOLE_FUNCTION_KINDS: frozenset[str] = frozenset({"decompile"}) | FUNCTION_LISTING_KINDS
 # A tool that reads cross-references.
 XREF_KINDS: frozenset[str] = frozenset({"xrefs"})
 # A tool whose answer holds the sample's strings as data: read from the file,
@@ -150,6 +153,15 @@ def lists_a_function(facts: Any, tool: Any) -> bool:
     """Whether a tool disassembles a whole function: by its declared kind, else by its name."""
     kind = _kind(facts)
     return kind in FUNCTION_LISTING_KINDS if kind is not None else named_as_function_listing(tool)
+
+
+def reads_a_whole_function(facts: Any) -> bool:
+    """Whether a tool declares that one call reads one whole function; never by its name.
+
+    A tool that declares no kind is read as no such tool: nothing about what
+    its answer covers is known.
+    """
+    return _kind(facts) in WHOLE_FUNCTION_KINDS
 
 
 def reads_xrefs(facts: Any, tool: Any) -> bool:
