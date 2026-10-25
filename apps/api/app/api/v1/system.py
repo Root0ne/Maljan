@@ -56,6 +56,7 @@ class UnavailableToolStatus(BaseModel):
     remediation: str = ""
     still_answers: str = ""
     degradation_reason: str
+    manifest_code: str = ""
 
 
 class SystemStatusResponse(BaseModel):

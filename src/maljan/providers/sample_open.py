@@ -790,7 +790,31 @@ def _input_names(tool: Any) -> set[str] | None:
         args = getattr(tool, "args", None)
     except Exception:  # noqa: BLE001 - a schema not read is said by the caller
         return None
-    return {str(name) for name in args} if isinstance(args, dict) else None
+    if not isinstance(args, dict):
+        return None
+    if not args and _declares_more_than_it_parsed(tool):
+        # An empty reading of a schema that refers elsewhere, combines others
+        # or requires arguments is a schema not read, not one that takes none.
+        return None
+    return {str(name) for name in args}
+
+
+# The JSON Schema keywords a schema reads its arguments through without
+# listing them under ``properties``.
+_INDIRECT_KEYWORDS = ("$ref", "allOf", "anyOf", "oneOf")
+
+
+def _declares_more_than_it_parsed(tool: Any) -> bool:
+    """Whether ``tool``'s raw input schema holds arguments its parsed ``args`` came out without."""
+    raw = getattr(tool, "args_schema", None)
+    try:
+        if raw is not None and not isinstance(raw, dict):
+            raw = raw.model_json_schema()
+    except Exception:  # noqa: BLE001 - a schema that cannot be dumped is not read either
+        return True
+    if not isinstance(raw, dict):
+        return False
+    return any(key in raw for key in _INDIRECT_KEYWORDS) or bool(raw.get("required"))
 
 
 def _program_refusal(code: str, message: str, tool: str, remediation: str) -> str:
@@ -802,10 +826,7 @@ def _program_refusal(code: str, message: str, tool: str, remediation: str) -> st
 
 def withheld_unpinned(server: str, tool: str, why: str) -> str:
     """Why ``tool`` is withheld on a shared server: ``why`` it cannot be held to the job."""
-    return (
-        f"{server}: {tool} is withheld: {why}, and on this server other jobs share it "
-        "could read or change another job's program"
-    )
+    return f"{server}: {tool}{_WITHHELD}{why}{_WITHHELD_TAIL}"
 
 
 # Why a tool is withheld, by what its schema declares.
@@ -819,6 +840,33 @@ LISTED_SHARED_WITHHELD = (
     "sample_open.shared_withheld_tools lists it: what it runs or changes reaches past "
     "the job's own program"
 )
+# The two of them that are the server's configured policy: the operator lists
+# a tool job-safe or shared-withheld. A schema not read, a job with no note
+# and a wrap that failed are losses, and stay degradations.
+WITHHELD_BY_POLICY = frozenset({UNCOVERED, LISTED_SHARED_WITHHELD})
+_WITHHELD = " is withheld: "
+_WITHHELD_TAIL = (
+    ", and on this server other jobs share it could read or change another job's program"
+)
+
+
+def withheld_tool(reason: str) -> str | None:
+    """The tool :func:`withheld_unpinned`'s sentence names, or ``None`` for another sentence."""
+    text = str(reason or "")
+    at = text.find(_WITHHELD)
+    if at < 0 or not text.endswith(_WITHHELD_TAIL):
+        return None
+    head = text[:at]
+    return head.rsplit(": ", 1)[1] if ": " in head else None
+
+
+def withheld_by_policy(reason: str) -> bool:
+    """Whether ``reason`` is :func:`withheld_unpinned`'s sentence for a policy reason."""
+    text = str(reason or "")
+    at = text.find(_WITHHELD)
+    if at < 0 or not text.endswith(_WITHHELD_TAIL):
+        return False
+    return text[at + len(_WITHHELD) : len(text) - len(_WITHHELD_TAIL)] in WITHHELD_BY_POLICY
 
 
 def pin_program_argument(

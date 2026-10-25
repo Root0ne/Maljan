@@ -333,6 +333,7 @@ def run_one(
             "job_error": record.job_error,
             "elapsed_s": round(record.elapsed_s, 1),
             "degradation_reasons": record.malware_report.get("degradation_reasons"),
+            "operator_choices": record.malware_report.get("operator_choices"),
             "empty_evidence_sections": record.empty_evidence_sections,
             "identity": record.malware_report.get("identity"),
             "reputation": record.malware_report.get("reputation"),
@@ -1180,7 +1181,7 @@ def scenario_d(ctx: Context) -> list[RunResult]:
             ) -> Gates:
                 wrote = store.writes[before:]
                 text = json.dumps(record.events, default=str) + json.dumps(
-                    record.malware_report.get("degradation_reasons") or []
+                    reach_mod.listed_reasons(record.malware_report)
                 )
                 own = {
                     "ltm_written_once": (len(wrote) == 1, f"writes this run: {wrote}"),
@@ -1439,7 +1440,7 @@ def _kit_gates(extra: dict[str, Any], declared: dict[str, Any]) -> Callable[...,
             str(e.get("tool")) for e in reach_mod.entries_of(record, reach_mod.by_server("kit"))
         ]
         findings = offered_name_findings(reach_mod.offers(dump), "kit", own, builtins)
-        degradations = [str(d) for d in record.malware_report.get("degradation_reasons") or []]
+        degradations = reach_mod.listed_reasons(record.malware_report)
         # A built-in renamed or hidden is a change the operator must be told
         # of; a degradation naming the kit's server unavailable is false.
         untold = [f for f in findings if not any(f.split()[2] in d for d in degradations)]

@@ -123,6 +123,7 @@ from maljan.pipeline.mediation_models import (
     MEDIATOR_NO_ANSWER,
     consensus_applies,
 )
+from maljan.pipeline.operator_choice import SampleFacts, facts_record, split_operator_choices
 from maljan.pipeline.outcome import (
     VERDICT_READ_FALLBACK,
     corrected_reasons,
@@ -3464,6 +3465,12 @@ RUN_QUALITY_ANSWER_NOTE = (
 # What leads the facts about claims that are not limits of the run, when the
 # run has limits of its own listed first.
 RUN_QUALITY_CLAIM_NOTES = "Also noted about the claims, not about the run:"
+# What leads the tools the operator's configuration left out
+# (``pipeline.operator_choice``): no limit of this run, and no finding either.
+RUN_QUALITY_CHOICES = (
+    "Left out by the operator's configuration, so no evidence this run would have had "
+    "was lost; read each as an absence of that evidence, not as a finding:"
+)
 
 
 def run_quality_note(
@@ -3472,6 +3479,7 @@ def run_quality_note(
     degraded: bool,
     informational: Sequence[str] = (),
     notes: Sequence[str] = (),
+    choices: Sequence[str] = (),
 ) -> str:
     """The RUN QUALITY paragraph the judge reads, or ``""`` when the run recorded nothing.
 
@@ -3483,10 +3491,16 @@ def run_quality_note(
     ``notes`` are facts about claims the judge weighs that are not limits of
     the run (technique claims citing nothing): stated to the judge as they
     are, after the run's own reasons, and never as a cause of degradation.
+    ``choices`` are what the operator's configuration left out: said after
+    them, as absences, and never as a cause of degradation either.
     """
     noted_claims = "; ".join(str(note) for note in notes if note).rstrip(". ")
+    chosen = "; ".join(str(choice) for choice in choices if choice).rstrip(". ")
     if not reasons:
-        return f"RUN QUALITY — {noted_claims}." if noted_claims else ""
+        parts = [noted_claims] if noted_claims else []
+        if chosen:
+            parts.append(f"{RUN_QUALITY_CHOICES} {chosen}")
+        return f"RUN QUALITY — {'. '.join(parts)}." if parts else ""
     sentences = "; ".join(reason_sentence(r) for r in reasons).rstrip(". ")
     if degraded:
         parts = [
@@ -3503,6 +3517,8 @@ def run_quality_note(
             parts.append(RUN_QUALITY_ANSWER_NOTE)
     if noted_claims:
         parts.append(f"{RUN_QUALITY_CLAIM_NOTES} {noted_claims}.")
+    if chosen:
+        parts.append(f"{RUN_QUALITY_CHOICES} {chosen}.")
     return " ".join(parts)
 
 
@@ -5698,6 +5714,7 @@ def _failed_verdict_summary(
     state: AnalysisState,
     own_stage: dict[str, Any] | None,
     reasons: list[str],
+    choices: Sequence[str] = (),
 ) -> dict[str, Any] | None:
     """The run summary of a run whose judge failed, or ``None`` when none can be built.
 
@@ -5714,6 +5731,7 @@ def _failed_verdict_summary(
             .set_sample(state.get("file_hash", ""), state.get("file_name"))
             .set_verdict("Suspicious", 0)
             .set_degraded_mode(True, list(reasons))
+            .set_operator_choices(list(choices))
         )
         parts: tuple[tuple[str, Callable[[], Any]], ...] = (
             ("stages", lambda: builder.set_stages(stage_rollup(container, state, own_stage))),
@@ -5958,10 +5976,16 @@ def make_judge_node(
             str(reason)
             for reason in (dict(state.get("triage_facts") or {}).get("degradation_reasons") or [])
         ]
+        # What the operator's configuration left out, taken off the reasons
+        # once the body has assembled them (``pipeline.operator_choice``): the
+        # unset settings are the ones the servers' manifests mark by code.
+        _operator_choices: list[str] = []
+        _not_configured: list[str] = []
         try:
             for _server_reason in container.server_degradation_reasons():
                 if str(_server_reason) not in _degradation_reasons:
                     _degradation_reasons.append(str(_server_reason))
+            _not_configured = [str(r) for r in container.server_not_configured_reasons()]
         except Exception as exc:  # noqa: BLE001 — a reason unread is not a verdict lost
             logger.debug("judge_node: server degradation reasons not read (%s).", exc)
         try:
@@ -6354,10 +6378,32 @@ def make_judge_node(
             # keeps the weight it always had.
             # A note on part of an answer whose other claims were read is
             # listed with the reasons and does not make the verdict tentative.
+            # A key never set, a server switched off, a tool a shared server
+            # withholds by policy: the operator's configuration, which cost the
+            # run no evidence it would have had. Listed apart, and never what
+            # makes the run degraded or draws the banner.
+            _degradation_reasons, _operator_choices = split_operator_choices(
+                _degradation_reasons, _not_configured
+            )
+            # What the run holds of its sample that says whether a missing
+            # tool cost it anything: its format, the tools that answered it
+            # short of a library, what each tool's missing part reads.
+            _sample_facts = SampleFacts(
+                file_type=str(state.get("file_type") or ""),
+                failures=tuple(state.get("evidence_ledger") or ()),
+            )
+            with suppress(Exception):
+                _sample_facts = SampleFacts(
+                    file_type=_sample_facts.file_type,
+                    failures=_sample_facts.failures,
+                    without_reads=container.server_without_reads(),
+                )
             _informational: list[str] = []
             with suppress(Exception):
                 _informational = informational_reasons_in_force(isr_reports)
-            _degraded_mode = run_is_degraded(_degradation_reasons, informational=_informational)
+            _degraded_mode = run_is_degraded(
+                _degradation_reasons, informational=_informational, facts=_sample_facts
+            )
             if _degraded_mode:
                 logger.warning("Degraded run detected (%s).", "; ".join(_degradation_reasons))
 
@@ -6371,6 +6417,7 @@ def make_judge_node(
                 degraded=_degraded_mode,
                 informational=_informational,
                 notes=[_ungrounded_note] if _ungrounded_note else (),
+                choices=_operator_choices,
             )
 
             verdict = await judge.give_verdict(
@@ -6628,6 +6675,8 @@ def make_judge_node(
                     )
                     .set_corroboration(_corroboration)
                     .set_degraded_mode(_degraded_mode, _degradation_reasons)
+                    .set_operator_choices(_operator_choices)
+                    .set_loss_facts(facts_record(_sample_facts))
                     .set_failed_analysts(_failed_analysts)
                     .set_profile(
                         container.config.agents.profile,
@@ -6806,6 +6855,7 @@ def make_judge_node(
                     # node and downstream consumers (API/dashboard).
                     "degraded_mode": _degraded_mode,
                     "degradation_reasons": _degradation_reasons,
+                    "operator_choices": _operator_choices,
                     # Exact opcode-hash family overlap, surfaced into the report's
                     # FamilyAttribution.function_hash_matches by the report node.
                     "function_hash_matches": _func_hash_report,
@@ -6851,7 +6901,10 @@ def make_judge_node(
             # and the coverage of a run whose judge failed were absent without
             # notice.
             _judge_failed = f"judge failed ({type(e).__name__})"
-            _failed_reasons = [*_degradation_reasons]
+            # The reasons may not have been split yet: the judge can fail
+            # before the body assembles them.
+            _failed_reasons, _moved = split_operator_choices(_degradation_reasons, _not_configured)
+            _failed_choices = list(dict.fromkeys([*_operator_choices, *_moved]))
             if _judge_failed not in _failed_reasons:
                 _failed_reasons.append(_judge_failed)
             _failed_record = _verdict_record(
@@ -6871,8 +6924,13 @@ def make_judge_node(
                     },
                     "degraded_mode": True,
                     "degradation_reasons": _failed_reasons,
+                    "operator_choices": _failed_choices,
                     "run_summary": _failed_verdict_summary(
-                        container, state, _failed_record.get("stage_results"), _failed_reasons
+                        container,
+                        state,
+                        _failed_record.get("stage_results"),
+                        _failed_reasons,
+                        _failed_choices,
                     ),
                     "evidence_ledger": _judge_evidence(),
                     **_judge_budget(container),
@@ -7105,6 +7163,7 @@ def make_report_node(
                 # stage read the ledger, so a run that carries them must not
                 # ship a report saying no analysis was performed.
                 degradation_reasons=corrected_reasons(state.get("degradation_reasons"), _ledger),
+                operator_choices=list(state.get("operator_choices") or []),
                 # The routing minimum, which stands in for the identity block
                 # when no agent called an identification tool.
                 sample_platform=state.get("platform"),

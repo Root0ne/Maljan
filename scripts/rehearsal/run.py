@@ -49,6 +49,9 @@ operator expects is allowed by its name, the words before its parenthesis
 (``--allow-degradation server.analysis.capa_unavailable``, repeatable; ``{n}``
 stands for a count). A fault scenario allows the reasons it declares it causes
 (``SCENARIO_DEGRADATIONS`` in ``scripts/rehearsal/roles.py``), and only those.
+What the operator's configuration left out (a key never set, a server switched
+off, a tool a shared server withholds by policy) cost the run no evidence it
+would have had: each is printed as a choice, and fails nothing.
 
 The account's sign-in is read from the environment variable named by
 ``--login-env``; it is never taken on the command line or printed.
@@ -79,6 +82,7 @@ from scripts.rehearsal.checklist import (  # noqa: E402
     as_markdown,
     check_run,
     compare,
+    operator_choices,
     signature,
 )
 from scripts.rehearsal.roles import (  # noqa: E402
@@ -1383,6 +1387,7 @@ def write_results(
             for c in matched
         ]
         result["degradations_not_allowed"] = degraded
+        result["operator_choices"] = operator_choices(record)
         result["passed"] = not failures and not degraded
         (out / f"{stem}.json").write_text(
             json.dumps(result, indent=1, default=str), encoding="utf-8"
@@ -1403,6 +1408,8 @@ def write_results(
             print(f"  DEGRADED {reason}")
         if degraded:
             print("    allow an expected one with --allow-degradation <name>")
+        for reason in result["operator_choices"]:
+            print(f"  NOT CONFIGURED OR WITHHELD BY CHOICE {reason}")
         for name, row in known.items():
             if any(c.name == name and c.ok for c in checks):
                 print(f"  known defect {row.get('id', '')} no longer reproduces: strike its row")

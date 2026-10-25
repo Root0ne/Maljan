@@ -1325,8 +1325,8 @@ def _decided_by_the_corpus() -> Callable[[str], bool]:
 
 def _degradation(
     run: _Run, stored: Mapping[str, Any], decided: Sequence[str], grounding: str = ""
-) -> tuple[list[str], bool]:
-    """The report's degradation reasons and whether the run is degraded, as far as decidable.
+) -> tuple[list[str], list[str], bool]:
+    """The report's degradation reasons, the operator's choices and whether the run is degraded.
 
     The reasons the verdict carries are decided again (``decided``), and the
     stored ones of that kind are dropped first, so one these rules no longer
@@ -1336,12 +1336,16 @@ def _degradation(
     degraded is decided again over the reasons, by the platform's own rule
     (``run_is_degraded``), the verdict's reasons making it degraded as the
     judge node's do; a stored degraded report with no reason stays degraded.
+    A stored reason that is the operator's choice (``pipeline.operator_choice``)
+    is moved to the choices, as the judge node now lists it, and named.
     """
     from maljan.pipeline.nodes import informational_reasons_in_force
+    from maljan.pipeline.operator_choice import SampleFacts, split_operator_choices
     from maljan.pipeline.outcome import corrected_reasons
     from maljan.pipeline.triage_pack import run_is_degraded
 
-    stored_reasons = [str(r) for r in stored.get("degradation_reasons") or []]
+    stored_reasons, moved = split_operator_choices(stored.get("degradation_reasons") or [])
+    choices = list(dict.fromkeys([*(str(r) for r in stored.get("operator_choices") or []), *moved]))
     by_the_verdict = _decided_by_the_verdict()
     by_the_corpus = _decided_by_the_corpus()
     kept = [r for r in stored_reasons if not by_the_verdict(r) and not by_the_corpus(r)]
@@ -1355,16 +1359,31 @@ def _degradation(
         place = len([r for r in before[:at] if not by_the_corpus(r)]) if at is not None else None
         grounded.insert(len(grounded) if place is None else place, grounding)
     reasons = corrected_reasons([*grounded, *(r for r in decided if r not in grounded)], run.ledger)
-    degraded = run_is_degraded(grounded, informational=informational_reasons_in_force(run.isrs))
+    facts = SampleFacts(
+        file_type=str(run.identity.get("file_type") or ""),
+        failures=tuple(run.ledger),
+    )
+    degraded = run_is_degraded(
+        grounded, informational=informational_reasons_in_force(run.isrs), facts=facts
+    )
     degraded = degraded or bool(decided)
-    if stored.get("degraded_mode") and not stored_reasons:
+    if stored.get("degraded_mode") and not stored_reasons and not moved:
         degraded = True
         run.name("report", "the stored report is degraded and states no reason: it stays degraded")
     run.degradation = {
         "decided": len(decided) + bool(grounding),
         "stored_decided_again": len(stored_reasons) - len(kept),
         "kept_as_stored": len(kept),
+        **({"moved_to_choices": len(moved)} if moved else {}),
     }
+    if moved:
+        run.name(
+            "report",
+            f"{len(moved)} stored degradation reason(s) are the operator's choice (a key never "
+            "set, a server switched off, a tool a shared server withholds by policy): they cost "
+            "the run no evidence it would have had, so they are listed as choices and no longer "
+            "make the run degraded",
+        )
     if kept:
         run.name(
             "report",
@@ -1374,7 +1393,7 @@ def _degradation(
             "remove it here. The verdict's own reasons are decided again, and whether the run is "
             "degraded is decided again over the reasons",
         )
-    return reasons, degraded
+    return reasons, choices, degraded
 
 
 def _replayed_validation(run: _Run) -> dict[str, Any]:
@@ -1462,7 +1481,7 @@ def _build(run: _Run, judged: _Judged, built: _Built) -> dict[str, Any]:
     grounding = (
         partial_grounding_reason(corpus_state) if run.ledger or corpus_state.missing_answers else ""
     )
-    reasons, degraded = _degradation(run, stored, decided, grounding)
+    reasons, choices, degraded = _degradation(run, stored, decided, grounding)
 
     summary = copy.deepcopy(run.stored.run_summary)
     summary["validation"] = _replayed_validation(run)
@@ -1493,6 +1512,7 @@ def _build(run: _Run, judged: _Judged, built: _Built) -> dict[str, Any]:
         malware_category=getattr(assessment, "malware_category", None),
         degraded_mode=degraded,
         degradation_reasons=reasons,
+        operator_choices=choices,
         sample_platform=run.identity.get("platform"),
         sample_file_type=run.identity.get("file_type"),
         evidence_ledger=run.ledger,

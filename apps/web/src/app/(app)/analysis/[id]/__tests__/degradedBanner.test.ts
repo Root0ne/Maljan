@@ -40,4 +40,18 @@ describe("the degraded-run banner", () => {
     expect(PAGE).toContain("degradedBannerText");
     expect(PAGE).not.toContain("the judge&apos;s own");
   });
+
+  it("keeps what the operator chose out of the banner and lists it in the run record", () => {
+    // T-338: a key never set or a tool withheld by policy cost the run no
+    // evidence it would have had. The banner lists the summary's
+    // degradation_reasons, which no longer carry them; the run record lists
+    // operator_choices under a heading of its own.
+    const banner = PAGE.slice(
+      PAGE.indexOf("{isDegraded && ("),
+      PAGE.indexOf("{fpWarnings.length > 0"),
+    );
+    expect(banner).not.toContain("operatorChoices");
+    expect(PAGE).toContain("runSummary.operator_choices");
+    expect(PAGE).toContain("Not configured or withheld by choice");
+  });
 });

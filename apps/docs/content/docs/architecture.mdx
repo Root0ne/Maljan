@@ -2423,7 +2423,9 @@ are informational while the analyst still has claims read
 other limitations and counted in the header's "Notes: … see §13" line, and
 they do not set `degraded_mode` (`triage_pack.run_is_degraded(reasons,
 informational=…)`). An answer none of whose claims was read, a failed stage
-and a failed required tool still degrade the run. The judge's RUN QUALITY
+and any failed or missing tool still degrade the run; only the operator's
+choices (`pipeline.operator_choice`: a key never set, a server switched off, a
+tool a shared server withholds by policy) are listed apart and never do. The judge's RUN QUALITY
 paragraph (`nodes.run_quality_note`) says a run that is not degraded is not,
 and adds only the sentences that fit its limitations: that a missing tool is an
 absence of evidence when a reason other than such a note is listed, and that a

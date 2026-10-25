@@ -88,7 +88,14 @@
   {"kind": "count", "surface": "events", "rule": "same", "ref": "tool_call_finished and model_usage events"},
   {"kind": "count", "surface": "usage", "rule": "same", "ref": "usage tokens are the run summary's own block"},
   {"kind": "identity", "surface": "job", "rule": "same", "ref": "job id, status and sample hash"},
-  {"kind": "identity", "surface": "package", "rule": "same", "ref": "the package's run/ files are the stored run"}
+  {"kind": "identity", "surface": "package", "rule": "same", "ref": "the package's run/ files are the stored run"},
+  {"kind": "degradation_reason", "surface": "report_full", "rule": "all", "ref": "src/maljan/reporting/models.py:1584"},
+  {"kind": "degradation_reason", "surface": "markdown", "rule": "all", "ref": "section 13, What limited this run"},
+  {"kind": "degradation_reason", "surface": "html", "rule": "all", "ref": "src/maljan/reporting/renderers/html.py:216"},
+  {"kind": "operator_choice", "surface": "report_full", "rule": "all", "ref": "src/maljan/reporting/models.py:1590"},
+  {"kind": "operator_choice", "surface": "markdown", "rule": "all", "ref": "section 13, Not configured or withheld by choice; never the header"},
+  {"kind": "operator_choice", "surface": "html", "rule": "all", "ref": "src/maljan/reporting/renderers/html.py:216"},
+  {"kind": "operator_choice", "surface": "run_summary", "rule": "all", "ref": "run_summary.operator_choices"}
  ],
  "filters": [
   {"surface": "iocs_default", "rule": "exactly the include=all rows whose published flag is true", "ref": "apps/api/app/services/report_service.py:793-797"},

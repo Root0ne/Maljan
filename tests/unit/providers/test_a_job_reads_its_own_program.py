@@ -654,6 +654,35 @@ class TestEveryServerAlike:
         )
         assert out == [] and "could not be read" in withheld["opaque"]
 
+    def test_an_empty_reading_of_a_schema_that_holds_more_is_one_not_read(self) -> None:
+        """T-338: ``{}`` from a schema with ``$ref``, ``allOf``, ``anyOf`` or a
+        required list is a schema not read, a loss, never the policy withhold."""
+
+        def _tool(name: str, schema: dict[str, Any]) -> Any:
+            class _Indirect:
+                description = "d"
+                args: dict[str, Any] = {}
+                args_schema = schema
+
+            _Indirect.name = name  # type: ignore[attr-defined]
+            return _Indirect()
+
+        tools = [
+            _tool("by_ref", {"$ref": "#/$defs/Args"}),
+            _tool("by_all", {"allOf": [{"type": "object"}]}),
+            _tool("by_any", {"anyOf": [{"type": "object"}]}),
+            _tool("by_required", {"type": "object", "required": ["program"]}),
+            _tool("takes_none", {"type": "object", "properties": {}}),
+        ]
+        withheld: dict[str, str] = {}
+        pin_program_argument(
+            tools, server=KEY, spec=self.SPEC, notes=SampleNotes(), shared=True, withheld=withheld
+        )
+        for name in ("by_ref", "by_all", "by_any", "by_required"):
+            assert "could not be read" in withheld[name], name
+        assert "could not be read" not in withheld["takes_none"]
+        assert "job_safe_tools does not list it" in withheld["takes_none"]
+
     def test_a_local_server_is_left_as_it_was(self) -> None:
         notes = SampleNotes()
         handle, seen = self._handle("stdio", notes)

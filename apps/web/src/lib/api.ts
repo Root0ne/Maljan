@@ -100,6 +100,10 @@ export interface UnavailableToolDTO {
   still_answers: string;
   /** The words a run's degraded block uses for the same tool. */
   degradation_reason: string;
+  /** The manifest's code: `not_configured` for a setting left unset, which a
+   *  run lists as the operator's choice, not as a degradation. Absent from an
+   *  older API. */
+  manifest_code?: string;
 }
 
 export interface SandboxReportDTO {

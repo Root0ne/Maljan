@@ -47,6 +47,32 @@ describe("the unavailable tools notice", () => {
     ]);
   });
 
+  it("says a key left unset is not configured and degrades nothing (T-338)", () => {
+    const unset: UnavailableToolDTO = {
+      server: "threatintel",
+      tool: "check_hash",
+      reason: "VIRUSTOTAL_API_KEY is not configured",
+      remediation: "set the credential or setting this tool needs in Settings",
+      still_answers: "",
+      degradation_reason: "server.threatintel.check_hash_unavailable(...)",
+      manifest_code: "not_configured",
+    };
+
+    const alone = unavailableToolsNotice([unset]);
+    expect(alone?.label).toBe("Tool not configured");
+    expect(alone?.detail).toContain("does not count as degrading it");
+    expect(alone?.detail).not.toContain("reports itself as degraded");
+    expect(alone?.lines).toEqual([
+      "check_hash on threatintel is not configured: VIRUSTOTAL_API_KEY is not configured. " +
+        "To use it: set the credential or setting this tool needs in Settings.",
+    ]);
+
+    const mixed = unavailableToolsNotice([CAPA, unset]);
+    expect(mixed?.label).toBe("2 tools unavailable");
+    expect(mixed?.detail).toContain("reports itself as degraded");
+    expect(mixed?.detail).toContain("one is not configured");
+  });
+
   it("says what a tool still answers, and counts them when there are several", () => {
     const notice = unavailableToolsNotice([CAPA, PY7ZR]);
 

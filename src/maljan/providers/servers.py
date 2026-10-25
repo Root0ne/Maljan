@@ -43,6 +43,8 @@ UNAVAILABLE_REASON = "mcp server '{name}' unavailable"
 # name. Distinct from ``UNAVAILABLE_REASON``: the server is fine, the
 # *reference* is stale, and an operator fixes those two things differently.
 AGENT_TOOL_UNAVAILABLE_REASON = "agent tool '{server}.{name}' unavailable"
+# What follows it for a server the operator switched off.
+SERVER_DISABLED = "server disabled"
 
 # The teardown budgets, and why they are these numbers.
 #
@@ -1359,6 +1361,17 @@ class ServerHandle:
 
     def _keep_capabilities(self, payload: Any) -> None:
         parsed = ServerCapabilities.from_payload(self.name, payload)
+        if parsed is not None and parsed.server != self.name:
+            # A manifest speaks for the server that answered it and no other:
+            # one naming another server's key would put its words in that
+            # server's reasons (``pipeline.operator_choice``). Kept under this
+            # handle's own name.
+            logger.warning(
+                "mcp server '%s': its manifest names the server %r; read as its own.",
+                self.name,
+                str(parsed.server)[:80],
+            )
+            parsed.server = self.name
         self.capabilities = parsed
         # The budgets the server declares for its own tools set how long the
         # guard lets one of their calls run before it counts as unanswered.
@@ -1521,6 +1534,59 @@ class ServerHandle:
         """Make the shared-server withholding decisions for the tools this handle holds."""
         if self._all_tools:
             self.tools()
+
+    def not_configured_reasons(self) -> list[str]:
+        """The reasons of the tools this host's manifest marks unset, which are the operator's.
+
+        A server's own manifest could claim any loss is a setting, so the
+        claim is held to what the platform knows of this server. A tool is one
+        only when all of these hold: its cell's code is ``not_configured``; it
+        names at least one setting; each is one the platform can hand this
+        server (a key of its ``env``, or a name in its ``env_allow``); none of
+        them holds a value on the platform's side, since one that does never
+        reached the server and is a loss; and its reason is exactly what the
+        probe says of those settings unset (``Requirement.probe``). The reason
+        carries this handle's name, never one the manifest gave
+        (``_keep_capabilities``). Anything else is a loss
+        (``pipeline.operator_choice``).
+        """
+        import os
+
+        from maljan.tools.errors import NOT_CONFIGURED
+
+        if self.capabilities is None:
+            return []
+        env = dict(self.config.env or {})
+        allowed = set(self.config.env_allow or ())
+        out: list[str] = []
+        for missing in self.capabilities.unavailable():
+            names = missing.requires
+            if (
+                missing.code != NOT_CONFIGURED
+                or missing.server != self.name
+                or not names
+                or any(name not in env and name not in allowed for name in names)
+                or missing.reason != "; ".join(f"{name} is not configured" for name in names)
+            ):
+                continue
+            held = [
+                name
+                for name in names
+                if env.get(name) or (name in allowed and os.environ.get(name))
+            ]
+            if not held:
+                out.append(missing.degradation_reason)
+        return out
+
+    def declared_without_reads(self) -> dict[str, frozenset[str]]:
+        """By tool, the routed formats its missing part reads, as this host's manifest says."""
+        if self.capabilities is None:
+            return {}
+        return {
+            name: frozenset(str(f) for f in cell["without_reads"])
+            for name, cell in self.capabilities.tools.items()
+            if isinstance(cell.get("without_reads"), list)
+        }
 
     def withheld_reasons(self) -> list[str]:
         """The degradation reasons for the tools this host cannot run.
@@ -2028,6 +2094,21 @@ class ServerRegistry:
         with self._lock:
             return [*self._handles.values(), *self._loop_handles.values()]
 
+    def not_configured_reasons(self) -> list[str]:
+        """Each attached server's unset settings (``ServerHandle.not_configured_reasons``)."""
+        out: list[str] = []
+        for handle in self._all_handles():
+            out.extend(r for r in handle.not_configured_reasons() if r not in out)
+        return out
+
+    def declared_without_reads(self) -> dict[tuple[str, str], frozenset[str]]:
+        """By ``(server, tool)``, the routed formats each tool's missing part reads."""
+        out: dict[tuple[str, str], frozenset[str]] = {}
+        for handle in self._all_handles():
+            for tool, formats in handle.declared_without_reads().items():
+                out.setdefault((handle.name, tool), formats)
+        return out
+
     def handles_for(self, role: str, *, exclude: str = "") -> list[ServerHandle]:
         """``for_agent``, plus the per-loop handles for the same servers.
 
@@ -2295,7 +2376,7 @@ class ServerRegistry:
             unavailable = AGENT_TOOL_UNAVAILABLE_REASON.format(
                 server=handle.name, name=ref.name or "*"
             )
-            return [], [f"{unavailable}: server disabled"]
+            return [], [f"{unavailable}: {SERVER_DISABLED}"]
         available = handle.tools()
         if ref.name is None:
             return list(available), handle.withheld_reasons()

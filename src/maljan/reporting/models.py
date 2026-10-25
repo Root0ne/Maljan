@@ -1582,6 +1582,12 @@ class MalwareReport(BaseModel):
     # reader sees why. ``degradation_reasons`` carries the human-readable list.
     degraded_mode: bool = False
     degradation_reasons: list[str] = Field(default_factory=list)
+    # What the operator's configuration left out — a key never set, a server
+    # switched off, a tool a shared server withholds by policy. It cost the
+    # run no evidence its configuration would give, so it is listed apart and
+    # never draws the banner (``pipeline.operator_choice``). Left out of the
+    # JSON when empty, so a report stored before the field existed reads as it did.
+    operator_choices: list[str] = Field(default_factory=list, exclude_if=lambda value: not value)
 
     # --- Identification ---
     identity: SampleIdentity

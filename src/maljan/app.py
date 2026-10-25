@@ -729,6 +729,7 @@ class MaljanApp:
             "verdict_fallback": None,
             "degraded_mode": False,
             "degradation_reasons": [],
+            "operator_choices": [],
             # F10: declared AnalysisState channels, populated later by the
             # attribution/RAG nodes. Must be initialised so the TypedDict is
             # complete (and the LangGraph channels exist from the first step).

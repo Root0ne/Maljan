@@ -1256,6 +1256,47 @@ def check_key_findings(found: Findings, texts: dict[str, str], out: Report) -> N
             _found_in_text(out, "key_finding", name, text, _norm(item.get("text")), cut_at=None)
 
 
+def check_reasons(surfaces: dict[str, Any], texts: dict[str, str], out: Report) -> None:
+    """Every degradation reason and operator choice the report lists, on every surface (T-338).
+
+    Each is in the Markdown and the HTML; a choice of the operator's is never
+    in the header, where the DEGRADED RUN banner is, and the run summary lists
+    each choice the report does.
+    """
+    mr = _dict(_dict(surfaces.get("report_row")).get("malware_report"))
+    choices = [_norm(r) for r in _list(mr.get("operator_choices")) if _norm(r)]
+    listed = {
+        "degradation_reason": [_norm(r) for r in _list(mr.get("degradation_reasons"))],
+        "operator_choice": choices,
+    }
+    for kind, reasons in listed.items():
+        for reason in (r for r in reasons if r):
+            for name, text in texts.items():
+                out.checked[kind] += 1
+                _found_in_text(out, kind, name, text, reason, cut_at=None)
+    markdown = surfaces.get("markdown")
+    if choices and isinstance(markdown, str):
+        head = plain(markdown.split("\n## ", 1)[0])
+        for choice in choices:
+            if find(head, choice) == "present":
+                out.defect(
+                    "differs", "operator_choice", "markdown", choice[:300], "listed in the header"
+                )
+    summary = surfaces.get("run_summary")
+    if choices and isinstance(summary, dict):
+        held = {_norm(r) for r in _list(summary.get("operator_choices"))}
+        for choice in choices:
+            out.checked["operator_choice"] += 1
+            if choice not in held:
+                out.defect(
+                    "missing",
+                    "operator_choice",
+                    "run_summary",
+                    choice[:300],
+                    "the report lists it and the run summary does not",
+                )
+
+
 def _ledger_rows(surfaces: dict[str, Any]) -> list[dict[str, Any]]:
     ledger = _dict(surfaces.get("evidence"))
     return [r for r in _list(ledger.get("items") or ledger.get("entries")) if isinstance(r, dict)]
@@ -1753,6 +1794,7 @@ def audit(surfaces: dict[str, Any], spec: dict[str, Any] | None = None) -> dict[
     check_iocs(found, surfaces, texts, out)
     check_sections(found, surfaces, texts, out)
     check_key_findings(found, texts, out)
+    check_reasons(surfaces, texts, out)
     check_citations(found, surfaces, out)
     check_processes(found, surfaces, texts, out)
     check_rules(found, surfaces, texts, out)
