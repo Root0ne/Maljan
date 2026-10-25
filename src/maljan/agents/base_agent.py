@@ -2289,6 +2289,10 @@ class ClaimRead:
     unread only when none of the answer's own claims was read: then they may
     be the answer's only claims, and saying nothing would lose them silently.
 
+    ``without_evidence`` is the blocks the stricter reading turned away for
+    citing no ledger id, on an EVIDENCE line or in brackets in the claim. They are
+    unread, and the sentence saying so names them.
+
     ``blocks_read`` is the blocks the claims were read from. A block whose
     TECHNIQUE line lists several ids is one claim per id, so it is the blocks,
     not the claims, that are counted against the claims begun. ``None`` (a
@@ -2301,6 +2305,7 @@ class ClaimRead:
     after_disputes: int = 0
     confidence_unreadable: tuple[str, ...] = ()
     blocks_read: int | None = None
+    without_evidence: int = 0
 
     @property
     def read(self) -> int:
@@ -2328,16 +2333,24 @@ def read_claim_blocks(text: str, *, require_evidence: bool = False) -> ClaimRead
     lists; the heading count says how many the model began, so a block the
     reader could not split is visible.
 
+    A block without an ``EVIDENCE:`` line, or with one that was nothing but
+    tool-call scaffolding, cites what its claim sentence cites in brackets:
+    those ledger ids (``ledger_ids_cited``) are its evidence, as they would be
+    on the line. An id named in the prose is no citation.
+
     ``require_evidence`` is the static, dynamic and network analysts'
-    stricter reading: a block without an ``EVIDENCE:`` line, or with one that
-    was nothing but tool-call scaffolding, is not their claim. Everywhere else
-    such a block is still a finding, recorded as unsourced. Neither reading
+    stricter reading: a block that cites no ledger id, on an EVIDENCE line or
+    in brackets in its sentence, is not their claim. It is counted
+    (``ClaimRead.without_evidence``), and the sentence naming the claims not
+    read says so. Everywhere else such a block is still a finding, recorded as
+    unsourced. Neither reading
     puts a confidence on a block that states none: the confidence on a claim
     is the analyst's own statement, so such blocks are counted instead, and
     the count is what the validation turn asks the analyst about.
     """
     claims: list[ClaimEvidence] = []
     without_confidence = 0
+    without_evidence = 0
     unreadable: list[str] = []
     blocks_read = 0
     # Stripped per field rather than over the whole text: removing a block
@@ -2371,7 +2384,13 @@ def read_claim_blocks(text: str, *, require_evidence: bool = False) -> ClaimRead
         evidence_text = (
             strip_tool_call_scaffolding(evidence_value).strip() if evidence_value else ""
         )
+        if not evidence_text:
+            # No EVIDENCE line, or one that cleaned to nothing: the ledger ids
+            # the claim's own sentence cites in brackets are its citation, the
+            # one part of the line the run checks.
+            evidence_text = ledger_ids_cited(claim_text)
         if require_evidence and not evidence_text:
+            without_evidence += 1
             continue
         stated = _field(tail, _LINE_CONFIDENCE_RE, _BLOCK_CONFIDENCE_RE)
         if stated is None:
@@ -2418,7 +2437,37 @@ def read_claim_blocks(text: str, *, require_evidence: bool = False) -> ClaimRead
         after_disputes=count_claims_after_disputes(text or ""),
         confidence_unreadable=tuple(unreadable),
         blocks_read=blocks_read,
+        without_evidence=without_evidence,
     )
+
+
+# A citation in a sentence: what one pair of square or round brackets holds,
+# on one line ("[ev_0028, ev_0012]", "(ev_0017)"), with at most one pair of the
+# other kind nested in it ("[ev_0021 (blob 0xfac0)]", "(see [ev_0005])"); where
+# brackets nest deeper or do not close, the innermost pair. Each part is read
+# possessively and stops at a bracket it does not hold, so a run of unclosed or
+# nested ones costs time linear in its length.
+_PLAIN = r"[^\[\]()\n]"
+_CITATION_RE = re.compile(
+    rf"\[(?:{_PLAIN}|\({_PLAIN}*+\))*+\]"
+    rf"|\((?:{_PLAIN}|\[{_PLAIN}*+\])*+\)"
+    rf"|[\[(]{_PLAIN}*+[\])]"
+)
+
+
+def ledger_ids_cited(text: str) -> str:
+    """The ledger ids ``text`` cites in brackets, each once in the order written, as an evidence line.
+
+    Only an id written as a citation, inside ``[...]`` or ``(...)``, counts: an
+    id named in the prose ("unlike ev_0012 suggests") is not a citation. ``""``
+    when the text cites none.
+    """
+    cited = dict.fromkeys(
+        found.lower()
+        for citation in _CITATION_RE.findall(text or "")
+        for found in ENTRY_ID_RE.findall(citation)
+    )
+    return ", ".join(f"[{found}]" for found in cited)
 
 
 def claims_unread_sentence(agent: str, read: ClaimRead, revision_round: int = 0) -> str:
@@ -2437,10 +2486,13 @@ def claims_unread_sentence(agent: str, read: ClaimRead, revision_round: int = 0)
         if read.confidence_unreadable
         else ""
     )
+    uncited = (
+        f" {read.without_evidence} of them cite no ledger id." if read.without_evidence else ""
+    )
     return (
         f"The {agent} analyst's answer{stage} began {read.begun} claim(s){quoted}, and "
         f"{read.read} were read{declined}; {read.unread} could not be read as a "
-        f"claim and are not in its findings.{unreadable}"
+        f"claim and are not in its findings.{uncited}{unreadable}"
     )
 
 

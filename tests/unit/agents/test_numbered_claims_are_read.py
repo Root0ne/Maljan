@@ -70,8 +70,11 @@ def test_a_claim_heading_inside_evidence_opens_its_own_block() -> None:
     read = read_claim_blocks(text)
     assert [(c.claim, c.confidence) for c in read.claims] == [("see also ev_0002", 0.8)]
     assert read.without_confidence == 1 and read.unread == 0
-    # The stricter reading wants an EVIDENCE line on each: neither block is its claim.
-    assert _parse_claim_blocks(text) == []
+    # The stricter reading wants evidence on each: the second block names
+    # ev_0002 in its prose, not in brackets, so it cites nothing and is not read.
+    strict = read_claim_blocks(text, require_evidence=True)
+    assert strict.claims == []
+    assert (strict.without_confidence, strict.without_evidence, strict.unread) == (1, 1, 1)
 
 
 def test_a_peer_claim_quoted_under_disputes_is_not_this_analyst_s() -> None:

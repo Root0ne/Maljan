@@ -601,7 +601,11 @@ def _cites_a_ledger_entry(
     for the id, and the findings block is where the same analyst may already
     have cited one for this technique. The claim's own prose is deliberately
     not searched: "as ev_0001 does not show, this may be injection" is not a
-    citation, and reading it as one is how a validator stops validating.
+    citation, and reading it as one is how a validator stops validating. An id
+    the claim sentence writes in brackets counts only for a block with no
+    EVIDENCE line (or one that cleaned to nothing): the reader puts those ids on
+    the evidence line (``base_agent.ledger_ids_cited``), and they are checked
+    here as any id on it is.
 
     The id has to be one this run issued. The feedback names three real ones,
     so the shape of an id is no proof of anything, and an ``ev_9999`` the run
