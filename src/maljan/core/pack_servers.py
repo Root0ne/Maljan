@@ -87,19 +87,27 @@ def _declaring_server_key(
     return chosen
 
 
-def _decoder_server_key(servers: Mapping[str, Any], steps: Sequence[Any]) -> str:
+def _decoder_server_key(
+    servers: Mapping[str, Any], steps: Sequence[Any], *, level: int = logging.INFO
+) -> str:
     """The key of the server the pack's decoded-strings step declares, ``""`` for none.
 
     The step's own ``server`` when it is enabled, else the server declaring
     the tool the step calls (:func:`_declaring_server_key`): the
     server whose tool the in-process step stands in for. With the step left
-    out of ``steps`` (switched off), its shipped declaration is read.
+    out of ``steps`` (switched off), its shipped declaration is read. The
+    choice is logged at ``level`` (:func:`_declaring_server_key`).
     """
-    return _step_server_key(servers, steps, _DECODER_RENDERER, purpose="the decoder")
+    return _step_server_key(servers, steps, _DECODER_RENDERER, purpose="the decoder", level=level)
 
 
 def _step_server_key(
-    servers: Mapping[str, Any], steps: Sequence[Any], renderer: str, *, purpose: str
+    servers: Mapping[str, Any],
+    steps: Sequence[Any],
+    renderer: str,
+    *,
+    purpose: str,
+    level: int = logging.INFO,
 ) -> str:
     """The key of the server the pack's ``renderer`` step declares, ``""`` for none.
 
@@ -112,10 +120,10 @@ def _step_server_key(
         named = servers.get(step.server)
         if named is not None and getattr(named, "enabled", True):
             return str(step.server)
-    return _declaring_server_key(servers, step.called, purpose=purpose)
+    return _declaring_server_key(servers, step.called, purpose=purpose, level=level)
 
 
-def _carve_server_key(servers: Mapping[str, Any]) -> str:
+def _carve_server_key(servers: Mapping[str, Any], *, level: int = logging.INFO) -> str:
     """The key of the server whose file tools read what the pack's UPX carve writes.
 
     The carve is the platform's own step, so its shipped declaration names
@@ -123,8 +131,9 @@ def _carve_server_key(servers: Mapping[str, Any]) -> str:
     (:func:`_declaring_server_key`) is the one whose staging base the
     carve writes under. Independent of the decoded-strings step: an operator
     who moves that step to another server leaves the carve where it was.
+    The choice is logged at ``level`` (:func:`_declaring_server_key`).
     """
     step = _pack_step_of(_CARVE_RENDERER, ())
     if step is None:
         return ""
-    return _declaring_server_key(servers, step.called, purpose="the unpack carve")
+    return _declaring_server_key(servers, step.called, purpose="the unpack carve", level=level)

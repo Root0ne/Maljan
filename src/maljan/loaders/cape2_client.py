@@ -447,6 +447,7 @@ class CAPEv2Client:
             what=f"CAPEv2Client: task {task_id}",
             sleep=self._sleep,
             interval=float(poll_interval_seconds),
+            client=self._http,
         )
         if path is not None:
             logger.info(

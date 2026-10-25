@@ -35,6 +35,7 @@ stage agent.
 from __future__ import annotations
 
 import asyncio
+import logging
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
@@ -1333,7 +1334,9 @@ async def aresolve_agent(key: str, container: Any, job_key: str = "job") -> Reso
     )
 
 
-def servers_a_job_calls(settings: Settings, *, global_provider: str | None = None) -> set[str]:
+def servers_a_job_calls(
+    settings: Settings, *, global_provider: str | None = None, level: int = logging.INFO
+) -> set[str]:
     """Every tool server a job under ``settings`` can call, by key.
 
     The one answer for "does this job use this server", read by the submit
@@ -1349,6 +1352,10 @@ def servers_a_job_calls(settings: Settings, *, global_provider: str | None = Non
     * ``static.generic.server`` when the global static provider, the team's or
       any reached agent's is ``generic_mcp`` (``global_provider`` is the one
       a submitted job names).
+
+    ``level`` is what the triage pack's choice of a switched-off or one of
+    several declaring servers is logged at: info for the job start, debug for
+    a status read (``pack_servers._declaring_server_key``).
     """
     from maljan.core.config import MEDIATOR_AGENT_KEY, SUMMARIZER_AGENT_KEY
     from maljan.core.declared_reading import declarations
@@ -1399,9 +1406,9 @@ def servers_a_job_calls(settings: Settings, *, global_provider: str | None = Non
     used |= {
         key
         for key in (
-            _decoder_server_key(servers, steps),
-            _step_server_key(servers, steps, _CAPA_RENDERER, purpose="capa"),
-            _carve_server_key(servers),
+            _decoder_server_key(servers, steps, level=level),
+            _step_server_key(servers, steps, _CAPA_RENDERER, purpose="capa", level=level),
+            _carve_server_key(servers, level=level),
         )
         if key
     }

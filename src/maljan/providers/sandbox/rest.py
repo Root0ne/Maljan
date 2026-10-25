@@ -428,6 +428,7 @@ class RestSandboxProvider(SandboxProvider):
             what=f"Sandbox task {task_id}",
             sleep=self._sleep,
             interval=float(self._cfg.poll_interval_seconds),
+            client=http,
         )
 
     async def probe(self) -> ProviderProbe:

@@ -518,7 +518,8 @@ class MaljanApp:
 
         Its retries stop at ``deadline`` (``time.monotonic``) and wait on the
         job's cancellation, so a cancel ends a wait at once and no try follows
-        it (``providers.sandbox.triage.FetchBudget``).
+        it, and each try is tracked by it, so a cancel ends the request in
+        flight too (``providers.sandbox.triage.FetchBudget``).
         """
         from maljan.providers.sandbox.triage import FetchBudget, fetch_budget
 
@@ -528,6 +529,7 @@ class MaljanApp:
             now=time.monotonic,
             sleep=cancellation.wait,
             cancelled=lambda: cancellation.is_cancelled,
+            track=cancellation.track,
         )
         with fetch_budget(bounds):
             return cast("str | None", provider.fetch_pcap(task_id, dest_dir))

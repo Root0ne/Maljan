@@ -287,6 +287,37 @@ class TestReadinessNamesWhatTheJobWouldCall:
         unavailable_tools(settings, level=logging.WARNING)
         assert reading_levels() == {logging.INFO}
 
+    def test_the_status_reads_servers_a_job_calls_lines_are_debug_lines(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The decoder, capa and carve choices the job's servers are read with (T-354)."""
+        import logging
+
+        from maljan.agents.composition import servers_a_job_calls
+        from maljan.core import pack_servers
+
+        _without(monkeypatch)
+        said = MagicMock()
+        monkeypatch.setattr(pack_servers, "logger", said)
+        settings = Settings()
+        settings.mcp.servers["analysis"].enabled = False
+
+        def pack_levels() -> set[int]:
+            levels = {c.args[0] for c in said.log.call_args_list if "reading of" not in c.args[2]}
+            levels |= {
+                logging.INFO for c in said.info.call_args_list if "reading of" not in c.args[1]
+            }
+            said.reset_mock()
+            return levels
+
+        unavailable_tools(settings)
+        assert pack_levels() == {logging.DEBUG}
+        unavailable_tools(settings, level=logging.WARNING)
+        assert pack_levels() == {logging.INFO}
+        # The job start, read by the worker, keeps its info lines.
+        servers_a_job_calls(settings)
+        assert pack_levels() == {logging.INFO}
+
     def test_a_profile_the_job_names_that_does_not_exist_names_nothing(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:

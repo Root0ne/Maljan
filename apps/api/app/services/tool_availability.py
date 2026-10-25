@@ -221,8 +221,10 @@ def unavailable_tools(
     if profile and profile != str(settings.agents.profile):
         agents = settings.agents.model_copy(update={"profile": profile})
         settings = settings.model_copy(update={"agents": agents})
+    # The status read asks often: its choice of a pack server is a debug line.
+    chosen_at = logging.DEBUG if level <= logging.DEBUG else logging.INFO
     try:
-        used = servers_a_job_calls(settings, global_provider=global_provider)
+        used = servers_a_job_calls(settings, global_provider=global_provider, level=chosen_at)
     except Exception as exc:  # noqa: BLE001 — what the job calls is unknown: nothing to name
         logger.debug("tool availability: servers not read (%s)", type(exc).__name__)
         return []
@@ -253,8 +255,6 @@ def unavailable_tools(
                 found.append(missing)
     named = {(u.server, u.tool) for u in found}
     try:
-        # The status read asks often: its choice of server is a debug line.
-        chosen_at = logging.DEBUG if level <= logging.DEBUG else logging.INFO
         readings = list(_in_process_readings(settings, level=chosen_at))
     except Exception as exc:  # noqa: BLE001 — the pack's steps unread: the servers' answer stands
         logger.debug("tool availability: pack readings not read (%s)", type(exc).__name__)
