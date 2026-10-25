@@ -98,6 +98,42 @@ def format_entry_id(seq: int) -> str:
     return f"ev_{max(1, int(seq)):0{_ID_DIGITS}d}"
 
 
+class ServerChanges:
+    """How often each server may have been changed in one job, by any agent of it.
+
+    A call that may change state is counted when it starts and again when it
+    ends (:meth:`bump`), so a read that ran beside it, or an answer held
+    before it, is known to be stale by its mark (:meth:`mark`) having moved.
+    A change on an unknown server (``""``) or on the team server (an ``ask_``
+    call, whose agent reaches servers the asking agent cannot name) is a
+    change of every server.
+    """
+
+    # The servers a change on which is a change of every server
+    # (``agents.delegation.TEAM_SERVER`` is ``"team"``).
+    ANYWHERE = frozenset({"", "team"})
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._count: dict[str, int] = {}
+        self._anywhere = 0
+
+    def bump(self, server: str) -> None:
+        """Count one possible change on ``server``."""
+        key = str(server or "")
+        with self._lock:
+            if key in self.ANYWHERE:
+                self._anywhere += 1
+            else:
+                self._count[key] = self._count.get(key, 0) + 1
+
+    def mark(self, server: str) -> tuple[int, int]:
+        """Where ``server``'s count stands now: two equal marks mean nothing changed between."""
+        key = str(server or "")
+        with self._lock:
+            return self._count.get(key, 0), self._anywhere
+
+
 class EvidenceCounter:
     """The per-job source of entry ids.
 
@@ -116,6 +152,9 @@ class EvidenceCounter:
         # reason.
         self._lock = threading.Lock()
         self._seq = 0
+        # What any agent of the job may have changed on each server: one count
+        # per job, so a delegate's change reaches the agent that asked it.
+        self.changes = ServerChanges()
 
     def next_id(self) -> tuple[str, int]:
         """The next ``(entry_id, seq)`` pair, seq being 1-based."""
