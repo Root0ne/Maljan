@@ -322,6 +322,26 @@ async def test_the_full_walk_breaks_on_a_rewritten_chain_and_names_both_seqs(
     assert (walked["anchor"]["anchored_seq"], walked["anchor"]["head_seq"]) == (3, 2)
 
 
+@pytest.mark.asyncio
+async def test_a_uuid_of_digits_and_one_e_is_read_back_whole_over_sqlite(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from scripts.ledger import verify as cli
+
+    # Read as a number this id is a float, and uuid.UUID(float) fails the walk.
+    numeric = uuid.UUID("12345678901234567890123456e78901")
+    jobs = [uuid.uuid4() for _ in range(2)]
+    rows = _chain_rows([{"n": n} for n in range(2)], jobs)
+    rows[0]["id"] = numeric
+    engine = _database(rows)
+    monkeypatch.setattr(audit_anchor, "configured", lambda: None)
+    with engine.connect() as conn:
+        stored = conn.execute(sa.select(AuditLog.__table__.c.id)).scalars().all()
+        assert numeric in stored
+        walked = await cli.walk_audit_chain(_Conn(conn))
+    assert walked["rows"] == 2
+
+
 # ---------------------------------------------------------------------------
 # A job's verification
 # ---------------------------------------------------------------------------

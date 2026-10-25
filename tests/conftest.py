@@ -2,12 +2,21 @@ from collections.abc import Iterator
 from unittest.mock import MagicMock
 
 import pytest
+from sqlalchemy.dialects import postgresql
+from sqlalchemy.ext.compiler import compiles
 
 from app import observability
 from app.auth import throttle
 from maljan.app import MaljanApp
 from maljan.core.ctype_locale import pin_character_classification
 from tests.golden_fixtures import report_absent_fixture_skips
+
+
+@compiles(postgresql.UUID, "sqlite")
+def _uuid_as_text_on_sqlite(element, compiler, **kw):  # noqa: ANN001, ANN202
+    # SQLite types a column by its declared name: "UUID" gets NUMERIC affinity,
+    # which stores a 32-digit hex id holding one "e" as a REAL. CHAR keeps text.
+    return "CHAR(32)"
 
 
 def pytest_configure(config: pytest.Config) -> None:
