@@ -369,7 +369,7 @@ The debate ends when nothing is left to settle (`pipeline/debate_facts.py`,
 - For a blocking line naming a function the run knows (an address the line writes, or one a claim it names writes, that is a row of the function index or a function a decompile or disassembly call listed; an offset and its virtual address are one function where an image base the run read joins them), the platform states whether the ledger holds a listing of it and which entries hold it (`debate_facts.place_facts`, `AgentArgument.place_facts`, said to the room as a notice). The analysts the line names in its field (every analyst, for a line with no field) are told it in their revision. An analyst with a tool whose declared arguments take an address (`undeclared_tools.address_arguments`, read from each tool's own schema) is also told it can read a function the ledger never listed in this round, and its revision is given its tools: a configurable analyst's revision is its tool loop already, and a built-in analyst's revision runs its tool loop in place of its one tools-free call (`BaseAnalyst.revision_answer`, `safe_revise_isr(read_places=True)`). The model decides whether to read; nothing is adopted or rejected for it, and no call is made for the facts.
 - A revision round whose every revision is the answer in force again, whitespace aside, ends the debate as `converged`; the router reads only the record of the round right before the mediation it routes.
 - A revision round whose every revision states the claims in force again, wording aside, ends the debate as `reworded`, with no consensus claimed: another round would argue over words. Nothing factual may change: each claim's values (numbers, hex addresses, technique ids, quoted values), the entry ids its evidence line cites, its technique, its negators ("not", "no", "never", "without", a word ending "n't"), its confidence in steps of 0.05, its technical terms (acronyms, identifiers and names holding a digit, folded: RC4 against XOR is a change) and its content words (every word but articles, prepositions, "and", "so", pronouns and forms of be, have and do, read before the plural fold; "or", "nor" and "but" count; case and plural folded: "three" against "four", "explorer" against "svchost", "packed" against "unpacked" is a change) are the same, claim for claim; a reordering, punctuation or a stopword is wording (`claim_drops.unchanged_in_substance`, recorded as `reworded` in the round's record). A claim that cannot be read so, or any difference, leaves the round not reworded, and the debate goes on as before.
-- A revision's tool loop is seeded with the calls the analyst made in the run's earlier rounds to a tool that changes nothing and answers an identical call the same: one its server marks read-only (MCP `readOnlyHint`) or its declaration marks `read_only` (`base_agent.repeatable_earlier_entries`, `tool_pinning.answers_again`). A call of any other tool (a rename, a status poll, a submission) runs again, and so does a call whose earlier answer was a failure, carried a reason, an error or a message, or a status other than a word of completion such as "pending" (`evidence_recorder.holds_a_settled_answer`); an empty answer that nothing explains, alone or beside a status "ok", is settled and seeded. A tool is matched by its server and its name together, never by its name alone. A seed holds only while no call that is not read-only has run on the same server (its server key, else its source) since its entry was recorded, by any agent in any earlier round (`base_agent._stale_after`, newest first by `seq`, or by ledger order where a row has none) or in the current loop (`RepeatGuard.forget_round_seeds`): a rename or a patch makes a later decompile of that server a new call. An identical call (same tool, same arguments) is answered with the result its entry recorded, stamped with that entry's id and a sentence saying it was made in an earlier round, and no tool runs; the call is filed as a repeat of that entry. A failed call, and one whose result the run did not keep whole, is served once more, as for a chunked analysis.
+- A revision's tool loop is seeded with the calls the analyst made in the run's earlier rounds to a tool that changes nothing and answers an identical call the same: one its server marks read-only (MCP `readOnlyHint`) or its declaration marks `read_only` (`base_agent.repeatable_earlier_entries`, `tool_pinning.answers_again`). A call of any other tool (a rename, a status poll, a submission) runs again, and so does a call whose earlier answer was a failure, carried a reason, an error or a message, or a status other than a word of completion such as "pending" (`evidence_recorder.holds_a_settled_answer`); an empty answer that nothing explains, alone or beside a status "ok", is settled and seeded. A tool is matched by its server and its name together, never by its name alone. A seed holds only while no call that is not read-only has run on the same server (its server key, else its source) since its entry was recorded, by any agent in any earlier round (`base_agent._stale_after`, newest first by `seq`, or by ledger order where a row has none) or in the current loop (`RepeatGuard.forget_round_seeds`): a rename or a patch makes a later decompile of that server a new call. An identical call (same tool, same arguments; an argument named for an address in the binary compared by its value where it is written with `0x`, and a bare spelling holding a decimal digit and a hex letter, for an argument whose name has no `name` word, answered from an entry a `0x` call made, never the other way) is answered with the result its entry recorded, stamped with that entry's id and a sentence saying it was made in an earlier round, and no tool runs; the call is filed as a repeat of that entry. A failed call, and one whose result the run did not keep whole, is served once more, as for a chunked analysis.
 - A revision round that revised analysts and left the contested points as they were ends the debate as `contested_points_unchanged`, with no consensus claimed. A point is read from its blocking line alone (`debate_facts.point_key`): the analysts its field names, the ledger ids, hex values and decimal numbers it writes (claim numbers aside, since a revision renumbers claims; the mark and its reason aside), and its words where it writes none of those; two mediations whose blocking lines hold the same points, none resolved and none new, are unchanged however the mediator reworded them.
 - A revision is made against the analyst's answer in force and its peers'; each value of the answer in force it states nowhere is recorded in `run_summary.negotiation.dropped_claims` (a decimal only as a stated value, never a claim, round, step, stage, phase or list number, nor the round's own number; nor a cross-reference to the answer's own numbering such as "#3" or "item 3"; a number after any other word, such as "line 75", is compared as a value), the report's run appendix prints one count line per analyst and round (`dropped_value_counts`), the worker log one count line per analyst and round at INFO with each claim's sentence at DEBUG, and nothing is asked.
 - The debate stage's duration adds the revision rounds' time to the mediations', and `termination_reason` comes from the router's own rules, `hard_limit` only when the debate would have gone on.
@@ -3898,12 +3898,13 @@ conversation weighs before every model turn, and what it hands out is charged
 as it goes so a turn that calls several tools spends one turn's room between
 them. See [Configuration](/configuration/) for the numbers.
 
-**Old answers cleared when the window refuses.** A tool loop sends its whole
-conversation on every turn, so what the caps above bound is each answer, not
-what the loop reads again. Two things clear the oldest tool answers, each
-replaced by one line naming the evidence id the recorder stamped on it and how
-to read it again — and both only where the request would otherwise end the
-loop:
+**Old answers cleared when the window refuses, or past a price tier.** A tool
+loop sends its whole conversation on every turn, so what the caps above bound
+is each answer, not what the loop reads again. Three things clear the oldest
+tool answers, each replaced by one line naming the evidence id the recorder
+stamped on it and how to read it again — the first two only where the request
+would otherwise end the loop, the third only where it loses nothing and saves
+money:
 
 - **A refusal.** When the provider refuses a request as over its window (the
   same errors the `window_full` ending reads), one batch is cleared and the
@@ -3916,11 +3917,32 @@ loop:
   assignment's — never the job's smallest) is refused by every server, so it is
   cleared before it is sent. A prompt between the window less the output cap
   and the window is sent as before.
+- **A prompt past the agent's model's price tier.** Where the agent's own
+  model is priced by its prompt's length (its price row's `tiers`, read from
+  the operator's `llm.model_prices`, else the vendored table: Claude Haiku 5.5
+  bills every token of a prompt over 100,000 tokens at five times the rate) and
+  the request is past the first boundary, the oldest answers whose evidence id
+  one of the model's own turns has already written in its text are cleared —
+  never one it has not cited yet (an id named only in a call's arguments or in
+  its reasoning is no citation), so no fact it has not used leaves the
+  conversation. The clear is made only where what no tier clear can take (the
+  above, plus every answer not cited yet) is already under the boundary — a
+  clear that cannot bring the request under it would give up the cached prefix
+  and keep the dearer price — and where the request it sends, written to the
+  cache whole, costs less at the model's prices than the one it replaces with
+  its cached prefix, the turn's answer priced at this loop's mean and every
+  write priced for an hour where the model's cache entries live that long
+  (`tool_answer_clearing.tier_clear_pays`). A model priced by no prompt length
+  is never cleared for it. On the stored haiku5 run no loop met both
+  conditions at either cache lifetime — the reverser's first request alone was 131,680 tokens, and the
+  other loops that crossed the boundary had cited too little of what they read
+  — so that run is sent as it was.
 
 A clear takes the oldest answers until the request weighs what no clear can
 take (the framing, the pack, the definitions, the agent's own turns and
 reasoning, its newest answers) plus half of the room between that and the
-point — the refused request, or the window — so the loop has room to go on.
+point — the refused request, the window or the tier's boundary — so the loop
+has room to go on.
 A cleared answer stays cleared under the same line on every later turn. Never
 cleared: the newest turn's answers, an answer without the recorder's stamp, the
 system prompt, the task and its pack, the run-state block, the agent's own
@@ -3947,7 +3969,7 @@ the provider's recovery drops them. The nudge and the salvage after the loop
 send the cleared answers as the loop last sent them and bind the tools the loop
 last offered. Each clear is in the agent's log and is published as
 `tool_answers_cleared` (agent, turn, answers, characters before and after, and
-`refused` or `window`). The judge's tool loop clears the same way, with the
+`refused`, `window` or `tier`). The judge's tool loop clears the same way, with the
 same `read_evidence` tool offered from its first clear. The code is
 `maljan.agents.tool_answer_clearing`.
 
@@ -4154,7 +4176,7 @@ and the console draws the running analysis from them.
 | `validation_feedback` | `pipeline/validation.retry_with_feedback` | `stage`, `agent`, `code`, `message`, `retry_index`, `state`, `path`; `answer_kept` on an unread answer's question: one sentence saying where the answer is kept (`run_summary.validation.unparsed_answers`, one masked row per answer with its analyst and round), never the answer |
 | `judge_question` | the judge's ReAct loop | `stage`, `text`, `addressed_to` |
 | `budget_tick` / `stage_ended_at_cap` | the budget meter | see *The evidence ledger* |
-| `tool_answers_cleared` | an analyst's tool loop, on each clear of its oldest tool answers | `stage`, `agent`, `turn`, `answers`, `chars_before`, `chars_after`, `why` (`refused` or `window`) |
+| `tool_answers_cleared` | an analyst's tool loop, on each clear of its oldest tool answers | `stage`, `agent`, `turn`, `answers`, `chars_before`, `chars_after`, `why` (`refused`, `window` or `tier`) |
 | `tool_server_rested` | a tool server's guard, when its breaker opens | `server`, `failures`, `cooldown_s`, `reason`, and `label` where the server's block has a label other than its key |
 | `enrichment_complete` | the enrichment worker, after the run | `report_id`, `domains_enriched`, `ips_enriched`, `similar_samples` |
 | `completed` / `error` / `cancelled` | the worker | the outcome |
