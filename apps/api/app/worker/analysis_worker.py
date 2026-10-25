@@ -1064,6 +1064,16 @@ def remember_configured_secrets(core_settings: Any) -> None:
         )
 
 
+# Which model answered, as ``model_assignments.model_label`` writes it:
+# ``provider/model`` and an endpoint's label. Not identity fields: the whole
+# scrub reads ``anthropic/claude-haiku-5-5`` as a key (26 characters of the
+# base64 alphabet with digit pieces), and an exemption would carry a key typed
+# into a model name through. A value here, each string of a list here and each
+# key of a mapping here (a per-model tally) is scrubbed as a model label
+# (``events.scrub_model_label``).
+MODEL_FIELDS = frozenset({"model", "models"})
+
+
 def scrubbed(value: Any, *, field: str = "") -> Any:
     """``value`` with every string inside it scrubbed, however deeply it sits.
 
@@ -1076,13 +1086,27 @@ def scrubbed(value: Any, *, field: str = "") -> Any:
     and so is each string of a list under one — ``agents: ["static", …]`` is
     the same kind of thing as ``agent: "static"``. The exemption stops there:
     a dict below an identity field is walked like any other, so its own fields
-    are judged by their own names.
+    are judged by their own names. Left alone by the shape rules, that is: a
+    value the operator configured as a secret is still masked by value.
+
+    A value under one of ``MODEL_FIELDS`` is scrubbed as a model label, and so
+    is each key of a mapping under one.
     """
-    from maljan.pipeline.events import scrub_keeping_layout
+    from maljan.pipeline.events import (
+        mask_configured_values,
+        scrub_keeping_layout,
+        scrub_model_label,
+    )
 
     if isinstance(value, str):
-        return value if field in IDENTITY_FIELDS else scrub_keeping_layout(value)
+        if field in MODEL_FIELDS:
+            return scrub_model_label(value)
+        if field in IDENTITY_FIELDS:
+            return mask_configured_values(value)
+        return scrub_keeping_layout(value)
     if isinstance(value, dict):
+        if field in MODEL_FIELDS:
+            return {scrub_model_label(key): scrubbed(item) for key, item in value.items()}
         return {key: scrubbed(item, field=str(key)) for key, item in value.items()}
     if isinstance(value, list | tuple):
         return [scrubbed(item, field=field) for item in value]
