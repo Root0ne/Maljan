@@ -666,6 +666,41 @@ class EvidenceRecorder:
         )
 
 
+# An address written with its ``0x`` prefix, and a bare one: hex digits with
+# at least one decimal digit and at least one hex letter among them.
+_PREFIXED_ADDRESS = re.compile(r"\s*0[xX]([0-9a-fA-F]{1,16})\s*")
+_BARE_ADDRESS = re.compile(r"\s*((?=[0-9a-fA-F]*\d)(?=[0-9]*[a-fA-F])[0-9a-fA-F]{1,16})\s*")
+# The words of an argument's name, as ``named_as_address`` splits them.
+_NAME_WORDS = re.compile(r"[A-Z]?[a-z]+|[A-Z]+(?![a-z])|\d+")
+
+
+def _address_spelling(name: str, value: Any, *, bare: bool = False) -> Any:
+    """``value`` as a repeat is keyed by: an address as ``0x`` and its value, else as written.
+
+    Only for an argument whose name says it takes an address in the binary,
+    read from the name alone (``undeclared_tools.named_as_address``). A value
+    written with ``0x`` is keyed by its value. A bare value is read as one only
+    for a lookup (``bare``), only where it holds a decimal digit and a hex
+    letter, and only for an argument whose name has no ``name`` word: a symbol
+    such as ``add`` is no address, and a tool nobody declared may read bare
+    digits in another base. Any other value is kept as written.
+    """
+    from maljan.core.undeclared_tools import named_as_address
+
+    if not isinstance(value, str) or not named_as_address(name):
+        return value
+    found = _PREFIXED_ADDRESS.fullmatch(value)
+    if found is None and bare and "name" not in _name_words(name):
+        found = _BARE_ADDRESS.fullmatch(value)
+    if found is None:
+        return value
+    return f"0x{int(found.group(1), 16):x}"
+
+
+def _name_words(name: str) -> set[str]:
+    return {word.lower() for word in _NAME_WORDS.findall(str(name or ""))}
+
+
 class RepeatGuard:
     """How often each ``(tool, arguments)`` pair has been asked for in one loop.
 
@@ -795,7 +830,7 @@ class RepeatGuard:
         kept; the ask is marked as told, and it is not a repeat. ``None``
         otherwise, and for every later ask of it.
         """
-        key = self._key(tool, kwargs)
+        key = self._lookup_key(tool, kwargs)
         entry = self._seeded.get(key)
         if entry is None or entry not in self._recorded or key in self._told:
             return None
@@ -813,7 +848,7 @@ class RepeatGuard:
         served) and not counted as a repeat: the model has not yet been told
         in this conversation. An ask after it counts as any repeat does.
         """
-        key = self._key(tool, kwargs)
+        key = self._lookup_key(tool, kwargs)
         if key not in self._seeded or key in self._told:
             return False
         self._told.add(key)
@@ -875,13 +910,40 @@ class RepeatGuard:
         return str(entry_id) in self._seeded_failures
 
     @staticmethod
-    def _key(tool: str, kwargs: dict[str, Any]) -> str:
-        """The call, canonically: same arguments in any order are the same call."""
+    def _key(tool: str, kwargs: dict[str, Any], *, bare: bool = False) -> str:
+        """The call, canonically: same arguments in any order are the same call.
+
+        An argument named for an address in the binary
+        (``undeclared_tools.named_as_address``) is keyed by its value where it
+        is written with ``0x`` (:func:`_address_spelling`): ``0x1360BC03868``
+        and ``0x1360bc03868`` are one call. ``bare`` also reads a bare spelling
+        as its value, the key a lookup tries second (:meth:`_lookup_key`).
+        Every other argument is keyed as written.
+        """
+        canonical = {
+            name: _address_spelling(name, value, bare=bare) for name, value in kwargs.items()
+        }
         try:
-            arguments = json.dumps(kwargs, sort_keys=True, default=str)
+            arguments = json.dumps(canonical, sort_keys=True, default=str)
         except (TypeError, ValueError):
-            arguments = repr(sorted(kwargs.items()))
+            arguments = repr(sorted(canonical.items()))
         return f"{tool}({arguments})"
+
+    def _lookup_key(self, tool: str, kwargs: dict[str, Any]) -> str:
+        """The key an ask is counted and answered under.
+
+        Its own key, unless that names nothing yet and the ask spells an
+        address bare that an earlier call wrote with ``0x``: then that call's
+        key. Never the other way: a ``0x`` ask is not answered from a call
+        made with the bare spelling.
+        """
+        key = self._key(tool, kwargs)
+        if key in self._first or key in self._seeded:
+            return key
+        read = self._key(tool, kwargs, bare=True)
+        if read != key and (read in self._first or read in self._seeded):
+            return read
+        return key
 
     def answered_by(self, tool: str, kwargs: dict[str, Any]) -> str | None:
         """The entry that already answers this call, when it must not run again.
@@ -892,7 +954,7 @@ class RepeatGuard:
         produced a guard that could reach 1 per call and never its own
         threshold.
         """
-        key = self._key(tool, kwargs)
+        key = self._lookup_key(tool, kwargs)
         if self._count.get(key, 0) < self.SERVED:
             return None
         return self._first.get(key)
@@ -905,7 +967,7 @@ class RepeatGuard:
         sentence on: the answer still arrives, and the model is told not to ask
         a third time while it can still do something else with the step.
         """
-        key = self._key(tool, kwargs)
+        key = self._lookup_key(tool, kwargs)
         if not 0 < self._count.get(key, 0) < self.SERVED:
             return None
         return self._first.get(key)
@@ -931,7 +993,7 @@ class RepeatGuard:
 
     def note(self, tool: str, kwargs: dict[str, Any], entry_id: str) -> None:
         """Record that the call ran, and which entry first answered it."""
-        key = self._key(tool, kwargs)
+        key = self._lookup_key(tool, kwargs)
         self._count[key] = self._count.get(key, 0) + 1
         # A retry of an earlier chunk's failure, or of a call whose result the
         # run did not keep, answers for the call from here on: its entry is

@@ -46,9 +46,11 @@ from maljan.agents.prompt_fragments import (
 )
 from maljan.agents.tool_answer_clearing import (
     CLEARED_FOR_REFUSAL,
+    CLEARED_FOR_TIER,
     Clearing,
     ToolAnswerClearing,
     read_evidence_tool,
+    tier_clear_pays,
 )
 from maljan.analysis.sandbox_sections import item_index_of
 from maljan.analysis.technique_ids import ID_BODY
@@ -429,6 +431,22 @@ def _reported_request(messages: list, per_token: int) -> tuple[int, int]:
             after = _chars_of(messages[index:])
             return chars_for_tokens(prompt, max(1, per_token)) + after, index
     return 0, -1
+
+
+def _mean_turn_output(messages: list) -> int:
+    """The mean answer, in output tokens, of the model turns a conversation holds that report one."""
+    answers: list[int] = []
+    for message in messages:
+        if getattr(message, "type", "") != "ai":
+            continue
+        usage = getattr(message, "usage_metadata", None) or {}
+        try:
+            out = int(usage.get("output_tokens") or 0)
+        except (AttributeError, TypeError, ValueError):
+            out = 0
+        if out > 0:
+            answers.append(out)
+    return sum(answers) // len(answers) if answers else 0
 
 
 def _reported_request_chars(messages: list, per_token: int) -> int:
@@ -4524,12 +4542,61 @@ class BudgetMeter:
         A provider's refusal of a request as over its window clears whatever
         else is known. The window point is the window the agent's own model
         serves (:meth:`_own_window_tokens`), in the budget's characters: a
-        prompt past it is refused by every server.
+        prompt past it is refused by every server. The tier point is the first
+        prompt length past which the agent's own model is priced higher
+        (:meth:`_own_price`, its row's ``tiers``), in the same characters, and
+        a clear for it is made only where the request it sends costs less at
+        those prices (``tool_answer_clearing.tier_clear_pays``), a write priced
+        for an hour where the model's cache entries live that long.
         """
+        from maljan.core.spend import prompt_tier_tokens
+        from maljan.llm.anthropic_history import writes_hour_caches
+
         window = self._own_window_tokens()
+        per_token = self._clearing_per_token()
+        price = self._own_price()
+        tier = prompt_tier_tokens(price)
+        pays: Callable[[int, int, int, list[Any]], bool] | None = None
+        if tier is not None and price is not None:
+            hour = writes_hour_caches(getattr(self, "llm", None))
+
+            def pays(before: int, cached: int, after: int, messages: list[Any]) -> bool:
+                return tier_clear_pays(
+                    price,
+                    before // per_token,
+                    cached // per_token,
+                    after // per_token,
+                    _mean_turn_output(messages),
+                    hour_writes=hour,
+                )
+
         return ToolAnswerClearing(
-            window_chars=chars_for_tokens(window, self._clearing_per_token()) if window else None
+            window_chars=chars_for_tokens(window, per_token) if window else None,
+            tier_chars=chars_for_tokens(tier, per_token) if tier is not None else None,
+            tier_pays=pays,
         )
+
+    def _own_price(self) -> Any | None:
+        """The price row of the model this agent calls first, as the job prices it, or ``None``.
+
+        The job's spend meter answers (the operator's ``llm.model_prices``, then
+        the vendored table), in force now; outside a job, the vendored table and
+        the process's settings. Never raises.
+        """
+        from maljan.core.spend import SpendMeter
+
+        try:
+            label = str(self._model_label() or "")
+            if not label:
+                return None
+            meter = getattr(getattr(self, "token_ledger", None), "spend", None)
+            if not isinstance(meter, SpendMeter):
+                llm_settings = getattr(get_settings(), "llm", None)
+                meter = SpendMeter(prices=getattr(llm_settings, "model_prices", None) or {})
+            return meter.price_now(label)
+        except Exception as exc:  # noqa: BLE001 — no price is no tier point, never a lost loop
+            logger.debug("%s: its model's price is not known (%s).", getattr(self, "name", ""), exc)
+            return None
 
     def _cleared_request(
         self,
@@ -4586,6 +4653,9 @@ class BudgetMeter:
         why = (
             "the model server refused the request as over its window"
             if clearing.why == CLEARED_FOR_REFUSAL
+            else "the request's prompt is past the length its model is priced higher above, "
+            "and the answers cleared were already cited"
+            if clearing.why == CLEARED_FOR_TIER
             else "the request's prompt is past the model's own window"
         )
         self.logger.info(

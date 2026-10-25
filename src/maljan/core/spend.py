@@ -630,6 +630,17 @@ class Price:
         ) / MILLION
 
 
+def prompt_tier_tokens(price: Price | None) -> int | None:
+    """The first prompt length past which ``price`` bills a request higher, or ``None``.
+
+    A row's ``tiers`` (``over_prompt_tokens``): the smallest boundary. A row
+    without tiers, or no row, has none.
+    """
+    if price is None or not price.tiers:
+        return None
+    return int(price.tiers[0][0])
+
+
 def _window_from(row: Any, parent_source: str) -> PriceWindow | None:
     read = row.model_dump() if hasattr(row, "model_dump") else row
     if not isinstance(read, Mapping):
