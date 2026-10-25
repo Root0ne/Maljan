@@ -376,6 +376,10 @@ def _register_retirement_hook() -> None:
 # how long the session of a block that declares it waits for an answer's next
 # bytes: a day, past any reading's own clock, which each call is held to.
 READER_DELIVERY_KIND = "reader_delivery"
+# The declared kind of the release of what those readings staged for a job
+# (``tools.readers.RELEASE_JOB``): a kind of its own, so a server that declares
+# only the release is never chosen to run a reading.
+RELEASE_DELIVERY_KIND = "staging_release"
 READING_SESSION_READ_TIMEOUT_SECONDS = 24 * 3600.0
 
 

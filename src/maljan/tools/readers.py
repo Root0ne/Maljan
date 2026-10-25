@@ -32,13 +32,16 @@ import hashlib
 import json
 import os
 import re
-from collections.abc import Callable, Iterable, Mapping
+import threading
+from collections.abc import Callable, Iterable, Iterator, Mapping
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
 __all__ = [
     "READERS",
+    "RELEASE_JOB",
     "RUN_READER",
     "Place",
     "Reader",
@@ -47,6 +50,7 @@ __all__ = [
     "SampleReaders",
     "groups_state",
     "merge_groups_state",
+    "serve_release",
     "serve_reader",
 ]
 
@@ -57,6 +61,13 @@ __all__ = [
 # answers ``value`` (the reading's answer) or ``raised`` (the class name and
 # words of what the reading raised). Never shown to a model.
 RUN_READER = "run_reader"
+
+# The delivery primitive a server that runs readings offers for the job's end:
+# ``job`` (the job's id), whose staging directory there (``<staging>/<job>``:
+# capa's and FLOSS's scratch, the unpacker's carves) it removes, that job's
+# alone. It answers ``released`` (whether nothing of the job's is left there)
+# or an ``error``. Never shown to a model.
+RELEASE_JOB = "release_job"
 
 
 class ReaderRefused(RuntimeError):
@@ -81,9 +92,10 @@ class Reader:
     artefact store first. ``local_only`` are arguments that exist only in
     process (an object the reading writes into) and are never sent.
     ``data_dirs`` are arguments that name a directory of the platform's own
-    data (a rule corpus), which a server holds to its data root; ``choices``
-    answers, for an argument that names one of a fixed set, the values a
-    server takes.
+    data (a rule corpus), which a server holds to its data root, and
+    ``optional_dirs`` those of them an empty value leaves out (capa's
+    signatures: no library identification); ``choices`` answers, for an
+    argument that names one of a fixed set, the values a server takes.
     """
 
     fn: Callable[..., Any]
@@ -92,6 +104,7 @@ class Reader:
     worker_files: tuple[str, ...] = ()
     local_only: tuple[str, ...] = ()
     data_dirs: tuple[str, ...] = ()
+    optional_dirs: tuple[str, ...] = ()
     choices: Callable[[], Mapping[str, Iterable[str]]] | None = None
 
 
@@ -364,7 +377,13 @@ READERS: dict[str, Reader] = {
     "strings": Reader(_strings, "strings"),
     "iocs_from_file": Reader(_iocs_from_file, "iocs_from_file"),
     "yara_scan": Reader(_yara_scan, "yara_scan"),
-    "capa": Reader(_capa, "capa", data_dirs=("rules_dir", "signatures_dir"), choices=_capa_choices),
+    "capa": Reader(
+        _capa,
+        "capa",
+        data_dirs=("rules_dir", "signatures_dir"),
+        optional_dirs=("signatures_dir",),
+        choices=_capa_choices,
+    ),
     "floss": Reader(_floss, "floss"),
     "floss_unavailable": Reader(_floss_unavailable, "floss", files=()),
     "resolve_api_hashes": Reader(_resolve_api_hashes, "resolve_api_hashes"),
@@ -468,6 +487,38 @@ def _in_data_root(value: str) -> str:
     return str(resolve_under(resolve_data(value), (get_project_root() / "data",)))
 
 
+def _text_argument(name: str, value: Any) -> str:
+    """A path argument as the string it must be.
+
+    Raises:
+        TypeError: for any other value (a number would name a file descriptor).
+    """
+    if not isinstance(value, str):
+        raise TypeError(f"{name} must be a string, not {type(value).__name__}")
+    return value
+
+
+def serve_release(job: Any, environ: Environ = None) -> dict[str, Any]:
+    """Remove job ``job``'s staging directory on the server's side: ``released``, or an ``error``.
+
+    The directory is ``<staging base>/<the job's directory name>``
+    (``tools.staging.release_job_directory``): one path segment composed from
+    the id, so no id names anything outside the base, and a link standing
+    there is removed rather than followed. A server started for one job
+    releases only that one. Never raises.
+    """
+    from maljan.tools import staging
+
+    if not isinstance(job, str) or not job.strip():
+        return {"error": f"{RELEASE_JOB} needs the id of the job to release"}
+    try:
+        return {"released": staging.release_job_directory(job, environ)}
+    except staging.NotThisJob as exc:
+        return {"error": str(exc)}
+    except Exception as exc:  # noqa: BLE001 — a release that failed is answered, not raised
+        return {"error": f"{type(exc).__name__}: the job's staging was not removed"}
+
+
 def serve_reader(
     reader: str,
     arguments: Mapping[str, Any] | None,
@@ -483,7 +534,12 @@ def serve_reader(
     job (``confine``, given the path and the job's id), each data directory
     to the platform's data root (:func:`_in_data_root`) and each argument of
     a fixed set to that set; an argument only an in-process call passes is
-    refused. The environment read is the server's own. Never raises.
+    refused. A file argument or a data directory given at all is a string,
+    or the reading raises ``TypeError``: no other value reaches a path or a
+    file descriptor unchecked. An empty data directory is refused (it would
+    name the project root, outside the data root) unless the reading declares
+    it optional (``Reader.optional_dirs``). The environment read is the
+    server's own. Never raises.
     """
     spec = READERS.get(str(reader or ""))
     if spec is None or spec.stands_for not in offered:
@@ -493,13 +549,16 @@ def serve_reader(
         return {"error": f"{reader} takes {', '.join(spec.local_only)} only in process"}
     try:
         for name in (*spec.files, *spec.worker_files):
-            value = given.get(name)
-            if isinstance(value, str) and value:
-                given[name] = confine(value, str(job or ""))
+            if name in given:
+                given[name] = confine(_text_argument(name, given[name]), str(job or ""))
         for name in spec.data_dirs:
-            value = given.get(name)
-            if isinstance(value, str) and value:
+            if name not in given:
+                continue
+            value = _text_argument(name, given[name])
+            if value:
                 given[name] = _in_data_root(value)
+            elif name not in spec.optional_dirs:
+                raise ValueError(f"{name} names no directory, and {reader} needs one")
         for name, allowed in (spec.choices() if spec.choices else {}).items():
             if name in given and given[name] not in tuple(allowed):
                 raise ValueError(
@@ -576,11 +635,40 @@ class SampleReaders:
     sample, the one argument value a place is handed its own path for.
     ``clock`` answers the wall clock a reading on a place is given when its
     caller names none (the pack: what is left of its budget; ``None``: none).
+    Where each reading ran is told to every :meth:`noting` open on the
+    thread that ran it.
     """
 
     sample_path: str = ""
     places: Mapping[str, Place] = field(default_factory=dict)
     clock: Callable[[], float | None] | None = None
+    # The lists :meth:`noting` opened on each thread, innermost last.
+    _noting: threading.local = field(
+        default_factory=threading.local, init=False, repr=False, compare=False
+    )
+
+    @contextmanager
+    def noting(self) -> Iterator[list[str | None]]:
+        """Where each reading run on this thread inside the block ran, in order.
+
+        A place's server for a reading sent there, ``None`` for one run in
+        this process; noted when the reading starts, so a reading that raised
+        is noted too. Blocks nest: a reading is noted in each one open.
+        """
+        stack: list[list[str | None]] | None = getattr(self._noting, "stack", None)
+        if stack is None:
+            stack = self._noting.stack = []
+        ran: list[str | None] = []
+        stack.append(ran)
+        try:
+            yield ran
+        finally:
+            # By identity: two blocks' lists may hold the same places.
+            del stack[next(at for at, held in enumerate(stack) if held is ran)]
+
+    def _ran(self, where: str | None) -> None:
+        for ran in getattr(self._noting, "stack", None) or ():
+            ran.append(where)
 
     def place_of(self, reader: str) -> Place | None:
         """The place ``reader`` runs on, ``None`` for this process."""
@@ -603,6 +691,7 @@ class SampleReaders:
         spec = READERS[reader]
         place = self.place_of(reader)
         if place is None:
+            self._ran(None)
             return spec.fn(environ, **arguments)
         sent = {k: v for k, v in arguments.items() if k not in spec.local_only}
         for name in spec.files:
@@ -623,6 +712,7 @@ class SampleReaders:
         if timeout is None and self.clock is not None:
             timeout = self.clock()
         wait = None if timeout is None else float(timeout) + CALL_MARGIN_SECONDS
+        self._ran(place.server)
         answer = place.call({"reader": reader, "arguments": sent, "job": place.job}, wait)
         if not isinstance(answer, Mapping):
             raise ReaderRefused(f"{place.server} answered {RUN_READER} with no object")

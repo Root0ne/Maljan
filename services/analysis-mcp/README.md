@@ -627,8 +627,9 @@ goes with the payloads it held; a symlink is never followed.
 | tool | arguments |
 | --- | --- |
 | `run_reader` | `reader`, `arguments=null`, `job=""` |
+| `release_job` | `job` |
 
-`run_reader` is a delivery primitive, never offered to a model
+`run_reader` and `release_job` are delivery primitives, never offered to a model
 (`agents.tool_pinning.DELIVERY_TOOLS`). With `--http` the server listens over
 streamable HTTP behind its token (`MCP_BIND_ADDRESS`, `MCP_PORT`,
 `MCP_AUTH_TOKEN`, the shared `services/cli-sidecar` plumbing), as the compose
@@ -643,16 +644,23 @@ FLOSS, the byte readings, the UPX unpacker and the directed-text scan of a
 file) and the worker reads only the answers. Only a reading that stands in for
 a tool this server offers is run; its file arguments are held to the sample
 roots and `job`'s staging directory, where a reading that writes (capa's and
-FLOSS's scratch, the unpacked program) writes. That directory is swept with
-the rest of the staging base (`MALJAN_STAGING_TTL_HOURS`, 24 h after it last
-changed), not when the job ends, so in the container it counts against the
-`/tmp` tmpfs, and the memory ceiling, until then. `run_reader`'s capa reading
-uses the `rules_dir`, `signatures_dir` and `backend` the worker's settings
-name, resolved inside this container's read-only `/app/data`; the `capa` tool
-an agent calls keeps the shipped corpus. A directory that resolves outside
+FLOSS's scratch, the unpacked program) writes; a file argument or a data
+directory that is not a string is refused. When the job ends the worker calls
+`release_job` with its id, and that directory is removed then: only that
+job's, by the one directory name the id composes (a `..`, a separator or an
+absolute path in the id cannot name anything else; a link standing there is
+unlinked, never followed). A release that fails, does not answer within its
+few seconds, or reaches a server built before the call leaves the directory to
+the sweep of the staging base (`MALJAN_STAGING_TTL_HOURS`, 24 h after it last
+changed), and never fails the job; until then it counts against the `/tmp`
+tmpfs and the memory ceiling. `run_reader`'s capa reading uses the
+`rules_dir`, `signatures_dir` and `backend` the worker's settings name,
+resolved inside this container's read-only `/app/data`; the `capa` tool an
+agent calls keeps the shipped corpus. A directory that resolves outside
 `/app/data` (a `..` climb, an absolute path elsewhere, a link out) is refused,
-and so is a backend capa's provider does not name: an operator whose rules
-live elsewhere puts them under `data/`.
+and so is an empty `rules_dir` (an empty `signatures_dir` runs without library
+identification) and a backend capa's provider does not name: an operator
+whose rules live elsewhere puts them under `data/`.
 
 `timeout_s` on `yara_scan`, `capa` and `floss` is a request, not an instruction: the
 value the `capabilities` manifest declares (60 s, 300 s and 600 s) is the ceiling, so

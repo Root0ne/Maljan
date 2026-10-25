@@ -430,6 +430,13 @@ def sample_readers(
     providers' mirrors), so a tool that declares nothing is counted too.
     Linear in the entries and their arguments: each source's block is looked up
     once.
+
+    **Where it ran.** A call is counted under its source, unless its entry
+    names where the platform's own readings behind it ran (``ran_on``, the
+    triage pack's on a server of their own, ``tools.readers``): then under
+    each of those, so a reading a server ran is placed by that server's
+    block and only one the worker ran is counted as the pack's, in process.
+    An entry without the field, every one stored before it, counts as it did.
     """
     from maljan.core.declared_reading import kind_free_facts
 
@@ -451,11 +458,20 @@ def sample_readers(
             reads = _names_a_sample_path(entry, paths)
         if not reads:
             continue
-        if source:
-            readers[source] = readers.get(source, 0) + 1
-        else:
+        places = ran_on_sources(entry)
+        for place in places or ([source] if source else []):
+            readers[place] = readers.get(place, 0) + 1
+        if not places and not source:
             unsourced += 1
     return readers, unsourced
+
+
+def ran_on_sources(entry: Any) -> list[str]:
+    """The sources an entry names its readings as run on (``ran_on``), once each; ``[]``: none."""
+    value = _field(entry, "ran_on")
+    if not isinstance(value, list | tuple):
+        return []
+    return list(dict.fromkeys(str(place) for place in value if isinstance(place, str) and place))
 
 
 # ---------------------------------------------------------------------------

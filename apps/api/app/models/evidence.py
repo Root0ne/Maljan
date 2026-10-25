@@ -124,6 +124,12 @@ class EvidenceEntry(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     # each only when set.
     args_nulls_dropped: Mapped[Any | None] = mapped_column(JSONB, nullable=True)
     args_nulls_withheld: Mapped[Any | None] = mapped_column(JSONB, nullable=True)
+    # Where the platform's own readings behind a triage pack entry ran, as
+    # sources (``mcp:<server key>``, ``pack`` for the worker beside one;
+    # ``maljan.tools.readers``). NULL where every reading ran in the worker
+    # and on every row older than the column; the chain digest seals it only
+    # when set.
+    ran_on: Mapped[Any | None] = mapped_column(JSONB, nullable=True)
     # Where the parts of the answer this row does not keep whole are kept
     # whole in object storage (``maljan.schemas.evidence_spill``): one
     # reference per part with the object key, the byte length and the SHA-256,

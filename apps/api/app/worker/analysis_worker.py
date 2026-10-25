@@ -1293,7 +1293,7 @@ def _evidence_row(
 ) -> Any:
     """One ledger entry as the row that keeps it.
 
-    Every one of the 31 fields ``maljan.schemas.evidence.LedgerEntry`` carries
+    Every one of the 34 fields ``maljan.schemas.evidence.LedgerEntry`` carries
     has a column here, which is what lets a reader of the stored ledger say why an output
     is empty instead of guessing. An absent value stays absent rather than
     becoming a default, for the same reason. ``written_at`` is the moment the
@@ -1358,6 +1358,13 @@ def _evidence_row(
         # path segments; absent where the call had none.
         args_nulls_dropped=_null_paths(entry.get("args_nulls_dropped")),
         args_nulls_withheld=_null_paths(entry.get("args_nulls_withheld")),
+        # Where the pack's own readings behind the entry ran, as sources;
+        # absent where every one ran in the worker.
+        ran_on=(
+            [str(place) for place in entry["ran_on"]]
+            if isinstance(entry.get("ran_on"), list) and entry["ran_on"]
+            else None
+        ),
         # The references to the parts of the answer kept whole, as the entry
         # carries them; absent where nothing was taken.
         spilled=(list(entry["spilled"]) if entry.get("spilled") else None),

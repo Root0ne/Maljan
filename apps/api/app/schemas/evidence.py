@@ -75,6 +75,10 @@ class EvidenceEntryResponse(BaseModel):
     # reads as it did, and as empty to a ledger entry read from it.
     args_nulls_dropped: list[list[str]] | None = Field(default=None, exclude_if=_absent)
     args_nulls_withheld: list[list[str]] | None = Field(default=None, exclude_if=_absent)
+    # Where the platform's own readings behind a triage pack entry ran, as
+    # sources (``maljan.tools.readers``). Left out where the row holds none:
+    # every reading ran in the worker, or the row is older than the column.
+    ran_on: list[str] | None = Field(default=None, exclude_if=_absent)
     # Where the parts of the answer this entry does not keep whole are kept
     # whole: one reference per part the run shortened, blanked or dropped
     # (``answer``, ``structured_content``, ``output``, ``structured``), each
@@ -95,10 +99,10 @@ class EvidenceEntryResponse(BaseModel):
         """Absent unless it was true, the rule the entry's dump keeps."""
         return True if value is True else None
 
-    @field_validator("args_nulls_dropped", "args_nulls_withheld", mode="before")
+    @field_validator("args_nulls_dropped", "args_nulls_withheld", "ran_on", mode="before")
     @classmethod
     def _none_is_absent(cls, value: Any) -> Any:
-        """An empty list is no field named, the rule the entry's dump keeps."""
+        """An empty list is nothing named, the rule the entry's dump keeps."""
         return value or None
 
     @field_validator("args_repaired", "truncated", mode="before")

@@ -84,9 +84,10 @@ DIGESTED: tuple[str, ...] = (
     "spilled",
     "args_nulls_dropped",
     "args_nulls_withheld",
+    "ran_on",
 )
 # Columns the canonical form carries only when they hold something.
-_SEALED_WHEN_SET = frozenset({"waited_ms", "args_nulls_dropped", "args_nulls_withheld"})
+_SEALED_WHEN_SET = frozenset({"waited_ms", "args_nulls_dropped", "args_nulls_withheld", "ran_on"})
 # The JSON columns: their values are read back through the driver's ``json``.
 _JSON_COLUMNS = frozenset(
     {
@@ -99,6 +100,7 @@ _JSON_COLUMNS = frozenset(
         "spilled",
         "args_nulls_dropped",
         "args_nulls_withheld",
+        "ran_on",
     }
 )
 # The row's bookkeeping, never digested: named so a new column is a decision.

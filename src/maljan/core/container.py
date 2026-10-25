@@ -92,6 +92,17 @@ _ACLOSE_BUDGET = 20.0
 # worker thread's, not the event loop's.
 _CLOSE_ALL_BUDGET = 45.0
 
+# What the job's end waits for the servers its readings ran on to remove what
+# those readings staged there (``pipeline.nodes.release_reader_staging``). Every
+# server is asked at once, each call capped at 5 s (``RELEASE_CALL_CAP_SECONDS``:
+# a 4 s answer and a second of crossing), so the whole release is one call's
+# time; a second more covers attaching a handle that rested. Against the
+# worker's 60 s teardown cap (``WORKER_TEARDOWN_TIMEOUT``): the release's 6 s
+# runs before the synchronous sweep's 45 s, 51 s in all, which leaves 9 s for
+# the agents' and providers' closes that normally take a moment; a release that
+# runs out of time is abandoned on its threads and never extends the sweep.
+_RELEASE_BUDGET = 6.0
+
 
 # Whether the load running on this thread is the outermost one: an agent's
 # input is stated once, where the whole of it is known (``_note_chunking``),
@@ -2001,6 +2012,28 @@ class ServiceContainer:
             for (name, _), result in zip(closing, results, strict=True):
                 if isinstance(result, Exception):
                     logger.warning("%s did not close cleanly: %s", name, result)
+
+        # What this job's readings staged on a server of their own, removed
+        # there now rather than at that server's staging TTL, while its handle
+        # is still attached (``pipeline.nodes.release_reader_staging``). In an
+        # executor and bounded, like the sweep below: a server that does not
+        # answer costs a worker thread, never the job or the fences.
+        if self._server_registry_cache is not None:
+            from maljan.pipeline.nodes import release_reader_staging
+
+            try:
+                await asyncio.wait_for(
+                    loop.run_in_executor(None, release_reader_staging, self),
+                    timeout=_RELEASE_BUDGET,
+                )
+            except TimeoutError:
+                logger.warning(
+                    "Releasing the readings' staging exceeded %.0fs; it is left to the "
+                    "servers' staging TTL.",
+                    _RELEASE_BUDGET,
+                )
+            except Exception as exc:  # noqa: BLE001 — teardown never propagates
+                logger.warning("Releasing the readings' staging failed (non-fatal): %s", exc)
 
         # Same rule as the providers above: close the *cached* registry, never
         # ``get_server_registry()`` — a job that never attached a tool server

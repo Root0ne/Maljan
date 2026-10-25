@@ -588,6 +588,19 @@
    "title": "put_sample_finishArguments",
    "type": "object"
   },
+  "release_job": {
+   "properties": {
+    "job": {
+     "title": "Job",
+     "type": "string"
+    }
+   },
+   "required": [
+    "job"
+   ],
+   "title": "release_jobArguments",
+   "type": "object"
+  },
   "resolve_api_hashes": {
    "properties": {
     "algorithms": {
@@ -1573,6 +1586,19 @@
     "pcap_path"
    ],
    "title": "read_pcap_summaryArguments",
+   "type": "object"
+  },
+  "release_job": {
+   "properties": {
+    "job": {
+     "title": "Job",
+     "type": "string"
+    }
+   },
+   "required": [
+    "job"
+   ],
+   "title": "release_jobArguments",
    "type": "object"
   },
   "run_reader": {

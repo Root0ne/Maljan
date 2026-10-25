@@ -66,6 +66,10 @@ export interface EvidenceEntry {
    *  record, and the operator's pack step, as the entry recorded them. Absent
    *  where the entry carried none and on rows older than the columns. */
   source?: string;
+  /** Where the platform's own readings behind a triage pack entry ran, as
+   *  sources (`mcp:<server key>`, `pack` for the worker beside one). Absent
+   *  where every reading ran in the worker and on rows older than the column. */
+  ran_on?: string[] | null;
   facts?: Record<string, unknown>;
   reputation?: Record<string, unknown>;
   pack_step?: Record<string, unknown>;

@@ -404,6 +404,19 @@ class LedgerEntry(BaseModel):
             "(core.tool_declarations)."
         ),
     )
+    ran_on: list[str] = Field(
+        default_factory=list,
+        # Absent when empty, so an entry whose readings all ran in the worker,
+        # and every entry written before the field existed, dumps as it did.
+        exclude_if=lambda value: not value,
+        description=(
+            "Where the platform's own readings behind a triage pack entry ran (tools.readers), "
+            "in the order first run, as sources: 'mcp:<server key>' for a server reached at "
+            "an address, 'pack' for the worker beside one. Empty where every reading ran in "
+            "the worker, or the entry made none; the isolation part counts the entry under "
+            "these rather than under its source (analysis.isolation.sample_readers)."
+        ),
+    )
     facts: dict[str, Any] | None = Field(
         default=None,
         # Like ``source``: an entry with none dumps as it always did.

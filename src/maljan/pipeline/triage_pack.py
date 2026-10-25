@@ -616,8 +616,22 @@ class PackResult:
         )
 
 
-# A step started beside the rest of the pack: its work's future and when it began.
-_Early = tuple["Future[tuple[Any, BaseException | None, float]]", float]
+# A step started beside the rest of the pack: its work's future and when it
+# began. The work answers its value, what it raised, how long it took and
+# where its readings ran (``SampleReaders.noting``).
+_Early = tuple["Future[tuple[Any, BaseException | None, float, tuple[str | None, ...]]]", float]
+
+
+def _ran_on(noted: Sequence[str | None]) -> list[str]:
+    """Where an entry's readings ran, as its ``ran_on``: empty when all ran in the worker.
+
+    Each place's server as its source (``mcp:<key>``), and the pack's own
+    source for the worker beside one, in the order first run.
+    """
+    places = list(dict.fromkeys(noted))
+    if all(place is None for place in places):
+        return []
+    return [PACK_SOURCE if place is None else f"mcp:{place}" for place in places]
 
 
 @dataclass(frozen=True)
@@ -761,6 +775,7 @@ class _Pack:
         call: Callable[[], Any],
         *,
         started: float | None = None,
+        ran: Sequence[str | None] = (),
     ) -> dict[str, Any] | None:
         """Run one tool, write its entry, and hand back its dict when it gave one.
 
@@ -769,7 +784,9 @@ class _Pack:
         kept either way, because what the tool said is the evidence. A
         ``reason`` beside no finding is read the same way, for the tools that
         answer that shape. ``started`` is the clock a caller that already ran
-        the work hands in, so the entry's duration is the work's.
+        the work hands in, so the entry's duration is the work's, and ``ran``
+        where that work's readings ran. Where the call's readings ran, and
+        ``ran``, is the entry's ``ran_on`` (:func:`_ran_on`).
         """
         # A step handed in with its own start clock began within the budget,
         # and what it did is recorded whatever the clock says now.
@@ -779,10 +796,15 @@ class _Pack:
             return None
         self.steps_run += 1
         started, wall_clock = (started if started is not None else time.monotonic()), time.time()
-        try:
-            value = call()
-        except Exception as exc:  # noqa: BLE001 — a failed tool is an entry, never a crash
-            message = f"{type(exc).__name__}: {exc}"
+        failed: Exception | None = None
+        with self.readers.noting() as noted:
+            try:
+                value = call()
+            except Exception as exc:  # noqa: BLE001 — a failed tool is an entry, never a crash
+                failed = exc
+        places = _ran_on([*ran, *noted])
+        if failed is not None:
+            message = f"{type(failed).__name__}: {failed}"
             entry = self.recorder.record(
                 tool=tool,
                 args=args,
@@ -794,6 +816,7 @@ class _Pack:
                 started_at=wall_clock,
                 duration_ms=int((time.monotonic() - started) * 1000),
             )
+            entry.ran_on = places
             self._failed(tool, entry)
             return None
         # A flat error from an in-process implementation is given the code
@@ -819,6 +842,7 @@ class _Pack:
             started_at=wall_clock,
             duration_ms=int((time.monotonic() - started) * 1000),
         )
+        entry.ran_on = places
         if error:
             self._failed(tool, entry)
             return None
@@ -1095,12 +1119,13 @@ class _Pack:
         pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix=f"triage-{step.id}")
         self._pools.append(pool)
 
-        def timed() -> tuple[Any, BaseException | None, float]:
+        def timed() -> tuple[Any, BaseException | None, float, tuple[str | None, ...]]:
             began = time.monotonic()
-            try:
-                return work(), None, time.monotonic() - began
-            except Exception as exc:  # noqa: BLE001 — handed to the recording like any failure
-                return None, exc, time.monotonic() - began
+            with self.readers.noting() as noted:
+                try:
+                    return work(), None, time.monotonic() - began, tuple(noted)
+                except Exception as exc:  # noqa: BLE001 — handed to the recording like any failure
+                    return None, exc, time.monotonic() - began, tuple(noted)
 
         future = pool.submit(timed)
 
@@ -1181,7 +1206,7 @@ class _Pack:
         """A server's tool, called through the server registry and recorded under that server."""
         early = self._early.pop(step.id, None)
         if early is not None:
-            value, error, took = early[0].result()
+            value, error, took, _ran = early[0].result()
             if error is not None or not isinstance(value, ServerAnswer):
                 said = f"{type(error).__name__}: {error}" if error is not None else "no answer"
                 value = ServerAnswer(
@@ -1583,7 +1608,7 @@ class _Pack:
         early = self._early.pop(step.id, None)
         if early is not None:
             running, _submitted = early
-            value, error, took = running.result()
+            value, error, took, ran = running.result()
 
             def outcome() -> Any:
                 if error is not None:
@@ -1592,17 +1617,18 @@ class _Pack:
 
             # The clock the entry is given is the emulator's own run, not the
             # time it then waited for the rest of the pack.
-            self.record("floss", args, outcome, started=time.monotonic() - took)
+            self.record("floss", args, outcome, started=time.monotonic() - took, ran=ran)
         else:
             settings = self.inputs.floss
             spent = self._over_budget()
             if spent is not None:
                 self._record_not_run("floss", args, spent)
                 return
-            missing = self.readers.read("floss_unavailable", settings.environ)
+            with self.readers.noting() as asked:
+                missing = self.readers.read("floss_unavailable", settings.environ)
             if missing:
                 message = f"{NOT_RUN_PREFIX} {missing}"
-                self.recorder.record(
+                absent = self.recorder.record(
                     tool="floss",
                     args=args,
                     server=PIPELINE,
@@ -1613,6 +1639,8 @@ class _Pack:
                     remediation=emulated_strings.FLOSS_REMEDIATION,
                     started_at=time.time(),
                 )
+                # Where the emulator's build was looked for.
+                absent.ran_on = _ran_on(asked)
                 logger.info("triage pack: %s", message)
                 return
             if step.id not in self.result.schedules:
@@ -1873,15 +1901,19 @@ class _Pack:
         saying so.
         """
         path = self.inputs.sample_path
-        try:
-            holds = _names_upx(self.format_facts) or self._holds_a_pack_header(path)
-        except Exception as exc:  # noqa: BLE001 — a header that could not be read is an entry
-            failed = exc
+        unread: Exception | None = None
+        with self.readers.noting() as header:
+            try:
+                holds = _names_upx(self.format_facts) or self._holds_a_pack_header(path)
+            except Exception as exc:  # noqa: BLE001 — a header that could not be read is an entry
+                unread = exc
+        if unread is not None:
+            failed = unread
 
             def raised() -> Any:
                 raise failed
 
-            self.record(upx.TOOL, {"path": path}, raised)
+            self.record(upx.TOOL, {"path": path}, raised, ran=header)
             return
         if not holds:
             return
@@ -1897,6 +1929,7 @@ class _Pack:
             upx.TOOL,
             args,
             lambda: self.readers.read("unpack_upx", environ, path=path, job=settings.job_id),
+            ran=header,
         )
 
     def _holds_a_pack_header(self, path: str) -> bool:

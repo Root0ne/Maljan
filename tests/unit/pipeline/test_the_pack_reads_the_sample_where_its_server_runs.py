@@ -107,7 +107,9 @@ def _pack(
         sha256="a" * 64,
         file_type=file_type,
         strings_head=10,
-        capa=CapaSettings(rules_dir="", signatures_dir="", timeout_s=capa_seconds, job_id=JOB),
+        capa=CapaSettings(
+            rules_dir="data/capa-rules", signatures_dir="", timeout_s=capa_seconds, job_id=JOB
+        ),
         floss=FlossSettings(environ=environ, job_id=JOB),
         readers=place_readers,
         budget_s=budget_s,
@@ -434,7 +436,7 @@ def test_capas_backend_is_one_the_provider_names(monkeypatch: pytest.MonkeyPatch
             "path": "/x",
             "timeout_s": 1,
             "backend": "something-else",
-            "rules_dir": "",
+            "rules_dir": "data/capa-rules",
             "signatures_dir": "",
         },
         JOB,
@@ -442,3 +444,277 @@ def test_capas_backend_is_one_the_provider_names(monkeypatch: pytest.MonkeyPatch
         confine=lambda p, j: p,
     )
     assert said["raised"]["type"] == "ValueError"
+
+
+# -- A data directory or a file argument is a string (T-326) ---------------------------
+
+
+def _capa_arguments(**over: Any) -> dict[str, Any]:
+    arguments: dict[str, Any] = {
+        "path": "/x",
+        "timeout_s": 1,
+        "backend": "auto",
+        "rules_dir": "data/capa-rules",
+        "signatures_dir": "data/capa-signatures",
+    }
+    arguments.update(over)
+    return arguments
+
+
+def test_an_empty_rule_directory_is_refused_and_never_names_the_project_root(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    seen: list[dict[str, Any]] = []
+    monkeypatch.setattr(rules, "capa", lambda path, **kwargs: seen.append(kwargs) or {})
+    said = readers.serve_reader(
+        "capa", _capa_arguments(rules_dir=""), JOB, offered=EVERY_TOOL, confine=lambda p, j: p
+    )
+    assert said["raised"]["type"] == "ValueError"
+    assert "rules_dir" in said["raised"]["message"]
+    assert seen == []
+
+
+def test_an_empty_signature_directory_is_the_optional_one_left_out(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    seen: list[dict[str, Any]] = []
+    monkeypatch.setattr(rules, "capa", lambda path, **kwargs: seen.append(kwargs) or {"ok": 1})
+    said = readers.serve_reader(
+        "capa", _capa_arguments(signatures_dir=""), JOB, offered=EVERY_TOOL, confine=lambda p, j: p
+    )
+    assert said == {"value": {"ok": 1}}
+    assert seen[0]["signatures_dir"] == ""
+    assert READERS["capa"].optional_dirs == ("signatures_dir",)
+
+
+@pytest.mark.parametrize("value", [None, 0, 7, 1.5, True, ["data/capa-rules"], {"a": 1}])
+@pytest.mark.parametrize("name", ["rules_dir", "signatures_dir"])
+def test_a_data_directory_that_is_no_string_raises_type_error(
+    name: str, value: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    seen: list[dict[str, Any]] = []
+    monkeypatch.setattr(rules, "capa", lambda path, **kwargs: seen.append(kwargs) or {})
+    said = readers.serve_reader(
+        "capa", _capa_arguments(**{name: value}), JOB, offered=EVERY_TOOL, confine=lambda p, j: p
+    )
+    assert said["raised"]["type"] == "TypeError", said
+    assert seen == []
+
+
+@pytest.mark.parametrize("value", [None, 0, 3, ["/etc/passwd"], {"path": "/etc/passwd"}])
+def test_a_file_argument_that_is_no_string_never_reaches_the_reading(value: Any) -> None:
+    # A number is a file descriptor to ``open``: it must not pass unconfined.
+    held: list[Any] = []
+
+    def confine(path: str, job: str) -> str:
+        held.append(path)
+        return path
+
+    said = readers.serve_reader("hashes", {"path": value}, JOB, offered=EVERY_TOOL, confine=confine)
+    assert said["raised"]["type"] == "TypeError", said
+    assert held == []
+
+
+def test_an_empty_file_argument_is_held_by_the_confinement_too() -> None:
+    held: list[str] = []
+
+    def confine(path: str, job: str) -> str:
+        held.append(path)
+        raise PermissionError("outside the roots")
+
+    said = readers.serve_reader("hashes", {"path": ""}, JOB, offered=EVERY_TOOL, confine=confine)
+    assert held == [""]
+    assert said["raised"]["type"] == "PermissionError"
+
+
+# -- Where each reading ran is recorded with its entry (T-324) --------------------------
+
+
+def test_an_entry_whose_readings_ran_on_a_server_names_that_server(tmp_path: Path) -> None:
+    path = _sample(tmp_path)
+    there = _pack(path, tmp_path, _placed(path, _Server()))
+    by_tool = {e.tool: e for e in there.entries}
+    for tool in ("identify_file", "hashes", "pe_info", "strings", "yara_scan", "capa"):
+        assert by_tool[tool].ran_on == ["mcp:analysis"], tool
+    assert by_tool[upx.TOOL].ran_on == ["mcp:analysis"]
+    # A step that reads nothing of the sample names nowhere.
+    assert all(
+        not e.ran_on for e in there.entries if e.tool in ("sandbox_status", "api_capability")
+    )
+
+
+def test_an_entry_whose_readings_ran_in_the_worker_dumps_as_it_did(tmp_path: Path) -> None:
+    path = _sample(tmp_path)
+    here = _pack(path, tmp_path, None)
+    assert here.entries
+    for entry in here.entries:
+        assert entry.ran_on == []
+        assert "ran_on" not in entry.model_dump(mode="json")
+
+
+def test_an_emulator_started_beside_the_pack_names_the_server_it_ran_on(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from maljan.pipeline import triage_pack
+
+    rows = [{"kind": "decoded", "string": "text", "function": "0x401000"}]
+    monkeypatch.setattr(emulated_strings, "floss_unavailable", lambda environ=None: None)
+    monkeypatch.setattr(
+        emulated_strings,
+        "recovered",
+        lambda path, **_: {"rows": rows, "counts": {"decoded": 1}, "meta": {}},
+    )
+    monkeypatch.setattr(
+        emulated_strings,
+        "floss",
+        lambda path, limit, found, **_: {"strings": list(found["rows"]), "meta": {}},
+    )
+    # The host has room for it beside the rest: it starts on a thread of its own.
+    monkeypatch.setattr(triage_pack._Pack, "_no_room_beside", lambda self, step: "")
+    path = _sample(tmp_path)
+    there = _pack(path, tmp_path, _placed(path, _Server()))
+    floss = next(e for e in there.entries if e.tool == "floss")
+    assert floss.ok and floss.ran_on == ["mcp:analysis"]
+    assert "floss" in there.schedules and there.schedules["floss"].startswith("beside")
+
+
+def test_where_readings_ran_is_noted_per_thread_and_in_every_open_block(tmp_path: Path) -> None:
+    import threading
+
+    path = _sample(tmp_path)
+    placed = _placed(path, _Server())
+    local = SampleReaders(sample_path=path)
+    with placed.noting() as outer:
+        with placed.noting() as inner:
+            placed.read("upx_header", path=path)
+        placed.read("hashes", path=path)
+        elsewhere: list[Any] = []
+        worker = threading.Thread(target=lambda: elsewhere.append(placed.read("hashes", path=path)))
+        worker.start()
+        worker.join()
+    assert inner == ["analysis"]
+    assert outer == ["analysis", "analysis"]
+    with local.noting() as here:
+        local.read("hashes", path=path)
+    assert here == [None]
+
+
+def test_a_mixed_entry_names_the_worker_beside_the_server() -> None:
+    from maljan.pipeline.triage_pack import PACK_SOURCE, _ran_on
+
+    assert _ran_on([None, None]) == []
+    assert _ran_on([]) == []
+    assert _ran_on(["analysis", "analysis"]) == ["mcp:analysis"]
+    assert _ran_on(["analysis", None, "network"]) == ["mcp:analysis", PACK_SOURCE, "mcp:network"]
+
+
+def _isolation_rows(entries: list[Any]) -> dict[str, dict[str, Any]]:
+    from maljan.analysis.isolation import isolation_part, sample_readers
+    from maljan.core.host_locality import LOCAL
+
+    def route(source: str) -> tuple[str, str, str, str]:
+        return ("streamable-http", "analysis-mcp", LOCAL, "")
+
+    counted, unsourced = sample_readers({}, entries, lambda source: None)
+    part = isolation_part(
+        counted,
+        unsourced,
+        {},
+        worker={"uid": 1000},
+        in_process={"pack": "Triage pack"},
+        route=route,
+        needs_network=lambda source: False,
+    )
+    return {row["source"]: row for row in part["rows"]}
+
+
+def test_the_isolation_part_places_a_reading_where_it_ran(tmp_path: Path) -> None:
+    from maljan.analysis.isolation import IN_PROCESS, LOCAL_SERVICE
+
+    path = _sample(tmp_path)
+    there = _pack(path, tmp_path, _placed(path, _Server()))
+    # The emulator's absence was asked of the server too.
+    assert next(e for e in there.entries if e.tool == "floss").ran_on == ["mcp:analysis"]
+    rows = _isolation_rows(list(there.entries))
+    assert rows["mcp:analysis"]["where"] == LOCAL_SERVICE
+    assert rows["mcp:analysis"]["calls"] > 0
+    # Only a reading the worker ran is the pack's, in process: here, none.
+    assert "pack" not in rows
+    here = _pack(path, tmp_path, None)
+    rows = _isolation_rows(list(here.entries))
+    assert rows["pack"]["where"] == IN_PROCESS
+    assert "mcp:analysis" not in rows
+
+
+def test_a_stored_entry_without_the_field_counts_as_it_did() -> None:
+    from maljan.analysis.isolation import sample_readers
+    from maljan.schemas.evidence import LedgerEntry
+
+    stored = {
+        "id": "ev_0001",
+        "tool": "pe_info",
+        "server": PIPELINE,
+        "source": "pack",
+        "args": {"path": "/w/x.exe"},
+        "seq": 1,
+    }
+    entry = LedgerEntry.model_validate(stored)
+    assert entry.ran_on == []
+    assert LedgerEntry.model_validate(stored).model_dump(mode="json") == entry.model_dump(
+        mode="json"
+    )
+    assert "ran_on" not in entry.model_dump(mode="json")
+    for given in (stored, entry):
+        assert sample_readers({}, [given], lambda source: None, ["/w/x.exe"]) == ({"pack": 1}, 0)
+    mixed = {**stored, "ran_on": ["mcp:analysis", "pack"]}
+    assert sample_readers({}, [mixed], lambda source: None, ["/w/x.exe"]) == (
+        {"mcp:analysis": 1, "pack": 1},
+        0,
+    )
+
+
+def test_the_emulators_row_reads_where_it_ran(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from maljan.analysis.isolation import IN_PROCESS, LOCAL_SERVICE, isolation_part, sample_readers
+    from maljan.analysis.tool_effects import effects_part
+    from maljan.core.host_locality import LOCAL
+
+    rows = [{"kind": "decoded", "string": "text", "function": "0x401000"}]
+    monkeypatch.setattr(emulated_strings, "floss_unavailable", lambda environ=None: None)
+    monkeypatch.setattr(
+        emulated_strings,
+        "recovered",
+        lambda path, **_: {"rows": rows, "counts": {"decoded": 1}, "meta": {}},
+    )
+    monkeypatch.setattr(
+        emulated_strings,
+        "floss",
+        lambda path, limit, found, **_: {"strings": list(found["rows"]), "meta": {}},
+    )
+    path = _sample(tmp_path)
+
+    def read_where(result: Any) -> Any:
+        entries = list(result.entries)
+        counted, unsourced = sample_readers({}, entries, lambda source: None)
+        part = isolation_part(
+            counted,
+            unsourced,
+            {},
+            worker={"uid": 1000},
+            in_process={"pack": "Triage pack"},
+            route=lambda source: ("streamable-http", "analysis-mcp", LOCAL, ""),
+            needs_network=lambda source: False,
+        )
+        tools = effects_part(entries, isolation=part)["tools"]
+        return next(row for row in tools if row["tool"] == "floss")["read_where"]
+
+    assert read_where(_pack(path, tmp_path, _placed(path, _Server()))) == LOCAL_SERVICE
+    assert read_where(_pack(path, tmp_path, None)) == IN_PROCESS
+    # Run partly in the worker, it reads as the worker, its least isolated place.
+    mixed = _pack(path, tmp_path, _placed(path, _Server()))
+    floss = next(e for e in mixed.entries if e.tool == "floss")
+    floss.ran_on = ["mcp:analysis", "pack"]
+    assert read_where(mixed) == IN_PROCESS
+    floss.ran_on = ["pack", "mcp:analysis"]
+    assert read_where(mixed) == IN_PROCESS
