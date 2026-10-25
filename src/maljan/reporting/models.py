@@ -19,6 +19,7 @@ Design notes:
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from datetime import datetime
 from typing import Annotated, Any, Literal, get_args
 
@@ -1540,6 +1541,22 @@ def _readable_reputation(value: Any) -> Any:
                 exc.error_count(),
             )
     return kept
+
+
+def key_ordered(value: Any) -> Any:
+    """``value`` with every mapping's keys in sorted order; lists keep theirs.
+
+    A stored report's key order is the storage's, not a fact of the run:
+    Postgres JSONB returns keys shorter first, a run export writes them
+    sorted. Every rendering of a stored report reads it through this, so
+    the served Markdown and HTML and the job package's ``report.md`` list
+    a mapping's entries in one order, whichever store they were read from.
+    """
+    if isinstance(value, Mapping):
+        return {key: key_ordered(value[key]) for key in sorted(value)}
+    if isinstance(value, list):
+        return [key_ordered(item) for item in value]
+    return value
 
 
 # ---------------------------------------------------------------------------

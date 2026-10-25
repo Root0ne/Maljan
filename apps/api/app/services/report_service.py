@@ -583,14 +583,18 @@ class ReportService:
         user: User,
         export: str,
     ) -> "MalwareReport | None":
-        """Fetch + validate the stored MalwareReport, or ``None`` if unusable."""
+        """Fetch + validate the stored MalwareReport, or ``None`` if unusable.
+
+        Read in sorted key order (``key_ordered``), as the job package renders
+        it, so the served exports and the package's ``report.md`` agree.
+        """
         mr = await self.get_malware_report(report_id, user)
         if not mr:
             return None
-        from maljan.reporting.models import MalwareReport
+        from maljan.reporting.models import MalwareReport, key_ordered
 
         try:
-            return MalwareReport.model_validate(mr)
+            return MalwareReport.model_validate(key_ordered(mr))
         except Exception as exc:  # noqa: BLE001
             logger.warning("get_malware_report_%s: validation failed (%s).", export, exc)
             return None
