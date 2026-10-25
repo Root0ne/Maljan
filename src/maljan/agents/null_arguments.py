@@ -265,10 +265,18 @@ def _drop(
     return args if kept is None else kept
 
 
-def call_nulls(args: Any, rules: NullRules) -> CallNulls:
-    """The nulls of one call's arguments as the model gave them, under ``rules``."""
+def call_nulls(args: Any, rules: NullRules, model: Any = None) -> CallNulls:
+    """The nulls of one call's arguments as the model gave them, under ``rules``.
+
+    ``rules`` name each argument by the server's name; an argument the model
+    wrote by the name of the field of ``model`` that holds it is read by the
+    server's (``agents.server_names``).
+    """
     if not rules or not isinstance(args, dict):
         return NO_NULLS
+    from maljan.agents.server_names import to_server_names
+
+    args = to_server_names(model, args)
     dropped = drop_unset_nulls(args, rules.dropped)[1]
     withheld = tuple((name,) for name in args if name in rules.withheld and args[name] is None)
     return CallNulls(dropped, withheld) if dropped or withheld else NO_NULLS
@@ -279,23 +287,39 @@ def validators(rule: NullRule | None) -> dict[str, Any]:
 
     A model validator run before the fields are read, so a field dropped takes
     its declared default and the JSON schema the model is offered is the same
-    as without it.
+    as without it. ``rule`` names each argument by the server's name, so an
+    argument written by the name of the field that holds it is read by the
+    server's first (``agents.server_names``).
     """
     if not rule:
         return {}
     from pydantic import model_validator
 
+    from maljan.agents.server_names import to_server_names
+
     def leave_out_unset_nulls(cls: Any, data: Any) -> Any:
+        if isinstance(data, dict):
+            data = to_server_names(cls, data)
         return drop_unset_nulls(data, rule)[0]
 
     return {"leave_out_unset_nulls": model_validator(mode="before")(leave_out_unset_nulls)}
 
 
 def argument_model(name: str, fields: Mapping[str, Any], rules: NullRules) -> Any:
-    """A tool's argument model, carrying ``rules``. A tool without any is built exactly as it was."""
+    """A tool's argument model, carrying ``rules``. A tool without any is built exactly as it was.
+
+    A field held under a name apart from the server's (``agents.server_names``)
+    is read by either; ``rules`` name it by the server's, which is what a call
+    is validated under.
+    """
     from pydantic import create_model
 
-    model = create_model(name, __validators__=validators(rules.dropped) or None, **fields)  # type: ignore[call-overload]
+    from maljan.agents.server_names import BY_EITHER_NAME, server_named
+
+    config = BY_EITHER_NAME if server_named(fields.values()) else None
+    model = create_model(  # type: ignore[call-overload]
+        name, __config__=config, __validators__=validators(rules.dropped) or None, **fields
+    )
     if rules:
         model.__maljan_null_rules__ = rules  # type: ignore[attr-defined]  # RULES_ATTRIBUTE
     return model
@@ -329,7 +353,7 @@ def noting_class(base: type) -> type:
 
     class _NotesUnsetNulls(base):  # type: ignore[misc, valid-type]
         def _parse_input(self, tool_input: Any, tool_call_id: Any) -> Any:
-            found = call_nulls(tool_input, rules_of(self.args_schema))
+            found = call_nulls(tool_input, rules_of(self.args_schema), self.args_schema)
             parsed = super()._parse_input(tool_input, tool_call_id)
             if isinstance(parsed, dict):
                 parsed = {**parsed, DROPPED_KEY: found}

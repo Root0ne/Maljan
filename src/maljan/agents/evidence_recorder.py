@@ -1414,6 +1414,7 @@ def _record_tool(
     from langchain_core.tools import StructuredTool
 
     from maljan.agents.output_shortening import bounding_arguments, narrowing_arguments
+    from maljan.agents.server_names import ServerNamedTool, server_names, to_server_names
     from maljan.agents.tool_pinning import (
         declared_facts_of,
         declared_name_of,
@@ -1443,7 +1444,8 @@ def _record_tool(
     from maljan.agents.tool_pinning import SERVER_HINTS_METADATA_KEY
 
     hints = (getattr(tool, "metadata", None) or {}).get(SERVER_HINTS_METADATA_KEY)
-    accepted = tuple(getattr(args_schema, "model_fields", {}) or {})
+    # By the server's names (``agents.server_names``), as every call below is.
+    accepted = server_names(args_schema)
     # What the tool does with a ``null`` (``agents.null_arguments``): when it
     # drops or withholds any, the boundary names each such field of a call.
     null_rules = rules_of(args_schema)
@@ -1988,6 +1990,8 @@ def _record_tool(
 
         def wrapped_func(**kwargs: Any) -> str:  # noqa: F811
             nulls = take_call_nulls(kwargs, null_rules) if notes_nulls else NO_NULLS
+            # What is recorded, cited and keyed for a repeat is what is sent.
+            kwargs = to_server_names(args_schema, kwargs)
             with nulls_of_call(recorder, nulls):
                 return _recorded_func(kwargs)
 
@@ -2045,6 +2049,8 @@ def _record_tool(
 
         async def wrapped_coroutine(**kwargs: Any) -> str:  # noqa: F811
             nulls = take_call_nulls(kwargs, null_rules) if notes_nulls else NO_NULLS
+            # What is recorded, cited and keyed for a repeat is what is sent.
+            kwargs = to_server_names(args_schema, kwargs)
             with nulls_of_call(recorder, nulls):
                 return await _recorded_coroutine(kwargs)
 
@@ -2094,10 +2100,12 @@ def _record_tool(
     try:
         # The tool's own class where it opts in (``keeps_named_args``): a tool
         # that keeps to the arguments a call named keeps doing so in the recorder.
+        # Any other is offered each argument under its server's own name
+        # (``agents.server_names``), as the tool it wraps was.
         builder = (
             type(tool)
             if isinstance(tool, StructuredTool) and getattr(tool, "keeps_named_args", False)
-            else StructuredTool
+            else ServerNamedTool
         )
         if notes_nulls:
             builder = noting_class(builder)

@@ -198,7 +198,7 @@ def _reading_error_replies(
     second reply is the answer. Without it the failure says which call
     analyses the address.
     """
-    from langchain_core.tools import StructuredTool
+    from maljan.agents.server_names import ServerNamedTool, to_server_names
 
     coroutine = getattr(tool, "coroutine", None)
     args_schema = getattr(tool, "args_schema", None)
@@ -207,6 +207,8 @@ def _reading_error_replies(
     name = str(getattr(tool, "name", "") or "")
 
     async def _call(**kwargs: Any) -> Any:
+        # By the server's names (``agents.server_names``).
+        kwargs = to_server_names(args_schema, kwargs)
         reply = await coroutine(**kwargs)
         tried = kwargs.get("file_path") if name == _R2_OPEN_TOOL else None
         failure = r2_error_reply(
@@ -241,7 +243,7 @@ def _reading_error_replies(
         return json.dumps(failure) if failure is not None else reply
 
     try:
-        return StructuredTool.from_function(
+        return ServerNamedTool.from_function(
             func=None,
             coroutine=_call,
             name=name,
