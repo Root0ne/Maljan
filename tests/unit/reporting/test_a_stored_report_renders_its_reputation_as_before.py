@@ -31,11 +31,16 @@ from tests.unit.reporting.test_an_entry_without_a_source_is_read_as_before impor
 # The Markdown and HTML re-pinned when §10.2's introduction came to say each
 # draft rule's body is printed as written (T-357): that one line is the only
 # change; the STIX did not change.
+# The STIX re-pinned when the export's own malware object came to carry the
+# types the published category names after the category as written (T-337):
+# ``loader`` gains ``downloader``. run4's Markdown and HTML re-pinned with it:
+# its eight key findings wrote their citations into the sentence, and each is
+# no longer printed a second time after it; nothing else changed.
 STORED_RENDERS = {
-    "run7": ("316ea45a47dcf965", "2222d734a9d4104f", "e24f2d1b2733f7a3"),
-    "run5": ("569fa30c8cb6ba18", "8fdd5c05cff3d393", "85795f39d2b17a77"),
-    "run4": ("7004aace97325d30", "434a19df7368b41d", "74381ef6ce484e2a"),
-    "local8": ("0da0f60173fa7bfd", "087f32c8af5adaa3", "d53c784002386286"),
+    "run7": ("316ea45a47dcf965", "2222d734a9d4104f", "865cd19e7ce6284b"),
+    "run5": ("569fa30c8cb6ba18", "8fdd5c05cff3d393", "0f3807de7d1fb836"),
+    "run4": ("3dc5e451b4b61066", "e98cdab463df19f6", "204536a060726373"),
+    "local8": ("0da0f60173fa7bfd", "087f32c8af5adaa3", "7f04dee0deee7a55"),
 }
 
 _UUID = re.compile(r"--[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")

@@ -101,6 +101,11 @@ from maljan.reporting.models import (
     outcome_words,
     stated_family,
 )
+from maljan.reporting.prose_decisions import (
+    CATEGORY_TYPE_UNSTATED_CODE,
+    PUBLISHED_TECHNIQUE_DOUBTED_CODE,
+    with_decided_statements,
+)
 from maljan.schemas.evidence import is_guard_answer
 from maljan.schemas.isr_models import UNVERIFIED_TECHNIQUE_MARKER
 
@@ -487,7 +492,7 @@ class MarkdownRenderer:
         # not headed as if it were: each of its lines names its own voice.
         lines = [_heading(1, "Key findings", REPORT_MODEL if written else PER_ROW), ""]
         for finding in report.key_findings:
-            lines.append(_item(f"{ctx.line(finding.text)} {_cite(finding.evidence_ids)}"))
+            lines.append(_item(_cited(ctx.line(finding.text), finding.evidence_ids, finding.text)))
         if summary:
             if report.key_findings:
                 lines.append("")
@@ -653,7 +658,7 @@ class MarkdownRenderer:
                 [
                     "",
                     f"**Category:** {_one_line(report.malware_category)} "
-                    "_(a behavioural class, not a family)_",
+                    f"_(a behavioural class, not a family)_{ctx.category_mark}",
                 ]
             )
         lines.extend(["", "**Family:** " + _family_words(report)])
@@ -729,7 +734,11 @@ class MarkdownRenderer:
             else:
                 note = ""
             lines.append(
-                _step(index, f"{ctx.line(step.action)} ({mark}) {_cite(step.evidence_refs)}{note}")
+                _step(
+                    index,
+                    _cited(f"{ctx.line(step.action)} ({mark})", step.evidence_refs, step.action)
+                    + note,
+                )
             )
         return "\n".join(lines)
 
@@ -1823,7 +1832,7 @@ class MarkdownRenderer:
             family.append("")
             family.append(
                 f"**Category:** {_one_line(report.malware_category)} "
-                "_(a behavioural class, not a family)_"
+                f"_(a behavioural class, not a family)_{ctx.category_mark}"
             )
         blocks.append("\n".join(family))
 
@@ -2579,17 +2588,26 @@ class _Context:
         # The report model's sentences a check asked about and the retry left
         # standing, each with the mark printed after it. Longest first, so a
         # sentence that holds another is marked as itself.
+        # The statements a check of the finished report finds against what the
+        # run published (``prose_decisions``) are marked the same way; the
+        # category's row is marked on the category line (``category_mark``),
+        # not wherever its word stands in prose.
         marks: dict[str, list[str]] = {}
-        for row in getattr(report, "flagged_statements", None) or []:
-            if row.sentence.strip():
+        self.category_mark = ""
+        stored = list(getattr(report, "flagged_statements", None) or [])
+        for statement in with_decided_statements(stored, report):
+            if statement.sentence.strip():
                 try:
-                    label = _inline_safe(row.label, pipes=False, plain=self._defang)
+                    label = _inline_safe(statement.label, pipes=False, plain=self._defang)
                 except Exception as exc:  # noqa: BLE001 — the sentence is marked all the same
                     logger.debug("markdown: a mark's label was not written (%s).", exc)
                     label = STATE_UNKNOWN
-                mark = _flag_mark(row.code, label, asked=row.asked)
-                if mark not in marks.setdefault(row.sentence, []):
-                    marks[row.sentence].append(mark)
+                mark = _flag_mark(statement.code, label, asked=statement.asked)
+                if statement.code == CATEGORY_TYPE_UNSTATED_CODE:
+                    self.category_mark = f" {mark}"
+                    continue
+                if mark not in marks.setdefault(statement.sentence, []):
+                    marks[statement.sentence].append(mark)
         # The IOC table's answers, read on first use by ``publish_state``.
         self._answers: Any = None
         self.flagged = sorted(
@@ -3081,6 +3099,8 @@ _FLAG_WORDS = {
     "narrative.ungrounded_capability": "not established by this run",
     "report.rule_match_as_action": "a rule match only, stated as an action",
     "report.unpublished_value": "not published by this run",
+    PUBLISHED_TECHNIQUE_DOUBTED_CODE: "published by this run",
+    CATEGORY_TYPE_UNSTATED_CODE: "not the export's malware type",
 }
 
 
@@ -4573,6 +4593,23 @@ def _ids(ids: Iterable[Any]) -> str:
 def _cite(ids: Iterable[str]) -> str:
     listed = _ids(ids)
     return f"[{listed}]" if listed else _NO_CITATION
+
+
+def _cited(text: str, ids: Iterable[str], written: str) -> str:
+    """``text`` with the entries of ``ids`` its words (``written``) do not cite printed after it.
+
+    A report model writes its citations into a bullet and lists them again
+    beside it; printed twice, every bullet cited each entry twice. An entry
+    the words already cite is not printed again, a text citing every one gets
+    nothing after it, and a text citing none gets them all, or the note that
+    nothing is cited. The words are read as the model wrote them, so an entry
+    a mark beside them names is no citation of theirs. They are not changed.
+    """
+    cited = set(_EV_RE.findall(written))
+    rest = [i for i in ids if str(i).strip() and _one_line(i).strip() not in cited]
+    if cited and not rest:
+        return text
+    return f"{text} {_cite(rest)}"
 
 
 def _ids_in(texts: Iterable[str]) -> list[str]:
