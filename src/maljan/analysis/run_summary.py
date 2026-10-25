@@ -119,6 +119,11 @@ class NegotiationMetrics:
     dropped_value_counts: list[dict[str, Any]] = field(default_factory=list)
     # The lines written with a mark the platform did not honour; they blocked.
     unread_marks: list[str] = field(default_factory=list)
+    # Each mediator answer, whole and masked (``AgentArgument.answer``), with
+    # its round: the argument's position in ``discussion_history``, counted
+    # from 1 as ``negotiation_log`` counts it. The text the final block can be
+    # read again from after the run.
+    mediator_answers: list[dict[str, str]] = field(default_factory=list)
     # How many lines the last mediation marked not blocking.
     not_blocking_at_end: int = 0
     # The blocking lines every count of which the ledger states, after the
@@ -1724,6 +1729,11 @@ class RunSummary:
                     else {}
                 ),
                 **({"unread_marks": list(n.unread_marks)} if n.unread_marks else {}),
+                **(
+                    {"mediator_answers": [dict(r) for r in n.mediator_answers]}
+                    if n.mediator_answers
+                    else {}
+                ),
                 **({"not_blocking_at_end": n.not_blocking_at_end} if n.not_blocking_at_end else {}),
                 **({"ledger_stated": list(n.ledger_stated)} if n.ledger_stated else {}),
             },
@@ -2446,6 +2456,12 @@ class RunSummaryBuilder:
                 for arg in discussion_history
                 if getattr(arg, "agent_name", "") == MEDIATOR_AGENT_NAME
                 for line in getattr(arg, "unread_marks", None) or []
+            ],
+            mediator_answers=[
+                {"round": str(index + 1), "answer": str(getattr(arg, "answer", ""))}
+                for index, arg in enumerate(discussion_history)
+                if getattr(arg, "agent_name", "") == MEDIATOR_AGENT_NAME
+                and getattr(arg, "answer", "")
             ],
             not_blocking_at_end=next(
                 (

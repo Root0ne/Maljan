@@ -114,6 +114,18 @@ class AgentArgument(BaseModel):
         repr=False,
         description="For the mediator: the platform's sentence on why ``revise`` was not read.",
     )
+    answer: str = Field(
+        default="",
+        repr=False,
+        description=(
+            "For the mediator: its answer whole whenever it answered, the text its final "
+            "CONTRADICTIONS: block is read from (with its reply to the one question for that "
+            "block, when it was asked), masked as model text in the run record is "
+            "(``events.safe_answer_text``). Kept in ``run_summary.negotiation.mediator_answers`` "
+            "so the block can be read again after the run. Empty on a round the mediator wrote "
+            "no answer for, and on state written before it was kept."
+        ),
+    )
     note: str = Field(
         default="",
         description=(
