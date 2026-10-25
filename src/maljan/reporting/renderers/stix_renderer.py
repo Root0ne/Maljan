@@ -2305,6 +2305,11 @@ def indicator_publish_reason(
     judge was never asked with the sandbox's fact (:func:`sandbox_row_kwargs`):
     its keep is then not among ``kept_by``, and publishes nothing.
 
+    A file, digest, key or mutex the sandbox recorded (source ``sandbox``) is
+    published only as an indicator the judge names (:data:`HOST_ROW_NOT_NAMED`):
+    one a process of the sample's tree made on the judge's keep (``kept_by``),
+    one no record attributes on its keep against that fact (``unattributed``).
+
     ``in_published_url`` names a URL this run publishes whose host is this
     domain (:func:`published_url_hosts`). The domain follows that URL's
     decision: one live run published two C2 URLs and neither of their names,
@@ -2371,6 +2376,12 @@ def indicator_publish_reason(
         # A host row no process of the sample's tree made is not its
         # observation: it is published only on the judge's keep against that fact.
         return _kept_with_the_fact(kept_by, unattributed)
+    if kind in HOST_KINDS and _recorded_by_the_sandbox(source):
+        # One a process of the sample's tree made: published only on the
+        # judge's indicator, never on the record alone (HOST_ROW_NOT_NAMED).
+        if not kept_by or not _host_value_could_publish(kind, value):
+            return None
+        return f"{_kept_by_a_model(kept_by)}; {HOST_ROW_OF_THE_TREE}"
     if listed_only_by_an_analyst(kind, source):
         if kind not in ("domain", "ip", "url"):
             # A mutex, a path, a registry key only an analyst listed: a
@@ -2512,6 +2523,11 @@ def _published_url_hosts(report: Any) -> dict[str, tuple[str, str]]:
     return out
 
 
+def _recorded_by_the_sandbox(source: Any) -> bool:
+    """Whether a row's source is the sandbox's own record."""
+    return str(source or "").strip().lower() == "sandbox"
+
+
 def _kept_by_a_model(kept_by: str) -> str | None:
     return f"kept as an indicator by {kept_by}" if kept_by else None
 
@@ -2622,29 +2638,92 @@ def _the_judge_s_keep(
     return out
 
 
-def sandbox_facts_for_the_judge(network: Any) -> Any:
-    """``(kind, value) -> fact`` for the judge's question, or ``None`` with no network block.
+def sandbox_facts_for_the_judge(
+    network: Any, dynamic: Any = None, persistence: Any = None, sample: Any = None
+) -> Any:
+    """``(kind, value) -> fact`` for the judge's question, or ``None`` with no sandbox block.
 
     The sandbox's fact about a value it recorded and attributes no flow of the
     sample to, in the publish rule's own words (:func:`sandbox_row_kwargs`),
-    and ``""`` for any other value. Read from the network block the report
-    will be built from, before the judge's verdict exists, so nothing about
-    the judge's own keep is in it.
+    and ``""`` for any other value. A file, a digest, a key or a mutex the
+    sandbox recorded and no record of which names a process of the sample's
+    tree has its fact too (:func:`sandbox_host_kwargs`), when it is a value
+    the rule could publish at all (:func:`_host_value_could_publish`): the same
+    keep, against the same kind of fact, decides it. A Run key one of the
+    run's ``persistence`` mechanisms names is that mechanism's row
+    (:func:`persistence_run_keys`) and is not asked about. ``sample`` is the
+    routed identity (``file_name``, ``sha256``) the sample's process tree is
+    found by (:func:`_tree_processes`); without it no process is the sample's.
+    Read from the blocks the report will be built from, before the judge's
+    verdict exists, so nothing about the judge's own keep is in it. The
+    lookups are built once here, so asking about every value of a bundle reads
+    each block once.
     """
-    if network is None:
+    if network is None and dynamic is None:
         return None
     from types import SimpleNamespace
 
-    facts = SimpleNamespace(network=network, judge_indicators=[], run_summary={})
+    known = sample if isinstance(sample, Mapping) else {}
+    identity = {
+        "file_name": str(known.get("file_name") or ""),
+        "hashes": {"sha256": str(known.get("sha256") or "")},
+    }
+    facts = SimpleNamespace(
+        network=network, dynamic=dynamic, identity=identity, judge_indicators=[], run_summary={}
+    )
+    with one_reading(facts):
+        reading = _READING.get()
+        _network_index(facts)
+        host_index = _sandbox_host_index(facts)
+    run_keys = persistence_run_keys(persistence)
 
     def _fact(kind: str, value: str) -> str:
         try:
-            return str(sandbox_row_kwargs(facts, kind, value).get("unattributed") or "")
+            if kind in HOST_KINDS:
+                if not _host_value_could_publish(kind, value):
+                    return ""
+                if kind == "registry" and str(value or "").strip().lower() in run_keys:
+                    return ""
+                return host_index.get((kind, _value_key(kind, value))) or ""
+            # The network rows through the reading the lookups were built in.
+            token = _READING.set(reading)
+            try:
+                return str(sandbox_row_kwargs(facts, kind, value).get("unattributed") or "")
+            finally:
+                _READING.reset(token)
         except Exception as exc:  # noqa: BLE001 — a fact not read asks nothing
             logger.debug("stix_renderer: no sandbox fact for a judge value (%s).", exc)
             return ""
 
     return _fact
+
+
+def persistence_run_keys(mechanisms: Any) -> dict[str, str]:
+    """``{folded key: key}`` for each Run key a persistence mechanism names.
+
+    Such a key is that mechanism's row, answered as a persistence record
+    (``builder.build_consolidated_iocs``), never as the sandbox's write.
+    """
+    return {
+        str(_field(mech, "target")).strip().lower(): _field(mech, "target")
+        for mech in mechanisms or []
+        if _field(mech, "kind") == "registry_run" and str(_field(mech, "target") or "").strip()
+    }
+
+
+def _host_value_could_publish(kind: str, value: str) -> bool:
+    """The class half of the rule for a host value: a file, a whole digest, a key or a mutex.
+
+    What :func:`indicator_publish_reason` and :func:`publish_answer` refuse a
+    host value of each kind for before any source is read, as the address and
+    host classes are for a network value. A value no keep could publish is
+    not asked about.
+    """
+    if kind == "path":
+        return path_names_a_file(value)
+    if kind == "hash":
+        return _is_a_whole_digest(value)
+    return kind in STRING_IOC_KINDS and indicator_pattern(kind, value) is not None
 
 
 def _recovery_refusal(recovered: str, verdict: Any, host: str) -> str:
@@ -2917,37 +2996,142 @@ HOST_ROW_OUTSIDE_THE_TREE = (
 )
 # The host kinds that answer for the process that made them.
 HOST_KINDS = frozenset({"hash", "path", "registry", "mutex"})
+# Why a host row the sandbox recorded is not published on its own: the guest
+# writes temporary files, zone keys and mutexes under every process, the
+# sample's included, and only the judge's indicator says which of them mark
+# the sample. A false mark costs more than a missed one.
+HOST_ROW_NOT_NAMED = (
+    "the sandbox recorded it, and a file, digest, key or mutex the sandbox recorded is "
+    "published only as an indicator the judge names"
+)
+# What a published host row of the sample's tree stands on, beside the keep.
+HOST_ROW_OF_THE_TREE = "the sandbox recorded it from the sample's process tree"
 # The keys a sandbox record names the process that made it under.
-_PID_KEYS = ("pid", "process_id")
+_PID_KEYS = ("pid", "process_id", "pids")
 _PROCESS_KEYS = ("process", "process_name", "processes")
 
 
-def _tree_processes(roots: list[Any]) -> tuple[set[str], set[str]]:
-    """The pids and the image names (lower case) of every process in the sample's tree."""
-    pids: set[str] = set()
-    names: set[str] = set()
-    stack = list(roots)
+@dataclass(frozen=True)
+class _SampleTree:
+    """The sample's process tree as the host rows read it.
+
+    ``pids`` and ``names`` (lower case) of its processes; ``unsettled`` the
+    pids whose attribution the listing does not settle: one the two lineage
+    facts disagree about, or one more than one listed process carries with
+    lineages that differ. A record naming an unsettled pid is unattributed.
+    """
+
+    pids: frozenset[str]
+    names: frozenset[str]
+    unsettled: frozenset[str]
+
+
+def _pid_text(value: Any) -> str:
+    text = "" if value is None or isinstance(value, bool) else str(value).strip()
+    return "" if text in ("0", "None") else text
+
+
+def _tree_processes(roots: list[Any], file_name: str = "", sha256: str = "") -> _SampleTree:
+    """The sample's process tree among the listed processes, read from its lineage facts.
+
+    The facts the network block's flows are attributed by
+    (``schemas.sandbox_report``): the processes that run the submitted file
+    (its name or its digest, ``runs_the_submitted_file``) and the processes
+    the sandbox marks as the sample's (``ProcessNode.marked``). Each gives a
+    tree, the listed processes whose parent chain reaches one it names; where
+    both name processes, a process in both trees is the sample's and one in
+    exactly one is disputed. A listed root that is neither is not the sample's,
+    nor is anything under it, whatever the listing calls a root. A parent pid
+    more than one listed process carries is no link: the chain stops there.
+    """
+    from maljan.schemas.sandbox_report import runs_the_submitted_file
+
+    nodes: list[tuple[str, str, str, bool, bool]] = []
+    stack: list[tuple[Any, str]] = [(node, "") for node in roots]
     while stack:
-        node = stack.pop()
-        pids.add(str(_field(node, "pid")))
-        name = str(_field(node, "name") or "").strip().lower()
-        if name:
-            names.add(name)
-        stack.extend(_field(node, "children") or [])
-    return pids, names
+        node, container = stack.pop()
+        pid = _pid_text(_field(node, "pid"))
+        name = str(_field(node, "name") or "")
+        runs = bool(file_name or sha256) and runs_the_submitted_file(
+            name, str(_field(node, "command_line") or ""), file_name, sha256
+        )
+        nodes.append(
+            (
+                pid,
+                _pid_text(_field(node, "ppid")) or container,
+                name,
+                runs,
+                _field(node, "marked") is True,
+            )
+        )
+        stack.extend((child, pid) for child in _field(node, "children") or [])
+    by_pid: dict[str, list[int]] = {}
+    for index, (pid, *_rest) in enumerate(nodes):
+        if pid:
+            by_pid.setdefault(pid, []).append(index)
+
+    def _reach(seeds: set[int]) -> set[int]:
+        # Each process settled once: a chain is walked to the first settled
+        # process, and every process on it takes that answer.
+        settled: dict[int, bool] = {}
+        for start in range(len(nodes)):
+            chain: list[int] = []
+            on_chain: set[int] = set()
+            current: int | None = start
+            reaches = False
+            while current is not None:
+                if current in settled:
+                    reaches = settled[current]
+                    break
+                if current in seeds:
+                    reaches = settled[current] = True
+                    break
+                if current in on_chain:
+                    break
+                on_chain.add(current)
+                chain.append(current)
+                parents = by_pid.get(nodes[current][1]) or []
+                current = parents[0] if len(parents) == 1 else None
+            for one in chain:
+                settled[one] = reaches
+        return {index for index, reaches in settled.items() if reaches}
+
+    by_file = _reach({i for i, node in enumerate(nodes) if node[3]})
+    by_mark = _reach({i for i, node in enumerate(nodes) if node[4]})
+    if by_file and by_mark:
+        tree, disputed = by_file & by_mark, by_file ^ by_mark
+    else:
+        tree, disputed = by_file | by_mark, set()
+    unsettled = {nodes[i][0] for i in disputed if nodes[i][0]}
+    unsettled.update(pid for pid, listed in by_pid.items() if len({i in tree for i in listed}) > 1)
+    return _SampleTree(
+        pids=frozenset(nodes[i][0] for i in tree if nodes[i][0]) - unsettled,
+        names=frozenset(n for n in (nodes[i][2].strip().lower() for i in tree) if n),
+        unsettled=frozenset(unsettled),
+    )
 
 
-def _not_the_sample_s(record: Any, pids: set[str], names: set[str], did: str) -> str:
+def _not_the_sample_s(record: Any, tree: _SampleTree, did: str) -> str:
     """Why a sandbox record is not the sample's, or ``""`` when a process of its tree made it.
 
     Decided by the record's pid when it names one; its image name is read only
     when it names no pid, because a common image the tree also runs
-    (``explorer.exe``) would otherwise attribute every record of that name.
+    (``explorer.exe``) would otherwise attribute every record of that name. A
+    record naming a pid the listing does not settle (:class:`_SampleTree`) is
+    unattributed.
     """
+    pids, names = tree.pids, tree.names
     if not isinstance(record, dict):
         return UNATTRIBUTED_HOST_ROW.format(did=did)
-    by_pid = [str(record[key]) for key in _PID_KEYS if record.get(key) not in (None, "")]
+    by_pid: list[str] = []
+    for key in _PID_KEYS:
+        value = record.get(key)
+        for one in value if isinstance(value, list) else [value]:
+            if one not in (None, ""):
+                by_pid.append(str(one).strip())
     if by_pid:
+        if any(pid in tree.unsettled for pid in by_pid):
+            return UNATTRIBUTED_HOST_ROW.format(did=did)
         return "" if any(pid in pids for pid in by_pid) else HOST_ROW_OUTSIDE_THE_TREE
     by_name: list[str] = []
     for key in _PROCESS_KEYS:
@@ -2964,14 +3148,21 @@ def _sandbox_host_index(report: Any) -> dict[tuple[str, str], str]:
     """``(kind, value key) -> why it is not the sample's`` for each host value the sandbox holds.
 
     ``""`` for a value a record attributes to the sample's tree: one such
-    record is enough. A registry record names no process, so no key is.
+    record is enough. A registry record is read by the pids of the calls the
+    sandbox recorded writing the key (``RegistryMod.pids``); one with none
+    names no process, so its key is not attributed.
     """
 
     def _build() -> dict[tuple[str, str], str]:
         dynamic = _field(report, "dynamic")
         if dynamic is None:
             return {}
-        pids, names = _tree_processes(list(_field(dynamic, "process_tree") or []))
+        identity = _field(report, "identity")
+        tree = _tree_processes(
+            list(_field(dynamic, "process_tree") or []),
+            str(_field(identity, "file_name") or ""),
+            str(_field(_field(identity, "hashes"), "sha256") or ""),
+        )
         out: dict[tuple[str, str], str] = {}
 
         def _put(kind: str, value: Any, record: Any, did: str) -> None:
@@ -2979,7 +3170,7 @@ def _sandbox_host_index(report: Any) -> dict[tuple[str, str], str]:
             if not text:
                 return
             key = (kind, _value_key(kind, text))
-            why = _not_the_sample_s(record, pids, names, did)
+            why = _not_the_sample_s(record, tree, did)
             if key not in out or not why:
                 out[key] = why
 
@@ -2993,7 +3184,7 @@ def _sandbox_host_index(report: Any) -> dict[tuple[str, str], str]:
                 _put("mutex", op.get("name"), op, "created")
         for mod in list(_field(dynamic, "registry_mods") or []):
             if _field(mod, "operation") in ("create", "modify"):
-                _put("registry", _field(mod, "key"), None, "wrote")
+                _put("registry", _field(mod, "key"), {"pids": _field(mod, "pids")}, "wrote")
         return out
 
     index: dict[tuple[str, str], str] = _memo(report, "sandbox_host_index", _build)
@@ -3003,18 +3194,22 @@ def _sandbox_host_index(report: Any) -> dict[tuple[str, str], str]:
 def sandbox_host_kwargs(report: Any, kind: str, value: str) -> dict[str, str]:
     """``unattributed``, ``kept_by`` and ``untold`` for a host value the sandbox recorded.
 
-    Empty for a value a record attributes to the sample's tree, and for one
-    the sandbox did not record. A value no record attributes is the judge's
-    only by its answer to the question that told it that fact, exactly as an
-    unattributed flow is (:func:`_the_judge_s_keep`); the sandbox's own record
-    of the value is never its second source.
+    Empty for a value the sandbox did not record. A host row is published
+    only as an indicator the judge names (:data:`HOST_ROW_NOT_NAMED`): a value
+    a record attributes to the sample's tree carries the judge's keep, or none,
+    and a value no record attributes is the judge's only by its answer to the
+    question that told it that fact, exactly as an unattributed flow is
+    (:func:`_the_judge_s_keep`). The sandbox's own record of the value is never
+    its second source.
     """
     if kind not in HOST_KINDS:
         return {}
     key = _value_key(kind, value)
     why = _sandbox_host_index(report).get((kind, key))
-    if not why:
+    if why is None:
         return {}
+    if not why:
+        return kept_kwargs(report, kind, key)
     said = {"unattributed": why, **kept_kwargs(report, kind, key)}
     return _the_judge_s_keep(report, kind, key, said)
 
@@ -3983,6 +4178,12 @@ def publish_answer(
         )
     if unattributed and kind in HOST_KINDS:
         return f"no: {unattributed}; {untold}" if untold else f"no: {unattributed}"
+    if (
+        kind in HOST_KINDS
+        and _recorded_by_the_sandbox(source)
+        and _host_value_could_publish(kind, text)
+    ):
+        return f"no: {HOST_ROW_NOT_NAMED}"
     if unattributed and kind in ("ip", "domain", "url"):
         refused = _recovery_refusal(recovered, verdict, url_host(text) if kind == "url" else text)
         if untold:

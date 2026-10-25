@@ -1137,7 +1137,7 @@ def _judge(run: _Run, judged: _Judged) -> dict[str, Any]:
         searched=searched,
         corpus_state=corpus_state,
         technique_sources=sources,
-        sandbox_facts=judge_sandbox_facts(run.ledger, run.isrs, None),
+        sandbox_facts=judge_sandbox_facts(run.ledger, run.isrs, None, sample=dict(run.identity)),
         analyst_claims=claims,
         ledger_ids=ledger_ids,
     )

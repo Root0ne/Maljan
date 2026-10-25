@@ -1507,6 +1507,9 @@
         "path": [
           "C:\\ProgramData\\USOPrivate\\UpdateStore\\store.db-journal"
         ],
+        "pids": [
+          "6968"
+        ],
         "sha256": "18cfd7c2fad557123f7649013b40814b0f62aa840de01112c5c3765bfb6c7873",
         "size": 12824,
         "type": "SQLite Rollback Journal"
@@ -1517,6 +1520,9 @@
         ],
         "path": [
           "C:\\ProgramData\\USOPrivate\\UpdateStore\\store.db-journal"
+        ],
+        "pids": [
+          "6968"
         ],
         "sha256": "e2f278a40c8d998f9fd4d025c231bd43629697072b8956d8310f8af0bb475f30",
         "size": 12824,
@@ -1529,6 +1535,9 @@
         "path": [
           "C:\\ProgramData\\USOPrivate\\UpdateStore\\store.db-journal"
         ],
+        "pids": [
+          "6968"
+        ],
         "sha256": "b38062265cc125604bf572add8c3a463a34d7cd84be7dbcd21a8df2c85bf85c1",
         "size": 12824,
         "type": "SQLite Rollback Journal"
@@ -1539,6 +1548,9 @@
         ],
         "path": [
           "C:\\ProgramData\\USOPrivate\\UpdateStore\\store.db-journal"
+        ],
+        "pids": [
+          "6968"
         ],
         "sha256": "0ebb35814dab98a580d338259e7d4d33629795d8e1557d2a9ca63dfba93e9d29",
         "size": 12824,
@@ -1562,6 +1574,9 @@
         "path": [
           "C:\\ProgramData\\USOPrivate\\UpdateStore\\store.db-journal"
         ],
+        "pids": [
+          "6968"
+        ],
         "sha256": "272a0bff9db883eb65a1ed3859dd8d09e88d79d7fa581d7bd196316e8c00d832",
         "size": 12824,
         "type": "SQLite Rollback Journal"
@@ -1572,6 +1587,9 @@
         ],
         "path": [
           "C:\\ProgramData\\USOPrivate\\UpdateStore\\store.db-journal"
+        ],
+        "pids": [
+          "6968"
         ],
         "sha256": "8cac6a87d2d410eea9abb5e5da612d64186845fe2a2b74b138a330379c85ea94",
         "size": 12824,
@@ -1584,6 +1602,9 @@
         "path": [
           "C:\\ProgramData\\USOPrivate\\UpdateStore\\store.db-journal"
         ],
+        "pids": [
+          "6968"
+        ],
         "sha256": "1dcd13169bf5ddd22cc4283e0b42f67351470a20207b74262793bc25b30d39c2",
         "size": 12824,
         "type": "SQLite Rollback Journal"
@@ -1594,6 +1615,9 @@
         ],
         "path": [
           "C:\\ProgramData\\USOPrivate\\UpdateStore\\store.db-journal"
+        ],
+        "pids": [
+          "6968"
         ],
         "sha256": "4d17e0b7a1b8013f1d0484d05652c30f2e2a0d07417a1846626ec00cef5cab7a",
         "size": 12824,
@@ -1606,6 +1630,9 @@
         "path": [
           "C:\\ProgramData\\USOPrivate\\UpdateStore\\store.db-journal"
         ],
+        "pids": [
+          "6968"
+        ],
         "sha256": "94b00df60efbb5b7ebedf685318a6859534b43d69ff41c901f7331049c035c34",
         "size": 12824,
         "type": "SQLite Rollback Journal"
@@ -1616,6 +1643,9 @@
         ],
         "path": [
           "C:\\ProgramData\\USOPrivate\\UpdateStore\\store.db-journal"
+        ],
+        "pids": [
+          "6968"
         ],
         "sha256": "8fac4c4a6d102d6a148da53d67a05db9c16706efffe4217fa6fdfffea3ce1c18",
         "size": 12824,
@@ -1628,6 +1658,9 @@
         "path": [
           "C:\\ProgramData\\USOPrivate\\UpdateStore\\store.db-journal"
         ],
+        "pids": [
+          "6968"
+        ],
         "sha256": "459ff4b3a28910be583ff7cd6a0c83f877ecf736000517d5e895c9049386507b",
         "size": 12824,
         "type": "SQLite Rollback Journal"
@@ -1638,6 +1671,9 @@
         ],
         "path": [
           "C:\\ProgramData\\USOPrivate\\UpdateStore\\store.db-journal"
+        ],
+        "pids": [
+          "6968"
         ],
         "sha256": "5c76e467b757ee5fc8fcd147dc25c25676816e054456682d4f7a3b1e070ece7c",
         "size": 12824,
@@ -1650,6 +1686,9 @@
         "path": [
           "C:\\ProgramData\\USOPrivate\\UpdateStore\\store.db-journal"
         ],
+        "pids": [
+          "6968"
+        ],
         "sha256": "bb37c14703c7d672979bff3899a6a9aadea6cc6df9af9450b229ac840578b597",
         "size": 12824,
         "type": "SQLite Rollback Journal"
@@ -1661,6 +1700,9 @@
         "path": [
           "C:\\ProgramData\\USOPrivate\\UpdateStore\\store.db-journal"
         ],
+        "pids": [
+          "6968"
+        ],
         "sha256": "f20306a1d23d1c030154dd1402f3023e8fdd1e95fa99744859ccd36bd96b5167",
         "size": 12824,
         "type": "SQLite Rollback Journal"
@@ -1671,6 +1713,9 @@
         ],
         "path": [
           "C:\\ProgramData\\USOPrivate\\UpdateStore\\store.db-journal"
+        ],
+        "pids": [
+          "6968"
         ],
         "sha256": "4f1cccd8159080c5d031d1595f43f74ed5d831fac1df616a404f613d85fafa88",
         "size": 12824,

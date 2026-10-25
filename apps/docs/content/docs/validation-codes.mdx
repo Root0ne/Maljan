@@ -539,7 +539,7 @@ No comment names its meaning; the message at `maljan.pipeline.validation:indicat
 
 ### `stix.indicator_unattributed_flow`
 
-A judge indicator naming a value the sandbox recorded and attributes no flow of the sample to. The judge is asked once, with the sandbox's own fact beside the value; what it answers decides whether the value is published. A keep it was never asked about publishes nothing (`stix_renderer.sandbox_row_kwargs`).
+A judge indicator naming a value the sandbox recorded and attributes no flow, or no process, of the sample to. The judge is asked once, with the sandbox's own fact beside the value; what it answers decides whether the value is published. A keep it was never asked about publishes nothing (`stix_renderer.sandbox_row_kwargs`).
 
 - **Raised at** `maljan.pipeline.validation:unattributed_indicator_violations`
 - **Constant** `maljan.pipeline.validation:UNATTRIBUTED_INDICATOR_CODE`

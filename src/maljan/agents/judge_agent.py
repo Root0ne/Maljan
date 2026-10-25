@@ -3552,7 +3552,7 @@ class JudgeAgent(BudgetMeter):
         crediting an agent with a technique it never named is asked about
         against it, and ``None`` asks nothing. ``sandbox_facts`` is
         ``(kind, value) -> the sandbox's fact`` for a value the sandbox recorded
-        and attributes no flow of the sample to
+        and attributes no flow, or no process, of the sample to
         (``stix_renderer.sandbox_facts_for_the_judge``): an indicator naming one
         is asked about once, with the fact, and a keep after that question is
         recorded as the judge's answer, which is what publishes the value.

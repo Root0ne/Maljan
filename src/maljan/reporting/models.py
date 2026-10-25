@@ -341,6 +341,10 @@ class ProcessNode(BaseModel):
     ppid: int = 0
     name: str = ""
     command_line: str = ""
+    # Whether the sandbox marks the process as the sample's: one of the two
+    # lineage facts the sample's process tree is read from. Left out of the
+    # dump when not marked, as on a report stored before the field existed.
+    marked: bool = Field(default=False, exclude_if=lambda value: not value)
     children: list[ProcessNode] = Field(default_factory=list)
     injected_into: list[int] = Field(default_factory=list)
 
@@ -355,6 +359,11 @@ class RegistryMod(BaseModel):
     value_name: str | None = None
     operation: Literal["create", "modify", "delete", "query"] = "modify"
     new_value: str | None = None
+    # The pids of the calls the sandbox recorded doing ``operation`` to the
+    # key, where its report kept them: what attributes the key to the sample's
+    # process tree. Empty when it named none, and then left out of the dump,
+    # as on a report stored before the field existed.
+    pids: list[str] = Field(default_factory=list, exclude_if=lambda value: not value)
 
 
 class SandboxSignature(BaseModel):

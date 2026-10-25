@@ -1781,6 +1781,9 @@
         "path": [
           "C:\\Users\\Admin\\AppData\\Local\\Temp\\__PSScriptPolicyTest_15ccb2hc.ysk.psm1"
         ],
+        "pids": [
+          "1988"
+        ],
         "sha256": "96ad1146eb96877eab5942ae0736b82d8b5e2039a80d3d6932665c1a4c87dcf7",
         "size": 60,
         "type": "ASCII text, with no line terminators"

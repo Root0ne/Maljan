@@ -1372,6 +1372,9 @@
         "path": [
           "C:\\Users\\Admin\\AppData\\Local\\Temp\\tmpB6DF.tmp"
         ],
+        "pids": [
+          "3512"
+        ],
         "sha256": "bb0e1fa360a4d21dc9690fb1b0d2aed20097f7c98914d331e98313620197a592",
         "size": 1600,
         "type": "XML 1.0 document, ASCII text"
@@ -1382,6 +1385,9 @@
         ],
         "path": [
           "C:\\Users\\Admin\\AppData\\Local\\Temp\\tmp38E1.tmp"
+        ],
+        "pids": [
+          "5720"
         ],
         "sha256": "39b16b3a00b6b43c6820357127228c0768a577153014ce7b0ea3c585244dc08b",
         "size": 1310,
@@ -1394,6 +1400,9 @@
         "path": [
           "C:\\Users\\Admin\\AppData\\Local\\Temp\\tmp33CF.tmp"
         ],
+        "pids": [
+          "5720"
+        ],
         "sha256": "3086d914f6b23268f8a12cb1a05516cd5465c2577e1d1e449f1b45c8e5e8f83c",
         "size": 1320,
         "type": "XML 1.0 document, ASCII text, with CRLF line terminators"
@@ -1404,6 +1413,9 @@
         ],
         "path": [
           "C:\\Users\\Admin\\AppData\\Local\\Temp\\__PSScriptPolicyTest_bkqfhoi2.b3f.psm1"
+        ],
+        "pids": [
+          "4528"
         ],
         "sha256": "96ad1146eb96877eab5942ae0736b82d8b5e2039a80d3d6932665c1a4c87dcf7",
         "size": 60,

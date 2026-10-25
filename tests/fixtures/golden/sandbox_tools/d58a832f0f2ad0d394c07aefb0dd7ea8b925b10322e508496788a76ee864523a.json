@@ -787,6 +787,9 @@
         "path": [
           "C:\\Users\\Admin\\AppData\\Roaming\\Microsoft\\Windows\\PushPrinterConnection application\\34645675765865745"
         ],
+        "pids": [
+          "3736"
+        ],
         "sha256": "1b41c1747999605677f2e677a66bf314ac000174e9818b43a0e4c4f1acde9952",
         "size": 1443,
         "type": "XML 1.0 document, ASCII text, with CRLF, CR line terminators"
@@ -797,6 +800,9 @@
         ],
         "path": [
           "C:\\Users\\Admin\\AppData\\Roaming\\Microsoft\\Windows\\PushPrinterConnection application\\34645675765865745"
+        ],
+        "pids": [
+          "3736"
         ],
         "sha256": "b34dd57691d830b1c6bc2a5e2788d7641518b77d60d49134a84dc5e0276b3304",
         "size": 1440,

@@ -373,6 +373,9 @@
         "path": [
           "C:\\Program Files (x86)\\Darksart.dll"
         ],
+        "pids": [
+          "3616"
+        ],
         "sha256": "cc68aafee6c68966c06c7c70f431d26fe262e58f0211d4baa069b4778f5d4b8d",
         "size": 192512,
         "type": "PE32 executable (DLL) (GUI) Intel 80386, for MS Windows"

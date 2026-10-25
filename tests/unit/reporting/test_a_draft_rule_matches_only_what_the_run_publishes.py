@@ -89,8 +89,9 @@ class TestAMalwareVerdict:
 
         report = _report(
             judge_indicators=[JudgeIndicator(kind="path", value="C:\\ProgramData\\relay4.dat")],
+            # The sample's process, staged under its digest, wrote the file.
             dynamic=DynamicBehavior(
-                process_tree=[{"pid": 1, "name": "sample.exe"}],
+                process_tree=[{"pid": 1, "name": f"{'c' * 64}.exe"}],
                 file_operations=[
                     {"operation": "write", "path": "C:\\ProgramData\\relay4.dat", "pid": 1}
                 ],

@@ -738,6 +738,7 @@ def _build_consolidated_iocs(report: MalwareReport) -> list[ConsolidatedIOC]:
         emulation_record,
         listed_value_sightings,
         path_names_a_file,
+        persistence_run_keys,
         publish_answer,
         query_answers,
         recovered_by_words,
@@ -817,11 +818,12 @@ def _build_consolidated_iocs(report: MalwareReport) -> list[ConsolidatedIOC]:
     strings = list(static.interesting_strings) if static else []
     file_ops = [op for op in (dynamic.file_operations if dynamic else []) if isinstance(op, dict)]
 
-    # A file, a digest, a key or a mutex the sandbox recorded is the sample's
-    # observation when a record of it names a process of the sample's tree;
-    # one no record attributes is withheld with the reason, unless the judge
+    # A file, a digest, a key or a mutex the sandbox recorded is published
+    # only as an indicator the judge names: one a record attributes to the
+    # sample's tree on that keep, one no record attributes only when the judge
     # kept it when asked with that fact, as an unattributed flow is
-    # (``stix_renderer.sandbox_host_kwargs``).
+    # (``stix_renderer.sandbox_host_kwargs``). Every other is withheld with
+    # the reason.
     def _sandbox_host(kind: str, value: str) -> str:
         return publish_answer(kind, value, "sandbox", **sandbox_host_kwargs(report, kind, value))
 
@@ -873,15 +875,12 @@ def _build_consolidated_iocs(report: MalwareReport) -> list[ConsolidatedIOC]:
         if mod.operation in ("create", "modify") and mod.key.strip():
             said = f"{mod.operation} value {mod.value_name}" if mod.value_name else mod.operation
             written.setdefault(mod.key.strip().lower(), (mod.key.strip(), {}))[1][said] = None
-    run_keys = {
-        mech.target.strip().lower(): mech.target
-        for mech in report.persistence
-        if mech.kind == "registry_run" and mech.target.strip()
-    }
+    run_keys = persistence_run_keys(report.persistence)
     for folded, (key, operations) in written.items():
         if folded in run_keys:
             continue
-        # A registry record names no process, so no key is attributed.
+        # A key is attributed by the pids of the calls that wrote it, where
+        # the sandbox kept them (``RegistryMod.pids``).
         _add(
             "Registry key",
             "registry",

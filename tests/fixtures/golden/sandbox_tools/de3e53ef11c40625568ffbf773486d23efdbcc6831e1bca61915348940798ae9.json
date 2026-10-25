@@ -1111,6 +1111,9 @@
         "path": [
           "C:\\Users\\Admin\\AppData\\Local\\Temp\\MSI8797.tmp"
         ],
+        "pids": [
+          "988"
+        ],
         "sha256": "b3f5e10fb1b7352a6dbbcbb10ed605a8fda24f3f9c31f954835bd5a41eb6ea68",
         "size": 388008,
         "type": "PE32 executable (DLL) (GUI) Intel 80386, for MS Windows"
@@ -1121,6 +1124,9 @@
         ],
         "path": [
           "C:\\Users\\Admin\\AppData\\Roaming\\driver_booster_setup\\driver_booster_setup 1.0.0\\install\\F1C926D\\driver_booster_setup.exe"
+        ],
+        "pids": [
+          "988"
         ],
         "sha256": "a146cf8b84d5e38a583fa9a69b922d2b6c78f55a995a0447b34a88c6f2449af3",
         "size": 30505352,
@@ -1133,6 +1139,9 @@
         "path": [
           "C:\\Users\\Admin\\AppData\\Local\\Temp\\shi792F.tmp"
         ],
+        "pids": [
+          "988"
+        ],
         "sha256": "948589c349b0205ff73c7049b0d2e5c4faffb64271c64ee0033e384f61cf51d6",
         "size": 5039616,
         "type": "PE32+ executable (DLL) (GUI) x86-64, for MS Windows"
@@ -1143,6 +1152,9 @@
         ],
         "path": [
           "C:\\Users\\Admin\\AppData\\Roaming\\driver_booster_setup\\driver_booster_setup 1.0.0\\install\\holder0.aiph"
+        ],
+        "pids": [
+          "988"
         ],
         "sha256": "13fb152094788bebd69fdccdf629dc16b728f6122d246157ee26d82932482bf9",
         "size": 31107976,
@@ -1155,6 +1167,9 @@
         "path": [
           "C:\\Users\\Admin\\AppData\\Roaming\\driver_booster_setup\\driver_booster_setup 1.0.0\\install\\F1C926D\\AppDataFolder\\WindowsActiveServices\\Patch.exe"
         ],
+        "pids": [
+          "988"
+        ],
         "sha256": "7b949ec5f73dff9e83d9c5e8995e025940f1ed6d3b07c27923d9321ca9a42ead",
         "size": 602624,
         "type": "PE32 executable (GUI) Intel 80386 Mono/.Net assembly, for MS Windows"
@@ -1165,6 +1180,9 @@
         ],
         "path": [
           "C:\\Users\\Admin\\AppData\\Roaming\\driver_booster_setup\\driver_booster_setup 1.0.0\\install\\F1C926D\\driver_booster_setup.msi"
+        ],
+        "pids": [
+          "988"
         ],
         "sha256": "28b55fd2c5122fdf263d074cc559ad781b477daf827750b7656982bf58f48049",
         "size": 1175040,
