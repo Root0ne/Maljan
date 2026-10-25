@@ -144,6 +144,7 @@ def test_the_analysts_come_from_the_report_s_own_analyst_record() -> None:
     assert "- Analyst `intel` ran and made no claims." in appendix
 
 
+@pytest.mark.usefixtures("no_model_endpoint_configured")
 @pytest.mark.parametrize("run", sorted(STORED_RENDERS))
 def test_a_stored_run_renders_as_it_did_before_the_blocks(run: str) -> None:
     from maljan.reporting.renderers import HtmlRenderer

@@ -20,6 +20,8 @@ import pytest
 from maljan.reporting.models import MalwareReport
 from tests.unit.reporting.test_an_entry_without_a_source_is_read_as_before import _benchmark
 
+pytestmark = pytest.mark.usefixtures("no_model_endpoint_configured")
+
 # Normalised STIX over the judge's bundle, as dev 5cd25b75 renders it.
 # Re-pinned when every IOC-table row came to carry a publish answer and the
 # export to name the sample by its identity digests (T-344, T-345): a dropped file's

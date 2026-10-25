@@ -46,6 +46,7 @@ def _digest(text: str) -> str:
     return hashlib.sha256(text.encode()).hexdigest()[:16]
 
 
+@pytest.mark.usefixtures("no_model_endpoint_configured")
 @pytest.mark.parametrize("run", sorted(STORED_RENDERS))
 def test_a_stored_run_renders_as_dev_rendered_it(run: str) -> None:
     from maljan.reporting.renderers import HtmlRenderer, MarkdownRenderer
