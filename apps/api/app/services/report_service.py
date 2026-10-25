@@ -211,7 +211,9 @@ def with_current_iocs(mr: Any, owner: str) -> tuple[Any, str | None]:
     """The stored report as served: its IOC table rebuilt, and MISP attributes when it has none.
 
     The table is the one ``/iocs`` and §9 read (``builder.ioc_table``), so the
-    console's indicator panel shows the rows the feed serves. A report stored
+    console's indicator panel shows the rows the feed serves. Its flagged
+    statements carry, after the stored ones, the sentences the exports mark
+    against what the run published (``prose_decisions``). A report stored
     before MISP attributes were built has them built here, their uuids derived
     from ``owner`` (the report's id). The second value is the note a report
     stored under the earlier rule carries about its STIX bundle, else
@@ -223,9 +225,13 @@ def with_current_iocs(mr: Any, owner: str) -> tuple[Any, str | None]:
     if typed is None:
         return mr, None
     from maljan.reporting.misp import build_misp_attributes
+    from maljan.reporting.prose_decisions import with_decided_statements
 
     table = ioc_table(typed)
     served = {**mr, "consolidated_iocs": [row.model_dump(mode="json") for row in table]}
+    flagged = with_decided_statements(list(typed.flagged_statements), typed)
+    if len(flagged) > len(typed.flagged_statements):
+        served["flagged_statements"] = [row.model_dump(mode="json") for row in flagged]
     note = None
     if mr.get("misp_attributes") is None:
         served["misp_attributes"] = build_misp_attributes(typed, table, owner=owner)

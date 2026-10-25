@@ -46,7 +46,7 @@ not prove the test makes the platform raise it. The tests are not listed here:
 one nothing raises any more and stored runs still carry; the comment on that
 name says what reads it.
 
-**99 codes in 11 families:** [attck](#attck) 6 · [attribution](#attribution) 1 · [composer](#composer) 3 · [isr](#isr) 13 · [narrative](#narrative) 5 · [question](#question) 9 · [report](#report) 12 · [stix](#stix) 32 · [tool](#tool) 1 · [validation](#validation) 1 · [verdict](#verdict) 16. 15 code positions the register could not resolve are [listed at the end](#unresolved-code-positions).
+**101 codes in 11 families:** [attck](#attck) 6 · [attribution](#attribution) 1 · [composer](#composer) 3 · [isr](#isr) 13 · [narrative](#narrative) 5 · [question](#question) 9 · [report](#report) 14 · [stix](#stix) 32 · [tool](#tool) 1 · [validation](#validation) 1 · [verdict](#verdict) 16. 15 code positions the register could not resolve are [listed at the end](#unresolved-code-positions).
 
 ## attck
 
@@ -367,6 +367,14 @@ A report sentence that says a routine was not read, or that something is not in 
 - **Constant** `maljan.pipeline.validation:ABSENCE_CONTRADICTS_LEDGER_CODE`
 - **Docs** [Architecture](/architecture/)
 
+### `report.category_type_unstated`
+
+The report's category names a STIX malware type the judge's malware object, published as written, does not carry; marked beside the category line.
+
+- **Raised at** `maljan.reporting.prose_decisions:category_types_unstated`
+- **Constant** `maljan.reporting.prose_decisions:CATEGORY_TYPE_UNSTATED_CODE`
+- **Docs** none
+
 ### `report.citation_not_evidence`
 
 No comment names its meaning, and the message at `maljan.pipeline.validation:citation_violations` is made only of values it fills in: see the message there.
@@ -422,6 +430,14 @@ No comment names its meaning; the message at `maljan.pipeline.validation:persist
 - **Raised at** `maljan.pipeline.validation:persistence_not_observed_violations`
 - **Constant** `maljan.pipeline.validation:PERSISTENCE_NOT_OBSERVED_CODE`
 - **Docs** [Architecture](/architecture/)
+
+### `report.published_technique_doubted`
+
+No comment of its own names its meaning; the comment over the group of constants it belongs to, on `maljan.reporting.prose_decisions:PUBLISHED_TECHNIQUE_DOUBTED_CODE`, reads: "A sentence of the report model's prose that calls a technique this run publishes a candidate or not confirmed; marked in place with the publication."
+
+- **Raised at** `maljan.reporting.prose_decisions:statements_against_publication`
+- **Constant** `maljan.reporting.prose_decisions:PUBLISHED_TECHNIQUE_DOUBTED_CODE`
+- **Docs** none
 
 ### `report.rule_match_as_action`
 

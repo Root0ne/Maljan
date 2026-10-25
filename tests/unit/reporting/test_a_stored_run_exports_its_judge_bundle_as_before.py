@@ -41,8 +41,11 @@ STORED_EXPORTS = {
 # came to print escaped (F7), and when an analyst's listing came to be read by
 # its headings (AUD-43); the STIX did not change. Re-pinned when §10.2's
 # introduction came to say each draft rule's body is printed as written
-# (T-357): that one line is the only change; the STIX did not change.
-HAIKU4_RENDERS = ("b55653be5852ab97", "4eb094b857490468", "ffef51adf3a2ebac")
+# (T-357): that one line is the only change; the STIX did not change. The STIX
+# re-pinned when the export's own malware object came to carry the types the
+# published category names (T-337): ``downloader`` and ``backdoor`` after the
+# category as written; the Markdown and HTML did not change.
+HAIKU4_RENDERS = ("b55653be5852ab97", "4eb094b857490468", "98ec03129873afd3")
 
 _UUID = re.compile(r"--[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
 _STAMP = re.compile(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})")

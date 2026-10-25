@@ -235,10 +235,13 @@ def test_the_enrichment_queued_after_the_report_is_named_then_what_it_asked() ->
 # Re-pinned when §10.2's introduction came to say that each draft rule's body
 # is printed as written, its network values not defanged (T-357): that one
 # line is the only change in each run's Markdown and HTML.
+# run4 re-pinned when a key finding came to print only the entries its text
+# does not cite itself (T-337): its eight key findings each wrote their
+# citations into the sentence, and those lines are the only change.
 STORED_RENDERS = {
     "run7": ("316ea45a47dcf965", "2222d734a9d4104f"),
     "run5": ("569fa30c8cb6ba18", "8fdd5c05cff3d393"),
-    "run4": ("7004aace97325d30", "434a19df7368b41d"),
+    "run4": ("3dc5e451b4b61066", "e98cdab463df19f6"),
     "local8": ("0da0f60173fa7bfd", "087f32c8af5adaa3"),
     "haiku4": ("b55653be5852ab97", "4eb094b857490468"),
 }

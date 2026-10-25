@@ -13,7 +13,11 @@ augments it with the richer SDO set required by downstream CTI tooling:
 The renderer is additive but for one set: the judge's attack-patterns are
 replaced by one per technique in ``report.ttp_mappings``, so the bundle names
 the techniques the report names, with stable ids and an ATT&CK reference on
-each. Everything else the judge emitted is preserved as-is. Producing this
+each. The export's own malware object, minted when the judge wrote none,
+carries the category and the types it names (:func:`with_category_types`).
+Everything else the judge emitted is preserved as-is; where its malware object
+lacks a type the category names, the report says so
+(``prose_decisions``). Producing this
 bundle is side-effect free; callers serialise it via ``model_dump(mode="json")``.
 """
 
@@ -1039,7 +1043,10 @@ class ExtendedSTIXRenderer:
                 # Named for the family the run states, it stands for that
                 # family; named for a category or ``unknown``, for this sample.
                 is_family=bool(family),
-                malware_types=[report.malware_category] if report.malware_category else [],
+                malware_types=with_category_types(
+                    [report.malware_category] if report.malware_category else [],
+                    report.malware_category,
+                ),
                 # Named from the family, so the family's own citations are
                 # this object's; a name from the category or ``unknown`` has
                 # none in the record.
@@ -1598,6 +1605,75 @@ PRODUCER_IDENTITY_ID = f"identity--{uuid.uuid5(_ATTACK_PATTERN_NAMESPACE, 'malja
 def _pattern_id_for(technique_id: str) -> str:
     """The published object id of one technique. Same id every time."""
     return attack_pattern_id(technique_id)
+
+
+# The STIX 2.1 ``malware-type-ov`` word for a category word outside that
+# vocabulary, where the vocabulary has one. A loader fetches and starts what
+# comes next, which the vocabulary calls a downloader (the judges of the stored
+# runs wrote ``downloader`` beside the category ``loader``); a stealer takes
+# data off the host, which it calls spyware.
+_CATEGORY_WORD_TYPES = {
+    "loader": "downloader",
+    "stealer": "spyware",
+    "infostealer": "spyware",
+    "rat": "remote-access-trojan",
+    "miner": "resource-exploitation",
+    "cryptominer": "resource-exploitation",
+    "botnet": "bot",
+}
+_CATEGORY_WORD_RE = re.compile(r"[a-z0-9]+(?:-[a-z0-9]+)*")
+# The category's head: what it says before a bracket, a semicolon or a comma
+# qualifies it ("backdoor (not a downloader)", "worm; no rat observed").
+_CATEGORY_HEAD_RE = re.compile(r"[(;,]")
+# A word that negates the type word right after it: never a type it names.
+_NEGATING_WORDS = frozenset({"no", "not", "non", "never", "without"})
+
+
+def category_type_words(category: Any) -> list[tuple[str, str]]:
+    """Each type word of the category's head with the ``malware-type-ov`` type it names.
+
+    The head is the category before its first bracket, semicolon or comma. A
+    hyphenated word that is a vocabulary word whole (``remote-access-trojan``)
+    counts as one; any other is read part by part (``info-stealer``,
+    ``trojan-downloader``). A vocabulary word counts as itself, a word outside
+    the vocabulary as the vocabulary's word for it (:data:`_CATEGORY_WORD_TYPES`);
+    a word a negation stands before, and ``unknown``, name no type.
+    """
+    from maljan.pipeline.validation import MALWARE_TYPES
+
+    head = _CATEGORY_HEAD_RE.split(str(category or "").casefold(), maxsplit=1)[0]
+    words: list[str] = []
+    for match in _CATEGORY_WORD_RE.finditer(head):
+        token = match.group(0)
+        words.extend([token] if token in MALWARE_TYPES else token.split("-"))
+    named: list[tuple[str, str]] = []
+    for index, word in enumerate(words):
+        if index and words[index - 1] in _NEGATING_WORDS:
+            continue
+        kind = word if word in MALWARE_TYPES else _CATEGORY_WORD_TYPES.get(word)
+        if kind and kind != "unknown":
+            named.append((word, kind))
+    return named
+
+
+def category_malware_types(category: Any) -> list[str]:
+    """The ``malware-type-ov`` types a published category names, in the order it names them.
+
+    Read from the category's head (:func:`category_type_words`); each type once.
+    """
+    return list(dict.fromkeys(kind for _word, kind in category_type_words(category)))
+
+
+def with_category_types(types: Sequence[str], category: Any) -> list[str]:
+    """``types`` as written, then each type the category names that they lack.
+
+    For the export's own malware object: what was written is kept, in its
+    order, and nothing is added for a category that names no type or only
+    types already there. A judge's object is never given this; the report
+    names what it lacks instead (``prose_decisions``).
+    """
+    held = {str(t).strip().casefold() for t in types}
+    return [*types, *(kind for kind in category_malware_types(category) if kind not in held)]
 
 
 def report_types_for(verdict: str) -> list[str]:
