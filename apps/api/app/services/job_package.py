@@ -343,14 +343,15 @@ def _markdown(report: Any, job: Any) -> tuple[str | None, str | None]:
 
     A report stored without ``generated_at`` is dated with the job's stored
     completion time, never the build's clock, so the rendering is the same on
-    every build.
+    every build. It is read in sorted key order (``key_ordered``), as the
+    served exports read it, whichever order the run's files hold.
     """
     if not isinstance(report, Mapping):
         return None, "The run holds no report document (report.json), so nothing is rendered."
-    from maljan.reporting.models import MalwareReport
+    from maljan.reporting.models import MalwareReport, key_ordered
     from maljan.reporting.renderers import MarkdownRenderer
 
-    document = dict(report)
+    document = key_ordered(report)
     if not document.get("generated_at"):
         completed = job.get("completed_at") if isinstance(job, Mapping) else None
         if not completed:

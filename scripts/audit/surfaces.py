@@ -710,9 +710,15 @@ def check_scalars(
 
 
 def _completed_event(events: Any) -> dict[str, Any] | None:
+    """The last ``completed`` event's facts.
+
+    ``GET /jobs/{id}/events`` serves them under ``data`` (job_events.py reads
+    the table's ``payload`` column into it); a stored run's ``events.json``,
+    exported from the table, keeps ``payload``.
+    """
     for event in reversed(_events(events)):
         if event.get("type") == "completed":
-            return _dict(event.get("payload")) or event
+            return _dict(event.get("data")) or _dict(event.get("payload")) or event
     return None
 
 
