@@ -799,6 +799,11 @@ def redact_url(text: str) -> str:
     """Mask any ``scheme://user:pass@`` credential, and any secret-named query parameter.
 
     Applied to free text (a driver's error message, a config value echoed
-    back), not only to values known to be URLs.
+    back), not only to values known to be URLs. An address written with no
+    scheme (``user:pass@host:8080``) has its userinfo masked too
+    (``settings_masking.masked_bare_userinfo``).
     """
-    return _URL_SPAN.sub(_mask_secret_params, _CREDENTIAL_IN_URL.sub(r"\1***@", text))
+    from maljan.core.settings_masking import masked_bare_userinfo
+
+    redacted = _URL_SPAN.sub(_mask_secret_params, _CREDENTIAL_IN_URL.sub(r"\1***@", text))
+    return masked_bare_userinfo(redacted)

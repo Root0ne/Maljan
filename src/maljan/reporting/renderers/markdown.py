@@ -2764,9 +2764,12 @@ class _Context:
         """A model's recorded name, its endpoint set aside where it is a configured one.
 
         A run records a model as ``<model> @ <label>``. Only a label equal to
-        one the settings configure (``model_assignments.configured_endpoint_labels``),
-        as the whole of what follows the last `` @ ``, is kept from the closing
-        pass; the same text anywhere else in the report is defanged.
+        one the run's own settings configured, as the whole of what follows the
+        last `` @ ``, is kept from the closing pass; the same text anywhere else
+        in the report is defanged. The labels are the ones the record took from
+        the run's snapshot when it was built (``disclosure.endpoint_labels``),
+        so a later render prints the same on any machine; a record that holds
+        none keeps no endpoint.
         """
         name, sep, label = model.rpartition(" @ ")
         if sep and label in self._endpoint_labels():
@@ -2794,16 +2797,11 @@ class _Context:
         return self._hosts
 
     def _endpoint_labels(self) -> set[str]:
-        """The configured model endpoints' labels, read once per render."""
+        """The model endpoints the run's settings configured, as the record holds them."""
         if self._labels is None:
-            try:
-                from maljan.core.config import get_settings
-                from maljan.core.model_assignments import configured_endpoint_labels
-
-                self._labels = set(configured_endpoint_labels(get_settings()))
-            except Exception as exc:  # noqa: BLE001 — with none read, every value is defanged
-                logger.debug("markdown: the configured model endpoints were not read (%s).", exc)
-                self._labels = set()
+            record = (self.report.run_summary or {}).get("disclosure")
+            held = record.get("endpoint_labels") if isinstance(record, dict) else None
+            self._labels = {str(label) for label in held} if isinstance(held, list) else set()
         return self._labels
 
     def cell(self, text: Any) -> str:
