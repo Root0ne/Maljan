@@ -78,6 +78,11 @@ _ANY_MARK = re.compile(
 # What a mark opens with: a line that holds it and no mark that reads was
 # written a mark the parser could not read.
 _MARK_OPENING = re.compile(r"\[\s*(?:not\s+)?blocking\b", re.IGNORECASE)
+# The [analysts: ...] field opening a line, after any list marker or emphasis.
+# A quoted line is never one.
+_LINE_FIELD_OPEN = re.compile(
+    r"^[\s*_`]*+(?:(?:[-*•]|\d+[.)])\s+)?[*_`]*+\[\s*analysts?\s*:", re.IGNORECASE
+)
 
 # The field the mediator writes on a listed line: the analysts who must
 # revise over it, by the names their reports are headed with.
@@ -569,6 +574,27 @@ def read_marks(lines: Iterable[str]) -> list[Mark]:
                 Mark(line=text, blocking=_kind(match) == "blocking", marked=True, reason=reason)
             )
     return marks
+
+
+def carries_line_field(line: str) -> bool:
+    """Whether a line holds a field every listed line is asked for.
+
+    The ``[analysts: ...]`` field the line opens with (after a list marker or
+    emphasis; a quoted line is never one), or a ``[blocking ...]`` or ``[not blocking ...]``
+    mark that ends it. Prose between two lists, or after one, holds neither,
+    even where it names a field or a mark inside a sentence.
+    """
+    text = str(line)
+    if _LINE_FIELD_OPEN.match(text):
+        return True
+    # Only the last mark opening can end the line: the mark is read from there
+    # alone and what follows it checked by hand, as ``_MARK`` reads its end, so
+    # a line costs one pass whatever it holds.
+    last = None
+    for opening in _MARK_OPENING.finditer(text):
+        last = opening
+    mark = _ANY_MARK.match(text, last.start()) if last is not None else None
+    return mark is not None and text[mark.end() :].lstrip("*_`").strip() in ("", ".")
 
 
 def with_ledger_facts(directive: str, facts: Sequence[str]) -> str:

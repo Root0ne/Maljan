@@ -108,8 +108,18 @@ from maljan.memory.long_term_memory import (
     similar_cases_shown,
 )
 from maljan.memory.technique_cards import technique_card_lines
-from maljan.pipeline.debate_facts import read_marks, with_ledger_facts, with_ledger_stated
-from maljan.pipeline.events import emit_judge_question, safe_finding_value, scrub
+from maljan.pipeline.debate_facts import (
+    carries_line_field,
+    read_marks,
+    with_ledger_facts,
+    with_ledger_stated,
+)
+from maljan.pipeline.events import (
+    emit_judge_question,
+    safe_answer_text,
+    safe_finding_value,
+    scrub,
+)
 from maljan.pipeline.mediation_models import (
     CONTRADICTIONS_BLOCK_MISSING_NOTE,
     CONTRADICTIONS_BLOCK_MIXED_NOTE,
@@ -641,6 +651,23 @@ _NONE_OPENING_RE = re.compile(r"^[\s*_`(]*none\b", re.IGNORECASE)
 _SUMMARY_LINE_RE = re.compile(r"^[\s*_`]*(?:summary|in summary|overall|in total)\b", re.I)
 
 _TABLE_SEPARATOR_RE = re.compile(r"^\s*\|?[\s:|-]*-[\s:|-]*$")
+# A Markdown heading line.
+_HEADING_RE = re.compile(r"^ {0,3}#{1,6}(?:\s|$)")
+
+
+def _next_line_continues(lines: list[str], index: int, *, listed: bool = False) -> bool:
+    """Whether the first non-blank line from ``index`` on is a block line with its fields.
+
+    With ``listed``, a list line is one too. The agreement line, the end of the
+    answer and any other line (``debate_facts.carries_line_field``) are not.
+    """
+    for at in range(index, len(lines)):
+        line = lines[at]
+        if line.strip():
+            if _AGREEMENT_LINE_RE.match(line):
+                return False
+            return bool(listed and _LIST_MARKER_RE.match(line)) or carries_line_field(line)
+    return False
 
 
 def _table_border_or_header(lines: list[str], index: int) -> bool:
@@ -677,7 +704,16 @@ def read_contradictions_block(text: str) -> ContradictionsBlock:
     the mediator's word. The label is matched in capitals, as the prompt spells
     it, so a prose heading such as "Contradictions:" in the reasoning is not
     taken for it. The block runs to the agreement line, the end of the answer,
-    or a blank line followed by a line that is not a list line.
+    or a blank line followed by a line that is neither a list line nor one
+    holding a field every line is asked for (opening with ``[analysts: ...]``
+    or ending with a ``[blocking ...]`` mark, ``debate_facts.carries_line_field``):
+    blank lines between plain lines that carry those fields do not end it, and
+    a remark after a blank line followed by such a line is read past and is no
+    item. A heading with no blank line above it is no item: inside the block it
+    is read past, and before the block's first line it heads the lines under
+    it when the next line is a list line or holds the fields and ends the
+    block otherwise, which leaves the block unreadable. After a NONE, a blank
+    line ends the block.
 
     Each line is one contradiction, bulleted, numbered or plain, the text on
     the label line included; an indented line under an item continues it. A
@@ -715,6 +751,7 @@ def read_contradictions_block(text: str) -> ContradictionsBlock:
             none_phrase = bool(_NONE_OPENING_RE.match(rest))
             found.append(rest.strip("*_`").strip())
     after_blank = False
+    ended_at_heading = False
     for index in range(start + 1, len(lines)):
         line = lines[index]
         if _AGREEMENT_LINE_RE.match(line):
@@ -722,9 +759,29 @@ def read_contradictions_block(text: str) -> ContradictionsBlock:
         if not line.strip():
             after_blank = True
             continue
-        listed = _LIST_MARKER_RE.match(line)
-        if after_blank and not listed:
+        if after_blank and said_none and not found:
+            # What follows a NONE and a blank line is a remark on the block.
             break
+        listed = _LIST_MARKER_RE.match(line)
+        fielded = not listed and carries_line_field(line)
+        if not listed and not fielded and after_blank:
+            # Prose after a blank line ends the block, unless the next line
+            # holds a field of the block's lines: then it is a heading or a
+            # remark between them and no item.
+            if not _next_line_continues(lines, index + 1):
+                break
+            after_blank = False
+            continue
+        if not listed and not fielded and _HEADING_RE.match(line):
+            # A heading with no blank line above it is no item. Inside the
+            # block it is read past, whatever follows it. Before the block's
+            # first line it heads the lines below it when the next is a list
+            # line or holds the fields, and otherwise ends the block.
+            if not found and not _next_line_continues(lines, index + 1, listed=True):
+                ended_at_heading = True
+                break
+            continue
+        new_paragraph = after_blank
         after_blank = False
         stripped = line.strip()
         if not listed:
@@ -734,9 +791,9 @@ def read_contradictions_block(text: str) -> ContradictionsBlock:
                 table_rows = table_rows or not _table_border_or_header(lines, index)
             elif _table_border_or_header(lines, index) or _SUMMARY_LINE_RE.match(stripped):
                 continue
-            elif line[:1].isspace() and found:
+            elif line[:1].isspace() and found and not new_paragraph:
                 found[-1] = f"{found[-1]} {stripped}"
-            else:
+            elif stripped.strip("*_`").strip():
                 found.append(stripped.strip("*_`").strip())
             continue
         item = line[listed.end() :].strip().strip("*_`").strip()
@@ -753,7 +810,9 @@ def read_contradictions_block(text: str) -> ContradictionsBlock:
         if none_phrase and len(found) == 1 and not said_none:
             return ContradictionsBlock(found, ambiguous="none_phrase")
         return ContradictionsBlock(found, mixed=said_none)
-    if table_rows and not said_none:
+    if (table_rows or ended_at_heading) and not said_none:
+        # Only table rows, or a heading the block ended at before any line:
+        # nothing says what stands, and the mediator is asked once.
         return ContradictionsBlock(None)
     return ContradictionsBlock([])
 
@@ -3155,6 +3214,7 @@ class JudgeAgent(BudgetMeter):
                     # sentence in a field of its own rather than inside them.
                     finding=reasoning_text.strip(),
                     confidence_score=None,
+                    answer=safe_answer_text(reasoning_text) if reasoning_text.strip() else "",
                     note=(
                         f"Consensus: not applicable — {len(claimants)} of {len(reports)} "
                         "analyst(s) produced claims."
@@ -3328,6 +3388,8 @@ class JudgeAgent(BudgetMeter):
             contradictions=blocking,
             not_blocking=not_blocking,
             unread_marks=unread_marks,
+            # The words the block was read from, kept for the run record.
+            answer=safe_answer_text(reasoning_text),
             note=(
                 CONTRADICTIONS_BLOCK_MISSING_NOTE
                 if block_missing
