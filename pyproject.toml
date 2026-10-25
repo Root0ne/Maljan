@@ -72,6 +72,10 @@ dependencies = [
     # runs on (core.tool_declarations), since those are held against tool
     # answers a sample's own strings reach. BSD-3-Clause, wheels for 3.13.
     "google-re2>=1.1",
+    # Checks the schema an MCP tool argument is offered with is a valid Draft
+    # 2020-12 schema before a model's client sees it (agents.argument_schema).
+    # Named in its own right rather than left to arrive through mcp.
+    "jsonschema>=4.20.0",
 ]
 
 [project.scripts]

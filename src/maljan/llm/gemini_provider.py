@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import json
 from typing import Any
 
 from langchain_core.language_models.chat_models import BaseChatModel
 from pydantic import SecretStr
 
+from maljan.agents.argument_schema import _SCHEMA_KEYS, _SCHEMA_LIST_KEYS, _SCHEMA_MAP_KEYS
 from maljan.core.config import GeminiConfig, Settings
 from maljan.core.exceptions import LLMError
 from maljan.llm.provider_base import (
@@ -121,7 +123,8 @@ class GeminiProvider(LLMProvider):
         from maljan.llm.tool_replies import with_answered_tool_calls
 
         chat_class = with_answered_tool_calls(
-            with_sized_request_timeout(ChatGoogleGenerativeAI), "gemini"
+            _with_gemini_tool_schemas(with_sized_request_timeout(ChatGoogleGenerativeAI)),
+            "gemini",
         )
         built = chat_class(
             model=model,
@@ -135,6 +138,111 @@ class GeminiProvider(LLMProvider):
         )
         _bind_async_client_per_loop(built)
         return built  # type: ignore[no-any-return]
+
+
+_JSON_TYPES: dict[type, str] = {bool: "boolean", int: "integer", float: "number", str: "string"}
+
+
+def _gemini_schema(schema: Any) -> Any:
+    """``schema`` with every form Gemini's client refuses or misreads rewritten; itself when none.
+
+    Gemini takes only string enum values. A ``null`` among them is left out
+    (it says the value may be absent); when any other value is not a string,
+    the ``enum`` is left out, its ``type`` kept (or read off the values when
+    they agree on one), and the values are named in the description so the
+    model still reads them. A type list of one type and ``"null"``, which the
+    client would read as a string, is an ``anyOf`` of that type and ``null``,
+    the form the client reads as nullable. Only subschemas are read: a
+    ``default``, ``examples`` or ``const`` value is data and is passed as it
+    is. The tool's own argument model still checks the value.
+    """
+    if not isinstance(schema, dict):
+        return schema
+    out: dict[str, Any] = {}
+    for key, value in schema.items():
+        if key in _SCHEMA_LIST_KEYS and isinstance(value, list):
+            items = [_gemini_schema(v) for v in value]
+            same = all(a is b for a, b in zip(items, value, strict=True))
+            out[key] = value if same else items
+        elif key in _SCHEMA_MAP_KEYS and isinstance(value, dict):
+            named = {name: _gemini_schema(v) for name, v in value.items()}
+            out[key] = value if all(named[n] is value[n] for n in value) else named
+        elif key in _SCHEMA_KEYS:
+            out[key] = _gemini_schema(value)
+        else:
+            out[key] = value
+    listed = schema.get("enum")
+    if isinstance(listed, list) and not all(isinstance(v, str) for v in listed):
+        values = [v for v in listed if v is not None]
+        if values and all(isinstance(v, str) for v in values):
+            out["enum"] = values
+        else:
+            del out["enum"]
+            kinds = {_JSON_TYPES.get(type(v)) for v in values}
+            if "type" not in schema and len(kinds) == 1 and None not in kinds:
+                out["type"] = kinds.pop()
+            if values:
+                said_values = ", ".join(json.dumps(v) for v in values)
+                said = str(schema.get("description") or "").strip()
+                out["description"] = f"{said} One of: {said_values}.".strip()
+    stated = schema.get("type")
+    if isinstance(stated, list) and all(isinstance(n, str) for n in stated):
+        kinds_named = [n for n in stated if n != "null"]
+        if len(kinds_named) == 1 and len(kinds_named) < len(stated) and "anyOf" not in schema:
+            del out["type"]
+            out["anyOf"] = [{"type": kinds_named[0]}, {"type": "null"}]
+        elif len(kinds_named) == 1:
+            out["type"] = kinds_named[0]
+    if out.keys() == schema.keys() and all(out[k] is schema[k] for k in schema):
+        return schema
+    return out
+
+
+def gemini_tools(tools: Any) -> list[Any]:
+    """``tools`` as Gemini's client can bind them; a tool that needs no change is passed as it was.
+
+    A tool whose parameters hold a form Gemini's client refuses or misreads is
+    passed in the OpenAI shape with that form rewritten
+    (:func:`_gemini_schema`); anything else, Gemini's own tools included, is
+    passed untouched.
+    """
+    from langchain_core.utils.function_calling import convert_to_openai_tool
+
+    adapted: list[Any] = []
+    for tool in tools:
+        try:
+            shaped = convert_to_openai_tool(tool)
+        except Exception:  # noqa: BLE001 — Gemini's own tool kinds are not ours to convert
+            adapted.append(tool)
+            continue
+        function: Any = shaped.get("function") if isinstance(shaped, dict) else None
+        parameters = function.get("parameters") if isinstance(function, dict) else None
+        rewritten = _gemini_schema(parameters)
+        if rewritten is parameters:
+            adapted.append(tool)
+        else:
+            adapted.append({**shaped, "function": {**function, "parameters": rewritten}})
+    return adapted
+
+
+_GEMINI_TOOL_CLASSES: dict[type, type] = {}
+
+
+def _with_gemini_tool_schemas(chat_class: Any) -> Any:
+    """``chat_class`` binding tools through :func:`gemini_tools`."""
+    cached = _GEMINI_TOOL_CLASSES.get(chat_class)
+    if cached is not None:
+        return cached
+    base: Any = chat_class
+
+    def bind_tools(self: Any, tools: Any, *args: Any, **kwargs: Any) -> Any:
+        return base.bind_tools(self, gemini_tools(tools), *args, **kwargs)
+
+    adapted = type(chat_class.__name__, (chat_class,), {"bind_tools": bind_tools})
+    adapted.__module__ = chat_class.__module__
+    adapted.__qualname__ = chat_class.__qualname__
+    _GEMINI_TOOL_CLASSES[chat_class] = adapted
+    return adapted
 
 
 def _bind_async_client_per_loop(built: Any) -> None:

@@ -26,7 +26,15 @@ from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 from pydantic import ValidationError
 
-from maljan.agents.null_arguments import argument_model, schema_rules
+from maljan.agents.argument_schema import (
+    PLAIN_TYPES,
+    UnusableSchema,
+    holds_ref,
+    is_plain,
+    plain_type,
+)
+from maljan.agents.argument_schema import annotation as argument_annotation
+from maljan.agents.null_arguments import NullRules, argument_model, schema_rules
 from maljan.core.logger import logger
 from maljan.llm.context_window import note_call_began
 
@@ -807,18 +815,39 @@ class MCPLangChainToolkit:
         for prop_name, prop_schema in schema_props.items():
             if not isinstance(prop_schema, dict):
                 prop_schema = {"type": "string"}
-            prop_type_str = prop_schema.get("type", "string")
+            default = prop_schema.get("default", None)
+            if holds_ref(default):
+                # A default that holds a ``$ref`` would be read as a reference
+                # by every client that converts the schema. Left out, the
+                # argument is not sent and the server applies its own default.
+                default = None
+            if not is_plain(prop_schema):
+                # A type list, a combinator, an enum, a nested object or array,
+                # a ``$ref`` or no type at all: offered the server's schema with
+                # its references written out (``agents.argument_schema``).
+                optional = prop_name not in required
+                try:
+                    shaped = argument_annotation(
+                        prop_schema, mcp_tool.inputSchema, optional=optional
+                    )
+                except Exception as exc:  # noqa: BLE001 — one property never costs the tool
+                    # Too large, too deep or not a valid schema: offered as the
+                    # plain type it was before any other form was read.
+                    logger.warning(
+                        "MCP server '%s' tool %r property %r is offered as its plain type: "
+                        "its schema is %s",
+                        self._server_name(),
+                        mcp_tool.name,
+                        prop_name,
+                        self._said(exc)
+                        if isinstance(exc, UnusableSchema)
+                        else f"unreadable ({type(exc).__name__})",
+                    )
+                    shaped = plain_type(prop_schema) | None if optional else plain_type(prop_schema)
+                properties[prop_name] = (shaped, default if optional else ...)
+                continue
 
-            # Map simple types
-            type_mapping = {
-                "string": str,
-                "integer": int,
-                "number": float,
-                "boolean": bool,
-                "array": list,
-                "object": dict,
-            }
-            py_type = type_mapping.get(prop_type_str, Any)
+            py_type = PLAIN_TYPES.get(prop_schema["type"], Any)
 
             if prop_name in required:
                 properties[prop_name] = (py_type, ...)
@@ -832,17 +861,25 @@ class MCPLangChainToolkit:
             # The annotation stays nullable so that an agent which emits an
             # explicit ``null`` is tolerated here and dropped below, rather
             # than raising inside LangChain's own argument parsing.
-            properties[prop_name] = (py_type | None, prop_schema.get("default", None))
+            properties[prop_name] = (py_type | None, default)
 
         # A ``null`` the server's schema does not allow is dropped while the
         # model validates (``agents.null_arguments``), so the field takes its
         # declared default exactly as if the call had left it out. A ``null``
         # it admits is let through, and ``arun_tool`` does not send it.
-        args_schema = argument_model(
-            f"{mcp_tool.name}Schema",
-            properties,
-            schema_rules(mcp_tool.inputSchema, withholds_admitted_nulls=True),
-        )
+        try:
+            rules = schema_rules(mcp_tool.inputSchema, withholds_admitted_nulls=True)
+        except RecursionError:
+            # Nested past what can be walked: every optional field is still
+            # nullable here and a top-level ``None`` is still not sent.
+            logger.warning(
+                "MCP server '%s' tool '%s': its schema is nested too deep to read its null "
+                "rules; a null inside a nested object is sent as given",
+                self._server_name(),
+                mcp_tool.name,
+            )
+            rules = NullRules()
+        args_schema = argument_model(f"{mcp_tool.name}Schema", properties, rules)
 
         tool_name = mcp_tool.name
         # This tool's own way of asking for less, read off the schema it
