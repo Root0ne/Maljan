@@ -1444,6 +1444,9 @@
         "path": [
           "C:\\Users\\Admin\\AppData\\Local\\Temp\\~DF3FA865BB7EA0E61F.TMP"
         ],
+        "pids": [
+          "4552"
+        ],
         "sha256": "10c911f3b846cff1892710f7c774ab749be08411e9d5d518c7048cbabd482c7f",
         "size": 31462,
         "type": "Composite Document File V2 Document, Cannot read section info"
@@ -1454,6 +1457,9 @@
         ],
         "path": [
           "C:\\Users\\Admin\\AppData\\Local\\Temp\\~DFB8E90FD0BE1CA961.TMP"
+        ],
+        "pids": [
+          "1192"
         ],
         "sha256": "292dc1144bdfb7e72d9995890378c0fe211091c2edac287a7afc000eeba5ad3f",
         "size": 31462,

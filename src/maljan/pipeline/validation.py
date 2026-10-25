@@ -12439,8 +12439,8 @@ def unsupported_malware_violations(
     ]
 
 
-# A judge indicator naming a value the sandbox recorded and attributes no flow
-# of the sample to. The judge is asked once, with the sandbox's own fact beside
+# A judge indicator naming a value the sandbox recorded and attributes no flow,
+# or no process, of the sample to. The judge is asked once, with the sandbox's own fact beside
 # the value; what it answers decides whether the value is published. A keep it
 # was never asked about publishes nothing (``stix_renderer.sandbox_row_kwargs``).
 UNATTRIBUTED_INDICATOR_CODE = "stix.indicator_unattributed_flow"
@@ -12456,12 +12456,14 @@ def unattributed_indicator_violations(
     ``""`` otherwise (``stix_renderer.sandbox_facts_for_the_judge``). Each such
     value is one question, with the fact written beside it; ``subject`` names
     the value the fact is about, which is what the report's publish rule reads.
+    A file, a digest, a key or a mutex no process of the sample's tree is
+    recorded as making is asked the same way, in the words of a host record.
     Nothing is removed: a keep after the question is the judge's answer.
     """
     if facts is None:
         return []
     from maljan.reporting.ledger_projection import value_key
-    from maljan.reporting.renderers.stix_renderer import rule_values, url_host
+    from maljan.reporting.renderers.stix_renderer import HOST_KINDS, rule_values, url_host
 
     out: list[Violation] = []
     seen: set[str] = set()
@@ -12470,6 +12472,28 @@ def unattributed_indicator_violations(
             continue
         name = safe_finding_value(getattr(obj, "name", "") or getattr(obj, "pattern", ""))
         for value in rule_values(str(getattr(obj, "pattern", "") or "")):
+            if value.kind in HOST_KINDS:
+                said = facts(value.kind, value.value)
+                subject = f"{value.kind}:{value_key(value.kind, value.value)}"
+                if not said or subject in seen:
+                    continue
+                seen.add(subject)
+                out.append(
+                    Violation(
+                        code=UNATTRIBUTED_INDICATOR_CODE,
+                        message=(
+                            f"the indicator {name!r} names {safe_finding_value(value.value)!r} "
+                            f"and {safe_finding_value(said)}: the sandbox's record of it names "
+                            "no process of the sample's tree. Keep the indicator only if an "
+                            "entry of this run shows a process of the sample's tree made it, "
+                            "and cite that entry in the indicator's description; otherwise "
+                            "remove the indicator."
+                        ),
+                        path=f"objects.{subject}",
+                        subject=subject,
+                    )
+                )
+                continue
             if value.kind not in ("ip", "domain", "url"):
                 continue
             kind, about, host = value.kind, value.value, ""

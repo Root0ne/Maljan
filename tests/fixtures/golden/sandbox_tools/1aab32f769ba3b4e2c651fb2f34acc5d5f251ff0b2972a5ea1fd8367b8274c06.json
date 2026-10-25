@@ -1354,6 +1354,9 @@
         "path": [
           "C:\\Users\\Admin\\AppData\\Local\\Temp\\autC511.tmp"
         ],
+        "pids": [
+          "4384"
+        ],
         "sha256": "0cb072ab06c2452229053e02e8c6986865adc8a0dd3622e98d2f1079bc9db307",
         "size": 271360,
         "type": "data"

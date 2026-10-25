@@ -37,6 +37,7 @@ from maljan.core.logger import logger
 from maljan.pipeline.sandbox_status import NOT_RUN, sandbox_status
 from maljan.providers.call_arguments import pick_argument
 from maljan.schemas.sandbox_document import place
+from maljan.schemas.sandbox_report import LINEAGE_MARKED_STORED
 from maljan.utils.marked_cut import marked_cut
 
 if TYPE_CHECKING:
@@ -283,17 +284,28 @@ def sandbox_processes(
         for proc in page:
             if not isinstance(proc, dict):
                 continue
-            rows.append(
-                {
-                    "pid": proc.get("pid"),
-                    "ppid": proc.get("ppid") or proc.get("parent_id"),
-                    "name": proc.get("process_name") or proc.get("name") or "",
-                    "command_line": proc.get("command_line") or proc.get("cmd") or "",
-                    "first_seen": proc.get("first_seen"),
-                    "call_count": len(proc.get("calls") or []),
-                }
-            )
+            row = {
+                "pid": proc.get("pid"),
+                "ppid": proc.get("ppid") or proc.get("parent_id"),
+                "name": proc.get("process_name") or proc.get("name") or "",
+                "command_line": proc.get("command_line") or proc.get("cmd") or "",
+                "first_seen": proc.get("first_seen"),
+                "call_count": len(proc.get("calls") or []),
+            }
+            # The sandbox's own mark that the process is the sample's, where
+            # the record carries one: one of the two lineage facts.
+            if _marked_as_the_sample(proc):
+                row["marked"] = True
+            rows.append(row)
     return {"processes": rows, "total": len(processes), **meta}
+
+
+def _marked_as_the_sample(proc: dict[str, Any]) -> bool:
+    """Whether a process record carries the sandbox's mark that it is the sample's."""
+    extra = proc.get("extra")
+    return proc.get(LINEAGE_MARKED_STORED) is True or (
+        isinstance(extra, dict) and extra.get(LINEAGE_MARKED_STORED) is True
+    )
 
 
 def sandbox_network(
@@ -453,16 +465,42 @@ def sandbox_dropped_files(
         for entry in page:
             if not isinstance(entry, dict):
                 continue
-            rows.append(
-                {
-                    "name": entry.get("name") or entry.get("filepath") or "",
-                    "path": entry.get("filepath") or entry.get("guest_paths") or "",
-                    "size": entry.get("size"),
-                    "sha256": entry.get("sha256"),
-                    "type": entry.get("type"),
-                }
-            )
+            row = {
+                "name": entry.get("name") or entry.get("filepath") or "",
+                "path": entry.get("filepath") or entry.get("guest_paths") or "",
+                "size": entry.get("size"),
+                "sha256": entry.get("sha256"),
+                "type": entry.get("type"),
+            }
+            # The processes the sandbox says wrote the file, where it says:
+            # which tree wrote it is what makes the file the sample's.
+            pids = _writer_pids(entry)
+            if pids:
+                row["pids"] = pids
+            rows.append(row)
     return {"dropped": rows, "total": len(dropped), **meta}
+
+
+# The fields a dropped file names the processes that wrote it under.
+_WRITER_PID_KEYS = ("pids", "pid", "process_id")
+
+
+def _writer_pids(entry: dict[str, Any]) -> list[str]:
+    """The pids a dropped-file record names, as text, in its order, once each.
+
+    A sandbox may write several in one field joined by commas (``"1536,908"``).
+    """
+    out: list[str] = []
+    for key in _WRITER_PID_KEYS:
+        value = entry.get(key)
+        for one in value if isinstance(value, list) else [value]:
+            if one in (None, "") or isinstance(one, bool):
+                continue
+            for text in str(one).split(","):
+                text = text.strip()
+                if text and text not in out:
+                    out.append(text)
+    return out
 
 
 # Registry APIs, and what each one does to the key it names. A call the table
@@ -528,6 +566,17 @@ _REGISTRY_OP_WEIGHT: dict[str, int] = {
 _REGISTRY_KEY_ARGS = ("FullName", "KeyName", "ObjectAttributes", "SubKey", "Registry")
 _REGISTRY_VALUE_ARGS = ("Buffer", "Data", "ValueData", "Value", "Information")
 _MUTEX_APIS = frozenset({"ntcreatemutant", "ntopenmutant", "createmutexa", "createmutexw"})
+# The mutex APIs that create one: only a creation names the process that made
+# the mutex. An open, or a create that found the mutex already there, names a
+# process that used someone's mutex.
+_MUTEX_CREATE_APIS = frozenset({"ntcreatemutant", "createmutexa", "createmutexw"})
+# What a create says when the object already existed: the native status
+# STATUS_OBJECT_NAME_EXISTS as its return, and ERROR_ALREADY_EXISTS as the
+# Win32 call's last error, by number or by name.
+_NT_NAME_EXISTS = 0x40000000
+_WIN32_ALREADY_EXISTS = 183
+_EXISTED_WORDS = ("OBJECT_NAME_EXISTS", "ALREADY_EXISTS")
+_LAST_ERROR_KEYS = ("last_error", "lasterror", "LastError")
 _MUTEX_ARGS = ("MutexName", "lpName", "ObjectAttributes", "Name")
 _SERVICE_APIS = frozenset({"createservicea", "createservicew", "startservicea", "startservicew"})
 _SERVICE_ARGS = ("ServiceName", "lpServiceName", "DisplayName", "BinaryPathName")
@@ -631,9 +680,12 @@ def sandbox_registry_ops(
     if missing is not None:
         return missing
     rows: dict[str, dict[str, Any]] = {}
+    # The pids of the calls behind each key's operation: a row names the
+    # processes that did what it says, where the report kept the pid.
+    pids: dict[tuple[str, str], set[str]] = {}
     for key in _summary_list(report, "registry"):
         rows.setdefault(key, {"key": key, "operation": "access", "value": None})
-    for call in _calls(report):
+    for pid, call in _calls_by_process(report):
         api = str(call.get("api") or "")
         # Zw* and Nt* are the same native call; the table lists the Nt name.
         name = api.lower()
@@ -649,6 +701,8 @@ def sandbox_registry_ops(
         value = _argument(call, _REGISTRY_VALUE_ARGS) or None
         if operation == _FAILED_WRITE:
             value = None
+        if pid:
+            pids.setdefault((key, operation), set()).add(pid)
         before = rows.get(key)
         if before is not None:
             if _REGISTRY_OP_WEIGHT[operation] < _REGISTRY_OP_WEIGHT[before["operation"]]:
@@ -656,7 +710,10 @@ def sandbox_registry_ops(
             if operation == before["operation"] == "query" and value is None:
                 continue
         rows[key] = {"key": key, "operation": operation, "value": value}
-    ordered = list(rows.values())
+    ordered = []
+    for key, row in rows.items():
+        made_by = pids.get((key, row["operation"]))
+        ordered.append({**row, "pids": sorted(made_by)} if made_by else row)
     page, meta = _page(ordered, offset, limit)
     return {"registry": page, "total": len(ordered), **meta}
 
@@ -790,6 +847,28 @@ def sandbox_api_calls(
     return answer
 
 
+def _created_the_mutex(call: dict[str, Any]) -> bool:
+    """Whether a mutex call created its mutex: a create API whose recorded status says so.
+
+    A create the call says found the mutex already there opened it, and one
+    it says failed made nothing. A call that records no status is taken at its
+    API's word.
+    """
+    api = str(call.get("api") or "").lower()
+    if api not in _MUTEX_CREATE_APIS or call.get("status") is False:
+        return False
+    said = [call.get("pretty_return"), *(call.get(key) for key in _LAST_ERROR_KEYS)]
+    if api.startswith("nt"):
+        said.append(call.get("return"))
+        if _outcome_code(call.get("return")) == _NT_NAME_EXISTS:
+            return False
+    elif any(_outcome_code(call.get(key)) == _WIN32_ALREADY_EXISTS for key in _LAST_ERROR_KEYS):
+        return False
+    return not any(
+        word in str(value).upper() for value in said if value is not None for word in _EXISTED_WORDS
+    )
+
+
 def sandbox_mutexes(
     report: dict[str, Any] | None,
     offset: int = 0,
@@ -809,14 +888,23 @@ def sandbox_mutexes(
     if missing is not None:
         return missing
     names: list[str] = list(_summary_list(report, "summary.mutexes"))
-    for call in _calls(report):
+    pids: dict[str, set[str]] = {}
+    for pid, call in _calls_by_process(report):
         if str(call.get("api") or "").lower() not in _MUTEX_APIS:
             continue
         name = _argument(call, _MUTEX_ARGS)
         if name and name not in names:
             names.append(name)
+        if name and pid and _created_the_mutex(call):
+            pids.setdefault(name, set()).add(pid)
     page, meta = _page(names, offset, limit)
-    return {"mutexes": page, "total": len(names), **meta}
+    answer: dict[str, Any] = {"mutexes": page, "total": len(names), **meta}
+    # The processes whose calls named each mutex, where the report kept the
+    # pid; a name only the summary lists has none.
+    by_name = {name: sorted(pids[name]) for name in page if name in pids}
+    if by_name:
+        answer["pids"] = by_name
+    return answer
 
 
 def sandbox_services_and_tasks(

@@ -185,8 +185,10 @@ class TestTheKindsTheRuleNowAnswers:
 
     def test_a_hash_of_a_file_the_sandbox_saw_dropped_is(self) -> None:
         judge = _judge(f"[file:hashes.'SHA-256' = '{DROPPED}']")
+        # The sample's process, staged under its digest, wrote the file the
+        # judge names: the judge's keep of a row of its tree publishes it.
         dynamic = DynamicBehavior(
-            process_tree=[{"pid": 1, "name": "sample.exe"}],
+            process_tree=[{"pid": 1, "name": f"{SHA256}.exe"}],
             file_operations=[
                 {"operation": "write", "path": "C:\\x\\a.bin", "sha256": DROPPED, "pid": 1}
             ],

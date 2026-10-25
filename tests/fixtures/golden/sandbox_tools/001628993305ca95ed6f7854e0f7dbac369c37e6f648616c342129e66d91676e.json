@@ -706,6 +706,9 @@
         "path": [
           "C:\\Users\\Admin\\AppData\\Local\\Temp\\look2.exe"
         ],
+        "pids": [
+          "1044"
+        ],
         "sha256": "86492ebf2d6f471a5ee92977318d099b3ea86175b5b7ae522237ae01d07a4857",
         "size": 345600,
         "type": "PE32 executable (GUI) Intel 80386, for MS Windows"

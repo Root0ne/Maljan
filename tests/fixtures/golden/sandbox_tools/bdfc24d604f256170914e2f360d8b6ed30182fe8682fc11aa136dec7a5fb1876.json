@@ -1228,6 +1228,9 @@
         "path": [
           "C:\\Users\\Admin\\AppData\\Local\\Temp\\tmpEF64.tmp"
         ],
+        "pids": [
+          "5556"
+        ],
         "sha256": "976c2b3f050f617995837f92ffdd6a0114252d57f1c50e0b9b019415edaf4f93",
         "size": 1321,
         "type": "XML 1.0 document, ASCII text, with CRLF line terminators"
@@ -1238,6 +1241,9 @@
         ],
         "path": [
           "C:\\Users\\Admin\\AppData\\Local\\Temp\\tmpF22.tmp"
+        ],
+        "pids": [
+          "5556"
         ],
         "sha256": "8135c4e4eeaa741f752c0ab8f4ee33e3bb8a0cac5923812234f2e5177d50eb5b",
         "size": 1311,

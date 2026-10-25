@@ -27,7 +27,7 @@ from maljan.pipeline.validation import (
     validate_verdict_bundle,
 )
 from maljan.reporting.builder import MalwareReportBuilder
-from maljan.reporting.models import DynamicBehavior, MalwareReport
+from maljan.reporting.models import DynamicBehavior, JudgeIndicator, MalwareReport
 from maljan.reporting.renderers.stix_renderer import (
     UNPUBLISHABLE_PATTERN_CODE,
     ExtendedSTIXRenderer,
@@ -159,14 +159,16 @@ class TestTheExport:
         assert not [p for p in patterns if "127.0.0.1" in p]
 
     def test_a_kept_indicator_type_is_published_as_written(self) -> None:
-        # The sandbox saw the sample write the file: the second source the one publish
-        # rule asks of the judge's value. A file name is a value the export
-        # mints no object of its own for, so the object carried is the judge's.
+        # The sandbox saw the sample write the file the judge names: the
+        # judge's keep of a host row of the sample's tree publishes it. A file
+        # name is a value the export mints no object of its own for, so the
+        # object carried is the judge's.
         report = _report()
         report.dynamic = DynamicBehavior(
-            process_tree=[{"pid": 1, "name": "sample.exe"}],
+            process_tree=[{"pid": 1, "name": "sample.elf"}],
             file_operations=[{"operation": "write", "path": "/tmp/dropper.bin", "pid": 1}],
         )
+        report.judge_indicators = [JudgeIndicator(kind="path", value="/tmp/dropper.bin")]
         exported = ExtendedSTIXRenderer().render(
             report, _bundle(_indicator("[file:name = '/tmp/dropper.bin']", "ip-addr"))
         )

@@ -1354,6 +1354,9 @@
         "path": [
           "C:\\Users\\Admin\\AppData\\Local\\Temp\\nsx3E4F.tmp\\nsDialogs.dll"
         ],
+        "pids": [
+          "3676"
+        ],
         "sha256": "4b7d17da290f41ebe244827cc295ce7e580da2f7e9f7cc3efc1abc6898e3c9ed",
         "size": 9728,
         "type": "PE32 executable (DLL) (GUI) Intel 80386, for MS Windows"
@@ -1364,6 +1367,9 @@
         ],
         "path": [
           "C:\\Users\\Admin\\AppData\\Local\\Temp\\__PSScriptPolicyTest_dw4ywr25.x4l.psm1"
+        ],
+        "pids": [
+          "6744"
         ],
         "sha256": "96ad1146eb96877eab5942ae0736b82d8b5e2039a80d3d6932665c1a4c87dcf7",
         "size": 60,

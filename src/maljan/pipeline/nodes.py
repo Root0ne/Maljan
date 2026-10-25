@@ -425,22 +425,47 @@ def skipped_analysts_reason(why: str, names: Sequence[str]) -> str:
 SAMPLE_FED_ROLES: tuple[str, ...] = ("static", *PROMPT_ROLES)
 
 
-def judge_sandbox_facts(ledger: Any, isr_reports: Any, sandbox_report: Any) -> Any:
+def judge_facts_identity(state: Any) -> dict[str, str]:
+    """The name and digest the sample's process tree is found by, as the report's identity has them.
+
+    The name the sample arrived with, else the file name of its path, as the
+    report builder's identity falls back (``ledger_projection.identity_from_ledger``),
+    so the tree the question reads is the tree the report's rows are decided by.
+    """
+    path = str(state.get("sample_path") or "")
+    return {
+        "file_name": str(state.get("file_name") or (Path(path).name if path else "")),
+        "sha256": str(state.get("file_hash") or ""),
+    }
+
+
+def judge_sandbox_facts(
+    ledger: Any, isr_reports: Any, sandbox_report: Any, sample: Any = None
+) -> Any:
     """What the sandbox says about each value it recorded, for the judge's indicator question.
 
-    The network block the report will be built from, read before the verdict
-    exists (``ledger_projection.network_from_ledger``), and the publish rule's
-    own words for a value the sandbox attributes no flow of the sample to
-    (``stix_renderer.sandbox_facts_for_the_judge``). ``None`` when no network
-    block can be read: then nothing is asked, and nothing such a question
-    would have decided is published.
+    The network and dynamic blocks the report will be built from, read before
+    the verdict exists (``ledger_projection.network_from_ledger`` and
+    ``dynamic_from_ledger``), and the publish rule's own words for a value the
+    sandbox attributes no flow, or no process, of the sample to
+    (``stix_renderer.sandbox_facts_for_the_judge``), with the persistence a
+    Run key is answered under and the routed identity (``sample``) the
+    sample's process tree is found by. ``None`` when neither block can be read: then
+    nothing is asked, and nothing such a question would have decided is
+    published. A block that cannot be read asks nothing of its own values.
     """
-    from maljan.reporting.ledger_projection import network_from_ledger
+    from maljan.reporting.ledger_projection import (
+        dynamic_from_ledger,
+        network_from_ledger,
+        persistence_from_ledger,
+    )
     from maljan.reporting.renderers.stix_renderer import sandbox_facts_for_the_judge
 
+    # Read as the report builder reads it: a repeat holds a note, not an answer.
+    answered = [e for e in ledger or [] if not getattr(e, "repeated_of", None)]
     try:
         network = network_from_ledger(
-            list(ledger or []),
+            answered,
             isr_reports,
             sandbox_report=sandbox_report if isinstance(sandbox_report, dict) else None,
         )
@@ -450,8 +475,18 @@ def judge_sandbox_facts(ledger: Any, isr_reports: Any, sandbox_report: Any) -> A
             "indicator question (%s).",
             type(exc).__name__,
         )
-        return None
-    return sandbox_facts_for_the_judge(network)
+        network = None
+    try:
+        dynamic = dynamic_from_ledger(answered)
+        persistence = persistence_from_ledger(answered) if dynamic is not None else []
+    except Exception as exc:  # noqa: BLE001 — a fact not read asks nothing
+        logger.warning(
+            "Judge verdict: the sandbox's host record could not be read for the "
+            "indicator question (%s).",
+            type(exc).__name__,
+        )
+        dynamic, persistence = None, []
+    return sandbox_facts_for_the_judge(network, dynamic, persistence, sample)
 
 
 def _sandbox_report_is_synthetic(state: AnalysisState) -> bool:
@@ -6583,7 +6618,10 @@ def make_judge_node(
                 # not attribute to the sample: an indicator on one is asked
                 # about once, with the fact beside it.
                 sandbox_facts=judge_sandbox_facts(
-                    _ledger, isr_reports, state.get("sandbox_report")
+                    _ledger,
+                    isr_reports,
+                    state.get("sandbox_report"),
+                    sample=judge_facts_identity(state),
                 ),
             )
             # A verdict the judge never expressed as a bundle is the thinnest

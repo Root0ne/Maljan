@@ -1057,6 +1057,9 @@
         "path": [
           "C:\\Users\\Admin\\AppData\\Local\\Temp\\nswEDE8.tmp\\uqjxazkp.dll"
         ],
+        "pids": [
+          "2424"
+        ],
         "sha256": "915ac1ffe2ffd66cf6d67e0d330f1356482cff954f3e2303936e74a089bdb0c5",
         "size": 13312,
         "type": "PE32 executable (DLL) (GUI) Intel 80386, for MS Windows"
@@ -1068,6 +1071,9 @@
         "path": [
           "C:\\Users\\Admin\\AppData\\Local\\Temp\\ignqriht.x"
         ],
+        "pids": [
+          "2424"
+        ],
         "sha256": "2cbcb2cda8a97fce76345e1e7b269dbdbbb1fd836c0dde2bfb4277ba5c4ad39e",
         "size": 8070,
         "type": "data"
@@ -1078,6 +1084,9 @@
         ],
         "path": [
           "C:\\Users\\Admin\\AppData\\Local\\Temp\\kkoecemvkxj.av"
+        ],
+        "pids": [
+          "2424"
         ],
         "sha256": "cbcce09e8719c94e09782c419011f812a2a1722e282ac39f0b406cda57bc69f9",
         "size": 307802,

@@ -1750,6 +1750,9 @@
         "path": [
           "C:\\Users\\Admin\\AppData\\Roaming\\kingsoft\\office6\\synccfg\\default\\head\\workarea.cfg.lock"
         ],
+        "pids": [
+          "5524"
+        ],
         "sha256": "c734d0ce79e2c85c33d72d22cf40a148574f933b0af7d9e987bcb3826755fbc2",
         "size": 63,
         "type": "ASCII text"

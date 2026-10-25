@@ -211,13 +211,23 @@ class TestThePredicateAnswersEveryKind:
             assert indicator_publish_reason(kind, "whatever", "strings") is None, kind
 
     def test_an_observed_artefact_of_any_kind_is_published(self) -> None:
+        assert indicator_publish_reason("email", "operator@example.org", "sandbox") == "sandbox"
+
+    def test_an_observed_host_artefact_is_published_only_as_the_judge_s_indicator(self) -> None:
+        # The guest writes temporary files, zone keys and mutexes under the
+        # sample's own processes too: the record alone marks nothing.
         for kind, value in (
-            ("email", "operator@example.org"),
             ("mutex", "Global\\Zararli"),
             ("registry", "HKLM\\Software\\Run\\x"),
             ("path", "C:\\Windows\\Temp\\dropper.exe"),
         ):
-            assert indicator_publish_reason(kind, value, "sandbox") == "sandbox", kind
+            assert indicator_publish_reason(kind, value, "sandbox") is None, kind
+            assert indicator_publish_reason(
+                kind, value, "sandbox", kept_by="the judge's indicator"
+            ) == (
+                "kept as an indicator by the judge's indicator; the sandbox recorded it from "
+                "the sample's process tree"
+            ), kind
 
     def test_a_string_derived_artefact_needs_a_second_source(self) -> None:
         for kind, value in (

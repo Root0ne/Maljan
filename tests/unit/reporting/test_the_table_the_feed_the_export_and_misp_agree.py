@@ -10,8 +10,10 @@ SHA-1 as the sample's own. And no build step wrote the report's MISP
 attributes, so the console's MISP export was always empty.
 
 Now every row is asked the one publish rule under the source that recorded
-it — a sandbox's file, digest, key or mutex only when its record names a
-process of the sample's tree — the feed is the table's rows, the export
+it — a sandbox's file, digest, key or mutex only as an indicator the judge
+names, and then on its record naming a process of the sample's tree or on the
+judge's answer to the question that told it the record names none — the feed
+is the table's rows, the export
 carries every observed host row the table publishes and every identity digest
 of the sample, and the MISP attributes are the table's published rows and the
 published techniques.
@@ -39,6 +41,7 @@ from maljan.reporting.misp import build_misp_attributes
 from maljan.reporting.models import (
     DynamicBehavior,
     FileHashes,
+    JudgeIndicator,
     MalwareReport,
     NetworkDomain,
     NetworkIOCs,
@@ -86,8 +89,17 @@ OWNER = "0f1e2d3c-4b5a-4968-8776-655443332211"
 def _report(**over: Any) -> MalwareReport:
     fields: dict[str, Any] = {
         "identity": SampleIdentity(
-            hashes=FileHashes(sha256=SHA256, sha1=SHA1, md5=MD5, imphash=IMPHASH)
+            hashes=FileHashes(sha256=SHA256, sha1=SHA1, md5=MD5, imphash=IMPHASH),
+            file_name="sample.exe",
         ),
+        # A host row the sandbox recorded is published only as an indicator
+        # the judge names: these are the judge's.
+        "judge_indicators": [
+            JudgeIndicator(kind="hash", value=DROPPED, algorithm="SHA-256"),
+            JudgeIndicator(kind="path", value=WRITTEN),
+            JudgeIndicator(kind="hash", value=DROPPED_SHA1, algorithm="SHA-1"),
+            JudgeIndicator(kind="mutex", value=MUTEX),
+        ],
         "verdict": "Malware",
         "malware_category": "loader",
         "static": StaticAnalysis(
@@ -154,6 +166,14 @@ UNSAID = "no: the sandbox report does not say which process {did} it"
 OUTSIDE_THE_TREE = (
     "no: the sandbox report attributes it to a process outside the sample's process tree"
 )
+KEPT_FROM_THE_TREE = (
+    "yes: kept as an indicator by the judge's indicator; the sandbox recorded it from the "
+    "sample's process tree"
+)
+NOT_NAMED = (
+    "no: the sandbox recorded it, and a file, digest, key or mutex the sandbox recorded is "
+    "published only as an indicator the judge names"
+)
 
 
 class TestEveryRowHasAPublishAnswer:
@@ -168,9 +188,9 @@ class TestEveryRowHasAPublishAnswer:
     @pytest.mark.parametrize(
         ("value", "answer"),
         [
-            (DROPPED, "yes: the sandbox recorded it"),
-            (WRITTEN, "yes: the sandbox recorded it"),
-            (MUTEX, "yes: the sandbox recorded it"),
+            (DROPPED, KEPT_FROM_THE_TREE),
+            (WRITTEN, KEPT_FROM_THE_TREE),
+            (MUTEX, KEPT_FROM_THE_TREE),
             (STRAY, UNSAID.format(did="wrote")),
             (OUTSIDE, OUTSIDE_THE_TREE),
             (RUN_KEY, UNSAID.format(did="wrote")),
@@ -207,7 +227,21 @@ class TestEveryRowHasAPublishAnswer:
 
         assert rows[OUTSIDE].published == OUTSIDE_THE_TREE
         # With no pid, the image name decides.
-        assert rows[MUTEX].published == "yes: the sandbox recorded it"
+        assert rows[MUTEX].published == KEPT_FROM_THE_TREE
+
+    def test_a_row_of_the_sample_s_tree_the_judge_did_not_name_is_withheld(self) -> None:
+        # The guest writes temporary files, zone keys and mutexes under the
+        # sample's own processes too: the record alone marks nothing.
+        report = _report(judge_indicators=[])
+
+        rows = _rows(report)
+        feed = {_bare(row["value"]): row for row in ioc_feed_rows(report.model_dump(mode="json"))}
+        exported = json.dumps(_export(report))
+
+        for value in (DROPPED, DROPPED_SHA1, WRITTEN, MUTEX):
+            assert rows[value].published == NOT_NAMED, value
+            assert not publishes(feed[value]["publish_answer"]), value
+            assert value.replace("\\", "\\\\") not in exported, value
 
     def test_a_judge_keep_is_no_second_source_for_an_unattributed_row(self) -> None:
         from maljan.reporting.models import JudgeIndicator
@@ -296,7 +330,7 @@ class TestEveryRowHasAPublishAnswer:
         assert (rows[DROPPED].type, rows[DROPPED_SHA1].type) == ("SHA-256", "SHA-1")
         odd = _report(
             dynamic=DynamicBehavior(
-                process_tree=[ProcessNode(pid=1, name="s.exe")],
+                process_tree=[ProcessNode(pid=1, name="sample.exe")],
                 file_operations=[{"operation": "write", "sha256": "ab" * 20 + "c", "pid": 1}],
             )
         )
@@ -591,7 +625,9 @@ class TestTheMispAttributes:
             sha256=SHA256, sha1=SHA1, md5=MD5, sha512="ab" * 64, imphash=IMPHASH,
             ssdeep=SSDEEP, tlsh=TLSH,
         )  # fmt: skip
-        attributes = self._attributes(_report(identity=SampleIdentity(hashes=hashes)))
+        attributes = self._attributes(
+            _report(identity=SampleIdentity(hashes=hashes, file_name="sample.exe"))
+        )
 
         assert attributes
         for attribute in attributes:
@@ -642,12 +678,14 @@ class TestTheMispAttributes:
         self,
     ) -> None:
         hashes = FileHashes(sha256=SHA256, md5=MD5, imphash=IMPHASH, ssdeep=SSDEEP, tlsh=TLSH)
-        attributes = self._attributes(_report(identity=SampleIdentity(hashes=hashes)))
+        attributes = self._attributes(
+            _report(identity=SampleIdentity(hashes=hashes, file_name="sample.exe"))
+        )
         flags = {a["type"]: a["to_ids"] for a in attributes if a["category"] != "External analysis"}
 
         assert (flags["sha256"], flags["md5"], flags["mutex"]) == (True, True, True)
         assert (flags["imphash"], flags["ssdeep"], flags["tlsh"]) == (False, False, False)
-        assert "published because the sandbox recorded it" in next(
+        assert "the sandbox recorded it from the sample's process tree" in next(
             a["comment"] for a in attributes if a["value"] == DROPPED
         )
 
