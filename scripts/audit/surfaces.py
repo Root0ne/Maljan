@@ -695,7 +695,7 @@ def check_scalars(
             if isinstance(o, dict) and o.get("type") == "malware"
         ]
         if "stix" in surfaces:
-            seen["stix"] = malware[0].get("name") if malware else None
+            seen["stix"] = _stix_family_name(malware, found.family)
         for name, value in seen.items():
             out.checked["family"] += 1
             if _norm(value).casefold() != found.family.casefold():
@@ -707,6 +707,30 @@ def check_scalars(
                 out.defect(
                     "differs", "family", name, found.family, "the header does not name the family"
                 )
+
+
+def _stix_family_name(malware: list[dict[str, Any]], family: str) -> Any:
+    """The family name a bundle's malware objects state, as STIX 2.1 states one.
+
+    A family is the name of a malware object with ``is_family: true``; the
+    judge's object for the one sample (``is_family: false``) may be named for
+    the sample itself, its hash for one, and is then a ``variant-of`` the
+    family's object the export adds beside it. Every family object must name
+    the family; the first one that does not is the value returned. With no
+    family object, an object named for the family stands for it, as the export
+    reads it (``_names_the_family``); else the first object's name is returned.
+    """
+    wanted = family.casefold()
+    families = [o for o in malware if o.get("is_family") is True]
+    for obj in families:
+        if _norm(obj.get("name")).casefold() != wanted:
+            return obj.get("name")
+    if families:
+        return families[0].get("name")
+    for obj in malware:
+        if _norm(obj.get("name")).casefold() == wanted:
+            return obj.get("name")
+    return malware[0].get("name") if malware else None
 
 
 def _completed_event(events: Any) -> dict[str, Any] | None:
