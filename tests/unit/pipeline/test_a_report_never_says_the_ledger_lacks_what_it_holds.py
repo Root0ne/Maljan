@@ -1,9 +1,11 @@
 """A report sentence that says the ledger lacks what an answered entry holds is asked once.
 
-A report said a routine "is not read" while a decompile of it had answered,
+A report said a routine "is not read", or that its decompile "was not
+obtained", while a decompile of it had answered,
 that a routine's callers "are not in the ledger" while a callers query listed
-them, and that import names "are not confirmed by the parser output" it cited
-while that entry listed them. Each such sentence is read for the head of its
+them, and that import names "are not confirmed (or verified) by the parser
+output" it cited while that entry listed them; "no X is in the evidence" is read
+as "X is not in the evidence". Each such sentence is read for the head of its
 subject — an address, an entry id or a value — and checked against the
 answered entries: the model is asked once with the entry named, and the
 sentence is never rewritten. An identifier inside a modifier ("the caller of
@@ -123,6 +125,33 @@ class TestAStatementTheLedgerContradicts:
         )
         assert len(found) == 1
 
+    @pytest.mark.parametrize(
+        "text",
+        [
+            "The decompile of init 0x5a10 was not obtained in this run.",
+            "The decompile of routine 0x5a10 was not obtained.",
+            "Decompile results for 0x5a10 were not returned.",
+            "The disassembly of 0x5a10 has not been obtained.",
+            "The decompilation of the routine at 0x5a10 was not read.",
+        ],
+    )
+    def test_a_decompile_said_not_obtained_whose_decompile_answered(self, text: str) -> None:
+        [violation] = _asked(text)
+        assert "0x5a10 was not read" in violation.message
+        assert "ev_0159 (decompile_function)" in violation.message
+
+    def test_values_said_not_verified_by_the_entry_cited_for_them(self) -> None:
+        [violation] = _asked(
+            "The import names (ReadThingW, MakeThingW) are not verified by the parser output "
+            "[ev_0004]."
+        )
+        assert "ReadThingW, MakeThingW are not confirmed" in violation.message
+
+    def test_no_value_said_in_the_evidence_that_an_entry_holds(self) -> None:
+        [violation] = _asked("No import ReadThingW is in the evidence.")
+        assert "ReadThingW is not in the ledger" in violation.message
+        assert "ev_0004 (pe_info)" in violation.message
+
     def test_the_finding_is_kept_beside_the_sentence_after_one_ask(self) -> None:
         assert ABSENCE_CONTRADICTS_LEDGER_CODE in KEPT_WITH_A_FINDING
 
@@ -149,6 +178,18 @@ class TestAStatementThatStands:
             "Routines 0x7c40 and 0x5a10 build it. Its arguments are not in the ledger.",
             # A small number is an offset or a flag, not a routine.
             "The value at offset 0x60 is not read.",
+            # "Not obtained", "not verified" and "no ... in the evidence" of what no
+            # identifier names: nothing to look up.
+            "The sleep timing is not verified, and no steady state was observed.",
+            "No payload-level encryption is in the evidence.",
+            "The capture was not obtained in this run.",
+            "The decompile of the export was not obtained.",
+            # A routine said not obtained without its decompile, or whose decompile failed.
+            "Routine 0x5a10 was not obtained.",
+            "The decompile of 0x5b20 was not obtained.",
+            # A value the cited entry does not hold.
+            "The name GetTickCount is not verified by the parser output [ev_0004].",
+            "No import GetTickCount is in the evidence.",
         ],
     )
     def test_it_is_not_asked(self, text: str) -> None:
@@ -173,6 +214,9 @@ class TestAStatementThatStands:
             "The loader calls 0x7c40 and several helper routines. "
             "Their callers are not in the ledger.",
             "Routine 0x5a10 (the unpacked copy) was not read.",
+            "The decompile of the caller of 0x5a10 was not obtained.",
+            "The decompile of 0x7000, called by 0x5a10, was not obtained.",
+            "No caller of 0x5a10 is in the ledger.",
         ],
     )
     def test_an_identifier_outside_the_subject_s_head_is_not_judged(self, text: str) -> None:

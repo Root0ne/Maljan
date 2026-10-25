@@ -3,10 +3,12 @@
 Models write the techniques a claim holds as one list ("T1027, T1140"), and
 the reader used to read no id from such a line and ask for one claim per
 technique: in a paid run that question was most of the validation turns. A
-list of ids, each one an id and nothing else, separated by commas or "and",
-is read as one claim per id, each carrying the claim's own sentence, evidence
-and confidence, so every check a technique gets after the read is asked of
-each one. A line with words beside an id is still kept whole and asked about.
+list of ids, each one an id and nothing else, separated by commas, "and",
+slashes or semicolons, is read as one claim per id, each carrying the claim's
+own sentence, evidence and confidence, so every check a technique gets after
+the read is asked of each one. A line with words beside an id is still kept
+whole and asked about, unless they are a note the reader can read
+(``test_a_technique_line_with_a_note_is_read``).
 """
 
 from __future__ import annotations
@@ -53,6 +55,9 @@ def _block(line: str) -> str:
         ("T1027/T1140", ["T1027", "T1140"]),
         ("T1027, T1140 / T1106", ["T1027", "T1140", "T1106"]),
         ("T1055/T1055.012", ["T1055", "T1055.012"]),
+        # A semicolon between whole ids.
+        ("T1027; T1140", ["T1027", "T1140"]),
+        ("T1027;T1140, T1106", ["T1027", "T1140", "T1106"]),
     ],
 )
 def test_a_list_of_ids_is_one_claim_per_id(line: str, ids: list[str]) -> None:
@@ -89,7 +94,6 @@ def test_a_list_of_ids_is_one_claim_per_id(line: str, ids: list[str]) -> None:
         "T1027 // T1140",
         "T1027 /, T1140",
         "T1027 & T1140",
-        "T1027; T1140",
         "T1055.001/.002",
         "T1027/",
         "/T1027",

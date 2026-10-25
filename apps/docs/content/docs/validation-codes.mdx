@@ -219,7 +219,7 @@ A retry kept as the analyst's answer that no longer states claims or findings it
 
 ### `isr.technique_line_unread`
 
-A claim whose TECHNIQUE line is more than ids or NONE. No id is read from it, and the analyst is asked once for ids alone. A list of ids separated by commas or "and" is read (`base_agent.read_technique_line`) and not asked.
+A claim whose TECHNIQUE line is more than ids or NONE. No id is read from it, and the analyst is asked once for ids alone. A list of ids separated by commas, "and", slashes or semicolons is read (`base_agent.read_technique_line`) and not asked, and so is an id with a closing note in brackets that decides nothing or says the id is not asserted.
 
 - **Raised at** `maljan.pipeline.validation:technique_line_violation`
 - **Constant** `maljan.pipeline.validation:TECHNIQUE_LINE_UNREAD_CODE`
@@ -361,7 +361,7 @@ A reply names an open question the analysts did not leave.
 
 ### `report.absence_contradicts_ledger`
 
-A report sentence that says a routine was not read, or that something is not in the ledger, or that a cited entry does not confirm a value, while an answered entry of this run holds it (`ledger_absence_contradictions`). Asked once, naming the entry; a sentence kept after it is recorded.
+A report sentence that says a routine was not read (or its decompile not obtained), or that something is not in the ledger, or that a cited entry does not confirm (or verify) a value, while an answered entry of this run holds it (`ledger_absence_contradictions`). Asked once, naming the entry; a sentence kept after it is recorded.
 
 - **Raised at** `maljan.pipeline.validation:ledger_absence_contradictions`
 - **Constant** `maljan.pipeline.validation:ABSENCE_CONTRADICTS_LEDGER_CODE`
