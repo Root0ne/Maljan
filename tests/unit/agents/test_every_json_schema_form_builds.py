@@ -532,6 +532,241 @@ def test_the_corpus_carries_every_tool_the_goldens_name() -> None:
             assert sorted(corpus[server][tool].get("properties", {})) == arguments, tool
 
 
+# -- A name a field cannot carry ------------------------------------------------------
+
+# Every kind of argument name a pydantic field or a Python keyword argument
+# cannot be: ``model_config`` crashed the build, a leading underscore made the
+# field private so the argument was neither offered nor sent, a ``BaseModel``
+# member crashed or shadowed it, a keyword or a name that is not an identifier
+# was sent but never offered, and a keyword of the tool's own call was lost or
+# crashed the call (T-360). Each is offered and sent under the server's name.
+RESERVED: dict[str, tuple[str, ...]] = {
+    "pydantic_config": ("model_config",),
+    "private": ("__x", "_x", "__init__", "_"),
+    "basemodel_member": (
+        "model_dump",
+        "model_post_init",
+        "model_fields",
+        "schema",
+        "json",
+        "dict",
+        "copy",
+        "validate",
+    ),
+    "model_namespace": ("model_dump_extra", "model_validate_this"),
+    "keyword": ("class", "from", "None"),
+    "not_an_identifier": ("a-b", "1x", "x y", ""),
+    "tool_call_keyword": ("self", "config", "run_manager"),
+}
+
+RESERVED_CASES = [(kind, name) for kind, names in RESERVED.items() for name in names]
+RESERVED_IDS = [
+    f"{kind}-{index}" for kind, names in RESERVED.items() for index in range(len(names))
+]
+
+
+def _named(name: str, field: dict[str, Any], *, required: bool = True) -> dict[str, Any]:
+    schema: dict[str, Any] = {
+        "type": "object",
+        "properties": {name: field, "y": {"type": "integer"}},
+    }
+    if required:
+        schema["required"] = [name]
+    return schema
+
+
+@pytest.mark.parametrize(("kind", "name"), RESERVED_CASES, ids=RESERVED_IDS)
+class TestAReservedName:
+    def test_a_plain_field_builds_is_offered_and_sent_under_the_servers_name(
+        self, kind: str, name: str
+    ) -> None:
+        schema = _named(name, {"type": "string"})
+        tool, _ = _build(schema)
+        offered = _offered(tool)
+        assert list(offered["properties"]) == [name, "y"]
+        assert offered["properties"][name] == {"type": "string"}
+        assert offered["required"] == [name]
+        assert _sent(schema, {name: "v", "y": 2}) == {name: "v", "y": 2}
+
+    def test_a_shaped_field_builds_is_offered_and_sent_under_the_servers_name(
+        self, kind: str, name: str
+    ) -> None:
+        field = {"anyOf": [{"type": "integer"}, {"type": "string"}]}
+        schema = _named(name, field)
+        tool, _ = _build(schema)
+        assert _offered(tool)["properties"][name] == field
+        assert _sent(schema, {name: 7}) == {name: 7}
+        assert _sent(schema, {name: "seven"}) == {name: "seven"}
+
+    def test_its_value_is_still_checked_under_the_servers_name(self, kind: str, name: str) -> None:
+        from pydantic import ValidationError
+
+        tool, session = _build(_named(name, {"type": "integer"}))
+        with pytest.raises(ValidationError):
+            asyncio.run(tool.ainvoke({name: [1]}))
+        with pytest.raises(ValidationError):
+            asyncio.run(tool.ainvoke({"y": 1}))
+        assert session.calls == []
+
+    def test_the_null_rules_read_it_by_the_servers_name(self, kind: str, name: str) -> None:
+        # T-330: an optional field that does not admit null takes a null as
+        # left out; one that admits it is not sent a top-level null; a required
+        # one that admits it is sent its null; a nested one is dropped inside.
+        optional = _named(name, {"type": "integer"}, required=False)
+        assert _sent(optional, {name: None, "y": 1}) == {"y": 1}
+        assert _sent(optional, {name: 4}) == {name: 4}
+        admitted = _named(name, {"type": ["integer", "null"]}, required=False)
+        assert _sent(admitted, {name: None}) == {}
+        needed = _named(name, {"type": ["integer", "null"]})
+        assert _sent(needed, {name: None}) == {name: None}
+        nested = _named(name, OPTIONS, required=False)
+        value = {"mode": "fast", "depth": None}
+        assert _sent(nested, {name: value}) == {name: {"mode": "fast"}}
+        tool, _ = _build(admitted)
+        assert name in rules_of(tool.args_schema).withheld
+
+    def test_the_build_warns_of_nothing(self, kind: str, name: str) -> None:
+        import warnings
+
+        with warnings.catch_warnings(record=True) as said:
+            warnings.simplefilter("always")
+            _build(_named(name, {"type": "string"}))
+        assert [str(w.message) for w in said] == []
+
+    def test_a_tool_rebuilt_around_it_offers_and_sends_the_servers_name(
+        self, kind: str, name: str
+    ) -> None:
+        from maljan.agents.evidence_recorder import EvidenceRecorder, record_tools
+        from maljan.providers.declared_errors import ErrorPattern, with_declared_errors
+
+        schema = _named(name, {"type": "string"})
+        tool, session = _build(schema)
+        pattern = ErrorPattern.model_validate({"match": "never said", "remediation": "none"})
+        (declared,) = with_declared_errors([tool], [pattern])
+        (recorded,) = record_tools([declared], EvidenceRecorder("static"))
+        for rebuilt in (declared, recorded):
+            assert list(_offered(rebuilt)["properties"]) == [name, "y"]
+            asyncio.run(rebuilt.ainvoke({name: "v"}))
+            assert session.calls[-1] == {name: "v"}
+
+
+def test_the_ledger_records_cites_and_keys_a_call_by_what_was_sent() -> None:
+    from maljan.agents.evidence_recorder import EvidenceRecorder, RepeatGuard, record_tools
+
+    tool, session = _build(_named("class", {"type": "string"}))
+    recorder = EvidenceRecorder("static")
+    repeats = RepeatGuard()
+    (recorded,) = record_tools([tool], recorder, repeats)
+    arguments = {"class": "PE", "y": 1}
+    answers = [asyncio.run(recorded.ainvoke(arguments)) for _ in range(3)]
+    assert session.calls == [arguments, arguments]
+    # Recorded, and cited by the repeat, under the name the server was sent.
+    assert [entry.args for entry in recorder.entries] == [arguments] * 3
+    assert [entry.repeated_of for entry in recorder.entries] == [None, None, "ev_0001"]
+    assert "[ev_0001]" in answers[2]
+    # The repeat key is the server's name, never the field that held it.
+    assert repeats.answered_by("probe", arguments) == "ev_0001"
+    assert repeats.answered_by("probe", {"arg_class": "PE", "y": 1}) is None
+
+
+def test_the_null_rules_read_an_argument_written_by_its_field_name() -> None:
+    from maljan.agents.evidence_recorder import EvidenceRecorder, record_tools
+
+    schema = _named("class", OPTIONS, required=False)
+    by_field = {"arg_class": {"mode": "f", "depth": None}}
+    assert _sent(schema, by_field) == {"class": {"mode": "f"}}
+    tool, session = _build(schema)
+    recorder = EvidenceRecorder("static")
+    (recorded,) = record_tools([tool], recorder)
+    asyncio.run(recorded.ainvoke(by_field))
+    assert session.calls[-1] == {"class": {"mode": "f"}}
+    # Recorded as every call is, with the optional ``y`` at its default.
+    assert recorder.entries[-1].args == {"class": {"mode": "f"}, "y": None}
+    assert recorder.entries[-1].args_nulls_dropped == [["class", "depth"]]
+
+
+def test_the_offered_schema_is_written_once() -> None:
+    tool, _ = _build(_named("class", {"type": "string"}))
+    offered = tool.tool_call_schema
+    assert offered is tool.tool_call_schema
+    assert offered.model_json_schema() is offered.model_json_schema()
+    assert list(offered.model_json_schema()["properties"]) == ["class", "y"]
+
+
+def test_a_guard_hides_and_fills_an_argument_by_the_servers_name() -> None:
+    from maljan.agents.evidence_recorder import EvidenceRecorder, record_tools
+    from maljan.agents.tool_pinning import _pin_tool
+
+    schema = {
+        "type": "object",
+        "properties": {"from": {"type": "string"}, "path": {"type": "string"}},
+        "required": ["from", "path"],
+    }
+    tool, session = _build(schema)
+    pinned = _pin_tool(
+        tool,
+        "/samples/evil.exe",
+        frozenset({"evil.exe"}),
+        frozenset(),
+        "probe",
+        filled={"from": "/job/one.pcap"},
+    )
+    assert list(_offered(pinned)["properties"]) == ["path"]
+    recorder = EvidenceRecorder("static")
+    (recorded,) = record_tools([pinned], recorder)
+    asyncio.run(recorded.ainvoke({"path": "evil.exe"}))
+    sent = {"path": "/samples/evil.exe", "from": "/job/one.pcap"}
+    assert session.calls[-1] == sent
+    assert recorder.entries[-1].args == {"path": "evil.exe"}
+
+
+def test_a_server_name_equal_to_an_internal_one_keeps_both_arguments() -> None:
+    schema = {
+        "type": "object",
+        "properties": {
+            "class": {"type": "string"},
+            "arg_class": {"type": "integer"},
+            "arg_class_2": {"type": "boolean"},
+        },
+        "required": ["class", "arg_class"],
+    }
+    tool, _ = _build(schema)
+    assert list(_offered(tool)["properties"]) == ["class", "arg_class", "arg_class_2"]
+    sent = {"class": "c", "arg_class": 1, "arg_class_2": True}
+    assert _sent(schema, sent) == sent
+
+
+def test_a_narrowed_tool_keeps_the_servers_names() -> None:
+    schema = {
+        "type": "object",
+        "properties": {
+            "path": {"type": "string"},
+            "from": {"type": "integer"},
+            "model_config": {"anyOf": [{"type": "integer"}, {"type": "null"}]},
+        },
+        "required": ["path", "from"],
+    }
+    tool, _ = _build(schema)
+    narrowed = _schema_without(tool.args_schema, ("path",))
+    assert narrowed is not None
+    before = tool.args_schema.model_json_schema()["properties"]
+    after = narrowed.model_json_schema()["properties"]
+    assert list(after) == ["from", "model_config"]
+    assert after == {k: v for k, v in before.items() if k != "path"}
+    assert narrowed.model_validate({"from": 3}).model_dump(by_alias=True) == {
+        "from": 3,
+        "model_config": None,
+    }
+
+
+RESERVED_FORMS: dict[str, dict[str, Any]] = {
+    f"{form}_{kind}_{index}": _named(name, field)
+    for form, field in (("plain", {"type": "string"}), ("shaped", {"type": ["integer", "null"]}))
+    for kind, names in RESERVED.items()
+    for index, name in enumerate(names)
+}
+
+
 # -- Every provider's client takes what is offered ----------------------------------
 
 NODE = {
@@ -583,6 +818,7 @@ def _all_schemas() -> list[tuple[str, dict[str, Any]]]:
     ]
     cases += [(f"form/{name}", schema) for name, schema in FORMS.items()]
     cases += [(f"hostile/{name}", schema) for name, schema in HOSTILE.items()]
+    cases += [(f"reserved/{name}", schema) for name, schema in RESERVED_FORMS.items()]
     return cases
 
 

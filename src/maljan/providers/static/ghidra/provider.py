@@ -800,7 +800,7 @@ class GhidraStaticProvider(StaticProvider):
         a call; a request that got no answer from Ghidra is not. With no held
         path the model's own call runs as it was made.
         """
-        from langchain_core.tools import StructuredTool
+        from maljan.agents.server_names import ServerNamedTool, to_server_names
 
         inner = getattr(tool, "coroutine", None)
         if inner is None:
@@ -813,6 +813,8 @@ class GhidraStaticProvider(StaticProvider):
         path_arg = str(getattr(spec, "path_argument", "")) if declared(spec) else "file"
 
         async def pinned_load_program(**kwargs: Any) -> str:
+            # By the server's names, as the declaration names them.
+            kwargs = to_server_names(tool.args_schema, kwargs)
             pinned = provider._held_path()
             if pinned is None:
                 return str(await inner(**kwargs))
@@ -853,7 +855,7 @@ class GhidraStaticProvider(StaticProvider):
             logger.error("%s", failure)
             raise failure
 
-        return StructuredTool.from_function(
+        return ServerNamedTool.from_function(
             func=None,
             coroutine=pinned_load_program,
             name=tool.name,

@@ -653,7 +653,7 @@ def wrap_open_tool(
     server (``open_key``). With no declaration, no note store, or no open tool
     among ``tools``, ``tools`` come back as they were.
     """
-    from langchain_core.tools import StructuredTool
+    from maljan.agents.server_names import ServerNamedTool, to_server_names
 
     if not declared(spec) or notes is None:
         return list(tools)
@@ -681,13 +681,15 @@ def wrap_open_tool(
         return await found.ainvoke(arguments)
 
     async def open_once(**kwargs: Any) -> str:
+        # By the server's names, as the declaration names them.
+        kwargs = to_server_names(raw.args_schema, kwargs)
         path = kwargs.get(spec.path_argument)
         held = held_path() if held_path is not None else None
         rest = {k: v for k, v in kwargs.items() if k != spec.path_argument and v is not None}
         return await opener.aopen(path, call, rest, held=held or None)
 
     try:
-        wrapped = StructuredTool.from_function(
+        wrapped = ServerNamedTool.from_function(
             func=None,
             coroutine=open_once,
             name=raw.name,
@@ -910,7 +912,7 @@ def pin_program_argument(
     ``tools`` come back as they were; a shared, declared server with no note
     store (``notes``) has every tool withheld.
     """
-    from langchain_core.tools import StructuredTool
+    from maljan.agents.server_names import ServerNamedTool, to_server_names
 
     if not shared or not declared(spec):
         return list(tools)
@@ -945,6 +947,8 @@ def pin_program_argument(
 
         async def call(**kwargs: Any) -> Any:
             own = ledger.current(server)
+            # By the server's names, as the declaration names them.
+            kwargs = to_server_names(tool.args_schema, kwargs)
             # Every declared argument the call carries, whether or not its
             # schema names it.
             sent = dict(kwargs)
@@ -987,7 +991,7 @@ def pin_program_argument(
                 ledger.make_current(server, sent.get(fill))
             return answer
 
-        return StructuredTool.from_function(
+        return ServerNamedTool.from_function(
             func=None,
             coroutine=call,
             name=name,

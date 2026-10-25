@@ -21,10 +21,10 @@ from datetime import timedelta
 from typing import Any, cast
 
 from anyio.abc import ObjectReceiveStream
-from langchain_core.tools import BaseTool, StructuredTool
+from langchain_core.tools import BaseTool
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
-from pydantic import ValidationError
+from pydantic import Field, ValidationError
 
 from maljan.agents.argument_schema import (
     PLAIN_TYPES,
@@ -35,6 +35,7 @@ from maljan.agents.argument_schema import (
 )
 from maljan.agents.argument_schema import annotation as argument_annotation
 from maljan.agents.null_arguments import NullRules, argument_model, schema_rules
+from maljan.agents.server_names import ServerNamedTool, field_names, to_server_names
 from maljan.core.logger import logger
 from maljan.llm.context_window import note_call_began
 
@@ -811,6 +812,17 @@ class MCPLangChainToolkit:
         properties: dict[str, tuple[Any, Any]] = {}
         required = mcp_tool.inputSchema.get("required", [])
         schema_props = mcp_tool.inputSchema.get("properties", {})
+        # A name no field can carry (``model_config``, ``_x``, ``class``,
+        # ``a-b``) is held under an internal field name with the server's own
+        # as its alias (``agents.server_names``); every other is its own.
+        held_as = field_names(schema_props)
+
+        def hold(prop_name: str, shaped: Any, default: Any) -> None:
+            field = held_as[prop_name]
+            if field == prop_name:
+                properties[field] = (shaped, default)
+            else:
+                properties[field] = (shaped, Field(default, alias=prop_name))
 
         for prop_name, prop_schema in schema_props.items():
             if not isinstance(prop_schema, dict):
@@ -844,13 +856,13 @@ class MCPLangChainToolkit:
                         else f"unreadable ({type(exc).__name__})",
                     )
                     shaped = plain_type(prop_schema) | None if optional else plain_type(prop_schema)
-                properties[prop_name] = (shaped, default if optional else ...)
+                hold(prop_name, shaped, default if optional else ...)
                 continue
 
             py_type = PLAIN_TYPES.get(prop_schema["type"], Any)
 
             if prop_name in required:
-                properties[prop_name] = (py_type, ...)
+                hold(prop_name, py_type, ...)
                 continue
 
             # An optional parameter carries the server's own declared default
@@ -861,7 +873,7 @@ class MCPLangChainToolkit:
             # The annotation stays nullable so that an agent which emits an
             # explicit ``null`` is tolerated here and dropped below, rather
             # than raising inside LangChain's own argument parsing.
-            properties[prop_name] = (py_type | None, default)
+            hold(prop_name, py_type | None, default)
 
         # A ``null`` the server's schema does not allow is dropped while the
         # model validates (``agents.null_arguments``), so the field takes its
@@ -888,7 +900,7 @@ class MCPLangChainToolkit:
         # cut to.
         from maljan.agents.output_shortening import narrowing_arguments
 
-        narrowing = narrowing_arguments(properties)
+        narrowing = narrowing_arguments(schema_props)
 
         async def arun_tool(**kwargs: Any) -> str:
             if not self.session:
@@ -901,7 +913,9 @@ class MCPLangChainToolkit:
             # not. Only the first is a value the caller meant; forwarding the
             # second turns "unset" into "explicitly null" and denies the server
             # the chance to apply its own default.
-            args = {k: v for k, v in kwargs.items() if v is not None or k in required}
+            # Each under the server's own name, whatever field held it.
+            named = to_server_names(args_schema, kwargs)
+            args = {k: v for k, v in named.items() if v is not None or k in required}
             guard = self._guard
             if guard is None:
                 return await self._call(tool_name, args, narrowing)
@@ -950,7 +964,7 @@ class MCPLangChainToolkit:
         given = hints_of_annotations(hints)
         if given:
             metadata[SERVER_HINTS_METADATA_KEY] = given
-        return StructuredTool.from_function(
+        return ServerNamedTool.from_function(
             func=None,  # Not supporting sync execution since MCP client is async
             coroutine=arun_tool,
             name=mcp_tool.name,
