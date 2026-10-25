@@ -386,6 +386,18 @@ def run_reader(
     return readers.serve_reader(reader, arguments, job, offered=_OFFERED, confine=_reader_path)
 
 
+@mcp.tool()
+def release_job(job: str) -> dict[str, Any]:
+    """Remove what was staged here for one job's readings, at that job's end.
+
+    A delivery primitive, never offered to a model: the worker calls it when
+    a job whose readings ran here ends, so ``job``'s staging directory goes
+    then rather than at the staging TTL. Only that job's directory, never a
+    path the id could name (``maljan.tools.readers.serve_release``).
+    """
+    return readers.serve_release(job)
+
+
 def _http_serve() -> None:
     """Serve over streamable HTTP behind the token, with the shared sidecar plumbing."""
     try:  # An image that copies the shared module beside this file.

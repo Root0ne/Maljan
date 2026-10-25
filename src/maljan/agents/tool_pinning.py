@@ -109,7 +109,8 @@ SAMPLE_ARG_NAMES = frozenset(
 # How the worker hands a server that cannot see this filesystem the sample's
 # bytes, reads back a file the server wrote (``get_artefact``, for the job's
 # artefact store, ``pipeline.artefacts``), and runs one of the platform's own
-# readings of the sample there (``run_reader``, ``tools.readers``). They are
+# readings of the sample there (``run_reader``, ``tools.readers``) and removes
+# what they staged there at the job's end (``release_job``). They are
 # the platform's delivery primitives and never an analysis step, so they are
 # not in the toolbox the model is shown — a live run called ``put_sample`` with
 # ``{"sha256": "null", "content_b64": ""}`` and was told, correctly, that the
@@ -122,6 +123,7 @@ DELIVERY_TOOLS = frozenset(
         "put_sample_finish",
         "get_artefact",
         "run_reader",
+        "release_job",
     }
 )
 

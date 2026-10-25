@@ -1551,6 +1551,133 @@ def _reader_servers(container: Any) -> dict[str, str]:
     return chosen
 
 
+# How long the job's end waits for one server's answer to ``release_job`` (the
+# removal of one job's directory, which takes a moment), and the hard cap on
+# its call, a second beyond. Every server is asked at once, so the whole
+# release takes about one call's time (``core.container._RELEASE_BUDGET``).
+RELEASE_SECONDS = 4.0
+RELEASE_CALL_CAP_SECONDS = RELEASE_SECONDS + 1.0
+
+# Guards the note of the servers a job's readings were sent to: the pack's
+# thread and a step started beside it (the emulator) note from two threads.
+_READING_SERVERS_LOCK = threading.Lock()
+
+
+def _note_reading_server(container: Any, key: str) -> None:
+    """Note that server ``key`` was sent a reading for this job (:func:`release_reader_staging`)."""
+    job = str(container.job_key())
+    with _READING_SERVERS_LOCK:
+        held = getattr(container, "_reading_servers_held", None)
+        if not (isinstance(held, tuple) and held[0] == job):
+            held = (job, set())
+            try:
+                container._reading_servers_held = held
+            except Exception:  # noqa: BLE001 — a container that keeps nothing releases nothing
+                return
+        held[1].add(key)
+
+
+def _noted_reading_servers(container: Any, job: str) -> list[str]:
+    """The servers noted for ``job``, in name order; ``[]`` for none or another job's note."""
+    with _READING_SERVERS_LOCK:
+        held = getattr(container, "_reading_servers_held", None)
+        return sorted(held[1]) if isinstance(held, tuple) and held[0] == job else []
+
+
+def _release_on(container: Any, key: str, job: str) -> bool:
+    """Send server ``key`` ``release_job`` for ``job``; whether it released. Never raises."""
+    from maljan.agents.base_agent import run_coro_blocking
+    from maljan.core.config import ToolRef
+    from maljan.tools.readers import RELEASE_JOB
+
+    try:
+        registry = container.get_server_registry()
+        _tools, reasons = registry.tools_for_ref(
+            ToolRef(kind="mcp", server=key, name=RELEASE_JOB),
+            job,
+            truncation_ledger=container.get_truncation_ledger(),
+        )
+        handle = registry.get(key)
+        if not getattr(handle, "is_open", False):
+            raise RuntimeError("; ".join(reasons) or f"{key} could not be attached")
+        if RELEASE_JOB not in handle.all_tool_names():
+            logger.info(
+                "%s offers no %s; what this job's readings staged there is left to its "
+                "staging TTL.",
+                key,
+                RELEASE_JOB,
+            )
+            return False
+        said = run_coro_blocking(
+            handle.deliver(RELEASE_JOB, {"job": job}, RELEASE_SECONDS),
+            RELEASE_CALL_CAP_SECONDS,
+            label=f"release:{key}",
+        )
+    except Exception as exc:  # noqa: BLE001 — a release never fails the job
+        logger.warning(
+            "%s did not release this job's staging (%s: %s); it is left to its staging TTL.",
+            key,
+            type(exc).__name__,
+            exc,
+        )
+        return False
+    if isinstance(said, Mapping) and said.get("released") is True:
+        return True
+    why = said.get("error") if isinstance(said, Mapping) else None
+    logger.warning(
+        "%s did not release this job's staging (%s); it is left to its staging TTL.",
+        key,
+        str(why or "not all of it was removed")[:200],
+    )
+    return False
+
+
+def release_reader_staging(container: Any) -> list[str]:
+    """At the job's end, each server its readings ran on removes what they staged there.
+
+    A reading on a server of its own (capa's and FLOSS's scratch, the
+    unpacker's carves) writes under ``<staging>/<job>`` on that server, which
+    only its staging TTL would otherwise remove. Each server a reading was
+    sent to this job (:func:`_note_reading_server`) is sent ``release_job``
+    (``tools.readers.RELEASE_JOB``) with this job's id, all at once on
+    threads of their own, and removes that job's directory alone. Each call
+    waits :data:`RELEASE_SECONDS` and is capped at
+    :data:`RELEASE_CALL_CAP_SECONDS`; this waits for them no longer than
+    that cap. The threads start with a context of their own, so a job that
+    was cancelled still releases: the release is its teardown, not its work.
+    A server that does not offer the call (one built before it), cannot be
+    attached, refuses or does not answer in time is logged and its staging
+    left to its TTL: the job is never failed or held by it. Never raises.
+    Returns the servers that released, in name order.
+    """
+    from concurrent.futures import ThreadPoolExecutor, wait
+
+    try:
+        job = str(container.job_key())
+        servers = _noted_reading_servers(container, job)
+    except Exception as exc:  # noqa: BLE001 — teardown never propagates
+        logger.warning("release of the readings' staging: the job was not read (%s).", exc)
+        return []
+    if not servers:
+        return []
+    pool = ThreadPoolExecutor(max_workers=len(servers), thread_name_prefix="release")
+    try:
+        # ``submit`` copies no context: no thread runs under the job's cancellation.
+        asked = {key: pool.submit(_release_on, container, key, job) for key in servers}
+        wait(asked.values(), timeout=RELEASE_CALL_CAP_SECONDS)
+    finally:
+        pool.shutdown(wait=False)
+    released: list[str] = []
+    for key, future in asked.items():
+        if not future.done():
+            logger.warning(
+                "%s did not answer release_job in time; its staging is left to its TTL.", key
+            )
+        elif future.result():
+            released.append(key)
+    return released
+
+
 def _reader_place(container: Any, key: str, config: Any, artefacts: Any) -> Any:
     """The place of server ``key`` for this job's readings (``tools.readers.Place``)."""
     from maljan.agents.base_agent import run_coro_blocking
@@ -1570,6 +1697,7 @@ def _reader_place(container: Any, key: str, config: Any, artefacts: Any) -> Any:
         handle = registry.get(key)
         if not getattr(handle, "is_open", False):
             raise ReaderRefused("; ".join(reasons) or f"{key} could not be attached")
+        _note_reading_server(container, key)
         return run_coro_blocking(
             handle.deliver(RUN_READER, payload, timeout),
             float(timeout) if timeout else None,

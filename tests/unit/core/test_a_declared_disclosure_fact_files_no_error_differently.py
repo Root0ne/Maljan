@@ -46,10 +46,12 @@ SHIPPED_SINCE = frozenset(
     }
 )
 # The tools added since to a source dev had, each filed as the dev tool it is
-# like: the readers' delivery primitive as the sample's (``tools.readers``).
+# like: the readers' delivery primitives as the sample's (``tools.readers``).
 ADDED_SINCE = {
     "mcp:analysis::run_reader": "mcp:analysis::put_sample",
     "mcp:network::run_reader": "mcp:analysis::put_sample",
+    "mcp:analysis::release_job": "mcp:analysis::put_sample",
+    "mcp:network::release_job": "mcp:analysis::put_sample",
 }
 
 

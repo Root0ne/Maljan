@@ -35,9 +35,11 @@ delivery primitive no model is shown, the capture handed over through the
 job's artefact store, and the worker does not run that reading itself. The
 network analyst's own input slice still summarises the capture in the worker,
 a reading left for a later change. A job's staging directory in the
-container's `/tmp` (the capture handed over) is swept
-`MALJAN_STAGING_TTL_HOURS` (24 h unless set) after it last changed, not when
-the job ends, and counts against the tmpfs until then.
+container's `/tmp` (the capture handed over) is removed when the job ends,
+over `release_job`, the delivery primitive the worker calls with the job's id
+(that job's directory only, as on the analysis server); a release that fails
+leaves it to the sweep `MALJAN_STAGING_TTL_HOURS` (24 h unless set) after it
+last changed, and it counts against the tmpfs until then.
 
 ## Which captures it may read
 

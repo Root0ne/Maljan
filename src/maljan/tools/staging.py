@@ -464,6 +464,42 @@ def remove_job_staging(job_id: str) -> list[Path]:
     return removed
 
 
+class NotThisJob(ValueError):
+    """A release asked of a server started for one job, for another job."""
+
+
+def release_job_directory(job_id: str, environ: Mapping[str, str] | None = None) -> bool:
+    """Remove ``<base>/<job_id's directory>`` on this side, for a job that ended. True when gone.
+
+    For a server that serves many jobs from one process (a container of its
+    own, ``tools.readers.RELEASE_JOB``), asked by the worker at the job's
+    end, so the job's scratch and carves go then rather than at the TTL.
+
+    Only that job's directory: its name is :func:`job_directory_name`, a
+    single segment whatever the id holds (a ``..``, a separator, an absolute
+    path are replaced and told apart by a digest), joined to the base and
+    checked to sit directly in it. A link standing there is unlinked and its
+    target left alone (:func:`remove_tree`). A server whose environment names
+    one job's leaf releases only that job.
+
+    Raises:
+        NotThisJob: when this server was started for another job.
+        ValueError: when the id is empty or the name lands anywhere but in the base.
+    """
+    if not str(job_id or "").strip():
+        raise ValueError("no job to release")
+    source = os.environ if environ is None else environ
+    base = staging_base(source)
+    name = job_directory_name(job_id)
+    root = staging_root(source)
+    if root != base and root.name != name:
+        raise NotThisJob("this server stages for another job")
+    target = base / name
+    if not is_job_directory_name(name) or target.parent != base:
+        raise ValueError("the job's directory name is not one segment of the staging base")
+    return remove_tree(target)
+
+
 def remove_tree(root: Path) -> bool:
     """Delete ``root`` and everything under it. True when nothing is there.
 

@@ -1,6 +1,6 @@
 """Every field a ledger entry carries is stored on its row and served back.
 
-``LedgerEntry`` has 33 fields. Each one goes into the row ``_evidence_row``
+``LedgerEntry`` has 34 fields. Each one goes into the row ``_evidence_row``
 builds and comes out of ``GET /jobs/{id}/evidence`` unchanged; the entry's
 ``id`` is the row's ``entry_id``. A row written before the seven newest
 columns existed reads with those seven absent, never as false or empty, and
@@ -42,7 +42,7 @@ _SEVEN = (
 
 
 def _full_entry() -> LedgerEntry:
-    """An entry where every one of the 33 fields holds a value other than its default."""
+    """An entry where every one of the 34 fields holds a value other than its default."""
     return LedgerEntry(
         id="ev_0042",
         stage="verdict",
@@ -70,6 +70,7 @@ def _full_entry() -> LedgerEntry:
         waited_ms=321,
         seq=42,
         source="mcp:disasm",
+        ran_on=["mcp:analysis", "pack"],
         facts={"v": 1, "kind": "decompilation", "display_name": "Decompiler"},
         reputation={"v": 1, "service": "lookup", "malicious": 3, "total": 70},
         pack_step={"v": 1, "id": "strings_custom", "label": "Strings"},
@@ -83,8 +84,8 @@ def _full_entry() -> LedgerEntry:
     )
 
 
-def test_the_entry_has_the_thirty_three_fields_the_round_trip_walks():
-    assert len(LedgerEntry.model_fields) == 33
+def test_the_entry_has_the_thirty_four_fields_the_round_trip_walks():
+    assert len(LedgerEntry.model_fields) == 34
     for name in _SEVEN:
         assert name in LedgerEntry.model_fields
 

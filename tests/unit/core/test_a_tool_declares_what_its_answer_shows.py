@@ -115,9 +115,10 @@ class TestTheDigests:
     def test_the_built_ins_that_declare_neither_keep_dev_s_digests(self) -> None:
         digests = ToolDeclarations.from_settings(Settings(_env_file=None)).digests()
         assert digests["mcp:knowledge"] == "2fbd76f41eddabe6"
-        # Moved once since dev, by a tool added, not by these fields: the
-        # readers' delivery primitive (``run_reader``, T-006).
-        assert digests["mcp:network"] == "e70b347e09e62b5a"
+        # Moved twice since dev, by tools added, not by these fields: the
+        # readers' delivery primitives (``run_reader``, T-006; ``release_job``,
+        # T-325).
+        assert digests["mcp:network"] == "7438a760e7ef8ec6"
         assert digests["provider:ghidra"] == "f2901a540b190c6d"
         assert digests["sandbox"] == "c2bf77971e47dfa4"
 

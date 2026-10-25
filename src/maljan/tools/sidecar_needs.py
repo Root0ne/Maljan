@@ -98,6 +98,7 @@ ANALYSIS: list[ToolNeeds] = [
     ToolNeeds("put_sample_chunk"),
     ToolNeeds("put_sample_finish"),
     ToolNeeds(readers.RUN_READER),
+    ToolNeeds(readers.RELEASE_JOB),
 ]
 
 # The two retrievals over a vector store need its client; every other lookup
@@ -120,6 +121,7 @@ NETWORK: list[ToolNeeds] = [
     ToolNeeds("extract_http"),
     ToolNeeds("pcap_summary"),
     ToolNeeds(readers.RUN_READER),
+    ToolNeeds(readers.RELEASE_JOB),
 ]
 
 # The threat-intel server is not here: what its lookups need is a service's

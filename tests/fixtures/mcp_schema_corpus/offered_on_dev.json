@@ -897,6 +897,24 @@
     }
    }
   },
+  "release_job": {
+   "type": "function",
+   "function": {
+    "name": "release_job",
+    "description": "[TOOL] release_job tool.",
+    "parameters": {
+     "properties": {
+      "job": {
+       "type": "string"
+      }
+     },
+     "required": [
+      "job"
+     ],
+     "type": "object"
+    }
+   }
+  },
   "resolve_api_hashes": {
    "type": "function",
    "function": {
@@ -2265,6 +2283,24 @@
      },
      "required": [
       "pcap_path"
+     ],
+     "type": "object"
+    }
+   }
+  },
+  "release_job": {
+   "type": "function",
+   "function": {
+    "name": "release_job",
+    "description": "[TOOL] release_job tool.",
+    "parameters": {
+     "properties": {
+      "job": {
+       "type": "string"
+      }
+     },
+     "required": [
+      "job"
      ],
      "type": "object"
     }

@@ -112,6 +112,9 @@
     "put_sample_finish": [
       "upload_id"
     ],
+    "release_job": [
+      "job"
+    ],
     "resolve_api_hashes": [
       "algorithms",
       "carved_path",
@@ -196,6 +199,7 @@
     "put_sample_begin",
     "put_sample_chunk",
     "put_sample_finish",
+    "release_job",
     "resolve_api_hashes",
     "run_reader",
     "sigma_match",

@@ -391,6 +391,8 @@ _ANALYSIS_TOOLS: dict[str, dict[str, Any]] = {
     "put_sample_begin": {"kind": "sample_delivery"},
     "put_sample_chunk": {"kind": "sample_delivery"},
     "put_sample_finish": {"kind": "sample_delivery"},
+    # What those readings staged here for a job, removed at its end.
+    "release_job": {"kind": "staging_release"},
     "resolve_api_hashes": _API_HASHES,
     # The triage pack's own readings of the sample, run on this server when it
     # is a container of its own (``tools.readers``): a delivery primitive.
@@ -433,6 +435,7 @@ _NETWORK_TOOLS: dict[str, dict[str, Any]] = {
     "extract_http": {"kind": "http", "arguments": {"path": "pcap_path"}},
     "pcap_summary": _PCAP_SUMMARY,
     "read_pcap_summary": {**_PCAP_SUMMARY, "kind": "packet_overview", "reader": "packet_lines"},
+    "release_job": {"kind": "staging_release"},
     "run_reader": {"kind": "reader_delivery"},
 }
 

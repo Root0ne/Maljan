@@ -667,11 +667,12 @@ services:
   # lists as left for a later change.
   #
   # Each job's staging directory in the container's /tmp (capa's and FLOSS's
-  # scratch, the unpacked program, an uploaded capture) is removed by the
-  # server's own sweep once nothing in it changed for MALJAN_STAGING_TTL_HOURS
-  # (24 h unless set), not when the job ends; it counts against the tmpfs,
-  # and so against the memory ceiling, until then. Size the tmpfs for a day's
-  # jobs, or set the TTL lower in the container's environment.
+  # scratch, the unpacked program, an uploaded capture) is removed when the
+  # job ends: the worker calls the server's release_job with the job's id. A
+  # release that fails leaves it to the server's own sweep once nothing in it
+  # changed for MALJAN_STAGING_TTL_HOURS (24 h unless set); it counts against
+  # the tmpfs, and so against the memory ceiling, until then. Size the tmpfs
+  # for the jobs that run at once, with room for a release that failed.
   #
   # Held as x-cli-sidecar says, on the backend image's account: no
   # capability and no way to gain one, a pids limit, a read-only root whose
