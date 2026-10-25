@@ -244,6 +244,7 @@ STORED_RENDERS = {
 }
 
 
+@pytest.mark.usefixtures("no_model_endpoint_configured")
 @pytest.mark.parametrize("run", sorted(STORED_RENDERS))
 def test_a_stored_run_renders_as_it_did_before_the_block(run: str) -> None:
     from maljan.reporting.renderers import HtmlRenderer

@@ -640,7 +640,7 @@
     "comment": "the sample; published because the sample's own digest",
     "to_ids": true,
     "type": "sha256",
-    "uuid": "bcc866f2-d04f-5948-a05c-d928875444be",
+    "uuid": "f294d2b0-70e2-5c29-ace1-c069c13ab658",
     "value": "275a021bbfb6489e54d471899f7db9d1663fc695ec2fe2a2c4538aabf651fd0f"
    },
    {
@@ -648,7 +648,7 @@
     "comment": "the sample; published because the sample's own digest",
     "to_ids": true,
     "type": "sha1",
-    "uuid": "66e1d6db-5c28-5f87-8fd4-7e6475323e14",
+    "uuid": "f52845cc-a911-5423-99d1-580004180d51",
     "value": "3395856ce81f2b7382dee72602f798b642f14140"
    },
    {
@@ -656,7 +656,7 @@
     "comment": "the sample; published because the sample's own digest",
     "to_ids": true,
     "type": "md5",
-    "uuid": "db5c8e1e-74fd-59df-baef-27abe75e01d7",
+    "uuid": "3cb19c43-8ca1-55cb-8431-f443d16d024a",
     "value": "44d88612fea8a8f36de82e1278abb02f"
    },
    {
@@ -664,7 +664,7 @@
     "comment": "the sample; published because the sample's own digest",
     "to_ids": false,
     "type": "imphash",
-    "uuid": "1a2c0fe1-7573-5083-9129-2a51588d73cc",
+    "uuid": "e5a9831a-746c-5313-85a0-6d7596353fd0",
     "value": "f34d5f2d4577ed6d9ceec516c1f5a744"
    },
    {
@@ -672,7 +672,7 @@
     "comment": "run key; modify; published because a persistence mechanism this run recorded",
     "to_ids": true,
     "type": "regkey",
-    "uuid": "6c1c3e6b-9912-5fec-9dd2-05d681ffae8f",
+    "uuid": "c6224348-f121-531d-b510-fbae422ae8da",
     "value": "HKLM\\Software\\Microsoft\\Windows\\CurrentVersion\\Run"
    },
    {
@@ -680,7 +680,7 @@
     "comment": "published because the host of http://c2.evil.tld/gate.php, which this run publishes",
     "to_ids": true,
     "type": "domain",
-    "uuid": "ba3e81eb-1b3a-5363-86bc-addcede4d823",
+    "uuid": "7b0cb307-08f1-55f4-a79e-aeadf2e3f85d",
     "value": "c2.evil.tld"
    },
    {
@@ -688,7 +688,7 @@
     "comment": "reached by the sample's process tree; published because the sandbox recorded it",
     "to_ids": true,
     "type": "ip-dst",
-    "uuid": "6557a962-09e7-551e-ba3c-0b0c85d0aae8",
+    "uuid": "1198f774-704d-546d-b5ce-5031e98bd86d",
     "value": "185.220.101.5"
    },
    {
@@ -696,7 +696,7 @@
     "comment": "POST; published because the sandbox recorded it",
     "to_ids": true,
     "type": "url",
-    "uuid": "dbdd2f60-4b28-5487-b455-d2db0e612c5d",
+    "uuid": "5029bce1-56c8-59a4-bba8-7df4cbf8abd6",
     "value": "http://c2.evil.tld/gate.php"
    }
   ],
