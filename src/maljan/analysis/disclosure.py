@@ -82,10 +82,11 @@ from maljan.core.host_locality import (
 )
 
 # The version of the stored record's shape. Version 2 adds the isolation part
-# (``analysis.isolation``), version 3 the effects part (``analysis.tool_effects``);
-# a record of an earlier version has neither of the later parts and renders as
+# (``analysis.isolation``), version 3 the effects part (``analysis.tool_effects``),
+# version 4 the configured model endpoints' labels (``endpoint_labels``); a
+# record of an earlier version has none of the later parts and renders as
 # before.
-DISCLOSURE_VERSION = 3
+DISCLOSURE_VERSION = 4
 
 # The transports a tool server is reached over at an address.
 HTTP_TRANSPORTS = frozenset({"http", "streamable-http", "sse"})
@@ -805,6 +806,56 @@ def addressed_hosts(snapshot: Mapping[str, Any]) -> list[str]:
     return sorted(hosts)
 
 
+def settings_hosts(settings: Any) -> list[str]:
+    """Every host the job's own settings address, as :func:`addressed_hosts` reads them.
+
+    Read off the settings masked for a record (``settings_overrides.masked_settings_tree``:
+    every URL's userinfo, query values and fragment masked, every leaf the
+    catalogue types as a secret masked) but not scrubbed of the configured
+    secrets' text, which would mask a host that holds it (an ``ollama`` key
+    beside ``http://ollama:11434``). Only each address's host is kept
+    (``host_locality.host_of``), so no credential travels.
+    """
+    from maljan.core.settings_masking import SNAPSHOT_MASK
+    from maljan.core.settings_overrides import flatten, masked_settings_tree
+
+    tree, typed = masked_settings_tree(settings)
+    hidden = set(typed)
+    flat = {
+        key: (SNAPSHOT_MASK if key in hidden and value else value)
+        for key, value in flatten(tree).items()
+    }
+    return addressed_hosts(flat)
+
+
+def endpoint_labels(snapshot: Mapping[str, Any]) -> list[str]:
+    """Every model endpoint the run's settings configure, each as a run records it (its label).
+
+    The global provider's endpoint, the configured address of every provider
+    an agent may point at an address of its own, and every endpoint an
+    agent's own entry or its fallbacks name. A vendor API's own name is no
+    address and is left out. A label is a scheme, a host and a port
+    (``model_assignments.endpoint_label``), read off the masked snapshot, so
+    no credential, path or query travels. The report prints a model recorded
+    under one of these as configured (``reporting.renderers.markdown``). The
+    snapshot's reading of ``model_assignments.configured_endpoint_labels``,
+    which a run reads off its own settings; this one stands in where no
+    settings are held.
+    """
+    from maljan.core.model_assignments import endpoint_where
+    from maljan.llm.provider_base import facts_of, provider_names
+
+    where = [endpoint for _provider, endpoint in model_list(snapshot, "")]
+    where.extend(
+        endpoint_where(name, None, configured=_configured(snapshot, name))
+        for name in provider_names()
+        if facts_of(name).supports_agent_base_url
+    )
+    for agent in configured_agents(snapshot):
+        where.extend(endpoint for _provider, endpoint in model_list(snapshot, agent))
+    return sorted({_endpoint_label(str(w)) for w in where} - {""})
+
+
 def _setting_on(value: Any) -> bool:
     if isinstance(value, bool):
         return value
@@ -827,6 +878,8 @@ def disclosure_record(
     opened: Mapping[str, Sequence[Mapping[str, Any]]] | None = None,
     worker: Mapping[str, Any] | None = None,
     sample_paths: Iterable[str] = (),
+    endpoints: Iterable[str] | None = None,
+    addressed: Iterable[str] | None = None,
 ) -> dict[str, Any]:
     """What the run sent beyond this machine, as the run summary stores it.
 
@@ -844,7 +897,12 @@ def disclosure_record(
     in the worker that write no entry (``analysis.isolation.noted``), and
     ``worker`` the worker's own facts (``analysis.isolation.worker_facts``,
     read here where ``None``); ``sample_paths`` the job's paths to the sample,
-    a call handed one of which read it. Linear in the entries and the snapshot.
+    a call handed one of which read it. ``endpoints`` are the labels of the
+    model endpoints the job's settings configure and ``addressed`` the hosts
+    they address, read off the job's own settings (:func:`run_disclosure`);
+    each is read off ``snapshot`` where ``None``, whose secret scrub may have
+    masked a host that holds a configured secret's text. Linear in the
+    entries and the snapshot.
     """
     entries = list(entries)
     tools = _tool_rows(snapshot, entries)
@@ -863,7 +921,12 @@ def disclosure_record(
         "stores": _stores(snapshot, memory_backends() if backends is None else backends),
         "tracing": bool(tracing) or _setting_on(snapshot.get(TRACING_SETTING)),
         "unreadable_entries": max(0, int(unreadable or 0)),
-        "addressed": addressed_hosts(snapshot),
+        "addressed": (
+            addressed_hosts(snapshot) if addressed is None else sorted(set(addressed) - {""})
+        ),
+        "endpoint_labels": (
+            endpoint_labels(snapshot) if endpoints is None else sorted(set(endpoints) - {""})
+        ),
         "isolation": _isolation(snapshot, entries, opened or {}, worker, sample_paths),
     }
     from maljan.analysis.tool_effects import effects_part
@@ -1288,6 +1351,7 @@ def run_disclosure(
     """
     try:
         from maljan.core.config import Settings
+        from maljan.core.model_assignments import configured_endpoint_labels
         from maljan.core.settings_overrides import public_snapshot
         from maljan.core.tracing import tracing_in_environment
 
@@ -1317,6 +1381,8 @@ def run_disclosure(
             partial_reason=partial_reason,
             opened=noted(str(job_key())) if callable(job_key) else {},
             sample_paths=job_sample_paths(container),
+            endpoints=configured_endpoint_labels(settings),
+            addressed=settings_hosts(settings),
         )
     except Exception as exc:  # noqa: BLE001 — an absent block is right; a guessed one is not
         from maljan.core.logger import logger

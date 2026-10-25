@@ -242,3 +242,140 @@ def test_a_credential_that_begins_with_a_dash_is_masked():
     ]
     # Another long flag right after is a flag, not the value.
     assert masked_args(["--api-key", "--verbose"]) == ["--api-key", "--verbose"]
+
+
+# An address written with no scheme, and what is left of it once its userinfo is masked.
+_SCHEMELESS = [
+    ("user:{pw}@llm.internal:8080/v1", "***@llm.internal:8080/v1"),
+    ("user:{pw}@x@llm.internal:8080/v1", "***@llm.internal:8080/v1"),
+    ("user:{pw}%40x@llm.internal:8080", "***@llm.internal:8080"),
+    ("{pw}@llm.internal:8080", "***@llm.internal:8080"),
+    ("user:{pw}@[::1]:8080/v1", "***@[::1]:8080/v1"),
+]
+
+
+@pytest.mark.parametrize(("written", "masked"), _SCHEMELESS)
+def test_a_schemeless_address_loses_its_userinfo_in_the_snapshot(written, masked):
+    secret = _marker(500)
+    settings = ov.build_settings({"llm.openai.base_url": written.format(pw=secret)})
+
+    snap = ov.public_snapshot(settings, ())
+
+    assert snap["llm.openai.base_url"] == masked
+    assert secret not in json.dumps(snap)
+
+
+@pytest.mark.parametrize(("written", "masked"), _SCHEMELESS)
+def test_every_url_masking_masks_a_schemeless_userinfo(written, masked):
+    from maljan.core.settings_catalog import configured_secret_values
+    from maljan.core.settings_masking import masked_text, masked_value
+
+    secret = _marker(501)
+    value = written.format(pw=secret)
+
+    assert masked_text(f"cannot reach ({value}).") == f"cannot reach ({masked})."
+    assert masked_value({"base_url": value}) == {"base_url": masked}
+    assert secret not in ov.redact_url(f"driver said: {value}")
+    if written.startswith("user:"):
+        # A password is a secret the event scrub registers, as in a URL with a
+        # scheme; a user name alone only where it has a token's shape.
+        held = configured_secret_values(ov.build_settings({"llm.openai.base_url": value}))
+        assert any(secret in found for found in held)
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "ops@example.com",
+        "pkg@1.2.3",
+        "npx -y @scope/server@latest",
+        "git@github.com:org/repo.git",
+        "image@sha256:0123abcd",
+        "https://***@svc.example/x",
+        "mailto:ops@example.com",
+        "From:alice@evil.com",
+        "C:\\Users\\bob@corp",
+    ],
+)
+def test_a_value_that_is_no_schemeless_address_is_kept(text):
+    from maljan.core.settings_masking import masked_text
+
+    assert masked_text(text) == text
+
+
+def test_an_address_inside_compact_json_is_masked():
+    from maljan.core.settings_masking import masked_text
+
+    secret = _marker(502)
+
+    # The member's key is masked with it: a colon before the last quote may
+    # be the password's own.
+    assert masked_text(f'{{"u":"user:{secret}@llm.internal"}}') == '{"***@llm.internal"}'
+    # A quoted value with no colon before its quote keeps what stands before it.
+    assert masked_text(f'url="user:{secret}@llm.internal"') == 'url="***@llm.internal"'
+
+
+def _registered(value: str) -> set[str]:
+    from maljan.core.settings_catalog import configured_secret_values
+
+    return configured_secret_values(_with_fragment(f"Error: cannot connect to {value}"))
+
+
+@pytest.mark.parametrize("word", ["from", "to"])
+@pytest.mark.parametrize("tail", ["h:5432", "h:8080/v1"])
+def test_a_mailbox_word_before_a_password_and_a_port_is_no_mailbox(word, tail):
+    from maljan.core.settings_masking import masked_text
+
+    secret = _marker(503)
+    for value in (f"{word}:user:{secret}@{tail}", f"{word}:{secret}@{tail}"):
+        assert masked_text(value) == f"***@{tail}"
+        assert secret in _registered(value)
+
+
+@pytest.mark.parametrize("opener", list("\"'([{<"))
+@pytest.mark.parametrize("tail", ["llm.internal", "llm.internal:8080/v1"])
+def test_a_password_holding_an_opener_leaves_nothing_of_itself(opener, tail):
+    from maljan.core.settings_masking import masked_text
+
+    password = f"{_marker(504)}{opener}{_marker(505)}"
+    value = f"user:{password}@{tail}"
+
+    masked = masked_text(f"Error: cannot connect to {value}")
+
+    assert masked == f"Error: cannot connect to ***@{tail}"
+    assert _marker(504) not in masked and _marker(505) not in masked
+    assert password in _registered(value)
+
+
+def _with_fragment(fragment: str) -> Settings:
+    return ov.build_settings(
+        {
+            "mcp.servers": {
+                "notes": {"transport": "stdio", "command": "notes-mcp", "prompt_fragment": fragment}
+            }
+        }
+    )
+
+
+@pytest.mark.parametrize("fragment", ["Label: x@example.com", "Contact: ops@example.com"])
+def test_a_mail_address_in_free_text_is_no_secret_and_is_kept(fragment):
+    from maljan.core.settings_catalog import configured_secret_values
+
+    settings = _with_fragment(fragment)
+
+    assert configured_secret_values(settings) & {fragment, *fragment.split()} == set()
+    assert ov.public_snapshot(settings, ())["mcp.servers.notes.prompt_fragment"] == fragment
+
+
+def test_an_address_in_free_text_registers_only_its_password():
+    from maljan.core.settings_catalog import configured_secret_values
+
+    fragment = "Error: cannot connect to admin:s3cr3t@10.0.0.5"
+    settings = _with_fragment(fragment)
+
+    held = configured_secret_values(settings)
+
+    assert "s3cr3t" in held
+    assert not any("cannot" in value or "Error" in value for value in held)
+    snap = ov.public_snapshot(settings, ())
+    assert snap["mcp.servers.notes.prompt_fragment"] == "Error: cannot connect to ***@10.0.0.5"

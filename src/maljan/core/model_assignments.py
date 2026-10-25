@@ -303,7 +303,10 @@ def configured_endpoint_labels(settings: object) -> set[str]:
     The global provider's endpoint for each role, the endpoint of every
     provider an agent may point at an address of its own, and every endpoint
     an agent's own entry or its fallbacks name. A vendor API's own name is no
-    address and is left out.
+    address and is left out. Read off the job's own settings by the function
+    that writes a model's label (:func:`endpoint_label`), so a label the run
+    records and the label its disclosure record keeps
+    (``disclosure.endpoint_labels``) are one spelling.
     """
     from maljan.llm.provider_base import facts_of, provider_names
 
