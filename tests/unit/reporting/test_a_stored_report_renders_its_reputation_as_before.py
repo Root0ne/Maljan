@@ -28,11 +28,14 @@ from tests.unit.reporting.test_an_entry_without_a_source_is_read_as_before impor
 # a command line, the sample's indicator adds its SHA-1 and MD5, its imphash
 # is an anomalous-activity indicator of its own, and an indicator's reason is
 # read from the rebuilt table.
+# The Markdown and HTML re-pinned when §10.2's introduction came to say each
+# draft rule's body is printed as written (T-357): that one line is the only
+# change; the STIX did not change.
 STORED_RENDERS = {
-    "run7": ("56ba218bfdd38f0c", "b229d1d5d08362c0", "e24f2d1b2733f7a3"),
-    "run5": ("e645b4e33f1e2046", "1d3964267514a2ca", "85795f39d2b17a77"),
-    "run4": ("30e4d03751bb2760", "7c21afe931f2652d", "74381ef6ce484e2a"),
-    "local8": ("f16aaba51ce874eb", "c18035f83e61303b", "d53c784002386286"),
+    "run7": ("316ea45a47dcf965", "2222d734a9d4104f", "e24f2d1b2733f7a3"),
+    "run5": ("569fa30c8cb6ba18", "8fdd5c05cff3d393", "85795f39d2b17a77"),
+    "run4": ("7004aace97325d30", "434a19df7368b41d", "74381ef6ce484e2a"),
+    "local8": ("0da0f60173fa7bfd", "087f32c8af5adaa3", "d53c784002386286"),
 }
 
 _UUID = re.compile(r"--[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")

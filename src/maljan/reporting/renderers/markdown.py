@@ -325,16 +325,18 @@ class MarkdownRenderer:
             self._safe_section("appendix_methodology", lambda: self._appendix_method(report, ctx)),
         ]
         # Every value a viewer could follow, wherever a section printed it, is
-        # read once more by the report's defanger: a cell or a code span a
-        # sandbox, the sample's bytes or a model filled prints defanged even
-        # where its section did not pass it through the context. What this
+        # read once more by the report's defanger, the run's own values first:
+        # a cell or a code span a sandbox, the sample's bytes or a model filled
+        # prints defanged even where its section did not pass it through the
+        # context, a value the reader of every host would leave as written
+        # ("loader.sh", a name under a TLD it does not know) too. What this
         # renderer itself wrote to print as written — each draft rule's body,
         # a configured model endpoint where a rate line names its model — was
         # set aside under a token no text can name, and only that comes back
         # unread. A character reference ("&#58;", "&colon;") is escaped in the
         # same pass: a viewer decodes one after the defanger has read the text,
         # so "https&#58;//evil&#46;example" would become a live link there.
-        defanged = [_defanged_text(text) for text in sections]
+        defanged = [_defanged_text(text, ctx.run_values) for text in sections]
         # Code is read only where no line may open an HTML block, anywhere in
         # the render; the fences are followed across the sections in order.
         looked = _ReferenceScan()
@@ -377,14 +379,14 @@ class MarkdownRenderer:
         else:
             lines.append(f"Generated {report.generated_at.isoformat()}  ")
         lines.append(
-            f"**Sample:** {_code_span(sha256)} ({_inline_safe(ident.file_type)}, "
+            f"**Sample:** {_code_span(sha256)} ({_inline_safe(ident.file_type, plain=ctx.plain)}, "
             f"{ident.file_size_bytes:,} bytes)  "
         )
         lines.append(_verdict_line(report))
         for row in ctx.verdict_findings:
             lines.append(
                 f"  \n_Unresolved on the verdict: {_code_span(row['code'])}: "
-                f"{_one_line(_finding_text(row))}_"
+                f"{_one_line(_finding_text(row, ctx.plain))}_"
             )
 
         if report.verdict_not_assessed:
@@ -492,7 +494,7 @@ class MarkdownRenderer:
             if not report.key_findings and not _EV_RE.search(summary):
                 lines.extend(["", _UNCITED_NOTE])
         if written:
-            lines.extend(_findings_beside(ctx.narrative_findings))
+            lines.extend(_findings_beside(ctx.narrative_findings, ctx.plain))
             return "\n".join(lines)
 
         # No summary was written. Said, with the reason, and the verdict's
@@ -689,7 +691,7 @@ class MarkdownRenderer:
         if ctx.verdict_findings:
             lines.extend(["", "**Unresolved findings on the verdict:**", ""])
             lines.extend(
-                _item(f"{_code_span(row['code'])}: {_finding_text(row)}")
+                _item(f"{_code_span(row['code'])}: {_finding_text(row, ctx.plain)}")
                 for row in ctx.verdict_findings
             )
         return "\n".join(lines)
@@ -1046,10 +1048,14 @@ class MarkdownRenderer:
             for u in observed_urls[:20]:
                 measured.append(
                     _row(
-                        _inline_safe(u.method or "-", pipes=False),
+                        _inline_safe(u.method or "-", pipes=False, plain=ctx.plain),
                         _code_span(defang(_truncate(u.url, _CELL_LIMIT), "url")),
-                        _inline_safe(u.status or "-", pipes=False),
-                        _inline_safe(_truncate(u.user_agent or "-", _CELL_LIMIT), pipes=False),
+                        _inline_safe(u.status or "-", pipes=False, plain=ctx.plain),
+                        _inline_safe(
+                            _truncate(u.user_agent or "-", _CELL_LIMIT),
+                            pipes=False,
+                            plain=ctx.plain,
+                        ),
                     )
                 )
             measured.extend(_left_out(len(observed_urls), 20, "requests"))
@@ -1109,7 +1115,9 @@ class MarkdownRenderer:
         # What the carver's own cap left out, stated beside what it carved.
         carve_notes = [r for r in (static.embedded_resources if static else []) if is_carve_note(r)]
         if carve_notes:
-            measured.extend(["", *(_item(_inline_safe(str(r["type"]))) for r in carve_notes)])
+            measured.extend(
+                ["", *(_item(_inline_safe(str(r["type"]), plain=ctx.plain)) for r in carve_notes)]
+            )
         blocks.append(
             _subsection(
                 "5.8",
@@ -1405,7 +1413,7 @@ class MarkdownRenderer:
                     kind = res.get("type") or res.get("kind") or "resource"
                     size = res.get("size")
                     said = f"{kind}" + (f" ({size} bytes)" if size else "")
-                    lines.append(_item(_inline_safe(said)))
+                    lines.append(_item(_inline_safe(said, plain=ctx.plain)))
                 lines.extend(_left_out(len(plain), 20, "resources"))
                 lines.append("")
 
@@ -1453,7 +1461,10 @@ class MarkdownRenderer:
         if static.obfuscation_indicators:
             lines.append(
                 "Obfuscation indicators: "
-                + ", ".join(_inline_safe(_one_line(x)) for x in static.obfuscation_indicators)
+                + ", ".join(
+                    _inline_safe(_one_line(x), plain=ctx.plain)
+                    for x in static.obfuscation_indicators
+                )
             )
         return "\n".join(lines).rstrip()
 
@@ -1695,7 +1706,8 @@ class MarkdownRenderer:
             body = [_subheading("10.2", "Draft detection rules", GENERATED), ""]
             body.append(
                 "_Generated from templates over this report's own values and not reviewed "
-                "by an analyst. Test before deploying._"
+                "by an analyst. Test before deploying. Each rule's body is printed as "
+                "written, its network values not defanged, so it compiles as deployed._"
             )
             body.append("")
             for rule in report.detection_signatures:
@@ -2049,7 +2061,7 @@ class MarkdownRenderer:
                 lines.append(
                     _item(
                         f"{_code_span(str(row.get('code', '')))} ({row.get('agent', '')}){advisory}"
-                        f"{_times(row)}: {_finding_text(row)}"
+                        f"{_times(row)}: {_finding_text(row, ctx.plain)}"
                     )
                 )
             for row in answered:
@@ -2057,7 +2069,7 @@ class MarkdownRenderer:
                     _item(
                         f"{_code_span(str(row.get('code', '')))} ({row.get('agent', '')})"
                         " (answered)"
-                        f"{_times(row)}: {_finding_text(row)}"
+                        f"{_times(row)}: {_finding_text(row, ctx.plain)}"
                     )
                 )
             if others or answered:
@@ -2082,7 +2094,8 @@ class MarkdownRenderer:
         if exports:
             lines.extend(["**Export decisions:**", ""])
             for row in exports:
-                lines.append(_item(f"{_code_span(str(row.get('code', '')))}: {_finding_text(row)}"))
+                said = _finding_text(row, ctx.plain)
+                lines.append(_item(f"{_code_span(str(row.get('code', '')))}: {said}"))
             lines.append("")
         lines.append(
             "Values in Measured sections come from tools and are reported as the tools "
@@ -2316,10 +2329,11 @@ class MarkdownRenderer:
         # (``_AnalystStates``), so the block and the rest of the report agree.
         recorded = run_summary.get("coverage")
         states = _AnalystStates(report) if isinstance(recorded, dict) else None
+        plain = ctx.plain if ctx is not None else _defanged_text
         missing, looked, negatives = coverage_lines(
             recorded,
             lambda text: _code_span(_one_line(text)),
-            lambda text: _inline_safe(_one_line(text)),
+            lambda text: _inline_safe(_one_line(text), plain=plain),
             (states.failed, states.skipped, states.silent) if states is not None else None,
         )
         if unbuilt := not_built_line("coverage", recorded):
@@ -2534,21 +2548,21 @@ class _Context:
         read = _indicator_rows(report)
         self._table_read = read is not None
         self.iocs = read or []
-        indicators = [
-            (row.value, row.kind or "") for row in self.iocs if row.kind in _NETWORK_KINDS
-        ]
-        net = report.network
-        if net is not None:
-            indicators += [(d.fqdn, "domain") for d in net.domains]
-            indicators += [(ip.address, "ip") for ip in net.ips]
-            indicators += [(u.url, "url") for u in net.urls]
-        # Every value a recovering tool decoded, row or not, so a decoded C2
-        # printed in a FLOSS or decoder table is never printed live.
-        recovered = report.emulated_strings
-        for key in recovered.recovered_by if recovered is not None else {}:
-            indicators += [(value, kind) for kind, value in cell_network_values(key, None)]
+        indicators = run_network_values(report, self.iocs)
         self.indicators = indicators
         run_values = ProseDefanger(indicators)
+        # The same pass, for the closing read of every section (``_render``),
+        # over each value as written and as an escaped cell writes it
+        # ("cdn\_.example.zip"): a section that escaped a value before the
+        # run's values were read leaves it for this pass to find.
+        self.run_values = ProseDefanger(
+            indicators
+            + [
+                (escaped, kind)
+                for value, kind in indicators
+                if (escaped := _escaped_spelling(value)) != value
+            ]
+        )
         # The run's own values first, then every other URL, mailbox, address
         # and host the text names: a model's prose can name one the run never
         # recorded, and it is printed for reading like any other.
@@ -2561,7 +2575,7 @@ class _Context:
         for row in getattr(report, "flagged_statements", None) or []:
             if row.sentence.strip():
                 try:
-                    label = _inline_safe(row.label, pipes=False)
+                    label = _inline_safe(row.label, pipes=False, plain=self._defang)
                 except Exception as exc:  # noqa: BLE001 — the sentence is marked all the same
                     logger.debug("markdown: a mark's label was not written (%s).", exc)
                     label = STATE_UNKNOWN
@@ -2686,7 +2700,7 @@ class _Context:
                 said = found[0][2]
             else:
                 said = "; ".join(f"{defang(value, kind)}: {state}" for kind, value, state in found)
-            return f" ({_inline_safe(said, pipes=False)})"
+            return f" ({_inline_safe(said, pipes=False, plain=self.plain)})"
         except Exception as exc:  # noqa: BLE001 — the cell says what is not known
             logger.debug("markdown: a cell's publish state was not read (%s).", exc)
             return f" ({STATE_UNKNOWN})" if _names_a_network_value(text) else ""
@@ -3087,7 +3101,7 @@ _AUTHORITY_END = frozenset("/?#\\<>()[]{}\"'`" + _PIPE)
 _DEFANGED_MARKS = ("[.]", "[:]", "[@]")
 
 
-def _defanged_text(text: str) -> str:
+def _defanged_text(text: str, run_values: Callable[[str], str] | None = None) -> str:
     """``text`` with every network indicator in it defanged, as the report does.
 
     A URL, a mailbox, a host under a real top-level domain (the string sweep's
@@ -3098,14 +3112,20 @@ def _defanged_text(text: str) -> str:
     service's own lookup (``_REFERENCE_LOOKUPS``) stays a link, exactly as it
     was checked; the text is split around those links and only the pieces
     between them are read. A value the run itself recorded is defanged before
-    this, by the context's own pass, wherever it stands.
+    this, by the context's own pass, wherever it stands; ``run_values`` is that
+    pass for the closing read of a whole section, applied to each piece
+    between the kept links, so a kept link stays exactly as it was checked.
     """
+
+    def piece(part: str) -> str:
+        return _defanged_piece(run_values(part) if run_values is not None else part)
+
     out: list[str] = []
     at = 0
     for start, end in _reference_spans(text):
-        out += [_defanged_piece(text[at:start]), text[start:end]]
+        out += [piece(text[at:start]), text[start:end]]
         at = end
-    out.append(_defanged_piece(text[at:]))
+    out.append(piece(text[at:]))
     return "".join(out)
 
 
@@ -3574,6 +3594,13 @@ def _mark_hosts(text: str, marks: dict[int, str]) -> None:
     for pattern in (_WWW_HOST, _ONION_HOST):
         for found in pattern.finditer(text):
             _bracket_dots(text, found.start(), found.end(), marks)
+    # A name with an underscore in a label ("_ldap._tcp.dc._msdcs.example.com",
+    # "cdn_.example.net"): no registrar hands one out, but DNS serves one under
+    # a registered name. Read whole where what follows its last underscore
+    # label is a host this reader takes alone (:func:`_underscore_host`).
+    for found in _UNDERSCORE_HOST.finditer(text):
+        if "_" in found.group(0) and _underscore_host(found.group(0)):
+            _bracket_dots(text, found.start(), found.end(), marks)
     # Any run an IPv6 address could be is defanged, a short one too ("fe80::1"):
     # only its first colon is bracketed, and the publish checks' stricter
     # reader (``validation.ipv6_addresses_in``) decides which is a value.
@@ -3733,6 +3760,15 @@ def _reference_lookup(url: str) -> bool:
 _DOTTED_TOKEN = re.compile(r"[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+")
 _SHOUTED_HOST = re.compile(r"(?<![\w.-])[A-Z0-9-]+(?:\.[A-Z0-9-]+)+(?![\w-])")
 _ONION_HOST = re.compile(r"(?i)(?<![\w.-])(?:[a-z0-9-]+\.)+onion(?![\w-])")
+# A dotted name whose labels may hold an underscore, ending in letters; read
+# as a host only by :func:`_underscore_host`. A sentence's full stop after it
+# is no label. It may follow a path's slash or a run of dots ("dir/_dmarc.",
+# "./_a.", ".._a."), never a label's dot, so it starts where a name starts.
+_UNDERSCORE_HOST = re.compile(
+    r"(?<![\w@-])(?<![\w-]\.)(?:[A-Za-z0-9_-]{1,63}\.)+[A-Za-z]{2,24}(?![\w-]"
+    + _PIPE
+    + r"\.[A-Za-z0-9])"
+)
 # A .NET technology's name, which ends in a real top-level domain.
 _DOTNET_NAME = re.compile(r"(?i)(?:" + _PIPE.join(("ASP", "ADO", "VB")) + r")\.NET")
 # The top-level domains that are also common files' extensions: a two-label
@@ -3766,15 +3802,78 @@ def _file_name_host(kind: str, value: str) -> bool:
     return kind == "domain" and len(labels) == 2 and labels[-1] in _FILE_EXTENSION_TLDS
 
 
-def _inline_safe(text: Any, *, pipes: bool = True) -> str:
+def _underscore_host(name: str) -> bool:
+    """Whether a dotted name with an underscore label is a host under a name this reader reads.
+
+    The labels after the last one holding an underscore must be two or more
+    and be, alone, a host the reader of every host takes (the string sweep's
+    TLD list and shape rules, the file-extension rule above): ``victimcorp.com``
+    in ``_ldap._tcp.dc._msdcs.victimcorp.com``. A registered name never holds
+    an underscore, so a name whose underscore is in its last two labels
+    (``my_site.com``, ``foo._bar.com``) is no host, and neither is a dunder, a
+    decompiler's function or a module path (``__init__.py``, ``FUN_00401310``,
+    ``self._data.items``): nothing after the underscore is a host.
+    """
+    from maljan.pipeline.validation import network_values_in
+
+    labels = name.split(".")
+    last = max(index for index, label in enumerate(labels) if "_" in label)
+    tail = ".".join(labels[last + 1 :])
+    if tail.count(".") < 1:
+        return False
+    # The tail is read in lower case, as a resolver reads it: a host written
+    # in capitals or mixed case ("VictimCorp.Com") is the host it spells.
+    read = tail.lower()
+    return any(
+        kind == "domain" and value == read and not _file_name_host(kind, value)
+        for kind, value in network_values_in(read)
+    )
+
+
+def run_network_values(
+    report: MalwareReport, rows: list[ConsolidatedIOC] | None = None
+) -> list[tuple[str, str]]:
+    """Every network value the run recorded, ``(value, kind)``: what the run's defanger reads.
+
+    The IOC table's network rows (``rows``, or the table rebuilt when none
+    are given), the network block's domains, addresses and URLs, and every
+    value a recovering tool decoded, row or not, so a decoded C2 printed in a
+    FLOSS or decoder table is never printed live. The render's context, a
+    listing figure and the HTML renderer's read of stored figures all read it.
+    """
+    if rows is None:
+        rows = _indicator_rows(report) or []
+    values = [(row.value, row.kind or "") for row in rows if row.kind in _NETWORK_KINDS]
+    net = report.network
+    if net is not None:
+        values += [(d.fqdn, "domain") for d in net.domains]
+        values += [(ip.address, "ip") for ip in net.ips]
+        values += [(u.url, "url") for u in net.urls]
+    recovered = report.emulated_strings
+    for key in recovered.recovered_by if recovered is not None else {}:
+        values += [(value, kind) for kind, value in cell_network_values(key, None)]
+    return values
+
+
+def _escaped_spelling(value: Any) -> str:
+    """A recorded value as a tool's escaped text writes it: Markdown escaped, then underscores."""
+    return _emphasis_escaped(_escaped_keeping_spans(str(value or "")))
+
+
+def _inline_safe(
+    text: Any, *, pipes: bool = True, plain: Callable[[str], str] = _defanged_text
+) -> str:
     """A value this report's checks wrote about the sample: escaped, then defanged.
 
     Markdown's own characters are escaped first, so a sample's value cannot
     open a link, a tag or a code span; ``pipes=False`` leaves the table
-    separator to the row, which escapes it itself (:func:`_cell`).
+    separator to the row, which escapes it itself (:func:`_cell`). ``plain``
+    is the render's own defanger (``ctx.plain``) wherever a section has it,
+    so the run's recorded values are read before the escape of an underscore
+    could hide one from the closing pass.
     """
     meta = _INLINE_META if pipes else _INLINE_META_NO_PIPE
-    return _emphasis_escaped(_defanged_text(meta.sub(r"\\\1", str(text or ""))))
+    return _emphasis_escaped(plain(meta.sub(r"\\\1", str(text or ""))))
 
 
 def _escaped_keeping_spans(text: Any, meta: re.Pattern[str] = _INLINE_META_NO_PIPE) -> str:
@@ -3933,8 +4032,8 @@ def _directed_text_lines(rows: list[Any], ctx: _Context) -> list[str]:
                 row.family,
                 _code_span(text),
                 row.count,
-                _inline_safe(row.where) or "-",
-                _inline_safe(notes) or "-",
+                _inline_safe(row.where, plain=ctx.plain) or "-",
+                _inline_safe(notes, plain=ctx.plain) or "-",
                 row.evidence_id or "-",
             )
         )
@@ -3998,18 +4097,20 @@ def _held_by_clauses(
     return "the rule does not match it" + (f" ({counted})." if declared else ".")
 
 
-def _finding_text(row: dict[str, Any]) -> str:
+def _finding_text(row: dict[str, Any], plain: Callable[[str], str] = _defanged_text) -> str:
     """A finding's message as the report prints it: escaped, then every network value defanged.
 
     A message quotes the claim, the value or the object it is about, which a
     sample, a tool or a model wrote: its Markdown is escaped like any such
     value, so a quote cannot open a link or a tag, a balanced backtick pair
     stays a code span no backtick inside can close, and a claim's URL, once
-    printed live in the list of findings, is defanged.
+    printed live in the list of findings, is defanged. ``plain`` is the
+    render's own defanger (``ctx.plain``): the run's recorded values first,
+    as a tool's text is read (``ctx.inline``), then every other value.
     """
     message = str(row.get("message") or "")
     try:
-        return _emphasis_escaped(_defanged_text(_escaped_keeping_spans(message, _INLINE_META)))
+        return _emphasis_escaped(plain(_escaped_keeping_spans(message, _INLINE_META)))
     except Exception as exc:  # noqa: BLE001 — never the raw values
         logger.debug("markdown: a finding was not written (%s).", exc)
         return STATE_UNKNOWN
@@ -4026,12 +4127,12 @@ def _flag_mark(code: str, label: str, *, asked: bool = True) -> str:
     return f"**[{said}; not asked]**" if not asked else f"**[{said}]**"
 
 
-def _findings_beside(rows: list[dict[str, str]]) -> list[str]:
+def _findings_beside(rows: list[dict[str, str]], plain: Callable[[str], str]) -> list[str]:
     """The platform's unresolved findings on a section, printed under it."""
     if not rows:
         return []
     lines = ["", f"_The platform's unresolved findings on this section ({MEASURED}):_", ""]
-    lines.extend(_item(f"{_code_span(row['code'])}: {_finding_text(row)}") for row in rows)
+    lines.extend(_item(f"{_code_span(row['code'])}: {_finding_text(row, plain)}") for row in rows)
     return lines
 
 

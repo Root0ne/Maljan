@@ -232,12 +232,15 @@ def test_the_enrichment_queued_after_the_report_is_named_then_what_it_asked() ->
 # a command line, the sample's indicator adds its SHA-1 and MD5, its imphash
 # is an anomalous-activity indicator of its own, and an indicator's reason is
 # read from the rebuilt table.
+# Re-pinned when §10.2's introduction came to say that each draft rule's body
+# is printed as written, its network values not defanged (T-357): that one
+# line is the only change in each run's Markdown and HTML.
 STORED_RENDERS = {
-    "run7": ("56ba218bfdd38f0c", "b229d1d5d08362c0"),
-    "run5": ("e645b4e33f1e2046", "1d3964267514a2ca"),
-    "run4": ("30e4d03751bb2760", "7c21afe931f2652d"),
-    "local8": ("f16aaba51ce874eb", "c18035f83e61303b"),
-    "haiku4": ("5c3c0ac88b9f96f1", "1687de4769937d7f"),
+    "run7": ("316ea45a47dcf965", "2222d734a9d4104f"),
+    "run5": ("569fa30c8cb6ba18", "8fdd5c05cff3d393"),
+    "run4": ("7004aace97325d30", "434a19df7368b41d"),
+    "local8": ("0da0f60173fa7bfd", "087f32c8af5adaa3"),
+    "haiku4": ("b55653be5852ab97", "4eb094b857490468"),
 }
 
 
