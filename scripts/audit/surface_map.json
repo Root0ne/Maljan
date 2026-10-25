@@ -18,7 +18,7 @@
   "usage": {"endpoint": "GET /api/v1/jobs/{job_id}/usage", "file": "usage.json", "ref": "apps/api/app/api/v1/jobs.py:539"},
   "follow_ups": {"endpoint": "GET /api/v1/jobs/{job_id}/follow-ups", "file": "follow-ups.json", "ref": "apps/api/app/api/v1/jobs.py:930"},
   "signatures": {"endpoint": "GET /api/v1/reports/{report_id}/signatures/{kind}", "file": "signatures.json", "ref": "apps/api/app/services/report_service.py:801"},
-  "package": {"endpoint": "GET /api/v1/jobs/{job_id}/package", "file": "package.tar.gz", "ref": "apps/api/app/services/job_package.py:84"},
+  "package": {"endpoint": "GET /api/v1/jobs/{job_id}/package", "file": "package.tar.gz", "ref": "apps/api/app/services/job_package.py:98"},
   "web": {"endpoint": "the analysis tabs, by scripts/audit/web_fields.json", "file": "scripts/audit/web_fields.json", "ref": "apps/web/src/app/(app)/analysis/[id]"}
  },
  "mapping": [

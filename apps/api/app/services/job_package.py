@@ -39,6 +39,19 @@ header carries no name and no time. The same job therefore gives the same
 bytes on the same build of zlib (another zlib may compress the same tar
 differently; the uncompressed tar is the same everywhere).
 
+The gzip header carries the file's own digest in an extra field
+(:data:`_HEADER`): the SHA-256 of every byte after the header, to the end of
+the file, and beside it an HMAC-SHA256 of that digest under the package key
+when the manifest is signed (zeros when it is not). Deflate is not canonical
+(a match in a run of zeros may point at any earlier zero, and padding bits are
+never read), so a changed byte can leave the archive and its CRC the same; the
+digest makes every byte of the file count, and the HMAC keeps anyone without
+the key from re-encoding a signed package. A package built before the digest
+(:data:`LEGACY_FORMAT`) is checked byte for byte instead, against the header,
+the tar headers, padding and end the builder wrote then, and the exact gzip
+end; only an equivalent encoding of its deflate stream, which yields the same
+archive, cannot be told apart.
+
 What is held in memory: the archive is staged on disk file by file, hashed as
 it is written, and streamed from there; verification reads it in one pass in
 :data:`CHUNK` reads, and every entry's size is bounded by the manifest before
@@ -54,24 +67,25 @@ the manifest as absent with its SHA-256, its size and the reason
 
 from __future__ import annotations
 
-import gzip
 import hashlib
 import hmac
 import io
 import json
 import posixpath
 import re
+import struct
 import tarfile
 import tempfile
 import zlib
 from collections.abc import Callable, Iterable, Iterator, Mapping
+from contextlib import contextmanager
 from pathlib import Path
-from typing import IO, Any, BinaryIO
+from typing import IO, Any, BinaryIO, Protocol
 
 from app.services import ledger_chain
 from app.services.run_export import LAYOUT
 
-FORMAT = "maljan-job-package/1"
+FORMAT = "maljan-job-package/2"
 # The HKDF purpose label the signature key is derived under.
 SIGNATURE_LABEL = b"maljan-job-package-v1"
 _SIGNATURE_TAG = b"maljan-job-package-manifest/1\n"
@@ -109,6 +123,25 @@ HEX_SHA256 = hashlib.sha256().digest_size * 2
 _FILE_MODE = 0o644
 _HEX = frozenset("0123456789abcdef")
 
+# A package built before the file digest: the same archive under the plain
+# gzip header the builder wrote then (no flags, no time, maximum compression,
+# no named system).
+LEGACY_FORMAT = "maljan-job-package/1"
+_LEGACY_HEADER = b"\x1f\x8b\x08\x00\x00\x00\x00\x00\x02\xff"
+# The current header: the same fields with FEXTRA set, and one extra subfield
+# ("MJ") holding the SHA-256 of the rest of the file and its HMAC.
+_DIGEST_FIELD = b"MJ"
+_DIGEST_BYTES = hashlib.sha256().digest_size
+_HEADER = (
+    b"\x1f\x8b\x08\x04\x00\x00\x00\x00\x02\xff"
+    + struct.pack("<H", 4 + 2 * _DIGEST_BYTES)
+    + _DIGEST_FIELD
+    + struct.pack("<H", 2 * _DIGEST_BYTES)
+)
+_HEADER_BYTES = len(_HEADER) + 2 * _DIGEST_BYTES
+_FILE_TAG = b"maljan-job-package-file/1\n"
+_NO_HMAC = bytes(_DIGEST_BYTES)
+
 VERIFIED = "verified"
 BROKEN = "broken"
 UNSIGNED = "unsigned"
@@ -133,6 +166,29 @@ SAMPLE_NOTE = (
 
 # The verdict's reasons: fixed platform text, never text read from the package.
 UNREADABLE = "The archive cannot be read: its gzip or tar data is corrupt or truncated."
+NOT_A_PACKAGE_HEADER = "The gzip header is not the one the package builder writes."
+FILE_DIGEST_DIFFERS = (
+    "The file's bytes differ from the SHA-256 its gzip header carries: it was changed, cut "
+    "short or extended after it was built."
+)
+FILE_HMAC_DIFFERS = (
+    "The HMAC in the gzip header does not match the file under the manifest's signature key, "
+    "or an unsigned package carries one: the file was re-encoded without the key."
+)
+FORMAT_MISMATCH = (
+    "The manifest's format is not the one the gzip header belongs to: a current package must "
+    "carry the file digest, and only an older one may lack it."
+)
+NOT_CANONICAL = (
+    "The archive is not byte for byte the one the builder writes: a tar header, a padding "
+    "byte or the end of the archive differs, or data follows the gzip end."
+)
+FILE_DIGEST_LEGACY = (
+    "Built before the file digest (maljan-job-package/1): the gzip header, every tar header "
+    "and padding byte, the archive's end and the gzip CRC, length and end are checked against "
+    "what the builder wrote then; only an equivalent encoding of the deflate stream, which "
+    "yields the same archive, cannot be told apart."
+)
 NOT_PLAIN = (
     "The entry is not a plain regular file (a link, a device, a sparse file, or one with PAX "
     "or GNU extended headers)."
@@ -600,17 +656,22 @@ def build_package(
             body = (stage.root / MANIFEST).read_bytes()
             stage.json(
                 SIGNATURE,
-                {
-                    "algorithm": SIGNATURE_ALGORITHM,
-                    "key_label": SIGNATURE_LABEL.decode("ascii"),
-                    "key_id": key.key_id,
-                    "manifest_sha256": hashlib.sha256(body).hexdigest(),
-                    "hmac": sign(body, key),
-                },
+                _signature_record(body, key.key_id, sign(body, key)),
                 "the manifest's signature",
             )
-        write_archive(((p, stage.root / p) for p in stage.files), out)
+        write_archive(((p, stage.root / p) for p in stage.files), out, key=key)
     return manifest
+
+
+def _signature_record(body: bytes, key_id: str, mac: str) -> dict[str, str]:
+    """The signature record the builder writes for the manifest's bytes ``body``."""
+    return {
+        "algorithm": SIGNATURE_ALGORITHM,
+        "key_label": SIGNATURE_LABEL.decode("ascii"),
+        "key_id": key_id,
+        "manifest_sha256": hashlib.sha256(body).hexdigest(),
+        "hmac": mac,
+    }
 
 
 def archive_order(name: str) -> tuple[int, str]:
@@ -618,26 +679,106 @@ def archive_order(name: str) -> tuple[int, str]:
     return ({MANIFEST: 0, SIGNATURE: 1}.get(name, 2), name)
 
 
-def write_archive(entries: Iterable[tuple[str, Path]], out: IO[bytes]) -> None:
+def _tar_info(name: str, size: int) -> tarfile.TarInfo:
+    """The header the builder writes for a file: plain USTAR, time 0, mode 0644, owner 0:0."""
+    info = tarfile.TarInfo(name)
+    info.size = size
+    info.mtime = 0
+    info.mode = _FILE_MODE
+    info.uid = info.gid = 0
+    info.uname = info.gname = ""
+    info.type = tarfile.REGTYPE
+    return info
+
+
+class _Deflating:
+    """A gzip member's body written into ``sink``: the deflate stream, its CRC and length.
+
+    The compressor is the one ``gzip.GzipFile`` uses at its default level, so
+    the deflate bytes are those the builder always wrote; the header is
+    written apart (:func:`archive_stream`).
+    """
+
+    def __init__(self, sink: IO[bytes]) -> None:
+        self.sink = sink
+        self.crc = 0
+        self.size = 0
+        self._compress = zlib.compressobj(9, zlib.DEFLATED, -zlib.MAX_WBITS, zlib.DEF_MEM_LEVEL, 0)
+
+    def write(self, data: bytes) -> int:
+        self.crc = zlib.crc32(data, self.crc)
+        self.size += len(data)
+        self.sink.write(self._compress.compress(data))
+        return len(data)
+
+    def tell(self) -> int:
+        return self.size
+
+    # Write-only: what ``tarfile`` asks of a file object it is handed.
+    def read(self, size: int, /) -> bytes:
+        raise io.UnsupportedOperation("a package stream is write-only")
+
+    def seek(self, pos: int, /) -> int:
+        raise io.UnsupportedOperation("a package stream is write-only")
+
+    def close(self) -> None:
+        return None
+
+    def finish(self) -> None:
+        self.sink.write(self._compress.flush())
+        self.sink.write(struct.pack("<II", self.crc, self.size & 0xFFFFFFFF))
+
+
+def _file_hmac(digest: bytes, key: ledger_chain.ChainKey) -> bytes:
+    """The HMAC the header carries beside the file digest, under the package key."""
+    return bytes.fromhex(ledger_chain.keyed(key, _FILE_TAG, digest))
+
+
+@contextmanager
+def archive_stream(
+    out: IO[bytes], *, key: ledger_chain.ChainKey | None = None
+) -> Iterator[_Deflating]:
+    """A writable stream whose bytes become one package file in ``out``.
+
+    What is written is compressed into an anonymous temporary file; once the
+    block ends, the header with the SHA-256 of that body (and its HMAC under
+    ``key``, which must be the manifest's signature key, or zeros for an
+    unsigned package) is written into ``out``, then the body.
+    """
+    with tempfile.TemporaryFile(prefix="maljan-package-body-") as body:
+        stream = _Deflating(body)
+        yield stream
+        stream.finish()
+        body.seek(0)
+        digest = hashlib.sha256()
+        while chunk := body.read(CHUNK):
+            digest.update(chunk)
+        value = digest.digest()
+        out.write(_HEADER + value + (_file_hmac(value, key) if key is not None else _NO_HMAC))
+        body.seek(0)
+        while chunk := body.read(CHUNK):
+            out.write(chunk)
+
+
+def write_archive(
+    entries: Iterable[tuple[str, Path]],
+    out: IO[bytes],
+    *,
+    key: ledger_chain.ChainKey | None = None,
+) -> None:
     """Write ``entries`` (archive path, source file) as a deterministic ``.tar.gz`` into ``out``.
 
     Entries are written in :func:`archive_order` whatever order they are given
-    in, as plain USTAR regular files.
+    in, as plain USTAR regular files, under the header :func:`archive_stream`
+    writes (``key`` is the manifest's signature key, or ``None`` unsigned).
     """
     with (
-        gzip.GzipFile(filename="", mode="wb", fileobj=out, mtime=0) as compressed,
+        archive_stream(out, key=key) as compressed,
         tarfile.open(fileobj=compressed, mode="w", format=tarfile.USTAR_FORMAT) as tar,
     ):
         for name, source in sorted(entries, key=lambda e: archive_order(e[0])):
-            info = tarfile.TarInfo(name)
-            info.size = source.stat().st_size
-            info.mtime = 0
-            info.mode = _FILE_MODE
-            info.uid = info.gid = 0
-            info.uname = info.gname = ""
-            info.type = tarfile.REGTYPE
             with source.open("rb") as handle:
-                tar.addfile(info, handle)
+                tar.addfile(_tar_info(name, source.stat().st_size), handle)
 
 
 def _unsafe(name: str) -> str | None:
@@ -745,6 +886,205 @@ class _Null:
         return len(data)
 
 
+class _Sink(Protocol):
+    def update(self, data: bytes, /) -> None: ...
+
+
+class _Once:
+    """``raw`` read once, front to back, as ``gzip`` reads it.
+
+    The header is read first and served again from memory; every later byte
+    is handed to the sink :meth:`watch` names the first time it passes, and a
+    forward seek reads the bytes it skips, so the sink sees each byte of the
+    file exactly once and the file is never read a second time.
+    """
+
+    mode = "rb"
+
+    def __init__(self, raw: BinaryIO, head: int) -> None:
+        self.raw = raw
+        self.head = raw.read(head)
+        self.read_to = len(self.head)
+        self.raw_at = len(self.head)
+        self.position = 0
+        self.sink: _Sink | None = None
+
+    def watch(self, start: int, sink: _Sink) -> None:
+        self.sink = sink
+        sink.update(self.head[start:])
+
+    def read(self, size: int = -1, /) -> bytes:
+        if self.position < len(self.head):
+            end = len(self.head) if size < 0 else min(len(self.head), self.position + size)
+            out = self.head[self.position : end]
+            self.position = end
+            return out
+        if self.raw_at != self.position:
+            self.raw.seek(self.position)
+        data = self.raw.read(size)
+        end = self.position + len(data)
+        if end > self.read_to:
+            fresh = data[max(0, self.read_to - self.position) :]
+            self.read_to = end
+            if self.sink is not None:
+                self.sink.update(fresh)
+        self.position = self.raw_at = end
+        return data
+
+    def seek(self, offset: int, whence: int = io.SEEK_SET, /) -> int:
+        if whence not in (io.SEEK_SET, io.SEEK_CUR):
+            raise io.UnsupportedOperation("a package is read front to back")
+        target = offset if whence == io.SEEK_SET else self.position + offset
+        if target > self.read_to:
+            # Only by reading: a file that ends first (or grows later) never
+            # leaves bytes the sink has not seen.
+            self.position = self.read_to
+            while self.position < target:
+                if not self.read(min(CHUNK, target - self.position)):
+                    raise EOFError("the package ends before the position sought")
+        self.position = target
+        return target
+
+    def tell(self) -> int:
+        return self.position
+
+    # Read-only: what ``tarfile`` asks of a file object it is handed.
+    def write(self, data: bytes, /) -> int:
+        raise io.UnsupportedOperation("a package is only read")
+
+    def close(self) -> None:
+        return None
+
+    def drain(self) -> None:
+        """Read what is left of the file, so the sink has seen all of it."""
+        self.seek(self.read_to)
+        while self.read(CHUNK):
+            pass
+
+
+class _Canonical:
+    """A package built before the file digest, checked byte for byte as its bytes pass.
+
+    Fed the deflate stream after the old plain header (:class:`_Once`), it
+    inflates it in bounded steps and holds it to what the builder wrote then:
+    every tar header the one :func:`_tar_info` gives for its name and size,
+    every padding byte zero, the end marker and the record padding exact,
+    nothing more inflated, and the gzip CRC and length right with nothing
+    after them.
+    """
+
+    def __init__(self) -> None:
+        self.inflate = zlib.decompressobj(-zlib.MAX_WBITS)
+        self.buffer = bytearray()
+        self.tail = bytearray()
+        self.crc = 0
+        self.size = 0
+        self.ok = True
+        self.state = "header"
+        self.want = tarfile.BLOCKSIZE
+        self.skip = 0
+        self.offset = 0
+
+    def update(self, data: bytes, /) -> None:
+        if not self.ok:
+            return
+        if self.inflate.eof:
+            self.tail += data
+            self.ok = len(self.tail) <= 8
+            return
+        try:
+            self._take(self.inflate.decompress(data, CHUNK))
+            while self.ok and not self.inflate.eof and self.inflate.unconsumed_tail:
+                self._take(self.inflate.decompress(self.inflate.unconsumed_tail, CHUNK))
+        except zlib.error:
+            self.ok = False
+            return
+        if self.inflate.eof:
+            self.tail += self.inflate.unused_data
+            self.ok = self.ok and len(self.tail) <= 8
+
+    def _take(self, out: bytes) -> None:
+        self.crc = zlib.crc32(out, self.crc)
+        self.size += len(out)
+        self.buffer += out
+        while self.ok:
+            if self.state == "data":
+                step = min(self.skip, len(self.buffer))
+                del self.buffer[:step]
+                self.skip -= step
+                if self.skip:
+                    return
+                self.state, self.want = "padding", -self.offset % tarfile.BLOCKSIZE
+                self.offset += self.want
+                continue
+            if self.state == "done":
+                self.ok = not self.buffer
+                return
+            if len(self.buffer) < self.want:
+                return
+            chunk = bytes(self.buffer[: self.want])
+            del self.buffer[: self.want]
+            self._step(chunk)
+
+    def _step(self, chunk: bytes) -> None:
+        if self.state in ("padding", "end"):
+            self.ok = not chunk.strip(b"\0")
+            self.state, self.want = (
+                ("header", tarfile.BLOCKSIZE) if self.state == "padding" else ("done", 0)
+            )
+            return
+        self.offset += tarfile.BLOCKSIZE
+        if chunk == bytes(tarfile.BLOCKSIZE):
+            # The second zero block, then zeros to the end of the record.
+            end = self.offset + tarfile.BLOCKSIZE
+            end += -end % tarfile.RECORDSIZE
+            self.state, self.want = "end", end - self.offset
+            return
+        try:
+            info = tarfile.TarInfo.frombuf(chunk, tarfile.ENCODING, "surrogateescape")
+            canonical = _tar_info(info.name, info.size).tobuf(
+                tarfile.USTAR_FORMAT, tarfile.ENCODING, "surrogateescape"
+            )
+        except (tarfile.TarError, ValueError):
+            self.ok = False
+            return
+        self.ok = chunk == canonical
+        self.state, self.skip = "data", info.size
+        self.offset += info.size
+
+    def finish(self) -> bool:
+        trailer = struct.pack("<II", self.crc, self.size & 0xFFFFFFFF)
+        return (
+            self.ok
+            and self.state == "done"
+            and self.inflate.eof
+            and not self.buffer
+            and bytes(self.tail) == trailer
+        )
+
+
+def _file_digest(
+    digest: bytes,
+    carried: bytes,
+    manifest: Mapping[str, Any],
+    state: str,
+    keys: Mapping[str, ledger_chain.ChainKey],
+) -> tuple[str, str] | None:
+    """The file digest's state and reason once it matched, or ``None`` when its HMAC does
+    not: a signed package's under the manifest's key, an unsigned package's none."""
+    matched = "The whole file matches the SHA-256 its gzip header carries"
+    if state == "absent":
+        if carried != _NO_HMAC:
+            return None
+        return "valid", f"{matched}; the package is unsigned, so no HMAC covers it."
+    if state == "other_key":
+        return "valid", f"{matched}; its HMAC is under a key this environment cannot derive."
+    key_id = str(manifest["signature"]["key_id"])
+    if not hmac.compare_digest(_file_hmac(digest, keys[key_id]), carried):
+        return None
+    return "valid", f"{matched}, and its HMAC verifies under key {key_id}."
+
+
 def verify_package(
     path: Path,
     *,
@@ -755,7 +1095,21 @@ def verify_package(
 ) -> dict[str, Any]:
     """Re-check a package: the manifest's digests, its signature and the embedded ledger seal.
 
-    One pass over the archive, read through ``gzip``'s bounded reader in
+    The file is opened once and read once, front to back (:class:`_Once`):
+    its gzip header must be the builder's, and every byte after it is hashed
+    as the archive reads it, then the rest to the end of the file; the
+    SHA-256 must match the one the header carries, and once the signature is
+    known the HMAC beside it must verify under the manifest's key (zeros for
+    an unsigned package; not checked under a key this environment cannot
+    derive). A package built before the digest (:data:`LEGACY_FORMAT`, under
+    the old plain header) is instead compared byte for byte, in the same
+    pass, with what the builder wrote then (:class:`_Canonical`). The
+    manifest's format must be the one its header belongs to. Any change to
+    the file therefore reads ``broken`` before the seal is looked at, and
+    ``seal_unverifiable`` only ever means a key, a seal or a run file the
+    package lacks, never damage.
+
+    The archive is read through ``gzip``'s bounded reader in
     :data:`CHUNK` reads, to the gzip end (its CRC is checked) with nothing
     after the tar end marker but its zero padding. Every entry must be a plain
     USTAR regular file under a safe relative name. The manifest must come
@@ -784,10 +1138,28 @@ def verify_package(
     manifest: dict[str, Any] | None = None
     manifest_bytes = b""
     signature: tuple[str, str, Any] | None = None
-    with tempfile.TemporaryDirectory(prefix="maljan-package-verify-") as tmp:
+    try:
+        raw = path.open("rb")
+    except OSError:
+        return _broken(str(path), UNREADABLE)
+    file_hash = hashlib.sha256()
+    canonical = _Canonical()
+    with raw, tempfile.TemporaryDirectory(prefix="maljan-package-verify-") as tmp:
         root = Path(tmp).resolve()
         try:
-            with tarfile.open(path, mode="r:gz") as tar:
+            # One pass over the file: the header, then every later byte into
+            # the file digest (or the byte-for-byte check of an older
+            # package) as the archive reads it.
+            source = _Once(raw, _HEADER_BYTES)
+            head = source.head
+            legacy = head[: len(_LEGACY_HEADER)] == _LEGACY_HEADER
+            if legacy:
+                source.watch(len(_LEGACY_HEADER), canonical)
+            elif len(head) == _HEADER_BYTES and head[: len(_HEADER)] == _HEADER:
+                source.watch(_HEADER_BYTES, file_hash)
+            else:
+                return _broken(str(path), NOT_A_PACKAGE_HEADER)
+            with tarfile.open(fileobj=source, mode="r:gz") as tar:
                 if tar.pax_headers:
                     return _broken(str(path), NOT_PLAIN)
                 for index, member in enumerate(tar):
@@ -809,8 +1181,11 @@ def verify_package(
                             return _broken(MANIFEST, "The manifest is above upload_max_bytes.")
                         manifest_bytes = handle.read()
                         parsed = _parse(manifest_bytes, MANIFEST_DEPTH)
-                        if not isinstance(parsed, dict) or parsed.get("format") != FORMAT:
+                        formats = (FORMAT, LEGACY_FORMAT)
+                        if not isinstance(parsed, dict) or parsed.get("format") not in formats:
                             return _broken(MANIFEST, f"The manifest is not a {FORMAT} manifest.")
+                        if parsed["format"] != (LEGACY_FORMAT if legacy else FORMAT):
+                            return _broken(MANIFEST, FORMAT_MISMATCH)
                         manifest = parsed
                         found = _listing(manifest, max_bytes)
                         if isinstance(found, str):
@@ -857,8 +1232,15 @@ def verify_package(
                     return _broken(str(path), "The archive holds data after its end marker.")
                 if tar.fileobj is not None and tar.fileobj.read(1):
                     return _broken(str(path), "The archive holds data after its end marker.")
+            source.drain()
         except (tarfile.TarError, OSError, EOFError, zlib.error):
             return _broken(str(path), UNREADABLE)
+        # Every byte of the file, before the seal is looked at.
+        carried = head[len(_HEADER) : len(_HEADER) + _DIGEST_BYTES]
+        if legacy and not canonical.finish():
+            return _broken(str(path), NOT_CANONICAL)
+        if not legacy and not hmac.compare_digest(file_hash.digest(), carried):
+            return _broken(str(path), FILE_DIGEST_DIFFERS)
 
         if manifest is None:
             return _broken(MANIFEST, "The package holds no manifest.")
@@ -871,6 +1253,16 @@ def verify_package(
                 return _broken(
                     name, "The manifest lists this file and the package does not hold it."
                 )
+        # The HMAC beside the file digest, before the seal: no change to the
+        # file can read anything but broken.
+        if legacy:
+            file_digest = ("legacy", FILE_DIGEST_LEGACY)
+        else:
+            mac = head[len(_HEADER) + _DIGEST_BYTES :]
+            matched = _file_digest(file_hash.digest(), mac, manifest, signature[0], keys)
+            if matched is None:
+                return _broken(str(path), FILE_HMAC_DIFFERS)
+            file_digest = matched
         # A run file the seal check reads, left out for its size: the check
         # would read a partial run, so it is not run at all.
         blocked = any(str(e["path"]) in SEAL_READS for e in manifest.get("oversized") or [])
@@ -886,6 +1278,8 @@ def verify_package(
             else None
         ),
         "seal_at_build": manifest.get("seal"),
+        "file_digest": file_digest[0],
+        "file_digest_reason": file_digest[1],
         "absent": manifest.get("absent") or [],
         "oversized": manifest.get("oversized") or [],
     }
@@ -981,6 +1375,11 @@ def _check_signature(
         return "invalid", "The signature record carries no well-formed key id and HMAC.", None
     if key_id != declared.get("key_id"):
         return "invalid", "The signature names another key than the manifest does.", None
+    # Byte for byte the record the builder writes (as ``_Stage.json`` writes
+    # it): no field, value or spacing of it is left unchecked.
+    canonical = json.dumps(_signature_record(body, str(key_id), str(mac)), indent=1, sort_keys=True)
+    if signature_bytes != canonical.encode("utf-8"):
+        return "invalid", "The signature file is not the record the builder writes.", None
     key = keys.get(str(key_id))
     if key is None:
         return (
