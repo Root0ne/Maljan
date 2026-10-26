@@ -1221,6 +1221,48 @@ class EmulatedStrings(BaseModel):
     spelled: dict[str, str] = Field(default_factory=dict)
 
 
+class BoundValue(BaseModel):
+    """A decoded text the code passes whole to an API argument of a known role.
+
+    Built from the ledger at build time (``reporting.call_bindings``): the
+    decoder's entry (``entry``) states the text, the blob's file offset, the
+    place that loads it (``site``, in ``function``), the program's own routine
+    that receives it (``decoder_call``) and the frame slot that routine was
+    given, which a later call (``call_at``) receives as argument ``argument``:
+    directly, or inside the function (``inside``) that the call at ``reaches``
+    calls with it as argument ``reaches_argument``. The API
+    that call makes is the import the file's table names, or the slot a
+    function index entry names (``named_by``, with the ``slot``). The role,
+    its kind and the parameter's name are the argument-role table's for that
+    API. ``fall_through`` says the decoder followed the slot on the path where
+    every conditional jump falls through.
+    """
+
+    model_config = _STRICT_CONFIG
+
+    value: str
+    kind: str
+    role: str
+    role_words: str = ""
+    api: str
+    argument: int
+    parameter: str = ""
+    entry: str
+    tool: str = ""
+    offset: str = ""
+    site: str = ""
+    function: str = ""
+    decoder_call: str = ""
+    call_at: str = ""
+    inside: str = ""
+    reaches: str = ""
+    reaches_argument: int = 0
+    slot: str = ""
+    imported_as: str = ""
+    named_by: str = ""
+    fall_through: bool = False
+
+
 class ClaimNotDiscussed(BaseModel):
     """An analyst claim in force whose code locations or API names the body does not name.
 
@@ -1702,6 +1744,11 @@ class MalwareReport(BaseModel):
     # entries at build time; ``None`` on a report stored before it existed,
     # which is then read from its kept section rows and said to be partial.
     emulated_strings: EmulatedStrings | None = None
+    # Each decoded text the code passes whole to an API argument of a known
+    # role, with the chain that binds it, built from the ledger at build time
+    # (``reporting.call_bindings``). Empty, and left out of the dump, on a
+    # report stored before it existed or a run that bound none.
+    bound_values: list[BoundValue] = Field(default_factory=list, exclude_if=lambda value: not value)
     # For every value an analyst's artifact lists, lower-cased: the tool
     # answers of the run that hold it whole, as ``(entry id, tool)``, and an
     # empty list when the ledger search found none. Built at build time from

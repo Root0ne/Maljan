@@ -62,6 +62,11 @@ from maljan.extractors.network_extractor import (
 )
 from maljan.pipeline.events import safe_finding_value
 from maljan.reporting import tool_kinds
+from maljan.reporting.call_bindings import (
+    BOUND_SOURCE,
+    BROWSER_LIKE,
+    reads_as_a_browser_user_agent,
+)
 from maljan.reporting.dedupe import distinct_processes, process_identity
 from maljan.reporting.ledger_report import ANALYST_SECTION_SOURCES
 from maljan.reporting.models import (
@@ -1957,6 +1962,9 @@ STRING_IOC_KINDS: tuple[str, ...] = (
 
 # The comparison a file's directory is written under.
 _PARENT_PATH = ("file", "parent_directory_ref.path")
+# Where a user agent is compared: the request header of STIX 2.1's
+# ``http-request-ext``, as the pattern reader folds the path (lower case).
+_USER_AGENT_PATH = "extensions.'http-request-ext'.request_header.'User-Agent'"
 _SEPARATORS = "\\/"
 
 
@@ -2026,6 +2034,9 @@ def indicator_pattern(kind: str, value: str) -> str | None:
         return f"[mutex:name = '{quoted}']"
     if kind == "registry":
         return f"[windows-registry-key:key = '{quoted}']"
+    if kind == "user_agent":
+        # The header an HTTP request carries it in (STIX 2.1 ``http-request-ext``).
+        return f"[network-traffic:{_USER_AGENT_PATH} = '{quoted}']"
     if kind == "path":
         # A file's name is its last component; the directory it was written
         # in is its parent's path (STIX ``file`` and ``directory``). A
@@ -2298,8 +2309,14 @@ def indicator_publish_reason(
     untold: str = "",
     kept_address: str = "",
     url_only: str = "",
+    bound: str = "",
 ) -> str | None:
     """Why this run may publish one indicator of ``kind``, or ``None``.
+
+    ``bound`` is the chain that binds a decoded text to the API argument the
+    code passes it to whole (``reporting.call_bindings``): such a value stands
+    on that chain, which is its reason, wherever the export has an object for
+    its kind (a path that names a file).
 
     ``untold`` is set on a sandbox row the judge's indicator names when the
     judge was never asked with the sandbox's fact (:func:`sandbox_row_kwargs`):
@@ -2372,6 +2389,19 @@ def indicator_publish_reason(
     """
     if kind == "ip" and is_public_resolver(value):
         return None
+    if bound:
+        # Never under a Benign verdict, nor one the judge stated no confidence
+        # for, as a value only a recovering tool read (``_emulation_admits``).
+        if _is_benign_verdict(verdict) or verdict == UNSTATED_VERDICT:
+            return None
+        if kind == "user_agent" and reads_as_a_browser_user_agent(value):
+            # A pattern on it would match the browsers' own traffic.
+            return None
+        if indicator_pattern(kind, value) is None:
+            return None
+        if kind == "path" and not path_names_a_file(value):
+            return None
+        return bound
     if unattributed and kind in HOST_KINDS:
         # A host row no process of the sample's tree made is not its
         # observation: it is published only on the judge's keep against that fact.
@@ -3018,6 +3048,15 @@ UNATTRIBUTED_CAPTURE_VALUE = (
 )
 # The kinds only a capture records.
 CAPTURE_KINDS = frozenset({"user_agent", "ja3", "ja3s"})
+# A kind no string sweep or listing stands for: published only where the code
+# passes the value whole to an API argument of its role (``bound``).
+BOUND_ONLY_KINDS = frozenset({"user_agent"})
+# A bound value's refusal names the binding in short; its chain is in the row.
+BOUND = "the code passes it whole to an API argument of its role"
+NOT_BOUND = (
+    "published only where the code passes it whole to an API argument that takes a user "
+    "agent, and no such call is bound in this run"
+)
 # The keys a sandbox record names the process that made it under.
 _PID_KEYS = ("pid", "process_id", "pids")
 _PROCESS_KEYS = ("process", "process_name", "processes")
@@ -3944,6 +3983,27 @@ def emulation_record(report: Any) -> EmulatedStrings:
     return EmulatedStrings(values=kept, plain=plain, partial=_FROM_KEPT_ROWS if values else "")
 
 
+def bound_kwargs(report: Any, kind: str, value: str) -> dict[str, str]:
+    """``{"bound": <the chain>, "verdict"}`` for a value the report binds, else ``{}``.
+
+    Read from the report's record (``bound_values``, built from the ledger at
+    build time by ``call_bindings``); the value is matched whole, as the
+    decoder wrote it. The verdict is read as stated only when the judge gave it
+    a confidence.
+    """
+    from maljan.reporting.call_bindings import binding_words, bound_value
+
+    found = bound_value(report, kind, value)
+    if found is None:
+        return {}
+    said = binding_words(found)
+    stated = _field(report, "overall_confidence") is not None
+    return {
+        "bound": said,
+        "verdict": _field(report, "verdict") if stated else UNSTATED_VERDICT,
+    }
+
+
 # The verdict a record is asked under when the judge stated none with a
 # confidence: a fallback's default word is not a verdict anybody stated.
 UNSTATED_VERDICT = "unstated"
@@ -4135,6 +4195,7 @@ def publish_answer(
     kept_address: str = "",
     judge_only: str = "",
     url_only: str = "",
+    bound: str = "",
 ) -> str:
     """The publish rule's answer for one row, as the report prints it.
 
@@ -4167,6 +4228,7 @@ def publish_answer(
         in_published_url=in_published_url,
         kept_address=kept_address,
         url_only=url_only,
+        bound=bound,
     )
     if admitted:
         return yes_because(admitted)
@@ -4226,6 +4288,12 @@ def publish_answer(
         return "no: names a directory or a root, not a file"
     if kind == "hash" and not _is_a_whole_digest(text):
         return "no: not a whole digest"
+    if bound and _is_benign_verdict(verdict):
+        return f"no: {BOUND}, but the verdict is Benign, which publishes no malicious indicator"
+    if bound and verdict == UNSTATED_VERDICT:
+        return f"no: {BOUND}, but the judge stated no verdict with a confidence"
+    if bound and kind == "user_agent" and reads_as_a_browser_user_agent(text):
+        return f"no: {bound}; {BROWSER_LIKE}"
     if recovered and _is_benign_verdict(verdict):
         return f"no: {recovered}, but the verdict is Benign, which publishes no malicious indicator"
     if recovered and verdict == UNSTATED_VERDICT:
@@ -4245,6 +4313,8 @@ def publish_answer(
         return named_only_reason(listed_by, tool_search or SEARCHED_THE_RUN, asked_in)
     if kind == "command":
         return "no: a command line is not an indicator this run publishes"
+    if kind in BOUND_ONLY_KINDS:
+        return f"no: {NOT_BOUND}"
     if kind != "hash" and (kind not in STRING_IOC_KINDS or indicator_pattern(kind, text) is None):
         return "no: the export has no object for this kind"
     if seen_in:
@@ -4274,6 +4344,11 @@ def judge_value_answer(report: Any, kind: str, value: str, corroborating: str) -
     """
     text = str(value or "").strip()
     network = getattr(report, "network", None)
+    said = bound_kwargs(report, kind, text)
+    if said:
+        # A value the code passes whole to an API argument of its role is
+        # asked as that binding's row is: the chain is its source.
+        return publish_answer(kind, text, BOUND_SOURCE, **said)
     host = sandbox_host_kwargs(report, kind, text)
     if host:
         # A file, digest, key or mutex the sandbox recorded and attributes to
@@ -4403,6 +4478,7 @@ _EXPORTED_KINDS: dict[tuple[str, str], str] = {
     ("windows-registry-key", "key"): "registry",
     ("mutex", "name"): "mutex",
     ("process", "command_line"): "command",
+    ("network-traffic", _USER_AGENT_PATH.lower()): "user_agent",
 }
 _HASH_PROPERTY_RE = re.compile(r"^hashes\.'([^']+)'$")
 
@@ -4545,8 +4621,10 @@ def exported_indicator_values(bundle: Any) -> list[ExportedValue]:
 # Who records a host row the export carries from the IOC table (step 6.7), and
 # the kinds it has a pattern for. The string rows and the network block have
 # their own steps; the judge's values are its own indicators.
-_OBSERVED_HOST_SOURCES = frozenset({"sandbox", "persistence", "static"})
-_OBSERVED_HOST_KINDS = frozenset({"hash", "path", "registry", "mutex"})
+# A value the code passes whole to an API argument (``call_bindings``) is a
+# row of the same step, a user agent among them.
+_OBSERVED_HOST_SOURCES = frozenset({"sandbox", "persistence", "static", BOUND_SOURCE})
+_OBSERVED_HOST_KINDS = frozenset({"hash", "path", "registry", "mutex", "user_agent"})
 
 
 def _observed_host_indicators(
