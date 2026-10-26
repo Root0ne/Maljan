@@ -1,0 +1,3 @@
+### Fixed
+
+- **The surface checker reads the STIX family from the family's own malware object (T-375).** It read the name of the bundle's first malware object, so a run whose judge named its malware object for the sample's SHA-256 with `is_family: false` was reported as a STIX family defect, although the export carries the family's object (`is_family: true`, named for the family the report states) beside it, with the judge's object a `variant-of` it. The checker now reads every `is_family: true` object and reports one that names another family; with none, an object named for the family stands for it, as the export reads it. The export itself is unchanged.
