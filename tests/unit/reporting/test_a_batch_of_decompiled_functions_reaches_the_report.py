@@ -11,8 +11,9 @@ functions a batch lists form one run-wide table: each function once, in one
 spelling of its address, with the citation of every entry that listed it
 (``ev_0008 (function 0x401000)``, the ledger's form for a part of an entry).
 Its code is shown whole in the sections whose claims cite its entry or name
-it, else in ``commands``; every other section that reads code gets one line
-for it. The claims and the tool answers keep the share of the window they
+it, else in ``commands``, and in every section the code shown to which calls
+it, at any depth; every other section that reads code gets one line for it.
+The claims and the tool answers keep the share of the window they
 had. A tool that declares nothing is read the same way only when each
 function of its answer names the function it stands under: a string table,
 a cross-reference map or a rule's matches keyed by address is not code. A
@@ -544,6 +545,48 @@ def test_a_function_no_claim_points_at_falls_to_the_first_section_it_reaches(
         assert row.shown_in == [row.reaches[0]] == [first]
 
 
+CALLER = "\nvoid FUN_00405000(void)\n\n{\n  FUN_00406000();\n  return;\n}\n"
+MIDDLE = "\nvoid FUN_00406000(void)\n\n{\n  FUN_00407000(0x10);\n  return;\n}\n"
+LEAF = "\nint FUN_00407000(int n)\n\n{\n  return n + 1;\n}\n"
+CHAIN = json.dumps({"0x405000": CALLER, "0x406000": MIDDLE, "0x407000": LEAF, **json.loads(BATCH)})
+
+
+def test_a_section_is_shown_the_code_its_shown_code_calls_at_any_depth() -> None:
+    # T-379: a section shown 0xc42c named its callees and read none of them,
+    # their code shown only in commands, and wrote that their bodies were not
+    # reproduced although the ledger held them.
+    report = _report(_capture("batch_decompile", CHAIN, 7, BATCH_FACTS))
+    claim = _Claim("FUN_00405000 enumerates the drives.", "ev_0008")
+    shown, listed = _discovery(report, claim)
+    assert shown == ["0x405000", "0x406000", "0x407000"]
+    assert listed == ["0x401000", "0x402000", "0x403000"]
+    # A callee is still shown where nothing else points it (its home).
+    table = {row.where: row for row in function_table(report, None, {"reverser": _Isr(claim)})}
+    assert table["0x407000"].shown_in == ["discovery"]
+    assert table["0x401000"].shown_in == [CODE_HOME_SECTION]
+
+
+def test_a_section_is_shown_the_code_a_single_decompile_it_is_shown_calls() -> None:
+    caller = "\nvoid FUN_00408000(void)\n\n{\n  FUN_00402000();\n  return;\n}\n"
+    report = _report(
+        _capture("decompile_function", caller, 3, SINGLE_FACTS, symbol="0x408000"),
+        _capture("batch_decompile", BATCH, 7, BATCH_FACTS),
+    )
+    bundle = bundle_for("command_and_control", report)
+    assert [row["symbol"] for row in bundle["function_code"]] == ["0x402000"]
+    assert [row["symbol"] for row in bundle["function_index"]] == ["0x401000", "0x403000"]
+
+
+def test_a_constant_that_is_an_offset_from_the_image_base_names_no_function() -> None:
+    caller = "\nvoid FUN_00408000(void)\n\n{\n  g(0x2000);\n  return;\n}\n"
+    report = _report(
+        _capture("decompile_function", caller, 3, SINGLE_FACTS, symbol="0x408000"),
+        _capture("batch_decompile", BATCH, 7, BATCH_FACTS),
+        _capture("program_info", json.dumps({"image_base": "0x400000"}), 2),
+    )
+    assert "function_code" not in bundle_for("command_and_control", report)
+
+
 def test_code_that_takes_a_prompt_past_the_window_is_stated() -> None:
     import asyncio
     from types import SimpleNamespace
@@ -644,3 +687,26 @@ def test_the_stored_run_s_batch_functions_now_reach_the_composer() -> None:
         for row in bundle_for(s, report).get("function_code", [])
     }
     assert len(shown) == 46
+
+
+def test_the_stored_run_s_callees_reach_the_sections_that_read_their_callers() -> None:
+    root = _haiku5()
+    if root is None or not (root.parent / "haiku6" / "report.json").is_file():
+        pytest.skip("the stored benchmark runs are not on this machine")
+    report = MalwareReport.model_validate(
+        json.loads((root.parent / "haiku6" / "report.json").read_text())
+    )
+    # Persistence is shown 0xc42c by the claim naming it, which calls 0xc19c
+    # and 0xc7b4; the string section is shown 0xae78's single decompile, which
+    # calls 0x9040 (haiku6 §5.4 and §5.2).
+    claim = _Claim("Routine 0x1360bc0c42c registers the scheduled task.", "ev_0093")
+    isrs = {"all_tools_reverser_ghidra": _Isr(claim)}
+    for section, wanted in (
+        ("persistence_detail", ("0x1360bc0c19c", "0x1360bc0c7b4")),
+        ("string_resolution", ("0x1360bc09040",)),
+    ):
+        bundle = bundle_for(section, report, None, isrs)
+        shown = {row["symbol"] for row in bundle.get("function_code", [])}
+        listed = {row["symbol"] for row in bundle.get("function_index", [])}
+        for where in wanted:
+            assert where in shown and where not in listed, (section, where)
