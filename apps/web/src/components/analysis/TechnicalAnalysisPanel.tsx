@@ -148,7 +148,9 @@ export default function TechnicalAnalysisPanel({ report }: { report: MalwareRepo
               </tbody>
             </table>
             <p className="mt-1 text-[10px] italic text-text-muted">
-              Read out of this run&apos;s evidence by the report model; not published.
+              Read out of this run&apos;s evidence by the report model. This table publishes
+              nothing itself: a value it lists is published only where the IOC table publishes
+              it.
             </p>
           </section>
         )}

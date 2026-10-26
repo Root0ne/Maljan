@@ -163,7 +163,14 @@ class TestTheWiderModes:
     def test_unpublished_returns_only_the_withheld(self, client: TestClient) -> None:
         rows = _rows(client, "?include=unpublished")
 
-        assert {row["value"] for row in rows} == {"rosoft.com", "6.0.0.0", "http://localho"}
+        # The capture's user agent names no process, and is refused as an
+        # unattributed flow is.
+        assert {row["value"] for row in rows} == {
+            "rosoft.com",
+            "6.0.0.0",
+            "http://localho",
+            "Mozilla/5.0",
+        }
         assert not any(row["published"] for row in rows)
 
     def test_a_mode_the_route_does_not_know_is_refused(self, client: TestClient) -> None:

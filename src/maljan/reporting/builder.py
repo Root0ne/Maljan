@@ -732,6 +732,7 @@ def _build_consolidated_iocs(report: MalwareReport) -> list[ConsolidatedIOC]:
     from maljan.reporting.ledger_projection import listed_non_network_values
     from maljan.reporting.ledger_report import artifact_sections, listed_headings, listed_rows
     from maljan.reporting.renderers.stix_renderer import (
+        UNATTRIBUTED_CAPTURE_VALUE,
         corroborating_values,
         digest_label,
         emulation_kwargs,
@@ -985,9 +986,13 @@ def _build_consolidated_iocs(report: MalwareReport) -> list[ConsolidatedIOC]:
 
     net = report.network
     reputations: dict[str, Any] = {}
-    # A fingerprint and a user agent are the sandbox's own records of the
-    # traffic; no string sweep produces one, and the reason says so.
-    _seen = yes_because("sandbox")
+
+    # A fingerprint and a user agent are read out of the sandbox's capture,
+    # which names no process beside them: each is refused as an unattributed
+    # flow is, on every surface, and STIX has no object for one either.
+    def _captured(kind: str, value: str) -> str:
+        return publish_answer(kind, value, "sandbox", unattributed=UNATTRIBUTED_CAPTURE_VALUE)
+
     if net:
         for d in net.domains:
             reputations[d.fqdn.strip().lower().rstrip(".")] = d.reputation
@@ -1058,12 +1063,20 @@ def _build_consolidated_iocs(report: MalwareReport) -> list[ConsolidatedIOC]:
                 ),
                 is_network=True,
             )
-        for ua in net.user_agents:
-            _add("User-Agent", "user_agent", ua, "sandbox", published=_seen, is_network=True)
-        for ja3 in net.ja3_fingerprints:
-            _add("JA3", "ja3", ja3, "sandbox", published=_seen, is_network=True)
-        for ja3s in net.ja3s_fingerprints:
-            _add("JA3S", "ja3s", ja3s, "sandbox", published=_seen, is_network=True)
+        for label, kind, values in (
+            ("User-Agent", "user_agent", net.user_agents),
+            ("JA3", "ja3", net.ja3_fingerprints),
+            ("JA3S", "ja3s", net.ja3s_fingerprints),
+        ):
+            for value in values:
+                _add(
+                    label,
+                    kind,
+                    value,
+                    "sandbox",
+                    published=_captured(kind, value),
+                    is_network=True,
+                )
 
     labels = {"url": "URL", "domain": "Domain", "email": "Email"}
     for s in strings:

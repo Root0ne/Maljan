@@ -5019,7 +5019,10 @@ def _host_identifier_table(identifiers: list[Any], ctx: _Context) -> list[str]:
     The model's own table, under its own voice: the platform copies no string
     into it and publishes none of it. Host values are never defanged. A row
     the validator asked about and the model kept says so beside its evidence.
+    A row whose whole value the IOC table publishes names the table of this
+    section that does (:func:`_published_in`).
     """
+    published = _published_in(ctx)
     lines = [_subheading("", "Host identifiers read by the report model", REPORT_MODEL), ""]
     lines.append(_row("Kind", "Value", "Purpose", "Evidence"))
     lines.append(_divider(4))
@@ -5029,10 +5032,13 @@ def _host_identifier_table(identifiers: list[Any], ctx: _Context) -> list[str]:
             cited += " (unresolved: report.identifier_uncited)"
         if index + 1 in ctx.identifier_unheld:
             cited += " (unresolved: report.value_not_in_cited_entry)"
+        where = published(item.value)
         lines.append(
             _row(
                 ctx.cell(item.kind),
-                _code_span(ctx.plain(_one_line(item.value))) + ctx.publish_state(item.value),
+                _code_span(ctx.plain(_one_line(item.value)))
+                + (f" (published in the {where} table)" if where else "")
+                + ctx.publish_state(item.value),
                 ctx.cell(item.purpose) if item.purpose.strip() else PURPOSE_NOT_STATED,
                 cited,
             )
@@ -5041,12 +5047,46 @@ def _host_identifier_table(identifiers: list[Any], ctx: _Context) -> list[str]:
         [
             "",
             "_Read out of this run's evidence by the report model and cited to the entries it "
-            "names. These rows are not published: the export and `/iocs` carry the indicators "
-            "above._",
+            "names. This table publishes nothing itself: a value it lists is published only "
+            "where the IOC table of this section publishes it, and such a row is marked here "
+            "with the table that does. The export and `/iocs` carry the IOC table's published "
+            "rows._",
             "",
         ]
     )
     return lines
+
+
+def _published_in(ctx: _Context) -> Callable[[Any], str]:
+    """``value -> the §9 table that publishes it whole``, or ``""`` when none does.
+
+    Read off the IOC table's own answers, row by row, in the one spelling
+    every lookup uses (``ledger_projection.value_key``): a value is marked
+    only where a row holds it whole and that row's answer publishes. A table
+    that could not be read marks nothing, and its cell states say why.
+    """
+    from maljan.reporting.ledger_projection import value_key
+    from maljan.reporting.renderers.stix_renderer import publishes
+
+    held: dict[tuple[str, str], str] = {}
+    for row in ctx.iocs if ctx._table_read else []:
+        kind = str(row.kind or "")
+        if publishes(row.published):
+            table = "Network indicators" if kind in _NETWORK_KINDS else "File and host indicators"
+            held.setdefault((kind, value_key(kind, row.value)), table)
+    kinds = sorted({kind for kind, _ in held})
+
+    def _where(value: Any) -> str:
+        text = _one_line(str(value or "")).strip()
+        if not text:
+            return ""
+        for kind in kinds:
+            table = held.get((kind, value_key(kind, text)))
+            if table:
+                return table
+        return ""
+
+    return _where
 
 
 def _port_or_path(row: ConsolidatedIOC, report: MalwareReport) -> str:

@@ -39,11 +39,14 @@ from tests.unit.reporting.test_an_entry_without_a_source_is_read_as_before impor
 # The Markdown and HTML re-pinned when Appendix A came to draw held code whole
 # as listings and to say where a cut value is whole (T-384): only Appendix A and
 # Appendix D changed; the STIX did not change.
+# The Markdown and HTML re-pinned when the host identifier table came to mark
+# each row the IOC table publishes and its footer to say the table publishes
+# nothing itself (T-386); the STIX did not change.
 STORED_RENDERS = {
-    "run7": ("2b2d5402620287d8", "db276d30ff84e831", "865cd19e7ce6284b"),
-    "run5": ("b306166c385ee1a8", "1fc106bbc25416e9", "0f3807de7d1fb836"),
-    "run4": ("33ca722e9679caaa", "927d0acc0f76639b", "204536a060726373"),
-    "local8": ("be800f4b7319ecd3", "37b81ce18e40a217", "7f04dee0deee7a55"),
+    "run7": ("cdd9515862d5af1d", "dea1f998fc174103", "865cd19e7ce6284b"),
+    "run5": ("83588faa188377b2", "b771abbf5ef82b73", "0f3807de7d1fb836"),
+    "run4": ("db8c93d83f3b8f4e", "8f930558dc551ae8", "204536a060726373"),
+    "local8": ("0de08c4dc87e22cd", "4cb8cd5f0fb12432", "7f04dee0deee7a55"),
 }
 
 _UUID = re.compile(r"--[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")

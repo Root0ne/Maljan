@@ -46,7 +46,9 @@ STORED_EXPORTS = {
 # The Markdown and HTML re-pinned when Appendix A came to say where a cut value
 # is whole and the methodology that code is never cut (T-384); the STIX did not
 # change.
-HAIKU4_RENDERS = ("3e402d8a1b42194e", "ed5d84108712d4ed", "98ec03129873afd3")
+# The Markdown and HTML re-pinned when the host identifier table came to mark
+# each row the IOC table publishes (T-386); the STIX did not change.
+HAIKU4_RENDERS = ("75b9157b1a863aca", "b47768bbf80581cb", "98ec03129873afd3")
 
 _UUID = re.compile(r"--[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
 _STAMP = re.compile(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})")
