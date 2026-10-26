@@ -43,7 +43,10 @@ STORED_EXPORTS = {
 # re-pinned when the export's own malware object came to carry the types the
 # published category names (T-337): ``downloader`` and ``backdoor`` after the
 # category as written; the Markdown and HTML did not change.
-HAIKU4_RENDERS = ("b55653be5852ab97", "4eb094b857490468", "98ec03129873afd3")
+# The Markdown and HTML re-pinned when Appendix A came to say where a cut value
+# is whole and the methodology that code is never cut (T-384); the STIX did not
+# change.
+HAIKU4_RENDERS = ("3e402d8a1b42194e", "ed5d84108712d4ed", "98ec03129873afd3")
 
 _UUID = re.compile(r"--[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
 _STAMP = re.compile(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})")

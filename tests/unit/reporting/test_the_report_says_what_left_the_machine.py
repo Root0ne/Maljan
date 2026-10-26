@@ -238,12 +238,15 @@ def test_the_enrichment_queued_after_the_report_is_named_then_what_it_asked() ->
 # run4 re-pinned when a key finding came to print only the entries its text
 # does not cite itself (T-337): its eight key findings each wrote their
 # citations into the sentence, and those lines are the only change.
+# Re-pinned when Appendix A came to draw held code whole as listings and to say
+# under a section with a value cut where it is whole, and the methodology to say
+# code is never cut (T-384): only Appendix A and Appendix D changed.
 STORED_RENDERS = {
-    "run7": ("316ea45a47dcf965", "2222d734a9d4104f"),
-    "run5": ("569fa30c8cb6ba18", "8fdd5c05cff3d393"),
-    "run4": ("3dc5e451b4b61066", "e98cdab463df19f6"),
-    "local8": ("0da0f60173fa7bfd", "087f32c8af5adaa3"),
-    "haiku4": ("b55653be5852ab97", "4eb094b857490468"),
+    "run7": ("2b2d5402620287d8", "db276d30ff84e831"),
+    "run5": ("b306166c385ee1a8", "1fc106bbc25416e9"),
+    "run4": ("33ca722e9679caaa", "927d0acc0f76639b"),
+    "local8": ("be800f4b7319ecd3", "37b81ce18e40a217"),
+    "haiku4": ("3e402d8a1b42194e", "ed5d84108712d4ed"),
 }
 
 

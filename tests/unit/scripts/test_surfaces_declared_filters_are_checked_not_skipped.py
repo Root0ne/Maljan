@@ -2,7 +2,8 @@
 
 The default ``/iocs`` must be exactly the ``include=all`` rows that are
 published; the Markdown may cut a long value only where its rule cuts it,
-and a cut anywhere else (or inside a defang mark) is a truncation; the STIX
+and a cut anywhere else (or inside a defang mark, or of a value that is code)
+is a truncation; the STIX
 export's withheld values are counted, not reported; a usage snapshot a stored
 run took mid-run is set aside, while the same gap read live is a defect.
 """
@@ -13,7 +14,7 @@ from typing import Any
 
 from scripts.audit import surfaces
 
-from tests.unit.scripts._surfaces_run import IP, clean_run, clean_spec, defects
+from tests.unit.scripts._surfaces_run import CELL, IP, clean_run, clean_spec, defects
 
 
 def _with_default_feed(run: dict[str, Any], rows: list[dict[str, Any]]) -> dict[str, Any]:
@@ -102,6 +103,47 @@ def test_a_cell_cut_short_of_its_declared_length_is_truncated() -> None:
         ("truncated", "section_item", "markdown:strings"),
         ("truncated", "section_item", "html:strings"),
     }
+
+
+CODE = "int FUN_00401000(int a)\n{\n" + "  a = a + 1;\n" * 30 + "  return a;\n}"
+
+
+def _code_run(row: str, *, kind: str | None = "decompile_batch") -> dict[str, Any]:
+    """The clean run with its one section holding a function's code, drawn as ``row``."""
+    run = clean_run()
+    for mr in (run["report_row"]["malware_report"], run["report_full"]):
+        mr["sections"][0]["columns"] = ["Field", "Value"]
+        mr["sections"][0]["rows"] = [["0x401000", CODE]]
+        mr["evidence_index"][0]["facts"] = {"kind": kind} if kind else None
+    run["markdown"] = run["markdown"].replace(
+        f"| Text |\n|---|\n| {CELL} |", f"| Field | Value |\n|---|---|\n{row}"
+    )
+    return run
+
+
+def test_a_code_value_cut_at_the_cell_length_is_a_truncation() -> None:
+    cut = " ".join(CODE.split())[:159] + "…"
+    run = _code_run(f"| 0x401000 | {cut} |")
+    run["html"] += f"<td>0x401000</td><td>{cut}</td>"
+
+    result = surfaces.audit(run, clean_spec())
+
+    assert set(defects(result)) == {
+        ("truncated", "section_item", "markdown:strings"),
+        ("truncated", "section_item", "html:strings"),
+    }
+    assert result["checked"]["section_code"] == 2
+
+
+def test_a_code_value_drawn_whole_as_a_listing_is_present() -> None:
+    for kind in ("decompile_batch", None):
+        run = _code_run(f"| 0x401000 | code: Listing 1 below |\n\n```\n{CODE}\n```", kind=kind)
+        run["html"] += f"<td>0x401000</td><pre><code>{CODE}</code></pre>"
+
+        result = surfaces.audit(run, clean_spec())
+
+        assert defects(result) == [], kind
+        assert result["checked"]["section_code"] == 2
 
 
 def test_a_cut_inside_a_defang_mark_is_a_truncation() -> None:

@@ -21,9 +21,11 @@ A surface that filters on purpose is named in the table with the code that
 filters and the rule it follows, and the rule is checked rather than the
 surface skipped: the default ``/iocs`` is the ``include=all`` rows that carry
 ``published: true``; the STIX export carries the published IOCs only; the
-Markdown cuts a cell at 160 characters and a list item at 200 with an
-ellipsis. A cut that follows its rule is counted under ``filtered``; anything
-else is a defect.
+Markdown cuts a one-line cell at 160 characters and a list item at 200 with
+an ellipsis. A cut that follows its rule is counted under ``filtered``;
+anything else is a defect. Code is never cut: a section value the renderer
+draws as a code listing (``holds_code``) must be on the Markdown and the HTML
+whole, and a cut of it is a defect.
 
 ``--run`` reads the files the benchmark runner saves (``job.json``,
 ``report-byjob.json``, ``report.json``, ``report.md``, ``report.html``,
@@ -1124,6 +1126,17 @@ def _section_blocks(blocks: list[_Block], title: str) -> list[_Block]:
 def check_sections(
     found: Findings, surfaces: dict[str, Any], texts: dict[str, str], out: Report
 ) -> None:
+    from maljan.reporting.renderers.markdown import declares_code, holds_code
+
+    # The calls behind the report, with the kind each declared: a section
+    # citing one that declares code holds code (markdown.py ``declares_code``).
+    calls = [
+        r
+        for r in _list(
+            _dict(_dict(surfaces.get("report_row")).get("malware_report")).get("evidence_index")
+        )
+        if isinstance(r, dict)
+    ]
     blocks: dict[str, list[_Block]] = {}
     if isinstance(surfaces.get("markdown"), str):
         blocks["markdown"] = _md_blocks(surfaces["markdown"])
@@ -1158,6 +1171,7 @@ def check_sections(
         items = [_text(i) for i in _list(section.get("items"))]
         body = _text(section.get("text")).strip()
         has = bool(rows or items or body)
+        declared = declares_code(_list(section.get("evidence_ids")), calls)
         if isinstance(full, dict):
             out.checked["section"] += 1
             if full_keys[(key, len(rows), len(items))] <= 0:
@@ -1236,12 +1250,21 @@ def check_sections(
                         key,
                         f"the table draws {drawn[1]} rows of the section's {distinct}",
                     )
-            for cell in _distinct(_text(c) for r in rows for c in r):
+            # Code is drawn whole, as a listing under the section's table
+            # (markdown.py ``holds_code``): a code value cut anywhere is a
+            # truncation, never the cell's declared cut.
+            code = {
+                _text(c) for r in rows for c in r if holds_code(_text(c), map(_text, r), declared)
+            } | {i for i in items if holds_code(i, (), declared)}
+            for value, width in [
+                *((cell, 160) for cell in _distinct(_text(c) for r in rows for c in r)),
+                *((item, 200) for item in _distinct(items)),
+            ]:
                 out.checked["section_item"] += 1
-                _found_in_text(out, "section_item", f"{name}:{key}", where, cell, cut_at=160)
-            for item in _distinct(items):
-                out.checked["section_item"] += 1
-                _found_in_text(out, "section_item", f"{name}:{key}", where, item, cut_at=200)
+                if value in code:
+                    out.checked["section_code"] += 1
+                cut_at = None if value in code else width
+                _found_in_text(out, "section_item", f"{name}:{key}", where, value, cut_at=cut_at)
             if body:
                 out.checked["section_item"] += 1
                 _found_in_text(out, "section_item", f"{name}:{key}", where, body, cut_at=None)
