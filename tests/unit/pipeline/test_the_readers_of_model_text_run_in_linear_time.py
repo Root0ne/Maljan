@@ -25,7 +25,11 @@ from maljan.agents.claim_headings import CLAIM_HEAD_RE, claim_blocks
 from maljan.agents.repeat_watch import ClaimRepeatReader
 from maljan.pipeline.claim_drops import claim_substance
 from maljan.pipeline.debate_facts import fact_atoms, ledger_count_facts, ledger_stated
-from maljan.pipeline.validation import EntryTexts, ledger_absence_contradictions
+from maljan.pipeline.validation import (
+    EntryTexts,
+    absence_holders_note,
+    ledger_absence_contradictions,
+)
 from maljan.schemas.evidence import build_entry
 from tests.linear_cost import TIME_RATIO_LIMIT, cpu_seconds
 
@@ -161,6 +165,28 @@ LEDGER = [{"id": "ev_0001", "tool": "t", "structured": {"matches": [], "total": 
                 ENTRIES,
             ),
             id="a long decompile subject",
+        ),
+        pytest.param(
+            lambda t: ledger_absence_contradictions(
+                {
+                    "body": "The body of 0x1400"
+                    + ", which a" * (len(t) // 9)
+                    + " is not in my rows."
+                },
+                ENTRIES,
+            ),
+            id="a subject of many asides",
+        ),
+        pytest.param(
+            lambda t: ledger_absence_contradictions(
+                {"body": "the " + "plain " * (len(t) // 6) + "slots 0x1400 remain unresolved."},
+                ENTRIES,
+            ),
+            id="many words describing a kind noun",
+        ),
+        pytest.param(
+            lambda t: absence_holders_note("Slot 0x1400 is unresolved, and " + t, ENTRIES),
+            id="a claim's absence note",
         ),
         pytest.param(
             lambda t: ledger_count_facts([" " * len(t) + "x"], {}, LEDGER, ["a"]),

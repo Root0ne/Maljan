@@ -67,6 +67,7 @@ from maljan.pipeline.validation import (
     ValidationTally,
     Validator,
     Violation,
+    absence_holders_note,
     citation_violations,
     configuration_citation_violations,
     flow_voice_violations,
@@ -534,7 +535,14 @@ def _bundle_text(
             claim = f"{c.get('claim', '')} — {c.get('evidence_ref', '')}"
             label = f"[{c['label']}] " if c.get("label") else ""
             shown = _within_view(claim, item_chars, quoted_value)
-            lines.append(f"- {label}{shown}" + _where_quoted(claim, entries))
+            # What the ledger holds of anything the claim says is absent: the
+            # analyst's view is not the run's (``absence_holders_note``). It
+            # shares the claim's room: what the claim's view left of it.
+            held = absence_holders_note(claim, entries)
+            if held and item_chars is not None:
+                left = item_chars - (len(shown) - len(quoted_value(""))) if item_chars >= 0 else -1
+                held = _within_view(held, left, str) if left != 0 else ""
+            lines.append(f"- {label}{shown}" + _where_quoted(claim, entries) + held)
         lines.append("")
     tools = bundle.get("tool_outputs") or []
     if tools:
