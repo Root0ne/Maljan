@@ -254,6 +254,10 @@ CODE_OWNED: dict[tuple[str, str], frozenset[str]] = {
     # numbers and states, around values each wrapped in the helper where the
     # sentence is built.
     ("pipeline/validation.py", "stated_value_violations"): frozenset({"said"}),
+    # The command table's row numbers and counts, and the values the platform
+    # read from the code as whole numbers, around the code's place, its
+    # expression and each row's id, each wrapped in the helper where written.
+    ("pipeline/validation.py", "command_value_violations"): frozenset({"said"}),
     # The claim's number is a count; the function and source phrases are built
     # in the function from values each wrapped in the helper where written.
     ("pipeline/function_claims.py", "_question"): frozenset({"number", "head", "sources"}),

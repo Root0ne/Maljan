@@ -46,7 +46,7 @@ not prove the test makes the platform raise it. The tests are not listed here:
 one nothing raises any more and stored runs still carry; the comment on that
 name says what reads it.
 
-**102 codes in 11 families:** [attck](#attck) 6 · [attribution](#attribution) 1 · [composer](#composer) 3 · [isr](#isr) 14 · [narrative](#narrative) 5 · [question](#question) 9 · [report](#report) 14 · [stix](#stix) 32 · [tool](#tool) 1 · [validation](#validation) 1 · [verdict](#verdict) 16. 14 code positions the register could not resolve are [listed at the end](#unresolved-code-positions).
+**103 codes in 11 families:** [attck](#attck) 6 · [attribution](#attribution) 1 · [composer](#composer) 4 · [isr](#isr) 14 · [narrative](#narrative) 5 · [question](#question) 9 · [report](#report) 14 · [stix](#stix) 32 · [tool](#tool) 1 · [validation](#validation) 1 · [verdict](#verdict) 16. 14 code positions the register could not resolve are [listed at the end](#unresolved-code-positions).
 
 ## attck
 
@@ -110,6 +110,14 @@ No comment names its meaning; the message at `maljan.pipeline.validation:validat
 - **Docs** none
 
 ## composer
+
+### `composer.command_values`
+
+A command table whose numbered ids leave out a value the code it was shown compares the command value with, or name a value that code compares it with nowhere. A row whose id was converted between bases by hand can name another case's value, and a case the table leaves out is a command the reader never learns of. Asked once with the values the platform read from the code; the model decides which branch is a command and what it does, and the table is kept as written with the finding beside it.
+
+- **Raised at** `maljan.pipeline.validation:command_value_violations`
+- **Constant** `maljan.pipeline.validation:COMMAND_VALUES_CODE`
+- **Docs** none
 
 ### `composer.cut_at_output_cap`
 
