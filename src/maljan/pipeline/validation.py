@@ -11579,58 +11579,134 @@ def retry_drops(
     return RetryDrops(claims=tuple(claims), findings=findings)
 
 
-def retry_drop_question(drops: RetryDrops) -> str:
-    """The one question a kept retry's dropped items are put to the analyst with."""
+def retry_drop_cited(item: Any) -> list[str]:
+    """The entry ids one dropped claim or finding cites, lower-cased, in the order written."""
+    if hasattr(item, "claim"):
+        text = f"{getattr(item, 'claim', '')} {getattr(item, 'evidence_ref', '') or ''}"
+    else:
+        ids = " ".join(str(i) for i in getattr(item, "evidence_ids", None) or ())
+        text = f"{ids} {getattr(item, 'title', '')} {getattr(item, 'detail', '') or ''}"
+    return list(dict.fromkeys(found.lower() for found in ENTRY_ID_RE.findall(text)))
+
+
+def _whole_line(value: Any) -> str:
+    """A model-written value on one line, masked as the record masks an answer, never cut.
+
+    The question is the analyst's own words put back to it: a claim cut at a
+    finding row's bound is a claim it cannot judge.
+    """
+    return " ".join(safe_answer_text(value).split())
+
+
+def _retry_drop_item_lines(drops: RetryDrops, *, numbered: bool, values: bool) -> list[str]:
     lines = []
     for label, kind, item, missing in drops.labelled():
         if kind == "claim":
-            stated = safe_finding_value(", ".join(missing))
+            block = getattr(item, "block", None)
+            number = f" {int(block) + 1}" if numbered and block is not None else ""
             technique = str(getattr(item, "technique_id", "") or "")
-            on_line = f", TECHNIQUE {safe_finding_value(technique)}" if technique else ""
-            values = f" (it stated {stated}, which your retry states nowhere)"
-            lines.append(f"{label}. CLAIM: {safe_finding_value(item.claim)}{on_line}{values}")
+            on_line = f", TECHNIQUE {_whole_line(technique)}" if technique else ""
+            stated = (
+                f" (it stated {_whole_line(', '.join(missing))}, which your retry states nowhere)"
+                if values
+                else ""
+            )
+            lines.append(f"{label}. CLAIM{number}: {_whole_line(item.claim)}{on_line}{stated}")
+            ref = str(getattr(item, "evidence_ref", "") or "").strip()
+            if ref:
+                lines.append(f"    EVIDENCE: {_whole_line(ref)}")
         else:
             detail = str(getattr(item, "detail", "") or "").strip()
             said = f": {detail}" if detail else ""
-            lines.append(f"{label}. FINDING: {safe_finding_value(f'{item.title}{said}')}")
+            lines.append(f"{label}. FINDING: {_whole_line(f'{item.title}{said}')}")
+            ids = [str(i) for i in getattr(item, "evidence_ids", None) or () if str(i).strip()]
+            if ids:
+                lines.append(f"    EVIDENCE: {_whole_line(', '.join(ids))}")
+    return lines
+
+
+# The head of the entries a drops question shows, what it says of an entry that
+# does not fit beside the conversation and the entries shown, and of a question
+# asked in parts.
+RETRY_DROP_ENTRIES_HEAD = (
+    "The ledger entries these items cite, as recorded. Your retry was written without them "
+    "in view; read them again here:"
+)
+RETRY_DROP_ENTRIES_UNFIT = (
+    "The ledger holds these entries the items cite; they do not fit beside this conversation "
+    "and the entries shown above, so they are not shown here:"
+)
+RETRY_DROP_PART = (
+    "This question is asked in {total} parts, each beside the entries its items cite; this "
+    "is part {number}."
+)
+
+
+def _retry_drop_closing(
+    entries: Mapping[str, str] | None, unfit: Sequence[str], part: tuple[int, int] | None
+) -> str:
+    parts: list[str] = []
+    if part is not None:
+        parts.append(RETRY_DROP_PART.format(number=part[0], total=part[1]))
+    if entries:
+        parts.append(RETRY_DROP_ENTRIES_HEAD)
+        parts.extend(text.rstrip() for text in entries.values())
+    if unfit:
+        parts.append(f"{RETRY_DROP_ENTRIES_UNFIT} {', '.join(unfit)}.")
+    parts.append(
+        "For each item, write one line: KEEP <label>: <reason> to keep it in your answer as "
+        "your first answer wrote it, or WITHDRAW <label>: <reason> to leave it out. Write "
+        "nothing else."
+    )
+    return "\n".join(parts)
+
+
+def retry_drop_question(
+    drops: RetryDrops,
+    entries: Mapping[str, str] | None = None,
+    *,
+    unfit: Sequence[str] = (),
+    part: tuple[int, int] | None = None,
+) -> str:
+    """The question a kept retry's dropped items are put to the analyst with.
+
+    Each item whole, with the entries it cites: ``entries`` maps each cited id
+    the conversation does not hold to its text as recorded, shown once under
+    the items. ``unfit`` names the cited entries that do not fit beside the
+    conversation and the entries shown; ``part`` is ``(number, total)`` when the items
+    are asked in several parts, each beside its own entries.
+    """
     return (
         "Your retry stands as your answer, and it no longer states these items of your first "
         "answer:\n"
-        + "\n".join(lines)
-        + "\nFor each item, write one line: KEEP <label>: <reason> to keep it in your answer "
-        "as your first answer wrote it, or WITHDRAW <label>: <reason> to leave it out. Write "
-        "nothing else."
+        + "\n".join(_retry_drop_item_lines(drops, numbered=False, values=True))
+        + "\n"
+        + _retry_drop_closing(entries, unfit, part)
     )
 
 
-def retry_unplaced_question(drops: RetryDrops) -> str:
-    """The one question about what a merged retry left as it was, item by item.
+def retry_unplaced_question(
+    drops: RetryDrops,
+    entries: Mapping[str, str] | None = None,
+    *,
+    unfit: Sequence[str] = (),
+    part: tuple[int, int] | None = None,
+) -> str:
+    """The question about what a merged retry left as it was, item by item.
 
     The claims a question was about that the retry neither wrote again nor
     withdrew, each named with its claim number, and the findings it did not
-    write again while it wrote findings under new titles. The answer is read
+    write again while it wrote findings under new titles, with the entries
+    they cite as :func:`retry_drop_question` shows them. The answer is read
     as :func:`retry_drop_question`'s is (:func:`read_retry_drop_answers`).
     """
-    lines = []
-    for label, kind, item, _missing in drops.labelled():
-        if kind == "claim":
-            block = getattr(item, "block", None)
-            number = f" {int(block) + 1}" if block is not None else ""
-            technique = str(getattr(item, "technique_id", "") or "")
-            on_line = f", TECHNIQUE {safe_finding_value(technique)}" if technique else ""
-            lines.append(f"{label}. CLAIM{number}: {safe_finding_value(item.claim)}{on_line}")
-        else:
-            detail = str(getattr(item, "detail", "") or "").strip()
-            said = f": {detail}" if detail else ""
-            lines.append(f"{label}. FINDING: {safe_finding_value(f'{item.title}{said}')}")
     return (
         "Your retry neither wrote again nor withdrew these items of your answer: the claims "
         "you were asked to fix, and the findings your findings block did not write again "
         "while it wrote findings under new titles. Each stands as your first answer wrote it:\n"
-        + "\n".join(lines)
-        + "\nFor each item, write one line: KEEP <label>: <reason> to keep it in your answer "
-        "as your first answer wrote it, or WITHDRAW <label>: <reason> to leave it out. Write "
-        "nothing else."
+        + "\n".join(_retry_drop_item_lines(drops, numbered=True, values=False))
+        + "\n"
+        + _retry_drop_closing(entries, unfit, part)
     )
 
 

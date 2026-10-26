@@ -152,6 +152,7 @@ from maljan.pipeline.validation import (
     library_only_claims,
     parse_violations,
     read_retry_drop_answers,
+    retry_drop_cited,
     retry_drop_question,
     retry_drop_row,
     retry_drops,
@@ -3464,6 +3465,114 @@ def current_run_state(agent: Any) -> str:
         return render_run_state({**source, "evidence_ledger": [*rows, *added]}) or body
     except Exception:  # noqa: BLE001 — the block the agent was briefed with still holds
         return body
+
+
+# One item of a drops question as ``RetryDrops.labelled`` gives it.
+_DropRow = tuple[str, str, Any, tuple[str, ...]]
+
+
+def _read_in_loop(agent: Any, rows: Sequence[Any]) -> set[str]:
+    """The ids of the entries ``agent`` had in view past a pack summary: its own calls, and every
+    entry a row of its own read again.
+
+    Judged from the ledger's rows alone: a row the agent filed is its own call,
+    and a row of its own that repeats another entry (``repeated_of``: a read of
+    a stored answer, a decompile answered from an earlier one) touched that
+    entry, whether it read it whole, in pages or cut. A chain of repeats is
+    followed to the entry that holds the answer (``repeat_holders``).
+    """
+    from maljan.schemas.evidence import repeat_holders
+
+    name = str(getattr(agent, "name", "") or "")
+    if not name:
+        return set()
+    holders = repeat_holders(rows)
+    touched: set[str] = set()
+    for row in rows:
+        if str(getattr(row, "agent", "") or "") != name:
+            continue
+        row_id = str(getattr(row, "id", "") or "").lower()
+        touched.add(row_id)
+        first = str(getattr(row, "repeated_of", "") or "").lower()
+        if first:
+            touched.add(holders.get(row_id) or first)
+    touched.discard("")
+    return touched
+
+
+# What a pack entry shown as its summary line says of the rest of it.
+PACK_SUMMARY_NOTE = (
+    "is in your brief above as its summary line, as you had it in view when you wrote the "
+    "claim; the whole entry is in the ledger"
+)
+
+
+def cited_entry_texts(agent: Any, cited: Sequence[str], messages: Sequence[Any]) -> dict[str, str]:
+    """The cited entries a tools-free turn does not hold, each as the agent had it in view, by id.
+
+    The ledger is the agent's own entries and the run's as the agent was
+    briefed with it (``run_state_source``); a repeat is shown as the entry
+    that holds its answer. An entry from the agent's own calls, or one it read
+    again in its loop, whole, in pages or cut (:func:`_read_in_loop`), is shown
+    whole, as recorded and marked when the ledger holds only part of it, unless
+    the conversation
+    (``messages``, every run-state block aside) carries its stored output
+    verbatim. A pack entry the agent saw only as its summary line (a line of
+    the conversation opening with its bracketed id) is named with a note
+    that the line is in its brief and the whole entry in the ledger: that
+    line is what its claims were written from, and the conversation already
+    carries it. Any other entry is shown whole. Keyed by id in the order
+    first cited. Never raises: an unreadable ledger shows nothing.
+    """
+    from maljan.agents.judge_agent import NO_ENTRY_TEXT, PARTIAL_ENTRY_MARK, question_evidence
+    from maljan.pipeline.run_state import RUN_STATE_BEGIN, RUN_STATE_END
+
+    wanted = list(dict.fromkeys(str(entry_id).lower() for entry_id in cited if entry_id))
+    if not wanted:
+        return {}
+    try:
+        rows: list[Any] = [
+            *(getattr(agent, "_evidence_entries", None) or ()),
+            *(getattr(agent, "_live_map_entries", None) or ()),
+        ]
+        source = getattr(agent, "run_state_source", None)
+        if isinstance(source, Mapping):
+            for row in source.get("evidence_ledger") or ():
+                try:
+                    rows.append(
+                        row if isinstance(row, LedgerEntry) else LedgerEntry.model_validate(row)
+                    )
+                except Exception:  # noqa: BLE001 — one unreadable row is not a lost question
+                    continue
+        ledger = question_evidence(rows)
+        touched = _read_in_loop(agent, rows)
+        block = re.compile(re.escape(RUN_STATE_BEGIN) + r".*?" + re.escape(RUN_STATE_END), re.S)
+        conversation = "\n".join(
+            block.sub("", content if isinstance(content, str) else answer_text(content))
+            for content in (getattr(m, "content", m) for m in messages)
+        )
+        summaries: dict[str, str] = {}
+        for line in conversation.splitlines():
+            found = re.match(rf"\s*\[({ENTRY_ID_RE.pattern})\]", line, re.IGNORECASE)
+            if found:
+                summaries.setdefault(found.group(1).lower(), line.strip())
+    except Exception:  # noqa: BLE001 — no ledger read is the question as it was
+        return {}
+    texts: dict[str, str] = {}
+    for entry_id in wanted:
+        shown = ledger.get(entry_id)
+        if shown is None:
+            continue
+        if entry_id not in touched and entry_id in summaries:
+            texts[entry_id] = f"[{entry_id}] {PACK_SUMMARY_NOTE}."
+            continue
+        body = shown.text.strip()
+        if body and not shown.partial and not shown.lowered and body in conversation:
+            continue
+        mark = f" ({PARTIAL_ENTRY_MARK})" if shown.partial else ""
+        tool = f" {shown.tool}" if shown.tool else ""
+        texts[entry_id] = f"[{entry_id}]{tool}{mark}:\n{shown.text or NO_ENTRY_TEXT}"
+    return texts
 
 
 def own_earlier_entries(agent: Any) -> list[LedgerEntry]:
@@ -9915,7 +10024,7 @@ class BaseAnalyst(BudgetMeter, ABC):
         withdrawn = BaseAnalyst._ask_retry_drops(  # type: ignore[arg-type]
             self,
             drops,
-            retry_drop_question(drops),
+            retry_drop_question,
             said,
             answer,
             messages,
@@ -9978,7 +10087,7 @@ class BaseAnalyst(BudgetMeter, ABC):
         withdrawn = BaseAnalyst._ask_retry_drops(  # type: ignore[arg-type]
             self,
             drops,
-            retry_unplaced_question(drops),
+            retry_unplaced_question,
             said,
             answer,
             messages,
@@ -10031,10 +10140,124 @@ class BaseAnalyst(BudgetMeter, ABC):
             }
         )
 
+    def _window_room_chars(self, cap: int) -> float | None:
+        """The characters a prompt may take beside an answer of ``cap`` tokens, or ``None``.
+
+        The job's learned window first, in the budget's own characters per
+        token; with none learned, the window recorded on the model as the
+        settings declared it or its server reported it, then the vendored
+        table's row for its family. ``None`` when no window is known.
+        """
+        from maljan.llm.context_window import WindowFact, built_window, table_window
+
+        budget = BaseAnalyst._context_budget(self)  # type: ignore[arg-type]
+        per_token = float(CHARS_PER_TOKEN)
+        tokens = 0
+        try:
+            learned = isinstance(getattr(budget, "window", None), WindowFact)
+            if budget is not None and learned and getattr(budget, "derives", False) is True:
+                per_token = float(budget.chars_per_token)
+                tokens = int(budget.window.tokens)
+            else:
+                model = getattr(self, "llm", None)
+                named = getattr(model, "model", None) or getattr(model, "model_name", None)
+                fact = built_window(model) or table_window(named if isinstance(named, str) else "")
+                tokens = int(fact.tokens) if fact is not None else 0
+        except Exception:  # noqa: BLE001 — a window that cannot be read is not known
+            return None
+        if tokens <= 0:
+            return None
+        return (tokens - int(cap)) * per_token
+
+    def _retry_drop_parts(
+        self,
+        drops: RetryDrops,
+        question: Callable[..., str],
+        entries: Mapping[str, str],
+        answer: str,
+        messages: list[Any],
+    ) -> list[tuple[RetryDrops, dict[str, str], list[str]]]:
+        """The question's items in parts that each fit the window beside their own entries.
+
+        Each part is ``(items, entries shown, entries named as too large)``,
+        built when it is closed, so an entry named for a later item stays shown
+        in the part that was measured with it. Every turn is measured framed,
+        run-state block and all, against :meth:`_window_room_chars`: the framed
+        conversation once, and each part's question beside it. With no window
+        known the items are one part. Items are taken in order while the part
+        still fits; an item that does not fit alone first has named each entry
+        that cannot fit beside it even alone, then, if it still does not fit,
+        its largest entries, one at a time, until it does. Nothing is cut.
+        """
+        from langchain_core.messages import AIMessage, HumanMessage
+
+        rows = drops.labelled()
+        room = BaseAnalyst._window_room_chars(  # type: ignore[arg-type]
+            self, int(self.output_cap_tokens() or 0)
+        )
+        unfit: set[str] = set()
+        framed = frame_messages(
+            [*messages, AIMessage(content=str(answer or "")), HumanMessage(content="")],
+            run_state=current_run_state(self),
+        )
+        conversation = sum(len(str(getattr(m, "content", m) or "")) for m in framed)
+
+        def _built(
+            part: list[_DropRow], named: set[str]
+        ) -> tuple[RetryDrops, dict[str, str], list[str]]:
+            items = RetryDrops(
+                claims=tuple((item, miss) for _l, kind, item, miss in part if kind == "claim"),
+                findings=tuple(item for _l, kind, item, _m in part if kind == "finding"),
+            )
+            cited = list(
+                dict.fromkeys(
+                    entry_id
+                    for _l, _k, item, _m in part
+                    for entry_id in retry_drop_cited(item)
+                    if entry_id in entries
+                )
+            )
+            shown = {entry_id: entries[entry_id] for entry_id in cited if entry_id not in named}
+            return items, shown, [entry_id for entry_id in cited if entry_id in named]
+
+        def _fits(part: list[_DropRow], named: set[str]) -> bool:
+            if room is None:
+                return True
+            items, shown, left_out = _built(part, named)
+            # Measured as a part of several: the longest form the turn takes.
+            asked = question(items, shown, unfit=left_out, part=(1, 2))
+            return conversation + len(asked) <= room
+
+        batches: list[tuple[RetryDrops, dict[str, str], list[str]]] = []
+        current: list[_DropRow] = []
+        # Named in the current part only, to let its item fit; an entry that
+        # cannot fit beside its item even alone is named wherever it is cited.
+        in_part: set[str] = set()
+        for row in rows:
+            if _fits([*current, row], unfit | in_part):
+                current.append(row)
+                continue
+            if current:
+                batches.append(_built(current, unfit | in_part))
+            current, in_part = [row], set()
+            own = [e for e in retry_drop_cited(row[2]) if e in entries and e not in unfit]
+            for entry_id in own:
+                if not _fits(current, unfit | (set(own) - {entry_id})):
+                    unfit.add(entry_id)
+            for entry_id in sorted(
+                (e for e in own if e not in unfit), key=lambda e: len(entries[e]), reverse=True
+            ):
+                if _fits(current, unfit | in_part):
+                    break
+                in_part.add(entry_id)
+        if current:
+            batches.append(_built(current, unfit | in_part))
+        return batches
+
     def _ask_retry_drops(
         self,
         drops: RetryDrops,
-        question: str,
+        question: Callable[..., str],
         said: str,
         answer: str,
         messages: list[Any],
@@ -10043,13 +10266,34 @@ class BaseAnalyst(BudgetMeter, ABC):
         *,
         merged: bool = False,
     ) -> set[int]:
-        """Ask once about ``drops``, record every item, and return the ids of the items withdrawn.
+        """Ask about ``drops``, record every item, and return the ids of the items withdrawn.
 
-        The question follows the retry as the analyst wrote it. Each item is
+        The question follows the retry as the analyst wrote it, and shows the
+        ledger entries the items cite that the conversation does not hold,
+        whole: the retry and this question are tools-free turns, and the tool
+        results the first answer read are in neither. Items whose entries do
+        not fit beside the conversation together are asked in parts, each
+        beside its own entries (:meth:`_retry_drop_parts`). Each item is
         recorded (``retry_drop_row``) as kept, withdrawn or not answered, with
         the analyst's reason; an item not answered is not withdrawn.
         """
+        from langchain_core.messages import AIMessage, HumanMessage
+
         labelled = drops.labelled()
+        cited = [entry_id for _l, _k, item, _m in labelled for entry_id in retry_drop_cited(item)]
+        entries = cited_entry_texts(self, cited, messages)
+        asked_in = BaseAnalyst._retry_drop_parts(  # type: ignore[arg-type]
+            self, drops, question, entries, answer, messages
+        )
+        named = sorted({entry_id for _items, _shown, unfit in asked_in for entry_id in unfit})
+        if len(asked_in) > 1 or named:
+            self.logger.warning(
+                "Validation: the kept-retry drops question for '%s' is asked in %d part(s), each "
+                "beside the entries its items cite; %s.",
+                self.name,
+                len(asked_in),
+                f"too large to show even alone: {', '.join(named)}" if named else "all shown",
+            )
         from maljan.pipeline.events import (
             VALIDATION_RESOLVED,
             VALIDATION_RETRIED,
@@ -10067,29 +10311,39 @@ class BaseAnalyst(BudgetMeter, ABC):
             retry_index=1,
             state=VALIDATION_RETRIED,
         )
-        decided: dict[str, tuple[str, str]] = {}
-        try:
-            from langchain_core.messages import AIMessage, HumanMessage
-
-            turns = [
-                *messages,
-                AIMessage(content=str(answer or "")),
-                HumanMessage(content=question),
-            ]
-            reply = self._invoke_llm_with_timeout(
-                frame_messages(turns, run_state=current_run_state(self)),
-                left,
-                what=RETRY_DROPS_QUESTION_CALL,
+        decided: dict[int, tuple[str, str]] = {}
+        for number, (items, shown, unfit) in enumerate(asked_in, start=1):
+            part_rows = items.labelled()
+            asked = question(
+                items,
+                shown,
+                unfit=unfit,
+                part=(number, len(asked_in)) if len(asked_in) > 1 else None,
             )
-            decided = read_retry_drop_answers(
-                answer_text(getattr(reply, "content", reply)), [row[0] for row in labelled]
-            )
-        except Exception as exc:  # noqa: BLE001 — unanswered, the first answer's items stay
-            self.logger.warning(
-                "Validation: the kept-retry drops question for '%s' was not answered (%s).",
-                self.name,
-                describe_exception_for_log(exc),
-            )
+            try:
+                turns = [
+                    *messages,
+                    AIMessage(content=str(answer or "")),
+                    HumanMessage(content=asked),
+                ]
+                reply = self._invoke_llm_with_timeout(
+                    frame_messages(turns, run_state=current_run_state(self)),
+                    left,
+                    what=RETRY_DROPS_QUESTION_CALL,
+                )
+                read = read_retry_drop_answers(
+                    answer_text(getattr(reply, "content", reply)), [row[0] for row in part_rows]
+                )
+            except Exception as exc:  # noqa: BLE001 — unanswered, the first answer's items stay
+                self.logger.warning(
+                    "Validation: the kept-retry drops question for '%s' was not answered (%s).",
+                    self.name,
+                    describe_exception_for_log(exc),
+                )
+                continue
+            for label, _kind, item, _missing in part_rows:
+                if label in read:
+                    decided[id(item)] = read[label]
         emit_validation_feedback(
             self._event_sink(),
             stage=stage,
@@ -10099,7 +10353,7 @@ class BaseAnalyst(BudgetMeter, ABC):
             retry_index=1,
             state=(
                 VALIDATION_RESOLVED
-                if all(row[0] in decided for row in labelled)
+                if all(id(row[2]) in decided for row in labelled)
                 else VALIDATION_SURVIVED
             ),
         )
@@ -10108,8 +10362,8 @@ class BaseAnalyst(BudgetMeter, ABC):
             self.validation_fed_back.get(RETRY_DROPPED_CODE, 0) + 1
         )
         withdrawn: set[int] = set()
-        for label, kind, item, missing in labelled:
-            decision, reason = decided.get(label, ("", ""))
+        for _label, kind, item, missing in labelled:
+            decision, reason = decided.get(id(item), ("", ""))
             if decision == "WITHDRAW":
                 state = RETRY_DROP_WITHDRAWN
                 withdrawn.add(id(item))
