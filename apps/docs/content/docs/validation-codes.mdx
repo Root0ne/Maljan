@@ -46,7 +46,7 @@ not prove the test makes the platform raise it. The tests are not listed here:
 one nothing raises any more and stored runs still carry; the comment on that
 name says what reads it.
 
-**101 codes in 11 families:** [attck](#attck) 6 · [attribution](#attribution) 1 · [composer](#composer) 3 · [isr](#isr) 13 · [narrative](#narrative) 5 · [question](#question) 9 · [report](#report) 14 · [stix](#stix) 32 · [tool](#tool) 1 · [validation](#validation) 1 · [verdict](#verdict) 16. 14 code positions the register could not resolve are [listed at the end](#unresolved-code-positions).
+**102 codes in 11 families:** [attck](#attck) 6 · [attribution](#attribution) 1 · [composer](#composer) 3 · [isr](#isr) 14 · [narrative](#narrative) 5 · [question](#question) 9 · [report](#report) 14 · [stix](#stix) 32 · [tool](#tool) 1 · [validation](#validation) 1 · [verdict](#verdict) 16. 14 code positions the register could not resolve are [listed at the end](#unresolved-code-positions).
 
 ## attck
 
@@ -213,9 +213,17 @@ A reverser's answer was mostly one-line claims of the form "uses `x.dll` APIs fo
 
 A retry kept as the analyst's answer that no longer states claims or findings its first answer had. The platform states which, per analyst, and asks the analyst once to keep or withdraw each with a reason; its answer stands. Unanswered, the first answer's items stay, their state said.
 
-- **Raised at** `maljan.agents.base_agent:BaseAnalyst._ask_retry_drops`, `maljan.pipeline.events:emit_validation_feedback`
+- **Raised at** `maljan.agents.base_agent:BaseAnalyst._ask_retry_drops._emit`, `maljan.pipeline.events:emit_validation_feedback`
 - **Constant** `maljan.pipeline.validation:RETRY_DROPPED_CODE`
 - **Docs** [Architecture](/architecture/), [Replaying a stored run](/replay/)
+
+### `isr.retry_restated_few`
+
+A whole retry that restates fewer of the first answer's claims than it leaves out (by the claim's values: restated when the retry states every value it holds; a claim that holds none, or whose only values left out are technique ids the retry was asked about, is counted neither way) is more another answer than a fix of this one, written in a tools-free turn. It does not replace the first answer: what it left out stands beside the retry's own claims, which stand for the claims they restate. The one question about those items says so, and also names each claim with no value whose sentence the retry does not write; it is asked under this code beside the drops code, with the same events. Each item the analyst withdraws stays out, every other stays as first written.
+
+- **Raised at** `maljan.agents.base_agent:BaseAnalyst._ask_retry_drops._emit`, `maljan.pipeline.events:emit_validation_feedback`
+- **Constant** `maljan.pipeline.validation:RETRY_RESTATED_FEW_CODE`
+- **Docs** [Architecture](/architecture/)
 
 ### `isr.technique_line_unread`
 

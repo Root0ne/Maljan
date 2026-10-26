@@ -24,7 +24,7 @@ from concurrent.futures import CancelledError as _FuturesCancelled
 from concurrent.futures import Future as _ConcurrentFuture
 from concurrent.futures import TimeoutError as _FuturesTimeout
 from dataclasses import dataclass, replace
-from functools import lru_cache
+from functools import lru_cache, partial
 from types import MappingProxyType, SimpleNamespace
 from typing import TYPE_CHECKING, Any, Literal, cast
 
@@ -130,6 +130,7 @@ from maljan.pipeline.validation import (
     RETRY_DROP_NOT_ANSWERED,
     RETRY_DROP_WITHDRAWN,
     RETRY_DROPPED_CODE,
+    RETRY_RESTATED_FEW_CODE,
     TECHNIQUE_LINE_UNREAD_CODE,
     VALIDATION_TURN_NOT_RUN_CODE,
     VALIDITY_CODE,
@@ -156,12 +157,14 @@ from maljan.pipeline.validation import (
     retry_drop_question,
     retry_drop_row,
     retry_drops,
+    retry_restated_few_question,
     retry_unplaced_question,
     retry_with_feedback_sync,
     retry_withdrawn_row,
     run_image_bases,
     settle_validation_marks,
     unparsed_answer_rows,
+    validation_entries_text,
     validity_check_available,
     whole_answer_questions,
 )
@@ -9204,7 +9207,7 @@ class BaseAnalyst(BudgetMeter, ABC):
             # saying it was not asked, and the technique goes through as claimed.
             return _settle_an_unanswered_turn(self, isr, initial, detail)
 
-        from langchain_core.messages import HumanMessage, SystemMessage
+        from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 
         # The validation turn is one tools-free call over the evidence text: it
         # asks for a fix to an answer, not for more looking, so the prompt it is
@@ -9274,6 +9277,27 @@ class BaseAnalyst(BudgetMeter, ABC):
         ):
             cards = False
             sent = with_question(messages, feedback_text(initial, closing=closing, cards=False))
+        # The retry is a tools-free turn, and the tool results the answer was
+        # written from are not in the conversation it is sent in: the ledger
+        # entries the answer cites are shown in front of the closing, as the
+        # analyst had them in view, as many as fit beside an answer of the cap
+        # the cards were measured with. What fitted before still fits.
+        bare_closing = closing
+        with_entries = BaseAnalyst._with_cited_entries(  # type: ignore[arg-type]
+            self,
+            isr,
+            messages,
+            closing,
+            lambda text: [
+                *messages,
+                AIMessage(content=str(_PriorAnswer(isr).content or "")),
+                HumanMessage(content=feedback_text(initial, closing=text, cards=cards)),
+            ],
+            max(widest, int(self.output_cap_tokens() or 0)),
+        )
+        if with_entries != closing:
+            closing = with_entries
+            sent = with_question(messages, feedback_text(initial, closing=closing, cards=cards))
         too_big = (loop_cuts or loop_repeat is not None) and not BaseAnalyst._fits_the_window(  # type: ignore[arg-type]
             self, sent, widest
         )
@@ -9456,21 +9480,36 @@ class BaseAnalyst(BudgetMeter, ABC):
                 whole_answer_after_retry_question,
             )
 
-            asked = _with_feedback(
-                messages,
-                first_answer.answer_text or first_answer.to_text_summary(),
-                shown,
-                closing=closing,
-                cards=cards,
-            )
             retried_answer = raw_answers.get(id(retried), "")
             question = whole_answer_after_retry_question(why, techniques=techniques)
-            # A retry answer with no text is not sent back (``_with_feedback``'s
-            # rule): the question is asked at the end of the turn before it.
-            turns = (
-                [*asked, AIMessage(content=retried_answer), HumanMessage(content=question)]
-                if answer_text(retried_answer).strip()
-                else with_question(asked, question)
+
+            def _turns(text: str) -> list[Any]:
+                asked = _with_feedback(
+                    messages,
+                    first_answer.answer_text or first_answer.to_text_summary(),
+                    shown,
+                    closing=text,
+                    cards=cards,
+                )
+                # A retry answer with no text is not sent back (``_with_feedback``'s
+                # rule): the question is asked at the end of the turn before it.
+                return (
+                    [*asked, AIMessage(content=retried_answer), HumanMessage(content=question)]
+                    if answer_text(retried_answer).strip()
+                    else with_question(asked, question)
+                )
+
+            # The entries are fitted again: this turn also carries the retry's
+            # own answer and the question after it, beside a whole answer.
+            turns = _turns(
+                BaseAnalyst._with_cited_entries(  # type: ignore[arg-type]
+                    self,
+                    first_answer,
+                    messages,
+                    bare_closing,
+                    _turns,
+                    int(self.output_cap_tokens() or 0),
+                )
             )
             self.validation_retries += 1
             try:
@@ -10005,31 +10044,73 @@ class BaseAnalyst(BudgetMeter, ABC):
         each it keeps, and each it does not answer for, is put back into the
         answer as the first answer wrote it, and each it withdraws stays out.
         Every item is recorded with its state and the analyst's reason.
+
+        A retry that restates fewer of the first answer's claims than it
+        leaves out does not replace the first answer (:meth:`_restated_few`):
+        the question says so, and that the items stand beside the retry's
+        claims unless withdrawn. It also names each claim of the first answer
+        that holds no value and whose sentence no claim of the retry writes, so
+        no claim leaves the answer unasked.
         """
         drops = retry_drops(first_answer, retried, answer, asked_about, set_aside)
         if not drops:
             return retried
-        self.logger.warning(
-            "Validation: the kept retry for '%s' no longer states %d claim(s) and %d "
-            "finding(s) of the first answer; asking once whether to keep each.",
-            self.name,
-            len(drops.claims),
-            len(drops.findings),
+        restated = BaseAnalyst._restated_few(  # type: ignore[arg-type]
+            self, first_answer, retried, answer, drops, set_aside
         )
-        said = (
-            f"The kept retry no longer states {len(drops.claims)} claim(s) and "
-            f"{len(drops.findings)} finding(s) of the first answer; each is named to the "
-            "analyst once, to keep or withdraw with a reason."
-        )
+        question: Callable[..., str] = retry_drop_question
+        restated_said = ""
+        if restated is not None:
+            left_out = len(drops.claims)
+            drops = BaseAnalyst._with_unwritten_plain_claims(  # type: ignore[arg-type]
+                first_answer, retried, drops, set_aside
+            )
+            plain = len(drops.claims) - left_out
+            question = partial(
+                retry_restated_few_question, restated=restated, left_out=left_out, plain=plain
+            )
+            said = (
+                f"The retry restated {restated} of the first answer's claims that hold a value "
+                f"and left out {left_out}, so it does not replace the first answer: those "
+                f"{left_out} claim(s), {plain} claim(s) holding no value that the retry does not "
+                f"write and {len(drops.findings)} finding(s) stand beside the retry's claims, and "
+                "each is named to the analyst once, to keep or withdraw with a reason."
+            )
+            restated_said = said
+            self.logger.warning("Validation: for '%s', %s", self.name, said)
+            BaseAnalyst._note_on_last_loop(  # type: ignore[arg-type]
+                self,
+                "validation_retry_restated",
+                {
+                    "restated_claims": restated,
+                    "left_out_claims": left_out,
+                    "plain_claims_asked": plain,
+                    "left_out_findings": len(drops.findings),
+                },
+            )
+        else:
+            self.logger.warning(
+                "Validation: the kept retry for '%s' no longer states %d claim(s) and %d "
+                "finding(s) of the first answer; asking once whether to keep each.",
+                self.name,
+                len(drops.claims),
+                len(drops.findings),
+            )
+            said = (
+                f"The kept retry no longer states {len(drops.claims)} claim(s) and "
+                f"{len(drops.findings)} finding(s) of the first answer; each is named to the "
+                "analyst once, to keep or withdraw with a reason."
+            )
         withdrawn = BaseAnalyst._ask_retry_drops(  # type: ignore[arg-type]
             self,
             drops,
-            retry_drop_question,
+            question,
             said,
             answer,
             messages,
             left,
             int(retried.revision_round or 0),
+            restated=restated_said,
         )
         restored_claims: list[ClaimEvidence] = []
         restored_findings: list[Finding] = []
@@ -10048,6 +10129,71 @@ class BaseAnalyst(BudgetMeter, ABC):
                 "findings": [*(retried.findings or []), *restored_findings],
             }
         )
+
+    def _restated_few(
+        self,
+        first_answer: AgentISR,
+        retried: AgentISR,
+        answer: str,
+        drops: RetryDrops,
+        set_aside: Sequence[Any],
+    ) -> int | None:
+        """How many of the first answer's claims a retry restated, when fewer than it left out.
+
+        Restated by the values a claim holds (``claim_drops.dropped_claims``,
+        the identity ``retry_drops`` reads): a claim of the first answer that
+        holds a value, every one of which the retry states, and that is not set
+        aside. Left out: a claim among ``drops``. A claim whose only values the
+        retry states nowhere are technique ids it was asked about answered its
+        question, and is counted neither way, nor is a claim that holds no
+        value. A retry that restates fewer claims than it leaves out is more
+        another answer than a fix of this one, written in a tools-free turn,
+        and does not replace the first answer: what it left out stands beside
+        its claims unless the analyst withdraws it; ``None`` otherwise. The
+        caller says it once, in the run log and on the loop's record. Linear in
+        both answers.
+        """
+        from maljan.pipeline.claim_drops import dropped_claims
+
+        dropped = {id(claim) for claim, _missing in dropped_claims(first_answer, retried, answer)}
+        aside = {id(item) for item in set_aside}
+        restated = sum(
+            1
+            for claim in first_answer.claims
+            if id(claim) not in dropped
+            and id(claim) not in aside
+            and values_as_written(str(claim.claim), claim.technique_id or "")
+        )
+        if restated >= len(drops.claims):
+            return None
+        return restated
+
+    @staticmethod
+    def _with_unwritten_plain_claims(
+        first_answer: AgentISR, retried: AgentISR, drops: RetryDrops, set_aside: Sequence[Any]
+    ) -> RetryDrops:
+        """``drops`` with each first-answer claim that holds no value and the retry does not write.
+
+        ``retry_drops`` reads a claim by its values, so a claim that holds none
+        is never among them. Beside a retry that does not replace the first
+        answer, such a claim whose sentence (spacing aside) no claim of the
+        retry writes is named too, with no value, so the analyst keeps or
+        withdraws it. In the first answer's order. Linear in both answers.
+        """
+        sentences = {" ".join(str(c.claim).split()) for c in retried.claims}
+        aside = {id(item) for item in set_aside}
+        named = {id(claim): missing for claim, missing in drops.claims}
+        claims: list[tuple[Any, tuple[str, ...]]] = []
+        for claim in first_answer.claims:
+            if id(claim) in named:
+                claims.append((claim, named[id(claim)]))
+            elif (
+                id(claim) not in aside
+                and not values_as_written(str(claim.claim), claim.technique_id or "")
+                and " ".join(str(claim.claim).split()) not in sentences
+            ):
+                claims.append((claim, ()))
+        return RetryDrops(claims=tuple(claims), findings=drops.findings)
 
     def _settle_unplaced(
         self,
@@ -10169,6 +10315,76 @@ class BaseAnalyst(BudgetMeter, ABC):
             return None
         return (tokens - int(cap)) * per_token
 
+    def _with_cited_entries(
+        self,
+        isr: AgentISR,
+        messages: list[Any],
+        closing: str,
+        turns: Callable[[str], list[Any]],
+        cap: int,
+    ) -> str:
+        """``closing`` with the ledger entries ``isr`` cites in front of it, as many as fit.
+
+        The entries are the ones its claims and findings cite that the
+        conversation does not hold, each as the analyst had it in view
+        (:func:`cited_entry_texts`), in the order first cited. ``turns`` is the
+        conversation the turn is sent as, for a closing; it is measured framed,
+        run-state block and all, against :meth:`_window_room_chars` for an
+        answer of ``cap`` tokens. The names of every entry are reserved first,
+        so taking an entry in never makes the turn outgrow the room; an entry
+        that does not fit beside those shown is named by id. When none fits,
+        ``closing`` is returned as it was: a line of names alone would only
+        make the turn longer. With no window known every entry is shown.
+        Nothing is cut. Linear in the entries.
+        """
+        cited = [
+            entry_id
+            for item in [*isr.claims, *(isr.findings or [])]
+            for entry_id in retry_drop_cited(item)
+        ]
+        entries = cited_entry_texts(self, cited, messages)
+        if not entries:
+            return closing
+
+        def _closing(shown: Mapping[str, str], unfit: Sequence[str]) -> str:
+            return f"{validation_entries_text(shown, unfit)}\n{closing}"
+
+        room = BaseAnalyst._window_room_chars(self, cap)  # type: ignore[arg-type]
+        if room is None:
+            return _closing(entries, ())
+        named = list(entries)
+        framed = frame_messages(turns(_closing({}, named)), run_state=current_run_state(self))
+        used = sum(len(str(getattr(m, "content", m) or "")) for m in framed)
+        # The head is written once any entry is shown.
+        used += len(validation_entries_text({"": ""})) + 1
+        shown: dict[str, str] = {}
+        unfit: list[str] = []
+        for entry_id, text in entries.items():
+            taken = len(text.rstrip()) + 1
+            if used + taken <= room:
+                shown[entry_id] = text
+                used += taken
+            else:
+                unfit.append(entry_id)
+        if not shown:
+            self.logger.warning(
+                "Validation: none of the %d ledger entries '%s' cites fits beside its "
+                "validation turn; it is asked without them.",
+                len(entries),
+                self.name,
+            )
+            return closing
+        if unfit:
+            self.logger.warning(
+                "Validation: %d of the %d ledger entries '%s' cites do not fit beside its "
+                "validation retry and are named by id: %s.",
+                len(unfit),
+                len(entries),
+                self.name,
+                ", ".join(unfit),
+            )
+        return _closing(shown, unfit)
+
     def _retry_drop_parts(
         self,
         drops: RetryDrops,
@@ -10265,6 +10481,7 @@ class BaseAnalyst(BudgetMeter, ABC):
         revision_round: int,
         *,
         merged: bool = False,
+        restated: str = "",
     ) -> set[int]:
         """Ask about ``drops``, record every item, and return the ids of the items withdrawn.
 
@@ -10276,6 +10493,10 @@ class BaseAnalyst(BudgetMeter, ABC):
         beside its own entries (:meth:`_retry_drop_parts`). Each item is
         recorded (``retry_drop_row``) as kept, withdrawn or not answered, with
         the analyst's reason; an item not answered is not withdrawn.
+
+        ``restated`` is the message of ``RETRY_RESTATED_FEW_CODE`` when the
+        question is also asked under it: it then has the drops code's events,
+        retried then resolved or survived, and is counted as fed back as it is.
         """
         from langchain_core.messages import AIMessage, HumanMessage
 
@@ -10302,15 +10523,29 @@ class BaseAnalyst(BudgetMeter, ABC):
         )
 
         stage = str(getattr(self, "pipeline_stage", "") or "analysis")
-        emit_validation_feedback(
-            self._event_sink(),
-            stage=stage,
-            agent=str(self.name),
-            code=RETRY_DROPPED_CODE,
-            message=said,
-            retry_index=1,
-            state=VALIDATION_RETRIED,
-        )
+
+        def _emit(state: str) -> None:
+            emit_validation_feedback(
+                self._event_sink(),
+                stage=stage,
+                agent=str(self.name),
+                code=RETRY_DROPPED_CODE,
+                message=said,
+                retry_index=1,
+                state=state,
+            )
+            if restated:
+                emit_validation_feedback(
+                    self._event_sink(),
+                    stage=stage,
+                    agent=str(self.name),
+                    code=RETRY_RESTATED_FEW_CODE,
+                    message=restated,
+                    retry_index=1,
+                    state=state,
+                )
+
+        _emit(VALIDATION_RETRIED)
         decided: dict[int, tuple[str, str]] = {}
         for number, (items, shown, unfit) in enumerate(asked_in, start=1):
             part_rows = items.labelled()
@@ -10344,23 +10579,14 @@ class BaseAnalyst(BudgetMeter, ABC):
             for label, _kind, item, _missing in part_rows:
                 if label in read:
                     decided[id(item)] = read[label]
-        emit_validation_feedback(
-            self._event_sink(),
-            stage=stage,
-            agent=str(self.name),
-            code=RETRY_DROPPED_CODE,
-            message=said,
-            retry_index=1,
-            state=(
-                VALIDATION_RESOLVED
-                if all(id(row[2]) in decided for row in labelled)
-                else VALIDATION_SURVIVED
-            ),
+        _emit(
+            VALIDATION_RESOLVED
+            if all(id(row[2]) in decided for row in labelled)
+            else VALIDATION_SURVIVED
         )
         self.validation_retries += 1
-        self.validation_fed_back[RETRY_DROPPED_CODE] = (
-            self.validation_fed_back.get(RETRY_DROPPED_CODE, 0) + 1
-        )
+        for code in (RETRY_DROPPED_CODE, *((RETRY_RESTATED_FEW_CODE,) if restated else ())):
+            self.validation_fed_back[code] = self.validation_fed_back.get(code, 0) + 1
         withdrawn: set[int] = set()
         for _label, kind, item, missing in labelled:
             decision, reason = decided.get(id(item), ("", ""))
