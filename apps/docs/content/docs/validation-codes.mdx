@@ -46,7 +46,7 @@ not prove the test makes the platform raise it. The tests are not listed here:
 one nothing raises any more and stored runs still carry; the comment on that
 name says what reads it.
 
-**101 codes in 11 families:** [attck](#attck) 6 · [attribution](#attribution) 1 · [composer](#composer) 3 · [isr](#isr) 13 · [narrative](#narrative) 5 · [question](#question) 9 · [report](#report) 14 · [stix](#stix) 32 · [tool](#tool) 1 · [validation](#validation) 1 · [verdict](#verdict) 16. 16 code positions the register could not resolve are [listed at the end](#unresolved-code-positions).
+**101 codes in 11 families:** [attck](#attck) 6 · [attribution](#attribution) 1 · [composer](#composer) 3 · [isr](#isr) 13 · [narrative](#narrative) 5 · [question](#question) 9 · [report](#report) 14 · [stix](#stix) 32 · [tool](#tool) 1 · [validation](#validation) 1 · [verdict](#verdict) 16. 14 code positions the register could not resolve are [listed at the end](#unresolved-code-positions).
 
 ## attck
 
@@ -888,7 +888,6 @@ Each of these is a code position whose value the register could not follow to a 
 
 - `maljan.agents.delegation:_hand_over_the_record`: `code=str(row.get('code', ''))`, the result of a call.
 - `maljan.core.team_lint:TeamFinding.to_dict`: `"code": self.code`, an attribute of a value.
-- `maljan.core.undeclared_tools:_code_parts`: `CodePart(code, …)`, the result of a call.
 - `maljan.pipeline.nodes:_note_export_findings`: `"code": code`, `code`, bound by unpacking, `+=`, `with` or `except`.
 - `maljan.pipeline.nodes:_violations_from_rows`: `code=str(row.get('code'))`, the result of a call.
 - `maljan.pipeline.validation:ValidationTally.record_unresolved`: `"code": v.code`, an attribute of a value.
@@ -900,5 +899,4 @@ Each of these is a code position whose value the register could not follow to a 
 - `maljan.providers.sandbox.upload:UploadSandboxProvider.set_pending_blob`: `'report.json'`, a code-shaped string where no code position is, nor a read.
 - `maljan.reporting.evidence_bundles:function_table`: `FunctionCode(part.code, …)`, an attribute of a value.
 - `maljan.reporting.renderers.markdown:_Context.__init__`: `"code": str(row.get('code', ''))`, the result of a call.
-- `maljan.reporting.renderers.markdown:holds_code`: `CodePart(text, …)`, the result of a call.
 - `maljan.tools.errors:normalise_error`: `"code": code`, the result of a call.

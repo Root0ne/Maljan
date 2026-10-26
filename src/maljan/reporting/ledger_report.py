@@ -29,7 +29,7 @@ every number the first occurrence carried exactly as it was written.
 from __future__ import annotations
 
 from collections import Counter
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from typing import TYPE_CHECKING, Any
 
 from maljan.agents.output_shortening import BOOKKEEPING_KEY, our_key_in
@@ -41,7 +41,13 @@ from maljan.analysis.technique_ids import (
 )
 from maljan.core.reputation import reputation_of
 from maljan.core.tool_declarations import first, select
-from maljan.core.undeclared_tools import address_arguments
+from maljan.core.undeclared_tools import (
+    CODE_LISTING_KINDS,
+    DECOMPILE_KINDS,
+    CodePart,
+    address_arguments,
+    names_itself,
+)
 from maljan.reporting import tool_kinds
 from maljan.reporting.dedupe import (
     MergeTally,
@@ -70,6 +76,8 @@ MAX_TEXT_CHARS = 4000
 MAX_ROWS = 200
 
 # How much of one cell a table prints; a longer cell ends in the cut mark.
+# A function's code a table holds is never cut to it (``_code_or_text``):
+# only a one-line fact is, in a section citing the entry that holds it whole.
 CELL_CHARS = 400
 
 ROWS_LEFT_OUT = (
@@ -297,6 +305,42 @@ def _text(value: Any) -> str:
     if isinstance(value, dict):
         return marked_cut(", ".join(f"{k}={_text(v)}" for k, v in value.items()), CELL_CHARS)
     return marked_cut(str(value), CELL_CHARS)
+
+
+def _declares_code(entry: LedgerEntry) -> bool:
+    """Whether ``entry`` stored that its answer is code: decompiled, or listed as instructions.
+
+    Read from the kind stored with the entry's facts when it was written,
+    never from its tool's name.
+    """
+    kind = str((entry.facts or {}).get("kind") or "")
+    return kind in DECOMPILE_KINDS or kind in CODE_LISTING_KINDS
+
+
+def _holds_code(value: Any, row: Iterable[Any] = (), declared: bool = False) -> bool:
+    """Whether one value of a table is code, kept whole rather than cut to a cell.
+
+    Code spans lines: a one-line value is a table's fact whatever its entry.
+    Where the entry declares code (:func:`_declares_code`), every text of more
+    than one line is code; anywhere else a text is code when it names the
+    function another value of its row names (``FUN_<address>`` under the
+    address, or its first instruction at it).
+    """
+    text = value.strip() if isinstance(value, str) else ""
+    if "\n" not in text:
+        return False
+    if declared:
+        return True
+    return any(
+        names_itself(CodePart(str(other).strip(), text, False))
+        for other in row
+        if "\n" not in str(other).strip()
+    )
+
+
+def _code_or_text(value: Any, row: Iterable[Any], declared: bool) -> str:
+    """One cell: code whole as the entry holds it (:func:`_holds_code`), else as ``_text``."""
+    return str(value) if _holds_code(value, row, declared) else _text(value)
 
 
 # ---------------------------------------------------------------------------
@@ -1243,8 +1287,16 @@ def _generic_table(
     for column in columns:
         if column not in section.columns:
             section.columns.append(column)
+    declared = _declares_code(entry)
     for row in dicts:
-        acc.add_row(section, [_text(row.get(column)) for column in section.columns])
+        values = [row.get(column) for column in section.columns]
+        acc.add_row(
+            section,
+            [
+                _code_or_text(value, values[:at] + values[at + 1 :], declared)
+                for at, value in enumerate(values)
+            ],
+        )
     acc.credit(section, entry)
 
 
@@ -1263,6 +1315,7 @@ def _generic_kv(
         columns=["Field", "Value"],
     )
     ours = our_own_words(data)
+    declared = _declares_code(entry)
     for name, value in data.items():
         if name in {"tool"} or name in ours or value in (None, "", [], {}):
             continue
@@ -1275,7 +1328,10 @@ def _generic_kv(
                 title=f"{section.title}: {name.replace('_', ' ')}",
             )
             continue
-        acc.add_row(section, [str(name).replace("_", " "), _text(value)])
+        acc.add_row(
+            section,
+            [str(name).replace("_", " "), _code_or_text(value, (name,), declared)],
+        )
     acc.credit(section, entry)
 
 
