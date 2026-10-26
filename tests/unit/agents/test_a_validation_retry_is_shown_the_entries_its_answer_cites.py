@@ -23,6 +23,7 @@ from unittest.mock import MagicMock, patch
 from langchain_core.messages import AIMessage, HumanMessage
 
 from maljan.agents.base_agent import PACK_SUMMARY_NOTE, BaseAnalyst
+from maljan.agents.tool_fence import fenced
 from maljan.pipeline.validation import (
     ANALYST_FEEDBACK_CLOSING_BY_NUMBER,
     VALIDATION_ENTRIES_HEAD,
@@ -108,8 +109,8 @@ class TestTheRetryShowsWhatTheAnswerCites:
 
         retry = analyst.questions[0]
         assert VALIDATION_ENTRIES_HEAD in retry
-        assert f"[ev_0080] batch_decompile:\n{BODY}" in retry
-        assert f"[ev_0081] batch_decompile:\n{OTHER_BODY}" in retry
+        assert f"[ev_0080] batch_decompile:\n{fenced('ev_0080', BODY)}" in retry
+        assert f"[ev_0081] batch_decompile:\n{fenced('ev_0081', OTHER_BODY)}" in retry
         assert retry.count(BODY) == 1
         # The brief holds the pack entry verbatim: it is not shown again.
         assert PACK_BODY not in retry.split(VALIDATION_ENTRIES_HEAD, 1)[1]
@@ -147,7 +148,7 @@ class TestTheRetryShowsWhatTheAnswerCites:
 
         _retry, whole = analyst.sent
         assert "whole" in analyst.questions[1]
-        assert f"[ev_0080] batch_decompile:\n{BODY}" in whole
+        assert f"[ev_0080] batch_decompile:\n{fenced('ev_0080', BODY)}" in whole
 
 
 class TestTheEntriesFitTheWindow:
@@ -169,7 +170,7 @@ class TestTheEntriesFitTheWindow:
         retry = analyst.questions[0]
         assert "A" * 60_000 not in retry
         assert f"{VALIDATION_ENTRIES_UNFIT} ev_0080." in retry
-        assert f"[ev_0081] batch_decompile:\n{OTHER_BODY}" in retry
+        assert f"[ev_0081] batch_decompile:\n{fenced('ev_0081', OTHER_BODY)}" in retry
 
     def test_every_entry_is_shown_when_the_window_holds_them(self) -> None:
         analyst = self._analyst(_window(200_000))

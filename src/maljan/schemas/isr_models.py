@@ -178,6 +178,20 @@ class ClaimEvidence(BaseModel):
         ),
         exclude_if=lambda value: value is None,
     )
+    # The entries a debate showed this claim's analyst from another agent's
+    # calls, when they are every entry the claim cites
+    # (``nodes._mark_claims_on_shown_entries``): the claim restates what it
+    # was shown, and is no support of its own for corroboration
+    # (``validation.shown_claim_unbacked``). Left out of the serialised claim
+    # when empty.
+    rests_on_shown_entries: list[str] = Field(
+        default_factory=list,
+        description=(
+            "The entries of other agents a debate round showed this claim's analyst, when they "
+            "are every entry the claim cites."
+        ),
+        exclude_if=lambda value: not value,
+    )
     # What the ATT&CK index made of the claim text against the id the analyst
     # chose: the id's own gate score and the index's top candidates with
     # theirs. Recorded by ``pipeline.validation`` when the index was warm, so

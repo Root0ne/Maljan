@@ -22,6 +22,7 @@ from unittest.mock import MagicMock, patch
 from langchain_core.messages import AIMessage
 
 from maljan.agents.base_agent import BaseAnalyst
+from maljan.agents.tool_fence import fenced
 from maljan.pipeline.validation import (
     RETRY_DROP_KEPT,
     RETRY_DROP_NOT_ANSWERED,
@@ -588,7 +589,7 @@ class TestTheQuestionShowsWhatTheItemsCite:
         assert f"C1. CLAIM: {self.CLAIM}" in question
         assert "    EVIDENCE: [ev_0080] decompile of 0x3868; [ev_0001] identity" in question
         assert RETRY_DROP_ENTRIES_HEAD in question
-        assert f"[ev_0080] batch_decompile:\n{self.BODY}" in question
+        assert f"[ev_0080] batch_decompile:\n{fenced('ev_0080', self.BODY)}" in question
         # Once, under the items, though both cite it; the conversation holds ev_0001 verbatim.
         assert question.count(self.BODY) == 1
         assert self.PACK_BODY not in question
@@ -607,7 +608,7 @@ class TestTheQuestionShowsWhatTheItemsCite:
         assert question.count("pe windows, dll") == 0
         assert self.PACK_BODY not in question
         # The agent's own call is shown whole beside it.
-        assert f"[ev_0080] batch_decompile:\n{self.BODY}" in question
+        assert f"[ev_0080] batch_decompile:\n{fenced('ev_0080', self.BODY)}" in question
 
     def test_a_pack_entry_the_agent_read_whole_is_shown_whole(self) -> None:
         analyst, _result = self._settle(
@@ -616,7 +617,9 @@ class TestTheQuestionShowsWhatTheItemsCite:
             read={"evidence_id": "ev_0001"},
         )
 
-        assert f"[ev_0001] identify_file:\n{self.PACK_BODY}" in analyst.questions[0]
+        assert (
+            f"[ev_0001] identify_file:\n{fenced('ev_0001', self.PACK_BODY)}" in analyst.questions[0]
+        )
 
     def test_a_pack_entry_read_in_pages_is_shown_whole(self) -> None:
         analyst, _result = self._settle(
@@ -625,7 +628,9 @@ class TestTheQuestionShowsWhatTheItemsCite:
             read={"evidence_id": "ev_0001", "offset": 0, "limit": 10},
         )
 
-        assert f"[ev_0001] identify_file:\n{self.PACK_BODY}" in analyst.questions[0]
+        assert (
+            f"[ev_0001] identify_file:\n{fenced('ev_0001', self.PACK_BODY)}" in analyst.questions[0]
+        )
 
     def test_a_pack_entry_read_again_cut_is_shown_whole_and_marked_partial(self) -> None:
         from maljan.agents.judge_agent import PARTIAL_ENTRY_MARK
@@ -653,7 +658,8 @@ class TestTheQuestionShowsWhatTheItemsCite:
         )
 
         question = analyst.questions[0]
-        assert f"[ev_0002] floss ({PARTIAL_ENTRY_MARK}):\ndecoded text, first part" in question
+        shown = fenced("ev_0002", "decoded text, first part")
+        assert f"[ev_0002] floss ({PARTIAL_ENTRY_MARK}):\n{shown}" in question
 
     def test_a_chain_of_repeats_is_followed_to_the_entry_that_holds_the_answer(self) -> None:
         from maljan.schemas.evidence import LedgerEntry
@@ -673,7 +679,9 @@ class TestTheQuestionShowsWhatTheItemsCite:
             rows=(peer, own),
         )
 
-        assert f"[ev_0001] identify_file:\n{self.PACK_BODY}" in analyst.questions[0]
+        assert (
+            f"[ev_0001] identify_file:\n{fenced('ev_0001', self.PACK_BODY)}" in analyst.questions[0]
+        )
 
     def test_an_entry_read_whole_that_the_pack_holds_cut_short_is_shown_whole(self) -> None:
         analyst, _result = self._settle(

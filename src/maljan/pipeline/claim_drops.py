@@ -393,6 +393,29 @@ def unchanged_in_substance(in_force: Any, revision: Any) -> bool:
         return False
 
 
+def changed_anywhere(in_force: Any, revision: Any) -> bool:
+    """Whether a revision changed what any of its claims states, anywhere in its answer.
+
+    Read by :func:`claim_substance`, the key the ``reworded`` route reads,
+    claim for claim and with counts: a claim added or removed, or one whose
+    values, cited entries, technique, negators, confidence step, technical
+    terms or content words differ, is a change, whatever entries or places
+    it cites ("Emotet" against "Qakbot", one C2 address against another,
+    "RC4" against "AES"). A claim that names none of a line's entries may
+    still be the analyst's new answer to it. Reordering, punctuation and
+    stopwords are not a change; any other rewording is, which keeps the
+    debate going rather than ending it on a move it missed. Unsure is a
+    change: an answer whose claims cannot be read states nothing to compare.
+    """
+    try:
+        for answer in (in_force, revision):
+            if not isinstance(getattr(answer, "claims", None), list):
+                return True
+        return claim_substance(in_force) != claim_substance(revision)
+    except Exception:  # noqa: BLE001 — unsure is a change
+        return True
+
+
 def answer_unchanged(in_force: str, revision: str) -> bool:
     """Whether a revision's text is the answer in force again, whitespace aside."""
     before = " ".join(str(in_force or "").split())

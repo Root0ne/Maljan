@@ -12588,6 +12588,25 @@ def retry_claim_unbacked(claim: Any, agent: str, ledger: Sequence[Any] | None) -
     return not any(i.lower() in own for i in entry_ids_in(said))
 
 
+def shown_claim_unbacked(claim: Any, agent: str, ledger: Sequence[Any] | None) -> bool:
+    """Whether a claim rests only on other agents' entries a debate showed its analyst.
+
+    A claim with no ``rests_on_shown_entries`` is never one. A marked claim
+    is backed only when one of the entries it cites is a call ``agent`` made
+    itself: restating a peer's tool result it was shown is not a reading of
+    its own.
+    """
+    if not getattr(claim, "rests_on_shown_entries", None):
+        return False
+    own = {
+        str(getattr(entry, "id", "") or "").lower()
+        for entry in ledger or ()
+        if str(getattr(entry, "agent", "") or "") == agent
+    }
+    said = f"{getattr(claim, 'claim', '') or ''} {getattr(claim, 'evidence_ref', '') or ''}"
+    return not any(i.lower() in own for i in entry_ids_in(said))
+
+
 def tool_backed_answers(
     isrs: dict[str, Any] | None, ledger: Sequence[Any] | None
 ) -> dict[str, Any] | None:
@@ -12597,8 +12616,11 @@ def tool_backed_answers(
     this returns, so a claim written in a turn with no tools, after a
     revision that wrote none, is never independent tool-backed support for
     its technique unless it cites an entry its analyst's own calls filed
-    (:func:`retry_claim_unbacked`). The answers in force are not changed: an
-    answer with such a claim is read as a copy without it.
+    (:func:`retry_claim_unbacked`). Nor is a claim that cites only other
+    agents' entries a debate round showed its analyst
+    (:func:`shown_claim_unbacked`): a sayer counts once, however many restate
+    its result. The answers in force are not changed: an answer with such a
+    claim is read as a copy without it.
     """
     if not isrs:
         return isrs
@@ -12606,7 +12628,12 @@ def tool_backed_answers(
     for name, isr in isrs.items():
         claims = list(getattr(isr, "claims", None) or [])
         agent = str(getattr(isr, "agent_id", "") or name)
-        kept = [c for c in claims if not retry_claim_unbacked(c, agent, ledger)]
+        kept = [
+            c
+            for c in claims
+            if not retry_claim_unbacked(c, agent, ledger)
+            and not shown_claim_unbacked(c, agent, ledger)
+        ]
         if len(kept) == len(claims) or not hasattr(isr, "model_copy"):
             out[name] = isr
             continue

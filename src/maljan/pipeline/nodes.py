@@ -19,6 +19,7 @@ from collections.abc import Callable, Iterable, Mapping, Sequence
 from contextlib import suppress
 from dataclasses import replace
 from pathlib import Path
+from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any, cast
 
 from maljan.agents.base_agent import (
@@ -80,6 +81,7 @@ from maljan.memory.long_term_memory import build_stored_case, earlier_run_of, ea
 from maljan.pipeline import triage_pack
 from maljan.pipeline.claim_drops import (
     answer_unchanged,
+    changed_anywhere,
     dropped_values,
     dropped_values_sentence,
     unchanged_in_substance,
@@ -96,14 +98,19 @@ from maljan.pipeline.conditions import (
 from maljan.pipeline.debate_facts import (
     BLOCK_NOT_READ_NOTE,
     analysts_to_revise,
+    carried_marks,
     contested_input,
     facts_naming,
     ledger_count_facts,
     ledger_stated,
     ledger_stated_sentence,
+    line_entry_ids,
+    line_round_facts,
     names_an_unlisted_place,
     place_facts,
     place_facts_for,
+    points_naming,
+    round_facts_text,
     tools_taking_an_address,
     with_ledger_facts,
     with_place_facts,
@@ -915,8 +922,6 @@ def answer_with_retry_additions(in_force: AgentISR, retried: Any, revision_round
     its artifacts, its open questions and its disputes are added the same
     way, after the ones in force. ``in_force`` itself is not changed.
     """
-    from types import SimpleNamespace
-
     from maljan.pipeline.claim_drops import claim_substance
     from maljan.pipeline.retry_merge import folded_title
 
@@ -4825,6 +4830,17 @@ def _ledger_stated_lines(
         return []
 
 
+def _last_mediation_lines(state: AnalysisState) -> tuple[list[str], list[str]]:
+    """``(blocking lines, place facts)`` of the last mediation in the history, or empty."""
+    for earlier in reversed(state.get("discussion_history") or []):
+        if getattr(earlier, "agent_name", "") == MEDIATOR_AGENT_NAME:
+            return (
+                [str(line) for line in getattr(earlier, "contradictions", None) or []],
+                [str(fact) for fact in getattr(earlier, "place_facts", None) or []],
+            )
+    return [], []
+
+
 def _place_facts(state: AnalysisState, agent_names: Sequence[str], argument: Any) -> list[str]:
     """The functions the blocking lines name and whether each was listed. Never raises."""
     lines = list(getattr(argument, "contradictions", None) or [])
@@ -4992,6 +5008,11 @@ def make_negotiation_node(
             else False
         )
         convergence_said = convergence_sentence(converged or []) if syco else ""
+        # What the round before did on each blocking line of the last
+        # mediation: told to this mediation once, with no call made for it,
+        # and the mediator asked to mark each blocking line it lists carried
+        # or new.
+        said_of_round = round_facts_text(round_before)
 
         def _judge_evidence() -> list[dict[str, Any]]:
             """The judges' tool calls, drained from every cached role.
@@ -5041,6 +5062,21 @@ def make_negotiation_node(
             from maljan.agents.judge_agent import MEDIATION_CALL_SPANS
 
             judge_timeout, _judge_steps = loop_limits("judge")
+            facts_for_mediation = pack_text(state, container)
+            # The stored text of the entries the last mediation's blocking
+            # lines cite, as the analysts they name were shown them; what the
+            # mediation's pack already holds is left out.
+            last_lines, last_places = _last_mediation_lines(state)
+            mediation_entries = (
+                _contested_entries(
+                    SimpleNamespace(name=MEDIATOR_AGENT_NAME, run_state_source=state),
+                    last_lines,
+                    last_places,
+                    [facts_for_mediation],
+                )
+                if round_before is not None and last_lines
+                else {}
+            )
             # Every call the mediation can make one after another
             # (``MEDIATION_CALL_SPANS``), each within the judge's own limit.
             mediation_timeout = (
@@ -5068,9 +5104,11 @@ def make_negotiation_node(
                     # The same facts the analysts were given, so the mediator
                     # weighs their reports against the record rather than
                     # against each other alone.
-                    facts_block=pack_text(state, container)
+                    facts_block=facts_for_mediation
                     + (f"\n\n{convergence_said}" if convergence_said else ""),
                     run_state=render_run_state(state),
+                    **({"round_facts": said_of_round} if said_of_round else {}),
+                    **({"cited_entries": mediation_entries} if mediation_entries else {}),
                 ),
                 hard_timeout=mediation_timeout,
                 label="mediation",
@@ -5130,6 +5168,15 @@ def make_negotiation_node(
                         stage=stage_key_of(stage, "debate"),
                         kind="system",
                     )
+            # The mediator's carried-or-new mark on each blocking line, read
+            # against the lines of the last mediation the round's record
+            # numbered for it: the router ends the debate when every blocking
+            # line is carried and no analyst it names moved on it.
+            facts_told = (round_before or {}).get("lines") if said_of_round else None
+            if measured and argument.status == "complete" and isinstance(facts_told, list):
+                argument.carried = carried_marks(
+                    list(argument.contradictions or []), len(facts_told)
+                )
             # Who the mediation asks to revise: the analysts its blocking lines
             # name in their [analysts: ...] field, read and never guessed.
             if measured and argument.status == "complete":
@@ -5314,8 +5361,13 @@ def _round_convergence(
     after: Mapping[str, Any],
     revised: Sequence[str],
     round_ledger: Sequence[Mapping[str, Any]],
+    shown: Mapping[str, Sequence[str]] | None = None,
 ) -> list[dict[str, Any]]:
-    """The round's convergence flags (``sycophancy_detector.convergence_flags``). Never raises."""
+    """The round's convergence flags (``sycophancy_detector.convergence_flags``). Never raises.
+
+    ``shown`` is the entries each revision was shown: citing one is no
+    citation of the analyst's own.
+    """
     try:
         texts: dict[str, str] = {}
         for row in [*(state.get("evidence_ledger") or []), *round_ledger]:
@@ -5329,10 +5381,123 @@ def _round_convergence(
         for row in round_ledger:
             agent = str(row.get("agent") or "")
             calls[agent] = calls.get(agent, 0) + 1
-        return convergence_flags(before, after, revised, calls, texts)
+        return convergence_flags(before, after, revised, calls, texts, shown=shown or None)
     except Exception as exc:  # noqa: BLE001 — a reading not made is no flag
         logger.debug("revision: the round's convergence was not read (%s).", exc)
         return []
+
+
+def _contested_entries(
+    reader: Any, lines: Sequence[str], facts: Sequence[str], held: Sequence[str]
+) -> dict[str, str]:
+    """The stored texts of the entries ``lines`` cite and their place facts list, by id.
+
+    Read as the reader had each in view (``base_agent.cited_entry_texts``):
+    an entry ``held`` (its brief, its raw data) carries verbatim, or as the
+    summary line of the brief, is left out. Never raises: nothing is shown.
+    """
+    ids = line_entry_ids(lines, facts, every_listing=False)
+    if not ids:
+        return {}
+    try:
+        from maljan.agents.base_agent import cited_entry_texts
+
+        return cited_entry_texts(reader, ids, [h for h in held if h], summary_lines=False)
+    except Exception as exc:  # noqa: BLE001 — an entry not read is no entry shown
+        logger.debug("debate: the entries of the contested lines were not read (%s).", exc)
+        return {}
+
+
+def _mark_claims_on_shown_entries(
+    state: AnalysisState,
+    isrs: dict[str, Any],
+    revised: Sequence[str],
+    shown: Mapping[str, Sequence[str]],
+    round_ledger: Sequence[Mapping[str, Any]],
+) -> None:
+    """Mark each revised claim that cites only other agents' entries the debate showed it.
+
+    The entries shown are this round's and every earlier round's of the
+    debate (``revision_rounds[].shown``). A claim citing at least one entry,
+    all of them shown to its analyst and none filed by its analyst, is
+    replaced in ``isrs`` by a copy carrying ``rests_on_shown_entries``: the
+    corroboration reading counts it as no support of its own
+    (``validation.shown_claim_unbacked``). Never raises.
+    """
+    try:
+        from maljan.schemas.evidence import entry_ids_in
+
+        seen: dict[str, set[str]] = {}
+        for record in [*(state.get("revision_rounds") or []), {"shown": shown}]:
+            for name, ids in ((record or {}).get("shown") or {}).items():
+                seen.setdefault(str(name), set()).update(str(i).lower() for i in ids or ())
+        own: dict[str, set[str]] = {}
+        for row in [*(state.get("evidence_ledger") or []), *round_ledger]:
+            agent = row.get("agent") if isinstance(row, Mapping) else getattr(row, "agent", "")
+            entry = row.get("id") if isinstance(row, Mapping) else getattr(row, "id", "")
+            own.setdefault(str(agent or ""), set()).add(str(entry or "").lower())
+        for name in revised:
+            given = seen.get(name)
+            isr: Any = isrs.get(name)
+            if not given or not isinstance(getattr(isr, "claims", None), list):
+                continue
+            mine = own.get(name, set())
+            claims = []
+            marked = False
+            for claim in isr.claims:
+                said = f"{claim.claim or ''} {claim.evidence_ref or ''}"
+                cited = {i.lower() for i in entry_ids_in(said)}
+                if cited and cited <= given and not cited & mine:
+                    claim = claim.model_copy()
+                    claim.rests_on_shown_entries = sorted(cited)
+                    marked = True
+                claims.append(claim)
+            if marked:
+                isrs[name] = isr.model_copy(update={"claims": claims})
+    except Exception as exc:  # noqa: BLE001 — a mark not made is a claim read as before
+        logger.debug("revision: the claims on shown entries were not marked (%s).", exc)
+
+
+def _round_line_facts(
+    contested: Sequence[str],
+    places: Sequence[str],
+    asked: Sequence[str],
+    revised: Sequence[str],
+    shown: Mapping[str, Sequence[str]],
+    before: Mapping[str, Any],
+    after: Mapping[str, Any],
+    participants: Sequence[str],
+    round_ledger: Sequence[Mapping[str, Any]],
+) -> dict[str, Any]:
+    """What the round did on each blocking line it answered, for the next mediation. Never raises.
+
+    ``lines`` per line (``debate_facts.line_round_facts``), and ``filed``,
+    the entries the round filed by agent. Nothing for a round that answered
+    no blocking line.
+    """
+    if not contested:
+        return {}
+    try:
+
+        def _changed(name: str, _ids: Sequence[str], _spots: set[int]) -> bool:
+            # Anywhere in its answer, not only on the claims citing the line:
+            # a new claim that cites none of its entries may answer it.
+            return changed_anywhere(before.get(name), after.get(name))
+
+        filed: dict[str, list[str]] = {}
+        for row in round_ledger:
+            entry_id = str(row.get("id") or "")
+            if entry_id:
+                filed.setdefault(str(row.get("agent") or ""), []).append(entry_id)
+        return {
+            "lines": line_round_facts(
+                contested, places, asked, revised, shown, _changed, participants, filed
+            ),
+            "filed": filed,
+        }
+    except Exception as exc:  # noqa: BLE001 — a record not made is no fact told
+        logger.debug("revision: the round's line facts were not read (%s).", exc)
+        return {}
 
 
 def make_revision_node(container: ServiceContainer, *, stage: Any = None) -> Any:
@@ -5480,11 +5645,28 @@ def make_revision_node(container: ServiceContainer, *, stage: Any = None) -> Any
             mine = place_facts_for(name, places, agent_names)
             can_read = bool(tools_taking_an_address(getattr(agent, "tools", None) or ()))
             reads = can_read and names_an_unlisted_place(mine)
+            # The stored text of the entries those lines cite and of the
+            # listings their places resolve to: a peer's tool results are in
+            # no input of this analyst's own. What its brief and its raw data
+            # already hold is left out; the revision sizes the rest.
+            entries = _contested_entries(
+                agent,
+                points_naming(name, contested, agent_names) if named is not None else contested,
+                mine,
+                [str(getattr(agent, "facts_block", "") or ""), str(data or "")],
+            )
             # The reports are what models wrote: a run-state marker in one is
             # written out, so the debate never shows one as the platform's
             # block. One character for one: every length read of them holds.
             from maljan.utils.written_forms import markers_written_out
 
+            # Each passed only when it says something, so a round with neither
+            # makes the call it always made.
+            offered: dict[str, Any] = {}
+            if reads:
+                offered["read_places"] = True
+            if entries:
+                offered["cited_entries"] = entries
             return await asyncio.to_thread(
                 agent.safe_revise_isr,
                 data,
@@ -5500,7 +5682,7 @@ def make_revision_node(container: ServiceContainer, *, stage: Any = None) -> Any
                     can_read=can_read,
                 ),
                 iteration,
-                **({"read_places": True} if reads else {}),
+                **offered,
             )
 
         # Slot-topology parity with the initial fan-out (builder.py). On a
@@ -5569,6 +5751,8 @@ def make_revision_node(container: ServiceContainer, *, stage: Any = None) -> Any
         # The claims a validation retry added beside the answer in force after
         # a revision that wrote none, per analyst (``answer_with_retry_additions``).
         retry_added: dict[str, int] = {}
+        # The entries of the contested lines each revision was shown.
+        entries_shown: dict[str, list[str]] = {}
 
         def _keep_the_answer_in_force(
             name: str, why: str, status: str = "", report: str = "", *, was_asked: bool = True
@@ -5634,6 +5818,12 @@ def make_revision_node(container: ServiceContainer, *, stage: Any = None) -> Any
                 )
             else:
                 revised_text, isr = result
+                with suppress(Exception):
+                    entries_shown[name] = [
+                        str(i)
+                        for i in getattr(container.get_agent(name), "revision_entries_shown", ())
+                        or ()
+                    ]
                 try:
                     revision_ledger.extend(
                         entry.model_dump(mode="json")
@@ -5785,6 +5975,11 @@ def make_revision_node(container: ServiceContainer, *, stage: Any = None) -> Any
                     display_name=label_of(container, name),
                 )
 
+        # A claim restating only what the debate showed its analyst from a
+        # peer's calls is no support of its own for corroboration.
+        _mark_claims_on_shown_entries(
+            state, revised_isrs, revised_names, entries_shown, revision_ledger
+        )
         out: dict[str, Any] = {"revised_reports": revised, "isr_reports": revised_isrs}
         if revision_ledger:
             out["evidence_ledger"] = revision_ledger
@@ -5811,10 +6006,28 @@ def make_revision_node(container: ServiceContainer, *, stage: Any = None) -> Any
                 "revised": revised_names,
                 "not_revised": not_revised,
                 "converged": _round_convergence(
-                    state, kept_isrs, revised_isrs, revised_names, revision_ledger
+                    state, kept_isrs, revised_isrs, revised_names, revision_ledger, entries_shown
                 ),
                 **({"asked_all": asked_all} if asked_all else {}),
                 **({"retry_added": retry_added} if retry_added else {}),
+                # The entries each revision was shown, for the claims of later
+                # rounds to be read against (``_mark_claims_on_shown_entries``).
+                **(
+                    {"shown": {n: ids for n, ids in entries_shown.items() if ids}}
+                    if any(entries_shown.values())
+                    else {}
+                ),
+                **_round_line_facts(
+                    contested,
+                    places,
+                    asked,
+                    revised_names,
+                    entries_shown,
+                    kept_isrs,
+                    revised_isrs,
+                    agent_names,
+                    revision_ledger,
+                ),
             }
         ]
         if not made:

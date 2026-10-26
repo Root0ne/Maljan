@@ -2952,6 +2952,8 @@ class JudgeAgent(BudgetMeter):
         sample: Any = None,
         facts_block: str = "",
         run_state: str = "",
+        round_facts: str = "",
+        cited_entries: Mapping[str, str] | None = None,
     ) -> tuple[AgentArgument, bool | None]:
         """One mediation round (:meth:`_mediate_round`), or the round the mediator's ceiling ends.
 
@@ -2970,6 +2972,8 @@ class JudgeAgent(BudgetMeter):
                 sample=sample,
                 facts_block=facts_block,
                 run_state=run_state,
+                round_facts=round_facts,
+                cited_entries=cited_entries,
             )
         except AgentCeilingStop as stop:
             self.logger.warning("Mediator: %s; the round is not mediated.", stop)
@@ -2994,6 +2998,8 @@ class JudgeAgent(BudgetMeter):
         sample: Any = None,
         facts_block: str = "",
         run_state: str = "",
+        round_facts: str = "",
+        cited_entries: Mapping[str, str] | None = None,
     ) -> tuple[AgentArgument, bool | None]:
         """Find contradictions between expert reports and determine consensus.
 
@@ -3011,6 +3017,13 @@ class JudgeAgent(BudgetMeter):
             isr_reports: Optional structured ISR objects. When provided, their
                 summaries are appended to give the judge per-claim confidence
                 scores and explicit dissent signals.
+            round_facts: What the revision round before did on each blocking
+                line of the last mediation, with the question for the
+                carried-or-new mark (``debate_facts.round_facts_text``),
+                carried after the ledger's counts.
+            cited_entries: The stored texts of the entries those lines cite,
+                by id, shown after them whole, as many as the room the
+                reports and the history leave (``debate_facts.fit_entries``).
 
         Returns:
             Tuple of (AgentArgument with mediator findings, bool indicating
@@ -3067,6 +3080,8 @@ class JudgeAgent(BudgetMeter):
             _last_ledger_facts(history, "ledger_stated"),
         )
         carried_facts = f"{last_counts}\n\n" if last_counts else ""
+        if round_facts:
+            carried_facts += f"{round_facts}\n\n"
         system_text = mediator_system_prompt(
             identity_unanswered=identity_unanswered,
             lookup_attached=lookup_attached,
@@ -3076,13 +3091,16 @@ class JudgeAgent(BudgetMeter):
         )
         history_text = str(history)
 
-        def _mediation_human(reports_shown: str, history_shown: str, notice: str) -> str:
+        def _mediation_human(
+            reports_shown: str, history_shown: str, notice: str, entries_shown: str = ""
+        ) -> str:
             note = f"{notice}\n\n" if notice else ""
+            entries = f"{entries_shown}\n\n" if entries_shown else ""
             return (
                 f"{_standing_blocks(run_state, facts_block)}"
                 f"{_identity_prefix(sample)}{note}"
                 f"Expert Reports:\n{reports_shown}\n\nPrevious Discussion:\n{history_shown}\n\n"
-                f"{carried_facts}"
+                f"{carried_facts}{entries}"
                 f"{MEDIATOR_HUMAN_CLOSING}"
             )
 
@@ -3098,12 +3116,30 @@ class JudgeAgent(BudgetMeter):
         )
         if fitted_notice:
             self.logger.warning("JudgeAgent mediation prompt: %s", fitted_notice)
+        # The entries take what the reports and the history leave of the room,
+        # so they never shorten either, less what the turns after this one
+        # need (``_mediation_entries_reserve``).
+        entries_text = ""
+        if cited_entries:
+            entries_text = self._mediation_entries(
+                cited_entries,
+                None
+                if mediation_room is None
+                else mediation_room
+                - len(fitted_parts["expert reports"])
+                - len(fitted_parts[_HISTORY_PART])
+                - len(fitted_notice)
+                - self._mediation_entries_reserve(),
+            )
         prompt_messages = [
             ("system", system_text),
             (
                 "human",
                 _mediation_human(
-                    fitted_parts["expert reports"], fitted_parts[_HISTORY_PART], fitted_notice
+                    fitted_parts["expert reports"],
+                    fitted_parts[_HISTORY_PART],
+                    fitted_notice,
+                    entries_text,
                 ),
             ),
         ]
@@ -3399,6 +3435,57 @@ class JudgeAgent(BudgetMeter):
             ),
         )
         return argument, is_consensus
+
+    def _mediation_entries_reserve(self) -> int:
+        """The characters the turns after a mediation's first need, kept free of its entries.
+
+        One tool answer's share of the conversation's room
+        (``context_window.ANSWER_SHARE`` of ``ContextBudget.tool_budget_chars``,
+        as an analyst's input room keeps it) for the tool loop, the first
+        answer at the output cap, and the question for a missing block
+        (:data:`CONTRADICTIONS_BLOCK_QUESTION`): the follow-up turn resends the
+        prompt with both. The second answer's cap is already out of the room.
+        No budget known keeps the question's length alone. Never raises.
+        """
+        from maljan.llm.context_window import ANSWER_SHARE, ContextBudget
+
+        reserve = len(CONTRADICTIONS_BLOCK_QUESTION)
+        try:
+            budget = self._context_budget()
+            if isinstance(budget, ContextBudget) and budget.derives:
+                reserve += int(budget.tool_budget_chars() * ANSWER_SHARE)
+                cap = int(self._built_cap_tokens() or 0)
+                reserve += int(cap * float(budget.chars_per_token))
+        except Exception as exc:  # noqa: BLE001 — a reserve not read keeps the question's
+            self.logger.debug("Mediator: the entries' reserve was not read (%s).", exc)
+        return reserve
+
+    def _mediation_entries(self, entries: Mapping[str, str], room: int | None) -> str:
+        """The entries block a mediation shows after the round's facts, or ``""``.
+
+        ``room`` is the characters the mediation's window leaves once its
+        reports and history are in; ``None`` is no window known, and every
+        entry is shown. An entry that does not fit is named by id; nothing
+        is cut (``debate_facts.fit_entries``).
+        """
+        from maljan.pipeline.debate_facts import entries_block, fit_entries
+
+        shown, unfit = fit_entries(entries, room, mediation=True)
+        if unfit:
+            self.logger.warning(
+                "Mediator: %d of the %d ledger entries the last mediation's blocking lines cite "
+                "do not fit beside this mediation and are named by id: %s.",
+                len(unfit),
+                len(entries),
+                ", ".join(unfit),
+            )
+        elif not shown:
+            self.logger.warning(
+                "Mediator: none of the %d ledger entries the last mediation's blocking lines "
+                "cite fits beside this mediation; it mediates without them.",
+                len(entries),
+            )
+        return entries_block(shown, unfit, mediation=True)
 
     async def _ask_mediation_again(
         self, messages: list[Any], timeout: float | None
