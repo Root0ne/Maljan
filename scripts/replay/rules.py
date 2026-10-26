@@ -106,7 +106,14 @@ COMPOSER_CHECKS: tuple[str, ...] = (
     "identifier_citation_violations",
     "stated_value_violations",
 )
-COMPOSER_NOT_REPLAYED: dict[str, str] = {"section_cut_violation": _CUT_NOT_STORED}
+COMPOSER_NOT_REPLAYED: dict[str, str] = {
+    "section_cut_violation": _CUT_NOT_STORED,
+    "command_value_violations": (
+        "the values the command table is checked against are read from the code its section "
+        "was shown, and which code that was, within the share of the window each output had, "
+        "is not in the stored record"
+    ),
+}
 TOOL_CHECKS: tuple[str, ...] = ("self_named_arguments",)
 
 # Where each composer section's answer stands in a stored report, and how the

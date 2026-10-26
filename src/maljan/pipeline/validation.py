@@ -6117,6 +6117,457 @@ def repeated_item_violations(
     return found
 
 
+# A command table whose numbered ids leave out a value the code it was shown
+# compares the command value with, or name a value that code compares it with
+# nowhere. A row whose id was converted between bases by hand can name another
+# case's value, and a case the table leaves out is a command the reader never
+# learns of. Asked once with the values the
+# platform read from the code; the model decides which branch is a command and
+# what it does, and the table is kept as written with the finding beside it.
+COMMAND_VALUES_CODE = "composer.command_values"
+
+# The parts of C-like code that are not code: comments, and string and
+# character literals, each read to its end or to the end of its line (an
+# unclosed comment to the end of the text), so one pass reads them all.
+_CODE_NOT_CODE_RE = re.compile(
+    r"/\*(?:[^*]|\*(?!/))*(?:\*/)?|//[^\n]*|\"(?:\\.|[^\"\\\n])*\"?|'(?:\\.|[^'\\\n])*'?"
+)
+# A whole number a 64-bit value holds, as C writes it: hex after ``0x``, octal
+# after a leading zero, else decimal. A longer literal, and a leading-zero form
+# that is no octal, is not read: what is read is held to that width.
+_CODE_INT = (
+    r"-?(?:0[xX][0-9a-fA-F]{1,16}(?![0-9a-fA-F])|0[0-7]{1,22}(?![0-9])"
+    r"|(?:0|[1-9][0-9]{0,19})(?![0-9]))"
+)
+_CODE_INT_SUFFIX = r"[uUlL]{0,3}(?![\w.])"
+# One name tested for equality with one number, the whole of a condition or
+# of one of its ``||`` parts: ``param_2 == 0x12``.
+_CODE_PLAIN_EQUALITY_RE = re.compile(
+    rf"([A-Za-z_]\w*)\s*==\s*({_CODE_INT}){_CODE_INT_SUFFIX}", re.ASCII
+)
+# One name compared with one number by order, the whole of a condition:
+# ``param_2 < 0x10``. It splits the values it is compared with by range and
+# compares it with none of them.
+_CODE_PLAIN_RANGE_RE = re.compile(
+    rf"([A-Za-z_]\w*)\s*[<>]=?\s*{_CODE_INT}{_CODE_INT_SUFFIX}", re.ASCII
+)
+# What the code is read by, in one pass: the head of a switch and of an if,
+# ``else``, the braces round each block, the end of a statement, each case
+# label, and a case label that is not one number (a name, a character, a
+# range, a number wider than 64 bits).
+_CODE_TOKEN_RE = re.compile(
+    rf"\b(switch|if)\s*\(|\belse\b|[{{}};]"
+    rf"|\bcase\s+({_CODE_INT}){_CODE_INT_SUFFIX}\s*:|\bcase\b",
+    re.ASCII,
+)
+# Every equality and inequality test in the code.
+_CODE_EQUALITY_OP_RE = re.compile(r"[!=]=")
+# A word of code: a name or a number with its suffix.
+_CODE_WORD_RE = re.compile(r"[A-Za-z0-9_]+", re.ASCII)
+_CODE_NAME_RE = re.compile(r"[A-Za-z_]\w*", re.ASCII)
+_CODE_NUMBER_RE = re.compile(rf"({_CODE_INT}){_CODE_INT_SUFFIX}", re.ASCII)
+# What may stand before an operand of a test, past spaces, and after one: the
+# operand is then the whole operand, not a field, a pointee, a cast's result
+# or a term of a sum.
+_OPERAND_BEFORE = frozenset("(|&,?:;{=")
+_OPERAND_AFTER = frozenset(")|&,?:;}")
+# A command id read as a number, in the forms the code's numbers are read in.
+_ROW_NUMBER_RE = re.compile(_CODE_INT, re.ASCII)
+# The owner of a block inside a switch whose head was not read: its labels are
+# not read either.
+_UNREAD_SWITCH = (-1, "")
+
+
+@dataclass(frozen=True)
+class ComparedValues:
+    """The values one piece of code compares one expression with, as a section was shown it.
+
+    ``where`` names the code as the section's prompt names it; ``subject`` is
+    the expression as the code writes it.
+    """
+
+    where: str
+    subject: str
+    values: tuple[int, ...]
+
+
+def _code_number(text: str) -> int:
+    """A whole number as :data:`_CODE_INT` reads it, any suffix aside."""
+    digits = text.rstrip("uUlL")
+    negative = digits.startswith("-")
+    digits = digits.lstrip("-")
+    if digits[:2].lower() == "0x":
+        value = int(digits, 16)
+    elif len(digits) > 1 and digits[0] == "0":
+        value = int(digits, 8)
+    else:
+        value = int(digits)
+    return -value if negative else value
+
+
+def _bare(text: str, pairs: dict[int, int], start: int, stop: int) -> tuple[int, int]:
+    """``text[start:stop]`` past its spaces and the brackets that enclose the whole of it."""
+    while True:
+        while start < stop and text[start].isspace():
+            start += 1
+        while stop > start and text[stop - 1].isspace():
+            stop -= 1
+        if start < stop and text[start] == "(" and pairs.get(start) == stop - 1:
+            start, stop = start + 1, stop - 1
+        else:
+            return start, stop
+
+
+def _rung(condition: str) -> tuple[str, str, frozenset[int]] | None:
+    """What one if's condition tests, read whole or not at all.
+
+    ``("eq", name, values)`` for one name tested for equality with numbers,
+    alone or in parts joined by ``||`` at any depth; ``("range", name, {})``
+    for one name compared with one number by order; ``None`` for any other
+    condition. Linear in its length: each part is walked once at its depth,
+    a bracketed part jumped over.
+    """
+    pairs: dict[int, int] = {}
+    opened: list[int] = []
+    for at, char in enumerate(condition):
+        if char == "(":
+            opened.append(at)
+        elif char == ")":
+            if not opened:
+                return None
+            pairs[opened.pop()] = at
+    if opened:
+        return None
+    name: str | None = None
+    values: set[int] = set()
+    todo = [_bare(condition, pairs, 0, len(condition))]
+    whole = True
+    while todo:
+        start, stop = _bare(condition, pairs, *todo.pop())
+        parts: list[tuple[int, int]] = []
+        cut = at = start
+        while at < stop:
+            if condition[at] == "(":
+                at = pairs[at] + 1
+            elif condition.startswith("||", at):
+                parts.append((cut, at))
+                at += 2
+                cut = at
+            else:
+                at += 1
+        if parts:
+            whole = False
+            todo.extend([*parts, (cut, stop)])
+            continue
+        found = _CODE_PLAIN_EQUALITY_RE.fullmatch(condition, start, stop)
+        if found is None or (name is not None and found.group(1) != name):
+            ranged = _CODE_PLAIN_RANGE_RE.fullmatch(condition, start, stop) if whole else None
+            return ("range", ranged.group(1), frozenset()) if ranged else None
+        name = found.group(1)
+        values.add(_code_number(found.group(2)))
+    return ("eq", name, frozenset(values)) if name else None
+
+
+@dataclass
+class _Ladder:
+    """One if and the else-ifs that follow it: the name its rungs test, and what they test."""
+
+    name: str | None = None
+    values: set[int] = field(default_factory=set)
+    rungs: int = 0
+    # A rung on another condition was met, and a rung on the name after it.
+    interrupted: bool = False
+    broken: bool = False
+
+
+def _is_code_word_char(char: str) -> bool:
+    return char.isascii() and (char.isalnum() or char == "_")
+
+
+def _operand(word: str, whole: bool, negative: bool = False) -> tuple[str, str, int]:
+    """One side of a test: ``("name", name, 0)``, ``("num", "", value)`` or ``("other", name, 0)``.
+
+    ``whole`` says the word is the whole side. A side that is not ``other``
+    still names the name it holds, so a test of a name the reader cannot
+    read marks that name.
+    """
+    if _CODE_NAME_RE.fullmatch(word):
+        return ("name" if whole and not negative else "other", word, 0)
+    number = _CODE_NUMBER_RE.fullmatch(word)
+    if number is not None and whole:
+        value = _code_number(number.group(1))
+        return ("num", "", -value if negative else value)
+    return ("other", "", 0)
+
+
+def _left_operand(text: str, at: int) -> tuple[str, str, int]:
+    """The side of the test written before ``text[at]``."""
+    at -= 1
+    while at >= 0 and text[at].isspace():
+        at -= 1
+    closed = at >= 0 and text[at] == ")"
+    while at >= 0 and (text[at] == ")" or text[at].isspace()):
+        at -= 1
+    end = at + 1
+    while at >= 0 and _is_code_word_char(text[at]):
+        at -= 1
+    word = text[at + 1 : end]
+    if not word:
+        return ("other", "", 0)
+    if closed:
+        # A cast's result or a bracketed expression: the name in it is tested
+        # in a form this reader does not read.
+        return ("other", word if _CODE_NAME_RE.fullmatch(word) else "", 0)
+    while at >= 0 and text[at].isspace():
+        at -= 1
+    whole = at < 0 or (
+        text[at] in _OPERAND_BEFORE and not (text[at] == "=" and at > 0 and text[at - 1] in "<>!=")
+    )
+    return _operand(word, whole)
+
+
+def _right_operand(text: str, at: int) -> tuple[str, str, int]:
+    """The side of the test written from ``text[at]`` on."""
+    size = len(text)
+    while at < size and text[at].isspace():
+        at += 1
+    negative = at < size and text[at] == "-"
+    if negative:
+        at += 1
+    start = at
+    while at < size and _is_code_word_char(text[at]):
+        at += 1
+    word = text[start:at]
+    if not word:
+        return ("other", "", 0)
+    while at < size and text[at].isspace():
+        at += 1
+    return _operand(word, at >= size or text[at] in _OPERAND_AFTER, negative)
+
+
+def _read_compared_values(code: str) -> list[tuple[str, tuple[int, ...]]]:
+    """:func:`compared_values` without its guard."""
+    text = _CODE_NOT_CODE_RE.sub(" ", str(code or ""))
+    # A top-level block opened by no if or switch head is a function's body:
+    # what one function compares is never joined to another's. Where each
+    # body opens, so a test anywhere is placed in its function.
+    scope = 0
+    opens: list[tuple[int, int]] = []
+    # Per open block: the switch whose labels it holds, and the ladder it is a
+    # rung of when it is an if's body.
+    frames: list[tuple[tuple[int, str] | None, _Ladder | None]] = []
+    pending: tuple[str, Any] | None = None
+    closed_if: _Ladder | None = None
+    else_of: _Ladder | None = None
+    # What a switch or a ladder chooses by, per function and expression, and
+    # the ones some test or label of which this reader cannot read.
+    held: dict[tuple[int, str], set[int]] = {}
+    ladders: list[tuple[int, _Ladder]] = []
+    unread: set[tuple[int, str]] = set()
+    end = 0
+    for match in _CODE_TOKEN_RE.finditer(text):
+        if match.start() < end:
+            continue
+        token = match.group(0)
+        # Each holds for the one token that follows what set it.
+        just_closed, closed_if = closed_if, None
+        after_else, else_of = else_of, None
+        head = match.group(1)
+        if head:
+            # A switch's expression closes on its line; an if's condition may
+            # run over lines. Either is read once, to its closing bracket.
+            depth, at = 1, match.end()
+            line_end = text.find("\n", at) if head == "switch" else -1
+            stop = len(text) if line_end < 0 else line_end
+            while at < stop and depth:
+                depth += {"(": 1, ")": -1}.get(text[at], 0)
+                at += 1
+            inside = text[match.end() : at - 1] if not depth else None
+            end = at
+            if head == "switch":
+                subject = " ".join(inside.split()) if inside else ""
+                pending = ("switch", (scope, subject) if subject else _UNREAD_SWITCH)
+                continue
+            # An else-if ladder: ``if (x == a) {…} else if (x == b || x == c) {…}``.
+            ladder = after_else
+            if ladder is None:
+                ladder = _Ladder()
+                ladders.append((scope, ladder))
+            rung = _rung(inside) if inside is not None else None
+            if rung is not None and ladder.name in (None, rung[1]):
+                ladder.name = rung[1]
+                if rung[0] == "eq":
+                    ladder.broken = ladder.broken or ladder.interrupted
+                    ladder.values |= rung[2]
+                    ladder.rungs += 1
+            else:
+                ladder.interrupted = True
+            pending = ("if", ladder)
+        elif token == "else":
+            else_of = just_closed
+            pending = None
+        elif token == "{":
+            owner = frames[-1][0] if frames else None
+            ladder = None
+            if pending is not None and pending[0] == "switch":
+                owner = pending[1]
+            elif pending is not None:
+                ladder = pending[1]
+            elif not frames:
+                scope += 1
+                opens.append((match.start(), scope))
+            frames.append((owner, ladder))
+            pending = None
+        elif token == "}":
+            if frames:
+                _owner, closed_if = frames.pop()
+            pending = None
+        elif token == ";":
+            pending = None
+        else:
+            owner = frames[-1][0] if frames else None
+            if owner is None or owner == _UNREAD_SWITCH:
+                continue
+            if match.group(2) is None:
+                unread.add(owner)
+            else:
+                held.setdefault(owner, set()).add(_code_number(match.group(2)))
+    for at_scope, ladder in ladders:
+        if ladder.name is not None and ladder.rungs > 1:
+            key = (at_scope, ladder.name)
+            held.setdefault(key, set()).update(ladder.values)
+            if ladder.broken:
+                unread.add(key)
+    # Every other test of a name in its function: one with a number adds the
+    # number, any other marks the name, so no set is stated short of a value.
+    tested: dict[tuple[int, str], set[int]] = {}
+    current, index = 0, 0
+    for match in _CODE_EQUALITY_OP_RE.finditer(text):
+        while index < len(opens) and opens[index][0] < match.start():
+            current = opens[index][1]
+            index += 1
+        left = _left_operand(text, match.start())
+        right = _right_operand(text, match.end())
+        if left[0] == "name" and right[0] == "num":
+            tested.setdefault((current, left[1]), set()).add(right[2])
+        elif right[0] == "name" and left[0] == "num":
+            tested.setdefault((current, right[1]), set()).add(left[2])
+        else:
+            unread.update((current, side[1]) for side in (left, right) if side[1])
+    return [
+        (subject, tuple(sorted(values | tested.get((at_scope, subject), set()))))
+        for (at_scope, subject), values in held.items()
+        if (at_scope, subject) not in unread
+        and len(values | tested.get((at_scope, subject), set())) > 1
+    ]
+
+
+def compared_values(code: str) -> list[tuple[str, tuple[int, ...]]]:
+    """The expressions ``code`` chooses among two or more whole numbers by, each with its numbers.
+
+    Read from C-like code, the form a decompiler writes, one function body
+    (a top-level block no if or switch opens) apart from another: the case
+    labels of a switch on an expression (``switch (param_2)`` … ``case
+    0x12:``), and an else-if ladder on one name (``if (param_2 == 0x12) {…}
+    else if (param_2 == 0xe || param_2 == 0xc) {…}``), each rung's whole
+    condition equality tests of that name joined by ``||``, or one range test
+    of it. Every other test of that name in the function with a number adds
+    the number. The set is stated whole or not at all: a case label that is
+    not one number, a test of the name in any other form (a cast, another
+    name, a symbol), or a rung on another condition with the ladder going on
+    after it, and the expression is not returned. A label inside a switch
+    whose head does not close on its line is not read. An expression compared
+    with a single number is a test, not a choice among values, and is not
+    returned; nor is a name no switch or ladder chooses by. Comments and
+    string and character literals are not read, nor a number wider than 64
+    bits. Each expression is returned once per function, a switch's in the
+    order of its first label and a ladder's after them in the order the
+    ladders begin, with its numbers ascending. Linear in the
+    length of ``code``; code in any other form returns nothing, and code this
+    reader fails on returns nothing too, so no section is lost to it.
+    """
+    try:
+        return _read_compared_values(code)
+    except Exception as exc:  # noqa: BLE001 — a fact not read is no fact, never a lost section
+        logger.debug("validation: the compared values were not read (%s).", type(exc).__name__)
+        return []
+
+
+def both_bases(value: int) -> str:
+    """A whole number in hex with its decimal beside it: ``0x15 (21)``."""
+    return f"{hex(value)} ({value})"
+
+
+def command_value_violations(payload: Any, compared: Sequence[ComparedValues]) -> list[Violation]:
+    """A command table whose ids and the values its code compares disagree, as one question.
+
+    Each row's id is read as a number as written, alone or as its last word
+    (``0x15``, ``COMMAND 21``), as the code's numbers are read
+    (:data:`_CODE_INT`); any other id is not read. A table whose ids are 1 to
+    N, which row numbers would be too, is not checked. The code the table is
+    checked against is the one expression whose values hold the most of the
+    table's distinct numbered ids, more than half of them and at least two;
+    with two different value sets holding as many, the table is not checked.
+    The question names the values no row's id is and the ids that are none
+    of the values, every value in hex and decimal, and asks the model to read
+    each branch of that code again: the model decides which value is a
+    command and what its branch does.
+    """
+    numbered: list[tuple[int, str, int]] = []
+    for index, row in enumerate(_rows_of(payload, "commands")):
+        written = str(row.get("id") or "").strip()
+        last = written.rsplit(None, 1)[-1] if written else ""
+        if _ROW_NUMBER_RE.fullmatch(last):
+            numbered.append((index + 1, written, _code_number(last)))
+    ids = {value for _number, _written, value in numbered}
+    if len(ids) < 2 or not compared:
+        return []
+    if sorted(ids) == list(range(1, len(ids) + 1)):
+        # Ids 1 to N cannot be told from row numbers.
+        return []
+    best = max(len(ids.intersection(c.values)) for c in compared)
+    if best * 2 <= len(ids):
+        return []
+    chosen = [c for c in compared if len(ids.intersection(c.values)) == best]
+    if len({c.values for c in chosen}) > 1:
+        return []
+    values = chosen[0].values
+    unnamed = [value for value in values if value not in ids]
+    stray = [(number, written) for number, written, value in numbered if value not in values]
+    if not unnamed and not stray:
+        return []
+    where = "; ".join(
+        dict.fromkeys(
+            f"{quoted_value(safe_finding_value(c.where))}, which compares "
+            f"{quoted_value(safe_finding_value(c.subject))}"
+            for c in chosen
+        )
+    )
+    said = [
+        f"The code you were shown at {where} for equality with {len(values)} values, read by "
+        f"the platform from that code: {', '.join(both_bases(v) for v in values)}. {best} of "
+        f"your table's {len(ids)} numbered ids are among them, each id read as written: 0x and "
+        "hex digits as hex, a leading 0 and octal digits as octal, other digits as decimal."
+    ]
+    if unnamed:
+        said.append(f"No row's id is {', '.join(both_bases(v) for v in unnamed)}.")
+    if stray:
+        said.append(
+            "These rows' ids are none of those values: "
+            + "; ".join(
+                f"row {number} ({quoted_value(safe_finding_value(w))})" for number, w in stray
+            )
+            + "."
+        )
+    said.append(
+        "Read each value's branch in that code again. Give each row the value its branch is "
+        "taken on as its id, in one base for every row, and describe what that branch's own "
+        "code does; write a row for each value whose branch carries out a command, and none "
+        "for a value that is not one. Answer again with the whole list."
+    )
+    return [Violation(code=COMMAND_VALUES_CODE, message=" ".join(said), path="commands")]
+
+
 CITATION_WRONG_ENTRY_CODE = "report.citation_wrong_entry"
 # A recommendation or hunting note that acts on a value this run does not
 # publish. Asked once with the IOC table's own answer; a value kept after it
@@ -6168,6 +6619,7 @@ KEPT_WITH_A_FINDING: frozenset[str] = frozenset(
         TECHNIQUE_NAME_CODE,
         RULE_MATCH_AS_ACTION_CODE,
         REPEATED_ITEMS_CODE,
+        COMMAND_VALUES_CODE,
         UNPUBLISHED_RECOMMENDATION_CODE,
         UNPUBLISHED_RECOMMENDATION_TECHNIQUE_CODE,
         PERSISTENCE_NOT_OBSERVED_CODE,
