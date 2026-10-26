@@ -208,12 +208,21 @@ if TYPE_CHECKING:
 # deadline bounds the round. It was a fixed 600 s, a default limit nobody set;
 # a cut at ten minutes sent a slow model's round to the template.
 def _narrative_timeout(
-    narrative_agent: Any, report: Any, facts: str, run_state: str, isr_reports: Any = None
+    narrative_agent: Any,
+    report: Any,
+    facts: str,
+    run_state: str,
+    isr_reports: Any = None,
+    evidence: Any = None,
 ) -> float | None:
-    """The narrative round's outer wait: the configured one, and none is configured."""
+    """The narrative round's outer wait: the configured one, and none is configured.
+
+    Sized on the prompt :meth:`NarrativeAgent.generate` sends: ``evidence`` is
+    the entry texts it is handed.
+    """
     try:
         seconds = narrative_agent.round_timeout(
-            None, narrative_agent.prompt_chars(report, facts, run_state, isr_reports)
+            None, narrative_agent.prompt_chars(report, facts, run_state, isr_reports, evidence)
         )
         return None if seconds is None else float(seconds)
     except Exception as exc:  # noqa: BLE001 — a wait that cannot be sized is no wait
@@ -7448,6 +7457,7 @@ def make_report_node(
                 _narrative_facts,
                 _narrative_state,
                 state.get("isr_reports"),
+                _entry_texts,
             )
             if narrative_agent is not None
             else None

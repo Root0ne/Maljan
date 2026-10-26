@@ -369,7 +369,7 @@ A reply names an open question the analysts did not leave.
 
 ### `report.absence_contradicts_ledger`
 
-A report sentence that says a routine was not read (or its decompile not obtained), or that something is not in the ledger, or that a cited entry does not confirm (or verify) a value, while an answered entry of this run holds it (`ledger_absence_contradictions`). Asked once, naming the entry; a sentence kept after it is recorded.
+A report sentence that says a routine was not read (or its decompile not obtained, or its body not in the evidence), or that something is not in the ledger, or that a cited entry does not confirm (or verify) a value, or that an address is unresolved, while an answered entry of this run holds it (`ledger_absence_contradictions`). Asked once, naming the entry and showing what it holds (the routine's code, the object that names the address); a sentence kept after it is recorded.
 
 - **Raised at** `maljan.pipeline.validation:ledger_absence_contradictions`
 - **Constant** `maljan.pipeline.validation:ABSENCE_CONTRADICTS_LEDGER_CODE`
