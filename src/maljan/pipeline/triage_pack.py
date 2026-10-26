@@ -5973,3 +5973,27 @@ _SHORTER_RENDERERS: dict[str, Callable[[dict[str, Any], int], str]] = {
     directed_text.RENDERER: lambda data, room: _directed_text(data, max_chars=room),
     "behaviour_code": lambda data, room: _behaviour_code(data, max_chars=room),
 }
+
+
+# The detail a pack row's head is rendered at: no item of any list, every text
+# whole. What a line says besides its items (its counts, what was and was not
+# shown, the platform's sentences on reading it) is what remains.
+_HEAD_DETAIL = PackDetail(list_head=0, strings_shown=0, labels_shown=0)
+
+
+def pack_row_heads(rows: Any) -> dict[str, str]:
+    """Each pack entry's line with none of its listed items, by lower-cased id.
+
+    The line's own renderer decides what an item is, so the head keeps every
+    sentence the renderer writes besides them. A question that shows the
+    entry's whole output elsewhere shows this head in the pack in place of the
+    full line (``judge_agent.pack_rows_shown_below``). Rendered with the
+    entries of the pack as the full pack is, so a line naming another tool
+    names it the same way. Linear in the entries.
+    """
+    entries = pack_entries(rows)
+    if not entries:
+        return {}
+    with _viewing(entries):
+        lines = _render_lines(list(entries), _HEAD_DETAIL)
+    return {str(entry.id).lower(): line for entry, line in zip(entries, lines, strict=True)}

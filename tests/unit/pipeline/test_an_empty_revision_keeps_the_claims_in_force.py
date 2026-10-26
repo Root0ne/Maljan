@@ -24,11 +24,17 @@ from unittest.mock import MagicMock, patch
 
 from langchain_core.messages import AIMessage
 
-from maljan.agents.base_agent import NO_STRUCTURED_REPORT_STATUS, BaseAnalyst
+from maljan.agents.base_agent import (
+    NO_STRUCTURED_REPORT_STATUS,
+    WRITTEN_BESIDES_CLAIMS,
+    BaseAnalyst,
+)
 from maljan.pipeline.nodes import (
     RevisionInput,
     answer_with_retry_additions,
     make_revision_node,
+    retry_additions_report,
+    retry_additions_text,
     revision_decided_nothing,
 )
 from maljan.pipeline.state import AgentArgument
@@ -132,14 +138,17 @@ class TestTheRevisionNode:
             assert after.claims[3].added_by_retry_in_round == 2
             assert all(c.added_by_retry_in_round is None for c in after.claims[:3])
             assert [f.title for f in after.findings] == ["Install path"]
-            # The text in force is the analyst's answer in force, with the
-            # added claims after it, numbered on and marked.
+            # The report is built from the answer in force with the claims
+            # added: each claim once, the added one numbered on and marked,
+            # the line saying so, then what the answer in force wrote besides.
             report = update["revised_reports"][name]
-            assert report.startswith(f"{name} first answer\n\n")
-            assert "Claims added by the round-2 validation retry, written without tools" in report
-            assert f"Claim 4: {RETRY_NEW.claim}" in report
+            assert report.startswith(after.to_text_summary())
+            assert after.rendered_summary == after.to_text_summary()
+            assert "Claim 4 above was added by the round-2 validation retry" in report
+            assert report.count(RETRY_NEW.claim) == 1
             assert "(added by a tool-less retry, round 2)" in report
-            assert TIMING.claim not in report
+            assert report.count(TIMING.claim) == 1
+            assert report.endswith(f"{WRITTEN_BESIDES_CLAIMS}\n{name} first answer")
             # The answer it was built from is unchanged.
             assert len(in_force[name].claims) == 3
         [record] = update["revision_rounds"]
@@ -330,3 +339,50 @@ class TestTheRevisionPathRecordsIt:
         )
 
         assert isr.revision_wrote_no_claim is False
+
+
+class TestTheAdditionsReport:
+    def test_after_a_rendered_summary_the_tail_is_kept_and_no_claim_is_shown_twice(
+        self,
+    ) -> None:
+        prior = _in_force("reverser")
+        summary = prior.to_text_summary()
+        prior.note_rendered_summary(summary)
+        tail = "\n  Findings:\n    - Install path: read in round 0"
+        combined = answer_with_retry_additions(
+            prior, _empty_revision_retried("reverser", RETRY_NEW), 2
+        )
+
+        report = retry_additions_report(summary + tail, prior, combined, 1, 2)
+
+        assert report == (
+            f"{combined.to_text_summary()}\n{retry_additions_text(combined, 1, 2)}{tail}"
+        )
+        assert report.count(RETRY_NEW.claim) == 1 and report.count(DISPATCH.claim) == 1
+
+    def test_after_written_text_its_other_sections_and_the_findings_follow(self) -> None:
+        prior = _in_force("reverser")
+        written = (
+            f"CLAIM 1: {DISPATCH.claim}\nEVIDENCE: [ev_0068]\nCONFIDENCE: 0.8\n\n"
+            "DISPUTES:\n- Dynamic claim 2 reads the sleep as fixed; ev_0063 shows a range."
+        )
+        combined = answer_with_retry_additions(
+            prior, _empty_revision_retried("reverser", RETRY_NEW), 2
+        )
+
+        report = retry_additions_report(written, prior, combined, 1, 2)
+
+        assert report.startswith(combined.to_text_summary())
+        assert "  Findings:\n    - Install path: read in round 0" in report
+        assert retry_additions_text(combined, 1, 2) in report
+        assert report.endswith(
+            f"{WRITTEN_BESIDES_CLAIMS}\nDISPUTES:\n- Dynamic claim 2 reads the sleep as "
+            "fixed; ev_0063 shows a range."
+        )
+        assert report.count(DISPATCH.claim) == 1
+
+    def test_the_line_names_the_added_claims_by_their_numbers(self) -> None:
+        combined = AgentISR(agent_id="x", domain="x", claims=[DISPATCH, TIMING, INSTALL])
+
+        assert retry_additions_text(combined, 1, 3).startswith("Claim 3 above was")
+        assert retry_additions_text(combined, 2, 3).startswith("Claims 2 to 3 above were")

@@ -350,3 +350,58 @@ def claim_blocks(text: str) -> list[tuple[int, str]]:
                 current.append(bare)
         offset += len(line)
     return [(start, _block_key(lines)) for start, lines in blocks]
+
+
+def besides_claims(text: str) -> str:
+    """``text`` without the claim blocks it begins: its other sections, as written.
+
+    A claim block is its heading line, the lines of its sentence and its
+    field lines (EVIDENCE, CONFIDENCE, TECHNIQUE, DISSENT), up to a ``---``
+    separator or the first line that is not a field once its fields began.
+    The lines after a heading are its sentence only when a field line follows
+    them before a blank line or another heading; otherwise the block is its
+    heading line alone, and what follows (a rebuttal written right under it)
+    stays. Everything else before the DISPUTES section stays, and the
+    DISPUTES section and what follows it stay whole: a peer's claim quoted
+    there is a dispute, not this analyst's claim. Runs of blank lines are kept
+    to one. ``""`` when nothing besides the claims is written. Each line is
+    read at most twice: linear in the text.
+    """
+    own, disputes = _split_at_disputes(text)
+    kept: list[str] = []
+    index = 0
+    while index < len(own):
+        line = own[index]
+        if _SEPARATOR_RE.match(line):
+            index += 1
+            continue
+        if CLAIM_HEAD_RE.match(line) is None:
+            kept.append(line)
+            index += 1
+            continue
+        # The sentence's lines, when a field follows them before a blank
+        # line, a separator or another heading.
+        after = index + 1
+        while (
+            after < len(own)
+            and own[after].strip()
+            and not _FIELD_LABEL_RE.match(own[after])
+            and not CLAIM_HEAD_RE.match(own[after])
+            and not _SEPARATOR_RE.match(own[after])
+        ):
+            after += 1
+        if after < len(own) and _FIELD_LABEL_RE.match(own[after]):
+            # Its fields, blank lines between them included, up to the first
+            # other line.
+            index = after
+            while index < len(own) and (
+                not own[index].strip() or _FIELD_LABEL_RE.match(own[index])
+            ):
+                index += 1
+            continue
+        index += 1
+    out: list[str] = []
+    for line in [*kept, *disputes]:
+        if line.strip() or (out and out[-1].strip()):
+            out.append(line)
+    return "\n".join(out).strip("\n")

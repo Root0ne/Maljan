@@ -30,6 +30,7 @@ import contextlib
 import logging
 import re
 import uuid
+from collections import Counter
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Any, Literal, NamedTuple, cast
@@ -845,13 +846,16 @@ def verdict_report_parts(
     degradation note. Nothing here is cut; :func:`fit_prompt_parts` does
     that, and only when the judge's window cannot hold them.
     """
+    from maljan.agents.base_agent import report_rendered_again
     from maljan.utils.written_forms import markers_written_out
 
     parts: dict[str, str] = {}
     for name, report in reports.items():
         # A report is what a model wrote: a run-state marker in it is written
-        # out, so the judge never reads one as the platform's block.
-        parts[f"{name} report"] = f"--- {name.upper()} ANALYST ---\n{markers_written_out(report)}"
+        # out, so the judge never reads one as the platform's block. A claims
+        # summary is rendered again from its ISR, with every mark set since.
+        shown = report_rendered_again(report, (isr_reports or {}).get(name))
+        parts[f"{name} report"] = f"--- {name.upper()} ANALYST ---\n{markers_written_out(shown)}"
     if isr_reports:
         isr_block = "\n".join(
             f"[{name}] domain={isr.domain} | "
@@ -1148,12 +1152,78 @@ class QuestionEvidence(NamedTuple):
     partial: bool = False
     # The stored output was blanked and this is the run's lower-cased search copy.
     lowered: bool = False
+    # Whether the call answered: a failed call's text is its failure, which
+    # the pack row says in the platform's words.
+    ok: bool = True
 
 
 # What an entry's heading says when what is shown is not the whole answer as stored.
 PARTIAL_ENTRY_MARK = "incomplete: this run holds only part of this entry's answer"
 LOWERED_ENTRY_MARK = "the stored output was not kept; this is the run's lower-cased search copy"
 NO_ENTRY_TEXT = "(no text recorded in this run)"
+# What a pack row says after its head in the technique question when the
+# entry's stored output, from which the row is rendered, is shown whole under
+# EVIDENCE CITED.
+PACK_ROW_SHOWN_BELOW = (
+    "the items of this line are in its stored output, shown whole under EVIDENCE CITED below"
+)
+_PACK_ROW_RE = re.compile(r"\[([^\]\s]+)\] ")
+
+
+def pack_rows_shown_below(
+    facts_block: str, whole: Mapping[str, str], heads: Mapping[str, str] | None = None
+) -> str:
+    """``facts_block`` with each row whose entry is shown whole below cut to its head and a pointer.
+
+    The technique question shows the pack and, under EVIDENCE CITED, the
+    stored output of every entry a question cites. A pack row is rendered
+    from its entry's stored output, so where that output is shown whole
+    (``whole``: id, lower-cased, to the text shown) the row keeps its head and
+    says where the output is; the fuller text is shown once. The head is what
+    the row says besides the items it lists: a row of several lines, its
+    first line (the lines below it are its items); a row of one line, the
+    line its renderer writes with no item listed (``heads``,
+    ``triage_pack.pack_row_heads``), which keeps every sentence the renderer
+    adds of its own. A one-line row with no head given stays whole.
+
+    A row is a line of the pack (below its heading, up to the first blank
+    line: the earlier run's block after it is left as it is) opening with
+    ``[id] ``, with the list lines (``- ``) or indented lines right below it.
+    A row is left whole when its pointed form would be no shorter, or when the
+    output shown is shorter than the row: then the row is the fuller text.
+    Linear in the block.
+    """
+    from maljan.pipeline.triage_pack import PACK_HEADING
+
+    if not facts_block or not whole:
+        return facts_block
+    heads = heads or {}
+    lines = facts_block.split("\n")
+    out: list[str] = []
+    in_pack = False
+    index = 0
+    while index < len(lines):
+        line = lines[index]
+        if line == PACK_HEADING or not line.strip():
+            in_pack = line == PACK_HEADING
+        opened = _PACK_ROW_RE.match(line) if in_pack else None
+        end = index + 1
+        if opened is not None:
+            while end < len(lines) and lines[end][:1] in ("-", " ", "\t") and lines[end].strip():
+                end += 1
+        key = opened.group(1).lower() if opened is not None else ""
+        shown = whole.get(key, "") if opened is not None else ""
+        head = line if end > index + 1 else heads.get(key, "")
+        if opened is None or not shown or not head:
+            out.extend(lines[index:end])
+            index = end
+            continue
+        row = "\n".join(lines[index:end])
+        pointed = f"{head} — {PACK_ROW_SHOWN_BELOW}."
+        out.append(pointed if len(pointed) < len(row) and len(shown) >= len(row) else row)
+        index = end
+    return "\n".join(out)
+
 
 # The labels the question's head writes before its technique list.
 QUESTION_REPORTS_LABEL = "Expert Reports:"
@@ -1212,6 +1282,7 @@ def question_evidence(ledger: Iterable[Any], corpus: Any = None) -> dict[str, Qu
             tool=str(getattr(entry, "tool", "") or ""),
             partial=bool(getattr(entry, "truncated", False)),
             lowered=lowered,
+            ok=bool(getattr(entry, "ok", True)),
         )
     holders = repeat_holders(ledger)
     for repeat, holder in holders.items():
@@ -1723,8 +1794,15 @@ def mediation_reports_text(
     analyst's own words and its ISR the claims in force, which differ and are
     both kept. Empty ISRs are left out, as before.
     """
+    from maljan.agents.base_agent import report_rendered_again
     from maljan.utils.written_forms import markers_written_out
 
+    # A report that is an answer's claims summary is rendered again from its
+    # ISR, so a mark set since cannot make the two differ and show it twice.
+    isrs = isr_reports or {}
+    reports = {
+        name: report_rendered_again(report, isrs.get(name)) for name, report in reports.items()
+    }
     # A report and a claim's words are what a model wrote: a run-state marker
     # in them is written out, so the mediator never reads one as the
     # platform's block.
@@ -1735,14 +1813,199 @@ def mediation_reports_text(
     if not isr_reports:
         return reports_text
     shown = set(reports.values())
+
+    def _shown(name: str, summary: str) -> bool:
+        # A report that is the summary, or the summary with the findings in
+        # force after it (``base_agent.answer_in_force_text``), already holds it.
+        report = reports.get(name, "")
+        return summary in shown or report.startswith(f"{summary}\n")
+
     isr_block = "\n\n".join(
         f"[ISR] {markers_written_out(summary)}"
-        for summary in (isr.to_text_summary() for isr in isr_reports.values() if isr.claims)
-        if summary not in shown
+        for name, summary in (
+            (name, isr.to_text_summary()) for name, isr in isr_reports.items() if isr.claims
+        )
+        if not _shown(name, summary)
     )
     if not isr_block:
         return reports_text
     return f"{reports_text}\n\n=== STRUCTURED CLAIMS (ISR) ===\n{isr_block}"
+
+
+# The standing of each line a mediation listed, as the history states it once
+# beside the line: the platform reads the mediator's mark and overrides it in
+# neither direction; a mark it could not read leaves the line blocking. Said
+# in words and parentheses, never in the mediator's bracketed mark syntax, so
+# a line copied from the history is read by its own mark alone.
+HISTORY_LINE_BLOCKING = "blocking"
+HISTORY_LINE_NOT_BLOCKING = "not blocking"
+HISTORY_LINE_MARK_UNREAD = "blocking, its mark was not read"
+_CONFIDENCE_TAIL_RE = re.compile(r"\nConfidence: (\d+\.\d+)\Z")
+
+
+def _listed_in_order(argument: AgentArgument) -> tuple[str, list[str], str] | None:
+    """The finding's own words, its listed lines in order and its confidence, or ``None``.
+
+    A mediation's finding ends with the lines it listed, joined by ``"; "``,
+    and the confidence it wrote (``JudgeAgent._mediate_round``); the lines are
+    also its ``contradictions`` and ``not_blocking``. When the finding's tail
+    is exactly those lines, in some order, that order is read off it and the
+    words before it are returned; any other finding (an error, a mediation
+    that did not apply, state written another way) is ``None``. Linear in the
+    finding.
+    """
+    finding = str(argument.finding or "")
+    at = finding.rfind("\n\nContradictions: ")
+    if at < 0:
+        return None
+    tail = finding[at + len("\n\nContradictions: ") :]
+    confidence = _CONFIDENCE_TAIL_RE.search(tail)
+    if confidence is None:
+        return None
+    joined = tail[: confidence.start()]
+    lines = list(dict.fromkeys([*argument.contradictions, *argument.not_blocking]))
+    if not lines:
+        return (finding[:at], [], confidence.group(1)) if joined == "None" else None
+    # The tail read from its start: at each "; " (and at its end) the text
+    # since the last line placed is a line when its length is one a line not
+    # yet placed has and it is that line. Each separator is visited once and a
+    # slice is taken only at a length that can match. Tail left over, or a
+    # line never placed, is no match.
+    left = set(lines)
+    lengths = Counter(len(line) for line in lines)
+    ends: list[int] = []
+    sep = joined.find("; ")
+    while sep >= 0:
+        ends.append(sep)
+        sep = joined.find("; ", sep + 2)
+    ends.append(len(joined))
+    ordered: list[str] = []
+    start = 0
+    for end in ends:
+        if end < start or not lengths.get(end - start):
+            continue
+        candidate = joined[start:end]
+        if candidate in left:
+            left.discard(candidate)
+            lengths[len(candidate)] -= 1
+            ordered.append(candidate)
+            start = end + 2
+    if left or start != len(joined) + 2:
+        return None
+    return finding[:at], ordered, confidence.group(1)
+
+
+_FACT_LINE_HEAD = 'For the line "'
+_FACT_LINE_END = '": '
+
+
+def _quoted_line(fact: str, lines: Iterable[str]) -> tuple[str, str] | None:
+    """The listed line a ledger fact quotes whole and what it says of it, or ``None``.
+
+    The debate's facts open ``For the line "<line>": `` (``debate_facts``).
+    The longest listed line the fact opens with is the one it quotes, so a
+    line that is the start of another (``says "abc`` and ``says "abc": def``)
+    never takes the other's fact. Linear in the lines.
+    """
+    if not fact.startswith(_FACT_LINE_HEAD):
+        return None
+    best = ""
+    for line in lines:
+        if len(line) > len(best) and fact.startswith(f"{_FACT_LINE_HEAD}{line}{_FACT_LINE_END}"):
+            best = line
+    if not best:
+        return None
+    return best, fact[len(_FACT_LINE_HEAD) + len(best) + len(_FACT_LINE_END) :]
+
+
+def _history_entry_text(argument: Any, number: int, total: int) -> str:
+    """One history entry as text: its words once, each listed line once with its standing."""
+    from maljan.utils.written_forms import markers_written_out
+
+    if not isinstance(argument, AgentArgument):
+        # Not an argument this module wrote: shown as it reads, under its head.
+        return f"--- entry {number} of {total} ---\n{argument}"
+    unread = set(argument.unread_marks)
+    not_blocking = set(argument.not_blocking)
+
+    def standing(line: str) -> str:
+        if line in unread:
+            return HISTORY_LINE_MARK_UNREAD
+        return HISTORY_LINE_NOT_BLOCKING if line in not_blocking else HISTORY_LINE_BLOCKING
+
+    # A ledger fact quoting a listed line whole is said under that line, the
+    # quote left out: the line is shown once.
+    held = {*argument.contradictions, *argument.not_blocking}
+    under: dict[str, list[str]] = {}
+    apart: list[str] = []
+    for fact in argument.ledger_facts:
+        quoted = _quoted_line(str(fact), held)
+        if quoted is None:
+            apart.append(str(fact))
+        else:
+            under.setdefault(quoted[0], []).append(quoted[1])
+
+    def listed(lines: Sequence[str]) -> list[str]:
+        rows: list[str] = []
+        for line in lines:
+            rows.append(f"- (standing: {standing(line)}) {markers_written_out(line)}")
+            rows.extend(f"  Ledger: {said}" for said in under.get(line, ()))
+        return rows
+
+    out = [f"--- {argument.agent_name} (entry {number} of {total}) ---"]
+    read = _listed_in_order(argument)
+    if read is not None:
+        words, lines, confidence = read
+        if words.strip():
+            out.append(markers_written_out(words))
+        out.append("Contradictions:" if lines else "Contradictions: None")
+        out.extend(listed(lines))
+        out.append(f"Confidence: {confidence}")
+        if argument.confidence_score is None:
+            out.append("Confidence score: none recorded")
+    else:
+        # A finding in no form the lines can be placed in (an error, a
+        # mediation consensus did not apply to, state written another way) is
+        # shown whole, then each line the platform holds with its standing.
+        finding = str(argument.finding or "")
+        if finding.strip():
+            out.append(markers_written_out(finding))
+        lines = list(dict.fromkeys([*argument.contradictions, *argument.not_blocking, *unread]))
+        if lines:
+            out.append("Contradictions:")
+            out.extend(listed(lines))
+        score = argument.confidence_score
+        out.append(f"Confidence score: {'none recorded' if score is None else f'{score:.2f}'}")
+    if argument.status != "complete":
+        out.append(f"Status: {argument.status}")
+    if argument.note:
+        out.append(f"Note: {argument.note}")
+    if apart:
+        out.append("Ledger facts:")
+        out.extend(f"- {fact}" for fact in apart)
+    return "\n".join(out)
+
+
+def negotiation_history_text(history: Sequence[Any]) -> str:
+    """The negotiation history as the mediator and the verdict read it, each line once.
+
+    One entry per argument, in order: the mediator's words, then every line
+    its final block listed, once, each with its standing (blocking, not
+    blocking, or blocking because its mark was not read), the confidence it
+    wrote, and the status, note and ledger facts where there are any (a fact
+    about one line under that line, its quote of the line left out). The
+    lines were shown up to four times before (in the finding, again in
+    ``contradictions``, ``not_blocking`` and ``unread_marks``, and quoted by
+    the ledger facts); the routing
+    fields the platform keeps for itself are not shown, as they never were.
+    Model words have their run-state markers written out, as the reports do.
+    Linear in the history.
+    """
+    items = list(history or [])
+    return "\n\n".join(
+        _history_entry_text(argument, number, len(items))
+        for number, argument in enumerate(items, 1)
+    )
 
 
 def mediator_system_prompt(
@@ -3089,7 +3352,7 @@ class JudgeAgent(BudgetMeter):
             sha256=_sha256_of(sample),
             tools=self.tools,
         )
-        history_text = str(history)
+        history_text = negotiation_history_text(history)
 
         def _mediation_human(
             reports_shown: str, history_shown: str, notice: str, entries_shown: str = ""
@@ -3672,7 +3935,8 @@ class JudgeAgent(BudgetMeter):
             parts["long-term memory"] = memory_block
         # The negotiation history whole, as its own part: a fixed cut at 800
         # characters kept the first round and none of the ones that decided.
-        history_text = str(history)
+        # Each listed line once, with its standing (``negotiation_history_text``).
+        history_text = negotiation_history_text(history)
 
         # Built as messages rather than through ``ChatPromptTemplate``: the
         # system turn now contains a JSON skeleton, and a template would read
@@ -4274,6 +4538,30 @@ class JudgeAgent(BudgetMeter):
         if notice:
             self.logger.warning("JudgeAgent technique question: %s", notice)
         fitted = {i: e._replace(text=texts[i]) for i, e in entries.items()}
+        # A pack row whose entry's stored output is shown whole below keeps its
+        # head and points there: the output the row is rendered from is shown
+        # once. Only after the fit, so it frees room and takes none; an entry
+        # shortened, incomplete, a lower-cased copy or a failed call leaves its
+        # row whole.
+        whole = {
+            i: texts[i]
+            for i, e in entries.items()
+            if e.ok and e.text and texts[i] == e.text and not e.partial and not e.lowered
+        }
+        heads: dict[str, str] = {}
+        if whole and ledger:
+            from maljan.pipeline.triage_pack import pack_row_heads
+
+            try:
+                heads = pack_row_heads(ledger)
+            except Exception as exc:  # noqa: BLE001 — no head, the row stays whole
+                self.logger.debug("Technique question: pack row heads not read (%s).", exc)
+        pointed = pack_rows_shown_below(facts_block, whole, heads)
+        if pointed != facts_block:
+            head = (
+                f"{_standing_blocks(run_state, pointed)}{_identity_prefix(sample)}"
+                + technique_question_head(join_prompt_parts(fitted_reports), decided, carried)
+            )
         # The technique cards are reference beside the claims: they go in only
         # where the window has room left after the reports and the evidence,
         # so they never shorten either.

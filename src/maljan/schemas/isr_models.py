@@ -525,6 +525,44 @@ class AgentISR(BaseModel):
     # revision node keeps them and adds what the retry wrote beside them.
     _revision_wrote_no_claim: bool = PrivateAttr(default=False)
 
+    # The report a revision's answer in force is read as, when the validation
+    # turn changed the answer the revision wrote (``base_agent
+    # .answer_in_force_text``), and the kept retry's own words when the answer
+    # in force is a retry; both ``""`` when the written answer stands. The
+    # revision node puts the report in the prompts and keeps the written
+    # answer, and the retry's words, on the record.
+    _report_in_force: str = PrivateAttr(default="")
+    _retry_words: str = PrivateAttr(default="")
+    # The claims summary the platform put at the head of this answer's report
+    # (a first answer's report, a revision's answer in force), exactly as it
+    # was rendered: the part a prompt may render again with marks set since.
+    # ``""`` when the report is text the analyst wrote.
+    _rendered_summary: str = PrivateAttr(default="")
+
+    @property
+    def rendered_summary(self) -> str:
+        """The claims summary the platform put at the head of this answer's report, or ``""``."""
+        return self._rendered_summary
+
+    def note_rendered_summary(self, summary: str) -> None:
+        """Record the claims summary the platform put at the head of this answer's report."""
+        self._rendered_summary = str(summary or "")
+
+    @property
+    def report_in_force(self) -> str:
+        """The report this answer in force is read as, or ``""`` when the written one stands."""
+        return self._report_in_force
+
+    @property
+    def retry_words(self) -> str:
+        """The kept validation retry's own words, or ``""`` when no retry is in force."""
+        return self._retry_words
+
+    def note_report_in_force(self, report: str, retry_words: str = "") -> None:
+        """Record the report this answer in force is read as, and the kept retry's words."""
+        self._report_in_force = str(report or "")
+        self._retry_words = str(retry_words or "")
+
     @property
     def revision_wrote_no_claim(self) -> bool:
         """Whether the revision itself wrote no claim, whatever a retry wrote after it."""
