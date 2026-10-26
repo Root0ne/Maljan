@@ -98,6 +98,18 @@ class AgentArgument(BaseModel):
             "flag was kept, where only ``converged`` says."
         ),
     )
+    carried: dict[str, int] = Field(
+        default_factory=dict,
+        repr=False,
+        description=(
+            "For the mediator: each blocking line it marked [carried: L<number>], with the "
+            "number of the last mediation's line it raises again, as the revision round's record "
+            "numbered those lines for it (``debate_facts.carried_marks``). A line marked [new] "
+            "or not marked is not in it. When every blocking line is in it and no analyst a "
+            "line names changed a claim on the earlier line, the debate ends as "
+            "``contested_points_unchanged``."
+        ),
+    )
     revise: list[str] | None = Field(
         default=None,
         repr=False,

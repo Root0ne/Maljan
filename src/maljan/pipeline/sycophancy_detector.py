@@ -202,6 +202,7 @@ def convergence_flags(
     tool_calls: Mapping[str, int],
     entry_texts: Mapping[str, str],
     threshold: float = SYCOPHANCY_THRESHOLD,
+    shown: Mapping[str, Iterable[str]] | None = None,
 ) -> list[dict[str, Any]]:
     """The revisions of a round that moved towards a peer beyond their shared sources.
 
@@ -214,6 +215,12 @@ def convergence_flags(
     revision whose similarity is above ``threshold`` and above the one before
     the round is flagged ``{agent, towards, before, after}``. Linear in the
     pairs and their words.
+
+    ``shown`` is, per analyst, the entries the platform showed its revision
+    (a peer's tool results among them): citing one of those is no citation
+    added, since the analyst read it in no call of its own. Its words are
+    left out like any shared entry's, so agreeing with what the entry states
+    is no move; agreeing beyond it still is.
     """
     flags: list[dict[str, Any]] = []
     for name in revised:
@@ -221,13 +228,16 @@ def convergence_flags(
         if old is None or new is None or int(tool_calls.get(name, 0) or 0) > 0:
             continue
         cited_new = _citations(new)
-        if cited_new - _citations(old):
+        given = {str(e).lower() for e in ((shown or {}).get(name) or ())}
+        if cited_new - _citations(old) - given:
             continue
         old_text, new_text = old.to_text_summary(), new.to_text_summary()
         for peer, answer in after.items():
             if peer == name:
                 continue
-            shared = cited_new & _citations(answer)
+            # The entries both cite, and the shown entries the revision cites:
+            # what such an entry states is no move towards anyone.
+            shared = (cited_new & _citations(answer)) | (cited_new & given)
             drop: set[str] = set()
             for entry in shared:
                 drop.update(_tokenize(str(entry_texts.get(entry, "") or "")))

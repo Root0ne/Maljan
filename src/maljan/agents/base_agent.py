@@ -3510,7 +3510,9 @@ PACK_SUMMARY_NOTE = (
 )
 
 
-def cited_entry_texts(agent: Any, cited: Sequence[str], messages: Sequence[Any]) -> dict[str, str]:
+def cited_entry_texts(
+    agent: Any, cited: Sequence[str], messages: Sequence[Any], *, summary_lines: bool = True
+) -> dict[str, str]:
     """The cited entries a tools-free turn does not hold, each as the agent had it in view, by id.
 
     The ledger is the agent's own entries and the run's as the agent was
@@ -3526,8 +3528,14 @@ def cited_entry_texts(agent: Any, cited: Sequence[str], messages: Sequence[Any])
     line is what its claims were written from, and the conversation already
     carries it. Any other entry is shown whole. Keyed by id in the order
     first cited. Never raises: an unreadable ledger shows nothing.
+
+    ``summary_lines=False`` is a turn for a reader that wrote no claim from such
+    a line (a debate's revision or mediation): a pack entry whose summary
+    line the conversation carries is left out rather than named with the
+    note, as the conversation already holds what the brief gave everyone.
     """
     from maljan.agents.judge_agent import NO_ENTRY_TEXT, PARTIAL_ENTRY_MARK, question_evidence
+    from maljan.agents.tool_fence import fenced
     from maljan.pipeline.run_state import RUN_STATE_BEGIN, RUN_STATE_END
 
     wanted = list(dict.fromkeys(str(entry_id).lower() for entry_id in cited if entry_id))
@@ -3567,14 +3575,20 @@ def cited_entry_texts(agent: Any, cited: Sequence[str], messages: Sequence[Any])
         if shown is None:
             continue
         if entry_id not in touched and entry_id in summaries:
-            texts[entry_id] = f"[{entry_id}] {PACK_SUMMARY_NOTE}."
+            if summary_lines:
+                texts[entry_id] = f"[{entry_id}] {PACK_SUMMARY_NOTE}."
             continue
         body = shown.text.strip()
-        if body and not shown.partial and not shown.lowered and body in conversation:
+        # Shown through the one view of a tool answer (``agents.tool_fence``):
+        # the text is the sample's and the tools', so a line in it that reads
+        # as the platform's (a run-state block, a heading) stays data.
+        view = fenced(entry_id, shown.text) if body else ""
+        held = body in conversation or (view and view in conversation)
+        if body and not shown.partial and not shown.lowered and held:
             continue
         mark = f" ({PARTIAL_ENTRY_MARK})" if shown.partial else ""
         tool = f" {shown.tool}" if shown.tool else ""
-        texts[entry_id] = f"[{entry_id}]{tool}{mark}:\n{shown.text or NO_ENTRY_TEXT}"
+        texts[entry_id] = f"[{entry_id}]{tool}{mark}:\n{view or NO_ENTRY_TEXT}"
     return texts
 
 
@@ -10707,6 +10721,7 @@ class BaseAnalyst(BudgetMeter, ABC):
         revision_round: int = 1,
         *,
         read_places: bool = False,
+        cited_entries: Mapping[str, str] | None = None,
     ) -> tuple[str, AgentISR]:
         """Wrapper around revise_isr() with error handling, checked like a first answer.
 
@@ -10723,6 +10738,12 @@ class BaseAnalyst(BudgetMeter, ABC):
         holds no listing of (``debate_facts.place_facts``): the revision is
         given this agent's tools (``revision_answer``), and the model decides
         whether to read it.
+
+        ``cited_entries`` are the stored texts of the ledger entries the
+        contested lines naming this agent cite (``debate_facts.line_entry_ids``),
+        by id: shown after the feedback, whole, as many as the input room
+        leaves beside the raw data, which they never shorten
+        (:meth:`_revision_entries`).
         """
         self.current_round = int(revision_round)
         with lock_for(self):
@@ -10739,6 +10760,7 @@ class BaseAnalyst(BudgetMeter, ABC):
                     mediator_feedback,
                     revision_round,
                     read_places=read_places,
+                    cited_entries=cited_entries,
                 )
             finally:
                 self._measured_peers = ()
@@ -10753,14 +10775,29 @@ class BaseAnalyst(BudgetMeter, ABC):
         revision_round: int,
         *,
         read_places: bool,
+        cited_entries: Mapping[str, str] | None = None,
     ) -> tuple[str, AgentISR]:
         """:meth:`safe_revise_isr`'s body, run under the agent's lock."""
+        self.revision_entries_shown: tuple[str, ...] = ()
         try:
             # The raw data sits beside the reports and the feedback in the
             # revision prompt, so it has the input room less them.
             beside = len(own_report or "") + len(mediator_feedback or "")
             beside += sum(len(str(r)) for r in (peer_reports or {}).values() if r)
             truncated = self._truncate_input(original_data, beside)
+            # The entries come after the raw data has its room: what is left
+            # of the room is theirs, so they never shorten it.
+            block = (
+                self._revision_entries(cited_entries, original_data, truncated, beside)
+                if cited_entries
+                else ""
+            )
+            if block:
+                mediator_feedback = (
+                    f"{mediator_feedback}\n\n{block}" if mediator_feedback else block
+                )
+            # The entries shown are text the revision read, as its raw data is.
+            grounds = f"{truncated}\n\n{block}" if block else truncated
             self._last_loop_deadline = None
             self._answer_unstructured = False
             self._revision_reads = bool(read_places)
@@ -10786,7 +10823,7 @@ class BaseAnalyst(BudgetMeter, ABC):
                 and not isr.confidence_unreadable
                 and count_claims_begun(str(text or "")) == 0
             )
-            checked = self._validate_isr(self._apply_consistency_gate(isr, truncated), truncated)
+            checked = self._validate_isr(self._apply_consistency_gate(isr, grounds), grounds)
             checked = self._drain_findings(checked)
             if wrote_no_claim:
                 checked.note_revision_wrote_no_claim()
@@ -10796,6 +10833,42 @@ class BaseAnalyst(BudgetMeter, ABC):
         except Exception as e:
             self.logger.error("ISR revision failed: %s", e)
             raise AnalystError(f"{self.name} ISR revision failed: {e}") from e
+
+    def _revision_entries(
+        self, entries: Mapping[str, str], data: str, truncated: str, beside: int
+    ) -> str:
+        """The entries block a revision shows after its feedback, or ``""``.
+
+        Sized by the input room (:meth:`_input_room_chars`) less what the
+        request already carries beside its raw data and the raw data as it is
+        sent: the entries take what the raw data leaves (``debate_facts
+        .fit_entries``), each whole, an entry that does not fit named by id.
+        With no room known every entry is shown. What was shown, and what was
+        named, is kept on ``revision_entries_shown`` for the round's record.
+        """
+        from maljan.pipeline.debate_facts import entries_block, fit_entries
+
+        room = self._input_room_chars(data)
+        left = None if room is None else max(0, room - max(0, int(beside)) - len(truncated))
+        shown, unfit = fit_entries(entries, left)
+        self.revision_entries_shown = tuple(shown)
+        if unfit:
+            self.logger.warning(
+                "Revision: %d of the %d ledger entries the lines naming '%s' cite do not fit "
+                "beside its revision and are named by id: %s.",
+                len(unfit),
+                len(entries),
+                self.name,
+                ", ".join(unfit),
+            )
+        elif not shown:
+            self.logger.warning(
+                "Revision: none of the %d ledger entries the lines naming '%s' cite fits beside "
+                "its revision; it revises without them.",
+                len(entries),
+                self.name,
+            )
+        return entries_block(shown, unfit)
 
     # ------------------------------------------------------------------
     # Private helpers
