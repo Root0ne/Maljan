@@ -482,7 +482,9 @@ def function_table(
     address, its decompiler name, or an offset from an image base the run
     states), or cites its entry naming none of that entry's functions
     (:func:`_claimed_rows`); one no claim points at is shown in
-    :data:`CODE_HOME_SECTION`. Linear in the answers and the claims.
+    :data:`CODE_HOME_SECTION`. A section is also shown the code of every
+    function the code it is shown calls, at any depth (:func:`_show_called`).
+    Linear in the answers, the claims and the code shown.
     """
     from maljan.core.undeclared_tools import (
         ANSWER_CUT_NOTE,
@@ -535,16 +537,83 @@ def function_table(
             by_address.setdefault(address, []).append(row)
         for entry_id in dict.fromkeys(cite.split(" ", 1)[0] for cite in row.cites):
             by_entry.setdefault(entry_id, []).append(row)
-    for section in _CODE_SECTIONS:
-        for claim in _filter_claims(claims, _SECTION_CLAIM_KEYWORDS.get(section, ())):
+    section_claims = {
+        section: _filter_claims(claims, _SECTION_CLAIM_KEYWORDS.get(section, ()))
+        for section in _CODE_SECTIONS
+    }
+    for section, picked in section_claims.items():
+        for claim in picked:
             for row in _claimed_rows(claim, by_address, by_entry, bases):
                 if section in row.reaches and section not in row.shown_in:
                     row.shown_in.append(section)
+    singles_shown = _single_code_shown(tech_ev, section_claims, index)
+    _show_called(table, by_address, singles_shown)
+    homed = False
     for row in table:
         if not row.shown_in:
             home = CODE_HOME_SECTION if CODE_HOME_SECTION in row.reaches else row.reaches[0]
             row.shown_in.append(home)
+            homed = True
+    if homed:
+        _show_called(table, by_address, singles_shown)
     return table
+
+
+def _single_code_shown(
+    technical_evidence: dict[str, list[dict[str, Any]]] | None,
+    section_claims: dict[str, list[dict[str, str]]],
+    index: dict[str, Any],
+) -> dict[str, list[str]]:
+    """Per section that reads code, the code of each single decompile it is shown as a tool answer.
+
+    The answers :func:`_filter_tool_outputs` gives the section that hold one
+    listing (a batch's functions are rows of :func:`function_table`).
+    """
+    from maljan.core.undeclared_tools import code_text
+
+    out: dict[str, list[str]] = {section: [] for section in section_claims}
+    cited = {section: cited_entry_ids(picked) for section, picked in section_claims.items()}
+    for outputs in (technical_evidence or {}).values():
+        for o in outputs or []:
+            if o.get("ok") is False or tool_kinds.function_parts(o):
+                continue
+            if not tool_kinds.code_family_kind(o):
+                continue
+            code = code_text(o.get("output"))
+            for section in section_claims:
+                if shown_to_section(section, o) or cited_undeclared_output(
+                    o, cited[section], index
+                ):
+                    out[section].append(code)
+    return out
+
+
+def _show_called(
+    table: list[FunctionCode],
+    by_address: dict[int, list[FunctionCode]],
+    singles_shown: dict[str, list[str]],
+) -> None:
+    """Show each section the code of every function the code it is shown calls, at any depth.
+
+    A section shown a function's code reads the calls in it, and is the one
+    that describes what those calls do: a callee's code shown only in another
+    section left it with a body it could name and not read (T-379). The code
+    a section is shown is its rows of ``table`` and its single decompiles
+    (:func:`_single_code_shown`); a function it names by its decompiler name
+    or its whole address is shown too, where the section reads its answers.
+    No image base is added: code names a function at its address as loaded.
+    No depth bounds it: a callee's callees are read for the same reason.
+    Linear in the code each section is shown.
+    """
+    for section, singles in singles_shown.items():
+        queue = [row.code for row in table if section in row.shown_in]
+        queue.extend(singles)
+        while queue:
+            for address in _named_functions(queue.pop()):
+                for row in by_address.get(address, ()):
+                    if section in row.reaches and section not in row.shown_in:
+                        row.shown_in.append(section)
+                        queue.append(row.code)
 
 
 def _claimed_rows(
