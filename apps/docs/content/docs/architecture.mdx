@@ -4277,9 +4277,30 @@ field name (`analysis_worker.IDENTITY_FIELDS`): the ids this system issues
 `agents`, `addressed_to`, `stage`, `stages`, `via`, `server`, `tool`, `key`,
 `profile`), the labels an operator typed (`label`, `display_name`) and the
 words the console switches on (`role`, `kind`, `status`, `phase`, `cap`,
-`code`, `verdict`). Nothing is exempt for the *shape* of its value beyond a
-digest and a canonical UUID, because a credential does not become safe by
-being lowercase.
+`code`, `verdict`). They are exempt from the shape rules only: a value the
+operator configured as a secret, a short one as a whole word, is masked in
+them as everywhere else.
+
+The model that answered (`model`, `models`, and each key of a `models`
+mapping; `analysis_worker.MODEL_FIELDS`) is not exempt, because the whole
+scrub reads `anthropic/claude-haiku-5-5` as a key by its length. It is
+scrubbed as a model label (`events.scrub_model_label`): configured values are
+masked and a URL loses its userinfo and its credential-named query values.
+Then each side of ` @ ` is kept as written only when it is an endpoint label
+(a scheme and a host, nothing else) or a provider and a model id split at the
+first `/`, each written as a model id is: parts between `-`, `.`, `_`, `:` and
+`/` that are words in one case (`claude`, `Llama`, `UD`), numbers of up to
+eight digits, or letter-and-digit runs of up to six characters in one case
+(`35b`, `Q4`), fewer than three of the last, and no vendor key prefix
+(`claude-sonnet-4-20250514`, `meta-llama/Llama-3.1-8B-Instruct`). Any other
+side is given the whole scrub, as every label was before. A process that has
+registered no configured values, or whose registration failed, holds the label
+to the whole scrub instead, as it holds a finding row; the API process
+registers none, so a model label it writes itself (a follow-up's usage rows)
+can still read `***`.
+
+Nothing is exempt for the *shape* of its value beyond a digest and a canonical
+UUID, because a credential does not become safe by being lowercase.
 
 A failed call travels as the remedy the tool offered, not as its error text,
 and a failed node travels as the class of its exception, never its message.

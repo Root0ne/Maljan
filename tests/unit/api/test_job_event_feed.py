@@ -684,6 +684,142 @@ class TestThePublisherIsTheGuarantee:
         assert published["data"]["agents"][0]["key"] == "static"
         assert set(published["data"]["agents"][0]) == {"key", "label"}
 
+    def _copies(self, event_type: str, data: dict[str, Any]) -> list[dict[str, Any]]:
+        """Every copy of one published event: a usage row goes to the table alone."""
+        redis_conn, session = self._publish(event_type, data)
+        copies = [message["data"] for message in self._published(redis_conn)]
+        copies += [row.payload for row in session.added]
+        assert copies, event_type
+        return copies
+
+    def test_a_model_label_is_a_name_not_a_key(self) -> None:
+        """``anthropic/claude-haiku-5-5`` is long enough for the shape rules to read as a key.
+
+        Every ``model_usage`` row and every delta of an Anthropic run named its
+        model ``***``, so the job's usage counted calls under no model at all.
+        The worker registers its configured values before it publishes.
+        """
+        from tests.credential_shapes import password
+
+        from maljan.core.model_assignments import model_label
+        from maljan.pipeline.events import remember_secret_values
+
+        remember_secret_values([password(20, variant=380)])
+        for event_type, label in (
+            ("model_usage", model_label("anthropic", "claude-haiku-5-5")),
+            ("agent_message_delta", model_label("anthropic", "claude-sonnet-4-20250514")),
+            ("model_usage", "claude-haiku-5-5"),
+            ("model_usage", "claude-sonnet-4-20250514"),
+            (
+                "model_fallback",
+                model_label("openai", "qwen3.6-35b-a3b", "http://127.0.0.1:8080/v1"),
+            ),
+            ("model_fallback", "qwen3.6-35b-a3b @ http://127.0.0.1:8080"),
+            ("model_usage", "Qwen3.6-35B-A3B-UD-Q4_K_XL.gguf"),
+            ("model_usage", "openai/Qwen3.6-35B-A3B-UD-Q4_K_XL.gguf"),
+            ("model_usage", "meta-llama/Llama-3.1-8B-Instruct"),
+            ("model_usage", "openai/meta-llama/Llama-3.1-8B-Instruct"),
+            ("model_usage", "llama3.1:8b-instruct-q4_K_M"),
+            ("model_usage", "ollama/llama3.1:8b-instruct-q4_K_M"),
+        ):
+            for copy in self._copies(
+                event_type, {"agent": "triage", "model": label, "models": [label]}
+            ):
+                assert copy["model"] == label
+                assert copy["models"] == [label]
+
+    def test_a_per_model_tally_keeps_its_names_and_loses_a_key(self) -> None:
+        """The keys of a ``models`` mapping are model labels, held to the same rule."""
+        from tests.credential_shapes import password
+
+        from maljan.pipeline.events import remember_secret_values
+
+        remember_secret_values([password(20, variant=380)])
+        key = prefixed_key("sk-ant-")
+        (copy,) = self._copies(
+            "model_usage",
+            {
+                "models": {
+                    "anthropic/claude-haiku-5-5": {"calls": 3},
+                    f"anthropic/{key}": {"calls": 1},
+                }
+            },
+        )
+
+        assert key not in json.dumps(copy)
+        assert copy["models"] == {"anthropic/claude-haiku-5-5": {"calls": 3}, "***": {"calls": 1}}
+
+    def test_a_key_in_a_model_label_is_still_masked(self) -> None:
+        """A model field is not exempt: no key shape the whole scrub masks goes out as written.
+
+        A side that is not an endpoint label, or a model id that is not word and
+        number parts in one case, is given the whole scrub.
+        """
+        from tests.credential_shapes import password
+
+        from maljan.pipeline.events import remember_secret_values
+
+        secret = password(20, variant=380)
+        remember_secret_values([secret])
+        aws_id = "AKIA" + "IOSFODNN7" + "EXAMPLE"
+        aws_secret = "/".join(("wJalrXUtnFEMI", "K7MDENG", "bPxRfiCYEXAMPLEKEY"))
+        mixed_case = "".join(
+            letter.upper() if index % 2 == 0 else letter
+            for index, letter in enumerate("abcdefghijklmnopqrstuvw")
+        )
+        grouped = "-".join(
+            "".join(
+                letter.upper() if (group + index) % 3 == 0 else letter
+                for index, letter in enumerate(lowercase_body(36)[group * 6 : group * 6 + 6])
+            )
+            for group in range(6)
+        )
+        short_groups = "-".join(lowercase_body(30)[start : start + 6] for start in range(0, 30, 6))
+        for label, hidden in (
+            (f"anthropic/{prefixed_key('sk-ant-')}", prefixed_key("sk-ant-")),
+            (f"openai/{prefixed_key('sk-ant-api03-')} http://h:1", prefixed_key("sk-ant-api03-")),
+            (f"openai/{lowercase_body(32)}://x", lowercase_body(32)),
+            (f"openai/{aws_secret}", aws_secret),
+            (f"openai/{mixed_case}", mixed_case),
+            (f"openai/{grouped}", grouped),
+            (short_groups, short_groups),
+            (f"openai/{aws_id}", aws_id),
+            (f"anthropic/{secret}", secret),
+        ):
+            (row,) = self._publish("model_usage", {"agent": "triage", "model": label})[1].added
+            assert hidden not in json.dumps(row.payload), label
+            assert "***" in row.payload["model"], label
+            assert row.payload["agent"] == "triage"
+
+    def test_a_url_in_a_model_label_loses_its_userinfo(self) -> None:
+        from tests.credential_shapes import password
+
+        from maljan.pipeline.events import remember_secret_values
+
+        remember_secret_values([password(20, variant=380)])
+        userinfo = f"ops:{password(12, variant=7)}"
+        label = f"openai/qwen3.6-35b-a3b @ http://{userinfo}@127.0.0.1:8080"
+        (row,) = self._publish("model_usage", {"model": label})[1].added
+
+        assert userinfo not in json.dumps(row.payload)
+        assert row.payload["model"].startswith("openai/qwen3.6-35b-a3b @ http://")
+        assert "127.0.0.1:8080" in row.payload["model"]
+
+    def test_with_no_values_registered_a_model_label_gets_the_whole_scrub(self) -> None:
+        """No configured value to mask by (a process that registered none, or a failed
+        registration): the shape rules are what keeps a key out, as for a finding row."""
+        from maljan.pipeline.events import secret_registration_failed
+
+        key = prefixed_key("sk-ant-")
+        (row,) = self._publish("model_usage", {"model": f"anthropic/{key}"})[1].added
+        assert key not in json.dumps(row.payload)
+        (row,) = self._publish("model_usage", {"model": "anthropic/claude-haiku-5-5"})[1].added
+        assert row.payload["model"] == "***"
+
+        secret_registration_failed("job")
+        (row,) = self._publish("model_usage", {"model": f"anthropic/{key}"})[1].added
+        assert key not in json.dumps(row.payload)
+
     def test_numbers_and_flags_keep_their_type(self) -> None:
         redis_conn, _session = self._publish(
             "tool_call_finished",
