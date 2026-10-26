@@ -11434,6 +11434,18 @@ RETRY_DROP_RECORD = "retry_drop"
 RETRY_DROP_KEPT = "kept when asked"
 RETRY_DROP_WITHDRAWN = "withdrawn when asked"
 RETRY_DROP_NOT_ANSWERED = "not answered; kept as the first answer wrote it"
+# A whole retry that restates fewer of the first answer's claims than it
+# leaves out (by the claim's values: restated when the retry states every value
+# it holds; a claim that holds none, or whose only values left out are
+# technique ids the retry was asked about, is counted neither way) is more
+# another answer than a fix of this one, written in a tools-free turn. It does
+# not replace the first answer: what it left out stands beside the retry's own
+# claims, which stand for the claims they restate. The one question about
+# those items says so, and also names each claim with no value whose sentence
+# the retry does not write; it is asked under this code beside the drops code,
+# with the same events. Each item the analyst withdraws stays out, every other
+# stays as first written.
+RETRY_RESTATED_FEW_CODE = "isr.retry_restated_few"
 # One answer line: ``KEEP C2: reason``, ``WITHDRAW F1 - reason``,
 # ``KEEP C1, C2 and F1: reason``, ``KEEP C3 because reason``, ``C2: WITHDRAW -
 # reason`` or ``1. KEEP C1: reason``, marks allowed.
@@ -11608,7 +11620,7 @@ def _retry_drop_item_lines(drops: RetryDrops, *, numbered: bool, values: bool) -
             on_line = f", TECHNIQUE {_whole_line(technique)}" if technique else ""
             stated = (
                 f" (it stated {_whole_line(', '.join(missing))}, which your retry states nowhere)"
-                if values
+                if values and missing
                 else ""
             )
             lines.append(f"{label}. CLAIM{number}: {_whole_line(item.claim)}{on_line}{stated}")
@@ -11642,17 +11654,49 @@ RETRY_DROP_PART = (
 )
 
 
+def _cited_entry_lines(
+    head: str, unfit_head: str, entries: Mapping[str, str] | None, unfit: Sequence[str]
+) -> list[str]:
+    """The entries a tools-free turn shows under ``head``, then the ones named as unfit."""
+    lines: list[str] = []
+    if entries:
+        lines.append(head)
+        lines.extend(text.rstrip() for text in entries.values())
+    if unfit:
+        lines.append(f"{unfit_head} {', '.join(unfit)}.")
+    return lines
+
+
+# The head of the entries a validation retry shows beside its questions, and
+# what it says of a cited entry that does not fit beside the conversation and
+# the entries shown. The retry is a tools-free turn: the tool results the
+# answer was written from are not in it.
+VALIDATION_ENTRIES_HEAD = (
+    "The ledger entries your answer cites, as recorded. This turn carries no tools and the "
+    "tool results you read are not in it; read the entries here:"
+)
+VALIDATION_ENTRIES_UNFIT = (
+    "The ledger holds these entries your answer cites; they do not fit beside this "
+    "conversation and the entries shown above, so they are not shown here:"
+)
+
+
+def validation_entries_text(entries: Mapping[str, str], unfit: Sequence[str] = ()) -> str:
+    """The cited entries a validation retry shows in front of its closing, or ``""``."""
+    return "\n".join(
+        _cited_entry_lines(VALIDATION_ENTRIES_HEAD, VALIDATION_ENTRIES_UNFIT, entries, unfit)
+    )
+
+
 def _retry_drop_closing(
     entries: Mapping[str, str] | None, unfit: Sequence[str], part: tuple[int, int] | None
 ) -> str:
     parts: list[str] = []
     if part is not None:
         parts.append(RETRY_DROP_PART.format(number=part[0], total=part[1]))
-    if entries:
-        parts.append(RETRY_DROP_ENTRIES_HEAD)
-        parts.extend(text.rstrip() for text in entries.values())
-    if unfit:
-        parts.append(f"{RETRY_DROP_ENTRIES_UNFIT} {', '.join(unfit)}.")
+    parts.extend(
+        _cited_entry_lines(RETRY_DROP_ENTRIES_HEAD, RETRY_DROP_ENTRIES_UNFIT, entries, unfit)
+    )
     parts.append(
         "For each item, write one line: KEEP <label>: <reason> to keep it in your answer as "
         "your first answer wrote it, or WITHDRAW <label>: <reason> to leave it out. Write "
@@ -11679,6 +11723,39 @@ def retry_drop_question(
     return (
         "Your retry stands as your answer, and it no longer states these items of your first "
         "answer:\n"
+        + "\n".join(_retry_drop_item_lines(drops, numbered=False, values=True))
+        + "\n"
+        + _retry_drop_closing(entries, unfit, part)
+    )
+
+
+def retry_restated_few_question(
+    drops: RetryDrops,
+    entries: Mapping[str, str] | None = None,
+    *,
+    unfit: Sequence[str] = (),
+    part: tuple[int, int] | None = None,
+    restated: int = 0,
+    left_out: int = 0,
+    plain: int = 0,
+) -> str:
+    """The question about what a retry that restated few claims left out, item by item.
+
+    The retry restated ``restated`` of the first answer's claims that hold a
+    value and left out ``left_out``, more; ``plain`` claims that hold no value
+    and that it does not write are named too. The counts are the answer's
+    whole, the same in every part. It does not replace the first answer: each
+    item stands
+    beside the retry's claims as the first answer wrote it, shown whole with
+    the entries it cites as :func:`retry_drop_question` shows them. The answer
+    is read as that question's is (:func:`read_retry_drop_answers`).
+    """
+    return (
+        f"Your retry restated {restated} of your first answer's claims that state a value "
+        f"and leaves out {left_out}"
+        + (f", and leaves out {plain} that state none" if plain else "")
+        + ", so it does not replace your first answer: these items of your first answer "
+        "stand in your answer as you wrote them, beside your retry's claims:\n"
         + "\n".join(_retry_drop_item_lines(drops, numbered=False, values=True))
         + "\n"
         + _retry_drop_closing(entries, unfit, part)

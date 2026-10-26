@@ -1939,7 +1939,39 @@ decides.
    analyst in `run_summary.validation.retry_drops`, listed in the run summary
    and in the report's section 13 (`validation.retry_drop_row`): every value
    masked as model text in the record is, in the case the claim wrote it,
-   and the sentence defanged after the mask.
+   and the sentence defanged after the mask. A kept retry that restates fewer
+   of the first answer's claims than it leaves out is more another answer
+   than a fix of this one, and does not replace the first answer
+   (`base_agent._restated_few`). Restated is read by the claim's values
+   (`claim_drops.dropped_claims`): a claim that holds a value, every one of
+   which the retry states, and that it was not asked to fold away; left out,
+   a claim the question names. A claim whose only values left out are
+   technique ids the retry was asked about, and a claim that holds no value,
+   are counted neither way. The one question about what it left out then says
+   the items stand in the answer as first written, beside the retry's claims
+   (`validation.retry_restated_few_question`), and also names each claim of
+   the first answer that holds no value and whose sentence (spacing aside) no
+   claim of the retry writes, so no claim leaves the answer unasked. It is
+   asked under `isr.retry_restated_few` as well as `isr.retry_dropped`: both
+   have the same `validation_feedback` events, retried then resolved or
+   survived, and both count in `validation_fed_back`;
+   `validation_retry_restated` on the loop's record keeps the counts. The
+   answer is read and applied as above; a withdrawn item stays out.
+   **The validation retry is shown what the answer cites.** It is a tools-free
+   turn over the brief, so in front of its closing it carries each ledger entry
+   the answer's claims and findings cite that the conversation does not hold,
+   the way `cited_entry_texts` gives it to the drops question
+   (`validation.validation_entries_text`). The turn is measured framed, with
+   the answer as it is sent back, against `_window_room_chars` beside an answer
+   of the cap the technique cards are measured with, every entry's id reserved
+   first; an entry that does not fit beside those shown is named by id, and
+   with no window known every entry is shown (`_with_cited_entries`). When no
+   entry fits, the turn is sent as it was, with no line of names. A turn that
+   fitted the window before still fits it, so whether the cards and the
+   cut-at-cap question are sent is decided as before. The whole answer asked
+   for after a retry that could not be merged fits the entries again, over the
+   turn it is sent as: the first turn, the retry's own answer and the question
+   after it, beside an answer of the output cap.
    **A retry changes only what it writes** (`pipeline.retry_merge`). A claim
    is named by its block number everywhere: its block's place among the
    answer's claim blocks, counted from 1 (`validation.claim_block_indexes`),
