@@ -62,7 +62,7 @@
   {"kind": "ioc", "surface": "html", "rule": "all", "ref": "src/maljan/reporting/renderers/html.py:264"},
   {"kind": "ioc", "surface": "web", "rule": "all", "ref": "identity, network, static, detection tabs"},
   {"kind": "section", "surface": "report_full", "rule": "all", "ref": "src/maljan/reporting/models.py:1694"},
-  {"kind": "section", "surface": "markdown", "rule": "all", "ref": "Appendix A, src/maljan/reporting/renderers/markdown.py:5460 (every part whatever the kind; cells cut at 160, items at 200)"},
+  {"kind": "section", "surface": "markdown", "rule": "all", "ref": "Appendix A, src/maljan/reporting/renderers/markdown.py:5721 (every part whatever the kind; a one-line cell cut at 160, an item at 200; code drawn whole as a listing, markdown.py:5815)"},
   {"kind": "section", "surface": "html", "rule": "all", "ref": "src/maljan/reporting/renderers/html.py:264"},
   {"kind": "section", "surface": "web", "rule": "all", "ref": "apps/web/src/components/analysis/reportSections.ts:105, ArtifactTable.tsx:105"},
   {"kind": "key_finding", "surface": "report_full", "rule": "all", "ref": "src/maljan/reporting/models.py:1618"},
@@ -100,7 +100,7 @@
  "filters": [
   {"surface": "iocs_default", "rule": "exactly the include=all rows whose published flag is true", "ref": "apps/api/app/services/report_service.py:793-797"},
   {"surface": "stix", "rule": "indicators carry published IOCs only", "ref": "src/maljan/reporting/renderers/stix_renderer.py"},
-  {"surface": "markdown", "rule": "a section cell is cut to 159 characters plus an ellipsis past 160, a list item past 200, a typed cell past 240", "ref": "src/maljan/reporting/renderers/markdown.py:249,5509,5516,5720"},
+  {"surface": "markdown", "rule": "a one-line section cell is cut to 159 characters plus an ellipsis past 160, a list item past 200, a typed cell past 240, and the section says where the value is whole; code (a value of more than one line where a cited entry declares code, or one naming its row's function) is never cut, so a cut code value is a truncation", "ref": "src/maljan/reporting/renderers/markdown.py:263,5717,5815"},
   {"surface": "markdown", "rule": "a typed list shown in part ends with the 'more ... not shown here' line", "ref": "src/maljan/reporting/renderers/markdown.py:5684"},
   {"surface": "web", "rule": "a typed panel stands down when a section with content covers it; a list draws its first N", "ref": "scripts/audit/web_fields.json (hidden_if_section, limit)"}
  ]

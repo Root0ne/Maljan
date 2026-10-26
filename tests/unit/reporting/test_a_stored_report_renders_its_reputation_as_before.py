@@ -36,11 +36,14 @@ from tests.unit.reporting.test_an_entry_without_a_source_is_read_as_before impor
 # ``loader`` gains ``downloader``. run4's Markdown and HTML re-pinned with it:
 # its eight key findings wrote their citations into the sentence, and each is
 # no longer printed a second time after it; nothing else changed.
+# The Markdown and HTML re-pinned when Appendix A came to draw held code whole
+# as listings and to say where a cut value is whole (T-384): only Appendix A and
+# Appendix D changed; the STIX did not change.
 STORED_RENDERS = {
-    "run7": ("316ea45a47dcf965", "2222d734a9d4104f", "865cd19e7ce6284b"),
-    "run5": ("569fa30c8cb6ba18", "8fdd5c05cff3d393", "0f3807de7d1fb836"),
-    "run4": ("3dc5e451b4b61066", "e98cdab463df19f6", "204536a060726373"),
-    "local8": ("0da0f60173fa7bfd", "087f32c8af5adaa3", "7f04dee0deee7a55"),
+    "run7": ("2b2d5402620287d8", "db276d30ff84e831", "865cd19e7ce6284b"),
+    "run5": ("b306166c385ee1a8", "1fc106bbc25416e9", "0f3807de7d1fb836"),
+    "run4": ("33ca722e9679caaa", "927d0acc0f76639b", "204536a060726373"),
+    "local8": ("be800f4b7319ecd3", "37b81ce18e40a217", "7f04dee0deee7a55"),
 }
 
 _UUID = re.compile(r"--[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")

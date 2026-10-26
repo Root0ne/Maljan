@@ -69,6 +69,13 @@ from maljan.analysis.technique_ids import ID_BODY
 from maljan.analysis.tool_effects import INTRO_SENTENCE as EFFECTS_INTRO
 from maljan.analysis.tool_effects import effects_lines
 from maljan.core.logger import logger
+from maljan.core.undeclared_tools import (
+    CODE_LISTING_KINDS,
+    DECOMPILE_KINDS,
+    CodePart,
+    function_address,
+    names_itself,
+)
 from maljan.reporting import tool_kinds
 from maljan.reporting.dedupe import distinct_processes, distinct_signatures
 from maljan.reporting.defang import ProseDefanger, defang
@@ -108,6 +115,7 @@ from maljan.reporting.prose_decisions import (
 )
 from maljan.schemas.evidence import is_guard_answer
 from maljan.schemas.isr_models import UNVERIFIED_TECHNIQUE_MARKER
+from maljan.utils.marked_cut import CUT_MARK
 
 # ---------------------------------------------------------------------------
 # Voices
@@ -2166,7 +2174,13 @@ class MarkdownRenderer:
                 lines.extend([analyst_list_note(analysts, kind), ""])
             elif is_open_question_section(section):
                 lines.extend([OPEN_QUESTIONS_NOTE, ""])
-            lines.extend(_evidence_body(section, ctx.plain))
+            lines.extend(
+                _evidence_body(
+                    section,
+                    ctx.plain,
+                    declared_code=declares_code(section.evidence_ids, report.evidence_index),
+                )
+            )
             if section.evidence_ids:
                 lines.extend(["", f"_Evidence: {_ids(section.evidence_ids)}_"])
             lines.append("")
@@ -5667,7 +5681,9 @@ def _as_is(text: str) -> str:
     return text
 
 
-def _evidence_body(section: Any, write: Callable[[str], str] = _as_is) -> list[str]:
+def _evidence_body(
+    section: Any, write: Callable[[str], str] = _as_is, *, declared_code: bool = False
+) -> list[str]:
     """One evidence section's rows, items and text, whichever of them it carries.
 
     A section may carry more than one. Rows are what a tool found; the text
@@ -5679,8 +5695,12 @@ def _evidence_body(section: Any, write: Callable[[str], str] = _as_is) -> list[s
     keeps its fence, and so does the text of a section opened by such an
     output that a later call of the same tool answered with records: the
     section keeps the kind of its first answer, and its rows follow the fence.
+
+    Code the section holds is drawn whole, each function as a listing under
+    the table (:func:`_evidence_rows`); ``declared_code`` is whether an entry
+    the section cites declares its answer code (:func:`declares_code`).
     """
-    rows = _evidence_rows(section, write)
+    rows = _evidence_rows(section, write, listings=True, declared_code=declared_code)
     if not rows:
         return _fenced(write(section.text)) if section.text else []
     if not section.text:
@@ -5690,7 +5710,21 @@ def _evidence_body(section: Any, write: Callable[[str], str] = _as_is) -> list[s
     return [_escape_block(write(section.text)), ""] + rows
 
 
-def _evidence_rows(section: Any, write: Callable[[str], str] = _as_is) -> list[str]:
+# How much of one table cell, and of one list item, the page prints. Only a
+# one-line value is ever cut so: code a section holds is drawn whole as a
+# listing (``_evidence_rows``), and a section with a cut value says where it
+# is whole (``_cut_note``).
+CELL_WIDTH = 160
+ITEM_WIDTH = 200
+
+
+def _evidence_rows(
+    section: Any,
+    write: Callable[[str], str] = _as_is,
+    *,
+    listings: bool = False,
+    declared_code: bool = False,
+) -> list[str]:
     """The tabular and bulleted parts of a section, or nothing.
 
     Drawn whatever kind the section was opened as: a tool keyed to one
@@ -5701,8 +5735,16 @@ def _evidence_rows(section: Any, write: Callable[[str], str] = _as_is) -> list[s
 
     ``write`` is how a cell's text is written: the report's own network
     indicators defanged in it, where a section is printed for reading.
+
+    With ``listings`` (Appendix A), a cell or an item that holds code
+    (:func:`holds_code`) is no cell: the table points to a listing under
+    it, and the listing draws the code whole in a fence, headed by the
+    function it is. A one-line value is still cut to the page, and a
+    section with a value cut says under it where the value is whole.
     """
     out: list[str] = []
+    code: list[tuple[str, str]] = []
+    cut = False
     if section.rows:
         columns = list(section.columns or [])
         widest = max(len(row) for row in section.rows)
@@ -5713,21 +5755,141 @@ def _evidence_rows(section: Any, write: Callable[[str], str] = _as_is) -> list[s
         # cannot open a link, a tag or a fence (``ledger_report``).
         spans, plain = _SAMPLE_TEXT_COLUMNS.get(str(getattr(section, "key", "") or ""), ((), ()))
         for row in section.rows:
-            cells = [
-                _code_span(_one_line(_truncate(write(str(cell)), 160)))
-                if at in spans and str(cell) and str(cell) not in plain
-                else _truncate_escaped(_emphasis_escaped(write(_escaped(cell))), 160)
-                for at, cell in enumerate(row)
-            ]
+            cells: list[str] = []
+            for at, cell in enumerate(row):
+                if listings and holds_code(cell, row, declared_code):
+                    code.append((_listing_where(row, at), str(cell)))
+                    cells.append(f"code: Listing {len(code)} below")
+                    continue
+                if at in spans and str(cell) and str(cell) not in plain:
+                    whole = write(str(cell))
+                    shown = _truncate(whole, CELL_WIDTH)
+                    cells.append(_code_span(_one_line(shown)))
+                else:
+                    whole = _emphasis_escaped(write(_escaped(cell)))
+                    shown = _truncate_escaped(whole, CELL_WIDTH)
+                    cells.append(shown)
+                cut = cut or shown != whole
             cells += [""] * (len(columns) - len(cells))
             out.append(_row(*cells))
     if section.items:
         out += [""] if out else []
-        out += [
-            _item(_truncate_escaped(_emphasis_escaped(write(_escaped(item))), 200))
-            for item in section.items
-        ]
+        for item in section.items:
+            if listings and holds_code(item, (), declared_code):
+                code.append(("", str(item)))
+                out.append(_item(f"code: Listing {len(code)} below"))
+                continue
+            whole = _emphasis_escaped(write(_escaped(item)))
+            shown = _truncate_escaped(whole, ITEM_WIDTH)
+            cut = cut or shown != whole
+            out.append(_item(shown))
+    if listings and cut:
+        out += ["", _cut_note(section)]
+    for number, (where, body) in enumerate(code, 1):
+        out += ["", _listing_heading(number, where, body, section), ""]
+        out += _fenced(write(body.strip("\n")))
+        if body.rstrip().endswith(CUT_MARK):
+            out += ["", _stored_cut_note(section)]
     return out
+
+
+def declares_code(evidence_ids: Iterable[Any], evidence_index: Iterable[Any]) -> bool:
+    """Whether an entry a section cites (``evidence_ids``) declares that its answer is code.
+
+    Read from the kind the entry stored with its facts when it was written
+    (``EvidenceIndexRow.facts``): decompiled code, of one function or of a
+    batch, or code listed as instructions. An index row read from a stored
+    report's JSON is read as the model's is.
+    """
+    cited = {str(i) for i in (evidence_ids or [])}
+    if not cited:
+        return False
+    kinds = DECOMPILE_KINDS | CODE_LISTING_KINDS
+    for row in evidence_index or []:
+        said = row if isinstance(row, dict) else {"id": row.id, "facts": row.facts}
+        if str(said.get("id")) in cited and str((said.get("facts") or {}).get("kind")) in kinds:
+            return True
+    return False
+
+
+def holds_code(value: Any, row: Iterable[Any] = (), declared: bool = False) -> bool:
+    """Whether one value of a section is code, drawn whole as a listing rather than as a cell.
+
+    Code spans lines: a one-line value is a table's fact whatever its
+    section. Where an entry the section cites declares code
+    (:func:`declares_code`), every value of more than one line is code;
+    anywhere else a value is code when it names the function another value
+    of its row names (``FUN_<address>`` under the address, or its first
+    instruction at it). Read by the declared kind and the content, never by
+    a tool's name.
+    """
+    text = str(value or "").strip()
+    if "\n" not in text:
+        return False
+    if declared:
+        return True
+    return any(
+        names_itself(CodePart(str(other).strip(), text, False))
+        for other in row
+        if "\n" not in str(other).strip()
+    )
+
+
+# The name a listing's first line declares its function under: the first
+# word an opening parenthesis follows (``int FUN_00401000(int a)``).
+_DECLARED_NAME_RE = re.compile(r"([A-Za-z_][\w.@$?]*)\s*\(")
+
+
+def _listing_where(row: Sequence[Any], at: int) -> str:
+    """The function a row's code stands under: an address another cell gives, else its first."""
+    others = [str(c).strip() for i, c in enumerate(row) if i != at]
+    others = [c for c in others if c and "\n" not in c]
+    return next((c for c in others if function_address(c) is not None), others[0] if others else "")
+
+
+def _listing_heading(number: int, where: str, body: str, section: Any) -> str:
+    """One listing's heading: its number, the function's address and name, and its entry.
+
+    The entry is named when the section cites one; a section merged from
+    several calls names them all under it (``_Evidence:``).
+    """
+    first = next((line for line in body.splitlines() if line.strip()), "")
+    declared = _DECLARED_NAME_RE.search(first)
+    name = declared.group(1) if declared else ""
+    parts = [f"**Listing {number}**"]
+    parts += [_code_span(_one_line(where))] if where else []
+    parts += [_code_span(name)] if name and name != where else []
+    ids = [str(i) for i in (getattr(section, "evidence_ids", None) or []) if str(i).strip()]
+    parts += [_ids(ids)] if len(ids) == 1 else []
+    return " · ".join(parts)
+
+
+def _whole_at(section: Any) -> str:
+    """Where a value the page shows cut is whole: the section's entry or entries, else the JSON.
+
+    A section that cites several entries names them once, on its own
+    ``_Evidence:`` line under it, and is pointed to there.
+    """
+    ids = [str(i) for i in (getattr(section, "evidence_ids", None) or []) if str(i).strip()]
+    if len(ids) == 1:
+        return f"the evidence ledger carries it whole under {_ids(ids)}"
+    if ids:
+        return "the evidence ledger carries it whole under the entries cited below"
+    key = _one_line(getattr(section, "key", "") or "")
+    return f"the JSON report carries it whole under the section {_code_span(key)}"
+
+
+def _cut_note(section: Any) -> str:
+    """The line under a section with a value cut to the page: where that value is whole."""
+    return (
+        f"_A value above that ends in … is cut to fit the page ({CELL_WIDTH} characters "
+        f"a cell, {ITEM_WIDTH} an item; no code is cut to fit it); {_whole_at(section)}._"
+    )
+
+
+def _stored_cut_note(section: Any) -> str:
+    """The line under a listing the report was built with cut: where the code is whole."""
+    return f"_The report was built with this listing cut at the …; {_whole_at(section)}._"
 
 
 # The sections whose table columns hold the sample's or a sandbox's own text,
@@ -5899,7 +6061,8 @@ LEFT_OUT_LINE = "_{rest:,} more {what} not shown here; the JSON report carries e
 # mark.
 CUT_CELL_SENTENCE = (
     "A table value that ends in … is cut to fit the page; the JSON report and the "
-    "evidence ledger (Appendix A's ids) carry it whole."
+    "evidence ledger (Appendix A's ids) carry it whole. Code is never cut to fit the page: "
+    "Appendix A draws each function's code whole, as a listing."
 )
 
 
