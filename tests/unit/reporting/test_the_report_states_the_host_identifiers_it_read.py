@@ -191,7 +191,40 @@ class TestTheReportPrintsIt:
         row = next(line for line in text.splitlines() if VALUE in line)
         # Five cell borders once the escaped pipe inside the kind is taken out.
         assert "ev_0012" in row and row.replace("\\|", "").count("|") == 5
-        assert "These rows are not published" in text
+        assert "This table publishes nothing itself" in text
+        assert "These rows are not published" not in text
+        assert "published in the" not in row
+
+    def test_a_row_the_ioc_table_publishes_names_the_table_that_does(self) -> None:
+        """The footer said no row was published, while the IOC table published some of them."""
+        from maljan.reporting.models import NetworkIOCs, NetworkIP, PersistenceMechanism
+
+        key = "HKLM\\Software\\Microsoft\\Windows\\CurrentVersion\\Run"
+        address = "185.220.101.5"
+        report = _report(
+            persistence=[PersistenceMechanism(kind="registry_run", target=key)],
+            network=NetworkIOCs(
+                ips=[NetworkIP(address=address, source="sandbox", sample_process_tree=True)]
+            ),
+            technical_analysis=TechnicalAnalysis(
+                host_identifiers=[
+                    HostIdentifier(kind="Registry key", value=key, evidence_refs=["ev_0012"]),
+                    HostIdentifier(kind="Address", value=address, evidence_refs=["ev_0012"]),
+                    HostIdentifier(kind="File", value=VALUE, evidence_refs=["ev_0012"]),
+                ]
+            ),
+        )
+
+        text = MarkdownRenderer().render(report)
+        start = text.index("Host identifiers read by the report model")
+        table = text[start : text.index("\n\n_Read out", start)].splitlines()
+
+        def _row(kind: str) -> str:
+            return next(line for line in table if line.startswith(f"| {kind} |"))
+
+        assert "(published in the File and host indicators table)" in _row("Registry key")
+        assert "(published in the Network indicators table)" in _row("Address")
+        assert "published in the" not in _row("File")
 
     def test_a_purpose_the_model_gave_none_is_said_to_be_not_stated(self) -> None:
         """A dash read as a cell nobody filled in, which is not what an empty purpose is."""

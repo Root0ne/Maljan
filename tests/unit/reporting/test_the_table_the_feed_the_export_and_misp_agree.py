@@ -650,10 +650,18 @@ class TestTheMispAttributes:
         assert "tlsh" not in MISP_CATEGORY_TYPES["Artifacts dropped"]
 
     def test_a_kind_misp_has_no_type_for_is_text_and_never_for_ids(self) -> None:
-        from maljan.reporting.models import NetworkIOCs
+        from maljan.reporting.models import ConsolidatedIOC
 
-        network = NetworkIOCs(ja3s_fingerprints=["e35df3e00ca4ef31d42b34bebaa2f86e"])
-        attributes = self._attributes(_report(network=network))
+        # A capture's JA3S is published by no rule (it names no process), so
+        # the typing is read off a row given as published.
+        row = ConsolidatedIOC(
+            type="JA3S",
+            kind="ja3s",
+            value="e35df3e00ca4ef31d42b34bebaa2f86e",
+            source="sandbox",
+            published="yes: a test row",
+        )
+        attributes = build_misp_attributes(_report(), [row], owner=OWNER)
         (ja3s,) = [a for a in attributes if a["value"] == "e35df3e00ca4ef31d42b34bebaa2f86e"]
 
         assert (ja3s["type"], ja3s["category"], ja3s["to_ids"]) == ("text", "Other", False)

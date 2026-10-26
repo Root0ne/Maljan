@@ -2376,6 +2376,9 @@ def indicator_publish_reason(
         # A host row no process of the sample's tree made is not its
         # observation: it is published only on the judge's keep against that fact.
         return _kept_with_the_fact(kept_by, unattributed)
+    if unattributed and kind in CAPTURE_KINDS:
+        # A capture's value no process is named beside: never the sample's own.
+        return None
     if kind in HOST_KINDS and _recorded_by_the_sandbox(source):
         # One a process of the sample's tree made: published only on the
         # judge's indicator, never on the record alone (HOST_ROW_NOT_NAMED).
@@ -3006,6 +3009,15 @@ HOST_ROW_NOT_NAMED = (
 )
 # What a published host row of the sample's tree stands on, beside the keep.
 HOST_ROW_OF_THE_TREE = "the sandbox recorded it from the sample's process tree"
+# A user agent, a JA3 or a JA3S the sandbox recorded is read out of the
+# capture, and the report records no process beside it: it is the guest's
+# traffic as much as the sample's, refused the way an unattributed flow is.
+# None is published on its own record, and STIX has no object for one.
+UNATTRIBUTED_CAPTURE_VALUE = (
+    "the sandbox report does not say which process made the traffic it was read from"
+)
+# The kinds only a capture records.
+CAPTURE_KINDS = frozenset({"user_agent", "ja3", "ja3s"})
 # The keys a sandbox record names the process that made it under.
 _PID_KEYS = ("pid", "process_id", "pids")
 _PROCESS_KEYS = ("process", "process_name", "processes")
@@ -4178,6 +4190,8 @@ def publish_answer(
         )
     if unattributed and kind in HOST_KINDS:
         return f"no: {unattributed}; {untold}" if untold else f"no: {unattributed}"
+    if unattributed and kind in CAPTURE_KINDS:
+        return f"no: {unattributed}"
     if (
         kind in HOST_KINDS
         and _recorded_by_the_sandbox(source)

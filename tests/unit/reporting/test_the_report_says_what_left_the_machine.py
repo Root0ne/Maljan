@@ -241,12 +241,15 @@ def test_the_enrichment_queued_after_the_report_is_named_then_what_it_asked() ->
 # Re-pinned when Appendix A came to draw held code whole as listings and to say
 # under a section with a value cut where it is whole, and the methodology to say
 # code is never cut (T-384): only Appendix A and Appendix D changed.
+# Re-pinned when the report model's host identifier table came to mark each
+# row the IOC table publishes and its footer to say the table publishes
+# nothing itself (T-386): only that table's marked rows and footer changed.
 STORED_RENDERS = {
-    "run7": ("2b2d5402620287d8", "db276d30ff84e831"),
-    "run5": ("b306166c385ee1a8", "1fc106bbc25416e9"),
-    "run4": ("33ca722e9679caaa", "927d0acc0f76639b"),
-    "local8": ("be800f4b7319ecd3", "37b81ce18e40a217"),
-    "haiku4": ("3e402d8a1b42194e", "ed5d84108712d4ed"),
+    "run7": ("cdd9515862d5af1d", "dea1f998fc174103"),
+    "run5": ("83588faa188377b2", "b771abbf5ef82b73"),
+    "run4": ("db8c93d83f3b8f4e", "8f930558dc551ae8"),
+    "local8": ("0de08c4dc87e22cd", "4cb8cd5f0fb12432"),
+    "haiku4": ("75b9157b1a863aca", "b47768bbf80581cb"),
 }
 
 

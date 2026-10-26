@@ -504,6 +504,8 @@ class TestAgainstTheSequentialBase:
     (AUD-41); its report, Markdown and HTML digests did not change. Its
     Markdown and HTML digests were re-pinned when the methodology came to say
     code is never cut to fit the page (T-384): that sentence is the only change.
+    They were re-pinned again when the host identifier table's footer came to
+    say the table publishes nothing itself (T-386): that line is the only change.
     """
 
     def test_the_requests_and_the_report_are_those_of_the_base(self) -> None:
