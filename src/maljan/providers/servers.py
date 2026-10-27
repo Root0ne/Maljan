@@ -393,6 +393,11 @@ class ServerHandle:
         self._attach_count = 0
         self.name = name
         self.config = config
+        # The job's count of what may have changed on each server
+        # (``schemas.evidence.ServerChanges``), set by the registry: every
+        # attach is a fresh process or session whose state no earlier answer
+        # describes, so it counts as a change (``_note_attach``).
+        self.server_changes: Any = None
         self._toolkit: Any = None
         self._all_tools: list[Any] = []
         self._job_id: str = ""
@@ -831,6 +836,7 @@ class ServerHandle:
         self._all_tools = list(toolkit.get_tools())
         self._read_capabilities()
         self._attach_count += 1
+        self._note_attach()
         allowed = self.config.tools
         if allowed:
             manifest = {str(getattr(t, "name", "")) for t in self._all_tools}
@@ -932,6 +938,22 @@ class ServerHandle:
         self._all_tools = list(toolkit.get_tools())
         await self._aread_capabilities()
         self._attach_count += 1
+        self._note_attach()
+
+    def _note_attach(self) -> None:
+        """Count an attach as a possible change of this server, for every answer held of it.
+
+        A reconnect, a restart or a per-loop replica is a session whose state
+        (an open program, a loaded file) no answer read before it describes.
+        """
+        changes = self.server_changes
+        if changes is not None:
+            changes.bump(self.name)
+            # Its tools are keyed by where they are declared where no server
+            # key is stamped on them (a provider driving the server).
+            source = str(getattr(self, "declared_source", "") or "")
+            if source and source != self.name:
+                changes.bump(source)
 
     async def _acleanup(self, toolkit: Any) -> bool:
         """Best-effort async close of ``toolkit`` **on the caller's loop**.
@@ -1868,6 +1890,38 @@ def _own_words(handle: Any, tools: list[BaseTool], seen: dict[str, str] | None =
     return undeclared_server_text(server, instructions, tools, names=names)
 
 
+def _handle_marks(server: str, handle: ServerHandle) -> dict[str, Any]:
+    """The marks each of ``handle``'s tools carries: its token, and whether its server is quiet.
+
+    The server changes nothing when every tool it offers changes nothing
+    (``tool_pinning.changes_nothing``: its server or its declaration marks it
+    read-only and no declaration vetoes it), read off each tool as stamped with
+    the server. A server that offers no tool changes nothing it can be asked to.
+    """
+    from maljan.agents.tool_pinning import (
+        SERVER_CHANGES_NOTHING_METADATA_KEY,
+        SERVER_HANDLE_METADATA_KEY,
+        changes_nothing,
+    )
+
+    def _stamped(tool: Any) -> Any:
+        metadata = {**(getattr(tool, "metadata", None) or {}), "maljan_server": server}
+        try:
+            return tool.model_copy(update={"metadata": metadata})
+        except Exception:  # noqa: BLE001 — a tool that cannot be copied may change anything
+            return None
+
+    try:
+        stamped = [_stamped(tool) for tool in handle.tools()]
+        quiet = all(tool is not None and changes_nothing(tool) for tool in stamped)
+    except Exception:  # noqa: BLE001 — an unread manifest may hold anything
+        quiet = False
+    return {
+        SERVER_HANDLE_METADATA_KEY: f"{handle.name}#{id(handle)}",
+        SERVER_CHANGES_NOTHING_METADATA_KEY: quiet,
+    }
+
+
 class ServerRegistry:
     """The tool servers one job may attach, built from ``cfg.mcp.servers``."""
 
@@ -1880,6 +1934,7 @@ class ServerRegistry:
         event_sink: Any | None = None,
         sample_notes: Any | None = None,
         sample_sha256: Callable[[], str] | None = None,
+        server_changes: Any | None = None,
     ) -> None:
         from maljan.providers.sample_open import SampleNotes
         from maljan.providers.server_guard import guard_from_settings
@@ -1896,6 +1951,8 @@ class ServerRegistry:
             handle.sample_notes = self.sample_notes
             # A job's server: its process is measured for the run's isolation part.
             handle.measures_isolation = True
+            # The job's change count, which each attach of the server bumps.
+            handle.server_changes = server_changes
         # Every rest this job gave a server, in the order the breakers opened;
         # the judge node reads it into the run summary. Written from whichever
         # loop's call tripped the breaker, so appended under the lock.
@@ -2065,6 +2122,8 @@ class ServerRegistry:
                 replica.held_sample_path = handle.held_sample_path
                 replica.declared_source = handle.declared_source
                 replica.measures_isolation = handle.measures_isolation
+                # Its own process or session: its attach counts as a change.
+                replica.server_changes = handle.server_changes
                 self._loop_handles[key] = replica
                 logger.info(
                     "mcp server '%s' is attached on another loop; the caller gets "
@@ -2182,6 +2241,7 @@ class ServerRegistry:
         fragment: str = "",
         own_words: str = "",
         aggregates: Mapping[str, Sequence[str]] | None = None,
+        handle: ServerHandle | None = None,
     ) -> int:
         """Append ``incoming`` to ``tools`` under the collision rule.
 
@@ -2212,6 +2272,12 @@ class ServerRegistry:
         offered (``core.undeclared_tools.with_aggregate_notes``), the names
         settled before anything is claimed, as :func:`_own_words` settles them.
 
+        ``handle`` is the server handle the tools call through: each tool is
+        stamped with its token and with whether that server exposes no tool
+        that may change it (:func:`_handle_marks`), which decide whether an
+        answer read through one handle is served to a call through another
+        (``agents.evidence_recorder``).
+
         Returns how many tools were renamed, so the caller can log it once
         per server instead of per tool.
         """
@@ -2221,13 +2287,18 @@ class ServerRegistry:
             offered_as = _offered_names(server, incoming, seen)
             incoming = with_aggregate_notes(incoming, aggregates, offered_as)
         renamed = 0
+        marks = _handle_marks(server, handle) if handle is not None else {}
         for tool in incoming:
             name = str(getattr(tool, "name", ""))
             owner = seen.get(name)
             if owner == server:
                 continue
             offered = offered_name(server, name, seen)
-            metadata = {**(getattr(tool, "metadata", None) or {}), "maljan_server": server}
+            metadata = {
+                **(getattr(tool, "metadata", None) or {}),
+                "maljan_server": server,
+                **marks,
+            }
             if fragment.strip():
                 metadata["maljan_server_fragment"] = fragment
             elif own_words.strip():
@@ -2263,6 +2334,7 @@ class ServerRegistry:
             fragment=_declared_fragment(handle),
             own_words=_own_words(handle, offered, seen),
             aggregates=_declared_aggregates(handle),
+            handle=handle,
         )
 
     def tools_for(
@@ -2436,6 +2508,7 @@ class ServerRegistry:
             fragment=_declared_fragment(handle),
             own_words=_own_words(handle, picked, claimed),
             aggregates=_declared_aggregates(handle),
+            handle=handle,
         )
         if renamed:
             logger.info(
@@ -2479,6 +2552,7 @@ class ServerRegistry:
             fragment=_declared_fragment(handle),
             own_words=_own_words(handle, picked, claimed),
             aggregates=_declared_aggregates(handle),
+            handle=handle,
         )
         if renamed:
             logger.info(

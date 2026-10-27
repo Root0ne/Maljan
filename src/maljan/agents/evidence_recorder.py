@@ -51,6 +51,7 @@ from maljan.pipeline.events import (
 from maljan.pipeline.validation import listed_function
 from maljan.schemas.evidence import (
     EvidenceCounter,
+    JobAnswers,
     LedgerEntry,
     ServerChanges,
     build_entry,
@@ -1261,9 +1262,24 @@ _STATUS_KEY_RE = re.compile(r"(?:^|_)status$", re.IGNORECASE)
 _SETTLED_STATUS = frozenset(
     {"ok", "success", "succeeded", "complete", "completed", "done", "finished"}
 )
+# For an answer handed to another agent or round of the job (``deep``): a
+# state is read as a status is, at every depth, and a lookup that found what it
+# was asked about ("found") is settled; one that found nothing may still be
+# waiting on the service, so it is not.
+_DEEP_STATUS_KEY_RE = re.compile(r"(?:^|_)(?:status|state)$", re.IGNORECASE)
+_DEEP_SETTLED_STATUS = _SETTLED_STATUS | {"found"}
 
 
-def holds_a_settled_answer(entry: Any) -> bool:
+def _unsettling(key: Any, value: Any, status_key: re.Pattern[str], settled: frozenset[str]) -> bool:
+    """Whether one field makes an answer unsettled: an explanation, or a status not settled."""
+    if _EXPLANATION_KEY_RE.search(str(key)) and value:
+        return True
+    if status_key.search(str(key)) and value is not None:
+        return not isinstance(value, str) or value.strip().lower() not in settled
+    return False
+
+
+def holds_a_settled_answer(entry: Any, *, deep: bool = False) -> bool:
     """Whether an entry's answer may be handed back for an identical call later: a settled one.
 
     Not for a call that failed (``ok`` false), an answer that only says the
@@ -1273,6 +1289,13 @@ def holds_a_settled_answer(entry: Any) -> bool:
     be what it answers now. An empty answer is settled when nothing explains
     it ("matches": [] alone, or beside a status "ok"). Anything in doubt is
     not.
+
+    The top level is read, for an answer this agent's own loop, rounds and
+    chunks hand back. ``deep`` reads every depth, a state as a status, and
+    takes "found" as settled, for an answer handed to any agent of the job
+    (``_from_the_job``): a poll that wraps its status
+    (``{"data": {"attributes": {"status": "queued"}}}``) is as unsettled as
+    one that does not. Each part of the structure is read once.
     """
     from maljan.core.undeclared_tools import prose_error
 
@@ -1281,13 +1304,25 @@ def holds_a_settled_answer(entry: Any) -> bool:
     if prose_error(getattr(entry, "output", "") or ""):
         return False
     structured = getattr(entry, "structured", None)
-    if isinstance(structured, Mapping):
-        for key, value in structured.items():
-            if _EXPLANATION_KEY_RE.search(str(key)) and value:
-                return False
-            if _STATUS_KEY_RE.search(str(key)) and value is not None:
-                if not isinstance(value, str) or value.strip().lower() not in _SETTLED_STATUS:
+    if not deep:
+        if isinstance(structured, Mapping):
+            for key, value in structured.items():
+                if _unsettling(key, value, _STATUS_KEY_RE, _SETTLED_STATUS):
                     return False
+        return True
+    pending: list[Any] = [structured]
+    while pending:
+        node = pending.pop()
+        if isinstance(node, list | tuple):
+            pending.extend(node)
+            continue
+        if not isinstance(node, Mapping):
+            continue
+        for key, value in node.items():
+            if _unsettling(key, value, _DEEP_STATUS_KEY_RE, _DEEP_SETTLED_STATUS):
+                return False
+            if isinstance(value, Mapping | list | tuple):
+                pending.append(value)
     return True
 
 
@@ -1404,6 +1439,16 @@ def held_member_sentence(tool: str, entry_id: str, holder_tool: str, address: in
         f"[{entry_id}], the answer of an earlier call to {holder_tool}, and the text above is "
         f"that function exactly as [{entry_id}] recorded it, answered from the ledger. Cite "
         f"[{entry_id}] for it."
+    )
+
+
+def job_answer_sentence(tool: str, entry_id: str, agent: str = "") -> str:
+    """The sentence under a call answered from an identical earlier call of the job."""
+    by = f" by {agent}" if agent else ""
+    return (
+        f"This call to {tool} with these arguments was not run again: an identical call{by} "
+        f"earlier in this job answered it, and the text above is the result recorded in "
+        f"[{entry_id}], answered from the ledger. Cite [{entry_id}] for it."
     )
 
 
@@ -1814,6 +1859,28 @@ def _record_tool(
     # nothing is held and every read runs.
     shared = getattr(recorder.counter, "changes", None)
     changes = shared if isinstance(shared, ServerChanges) else None
+    # Whether an identical call by any agent of the job, in any round, is
+    # answered from the entry that holds its answer (``_from_the_job``): by its
+    # server's hints, which a declaration may only veto
+    # (``tool_pinning.answers_the_job_again``), never for the read-again tool,
+    # whose answer is another entry's already. The answers
+    # are the job's own (``schemas.evidence.JobAnswers``); a counter that
+    # keeps none, or no change count, holds nothing and every call runs.
+    from maljan.agents.tool_pinning import answers_the_job_again
+
+    kept = getattr(recorder.counter, "answers", None)
+    job = kept if isinstance(kept, JobAnswers) and changes is not None else None
+    for_the_job = job is not None and not reads_evidence and answers_the_job_again(tool)
+    # What the job keys a call by: the name its source declares the tool
+    # under, so a tool offered renamed to one agent is the same tool.
+    job_name = declared_name or name
+    # The server handle the tool calls through, and whether that server
+    # exposes no tool that may change it (``tool_pinning.server_handle_of``):
+    # an answer is served to a call through another handle only then.
+    from maljan.agents.tool_pinning import server_changes_nothing, server_handle_of
+
+    handle = server_handle_of(tool)
+    one_view = server_changes_nothing(tool)
     # Whether a failed call is held against the loaded image's range: the tool
     # declares an address argument and that it does not run the sample's code.
     from maljan.agents.image_range import locates_in_image, out_of_image_note
@@ -2064,6 +2131,72 @@ def _record_tool(
         # Charged whole: this answer went through no guardrail now.
         return _charged(f"{shown}{_steering(kwargs, repeated)}")
 
+    def _from_the_job(kwargs: dict[str, Any]) -> str | None:
+        """The answer an identical call of the job already holds, from its entry, if one does.
+
+        For a tool that answers an identical call of the job the same
+        (``for_the_job``): an earlier call of any agent of the job, in any
+        round, with the same arguments on the same server, whose entry holds
+        the answer whole (answered, settled, uncut, unshortened and not
+        partial to its own arguments), and, for a whole-function read, a call
+        of a tool on the same server whose declaration names this one among
+        those it aggregates (``ToolFacts.aggregate_of``) and whose answer
+        holds this address's function whole. Not once a call that may change
+        state, by any agent, started or ended on the server since the read
+        started (``ServerChanges``). No tool runs: the model reads the held
+        text exactly as the entry recorded it, stamped with that entry's id
+        and told it is that entry's answer; the call is filed as a repeat of
+        that entry and counted by this loop's guard as an identical call that
+        ran is. Where the conversation has no room for the text, the tool runs
+        and its guardrail decides, as for any call.
+        """
+        if not for_the_job or job is None or changes is None:
+            return None
+        mark = changes.mark(held_from)
+        found = job.held(held_from, ("call", RepeatGuard._key(job_name, kwargs)), mark)
+        if found is not None:
+            holder, text, _holder_tool, holder_agent, holder_handle, holder_quiet = found
+            said = job_answer_sentence(name, holder, holder_agent)
+        else:
+            request = member_request(facts, kwargs) if whole_read else None
+            member = job.held(held_from, ("member", job_name, *request), mark) if request else None
+            if request is None or member is None:
+                return None
+            holder, text, holder_tool, _holder_agent, holder_handle, holder_quiet = member
+            # A member is a whole answer to this call only where nothing in it
+            # reads as partial to this call's own arguments.
+            if shortened_notice(text, narrowing=narrowing) or completeness_notice(
+                text, narrowing=narrowing, bounds=bounds, args=kwargs
+            ):
+                return None
+            said = held_member_sentence(name, holder, holder_tool, request[0])
+        # Another handle of the server is another session of it (a per-loop
+        # replica), whose state may differ from the one that read the answer:
+        # served across handles only by a server that changes nothing at all,
+        # as both the handle that read it and the one asking say.
+        if holder_handle != handle and not (one_view and holder_quiet):
+            return None
+        shown = f"[{holder}]\n{fenced(holder, text)}\n\n{said}"
+        from maljan.llm.context_window import ContextBudget
+
+        if isinstance(context_budget, ContextBudget) and not context_budget.room_for(
+            len(shown), recorder.agent
+        ):
+            return None
+        repeated = _served_again(kwargs)
+        recorder.record_repeat(
+            tool=name,
+            args=kwargs,
+            server=server,
+            source=source,
+            declared_name=declared_name,
+            first=holder,
+            said=said,
+        )
+        _note(kwargs, holder)
+        # Charged whole: this answer went through no guardrail now.
+        return _charged(f"{shown}{_steering(kwargs, repeated)}")
+
     def _hold(
         kwargs: dict[str, Any],
         entry: LedgerEntry,
@@ -2079,14 +2212,18 @@ def _record_tool(
 
         Only an answer the model read whole and the entry holds byte for byte:
         settled (``holds_a_settled_answer``), no repeat, nothing cut,
-        shortened or left out, no line under it saying it is partial, and a
-        listing (:func:`whole_code`). ``mark`` is the server's change mark
-        when the read started: a call that may change state, by any agent,
-        that started or ended while it ran leaves nothing held.
+        shortened or left out, no line under it saying it is partial, and,
+        for a whole-function read, a listing (:func:`whole_code`). ``mark`` is
+        the server's change mark when the read started: a call that may change
+        state, by any agent, that started or ended while it ran leaves nothing
+        held. Held for this loop's guard (a whole-function read, an
+        aggregate's members) and, for a tool that answers the job the same,
+        for every agent of the job (``_from_the_job``).
         """
         from maljan.schemas.answer_completeness import platform_cut
 
-        if repeats is None or not (whole_read or covers) or mark is None or changes is None:
+        in_loop = repeats is not None and (whole_read or covers)
+        if not (in_loop or for_the_job) or mark is None or changes is None:
             return
         if changes.mark(held_from) != mark:
             return
@@ -2094,18 +2231,48 @@ def _record_tool(
             return
         if entry.repeated_of or entry.truncated or platform_cut(entry) or entry.output != text:
             return
-        if not holds_a_settled_answer(entry):
-            return
+        # Settled as this loop reads it (the top level), and, for any agent
+        # of the job, at every depth (``holds_a_settled_answer``).
+        in_loop = in_loop and holds_a_settled_answer(entry)
+        to_the_job = for_the_job and job is not None and holds_a_settled_answer(entry, deep=True)
         # An empty or prose answer to a whole-function read is one a retry
         # may well better (a live run's first decompile answered nothing and
         # its identical second call the function): only a listing is held.
-        if whole_read and whole_code(text):
+        listing = whole_read and whole_code(text)
+        if in_loop and listing and repeats is not None:
             repeats.hold_answer(held_from, name, kwargs, entry.id, text, mark)
-        if covers:
+        if to_the_job and job is not None and (listing or not whole_read):
+            job.hold(
+                held_from,
+                ("call", RepeatGuard._key(job_name, kwargs)),
+                entry.id,
+                text,
+                name,
+                recorder.agent,
+                mark,
+                handle=handle,
+                quiet=one_view,
+            )
+        if covers and (in_loop or to_the_job):
             read = aggregate_members(facts, kwargs, text)
             if read is not None:
                 roles, members = read
-                repeats.hold_members(held_from, name, covers, roles, members, entry.id, mark)
+                if in_loop and repeats is not None:
+                    repeats.hold_members(held_from, name, covers, roles, members, entry.id, mark)
+                if to_the_job and job is not None:
+                    for member in covers:
+                        for address, body in members.items():
+                            job.hold(
+                                held_from,
+                                ("member", member, address, roles),
+                                entry.id,
+                                body,
+                                name,
+                                recorder.agent,
+                                mark,
+                                handle=handle,
+                                quiet=one_view,
+                            )
 
     def _starting() -> Any:
         """Note a call that is about to run on the job's change count; a read's mark, else ``None``.
@@ -2120,7 +2287,7 @@ def _record_tool(
         if not reads_only:
             changes.bump(held_from)
             return None
-        return changes.mark(held_from) if whole_read or covers else None
+        return changes.mark(held_from) if whole_read or covers or for_the_job else None
 
     def _ending() -> None:
         if changes is not None and not reads_only:
@@ -2484,7 +2651,9 @@ def _record_tool(
             question = _names_its_own_parameter(kwargs)
             if question is not None:
                 return question
-            answered = _already_answered(kwargs) or _from_the_ledger(kwargs)
+            answered = (
+                _already_answered(kwargs) or _from_the_ledger(kwargs) or _from_the_job(kwargs)
+            )
             if answered is not None:
                 return answered
             recorder.call_started(tool=name, args=kwargs, server=server)
@@ -2541,7 +2710,9 @@ def _record_tool(
             question = _names_its_own_parameter(kwargs)
             if question is not None:
                 return question
-            answered = _already_answered(kwargs) or _from_the_ledger(kwargs)
+            answered = (
+                _already_answered(kwargs) or _from_the_ledger(kwargs) or _from_the_job(kwargs)
+            )
             if answered is not None:
                 return answered
             recorder.call_started(tool=name, args=kwargs, server=server)

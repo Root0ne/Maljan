@@ -170,6 +170,17 @@ class GenericMCPStaticProvider(StaticProvider):
     def sample_notes(self, notes: Any) -> None:
         self._handle.sample_notes = notes
 
+    @property
+    def server_changes(self) -> Any:
+        """The job's count of what may have changed on each server (``ServerChanges``)."""
+        return self._handle.server_changes
+
+    @server_changes.setter
+    def server_changes(self, changes: Any) -> None:
+        # Each attach of this provider's server is a change of it, as a
+        # registry handle's is (``ServerHandle._note_attach``).
+        self._handle.server_changes = changes
+
     def _build_handle(self, name: str, cfg: MCPServerConfig) -> ServerHandle:
         """Wrap a directly-supplied config in a handle, honouring ``server_command``.
 

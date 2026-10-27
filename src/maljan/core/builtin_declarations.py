@@ -998,6 +998,18 @@ OUTWARD_KINDS: dict[str, str] = {
     "submission_status": "asks a service how a submission is going",
 }
 
+# The kinds whose answer moves by what they mean: an identical call later in
+# the same job may answer otherwise, so no agent's call of one is answered
+# from an earlier entry, whatever its server's hints say
+# (``tool_pinning.answers_the_job_again``). Each with why.
+MOVING_KINDS: dict[str, str] = {
+    "status": "says how a server or a service stands now",
+    "analysis_status": "says how far an analysis has run",
+    "submission": "hands a service something new to analyse with each call",
+    "submission_status": "says how a submission is going, which changes as it runs",
+    "sandbox_status": "says how the sandbox run stands now",
+}
+
 # Each name table the core reads tools by, as the set of kinds that is exactly
 # that table over every built-in tool (``tests/unit/core/
 # test_every_built_in_declares_what_its_name_tables_say.py`` holds each one
