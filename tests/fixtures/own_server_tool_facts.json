@@ -1,0 +1,1446 @@
+{
+  "analysis": {
+    "apk_info": {
+      "arguments": {
+        "carved": "carved_path",
+        "path": "path"
+      },
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "format_info",
+      "read_only": true,
+      "routed_formats": [
+        "apk",
+        "dex"
+      ]
+    },
+    "archive_list": {
+      "arguments": {
+        "carved": "carved_path",
+        "path": "path"
+      },
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "archive_listing",
+      "read_only": true
+    },
+    "capa": {
+      "arguments": {
+        "path": "path"
+      },
+      "asserts_techniques": true,
+      "display_name": "capa",
+      "does_not_show": "whether the matched code runs, or a capability no rule describes",
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "function_starts": "/function_starts",
+      "kind": "capability_rules",
+      "long_running": true,
+      "places": {
+        "addresses": "/addresses"
+      },
+      "rows": "/capabilities/*",
+      "shows": "the capabilities whose capa rules match features of the file, its code and its structure",
+      "source": "capa",
+      "techniques": [
+        {
+          "path": "/**6/technique_id"
+        },
+        {
+          "path": "/**6/attck"
+        },
+        {
+          "path": "/**6/technique_ids"
+        },
+        {
+          "format": "sigma_tag",
+          "path": "/**6/tags"
+        }
+      ],
+      "values": {
+        "namespace": "/namespace",
+        "rule": "/rule"
+      }
+    },
+    "capabilities": {
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "capabilities",
+      "read_only": true
+    },
+    "carve_payloads": {
+      "arguments": {
+        "carved": "carved_path",
+        "path": "path"
+      },
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "carve"
+    },
+    "decode_string_blobs": {
+      "arguments": {
+        "carved": "carved_path",
+        "path": "path"
+      },
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "decoded_strings",
+      "places": {
+        "rva": "/rva"
+      },
+      "rows": "/results/*",
+      "values": {
+        "text": "/text"
+      }
+    },
+    "document_info": {
+      "arguments": {
+        "carved": "carved_path",
+        "path": "path"
+      },
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "document_info",
+      "read_only": true,
+      "routed_formats": [
+        "ole2",
+        "ooxml",
+        "pdf"
+      ]
+    },
+    "elf_info": {
+      "arguments": {
+        "carved": "carved_path",
+        "path": "path"
+      },
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "format_info",
+      "read_only": true,
+      "reads_delay_imports": true,
+      "routed_formats": [
+        "elf"
+      ]
+    },
+    "find_crypto_constants": {
+      "arguments": {
+        "carved": "carved_path",
+        "path": "path"
+      },
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "crypto_constants",
+      "read_only": true
+    },
+    "floss": {
+      "arguments": {
+        "carved": "carved_path",
+        "path": "path"
+      },
+      "display_name": "FLOSS",
+      "effects": {
+        "executes": "emulation",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "emulated_strings",
+      "long_running": true,
+      "places": {
+        "call_site": "/called_at_rva",
+        "function": "/function_rva"
+      },
+      "reader": "emulated_strings_with_call_sites",
+      "rows": "/strings/*",
+      "values": {
+        "scheme": "/kind",
+        "text": "/string"
+      },
+      "words": [
+        "decoded",
+        "emulation",
+        "floss"
+      ]
+    },
+    "function_index": {
+      "arguments": {
+        "carved": "carved_path",
+        "path": "path"
+      },
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "function_index",
+      "reader": "function_table"
+    },
+    "hashes": {
+      "arguments": {
+        "carved": "carved_path",
+        "path": "path"
+      },
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "identity",
+      "read_only": true
+    },
+    "identify_file": {
+      "arguments": {
+        "carved": "carved_path",
+        "path": "path"
+      },
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "identity",
+      "read_only": true
+    },
+    "iocs_from_file": {
+      "arguments": {
+        "carved": "carved_path",
+        "path": "path"
+      },
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "file_iocs",
+      "read_only": true
+    },
+    "iocs_from_text": {
+      "arguments": {
+        "text": "text"
+      },
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "text_iocs",
+      "read_only": true
+    },
+    "macho_info": {
+      "arguments": {
+        "carved": "carved_path",
+        "path": "path"
+      },
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "format_info",
+      "read_only": true,
+      "routed_formats": [
+        "mach-o"
+      ]
+    },
+    "pe_info": {
+      "arguments": {
+        "carved": "carved_path",
+        "path": "path"
+      },
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "format_info",
+      "read_only": true,
+      "reader": "pe_header",
+      "reads_delay_imports": true,
+      "routed_formats": [
+        "pe"
+      ]
+    },
+    "put_sample": {
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "sample_delivery"
+    },
+    "put_sample_begin": {
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "sample_delivery"
+    },
+    "put_sample_chunk": {
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "sample_delivery"
+    },
+    "put_sample_finish": {
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "sample_delivery"
+    },
+    "release_job": {
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "staging_release"
+    },
+    "resolve_api_hashes": {
+      "arguments": {
+        "carved": "carved_path",
+        "path": "path"
+      },
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "api_hash_resolution",
+      "places": {
+        "rva": "/occurrences/*/rva"
+      },
+      "read_only": true,
+      "rows": "/hits/*",
+      "values": {
+        "name": "/readings/*/name"
+      }
+    },
+    "run_reader": {
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "reader_delivery"
+    },
+    "sigma_match": {
+      "arguments": {
+        "events": "events"
+      },
+      "asserts_techniques": true,
+      "display_name": "Sigma",
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "event_rules",
+      "places": {
+        "command_line": "/matched_fields/CommandLine"
+      },
+      "rows": "/matches/*",
+      "source": "sigma",
+      "techniques": [
+        {
+          "path": "/**6/technique_id"
+        },
+        {
+          "path": "/**6/attck"
+        },
+        {
+          "path": "/**6/technique_ids"
+        },
+        {
+          "format": "sigma_tag",
+          "path": "/**6/tags"
+        }
+      ],
+      "values": {
+        "rule": "/rule",
+        "title": "/title"
+      },
+      "words": [
+        "sigma",
+        "rule",
+        "rules"
+      ]
+    },
+    "sigma_match_sandbox": {
+      "arguments": {
+        "report": "report"
+      },
+      "asserts_techniques": true,
+      "display_name": "Sigma",
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "event_rules",
+      "places": {
+        "command_line": "/matched_fields/CommandLine"
+      },
+      "rows": "/matches/*",
+      "source": "sigma",
+      "techniques": [
+        {
+          "path": "/**6/technique_id"
+        },
+        {
+          "path": "/**6/attck"
+        },
+        {
+          "path": "/**6/technique_ids"
+        },
+        {
+          "format": "sigma_tag",
+          "path": "/**6/tags"
+        }
+      ],
+      "values": {
+        "rule": "/rule",
+        "title": "/title"
+      },
+      "words": [
+        "sigma",
+        "rule",
+        "rules"
+      ]
+    },
+    "signing_info": {
+      "arguments": {
+        "carved": "carved_path",
+        "path": "path"
+      },
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "signing",
+      "read_only": true
+    },
+    "strings": {
+      "arguments": {
+        "carved": "carved_path",
+        "path": "path"
+      },
+      "does_not_show": "strings that are encoded, encrypted, compressed or built at run time; nor runs shorter than min_len, or past this page (read next_offset)",
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "strings",
+      "places": {
+        "offset": "/offset"
+      },
+      "read_only": true,
+      "rows": "/strings/*",
+      "shows": "printable ASCII and UTF-16LE runs as they sit in the file, with their offsets",
+      "values": {
+        "text": "/text"
+      }
+    },
+    "transform_bytes": {
+      "arguments": {
+        "carved": "carved_path",
+        "path": "path"
+      },
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "transform",
+      "reader": "byte_transform"
+    },
+    "unpack_upx": {
+      "arguments": {
+        "carved": "carved_path",
+        "path": "path"
+      },
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "unpack",
+      "reader": "unpacked_image"
+    },
+    "yara_scan": {
+      "arguments": {
+        "carved": "carved_path",
+        "path": "path"
+      },
+      "asserts_techniques": true,
+      "display_name": "YARA",
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "signature_rules",
+      "places": {
+        "instance_offset": "/strings/*/instances/*/offset",
+        "offset": "/strings/*/offset"
+      },
+      "rows": "/matches/*",
+      "source": "yara",
+      "techniques": [
+        {
+          "path": "/**6/technique_id"
+        },
+        {
+          "path": "/**6/attck"
+        },
+        {
+          "path": "/**6/technique_ids"
+        },
+        {
+          "format": "sigma_tag",
+          "path": "/**6/tags"
+        }
+      ],
+      "timeout_seconds": 60.0,
+      "values": {
+        "rule": "/rule"
+      },
+      "words": [
+        "yara",
+        "rule",
+        "rules"
+      ]
+    }
+  },
+  "die": {
+    "capabilities": {
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "capabilities",
+      "read_only": true
+    },
+    "die_scan": {
+      "arguments": {
+        "path": "path"
+      },
+      "display_name": "Detect It Easy",
+      "does_not_show": "what the code does, or a packer or compiler no signature describes; a name is a signature match, not a proof",
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "identification",
+      "read_only": true,
+      "rows": "/detections/*",
+      "shows": "the packers, compilers, linkers, protectors, installers and libraries Detect It Easy's signatures name in the file, with the format each was found in",
+      "values": {
+        "file_type": "/file_type",
+        "name": "/name",
+        "type": "/type",
+        "version": "/version"
+      }
+    }
+  },
+  "goresym": {
+    "capabilities": {
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "capabilities",
+      "read_only": true
+    },
+    "go_strings": {
+      "arguments": {
+        "path": "path"
+      },
+      "display_name": "GoReSym",
+      "does_not_show": "strings built, decoded or decrypted at run time",
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "holds_strings": true,
+      "kind": "embedded_strings",
+      "long_running": true,
+      "read_only": true,
+      "routed_formats": [
+        "pe",
+        "elf",
+        "mach-o"
+      ],
+      "rows": "/strings/*",
+      "shows": "the strings the binary's Go string table holds, each cut where Go cuts it",
+      "values": {
+        "text": "/Str"
+      }
+    },
+    "go_symbols": {
+      "arguments": {
+        "path": "path"
+      },
+      "display_name": "GoReSym",
+      "does_not_show": "what a function does, or code that is not Go",
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "function_list",
+      "long_running": true,
+      "places": {
+        "address": "/start"
+      },
+      "read_only": true,
+      "routed_formats": [
+        "pe",
+        "elf",
+        "mach-o"
+      ],
+      "rows": "/functions/*",
+      "shows": "the Go version, build id and build info, and each function's name, package and address range, read from the Go runtime's own tables in the file",
+      "values": {
+        "name": "/name",
+        "package": "/package"
+      }
+    },
+    "go_types": {
+      "arguments": {
+        "path": "path"
+      },
+      "display_name": "GoReSym",
+      "does_not_show": "how the types are used, or types of a Go version it misreads",
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "type_list",
+      "long_running": true,
+      "read_only": true,
+      "routed_formats": [
+        "pe",
+        "elf",
+        "mach-o"
+      ],
+      "rows": "/types/*",
+      "shows": "the Go type structures and interfaces the binary's moduledata lists",
+      "values": {
+        "name": "/Str",
+        "type_kind": "/Kind"
+      }
+    }
+  },
+  "ilspy": {
+    "capabilities": {
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "capabilities",
+      "read_only": true
+    },
+    "dotnet_decompile_assembly": {
+      "aggregate_of": [
+        "dotnet_decompile_type",
+        "dotnet_decompile_member"
+      ],
+      "arguments": {
+        "path": "path"
+      },
+      "display_name": "ILSpy",
+      "does_not_show": "what runs at run time: code loaded, decrypted or emitted while the assembly runs, or native code beside the IL",
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "decompile_batch",
+      "long_running": true,
+      "read_only": true,
+      "report_sections": [
+        "cli_flags",
+        "discovery",
+        "persistence_detail",
+        "evasion_antiforensics",
+        "command_and_control",
+        "string_resolution",
+        "configuration",
+        "commands",
+        "payloads"
+      ],
+      "routed_formats": [
+        "pe"
+      ],
+      "shows": "C# (or IL) that ILSpy decompiled from the assembly's metadata and IL"
+    },
+    "dotnet_decompile_member": {
+      "arguments": {
+        "path": "path"
+      },
+      "display_name": "ILSpy",
+      "does_not_show": "what runs at run time: code loaded, decrypted or emitted while the assembly runs, or native code beside the IL",
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "decompile",
+      "read_only": true,
+      "report_sections": [
+        "cli_flags",
+        "discovery",
+        "persistence_detail",
+        "evasion_antiforensics",
+        "command_and_control",
+        "string_resolution",
+        "configuration",
+        "commands",
+        "payloads"
+      ],
+      "routed_formats": [
+        "pe"
+      ],
+      "shows": "C# (or IL) that ILSpy decompiled from the assembly's metadata and IL"
+    },
+    "dotnet_decompile_type": {
+      "arguments": {
+        "path": "path"
+      },
+      "display_name": "ILSpy",
+      "does_not_show": "what runs at run time: code loaded, decrypted or emitted while the assembly runs, or native code beside the IL",
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "decompile",
+      "read_only": true,
+      "report_sections": [
+        "cli_flags",
+        "discovery",
+        "persistence_detail",
+        "evasion_antiforensics",
+        "command_and_control",
+        "string_resolution",
+        "configuration",
+        "commands",
+        "payloads"
+      ],
+      "routed_formats": [
+        "pe"
+      ],
+      "shows": "C# (or IL) that ILSpy decompiled from the assembly's metadata and IL"
+    },
+    "dotnet_metadata_table": {
+      "arguments": {
+        "path": "path"
+      },
+      "display_name": "ILSpy",
+      "does_not_show": "how the rows are used by the code",
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "metadata_table",
+      "read_only": true,
+      "routed_formats": [
+        "pe"
+      ],
+      "rows": "/rows/*",
+      "shows": "every row of one ECMA-335 metadata table as the assembly holds it"
+    },
+    "dotnet_resources": {
+      "arguments": {
+        "path": "path"
+      },
+      "display_name": "ILSpy",
+      "does_not_show": "what a resource holds",
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "resource_listing",
+      "read_only": true,
+      "routed_formats": [
+        "pe"
+      ],
+      "rows": "/resources/*",
+      "shows": "the names of the resources embedded in the assembly",
+      "values": {
+        "name": "/name"
+      }
+    },
+    "dotnet_types": {
+      "arguments": {
+        "path": "path"
+      },
+      "display_name": "ILSpy",
+      "does_not_show": "what any of them does, or types built or loaded at run time",
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "type_list",
+      "read_only": true,
+      "routed_formats": [
+        "pe"
+      ],
+      "rows": "/types/*",
+      "shows": "the classes, interfaces, structs, delegates and enums the assembly defines",
+      "values": {
+        "name": "/name",
+        "type_kind": "/type_kind"
+      }
+    }
+  },
+  "jadx": {
+    "android_classes": {
+      "arguments": {
+        "path": "path"
+      },
+      "display_name": "JADX",
+      "does_not_show": "what any of them does; classes loaded, decrypted or downloaded at run time (no code is run); the manifest, permissions and certificates, which apk_info reads",
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "type_list",
+      "long_running": true,
+      "read_only": true,
+      "routed_formats": [
+        "apk",
+        "dex"
+      ],
+      "rows": "/classes/*",
+      "shows": "the classes the APK's or dex file's bytecode defines, each with its methods and their signatures, as JADX reads them",
+      "values": {
+        "name": "/name"
+      }
+    },
+    "android_decompile_class": {
+      "arguments": {
+        "path": "path"
+      },
+      "display_name": "JADX",
+      "does_not_show": "what runs at run time: code loaded, decrypted or downloaded while the app runs, or native libraries beside the bytecode; no code is run",
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "decompile",
+      "read_only": true,
+      "report_sections": [
+        "cli_flags",
+        "discovery",
+        "persistence_detail",
+        "evasion_antiforensics",
+        "command_and_control",
+        "string_resolution",
+        "configuration",
+        "commands",
+        "payloads"
+      ],
+      "routed_formats": [
+        "apk",
+        "dex"
+      ],
+      "shows": "Java source JADX decompiled from one class's dex bytecode, inner classes too"
+    },
+    "capabilities": {
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "capabilities",
+      "read_only": true
+    }
+  },
+  "knowledge": {
+    "api_capability": {
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "api_catalogue",
+      "read_only": true
+    },
+    "attck_lookup": {
+      "effects": {
+        "executes": "no",
+        "network": "on_refresh",
+        "third_party": "no"
+      },
+      "kind": "reference",
+      "read_only": true
+    },
+    "attck_validate": {
+      "effects": {
+        "executes": "no",
+        "network": "on_refresh",
+        "third_party": "no"
+      },
+      "kind": "reference",
+      "read_only": true
+    },
+    "capabilities": {
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "capabilities",
+      "read_only": true
+    },
+    "family_lookup": {
+      "effects": {
+        "executes": "no",
+        "network": "on_refresh",
+        "third_party": "no"
+      },
+      "kind": "reference",
+      "read_only": true
+    },
+    "lolbin_lookup": {
+      "arguments": {
+        "command_lines": "command_lines"
+      },
+      "asserts_techniques": true,
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "command_match",
+      "read_only": true,
+      "source": "lolbin",
+      "techniques": [
+        {
+          "path": "/**6/technique_id"
+        },
+        {
+          "path": "/**6/attck"
+        },
+        {
+          "path": "/**6/technique_ids"
+        },
+        {
+          "format": "sigma_tag",
+          "path": "/**6/tags"
+        }
+      ]
+    },
+    "resolve_technique": {
+      "effects": {
+        "executes": "no",
+        "network": "on_refresh",
+        "third_party": "no"
+      },
+      "kind": "reference",
+      "read_only": true
+    },
+    "similar_cases": {
+      "effects": {
+        "executes": "no",
+        "network": "on_refresh",
+        "third_party": "no"
+      },
+      "kind": "reference"
+    }
+  },
+  "network": {
+    "capabilities": {
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "capabilities",
+      "read_only": true
+    },
+    "extract_dns": {
+      "arguments": {
+        "path": "pcap_path"
+      },
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "dns",
+      "reader": "dns_query_lines"
+    },
+    "extract_http": {
+      "arguments": {
+        "path": "pcap_path"
+      },
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "http"
+    },
+    "pcap_summary": {
+      "arguments": {
+        "path": "pcap_path"
+      },
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "pcap",
+      "reader": "flow_table",
+      "words": [
+        "capture",
+        "packet",
+        "packets",
+        "pcap"
+      ]
+    },
+    "read_pcap_summary": {
+      "arguments": {
+        "path": "pcap_path"
+      },
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "packet_overview",
+      "reader": "packet_lines",
+      "words": [
+        "capture",
+        "packet",
+        "packets",
+        "pcap"
+      ]
+    },
+    "release_job": {
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "staging_release"
+    },
+    "run_reader": {
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "reader_delivery"
+    }
+  },
+  "oletools": {
+    "capabilities": {
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "capabilities",
+      "read_only": true
+    },
+    "office_dde": {
+      "arguments": {
+        "path": "path"
+      },
+      "display_name": "msodde",
+      "does_not_show": "whether a link would run, or the links of an encrypted document",
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "dde_links",
+      "read_only": true,
+      "routed_formats": [
+        "ole2",
+        "ooxml",
+        "rtf"
+      ],
+      "rows": "/links/*",
+      "shows": "the DDE links and field instructions in the document, DDEAUTO commands too",
+      "values": {
+        "instruction": "/text"
+      }
+    },
+    "ole_indicators": {
+      "arguments": {
+        "path": "path"
+      },
+      "display_name": "oleid",
+      "does_not_show": "the content behind an indicator, or anything oleid has no check for",
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "document_indicators",
+      "read_only": true,
+      "routed_formats": [
+        "ole2",
+        "ooxml",
+        "rtf"
+      ],
+      "rows": "/indicators/*",
+      "shows": "the document's format, encryption, VBA and XLM macros, external relationships, Flash and object pools, each with oleid's risk rating",
+      "values": {
+        "indicator": "/id",
+        "risk": "/risk",
+        "value": "/value"
+      }
+    },
+    "ole_macro_risk": {
+      "arguments": {
+        "path": "path"
+      },
+      "display_name": "MacroRaptor",
+      "does_not_show": "whether a macro is malicious or what it does: a keyword match on the source, with no macro run",
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "macro_risk",
+      "read_only": true,
+      "routed_formats": [
+        "ole2",
+        "ooxml"
+      ],
+      "rows": "/matches/*",
+      "shows": "whether the macros run on their own and write or execute, by keyword rules",
+      "values": {
+        "flag": "/flag",
+        "keyword": "/keyword"
+      }
+    },
+    "ole_vba": {
+      "arguments": {
+        "path": "path"
+      },
+      "display_name": "olevba",
+      "does_not_show": "what a macro does when it runs: no macro is run, so code it builds or downloads at run time is not seen",
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "vba_macros",
+      "read_only": true,
+      "routed_formats": [
+        "ole2",
+        "ooxml"
+      ],
+      "rows": "/indicators/*",
+      "shows": "the VBA source of each macro module and olevba's keyword analysis of it (auto-run triggers, suspicious calls, IOCs, encoded strings), Excel 4 macro sheets and VBA stomping",
+      "values": {
+        "keyword": "/keyword",
+        "type": "/type"
+      }
+    },
+    "rtf_objects": {
+      "arguments": {
+        "path": "path"
+      },
+      "display_name": "rtfobj",
+      "does_not_show": "what an object does when it is opened, or an object the parser cannot find; nothing is extracted or run",
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "embedded_objects",
+      "places": {
+        "offset": "/start"
+      },
+      "read_only": true,
+      "routed_formats": [
+        "rtf"
+      ],
+      "rows": "/objects/*",
+      "shows": "the objects embedded in the RTF: each one's OLE class (Package, Equation.3, OLE2Link and others), the file name and paths a Package names, and its payload's sha256",
+      "values": {
+        "class_name": "/class_name",
+        "filename": "/filename",
+        "payload_sha256": "/payload_sha256"
+      }
+    }
+  },
+  "threatintel": {
+    "capabilities": {
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "capabilities"
+    },
+    "check_domain_reputation": {
+      "arguments": {
+        "domain": "domain"
+      },
+      "does_not_show": "whether the sample contacts the domain, or what it would send there",
+      "effects": {
+        "executes": "no",
+        "network": true,
+        "third_party": "no"
+      },
+      "kind": "indicator_reputation",
+      "shows": "what VirusTotal reports of the domain: its engine counts and categories"
+    },
+    "check_hash": {
+      "arguments": {
+        "hash": "file_hash"
+      },
+      "display_name": "Threat intelligence",
+      "does_not_show": "this run's own analysis of the sample; an unknown hash or no detections is no evidence that the file is clean",
+      "effects": {
+        "executes": "no",
+        "network": true,
+        "third_party": "hash"
+      },
+      "kind": "reputation",
+      "reputation": {
+        "malicious": "/last_analysis_stats/malicious",
+        "rank": 20,
+        "stats": "/last_analysis_stats",
+        "summary": "/summary",
+        "suspicious": "/last_analysis_stats/suspicious",
+        "text_patterns": [
+          "(?s)\\AHash [0-9A-Fa-f]+ \\(.*\\): (?:clean|suspicious|malicious) — (?P<malicious>\\d+)/(?P<total>\\d+) malicious, (?P<suspicious>\\d+)/\\d+ suspicious\\.\\s*\\z"
+        ]
+      },
+      "shows": "what VirusTotal reports of the hash: its engine counts and details of the file"
+    },
+    "check_ip_reputation": {
+      "arguments": {
+        "ip": "ip_address"
+      },
+      "does_not_show": "whether the sample contacts the address, or what it would send there",
+      "effects": {
+        "executes": "no",
+        "network": true,
+        "third_party": "no"
+      },
+      "kind": "indicator_reputation",
+      "shows": "what VirusTotal and AbuseIPDB report of the address"
+    },
+    "get_threatintel_status": {
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "status"
+    }
+  },
+  "unblob": {
+    "capabilities": {
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "capabilities",
+      "read_only": true
+    },
+    "container_extract": {
+      "arguments": {
+        "path": "path"
+      },
+      "display_name": "unblob",
+      "does_not_show": "what an extracted file does: nothing extracted is run or opened beyond its type; a format unblob has no handler for, an encrypted chunk's contents, or anything past the sample upload bound the extraction stops at",
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "extracted_files",
+      "long_running": true,
+      "read_only": true,
+      "rows": "/files/*",
+      "shows": "every file the container's chunks hold, extracted recursively, each with its place in the container, size, sha256 and file type; links by what they name, and what unblob refused (a member whose path or link leaves the extraction, a device file)",
+      "values": {
+        "magic": "/magic",
+        "name": "/name",
+        "sha256": "/sha256"
+      }
+    },
+    "container_scan": {
+      "arguments": {
+        "path": "path"
+      },
+      "display_name": "unblob",
+      "does_not_show": "what a chunk holds (nothing is unpacked), or a format unblob has no handler for; nothing is run",
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "embedded_chunks",
+      "places": {
+        "offset": "/start_offset"
+      },
+      "read_only": true,
+      "rows": "/chunks/*",
+      "shows": "each chunk of a known format inside the file (archives, compressed streams, file systems, firmware containers, a payload appended to another file), found by its own bytes, with its byte range, and the ranges no format claims with their entropy",
+      "values": {
+        "handler": "/handler"
+      }
+    },
+    "get_artefact": {
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "artefact_delivery",
+      "read_only": true
+    }
+  },
+  "webcrack": {
+    "capabilities": {
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "capabilities",
+      "read_only": true
+    },
+    "js_deobfuscate": {
+      "arguments": {
+        "path": "path"
+      },
+      "display_name": "webcrack",
+      "does_not_show": "strings an obfuscator's decoder functions compute (decoding them would run the script, so those calls stay as written); with no sandbox, the control-flow flattening and dead code of a script guarded by an obfuscator-style string array, which stay as they are; VBScript, or JScript.Encode scripts",
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "deobfuscated_script",
+      "long_running": true,
+      "places": {
+        "offset": "/start"
+      },
+      "read_only": true,
+      "routed_formats": [
+        "js",
+        "hta",
+        "wsf"
+      ],
+      "rows": "/scripts/*",
+      "shows": "the script (or each script block of an HTA or WSF) unminified, unpacked from its bundle and cleared of self-defending and debugger traps, as readable JavaScript",
+      "values": {
+        "language": "/language"
+      }
+    }
+  },
+  "yarax": {
+    "capabilities": {
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "capabilities",
+      "read_only": true
+    },
+    "yarax_scan": {
+      "arguments": {
+        "path": "path"
+      },
+      "asserts_techniques": true,
+      "display_name": "YARA-X",
+      "does_not_show": "rules that are not in the mounted rule files, or that YARA-X could not compile (named in rules_not_compiled); a match is the rule author's claim, not a verdict",
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "signature_rules",
+      "places": {
+        "instance_offset": "/strings/*/instances/*/offset",
+        "offset": "/strings/*/offset"
+      },
+      "read_only": true,
+      "rows": "/matches/*",
+      "shows": "the operator's own YARA rules (the rule files mounted on the server) that match the file, with each matching string's offset and the rule's metadata",
+      "source": "yara",
+      "techniques": [
+        {
+          "path": "/**6/technique_id"
+        },
+        {
+          "path": "/**6/attck"
+        },
+        {
+          "path": "/**6/technique_ids"
+        },
+        {
+          "format": "sigma_tag",
+          "path": "/**6/tags"
+        }
+      ],
+      "values": {
+        "rule": "/rule"
+      },
+      "words": [
+        "yara",
+        "rule",
+        "rules"
+      ]
+    }
+  }
+}

@@ -42,6 +42,59 @@ _NOT_GO = ("no valid pclntab", "no valid moduledata")
 
 mcp = FastMCP("GoReSymMCP", stateless_http=True)
 
+# What each tool declares of itself (``cli_sidecar.reading_tool``).
+_EXECUTABLE_FORMATS = ["pe", "elf", "mach-o"]
+_DECLARED: dict[str, dict[str, Any]] = {
+    SYMBOLS_TOOL: sidecar.reading_tool(
+        "Go symbols",
+        {
+            "kind": "function_list",
+            "long_running": True,
+            "rows": "/functions/*",
+            "places": {"address": "/start"},
+            "values": {"name": "/name", "package": "/package"},
+            "arguments": {"path": "path"},
+            "routed_formats": _EXECUTABLE_FORMATS,
+            "display_name": "GoReSym",
+            "shows": (
+                "the Go version, build id and build info, and each function's name, package and "
+                "address range, read from the Go runtime's own tables in the file"
+            ),
+            "does_not_show": "what a function does, or code that is not Go",
+        },
+    ),
+    TYPES_TOOL: sidecar.reading_tool(
+        "Go types",
+        {
+            "kind": "type_list",
+            "long_running": True,
+            "rows": "/types/*",
+            "values": {"name": "/Str", "type_kind": "/Kind"},
+            "arguments": {"path": "path"},
+            "routed_formats": _EXECUTABLE_FORMATS,
+            "display_name": "GoReSym",
+            "shows": "the Go type structures and interfaces the binary's moduledata lists",
+            "does_not_show": "how the types are used, or types of a Go version it misreads",
+        },
+    ),
+    STRINGS_TOOL: sidecar.reading_tool(
+        "Go strings",
+        {
+            "kind": "embedded_strings",
+            "long_running": True,
+            "holds_strings": True,
+            "rows": "/strings/*",
+            "values": {"text": "/Str"},
+            "arguments": {"path": "path"},
+            "routed_formats": _EXECUTABLE_FORMATS,
+            "display_name": "GoReSym",
+            "shows": "the strings the binary's Go string table holds, each cut where Go cuts it",
+            "does_not_show": "strings built, decoded or decrypted at run time",
+        },
+    ),
+    "capabilities": sidecar.reading_tool("Tool availability", sidecar.CAPABILITIES_FACTS),
+}
+
 
 async def _goresym(path: str, flags: list[str], go_version: str) -> dict[str, Any]:
     """GoReSym's JSON document over the sample, or its failure as a :class:`ToolFailure`."""
@@ -95,7 +148,7 @@ def function_rows(document: dict[str, Any]) -> list[dict[str, Any]]:
     return rows
 
 
-@mcp.tool()
+@mcp.tool(**_DECLARED["go_symbols"])
 async def go_symbols(
     path: str,
     standard_library: bool = False,
@@ -126,7 +179,7 @@ async def go_symbols(
     return await sidecar.answering(SYMBOLS_TOOL, work)
 
 
-@mcp.tool()
+@mcp.tool(**_DECLARED["go_types"])
 async def go_types(path: str, go_version: str = "") -> dict[str, Any]:
     """Recover a Go binary's type structures and interfaces from its moduledata typelinks.
 
@@ -151,7 +204,7 @@ async def go_types(path: str, go_version: str = "") -> dict[str, Any]:
     return await sidecar.answering(TYPES_TOOL, work)
 
 
-@mcp.tool()
+@mcp.tool(**_DECLARED["go_strings"])
 async def go_strings(path: str, go_version: str = "") -> dict[str, Any]:
     """Recover the strings a Go binary embeds, from its string internment table.
 
@@ -172,7 +225,7 @@ async def go_strings(path: str, go_version: str = "") -> dict[str, Any]:
     return await sidecar.answering(STRINGS_TOOL, work)
 
 
-@mcp.tool()
+@mcp.tool(**_DECLARED["capabilities"])
 def capabilities() -> dict[str, Any]:
     """Which of this server's tools this host can run, and how to install what is missing."""
     return sidecar.capabilities(SERVER, PROGRAM, TOOLS, version=GORESYM_VERSION)

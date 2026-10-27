@@ -444,6 +444,7 @@ class MCPLangChainToolkit:
         keep_tool_definitions: bool = False,
         label: str = "",
         http_read_timeout: float = HTTP_READ_TIMEOUT_SECONDS,
+        categories_with_served: Callable[[Mapping[str, Any]], Mapping[str, str]] | None = None,
     ):
         self.server_params = server_params
         # The server's name in what this toolkit logs about it; a stdio
@@ -481,6 +482,10 @@ class MCPLangChainToolkit:
         # declares it (``ToolFacts.category``); an undeclared tool's is read
         # from its name (``core.undeclared_tools.category_tag``).
         self._categories = dict(categories or {})
+        # The tags as they are in force once the server's own declaration of
+        # its tools is read (``core.served_declarations``), asked of the
+        # handle before the tools are built; ``None`` keeps ``categories``.
+        self._categories_with_served = categories_with_served
         # What the server says about itself when it is initialised (the MCP
         # ``instructions``), exactly as served; "" for a server that says
         # nothing. Tool-supplied text: shown to a model only as the server's
@@ -498,6 +503,10 @@ class MCPLangChainToolkit:
         # listing is held no longer than it was before.
         self._keep_tool_definitions = keep_tool_definitions
         self.tool_definitions: list[Any] = []
+        # What the server declares of each of its tools under the listing's
+        # ``_meta`` (``core.served_declarations``), by the name it lists it
+        # under; the handle keeps it as the server's declaration.
+        self.served_tool_facts: dict[str, Any] = {}
 
     async def initialize(self) -> None:
         """Initialize the connection to the MCP server and fetch available tools.
@@ -573,6 +582,10 @@ class MCPLangChainToolkit:
             # answer can echo text a sample's author wrote.
             if self._stdout_lines is not None:
                 self._stdout_lines.reads_redraws = False
+            # What the server declares of its tools, read before they are
+            # built so their tags are the ones in force from the first attach.
+            self.served_tool_facts = self._served_tool_facts(response.tools)
+            self._settle_categories()
             for tool in response.tools:
                 lc_tool = self._create_langchain_tool(tool)
                 self._tools.append(lc_tool)
@@ -610,6 +623,39 @@ class MCPLangChainToolkit:
             with suppress(BaseException):
                 await self.cleanup()
             raise
+
+    def _settle_categories(self) -> None:
+        """The tags in force with what the server declared; those given where it cannot be read."""
+        ask = self._categories_with_served
+        if ask is None:
+            return
+        try:
+            self._categories = dict(ask(self.served_tool_facts))
+        except Exception as exc:  # noqa: BLE001 — a tag never costs an attach
+            logger.warning(
+                "The tool tags of %s were not read with its declaration (%s).",
+                self._server_name(),
+                type(exc).__name__,
+            )
+
+    def _served_tool_facts(self, definitions: Sequence[Any]) -> dict[str, Any]:
+        """What the listing declares of each tool; nothing when it cannot be read.
+
+        Read for every server alike (``core.served_declarations``); a
+        declaration is the server's data, and one that cannot be read never
+        costs the attach.
+        """
+        from maljan.core.served_declarations import served_tool_facts
+
+        try:
+            return served_tool_facts(definitions, where=f"{self._server_name()}.")
+        except Exception as exc:  # noqa: BLE001 — a declaration never costs an attach
+            logger.warning(
+                "The tool declarations %s listed were not read (%s).",
+                self._server_name(),
+                type(exc).__name__,
+            )
+            return {}
 
     def get_tools(self) -> list[BaseTool]:
         """Return the list of LangChain tools exposed by the MCP server."""

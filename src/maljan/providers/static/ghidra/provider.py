@@ -13,11 +13,13 @@ analyst's loop (``open_sample``), the call graph the sink pre-pass ranks
 from __future__ import annotations
 
 import threading
+from collections.abc import Mapping
 from typing import TYPE_CHECKING, Any
 
 from langchain_core.tools import BaseTool
 
 from maljan.core import builtin_declarations, cancellation
+from maljan.core.declared_reading import tools_in_force
 from maljan.core.exceptions import SampleNotOpened
 from maljan.core.logger import logger
 from maljan.core.settings_overrides import redact_url
@@ -542,7 +544,7 @@ class GhidraStaticProvider(StaticProvider):
                 context_budget=job.context_budget,
                 long_running_tools=long_running_tools(getattr(self._cfg, "sample_open", None)),
                 explicit_call_timeout=explicit_call_timeout(settings),
-                categories=categories_of(getattr(self._cfg, "tool_facts", None)),
+                categories=categories_of(tools_in_force(self.declaration_source, self._cfg)),
                 # The breaker and call cap every other tool server's calls go
                 # through, the one this provider's walks are held by too; none
                 # where no settings can be read (a probe, a test).
@@ -582,16 +584,37 @@ class GhidraStaticProvider(StaticProvider):
             max_output_chars=max_chars,
             truncation_ledger=job.truncation_ledger,
             context_budget=job.context_budget,
-            categories=categories_of(getattr(self._cfg, "tool_facts", None)),
+            categories=categories_of(tools_in_force(self.declaration_source, self._cfg)),
+            categories_with_served=self._categories_with_served,
         )
 
         self._run_async(toolkit.initialize())
         self._toolkit = toolkit  # type: ignore[assignment]
+        # What the server declared of its tools, kept under this provider's
+        # source (``core.served_declarations``).
+        from maljan.core.served_declarations import register_served
+        from maljan.core.tool_declarations import launch_identity
+
+        held = getattr(toolkit, "served_tool_facts", None)
+        if isinstance(held, dict):
+            register_served(self.declaration_source, held, launch_identity(self._cfg))
+            # Its budgets and long-running flags as now in force, for a guard
+            # this job already built.
+            if self._guard is not None:
+                self._guard.declare_tool_facts(tools_in_force(self.declaration_source, self._cfg))
         self._all_tools = self._with_aggregate_notes(
             self._pin_load_program_path(self._reading_errors(toolkit.get_tools()))
         )
         self.tools = list(self._all_tools)
         logger.info("Initialized Ghidra MCP tools: %d.", len(self.tools))
+
+    def _categories_with_served(self, held: Mapping[str, Any]) -> dict[str, str]:
+        """The description tags in force with ``held``, what the server declared, laid under.
+
+        Asked by the toolkit before it builds the tools; nothing is kept until
+        the attach succeeded.
+        """
+        return categories_of(tools_in_force(self.declaration_source, self._cfg, held))
 
     def server_guard(self) -> Any:
         """This job's breaker and call cap for Ghidra, or ``None`` where no settings can be read.
@@ -613,6 +636,7 @@ class GhidraStaticProvider(StaticProvider):
                         on_open=self._rested,
                         sample_open=getattr(self._cfg, "sample_open", None),
                         block=self._cfg,
+                        source=self.declaration_source,
                     )
             return self._guard
 

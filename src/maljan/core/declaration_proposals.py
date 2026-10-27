@@ -881,6 +881,7 @@ def propose_tool(
     manifest_cell: Mapping[str, Any] | None = None,
     answer: Any = None,
     sandbox_source: bool = False,
+    trusted: bool = False,
 ) -> ToolProposal | None:
     """The proposal for one tool, or ``None`` for one whose name a declaration cannot hold.
 
@@ -895,6 +896,9 @@ def propose_tool(
     a run's (processes, connections, DNS questions, dropped files) are also
     what a memory image, a capture, a live resolver or an intelligence lookup
     answers with, and a sandbox kind makes them observed run facts.
+    ``trusted`` says the server's block trusts its own declaration
+    (``trusts_served_declaration``): only then is what it declares of a tool
+    proposed with high confidence (:func:`_read_served`).
     """
     name = _get(definition, "name")
     if not isinstance(name, str):
@@ -1023,6 +1027,7 @@ def propose_tool(
     title = _title_of(definition, annotations)
     if title:
         proposal.fields["display_name"] = Proposed(title, ["title"], HIGH)
+    _read_served(definition, proposal, sandbox_source=sandbox_source, trusted=trusted)
 
     # A field read only through a kind is offered only with that kind: it
     # requires it, and with no kind proposed it is not offered at all.
@@ -1040,6 +1045,131 @@ def propose_tool(
         held.requires = (*needs_kind, *_REQUIRES.get(held_name, ()))
     _settle(proposal)
     return proposal
+
+
+def _read_served(
+    definition: Any, proposal: ToolProposal, *, sandbox_source: bool, trusted: bool = False
+) -> None:
+    """What the server declared of the tool itself (its ``_meta``), each field proposed.
+
+    The server named it outright (``core.served_declarations``), so each field
+    it sets is proposed over a reading of its schemas: with high confidence for
+    a block that trusts the server's own declaration
+    (``trusts_served_declaration``), and otherwise with medium confidence, as
+    the server's own claim. Never over a proposal more careful than it
+    (:func:`_more_careful`): a server saying of itself that it sends nothing,
+    reaches nothing or changes nothing does not undo what its hints or schemas
+    gave. A kind of what a sandbox observed is proposed only for a server
+    declared a sandbox source.
+    """
+    from maljan.core.served_declarations import (
+        FACTS_META_KEY,
+        OBSERVED_KIND_PREFIX,
+        served_facts_of,
+    )
+
+    served = served_facts_of(definition)
+    if served is None:
+        return
+    held = served.model_dump(mode="json", exclude_defaults=True)
+    whole = served.model_dump(mode="json")
+    # A field given at its default is the server's word too; ``effects`` as
+    # the parts it gives.
+    held.update({name: whole[name] for name in served.model_fields_set if name not in held})
+    if served.effects is not None:
+        held["effects"] = served.effects.model_dump(mode="json", exclude_defaults=True)
+    if str(held.get("kind") or "").startswith(OBSERVED_KIND_PREFIX) and not sandbox_source:
+        held.pop("kind")
+        proposal.notes.append(
+            "the kind its server declares is what a sandbox observed, proposed only for a "
+            "server declared a sandbox source"
+        )
+    evidence = [f"_meta {FACTS_META_KEY}" + ("" if trusted else " (the server's own claim)")]
+    confidence = HIGH if trusted else MEDIUM
+    # What its hints already say, which its own declaration never undoes.
+    if held.get("read_only") is True and (
+        proposal.read_only is False or proposal.destructive is True
+    ):
+        held.pop("read_only")
+        proposal.notes.append(
+            "read_only true, as its server declares it, not offered: its hints say it may "
+            "change something"
+        )
+    effects = held.get("effects")
+    if (
+        proposal.open_world is True
+        and isinstance(effects, Mapping)
+        and "network" in effects
+        and effects["network"] is not True
+    ):
+        held["effects"] = {k: v for k, v in effects.items() if k != "network"}
+        if not held["effects"]:
+            held.pop("effects")
+        proposal.notes.append(
+            f"effects.network {effects['network']}, as its server declares it, not offered: "
+            "its openWorldHint says it reaches the network"
+        )
+    for name, value in held.items():
+        if name == "kind" and not value:
+            continue
+        before = proposal.fields.get(name)
+        if before is not None:
+            value = _more_careful(name, before.value, value)
+            if value == before.value:
+                continue
+        proposal.fields[name] = Proposed(value, list(evidence), confidence)
+
+
+# The values of an effect, from least to most careful; values of one rank
+# are each as careful as the other, and neither replaces the other.
+_EFFECT_RANK: dict[str, dict[Any, int]] = {
+    "third_party": {"no": 0, "hash": 1, "bytes": 2},
+    "executes": {"no": 0, "emulation": 1, "native": 2, "sandbox": 2},
+}
+# The parts of an effect that only qualify it: what was proposed stays.
+_EFFECT_QUALIFIERS = frozenset({"offline_without_credentials", "when", "why_undeclared"})
+
+
+def _more_careful(name: str, before: Any, said: Any) -> Any:
+    """``said`` where it is no less careful than the proposal ``before``; ``before`` otherwise.
+
+    A sample sent (``discloses_sample``) and a tool that is not read-only stay
+    so whatever the server says of itself; so does a kind whose answer moves
+    or that reaches outside (``builtin_declarations.MOVING_KINDS``,
+    ``OUTWARD_KINDS``) against one that does neither. ``effects`` part by
+    part (:func:`_more_careful_effect`).
+    """
+    if name == "discloses_sample":
+        return True if before is True else said
+    if name == "read_only":
+        return False if before is False else said
+    if name == "kind":
+        from maljan.core.builtin_declarations import MOVING_KINDS, OUTWARD_KINDS
+
+        careful = set(MOVING_KINDS) | set(OUTWARD_KINDS)
+        return before if before in careful and said not in careful else said
+    if name != "effects" or not isinstance(before, Mapping) or not isinstance(said, Mapping):
+        return said
+    out = dict(before)
+    for part, value in said.items():
+        out[part] = _more_careful_effect(part, before.get(part), value)
+    return out
+
+
+def _more_careful_effect(part: str, before: Any, said: Any) -> Any:
+    """One part of an effect: ``said`` where nothing was proposed or it is no less careful."""
+    if before is None or before == said:
+        return said
+    if part == "network":
+        # Reaching the network outright is the most careful; any named way of
+        # reaching it is more careful than not reaching it.
+        return said if said is True or (before is False and said is not False) else before
+    if part in _EFFECT_QUALIFIERS:
+        return before
+    rank = _EFFECT_RANK.get(part)
+    if rank is None:
+        return said
+    return said if rank.get(said, -1) > rank.get(before, -1) else before
 
 
 def _kind_of(
@@ -1548,6 +1678,7 @@ def propose(
     skip: Iterable[str] = (),
     sandbox_source: bool = False,
     remote: bool = False,
+    trusted: bool = False,
 ) -> dict[str, Any]:
     """The proposals for every tool ``definitions`` lists, as JSON the console reads.
 
@@ -1568,6 +1699,8 @@ def propose(
     and accepted there it would offer only the tools that take a path, so it is
     offered marked ``incomplete`` (``program_arguments``, ``job_safe_tools``),
     with a note that says what to declare (:data:`SHARED_OPEN_NOTE`).
+    ``trusted`` says the server's block trusts its own declaration
+    (:func:`propose_tool`).
     """
     definitions = list(definitions)
     cells = _manifest_cells(capabilities)
@@ -1593,6 +1726,7 @@ def propose(
                 manifest_cell=cells.get(name),
                 answer=answer,
                 sandbox_source=sandbox_source,
+                trusted=trusted,
             )
             if proposal is None:
                 continue

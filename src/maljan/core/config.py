@@ -1655,6 +1655,13 @@ class MCPServerConfig(BaseModel):
     # Whether the server is the platform's own (its answers are the platform's
     # code, such as the API names its hash resolution reads).
     platform_owned: bool = False
+    # Whether what the server declares of its own tools when it lists them
+    # (``core.served_declarations``) is read as a declaration of this block:
+    # set by the operator for a server they trust to say what its tools do, and
+    # shipped set for the platform's own sidecars. Without it only the server's
+    # cautious claims are read, said as the server's own, and the rest is
+    # proposed to the operator.
+    trusts_served_declaration: bool = False
     # The prefixes the server's decompiler writes before an address when it
     # names a function itself (``FUN_``, ``fcn.``).
     auto_name_prefixes: list[str] = Field(default_factory=list)

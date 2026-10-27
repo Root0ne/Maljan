@@ -469,6 +469,15 @@ export default function DeclarationFields({
           />
           the platform&apos;s own server
         </label>
+        <label className="flex items-center gap-1 text-text-secondary">
+          <input
+            type="checkbox"
+            aria-label={`${serverKey} trusts_served_declaration`}
+            checked={server.trusts_served_declaration ?? false}
+            onChange={(e) => put({ trusts_served_declaration: e.target.checked })}
+          />
+          trust what the server declares of its own tools
+        </label>
         <ReadField
           id={box("launcher_depth")}
           label="Launcher levels (top levels of the started process tree that are a launcher, not a reader; empty: none)"

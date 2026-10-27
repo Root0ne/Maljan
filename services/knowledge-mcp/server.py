@@ -31,6 +31,7 @@ from maljan.tools import knowledge as knowledge_tools
 from maljan.tools import sidecar_needs
 from maljan.tools.arguments import read_unquoted, says_unquoted, with_read_as
 from maljan.tools.capabilities import CAPABILITIES_TOOL, ToolNeeds, manifest
+from maljan.tools.declared_facts import NO_EFFECT, tool_declaration
 from maljan.tools.errors import code_for_exception, normalise_error, tool_error
 
 mcp = FastMCP("KnowledgeMCP")
@@ -60,6 +61,47 @@ _apply_index_retry()
 # reads the vendored catalogues (``maljan.tools.sidecar_needs``).
 TOOL_NEEDS: list[ToolNeeds] = sidecar_needs.KNOWLEDGE
 CAPABILITIES = manifest("knowledge", TOOL_NEEDS)
+
+# What each tool declares of itself (``maljan.tools.declared_facts``). Each
+# reads the platform's own reference tables, so an identical call answers the
+# same, but for the case lookup, whose store grows with every run. The ATT&CK
+# lookups and the case lookup reach the network only to fetch or refresh the
+# reference data they keep: the ATT&CK bundle once it is stale and the
+# embedding model's weights on first use.
+_REFRESHES = {**NO_EFFECT, "network": "on_refresh"}
+_REFERENCE = {"kind": "reference", "effects": _REFRESHES}
+_DECLARED: dict[str, dict[str, Any]] = {
+    CAPABILITIES_TOOL: tool_declaration(
+        "Tool availability", {"kind": "capabilities", "effects": NO_EFFECT}, read_only=True
+    ),
+    "resolve_technique": tool_declaration(
+        "Resolve an ATT&CK technique", _REFERENCE, read_only=True
+    ),
+    "attck_lookup": tool_declaration("ATT&CK lookup", _REFERENCE, read_only=True),
+    "attck_validate": tool_declaration("Validate ATT&CK ids", _REFERENCE, read_only=True),
+    "api_capability": tool_declaration(
+        "API capability catalogue", {"kind": "api_catalogue", "effects": NO_EFFECT}, read_only=True
+    ),
+    "lolbin_lookup": tool_declaration(
+        "Living-off-the-land command match",
+        {
+            "kind": "command_match",
+            "asserts_techniques": True,
+            "source": "lolbin",
+            "techniques": [
+                {"path": "/**6/technique_id", "format": "attck"},
+                {"path": "/**6/attck", "format": "attck"},
+                {"path": "/**6/technique_ids", "format": "attck"},
+                {"path": "/**6/tags", "format": "sigma_tag"},
+            ],
+            "arguments": {"command_lines": "command_lines"},
+            "effects": NO_EFFECT,
+        },
+        read_only=True,
+    ),
+    "family_lookup": tool_declaration("Malware family lookup", _REFERENCE, read_only=True),
+    "similar_cases": tool_declaration("Similar past cases", _REFERENCE),
+}
 
 
 def _described_by(source: Any) -> Any:
@@ -105,7 +147,7 @@ def _guard(
     return dict(with_read_as(answer, read_as))
 
 
-@mcp.tool(name=CAPABILITIES_TOOL)
+@mcp.tool(name=CAPABILITIES_TOOL, **_DECLARED["capabilities"])
 def capabilities() -> dict[str, Any]:
     """What this server can do on this host.
 
@@ -116,7 +158,7 @@ def capabilities() -> dict[str, Any]:
     return copy.deepcopy(CAPABILITIES)
 
 
-@mcp.tool()
+@mcp.tool(**_DECLARED["resolve_technique"])
 @says_unquoted("text")
 def resolve_technique(text: str, k: int = 5, domain: str = "") -> dict[str, Any]:
     """Rank ATT&CK techniques against a behavioural description."""
@@ -130,7 +172,7 @@ def resolve_technique(text: str, k: int = 5, domain: str = "") -> dict[str, Any]
     )
 
 
-@mcp.tool()
+@mcp.tool(**_DECLARED["attck_lookup"])
 @says_unquoted("technique_id")
 def attck_lookup(technique_id: str) -> dict[str, Any]:
     """Look up one ATT&CK technique: name, domain, platforms, tactics, url."""
@@ -142,7 +184,7 @@ def attck_lookup(technique_id: str) -> dict[str, Any]:
     )
 
 
-@mcp.tool()
+@mcp.tool(**_DECLARED["attck_validate"])
 @says_unquoted("ids")
 def attck_validate(ids: list[str]) -> dict[str, Any]:
     """Report which technique ids do not exist, with likely intended ids."""
@@ -151,7 +193,7 @@ def attck_validate(ids: list[str]) -> dict[str, Any]:
     )
 
 
-@mcp.tool()
+@mcp.tool(**_DECLARED["api_capability"])
 @says_unquoted("api_names")
 @_described_by(knowledge_tools.api_capability)
 def api_capability(
@@ -167,13 +209,13 @@ def api_capability(
     )
 
 
-@mcp.tool()
+@mcp.tool(**_DECLARED["lolbin_lookup"])
 def lolbin_lookup(command_lines: list[str]) -> dict[str, Any]:
     """Match command lines against the signed-proxy-execution (LOLBin) table."""
     return _guard("lolbin_lookup", knowledge_tools.lolbin_lookup, command_lines=command_lines)
 
 
-@mcp.tool()
+@mcp.tool(**_DECLARED["family_lookup"])
 @says_unquoted("query")
 def family_lookup(query: str, k: int = 5) -> dict[str, Any]:
     """Retrieve malware families whose fingerprint is closest to the query."""
@@ -186,7 +228,7 @@ def family_lookup(query: str, k: int = 5) -> dict[str, Any]:
     )
 
 
-@mcp.tool()
+@mcp.tool(**_DECLARED["similar_cases"])
 @says_unquoted("text")
 def similar_cases(text: str, k: int = 5) -> dict[str, Any]:
     """Retrieve prior cases with similar behaviour, and the techniques they share."""

@@ -115,6 +115,17 @@ HINTS_KEY = "hints"
 # ``<server>__<tool>``). Written only for a call made through that server's own
 # handle, which knew the original name; never inferred from the offered name.
 DECLARED_NAME_KEY = "declared_name"
+# The key of the stored record that names the fields of it that only the
+# tool's own server said, for a block that does not trust its server's
+# declaration (``core.served_declarations``): dotted, ``kind``,
+# ``discloses_sample``, ``effects.network``. Each is the server's statement,
+# read as said and never as declared (:func:`declared_only`).
+SERVED_KEY = "served"
+# The key of the stored record that holds, by dotted field, what the tool's
+# untrusted server claims and nothing put in force (a kind whose answer moves
+# or reaches outside, ``core.served_declarations``): said as the server's,
+# never read as declared.
+SERVED_CLAIMS_KEY = "served_claims"
 # The MCP tool annotations a server may give, each a yes or no.
 SERVER_HINTS: tuple[str, ...] = (
     "readOnlyHint",
@@ -153,6 +164,36 @@ def declarations(settings: Settings | None = None) -> ToolDeclarations:
             _HELD[0] = settings
             _HELD[2] = version
         return _HELD[1]  # type: ignore[no-any-return]
+
+
+def tools_in_force(
+    source: str, block: Any, listing: Mapping[str, Any] | None = None
+) -> Mapping[str, Any]:
+    """The tool declarations in force for ``block`` under ``source``: its own, its server's under.
+
+    ``block`` is the settings block the server was started or reached by
+    (its ``tool_facts`` as they are in force), and what the server declared
+    of its tools when it attached is laid under them as the live declarations
+    lay it (``core.served_declarations.with_served``), so it reaches whatever
+    reads a block's tools before a call: the call guard's budgets and
+    long-running flags, the description tags. The block's own map where
+    nothing can be read. With ``listing``, what the server declares in a
+    listing nothing has kept yet is laid under in place of what was kept.
+    """
+    own = dict(getattr(block, "tool_facts", None) or {})
+    try:
+        from maljan.core.served_declarations import laid_under, with_served
+        from maljan.core.tool_declarations import Declared, SourceRef
+
+        declared = Declared.of(SourceRef.parse(str(source)), block, enabled=True)
+        if listing is not None:
+            return dict(laid_under(declared, listing).tools)
+        return dict(with_served(declared).tools)
+    except Exception as exc:  # noqa: BLE001 — an unreadable declaration falls back to the block
+        from maljan.core.logger import logger
+
+        logger.debug("declarations of %s not read (%s).", source, type(exc).__name__)
+        return own
 
 
 def forget() -> None:
@@ -242,13 +283,118 @@ def facts_record(
                 return shipped
         held = declared or declarations()
         if declared_name:
-            return stored_record(held.declaration_for((source, declared_name), exact=True))
-        return stored_record(held.declaration_for((source, tool)))
+            record = stored_record(held.declaration_for((source, declared_name), exact=True))
+            return _with_served(record, held, source, declared_name)
+        record = stored_record(held.declaration_for((source, tool)))
+        return _with_served(record, held, source, tool, bare_name(tool))
     except Exception as exc:  # noqa: BLE001 — a record is never worth a lost entry
         from maljan.core.logger import logger
 
         logger.debug("declared facts of %s under %s not recorded (%s).", tool, source, exc)
         return None
+
+
+def _with_served(
+    record: dict[str, Any], held: ToolDeclarations, source: str, *names: str
+) -> dict[str, Any]:
+    """``record`` naming the stored fields only the tool's server said (:data:`SERVED_KEY`).
+
+    And what that server claims that nothing put in force (:data:`SERVED_CLAIMS_KEY`).
+    """
+    said: tuple[str, ...] = ()
+    claims: Mapping[str, Any] = {}
+    for name in names:
+        said = said or held.served_fields_for(source, name)
+        claims = claims or held.served_claims_for(source, name)
+    stored = [name for name in said if name.partition(".")[0] in STORED_FACT_FIELDS]
+    out = dict(record)
+    if stored:
+        out[SERVED_KEY] = stored
+    if claims:
+        out[SERVED_CLAIMS_KEY] = dict(claims)
+    return out
+
+
+def served_fields(entry: Any) -> frozenset[str]:
+    """The fields of the entry's stored record that only its tool's server said."""
+    held = _field(entry, "facts")
+    said = held.get(SERVED_KEY) if isinstance(held, Mapping) else None
+    if not isinstance(said, list | tuple):
+        return frozenset()
+    return frozenset(str(name) for name in said if isinstance(name, str))
+
+
+def declared_only(entry: Any) -> Any:
+    """``entry`` as its declaration alone has it: without what only its server said.
+
+    A field a server's untrusted declaration set (:data:`SERVED_KEY`) is its
+    statement, never a declaration: a reader that places a call by what it
+    declares (the disclosure's rows, the tool-effects part) reads this, and
+    says the server's statement apart. The entry itself where nothing was.
+    """
+    held = _field(entry, "facts")
+    if not isinstance(held, Mapping) or not (SERVED_KEY in held or SERVED_CLAIMS_KEY in held):
+        return entry
+    record = _declared_record(held)
+    if isinstance(entry, Mapping):
+        return {**entry, "facts": record}
+    copy = getattr(entry, "model_copy", None)
+    if callable(copy):
+        return copy(update={"facts": record})
+    return {
+        "source": _field(entry, "source"),
+        "tool": _field(entry, "tool"),
+        "server": _field(entry, "server"),
+        "ok": _field(entry, "ok"),
+        "args": _field(entry, "args"),
+        "facts": record,
+    }
+
+
+def _declared_record(held: Mapping[str, Any]) -> dict[str, Any]:
+    """A stored record without what only its tool's server said or claimed."""
+    said = held.get(SERVED_KEY)
+    names = (
+        [str(name) for name in said if isinstance(name, str)]
+        if isinstance(said, list | tuple)
+        else []
+    )
+    record = {
+        key: value for key, value in held.items() if key not in (SERVED_KEY, SERVED_CLAIMS_KEY)
+    }
+    for name in names:
+        top, _, sub = name.partition(".")
+        if not sub:
+            record.pop(top, None)
+        elif isinstance(record.get(top), Mapping):
+            below = {k: v for k, v in record[top].items() if k != sub}
+            if below:
+                record[top] = below
+            else:
+                record.pop(top)
+    return record
+
+
+def served_statement(entry: Any) -> dict[str, Any]:
+    """What only the entry's tool's server said or claimed of it, by dotted field."""
+    said = served_fields(entry)
+    held = _field(entry, "facts")
+    if not isinstance(held, Mapping):
+        return {}
+    claimed = held.get(SERVED_CLAIMS_KEY)
+    out: dict[str, Any] = (
+        {str(name): value for name, value in claimed.items()}
+        if isinstance(claimed, Mapping)
+        else {}
+    )
+    for name in sorted(said):
+        top, _, sub = name.partition(".")
+        value = held.get(top)
+        if sub:
+            value = value.get(sub) if isinstance(value, Mapping) else None
+        if value is not None:
+            out[name] = value
+    return out
 
 
 def hints_of_annotations(annotations: Any) -> dict[str, bool]:
@@ -425,6 +571,11 @@ def _shipped_tools_by_source() -> Mapping[str, frozenset[str]]:
     return out
 
 
+def shipped_tools_of(source: str) -> frozenset[str]:
+    """The tool names the built-in ``source`` ships a declaration for; empty for any other."""
+    return _shipped_tools_by_source().get(str(source), frozenset())
+
+
 def shipped_under_its_source(entry: Any) -> bool:
     """Whether ``entry``'s tool is one a built-in source ships, under the source it recorded.
 
@@ -529,8 +680,9 @@ def facts_of(entry: Any) -> ToolFacts | None:
     """
     held = _field(entry, "facts")
     if isinstance(held, Mapping):
+        # What only the tool's server said is never read as declared.
         try:
-            text = json.dumps(dict(held), sort_keys=True, default=str)
+            text = json.dumps(_declared_record(held), sort_keys=True, default=str)
         except (TypeError, ValueError):
             return None
         return _parsed(text)
@@ -560,6 +712,7 @@ def kind_free_facts(entry: Any) -> ToolFacts:
     held = _field(entry, "facts")
     if not isinstance(held, Mapping):
         return _NO_FACTS
+    held = _declared_record(held)
     try:
         text = json.dumps(
             {key: held[key] for key in ("v", *_KIND_FREE_STORED) if key in held},

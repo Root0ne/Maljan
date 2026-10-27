@@ -154,6 +154,59 @@ _RUN_ID_RE = re.compile(r"[0-9a-f]{32}")
 
 mcp = FastMCP("UnblobMCP", stateless_http=True)
 
+# What each tool declares of itself (``cli_sidecar.reading_tool``).
+# unblob carves and extracts into a directory of its own, never beside the
+# sample, and runs nothing it extracts; a written file reaches another server
+# only through the job's artefact store, which reads it back over
+# ``get_artefact`` (a delivery primitive, never a model's).
+_DECLARED: dict[str, dict[str, Any]] = {
+    SCAN_TOOL: sidecar.reading_tool(
+        "Container chunks",
+        {
+            "kind": "embedded_chunks",
+            "rows": "/chunks/*",
+            "places": {"offset": "/start_offset"},
+            "values": {"handler": "/handler"},
+            "arguments": {"path": "path"},
+            "display_name": "unblob",
+            "shows": (
+                "each chunk of a known format inside the file (archives, compressed streams, "
+                "file systems, firmware containers, a payload appended to another file), found "
+                "by its own bytes, with its byte range, and the ranges no format claims with "
+                "their entropy"
+            ),
+            "does_not_show": (
+                "what a chunk holds (nothing is unpacked), or a format unblob has no handler "
+                "for; nothing is run"
+            ),
+        },
+    ),
+    EXTRACT_TOOL: sidecar.reading_tool(
+        "Extract a container",
+        {
+            "kind": "extracted_files",
+            "long_running": True,
+            "rows": "/files/*",
+            "values": {"name": "/name", "sha256": "/sha256", "magic": "/magic"},
+            "arguments": {"path": "path"},
+            "display_name": "unblob",
+            "shows": (
+                "every file the container's chunks hold, extracted recursively, each with its "
+                "place in the container, size, sha256 and file type; links by what they name, "
+                "and what unblob refused (a member whose path or link leaves the extraction, a "
+                "device file)"
+            ),
+            "does_not_show": (
+                "what an extracted file does: nothing extracted is run or opened beyond its "
+                "type; a format unblob has no handler for, an encrypted chunk's contents, or "
+                "anything past the sample upload bound the extraction stops at"
+            ),
+        },
+    ),
+    FETCH_TOOL: sidecar.reading_tool("Fetch an extracted file", {"kind": "artefact_delivery"}),
+    "capabilities": sidecar.reading_tool("Tool availability", sidecar.CAPABILITIES_FACTS),
+}
+
 
 def carve_root() -> Path:
     """The directory each extraction's own directory is made under."""
@@ -644,7 +697,7 @@ async def _extract_within(
         raise
 
 
-@mcp.tool()
+@mcp.tool(**_DECLARED["container_scan"])
 async def container_scan(path: str) -> dict[str, Any]:
     """Find the chunks of known formats inside a file, by their own bytes, without unpacking them.
 
@@ -685,7 +738,7 @@ async def container_scan(path: str) -> dict[str, Any]:
     return await sidecar.answering(SCAN_TOOL, work)
 
 
-@mcp.tool()
+@mcp.tool(**_DECLARED["container_extract"])
 async def container_extract(path: str, depth: int = DEFAULT_DEPTH) -> dict[str, Any]:
     """Carve and extract every file a container or firmware image holds, recursively.
 
@@ -860,7 +913,7 @@ def _read_chunk(name: str, offset: int, length: int) -> dict[str, Any]:
     return answer
 
 
-@mcp.tool()
+@mcp.tool(**_DECLARED["get_artefact"])
 async def get_artefact(
     path: str, offset: int = 0, length: int = FETCH_CHUNK_BYTES
 ) -> dict[str, Any]:
@@ -883,7 +936,7 @@ async def get_artefact(
     return await sidecar.answering(FETCH_TOOL, work)
 
 
-@mcp.tool()
+@mcp.tool(**_DECLARED["capabilities"])
 def capabilities() -> dict[str, Any]:
     """Which of this server's tools this host can run, and how to install what is missing."""
     return sidecar.capabilities(SERVER, PROGRAM, (*TOOLS, FETCH_TOOL), version=UNBLOB_VERSION)

@@ -520,6 +520,7 @@ def guard_from_settings(
     sample_open: Any = None,
     block: Any = None,
     label: str = "",
+    source: str = "",
 ) -> ServerGuard:
     """A guard for ``server`` with the thresholds ``cfg.mcp.breaker`` sets.
 
@@ -529,7 +530,10 @@ def guard_from_settings(
     (:func:`server_call_budget`) and whose ``tool_facts`` declare each tool's
     own budget and long-running flag (:meth:`ServerGuard.declare_tool_facts`);
     with none given it is ``cfg.mcp.servers[server]``. ``label`` is the
-    server's display name, where it has one.
+    server's display name, where it has one. ``source`` is where the block's
+    tools are declared (``provider:<id>`` for a provider's own block), so what
+    the server declared of them under it is read too; ``mcp:<server>`` when
+    not given.
     """
     breaker = getattr(getattr(cfg, "mcp", None), "breaker", None)
     if block is None:
@@ -546,7 +550,7 @@ def guard_from_settings(
         label=label,
     )
     guard.declare_sample_open(sample_open)
-    guard.declare_tool_facts(getattr(block, "tool_facts", None))
+    guard.declare_tool_facts(_tools_in_force(source or f"mcp:{server}", block))
     return guard
 
 
@@ -588,8 +592,23 @@ def operator_guard(
         label=label,
     )
     guard.declare_sample_open(sample_open)
-    guard.declare_tool_facts(getattr(block, "tool_facts", None))
+    guard.declare_tool_facts(_tools_in_force(f"mcp:{server}", block))
     return guard
+
+
+def _tools_in_force(source: str, block: Any) -> Any:
+    """``block``'s tool declarations, with what its server declared of them laid under.
+
+    ``core.declared_reading.tools_in_force`` under ``source``; the block's
+    own map for anything that is not a settings block.
+    """
+    from pydantic import BaseModel
+
+    if not isinstance(block, BaseModel):
+        return getattr(block, "tool_facts", None)
+    from maljan.core.declared_reading import tools_in_force
+
+    return tools_in_force(source, block)
 
 
 def explicit_call_timeout(cfg: Any) -> float:

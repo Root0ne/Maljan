@@ -29,6 +29,7 @@ from maljan.analysis.capture_reader import Packet
 from maljan.analysis.pcap_summary import each_packet
 from maljan.tools import readers, sidecar_needs, staging
 from maljan.tools.capabilities import CAPABILITIES_TOOL, ToolNeeds, manifest
+from maljan.tools.declared_facts import NO_EFFECT, tool_declaration
 from maljan.tools.errors import (
     CAPTURES_REMEDIATION,
     NO_CAPTURE_REMEDIATION,
@@ -50,6 +51,59 @@ from maljan.utils.written_forms import pack_escaped
 # longer than any backtick run inside it.
 
 mcp = FastMCP("NetworkMCP", stateless_http=True)
+
+# What each tool declares of itself (``maljan.tools.declared_facts``). Every
+# capture reader takes the capture's path as its ``pcap_path``; only the
+# manifest is read-only, the capture readers being left to answer again.
+_PCAP_WORDS = ["capture", "packet", "packets", "pcap"]
+_DECLARED: dict[str, dict[str, Any]] = {
+    CAPABILITIES_TOOL: tool_declaration(
+        "Tool availability", {"kind": "capabilities", "effects": NO_EFFECT}, read_only=True
+    ),
+    "read_pcap_summary": tool_declaration(
+        "Capture packets",
+        {
+            "kind": "packet_overview",
+            "arguments": {"path": "pcap_path"},
+            "reader": "packet_lines",
+            "words": _PCAP_WORDS,
+            "effects": NO_EFFECT,
+        },
+    ),
+    "extract_dns": tool_declaration(
+        "DNS queries in a capture",
+        {
+            "kind": "dns",
+            "arguments": {"path": "pcap_path"},
+            "reader": "dns_query_lines",
+            "effects": NO_EFFECT,
+        },
+    ),
+    "extract_http": tool_declaration(
+        "HTTP requests in a capture",
+        {"kind": "http", "arguments": {"path": "pcap_path"}, "effects": NO_EFFECT},
+    ),
+    "pcap_summary": tool_declaration(
+        "Capture flows",
+        {
+            "kind": "pcap",
+            "arguments": {"path": "pcap_path"},
+            "reader": "flow_table",
+            "words": _PCAP_WORDS,
+            "effects": NO_EFFECT,
+        },
+    ),
+    # The triage pack's own readings of a capture, run here when this server
+    # is a container of its own (``tools.readers``): a delivery primitive.
+    "run_reader": tool_declaration(
+        "Run a platform reader", {"kind": "reader_delivery", "effects": NO_EFFECT}
+    ),
+    "release_job": tool_declaration(
+        "Release a job's staging",
+        {"kind": "staging_release", "effects": NO_EFFECT},
+        destructive=True,
+    ),
+}
 
 # Every tool here reads the whole capture, one packet at a time
 # (``analysis.pcap_summary.each_packet``, over ``analysis.capture_reader``,
@@ -163,7 +217,7 @@ def _opened(tool: str, pcap_path: str) -> Path | str:
     return capture
 
 
-@mcp.tool(name=CAPABILITIES_TOOL)
+@mcp.tool(name=CAPABILITIES_TOOL, **_DECLARED["capabilities"])
 def capabilities() -> dict[str, Any]:
     """What this server can do on this host.
 
@@ -174,7 +228,7 @@ def capabilities() -> dict[str, Any]:
     return copy.deepcopy(CAPABILITIES)
 
 
-@mcp.tool()
+@mcp.tool(**_DECLARED["read_pcap_summary"])
 def read_pcap_summary(pcap_path: str, packet_limit: int | None = None, offset: int = 0) -> str:
     """Summarise a PCAP file, or list its IP packets one line each.
 
@@ -229,7 +283,7 @@ def read_pcap_summary(pcap_path: str, packet_limit: int | None = None, offset: i
         return _text_error(code_for_exception(e), f"{type(e).__name__}: {e}", "read_pcap_summary")
 
 
-@mcp.tool()
+@mcp.tool(**_DECLARED["extract_dns"])
 def extract_dns(pcap_path: str, packet_limit: int | None = None) -> str:
     """Extract every DNS query name in a PCAP file; ``packet_limit`` reads fewer packets."""
     capture = _opened("extract_dns", pcap_path)
@@ -290,7 +344,7 @@ def http_request_of(data: bytes) -> tuple[bytes, bytes] | None:
     return lines[0], b""
 
 
-@mcp.tool()
+@mcp.tool(**_DECLARED["extract_http"])
 def extract_http(pcap_path: str, packet_limit: int | None = None) -> str:
     """Extract every HTTP request line and Host header; ``packet_limit`` reads fewer packets."""
     capture = _opened("extract_http", pcap_path)
@@ -336,7 +390,7 @@ def extract_http(pcap_path: str, packet_limit: int | None = None) -> str:
         return _text_error(code_for_exception(e), f"{type(e).__name__}: {e}", "extract_http")
 
 
-@mcp.tool()
+@mcp.tool(**_DECLARED["pcap_summary"])
 def pcap_summary(pcap_path: str, packet_limit: int | None = None) -> dict[str, Any]:
     """Summarise a capture: conversations, TLS SNI destinations and beaconing.
 
@@ -370,7 +424,7 @@ def _reader_path(value: str, job: str) -> str:
     return str(staging.confined_to_this_job(inside, environ))
 
 
-@mcp.tool()
+@mcp.tool(**_DECLARED["run_reader"])
 def run_reader(
     reader: str, arguments: dict[str, Any] | None = None, job: str = ""
 ) -> dict[str, Any]:
@@ -386,7 +440,7 @@ def run_reader(
     return readers.serve_reader(reader, arguments, job, offered=_OFFERED, confine=_reader_path)
 
 
-@mcp.tool()
+@mcp.tool(**_DECLARED["release_job"])
 def release_job(job: str) -> dict[str, Any]:
     """Remove what was staged here for one job's readings, at that job's end.
 

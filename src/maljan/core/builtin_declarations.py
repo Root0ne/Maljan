@@ -1331,13 +1331,17 @@ def _one_program_block(role: str, tools: dict[str, dict[str, Any]]) -> dict[str,
         "roles": [role],
         "sample_mount": "/data/samples",
         "reads_staged_sample": True,
+        "trusts_served_declaration": True,
         "tool_facts": _with_effects(
             _marked_read_only(tools, frozenset(tools)), {}, default=_NO_EFFECT
         ),
     }
 
 
-# Each built-in server's declaration. ``roles``: ``reputation`` on the two
+# Each built-in server's declaration. ``trusts_served_declaration`` on the
+# platform's own sidecars (``services/``): what each declares of its own tools
+# when it lists them is read as this block's (``core.served_declarations``).
+# ``roles``: ``reputation`` on the two
 # servers that declare a reputation lookup. ``reads_staged_sample`` on the
 # three servers whose path-taking tools read the sample the platform staged
 # (``agents.tool_pinning.reads_staged_sample``). ``required_env_allow`` as
@@ -1347,6 +1351,7 @@ def _one_program_block(role: str, tools: dict[str, dict[str, Any]]) -> dict[str,
 # ``reporting.detection_signatures`` write it.
 _SERVER_BLOCKS: dict[str, dict[str, Any]] = {
     "analysis": {
+        "trusts_served_declaration": True,
         "roles": ["rule_scanner", "strings", "decoder"],
         "required_env_allow": [
             "MALJAN_STAGING_DIR",
@@ -1364,6 +1369,7 @@ _SERVER_BLOCKS: dict[str, dict[str, Any]] = {
         ),
     },
     "knowledge": {
+        "trusts_served_declaration": True,
         "roles": ["reference"],
         "required_env_allow": [
             "MALJAN_INDEX_RETRY_SECONDS",
@@ -1387,6 +1393,7 @@ _SERVER_BLOCKS: dict[str, dict[str, Any]] = {
         ),
     },
     "network": {
+        "trusts_served_declaration": True,
         "roles": ["capture"],
         "required_env_allow": ["MALJAN_STAGING_DIR", "MALJAN_SAMPLE_ROOTS"],
         "reads_staged_sample": True,
@@ -1395,6 +1402,7 @@ _SERVER_BLOCKS: dict[str, dict[str, Any]] = {
         ),
     },
     "threatintel": {
+        "trusts_served_declaration": True,
         "roles": ["reputation"],
         "tool_facts": _with_effects(
             _THREATINTEL_TOOLS,

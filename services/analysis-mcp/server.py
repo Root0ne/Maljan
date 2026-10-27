@@ -67,6 +67,7 @@ from maljan.tools import strings as string_tools
 from maljan.tools.arguments import SURROUNDING_QUOTES, read_unquoted, says_unquoted, with_read_as
 from maljan.tools.binary import carved_name_prefix
 from maljan.tools.capabilities import CAPABILITIES_TOOL, ToolNeeds, manifest
+from maljan.tools.declared_facts import NO_EFFECT, tool_declaration
 from maljan.tools.errors import (
     BAD_ARGUMENT,
     NO_SUCH_FILE,
@@ -93,6 +94,214 @@ YARA_TIMEOUT_S = sidecar_needs.YARA_TIMEOUT_S
 CAPA_TIMEOUT_S: int | None = sidecar_needs.CAPA_TIMEOUT_S
 FLOSS_TIMEOUT_S: int | None = sidecar_needs.FLOSS_TIMEOUT_S
 CAPABILITIES = manifest("analysis", TOOL_NEEDS)
+
+# ---------------------------------------------------------------------------
+# What each tool declares of itself (``maljan.tools.declared_facts``)
+# ---------------------------------------------------------------------------
+
+# Where an asserting tool's answer names technique ids: under these keys within
+# six levels.
+_TECHNIQUES_ANYWHERE: list[dict[str, str]] = [
+    {"path": "/**6/technique_id", "format": "attck"},
+    {"path": "/**6/attck", "format": "attck"},
+    {"path": "/**6/technique_ids", "format": "attck"},
+    {"path": "/**6/tags", "format": "sigma_tag"},
+]
+# Every path-taking tool reads the sample, or a file carved from it.
+_PATH = {"path": "path", "carved": "carved_path"}
+# FLOSS emulates the sample's code to recover the strings it builds.
+_EMULATES = {**NO_EFFECT, "executes": "emulation"}
+
+
+def _reads(kind: str, reader: str = "", **facts: Any) -> dict[str, Any]:
+    """A path-taking tool's facts: its kind, its arguments, what it does beyond answering."""
+    held: dict[str, Any] = {"kind": kind, "arguments": _PATH, **facts, "effects": NO_EFFECT}
+    if reader:
+        held["reader"] = reader
+    return held
+
+
+def _event_rules(argument: str) -> dict[str, Any]:
+    return {
+        "kind": "event_rules",
+        "asserts_techniques": True,
+        "source": "sigma",
+        "rows": "/matches/*",
+        "places": {"command_line": "/matched_fields/CommandLine"},
+        "values": {"rule": "/rule", "title": "/title"},
+        "techniques": _TECHNIQUES_ANYWHERE,
+        "arguments": {argument: argument},
+        "words": ["sigma", "rule", "rules"],
+        "display_name": "Sigma",
+        "effects": NO_EFFECT,
+    }
+
+
+_DELIVERY = {"kind": "sample_delivery", "effects": NO_EFFECT}
+
+# Each tool's declaration. Read-only: a tool that only reads the staged file
+# or the platform's own tables, so an identical call answers the same; a tool
+# that writes, carves, unpacks, transforms, delivers, analyses or runs rules
+# over the sample is not, nor one in doubt. A format-specific parser names the
+# routed formats it serves (as ``extractors.sample_identity`` names them), so a
+# parser a sample's format never calls on is no loss for that sample.
+_DECLARED: dict[str, dict[str, Any]] = {
+    CAPABILITIES_TOOL: tool_declaration(
+        "Tool availability", {"kind": "capabilities", "effects": NO_EFFECT}, read_only=True
+    ),
+    "identify_file": tool_declaration("Identify a file", _reads("identity"), read_only=True),
+    "hashes": tool_declaration("File hashes", _reads("identity"), read_only=True),
+    "signing_info": tool_declaration("Code signing", _reads("signing"), read_only=True),
+    # Runs read as they sit in the file (``string_tools.strings``).
+    "strings": tool_declaration(
+        "Strings in the file",
+        _reads(
+            "strings",
+            rows="/strings/*",
+            places={"offset": "/offset"},
+            values={"text": "/text"},
+            shows="printable ASCII and UTF-16LE runs as they sit in the file, with their offsets",
+            does_not_show=(
+                "strings that are encoded, encrypted, compressed or built at run time; nor runs "
+                "shorter than min_len, or past this page (read next_offset)"
+            ),
+        ),
+        read_only=True,
+    ),
+    "iocs_from_text": tool_declaration(
+        "Indicators in a text",
+        {"kind": "text_iocs", "arguments": {"text": "text"}, "effects": NO_EFFECT},
+        read_only=True,
+    ),
+    "iocs_from_file": tool_declaration("Indicators in a file", _reads("file_iocs"), read_only=True),
+    # The PE and ELF parsers' import rows cover the late-bound imports: the PE
+    # delay-load table, and the one import table ELF keeps them in. The Mach-O
+    # parser does not declare it: its lazily bound imports are not shown to
+    # be in the rows it answers.
+    "pe_info": tool_declaration(
+        "PE structure",
+        _reads("format_info", "pe_header", reads_delay_imports=True, routed_formats=["pe"]),
+        read_only=True,
+    ),
+    "elf_info": tool_declaration(
+        "ELF structure",
+        _reads("format_info", reads_delay_imports=True, routed_formats=["elf"]),
+        read_only=True,
+    ),
+    "macho_info": tool_declaration(
+        "Mach-O structure", _reads("format_info", routed_formats=["mach-o"]), read_only=True
+    ),
+    "apk_info": tool_declaration(
+        "APK structure", _reads("format_info", routed_formats=["apk", "dex"]), read_only=True
+    ),
+    "carve_payloads": tool_declaration("Carve embedded payloads", _reads("carve")),
+    "unpack_upx": tool_declaration("Unpack UPX", _reads("unpack", "unpacked_image")),
+    "archive_list": tool_declaration("Archive listing", _reads("archive_listing"), read_only=True),
+    "document_info": tool_declaration(
+        "Document structure",
+        _reads("document_info", routed_formats=["ole2", "ooxml", "pdf"]),
+        read_only=True,
+    ),
+    "yara_scan": tool_declaration(
+        "YARA scan",
+        {
+            "kind": "signature_rules",
+            "asserts_techniques": True,
+            "source": "yara",
+            "rows": "/matches/*",
+            "places": {
+                "offset": "/strings/*/offset",
+                "instance_offset": "/strings/*/instances/*/offset",
+            },
+            "values": {"rule": "/rule"},
+            "techniques": _TECHNIQUES_ANYWHERE,
+            "arguments": _PATH,
+            "words": ["yara", "rule", "rules"],
+            "display_name": "YARA",
+            "timeout_seconds": YARA_TIMEOUT_S,
+            "effects": NO_EFFECT,
+        },
+    ),
+    "sigma_match": tool_declaration("Sigma match over events", _event_rules("events")),
+    "sigma_match_sandbox": tool_declaration(
+        "Sigma match over a sandbox report", _event_rules("report")
+    ),
+    # capa reads the file, its code and its structure without running it (with
+    # the pefile backend, file-scope features only).
+    "capa": tool_declaration(
+        "capa capabilities",
+        {
+            "kind": "capability_rules",
+            "asserts_techniques": True,
+            "source": "capa",
+            "long_running": True,
+            "rows": "/capabilities/*",
+            "places": {"addresses": "/addresses"},
+            "values": {"rule": "/rule", "namespace": "/namespace"},
+            "function_starts": "/function_starts",
+            "techniques": _TECHNIQUES_ANYWHERE,
+            "arguments": {"path": "path"},
+            "display_name": "capa",
+            "shows": (
+                "the capabilities whose capa rules match features of the file, its code and its "
+                "structure"
+            ),
+            "does_not_show": "whether the matched code runs, or a capability no rule describes",
+            "effects": NO_EFFECT,
+        },
+    ),
+    "floss": tool_declaration(
+        "FLOSS decoded strings",
+        {
+            **_reads("emulated_strings", "emulated_strings_with_call_sites"),
+            "long_running": True,
+            "rows": "/strings/*",
+            "places": {"call_site": "/called_at_rva", "function": "/function_rva"},
+            "values": {"text": "/string", "scheme": "/kind"},
+            "words": ["decoded", "emulation", "floss"],
+            "display_name": "FLOSS",
+            "effects": _EMULATES,
+        },
+    ),
+    "resolve_api_hashes": tool_declaration(
+        "Resolve API hashes",
+        _reads(
+            "api_hash_resolution",
+            rows="/hits/*",
+            places={"rva": "/occurrences/*/rva"},
+            values={"name": "/readings/*/name"},
+        ),
+        read_only=True,
+    ),
+    "decode_string_blobs": tool_declaration(
+        "Decode string blobs",
+        _reads(
+            "decoded_strings", rows="/results/*", places={"rva": "/rva"}, values={"text": "/text"}
+        ),
+    ),
+    "find_crypto_constants": tool_declaration(
+        "Crypto constants", _reads("crypto_constants"), read_only=True
+    ),
+    "function_index": tool_declaration(
+        "Function index", _reads("function_index", "function_table")
+    ),
+    "transform_bytes": tool_declaration("Transform bytes", _reads("transform", "byte_transform")),
+    "put_sample": tool_declaration("Upload a sample", _DELIVERY),
+    "put_sample_begin": tool_declaration("Begin a chunked upload", _DELIVERY),
+    "put_sample_chunk": tool_declaration("Upload a chunk", _DELIVERY),
+    "put_sample_finish": tool_declaration("Finish a chunked upload", _DELIVERY),
+    # The triage pack's own readings of the sample, run on this server when it
+    # is a container of its own (``tools.readers``): a delivery primitive.
+    "run_reader": tool_declaration(
+        "Run a platform reader", {"kind": "reader_delivery", "effects": NO_EFFECT}
+    ),
+    # What those readings staged here for a job, removed at its end.
+    "release_job": tool_declaration(
+        "Release a job's staging",
+        {"kind": "staging_release", "effects": NO_EFFECT},
+        destructive=True,
+    ),
+}
 
 # Chunked uploads in flight, keyed by upload id. Bounded by the number of
 # concurrent stagers, which is the number of agents in a profile — but a
@@ -610,7 +819,7 @@ def _guard(tool: str, call: Any, **kwargs: Any) -> dict[str, Any]:
         )
 
 
-@mcp.tool(name=CAPABILITIES_TOOL)
+@mcp.tool(name=CAPABILITIES_TOOL, **_DECLARED["capabilities"])
 def capabilities() -> dict[str, Any]:
     """What this server can do on this host.
 
@@ -626,21 +835,21 @@ def capabilities() -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 
-@mcp.tool()
+@mcp.tool(**_DECLARED["identify_file"])
 @reads_a_carved_file
 def identify_file(path: str, carved_path: str = "") -> dict[str, Any]:
     """Detect a file's format, platform, mime type, size and magic bytes."""
     return _guard("identify_file", identify_tools.identify_file, path=path, carved_path=carved_path)
 
 
-@mcp.tool()
+@mcp.tool(**_DECLARED["hashes"])
 @reads_a_carved_file
 def hashes(path: str, carved_path: str = "") -> dict[str, Any]:
     """Compute md5, sha1, sha256 and any available fuzzy or import hash."""
     return _guard("hashes", identify_tools.hashes, path=path, carved_path=carved_path)
 
 
-@mcp.tool()
+@mcp.tool(**_DECLARED["signing_info"])
 @reads_a_carved_file
 def signing_info(path: str, file_type: str = "", carved_path: str = "") -> dict[str, Any]:
     """Report whether the file carries a code signature, for one format.
@@ -663,7 +872,7 @@ def signing_info(path: str, file_type: str = "", carved_path: str = "") -> dict[
 # ---------------------------------------------------------------------------
 
 
-@mcp.tool()
+@mcp.tool(**_DECLARED["strings"])
 @says_unquoted("pattern")
 @reads_a_carved_file
 def strings(
@@ -705,13 +914,13 @@ def strings(
     )
 
 
-@mcp.tool()
+@mcp.tool(**_DECLARED["iocs_from_text"])
 def iocs_from_text(text: str, kinds: list[str] | None = None) -> dict[str, Any]:
     """Extract typed indicators (url, domain, ip, path, secret, ...) from text."""
     return _guard("iocs_from_text", string_tools.iocs_from_text, text=text, kinds=kinds)
 
 
-@mcp.tool()
+@mcp.tool(**_DECLARED["iocs_from_file"])
 @reads_a_carved_file
 def iocs_from_file(
     path: str, kinds: list[str] | None = None, carved_path: str = ""
@@ -731,7 +940,7 @@ def iocs_from_file(
 # ---------------------------------------------------------------------------
 
 
-@mcp.tool()
+@mcp.tool(**_DECLARED["pe_info"])
 @reads_a_carved_file
 def pe_info(
     path: str,
@@ -763,7 +972,7 @@ def pe_info(
     )
 
 
-@mcp.tool()
+@mcp.tool(**_DECLARED["elf_info"])
 @reads_a_carved_file
 def elf_info(path: str, carved_path: str = "") -> dict[str, Any]:
     """Parse an ELF: sections, imports (listed without interpretation), exports, segments,
@@ -771,14 +980,14 @@ def elf_info(path: str, carved_path: str = "") -> dict[str, Any]:
     return _guard("elf_info", binary_tools.elf_info, path=path, carved_path=carved_path)
 
 
-@mcp.tool()
+@mcp.tool(**_DECLARED["macho_info"])
 @reads_a_carved_file
 def macho_info(path: str, carved_path: str = "") -> dict[str, Any]:
     """Parse a Mach-O: headers, load commands, dylibs, code-signature presence."""
     return _guard("macho_info", binary_tools.macho_info, path=path, carved_path=carved_path)
 
 
-@mcp.tool()
+@mcp.tool(**_DECLARED["apk_info"])
 @reads_a_carved_file
 def apk_info(
     path: str,
@@ -807,7 +1016,7 @@ def apk_info(
     )
 
 
-@mcp.tool()
+@mcp.tool(**_DECLARED["carve_payloads"])
 @reads_a_carved_file
 def carve_payloads(path: str, carved_path: str = "") -> dict[str, Any]:
     """Write each embedded payload found in the file out as its own file.
@@ -869,7 +1078,7 @@ def _carved_destination(target: Path, sample_digest: str) -> Path:
     return destination
 
 
-@mcp.tool()
+@mcp.tool(**_DECLARED["unpack_upx"])
 @reads_a_carved_file
 def unpack_upx(path: str, carved_path: str = "") -> dict[str, Any]:
     """Unpack a UPX-packed PE and write the program it holds out as a file of its own.
@@ -911,7 +1120,7 @@ def _unpack_under_staging(path: str, sample_digest: str = "") -> dict[str, Any]:
     return upx.unpack_upx(path, _carved_destination(target, sample_digest))
 
 
-@mcp.tool()
+@mcp.tool(**_DECLARED["archive_list"])
 @reads_a_carved_file
 def archive_list(path: str, limit: int = 500, carved_path: str = "") -> dict[str, Any]:
     """List a zip, 7z, tar or gzip archive's members without extracting them."""
@@ -924,7 +1133,7 @@ def archive_list(path: str, limit: int = 500, carved_path: str = "") -> dict[str
     )
 
 
-@mcp.tool()
+@mcp.tool(**_DECLARED["document_info"])
 @reads_a_carved_file
 def document_info(path: str, carved_path: str = "") -> dict[str, Any]:
     """Inspect an OLE2, OOXML or PDF document for macros, parts and action markers."""
@@ -936,7 +1145,7 @@ def document_info(path: str, carved_path: str = "") -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 
-@mcp.tool()
+@mcp.tool(**_DECLARED["yara_scan"])
 @reads_a_carved_file
 def yara_scan(
     path: str = "",
@@ -957,13 +1166,13 @@ def yara_scan(
     )
 
 
-@mcp.tool()
+@mcp.tool(**_DECLARED["sigma_match"])
 def sigma_match(events: list[dict[str, Any]], ruleset: str = "default") -> dict[str, Any]:
     """Match structured events against a Sigma rule corpus."""
     return _guard("sigma_match", rule_tools.sigma_match, events=events, ruleset=ruleset)
 
 
-@mcp.tool()
+@mcp.tool(**_DECLARED["sigma_match_sandbox"])
 def sigma_match_sandbox(report: dict[str, Any], ruleset: str = "default") -> dict[str, Any]:
     """Derive Sysmon-shaped events from a sandbox report and match Sigma rules."""
     return _guard(
@@ -971,7 +1180,7 @@ def sigma_match_sandbox(report: dict[str, Any], ruleset: str = "default") -> dic
     )
 
 
-@mcp.tool()
+@mcp.tool(**_DECLARED["capa"])
 @reads_a_carved_file
 async def capa(
     path: str,
@@ -998,7 +1207,7 @@ async def capa(
     )
 
 
-@mcp.tool()
+@mcp.tool(**_DECLARED["floss"])
 @says_unquoted("pattern")
 @reads_a_carved_file
 async def floss(
@@ -1094,7 +1303,7 @@ def _floss_not_remembered(answer: dict[str, Any]) -> bool:
     return message == emulated_strings.NOT_REMEMBERED
 
 
-@mcp.tool()
+@mcp.tool(**_DECLARED["resolve_api_hashes"])
 @reads_a_carved_file
 def resolve_api_hashes(
     path: str,
@@ -1136,7 +1345,7 @@ def resolve_api_hashes(
     )
 
 
-@mcp.tool()
+@mcp.tool(**_DECLARED["decode_string_blobs"])
 @reads_a_carved_file
 def decode_string_blobs(
     path: str,
@@ -1192,7 +1401,7 @@ def decode_string_blobs(
     )
 
 
-@mcp.tool()
+@mcp.tool(**_DECLARED["find_crypto_constants"])
 @reads_a_carved_file
 def find_crypto_constants(path: str, carved_path: str = "") -> dict[str, Any]:
     """Find the published constants of ciphers, hash functions and checksums in a file.
@@ -1217,7 +1426,7 @@ def find_crypto_constants(path: str, carved_path: str = "") -> dict[str, Any]:
     )
 
 
-@mcp.tool()
+@mcp.tool(**_DECLARED["function_index"])
 @reads_a_carved_file
 def function_index(path: str, address: str = "", carved_path: str = "") -> dict[str, Any]:
     """List every function of a PE with the artefacts it holds, ranked by how many.
@@ -1254,7 +1463,7 @@ def function_index(path: str, address: str = "", carved_path: str = "") -> dict[
     )
 
 
-@mcp.tool()
+@mcp.tool(**_DECLARED["transform_bytes"])
 @reads_a_carved_file
 def transform_bytes(
     path: str,
@@ -1549,7 +1758,7 @@ def _write_sample(filename: str, blob: bytes, sha256: str) -> dict[str, Any]:
     return {"path": str(destination), "sha256": actual, "size": len(blob)}
 
 
-@mcp.tool()
+@mcp.tool(**_DECLARED["put_sample"])
 def put_sample(filename: str, content_b64: str, sha256: str = "") -> dict[str, Any]:
     """Upload a sample in one call and get back the path to analyse it at."""
     _evict_stale_uploads()
@@ -1566,7 +1775,7 @@ def put_sample(filename: str, content_b64: str, sha256: str = "") -> dict[str, A
     return _guard("put_sample", _write_sample, filename=filename, blob=blob, sha256=sha256)
 
 
-@mcp.tool()
+@mcp.tool(**_DECLARED["put_sample_begin"])
 def put_sample_begin(filename: str, sha256: str, size: int) -> dict[str, Any]:
     """Start a chunked upload for a sample too large to send in one call."""
     _evict_stale_uploads()
@@ -1596,7 +1805,7 @@ def put_sample_begin(filename: str, sha256: str, size: int) -> dict[str, Any]:
     return {"upload_id": upload_id}
 
 
-@mcp.tool()
+@mcp.tool(**_DECLARED["put_sample_chunk"])
 def put_sample_chunk(upload_id: str, seq: int, content_b64: str) -> dict[str, Any]:
     """Send one chunk of a chunked upload, identified by its sequence number."""
     _evict_stale_uploads()
@@ -1633,7 +1842,7 @@ def put_sample_chunk(upload_id: str, seq: int, content_b64: str) -> dict[str, An
     return {"upload_id": upload_id, "seq": int(seq), "received": len(blob)}
 
 
-@mcp.tool()
+@mcp.tool(**_DECLARED["put_sample_finish"])
 def put_sample_finish(upload_id: str) -> dict[str, Any]:
     """Assemble a chunked upload, verify its digest and return the sample's path."""
     _evict_stale_uploads()
@@ -1673,7 +1882,7 @@ def _reader_path(value: str, job: str) -> str:
     return str(staging.confined_to_this_job(inside, environ))
 
 
-@mcp.tool()
+@mcp.tool(**_DECLARED["run_reader"])
 def run_reader(
     reader: str, arguments: dict[str, Any] | None = None, job: str = ""
 ) -> dict[str, Any]:
@@ -1689,7 +1898,7 @@ def run_reader(
     return readers.serve_reader(reader, arguments, job, offered=_OFFERED, confine=_reader_path)
 
 
-@mcp.tool()
+@mcp.tool(**_DECLARED["release_job"])
 def release_job(job: str) -> dict[str, Any]:
     """Remove what the platform's readings staged here for one job, at that job's end.
 

@@ -696,7 +696,8 @@ class ServerHandle:
                 truncation_ledger=truncation_ledger,
                 context_budget=context_budget,
                 guard=self.guard,
-                categories=categories_of(getattr(self.config, "tool_facts", None)),
+                categories=categories_of(self._tools_in_force()),
+                categories_with_served=self._categories_with_served,
                 keep_tool_definitions=self.keeps_tool_definitions,
                 label=self.label,
             )
@@ -716,7 +717,8 @@ class ServerHandle:
             truncation_ledger=truncation_ledger,
             context_budget=context_budget,
             guard=self.guard,
-            categories=categories_of(getattr(self.config, "tool_facts", None)),
+            categories=categories_of(self._tools_in_force()),
+            categories_with_served=self._categories_with_served,
             keep_tool_definitions=self.keeps_tool_definitions,
             **self._reading_session(),
         )
@@ -731,7 +733,7 @@ class ServerHandle:
         to its own clock (``MCPLangChainToolkit.deliver``) and an agent's to
         the job's breaker. Any other block keeps the library's wait.
         """
-        facts = getattr(self.config, "tool_facts", None) or {}
+        facts = self._tools_in_force()
         if any(getattr(f, "kind", None) == READER_DELIVERY_KIND for f in facts.values()):
             return {"http_read_timeout": READING_SESSION_READ_TIMEOUT_SECONDS}
         return {}
@@ -834,6 +836,7 @@ class ServerHandle:
         """What an attach does once its child is noted."""
         self._note_isolation()
         self._all_tools = list(toolkit.get_tools())
+        self._note_served_declarations(toolkit)
         self._read_capabilities()
         self._attach_count += 1
         self._note_attach()
@@ -936,9 +939,60 @@ class ServerHandle:
         """What an async attach does once its child is noted."""
         self._note_isolation()
         self._all_tools = list(toolkit.get_tools())
+        self._note_served_declarations(toolkit)
         await self._aread_capabilities()
         self._attach_count += 1
         self._note_attach()
+
+    def _note_served_declarations(self, toolkit: Any) -> None:
+        """Keep what the server declared of its tools when it listed them, under its source.
+
+        Under the source this handle's tools are declared under
+        (``declared_source``), so a provider driving the server reads it as
+        its own; laid under what that source's block puts in force
+        (``core.served_declarations``). A toolkit that read no declaration
+        keeps none.
+        """
+        from maljan.core.served_declarations import register_served, served_digest
+        from maljan.core.tool_declarations import launch_identity
+
+        held = getattr(toolkit, "served_tool_facts", None)
+        if not isinstance(held, Mapping):
+            return
+        register_served(self._source_text(), held, launch_identity(self.config))
+        # What it declared is recorded by its own digest, beside the name and
+        # version it gave (``server_versions``); the run's recorded declaration
+        # digests are of the blocks alone.
+        digest = served_digest(held)
+        if digest:
+            self.server_info = {**self.server_info, "declaration_digest": digest}
+        # Its tools' budgets and long-running flags as they are now in force,
+        # its own declaration under its block's, for every call from here on.
+        if self.guard is not None:
+            self.guard.declare_tool_facts(self._tools_in_force())
+
+    def _categories_with_served(self, held: Mapping[str, Any]) -> dict[str, str]:
+        """The description tags in force with ``held``, what the server declared, laid under.
+
+        Asked by the toolkit before it builds the tools, so the first attach
+        tags them as every later one does. Nothing is kept here: what the
+        server declared is kept only once the attach succeeded
+        (:meth:`_note_served_declarations`).
+        """
+        from maljan.core.declared_reading import tools_in_force
+        from maljan.core.undeclared_tools import categories_of
+
+        return categories_of(tools_in_force(self._source_text(), self.config, held))
+
+    def _source_text(self) -> str:
+        """The source this handle's tools are declared under."""
+        return str(self.declared_source or f"mcp:{self.name}")
+
+    def _tools_in_force(self) -> Mapping[str, Any]:
+        """The tool declarations in force for this handle's source; the block's own as fallback."""
+        from maljan.core.declared_reading import tools_in_force
+
+        return tools_in_force(self._source_text(), self.config)
 
     def _note_attach(self) -> None:
         """Count an attach as a possible change of this server, for every answer held of it.
