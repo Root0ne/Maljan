@@ -251,6 +251,56 @@ def _restart_reporter(llm: Any, seconds: Any, container: Any) -> None:
         logger.debug("report_node: the reporter's model list was not restarted (%s).", exc)
 
 
+async def _ask_section_agreement(
+    report: Any,
+    narrative_agent: Any,
+    container: Any,
+    *,
+    tally: ValidationTally,
+    narrative_written: bool,
+    discussion: Any,
+    citable_ids: Any,
+    items: Any,
+    evidence_texts: Any,
+) -> None:
+    """Ask the reporter once whether a passage written without the code says otherwise.
+
+    Called once the composer has written its sections. What the question
+    found goes on ``tally``, what it could not do on the report's degradation
+    reasons, and its counts on the run summary (``section_agreement``). Never
+    raises: a failure keeps every section as written and says so.
+    """
+    try:
+        from maljan.reporting.section_agreement import ask_section_agreement
+
+        # The reporter's next loop: its model list starts over.
+        _restart_reporter(getattr(narrative_agent, "llm", None), None, container)
+        agreement = await ask_section_agreement(
+            narrative_agent,
+            report,
+            narrative_written=narrative_written,
+            discussion=discussion,
+            citable_ids=citable_ids,
+            items=items,
+            evidence_texts=evidence_texts,
+        )
+    except Exception as exc:  # noqa: BLE001 — the question never costs the report
+        logger.warning("report_node: the section agreement question failed (%s).", exc)
+        said = f"The section agreement question was not answered ({type(exc).__name__})."
+        if said not in report.degradation_reasons:
+            report.degradation_reasons.append(said)
+        return
+    tally.merge(agreement.tally)
+    for reason in agreement.degradations:
+        if reason not in report.degradation_reasons:
+            report.degradation_reasons.append(reason)
+    if agreement.summary:
+        report.run_summary = {
+            **(report.run_summary or {}),
+            "section_agreement": dict(agreement.summary),
+        }
+
+
 # What the run summary calls a judge annotation whose technique did not
 # survive validation. Its own code: the technique's own rejection is recorded
 # under its own, and this row says what that rejection cost the export.
@@ -7890,6 +7940,21 @@ def make_report_node(
             for _reason in getattr(composer, "degradations", None) or []:
                 if _reason not in report.degradation_reasons:
                     report.degradation_reasons.append(str(_reason))
+
+            # The passages written without the code were written beside
+            # section 5, not after it: asked once whether one says otherwise
+            # (``reporting.section_agreement``).
+            await _ask_section_agreement(
+                report,
+                narrative_agent,
+                container,
+                tally=_report_tally,
+                narrative_written=narrative_dict is not None,
+                discussion=discussion_history,
+                citable_ids=_citable_ids,
+                items=_items,
+                evidence_texts=_entry_texts,
+            )
 
         # Every claim in force the composed body neither cites nor discusses,
         # listed in a section of its own rather than lost with nothing saying

@@ -229,6 +229,7 @@ WALKED: tuple[str, ...] = (
     "agents/judge_agent.py",
     "agents/judge_postprocess.py",
     "reporting/question_round.py",
+    "reporting/section_agreement.py",
 )
 
 # The values this codebase owns, per place. A bare spelling vouched for a name

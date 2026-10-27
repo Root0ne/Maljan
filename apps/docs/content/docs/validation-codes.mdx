@@ -46,7 +46,81 @@ not prove the test makes the platform raise it. The tests are not listed here:
 one nothing raises any more and stored runs still carry; the comment on that
 name says what reads it.
 
-**103 codes in 11 families:** [attck](#attck) 6 · [attribution](#attribution) 1 · [composer](#composer) 4 · [isr](#isr) 14 · [narrative](#narrative) 5 · [question](#question) 9 · [report](#report) 14 · [stix](#stix) 32 · [tool](#tool) 1 · [validation](#validation) 1 · [verdict](#verdict) 16. 14 code positions the register could not resolve are [listed at the end](#unresolved-code-positions).
+**112 codes in 12 families:** [agreement](#agreement) 9 · [attck](#attck) 6 · [attribution](#attribution) 1 · [composer](#composer) 4 · [isr](#isr) 14 · [narrative](#narrative) 5 · [question](#question) 9 · [report](#report) 14 · [stix](#stix) 32 · [tool](#tool) 1 · [validation](#validation) 1 · [verdict](#verdict) 16. 14 code positions the register could not resolve are [listed at the end](#unresolved-code-positions).
+
+## agreement
+
+### `agreement.listed`
+
+A sentence of a passage shown for reading only (a section 5 passage, a record's value field), listed as saying otherwise than its sources and kept as written: the model's answer, recorded where a reader finds it.
+
+- **Raised at** `maljan.reporting.section_agreement:apply_rows`
+- **Constant** `maljan.reporting.section_agreement:LISTED_CODE`
+- **Docs** none
+
+### `agreement.rewrite_cites_elsewhere`
+
+A rewrite cites an id that neither its sources nor its passage cite.
+
+- **Raised at** `maljan.reporting.section_agreement:_grounding_violations`
+- **Constant** `maljan.reporting.section_agreement:REWRITE_CITES_ELSEWHERE_CODE`
+- **Docs** none
+
+### `agreement.rewrite_drops_citation`
+
+A rewrite that leaves out an id the sentence it replaces cites.
+
+- **Raised at** `maljan.reporting.section_agreement:_grounding_violations`
+- **Constant** `maljan.reporting.section_agreement:REWRITE_DROPS_CITATION_CODE`
+- **Docs** none
+
+### `agreement.rewrite_ungrounded`
+
+A rewrite that cites none of the ids its sources cite, or rests only on sources that cite none.
+
+- **Raised at** `maljan.reporting.section_agreement:_grounding_violations`
+- **Constant** `maljan.reporting.section_agreement:REWRITE_UNGROUNDED_CODE`
+- **Docs** none
+
+### `agreement.rewritten`
+
+A sentence the agreement question rewrote: what stood, what replaced it and on which sources, recorded as the model's answer.
+
+- **Raised at** `maljan.reporting.section_agreement:apply_rows`
+- **Constant** `maljan.reporting.section_agreement:REWRITTEN_CODE`
+- **Docs** none
+
+### `agreement.schema`
+
+No comment names its meaning, and `maljan.pipeline.validation:schema_violations` passes more than one message for it: see the messages there.
+
+- **Raised at** `maljan.pipeline.validation:schema_violations`, `maljan.reporting.section_agreement:_ask`
+- **Constant** `maljan.reporting.section_agreement:SCHEMA_CODE`
+- **Docs** none
+
+### `agreement.sentence_not_found`
+
+A row's sentence does not stand in its passage as copied.
+
+- **Raised at** `maljan.reporting.section_agreement:_row_violations`
+- **Constant** `maljan.reporting.section_agreement:SENTENCE_NOT_FOUND_CODE`
+- **Docs** none
+
+### `agreement.unknown_passage`
+
+A row names a passage the round was not shown as one it may answer for.
+
+- **Raised at** `maljan.reporting.section_agreement:_row_violations`
+- **Constant** `maljan.reporting.section_agreement:UNKNOWN_PASSAGE_CODE`
+- **Docs** none
+
+### `agreement.unknown_source`
+
+A row names a source the round was not shown, or answers a section 5 passage with a source that is not a platform fact.
+
+- **Raised at** `maljan.reporting.section_agreement:_row_violations`
+- **Constant** `maljan.reporting.section_agreement:UNKNOWN_SOURCE_CODE`
+- **Docs** none
 
 ## attck
 

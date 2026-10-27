@@ -165,6 +165,8 @@ TAIL_CALLS = {
     "narrative": "report",
     # The report's question round (``reporting.question_round.QUESTION_CALL``).
     "questions": "report",
+    # The report's agreement question (``reporting.section_agreement.AGREEMENT_CALL``).
+    "agreement": "report",
     # A follow-up question asked of a finished run (``reporting.follow_up.FOLLOW_UP_CALL``).
     "follow-up": "report",
 }

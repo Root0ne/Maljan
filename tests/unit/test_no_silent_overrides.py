@@ -755,6 +755,10 @@ REPORT_PROSE_WRITERS: dict[str, frozenset[str]] = {
 # fails the test until it is looked at.
 DYNAMIC_SETATTR: dict[str, str] = {
     "reporting/composer.py": "a prose subsection, from the answer the composer received for it",
+    "reporting/section_agreement.py": (
+        "one sentence of a model-written passage, replaced by the rewrite the agreement "
+        "question received for it"
+    ),
     "agents/judge_postprocess.py": "a STIX object's property, not a report field",
     "agents/delegation.py": "a callee's attribute, not a report field",
     "core/config.py": "a settings attribute, not a report field",
