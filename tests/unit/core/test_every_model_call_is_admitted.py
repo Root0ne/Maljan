@@ -33,7 +33,14 @@ SCANNED = ("agents", "reporting", "analysis", "loaders", "memory", "preprocessin
 # The calls that admit a model call: the meter's own, and the wrappers around it.
 ADMISSION = frozenset({"_spend_admits", "spend_bound", "_call_limit", "admitted", "admit", "held"})
 # The calls of tools, not models, by file and receiver.
-TOOL_CALLS = frozenset({("agents/sample_staging.py", "tool"), ("pipeline/nodes.py", "tools[0]")})
+TOOL_CALLS = frozenset(
+    {
+        ("agents/sample_staging.py", "tool"),
+        ("pipeline/nodes.py", "tools[0]"),
+        # ``read_evidence`` answering a read from the run's ledger.
+        ("agents/ledger_reads.py", "self.tool"),
+    }
+)
 
 Function = ast.FunctionDef | ast.AsyncFunctionDef
 

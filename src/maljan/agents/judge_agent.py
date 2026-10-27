@@ -75,7 +75,11 @@ from maljan.agents.judge_postprocess import (
 )
 from maljan.agents.prompt_fragments import tools_statement
 from maljan.agents.run_evidence_corpus import read_of_entry as _read_of_entry
-from maljan.agents.tool_answer_clearing import read_evidence_tool
+from maljan.agents.tool_answer_clearing import (
+    THE_RUNS_LEDGER,
+    THIS_ANALYSIS,
+    read_evidence_tool,
+)
 from maljan.agents.tool_fence import (
     FENCE_STATEMENT,
     QUOTED_VALUE_STATEMENT,
@@ -175,8 +179,8 @@ _VERDICT_RETRIES = 1
 
 # The correction the judge is given for an answer that was not a bundle.
 _NOT_JSON_FEEDBACK = (
-    "Your previous answer was not a JSON STIX bundle. Return the JSON bundle only, "
-    "no tool calls, no prose."
+    "Your previous answer was not a JSON STIX bundle. Your answer is the JSON bundle "
+    "alone, with no prose around it."
 )
 
 # The correction for an answer the output cap cut off. The benchmark's large
@@ -579,7 +583,12 @@ CONTRADICTIONS_BLOCK_QUESTION = (
     "ledger entry), each opening with [analysts: <name>, <name>] for the analysts who must "
     "revise over it and ending in [blocking: <one-line reason>] or "
     "[not blocking: <one-line reason>], or the single line 'CONTRADICTIONS: NONE'; then the "
-    "line 'agreement_confidence: <number>'. This turn carries no tools."
+    "line 'agreement_confidence: <number>'."
+)
+# Said where the block question carries no tool: no ledger to read, or a model
+# that cannot bind ``read_evidence``.
+CONTRADICTIONS_BLOCK_QUESTION_WITHOUT_TOOLS = (
+    f"{CONTRADICTIONS_BLOCK_QUESTION} This turn carries no tools."
 )
 
 # The question of the turn after a mediation's tool loop ended on a limit (its
@@ -1080,7 +1089,7 @@ MEDIATOR_LOOKUP_ONCE = (
 # a finding) and the ones no claim naming them describes, by the ATT&CK check's
 # finding. The judge decides; with no answer nothing is withheld. The system
 # text says exactly what the question shows.
-TECHNIQUE_QUESTION_SYSTEM = (
+_TECHNIQUE_QUESTION_HEAD = (
     "You are the Chief Malware Judge. Your verdict is given. The analysts named some "
     "techniques that your bundle does not carry, some that appear only on an "
     "analyst's finding, which no check has asked about, and some for which the ATT&CK "
@@ -1089,8 +1098,17 @@ TECHNIQUE_QUESTION_SYSTEM = (
     "publishes it. You are shown the run state and the pack, the analysts' reports as "
     "your verdict call was shown them, your verdict and the techniques your bundle "
     "carries, and for each technique the claims or findings that name it with the "
-    "text of every evidence entry they cite. This turn carries no tools: decide from "
-    "what is shown."
+    "text of every evidence entry they cite. "
+)
+# The question offers ``read_evidence`` over the run's ledger
+# (``agents.ledger_reads``); a model that cannot bind it is asked with the
+# tools-free wording.
+TECHNIQUE_QUESTION_SYSTEM = (
+    f"{_TECHNIQUE_QUESTION_HEAD}Decide from what is shown; where what is shown of an "
+    "entry is not enough, read it by its id with read_evidence."
+)
+TECHNIQUE_QUESTION_SYSTEM_WITHOUT_TOOLS = (
+    f"{_TECHNIQUE_QUESTION_HEAD}This turn carries no tools: decide from what is shown."
 )
 # The answer's form: a JSON array the reader parses.
 TECHNIQUE_ANSWER_FORM = (
@@ -2226,6 +2244,12 @@ class JudgeAgent(BudgetMeter):
         # never ran.
         self.tools: list[Any] = []
         self.degradation_reasons: list[Any] = []
+        # Said when the judge's model could not bind ``read_evidence`` for its
+        # verdict or its technique question (``agents.ledger_reads``); the
+        # judge node adds it to the run's degradation reasons.
+        self.read_degradations: list[str] = []
+        # The run's ledger while a mediation round runs (:meth:`mediate`).
+        self._mediation_ledger: list[Any] | None = None
         # The notice the last verdict prompt carried when its parts did not
         # fit the judge's window whole, or ``""``; the judge node records it
         # as a degradation reason.
@@ -2770,12 +2794,31 @@ class JudgeAgent(BudgetMeter):
         # loop's first turn: whether to read an answer again is the model's.
         self._offered_after_clear: list[Any] = []
         clearing = self._tool_answer_clearing()
+        # The loop's own answers first, then the run's ledger: an analyst's id
+        # reads that analyst's entry, filed as a repeat of it.
+        run_reads = self._run_ledger_reads()
+        own_answer, own_copy = _stored_answer_of(recorder), _stored_copy_of(recorder)
+
+        def _answer_of(entry_id: str) -> str | None:
+            found = own_answer(entry_id)
+            if found is None and run_reads is not None:
+                found = run_reads.lookup(entry_id)
+            return found
+
+        def _copy_of(entry_id: str) -> Any:
+            if recorder.filed(recorder.holder_of(entry_id)) or run_reads is None:
+                return own_copy(entry_id)
+            return run_reads.stored_copy(entry_id)
+
+        recorder.outside = run_reads
         read_tool = record_tools(
             [
                 read_evidence_tool(
-                    _stored_answer_of(recorder),
+                    _answer_of,
                     self._answer_sizer(),
-                    _stored_copy_of(recorder),
+                    _copy_of,
+                    # An unknown id is none the ledger it reads holds.
+                    holds=THIS_ANALYSIS if run_reads is None else THE_RUNS_LEDGER,
                 )
             ],
             recorder,
@@ -3135,6 +3178,55 @@ class JudgeAgent(BudgetMeter):
                 with contextlib.suppress(Exception):
                     room.forget_conversation(recorder.agent)
 
+    def _run_ledger_reads(self) -> Any:
+        """``LedgerReads`` over the run's ledger of the mediation round running, or ``None``."""
+        if not self._mediation_ledger:
+            return None
+        from maljan.agents.ledger_reads import LedgerReads
+
+        return LedgerReads(
+            self._mediation_ledger,
+            sizer=self._answer_sizer(),
+            spill=getattr(self, "evidence_spill", None),
+        )
+
+    def _reading_model(
+        self, ledger: Sequence[Any] | None, tools: Sequence[Any] = ()
+    ) -> tuple[Any, Any]:
+        """``read_evidence`` over ``ledger`` and the judge's model bound with ``tools`` and it.
+
+        ``(None, None)`` for no ledger, or an empty one. A model that cannot bind it gives
+        ``(reads, None)``: the call is asked as it always was, and the judge's
+        ``read_degradations`` and the server registry's reasons say so once.
+        """
+        if not ledger:
+            return None, None
+        from maljan.agents.ledger_reads import LedgerReads, not_bound_reason, say_once
+
+        reads = LedgerReads(
+            ledger,
+            sizer=self._answer_sizer(),
+            spill=getattr(self, "evidence_spill", None),
+            container=getattr(self, "_container", None),
+        )
+        try:
+            return reads, reads.bind(self.llm, tools)
+        except Exception as exc:  # noqa: BLE001 — said, and the call is asked without it
+            self.logger.warning(
+                "JudgeAgent: its model could not bind read_evidence (%s: %s); the call is "
+                "asked without it.",
+                type(exc).__name__,
+                exc,
+            )
+            reason = not_bound_reason(str(self.name))
+            say_once(self.read_degradations, reason)
+            try:
+                registry = self._server_registry()
+            except Exception:  # noqa: BLE001 — the reason is still on the judge
+                registry = None
+            say_once(getattr(registry, "degradation_reasons", None), reason)
+            return reads, None
+
     def _salvage_model(self, keeps_turns: bool) -> Any:
         """The judge's model for its salvage: its loop's tools withheld where turns are kept."""
         tools = list(getattr(self, "tools", None) or [])
@@ -3293,6 +3385,7 @@ class JudgeAgent(BudgetMeter):
         run_state: str = "",
         round_facts: str = "",
         cited_entries: Mapping[str, str] | None = None,
+        ledger: Sequence[Any] | None = None,
     ) -> tuple[AgentArgument, bool | None]:
         """One mediation round (:meth:`_mediate_round`), or the round the mediator's ceiling ends.
 
@@ -3300,7 +3393,12 @@ class JudgeAgent(BudgetMeter):
         ends the round as a call the job's ceiling does not admit ends it: the
         mediator wrote no answer, the note says why in the ceiling's words,
         and consensus is neither reached nor refused.
+
+        ``ledger`` is the run's ledger: the round's ``read_evidence`` (in its
+        loop and in the block question) reads every entry of it by id, not
+        only the loop's own (``agents.ledger_reads``).
         """
+        self._mediation_ledger = list(ledger) if ledger else None
         try:
             return await self._mediate_round(
                 reports,
@@ -3326,6 +3424,8 @@ class JudgeAgent(BudgetMeter):
                 ),
                 None,
             )
+        finally:
+            self._mediation_ledger = None
 
     async def _mediate_round(
         self,
@@ -3822,10 +3922,12 @@ class JudgeAgent(BudgetMeter):
     ) -> str:
         """The mediation with the answer to one question for its missing block.
 
-        One turn with no tools, after the mediator's own answer in the
-        conversation that produced it. What comes back is appended to the
-        answer, so its last agreement line is the one read; a question that is
-        not made or fails leaves the answer as it was.
+        One question after the mediator's own answer in the conversation that
+        produced it, offering ``read_evidence`` over the run's ledger where the
+        model binds it (``agents.ledger_reads``), each turn after a read
+        admitted on its own. What comes back is appended to the answer, so its
+        last agreement line is the one read; a question that is not made or
+        fails leaves the answer as it was.
         """
         from langchain_core.messages import AIMessage, BaseMessage
 
@@ -3835,9 +3937,14 @@ class JudgeAgent(BudgetMeter):
             SystemMessage(content=text) if role == "system" else HumanMessage(content=text)
             for role, text in prompt_messages
         ]
+        reads, reading = self._reading_model(self._mediation_ledger)
         turns += [
             AIMessage(content=reasoning_text),
-            HumanMessage(content=CONTRADICTIONS_BLOCK_QUESTION),
+            HumanMessage(
+                content=CONTRADICTIONS_BLOCK_QUESTION
+                if reading is not None
+                else CONTRADICTIONS_BLOCK_QUESTION_WITHOUT_TOOLS
+            ),
         ]
         timeout = _seconds_or_none(loop_limits("judge")[0])
         slot = object()
@@ -3853,8 +3960,31 @@ class JudgeAgent(BudgetMeter):
             # A provider saying "not now" is asked again inside the model call
             # (``llm.transient``): a socket that closed is not an answer that
             # left the block out.
+            sent = [0]
+
+            async def _turn(conversation: list[Any]) -> Any:
+                kept = held
+                if sent[0]:
+                    later = self._spend_admits(
+                        "mediation block question", conversation, slot=slot, deadline_s=timeout
+                    )
+                    kept = output_bound_kwargs(self.llm, later) if later is not None else {}
+                sent[0] += 1
+                model = self.llm if reading is None else reading
+                return await as_call("Mediator block question", model.ainvoke(conversation, **kept))
+
             response = await asyncio.wait_for(
-                as_call("Mediator block question", self.llm.ainvoke(turns, **held)),
+                _turn(turns)
+                if reads is None or reading is None
+                else reads.answer(
+                    _turn,
+                    turns,
+                    on_read=lambda reply: self._record_usage(
+                        reply, call="mediation block question"
+                    ),
+                    what="Mediator block question",
+                    call="mediation block question",
+                ),
                 timeout,
             )
             self._record_usage(response, call="mediation block question")
@@ -3888,6 +4018,7 @@ class JudgeAgent(BudgetMeter):
         run_state: str = "",
         technique_sources: Mapping[str, Sequence[str]] | None = None,
         sandbox_facts: Any = None,
+        ledger: Sequence[Any] | None = None,
     ) -> JudgeVerdict:
         """The final decision: a STIX bundle plus the judge's own assessment.
 
@@ -3906,6 +4037,8 @@ class JudgeAgent(BudgetMeter):
         (``stix_renderer.sandbox_facts_for_the_judge``): an indicator naming one
         is asked about once, with the fact, and a keep after that question is
         recorded as the judge's answer, which is what publishes the value.
+        ``ledger`` is the run's ledger: the call offers ``read_evidence`` over
+        it from its first turn (``agents.ledger_reads``); ``None`` offers none.
 
         The answer is validated (``pipeline.validation.validate_verdict_bundle``)
         and, when something is wrong, handed back once with the problems named.
@@ -4017,19 +4150,36 @@ class JudgeAgent(BudgetMeter):
         # call: no answer, read the way a timeout is.
         ceiling_said = ""
 
-        async def _ask(turns: list[Any]) -> Any:
+        # ``read_evidence`` over the run's ledger from the first turn, where
+        # the model binds it; else the call as it always was.
+        reads, reading = self._reading_model(ledger)
+
+        async def _turn(model: Any, turns: list[Any]) -> Any:
             # The verdict is always made; past the spend ceiling its output cap
-            # is what the remaining spend pays for.
+            # is what the remaining spend pays for. Each turn of a call that
+            # reads is admitted and recorded as the verdict's.
             from maljan.llm.context_window import output_bound_kwargs
 
             verdict_slot = object()
             bound = self._spend_admits("verdict", turns, slot=verdict_slot)
             held = output_bound_kwargs(self.llm, bound) if bound is not None else {}
             try:
-                answer = await as_call("Judge verdict", self.llm.ainvoke(turns, **held))
+                answer = await as_call("Judge verdict", model.ainvoke(turns, **held))
                 self._record_usage(answer, call="verdict")
             finally:
                 self._spend_release(verdict_slot)
+            return answer
+
+        async def _ask(turns: list[Any]) -> Any:
+            if reads is None or reading is None:
+                answer = await _turn(self.llm, turns)
+            else:
+                answer = await reads.answer(
+                    lambda conversation: _turn(reading, conversation),
+                    turns,
+                    what="JudgeAgent verdict",
+                    call="verdict",
+                )
             # Whether the verdict reached its token cap, recorded like every
             # other judge call: a cut bundle reads as malformed JSON, and the
             # count is what says the cap, not the model, ended it.
@@ -4508,8 +4658,18 @@ class JudgeAgent(BudgetMeter):
             questions, {i: e._replace(text="") for i, e in entries.items()}, cards=False
         )
         empty_head = lead + technique_question_head("", decided, carried)
+        structured = self._supports_structured_output()
+        # ``read_evidence`` over the run's ledger from the first turn, beside
+        # the answer's schema on the structured path, where the model binds
+        # it; else the question as it always was, its system text saying so.
+        reads, reading = self._reading_model(ledger, [TechniqueAnswer] if structured else ())
+        system = (
+            TECHNIQUE_QUESTION_SYSTEM
+            if reading is not None
+            else TECHNIQUE_QUESTION_SYSTEM_WITHOUT_TOOLS
+        )
         room = self._question_room(
-            len(TECHNIQUE_QUESTION_SYSTEM) + len(empty_head) + len(bare) + _NOTICE_ROOM,
+            len(system) + len(empty_head) + len(bare) + _NOTICE_ROOM,
             int(cap or 0),
         )
         # The reports the verdict was drawn from and the evidence each question
@@ -4579,7 +4739,7 @@ class JudgeAgent(BudgetMeter):
                 )
                 question_text = without_cards
         messages: list[Any] = [
-            SystemMessage(content=TECHNIQUE_QUESTION_SYSTEM),
+            SystemMessage(content=system),
             HumanMessage(content=head + question_text),
         ]
         timeout = self._verdict_timeout(
@@ -4608,14 +4768,46 @@ class JudgeAgent(BudgetMeter):
                 unanswered=f"not asked: {stop}",
                 not_asked=not_asked,
             )
-        structured = self._supports_structured_output()
+        turns_sent = [0]
+
+        async def _turn(model: Any, conversation: list[Any]) -> Any:
+            # A turn after a read is admitted on its own, under the same reservation.
+            if turns_sent[0]:
+                self._spend_admits(
+                    "technique question", conversation, slot=question_slot, holdable=False
+                )
+            turns_sent[0] += 1
+            return await as_call("Judge technique question", model.ainvoke(conversation))
+
+        def _read_turn(reply: Any) -> None:
+            self._record_usage(reply, call=TECHNIQUE_QUESTION_CALL)
+
+        async def _reading(model: Any) -> Any:
+            return await reads.answer(
+                lambda conversation: _turn(model, conversation),
+                messages,
+                on_read=_read_turn,
+                what="JudgeAgent technique question",
+                call=TECHNIQUE_QUESTION_CALL,
+            )
 
         async def _ask() -> tuple[Any, Any]:
             if structured:
                 try:
-                    runnable = self.llm.with_structured_output(TechniqueAnswer, include_raw=True)
-                    result = await as_call("Judge technique question", runnable.ainvoke(messages))
-                except (TimeoutError, asyncio.CancelledError):
+                    if reading is not None:
+                        from maljan.agents.ledger_reads import structured_reply
+
+                        result = structured_reply(await _reading(reading), TechniqueAnswer)
+                    else:
+                        runnable = self.llm.with_structured_output(
+                            TechniqueAnswer, include_raw=True
+                        )
+                        result = await as_call(
+                            "Judge technique question", runnable.ainvoke(messages)
+                        )
+                except (TimeoutError, asyncio.CancelledError, SpendCeilingStop):
+                    # A turn after a read the ceiling refused ends the question,
+                    # as a refused first turn does.
                     raise
                 except Exception as exc:  # noqa: BLE001 — refused schema: asked once in text
                     self.logger.warning(
@@ -4653,7 +4845,14 @@ class JudgeAgent(BudgetMeter):
                 self._spend_admits(
                     "technique question", messages, slot=question_slot, holdable=False
                 )
-            answer = await as_call("Judge technique question", self.llm.ainvoke(messages))
+            if reading is not None and not structured:
+                answer = await _reading(reading)
+            elif reading is not None:
+                # The schema refused: the question in text offers the read alone.
+                turns_sent[0] = 0
+                answer = await _reading(reads.bind(self.llm))
+            else:
+                answer = await as_call("Judge technique question", self.llm.ainvoke(messages))
             self._record_usage(answer, call=TECHNIQUE_QUESTION_CALL)
             record_judge_response(getattr(self, "truncation_ledger", None), answer, cap=cap)
             return answer, None
@@ -4678,7 +4877,8 @@ class JudgeAgent(BudgetMeter):
             )
             return _unanswered(f"the question timed out after {limit_text(timeout, 's')}")
         except SpendCeilingStop as stop:
-            # The text question after a refused schema, not admitted.
+            # The text question after a refused schema, or a turn after a
+            # read, not admitted.
             return _unanswered(f"not asked: {stop}")
         except Exception as exc:  # noqa: BLE001 — an unanswered question withholds nothing
             self.logger.error("JudgeAgent technique question failed (%s).", type(exc).__name__)

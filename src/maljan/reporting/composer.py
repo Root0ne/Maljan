@@ -35,6 +35,7 @@ from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
 from pydantic import BaseModel, ConfigDict, Field
 
 from maljan.agents.base_agent import retry_on_connection_error
+from maljan.agents.ledger_reads import StructuredReads, reading_model
 from maljan.agents.tool_fence import (
     QUOTED_VALUE_STATEMENT,
     fenced_text,
@@ -1124,6 +1125,10 @@ class ReportComposer:
         # saying so; the keys an answer invented used to take the whole
         # section with them.
         self.degradations: list[str] = []
+        # ``read_evidence`` over the run's ledger, offered from the first turn
+        # of every section call; set by the report node
+        # (``agents.ledger_reads``), ``None`` offers none.
+        self.ledger_reads: Any = None
         # When the model list's clock ends while the sections run at once:
         # each section's start may only extend it. ``None`` while they run one
         # after another, where each section starts the clock anew.
@@ -2074,7 +2079,22 @@ class ReportComposer:
                 or self._call_bound(messages)
             ):
                 raise _StructuredOutputUnavailable
-            structured = self.llm.with_structured_output(schema, include_raw=True)
+            # ``read_evidence`` beside the schema from the first turn, where the
+            # model binds it (``agents.ledger_reads``).
+            reading = reading_model(self, [schema])
+            structured = (
+                StructuredReads(
+                    self.ledger_reads,
+                    reading,
+                    schema,
+                    on_read=self._record_read_turn,
+                    admit=self._admit_read_turn,
+                    what=f"ReportComposer section '{section or schema.__name__}'",
+                    call="report section",
+                )
+                if reading is not None
+                else self.llm.with_structured_output(schema, include_raw=True)
+            )
             # Taken only with no spend ceiling set, and admitted like every
             # model call: at its whole cap, the structured path taking none.
             with admitted(
@@ -2206,11 +2226,16 @@ class ReportComposer:
                 # under an output bound it goes by the plain model. The plain
                 # model is offered no tool, so a call in its turns is said as
                 # text, once. One call is chosen, and made once.
+                # With ``read_evidence`` bound (``agents.ledger_reads``), the
+                # plain call offers it and is asked until it reads no more.
                 as_kept = kept is not None and bound is None
                 plain = turns if as_kept else with_calls_said(turns)
+                reading = None if as_kept else reading_model(self)
                 reply = await retry_on_connection_error(
                     (lambda: structured.ainvoke(turns))
                     if as_kept
+                    else (lambda: self._reading_call(reading, plain, bound, slot, section))
+                    if reading is not None
                     else (lambda: self.llm.ainvoke(plain, **output_bound_kwargs(self.llm, bound)))
                     if bound is not None
                     else (lambda: self.llm.ainvoke(plain)),
@@ -2470,6 +2495,78 @@ class ReportComposer:
             asked=False,
         )
         return schema.model_validate(payload)
+
+    async def _reading_call(
+        self,
+        reading: Any,
+        turns: list[BaseMessage],
+        bound: int | None,
+        slot: Any,
+        section: str,
+    ) -> Any:
+        """A section's plain call through ``reading`` (the model bound with ``read_evidence``).
+
+        Asked until a reply reads no more. The first turn is the call its
+        caller admitted and held to ``bound``; a turn after a read is held as
+        a call of the section is (:meth:`_call_limit`, under the same
+        reservation) and recorded as a report section call. The reply that
+        reads no more is the caller's to record.
+        """
+        from maljan.llm.context_window import output_bound_kwargs
+
+        sent = [0]
+
+        async def _turn(conversation: list[Any]) -> Any:
+            held = bound
+            if sent[0]:
+                held, _why = self._call_limit(conversation, slot=slot)
+            sent[0] += 1
+            kwargs = output_bound_kwargs(self.llm, held) if held is not None else {}
+            return await reading.ainvoke(conversation, **kwargs)
+
+        return await self.ledger_reads.answer(
+            _turn,
+            turns,
+            on_read=self._record_read_turn,
+            what=f"ReportComposer section '{section}'",
+            call="report section",
+        )
+
+    def _admit_read_turn(self, conversation: list[Any], first: bool) -> Any:
+        """The spend ceiling's word on a structured section's turn: a turn after a read is admitted.
+
+        The first turn is the call :meth:`_invoke` admitted.
+        """
+        if first:
+            return contextlib.nullcontext()
+        return admitted(
+            self.token_ledger,
+            kind="report",
+            llm=self.llm,
+            model=self.model_label,
+            prompt_chars=sum(len(_message_text(message)) for message in conversation),
+            cap_tokens=int(getattr(self, "output_cap", 0) or self.section_max_tokens or 0),
+            holdable=False,
+        )
+
+    def _record_read_turn(self, reply: Any) -> None:
+        """A section's turn that read, on the token ledger as the section's answer is."""
+        if self.token_ledger is None:
+            return
+        try:
+            from maljan.core.token_ledger import record_response_usage
+
+            record_response_usage(
+                self.token_ledger,
+                reply,
+                agent=REPORTER_AGENT_KEY,
+                model=self.model_label,
+                call="report section",
+            )
+            self._announce_fallback(reply)
+        except Exception as exc:  # noqa: BLE001
+            # nosemgrep: python.lang.security.audit.logging.logger-credential-leak.python-logger-credential-disclosure — record_response_usage() swallows its own exceptions, so exc here is only an import/attribute error  # noqa: E501
+            logger.debug("ReportComposer: token usage not recorded (%s).", exc)
 
     def _announce_fallback(self, answer: Any) -> None:
         """Publish ``model_fallback`` when ``answer`` is the one the model list moved on for."""

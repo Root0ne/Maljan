@@ -22,6 +22,7 @@ from maljan.agents.judge_agent import (
     TECHNIQUE_ANSWER_UNREAD,
     TECHNIQUE_QUESTION_NOT_ASKED,
     TECHNIQUE_QUESTION_SYSTEM,
+    TECHNIQUE_QUESTION_SYSTEM_WITHOUT_TOOLS,
     JudgeAgent,
     read_technique_answer,
     technique_question_text,
@@ -193,7 +194,7 @@ class TestWhatIsAsked:
 
         assert len(llm.calls) == 1
         system, human = llm.calls[0]
-        assert system.content == TECHNIQUE_QUESTION_SYSTEM
+        assert system.content == TECHNIQUE_QUESTION_SYSTEM_WITHOUT_TOOLS
         assert human.type == "human"
         text = str(human.content)
         assert text.index("the run state") < text.index("the pack") < text.index(LEFT_OUT)

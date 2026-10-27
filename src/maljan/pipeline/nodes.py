@@ -251,6 +251,24 @@ def _restart_reporter(llm: Any, seconds: Any, container: Any) -> None:
         logger.debug("report_node: the reporter's model list was not restarted (%s).", exc)
 
 
+def _reporter_ledger_reads(container: Any, ledger: Sequence[Any] | None) -> Any:
+    """``read_evidence`` over the run's ledger for the reporter's calls, or ``None`` for no ledger.
+
+    Sized by the job's answer guardrail, and paged from its store of whole
+    answers, where the job has them.
+    """
+    if not ledger:
+        return None
+    from maljan.agents.ledger_reads import LedgerReads
+
+    sizer = spill = None
+    with suppress(Exception):
+        sizer = container.get_server_registry().answer_sizer()
+    with suppress(Exception):
+        spill = container.get_evidence_spill()
+    return LedgerReads(ledger, sizer=sizer, spill=spill, container=container)
+
+
 async def _ask_section_agreement(
     report: Any,
     narrative_agent: Any,
@@ -5244,6 +5262,9 @@ def make_negotiation_node(
                     run_state=render_run_state(state),
                     **({"round_facts": said_of_round} if said_of_round else {}),
                     **({"cited_entries": mediation_entries} if mediation_entries else {}),
+                    # The run's ledger, which the round's read_evidence reads
+                    # by id (``agents.ledger_reads``).
+                    ledger=state.get("evidence_ledger") or None,
                 ),
                 hard_timeout=mediation_timeout,
                 label="mediation",
@@ -6987,6 +7008,9 @@ def make_judge_node(
                 # What the sandbox says about each value it recorded and does
                 # not attribute to the sample: an indicator on one is asked
                 # about once, with the fact beside it.
+                # The run's ledger, which the verdict call may read by id
+                # (``agents.ledger_reads``).
+                ledger=_ledger,
                 sandbox_facts=judge_sandbox_facts(
                     _ledger,
                     isr_reports,
@@ -7095,6 +7119,14 @@ def make_judge_node(
                 verdict.bundle.x_maljan_similar_cases = (
                     _similar if isinstance(_similar, SimilarCases) else None
                 )
+            # The verdict or the technique question asked without
+            # ``read_evidence``, the judge's model unable to bind it: said
+            # once, as any turn that lost its tools is.
+            _degradation_reasons.extend(
+                reason
+                for reason in list(getattr(judge, "read_degradations", None) or [])
+                if isinstance(reason, str) and reason not in _degradation_reasons
+            )
 
             bundle = verdict.bundle
             stix_output: dict[str, Any] = bundle.model_dump() if isinstance(bundle, Bundle) else {}
@@ -7794,6 +7826,11 @@ def make_report_node(
         _items = sandbox_item_citations(state, container)
         _entry_texts = with_item_texts(_report_entry_texts(container, _ledger), _items)
 
+        # ``read_evidence`` over the run's ledger, offered from the first turn
+        # of every reporter call (``agents.ledger_reads``): built once, so
+        # every call offers the one definition.
+        _ledger_reads = _reporter_ledger_reads(container, _ledger)
+
         narrative_dict: dict[str, Any] | None = None
         # Why no summary was written, when none is: said where the summary
         # would have been, because the platform no longer writes one itself.
@@ -7804,6 +7841,8 @@ def make_report_node(
             logger.warning("report_node: NarrativeAgent unavailable (%s); using fallback.", exc)
             narrative_agent = None
             no_summary_because = f"the report model was unavailable ({type(exc).__name__})"
+        if narrative_agent is not None and _ledger_reads is not None:
+            narrative_agent.ledger_reads = _ledger_reads
 
         # The narrative round is the reporter's first loop: its model list
         # starts at its first model again, with turn deadlines measured against
@@ -7928,6 +7967,8 @@ def make_report_node(
         except Exception as exc:  # noqa: BLE001
             logger.warning("report_node: ReportComposer unavailable (%s); skipping spine.", exc)
             composer = None
+        if composer is not None and _ledger_reads is not None:
+            composer.ledger_reads = _ledger_reads
         if composer is not None:
             # The composer sections are its second: the list starts over, and
             # each turn is measured against one section's clock. A slow

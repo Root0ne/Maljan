@@ -75,6 +75,11 @@ class _Stored(BaseChatModel):
         text = self.answer_for(messages)
         return ChatResult(generations=[ChatGeneration(message=AIMessage(content=text))])
 
+    def bind_tools(self, tools: Any, **kwargs: Any) -> Any:
+        # Offered a tool (``read_evidence`` beside a call's schema), it calls
+        # none: what the run stored is its answer, as a model that reads nothing.
+        return self
+
 
 def _section_payload(stored: dict[str, Any], section: str) -> Any:
     """A composer section's answer as the stored report holds it, or the section declined."""

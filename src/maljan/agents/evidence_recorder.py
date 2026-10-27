@@ -335,6 +335,12 @@ class EvidenceRecorder:
         # here, so a byte budget or a structure eviction that later takes a
         # part keeps it there first. ``None`` outside a job: nothing is kept.
         self.spill = spill
+        # The run's ledger outside this loop (``agents.ledger_reads.LedgerReads``,
+        # its ``holder`` and ``failed``), where the loop's ``read_evidence``
+        # reads it too: a read of an entry another agent filed is filed as a
+        # repeat of that entry, so no second citable id exists. ``None`` reads
+        # this loop's entries alone.
+        self.outside: Any = None
 
     def note_turn(self, message: Any) -> None:
         """The model that gave ``message`` asked for the calls that follow it. Never raises."""
@@ -2368,8 +2374,14 @@ def _record_tool(
 
         wanted = str(kwargs.get("evidence_id") or "").strip().lower()
         holder = recorder.holder_of(wanted)
+        failed = recorder.entry_failed(holder)
         if not recorder.filed(holder):
-            return None
+            # An entry of the run's ledger outside this loop, where it reads one.
+            outside = recorder.outside
+            holder = str(outside.holder(wanted) or "") if outside is not None else ""
+            if not holder:
+                return None
+            failed = bool(outside.failed(holder))
         recorder.record(
             tool=name,
             args=kwargs,
@@ -2378,7 +2390,7 @@ def _record_tool(
             declared_name=declared_name,
             hints=hints,
             output=read_again_note(holder),
-            ok=not recorder.entry_failed(holder),
+            ok=not failed,
             started_at=wall_clock,
             duration_ms=int((time.monotonic() - started) * 1000),
             repeated_of=holder,
@@ -2396,8 +2408,17 @@ def _record_tool(
         # the cut this read made, whichever is more, and the paging arguments
         # of the tool that made it. Charged whole: the room this read's own
         # guardrail kept was for a line naming no argument.
+        # An entry of the run's ledger outside this loop is its row there: its
+        # cut and its arguments are that row's, and the tool that made it
+        # offered this loop no narrowing.
         held = recorder.entry_of(holder)
-        held_args = getattr(held, "args", None)
+        held_cut = recorder.cut_of(holder)
+        if held is None and recorder.outside is not None:
+            from maljan.schemas.answer_completeness import platform_cut
+
+            held = recorder.outside.row(holder)
+            held_cut = platform_cut(held) if held is not None else 0
+        held_args = held.get("args") if isinstance(held, Mapping) else getattr(held, "args", None)
         paged = bool(kwargs.get("offset") or kwargs.get("limit"))
         complete = _charged(
             completeness_notice(
@@ -2406,11 +2427,10 @@ def _record_tool(
                 # tool's paging arguments are not what the page is.
                 narrowing=() if paged else recorder.narrowing_of(holder),
                 args=None if paged or not isinstance(held_args, Mapping) else held_args,
-                cut=int(cut or 0) if paged else max(recorder.cut_of(holder), int(cut or 0)),
+                cut=int(cut or 0) if paged else max(held_cut, int(cut or 0)),
                 shortened=bool(shortened),
             )
         )
-        failed = recorder.entry_failed(holder)
         return f"[{holder}]\n{fenced(holder, text)}{shortened}{complete}" + _steering(
             kwargs, repeated, failed=failed
         )

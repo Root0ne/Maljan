@@ -108,9 +108,14 @@ def cleared_reference(entry_id: str, chars: int) -> str:
     )
 
 
-def unknown_evidence_message(wanted: str) -> str:
-    """What the read-again tool says about an id this loop never filed."""
-    return f"{wanted or 'no id'} is no evidence id this analysis filed"
+# Whose ids a read-again answers by: a loop's own, or the run's ledger.
+THIS_ANALYSIS = "this analysis filed"
+THE_RUNS_LEDGER = "the run's ledger holds"
+
+
+def unknown_evidence_message(wanted: str, holds: str = THIS_ANALYSIS) -> str:
+    """What the read-again tool says about an id ``holds`` (whose ids it reads) does not hold."""
+    return f"{wanted or 'no id'} is no evidence id {holds}"
 
 
 def read_again_note(entry_id: str) -> str:
@@ -614,11 +619,13 @@ def read_evidence_tool(
     lookup: Callable[[str], str | None],
     sizer: Any = None,
     stored_copy: Callable[[str], StoredCopy | None] | None = None,
+    holds: str = THIS_ANALYSIS,
 ) -> Any:
     """The read-again tool: a stored answer by its evidence id, sized like any tool answer.
 
     ``lookup`` answers an id with the output the ledger keeps for it, or
-    ``None`` for an id this analysis never filed. ``sizer`` is the job's
+    ``None`` for an id this analysis never filed; an unknown id is said to be
+    none ``holds`` (:func:`unknown_evidence_message`). ``sizer`` is the job's
     answer guardrail (``ServerRegistry.answer_sizer``): the answer is measured
     against the room the conversation has and shortened as every tool answer
     is. The recorder files a found answer as a repeat of the entry it reads and
@@ -660,7 +667,7 @@ def read_evidence_tool(
             return json.dumps(
                 tool_error(
                     BAD_ARGUMENT,
-                    unknown_evidence_message(wanted),
+                    unknown_evidence_message(wanted, holds),
                     tool=READ_EVIDENCE_TOOL,
                     remediation=UNKNOWN_EVIDENCE_REMEDIATION,
                 )
