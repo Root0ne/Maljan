@@ -239,6 +239,7 @@ const SERVER_FIELDS = [
   "variable_names",
   "reads_staged_sample",
   "platform_owned",
+  "trusts_served_declaration",
   "auto_name_prefixes",
   "reference_urls",
   "tool_facts",

@@ -48,10 +48,13 @@ def known_tool_names(settings: Any) -> frozenset[str]:
         provider_names,
         server_declaration,
     )
+    from maljan.core.declared_reading import tools_in_force
 
     names: set[str] = set()
-    for server in settings.mcp.servers.values():
+    for key, server in settings.mcp.servers.items():
         names.update(_facts_names(server))
+        # And each tool its server declared of itself when it attached.
+        names.update(str(tool) for tool in tools_in_force(f"mcp:{key}", server))
         names.update(str(tool) for tool in (server.tools or []))
     for key in builtin_server_names():
         names.update(_facts_names(server_declaration(key)))

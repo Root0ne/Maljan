@@ -582,6 +582,26 @@ def _vetoed(facts: Any) -> bool:
     return str(getattr(facts, "kind", "") or "") in MOVING_KINDS
 
 
+def _claims_a_moving_kind(tool: Any) -> bool:
+    """Whether ``tool``'s untrusted server claims a kind whose answer moves.
+
+    Such a claim is never put in force (``core.served_declarations``): it is
+    read here only to veto, as a declared moving kind does (:func:`_vetoed`).
+    """
+    source = declared_source_of(tool)
+    if source is None:
+        return False
+    try:
+        from maljan.core.builtin_declarations import MOVING_KINDS
+        from maljan.core.declared_reading import declarations
+
+        claims = declarations().served_claims_for(source, declared_name_of(tool))
+    except Exception as exc:  # noqa: BLE001 — an unreadable claim vetoes nothing
+        logger.debug("served claims of a tool not read (%s).", type(exc).__name__)
+        return False
+    return str(claims.get("kind") or "") in MOVING_KINDS
+
+
 def answers_the_job_again(tool: Any) -> bool:
     """Whether an identical call of ``tool`` by any agent of a job may be answered from its entry.
 
@@ -606,7 +626,7 @@ def answers_the_job_again(tool: Any) -> bool:
         and hints.get("idempotentHint") is True
     ):
         return False
-    return not _vetoed(declared_facts_of(tool))
+    return not (_vetoed(declared_facts_of(tool)) or _claims_a_moving_kind(tool))
 
 
 def changes_nothing(tool: Any) -> bool:
@@ -617,7 +637,7 @@ def changes_nothing(tool: Any) -> bool:
     (:func:`_vetoed`). Read off the tool as its server's handle offers it.
     """
     facts = declared_facts_of(tool)
-    if _vetoed(facts):
+    if _vetoed(facts) or _claims_a_moving_kind(tool):
         return False
     metadata = getattr(tool, "metadata", None) or {}
     if metadata.get(READ_ONLY_METADATA_KEY) is True:

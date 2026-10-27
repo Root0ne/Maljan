@@ -754,7 +754,10 @@ def trim_declarations(
         for key, value in snap.items()
         if not (key in dropped or key.startswith(dropped_dotted))
     }
-    for source, digest in sorted(ToolDeclarations.from_settings(settings).digests().items()):
+    # The blocks alone: what a server declared of its own tools is recorded by
+    # its own digest when it attaches (``core.served_declarations``).
+    blocks = ToolDeclarations.from_settings(settings, served=False)
+    for source, digest in sorted(blocks.digests().items()):
         out[f"declaration_digest.{source}"] = digest
     out["declaration_digest.shipped"] = shipped_digest()
     return out

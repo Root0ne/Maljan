@@ -69,6 +69,104 @@ FIELD_FILTERS = ("only_dde", "exclude_blacklisted", "keep_all")
 
 mcp = FastMCP("OletoolsMCP", stateless_http=True)
 
+# What each tool declares of itself (``cli_sidecar.reading_tool``).
+# oletools parses Office and RTF documents and runs no macro.
+_OFFICE_FORMATS = ["ole2", "ooxml"]
+_OFFICE_AND_RTF_FORMATS = ["ole2", "ooxml", "rtf"]
+_DECLARED: dict[str, dict[str, Any]] = {
+    VBA_TOOL: sidecar.reading_tool(
+        "VBA macros",
+        {
+            "kind": "vba_macros",
+            "rows": "/indicators/*",
+            "values": {"type": "/type", "keyword": "/keyword"},
+            "arguments": {"path": "path"},
+            "routed_formats": _OFFICE_FORMATS,
+            "display_name": "olevba",
+            "shows": (
+                "the VBA source of each macro module and olevba's keyword analysis of it "
+                "(auto-run triggers, suspicious calls, IOCs, encoded strings), Excel 4 macro "
+                "sheets and VBA stomping"
+            ),
+            "does_not_show": (
+                "what a macro does when it runs: no macro is run, so code it builds or downloads "
+                "at run time is not seen"
+            ),
+        },
+    ),
+    RISK_TOOL: sidecar.reading_tool(
+        "Macro risk",
+        {
+            "kind": "macro_risk",
+            "rows": "/matches/*",
+            "values": {"flag": "/flag", "keyword": "/keyword"},
+            "arguments": {"path": "path"},
+            "routed_formats": _OFFICE_FORMATS,
+            "display_name": "MacroRaptor",
+            "shows": "whether the macros run on their own and write or execute, by keyword rules",
+            "does_not_show": (
+                "whether a macro is malicious or what it does: a keyword match on the source, "
+                "with no macro run"
+            ),
+        },
+    ),
+    INDICATORS_TOOL: sidecar.reading_tool(
+        "Document indicators",
+        {
+            "kind": "document_indicators",
+            "rows": "/indicators/*",
+            "values": {"indicator": "/id", "value": "/value", "risk": "/risk"},
+            "arguments": {"path": "path"},
+            "routed_formats": _OFFICE_AND_RTF_FORMATS,
+            "display_name": "oleid",
+            "shows": (
+                "the document's format, encryption, VBA and XLM macros, external relationships, "
+                "Flash and object pools, each with oleid's risk rating"
+            ),
+            "does_not_show": "the content behind an indicator, or anything oleid has no check for",
+        },
+    ),
+    RTF_TOOL: sidecar.reading_tool(
+        "RTF embedded objects",
+        {
+            "kind": "embedded_objects",
+            "rows": "/objects/*",
+            "places": {"offset": "/start"},
+            "values": {
+                "class_name": "/class_name",
+                "filename": "/filename",
+                "payload_sha256": "/payload_sha256",
+            },
+            "arguments": {"path": "path"},
+            "routed_formats": ["rtf"],
+            "display_name": "rtfobj",
+            "shows": (
+                "the objects embedded in the RTF: each one's OLE class (Package, Equation.3, "
+                "OLE2Link and others), the file name and paths a Package names, and its "
+                "payload's sha256"
+            ),
+            "does_not_show": (
+                "what an object does when it is opened, or an object the parser cannot find; "
+                "nothing is extracted or run"
+            ),
+        },
+    ),
+    DDE_TOOL: sidecar.reading_tool(
+        "DDE links",
+        {
+            "kind": "dde_links",
+            "rows": "/links/*",
+            "values": {"instruction": "/text"},
+            "arguments": {"path": "path"},
+            "routed_formats": _OFFICE_AND_RTF_FORMATS,
+            "display_name": "msodde",
+            "shows": "the DDE links and field instructions in the document, DDEAUTO commands too",
+            "does_not_show": "whether a link would run, or the links of an encrypted document",
+        },
+    ),
+    "capabilities": sidecar.reading_tool("Tool availability", sidecar.CAPABILITIES_FACTS),
+}
+
 
 async def _report(tool: str, report: str, path: str, options: list[str]) -> dict[str, Any]:
     """One report's document over the sample, with the tool's name; a failure raised."""
@@ -84,7 +182,7 @@ async def _report(tool: str, report: str, path: str, options: list[str]) -> dict
     return {"tool": tool, **document}
 
 
-@mcp.tool()
+@mcp.tool(**_DECLARED["ole_vba"])
 async def ole_vba(path: str, deobfuscate: bool = False) -> dict[str, Any]:
     """The VBA macros of an Office document (OLE, OOXML, Word 2003 XML, MHT) and olevba's analysis.
 
@@ -111,7 +209,7 @@ async def ole_vba(path: str, deobfuscate: bool = False) -> dict[str, Any]:
     return await sidecar.answering(VBA_TOOL, work)
 
 
-@mcp.tool()
+@mcp.tool(**_DECLARED["ole_macro_risk"])
 async def ole_macro_risk(path: str) -> dict[str, Any]:
     """MacroRaptor's verdict on an Office document's VBA macros: auto-run, write, execute.
 
@@ -128,7 +226,7 @@ async def ole_macro_risk(path: str) -> dict[str, Any]:
     return await sidecar.answering(RISK_TOOL, work)
 
 
-@mcp.tool()
+@mcp.tool(**_DECLARED["ole_indicators"])
 async def ole_indicators(path: str) -> dict[str, Any]:
     """oleid's indicators of a document: format, encryption, macros, external links, objects.
 
@@ -144,7 +242,7 @@ async def ole_indicators(path: str) -> dict[str, Any]:
     return await sidecar.answering(INDICATORS_TOOL, work)
 
 
-@mcp.tool()
+@mcp.tool(**_DECLARED["rtf_objects"])
 async def rtf_objects(path: str) -> dict[str, Any]:
     """The objects embedded in an RTF document, as rtfobj finds them.
 
@@ -166,7 +264,7 @@ async def rtf_objects(path: str) -> dict[str, Any]:
     return await sidecar.answering(RTF_TOOL, work)
 
 
-@mcp.tool()
+@mcp.tool(**_DECLARED["office_dde"])
 async def office_dde(path: str, field_filter: str = "exclude_blacklisted") -> dict[str, Any]:
     """The DDE links and fields of a Word, Excel or RTF document, as msodde extracts them.
 
@@ -189,7 +287,7 @@ async def office_dde(path: str, field_filter: str = "exclude_blacklisted") -> di
     return await sidecar.answering(DDE_TOOL, work)
 
 
-@mcp.tool()
+@mcp.tool(**_DECLARED["capabilities"])
 def capabilities() -> dict[str, Any]:
     """Which of this server's tools this host can run, and how to install what is missing."""
     return sidecar.capabilities(SERVER, PROGRAM, TOOLS, version=OLETOOLS_VERSION)

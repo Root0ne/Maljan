@@ -99,6 +99,62 @@ _ERRORS_RE = re.compile(r"finished with errors, count: (\d+)")
 
 mcp = FastMCP("JadxMCP", stateless_http=True)
 
+# What each tool declares of itself (``cli_sidecar.reading_tool``).
+# The report sections a decompiled function's writer is shown, for decompiled
+# code.
+_DECOMPILED_CODE_SECTIONS = [
+    "cli_flags",
+    "discovery",
+    "persistence_detail",
+    "evasion_antiforensics",
+    "command_and_control",
+    "string_resolution",
+    "configuration",
+    "commands",
+    "payloads",
+]
+# JADX decompiles dex bytecode to Java and loads no class; an APK's
+# manifest, permissions and certificates are another tool's.
+_ANDROID_FORMATS = ["apk", "dex"]
+_DECLARED: dict[str, dict[str, Any]] = {
+    CLASSES_TOOL: sidecar.reading_tool(
+        "Android classes",
+        {
+            "kind": "type_list",
+            "long_running": True,
+            "rows": "/classes/*",
+            "values": {"name": "/name"},
+            "arguments": {"path": "path"},
+            "routed_formats": _ANDROID_FORMATS,
+            "display_name": "JADX",
+            "shows": (
+                "the classes the APK's or dex file's bytecode defines, each with its methods and "
+                "their signatures, as JADX reads them"
+            ),
+            "does_not_show": (
+                "what any of them does; classes loaded, decrypted or downloaded at run time (no "
+                "code is run); the manifest, permissions and certificates, which apk_info reads"
+            ),
+        },
+    ),
+    DECOMPILE_CLASS_TOOL: sidecar.reading_tool(
+        "Decompile an Android class",
+        {
+            "kind": "decompile",
+            "arguments": {"path": "path"},
+            "routed_formats": _ANDROID_FORMATS,
+            "report_sections": _DECOMPILED_CODE_SECTIONS,
+            "display_name": "JADX",
+            "shows": "Java source JADX decompiled from one class's dex bytecode, inner classes too",
+            "does_not_show": (
+                "what runs at run time: code loaded, decrypted or downloaded while the app runs, "
+                "or native libraries beside the bytecode; no code is run"
+            ),
+        },
+    ),
+    "capabilities": sidecar.reading_tool("Tool availability", sidecar.CAPABILITIES_FACTS),
+}
+
 
 def input_name(sample: str) -> str:
     """The name the sample is handed to JADX under: ``input.apk`` or ``input.dex``, by its bytes."""
@@ -201,7 +257,7 @@ def _package(value: str) -> str:
     return text
 
 
-@mcp.tool()
+@mcp.tool(**_DECLARED["android_classes"])
 async def android_classes(path: str, package: str = "") -> dict[str, Any]:
     """List the classes an APK or dex file defines, each with its methods, as JADX reads them.
 
@@ -244,7 +300,7 @@ async def android_classes(path: str, package: str = "") -> dict[str, Any]:
     return await sidecar.answering(CLASSES_TOOL, work)
 
 
-@mcp.tool()
+@mcp.tool(**_DECLARED["android_decompile_class"])
 async def android_decompile_class(path: str, class_name: str) -> dict[str, Any]:
     """Decompile one class of an APK or dex file to Java, with JADX.
 
@@ -278,7 +334,7 @@ async def android_decompile_class(path: str, class_name: str) -> dict[str, Any]:
     return await sidecar.answering(DECOMPILE_CLASS_TOOL, work)
 
 
-@mcp.tool()
+@mcp.tool(**_DECLARED["capabilities"])
 def capabilities() -> dict[str, Any]:
     """Which of this server's tools this host can run, and how to install what is missing."""
     return sidecar.capabilities(SERVER, PROGRAM, TOOLS, version=JADX_VERSION)

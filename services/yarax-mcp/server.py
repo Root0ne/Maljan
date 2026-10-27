@@ -10,7 +10,7 @@ server adds the operator's native rule sets beside it.
 
 The answer's rows are the rules that matched, each with its metadata, tags and
 every matching string's offset, in the row shape the platform's ``yara_scan``
-answers, so the declaration (``core.builtin_declarations``) reads both alike.
+answers, so a declaration reads both alike (``_DECLARED``).
 """
 
 from __future__ import annotations
@@ -89,6 +89,45 @@ TOOLS = (SCAN_TOOL,)
 
 mcp = FastMCP("YaraXMCP", stateless_http=True)
 
+# What each tool declares of itself (``cli_sidecar.reading_tool``).
+# Its rule matches are signature rules in ``yara_scan``'s row shape, and
+# corroborate as the one YARA layer (``source``), never as a second
+# independent one beside it.
+_DECLARED: dict[str, dict[str, Any]] = {
+    SCAN_TOOL: sidecar.reading_tool(
+        "YARA-X scan",
+        {
+            "kind": "signature_rules",
+            "asserts_techniques": True,
+            "source": "yara",
+            "rows": "/matches/*",
+            "places": {
+                "offset": "/strings/*/offset",
+                "instance_offset": "/strings/*/instances/*/offset",
+            },
+            "values": {"rule": "/rule"},
+            "techniques": [
+                {"path": "/**6/technique_id", "format": "attck"},
+                {"path": "/**6/attck", "format": "attck"},
+                {"path": "/**6/technique_ids", "format": "attck"},
+                {"path": "/**6/tags", "format": "sigma_tag"},
+            ],
+            "arguments": {"path": "path"},
+            "words": ["yara", "rule", "rules"],
+            "display_name": "YARA-X",
+            "shows": (
+                "the operator's own YARA rules (the rule files mounted on the server) that match "
+                "the file, with each matching string's offset and the rule's metadata"
+            ),
+            "does_not_show": (
+                "rules that are not in the mounted rule files, or that YARA-X could not compile "
+                "(named in rules_not_compiled); a match is the rule author's claim, not a verdict"
+            ),
+        },
+    ),
+    "capabilities": sidecar.reading_tool("Tool availability", sidecar.CAPABILITIES_FACTS),
+}
+
 
 def match_rows(document: Any) -> list[dict[str, Any]]:
     """The rules a ``yr scan --output-format json`` document says matched, in its order.
@@ -125,7 +164,7 @@ def compile_errors(said: str) -> list[str]:
     return errors
 
 
-@mcp.tool()
+@mcp.tool(**_DECLARED["yarax_scan"])
 async def yarax_scan(
     path: str,
     ignore_invalid_rules: bool = True,
@@ -183,7 +222,7 @@ async def yarax_scan(
     return await sidecar.answering(SCAN_TOOL, work)
 
 
-@mcp.tool()
+@mcp.tool(**_DECLARED["capabilities"])
 def capabilities() -> dict[str, Any]:
     """Which of this server's tools this host can run, and how to install what is missing."""
     return sidecar.capabilities(SERVER, PROGRAM, TOOLS, version=YARA_X_VERSION)

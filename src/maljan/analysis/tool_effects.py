@@ -28,6 +28,11 @@ Each answer is read, in this order, from:
    (``core.declared_reading.server_hints``) and said to be the server's own
    hint; ``readOnlyHint``, ``destructiveHint`` and ``idempotentHint`` say
    nothing of these three, and are kept in the part as given;
+   before it, a server's own declaration that its tool reaches the network,
+   where the block does not trust that declaration
+   (``core.declared_reading.served_statement``), said as the server's own
+   declaration (``server_stated``); anything else such a declaration said is
+   said as the server's own statement and never answers a count;
 3. otherwise **undeclared**, said as such and never taken as "no", with the
    reason the declaration gives where it gives one (``why_undeclared``). An
    entry with no recorded source is undeclared on every count: it is never
@@ -85,6 +90,9 @@ EFFECTS_VERSION = 1
 # Where an answer came from.
 DECLARED = "declared"
 SERVER_HINT = "server_hint"
+# What a server's own declaration of its tool said, where its block does not
+# trust it (``core.served_declarations``): only that it reaches the network.
+SERVER_STATED = "server_stated"
 # The MCP hint that answers whether a tool reaches the network.
 OPEN_WORLD_HINT = "openWorldHint"
 
@@ -166,11 +174,17 @@ def entry_effects(entry: Any) -> Effects:
     party says it reaches the network too, whatever else it says: the
     cautious answer is kept.
     """
-    from maljan.core.declared_reading import kind_free_facts, recorded, server_hints
+    from maljan.core.declared_reading import (
+        declared_only,
+        kind_free_facts,
+        recorded,
+        served_statement,
+        server_hints,
+    )
 
     if not recorded(entry):
         return Effects()
-    facts = kind_free_facts(entry)
+    facts = kind_free_facts(declared_only(entry))
     declared = facts.effects
     executes = declared.executes if declared is not None else ""
     network = declared.network if declared is not None else None
@@ -183,6 +197,10 @@ def entry_effects(entry: Any) -> Effects:
     ):
         network = True
     network_by = DECLARED if network is not None else ""
+    if network is None and served_statement(entry).get("effects.network") is True:
+        # What the server itself declared of its tool, where no declaration
+        # the operator trusts says: only that it reaches the network.
+        network, network_by = True, SERVER_STATED
     if network is None:
         hint = server_hints(entry).get(OPEN_WORLD_HINT)
         if hint is not None:
@@ -274,7 +292,7 @@ def effects_part(
     disclosure placed each ``(source, tool)`` it placed. Linear in the entries.
     """
     from maljan.analysis.isolation import ran_on_sources
-    from maljan.core.declared_reading import server_hints
+    from maljan.core.declared_reading import served_statement, server_hints
 
     placed = _read_where(isolation)
     rows: dict[tuple[str, str, str], dict[str, Any]] = {}
@@ -303,6 +321,15 @@ def effects_part(
                 "hints": server_hints(entry),
                 **dict.fromkeys(OUTCOMES, 0),
             }
+            stated = {
+                name: value
+                for name, value in served_statement(entry).items()
+                if name != "effects.network"
+            }
+            if stated:
+                # What its own server said of it that no declaration says:
+                # said as such, never counted as declared.
+                row["server_states"] = stated
             if effects.executes in (EXECUTES_NATIVE, EXECUTES_EMULATION):
                 # Placed where its readings ran when the entry names a server
                 # that ran them (``ran_on``), else by its source.
@@ -417,7 +444,16 @@ def _named(
 
 
 def _by_hint_only(row: Mapping[str, Any]) -> str:
+    if row.get("network_by") == SERVER_STATED:
+        return "by its server's own declaration, which its block does not trust"
     return "by its server's own hint" if row.get("network_by") == SERVER_HINT else ""
+
+
+def _server_states(row: Mapping[str, Any]) -> str:
+    held = row.get("server_states")
+    if not isinstance(held, Mapping):
+        return ""
+    return ", ".join(f"{name} {value}" for name, value in sorted(held.items()))
 
 
 def _when(row: Mapping[str, Any]) -> str:
@@ -577,6 +613,12 @@ def effects_lines(part: Any, code: Callable[[str], str] = _code) -> list[str]:
         lines.append(
             f"Said not to reach the network by its server's own hint ({OPEN_WORLD_HINT} false), "
             f"which no declaration says: {_named(hinted, code)}."
+        )
+    stated = [row for row in rows if isinstance(row.get("server_states"), Mapping)]
+    if stated:
+        lines.append(
+            "Said of itself by its own server, which no declaration the operator trusts says: "
+            f"{_named(stated, code, _server_states)}."
         )
     for state, lead in _ENDED.items():
         held = [row for row in every if int(row.get(state) or 0) and not _closed(row)]

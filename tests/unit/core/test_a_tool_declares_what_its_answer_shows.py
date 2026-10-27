@@ -113,7 +113,12 @@ class TestTheDigests:
         assert declaration_digest(plain) != declaration_digest(declaring)
 
     def test_the_built_ins_that_declare_neither_keep_dev_s_digests(self) -> None:
-        digests = ToolDeclarations.from_settings(Settings(_env_file=None)).digests()
+        # Each of the two servers' trust in its own declaration (T-418) moves
+        # its digest; without it each block is as recorded below.
+        settings = Settings(_env_file=None)
+        for key in ("knowledge", "network"):
+            object.__setattr__(settings.mcp.servers[key], "trusts_served_declaration", False)
+        digests = ToolDeclarations.from_settings(settings).digests()
         assert digests["mcp:knowledge"] == "2fbd76f41eddabe6"
         # Moved twice since dev, by tools added, not by these fields: the
         # readers' delivery primitives (``run_reader``, T-006; ``release_job``,

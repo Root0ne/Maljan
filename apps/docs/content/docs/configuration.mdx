@@ -3720,6 +3720,7 @@ are ever removed.
 | `variable_names` | environment variable names of the server's that are not secrets; those a shipped declaration or a registered provider class (`variable_names`) names are kept whole in published text, read from those so the redaction does not depend on a run's settings |
 | `reads_staged_sample` | whether the server's path-taking tools read the sample the platform staged |
 | `platform_owned` | whether the server is the platform's own, whose answers are the platform's code |
+| `trusts_served_declaration` | whether what the server declares of its own tools when it lists them (each tool's `_meta` at `maljan/tool_facts`) is read as this block's declaration, under what the block itself says; off, only its cautious claims are read, as the server's own statement, and the rest is proposed (see [Writing a tool server](#writing-a-tool-server)). Shipped on for the platform's own sidecars, and that shipped trust holds only while the block still starts or reaches the server it shipped with (its transport, command, arguments, working directory and address); a block pointed at another server trusts it only where you set the flag yourself |
 | `auto_name_prefixes` | the prefixes its decompiler writes before an address when it names a function itself (`FUN_`, `fcn.`); every server's join the shipped ones (`FUN_`, `fcn.`, `sub_`, `func.`, `loc.`, `LAB_`) wherever a function's auto-name is read as its address |
 | `reference_urls` | sample lookup URL templates, `https://` and naming `{sha256}`, `{md5}` or `{sha1}`; a report links them, under the name its lookup's record gives (else the server's label), only when the run recorded an entry from this server. `reporting.reference_urls` holds the lookups linked on every report (shipped with VirusTotal's and MalwareBazaar's) |
 | `tool_facts` | per tool name, what its answer is and where its facts sit (below) |
@@ -4520,9 +4521,10 @@ loop, and for a stdio server that is one child process per loop.
 
 ## Writing a tool server
 
-Any MCP server works: Maljan reads its manifest and calls its tools. Two
+Any MCP server works: Maljan reads its manifest and calls its tools. Three
 optional conventions make a server a better citizen of a run, and the four
-built-in sidecars follow both.
+built-in sidecars follow all three; every other sidecar under `services/`
+declares its tools too.
 
 **The capability manifest.** A tool named `capabilities`, taking no argument,
 answers what the server can do on the host it runs on:
@@ -4601,6 +4603,80 @@ ledger reads either. A returned error is a failed ledger entry: `ok` false,
 `error` the message, `remediation` the hint — the report header lists each
 distinct failure once with its remedy, the console's evidence row shows both,
 and `GET /api/v1/jobs/{id}/evidence` serves them.
+
+**Tools that declare themselves.** A server may say what each of its tools is
+when it lists them, so it is read at full strength with nothing stored for it.
+Each tool's MCP `annotations` give its `title` and the hints `readOnlyHint`,
+`idempotentHint`, `destructiveHint` and `openWorldHint` (kept on each of the
+tool's ledger entries as the server's hints), and the tool's `_meta` holds,
+under the key `maljan/tool_facts`, its declaration in the vocabulary of
+`tool_facts` (below: `kind`, `rows`, `places`, `values`, `techniques`,
+`routed_formats`, `shows`, `does_not_show`, `effects`, `long_running`,
+`timeout_seconds`, `reader`, `arguments`, `read_only` and the rest):
+
+```json
+{"name": "scan_file", "annotations": {"title": "Scan a file", "readOnlyHint": true,
+  "idempotentHint": true, "destructiveHint": false, "openWorldHint": false},
+ "_meta": {"maljan/tool_facts": {"kind": "identification", "rows": "/detections/*",
+  "values": {"name": "/name"}, "arguments": {"path": "path"}, "read_only": true,
+  "effects": {"executes": "no", "network": false, "third_party": "no"}}}}
+```
+
+The client reads it for every server alike, whenever it attaches one,
+leniently (a field this version does not know is left out with a warning; a
+declaration the model refuses declares nothing, with a warning), and keeps it
+under the launch identity of the block that reached the server (its transport,
+command, arguments, working directory and address), so a block pointed at
+another server reads none of the last one's. How much of it is read is the
+block's choice, `trusts_served_declaration` (in the table above):
+
+- **A block that trusts it** (the platform's own sidecars ship it set; set it
+  for a server you vouch for) reads it as a declaration, under what the block
+  puts in force, per tool and field by field: a field an operator stored for
+  the tool (or the platform ships for a built-in server's tool) is in force
+  over the server's, the server's fills what neither says, and a tool nothing
+  declares stays undeclared. A built-in tool an operator removed stays removed
+  whatever its server says.
+- **Any other block** reads only the claims that make the platform more
+  careful: the tool sends the sample (`discloses_sample`), sends its hash or
+  bytes to a third party, reaches the network (`true`, never a named way
+  such as `operator_sandbox`), runs something, or is not read-only (said
+  outright). Each
+  field such a claim sets that the block does not is stored with the tool's
+  entries as the server's own statement (`served` in the entry's facts): the
+  tool-effects part says it as the server's, the disclosure counts the call
+  where the block's own declaration places it (an undeclared tool stays
+  undeclared), never moving it to an upload, lookup or server row, and no
+  reader of a stored entry reads it as declared. Its kind is never put in
+  force, since a kind routes a tool, names its report sections and tags it: a
+  kind whose answer moves or that reaches outside the deployment (never a
+  reputation kind) is stored apart as the server's claim (`served_claims`),
+  said as the server's, and read only to keep an identical call from being
+  answered from an earlier entry when the kind's answer moves. The rest of
+  the declaration, its kind included, is what the connection test proposes,
+  each field with medium confidence as the server's own claim (high only for
+  a block that trusts it), for you to accept; it never offers a field less
+  careful than what the tool's hints already say (a sample sent, a network
+  reached, a tool that may change something).
+
+No block takes a kind of what a sandbox observed (`sandbox_…`) from a
+server's claim unless the block's `roles` hold `sandbox`. Each entry stores
+the facts in force when it was written, so a stored run never reads a
+server's declaration again; a run's recorded declaration digests are of the
+blocks alone, and what each server declared is recorded by its own digest
+beside the name and version it gave (the run fingerprint's server versions).
+
+What reads a server's declaration: the facts each entry stores, every reading
+of the live declarations (`core.declared_reading.declarations`), the call
+guard's per-tool budgets and long-running flags (from the attach on), the
+description tags of its tools and the tool names the prompts know. Read from
+the block alone for now: the static pre-pass's tool choice
+(`prepass_tools`), the triage pack's choice of the server whose environment
+an in-process step reads, its server steps' tools, and a Ghidra block's own
+reads of its tools. In FastMCP, `maljan.tools.declared_facts.tool_declaration`
+writes both parts for `@mcp.tool(...)`; every built-in sidecar declares its
+tools so, and a test holds what each declares equal, field by field, to what
+the platform read for it before.
 
 **The budget meter** needs nothing from a server. The tool loop emits
 `budget_tick` every five steps and once more when it ends (steps used against

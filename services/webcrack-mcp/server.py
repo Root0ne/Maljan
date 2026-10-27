@@ -62,8 +62,38 @@ TOOLS = (DEOBFUSCATE_TOOL,)
 
 mcp = FastMCP("WebcrackMCP", stateless_http=True)
 
+# What each tool declares of itself (``cli_sidecar.reading_tool``).
+# webcrack rewrites a script's syntax tree and is handed no sandbox to
+# evaluate any of it in.
+_DECLARED: dict[str, dict[str, Any]] = {
+    DEOBFUSCATE_TOOL: sidecar.reading_tool(
+        "Deobfuscate a script",
+        {
+            "kind": "deobfuscated_script",
+            "long_running": True,
+            "rows": "/scripts/*",
+            "places": {"offset": "/start"},
+            "values": {"language": "/language"},
+            "arguments": {"path": "path"},
+            "routed_formats": ["js", "hta", "wsf"],
+            "display_name": "webcrack",
+            "shows": (
+                "the script (or each script block of an HTA or WSF) unminified, unpacked from its "
+                "bundle and cleared of self-defending and debugger traps, as readable JavaScript"
+            ),
+            "does_not_show": (
+                "strings an obfuscator's decoder functions compute (decoding them would run the "
+                "script, so those calls stay as written); with no sandbox, the control-flow "
+                "flattening and dead code of a script guarded by an obfuscator-style string "
+                "array, which stay as they are; VBScript, or JScript.Encode scripts"
+            ),
+        },
+    ),
+    "capabilities": sidecar.reading_tool("Tool availability", sidecar.CAPABILITIES_FACTS),
+}
 
-@mcp.tool()
+
+@mcp.tool(**_DECLARED["js_deobfuscate"])
 async def js_deobfuscate(
     path: str,
     deobfuscate: bool = True,
@@ -120,7 +150,7 @@ async def js_deobfuscate(
     return await sidecar.answering(DEOBFUSCATE_TOOL, work)
 
 
-@mcp.tool()
+@mcp.tool(**_DECLARED["capabilities"])
 def capabilities() -> dict[str, Any]:
     """Which of this server's tools this host can run, and how to install what is missing."""
     return sidecar.capabilities(SERVER, PROGRAM, TOOLS, version=WEBCRACK_VERSION)

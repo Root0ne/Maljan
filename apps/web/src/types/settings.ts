@@ -247,6 +247,7 @@ export interface McpServerEntry {
   variable_names?: string[];
   reads_staged_sample?: boolean;
   platform_owned?: boolean;
+  trusts_served_declaration?: boolean;
   auto_name_prefixes?: string[];
   reference_urls?: string[];
   /** Per tool, as served: its changes over the shipped declaration of that

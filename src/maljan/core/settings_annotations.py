@@ -1646,6 +1646,17 @@ DECLARATION_LEAVES: tuple[tuple[str, str, str], ...] = (
         "Whether the server is the platform's own, whose answers are the platform's code.",
     ),
     (
+        "trusts_served_declaration",
+        "trusts the server's own declaration",
+        "Whether what the server declares of its own tools when it lists them (each tool's "
+        "_meta maljan/tool_facts) is read as this block's declaration, under what is stored "
+        "here. Off: only its cautious claims are read (it sends the sample or its hash, "
+        "reaches the network, runs code, or is not read-only), said as the server's own; its "
+        "kind is never put in force, and the rest is proposed by the connection test. Shipped "
+        "on for the platform's own servers while their block still starts the server it "
+        "shipped with.",
+    ),
+    (
         "auto_name_prefixes",
         "auto-name prefixes",
         "The prefixes the server's decompiler writes before an address when it names a "

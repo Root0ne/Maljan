@@ -601,14 +601,35 @@ def _probe_config(entry: dict[str, Any], name: str) -> MCPServerConfig:
     what the server ships, as the console stages them; without the mark,
     whole, as an earlier release read it.
     """
+    from maljan.core.config import _builtin_servers
     from maljan.core.settings_overrides import SERVER_MAP_PATH, shipped_tool_facts
-    from maljan.core.tool_declarations import sent_in_force
+    from maljan.core.tool_declarations import (
+        DECLARATION_FIELDS,
+        fill_declaration,
+        sent_in_force,
+        strip_declaration_defaults,
+    )
 
     facts = entry.get("tool_facts")
     if isinstance(facts, dict):
         shipped = shipped_tool_facts(f"{SERVER_MAP_PATH}.{name}")
         entry = {**entry, "tool_facts": sent_in_force(shipped, facts)}
+    builtin = _builtin_servers().get(name) if name in BUILTIN_SERVER_KEYS else None
+    if builtin is not None:
+        # As a save reads it (``server_map.validate_server_map``): a declaration
+        # field equal to the built-in's is the built-in's, not the operator's,
+        # so the editor posting it back sets nothing (a shipped trust in the
+        # server's own declaration among them, ``tool_declarations.trusts_served``).
+        model = fill_declaration(MCPServerConfig.model_validate(entry), builtin)
+        kept = strip_declaration_defaults(model.model_dump(mode="json"), builtin)
+        entry = {
+            key: value
+            for key, value in entry.items()
+            if key not in DECLARATION_FIELDS or key in kept or key == "tool_facts"
+        }
     config = MCPServerConfig.model_validate(entry)
+    if builtin is not None:
+        fill_declaration(config, builtin)
     update: dict[str, Any] = {"enabled": True, "tools": None}
     if name in BUILTIN_SERVER_KEYS:
         update["env_allow"] = builtin_env_allow(name, config.env_allow)
@@ -645,6 +666,7 @@ def _proposals(
     withheld: list[str] | None,
     sandbox_source: bool = False,
     remote: bool = False,
+    trusted: bool = False,
 ) -> dict[str, Any] | None:
     """The declaration proposals for the tools ``found`` lists and nothing declares.
 
@@ -657,6 +679,7 @@ def _proposals(
     the server's declaration names it a sandbox source (its ``roles``), the
     only server whose tools may be proposed sandbox kinds. ``remote`` says it is
     reached at an address other jobs share (:func:`maljan.core.declaration_proposals.propose`).
+    ``trusted`` says its block trusts what the server declares of its own tools.
     """
     from maljan.core.declaration_proposals import propose
     from maljan.tools.capabilities import CAPABILITIES_TOOL
@@ -671,6 +694,7 @@ def _proposals(
             skip=declared | {CAPABILITIES_TOOL},
             sandbox_source=sandbox_source,
             remote=remote,
+            trusted=trusted,
         )
     except Exception as exc:  # noqa: BLE001 — a proposal is never worth the probe
         logger.warning("declaration proposals could not be built (%s).", type(exc).__name__)
@@ -872,6 +896,7 @@ async def probe_mcp(v: dict[str, Any]) -> ProbeResult:
         if unavailable:
             detail += f"; {len(unavailable)} unavailable on this host"
         details = {"capabilities": capabilities}
+    from maljan.core.tool_declarations import trusts_served
     from maljan.providers.sample_open import is_shared_address
 
     proposals = _proposals(
@@ -880,6 +905,7 @@ async def probe_mcp(v: dict[str, Any]) -> ProbeResult:
         withheld=withheld,
         sandbox_source=SANDBOX_ROLE in config.roles,
         remote=is_shared_address(config),
+        trusted=trusts_served(f"mcp:{name}", config),
     )
     if proposals is not None:
         details = {**(details or {}), "proposals": proposals}

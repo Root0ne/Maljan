@@ -1453,6 +1453,7 @@ DECLARATION_FIELDS: tuple[str, ...] = (
     "variable_names",
     "reads_staged_sample",
     "platform_owned",
+    "trusts_served_declaration",
     "auto_name_prefixes",
     "reference_urls",
     "tool_facts",
@@ -2130,8 +2131,14 @@ def declaration_digest(cfg: Any) -> str:
     """A short digest of one block's whole declaration, as it is in force."""
     dumped = cfg.model_dump(mode="json") if isinstance(cfg, BaseModel) else dict(cfg)
     # A field a block leaves unset (``None``) is left out, so a field added to
-    # the declaration later moves no digest of a block that does not set it.
-    body = {name: dumped.get(name) for name in DECLARATION_FIELDS if dumped.get(name) is not None}
+    # the declaration later moves no digest of a block that does not set it;
+    # so is a block's trust in its server's own declaration when it is off.
+    body = {
+        name: dumped.get(name)
+        for name in DECLARATION_FIELDS
+        if dumped.get(name) is not None
+        and not (name == "trusts_served_declaration" and dumped.get(name) is False)
+    }
     if "tool_facts" in body:
         body["tool_facts"] = _digested_tools(body["tool_facts"])
     text = json.dumps(body, sort_keys=True, separators=(",", ":"), default=str)
@@ -2401,8 +2408,17 @@ def forget_provider_declaration(source: str) -> None:
 
 
 def declaration_version() -> int:
-    """How many times the runtime providers' declarations changed in this process."""
+    """How many times the runtime declarations changed in this process.
+
+    A runtime provider's registration, and a server's own declaration of its
+    tools read when it was listed (``core.served_declarations``).
+    """
     return _DECLARATION_VERSION[0]
+
+
+def bump_declaration_version() -> None:
+    """Have held declarations rebuilt: a runtime declaration changed in this process."""
+    _DECLARATION_VERSION[0] += 1
 
 
 def provider_declarations(settings: Any) -> dict[str, Any]:
@@ -2471,6 +2487,52 @@ def provider_declarations(settings: Any) -> dict[str, Any]:
     return blocks
 
 
+def launch_identity(cfg: Any) -> str:
+    """A short digest of how a block starts or reaches its server; ``""`` for a block of none.
+
+    Its transport, command, arguments, working directory and address: a
+    server's own declaration is kept under it, so a block pointed at another
+    server stops reading what the last one declared.
+    """
+    held = {
+        name: getattr(cfg, name, None)
+        for name in ("transport", "command", "args", "cwd", "url")
+        if getattr(cfg, name, None) not in (None, "", [], ())
+    }
+    if not held:
+        return ""
+    text = json.dumps(held, sort_keys=True, default=str)
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()[:16]
+
+
+@lru_cache(maxsize=1)
+def _shipped_launches() -> dict[str, str]:
+    """The launch identity of each built-in server block that ships trusting its server."""
+    from maljan.core.config import _builtin_servers
+
+    return {
+        f"mcp:{key}": launch_identity(cfg)
+        for key, cfg in _builtin_servers().items()
+        if getattr(cfg, "trusts_served_declaration", False) is True
+    }
+
+
+def trusts_served(source: Any, cfg: Any) -> bool:
+    """Whether ``cfg``, the block of ``source``, trusts what its server declares of its tools.
+
+    Its ``trusts_served_declaration``. The trust a built-in block ships with
+    holds only while the block still starts or reaches the server it shipped
+    with (the same :func:`launch_identity`): a block pointed at another server
+    trusts it only where the operator set the flag themselves.
+    """
+    if getattr(cfg, "trusts_served_declaration", False) is not True:
+        return False
+    shipped = _shipped_launches().get(str(source))
+    if shipped is None or launch_identity(cfg) == shipped:
+        return True
+    return "trusts_served_declaration" in (getattr(cfg, "model_fields_set", None) or set())
+
+
 @dataclass(frozen=True)
 class Declared:
     """One source's whole declaration, read from its settings block or built-in data."""
@@ -2491,6 +2553,20 @@ class Declared:
     auto_name_prefixes: tuple[str, ...] = ()
     reference_urls: tuple[str, ...] = ()
     tools: Mapping[str, ToolFacts] = field(default_factory=dict)
+    # Whether the server's own declaration of its tools is read as the block's
+    # (``trusts_served_declaration``), and the block's launch identity, which
+    # a server's declaration is kept under (``core.served_declarations``).
+    trusts_served: bool = False
+    launch: str = ""
+    # Per tool, the fields of its declaration in force that only its server
+    # said, for a block that does not trust it: stored with each entry, and
+    # read as the server's own statement (``core.declared_reading``).
+    served_fields: Mapping[str, tuple[str, ...]] = field(default_factory=dict)
+    # Per tool, what its untrusted server claims and nothing puts in force (a
+    # kind whose answer moves or reaches outside): stored with each entry and
+    # said as the server's, read only by a reader that applies it to be more
+    # careful (``agents.tool_pinning``).
+    served_claims: Mapping[str, Mapping[str, Any]] = field(default_factory=dict)
 
     @classmethod
     def of(cls, source: SourceRef, cfg: Any, *, enabled: bool, label: str = "") -> Declared:
@@ -2512,6 +2588,8 @@ class Declared:
             auto_name_prefixes=tuple(getattr(copied, "auto_name_prefixes", ()) or ()),
             reference_urls=tuple(getattr(copied, "reference_urls", ()) or ()),
             tools=dict(getattr(copied, "tool_facts", {}) or {}),
+            trusts_served=trusts_served(source, cfg),
+            launch=launch_identity(copied),
         )
 
 
@@ -2529,14 +2607,21 @@ class ToolDeclarations:
     ``generic_mcp`` provider reads the server it names), the CAPE provider's
     MCP block (``provider:cape2``), and the platform's in-process sources
     (``pack``, ``sandbox``, ``provider:capa_yara``), whose declarations are
-    built-in data only: their answers are the platform's own code.
+    built-in data only: their answers are the platform's own code. Under each
+    server's and provider's block, what the server itself declared of its
+    tools when it was last listed (``core.served_declarations``).
     """
 
     def __init__(self, sources: Iterable[Declared]) -> None:
         self._sources: dict[SourceRef, Declared] = {d.source: d for d in sources}
 
     @classmethod
-    def from_settings(cls, settings: Settings) -> ToolDeclarations:
+    def from_settings(cls, settings: Settings, *, served: bool = True) -> ToolDeclarations:
+        """``settings``' declarations; with ``served``, each server's own laid under its block's.
+
+        Without ``served``, the blocks alone: what the settings put in force,
+        whichever servers this process has attached (a run's recorded digests).
+        """
         from maljan.core.builtin_declarations import in_process_declarations
 
         selected = selected_static_providers(settings)
@@ -2550,7 +2635,13 @@ class ToolDeclarations:
         for source, cfg in in_process_declarations().items():
             enabled = source.kind != "provider" or source.key in selected
             sources.append(Declared.of(source, cfg, enabled=enabled))
-        return cls(sources)
+        if not served:
+            return cls(sources)
+        # What each server declared of its own tools when it was last listed,
+        # under what its block puts in force (``core.served_declarations``).
+        from maljan.core.served_declarations import with_served
+
+        return cls(with_served(declared) for declared in sources)
 
     def sources(self, *, enabled_only: bool = False) -> list[Declared]:
         return [d for d in self._sources.values() if d.enabled or not enabled_only]
@@ -2603,6 +2694,20 @@ class ToolDeclarations:
             return held.tools.get(renamed_tool(ref.key, tool))
         return None
 
+    def served_fields_for(self, source: SourceRef | str, tool: str) -> tuple[str, ...]:
+        """The fields of ``tool``'s declaration under ``source`` that only its server said.
+
+        Empty for a block that trusts its server's declaration, and for every
+        field the block itself declares (:attr:`Declared.served_fields`).
+        """
+        held = self.source(source)
+        return tuple(held.served_fields.get(tool, ())) if held is not None else ()
+
+    def served_claims_for(self, source: SourceRef | str, tool: str) -> Mapping[str, Any]:
+        """What ``tool``'s untrusted server under ``source`` claims that nothing put in force."""
+        held = self.source(source)
+        return dict(held.served_claims.get(tool, {})) if held is not None else {}
+
     def tools_of_kind(
         self, kind: str | Iterable[str], *, enabled_only: bool = False
     ) -> list[tuple[SourceRef, str, ToolFacts]]:
@@ -2639,6 +2744,9 @@ class ToolDeclarations:
                     "auto_name_prefixes": list(d.auto_name_prefixes),
                     "reference_urls": list(d.reference_urls),
                     "tool_facts": {n: f.model_dump(mode="json") for n, f in d.tools.items()},
+                    # Named only where set, so a block that does not set it
+                    # keeps the digest it had before the field existed.
+                    **({"trusts_served_declaration": True} if d.trusts_served else {}),
                 }
             )
             for d in self._sources.values()

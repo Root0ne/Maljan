@@ -495,7 +495,12 @@ def _tool_rows(snapshot: Mapping[str, Any], entries: Iterable[Any]) -> _ToolRows
         sends_sample_bytes,
     )
     from maljan.core.builtin_declarations import OUTWARD_KINDS
-    from maljan.core.declared_reading import kind_free_facts, server_hints
+    from maljan.core.declared_reading import (
+        declared_only,
+        kind_free_facts,
+        served_statement,
+        server_hints,
+    )
     from maljan.core.reputation import INDICATOR_ARGUMENTS, asks_about_an_indicator
     from maljan.core.tool_declarations import NETWORK_OPERATOR_SANDBOX
 
@@ -524,6 +529,10 @@ def _tool_rows(snapshot: Mapping[str, Any], entries: Iterable[Any]) -> _ToolRows
         if source not in routes:
             routes[source] = _route(snapshot, source, gateways)
         route = routes[source]
+        # What only the tool's own server said of it is its statement, never
+        # a declaration: it moves no call to another row.
+        said = bool(served_statement(entry))
+        entry = declared_only(entry)
         facts = kind_free_facts(entry)
         lookup = asks_about_an_indicator(facts)
         sends = sends_sample_bytes(facts)
@@ -595,6 +604,9 @@ def _tool_rows(snapshot: Mapping[str, Any], entries: Iterable[Any]) -> _ToolRows
             if server_hints(entry).get("openWorldHint") is True:
                 # Said, not placed: the row stays undeclared.
                 row["open_world_hints"] = int(row.get("open_world_hints") or 0) + 1
+            if said:
+                # So is what the server said of its tool in its own declaration.
+                row["server_stated"] = int(row.get("server_stated") or 0) + 1
         elif local:
             out.local_servers.setdefault(source, None)
             if not route.on_this_machine:
@@ -1587,6 +1599,12 @@ def _undeclared_line(rows: list[Mapping[str, Any]], code: Callable[[str], str]) 
         if hinted
         else ""
     )
+    stated = sum(int(row.get("server_stated") or 0) for row in rows)
+    if stated:
+        said += (
+            f"; for {count_label(stated, 'of them', 'of them')} the servers say more of their "
+            "own tools, which no declaration the operator trusts says (the tool-effects part)"
+        )
     return (
         f"Tool calls: {count_label(total, 'call')} to tools that declare no effects "
         f"({by_server}): whether they reached the network cannot be told{said}."

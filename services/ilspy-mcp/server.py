@@ -72,6 +72,85 @@ ENTITY_LETTERS = "cisde"
 
 mcp = FastMCP("ILSpyMCP", stateless_http=True)
 
+# What each tool declares of itself (``cli_sidecar.reading_tool``).
+# The report sections a decompiled function's writer is shown, for decompiled
+# code.
+_DECOMPILED_CODE_SECTIONS = [
+    "cli_flags",
+    "discovery",
+    "persistence_detail",
+    "evasion_antiforensics",
+    "command_and_control",
+    "string_resolution",
+    "configuration",
+    "commands",
+    "payloads",
+]
+_DECOMPILE: dict[str, Any] = {
+    "kind": "decompile",
+    "arguments": {"path": "path"},
+    "routed_formats": ["pe"],
+    "report_sections": _DECOMPILED_CODE_SECTIONS,
+    "display_name": "ILSpy",
+    "shows": "C# (or IL) that ILSpy decompiled from the assembly's metadata and IL",
+    "does_not_show": (
+        "what runs at run time: code loaded, decrypted or emitted while the assembly runs, or "
+        "native code beside the IL"
+    ),
+}
+_DECLARED: dict[str, dict[str, Any]] = {
+    TYPES_TOOL: sidecar.reading_tool(
+        ".NET types",
+        {
+            "kind": "type_list",
+            "rows": "/types/*",
+            "values": {"name": "/name", "type_kind": "/type_kind"},
+            "arguments": {"path": "path"},
+            "routed_formats": ["pe"],
+            "display_name": "ILSpy",
+            "shows": "the classes, interfaces, structs, delegates and enums the assembly defines",
+            "does_not_show": "what any of them does, or types built or loaded at run time",
+        },
+    ),
+    DECOMPILE_TYPE_TOOL: sidecar.reading_tool("Decompile a .NET type", _DECOMPILE),
+    DECOMPILE_MEMBER_TOOL: sidecar.reading_tool("Decompile a .NET member", _DECOMPILE),
+    DECOMPILE_ASSEMBLY_TOOL: sidecar.reading_tool(
+        "Decompile a .NET assembly",
+        {
+            **_DECOMPILE,
+            "kind": "decompile_batch",
+            "long_running": True,
+            "aggregate_of": [DECOMPILE_TYPE_TOOL, DECOMPILE_MEMBER_TOOL],
+        },
+    ),
+    RESOURCES_TOOL: sidecar.reading_tool(
+        ".NET resources",
+        {
+            "kind": "resource_listing",
+            "rows": "/resources/*",
+            "values": {"name": "/name"},
+            "arguments": {"path": "path"},
+            "routed_formats": ["pe"],
+            "display_name": "ILSpy",
+            "shows": "the names of the resources embedded in the assembly",
+            "does_not_show": "what a resource holds",
+        },
+    ),
+    METADATA_TABLE_TOOL: sidecar.reading_tool(
+        ".NET metadata table",
+        {
+            "kind": "metadata_table",
+            "rows": "/rows/*",
+            "arguments": {"path": "path"},
+            "routed_formats": ["pe"],
+            "display_name": "ILSpy",
+            "shows": "every row of one ECMA-335 metadata table as the assembly holds it",
+            "does_not_show": "how the rows are used by the code",
+        },
+    ),
+    "capabilities": sidecar.reading_tool("Tool availability", sidecar.CAPABILITIES_FACTS),
+}
+
 
 def _common(sample: str, bundle_entry: str) -> list[str]:
     arguments = ["--disable-updatecheck"]
@@ -110,7 +189,7 @@ async def _decompile(
     }
 
 
-@mcp.tool()
+@mcp.tool(**_DECLARED["dotnet_types"])
 async def dotnet_types(
     path: str, kinds: str = ENTITY_LETTERS, bundle_entry: str = ""
 ) -> dict[str, Any]:
@@ -135,7 +214,7 @@ async def dotnet_types(
     return await sidecar.answering(TYPES_TOOL, work)
 
 
-@mcp.tool()
+@mcp.tool(**_DECLARED["dotnet_decompile_type"])
 async def dotnet_decompile_type(
     path: str, type_name: str, il: bool = False, bundle_entry: str = ""
 ) -> dict[str, Any]:
@@ -152,7 +231,7 @@ async def dotnet_decompile_type(
     return await sidecar.answering(DECOMPILE_TYPE_TOOL, work)
 
 
-@mcp.tool()
+@mcp.tool(**_DECLARED["dotnet_decompile_member"])
 async def dotnet_decompile_member(
     path: str, member: str, il: bool = False, bundle_entry: str = ""
 ) -> dict[str, Any]:
@@ -170,7 +249,7 @@ async def dotnet_decompile_member(
     return await sidecar.answering(DECOMPILE_MEMBER_TOOL, work)
 
 
-@mcp.tool()
+@mcp.tool(**_DECLARED["dotnet_decompile_assembly"])
 async def dotnet_decompile_assembly(
     path: str, il: bool = False, bundle_entry: str = ""
 ) -> dict[str, Any]:
@@ -185,7 +264,7 @@ async def dotnet_decompile_assembly(
     return await sidecar.answering(DECOMPILE_ASSEMBLY_TOOL, work)
 
 
-@mcp.tool()
+@mcp.tool(**_DECLARED["dotnet_resources"])
 async def dotnet_resources(path: str, bundle_entry: str = "") -> dict[str, Any]:
     """List the resources a .NET assembly embeds, each entry of a .resources container apart."""
 
@@ -198,7 +277,7 @@ async def dotnet_resources(path: str, bundle_entry: str = "") -> dict[str, Any]:
     return await sidecar.answering(RESOURCES_TOOL, work)
 
 
-@mcp.tool()
+@mcp.tool(**_DECLARED["dotnet_metadata_table"])
 async def dotnet_metadata_table(path: str, table: str, bundle_entry: str = "") -> dict[str, Any]:
     """Dump one ECMA-335 metadata table of a .NET assembly, every row, as JSON.
 
@@ -225,7 +304,7 @@ async def dotnet_metadata_table(path: str, table: str, bundle_entry: str = "") -
     return await sidecar.answering(METADATA_TABLE_TOOL, work)
 
 
-@mcp.tool()
+@mcp.tool(**_DECLARED["capabilities"])
 def capabilities() -> dict[str, Any]:
     """Which of this server's tools this host can run, and how to install what is missing."""
     return sidecar.capabilities(SERVER, PROGRAM, TOOLS, version=ILSPYCMD_VERSION)

@@ -332,3 +332,49 @@ async def test_a_built_in_is_probed_without_a_shipped_name_an_admin_took_away():
 
     assert result.ok is True
     assert _Handle.made[-1].config.env_allow == []
+
+
+class _HandleThatDeclares(_Handle):
+    """A server whose listing declares one of its tools under ``_meta``."""
+
+    def all_tool_names(self):
+        return ["scan"]
+
+    def tool_definitions(self):
+        return [
+            {
+                "name": "scan",
+                "inputSchema": {"type": "object"},
+                "_meta": {"maljan/tool_facts": {"kind": "identification", "rows": "/d/*"}},
+            }
+        ]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("trusts", "confidence"), [(False, "medium"), (True, "high")])
+async def test_what_a_server_declares_is_proposed_as_far_as_its_block_trusts_it(
+    monkeypatch, trusts, confidence
+):
+    monkeypatch.setattr("app.services.settings_probes.ServerHandle", _HandleThatDeclares)
+    entry = {"enabled": True, "command": "x", "trusts_served_declaration": trusts}
+    result = await probe_mcp({"name": "mine", "entry": entry})
+    assert result.ok is True and result.details is not None
+    kind = result.details["proposals"]["tools"]["scan"]["fields"]["kind"]
+    assert kind["confidence"] == confidence
+    assert any("(the server's own claim)" in e for e in kind["evidence"]) is (not trusts)
+
+
+@pytest.mark.asyncio
+async def test_a_repointed_built_in_does_not_post_back_its_shipped_trust(monkeypatch):
+    from maljan.core.config import Settings
+
+    monkeypatch.setattr("app.services.settings_probes.ServerHandle", _HandleThatDeclares)
+    entry = Settings(_env_file=None).mcp.servers["analysis"].model_dump(mode="json")
+    entry["command"] = "/usr/bin/third-party-mcp"
+    entry["args"] = []
+    assert entry["trusts_served_declaration"] is True
+    result = await probe_mcp({"name": "analysis", "entry": entry})
+    assert result.ok is True and result.details is not None
+    kind = result.details["proposals"]["tools"]["scan"]["fields"]["kind"]
+    assert kind["confidence"] == "medium"
+    assert any("(the server's own claim)" in e for e in kind["evidence"])

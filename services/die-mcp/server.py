@@ -4,8 +4,8 @@ One tool around ``diec --json`` (Detect It Easy's console program), in an
 image of its own (``Dockerfile``); see ``README.md``. The answer's rows are
 Detect It Easy's detections, one per detected item, each with the file type it
 was found in, its type (Compiler, Linker, Packer, Protector, Library …), its
-name and version as Detect It Easy wrote them: the platform's declaration
-(``core.builtin_declarations``) reads ``name``, ``type``, ``version`` and
+name and version as Detect It Easy wrote them: the tool's own declaration
+(``_DECLARED``) says the platform reads ``name``, ``type``, ``version`` and
 ``file_type`` from each, and a pack step may run on one of them.
 """
 
@@ -39,6 +39,34 @@ TOOLS = (SCAN_TOOL,)
 
 mcp = FastMCP("DetectItEasyMCP", stateless_http=True)
 
+# What each tool declares of itself (``cli_sidecar.reading_tool``).
+_DECLARED: dict[str, dict[str, Any]] = {
+    SCAN_TOOL: sidecar.reading_tool(
+        "Detect It Easy scan",
+        {
+            "kind": "identification",
+            "rows": "/detections/*",
+            "values": {
+                "name": "/name",
+                "type": "/type",
+                "version": "/version",
+                "file_type": "/file_type",
+            },
+            "arguments": {"path": "path"},
+            "display_name": "Detect It Easy",
+            "shows": (
+                "the packers, compilers, linkers, protectors, installers and libraries Detect It "
+                "Easy's signatures name in the file, with the format each was found in"
+            ),
+            "does_not_show": (
+                "what the code does, or a packer or compiler no signature describes; a name is a "
+                "signature match, not a proof"
+            ),
+        },
+    ),
+    "capabilities": sidecar.reading_tool("Tool availability", sidecar.CAPABILITIES_FACTS),
+}
+
 
 def detections(document: Any) -> tuple[list[str], list[dict[str, Any]]]:
     """The file types and the detection rows of a ``diec --json`` document, in its order.
@@ -64,7 +92,7 @@ def detections(document: Any) -> tuple[list[str], list[dict[str, Any]]]:
     return file_types, rows
 
 
-@mcp.tool()
+@mcp.tool(**_DECLARED["die_scan"])
 async def die_scan(
     path: str,
     deep_scan: bool = True,
@@ -110,7 +138,7 @@ async def die_scan(
     return await sidecar.answering(SCAN_TOOL, work)
 
 
-@mcp.tool()
+@mcp.tool(**_DECLARED["capabilities"])
 def capabilities() -> dict[str, Any]:
     """Which of this server's tools this host can run, and how to install what is missing."""
     return sidecar.capabilities(SERVER, PROGRAM, TOOLS, version=DIE_VERSION)
