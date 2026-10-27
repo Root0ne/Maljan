@@ -1836,8 +1836,7 @@ Four parts, all in `pipeline/validation.py` and `tools/knowledge.py`, none of
 them a rewrite: the check produces violations and annotations, and the id an
 analyst wrote stays the id in the report.
 
-This is a change of method from the tree the paper was evaluated on (tag
-`paper-2026-09`). That tree carried a re-grounding pass,
+This is a change of method from the tree of 2026-09-12 (commit `bd511d81d`). That tree carried a re-grounding pass,
 `ATTCKValidator.correct_isr_reports`, which replaced an analyst's technique id
 with the alignment index's best candidate whenever the gate disagreed, so the
 identifiers in a report were valid because the pass had made them so. Here

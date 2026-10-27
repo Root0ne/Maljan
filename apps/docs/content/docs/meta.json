@@ -55,8 +55,6 @@
     "./benchmark/scores/latrodectus-iteration2-default",
     "./benchmark/scores/latrodectus-iteration2-r2",
     "./benchmark/scores/latrodectus-iteration1-default",
-    "./benchmark/scores/latrodectus-iteration1-small",
-    "---Paper---",
-    "paper"
+    "./benchmark/scores/latrodectus-iteration1-small"
   ]
 }
