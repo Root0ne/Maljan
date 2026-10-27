@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import os
 import re
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from typing import Any
 
 from maljan.agents.base_agent import (
@@ -189,6 +189,25 @@ def _reframe_static_raw_data(data: str, has_tools: bool) -> str:
             "do NOT claim the binary data is missing or that analysis could not be performed."
         )
     return data
+
+
+def server_changed_by(agent: Any, provider: Any) -> Callable[[], None]:
+    """Count a change on ``provider``'s tools' server now; returns what counts it again.
+
+    For work the provider does on its server outside any tool call, which the
+    job's change count (``schemas.evidence.ServerChanges``) must see as it
+    starts and as it ends. Keyed as its tools' calls are, by where they are
+    declared (``provider_source``). An ``agent`` with no counter counts
+    nothing. A function of the module, not of the analyst: what reads it may
+    hold any object that answers ``_provider``.
+    """
+    changes = getattr(getattr(agent, "evidence_counter", None), "changes", None)
+    bump = getattr(changes, "bump", None)
+    if not callable(bump):
+        return lambda: None
+    source = provider_source(provider)
+    bump(source)
+    return lambda: bump(source)
 
 
 @register_agent("static")
@@ -410,9 +429,18 @@ class StaticAnalyst(BaseAnalyst):
                 if store is None:
                     return ""  # the configured memory backend keeps no function hashes
 
-                functions = self._provider().function_hashes(
-                    StaticJobContext(mirror_sample_path=file_path)
-                )
+                # The provider's own walk may load, switch to and analyse a
+                # program on its server, outside any tool call: counted as a
+                # change there as it starts and as it ends, so no answer held
+                # of that server is handed out across it.
+                provider = self._provider()
+                changed = server_changed_by(self, provider)
+                try:
+                    functions = provider.function_hashes(
+                        StaticJobContext(mirror_sample_path=file_path)
+                    )
+                finally:
+                    changed()
                 if not functions:
                     unread = getattr(functions, "unavailable", "")
                     if unread:

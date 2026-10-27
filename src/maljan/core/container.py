@@ -1276,6 +1276,10 @@ class ServiceContainer:
                     cached.event_sink = self.event_sink
                 if hasattr(cached, "sample_notes"):
                     cached.sample_notes = self.sample_notes
+                # A provider that drives a tool server of its own counts each
+                # attach of it on the job's change count.
+                if hasattr(cached, "server_changes"):
+                    cached.server_changes = self._evidence_counter.changes
                 # A provider that does work of its own in the job's staging
                 # directory (capa_yara's capa runs) is told whose it is.
                 if hasattr(cached, "job_key"):
@@ -1311,6 +1315,8 @@ class ServiceContainer:
                     truncation_ledger=self._truncation_ledger,
                     context_budget=budget,
                     event_sink=self.event_sink,
+                    # The job's change count: an attach of a server is a change.
+                    server_changes=self._evidence_counter.changes,
                 )
                 logger.info(
                     "Tool servers: %s.",

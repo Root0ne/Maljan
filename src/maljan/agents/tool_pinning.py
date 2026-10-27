@@ -31,6 +31,7 @@ from, which is what lets one wrapper pick the right path per tool.
 from __future__ import annotations
 
 import os
+from collections.abc import Mapping
 from typing import TYPE_CHECKING, Any
 
 from maljan.core.logger import logger
@@ -60,6 +61,11 @@ READ_ONLY_METADATA_KEY = "maljan_read_only"
 # (``core.declared_reading.SERVER_HINTS``), kept on each of its entries for
 # the run's tool-effects part (``analysis.tool_effects``).
 SERVER_HINTS_METADATA_KEY = "maljan_server_hints"
+# The server handle a registry tool calls through (a token, one per handle and
+# per-loop replica), and whether that server exposes no tool that may change
+# it (``server_changes_nothing``), both set when its tools are merged.
+SERVER_HANDLE_METADATA_KEY = "maljan_server_handle"
+SERVER_CHANGES_NOTHING_METADATA_KEY = "maljan_server_changes_nothing"
 
 # An argument whose *name* looks like it takes a file. Substring matches cover
 # ``file``, ``file_path``, ``filepath``, ``filename``, ``path``, ``target_file``;
@@ -557,3 +563,79 @@ def answers_again(tool: Any) -> bool:
         return True
     facts = declared_facts_of(tool)
     return bool(facts is not None and getattr(facts, "read_only", False) is True)
+
+
+def _vetoed(facts: Any) -> bool:
+    """Whether a declaration vetoes reuse: it states the tool is not read-only, or its kind moves.
+
+    Stated means written: a declaration silent on ``read_only`` vetoes nothing.
+    A kind whose answer moves by what it means is one of
+    ``builtin_declarations.MOVING_KINDS``.
+    """
+    if facts is None:
+        return False
+    stated = getattr(facts, "model_fields_set", None) or set()
+    if "read_only" in stated and getattr(facts, "read_only", None) is not True:
+        return True
+    from maljan.core.builtin_declarations import MOVING_KINDS
+
+    return str(getattr(facts, "kind", "") or "") in MOVING_KINDS
+
+
+def answers_the_job_again(tool: Any) -> bool:
+    """Whether an identical call of ``tool`` by any agent of a job may be answered from its entry.
+
+    Decided from what every tool's own server can say of it: it marks the tool
+    both read-only and idempotent (MCP ``readOnlyHint`` and ``idempotentHint``,
+    as given when the tool was attached). The hints are taken as the server's
+    own statement that a call changes nothing and has no further effect when
+    repeated, not as a promise that it answers the same: an answer still
+    waiting on its service, at any depth, is never held or served
+    (``evidence_recorder.holds_a_settled_answer`` with ``deep``). A read-only
+    mark alone is not enough, and a tool its server says nothing of is not
+    reused. A declaration may only veto (:func:`_vetoed`): one that states the
+    tool is not read-only, or whose kind's answer moves by what it means, keeps
+    the tool running whatever its hints say; one silent on both leaves the
+    hints to decide.
+    """
+    metadata = getattr(tool, "metadata", None) or {}
+    hints = metadata.get(SERVER_HINTS_METADATA_KEY)
+    if not (
+        isinstance(hints, Mapping)
+        and hints.get("readOnlyHint") is True
+        and hints.get("idempotentHint") is True
+    ):
+        return False
+    return not _vetoed(declared_facts_of(tool))
+
+
+def changes_nothing(tool: Any) -> bool:
+    """Whether a call of ``tool`` changes nothing on its server.
+
+    Its server marks it read-only (MCP ``readOnlyHint``), or its declaration
+    marks it read-only (``ToolFacts.read_only``), and no declaration vetoes it
+    (:func:`_vetoed`). Read off the tool as its server's handle offers it.
+    """
+    facts = declared_facts_of(tool)
+    if _vetoed(facts):
+        return False
+    metadata = getattr(tool, "metadata", None) or {}
+    if metadata.get(READ_ONLY_METADATA_KEY) is True:
+        return True
+    return bool(facts is not None and getattr(facts, "read_only", False) is True)
+
+
+def server_handle_of(tool: Any) -> str:
+    """The token of the server handle ``tool`` calls through, ``""`` for a tool of none."""
+    metadata = getattr(tool, "metadata", None) or {}
+    return str(metadata.get(SERVER_HANDLE_METADATA_KEY, "") or "")
+
+
+def server_changes_nothing(tool: Any) -> bool:
+    """Whether ``tool``'s server exposes no tool that may change it (every one ``changes_nothing``).
+
+    Set on each tool when its server's tools are merged; a tool merged with
+    no such word, or of no server handle, is read as one whose server may.
+    """
+    metadata = getattr(tool, "metadata", None) or {}
+    return metadata.get(SERVER_CHANGES_NOTHING_METADATA_KEY) is True

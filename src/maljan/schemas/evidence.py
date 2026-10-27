@@ -134,6 +134,72 @@ class ServerChanges:
             return self._count.get(key, 0), self._anywhere
 
 
+class JobAnswers:
+    """The answers a job's calls hold whole, by the server that gave them, for every agent of it.
+
+    Filled and read by the evidence recorder (``agents.evidence_recorder``)
+    for the tools that answer an identical call of the job the same
+    (``tool_pinning.answers_the_job_again``): an identical call of any agent,
+    in any round, is answered from the entry that holds the answer instead of
+    running again. Each answer is kept with its server's change mark when its
+    read started (:class:`ServerChanges`): one whose mark has moved since is
+    not handed out and is dropped. Keys are the caller's; one job, never
+    another's.
+    """
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._held: dict[str, dict[Any, tuple[str, str, str, str, Any, str, bool]]] = {}
+
+    def hold(
+        self,
+        server: str,
+        key: Any,
+        entry_id: str,
+        text: str,
+        tool: str,
+        agent: str,
+        mark: Any,
+        *,
+        handle: str = "",
+        quiet: bool = False,
+    ) -> None:
+        """Record that ``entry_id``, a call of ``tool`` by ``agent``, holds ``text`` for ``key``.
+
+        ``handle`` names the server handle the call went through (``""`` for
+        none), and ``quiet`` whether that server exposes no tool that may
+        change it. The first holder of a key keeps it while its mark holds: the
+        answer is the same, and the entry first cited for it stays the one cited.
+        """
+        with self._lock:
+            held = self._held.setdefault(str(server or ""), {})
+            found = held.get(key)
+            if found is not None and found[4] == mark:
+                return
+            held[key] = (
+                str(entry_id),
+                text,
+                str(tool),
+                str(agent or ""),
+                mark,
+                str(handle),
+                bool(quiet),
+            )
+
+    def held(self, server: str, key: Any, mark: Any) -> tuple[str, str, str, str, str, bool] | None:
+        """``(entry id, text, tool, agent, handle, quiet)`` at ``mark`` for ``key``, or ``None``."""
+        with self._lock:
+            held = self._held.get(str(server or ""), {})
+            found = held.get(key)
+            if found is None:
+                return None
+            if found[4] != mark:
+                # Something may have changed the server since it was read.
+                del held[key]
+                return None
+            return found[0], found[1], found[2], found[3], found[5], found[6]
+
+
 class EvidenceCounter:
     """The per-job source of entry ids.
 
@@ -155,6 +221,9 @@ class EvidenceCounter:
         # What any agent of the job may have changed on each server: one count
         # per job, so a delegate's change reaches the agent that asked it.
         self.changes = ServerChanges()
+        # The answers the job's calls hold whole, for an identical call of
+        # any agent of the job (``JobAnswers``).
+        self.answers = JobAnswers()
 
     def next_id(self) -> tuple[str, int]:
         """The next ``(entry_id, seq)`` pair, seq being 1-based."""
